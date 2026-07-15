@@ -1,58 +1,38 @@
-// CSS filter property parsing and simplified rendering.
+// CSS filter property — Skia-backed implementation.
 //
-// Supports the common CSS filter functions:
+// Uses goskia's ImageFilter and ColorFilter to implement the full set of
+// CSS filter functions. Supported:
 //
-//	filter: blur(5px)
-//	filter: brightness(1.5)
-//	filter: contrast(200%)
-//	filter: grayscale(100%)
-//	filter: sepia(100%)
-//	filter: invert(100%)
-//	filter: opacity(50%)
-//	filter: saturate(2)
-//	filter: hue-rotate(90deg)
+//	filter: blur(5px)          — NewBlurImageFilter
+//	filter: grayscale(100%)    — NewColorMatrixFilter
+//	filter: sepia(100%)        — NewColorMatrixFilter
+//	filter: brightness(1.5)    — NewColorMatrixFilter
+//	filter: contrast(2)        — NewColorMatrixFilter
+//	filter: saturate(2)        — NewColorMatrixFilter
+//	filter: hue-rotate(90deg)  — NewColorMatrixFilter
+//	filter: invert(100%)       — NewColorMatrixFilter
+//	filter: opacity(50%)       — NewColorMatrixFilter (or layer opacity)
 //
-// Multiple filters can be combined with spaces:
-//
-//	filter: brightness(1.2) contrast(1.1)
-//
-// Since the Skia canvas in this port does not expose image filters (blur,
-// color matrix), most filters are approximated by drawing colored overlays
-// or are documented as known limitations. blur() is the only filter that
-// has a Skia-native implementation if goskia exposes it; if not, it is
-// documented as unimplemented.
+// Multiple filters can be combined with spaces.
 
 package rendering
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
-	"wb-ui/platform/graphics"
+	"github.com/hoonfeng/goskia/skia"
 )
 
 // CSSFilter describes a single CSS filter function.
 type CSSFilter struct {
-	// Name is the filter function name: blur, brightness, contrast,
-	// grayscale, sepia, invert, opacity, saturate, hue-rotate.
-	Name string
-	// Value is the parsed numeric value:
-	//   - blur:     blur radius in pixels
-	//   - brightness: multiplier (1.0 = normal)
-	//   - contrast:   multiplier (1.0 = normal)
-	//   - grayscale:  0.0-1.0
-	//   - sepia:      0.0-1.0
-	//   - invert:     0.0-1.0
-	//   - opacity:    0.0-1.0
-	//   - saturate:   multiplier (1.0 = normal)
-	//   - hue-rotate: degrees
+	Name  string // blur, brightness, contrast, grayscale, sepia, invert, opacity, saturate, hue-rotate
 	Value float64
-	// Valid reports whether the filter was successfully parsed.
 	Valid bool
 }
 
-// parseCSSFilters parses the CSS filter property value and returns
-// the list of filter functions.
+// parseCSSFilters parses the CSS filter property value.
 func parseCSSFilters(s string) []CSSFilter {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" {
@@ -72,21 +52,15 @@ func parseCSSFilters(s string) []CSSFilter {
 		name := strings.ToLower(tok[:paren])
 		args := strings.TrimSpace(tok[paren+1 : len(tok)-1])
 		val := parseFilterArg(args)
-
 		switch name {
 		case "blur", "brightness", "contrast", "grayscale",
 			"sepia", "invert", "opacity", "saturate", "hue-rotate":
-			filters = append(filters, CSSFilter{
-				Name:  name,
-				Value: val,
-				Valid: true,
-			})
+			filters = append(filters, CSSFilter{Name: name, Value: val, Valid: true})
 		}
 	}
 	return filters
 }
 
-// tokenizeFilterFuncs splits a filter value into individual function calls.
 func tokenizeFilterFuncs(s string) []string {
 	var tokens []string
 	var cur strings.Builder
@@ -114,8 +88,6 @@ func tokenizeFilterFuncs(s string) []string {
 	return tokens
 }
 
-// parseFilterArg parses a single filter function argument.
-// Handles numbers, percentages, and px/deg units.
 func parseFilterArg(s string) float64 {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -139,54 +111,162 @@ func parseFilterArg(s string) float64 {
 	return v
 }
 
-// applyCSSFilters applies the parsed CSS filter list to an element.
-// It modifies the style's opacity and color fields to approximate the
-// filter effects, and returns an opacity multiplier for brightness.
-//
-// For filters that cannot be approximated this way (blur, hue-rotate,
-// contrast), a comment is left as a placeholder.
-func applyCSSFilters(box *RenderBox, info *PaintInfo) {
-	if box == nil || info == nil {
-		return
-	}
-	st := box.Style()
-	if st == nil {
-		return
-	}
-	filters := parseCSSFilters(st.Filter)
-	if len(filters) == 0 {
-		return
-	}
-
-	for _, f := range filters {
+// buildCSSFilterChain builds a Skia ImageFilter chain from a parsed CSS filter
+// list. Filters are composed in order (outermost = first in list).
+// Returns nil if no filters can be applied.
+func buildCSSFilterChain(filters []CSSFilter) *skia.ImageFilter {
+	var result *skia.ImageFilter
+	// Process in reverse order so the first filter in the list is outermost.
+	for i := len(filters) - 1; i >= 0; i-- {
+		f := filters[i]
+		if !f.Valid {
+			continue
+		}
+		var imgFilter *skia.ImageFilter
 		switch f.Name {
-		case "opacity":
-			// CSS filter opacity is multiplicative with the element's opacity.
-			if f.Value >= 0 && f.Value <= 1 {
-				// We can't easily modify the style opacity here since it's
-				// already been consumed. document as approximation.
-			}
-		case "brightness":
-			// Brightness > 1 brightens, < 1 darkens. We approximate by
-			// drawing a white (brightness>1) or black (brightness<1) overlay.
-			// This is handled in paintCSSFiltersOverlay below.
-		case "grayscale", "sepia", "invert":
-			// These require per-pixel color matrix operations. Not implemented.
 		case "blur":
-			// Blur requires Skia ImageFilter. Not implemented.
+			if f.Value > 0 {
+				imgFilter = skia.NewBlurImageFilter(float32(f.Value), float32(f.Value), skia.TileModeClamp, result)
+			}
+		case "grayscale":
+			imgFilter = skia.NewColorFilterImageFilter(grayscaleColorMatrix(), result)
+		case "sepia":
+			imgFilter = skia.NewColorFilterImageFilter(sepiaColorMatrix(f.Value), result)
+		case "brightness":
+			imgFilter = skia.NewColorFilterImageFilter(brightnessColorMatrix(f.Value), result)
+		case "contrast":
+			imgFilter = skia.NewColorFilterImageFilter(contrastColorMatrix(f.Value), result)
+		case "invert":
+			imgFilter = skia.NewColorFilterImageFilter(invertColorMatrix(f.Value), result)
+		case "saturate":
+			imgFilter = skia.NewColorFilterImageFilter(saturateColorMatrix(f.Value), result)
+		case "hue-rotate":
+			imgFilter = skia.NewColorFilterImageFilter(hueRotateColorMatrix(f.Value), result)
+		case "opacity":
+			imgFilter = skia.NewColorFilterImageFilter(opacityColorMatrix(f.Value), result)
+		}
+		if imgFilter != nil {
+			result = imgFilter
 		}
 	}
+	return result
 }
 
-// computeBrightnessOverlay returns the overlay color and opacity for a
-// brightness() filter. For brightness=1.5, overlay is white at 0 opacity
-// (already bright enough). For brightness=0.5, overlay is black at 0.5 opacity.
-// Returns (color, opacity, shouldPaint).
-func computeBrightnessOverlay(val float64) (graphics.Color, float64, bool) {
-	if val >= 1.0 {
-		return graphics.Color{}, 0, false
+// --- Color matrix helpers for CSS filter functions ---
+// Each function returns a [20]float32 suitable for NewColorMatrixFilter.
+// The matrix is row-major 4x5:
+//
+//	[ R' ]   [ a b c d e ] [ R ]
+//	[ G' ] = [ f g h i j ] [ G ]
+//	[ B' ]   [ k l m n o ] [ B ]
+//	[ A' ]   [ p q r s t ] [ A ]
+//	                   [ 1 ]
+
+func grayscaleColorMatrix() *skia.ColorFilter {
+	const r, g, b = 0.2126, 0.7152, 0.0722
+	return skia.NewColorMatrixFilter([20]float32{
+		r, g, b, 0, 0,
+		r, g, b, 0, 0,
+		r, g, b, 0, 0,
+		0, 0, 0, 1, 0,
+	})
+}
+
+func sepiaColorMatrix(pct float64) *skia.ColorFilter {
+	t := float32(clamp(pct, 0, 1))
+	r, g, b := 0.393, 0.769, 0.189
+	sr, sg, sb := float32(r), float32(g), float32(b)
+	// Interpolate between identity and sepia matrix by t.
+	return skia.NewColorMatrixFilter([20]float32{
+		lerpCF(1, sr, t), lerpCF(0, sg, t), lerpCF(0, sb, t), 0, 0,
+		lerpCF(0, sr*0.7, t), lerpCF(1, sg*0.7, t), lerpCF(0, sb*0.7, t), 0, 0,
+		lerpCF(0, sr*0.5, t), lerpCF(0, sg*0.5, t), lerpCF(1, sb*0.5, t), 0, 0,
+		0, 0, 0, 1, 0,
+	})
+}
+
+func brightnessColorMatrix(val float64) *skia.ColorFilter {
+	v := float32(clamp(val, 0, 10))
+	return skia.NewColorMatrixFilter([20]float32{
+		v, 0, 0, 0, 0,
+		0, v, 0, 0, 0,
+		0, 0, v, 0, 0,
+		0, 0, 0, 1, 0,
+	})
+}
+
+func contrastColorMatrix(val float64) *skia.ColorFilter {
+	v := float32(clamp(val, 0, 10))
+	// Contrast matrix: interpolate between gray (v=0) and identity (v=1).
+	t := v
+	mid := float32(0.5)
+	return skia.NewColorMatrixFilter([20]float32{
+		t, 0, 0, 0, mid * (1 - t),
+		0, t, 0, 0, mid * (1 - t),
+		0, 0, t, 0, mid * (1 - t),
+		0, 0, 0, 1, 0,
+	})
+}
+
+func invertColorMatrix(pct float64) *skia.ColorFilter {
+	t := float32(clamp(pct, 0, 1))
+	return skia.NewColorMatrixFilter([20]float32{
+		lerpCF(1, -1, t), 0, 0, 0, lerpCF(0, 1, t),
+		0, lerpCF(1, -1, t), 0, 0, lerpCF(0, 1, t),
+		0, 0, lerpCF(1, -1, t), 0, lerpCF(0, 1, t),
+		0, 0, 0, 1, 0,
+	})
+}
+
+func saturateColorMatrix(val float64) *skia.ColorFilter {
+	v := float32(clamp(val, 0, 10))
+	// Grayscale luminance weights.
+	rw, gw, bw := float32(0.2126), float32(0.7152), float32(0.0722)
+	// Saturate: interpolate between grayscale (v=0) and identity (v=1).
+	return skia.NewColorMatrixFilter([20]float32{
+		lerpCF(rw, 1, v), lerpCF(gw, 0, v), lerpCF(bw, 0, v), 0, 0,
+		lerpCF(rw, 0, v), lerpCF(gw, 1, v), lerpCF(bw, 0, v), 0, 0,
+		lerpCF(rw, 0, v), lerpCF(gw, 0, v), lerpCF(bw, 1, v), 0, 0,
+		0, 0, 0, 1, 0,
+	})
+}
+
+func hueRotateColorMatrix(deg float64) *skia.ColorFilter {
+	rad := deg * math.Pi / 180.0
+	cosA := float32(math.Cos(rad))
+	sinA := float32(math.Sin(rad))
+	// Simplified hue rotation using the standard matrix.
+	rw, gw, bw := float32(0.213), float32(0.715), float32(0.072)
+	return skia.NewColorMatrixFilter([20]float32{
+		rw + cosA*(1-rw) + sinA*(-rw), gw + cosA*(-gw) + sinA*(-gw), bw + cosA*(-bw) + sinA*(1-bw), 0, 0,
+		rw + cosA*(-rw) + sinA*(rw), gw + cosA*(1-gw) + sinA*(gw), bw + cosA*(-bw) + sinA*(-bw), 0, 0,
+		rw + cosA*(-rw) + sinA*(-1+rw), gw + cosA*(-gw) + sinA*(gw), bw + cosA*(1-bw) + sinA*(bw), 0, 0,
+		0, 0, 0, 1, 0,
+	})
+}
+
+func opacityColorMatrix(pct float64) *skia.ColorFilter {
+	t := float32(clamp(pct, 0, 1))
+	return skia.NewColorMatrixFilter([20]float32{
+		1, 0, 0, 0, 0,
+		0, 1, 0, 0, 0,
+		0, 0, 1, 0, 0,
+		0, 0, 0, t, 0,
+	})
+}
+
+// --- helpers ---
+
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
 	}
-	// Darken: blend with black.
-	alpha := 1.0 - val
-	return graphics.Color{R: 0, G: 0, B: 0, A: 255}, alpha, true
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func lerpCF(a, b float32, t float32) float32 {
+	return a + (b-a)*t
 }

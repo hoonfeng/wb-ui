@@ -222,6 +222,22 @@ func (c *Canvas) SaveLayerWithOpacity(opacity float64) {
 	c.canvas.SaveLayer(nil, paint)
 }
 
+// SaveLayerWithFilter pushes an offscreen layer with a Skia ImageFilter.
+// The filter is applied when Restore is called. This is the primary mechanism
+// for implementing CSS filters (blur, grayscale, sepia, etc.) that require
+// per-pixel operations.
+func (c *Canvas) SaveLayerWithFilter(imgFilter *skia.ImageFilter) {
+	c.states = append(c.states, c.state)
+	if imgFilter != nil {
+		paint := skia.NewPaint()
+		paint.SetAntialias(true)
+		paint.SetImageFilter(imgFilter)
+		c.canvas.SaveLayer(nil, paint)
+	} else {
+		c.canvas.Save()
+	}
+}
+
 // Restore pops the most recently saved graphics state, mirroring GraphicsContext::
 // restore(). If the stack is empty it is a no-op (WebKit asserts / logs in that case).
 func (c *Canvas) Restore() {

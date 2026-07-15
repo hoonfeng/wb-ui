@@ -132,29 +132,25 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	if box == nil || !box.IsVisible() {
 		return
 	}
-	// Apply CSS transform if present.
+	// Apply CSS filter: wrap painting in a SaveLayer with ImageFilter.
+	var filterCleanup func()
+	if st := box.Style(); st != nil && st.Filter != "" && st.Filter != "none" {
+		filters := parseCSSFilters(st.Filter)
+		if imgFilter := buildCSSFilterChain(filters); imgFilter != nil {
+			info.canvas.SaveLayerWithFilter(imgFilter)
+			filterCleanup = info.canvas.Restore
+		}
+	}
+	// Apply CSS transform if present (inside filter layer).
 	if cleanup := tryApplyTransform(info.canvas, box); cleanup != nil {
 		defer cleanup()
 	}
 	PaintBackground(box, info)
 	PaintBorder(box, info)
-	// Apply CSS filter brightness() approximation as a black overlay.
-	if st := box.Style(); st != nil && st.Filter != "" && st.Filter != "none" {
-		for _, f := range parseCSSFilters(st.Filter) {
-			if f.Name == "brightness" && f.Valid && f.Value < 1.0 {
-				col, alpha, ok := computeBrightnessOverlay(f.Value)
-				if ok && alpha > 0 {
-					r := rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())
-					info.canvas.FillRect(r.X, r.Y, r.Width, r.Height,
-						ApplyOpacityToColor(col, alpha))
-				}
-			}
-		}
+	if filterCleanup != nil {
+		defer filterCleanup()
 	}
 }
-
-// paintObjectForeground paints text content during the foreground phase, mirroring the
-// Foreground phase of RenderText::paint() / TextBoxPainter::paint(). It also paints
 // <wb-editor> custom elements by delegating to the editor package's painter, and
 // native form controls (checkbox/radio/range/progress/meter/select arrow) via
 // PaintFormControl mirroring RenderTheme::paint().
@@ -175,6 +171,14 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	if widgets.IsEditorElement(el) && info.rv != nil {
 		registry := info.rv.EditorRegistry()
 		registry.PaintEditor(el, info.canvas, box.X(), box.Y(), box.Width(), box.Height())
+		return
+	}
+	// SVG elements: parse and paint shapes.
+	if el.LocalName() == "svg" {
+		doc := buildSVGDocument(el)
+		if doc != nil && len(doc.shapes) > 0 {
+			paintSVG(info.canvas, doc, box.X(), box.Y(), graphics.Color{})
+		}
 		return
 	}
 	// Native form controls (checkbox/radio/range/progress/meter/select arrow).
