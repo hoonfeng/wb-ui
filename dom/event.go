@@ -52,6 +52,10 @@ type Event interface {
 	StopImmediatePropagation()
 	PreventDefault()
 
+	// ComposedPath returns the event's path, which in this port (without shadow DOM)
+	// is a slice containing [Target] if target is set, otherwise nil.
+	ComposedPath() []EventTarget
+
 	// Internal query helpers used by the dispatcher.
 	PropagationStopped() bool
 	ImmediatePropagationStopped() bool
@@ -164,6 +168,15 @@ func (e *baseEvent) StopPropagation() { e.propagationStopped = true }
 func (e *baseEvent) StopImmediatePropagation() {
 	e.immediatePropagationStopped = true
 	e.propagationStopped = true
+}
+
+// ComposedPath returns the event's path. Since shadow DOM is not supported,
+// the path is [Target] when target is set, nil otherwise.
+func (e *baseEvent) ComposedPath() []EventTarget {
+	if e.target == nil {
+		return nil
+	}
+	return []EventTarget{e.target}
 }
 
 // PreventDefault sets the canceled flag when the event is cancelable and is not being

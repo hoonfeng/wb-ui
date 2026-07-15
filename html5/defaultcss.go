@@ -183,6 +183,39 @@ input[type="reset"]::-webkit-inner-button,
 input[type="button"]::-webkit-inner-button {
 	padding: 0;
 }
+
+/* Details / Summary disclosure widget. */
+details {
+	display: block;
+}
+
+details > summary {
+	display: block;
+	cursor: pointer;
+}
+
+/* When details is not open, hide everything except the first summary. */
+details:not([open]) > :not(summary) {
+	display: none !important;
+}
+
+/* Dialog. */
+dialog {
+	display: block;
+	position: static;
+	border: 1px solid rgba(0, 0, 0, 0.3);
+	padding: 1em;
+	background: #fff;
+	color: #000;
+}
+
+dialog[open] {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 1000;
+}
 `
 
 // NewUAStyleSheet parses the UA default CSS and returns a CSSStyleSheet

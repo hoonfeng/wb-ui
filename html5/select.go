@@ -376,3 +376,33 @@ func (d HTMLDataListElement) Options() []*dom.Element {
 func (d HTMLDataListElement) Length() int {
 	return len(d.Options())
 }
+
+// SuggestionsFor returns the label strings of options whose value starts with
+// the given prefix (case-insensitive). The label is the option's "label"
+// attribute if present, otherwise the option's "value" attribute, and finally
+// the option's text content.
+// This is the primary API for autocomplete dropdown rendering.
+func (d HTMLDataListElement) SuggestionsFor(prefix string) []string {
+	if prefix == "" {
+		return nil
+	}
+	lower := strings.ToLower(prefix)
+	var out []string
+	for _, opt := range d.Options() {
+		v := strings.ToLower(opt.GetAttribute("value"))
+		if strings.HasPrefix(v, lower) {
+			// label priority: <label> attribute > <value> attribute > text content
+			label := opt.GetAttribute("label")
+			if label == "" {
+				label = opt.GetAttribute("value")
+			}
+			if label == "" {
+				label = strings.TrimSpace(textContent(opt))
+			}
+			if label != "" {
+				out = append(out, label)
+			}
+		}
+	}
+	return out
+}

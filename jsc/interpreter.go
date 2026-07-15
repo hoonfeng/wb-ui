@@ -1191,3 +1191,21 @@ func (in *Interpreter) CallFunction(name string, args ...JSValue) (JSValue, erro
 	}
 	return v, nil
 }
+
+// ResolvePromise creates a Promise that is immediately resolved with the
+// given value. It is used by host APIs like fetch() to return a settled
+// promise without going through the full Promise constructor path.
+func (in *Interpreter) ResolvePromise(val JSValue) JSValue {
+	pd := newPromiseData()
+	pd.settle(promiseFulfilled, val, in)
+	return ObjectValue(newPromiseObject(pd, in))
+}
+
+// RejectPromise creates a Promise that is immediately rejected with the
+// given reason. It is used by host APIs like fetch() to return a rejected
+// promise when an error occurs.
+func (in *Interpreter) RejectPromise(reason JSValue) JSValue {
+	pd := newPromiseData()
+	pd.settle(promiseRejected, reason, in)
+	return ObjectValue(newPromiseObject(pd, in))
+}

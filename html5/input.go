@@ -185,6 +185,40 @@ func (i HTMLInputElement) Multiple() bool {
 	return attrBool(i.El, "multiple")
 }
 
+// List returns the associated <datalist> element, or nil if the input's
+// "list" attribute references a non-existent datalist. Mirrors
+// HTMLInputElement::list().
+func (i HTMLInputElement) List() *HTMLDataListElement {
+	listID := i.El.GetAttribute("list")
+	if listID == "" {
+		return nil
+	}
+	doc := i.El.OwnerDocument()
+	if doc == nil {
+		return nil
+	}
+	dl := doc.GetElementById(listID)
+	if dl == nil || dl.LocalName() != "datalist" {
+		return nil
+	}
+	dle, ok := ToDataListElement(dl)
+	if !ok {
+		return nil
+	}
+	return &dle
+}
+
+// AcceptedLabels returns the list of label strings from the datalist options
+// whose value starts with the given prefix. If the input has no associated
+// datalist, returns nil. This is the primary API for autocomplete UI.
+func (i HTMLInputElement) AcceptedLabels(prefix string) []string {
+	dl := i.List()
+	if dl == nil {
+		return nil
+	}
+	return dl.SuggestionsFor(prefix)
+}
+
 // --- Validation ---
 
 // Validity returns the ValidityState for this input.

@@ -734,3 +734,32 @@ func TestEvent_PropagationChain(t *testing.T) {
 		}
 	})
 }
+
+// TestEvent_ComposedPath verifies that ComposedPath returns [Target] when a
+// target is set, and nil when no target is set (no shadow DOM in this port).
+func TestEvent_ComposedPath(t *testing.T) {
+	d := NewDocument()
+	root := d.CreateElement("root")
+	_ = d.AppendChild(root)
+	leaf := d.CreateElement("leaf")
+	_ = root.AppendChild(leaf)
+
+	// Event with target set via dispatch.
+	var captured []EventTarget
+	leaf.AddEventListener("test", EventListenerFunc(func(e Event) {
+		captured = e.ComposedPath()
+	}), false)
+	_ = leaf.DispatchEvent(NewEvent("test", false, false, false))
+	if len(captured) != 1 {
+		t.Fatalf("ComposedPath() length = %d, want 1", len(captured))
+	}
+	if captured[0] != leaf {
+		t.Errorf("ComposedPath()[0] is not the target element")
+	}
+
+	// Event with no target.
+	e := NewEvent("not-dispatched", false, false, false)
+	if p := e.ComposedPath(); p != nil {
+		t.Fatalf("ComposedPath() = %v, want nil for non-dispatched event", p)
+	}
+}

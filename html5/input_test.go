@@ -628,3 +628,152 @@ func TestInput_AutofocusMultiple(t *testing.T) {
 		t.Error("Multiple() = false, want true")
 	}
 }
+
+// --- Datalist / list attribute ---
+
+func TestInput_ListNoAttr(t *testing.T) {
+	in := newInput(t, nil)
+	if dl := in.List(); dl != nil {
+		t.Fatal("List() = non-nil, want nil when no list attribute")
+	}
+}
+
+func TestInput_ListNonExistent(t *testing.T) {
+	in := newInput(t, map[string]string{"list": "nonexistent"})
+	if dl := in.List(); dl != nil {
+		t.Fatal("List() = non-nil, want nil when datalist id does not exist")
+	}
+}
+
+func TestInput_ListRefersToDatalist(t *testing.T) {
+	doc := dom.NewDocument()
+	dl := doc.CreateElement("datalist")
+	dl.SetAttribute("id", "colors")
+	doc.CreateElement("body").AppendChild(dl)
+
+	opt1 := doc.CreateElement("option")
+	opt1.SetAttribute("value", "red")
+	dl.AppendChild(opt1)
+	opt2 := doc.CreateElement("option")
+	opt2.SetAttribute("value", "green")
+	dl.AppendChild(opt2)
+	opt3 := doc.CreateElement("option")
+	opt3.SetAttribute("value", "blue")
+	dl.AppendChild(opt3)
+
+	// Add dummy root so CreateElement attaches to document
+	root := doc.CreateElement("html")
+	root.AppendChild(dl)
+	doc.AppendChild(root)
+
+	input := doc.CreateElement("input")
+	input.SetAttribute("list", "colors")
+	in, ok := ToInputElement(input)
+	if !ok {
+		t.Fatal("ToInputElement failed")
+	}
+
+	dlElem := in.List()
+	if dlElem == nil {
+		t.Fatal("List() = nil, want non-nil datalist")
+	}
+	if dlElem.Length() != 3 {
+		t.Fatalf("Length() = %d, want 3", dlElem.Length())
+	}
+}
+
+func TestInput_ListRefersToNonDatalist(t *testing.T) {
+	doc := dom.NewDocument()
+	div := doc.CreateElement("div")
+	div.SetAttribute("id", "not-datalist")
+	root := doc.CreateElement("html")
+	root.AppendChild(div)
+	doc.AppendChild(root)
+
+	input := doc.CreateElement("input")
+	input.SetAttribute("list", "not-datalist")
+	in, ok := ToInputElement(input)
+	if !ok {
+		t.Fatal("ToInputElement failed")
+	}
+	if dl := in.List(); dl != nil {
+		t.Fatal("List() returned non-nil for non-datalist element")
+	}
+}
+
+func TestDatalist_SuggestionsFor(t *testing.T) {
+	doc := dom.NewDocument()
+	dl := doc.CreateElement("datalist")
+	for _, v := range []string{"Apple", "Apricot", "Banana", "Blueberry", "Cherry"} {
+		opt := doc.CreateElement("option")
+		opt.SetAttribute("value", v)
+		dl.AppendChild(opt)
+	}
+	dle, _ := ToDataListElement(dl)
+
+	tests := []struct {
+		prefix string
+		want   int
+	}{
+		{"", 0},
+		{"A", 2},  // Apple, Apricot
+		{"Ap", 2}, // Apple, Apricot
+		{"B", 2},  // Banana, Blueberry
+		{"C", 1},  // Cherry
+		{"X", 0},
+		{"a", 2}, // case-insensitive
+	}
+	for _, tt := range tests {
+		got := dle.SuggestionsFor(tt.prefix)
+		if len(got) != tt.want {
+			t.Errorf("SuggestionsFor(%q) = %d results, want %d: %v", tt.prefix, len(got), tt.want, got)
+		}
+	}
+}
+
+func TestDatalist_SuggestionsWithLabel(t *testing.T) {
+	doc := dom.NewDocument()
+	dl := doc.CreateElement("datalist")
+	for _, pair := range [][2]string{
+		{"US", "United States"},
+		{"CA", "Canada"},
+		{"MX", "Mexico"},
+	} {
+		opt := doc.CreateElement("option")
+		opt.SetAttribute("value", pair[0])
+		opt.SetAttribute("label", pair[1])
+		dl.AppendChild(opt)
+	}
+	dle, _ := ToDataListElement(dl)
+
+	got := dle.SuggestionsFor("U")
+	if len(got) != 1 {
+		t.Fatalf("SuggestionsFor('U') = %d results, want 1: %v", len(got), got)
+	}
+	if got[0] != "United States" {
+		t.Errorf("label = %q, want 'United States'", got[0])
+	}
+}
+
+func TestInput_AcceptedLabels(t *testing.T) {
+	doc := dom.NewDocument()
+	dl := doc.CreateElement("datalist")
+	dl.SetAttribute("id", "fruits")
+	for _, v := range []string{"Apple", "Apricot", "Avocado", "Banana"} {
+		opt := doc.CreateElement("option")
+		opt.SetAttribute("value", v)
+		dl.AppendChild(opt)
+	}
+	root := doc.CreateElement("html")
+	root.AppendChild(dl)
+	doc.AppendChild(root)
+
+	input := doc.CreateElement("input")
+	input.SetAttribute("list", "fruits")
+	in, _ := ToInputElement(input)
+
+	labels := in.AcceptedLabels("Ap")
+	if len(labels) != 2 {
+		t.Fatalf("AcceptedLabels('Ap') = %d results, want 2: %v", len(labels), labels)
+	}
+}

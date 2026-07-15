@@ -38,6 +38,9 @@ func init() {
 	dom.RegisterElement("link", newHTMLLinkElement)
 	dom.RegisterElement("a", newHTMLAnchorElement)
 	dom.RegisterElement("img", newHTMLImageElement)
+	dom.RegisterElement("details", newHTMLDetailsElement)
+	dom.RegisterElement("summary", newHTMLSummaryElement)
+	dom.RegisterElement("dialog", newHTMLDialogElement)
 }
 
 // Each constructor creates a *dom.Element via dom.NewElement. In the current
@@ -117,5 +120,17 @@ func newHTMLAnchorElement(doc *dom.Document, tagName string) *dom.Element {
 }
 
 func newHTMLImageElement(doc *dom.Document, tagName string) *dom.Element {
+	return dom.NewElement(doc, tagName)
+}
+
+func newHTMLDetailsElement(doc *dom.Document, tagName string) *dom.Element {
+	return dom.NewElement(doc, tagName)
+}
+
+func newHTMLSummaryElement(doc *dom.Document, tagName string) *dom.Element {
+	return dom.NewElement(doc, tagName)
+}
+
+func newHTMLDialogElement(doc *dom.Document, tagName string) *dom.Element {
 	return dom.NewElement(doc, tagName)
 }
