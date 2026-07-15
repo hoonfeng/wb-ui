@@ -47,6 +47,11 @@ type Resolver struct {
 	// mediaQueryCtx holds the current viewport/device context for media query
 	// evaluation. Updated by SetMediaQueryContext / SetViewportSize.
 	mediaQueryCtx css.MediaQueryContext
+	// StyleSheetLoader is an optional callback for resolving @import URLs.
+	// When set, encountering an @import rule in AddStyleSheet triggers a fetch
+	// via this callback, the response is parsed as CSS and the resulting rules
+	// are merged into the cascade. When nil, @import rules are silently skipped.
+	StyleSheetLoader func(href string) (string, error)
 }
 
 // NewResolver constructs an empty Resolver.
@@ -86,9 +91,12 @@ func (r *Resolver) SetMediaQueryContext(ctx css.MediaQueryContext) {
 	r.mediaQueryCtx = ctx
 }
 
-// AddStyleSheet adds a parsed stylesheet to the resolver's cascade. Sheets added
-// earlier have lower source order than sheets added later (within the same origin).
+// AddStyleSheet adds a parsed stylesheet to the resolver's cascade. If the sheet
+// contains @import rules and a StyleSheetLoader is configured, the imported
+// stylesheets are fetched and their rules are also added. Sheets added earlier
+// have lower source order than sheets added later (within the same origin).
 func (r *Resolver) AddStyleSheet(sheet *css.CSSStyleSheet) {
+	r.resolveImports(sheet)
 	r.sheets = append(r.sheets, sheet)
 	r.addKeyframesFromSheet(sheet)
 }
@@ -105,11 +113,54 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 }
 
 // ClearCache drops the per-element ComputedStyle cache. Call this after mutating
-// the stylesheets or DOM so subsequent calls recompute fresh values.
+// the stylesheets or DOM so subsequent calls compute fresh values.
 func (r *Resolver) ClearCache() {
 	r.cache = map[*dom.Element]*ComputedStyle{}
 }
 
+// resolveImports walks all rules in the sheet, and for each @import rule
+// that has a non-empty Href, fetches the CSS via StyleSheetLoader, parses
+// it, and adds the resulting sheet to the resolver. This recursively resolves
+// @import chains up to a reasonable depth. Media-conditional imports are
+// checked against the current media query context.
+func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
+	if r.StyleSheetLoader == nil {
+		return
+	}
+	for _, rule := range sheet.Rules() {
+		imp, ok := rule.(*css.ImportRule)
+		if !ok {
+			continue
+		}
+		if imp.Href == "" {
+			continue
+		}
+		// Check media condition if present (skip if the media query does
+		// not match the current context).
+		if imp.Media != "" && r.mediaQueryCtx.Width > 0 {
+			parsed, _ := css.ParseMediaQueryList(imp.Media)
+			if len(parsed) > 0 && !css.MatchesAny(parsed, r.mediaQueryCtx) {
+				continue
+			}
+		}
+		cssText, err := r.StyleSheetLoader(imp.Href)
+		if err != nil || cssText == "" {
+			continue
+		}
+		importedSheet := css.NewCSSStyleSheetWithOwner(nil, imp.Href)
+		importedSheet.SetOrigin(imp.Origin)
+		p := css.NewParser(cssText)
+		p.ParseStyleSheetInto(importedSheet)
+
+		// Recursively resolve imports in the imported sheet.
+		r.resolveImports(importedSheet)
+
+		r.sheets = append(r.sheets, importedSheet)
+		r.addKeyframesFromSheet(importedSheet)
+	}
+}
+
+// collectedDecl is an intermediate structure used during cascade sorting.
 // collectedDecl is an intermediate structure used during cascade sorting.
 type collectedDecl struct {
 	decl       css.Declaration

@@ -71,6 +71,7 @@ func WeightName(weight int) string {
 type FontManager struct {
 	mu        sync.RWMutex
 	fonts     []loadedFont
+	customTF  map[string]*skia.Typeface // @font-face registered fonts, keyed by lowercased family name
 	defaultTF *skia.Typeface // default sans-serif (prefers CJK coverage)
 	sansTF    *skia.Typeface  // generic sans-serif
 	monoTF    *skia.Typeface  // generic monospace
@@ -88,7 +89,9 @@ var (
 // fonts were loaded).
 func InitFontManager(fontDir string) *FontManager {
 	globalFontMgrOnce.Do(func() {
-		m := &FontManager{}
+		m := &FontManager{
+			customTF: make(map[string]*skia.Typeface),
+		}
 		m.loadDir(fontDir)
 		globalFontMgr = m
 	})
@@ -98,6 +101,37 @@ func InitFontManager(fontDir string) *FontManager {
 // GetFontManager returns the global FontManager, or nil if InitFontManager has
 // not been called yet.
 func GetFontManager() *FontManager { return globalFontMgr }
+
+// RegisterCustomFont creates a Typeface from raw font file data (TTF/OTF/WOFF)
+// and registers it under the given CSS family name, making it available via
+// subsequent LookupTypeface calls. This is the primary integration point for
+// @font-face rules: when a style sheet declares @font-face { font-family: X;
+// src: url(Y); }, the loaded font data should be passed to this method so that
+// the painter can resolve text with the correct typeface.
+//
+// The font data must be a raw TTF, OTF or WOFF (Skia handles WOFF->SFNT
+// conversion internally). index is 0 for single-font files (the common case);
+// TTC collections may use a non-zero index.
+func (m *FontManager) RegisterCustomFont(family string, data []byte, index int) error {
+	if m == nil {
+		return fmt.Errorf("fontmgr: FontManager is nil")
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("fontmgr: empty font data for %q", family)
+	}
+	tf := skia.NewTypefaceFromData(data, index)
+	if tf == nil {
+		return fmt.Errorf("fontmgr: failed to create typeface from data for %q", family)
+	}
+	key := strings.ToLower(strings.TrimSpace(family))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.customTF == nil {
+		m.customTF = make(map[string]*skia.Typeface)
+	}
+	m.customTF[key] = tf
+	return nil
+}
 
 // loadDir reads every font file under dir and registers it.
 func (m *FontManager) loadDir(dir string) {
@@ -433,6 +467,24 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 	defer m.mu.RUnlock()
 	italic := style == "italic" || style == "oblique"
 	raw := strings.ToLower(strings.TrimSpace(family))
+
+	// Check @font-face custom fonts first. If the exact family matches
+	// a registered custom font, return it immediately.
+	if len(m.customTF) > 0 {
+		if tf, ok := m.customTF[raw]; ok {
+			// Check if there's a custom font with a weight match.
+			// Exact lookup by raw family name.
+			_ = italic // weight matching omitted for now; single-face @font-face
+			return tf
+		}
+		// Also check individual families from the font-family list.
+		for _, fam := range splitFontFamily(raw) {
+			if tf, ok := m.customTF[fam]; ok {
+				return tf
+			}
+		}
+	}
+
 	// Split the comma-separated list and try each family in order.
 	families := splitFontFamily(raw)
 

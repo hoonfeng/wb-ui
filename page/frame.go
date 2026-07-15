@@ -326,14 +326,20 @@ func (f *Frame) executeInlineScripts() {
 		if !ok {
 			continue
 		}
-		// Skip external scripts (need a network fetch; not yet implemented).
-		if s.Src() != "" {
-			continue
-		}
 		// Only execute standard JavaScript; skip modules and other types.
 		if s.Type() != "text/javascript" {
 			continue
 		}
+
+		// External script: load via ResourceLoader, then execute.
+		if src := s.Src(); src != "" && f.ResourceLoader != nil {
+			f.ResourceLoader.LoadScript(src, &frameScriptClient{
+				frame: f,
+			})
+			continue
+		}
+
+		// Inline script: execute directly.
 		code := s.Text()
 		if strings.TrimSpace(code) == "" {
 			continue
@@ -348,6 +354,30 @@ func (f *Frame) executeInlineScripts() {
 	}
 }
 
+// frameScriptClient implements CachedResourceClient to handle the
+// asynchronous delivery of an externally loaded JavaScript file.
+type frameScriptClient struct {
+	frame *Frame
+}
+
+func (c *frameScriptClient) NotifyFinished(resource *CachedResource) {
+	if resource.Status() != CachedResourceStatusLoaded {
+		return
+	}
+	data := resource.Data()
+	if len(data) == 0 {
+		return
+	}
+	code := string(data)
+	if strings.TrimSpace(code) == "" {
+		return
+	}
+	if err := c.frame.ScriptEngine(code); err != nil {
+		logError("external script execution failed: %v", err)
+	}
+}
+
+// NeedsLayout reports whether the frame's view requires a layout pass, mirroring
 // NeedsLayout reports whether the frame's view requires a layout pass, mirroring
 // the per-frame layout-pending check in WebKit (FrameView::needsLayout()).
 func (f *Frame) NeedsLayout() bool {

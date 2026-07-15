@@ -28,7 +28,8 @@ import (
 // engine and the render tree share a single representation.
 type RenderBox struct {
 	renderObjectBase
-	frame layout.LayoutRect
+	frame        layout.LayoutRect
+	decodedImage *DecodedImage
 }
 
 // NewRenderBox constructs a RenderBox for the given DOM node with the given computed
@@ -103,6 +104,14 @@ func (b *RenderBox) FrameRect() layout.LayoutRect { return b.frame }
 // SetFrameRect replaces the border-box frame rectangle, mirroring
 // RenderBox::setFrameRect().
 func (b *RenderBox) SetFrameRect(r layout.LayoutRect) { b.frame = r }
+
+// DecodedImage returns the decoded image attached to this box (nil if none),
+// used by PaintImage to render <img> elements and CSS background images.
+func (b *RenderBox) DecodedImage() *DecodedImage { return b.decodedImage }
+
+// SetDecodedImage attaches a decoded image to this box. The caller retains
+// ownership of the DecodedImage; the RenderBox does not release it.
+func (b *RenderBox) SetDecodedImage(img *DecodedImage) { b.decodedImage = img }
 
 // Margin returns the margin edges, mirroring RenderBox::marginBoxRect() sides.
 func (b *RenderBox) Margin() layout.Edges { return b.frame.Margin }

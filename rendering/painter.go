@@ -672,3 +672,39 @@ func hexVal(s string) uint8 {
 func colorsEqual(a, b style.Color) bool {
 	return a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A
 }
+
+// PaintImage paints a decoded image for a replaced-element RenderBox (e.g.
+// <img>). The image is drawn at the element's content-box position and size,
+// scaled to fill the box. If the box has no decoded image data attached (e.g.
+// the image has not loaded yet), nothing is painted. Returns true if an image
+// was painted, false otherwise.
+func PaintImage(box *RenderBox, info *PaintInfo) bool {
+	if box == nil || info == nil || info.canvas == nil {
+		return false
+	}
+	if !box.IsVisible() {
+		return false
+	}
+	img := box.DecodedImage()
+	if img == nil || !img.Loaded() {
+		return false
+	}
+	st := box.Style()
+	if st == nil {
+		return false
+	}
+	// Draw at the content-box position (border-box + padding offset).
+	pL := lengthValue(st.PaddingLeft)
+	pT := lengthValue(st.PaddingTop)
+	pR := lengthValue(st.PaddingRight)
+	pB := lengthValue(st.PaddingBottom)
+	x := box.X() + pL
+	y := box.Y() + pT
+	w := box.Width() - pL - pR
+	h := box.Height() - pT - pB
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	img.Draw(info.canvas, x, y, w, h)
+	return true
+}

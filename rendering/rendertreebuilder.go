@@ -358,7 +358,7 @@ func defaultDisplayForTag(localName string) style.DisplayType {
 		return style.DisplayBlock
 	case "head", "title", "meta", "link", "style", "script", "base":
 		return style.DisplayNone
-	case "input", "button", "select", "textarea":
+	case "input", "button", "select", "textarea", "img":
 		// Replaced/form controls default to inline-block (matches the UA
 		// stylesheet in html5/defaultcss.go). Without this, width:100% and
 		// fixed height/width would not apply to inline-level replaced

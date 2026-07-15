@@ -750,6 +750,23 @@ func (c *Canvas) Snapshot() *skia.Image {
 // Release frees the Skia resources backing this canvas. After Release the canvas
 // must not be used. If the canvas wraps an externally-owned surface (e.g. a GPU
 // window surface), the surface itself is not freed.
+// DrawImage draws an skia.Image at the given position and size.
+// Mirrors GraphicsContext::drawImage(). The image is scaled to fill the
+// destination rect (w, h) preserving no aspect ratio.
+func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
+	if img == nil || c.canvas == nil {
+		return
+	}
+	src := skia.RectXYWH(0, 0, float32(img.Width()), float32(img.Height()))
+	dst := skia.RectXYWH(float32(x), float32(y), float32(x+w), float32(y+h))
+	paint := skia.NewPaint()
+	paint.SetStyle(skia.PaintStyleFill)
+	paint.SetAntialias(true)
+	defer paint.Release()
+	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
+}
+
+// Release frees Skia resources held by this Canvas.
 func (c *Canvas) Release() {
 	if c.fillPaint != nil {
 		c.fillPaint.Release()

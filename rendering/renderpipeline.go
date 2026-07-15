@@ -210,6 +210,11 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	if PaintFormControl(box, info) {
 		return
 	}
+	// Image elements (<img>): paint the decoded image if one is attached.
+	if el.LocalName() == "img" {
+		PaintImage(box, info)
+		return
+	}
 }
 
 // paintObjectOutline paints the outline for box-bearing objects during the outline
