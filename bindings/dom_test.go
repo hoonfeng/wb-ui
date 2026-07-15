@@ -266,4 +266,29 @@ func TestElementWrapperStructExposesBothHalves(t *testing.T) {
 	if w.JS.Accessor("innerHTML") == nil {
 		t.Fatalf("innerHTML accessor should be installed")
 	}
+	if w.JS.Accessor("innerHTML") == nil {
+		t.Fatalf("innerHTML accessor should be installed")
+	}
+}
+
+// TestDOMErrorPropagation verifies that a GoCallback registered via DOM bindings
+// that returns an error propagates to JS as a catchable exception.
+func TestDOMErrorPropagation(t *testing.T) {
+	rt, doc, log := newRuntimeWithDoc(t)
+	// Register a Go callback on the document that always errors.
+	RegisterGoFunction(rt, "thrower", func(args []jsc.JSValue) (jsc.JSValue, error) {
+		return jsc.Undefined(), &customError{msg: "dom error"}
+	})
+	_ = doc
+	mustRun(t, rt, `
+		try {
+			go.thrower();
+			console.log("no-error");
+		} catch(e) {
+			console.log("caught:" + e);
+		}
+	`)
+	if got := strings.TrimSpace(log.String()); got != "caught:Error: dom error" {
+		t.Fatalf("got %q, want 'caught:Error: dom error'", got)
+	}
 }

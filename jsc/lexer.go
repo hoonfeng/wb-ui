@@ -129,6 +129,8 @@ const (
 	KeywordExtends
 	KeywordFinally
 	KeywordFor
+	// KeywordFrom is the 'from' keyword.
+	KeywordFrom
 	KeywordFunction
 	KeywordIf
 	KeywordImport
@@ -175,6 +177,7 @@ var keywordText = map[KeywordKind]string{
 	KeywordExtends:  "extends",
 	KeywordFinally:  "finally",
 	KeywordFor:      "for",
+	KeywordFrom:     "from",
 	KeywordFunction: "function",
 	KeywordIf:       "if",
 	KeywordImport:   "import",
@@ -992,6 +995,10 @@ func (l *Lexer) Next(prevAllowsRegex bool) Token {
 // token is not a binary operator. Higher numbers bind tighter, mirroring the
 // BINARY_OP_PRECEDENCE macro in ParserTokens.h.
 func BinaryPrecedence(tok TokenKind) int {
+	// Keyword 'in' is also a binary operator.
+	if tok.IsKeyword() && tok.KeywordOf() == KeywordIn {
+		return 8
+	}
 	switch tok {
 	case TokenCoalesce:
 		return 1

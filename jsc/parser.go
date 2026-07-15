@@ -432,9 +432,28 @@ func (n *ClassDeclaration) nodePos() (int, int) { return n.Line, n.Col }
 func (n *ClassDeclaration) stmtNode()           {}
 func (n *ClassDeclaration) exprNode()           {} // class expressions are parsed but unsupported
 
-// ---- Parser ----
+// ImportDeclaration is 'import default from "mod"' or 'import { a, b } from "mod"'.
+type ImportDeclaration struct {
+	DefaultName string   // name for default import, or "" if none
+	NamedNames  []string // named import names
+	Module      string   // module specifier
+	Line, Col   int
+}
 
-// Parser is the Go translation of JSC::Parser. It wraps a Lexer and produces an AST via
+func (n *ImportDeclaration) nodePos() (int, int) { return n.Line, n.Col }
+func (n *ImportDeclaration) stmtNode()           {}
+
+// ExportDeclaration is 'export default expr' or 'export { a, b }'.
+type ExportDeclaration struct {
+	DefaultExpr Expr     // export default expr (nil for named exports)
+	NamedNames  []string // export { a, b }
+	Line, Col   int
+}
+
+func (n *ExportDeclaration) nodePos() (int, int) { return n.Line, n.Col }
+func (n *ExportDeclaration) stmtNode()           {}
+
+// ---- Parser ----
 // recursive descent with precedence climbing (Pratt) for expressions.
 type Parser struct {
 	lex     *Lexer
@@ -597,6 +616,10 @@ func (p *Parser) parseStatement() Stmt {
 				p.advance() // async
 				return p.parseFunctionDeclaration(true)
 			}
+		case KeywordImport:
+			return p.parseImportDeclaration()
+		case KeywordExport:
+			return p.parseExportDeclaration()
 		}
 	}
 	// Expression statement
@@ -631,9 +654,23 @@ func (p *Parser) consumeSemicolon() {
 	if p.current.PrecedingNewline || p.current.Kind == TokenEOF || p.current.Kind == TokenCloseBrace {
 		return
 	}
-	p.errorf("expected ';' got %s (%q)", tokenName(p.current.Kind), p.current.Lexeme)
 }
 
+// consumeString consumes a string literal token and returns its value (stripping quotes).
+func (p *Parser) consumeString() string {
+	if p.current.Kind == TokenString {
+		val := p.current.Lexeme
+		p.advance()
+		// Strip surrounding quotes.
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') {
+			val = val[1 : len(val)-1]
+		}
+		return val
+	}
+	return ""
+}
+
+// parseBlock parses a block statement.
 // parseBlock parses a brace-delimited block.
 func (p *Parser) parseBlock() *BlockStatement {
 	tok := p.current
@@ -886,6 +923,79 @@ func (p *Parser) parseClassDeclaration() *ClassDeclaration {
 	}
 	body := p.parseClassBody()
 	return &ClassDeclaration{Name: name, SuperClass: super, Body: body, Line: tok.Line, Col: tok.Col}
+}
+
+// parseImportDeclaration parses 'import default from "mod"' or 'import { a, b } from "mod"'.
+func (p *Parser) parseImportDeclaration() *ImportDeclaration {
+	tok := p.current
+	p.advance() // 'import'
+	defaultName := ""
+	var namedNames []string
+	if p.current.Kind == TokenIdentifier {
+		// import default from "mod"
+		defaultName = p.current.Lexeme
+		p.advance()
+		if p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordFrom {
+			p.advance() // 'from'
+		}
+		module := p.consumeString()
+		return &ImportDeclaration{DefaultName: defaultName, Module: module, Line: tok.Line, Col: tok.Col}
+	}
+	if p.current.Kind == TokenOpenBrace {
+		p.advance() // '{'
+		for p.current.Kind != TokenCloseBrace && p.current.Kind != TokenEOF {
+			if p.current.Kind == TokenIdentifier {
+				namedNames = append(namedNames, p.current.Lexeme)
+				p.advance()
+			}
+			if p.current.Kind == TokenComma {
+				p.advance()
+			}
+		}
+		if p.current.Kind == TokenCloseBrace {
+			p.advance() // '}'
+		}
+		if p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordFrom {
+			p.advance() // 'from'
+		}
+		module := p.consumeString()
+		return &ImportDeclaration{NamedNames: namedNames, Module: module, Line: tok.Line, Col: tok.Col}
+	}
+	// Fallback: try to parse a string directly (just for resilience).
+	module := p.consumeString()
+	return &ImportDeclaration{Module: module, Line: tok.Line, Col: tok.Col}
+}
+
+// parseExportDeclaration parses 'export default expr' or 'export { a, b }'.
+func (p *Parser) parseExportDeclaration() *ExportDeclaration {
+	tok := p.current
+	p.advance() // 'export'
+	if p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordDefault {
+		p.advance() // 'default'
+		expr := p.parseExpression()
+		p.consumeSemicolon()
+		return &ExportDeclaration{DefaultExpr: expr, Line: tok.Line, Col: tok.Col}
+	}
+	if p.current.Kind == TokenOpenBrace {
+		p.advance() // '{'
+		var names []string
+		for p.current.Kind != TokenCloseBrace && p.current.Kind != TokenEOF {
+			if p.current.Kind == TokenIdentifier {
+				names = append(names, p.current.Lexeme)
+				p.advance()
+			}
+			if p.current.Kind == TokenComma {
+				p.advance()
+			}
+		}
+		if p.current.Kind == TokenCloseBrace {
+			p.advance() // '}'
+		}
+		p.consumeSemicolon()
+		return &ExportDeclaration{NamedNames: names, Line: tok.Line, Col: tok.Col}
+	}
+	// export var/let/const/function — not implemented, treat as no-op.
+	return &ExportDeclaration{Line: tok.Line, Col: tok.Col}
 }
 
 // parseClassBody parses a class body { ... }.

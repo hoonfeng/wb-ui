@@ -249,3 +249,216 @@ func TestEditor_ClearUndoRedo(t *testing.T) {
 		t.Fatal("should not be able to redo after clear")
 	}
 }
+
+// TestDeleteCommand_Backspace verifies backward deletion (backspace).
+func TestDeleteCommand_Backspace(t *testing.T) {
+	doc := dom.NewDocument()
+	target := doc.CreateElement("div")
+	target.SetTextContent("hello world")
+
+	// Delete the space before "world": offset 6 is the "w" position.
+	// DeleteBackward at offset 6 deletes the rune before it (the space at index 5).
+	cmd := NewDeleteCommand(doc, target, 6, DeleteBackward, EditActionDeleteKey)
+	if err := cmd.DoApply(); err != nil {
+		t.Fatalf("DoApply: %v", err)
+	}
+	if got := target.TextContent(); got != "helloworld" {
+		t.Fatalf("after backspace: got %q, want %q", got, "helloworld")
+	}
+}
+
+// TestDeleteCommand_ForwardDelete verifies forward deletion (Delete key).
+func TestDeleteCommand_ForwardDelete(t *testing.T) {
+	doc := dom.NewDocument()
+	target := doc.CreateElement("div")
+	target.SetTextContent("hello world")
+
+	// Delete the space at position 5: "hello| world" → "helloworld"
+	cmd := NewDeleteCommand(doc, target, 5, DeleteForward, EditActionForwardDeleteKey)
+	if err := cmd.DoApply(); err != nil {
+		t.Fatalf("DoApply: %v", err)
+	}
+	if got := target.TextContent(); got != "helloworld" {
+		t.Fatalf("after forward delete: got %q, want %q", got, "helloworld")
+	}
+}
+
+// TestDeleteCommand_UndoRedo verifies full undo/redo cycle for deletion.
+func TestDeleteCommand_UndoRedo(t *testing.T) {
+	doc := dom.NewDocument()
+	target := doc.CreateElement("div")
+	target.SetTextContent("hello world")
+
+	cmd := NewDeleteCommand(doc, target, 6, DeleteBackward, EditActionDeleteKey)
+	if err := cmd.DoApply(); err != nil {
+		t.Fatalf("DoApply: %v", err)
+	}
+	if got := target.TextContent(); got != "helloworld" {
+		t.Fatalf("after apply: got %q, want %q", got, "helloworld")
+	}
+
+	// Undo restores the space.
+	if err := cmd.DoUnapply(); err != nil {
+		t.Fatalf("DoUnapply: %v", err)
+	}
+	if got := target.TextContent(); got != "hello world" {
+		t.Fatalf("after undo: got %q, want %q", got, "hello world")
+	}
+
+	// Redo deletes the space again.
+	if err := cmd.DoReapply(); err != nil {
+		t.Fatalf("DoReapply: %v", err)
+	}
+	if got := target.TextContent(); got != "helloworld" {
+		t.Fatalf("after redo: got %q, want %q", got, "helloworld")
+	}
+}
+
+// TestDeleteCommand_RuneAware verifies multi-byte character deletion.
+func TestDeleteCommand_RuneAware(t *testing.T) {
+	doc := dom.NewDocument()
+	target := doc.CreateElement("div")
+	target.SetTextContent("你好世界")
+
+	// Delete the second character (好) using backspace before position 2.
+	cmd := NewDeleteCommand(doc, target, 2, DeleteBackward, EditActionDeleteKey)
+	if err := cmd.DoApply(); err != nil {
+		t.Fatalf("DoApply: %v", err)
+	}
+	if got := target.TextContent(); got != "你世界" {
+		t.Fatalf("rune-aware backspace: got %q, want %q", got, "你世界")
+	}
+
+	// Undo restores 好.
+	if err := cmd.DoUnapply(); err != nil {
+		t.Fatalf("DoUnapply: %v", err)
+	}
+	if got := target.TextContent(); got != "你好世界" {
+		t.Fatalf("rune-aware undo: got %q, want %q", got, "你好世界")
+	}
+}
+
+// TestReplaceCommand_Simulate verifies a composite insert+delete sequence
+// that simulates a replace operation.
+func TestReplaceCommand_Simulate(t *testing.T) {
+	doc := dom.NewDocument()
+	target := doc.CreateElement("div")
+	target.SetTextContent("hello world")
+
+	// Simulate replacement: delete "world" then insert "there".
+	composite := NewCompositeBase(doc)
+	// Delete 5 characters starting at position 6 ("world").
+	for i := 0; i < 5; i++ {
+		dc := NewDeleteCommand(doc, target, 6, DeleteForward, EditActionDeleteKey)
+		if err := composite.ApplyCommand(dc); err != nil {
+			t.Fatalf("delete %d: %v", i, err)
+		}
+	}
+	if got := target.TextContent(); got != "hello " {
+		t.Fatalf("after deletions: got %q, want %q", got, "hello ")
+	}
+
+	insCmd := NewInsertTextCommand(doc, target, 6, "there", EditActionInsertText)
+	if err := composite.ApplyCommand(insCmd); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if got := target.TextContent(); got != "hello there" {
+		t.Fatalf("after replace: got %q, want %q", got, "hello there")
+	}
+
+	// Undo the composite: reverses insert then deletes.
+	if err := composite.UnapplyAll(); err != nil {
+		t.Fatalf("UnapplyAll: %v", err)
+	}
+	if got := target.TextContent(); got != "hello world" {
+		t.Fatalf("after composite undo: got %q, want %q", got, "hello world")
+	}
+}
+
+// TestEditor_UndoRedoStack verifies Editor undo/redo stack with multiple commands.
+func TestEditor_UndoRedoStack(t *testing.T) {
+	editor := newTestEditor()
+	doc := editor.Document()
+	target := doc.CreateElement("div")
+	target.SetTextContent("")
+
+	// Execute insert command 1.
+	cmd1 := NewInsertTextCommand(doc, target, 0, "a", EditActionInsertText)
+	if err := editor.ExecuteCommand(cmd1); err != nil {
+		t.Fatalf("ExecuteCommand 1: %v", err)
+	}
+	if editor.UndoStackSize() != 1 {
+		t.Fatalf("undo stack size after cmd1: got %d, want 1", editor.UndoStackSize())
+	}
+
+	// Execute insert command 2.
+	cmd2 := NewInsertTextCommand(doc, target, 1, "b", EditActionInsertText)
+	if err := editor.ExecuteCommand(cmd2); err != nil {
+		t.Fatalf("ExecuteCommand 2: %v", err)
+	}
+	if editor.UndoStackSize() != 2 {
+		t.Fatalf("undo stack size after cmd2: got %d, want 2", editor.UndoStackSize())
+	}
+
+	if got := target.TextContent(); got != "ab" {
+		t.Fatalf("after both inserts: got %q, want %q", got, "ab")
+	}
+
+	// Undo command 2.
+	if !editor.Undo() {
+		t.Fatal("Undo failed")
+	}
+	if got := target.TextContent(); got != "a" {
+		t.Fatalf("after undo: got %q, want %q", got, "a")
+	}
+	if editor.UndoStackSize() != 1 {
+		t.Fatalf("undo stack size after undo: got %d, want 1", editor.UndoStackSize())
+	}
+	if !editor.CanRedo() {
+		t.Fatal("should be able to redo after undo")
+	}
+
+	// Undo command 1.
+	if !editor.Undo() {
+		t.Fatal("Undo 2 failed")
+	}
+	if got := target.TextContent(); got != "" {
+		t.Fatalf("after undo 2: got %q, want empty", got)
+	}
+	if editor.CanUndo() {
+		t.Fatal("should not be able to undo after both undone")
+	}
+
+	// Redo command 1.
+	if !editor.Redo() {
+		t.Fatal("Redo failed")
+	}
+	if got := target.TextContent(); got != "a" {
+		t.Fatalf("after redo: got %q, want %q", got, "a")
+	}
+
+	// Redo command 2.
+	if !editor.Redo() {
+		t.Fatal("Redo 2 failed")
+	}
+	if got := target.TextContent(); got != "ab" {
+		t.Fatalf("after redo 2: got %q, want %q", got, "ab")
+	}
+}
+
+// TestEditor_CutCopyPaste verifies EditAction InputTypeFor mapping.
+func TestEditor_CutCopyPaste(t *testing.T) {
+	// Verify input type mapping for cut/copy/paste actions.
+	if got := InputTypeFor(EditActionCut); got != "deleteByCut" {
+		t.Errorf("EditActionCut → %q, want %q", got, "deleteByCut")
+	}
+	if got := InputTypeFor(EditActionCopy); got != "copy" {
+		t.Errorf("EditActionCopy → %q, want copy", got)
+	}
+	if got := InputTypeFor(EditActionPaste); got != "insertFromPaste" {
+		t.Errorf("EditActionPaste → %q, want %q", got, "insertFromPaste")
+	}
+	if got := InputTypeFor(EditActionPasteAndMatchStyle); got != "insertFromPaste" {
+		t.Errorf("EditActionPasteAndMatchStyle → %q, want insertFromPaste", got)
+	}
+}

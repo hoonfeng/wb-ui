@@ -9,10 +9,11 @@
 //
 // In WebKit these are stored on the Editor as m_customCompositionUnderlines
 // and consumed by the inline-text-box painter to render the underlines.
+//
+// Note: Color is represented as [4]uint8{R,G,B,A} rather than importing
+// wb-ui/platform/graphics to avoid a CGo dependency on the editing package.
 
 package editing
-
-import "wb-ui/platform/graphics"
 
 // CompositionUnderlineColor mirrors WebCore::CompositionUnderlineColor.
 // It selects whether the underline uses a given explicit color or the text
@@ -26,6 +27,12 @@ const (
 	UnderlineColorTextColor CompositionUnderlineColor = false
 )
 
+// Color is a simple RGBA color used by composition underlines and highlights,
+// avoiding a dependency on wb-ui/platform/graphics.
+type Color struct {
+	R, G, B, A uint8
+}
+
 // CompositionUnderline is the Go translation of WebCore::CompositionUnderline.
 // It describes a single underline segment within a composition string.
 type CompositionUnderline struct {
@@ -38,7 +45,7 @@ type CompositionUnderline struct {
 	CompositionUnderlineColor CompositionUnderlineColor
 	// Color is the underline color when CompositionUnderlineColor is
 	// UnderlineColorGivenColor.
-	Color graphics.Color
+	Color Color
 	// Thick reports whether this underline is rendered thick (used for
 	// the active clause / selected segment).
 	Thick bool
@@ -53,5 +60,5 @@ type CompositionHighlight struct {
 	// EndOffset is the character offset where the highlight ends.
 	EndOffset uint
 	// Color is the background highlight color.
-	Color graphics.Color
+	Color Color
 }

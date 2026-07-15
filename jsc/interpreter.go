@@ -99,8 +99,10 @@ type tryFrame struct {
 
 // forInIter tracks an in-progress for-in loop's key list and position.
 type forInIter struct {
-	keys []string
-	pos  int
+	keys    []string
+	pos     int
+	isForOf bool
+	obj     JSValue // the original object (for-of needs it for values)
 }
 
 // CallContext carries the 'this' binding and arguments for a single function call.
@@ -117,10 +119,19 @@ type Interpreter struct {
 	objectProto   *JSObject
 	functionProto *JSObject
 	arrayProto    *JSObject
+	mapProto      *JSObject
+	setProto      *JSObject
+	promiseProto  *JSObject
+	symbolProto   *JSObject
 	forInStack    []*forInIter
+	// moduleRegistry holds exported values from modules, keyed by module specifier.
+	moduleRegistry map[string]map[string]JSValue
+	// currentModuleName is the module name being executed (for OpExport).
+	currentModuleName string
 	// maxCallDepth bounds recursion to avoid runaway stack growth.
 	maxCallDepth int
 	depth        int
+	throwPending *jsException
 }
 
 // NewInterpreter constructs an interpreter with a fresh global object and environment.
@@ -138,6 +149,7 @@ func NewInterpreter() *Interpreter {
 		functionProto: functionProto,
 		arrayProto:    arrayProto,
 		maxCallDepth:  1000,
+		moduleRegistry: make(map[string]map[string]JSValue),
 	}
 }
 
@@ -283,7 +295,9 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 		case OpStoreProp:
 			v := pop()
 			obj := pop()
-			if obj.IsObject() {
+			if IsProxy(obj) {
+				proxySet(in, obj, inst.Name, v)
+			} else if obj.IsObject() {
 				if a := obj.object.Accessor(inst.Name); a != nil && a.Setter != nil {
 					a.Setter(in, obj, v)
 				} else {
@@ -440,19 +454,43 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 			push(StringValue(sb.String()))
 		case OpBeginForIn:
 			obj := pop()
-			iter := &forInIter{}
-			if obj.IsObject() {
-				o := obj.object
-				if o.IsArray {
-					for i := range o.Elements {
-						iter.keys = append(iter.keys, fmt.Sprintf("%d", i))
+			isForOf := inst.IntArg == 1
+			if isForOf {
+				// For-of: store object reference; use element index as iteration.
+				var count int
+				if obj.IsObject() {
+					o := obj.object
+					if o.IsArray {
+						count = len(o.Elements)
+					} else {
+						count = len(o.Properties)
 					}
 				}
-				for k := range o.Properties {
-					iter.keys = append(iter.keys, k)
+				keys := make([]string, count)
+				for i := 0; i < count; i++ {
+					keys[i] = fmt.Sprintf("%d", i)
 				}
+				in.forInStack = append(in.forInStack, &forInIter{
+					keys:    keys,
+					isForOf: true,
+					obj:     obj,
+				})
+			} else {
+				// For-in: collect enumerable keys.
+				iter := &forInIter{}
+				if obj.IsObject() {
+					o := obj.object
+					if o.IsArray {
+						for i := range o.Elements {
+							iter.keys = append(iter.keys, fmt.Sprintf("%d", i))
+						}
+					}
+					for k := range o.Properties {
+						iter.keys = append(iter.keys, k)
+					}
+				}
+				in.forInStack = append(in.forInStack, iter)
 			}
-			in.forInStack = append(in.forInStack, iter)
 		case OpForInNext:
 			if len(in.forInStack) == 0 {
 				pc = inst.IntArg
@@ -463,8 +501,25 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 				pc = inst.IntArg
 				continue
 			}
-			push(StringValue(iter.keys[iter.pos]))
+			key := iter.keys[iter.pos]
 			iter.pos++
+			if iter.isForOf {
+				// For-of: push the actual element value from the stored object.
+				if iter.obj.IsObject() && iter.obj.AsObject().IsArray {
+					arr := iter.obj.AsObject()
+					idx := iter.pos - 1 // pos was already incremented
+					if idx >= 0 && idx < len(arr.Elements) {
+						push(arr.Elements[idx])
+					} else {
+						push(Undefined())
+					}
+				} else {
+					// Fallback: try to get by key.
+					push(Undefined())
+				}
+			} else {
+				push(StringValue(key))
+			}
 		case OpEndForIn:
 			if len(in.forInStack) > 0 {
 				in.forInStack = in.forInStack[:len(in.forInStack)-1]
@@ -476,8 +531,32 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 				tryStack = tryStack[:len(tryStack)-1]
 			}
 		case OpCatch:
-			// The thrown value is already on the stack; this opcode is a marker. The
-			// generator emits a StoreVar after it to bind the catch parameter.
+			// The thrown value is already on the stack; this opcode is a marker.
+		case OpImport:
+			moduleName := inst.Name
+			exportName := inst.StrArg
+			mod, ok := in.moduleRegistry[moduleName]
+			if !ok {
+				// Module not found: push undefined.
+				push(Undefined())
+			} else if v, found := mod[exportName]; found {
+				push(v)
+			} else {
+				push(Undefined())
+			}
+		case OpExport:
+			// Pop the top value and store it as an export.
+			value := pop()
+			if in.currentModuleName == "" {
+				// No module context: drop the value.
+			} else {
+				mod, ok := in.moduleRegistry[in.currentModuleName]
+				if !ok {
+					mod = make(map[string]JSValue)
+					in.moduleRegistry[in.currentModuleName] = mod
+				}
+				mod[inst.Name] = value
+			}
 		default:
 			return Undefined(), &jsException{value: StringValue(fmt.Sprintf("unknown opcode %d", inst.Op))}
 		}
@@ -504,13 +583,22 @@ func numericIndex(s string) (int, bool) {
 // getProperty retrieves obj.name walking the prototype chain. Works for objects and
 // functions (function instance properties live on fn.properties).
 func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
+	// Proxy check: if obj is a Proxy, call the get trap.
+	if IsProxy(obj) {
+		return proxyGet(in, obj, name)
+	}
 	switch obj.tag {
 	case TagObject:
-		if a := obj.object.Accessor(name); a != nil && a.Getter != nil {
-			return a.Getter(in, obj)
-		}
-		if v, ok := obj.object.Get(name); ok {
-			return v
+		// Walk the object + prototype chain, checking accessors first.
+		cur := obj.object
+		for cur != nil {
+			if a := cur.Accessor(name); a != nil && a.Getter != nil {
+				return a.Getter(in, obj)
+			}
+			if v, ok := cur.Properties[name]; ok {
+				return v
+			}
+			cur = cur.Prototype
 		}
 		if obj.object.IsArray && name == "length" {
 			return NumberValue(float64(len(obj.object.Elements)))
@@ -537,6 +625,14 @@ func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
 			return FunctionValue(fn)
 		}
 		return Undefined()
+	case TagSymbol:
+		// Symbols carry no own properties; check the Symbol prototype.
+		if in.symbolProto != nil {
+			if v, ok := in.symbolProto.Get(name); ok {
+				return v
+			}
+		}
+		return Undefined()
 	case TagFunction:
 		if v, ok := obj.fn.properties.Get(name); ok {
 			return v
@@ -556,6 +652,10 @@ func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
 
 // getIndex retrieves obj[key] for arbitrary key types.
 func (in *Interpreter) getIndex(obj JSValue, key JSValue) JSValue {
+	// Proxy check.
+	if IsProxy(obj) {
+		return proxyGet(in, obj, key.ToString())
+	}
 	switch obj.tag {
 	case TagObject:
 		o := obj.object
@@ -604,7 +704,13 @@ func (in *Interpreter) getIndex(obj JSValue, key JSValue) JSValue {
 }
 
 // setIndex assigns obj[key] = value.
+// setIndex assigns obj[key] = value.
 func (in *Interpreter) setIndex(obj JSValue, key JSValue, value JSValue) {
+	// Proxy check.
+	if IsProxy(obj) {
+		proxySet(in, obj, key.ToString(), value)
+		return
+	}
 	if obj.IsObject() {
 		o := obj.object
 		if o.IsArray || key.IsNumber() {
@@ -623,12 +729,22 @@ func (in *Interpreter) setIndex(obj JSValue, key JSValue, value JSValue) {
 
 // callValue invokes a callable JSValue with the given this and arguments.
 func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue, *jsException) {
+	// Proxy check: if callee is a Proxy, call the apply trap.
+	if IsProxy(callee) {
+		return proxyApply(in, callee, this, args)
+	}
 	if !callee.IsFunction() {
 		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function")}
 	}
 	fn := callee.fn
 	if fn.Native != nil {
 		res := fn.Native(in, this, args)
+		// Check if the native function set a pending exception via ThrowError.
+		if in.throwPending != nil {
+			exc := in.throwPending
+			in.throwPending = nil
+			return Undefined(), exc
+		}
 		return res, nil
 	}
 	if fn.Closure != nil {
@@ -640,6 +756,10 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 // construct implements the 'new' operator for script functions (native constructors
 // handle their own object creation).
 func (in *Interpreter) construct(callee JSValue, args []JSValue) (JSValue, *jsException) {
+	// Proxy check: if callee is a Proxy, call the construct trap.
+	if IsProxy(callee) {
+		return proxyConstruct(in, callee, args)
+	}
 	if !callee.IsFunction() {
 		return Undefined(), &jsException{value: StringValue("TypeError: value is not a constructor")}
 	}
@@ -677,6 +797,13 @@ func (in *Interpreter) construct(callee JSValue, args []JSValue) (JSValue, *jsEx
 
 // binaryOp applies a binary operator to two values.
 func (in *Interpreter) binaryOp(op TokenKind, a, b JSValue) JSValue {
+	// Normalize keyword-based tokens to their non-keyword equivalents.
+	if op.IsKeyword() {
+		switch op.KeywordOf() {
+		case KeywordIn:
+			op = TokenIn
+		}
+	}
 	switch op {
 	case TokenPlus:
 		if a.IsString() || b.IsString() {
@@ -733,9 +860,10 @@ func (in *Interpreter) binaryOp(op TokenKind, a, b JSValue) JSValue {
 		return NumberValue(float64(a.ToInt32() << (uint32(b.ToInt32()) & 31)))
 	case TokenRightShift:
 		return NumberValue(float64(a.ToInt32() >> (uint32(b.ToInt32()) & 31)))
-	case TokenUnsignedRightShift:
-		return NumberValue(float64(uint32(a.ToInt32()) >> (uint32(b.ToInt32()) & 31)))
 	case TokenIn:
+		if IsProxy(b) {
+			return BooleanValue(proxyHas(in, b, a.ToString()))
+		}
 		if b.IsObject() {
 			return BooleanValue(b.AsObject().HasOwn(a.ToString()))
 		}
@@ -1036,10 +1164,16 @@ func (in *Interpreter) Call(callee, this JSValue, args ...JSValue) (JSValue, err
 // arguments, mirroring how a host calls a named script function. 'this' is undefined.
 // It returns an error if the name is not bound to a callable value.
 //
-// The lookup checks both the global object's properties (host-installed bindings such
-// as console/Math, set via JSObject.Set) and the global environment (script-declared
-// var/function declarations, which bind into Environment.bindings rather than the
 // global object's property map).
+
+// ThrowError sets a pending JS exception that will be thrown when the current native
+// function call returns to the interpreter. It is used by bindings to propagate Go
+// errors to JS. After calling ThrowError, the native function should return a dummy
+// value (e.g. Undefined()); the interpreter will discard it and throw instead.
+func (in *Interpreter) ThrowError(msg string) {
+	in.throwPending = &jsException{value: StringValue("Error: " + msg)}
+}
+
 func (in *Interpreter) CallFunction(name string, args ...JSValue) (JSValue, error) {
 	fn, ok := in.global.Get(name)
 	if !ok {

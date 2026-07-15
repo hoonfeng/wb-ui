@@ -153,3 +153,59 @@ func TestCallJSFunctionUndefined(t *testing.T) {
 		t.Fatalf("expected error for unknown function")
 	}
 }
+
+// TestGoCallbackErrorThrows verifies that a GoCallback returning an error is caught
+// as a JS exception via try/catch.
+func TestGoCallbackErrorThrows(t *testing.T) {
+	rt := jsc.NewInterpreter()
+	log := &jsc.BufferLogger{}
+	rt.SetupGlobal(log)
+	// Register a Go function that always errors.
+	RegisterGoFunction(rt, "fail", func(args []jsc.JSValue) (jsc.JSValue, error) {
+		return jsc.Undefined(), &customError{msg: "something went wrong"}
+	})
+	if _, err := rt.Run(`
+		try {
+			go.fail();
+			console.log("no-error");
+		} catch(e) {
+			console.log("caught:" + e);
+		}
+	`); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if got := log.String(); got != "caught:Error: something went wrong" {
+		t.Fatalf("got %q, want 'caught:Error: something went wrong'", got)
+	}
+}
+
+// TestGoCallbackErrorPropagates verifies that an error from a nested Go callback
+// propagates correctly through the call stack.
+func TestGoCallbackErrorPropagates(t *testing.T) {
+	rt := jsc.NewInterpreter()
+	log := &jsc.BufferLogger{}
+	rt.SetupGlobal(log)
+	// Inner: always fails.
+	RegisterGoFunction(rt, "inner", func(args []jsc.JSValue) (jsc.JSValue, error) {
+		return jsc.Undefined(), &customError{msg: "inner fail"}
+	})
+	// Outer: calls inner.
+	if _, err := rt.Run(`
+		try {
+			go.inner();
+			console.log("no-error");
+		} catch(e) {
+			console.log("caught:" + e);
+		}
+	`); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if got := log.String(); got != "caught:Error: inner fail" {
+		t.Fatalf("got %q, want 'caught:Error: inner fail'", got)
+	}
+}
+
+// customError is a simple error type for test assertions.
+type customError struct{ msg string }
+
+func (e *customError) Error() string { return e.msg }

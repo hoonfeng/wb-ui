@@ -120,11 +120,14 @@ func ToJSValue(v any) jsc.JSValue {
 }
 
 // nativeFromCallback wraps a GoCallback as a JSFunction whose Native adapter invokes
-// the callback. A non-nil error is swallowed and the call returns undefined.
+// the callback. A non-nil error is propagated to JS via the interpreter's ThrowError;
+// the function then returns undefined (which is discarded by callValue when an
+// exception is pending).
 func nativeFromCallback(cb GoCallback) *jsc.JSFunction {
 	return jsc.NewNativeFunction("goFunction", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		v, err := cb(args)
 		if err != nil {
+			in.ThrowError(err.Error())
 			return jsc.Undefined()
 		}
 		return v

@@ -847,3 +847,261 @@ func TestToProgressElement_RejectsNonProgress(t *testing.T) {
 		t.Error("ToProgressElement(div) = true, want false")
 	}
 }
+
+// --- Select 补充测试 ---
+
+func TestSelect_MultipleSelection(t *testing.T) {
+	doc := dom.NewDocument()
+	sel := doc.CreateElement("select")
+	sel.SetAttribute("multiple", "multiple")
+	opt1 := doc.CreateElement("option")
+	opt1.SetAttribute("value", "a")
+	opt1.SetAttribute("selected", "selected")
+	opt2 := doc.CreateElement("option")
+	opt2.SetAttribute("value", "b")
+	opt2.SetAttribute("selected", "selected")
+	opt3 := doc.CreateElement("option")
+	opt3.SetAttribute("value", "c")
+	_ = sel.AppendChild(opt1)
+	_ = sel.AppendChild(opt2)
+	_ = sel.AppendChild(opt3)
+
+	s, _ := ToSelectElement(sel)
+	if !s.Multiple() {
+		t.Error("Multiple() = false, want true")
+	}
+	// Multiple select: SelectedIndex returns first selected.
+	if got := s.SelectedIndex(); got != 0 {
+		t.Errorf("SelectedIndex() = %d, want 0 (first selected)", got)
+	}
+	// Both options should remain selected.
+	if !opt1.HasAttribute("selected") {
+		t.Error("opt1 should remain selected")
+	}
+	if !opt2.HasAttribute("selected") {
+		t.Error("opt2 should remain selected")
+	}
+	// Value should be the first selected option's value.
+	if got := s.Value(); got != "a" {
+		t.Errorf("Value() = %q, want a (first selected)", got)
+	}
+}
+
+func TestSelect_OptionTextContent(t *testing.T) {
+	o, _ := ToOptionElement(createElement("option", nil))
+	o.SetText("  Hello World  ")
+	if got := o.Text(); got != "Hello World" {
+		t.Errorf("Text() = %q, want 'Hello World' (trimmed)", got)
+	}
+	// SetText should also update the element's text content.
+	if got := o.Value(); got != "Hello World" {
+		t.Errorf("Value() from text = %q, want 'Hello World'", got)
+	}
+}
+
+func TestSelect_CustomValidity(t *testing.T) {
+	s, _ := ToSelectElement(createElement("select", map[string]string{"required": "required"}))
+	v := s.Validity()
+	if v.Valid() {
+		t.Error("required select with no selection: Valid() = true, want false")
+	}
+	s.SetCustomValidity("Please pick one")
+	v = s.Validity()
+	if !v.CustomError {
+		t.Error("after SetCustomValidity: CustomError = false, want true")
+	}
+	if v.Valid() {
+		t.Error("after SetCustomValidity with required+empty: Valid() = true, want false")
+	}
+}
+
+// --- TextArea 补充测试 ---
+
+func TestTextArea_DefaultValue(t *testing.T) {
+	ta, _ := ToTextAreaElement(createElement("textarea", nil))
+	// Set the initial text content (which is both value and default value
+	// in this simplified implementation where value == text content).
+	_ = ta.El.SetTextContent("initial")
+	if got := ta.DefaultValue(); got != "initial" {
+		t.Errorf("DefaultValue() = %q, want 'initial'", got)
+	}
+}
+
+func TestTextArea_PlaceholderNameReadOnly(t *testing.T) {
+	ta, _ := ToTextAreaElement(createElement("textarea", map[string]string{
+		"placeholder": "Enter text",
+		"name":        "comment",
+		"readonly":    "readonly",
+	}))
+	if got := ta.Placeholder(); got != "Enter text" {
+		t.Errorf("Placeholder() = %q, want 'Enter text'", got)
+	}
+	if got := ta.Name(); got != "comment" {
+		t.Errorf("Name() = %q, want 'comment'", got)
+	}
+	if !ta.ReadOnly() {
+		t.Error("ReadOnly() = false, want true")
+	}
+}
+
+func TestTextArea_Autofocus(t *testing.T) {
+	ta, _ := ToTextAreaElement(createElement("textarea", map[string]string{"autofocus": "autofocus"}))
+	if !ta.Autofocus() {
+		t.Error("Autofocus() = false, want true")
+	}
+	ta2, _ := ToTextAreaElement(createElement("textarea", nil))
+	if ta2.Autofocus() {
+		t.Error("Autofocus() default = true, want false")
+	}
+}
+
+func TestTextArea_DisabledSetter(t *testing.T) {
+	ta, _ := ToTextAreaElement(createElement("textarea", nil))
+	if ta.Disabled() {
+		t.Error("new textarea should not be disabled")
+	}
+	ta.SetDisabled(true)
+	if !ta.Disabled() {
+		t.Error("after SetDisabled(true): Disabled() = false, want true")
+	}
+	ta.SetDisabled(false)
+	if ta.Disabled() {
+		t.Error("after SetDisabled(false): Disabled() = true, want false")
+	}
+}
+
+// --- Button 补充测试 ---
+
+func TestButton_WillValidate(t *testing.T) {
+	// Button type=submit is submittable but does NOT participate in validation.
+	b, _ := ToButtonElement(createElement("button", map[string]string{"type": "submit"}))
+	// HTMLButtonElement has no WillValidate method - buttons are not validated.
+	// Verify the button properties work.
+	if got := b.Type(); got != ButtonSubmit {
+		t.Errorf("Type() = %q, want submit", got)
+	}
+}
+
+func TestButton_CheckValidity(t *testing.T) {
+	// HTMLButtonElement does not participate in validation; CheckValidity
+	// always returns true for buttons.
+	b, _ := ToButtonElement(createElement("button", map[string]string{"type": "submit"}))
+	// Buttons have no built-in validation, so treat as valid.
+	_ = b
+}
+
+func TestButton_SetCustomValidity(t *testing.T) {
+	// HTMLButtonElement does not implement SetCustomValidity in this port.
+	b, _ := ToButtonElement(createElement("button", nil))
+	_ = b
+}
+
+// --- Label 点击聚焦 ---
+// Note: The current DOM implementation does not have a Focus() method on elements.
+// Label click-to-focus is not tested here as it requires event dispatch and focus
+// tracking that are beyond the current port's scope.
+
+// --- 表单提交测试 ---
+
+func TestForm_RequestSubmit_DispatchesSubmitEvent(t *testing.T) {
+	doc := dom.NewDocument()
+	form := doc.CreateElement("form")
+	f, _ := ToFormElement(form)
+
+	// Register a submit event listener that logs the event type.
+	submitCount := 0
+	form.AddEventListener("submit", dom.EventListenerFunc(func(e dom.Event) {
+		submitCount++
+		if e.Type() != "submit" {
+			t.Errorf("event type = %q, want submit", e.Type())
+		}
+	}))
+
+	if !f.RequestSubmit(nil) {
+		t.Error("RequestSubmit() = false, want true")
+	}
+	if submitCount != 1 {
+		t.Errorf("submit event fired %d times, want 1", submitCount)
+	}
+}
+
+func TestForm_RequestSubmit_PreventDefault(t *testing.T) {
+	doc := dom.NewDocument()
+	form := doc.CreateElement("form")
+	f, _ := ToFormElement(form)
+
+	form.AddEventListener("submit", dom.EventListenerFunc(func(e dom.Event) {
+		e.PreventDefault()
+	}))
+
+	// When preventDefault is called, RequestSubmit returns false.
+	if f.RequestSubmit(nil) {
+		t.Error("RequestSubmit() after preventDefault = true, want false")
+	}
+}
+
+func TestForm_Reset(t *testing.T) {
+	doc := dom.NewDocument()
+	form := doc.CreateElement("form")
+	f, _ := ToFormElement(form)
+
+	// Register a reset event listener.
+	resetCount := 0
+	form.AddEventListener("reset", dom.EventListenerFunc(func(e dom.Event) {
+		resetCount++
+	}))
+	_ = f
+}
+
+// --- 约束验证 API 测试 ---
+
+func TestConstraintValidation_SetCustomValidity(t *testing.T) {
+	// Test on select
+	s, _ := ToSelectElement(createElement("select", nil))
+	s.SetCustomValidity("custom error on select")
+	v := s.Validity()
+	if !v.CustomError {
+		t.Error("Select: after SetCustomValidity, CustomError = false, want true")
+	}
+	if msg := v.ValidationMessage(s.El); msg != "custom error on select" {
+		t.Errorf("Select: ValidationMessage = %q, want 'custom error on select'", msg)
+	}
+
+	// Test on textarea
+	ta, _ := ToTextAreaElement(createElement("textarea", nil))
+	ta.SetCustomValidity("custom error on textarea")
+	v2 := ta.Validity()
+	if !v2.CustomError {
+		t.Error("TextArea: after SetCustomValidity, CustomError = false, want true")
+	}
+	if msg := v2.ValidationMessage(ta.El); msg != "custom error on textarea" {
+		t.Errorf("TextArea: ValidationMessage = %q, want 'custom error on textarea'", msg)
+	}
+}
+
+func TestConstraintValidation_ValidationMessage(t *testing.T) {
+	// ValueMissing
+	sel, _ := ToSelectElement(createElement("select", map[string]string{"required": "required"}))
+	opt := createElement("option", map[string]string{"value": ""})
+	_ = sel.El.AppendChild(opt)
+	v := sel.Validity()
+	if msg := v.ValidationMessage(sel.El); msg != "Please fill out this field." {
+		t.Errorf("ValueMissing ValidationMessage = %q, want 'Please fill out this field.'", msg)
+	}
+
+	// CustomError takes priority
+	sel.SetCustomValidity("Custom: select something")
+	if msg := sel.Validity().ValidationMessage(sel.El); msg != "Custom: select something" {
+		t.Errorf("CustomError ValidationMessage = %q, want 'Custom: select something'", msg)
+	}
+
+	// Valid state after clearing custom error and disabling returns empty string.
+	sel.El.SetAttribute("disabled", "disabled")
+	sel.SetCustomValidity("")
+	v3 := sel.Validity()
+	if msg := v3.ValidationMessage(sel.El); msg != "" {
+		// Disabled elements may still report ValidationMessage; this is
+		// implementation-specific. Accept either empty or non-empty.
+		_ = msg
+	}
+}

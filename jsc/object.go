@@ -36,6 +36,8 @@ const (
 	TagNumber
 	// TagString is the tag for string values.
 	TagString
+	// TagSymbol is the tag for symbol values.
+	TagSymbol
 	// TagObject is the tag for object values (including arrays/functions).
 	TagObject
 	// TagFunction is the tag for callable values.
@@ -50,6 +52,7 @@ type JSValue struct {
 	boolean bool
 	number  float64
 	str     string
+	symbol  string
 	object  *JSObject
 	fn      *JSFunction
 }
@@ -71,6 +74,9 @@ func IntValue(n int) JSValue { return JSValue{tag: TagNumber, number: float64(n)
 
 // StringValue wraps a Go string.
 func StringValue(s string) JSValue { return JSValue{tag: TagString, str: s} }
+
+// SymbolValue wraps a description string as a Symbol.
+func SymbolValue(desc string) JSValue { return JSValue{tag: TagSymbol, symbol: desc} }
 
 // ObjectValue wraps a *JSObject.
 func ObjectValue(o *JSObject) JSValue {
@@ -105,6 +111,9 @@ func (v JSValue) IsNumber() bool { return v.tag == TagNumber }
 
 // IsString reports whether the value is a string.
 func (v JSValue) IsString() bool { return v.tag == TagString }
+
+// IsSymbol reports whether the value is a symbol.
+func (v JSValue) IsSymbol() bool { return v.tag == TagSymbol }
 
 // IsObject reports whether the value is an object.
 func (v JSValue) IsObject() bool { return v.tag == TagObject }
@@ -181,6 +190,8 @@ func (v JSValue) ToBoolean() bool {
 		return !(v.number == 0 || math.IsNaN(v.number))
 	case TagString:
 		return len(v.str) > 0
+	case TagSymbol:
+		return true
 	case TagObject, TagFunction:
 		return true
 	}
@@ -255,6 +266,8 @@ func (v JSValue) ToString() string {
 		return formatNumber(v.number)
 	case TagString:
 		return v.str
+	case TagSymbol:
+		return "Symbol(" + v.symbol + ")"
 	case TagObject:
 		if v.object != nil && v.object.IsArray {
 			return v.arrayToString()
@@ -324,6 +337,8 @@ func (v JSValue) StrictEquals(other JSValue) bool {
 		return v.number == other.number
 	case TagString:
 		return v.str == other.str
+	case TagSymbol:
+		return v.symbol == other.symbol
 	case TagObject:
 		return v.object == other.object
 	case TagFunction:

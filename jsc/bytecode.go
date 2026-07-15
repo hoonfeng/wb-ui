@@ -99,6 +99,10 @@ const (
 	OpLeaveTry
 	// OpCatch stores the caught exception value into Name.
 	OpCatch
+	// OpImport loads a value from a module by name.
+	OpImport
+	// OpExport stores a value into the current module's export table.
+	OpExport
 )
 
 // Instruction is a single bytecode instruction. It mirrors the packed Instruction
@@ -318,6 +322,31 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 		// Classes throw 'not implemented' at runtime: emit an error constant.
 		g.emit(Instruction{Op: OpLoadConst, Value: StringValue("class declarations are not implemented")})
 		g.emit(Instruction{Op: OpThrow})
+	case *ImportDeclaration:
+		// import default from "mod": load module and store default binding.
+		// Note: default import always loads the "default" export, not the local name.
+		if n.DefaultName != "" {
+			g.emit(Instruction{Op: OpImport, Name: n.Module, StrArg: "default"})
+			g.emit(Instruction{Op: OpStoreVar, Name: n.DefaultName})
+			g.emit(Instruction{Op: OpPop})
+		}
+		// import { a, b } from "mod": load each named export.
+		for _, name := range n.NamedNames {
+			g.emit(Instruction{Op: OpImport, Name: n.Module, StrArg: name})
+			g.emit(Instruction{Op: OpStoreVar, Name: name})
+			g.emit(Instruction{Op: OpPop})
+		}
+	case *ExportDeclaration:
+		// export { a, b }: export named values.
+		for _, name := range n.NamedNames {
+			g.emit(Instruction{Op: OpLoadVar, Name: name})
+			g.emit(Instruction{Op: OpExport, Name: name})
+		}
+		// export default expr: evaluate expr and export as "default".
+		if n.DefaultExpr != nil {
+			g.emitExpr(n.DefaultExpr)
+			g.emit(Instruction{Op: OpExport, Name: "default"})
+		}
 	default:
 		// Unknown statement kind: ignore.
 	}
@@ -402,7 +431,11 @@ func (g *BytecodeGenerator) emitForIn(n *ForInStatement) {
 	frame := &loopFrame{}
 	g.loopStack = append(g.loopStack, frame)
 	g.emitExpr(n.Right)
-	g.emit(Instruction{Op: OpBeginForIn})
+	isForOf := 0
+	if n.IsOf {
+		isForOf = 1
+	}
+	g.emit(Instruction{Op: OpBeginForIn, IntArg: isForOf})
 	loopStart := g.here()
 	frame.continueTargets = append(frame.continueTargets, loopStart)
 	exhaustedJump := g.emitJump(OpForInNext)

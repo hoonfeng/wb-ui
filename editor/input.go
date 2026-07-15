@@ -10,6 +10,8 @@
 
 package editor
 
+import "strings"
+
 // KeyEvent describes a keyboard event from the host.
 type KeyEvent struct {
 	// Key is the key name (e.g. "a", "Enter", "ArrowLeft", "Backspace").
@@ -183,7 +185,12 @@ func keyEventToString(ev KeyEvent) string {
 	if ev.Meta {
 		parts = append(parts, "Meta")
 	}
-	parts = append(parts, ev.Key)
+	key := ev.Key
+	// Uppercase single-letter keys to match keymap conventions (e.g. "Ctrl-A").
+	if len(key) == 1 {
+		key = strings.ToUpper(key)
+	}
+	parts = append(parts, key)
 	return joinKey(parts)
 }
 

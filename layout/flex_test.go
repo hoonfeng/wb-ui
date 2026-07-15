@@ -2,6 +2,8 @@ package layout
 
 import (
 	"testing"
+
+	"wb-ui/style"
 )
 
 // TestFlex_RowEqualGrow verifies that two flex items with flex-grow:1 share the
@@ -77,4 +79,35 @@ func TestFlex_FlexGrowRatio(t *testing.T) {
 	// a gets 3/4 * 800 = 600, b gets 1/4 * 800 = 200.
 	assertApprox(t, "a.Width", a.Rect.Width, 600)
 	assertApprox(t, "b.Width", b.Rect.Width, 200)
+}
+
+// TestFlex_MinMax verifies that min-width/max-width constrain flex item sizing.
+func TestFlex_MinMax(t *testing.T) {
+	// Subtest A: flex-grow:1 with min-width 250 → used width ≥ 250.
+	root := mkFlex()
+	a := mkBlockWH(100, 20)
+	a.Style.FlexGrow = 1
+	a.Style.MinWidth = style.Length{Value: 250, Unit: "px"}
+	b := mkBlock()
+	b.Style.FlexGrow = 1
+	root.AddChild(a)
+	root.AddChild(b)
+	Layout(root, 800, 600)
+	if a.Rect.Width < 250 {
+		t.Errorf("min-width 250 not honoured: a.Width = %g", a.Rect.Width)
+	}
+
+	// Subtest B: flex-grow:1 with max-width 200 → used width ≤ 200.
+	root2 := mkFlex()
+	c := mkBlockWH(500, 20)
+	c.Style.FlexGrow = 1
+	c.Style.MaxWidth = style.Length{Value: 200, Unit: "px"}
+	d := mkBlock()
+	d.Style.FlexGrow = 1
+	root2.AddChild(c)
+	root2.AddChild(d)
+	Layout(root2, 800, 600)
+	if c.Rect.Width > 200 {
+		t.Errorf("max-width 200 not honoured: c.Width = %g", c.Rect.Width)
+	}
 }

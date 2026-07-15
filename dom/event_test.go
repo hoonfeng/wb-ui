@@ -424,3 +424,313 @@ func TestRemoveAllEventListeners(t *testing.T) {
 		t.Errorf("listeners called %d times after RemoveAll, want 0", calls)
 	}
 }
+
+// TestEvent_IsTrusted verifies that user-created events have isTrusted=false and that
+// the trusted flag is not modified during dispatch.
+func TestEvent_IsTrusted(t *testing.T) {
+	// NewEvent creates an untrusted event.
+	ev := NewEvent("click", false, false, false)
+	if ev.IsTrusted() {
+		t.Errorf("NewEvent should not be trusted")
+	}
+
+	// NewMouseEvent creates a trusted event (mirroring browser-constructed events).
+	m := NewMouseEvent("click", false, false, false)
+	if !m.IsTrusted() {
+		t.Errorf("NewMouseEvent should be trusted")
+	}
+
+	// NewEventFromInit creates an untrusted event.
+	ev2 := NewEventFromInit("test", EventInit{Bubbles: true, Cancelable: true})
+	if ev2.IsTrusted() {
+		t.Errorf("NewEventFromInit should not be trusted")
+	}
+
+	// NewCustomEvent creates an untrusted event.
+	ce := NewCustomEvent("app-event", nil)
+	if ce.IsTrusted() {
+		t.Errorf("NewCustomEvent should not be trusted")
+	}
+
+	// DispatchEvent should not alter the isTrusted flag.
+	d := NewDocument()
+	el := d.CreateElement("div")
+	_ = d.AppendChild(el)
+
+	var trustedDuringDispatch bool
+	el.AddEventListener("trust-test", EventListenerFunc(func(e Event) {
+		trustedDuringDispatch = e.IsTrusted()
+	}))
+
+	untrusted := NewEvent("trust-test", true, false, false)
+	_ = el.DispatchEvent(untrusted)
+	if trustedDuringDispatch {
+		t.Errorf("untrusted event should remain untrusted during dispatch")
+	}
+	if untrusted.IsTrusted() {
+		t.Errorf("untrusted event should remain untrusted after dispatch")
+	}
+}
+
+// TestEvent_ComposedFlag verifies the Composed() flag on different event types.
+func TestEvent_ComposedFlag(t *testing.T) {
+	// Default composed=false.
+	ev := NewEvent("test", true, true, false)
+	if ev.Composed() {
+		t.Errorf("NewEvent with composed=false should return false")
+	}
+
+	// Explicit composed=true.
+	ev2 := NewEvent("test", true, true, true)
+	if !ev2.Composed() {
+		t.Errorf("NewEvent with composed=true should return true")
+	}
+
+	// MouseEvent defaults to composed=true (mirroring WebKit behavior).
+	m := NewMouseEvent("click", true, true, true)
+	if !m.Composed() {
+		t.Errorf("NewMouseEvent should have composed=true")
+	}
+
+	// FocusEvent defaults to composed=false.
+	f := NewFocusEvent("focus", false, false)
+	if f.Composed() {
+		t.Errorf("NewFocusEvent should have composed=false by default")
+	}
+
+	// CustomEvent with composed flag in init.
+	ce := NewCustomEvent("test", map[string]interface{}{"composed": true})
+	if !ce.Composed() {
+		t.Errorf("CustomEvent with composed=true should return true")
+	}
+
+	ce2 := NewCustomEvent("test", map[string]interface{}{"composed": false})
+	if ce2.Composed() {
+		t.Errorf("CustomEvent with composed=false should return false")
+	}
+}
+
+// TestEvent_PropagationChain verifies the full capture→target→bubble propagation
+// order, including StopPropagation and StopImmediatePropagation effects.
+//
+// Note: composedPath is a known limitation of this port (intentionally omitted per
+// event.go comments); no tests are written for it.
+func TestEvent_PropagationChain(t *testing.T) {
+	d := NewDocument()
+	root := d.CreateElement("root")
+	_ = d.AppendChild(root)
+	mid := d.CreateElement("mid")
+	_ = root.AppendChild(mid)
+	leaf := d.CreateElement("leaf")
+	_ = mid.AppendChild(leaf)
+
+	// Record the full propagation order with listener name and phase.
+	var order []string
+	type phaseInfo struct {
+		name  string
+		phase EventPhase
+	}
+	var phases []phaseInfo
+
+	addBoth := func(n Node, name string) {
+		n.AddEventListener("test", EventListenerFunc(func(e Event) {
+			order = append(order, "cap-"+name)
+			phases = append(phases, phaseInfo{"cap-" + name, e.EventPhase()})
+		}), true)
+		n.AddEventListener("test", EventListenerFunc(func(e Event) {
+			order = append(order, "bub-"+name)
+			phases = append(phases, phaseInfo{"bub-" + name, e.EventPhase()})
+		}))
+	}
+	addBoth(root, "root")
+	addBoth(mid, "mid")
+	addBoth(leaf, "leaf")
+
+	_ = leaf.DispatchEvent(NewEvent("test", true, false, false))
+
+	// Expected: capture root→mid, then target leaf (cap+cap, bub+bub),
+	// then bubble mid→root.
+	want := []string{"cap-root", "cap-mid", "cap-leaf", "bub-leaf", "bub-mid", "bub-root"}
+	if len(order) != len(want) {
+		t.Fatalf("propagation order len = %d, want %d\ngot:  %v\nwant: %v",
+			len(order), len(want), order, want)
+	}
+	for i, name := range want {
+		if order[i] != name {
+			t.Fatalf("order[%d] = %q, want %q\nfull: %v", i, order[i], name, order)
+		}
+	}
+
+	// Verify phases.
+	for _, p := range phases {
+		switch {
+		case len(p.name) > 4 && p.name[:4] == "cap-":
+			if p.phase != EventCapturingPhase && p.phase != EventAtTarget {
+				t.Errorf("%s phase = %d, want %d (capture or at-target)",
+					p.name, p.phase, EventCapturingPhase)
+			}
+		case len(p.name) > 4 && p.name[:4] == "bub-":
+			if p.phase != EventBubblingPhase && p.phase != EventAtTarget {
+				t.Errorf("%s phase = %d, want %d (bubble or at-target)",
+					p.name, p.phase, EventBubblingPhase)
+			}
+		}
+	}
+
+	// --- Sub-test: StopPropagation in capture phase ---
+	// When StopPropagation is called in a capture listener, subsequent capture
+	// listeners, the target phase, and the bubble phase are all skipped.
+	t.Run("StopPropagationInCapture", func(t *testing.T) {
+		d2 := NewDocument()
+		r := d2.CreateElement("r")
+		_ = d2.AppendChild(r)
+		m := d2.CreateElement("m")
+		_ = r.AppendChild(m)
+		l := d2.CreateElement("l")
+		_ = m.AppendChild(l)
+
+		var capOrder []string
+		r.AddEventListener("s", EventListenerFunc(func(e Event) {
+			capOrder = append(capOrder, "cap-r")
+		}), true)
+		m.AddEventListener("s", EventListenerFunc(func(e Event) {
+			capOrder = append(capOrder, "cap-m")
+			e.StopPropagation()
+		}), true)
+		// Target and bubble listeners should NOT fire.
+		l.AddEventListener("s", EventListenerFunc(func(Event) {
+			capOrder = append(capOrder, "tgt-l")
+		}))
+		r.AddEventListener("s", EventListenerFunc(func(Event) {
+			capOrder = append(capOrder, "bub-r")
+		}))
+
+		_ = l.DispatchEvent(NewEvent("s", true, false, false))
+		wantCap := []string{"cap-r", "cap-m"}
+		if len(capOrder) != len(wantCap) {
+			t.Fatalf("order len = %d, want %d\ngot:  %v\nwant: %v",
+				len(capOrder), len(wantCap), capOrder, wantCap)
+		}
+		for i, name := range wantCap {
+			if capOrder[i] != name {
+				t.Errorf("order[%d] = %q, want %q", i, capOrder[i], name)
+			}
+		}
+	})
+
+	// --- Sub-test: StopImmediatePropagation in capture ---
+	// Stops further listeners on the current target AND prevents remaining
+	// targets from being visited.
+	t.Run("StopImmediatePropagationInCapture", func(t *testing.T) {
+		d3 := NewDocument()
+		r := d3.CreateElement("r")
+		_ = d3.AppendChild(r)
+		m := d3.CreateElement("m")
+		_ = r.AppendChild(m)
+		l := d3.CreateElement("l")
+		_ = m.AppendChild(l)
+
+		var order3 []string
+		r.AddEventListener("s", EventListenerFunc(func(Event) {
+			order3 = append(order3, "cap-r")
+		}), true)
+		m.AddEventListener("s", EventListenerFunc(func(e Event) {
+			order3 = append(order3, "cap-m-1")
+			e.StopImmediatePropagation()
+		}), true)
+		// This second listener on mid should NOT fire.
+		m.AddEventListener("s", EventListenerFunc(func(Event) {
+			order3 = append(order3, "cap-m-2")
+		}), true)
+		l.AddEventListener("s", EventListenerFunc(func(Event) {
+			order3 = append(order3, "tgt-l")
+		}))
+
+		_ = l.DispatchEvent(NewEvent("s", true, false, false))
+		want3 := []string{"cap-r", "cap-m-1"}
+		if len(order3) != len(want3) {
+			t.Fatalf("order len = %d, want %d\ngot:  %v\nwant: %v",
+				len(order3), len(want3), order3, want3)
+		}
+		for i, name := range want3 {
+			if order3[i] != name {
+				t.Errorf("order[%d] = %q, want %q", i, order3[i], name)
+			}
+		}
+	})
+
+	// --- Sub-test: StopPropagation in bubble phase ---
+	// Upstream bubble listeners (towards the root) are skipped.
+	t.Run("StopPropagationInBubble", func(t *testing.T) {
+		d4 := NewDocument()
+		r := d4.CreateElement("r")
+		_ = d4.AppendChild(r)
+		m := d4.CreateElement("m")
+		_ = r.AppendChild(m)
+		l := d4.CreateElement("l")
+		_ = m.AppendChild(l)
+
+		var order4 []string
+		l.AddEventListener("s", EventListenerFunc(func(Event) {
+			order4 = append(order4, "tgt-l")
+		}))
+		m.AddEventListener("s", EventListenerFunc(func(e Event) {
+			order4 = append(order4, "bub-m")
+			e.StopPropagation()
+		}))
+		r.AddEventListener("s", EventListenerFunc(func(Event) {
+			order4 = append(order4, "bub-r") // should NOT fire
+		}))
+
+		_ = l.DispatchEvent(NewEvent("s", true, false, false))
+		want4 := []string{"tgt-l", "bub-m"}
+		if len(order4) != len(want4) {
+			t.Fatalf("order len = %d, want %d\ngot:  %v\nwant: %v",
+				len(order4), len(want4), order4, want4)
+		}
+		for i, name := range want4 {
+			if order4[i] != name {
+				t.Errorf("order[%d] = %q, want %q", i, order4[i], name)
+			}
+		}
+	})
+
+	// --- Sub-test: StopImmediatePropagation in bubble phase ---
+	// Stops further listeners on the current target AND prevents upstream
+	// bubble listeners from firing.
+	t.Run("StopImmediatePropagationInBubble", func(t *testing.T) {
+		d5 := NewDocument()
+		r := d5.CreateElement("r")
+		_ = d5.AppendChild(r)
+		l := d5.CreateElement("l")
+		_ = r.AppendChild(l)
+
+		var order5 []string
+		l.AddEventListener("s", EventListenerFunc(func(e Event) {
+			order5 = append(order5, "tgt-1")
+		}))
+		l.AddEventListener("s", EventListenerFunc(func(e Event) {
+			order5 = append(order5, "tgt-2")
+			e.StopImmediatePropagation()
+		}))
+		// This third listener on target should NOT fire.
+		l.AddEventListener("s", EventListenerFunc(func(Event) {
+			order5 = append(order5, "tgt-3")
+		}))
+		r.AddEventListener("s", EventListenerFunc(func(Event) {
+			order5 = append(order5, "bub-r") // should NOT fire
+		}))
+
+		_ = l.DispatchEvent(NewEvent("s", true, false, false))
+		want5 := []string{"tgt-1", "tgt-2"}
+		if len(order5) != len(want5) {
+			t.Fatalf("order len = %d, want %d\ngot:  %v\nwant: %v",
+				len(order5), len(want5), order5, want5)
+		}
+		for i, name := range want5 {
+			if order5[i] != name {
+				t.Errorf("order[%d] = %q, want %q", i, order5[i], name)
+			}
+		}
+	})
+}

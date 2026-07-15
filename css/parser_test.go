@@ -422,3 +422,190 @@ func TestParser_VarFunction(t *testing.T) {
 		t.Fatalf("var() not found in value: %v", sr.Declarations[0].Value)
 	}
 }
+
+func TestParser_KeyframesPercentage(t *testing.T) {
+	p := NewParser(`@keyframes slidein { 0% { left: 0px; } 50% { left: 100px; } 100% { left: 200px; } }`)
+	rules := p.ParseStyleSheet()
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(rules))
+	}
+	kf, ok := rules[0].(*KeyframesRule)
+	if !ok {
+		t.Fatalf("got %T, want *KeyframesRule", rules[0])
+	}
+	if kf.Name != "slidein" {
+		t.Fatalf("name=%q want slidein", kf.Name)
+	}
+	if len(kf.Keyframes) != 3 {
+		t.Fatalf("got %d keyframes, want 3", len(kf.Keyframes))
+	}
+	// Check keys are correct percentage strings.
+	wantKeys := []string{"0%", "50%", "100%"}
+	for i, want := range wantKeys {
+		if len(kf.Keyframes[i].Keys) != 1 {
+			t.Fatalf("keyframes[%d] has %d keys, want 1", i, len(kf.Keyframes[i].Keys))
+		}
+		if kf.Keyframes[i].Keys[0] != want {
+			t.Fatalf("keyframes[%d].Keys[0]=%q want %q", i, kf.Keyframes[i].Keys[0], want)
+		}
+	}
+	// Check declarations.
+	for i, wantLeft := range []string{"0px", "100px", "200px"} {
+		decls := kf.Keyframes[i].Declarations
+		if len(decls) != 1 {
+			t.Fatalf("keyframes[%d] has %d decls, want 1", i, len(decls))
+		}
+		if decls[0].Name != "left" {
+			t.Fatalf("keyframes[%d] decl name=%q want left", i, decls[0].Name)
+		}
+		if decls[0].ValueString() != wantLeft {
+			t.Fatalf("keyframes[%d] decl value=%q want %q", i, decls[0].ValueString(), wantLeft)
+		}
+	}
+}
+
+func TestParser_KeyframesMixed(t *testing.T) {
+	p := NewParser(`@keyframes mix { from { opacity: 0; } 50% { opacity: 0.5; } to { opacity: 1; } }`)
+	rules := p.ParseStyleSheet()
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(rules))
+	}
+	kf, ok := rules[0].(*KeyframesRule)
+	if !ok {
+		t.Fatalf("got %T, want *KeyframesRule", rules[0])
+	}
+	if kf.Name != "mix" {
+		t.Fatalf("name=%q want mix", kf.Name)
+	}
+	if len(kf.Keyframes) != 3 {
+		t.Fatalf("got %d keyframes, want 3", len(kf.Keyframes))
+	}
+	// Key 0: "from"
+	if len(kf.Keyframes[0].Keys) != 1 || kf.Keyframes[0].Keys[0] != "from" {
+		t.Fatalf("keyframes[0].Keys=%v want [from]", kf.Keyframes[0].Keys)
+	}
+	if len(kf.Keyframes[0].Declarations) != 1 {
+		t.Fatalf("keyframes[0] has %d decls, want 1", len(kf.Keyframes[0].Declarations))
+	}
+	if kf.Keyframes[0].Declarations[0].ValueString() != "0" {
+		t.Fatalf("keyframes[0] value=%q want 0", kf.Keyframes[0].Declarations[0].ValueString())
+	}
+	// Key 1: "50%"
+	if len(kf.Keyframes[1].Keys) != 1 || kf.Keyframes[1].Keys[0] != "50%" {
+		t.Fatalf("keyframes[1].Keys=%v want [50%%]", kf.Keyframes[1].Keys)
+	}
+	if kf.Keyframes[1].Declarations[0].ValueString() != "0.5" {
+		t.Fatalf("keyframes[1] value=%q want 0.5", kf.Keyframes[1].Declarations[0].ValueString())
+	}
+	// Key 2: "to"
+	if len(kf.Keyframes[2].Keys) != 1 || kf.Keyframes[2].Keys[0] != "to" {
+		t.Fatalf("keyframes[2].Keys=%v want [to]", kf.Keyframes[2].Keys)
+	}
+	if kf.Keyframes[2].Declarations[0].ValueString() != "1" {
+		t.Fatalf("keyframes[2] value=%q want 1", kf.Keyframes[2].Declarations[0].ValueString())
+	}
+	// All declarations have name "opacity"
+	for i, kf := range kf.Keyframes {
+		if kf.Declarations[0].Name != "opacity" {
+			t.Fatalf("keyframes[%d] decl name=%q want opacity", i, kf.Declarations[0].Name)
+		}
+	}
+}
+
+func TestParser_VarFallback(t *testing.T) {
+	p := NewParser("p { color: var(--main-color,red); }")
+	rules := p.ParseStyleSheet()
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(rules))
+	}
+	sr := rules[0].(*StyleRule)
+	if len(sr.Declarations) != 1 {
+		t.Fatalf("got %d decls, want 1", len(sr.Declarations))
+	}
+	decl := sr.Declarations[0]
+	if decl.Name != "color" {
+		t.Fatalf("decl name=%q want color", decl.Name)
+	}
+	// Value tokens: var(, --main-color, comma, red, )
+	toks := decl.Value
+	if len(toks) < 5 {
+		t.Fatalf("got %d value tokens, want at least 5 (var, --main-color, comma, red, )) got=%v", len(toks), toks)
+	}
+	// Token 0: TokenFunction "var"
+	if toks[0].Type != TokenFunction || toks[0].Value != "var" {
+		t.Fatalf("tok[0]=%+v want TokenFunction(var)", toks[0])
+	}
+	// Token 1: TokenIdent "--main-color"
+	if toks[1].Type != TokenIdent || toks[1].Value != "--main-color" {
+		t.Fatalf("tok[1]=%+v want TokenIdent(--main-color)", toks[1])
+	}
+	// Token 2: TokenComma
+	if toks[2].Type != TokenComma {
+		t.Fatalf("tok[2]=%+v want TokenComma", toks[2])
+	}
+	// Token 3: TokenIdent "red" (fallback)
+	if toks[3].Type != TokenIdent || toks[3].Value != "red" {
+		t.Fatalf("tok[3]=%+v want TokenIdent(red)", toks[3])
+	}
+	// Token 4: TokenRightParenthesis
+	if toks[4].Type != TokenRightParenthesis {
+		t.Fatalf("tok[4]=%+v want TokenRightParenthesis", toks[4])
+	}
+}
+
+func TestParser_VarNestedFallback(t *testing.T) {
+	p := NewParser("p { color: var(--primary,var(--fallback,blue)); }")
+	rules := p.ParseStyleSheet()
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules, want 1", len(rules))
+	}
+	sr := rules[0].(*StyleRule)
+	if len(sr.Declarations) != 1 {
+		t.Fatalf("got %d decls, want 1", len(sr.Declarations))
+	}
+	decl := sr.Declarations[0]
+	if decl.Name != "color" {
+		t.Fatalf("decl name=%q want color", decl.Name)
+	}
+	// Value tokens: var(, --primary, comma, var(, --fallback, comma, blue, ), )
+	toks := decl.Value
+	if len(toks) < 9 {
+		t.Fatalf("got %d value tokens, want at least 9 (var, --primary, comma, var, --fallback, comma, blue, ), )) got=%v", len(toks), toks)
+	}
+	// Token 0: outer var(
+	if toks[0].Type != TokenFunction || toks[0].Value != "var" {
+		t.Fatalf("tok[0]=%+v want TokenFunction(var)", toks[0])
+	}
+	// Token 1: "--primary"
+	if toks[1].Type != TokenIdent || toks[1].Value != "--primary" {
+		t.Fatalf("tok[1]=%+v want TokenIdent(--primary)", toks[1])
+	}
+	// Token 2: comma
+	if toks[2].Type != TokenComma {
+		t.Fatalf("tok[2]=%+v want TokenComma", toks[2])
+	}
+	// Token 3: inner var(
+	if toks[3].Type != TokenFunction || toks[3].Value != "var" {
+		t.Fatalf("tok[3]=%+v want TokenFunction(var)", toks[3])
+	}
+	// Token 4: "--fallback"
+	if toks[4].Type != TokenIdent || toks[4].Value != "--fallback" {
+		t.Fatalf("tok[4]=%+v want TokenIdent(--fallback)", toks[4])
+	}
+	// Token 5: comma
+	if toks[5].Type != TokenComma {
+		t.Fatalf("tok[5]=%+v want TokenComma", toks[5])
+	}
+	// Token 6: "blue" (nested fallback)
+	if toks[6].Type != TokenIdent || toks[6].Value != "blue" {
+		t.Fatalf("tok[6]=%+v want TokenIdent(blue)", toks[6])
+	}
+	// Token 7: closing inner )
+	if toks[7].Type != TokenRightParenthesis {
+		t.Fatalf("tok[7]=%+v want TokenRightParenthesis", toks[7])
+	}
+	// Token 8: closing outer )
+	if toks[8].Type != TokenRightParenthesis {
+		t.Fatalf("tok[8]=%+v want TokenRightParenthesis", toks[8])
+	}
+}

@@ -326,6 +326,8 @@ func valueToJSON(v JSValue, indent, current string) string {
 	case TagString:
 		b, _ := json.Marshal(v.str)
 		return string(b)
+	case TagSymbol:
+		return "null"
 	case TagObject:
 		o := v.object
 		if o.IsArray {
@@ -372,6 +374,44 @@ func valueToJSON(v JSValue, indent, current string) string {
 
 // installConstructors registers Array/Object/String/Number/Boolean as callable globals.
 func (in *Interpreter) installConstructors(g *JSObject) {
+	// Ensure Map and Set prototypes are created first.
+	mapProto := in.MapPrototype()
+	setProto := in.SetPrototype()
+
+	// Map constructor.
+	mapCtor := NewNativeFunction("Map", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		obj := NewObject(mapProto)
+		obj.ClassName = "Map"
+		obj.Internal = newMapStorage()
+		return ObjectValue(obj)
+	}, 0)
+	mapCtor.properties.Prototype = in.functionProto
+	mapCtor.properties.Set("prototype", ObjectValue(mapProto))
+	g.Set("Map", FunctionValue(mapCtor))
+
+	// Set constructor.
+	setCtor := NewNativeFunction("Set", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		obj := NewObject(setProto)
+		obj.ClassName = "Set"
+		obj.Internal = newSetStorage()
+		return ObjectValue(obj)
+	}, 0)
+	setCtor.properties.Prototype = in.functionProto
+	setCtor.properties.Set("prototype", ObjectValue(setProto))
+	g.Set("Set", FunctionValue(setCtor))
+
+	// Promise constructor.
+	promiseProto := in.PromisePrototype()
+	promiseCtor := in.PromiseConstructor()
+	promiseCtor.properties.Prototype = in.functionProto
+	promiseCtor.properties.Set("prototype", ObjectValue(promiseProto))
+	// Static methods.
+	promiseCtor.properties.Set("resolve", FunctionValue(in.staticResolve()))
+	promiseCtor.properties.Set("reject", FunctionValue(in.staticReject()))
+	promiseCtor.properties.Set("all", FunctionValue(in.staticAll()))
+	promiseCtor.properties.Set("race", FunctionValue(in.staticRace()))
+	g.Set("Promise", FunctionValue(promiseCtor))
+
 	arrayCtor := NewNativeFunction("Array", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		// Array(len) or Array(elem, elem, ...). For the subset, treat a single number
 		// argument as length, otherwise collect elements.
@@ -484,6 +524,16 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	objectCtor.properties.Set("keys", objStatic.GetOrZero("keys"))
 	objectCtor.properties.Set("values", objStatic.GetOrZero("values"))
 	objectCtor.properties.Set("entries", objStatic.GetOrZero("entries"))
+
+	// Symbol constructor.
+	symCtor := in.SymbolConstructor()
+	g.Set("Symbol", FunctionValue(symCtor))
+
+	// Proxy constructor.
+	g.Set("Proxy", FunctionValue(in.ProxyConstructor()))
+
+	// Reflect object.
+	g.Set("Reflect", ObjectValue(in.ReflectObject()))
 }
 
 // GetOrZero returns the property or undefined.
