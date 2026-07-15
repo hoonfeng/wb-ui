@@ -1,0 +1,105 @@
+// Translation of: Source/WebCore/rendering/RenderBlockFlow.h
+//                  Source/WebCore/rendering/RenderBlockFlow.cpp
+//                  Source/WebCore/rendering/LegacyLineLayout.cpp
+// Completeness: 50%
+// Simplifications:
+//   - the modern line-layout path (LineLayout) is omitted; all inline layout is
+//     delegated to the InlineFormattingContext via the associated layout box
+//   - floating-object tracking (FloatingObjects) is omitted; float layout is handled
+//     entirely by the layout package's float context
+//   - margin-collapse bookkeeping lives in the layout package
+//   - pagination / multi-column flow is omitted
+//   - bidi reordering is simplified to LTR only in the inline formatting context
+
+package rendering
+
+import (
+	"wb-ui/dom"
+	"wb-ui/layout"
+	"wb-ui/style"
+)
+
+// RenderBlockFlow is the Go translation of WebCore::RenderBlockFlow. It is the most
+// common block container: it participates in normal block flow and may contain either
+// block-level children (laid out by a BlockFormattingContext) or inline-level children
+// (laid out by an InlineFormattingContext). The childrenInline flag selects which path
+// is taken during layout.
+type RenderBlockFlow struct {
+	RenderBlock
+}
+
+// NewRenderBlockFlow constructs a RenderBlockFlow for the given DOM node with the given
+// style.
+func NewRenderBlockFlow(node dom.Node, st *style.ComputedStyle) *RenderBlockFlow {
+	rb := &RenderBlockFlow{}
+	rb.initBase(rb, node, st)
+	return rb
+}
+
+// Type returns ObjectBlockFlow.
+func (b *RenderBlockFlow) Type() RenderObjectType { return ObjectBlockFlow }
+
+// IsRenderBlockFlow reports that this object is a RenderBlockFlow, mirroring
+// RenderObject::isRenderBlockFlow().
+func (b *RenderBlockFlow) IsRenderBlockFlow() bool { return true }
+
+// IsInline reports whether this block flow represents an atomic inline-level box
+// (inline-block / inline-flex / inline-grid / inline-table). WebKit models these as
+// RenderBlockFlow whose IsInline() returns true, so the parent's childrenInline flag is
+// set correctly when such a box is inserted as a child. A plain block flow returns false.
+func (b *RenderBlockFlow) IsInline() bool {
+	if b.style == nil {
+		return false
+	}
+	switch b.style.Display {
+	case style.DisplayInlineBlock, style.DisplayInlineFlex,
+		style.DisplayInlineGrid, style.DisplayInlineTable:
+		return true
+	}
+	return false
+}
+
+// RenderName returns a debug name for the block flow.
+func (b *RenderBlockFlow) RenderName() string { return "RenderBlockFlow" }
+
+// Layout lays out the block flow and its children. It dispatches to the inline
+// formatting context when childrenInline is true, or to the block formatting context
+// otherwise. This mirrors RenderBlockFlow::layout().
+func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
+	if b.layoutBox == nil || state == nil {
+		b.ClearNeedsLayout()
+		return
+	}
+	if b.childrenInline {
+		b.layoutInlineChildren(state)
+	} else {
+		b.layoutBlockChildren(state)
+	}
+	b.ClearNeedsLayout()
+}
+
+// layoutBlockChildren lays out the block-level children of this block flow by invoking
+// the block formatting context, mirroring RenderBlockFlow::layoutBlockChildren().
+func (b *RenderBlockFlow) layoutBlockChildren(state *layout.LayoutState) {
+	ctx := &layout.BlockFormattingContext{}
+	ctx.Layout(b.layoutBox, state)
+}
+
+// layoutInlineChildren lays out the inline-level children of this block flow by invoking
+// the inline formatting context, mirroring RenderBlockFlow::layoutInlineChildren().
+func (b *RenderBlockFlow) layoutInlineChildren(state *layout.LayoutState) {
+	ctx := &layout.InlineFormattingContext{}
+	ctx.Layout(b.layoutBox, state)
+}
+
+// AddChild overrides the base to track whether the child is inline-level, mirroring
+// RenderBlockFlow's child-insertion logic that sets childrenInline. When a block flow
+// receives an inline child it flips childrenInline to true; a block-level child flips
+// it to false (a block container holds either all-block or all-inline children after
+// anonymous-box generation by the builder).
+func (b *RenderBlockFlow) AddChild(child RenderObject, beforeChild RenderObject) {
+	b.renderObjectBase.AddChild(child, beforeChild)
+	if child.IsInline() {
+		b.childrenInline = true
+	}
+}

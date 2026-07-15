@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Go + HTML + CSS + JS Mixed Demo</title>
+    <!-- Standard external references. wb-ui has no network layer, so the Go host
+         reads these files and inlines the CSS into a <style> tag, then runs the
+         script through the JS interpreter. This mirrors how a real browser
+         resolves <link> and <script src> sub-resources during page load. -->
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js"></script>
+  </head>
+  <body>
+    <h1>Go &lt;-&gt; JS Interop Demo</h1>
+
+    <!-- The button the user "clicks". wb-ui has no event loop, so app.js calls
+         the click handler directly; this element exists so the DOM update is
+         visible to Go and to the rendered pixels. -->
+    <button id="time-btn">Get Time</button>
+    <div id="time-display">(no time yet)</div>
+
+    <!-- A second demo: JS calls go.Calculate(a, b) and shows the product. -->
+    <div id="calc-result">(no calculation yet)</div>
+
+    <!-- Go updates this element from the host side to prove the Go -> DOM
+         direction of the bindings bridge. -->
+    <div id="status">waiting for Go...</div>
+  </body>
+</html>

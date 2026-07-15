@@ -1,0 +1,34 @@
+/* Stylesheet for the mixed Go+HTML+CSS+JS demo.
+ *
+ * wb-ui's CSS engine (wb-ui/css) parses this stylesheet, the style resolver
+ * (wb-ui/style) attaches computed styles to each element, and the layout
+ * engine (wb-ui/layout) uses them when painting. No external CSS library is
+ * involved; everything below is handled by the translated WebKit CSS pipeline.
+ */
+
+body {
+  background-color: rgb(250, 250, 245);
+  margin: 16px;
+  color: rgb(32, 32, 32);
+}
+
+h1 {
+  color: rgb(20, 60, 160);
+}
+
+button {
+  background-color: rgb(60, 110, 220);
+  color: rgb(255, 255, 255);
+}
+
+#time-display {
+  color: rgb(20, 120, 60);
+}
+
+#calc-result {
+  color: rgb(160, 80, 20);
+}
+
+#status {
+  color: rgb(120, 40, 140);
+}

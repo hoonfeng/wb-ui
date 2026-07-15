@@ -1,0 +1,995 @@
+// Package app provides a high-level application host that ties together a
+// platform window (GLFW + Skia GPU surface) and a webkit.WebView, running the
+// render + event loop so embedders can focus on page logic instead of GL
+// plumbing.
+//
+// This mirrors the embedding layer that real WebKit splits between
+// WebView (page logic) and the platform Window/HostWindow (GL + event pump).
+// Keeping the GPU/render/event loop inside the library means example
+// programs and downstream embedders no longer have to recreate the
+// Surface→Paint→Present→HitTest pipeline by hand.
+package app
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/go-gl/glfw/v3.3/glfw"
+
+	"wb-ui/css"
+	"wb-ui/dom"
+	"wb-ui/html5"
+	"wb-ui/platform/graphics"
+	"wb-ui/platform/ime"
+	"wb-ui/platform/window"
+	"wb-ui/rendering"
+	"wb-ui/webkit"
+)
+
+// ClickHandler is invoked when the user clicks an element whose onclick
+// attribute does not use the "js:" prefix. el is the deepest hit-tested
+// element with an onclick attribute (may be nil if nothing was hit), and
+// onclick is the raw value of the element's onclick attribute (empty when
+// absent). clickX / clickY are the hit point in render-tree CSS pixels
+// (already scroll-adjusted), useful for positioning IME composition windows.
+// Embedders typically dispatch to registered Go handlers based on onclick
+// and manage IME focus from here.
+type ClickHandler func(el *dom.Element, onclick string, clickX, clickY float64)
+
+// IMEHandler is invoked each frame with any IME events that arrived for the
+// currently focused editable element. The handler is only called while an
+// element is focused via FocusElement.
+type IMEHandler func(events []ime.Event)
+
+// Host is the top-level application host: it owns a platform.Window (GLFW +
+// Skia GPU surface) and drives a webkit.WebView render/event loop. Embedders
+// create a WebView, load HTML, register Go functions, then hand everything to
+// NewHost and call Run.
+type Host struct {
+	win *window.Window
+	wv  *webkit.WebView
+
+	// scrollY is the current vertical scroll offset in CSS pixels (content
+	// moves up as scrollY increases). contentHeight is the total laid-out
+	// content height, used to clamp scrollY.
+	scrollY       int
+	contentHeight int
+
+	// clickHandler dispatches non-js: onclick values to embedder code.
+	clickHandler ClickHandler
+	// imeHandler receives IME events for the focused element.
+	imeHandler IMEHandler
+
+	// IME focus state. When imeFocusedEl is non-nil, incoming IME events are
+	// applied to it: composition updates append a preview, char input appends
+	// confirmed text, and composition end finalizes. The embedder can read
+	// FocusedElement to know which element is receiving input.
+	imeFocusedEl   *dom.Element
+	imeInputText   string
+	imeComposing   bool
+	imeComposeText string
+
+	// animStart is the wall-clock time when Run() started, used to compute
+	// the animation clock (AnimationTime) each frame.
+	animStart time.Time
+
+	// Selection state. Text selection is tracked as CSS-pixel coordinates
+	// (not RenderText pointers) so it survives render tree rebuilds. Each
+	// frame, updateSelection converts these coordinates into a
+	// rendering.Selection against the current render tree.
+	clickCount     int                       // consecutive clicks (1-4)
+	selGranularity rendering.TextGranularity // current selection granularity
+	selAnchorX     float64                   // selection anchor (fixed start point)
+	selAnchorY     float64
+	selStartX      float64 // start position (= anchor unless shift+click)
+	selStartY      float64
+	selEndX        float64 // end position (drag/shift+click target)
+	selEndY        float64
+	selecting      bool // mouse button held during drag
+	shiftSelecting bool // shift+click extending selection
+	mouseDownX     float64 // press position for hysteresis
+	mouseDownY     float64
+	hysteresisMet  bool // drag threshold (3px) exceeded
+	lastClickTime  time.Time
+	lastClickX     float64
+	lastClickY     float64
+
+	// caretBlinkTime tracks the last caret visibility toggle for blinking.
+	caretBlinkTime time.Time
+}
+
+// NewHost creates a Host that drives the given WebView inside a new platform
+// window of the given CSS-pixel dimensions. The window is created with DPI
+// awareness so width/height are treated as logical (CSS) pixels and scaled to
+// physical pixels internally. The caller should call Run to start the loop.
+func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error) {
+	if wv == nil {
+		return nil, fmt.Errorf("app: WebView is nil")
+	}
+	wv.Resize(width, height)
+	win, err := window.NewWindow(width, height, title)
+	if err != nil {
+		return nil, fmt.Errorf("app: %w", err)
+	}
+	return &Host{win: win, wv: wv}, nil
+}
+
+// SetClickHandler installs the callback invoked for non-js: onclick hits.
+// js:-prefixed onclick values are executed via WebView.EvalJS directly by
+// the Host and are not forwarded to this handler.
+func (h *Host) SetClickHandler(fn ClickHandler) { h.clickHandler = fn }
+
+// SetIMEHandler installs the callback invoked with IME events while an
+// element is focused via FocusElement.
+func (h *Host) SetIMEHandler(fn IMEHandler) { h.imeHandler = fn }
+
+// Window returns the underlying platform window. Exposed so embedders can
+// query content scale, framebuffer size, or install custom GLFW callbacks
+// if needed.
+func (h *Host) Window() *window.Window { return h.win }
+
+// WebView returns the WebView driven by this host.
+func (h *Host) WebView() *webkit.WebView { return h.wv }
+
+// FocusElement marks el as the current IME focus target and enables IME
+// input on the platform window. Incoming IME events will be applied to el
+// until Unfocus is called or another element is focused. Call this from a
+// ClickHandler when the user clicks an editable element (e.g. <input>).
+//
+// For <input> and <textarea> elements, the text is read from / written to the
+// "value" attribute (mirroring WebCore::HTMLTextFormControlElement::value());
+// for other elements, text content is used (the legacy div-based editable
+// element behavior).
+func (h *Host) FocusElement(el *dom.Element) {
+	h.imeFocusedEl = el
+	if el != nil {
+		h.imeInputText = focusedElementValue(el)
+	}
+	h.win.SetIMEEnabled(true)
+	// For text-type form controls (<input>/<textarea>), register the element
+	// with the rendering package so paintTextInputValue draws a blinking caret.
+	// These are replaced elements with no RenderText children, so the regular
+	// CaretPos/PaintCaret path (which targets RenderText segments) cannot
+	// locate them.
+	if el != nil && isTextFormControl(el) {
+		rendering.FocusedFormControl = el
+	} else {
+		rendering.FocusedFormControl = nil
+	}
+}
+
+// focusedElementValue returns the current text of a focused element. For
+// <input>/<textarea> it reads the "value" attribute; for other elements it
+// reads textContent. Mirrors the value() accessor on
+// HTMLTextFormControlElement.
+func focusedElementValue(el *dom.Element) string {
+	if el == nil {
+		return ""
+	}
+	if isTextFormControl(el) {
+		return el.GetAttribute("value")
+	}
+	return el.TextContent()
+}
+
+// setFocusedElementValue writes the text back to a focused element. For
+// <input>/<textarea> it sets the "value" attribute; for other elements it
+// sets textContent.
+func setFocusedElementValue(el *dom.Element, text string) {
+	if el == nil {
+		return
+	}
+	if isTextFormControl(el) {
+		el.SetAttribute("value", text)
+		return
+	}
+	el.SetTextContent(text)
+}
+
+// isTextFormControl reports whether el is an <input> (non-checkbox/radio/
+// hidden/range/color/file/submit/reset/button/image) or <textarea>, i.e. a
+// form control whose text is carried by the value attribute and which
+// accepts text entry via IME. Mirrors HTMLTextFormControlElement::childShouldCreateRenderer.
+func isTextFormControl(el *dom.Element) bool {
+	if el == nil {
+		return false
+	}
+	switch el.LocalName() {
+	case "textarea":
+		return true
+	case "input":
+		t := el.GetAttribute("type")
+		switch strings.ToLower(t) {
+		case "checkbox", "radio", "range", "color", "file",
+			"submit", "reset", "button", "image", "hidden":
+			return false
+		}
+		return true
+	}
+}
+
+// calcTextControlOffset converts a CSS-pixel position (cssX, cssY in the
+// render tree's coordinate space) into a character offset within the text
+// of the given form control element. Used for click-to-caret positioning
+// and drag-to-select within <input>/<textarea> elements.
+func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
+	if el == nil {
+		return 0
+	}
+	text := focusedElementValue(el)
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return 0
+	}
+
+	// Find the render box for this element to get its absolute position.
+	elX := h.findFormControlBoxX(el)
+	if elX == 0 {
+		return 0
+	}
+	relX := cssX - elX - 4 // 4px for left padding
+
+	// Use a default font for measurement (same as the rendering package uses).
+	font := graphics.Font{Family: "Consolas", Size: 14, Weight: 400}
+	totalW := 0.0
+	for i, r := range runes {
+		charW := graphics.MeasureText(font, string(r))
+		if relX < totalW+charW/2 {
+			return i
+		}
+		totalW += charW
+	}
+	return len(runes)
+}
+
+// findFormControlBoxX walks the render tree to find the absolute X position
+// (left edge of the border box) of the given element. It returns 0 if the
+// element has no render box (e.g. display:none or not yet attached).
+func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
+	if el == nil || h.wv == nil {
+		return 0
+	}
+	rv := h.wv.RenderView()
+	walk = func(o rendering.RenderObject) {
+		if o == nil || foundX != 0 {
+			return
+		}
+		if n := o.Node(); n != nil {
+			if e, ok := n.(*dom.Element); ok && e == el {
+				if box, ok := o.(*rendering.RenderBox); ok {
+					foundX = box.AbsoluteX()
+				}
+				return
+			}
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(rendering.RenderObject(rv))
+	return foundX
+}
+
+
+// FocusElement sets the IME focus to the given element. When el is a text
+// form control (input/textarea), it enables IME and installs the blinking
+// caret. Call this from a ClickHandler for editable elements.
+func (h *Host) FocusElement(el *dom.Element) {
+	if el == nil {
+		h.Unfocus()
+		return
+	}
+	if isTextFormControl(el) {
+		h.imeFocusedEl = el
+		h.imeInputText = focusedElementValue(el)
+		h.imeComposing = false
+		h.imeComposeText = ""
+		rendering.FocusedFormControl = el
+		selEnd := len([]rune(h.imeInputText))
+		rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+			Start: selEnd,
+			End:   selEnd,
+		}
+		h.win.SetIMEEnabled(true)
+		h.caretBlinkTime = time.Now()
+		rendering.CaretVisible = true
+		rendering.CaretVisibleControl = true
+	}
+}
+
+// FocusedElement returns the element currently receiving IME input, or nil.
+// SetIMECompositionPos updates the IME composition/candidate window position
+// to the given CSS-pixel coordinates (relative to the window). The Host
+// converts these to physical pixels before forwarding to the platform window.
+func (h *Host) SetIMECompositionPos(cssX, cssY float64) {
+	h.win.SetIMECompositionPos(cssX, cssY)
+}
+
+// Run starts the render + event loop. It blocks until the window is closed.
+// Each iteration: layouts the WebView, paints onto the GPU surface, presents,
+// then processes input events (resize / scroll / mouse click / IME).
+func (h *Host) Run() {
+	gpuSurf := h.win.GPUSurface()
+	if gpuSurf == nil {
+		fmt.Println("app: GPU surface is nil")
+		return
+	}
+
+	// Set up the keyframes lookup bridge so the rendering package can find
+	// @keyframes rules stored in the style resolver.
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			if rsv := fr.Resolver(); rsv != nil {
+				rendering.KeyframesLookup = func(name string) *css.KeyframesRule {
+					return rsv.LookupKeyframes(name)
+				}
+			}
+		}
+	}
+
+	h.animStart = time.Now()
+
+	for !h.win.ShouldClose() {
+		gpuCanvas := graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
+
+		h.wv.EnsureLayout()
+		rv := h.wv.RenderView()
+		if rv != nil {
+			// Drive CSS animations: update the global animation clock and
+			// apply animated opacity to elements' ComputedStyle before paint.
+			rendering.AnimationTime = time.Since(h.animStart).Seconds()
+			rendering.ApplyAnimations(rv)
+
+			// Update text selection from stored coordinates against the
+		// current render tree (robust to rebuilds).
+		h.updateSelection(rv)
+
+		// Blink the caret at ~500ms intervals, mirroring WebKit's
+		// caret blink cycle. The caret is only visible when an IME
+		// focus target is set or a non-selection click positioned it.
+		// CaretVisibleControl follows the same cycle for form-control
+		// carets (which are drawn by paintFormControlCaret, not PaintCaret).
+		if time.Since(h.caretBlinkTime) > 500*time.Millisecond {
+			rendering.CaretVisible = !rendering.CaretVisible
+			rendering.CaretVisibleControl = rendering.CaretVisible
+			h.caretBlinkTime = time.Now()
+		}
+
+			bgColor := findBodyBgColor(rendering.RenderObject(rv))
+			if bgColor.A == 0 {
+				bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+			}
+			gpuCanvas.Clear(bgColor)
+
+			if _, _, _, ch, ok := rendering.BoxGeometry(rv); ok && ch > 0 {
+				h.contentHeight = int(ch)
+			}
+			maxScroll := h.contentHeight - h.win.Height()
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if h.scrollY > maxScroll {
+				h.scrollY = maxScroll
+			}
+			if h.scrollY < 0 {
+				h.scrollY = 0
+			}
+
+			gpuCanvas.Save()
+			csX, csY := h.win.ContentScale()
+			gpuCanvas.Scale(csX, csY)
+			gpuCanvas.Translate(0, -float64(h.scrollY))
+			dirtyRect := graphics.Rect{X: 0, Y: float64(h.scrollY), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
+			rendering.Paint(rv, gpuCanvas, dirtyRect)
+			gpuCanvas.Restore()
+		}
+
+		gpuCanvas.Release()
+		h.win.Present()
+
+		h.processEvents(rv)
+	}
+}
+
+// processEvents drains the platform event queue and dispatches each event.
+// Resize updates the WebView viewport; scroll adjusts scrollY; mouse clicks
+// are hit-tested against the render tree and forwarded to the click handler.
+// Mouse drag/move drive text selection; Ctrl+C copies selected text.
+func (h *Host) processEvents(rv *rendering.RenderView) {
+	for _, ev := range h.win.PollEvents() {
+		switch ev.Type {
+		case window.EventResize:
+			h.wv.Resize(h.win.Width(), h.win.Height())
+		case window.EventScroll:
+			// GLFW: ScrollY > 0 when scrolling up (away from user).
+			// Browser: scroll up → see content above → scrollY decreases.
+			h.scrollY -= int(ev.ScrollY * 40)
+		case window.EventMouseButton:
+			csX, csY := h.win.ContentScale()
+			if csX <= 0 {
+				csX = 1
+			}
+			if csY <= 0 {
+				csY = 1
+			}
+			cssX := ev.X / csX
+			cssY := ev.Y/csY + float64(h.scrollY)
+
+			if ev.Action == int(glfw.Press) {
+				now := time.Now()
+				dx := ev.X - h.lastClickX
+				dy := ev.Y - h.lastClickY
+				isConsecutive := now.Sub(h.lastClickTime) < 500*time.Millisecond &&
+					dx > -5 && dx < 5 && dy > -5 && dy < 5
+
+				if isConsecutive {
+					h.clickCount++
+					if h.clickCount > 4 {
+						h.clickCount = 4
+					}
+				} else {
+					h.clickCount = 1
+				}
+
+				// Map click count to granularity: 1=char, 2=word, 3=line, 4=paragraph
+				var gran rendering.TextGranularity
+				switch h.clickCount {
+				case 2:
+					gran = rendering.GranularityWord
+				case 3:
+					gran = rendering.GranularityLine
+				case 4:
+					gran = rendering.GranularityParagraph
+				default:
+					gran = rendering.GranularityCharacter
+				}
+				h.selGranularity = gran
+
+				// Shift+Click extends selection from the anchor.
+				if (ev.Mods&int(glfw.ModShift)) != 0 && h.clickCount > 0 &&
+					(h.selAnchorX != 0 || h.selAnchorY != 0) {
+					h.selEndX = cssX
+					h.selEndY = cssY
+					h.shiftSelecting = true
+					h.selecting = false
+				} else {
+				// Reset caret blink so the caret is immediately visible on focus.
+				h.caretBlinkTime = time.Now()
+				rendering.CaretVisible = true
+				rendering.CaretVisibleControl = true
+
+				// If the click is on a text form control, calculate the
+				// character offset and set the form-control selection.
+				if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+			// If the click is on a text form control, calculate the
+			// character offset and set the form-control selection.
+			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+				offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+				if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
+					// Shift+Click extends form-control selection.
+					rendering.FocusedFormControlSel.End = offset
+					rendering.FocusedFormControlSel.Active = true
+				} else {
+					rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+						Start:  offset,
+						End:    offset,
+						Active: true,
+					}
+				}
+			} else if h.imeFocusedEl != nil {
+				// Click outside a text control clears the form-control selection.
+				rendering.FocusedFormControlSel = nil
+			}
+		} else if ev.Action == int(glfw.Release) {
+			if h.selecting {
+				csX, csY := h.win.ContentScale()
+				if csX <= 0 {
+					csX = 1
+				}
+				if csY <= 0 {
+					csY = 1
+				}
+				cssX := ev.X / csX
+				cssY := ev.Y/csY + float64(h.scrollY)
+
+				// Hysteresis: only start dragging after moving > 3px from
+				// mouseDown.
+				if !h.hysteresisMet {
+					dx := cssX - h.mouseDownX
+					dy := cssY - h.mouseDownY
+					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+						continue // not yet dragging
+					}
+				// Update the cursor-move selection end point.
+					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+						continue // not yet dragging
+					}
+				// Update the cursor-move selection end point.
+				// The anchor (sel start) stays at the mouse-down point.
+				if rendering.FocusedFormControlSel != nil &&
+					rendering.FocusedFormControlSel.Active &&
+					h.imeFocusedEl != nil {
+					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+					rendering.FocusedFormControlSel.End = offset
+				}
+			}
+		case window.EventKey:
+			if ev.Action == int(glfw.Press) && (ev.Mods&int(glfw.ModControl)) != 0 {
+				switch ev.Key {
+				case int(glfw.KeyV):
+					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+						clipText := h.win.GetClipboardString()
+						if clipText != "" {
+							h.pasteIntoFocused(clipText)
+						}
+					}
+				case int(glfw.KeyX):
+					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+						sel := rendering.FocusedFormControlSel
+						if sel != nil && sel.Start != sel.End {
+							start, end := sel.Start, sel.End
+							if start > end {
+								start, end = end, start
+							}
+							val := focusedElementValue(h.imeFocusedEl)
+							runes := []rune(val)
+							if start >= 0 && end <= len(runes) {
+								cutText := string(runes[start:end])
+								h.win.SetClipboardString(cutText)
+								newVal := string(runes[:start]) + string(runes[end:])
+								setFocusedElementValue(h.imeFocusedEl, newVal)
+								rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+									Start: start, End: start,
+								}
+								h.imeInputText = newVal
+								h.wv.RebuildRenderTree()
+							}
+						}
+					}
+				}
+			}
+		case window.EventChar:
+			if ev.Char != 0 {
+				// char event handled elsewhere (IME path)
+			}
+								h.win.SetClipboardString(cutText)
+								newVal := string(runes[:start]) + string(runes[end:])
+								setFocusedElementValue(h.imeFocusedEl, newVal)
+								rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+									Start: start, End: start,
+								}
+								h.imeInputText = newVal
+								h.wv.RebuildRenderTree()
+							}
+						}
+					}
+				}
+
+		case window.EventChar:
+			return
+		}
+		switch h.selGranularity {
+		case rendering.GranularityWord:
+			rendering.SelectWord(pos)
+		case rendering.GranularityLine:
+			rendering.SelectLine(rv, pos)
+		case rendering.GranularityParagraph:
+			rendering.SelectParagraph(rv, pos)
+		case rendering.GranularityDocument:
+			rendering.SelectDocument(rv)
+		}
+		rendering.SetCaret(nil)
+		return
+	}
+
+	// Drag or shift+click: hit test both endpoints.
+	start := rendering.HitTestText(rv, h.selAnchorX, h.selAnchorY)
+	end := rendering.HitTestText(rv, h.selEndX, h.selEndY)
+
+	if !start.IsValid() && !end.IsValid() {
+		// Click outside text: clear selection and caret.
+		rendering.ClearSelection()
+		rendering.SetCaret(nil)
+		return
+	}
+	if !start.IsValid() {
+		start = end
+	}
+	if !end.IsValid() {
+		end = start
+	}
+
+	// Apply granularity expansion for drag with word/line/paragraph.
+	if h.selGranularity > rendering.GranularityCharacter && h.selecting {
+		forward := h.selEndY > h.selAnchorY ||
+			(h.selEndY == h.selAnchorY && h.selEndX >= h.selAnchorX)
+		end = rendering.ExpandPosition(end, h.selGranularity, forward)
+		start = rendering.ExpandPosition(start, h.selGranularity, !forward)
+	}
+
+	// When start == end (click without drag), show caret instead of empty selection.
+	// But only for editable (IME-focused) elements — browsers don't show a
+	// blinking caret when clicking non-editable text.
+	if !h.selecting && !h.shiftSelecting &&
+		start.RT == end.RT && start.Offset == end.Offset {
+		rendering.ClearSelection()
+		if h.isRenderTextEditable(start.RT) {
+			pos := start
+			rendering.SetCaret(&pos)
+		} else {
+			rendering.SetCaret(nil)
+		}
+		return
+	}
+
+	rendering.CurrentSelection = &rendering.Selection{
+		Start:       start,
+		End:         end,
+		Active:      h.selecting,
+		Granularity: h.selGranularity,
+	}
+	// While dragging or when a selection exists, hide the caret.
+	if h.selecting || (start.RT != end.RT) || (start.Offset != end.Offset) {
+		rendering.SetCaret(nil)
+	}
+}
+
+// isRenderTextEditable reports whether rt belongs to the IME-focused (editable)
+// element. Used to decide whether to show a caret when clicking on text: only
+// editable elements (e.g. <input>) show a blinking caret in browsers.
+func (h *Host) isRenderTextEditable(rt *rendering.RenderText) bool {
+	if h.imeFocusedEl == nil || rt == nil {
+		return false
+	}
+	node := rt.Node()
+	if node == nil {
+		return false
+	}
+	parent := node.ParentNode()
+	if parent == nil {
+		return false
+	}
+	el, ok := parent.(*dom.Element)
+	return ok && el == h.imeFocusedEl
+}
+
+// updateCaret positions the caret for the IME-focused element (e.g. an input
+// box), placing it at the end of the element's text content. Called when no
+// mouse-driven selection is active.
+func (h *Host) updateCaret(rv *rendering.RenderView) {
+	if rv == nil || h.imeFocusedEl == nil {
+		rendering.SetCaret(nil)
+		return
+	}
+	// Find the RenderText whose DOM node's parent is the focused element.
+	var found *rendering.RenderText
+	var walk func(o rendering.RenderObject)
+	walk = func(o rendering.RenderObject) {
+		if o == nil {
+			return
+		}
+		if rt, ok := o.(*rendering.RenderText); ok {
+			if node := rt.Node(); node != nil {
+				if parent := node.ParentNode(); parent != nil {
+					if el, ok := parent.(*dom.Element); ok && el == h.imeFocusedEl {
+						found = rt
+						return
+					}
+				}
+			}
+			return
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(rendering.RenderObject(rv))
+	if found != nil {
+		pos := rendering.TextPosition{RT: found, Offset: found.Length()}
+		rendering.SetCaret(&pos)
+	} else {
+		rendering.SetCaret(nil)
+	}
+}
+
+// handleClick converts the physical-pixel click coordinates to CSS pixels
+// (the render tree's coordinate space), hit-tests the render tree, and
+// dispatches the onclick value: "js:" prefix → EvalJS, otherwise → click
+// handler.
+func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
+	if rv == nil {
+		return
+	}
+	csX, csY := h.win.ContentScale()
+	if csX <= 0 {
+		csX = 1
+	}
+	if csY <= 0 {
+		csY = 1
+	}
+	clickCSSX := ev.X / csX
+	clickCSSY := ev.Y / csY
+	clickY := clickCSSY + float64(h.scrollY)
+
+	el := rendering.HitTest(rv, clickCSSX, clickY, "onclick")
+	if el == nil {
+		deepest := rendering.HitTest(rv, clickCSSX, clickY, "")
+		prevFocus := rendering.FocusedFormControl
+		if h.clickHandler != nil {
+			h.clickHandler(deepest, "", clickCSSX, clickCSSY)
+		}
+		if deepest != nil {
+			handleFormSubmitClick(deepest)
+			if deepest.LocalName() == "a" {
+				h.handleAnchorClick(deepest)
+			}
+		}
+		if rendering.FocusedFormControl != prevFocus {
+			h.wv.RebuildRenderTree()
+		}
+		return
+	}
+	onclickVal := el.GetAttribute("onclick")
+	if onclickVal == "" {
+		if h.clickHandler != nil {
+			h.clickHandler(el, "", clickCSSX, clickCSSY)
+		}
+		handleFormSubmitClick(el)
+		if el.LocalName() == "a" {
+			h.handleAnchorClick(el)
+		}
+		return
+	}
+	if strings.HasPrefix(onclickVal, "js:") {
+		_, _ = h.wv.EvalJS(onclickVal[3:])
+		h.wv.RebuildRenderTree()
+		return
+	}
+	if h.clickHandler != nil {
+		h.clickHandler(el, onclickVal, clickCSSX, clickCSSY)
+		h.wv.RebuildRenderTree()
+	}
+}
+func handleFormSubmitClick(el *dom.Element) {
+	if el == nil {
+		return
+	}
+	switch el.LocalName() {
+	case "input":
+		in, ok := html5.ToInputElement(el)
+		if !ok {
+			return
+		}
+		if in.Type() != html5.InputSubmit && in.Type() != html5.InputImage {
+			return
+		}
+		form := in.Form()
+		if form == nil {
+			return
+		}
+		f, ok := html5.ToFormElement(form)
+		if ok {
+			f.RequestSubmit(el)
+		}
+	case "button":
+		btn, ok := html5.ToButtonElement(el)
+		if !ok {
+			return
+		}
+		// Default button type is "submit".
+		if btn.Type() != html5.ButtonSubmit {
+			return
+		}
+		form := btn.Form()
+		if form == nil {
+			return
+		}
+		f, ok := html5.ToFormElement(form)
+	}
+}
+
+// handleAnchorClick performs navigation when an <a> element is clicked.
+// For external URLs (http/https) it attempts to open the system browser;
+// for local file paths it reads and loads the referenced file as new HTML.
+func (h *Host) handleAnchorClick(el *dom.Element) {
+	a, ok := html5.ToAnchorElement(el)
+	if !ok {
+		return
+	}
+	href := a.Href()
+	if href == "" || href == "#" {
+		return
+	}
+
+	// For external links, log (opening the system browser is platform-specific
+	// and left to the embedder; here we just log).
+	if a.IsExternalLink() {
+		fmt.Printf("app: external link: %s (open in system browser)\n", href)
+		return
+	}
+
+	// For local links, try to load the referenced file as new HTML.
+	if h.wv != nil {
+		frame := h.wv.MainFrame()
+		if frame != nil {
+			// Resolve the path: strip file:// prefix if present.
+			filePath := href
+			if strings.HasPrefix(filePath, "file://") {
+				filePath = strings.TrimPrefix(filePath, "file://")
+			}
+			// Try to read and load the file as HTML.
+			data, err := os.ReadFile(filePath)
+			if err == nil {
+				frame.LoadHTML(string(data))
+			} else {
+				fmt.Printf("app: cannot load link %q: %v\n", href, err)
+			}
+		}
+	}
+}
+
+// applyIMEEvents updates the focused element's text from IME
+// applyIMEEvents updates the focused element's text from IME
+// composition / character input events and dispatches the appropriate DOM
+// events (input, change, compositionstart/update/end) so that JavaScript
+// event listeners and the wb-ui form submission pipeline are notified.
+// After modifying the element's value, the render tree is rebuilt so the
+// next paint frame reflects the updated content.
+//
+// For <input>/<textarea> elements, the value attribute is updated (mirroring
+	}
+}
+
+// pasteIntoFocused inserts text into the currently focused form control,
+// replacing any active selection or inserting at the cursor position.
+// After updating the value, it dispatches input and change DOM events and
+// rebuilds the render tree so the next frame reflects the update.
+func (h *Host) pasteIntoFocused(text string) {
+	if h.imeFocusedEl == nil {
+		return
+	}
+
+	sel := rendering.FocusedFormControlSel
+	val := focusedElementValue(h.imeFocusedEl)
+	runes := []rune(val)
+
+	var newVal string
+	var newOffset int
+	textRunes := []rune(text)
+
+	if sel != nil && sel.Start != sel.End {
+		// Replace selection with pasted text.
+		start, end := sel.Start, sel.End
+		if start > end {
+			start, end = end, start
+		}
+		newVal = string(runes[:start]) + text + string(runes[end:])
+		newOffset = start + len(textRunes)
+	} else if sel != nil {
+		// Insert at cursor position.
+		pos := sel.Start
+		if pos > len(runes) {
+			pos = len(runes)
+		}
+		newVal = string(runes[:pos]) + text + string(runes[pos:])
+		newOffset = pos + len(textRunes)
+	} else {
+		// Append to end.
+		newVal = val + text
+		newOffset = len([]rune(newVal))
+	}
+
+	setFocusedElementValue(h.imeFocusedEl, newVal)
+	h.imeInputText = newVal
+	rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+		Start: newOffset,
+		End:   newOffset,
+	}
+
+	// Dispatch input event (inputType="insertFromPaste").
+	inputEvent := dom.NewInputEvent("insertFromPaste", text, false)
+	h.imeFocusedEl.DispatchEvent(inputEvent)
+
+	// Dispatch change event (bubbles, not cancelable).
+	h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+
+	h.wv.RebuildRenderTree()
+}
+
+// applyIMEEvents updates the focused element's text from IME
+		case ime.EventCompositionUpdate:
+			h.imeComposing = true
+			h.imeComposeText = ev.Composition
+			if h.imeFocusedEl != nil {
+				newText := h.imeInputText + h.imeComposeText
+				setFocusedElementValue(h.imeFocusedEl, newText)
+				needsRebuild = true
+
+				// Dispatch compositionupdate event
+				h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionupdate", ev.Composition))
+
+				// Dispatch input event with insertCompositionText
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertCompositionText", ev.Composition, true))
+			}
+
+		case ime.EventCharInput:
+			wasComposing := h.imeComposing
+			if h.imeComposing {
+				h.imeComposing = false
+				h.imeComposeText = ""
+			}
+			char := string(ev.Char)
+			h.imeInputText += char
+			if h.imeFocusedEl != nil {
+				setFocusedElementValue(h.imeFocusedEl, h.imeInputText)
+				needsRebuild = true
+
+				if wasComposing {
+					// End composition
+					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", h.imeInputText))
+				}
+
+				// Dispatch input event with insertText
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+
+				// Dispatch change event (bubbles, not cancelable)
+				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+			}
+
+		case ime.EventCompositionEnd:
+			wasComposing := h.imeComposing
+			h.imeComposing = false
+			h.imeComposeText = ""
+			finalText := h.imeInputText
+			if h.imeFocusedEl != nil {
+				setFocusedElementValue(h.imeFocusedEl, finalText)
+				needsRebuild = true
+
+				if wasComposing {
+					// Dispatch compositionend event
+					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", finalText))
+				}
+
+				// Dispatch input event with insertFromComposition
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertFromComposition", finalText, false))
+
+				// Dispatch change event
+				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+			}
+		}
+	}
+	if needsRebuild {
+		h.wv.RebuildRenderTree()
+	}
+
+}
+
+// findBodyBgColor walks the render tree to find the body element's background
+// color. In a browser the body background propagates to the root canvas,
+// filling the viewport (including the head margin area). Returns transparent
+// when not found so the caller can fall back to white.
+func findBodyBgColor(o rendering.RenderObject) graphics.Color {
+	if o == nil {
+		return graphics.Color{}
+	}
+	if n := o.Node(); n != nil {
+		if el, ok := n.(*dom.Element); ok && strings.EqualFold(el.TagName(), "body") {
+			if st := o.Style(); st != nil && st.BackgroundColor.A > 0 {
+				return graphics.Color{
+					R: st.BackgroundColor.R,
+					G: st.BackgroundColor.G,
+					B: st.BackgroundColor.B,
+					A: st.BackgroundColor.A,
+				}
+			}
+		}
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		if col := findBodyBgColor(c); col.A > 0 {
+			return col
+		}
+	}
+	return graphics.Color{}
+}

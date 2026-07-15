@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<!--
+  通用测试 HTML
+  - wb-ui 加载此文件渲染（main.go 读取后调用 LoadHTML）
+  - 浏览器直接打开此文件可对比渲染效果
+
+  onclick 约定：
+  - "go:Xxx()" 前缀：wb-ui 走 Go handler（handlers["Xxx"]）；浏览器执行 JS function Xxx()
+  - "js:code"   前缀：两边都执行 JS
+  本文件 onclick 使用无前缀的 "goXxx()" 形式，wb-ui 会剥离 "()" 后查 handlers map，
+  浏览器则直接执行 JS 函数。两套实现分别在 main.go (Go) 和本文件 <script> (JS)。
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; }
+body { padding: 20px; background-color: #f0f2f5; font-family: sans-serif; font-size: 14px; color: #333; }
+.header { font-size: 22px; font-weight: bold; color: #1a1a2e; margin-bottom: 4px; }
+.subtitle { font-size: 13px; color: #6b7280; margin-bottom: 16px; }
+.card {
+    background-color: #ffffff;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+}
+.card-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #1a1a2e;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e5e7eb;
+}
+.card-desc { font-size: 12px; color: #9ca3af; margin-bottom: 10px; }
+
+/* Flex 布局 */
+.flex-row { display: flex; flex-direction: row; }
+.flex-item { flex: 1; padding: 10px; background-color: #e3f2fd; border-radius: 4px; text-align: center; color: #1565c0; }
+.flex-grow-2 { flex: 2; background-color: #fff3e0; color: #e65100; }
+
+/* inline-block 布局 */
+.ib-box {
+    display: inline-block;
+    width: 80px;
+    height: 50px;
+    background-color: #ff9800;
+    border-radius: 4px;
+    text-align: center;
+    color: #fff;
+    line-height: 50px;
+    font-size: 12px;
+}
+
+/* 按钮 */
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #fff;
+    text-align: center;
+    background-color: #1a73e8;
+    cursor: pointer;
+}
+.btn-green { background-color: #10b981; }
+.btn-red { background-color: #ef4444; }
+.btn-orange { background-color: #f59e0b; }
+.btn-purple { background-color: #8b5cf6; }
+.btn-row { display: flex; flex-direction: row; }
+
+/* 信息框 */
+.info-box {
+    padding: 10px 14px;
+    background-color: #e8f0fe;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #333;
+    margin-top: 8px;
+}
+
+/* JS 输出区 */
+.js-output {
+    padding: 10px;
+    background-color: #1e1e1e;
+    color: #4ec9b3;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-top: 8px;
+}
+
+/* @keyframes 动画 */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+.anim-pulse { animation: pulse 2s infinite; }
+
+/* 切换盒子 */
+#toggleBox {
+    width: 200px;
+    height: 60px;
+    border-radius: 8px;
+    background-color: #1a73e8;
+    display: block;
+    color: #fff;
+    text-align: center;
+    line-height: 60px;
+    font-size: 14px;
+    margin-top: 8px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">wb-ui 综合测试</div>
+<div class="subtitle">CSS布局 · CSS动画 · Go函数 · JS函数 · 标签事件处理</div>
+
+<!-- 1. Flex 布局 -->
+<div class="card">
+    <div class="card-title">1. CSS Flex 布局</div>
+    <div class="card-desc">display:flex / flex-direction:row / flex</div>
+    <div class="flex-row">
+        <div class="flex-item">flex:1</div>
+        <div class="flex-item flex-grow-2">flex:2</div>
+        <div class="flex-item">flex:1</div>
+    </div>
+</div>
+
+<!-- 2. inline-block 布局 -->
+<div class="card">
+    <div class="card-title">2. inline-block 布局</div>
+    <div class="card-desc">display:inline-block 水平排列</div>
+    <div>
+        <div class="ib-box">A</div>
+        <div class="ib-box" style="background-color:#26a69a;">B</div>
+        <div class="ib-box" style="background-color:#ab47bc;">C</div>
+    </div>
+</div>
+
+<!-- 3. CSS 动画 -->
+<div class="card">
+    <div class="card-title">3. CSS @keyframes 动画</div>
+    <div class="card-desc">animation: pulse 2s infinite</div>
+    <div class="info-box anim-pulse" style="text-align:center;font-size:18px;font-weight:bold;color:#1a73e8;">
+        脉冲动画 (pulsing)
+    </div>
+</div>
+
+<!-- 4. Go 函数事件处理（onclick="goXxx()" 浏览器执行 JS，wb-ui 走 Go handler） -->
+<div class="card">
+    <div class="card-title">4. Go 函数事件处理</div>
+    <div class="card-desc">HTML 标签 onclick 直接指定 Go 函数名</div>
+
+    <div class="info-box" id="countDisplay" style="font-size:18px;font-weight:bold;text-align:center;color:#1a73e8;">Go 计数: 0</div>
+    <div class="btn-row" style="margin-top:8px;">
+        <div class="btn" onclick="goIncrement()" style="margin-right:8px;">+1 (Go)</div>
+        <div class="btn btn-red" onclick="goReset()">重置 (Go)</div>
+    </div>
+
+    <div class="info-box" id="timeDisplay" style="margin-top:10px;">Go 时间: (点击按钮获取)</div>
+    <div class="btn-row" style="margin-top:8px;">
+        <div class="btn btn-green" onclick="goGetTime()" style="margin-right:8px;">Go 获取时间</div>
+        <div class="btn btn-orange" onclick="goToggleBg()">Go 切换背景</div>
+    </div>
+
+    <div id="toggleBox">点击 "切换背景" 按钮</div>
+
+    <div class="btn-row" style="margin-top:8px;">
+        <div class="btn btn-purple" onclick="goAddItem()">Go 添加列表项</div>
+    </div>
+    <div id="itemList" style="margin-top:8px;"></div>
+</div>
+
+<!-- 5. JS 函数事件处理 -->
+<div class="card">
+    <div class="card-title">5. JS 函数事件处理</div>
+    <div class="card-desc">onclick="js:jsFunc()" 调用 JavaScript</div>
+
+    <div class="btn-row">
+        <div class="btn btn-green" onclick="js:jsButtonClick()" style="margin-right:8px;">JS 点击</div>
+        <div class="btn btn-purple" onclick="js:jsCallGo()" style="margin-right:8px;">JS 调用 Go</div>
+        <div class="btn btn-orange" onclick="js:jsToggleColor()">JS 切换</div>
+    </div>
+
+    <div class="js-output" id="jsOutput">JS 输出: (等待操作...)</div>
+
+    <div id="jsColorBox" style="width:200px;height:50px;border-radius:6px;background-color:#4caf50;display:block;color:#fff;text-align:center;line-height:50px;font-size:13px;margin-top:8px;">
+        JS 控制的盒子
+    </div>
+</div>
+
+<!-- 6. 文本输入 + IME 输入法测试（真实 <input> 元素） -->
+<div class="card">
+    <div class="card-title">6. 文本输入与 IME 输入法</div>
+    <div class="card-desc">点击输入框后可使用中文输入法（拼音/五笔等）输入</div>
+    <input id="imeInput" type="text" placeholder="点击此处输入文字..." style="box-sizing:border-box;width:100%;height:36px;border:2px solid #1a73e8;border-radius:6px;padding:0 8px;font-size:14px;color:#333;background-color:#fff;cursor:text;outline:none;" />
+    <div id="imeStatus" style="margin-top:6px;font-size:12px;color:#9ca3af;">IME 状态: 等待焦点</div>
+</div>
+
+<!-- 7. HTML 表单控件（Phase 9 迁移：真实 <input>/<select>/<progress>/<meter>） -->
+<div class="card">
+    <div class="card-title">7. HTML 表单控件</div>
+    <div class="card-desc">checkbox / radio / range / select / progress / meter / color</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:10px;">
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">复选框：</label>
+            <input type="checkbox" id="cb1" checked style="vertical-align:middle;" />
+            <label for="cb1" style="font-size:13px;color:#666;margin-left:4px;">已勾选</label>
+            <input type="checkbox" id="cb2" style="margin-left:12px;vertical-align:middle;" />
+            <label for="cb2" style="font-size:13px;color:#666;margin-left:4px;">未勾选</label>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">单选框：</label>
+            <input type="radio" name="rg1" checked style="vertical-align:middle;" />
+            <label style="font-size:13px;color:#666;margin-left:4px;">选项A</label>
+            <input type="radio" name="rg1" style="margin-left:12px;vertical-align:middle;" />
+            <label style="font-size:13px;color:#666;margin-left:4px;">选项B</label>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">滑块：</label>
+            <input type="range" min="0" max="100" value="40" style="width:200px;vertical-align:middle;" />
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">下拉选择：</label>
+            <select style="padding:2px 4px;border:1px solid #c0c0c0;border-radius:4px;font-size:13px;">
+                <option value="go">Go</option>
+                <option value="js">JavaScript</option>
+                <option value="py">Python</option>
+            </select>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">进度条：</label>
+            <progress value="70" max="100" style="width:200px;vertical-align:middle;"></progress>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">仪表：</label>
+            <meter value="0.3" min="0" max="1" low="0.4" high="0.7" optimum="0.2" style="width:120px;vertical-align:middle;"></meter>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#333;margin-right:8px;">颜色：</label>
+            <input type="color" value="#1a73e8" style="width:60px;height:30px;vertical-align:middle;" />
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== Go 命名空间（浏览器版模拟，与 main.go 的 RegisterGoFunction 一致）=====
+var go = {
+    getGreeting: function() { return "Hello from Go! 🎉"; },
+    computeProduct: function() { return 6 * 7; },
+    getTime: function() { return "Go 时间: 2026-07-08"; }
+};
+
+// ===== 对应 main.go 中 handlers 的浏览器版 JS 实现 =====
+// wb-ui 加载时 onclick 走 Go handler（不执行此处 JS）；
+// 浏览器加载时 onclick 执行这些 JS 函数。两边行为一致。
+var clickCount = 0;
+var itemCount = 0;
+
+function goIncrement() {
+    clickCount++;
+    var el = document.getElementById("countDisplay");
+    if (el) { el.textContent = "Go 计数: " + clickCount; }
+}
+function goReset() {
+    clickCount = 0;
+    var el = document.getElementById("countDisplay");
+    if (el) { el.textContent = "Go 计数: 0"; }
+}
+function goToggleBg() {
+    var el = document.getElementById("toggleBox");
+    if (el) {
+        if (clickCount % 2 === 0) {
+            el.setAttribute("style", "width:200px;height:60px;border-radius:8px;background-color:#e53935;display:block;color:#fff;text-align:center;line-height:60px;font-size:14px;margin-top:8px;");
+        } else {
+            el.setAttribute("style", "width:200px;height:60px;border-radius:8px;background-color:#1a73e8;display:block;color:#fff;text-align:center;line-height:60px;font-size:14px;margin-top:8px;");
+        }
+    }
+    clickCount++;
+}
+function goAddItem() {
+    itemCount++;
+    var list = document.getElementById("itemList");
+    if (list) {
+        var item = document.createElement("div");
+        item.setAttribute("style", "padding:6px 12px;margin:4px 0;background-color:#e8f0fe;border-radius:4px;font-size:13px;color:#333;");
+        item.textContent = "Go 创建的列表项 #" + itemCount;
+        list.appendChild(item);
+    }
+}
+function goGetTime() {
+    var el = document.getElementById("timeDisplay");
+    if (el) { el.textContent = "Go 时间: 2026-07-08 (由 Go 事件处理函数更新)"; }
+}
+
+// ===== 原有 JS 函数（js: 前缀调用）=====
+var jsCount = 0;
+var jsToggleOn = false;
+
+function jsButtonClick() {
+    jsCount++;
+    var el = document.getElementById("jsOutput");
+    if (el) { el.textContent = "JS 输出: 按钮点击 " + jsCount + " 次"; }
+}
+function jsCallGo() {
+    var greeting = go.getGreeting();
+    var product = go.computeProduct();
+    var el = document.getElementById("jsOutput");
+    if (el) { el.textContent = "JS→Go: " + greeting + " | 6×7=" + product; }
+}
+function jsToggleColor() {
+    jsToggleOn = !jsToggleOn;
+    var el = document.getElementById("jsColorBox");
+    if (el) {
+        if (jsToggleOn) {
+            el.setAttribute("style", "width:200px;height:50px;border-radius:6px;background-color:#e53935;display:block;color:#fff;text-align:center;line-height:50px;font-size:13px;margin-top:8px;");
+        } else {
+            el.setAttribute("style", "width:200px;height:50px;border-radius:6px;background-color:#4caf50;display:block;color:#fff;text-align:center;line-height:50px;font-size:13px;margin-top:8px;");
+        }
+    }
+}
+
+console.log("JS: 综合测试页面已加载");
+console.log("JS: go.getGreeting() = " + go.getGreeting());
+console.log("JS: go.computeProduct() = " + go.computeProduct());
+</script>
+
+</body>
+</html>

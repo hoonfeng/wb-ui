@@ -1,0 +1,197 @@
+// Package html5 defaultcss provides the User-Agent (UA) default stylesheet
+// for HTML form controls, mirroring WebCore/css/html.css.
+// The stylesheet is injected into the style resolver with OriginUserAgent so
+// that author stylesheets override it via the cascade.
+
+package html5
+
+import (
+	"wb-ui/css"
+)
+
+// UAStyleSheetCSS is the CSS text for form control default styles, mirroring
+// the relevant portions of WebCore/css/html.css. It covers form-associated
+// elements (form, fieldset, legend, label, input, button, select, textarea,
+// option, optgroup, datalist, output, progress, meter) plus a few structural
+// defaults that affect form layout.
+const UAStyleSheetCSS = `
+/* --- Form element defaults (mirrors WebCore/css/html.css form section) --- */
+
+form {
+	display: block;
+	margin: 0 0 1em 0;
+}
+
+fieldset {
+	display: block;
+	margin: 0 2px 0.8em 0;
+	padding: 0.8em 1em 1em;
+	border: 2px groove #c0c0c0;
+}
+
+legend {
+	display: block;
+	padding: 0 0.3em;
+}
+
+label {
+	cursor: default;
+}
+
+/* Replaced elements: input, button, select, textarea are inline-block by
+   default so they sit on the text baseline. */
+input, button, select, textarea {
+	display: inline-block;
+	font-family: inherit;
+	font-size: inherit;
+	color: inherit;
+	vertical-align: middle;
+}
+
+/* Text inputs share a common border/padding. */
+input[type="text"], input[type="password"], input[type="search"],
+input[type="email"], input[type="url"], input[type="tel"],
+input[type="number"], input[type="date"], input[type="time"],
+input[type="month"], input[type="week"], input[type="datetime-local"] {
+	padding: 2px 4px;
+	border: 1px solid #c0c0c0;
+	background-color: #ffffff;
+	box-sizing: border-box;
+}
+
+textarea {
+	padding: 2px 4px;
+	border: 1px solid #c0c0c0;
+	background-color: #ffffff;
+	box-sizing: border-box;
+	resize: both;
+	overflow: auto;
+}
+
+input[type="color"] {
+	width: 2em;
+	height: 1.5em;
+	padding: 1px;
+	border: 1px solid #c0c0c0;
+}
+
+/* Checkbox and radio are inline with no border. */
+input[type="checkbox"], input[type="radio"] {
+	display: inline-block;
+	width: 1em;
+	height: 1em;
+	margin: 0 0.2em 0 0;
+	vertical-align: baseline;
+}
+
+/* Range input renders as a slider. */
+input[type="range"] {
+	display: inline-block;
+	width: 12em;
+	height: 1.2em;
+	padding: 0;
+	border: none;
+	overflow: hidden;
+}
+
+/* File input. */
+input[type="file"] {
+	padding: 2px;
+}
+
+/* Hidden inputs have no box. */
+input[type="hidden"] {
+	display: none;
+}
+
+/* Image input behaves like img. */
+input[type="image"] {
+	display: inline-block;
+}
+
+/* Submit/reset/button inputs and <button> share button styling. */
+input[type="submit"], input[type="reset"], input[type="button"],
+button {
+	display: inline-block;
+	padding: 4px 10px;
+	border: 1px solid #a0a0a0;
+	background-color: #f0f0f0;
+	color: #000000;
+	text-align: center;
+	cursor: default;
+	box-sizing: border-box;
+	-webkit-appearance: button;
+}
+
+button[disabled], input[disabled] {
+	color: #808080;
+}
+
+/* Select and option. */
+select {
+	display: inline-block;
+	padding: 1px;
+	border: 1px solid #c0c0c0;
+	background-color: #ffffff;
+	box-sizing: border-box;
+}
+
+option {
+	display: block;
+	padding: 0 0.3em;
+}
+
+optgroup {
+	display: block;
+	font-weight: bold;
+	padding: 0 0.3em;
+}
+
+optgroup option {
+	font-weight: normal;
+	padding-left: 1.2em;
+}
+
+/* Datalist is not rendered. */
+datalist {
+	display: none;
+}
+
+/* Output is inline. */
+output {
+	display: inline;
+}
+
+/* Progress and meter. */
+progress {
+	display: inline-block;
+	width: 10em;
+	height: 1em;
+	vertical-align: middle;
+}
+
+meter {
+	display: inline-block;
+	width: 6em;
+	height: 1em;
+	vertical-align: middle;
+}
+
+/* Submit button alignment fix. */
+input[type="submit"]::-webkit-inner-button,
+input[type="reset"]::-webkit-inner-button,
+input[type="button"]::-webkit-inner-button {
+	padding: 0;
+}
+`
+
+// NewUAStyleSheet parses the UA default CSS and returns a CSSStyleSheet
+// with OriginUserAgent set, ready to be added to a style.Resolver.
+func NewUAStyleSheet() *css.CSSStyleSheet {
+	sheet := css.NewCSSStyleSheet()
+	sheet.SetOrigin(css.OriginUserAgent)
+	p := css.NewParser(UAStyleSheetCSS)
+	p.SetOrigin(css.OriginUserAgent)
+	p.ParseStyleSheetInto(sheet)
+	return sheet
+}
