@@ -903,24 +903,59 @@ func TestInterpreterPromiseThrowInExecutor(t *testing.T) {
 	}
 }
 
-// Note: async/await is not yet implemented. The parser recognises the keywords
-// (async function, await) but a body that uses await throws at runtime.
-// This test verifies that defining an async function does not crash.
-// func TestInterpreterAsyncFunction(t *testing.T) {
-// 	out := runScript(t, `
-// 		async function foo() {
-// 			return 1;
-// 		}
-// 		console.log("async defined");
-// 	`)
-// 	if got := strings.TrimSpace(out); got != "async defined" {
-// 		t.Fatalf("got %q, want 'async defined'", got)
-// 	}
-// }
-// 	if got := strings.TrimSpace(out); got != "async defined" {
-// 		t.Fatalf("got %q, want 'async defined'", got)
-// 	}
-// }
+// TestInterpreterAsyncFunction verifies async function definition, Promise return,
+// and await expression support.
+func TestInterpreterAsyncFunction(t *testing.T) {
+	// Basic async function: returns a Promise that resolves to the return value.
+	out := runScript(t, `
+		async function foo() {
+			return 42;
+		}
+		foo().then(function(v) { console.log("resolved: " + v); });
+	`)
+	if got := strings.TrimSpace(out); got != "resolved: 42" {
+		t.Fatalf("got %q, want 'resolved: 42'", got)
+	}
+
+	// Async function with await on a direct value (non-Promise).
+	out2 := runScript(t, `
+		async function bar() {
+			let x = await 10;
+			return x + 5;
+		}
+		bar().then(function(v) { console.log("value: " + v); });
+	`)
+	if got := strings.TrimSpace(out2); got != "value: 15" {
+		t.Fatalf("got %q, want 'value: 15'", got)
+	}
+
+	// Async function with await on a resolved Promise.
+	out3 := runScript(t, `
+		async function baz() {
+			let p = Promise.resolve(100);
+			let x = await p;
+			return x * 2;
+		}
+		baz().then(function(v) { console.log("awaited: " + v); });
+	`)
+	if got := strings.TrimSpace(out3); got != "awaited: 200" {
+		t.Fatalf("got %q, want 'awaited: 200'", got)
+	}
+
+	// Async function that throws: Promise should be rejected.
+	out4 := runScript(t, `
+		async function errFn() {
+			throw "oops";
+		}
+		errFn().then(
+			function(v) { console.log("unexpected"); },
+			function(e) { console.log("rejected"); }
+		);
+	`)
+	if got := strings.TrimSpace(out4); got != "rejected" {
+		t.Fatalf("got %q, want 'rejected'", got)
+	}
+}
 
 // TestInterpreterSymbol verifies Symbol creation, toString, uniqueness, and registry.
 func TestInterpreterSymbol(t *testing.T) {

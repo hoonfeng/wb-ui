@@ -7,8 +7,7 @@
 //   - AST nodes are Go structs implementing a Node interface instead of a class
 //     hierarchy with virtual emitBytecode; bytecode emission lives in bytecode.go.
 //   - Pratt (precedence-climbing) parser replaces the C++ precedence-climbing helper.
-//   - no destructuring patterns (array/object), no generators, no async/await body
-//     (async/await keywords are recognized but a body that awaits throws at runtime).
+//   - no destructuring patterns (array/object), no generators
 //   - automatic semicolon insertion is the simplified newline/EOF rule.
 
 package jsc
@@ -258,6 +257,15 @@ type UnaryExpression struct {
 
 func (n *UnaryExpression) nodePos() (int, int) { return n.Line, n.Col }
 func (n *UnaryExpression) exprNode()           {}
+
+// AwaitExpression is 'await expr' (only valid inside async functions).
+type AwaitExpression struct {
+	Argument  Expr
+	Line, Col int
+}
+
+func (n *AwaitExpression) nodePos() (int, int) { return n.Line, n.Col }
+func (n *AwaitExpression) exprNode()           {}
 
 // UpdateExpression is 'arg++' / '++arg' / 'arg--' / '--arg'.
 type UpdateExpression struct {
@@ -1222,6 +1230,12 @@ func (p *Parser) parseBinary(minPrec int) Expr {
 // uniformly.
 func (p *Parser) parseUnary() Expr {
 	tok := p.current
+	// 'await expr' — only valid inside async functions, but parsed regardless.
+	if tok.Kind == KeywordToken(KeywordAwait) {
+		p.advance()
+		arg := p.parseUnary()
+		return &AwaitExpression{Argument: arg, Line: tok.Line, Col: tok.Col}
+	}
 	if IsUpdateOp(tok.Kind) {
 		p.advance()
 		arg := p.parseUnary()

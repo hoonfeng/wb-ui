@@ -193,8 +193,21 @@ func (in *Interpreter) RunBody(body *FunctionBody, env *Environment, this JSValu
 
 // runFunction is the core bytecode dispatch loop. It returns the result value or an
 // exception sentinel. The operand stack is local to the frame.
+// For async functions (body.IsAsync), execution is wrapped in a Promise: the return
+// value resolves the promise, and any uncaught exception rejects it.
 func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (JSValue, *jsException) {
-	in.depth++
+	// Async functions: delegate to runAsyncFunction which wraps the synchronous
+	// bytecode execution in a Promise. The runAsyncFunction calls runFunctionBody
+	// (which does NOT check IsAsync) to avoid infinite recursion.
+	if body.IsAsync {
+		return in.runAsyncFunction(body, env, this, args)
+	}
+	return in.runFunctionBody(body, env, this, args)
+}
+
+// runFunctionBody is the dispatch loop without async wrapping. It is called by
+// both runFunction (non-async) and runAsyncFunction (async wrapper).
+func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (JSValue, *jsException) {
 	if in.depth > in.maxCallDepth {
 		in.depth--
 		return Undefined(), &jsException{value: StringValue("RangeError: Maximum call stack size exceeded")}
@@ -557,11 +570,48 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 				}
 				mod[inst.Name] = value
 			}
+		case OpAwait:
+			// await expr: pop the value, unwrap if it's a settled Promise.
+			val := pop()
+			if pd := promiseDataOf(val); pd != nil {
+				if pd.state == promiseFulfilled {
+					push(pd.value)
+				} else if pd.state == promiseRejected {
+					if e := handleThrow(pd.value); e != nil {
+						return Undefined(), e
+					}
+				} else {
+					// Pending promise shouldn't happen in sync model; push as-is.
+					push(val)
+				}
+			} else {
+				// await on non-thenable: evaluate to the value itself.
+				push(val)
+			}
 		default:
 			return Undefined(), &jsException{value: StringValue(fmt.Sprintf("unknown opcode %d", inst.Op))}
 		}
 	}
 	return Undefined(), nil
+}
+
+// runAsyncFunction wraps a synchronous bytecode execution in a Promise. The function
+// body is executed synchronously via runFunction. When the body returns, the result
+// is used to settle (resolve) the promise. If the body throws an exception, the
+// promise is rejected. The Promise object is returned immediately, matching the
+// ECMAScript async function semantics.
+func (in *Interpreter) runAsyncFunction(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (JSValue, *jsException) {
+	pd := newPromiseData()
+	promiseVal := ObjectValue(newPromiseObject(pd, in))
+
+	// Execute the function body synchronously (returns value or exception).
+	result, exc := in.runFunctionBody(body, env, this, args)
+	if exc != nil {
+		pd.settle(promiseRejected, exc.value, in)
+	} else {
+		pd.settle(promiseFulfilled, result, in)
+	}
+	return promiseVal, nil
 }
 
 // numericIndex returns the integer value of a numeric string and whether it parsed.

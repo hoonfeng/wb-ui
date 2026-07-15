@@ -642,6 +642,9 @@ type FunctionBody struct {
 	// that top-level var/function declarations persist on the global environment and
 	// remain reachable after Run returns (mirroring script-scope semantics).
 	IsTopLevel bool
+	// IsAsync marks async functions. When true the function execution wraps its
+	// result in a Promise and the await instruction can be used.
+	IsAsync bool
 }
 
 // String returns a debug representation of a JSValue's tag.

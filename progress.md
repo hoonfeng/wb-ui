@@ -280,3 +280,67 @@
 - 唯一已知失败：`wb-ui/layout` 的 `TestInline_TextWraps`（预先存在，与 Phase 9 无关）
 - 组件覆盖率：从 0/60 HTML 元素专用类提升到 15/15 表单元素 + 22 InputType + ValidityState + DOMFormData + 表单事件 + 原生表单控件渲染 + 文本输入框 value/placeholder 绘制 + IME 对真实 `<input>` 的 value 属性支持
 
+---
+
+## 2026-07-16 CGO 启用完成
+
+### 任务
+用户要求：CGO 环境已具备，启用 CGO 使项目可编译运行。
+
+### 完成内容
+
+#### 1. Makefile 更新
+- 添加 `export CGO_ENABLED := 1` — 确保所有 Go 命令使用 CGO
+- 添加 `export PATH` 含 Skia DLL 目录 — 运行时能找到 `libSkiaSharp.dll`
+- 添加头部注释说明 CGO 前置条件
+
+#### 2. 构建环境助手脚本
+- **`cgo_env.bat`** — Windows CMD 一键设置脚本
+  ```
+  cgo_env              — 显示环境状态
+  cgo_env build        — go build ./...
+  cgo_env test         — go test ./...
+  cgo_env test -v      — 详细测试输出
+  cgo_env run <target> — 运行指定程序
+  ```
+- **`cgo_env.ps1`** — PowerShell 版（彩色输出）
+
+两个脚本自动设置：
+- `CGO_ENABLED=1`
+- `PATH` 追加 `F:\syproject\goskia\bin`（Skia DLL 目录）
+- 检测 gcc 可用性并显示环境状态
+
+#### 3. 环境信息
+| 项目 | 值 |
+|------|-----|
+| GCC | `gcc (Rev2, Built by MSYS2 project) 14.2.0` |
+| GCC 路径 | `F:\msys64\mingw64\bin\gcc.exe` |
+| Skia DLL | `F:\syproject\goskia\bin\libSkiaSharp.dll` |
+| goskia 模块 | `github.com/hoonfeng/goskia@v0.0.0-20260605075657-bdf27a30942e` |
+| Go 版本 | 1.26.4 |
+| 默认 CGO_ENABLED | `0`（需显式设置） |
+
+#### 4. 验证结果
+- ✅ `go build ./...` — 全部 21+ 个包编译通过
+- ✅ `go test ./...` — 18 个可测试包全部通过（~800+ 测试）
+
+| 包 | 状态 |
+|-----|------|
+| bindings/ bmalloc/ css/ dom/ editing/ editor/ html/ html5/ jsc/ layout/ markdown/ page/ platform/graphics/ rendering/ style/ webkit/ widgets/ wtf/ | ✅ 全部 PASS |
+
+### 用法
+```bash
+# 方式一：使用 Makefile（自动处理 CGO 和 PATH）
+make build
+make test
+
+# 方式二：使用助手脚本
+cgo_env build
+cgo_env test
+
+# 方式三：手动设置
+set CGO_ENABLED=1
+set PATH=F:\syproject\goskia\bin;%PATH%
+go build ./...
+```
+

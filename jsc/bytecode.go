@@ -103,6 +103,12 @@ const (
 	OpImport
 	// OpExport stores a value into the current module's export table.
 	OpExport
+	// OpAwait pops a value from the stack and unwraps a Promise if the value is a
+	// Promise. If the Promise is already settled, the resolved/rejected value is
+	// pushed back. If the Promise is pending, the interpreter must be running inside
+	// an async function; the current function returns its Promise immediately
+	// (microtask scheduling not yet implemented).
+	OpAwait
 )
 
 // Instruction is a single bytecode instruction. It mirrors the packed Instruction
@@ -155,7 +161,7 @@ func CompileProgram(prog *Program) *FunctionBody {
 }
 
 // compileFunction compiles a function expression/declaration body into a FunctionBody.
-func compileFunction(name string, params []string, body []Stmt, isArrow bool) *FunctionBody {
+func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = isArrow
@@ -184,6 +190,7 @@ func compileFunction(name string, params []string, body []Stmt, isArrow bool) *F
 		Instructions: g.code,
 		NumLocals:    len(g.scopeLocals),
 		IsArrow:      isArrow,
+		IsAsync:      isAsync,
 	}
 }
 
@@ -239,7 +246,7 @@ func (g *BytecodeGenerator) here() int { return len(g.code) }
 
 // emitFunctionHoisted emits a NewClosure and StoreVar for a hoisted function declaration.
 func (g *BytecodeGenerator) emitFunctionHoisted(fd *FunctionDeclaration) {
-	body := compileFunction(fd.Name, fd.Params, fd.Body, false)
+	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: fd.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: fd.Name})
 	g.emit(Instruction{Op: OpPop})
@@ -566,13 +573,13 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		}
 		g.emit(Instruction{Op: OpLoadObject, IntArg: len(n.Properties)})
 	case *FunctionExpression:
-		body := compileFunction(n.Name, n.Params, n.Body, false)
+		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync)
 		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	case *ArrowFunction:
-		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true)
+		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync)
 		if n.IsExpr {
 			// Wrap a concise-body expression so the function returns it.
-			body = compileArrowExpr(n.Params, n.Body.(Expr))
+			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync)
 		}
 		g.emit(Instruction{Op: OpNewClosure, Body: body})
 	case *TemplateLiteral:
@@ -589,6 +596,9 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		}
 	case *SpreadExpression:
 		g.emitExpr(n.Argument)
+	case *AwaitExpression:
+		g.emitExpr(n.Argument)
+		g.emit(Instruction{Op: OpAwait})
 	case *ClassDeclaration:
 		// Class expressions are parsed but not supported at runtime.
 		g.emit(Instruction{Op: OpLoadConst, Value: StringValue("class expressions are not implemented")})
@@ -613,7 +623,7 @@ func stmtsFromNode(body Node) []Stmt {
 }
 
 // compileArrowExpr compiles an arrow function with a concise expression body.
-func compileArrowExpr(params []string, body Expr) *FunctionBody {
+func compileArrowExpr(params []string, body Expr, isAsync bool) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = true
@@ -622,7 +632,7 @@ func compileArrowExpr(params []string, body Expr) *FunctionBody {
 	}
 	g.emitExpr(body)
 	g.emit(Instruction{Op: OpReturn})
-	return &FunctionBody{Name: "<arrow>", Params: params, Instructions: g.code, NumLocals: len(g.scopeLocals), IsArrow: true}
+	return &FunctionBody{Name: "<arrow>", Params: params, Instructions: g.code, NumLocals: len(g.scopeLocals), IsArrow: true, IsAsync: isAsync}
 }
 
 // emitLogical compiles && || ?? with short-circuit jumps.
