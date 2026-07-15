@@ -31,7 +31,8 @@ type FormattingContext interface {
 // contextFor returns the formatting context that should lay out box based on its
 // display. Block / inline-block / list-item / flow-root use the block formatting
 // context; flex containers use FlexFormattingContext; grid containers use
-// GridFormattingContext; tables use TableLayout.
+// GridFormattingContext; tables use TableLayout. Multi-column containers
+// (column-count > 0 or column-width set) use MultiColumnFormattingContext.
 func contextFor(box *LayoutBox) FormattingContext {
 	// Anonymous boxes wrap inline-level content (produced by BuildLayoutTree when a
 	// block container mixes inline and block children); they are laid out by the
@@ -50,6 +51,9 @@ func contextFor(box *LayoutBox) FormattingContext {
 	case style.DisplayTable, style.DisplayInlineTable:
 		return &TableFormattingContext{}
 	default:
+		if HasColumns(box) {
+			return &MultiColumnFormattingContext{}
+		}
 		return &BlockFormattingContext{}
 	}
 }

@@ -230,6 +230,17 @@ type ComputedStyle struct {
 	RowGap              Length
 	ColumnGap           Length
 
+	// Multi-column layout.
+	ColumnCount      int    // 0 = auto (use column-width)
+	ColumnWidth      Length // zero Value = auto
+	ColumnRuleColor  string // "none" (default) or CSS color
+	ColumnRuleStyle  string // "none" (default), "solid", "dotted", "dashed", "double"
+	ColumnRuleWidth  Length
+	ColumnFill       string // "balance" (default) or "auto"
+
+	// Writing mode.
+	WritingMode string // "horizontal-tb" (default), "vertical-rl", "vertical-lr"
+
 	// Flex / Grid item.
 	FlexBasis       Length
 	FlexGrow        float64
@@ -342,6 +353,10 @@ func NewComputedStyle() *ComputedStyle {
 		FlexGrow:            0,
 		FlexShrink:          1,
 		Order:               0,
+		ColumnCount:         0,      // auto
+		ColumnRuleStyle:     "none", // no column rule
+		ColumnFill:          "balance",
+		WritingMode:         "horizontal-tb",
 		CustomProperties:    map[string][]css.Token{},
 		Properties:          map[string]string{},
 		ImportantProperties: map[string]bool{},
@@ -412,6 +427,22 @@ func (c *ComputedStyle) GetProperty(name string) string {
 		return c.AlignItems
 	case "flex-grow":
 		return formatFloat(c.FlexGrow)
+	case "column-count":
+		return intToString(c.ColumnCount)
+	case "column-width":
+		return c.ColumnWidth.String()
+	case "column-gap":
+		return c.ColumnGap.String()
+	case "column-rule-color":
+		return c.ColumnRuleColor
+	case "column-rule-style":
+		return c.ColumnRuleStyle
+	case "column-rule-width":
+		return c.ColumnRuleWidth.String()
+	case "column-fill":
+		return c.ColumnFill
+	case "writing-mode":
+		return c.WritingMode
 	case "flex-shrink":
 		return formatFloat(c.FlexShrink)
 	case "order":
@@ -475,6 +506,7 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	c.Cursor = parent.Cursor
 	c.UserSelect = parent.UserSelect
 	c.Opacity = parent.Opacity
+	c.WritingMode = parent.WritingMode
 	// Custom properties inherit.
 	if c.CustomProperties == nil {
 		c.CustomProperties = map[string][]css.Token{}

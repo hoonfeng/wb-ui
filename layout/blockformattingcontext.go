@@ -34,13 +34,14 @@ type BlockFormattingContext struct{}
 // border-box position (X/Y) and width (and margin/padding/border) before invoking; for
 // the root box these are set by the top-level Layout function. If box's height is auto
 // it is computed from the in-flow content.
+//
+// Supports both horizontal-tb (default) and vertical-rl/vertical-lr writing modes.
+// In vertical modes the block axis is horizontal and the inline axis is vertical.
 func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	if box.Style == nil {
 		box.Style = style.NewComputedStyle()
 	}
 	// The root box (no parent) has its box model resolved here since no parent did it.
-	// stretchRootToViewport set the border-box size to the viewport but could not
-	// subtract padding/border (they were not yet resolved).
 	if box.parent == nil {
 		margin, padding, border := computeBoxModel(box, state.ViewportWidth, fontSizeOf(box))
 		box.Rect.Margin = margin
@@ -49,9 +50,19 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		box.Rect.Width = state.ViewportWidth
 		box.Rect.Height = state.ViewportHeight
 	}
+
+	isVerticalWM := IsVerticalWritingMode(box.Style)
 	contentX := box.Rect.ContentX()
 	contentY := box.Rect.ContentY()
 	contentWidth := box.Rect.ContentWidth()
+
+	// In vertical writing mode:
+	//   - block axis = horizontal (contentX, content width)
+	//   - inline axis = vertical (contentY, content height)
+	blockStart := box.Rect.ContentY()
+	if isVerticalWM {
+		blockStart = box.Rect.ContentX()
+	}
 
 	// A BFC root contains its floats and does not collapse its margins with children.
 	establishesBFC := box.establishesBlockFormattingContext()
@@ -64,14 +75,9 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		fc = state.currentFloatContext()
 	}
 
-	// Lay out in-flow children vertically, applying simplified margin collapse.
-	cursor := contentY
-	// pendingMargin holds the uncollapsed bottom margin of the previous in-flow
-	// sibling that has yet to be applied to the next sibling's top.
+	// Lay out in-flow children, stacking them along the block axis.
+	cursor := blockStart
 	pendingMargin := 0.0
-	// collapseTopWithParent tracks whether the first in-flow child's top margin
-	// collapses with the parent's top margin (only when parent has no
-	// border/padding-top and does not establish a BFC).
 	collapseTopWithParent := !establishesBFC &&
 		box.Rect.Border.Top == 0 && box.Rect.Padding.Top == 0
 	firstInFlow := true
@@ -108,12 +114,8 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 
 		topMargin := margin.Top
-		// Collapse previous sibling's bottom margin with this child's top margin.
 		collapsedTop := 0.0
 		if firstInFlow && collapseTopWithParent {
-			// First child's top margin collapses with parent's top margin: do not
-			// add it to the cursor (it escapes the parent). The parent's own
-			// margin-top is applied by the grandparent.
 			collapsedTop = 0
 		} else {
 			collapsedTop = math.Max(pendingMargin, topMargin)
@@ -127,44 +129,37 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 
 		// Clamp child height to min-height/max-height constraints.
 		fs := fontSizeOf(child)
-		minH, maxH, minAuto, maxAuto := resolveMinMax(child.Style.MinHeight, child.Style.MaxHeight, 0, fs)
-		child.Rect.Height = clampSize(child.Rect.Height, minH, maxH, minAuto, maxAuto)
-		// Determine the child's bottom margin collapse eligibility. A child whose
-		// bottom margin would collapse with the parent's bottom margin must have an
-		// auto height and no following in-flow content; this is handled when sizing
-		// the parent height below. Here we just record the pending margin.
+		if isVerticalWM {
+			// In vertical mode, clamp the inline size (width), not block size.
+			minW, maxW, minAuto, maxAuto := resolveMinMax(child.Style.MinWidth, child.Style.MaxWidth, 0, fs)
+			child.Rect.Width = clampSize(child.Rect.Width, minW, maxW, minAuto, maxAuto)
+		} else {
+			minH, maxH, minAuto, maxAuto := resolveMinMax(child.Style.MinHeight, child.Style.MaxHeight, 0, fs)
+			child.Rect.Height = clampSize(child.Rect.Height, minH, maxH, minAuto, maxAuto)
+		}
 		pendingMargin = margin.Bottom
 		cursor = child.Rect.Y + child.Rect.Height
 		firstInFlow = false
 	}
 
-	// Resolve box height. box.Rect.Height stores the border-box height.
+	// Resolve box block size (height for horizontal-tb, width for vertical WM).
 	if heightIsAuto(box) {
-		// Auto height: the parent grows to enclose the last in-flow child's bottom
-		// edge (content height), then border-box = content + padding + border.
-		h := cursor - contentY
-		// Margin collapse: the last in-flow child's bottom margin collapses with the
-		// parent's bottom margin when the parent has no border/padding-bottom and
-		// height is auto. In that case the margin does not contribute to height.
+		blockSize := cursor - blockStart
 		if !establishesBFC && box.Rect.Border.Bottom == 0 && box.Rect.Padding.Bottom == 0 {
-			// pendingMargin collapses out; do not add it.
+			// pendingMargin collapses out
 		} else {
-			h += pendingMargin
+			blockSize += pendingMargin
 		}
-		// A BFC root encloses its floats.
 		if establishesBFC && fc != nil {
-			if fb := fc.maxFloatBottom(); fb > contentY+h {
-				h = fb - contentY
+			if fb := fc.maxFloatBottom(); fb > contentY+blockSize {
+				blockSize = fb - contentY
 			}
 		}
-		if h < 0 {
-			h = 0
+		if blockSize < 0 {
+			blockSize = 0
 		}
-		box.Rect.Height = h + box.Rect.Border.Vertical() + box.Rect.Padding.Vertical()
+		box.Rect.Height = blockSize + box.Rect.Border.Vertical() + box.Rect.Padding.Vertical()
 	} else {
-		// Specified height: resolve against the containing-block height. The root
-		// box already has its height set to the viewport; for children the specified
-		// value is used (content-box for content-box sizing, border-box otherwise).
 		if box.parent != nil {
 			fs := fontSizeOf(box)
 			cbHeight := box.parent.Rect.ContentHeight()
@@ -179,14 +174,14 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
-	// Apply relative offsets to in-flow children (does not affect layout flow).
+	// Apply relative offsets to in-flow children.
 	for _, child := range box.Children {
 		if child.IsRelativelyPositioned() && child.IsInFlow() {
 			applyRelativeOffset(child, contentWidth, box.Rect.ContentHeight())
 		}
 	}
 
-	// Lay out absolutely-positioned descendants against their containing block.
+	// Lay out absolutely-positioned descendants.
 	root := stateRoot(box)
 	for _, child := range deferredAbsolutes {
 		cb := containingBlockForAbsolute(child, root)

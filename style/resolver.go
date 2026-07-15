@@ -565,6 +565,53 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		if l, ok := parseLength(valueString); ok {
 			cs.ColumnGap = l
 		}
+	case "column-count":
+		if v, err := strconv.Atoi(valueString); err == nil && v > 0 {
+			cs.ColumnCount = v
+		}
+	case "column-width":
+		if l, ok := parseLength(valueString); ok {
+			cs.ColumnWidth = l
+		}
+	case "column-rule-color":
+		cs.ColumnRuleColor = valueString
+	case "column-rule-style":
+		cs.ColumnRuleStyle = valueString
+	case "column-rule-width":
+		if l, ok := parseLength(valueString); ok {
+			cs.ColumnRuleWidth = l
+		}
+	case "column-rule":
+		// Shorthand: <width> <style> <color>.
+		parts := strings.Fields(valueString)
+		for _, part := range parts {
+			if l, ok := parseLength(part); ok {
+				cs.ColumnRuleWidth = l
+			} else {
+				// Check border-style keywords inline.
+				switch part {
+				case "none", "hidden", "dotted", "dashed", "solid", "double",
+					"groove", "ridge", "inset", "outset":
+					cs.ColumnRuleStyle = part
+				default:
+					cs.ColumnRuleColor = part
+				}
+			}
+		}
+	case "column-fill":
+		cs.ColumnFill = valueString
+	case "columns":
+		// Shorthand: <column-width> || <column-count>
+		parts := strings.Fields(valueString)
+		for _, part := range parts {
+			if l, ok := parseLength(part); ok {
+				cs.ColumnWidth = l
+			} else if v, err := strconv.Atoi(part); err == nil && v > 0 {
+				cs.ColumnCount = v
+			}
+		}
+	case "writing-mode":
+		cs.WritingMode = valueString
 	case "grid-template-columns":
 		cs.GridTemplateColumns = valueString
 	case "grid-template-rows":

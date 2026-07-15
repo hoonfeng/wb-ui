@@ -143,6 +143,10 @@ type LayoutBox struct {
 	// these to populate RenderText.segments so the paint pipeline can draw each
 	// segment at its correct position. Nil for non-text-run boxes.
 	TextSegments []TextSegment
+
+	// columnInfo stores multi-column layout geometry computed during layout.
+	// Non-nil only for boxes that participated in multi-column layout.
+	columnInfo *columnLayoutInfo
 }
 
 // NewLayoutBox constructs a leaf layout box with the given type and style.
