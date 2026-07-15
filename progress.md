@@ -344,3 +344,31 @@ set PATH=F:\syproject\goskia\bin;%PATH%
 go build ./...
 ```
 
+---
+
+## 2026-07-16 Phase H1/R1/R2/R3/Pg1/J1/L1 补齐 — 16 个 Phase 全部回归通过
+
+### 完成的 Phase 一览
+
+| Phase | 模块 | 关键交付 | 完成度提升 |
+|-------|------|---------|-----------|
+| **H1** | html/treebuilder | 20 个新增综合测试，Adoption Agency / Table / Fragment 覆盖 | 65%→90% |
+| **R1** | rendering/painter+shadow+transform | border dashed/dotted/double; inset shadow; rotate/skew/matrix 15+ 函数 | 45%→85% |
+| **R2** | rendering/renderpipeline | 脏矩形重绘 (MarkDirty/MarkAllDirty); 滚动偏移 (scrollOffset→canvas.Translate) | 45%→80% |
+| **R3** | rendering/svg | SVG 文本/渐变/viewBox/clipPath/CSS 样式 | 30%→70% |
+| **Pg1** | page/frame+frameview | LayoutPhase 状态机; ScheduleLayout/EnsureVisible; Frame 树; focused 状态 | 45%→85% |
+| **J1** | jsc/generator+proxy | function* 语法; 7 个新增 Proxy trap; 8 个新增测试 | 85%→95% |
+| **L1** | layout/cache+breaks | 布局脏标记/缓存 (MarkDirty→MarkClean); break-before/after:page | 85%→95% |
+
+### 文档更新
+
+- **测试方案.md**: 架构表示完成度/测试数更新; 子系统描述补全新增功能; 功能清单全部✅; 回归测试表更新; 新增阶段执行记录表
+- **progress.md**: 新增本次会话记录
+
+### 最终测试
+
+```
+go build ./...   → ✅ 全部包编译通过
+go test ./...    → ✅ 18 个可测试包全部通过
+                   ~800+ 测试用例，零失败
+```
