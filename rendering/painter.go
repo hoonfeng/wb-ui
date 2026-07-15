@@ -9,7 +9,6 @@
 //     fills are omitted (no Image cache / decoded image backing in this port)
 //   - border styles other than solid are rasterized as solid; double / groove / ridge /
 //     inset / outset decorations are not rendered distinctly
-//   - border-radius is not applied (no rounded-rect rasterizer path)
 //   - outline reads outline-* from the ComputedStyle.Properties map; the dedicated
 //     outline fields that WebKit keeps on RenderStyle are not modeled
 //   - text is painted as a single run per InlineTextBox segment using the stub glyph
@@ -114,6 +113,18 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
+	rect := rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())
+	if !info.intersects(rect) {
+		return
+	}
+	// Paint box-shadow before the background (shadows sit behind the element).
+	// Paint shadows even when the background is transparent.
+	if st.BoxShadow != "" && st.BoxShadow != "none" {
+		r := lengthValue(st.BorderRadius)
+		shadows := parseShadowList(st.BoxShadow)
+		op := CumulativeOpacity(box)
+		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op)
+	}
 	bg := toGraphicsColor(st.BackgroundColor)
 	if bg.A == 0 {
 		return
@@ -122,12 +133,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if bg.A == 0 {
 		return
 	}
-	rect := rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())
-	if !info.intersects(rect) {
-		return
-	}
 	if r := lengthValue(st.BorderRadius); r > 0 {
-		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
 	} else {
 		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bg)
 	}
@@ -276,6 +282,24 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// Browsers default selected text to white so it is legible against the
 	// semi-transparent blue selection background.
 	selCol := graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+
+	// Paint text-shadow: draw the text once per shadow in the shadow color.
+	textShadows := parseShadowList(st.TextShadow)
+	if len(textShadows) > 0 {
+		opacity := CumulativeOpacity(text)
+		for _, seg := range segments {
+			end := seg.Start + seg.Len
+			if seg.Start < 0 || end > len(runes) {
+				continue
+			}
+			sub := string(runes[seg.Start:end])
+			if sub == "" || sub == "\n" {
+				continue
+			}
+			baseline := seg.Y + ascent
+			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
+		}
+	}
 
 	for _, seg := range segments {
 		end := seg.Start + seg.Len
