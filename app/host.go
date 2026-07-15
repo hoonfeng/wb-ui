@@ -459,24 +459,22 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// If the click is on a text form control, calculate the
 				// character offset and set the form-control selection.
 				if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-			// If the click is on a text form control, calculate the
-			// character offset and set the form-control selection.
-			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-				offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
-				if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
-					// Shift+Click extends form-control selection.
-					rendering.FocusedFormControlSel.End = offset
-					rendering.FocusedFormControlSel.Active = true
-				} else {
-					rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-						Start:  offset,
-						End:    offset,
-						Active: true,
+					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+					if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
+						// Shift+Click extends form-control selection.
+						rendering.FocusedFormControlSel.End = offset
+						rendering.FocusedFormControlSel.Active = true
+					} else {
+						rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+							Start:  offset,
+							End:    offset,
+							Active: true,
+						}
 					}
+				} else if h.imeFocusedEl != nil {
+					// Click outside a text control clears the form-control selection.
+					rendering.FocusedFormControlSel = nil
 				}
-			} else if h.imeFocusedEl != nil {
-				// Click outside a text control clears the form-control selection.
-				rendering.FocusedFormControlSel = nil
 			}
 		} else if ev.Action == int(glfw.Release) {
 			if h.selecting {
@@ -508,7 +506,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					rendering.FocusedFormControlSel.End = offset
 				}
 			}
-		case window.EventKey:
+		}
+	case window.EventKey:
 			if ev.Action == int(glfw.Press) && (ev.Mods&int(glfw.ModControl)) != 0 {
 				switch ev.Key {
 				case int(glfw.KeyV):
@@ -547,37 +546,26 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			if ev.Char != 0 {
 				// char event handled elsewhere (IME path)
 			}
-								h.win.SetClipboardString(cutText)
-								newVal := string(runes[:start]) + string(runes[end:])
-								setFocusedElementValue(h.imeFocusedEl, newVal)
-								rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-									Start: start, End: start,
-								}
-								h.imeInputText = newVal
-								h.wv.RebuildRenderTree()
-							}
-						}
-					}
-				}
-
-		case window.EventChar:
-			return
 		}
-		switch h.selGranularity {
-		case rendering.GranularityWord:
-			rendering.SelectWord(pos)
+	}
+}
+
+// handleSelection processes text selection based on granularity and drag state.
+func (h *Host) handleSelection(rv *rendering.RenderView, pos rendering.TextPosition) {
+	switch h.selGranularity {
+	case rendering.GranularityWord:
 		case rendering.GranularityLine:
 			rendering.SelectLine(rv, pos)
 		case rendering.GranularityParagraph:
-			rendering.SelectParagraph(rv, pos)
-		case rendering.GranularityDocument:
-			rendering.SelectDocument(rv)
-		}
-		rendering.SetCaret(nil)
-		return
 	}
+	rendering.SetCaret(nil)
+	return
+}
 
-	// Drag or shift+click: hit test both endpoints.
+// handleDragSelection handles text selection after a drag or shift+click.
+func (h *Host) handleDragSelection(rv *rendering.RenderView) {
+	start := rendering.HitTestText(rv, h.selAnchorX, h.selAnchorY)
+
 	start := rendering.HitTestText(rv, h.selAnchorX, h.selAnchorY)
 	end := rendering.HitTestText(rv, h.selEndX, h.selEndY)
 
@@ -830,10 +818,6 @@ func (h *Host) handleAnchorClick(el *dom.Element) {
 // event listeners and the wb-ui form submission pipeline are notified.
 // After modifying the element's value, the render tree is rebuilt so the
 // next paint frame reflects the updated content.
-//
-// For <input>/<textarea> elements, the value attribute is updated (mirroring
-	}
-}
 
 // pasteIntoFocused inserts text into the currently focused form control,
 // replacing any active selection or inserting at the cursor position.
@@ -892,6 +876,12 @@ func (h *Host) pasteIntoFocused(text string) {
 }
 
 // applyIMEEvents updates the focused element's text from IME
+// composition/handwriting events, dispatching DOM input/composition/change
+// events and rebuilding the render tree as needed.
+func (h *Host) applyIMEEvents(events []ime.Event) {
+	needsRebuild := false
+	for _, ev := range events {
+		switch ev.Kind {
 		case ime.EventCompositionUpdate:
 			h.imeComposing = true
 			h.imeComposeText = ev.Composition
