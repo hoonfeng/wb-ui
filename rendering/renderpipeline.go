@@ -132,6 +132,10 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	if box == nil || !box.IsVisible() {
 		return
 	}
+	// Apply CSS transform if present.
+	if cleanup := tryApplyTransform(info.canvas, box); cleanup != nil {
+		defer cleanup()
+	}
 	PaintBackground(box, info)
 	PaintBorder(box, info)
 }

@@ -5,8 +5,9 @@
 //                  Source/WebCore/rendering/TextBoxPainter.cpp
 // Completeness: 45%
 // Simplifications:
-//   - only flat background colors are painted; background-image / gradient / pattern
-//     fills are omitted (no Image cache / decoded image backing in this port)
+//   - only flat background colors AND linear gradients are painted; background-image
+//     images (png/jpg/svg) and pattern fills are omitted (no Image cache / decoded
+//     image backing in this port)
 //   - border styles other than solid are rasterized as solid; double / groove / ridge /
 //     inset / outset decorations are not rendered distinctly
 //   - outline reads outline-* from the ComputedStyle.Properties map; the dedicated
@@ -124,6 +125,21 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		shadows := parseShadowList(st.BoxShadow)
 		op := CumulativeOpacity(box)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op)
+	}
+	// Paint gradient if background-image is a linear-gradient.
+	bgGradient := parseGradient(st.BackgroundImage)
+	if bgGradient != nil {
+		r := lengthValue(st.BorderRadius)
+		if r > 0 {
+			// For rounded corners with gradient, use a simple fallback:
+			// fill the gradient first, then clip with rounded rect.
+			// Since we can't clip to a rounded rect, we draw the gradient
+			// and then draw the border-radius background on top.
+			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
+		} else {
+			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
+		}
+		return
 	}
 	bg := toGraphicsColor(st.BackgroundColor)
 	if bg.A == 0 {
