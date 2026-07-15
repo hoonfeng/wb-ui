@@ -378,7 +378,7 @@ func (c *ComputedStyle) GetProperty(name string) string {
 		return c.Color.String()
 	case "background-color":
 		return c.BackgroundColor.String()
-		return c.FontFamily
+
 	case "font-size":
 		return c.FontSize.String()
 	case "font-weight":

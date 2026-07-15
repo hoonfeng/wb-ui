@@ -13,6 +13,21 @@ func mkBlock() *LayoutBox {
 	return &LayoutBox{Type: BoxBlock, Style: cs}
 }
 
+// mkColumnBlock returns a block box with multi-column layout (column-count: N).
+func mkColumnBlock(colCount int) *LayoutBox {
+	b := mkBlock()
+	b.Style.ColumnCount = colCount
+	b.Style.ColumnGap = style.Length{Value: 16, Unit: "px"}
+	return b
+}
+
+// mkVerticalBlock returns a block box with vertical writing-mode.
+func mkVerticalBlock(wm string) *LayoutBox {
+	b := mkBlock()
+	b.Style.WritingMode = wm
+	return b
+}
+
 // mkBlockWH returns a block box with the given width and height in px.
 func mkBlockWH(w, h float64) *LayoutBox {
 	b := mkBlock()

@@ -43,9 +43,8 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	contentWidth := box.Rect.ContentWidth()
 	contentHeight := box.Rect.ContentHeight()
 
-	dir := flexDirectionOf(box)
-	isRow := dir == flexRow || dir == flexRowReverse
-	isReverse := dir == flexRowReverse || dir == flexColumnReverse
+	isRow := effectiveIsRow(box)
+	isReverse := effectiveIsReverse(box)
 	wrap := flexWrapOf(box)
 
 	// Collect visible in-flow flex items, sorted by order.
@@ -355,6 +354,29 @@ func flexDirectionOf(box *LayoutBox) flexDir {
 		return flexColumnReverse
 	}
 	return flexRow
+}
+
+// effectiveIsRow reports whether the main axis is the row axis, considering
+// writing-mode. In horizontal-tb this is equivalent to flex-direction: row.
+// In vertical writing-mode (vertical-rl/lr), the inline axis is vertical,
+// so flex-direction: row maps to the vertical axis (returns false).
+func effectiveIsRow(box *LayoutBox) bool {
+	dir := flexDirectionOf(box)
+	isRowPhys := dir == flexRow || dir == flexRowReverse
+	if IsVerticalWritingMode(box.Style) {
+		// In vertical writing mode, the inline axis (row direction) is vertical.
+		// So isRow effectively means the main axis is vertical, which corresponds
+		// to the physical height direction. We treat this as not-a-row in the
+		// traditional horizontal sense.
+		return !isRowPhys
+	}
+	return isRowPhys
+}
+
+// effectiveIsReverse reports whether the main axis direction is reversed.
+func effectiveIsReverse(box *LayoutBox) bool {
+	dir := flexDirectionOf(box)
+	return dir == flexRowReverse || dir == flexColumnReverse
 }
 
 func flexWrapOf(box *LayoutBox) string {

@@ -37,11 +37,21 @@ func (c *InlineFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	if box.Style == nil {
 		box.Style = style.NewComputedStyle()
 	}
+	isVerticalWM := IsVerticalWritingMode(box.Style)
 	contentX := box.Rect.ContentX()
 	contentY := box.Rect.ContentY()
 	contentWidth := box.Rect.ContentWidth()
+	contentHeight := box.Rect.ContentHeight()
 	fs := fontSizeOf(box)
 	lineHeight := resolvedLineHeight(box, fs)
+
+	// FIXME: Full vertical writing-mode support in the inline FC requires
+	// swapping contentX/contentY and cursor axis throughout (the inline axis
+	// is vertical in vertical-rl/lr, so line breaking should use contentHeight
+	// and lines should stack horizontally). For now the flex/block contexts
+	// handle vertical mode; the inline context falls back to horizontal layout.
+	_ = isVerticalWM
+	_ = contentHeight
 	// Vertical centering: offset the text segment within the line box so
 	// the glyph (ascent + descent) is centered against the line-height.
 	ascent, descent := fontAscentDescent(box)
