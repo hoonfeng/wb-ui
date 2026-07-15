@@ -121,12 +121,14 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		cursor += collapsedTop
 		child.Rect.Y = cursor
 
-		// Lay out child's descendants. The child's own width/position are set above;
-		// the child's formatting context lays out its children and computes its
-		// height if auto.
+		// Lay out child's descendants.
 		childCtx := contextFor(child)
 		childCtx.Layout(child, state)
 
+		// Clamp child height to min-height/max-height constraints.
+		fs := fontSizeOf(child)
+		minH, maxH, minAuto, maxAuto := resolveMinMax(child.Style.MinHeight, child.Style.MaxHeight, 0, fs)
+		child.Rect.Height = clampSize(child.Rect.Height, minH, maxH, minAuto, maxAuto)
 		// Determine the child's bottom margin collapse eligibility. A child whose
 		// bottom margin would collapse with the parent's bottom margin must have an
 		// auto height and no following in-flow content; this is handled when sizing

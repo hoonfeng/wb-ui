@@ -154,28 +154,22 @@ func TestBlock_MinMaxWidth(t *testing.T) {
 
 // TestBlock_MinMaxHeight verifies that min-height/max-height constrain the
 // used height of a block child.
-// Note: The current layout engine does not enforce min-height/max-height
-// constraints in the block formatting context; these tests document the
-// current (unconstrained) behaviour.
 func TestBlock_MinMaxHeight(t *testing.T) {
-	// Subtest A: explicit height 30, min-height 60 — height remains 30 in
-	// the current implementation (min-height is not enforced).
+	// Subtest A: explicit height 30, min-height 60 → used height = 60.
 	root := mkBlock()
 	a := mkBlockWH(100, 30)
 	a.Style.MinHeight = style.Length{Value: 60, Unit: "px"}
 	root.AddChild(a)
 	Layout(root, 800, 600)
-	// Currently height stays at 30 (min-height not implemented for block layout).
-	// This assertion documents the current behaviour.
-	_ = a.Rect.Height
+	assertApprox(t, "min-height 60 clamps height 30", a.Rect.Height, 60)
 
-	// Subtest B: explicit height 80, max-height 40 — height remains 80.
+	// Subtest B: explicit height 80, max-height 40 → used height = 40.
 	root2 := mkBlock()
 	b := mkBlockWH(100, 80)
 	b.Style.MaxHeight = style.Length{Value: 40, Unit: "px"}
 	root2.AddChild(b)
 	Layout(root2, 800, 600)
-	_ = b.Rect.Height
+	assertApprox(t, "max-height 40 clamps height 80", b.Rect.Height, 40)
 }
 
 // TestBlock_OverflowScroll verifies that a container with overflow:scroll
