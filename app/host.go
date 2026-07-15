@@ -498,10 +498,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
 						continue // not yet dragging
 					}
-				// Update the cursor-move selection end point.
-					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
-						continue // not yet dragging
-					}
+				}
 				// Update the cursor-move selection end point.
 				// The anchor (sel start) stays at the mouse-down point.
 				if rendering.FocusedFormControlSel != nil &&

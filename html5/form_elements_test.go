@@ -275,6 +275,86 @@ func TestLabel_ControlNone(t *testing.T) {
 	}
 }
 
+func TestLabel_ClickFocusesCheckbox(t *testing.T) {
+	doc := dom.NewDocument()
+	body := doc.CreateElement("body")
+	label := doc.CreateElement("label")
+	label.SetAttribute("for", "cb")
+	input := doc.CreateElement("input")
+	input.SetAttribute("id", "cb")
+	input.SetAttribute("type", "checkbox")
+	_ = doc.AppendChild(body)
+	_ = body.AppendChild(label)
+	_ = body.AppendChild(input)
+
+	l, _ := ToLabelElement(label)
+	if l.Control() != input {
+		t.Fatal("Control() should return the checkbox")
+	}
+
+	// Verify initial state.
+	in, _ := ToInputElement(input)
+	if in.Checked() {
+		t.Fatal("checkbox should be initially unchecked")
+	}
+	if in.El.IsFocused() {
+		t.Fatal("checkbox should not be initially focused")
+	}
+
+	// Click the label.
+	l.Click()
+
+	// After label click: checkbox should be checked and focused.
+	if !in.Checked() {
+		t.Fatal("checkbox should be checked after label click")
+	}
+	if !in.El.IsFocused() {
+		t.Fatal("checkbox should be focused after label click")
+	}
+
+	// Click again to toggle back.
+	l.Click()
+	if in.Checked() {
+		t.Fatal("checkbox should be unchecked after second label click")
+	}
+}
+
+func TestLabel_ClickFocusesRadio(t *testing.T) {
+	doc := dom.NewDocument()
+	body := doc.CreateElement("body")
+	label := doc.CreateElement("label")
+	label.SetAttribute("for", "radio1")
+	input := doc.CreateElement("input")
+	input.SetAttribute("id", "radio1")
+	input.SetAttribute("type", "radio")
+	input.SetAttribute("name", "rg")
+	_ = doc.AppendChild(body)
+	_ = body.AppendChild(label)
+	_ = body.AppendChild(input)
+
+	l, _ := ToLabelElement(label)
+	in, _ := ToInputElement(input)
+
+	if in.Checked() {
+		t.Fatal("radio should be initially unchecked")
+	}
+
+	// Click the label → radio becomes checked and focused.
+	l.Click()
+	if !in.Checked() {
+		t.Fatal("radio should be checked after label click")
+	}
+	if !in.El.IsFocused() {
+		t.Fatal("radio should be focused after label click")
+	}
+
+	// Click again — radio stays checked (can't uncheck a radio by clicking).
+	l.Click()
+	if !in.Checked() {
+		t.Fatal("radio should remain checked after second label click")
+	}
+}
+
 // --- HTMLFieldSetElement ---
 
 func TestFieldSet_DisabledAndName(t *testing.T) {

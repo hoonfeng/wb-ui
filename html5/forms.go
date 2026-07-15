@@ -346,6 +346,33 @@ func (l HTMLLabelElement) Control() *dom.Element {
 	return found
 }
 
+// Click simulates a click on the label, which transfers focus to the
+// associated control. For checkbox and radio inputs, it also toggles
+// the checked state. This mirrors the HTML spec's label activation
+// behavior.
+func (l HTMLLabelElement) Click() {
+	ctrl := l.Control()
+	if ctrl == nil {
+		return
+	}
+	// Focus the control.
+	ctrl.SetFocused(true)
+
+	// For checkbox/radio inputs, toggle the checked state.
+	if ctrl.LocalName() == "input" {
+		in, ok := ToInputElement(ctrl)
+		if !ok {
+			return
+		}
+		switch in.Type() {
+		case InputCheckbox:
+			in.SetChecked(!in.Checked())
+		case InputRadio:
+			in.SetChecked(true)
+		}
+	}
+}
+
 // --- HTMLFieldSetElement ---
 
 // HTMLFieldSetElement wraps a <fieldset> element. Mirrors

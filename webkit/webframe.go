@@ -42,6 +42,10 @@ type WebFrame struct {
 	// webView is the owning WebView, mirroring the back-pointer kept by
 	// WebFrame::page() / WebFrame::webView() (routed via WebPage).
 	webView *WebView
+
+	// ScriptEngine is an optional callback invoked by the HTML parser when
+	// an inline <script> element is encountered. It is set by WebView.LoadHTML.
+	ScriptEngine func(code string) error
 }
 
 // NewWebFrame constructs a WebFrame wrapping the given page.Frame for the given
