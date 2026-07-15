@@ -28,3 +28,11 @@ coverage.txt
 
 # Translation progress report
 translation-progress.txt
+# Generated test outputs 
+*.ppm 
+dump.txt 
+ 
+# Temp debug scripts 
+_debug_*.py 
+_fix_*.py 
+gen_*.py
