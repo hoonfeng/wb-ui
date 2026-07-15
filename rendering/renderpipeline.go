@@ -138,6 +138,19 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	}
 	PaintBackground(box, info)
 	PaintBorder(box, info)
+	// Apply CSS filter brightness() approximation as a black overlay.
+	if st := box.Style(); st != nil && st.Filter != "" && st.Filter != "none" {
+		for _, f := range parseCSSFilters(st.Filter) {
+			if f.Name == "brightness" && f.Valid && f.Value < 1.0 {
+				col, alpha, ok := computeBrightnessOverlay(f.Value)
+				if ok && alpha > 0 {
+					r := rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())
+					info.canvas.FillRect(r.X, r.Y, r.Width, r.Height,
+						ApplyOpacityToColor(col, alpha))
+				}
+			}
+		}
+	}
 }
 
 // paintObjectForeground paints text content during the foreground phase, mirroring the
