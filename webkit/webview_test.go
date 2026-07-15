@@ -287,3 +287,36 @@ func TestWebViewRenderAfterResize(t *testing.T) {
 		t.Errorf("pixel buffer length = %d, want %d", len(pixels), 7*5*4)
 	}
 }
+
+func TestWebViewConsoleOutputEmpty(t *testing.T) {
+	wv := NewWebView()
+	if got := wv.ConsoleOutput(); got != "" {
+		t.Errorf("ConsoleOutput() before any JS = %q, want empty", got)
+	}
+}
+
+func TestWebViewMultipleLoadHTML(t *testing.T) {
+	wv := NewWebView()
+	if err := wv.LoadHTML("<html><head><title>First</title></head><body><p>a</p></body></html>"); err != nil {
+		t.Fatalf("first LoadHTML failed: %v", err)
+	}
+	doc1 := wv.MainFrame().Document()
+	if doc1.Title() != "First" {
+		t.Errorf("title after first load = %q, want %q", doc1.Title(), "First")
+	}
+	if err := wv.LoadHTML("<html><head><title>Second</title></head><body><p>b</p></body></html>"); err != nil {
+		t.Fatalf("second LoadHTML failed: %v", err)
+	}
+	doc2 := wv.MainFrame().Document()
+	if doc2.Title() != "Second" {
+		t.Errorf("title after second load = %q, want %q", doc2.Title(), "Second")
+	}
+}
+
+func TestWebViewResizeBeforeLoad(t *testing.T) {
+	wv := NewWebView()
+	wv.Resize(640, 480)
+	if wv.Width() != 640 || wv.Height() != 480 {
+		t.Errorf("resize before load = %dx%d, want 640x480", wv.Width(), wv.Height())
+	}
+}

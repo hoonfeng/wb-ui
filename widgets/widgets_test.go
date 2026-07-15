@@ -205,3 +205,113 @@ func TestIsMarkdownElement(t *testing.T) {
 		t.Errorf("div should not be recognized as markdown")
 	}
 }
+
+func TestEditorRegistry_All(t *testing.T) {
+	doc := dom.NewDocument()
+	r := NewEditorRegistry()
+	el1 := doc.CreateElement("wb-editor")
+	el2 := doc.CreateElement("wb-editor")
+	r.GetOrCreate(el1)
+	r.GetOrCreate(el2)
+	all := r.All()
+	if len(all) != 2 {
+		t.Errorf("expected 2 editors in All(), got %d", len(all))
+	}
+}
+
+func TestEditorRegistry_AllEmpty(t *testing.T) {
+	r := NewEditorRegistry()
+	all := r.All()
+	if len(all) != 0 {
+		t.Errorf("expected empty All(), got %d", len(all))
+	}
+}
+
+func TestEditorRegistry_GetOrCreateConcurrent(t *testing.T) {
+	doc := dom.NewDocument()
+	el := doc.CreateElement("wb-editor")
+	r := NewEditorRegistry()
+	// Sequential calls from multiple goroutines
+	done := make(chan bool, 5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			v := r.GetOrCreate(el)
+			if v == nil {
+				t.Errorf("expected non-nil view")
+			}
+			done <- true
+		}()
+	}
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+	// Should have exactly one instance
+	all := r.All()
+	if len(all) != 1 {
+		t.Errorf("expected 1 editor after concurrent GetOrCreate, got %d", len(all))
+	}
+}
+
+func TestEditorRegistry_NilElement(t *testing.T) {
+	r := NewEditorRegistry()
+	if v := r.Get(nil); v != nil {
+		t.Errorf("expected nil for nil element")
+	}
+}
+
+func TestIsEditorElement_Nil(t *testing.T) {
+	if IsEditorElement(nil) {
+		t.Errorf("nil should not be an editor element")
+	}
+}
+
+func TestIsMarkdownElement_Nil(t *testing.T) {
+	if IsMarkdownElement(nil) {
+		t.Errorf("nil should not be a markdown element")
+	}
+}
+
+func TestProcessMarkdownElements_NilDoc(t *testing.T) {
+	// Should not panic
+	ProcessMarkdownElements(nil)
+}
+
+func TestProcessMarkdownElements_LanguageAttribute(t *testing.T) {
+	doc := dom.NewDocument()
+	body := doc.CreateElement("body")
+	md := doc.CreateElement("wb-markdown")
+	md.SetAttribute("lang", "en")
+	text := dom.NewText(doc, "# Title")
+	md.AppendChild(text)
+	body.AppendChild(md)
+	doc.AppendChild(body)
+
+	ProcessMarkdownElements(doc)
+
+	// After processing, should have an <h1> child.
+	h1 := md.FirstChild()
+	if h1 == nil {
+		t.Fatalf("expected at least one child after processing")
+	}
+	if el, ok := h1.(*dom.Element); ok && el.LocalName() != "h1" {
+		t.Errorf("expected <h1>, got <%s>", el.LocalName())
+	}
+}
+
+func TestEditorRegistry_Recreate(t *testing.T) {
+	doc := dom.NewDocument()
+	el := doc.CreateElement("wb-editor")
+	r := NewEditorRegistry()
+	v1 := r.GetOrCreate(el)
+	if v1 == nil {
+		t.Fatal("expected non-nil view")
+	}
+	r.Remove(el)
+	v2 := r.GetOrCreate(el)
+	if v2 == nil {
+		t.Fatal("expected non-nil view after recreate")
+	}
+	if v1 == v2 {
+		t.Errorf("expected new instance after remove+recreate")
+	}
+}

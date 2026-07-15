@@ -472,3 +472,87 @@ func TestStrongUnderscore(t *testing.T) {
 		t.Errorf("expected strong_open for __bold__: %+v", inline.Children)
 	}
 }
+
+func TestHTMLBlock(t *testing.T) {
+	md := NewMarkdownIt()
+	tokens := md.Parse("<div>\n<p>hello</p>\n</div>", nil)
+	// The parser may not tokenize HTML blocks separately; check the content is present
+	inline := findToken(tokens, "inline")
+	if inline != nil && strings.Contains(inline.Content, "<div>") {
+		return // HTML content preserved as inline text
+	}
+	// Fallback: check for html_block token
+	htmlBlock := findToken(tokens, "html_block")
+	if htmlBlock == nil {
+		// At minimum, verify the raw text survived
+		allContent := ""
+		for _, tok := range tokens {
+			allContent += tok.Content
+		}
+		if !strings.Contains(allContent, "<div>") {
+			t.Errorf("HTML content '<div>' not preserved in token stream")
+		}
+	}
+}
+
+func TestInlineHTML(t *testing.T) {
+	md := NewMarkdownIt()
+	tokens := md.Parse("Hello <span>world</span>.", nil)
+	inline := findToken(tokens, "inline")
+	if inline == nil {
+		t.Fatal("no inline token")
+	}
+	// Verify the HTML content is preserved somewhere
+	foundHTML := false
+	for _, child := range inline.Children {
+		if strings.Contains(child.Content, "<span>") {
+			foundHTML = true
+			break
+		}
+	}
+	if !foundHTML && findToken(inline.Children, "html_inline") == nil {
+		// The parser may embed HTML as text; just verify content preserved
+		if !strings.Contains(inline.Content, "<span>") {
+			t.Errorf("HTML <span> tag not preserved in inline content: %s", inline.Content)
+		}
+	}
+}
+
+func TestTableOfContents(t *testing.T) {
+	md := NewMarkdownIt()
+	src := "# Section 1\n\nContent.\n\n## Subsection\n\nMore."
+	tokens := md.Parse(src, nil)
+	headings := findTokens(tokens, "heading_open")
+	if len(headings) != 2 {
+		t.Fatalf("expected 2 headings, got %d", len(headings))
+	}
+	if headings[0].Tag != "h1" || headings[1].Tag != "h2" {
+		t.Errorf("expected h1 and h2, got %s and %s", headings[0].Tag, headings[1].Tag)
+	}
+}
+
+func TestEscapedCharInLink(t *testing.T) {
+	md := NewMarkdownIt()
+	tokens := md.Parse(`[link](http://example.com/foo\(bar\))`, nil)
+	inline := findToken(tokens, "inline")
+	if inline == nil {
+		t.Fatal("no inline token")
+	}
+	linkOpen := findToken(inline.Children, "link_open")
+	if linkOpen == nil {
+		t.Fatalf("no link_open: %+v", inline.Children)
+	}
+	href := linkOpen.AttrGet("href")
+	if !strings.Contains(href, "foo(bar)") {
+		t.Errorf("href should contain 'foo(bar)', got: %s", href)
+	}
+}
+
+func TestMultipleBlankLines(t *testing.T) {
+	md := NewMarkdownIt()
+	tokens := md.Parse("Para 1.\n\n\n\nPara 2.", nil)
+	opens := findTokens(tokens, "paragraph_open")
+	if len(opens) != 2 {
+		t.Errorf("expected 2 paragraph_open tokens (multiple blank lines), got %d", len(opens))
+	}
+}
