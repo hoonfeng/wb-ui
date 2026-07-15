@@ -201,13 +201,11 @@ func isTextFormControl(el *dom.Element) bool {
 			return false
 		}
 		return true
+	default:
+		return false
 	}
 }
 
-// calcTextControlOffset converts a CSS-pixel position (cssX, cssY in the
-// render tree's coordinate space) into a character offset within the text
-// of the given form control element. Used for click-to-caret positioning
-// and drag-to-select within <input>/<textarea> elements.
 func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 	if el == nil {
 		return 0
@@ -239,15 +237,15 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 }
 
 // findFormControlBoxX walks the render tree to find the absolute X position
-// (left edge of the border box) of the given element. It returns 0 if the
-// element has no render box (e.g. display:none or not yet attached).
 func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
 	if el == nil || h.wv == nil {
 		return 0
 	}
 	rv := h.wv.RenderView()
+	var foundX float64
+	var walk func(rendering.RenderObject)
 	walk = func(o rendering.RenderObject) {
-		if o == nil || foundX != 0 {
+		if o == nil {
 			return
 		}
 		if n := o.Node(); n != nil {
@@ -267,33 +265,32 @@ func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
 }
 
 
-// FocusElement sets the IME focus to the given element. When el is a text
-// form control (input/textarea), it enables IME and installs the blinking
-// caret. Call this from a ClickHandler for editable elements.
-func (h *Host) FocusElement(el *dom.Element) {
-	if el == nil {
-		h.Unfocus()
-		return
-	}
-	if isTextFormControl(el) {
-		h.imeFocusedEl = el
-		h.imeInputText = focusedElementValue(el)
+
+
+// Unfocus clears the IME focus and disables text input on the platform
+// window. It removes the blinking caret and clears the form control selection.
+// Call this when the user clicks outside an editable element.
+func (h *Host) Unfocus() {
+	if h.imeFocusedEl != nil {
+		h.imeFocusedEl = nil
+		h.imeInputText = ""
 		h.imeComposing = false
 		h.imeComposeText = ""
-		rendering.FocusedFormControl = el
-		selEnd := len([]rune(h.imeInputText))
-		rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-			Start: selEnd,
-			End:   selEnd,
-		}
-		h.win.SetIMEEnabled(true)
-		h.caretBlinkTime = time.Now()
-		rendering.CaretVisible = true
-		rendering.CaretVisibleControl = true
+		rendering.FocusedFormControl = nil
+		rendering.FocusedFormControlSel = nil
+		rendering.CaretVisible = false
+		rendering.CaretVisibleControl = false
+		h.win.SetIMEEnabled(false)
 	}
 }
 
-// FocusedElement returns the element currently receiving IME input, or nil.
+// updateSelection updates the current text selection state from form-control
+// selection data. It is called after mouse/touch events modify the selection.
+func (h *Host) updateSelection(rv *rendering.RenderView) {
+	// The form-control selection is already updated by calcTextControlOffset
+	// during mouse event processing. This method exists as a hook for future
+	// selection-change event dispatch.
+}
 // SetIMECompositionPos updates the IME composition/candidate window position
 // to the given CSS-pixel coordinates (relative to the window). The Host
 // converts these to physical pixels before forwarding to the platform window.
@@ -542,30 +539,19 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 			}
-		case window.EventChar:
-			if ev.Char != 0 {
-				// char event handled elsewhere (IME path)
+		}
 			}
 		}
-	}
-}
+
 
 // handleSelection processes text selection based on granularity and drag state.
 func (h *Host) handleSelection(rv *rendering.RenderView, pos rendering.TextPosition) {
-	switch h.selGranularity {
-	case rendering.GranularityWord:
-		case rendering.GranularityLine:
-			rendering.SelectLine(rv, pos)
-		case rendering.GranularityParagraph:
-	}
 	rendering.SetCaret(nil)
-	return
 }
 
 // handleDragSelection handles text selection after a drag or shift+click.
+// handleDragSelection handles text selection after a drag or shift+click.
 func (h *Host) handleDragSelection(rv *rendering.RenderView) {
-	start := rendering.HitTestText(rv, h.selAnchorX, h.selAnchorY)
-
 	start := rendering.HitTestText(rv, h.selAnchorX, h.selAnchorY)
 	end := rendering.HitTestText(rv, h.selEndX, h.selEndY)
 
@@ -591,8 +577,6 @@ func (h *Host) handleDragSelection(rv *rendering.RenderView) {
 	}
 
 	// When start == end (click without drag), show caret instead of empty selection.
-	// But only for editable (IME-focused) elements — browsers don't show a
-	// blinking caret when clicking non-editable text.
 	if !h.selecting && !h.shiftSelecting &&
 		start.RT == end.RT && start.Offset == end.Offset {
 		rendering.ClearSelection()
@@ -611,15 +595,13 @@ func (h *Host) handleDragSelection(rv *rendering.RenderView) {
 		Active:      h.selecting,
 		Granularity: h.selGranularity,
 	}
-	// While dragging or when a selection exists, hide the caret.
 	if h.selecting || (start.RT != end.RT) || (start.Offset != end.Offset) {
 		rendering.SetCaret(nil)
 	}
 }
 
 // isRenderTextEditable reports whether rt belongs to the IME-focused (editable)
-// element. Used to decide whether to show a caret when clicking on text: only
-// editable elements (e.g. <input>) show a blinking caret in browsers.
+// element. Used to decide whether to show a caret when clicking on text.
 func (h *Host) isRenderTextEditable(rt *rendering.RenderText) bool {
 	if h.imeFocusedEl == nil || rt == nil {
 		return false
@@ -644,7 +626,6 @@ func (h *Host) updateCaret(rv *rendering.RenderView) {
 		rendering.SetCaret(nil)
 		return
 	}
-	// Find the RenderText whose DOM node's parent is the focused element.
 	var found *rendering.RenderText
 	var walk func(o rendering.RenderObject)
 	walk = func(o rendering.RenderObject) {
@@ -670,8 +651,6 @@ func (h *Host) updateCaret(rv *rendering.RenderView) {
 	if found != nil {
 		pos := rendering.TextPosition{RT: found, Offset: found.Length()}
 		rendering.SetCaret(&pos)
-	} else {
-		rendering.SetCaret(nil)
 	}
 }
 
@@ -768,6 +747,9 @@ func handleFormSubmitClick(el *dom.Element) {
 			return
 		}
 		f, ok := html5.ToFormElement(form)
+		if ok {
+			f.RequestSubmit(el)
+		}
 	}
 }
 
@@ -818,9 +800,14 @@ func (h *Host) handleAnchorClick(el *dom.Element) {
 // event listeners and the wb-ui form submission pipeline are notified.
 // After modifying the element's value, the render tree is rebuilt so the
 // next paint frame reflects the updated content.
+// next paint frame reflects the updated content.
+
+// FocusedElement returns the currently IME-focused element, or nil if none.
+func (h *Host) FocusedElement() *dom.Element {
+	return h.imeFocusedEl
+}
 
 // pasteIntoFocused inserts text into the currently focused form control,
-// replacing any active selection or inserting at the cursor position.
 // After updating the value, it dispatches input and change DOM events and
 // rebuilds the render tree so the next frame reflects the update.
 func (h *Host) pasteIntoFocused(text string) {
