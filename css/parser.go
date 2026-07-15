@@ -156,7 +156,14 @@ func (p *Parser) parseMediaRule() Rule {
 	if p.peek().Type == TokenLeftBrace {
 		p.consume()
 	}
-	rule := &MediaRule{Condition: strings.TrimSpace(condition), Origin: p.origin}
+	condStr := strings.TrimSpace(condition)
+	rule := &MediaRule{Condition: condStr, Origin: p.origin}
+	// Attempt to parse the condition string as a media query list. Parsing errors
+	// are silently ignored; the rule is still created with an empty Parsed slice so
+	// it acts as if the media query always matches (backward-compatible behaviour).
+	if parsed, err := ParseMediaQueryList(condStr); err == nil {
+		rule.Parsed = parsed
+	}
 	for {
 		p.skipWhitespaceAndSemicolons()
 		if p.atEnd() {

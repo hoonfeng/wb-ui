@@ -51,12 +51,6 @@ type Host struct {
 	win *window.Window
 	wv  *webkit.WebView
 
-	// scrollY is the current vertical scroll offset in CSS pixels (content
-	// moves up as scrollY increases). contentHeight is the total laid-out
-	// content height, used to clamp scrollY.
-	scrollY       int
-	contentHeight int
-
 	// clickHandler dispatches non-js: onclick values to embedder code.
 	clickHandler ClickHandler
 	// imeHandler receives IME events for the focused element.
@@ -331,6 +325,12 @@ func (h *Host) Run() {
 
 	h.animStart = time.Now()
 
+	// Get the FrameView for scroll management.
+	frameView := h.wv.Page().MainFrame().View()
+	if frameView == nil {
+		return
+	}
+
 	for !h.win.ShouldClose() {
 		gpuCanvas := graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
 
@@ -363,25 +363,21 @@ func (h *Host) Run() {
 			}
 			gpuCanvas.Clear(bgColor)
 
-			if _, _, _, ch, ok := rendering.BoxGeometry(rv); ok && ch > 0 {
-				h.contentHeight = int(ch)
+			// Clamp scroll offset to valid range after layout.
+			scrollY := frameView.ScrollY()
+			if scrollY < 0 {
+				scrollY = 0
 			}
-			maxScroll := h.contentHeight - h.win.Height()
-			if maxScroll < 0 {
-				maxScroll = 0
+			if maxY := frameView.MaxScrollY(); scrollY > maxY {
+				scrollY = maxY
 			}
-			if h.scrollY > maxScroll {
-				h.scrollY = maxScroll
-			}
-			if h.scrollY < 0 {
-				h.scrollY = 0
-			}
+			frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
 
 			gpuCanvas.Save()
 			csX, csY := h.win.ContentScale()
 			gpuCanvas.Scale(csX, csY)
-			gpuCanvas.Translate(0, -float64(h.scrollY))
-			dirtyRect := graphics.Rect{X: 0, Y: float64(h.scrollY), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
+			gpuCanvas.Translate(0, -float64(frameView.ScrollY()))
+			dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
 			rendering.Paint(rv, gpuCanvas, dirtyRect)
 			gpuCanvas.Restore()
 		}
@@ -405,7 +401,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		case window.EventScroll:
 			// GLFW: ScrollY > 0 when scrolling up (away from user).
 			// Browser: scroll up → see content above → scrollY decreases.
-			h.scrollY -= int(ev.ScrollY * 40)
+			h.wv.Page().MainFrame().View().ScrollBy(0, -int(ev.ScrollY*40))
 		case window.EventMouseButton:
 			csX, csY := h.win.ContentScale()
 			if csX <= 0 {
@@ -415,7 +411,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				csY = 1
 			}
 			cssX := ev.X / csX
-			cssY := ev.Y/csY + float64(h.scrollY)
+			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
 				now := time.Now()
@@ -492,7 +488,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					csY = 1
 				}
 				cssX := ev.X / csX
-				cssY := ev.Y/csY + float64(h.scrollY)
+				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 				// Hysteresis: only start dragging after moving > 3px from
 				// mouseDown.
@@ -711,7 +707,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	}
 	clickCSSX := ev.X / csX
 	clickCSSY := ev.Y / csY
-	clickY := clickCSSY + float64(h.scrollY)
+	clickY := clickCSSY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 	el := rendering.HitTest(rv, clickCSSX, clickY, "onclick")
 	if el == nil {

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"wb-ui/css"
+	"wb-ui/platform/graphics"
 )
 
 // DisplayType mirrors WebCore::DisplayType.
@@ -267,6 +268,8 @@ type ComputedStyle struct {
 	AnimationIterationCount int     // 0 = infinite
 	AnimationDelay          float64 // seconds; 0 = no delay
 	AnimationFillMode       string  // "none" (default), "forwards", "backwards", "both"
+	AnimationDirection      string  // "normal" (default), "reverse", "alternate", "alternate-reverse"
+	AnimationTimingFunction string  // "linear" (default), "ease", "ease-in", "ease-out", "ease-in-out"
 	Filter                  string
 	BackdropFilter          string
 
@@ -276,6 +279,10 @@ type ComputedStyle struct {
 	TranslateY float64
 	ScaleX     float64
 	ScaleY     float64
+
+	// Animated color properties (set by the animation engine for @keyframes color/background-color).
+	AnimatedColor           graphics.Color
+	AnimatedBackgroundColor graphics.Color
 
 	// Inherited bit. Most font/text/color properties inherit; the resolver sets this
 	// when copying from the parent.
@@ -341,6 +348,11 @@ func NewComputedStyle() *ComputedStyle {
 		CalcValues:          map[string][]css.Token{},
 		DisplaySet:          false,
 	}
+}
+
+// GetProperty returns the raw string value of the named property. Looks first at the
+// typed fields, then at the Properties map. Returns "" when not set.
+func (c *ComputedStyle) GetProperty(name string) string {
 	name = strings.ToLower(name)
 	switch name {
 	case "display":
@@ -351,7 +363,6 @@ func NewComputedStyle() *ComputedStyle {
 		return c.Color.String()
 	case "background-color":
 		return c.BackgroundColor.String()
-	case "font-family":
 		return c.FontFamily
 	case "font-size":
 		return c.FontSize.String()
@@ -467,12 +478,31 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	// Custom properties inherit.
 	if c.CustomProperties == nil {
 		c.CustomProperties = map[string][]css.Token{}
-	}
 	for k, v := range parent.CustomProperties {
 		if _, ok := c.CustomProperties[k]; !ok {
 			c.CustomProperties[k] = v
 		}
 	}
+}
+}
+
+// ResolveLengthValue evaluates a deferred calc() expression for the named property
+// using the given layout context. Returns the resolved pixel value and true if the
+// property has a deferred calc expression; otherwise returns (0, false).
+//
+// Call this during layout when the parent dimensions, font size, and viewport
+// size are known. For non-calc properties or properties that were already resolved
+// at style time, the method returns false.
+func (c *ComputedStyle) ResolveLengthValue(name string, ctx css.CalcContext) (float64, bool) {
+	tokens, ok := c.CalcValues[name]
+	if !ok || len(tokens) == 0 {
+		return 0, false
+	}
+	result, err := css.EvalCalc(tokens, ctx)
+	if err != nil {
+		return 0, false
+	}
+	return result, true
 }
 
 // displayTypeName returns the CSS keyword for a DisplayType.

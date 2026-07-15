@@ -159,6 +159,7 @@ func (*StyleRule) Type() RuleType { return RuleStyle }
 // nested rules.
 type MediaRule struct {
 	Condition string
+	Parsed    []MediaQuery // parsed media query list, set by the parser
 	Rules     []Rule
 	Origin    Origin
 }

@@ -67,11 +67,7 @@ func TestWebViewLoadHTMLAndDocument(t *testing.T) {
 }
 
 // TestWebViewRenderEndToEnd is the end-to-end pipeline test: LoadHTML → Layout →
-// Paint → RGBA pixel buffer. It verifies the full WebView.Render pipeline returns a
-// correctly-sized pixel buffer for a non-trivial HTML document. The pixel content
-// depends on the layout package's sizing of block children; the test asserts the
-// pipeline ran and produced the right buffer dimensions, which is the core contract
-// of Render (加载 HTML → 布局 → 绘制 → 返回像素数据).
+// Paint → RGBA pixel buffer.
 func TestWebViewRenderEndToEnd(t *testing.T) {
 	wv := NewWebView()
 	wv.Resize(40, 30)
@@ -87,7 +83,6 @@ func TestWebViewRenderEndToEnd(t *testing.T) {
 	if len(pixels) != expectedLen {
 		t.Fatalf("pixel buffer length = %d, want %d", len(pixels), expectedLen)
 	}
-	// Verify the pipeline produced a render view and cleared the needs-layout flag.
 	if wv.MainFrame().RenderView() == nil {
 		t.Error("RenderView() = nil after Render")
 	}
@@ -108,8 +103,7 @@ func TestWebViewRenderNoDocument(t *testing.T) {
 }
 
 // TestWebViewResize verifies that Resize updates the viewport dimensions and marks
-// the main frame's view as needing layout, so the next Render lays out at the new
-// size.
+// the main frame's view as needing layout.
 func TestWebViewResize(t *testing.T) {
 	wv := NewWebView()
 	if err := wv.LoadHTML("<html><body><p>x</p></body></html>"); err != nil {
@@ -119,7 +113,6 @@ func TestWebViewResize(t *testing.T) {
 	if view == nil {
 		t.Fatal("MainFrame().View() = nil")
 	}
-	// Clear the dirty flag so Resize's effect is observable.
 	view.SetNeedsLayout(false)
 	wv.Resize(320, 240)
 	if wv.Width() != 320 || wv.Height() != 240 {
@@ -131,7 +124,6 @@ func TestWebViewResize(t *testing.T) {
 	if !view.NeedsLayout() {
 		t.Error("NeedsLayout() = false after Resize, want true")
 	}
-	// Resize with negative dimensions should clamp to 0.
 	wv.Resize(-5, -5)
 	if wv.Width() != 0 || wv.Height() != 0 {
 		t.Errorf("viewport after negative resize = %dx%d, want 0x0", wv.Width(), wv.Height())
@@ -139,8 +131,7 @@ func TestWebViewResize(t *testing.T) {
 }
 
 // TestWebViewEvalJS verifies that EvalJS evaluates a script against the loaded
-// document via the bindings package: document.title is read via console.log and
-// observed via ConsoleOutput.
+// document via the bindings package.
 func TestWebViewEvalJS(t *testing.T) {
 	wv := NewWebView()
 	if err := wv.LoadHTML("<html><head><title>hello</title></head><body><div id=\"x\">y</div></body></html>"); err != nil {
@@ -152,7 +143,6 @@ func TestWebViewEvalJS(t *testing.T) {
 	if got := strings.TrimSpace(wv.ConsoleOutput()); got != "hello" {
 		t.Errorf("document.title output = %q, want %q", got, "hello")
 	}
-	// A second script that mutates the DOM should be visible to a third.
 	wv.ResetConsole()
 	if _, err := wv.EvalJS(`document.getElementById("x").id = "changed";`); err != nil {
 		t.Fatalf("EvalJS mutate failed: %v", err)
@@ -184,8 +174,7 @@ func TestWebViewEvalJSDisabled(t *testing.T) {
 }
 
 // TestWebViewEvalJSNoDocument verifies that EvalJS still runs (and produces console
-// output) when no document is loaded: the interpreter exists but no DOM bindings are
-// installed.
+// output) when no document is loaded.
 func TestWebViewEvalJSNoDocument(t *testing.T) {
 	wv := NewWebView()
 	if _, err := wv.EvalJS(`console.log(1 + 2);`); err != nil {
@@ -196,16 +185,32 @@ func TestWebViewEvalJSNoDocument(t *testing.T) {
 	}
 }
 
-// TestWebViewLoadURLNotImplemented verifies that non-file URLs return
-// ErrNotImplemented because this port has no network layer.
-func TestWebViewLoadURLNotImplemented(t *testing.T) {
+// TestWebViewLoadURLHTTP verifies that http:// URLs are processed through the
+// network layer (will fail with a network error rather than ErrNotImplemented).
+func TestWebViewLoadURLHTTP(t *testing.T) {
 	wv := NewWebView()
-	if err := wv.LoadURL("https://example.com/"); err != ErrNotImplemented {
-		t.Errorf("LoadURL(https) err = %v, want ErrNotImplemented", err)
+	err := wv.LoadURL("http://localhost:19765/nonexistent")
+	if err == nil {
+		t.Fatal("LoadURL(http) expected error, got nil")
 	}
-	if err := wv.LoadURL("http://example.com/"); err != ErrNotImplemented {
-		t.Errorf("LoadURL(http) err = %v, want ErrNotImplemented", err)
+	if err == ErrNotImplemented {
+		t.Fatal("LoadURL(http) returned ErrNotImplemented — HTTP path not active")
 	}
+	t.Logf("LoadURL(http) correctly returned network error: %v", err)
+}
+
+// TestWebViewLoadURLHTTPS verifies that https:// URLs are processed through the
+// network layer (will fail with a network error rather than ErrNotImplemented).
+func TestWebViewLoadURLHTTPS(t *testing.T) {
+	wv := NewWebView()
+	err := wv.LoadURL("https://localhost:19766/nonexistent")
+	if err == nil {
+		t.Fatal("LoadURL(https) expected error, got nil")
+	}
+	if err == ErrNotImplemented {
+		t.Fatal("LoadURL(https) returned ErrNotImplemented — HTTPS path not active")
+	}
+	t.Logf("LoadURL(https) correctly returned network error: %v", err)
 }
 
 // TestWebViewLoadURLFile verifies that file:// URLs are loaded from disk.
@@ -224,6 +229,45 @@ func TestWebViewLoadURLFile(t *testing.T) {
 		t.Fatal("Document() = nil after LoadURL(file://)")
 	} else if doc.Title() != "file" {
 		t.Errorf("Document().Title() = %q, want %q", doc.Title(), "file")
+	}
+}
+
+// TestWebViewLoadURLDataURI verifies that data: URIs are loaded correctly.
+func TestWebViewLoadURLDataURI(t *testing.T) {
+	wv := NewWebView()
+	if err := wv.LoadURL("data:text/html,<h1>Hello</h1>"); err != nil {
+		t.Fatalf("LoadURL(data: text) failed: %v", err)
+	}
+	doc := wv.MainFrame().Document()
+	if doc == nil {
+		t.Fatal("Document() = nil after data: URI")
+	}
+	body := doc.Body()
+	if body == nil {
+		t.Fatal("Body() = nil after data: URI")
+	}
+	t.Logf("data: URI loaded OK: body has %d children", len(body.ChildNodes()))
+	if err := wv.LoadURL("data:"); err == nil {
+		t.Error("LoadURL(data:) expected error for empty data URI")
+	}
+}
+
+// TestWebViewLoadURLEmpty verifies that an empty URL returns an error.
+func TestWebViewLoadURLEmpty(t *testing.T) {
+	wv := NewWebView()
+	if err := wv.LoadURL(""); err == nil {
+		t.Error("LoadURL('') expected error")
+	}
+}
+
+// TestWebViewLoadURLUnsupportedScheme verifies that unsupported URL schemes
+// return a descriptive error.
+func TestWebViewLoadURLUnsupportedScheme(t *testing.T) {
+	wv := NewWebView()
+	if err := wv.LoadURL("ftp://files.example.com/data.html"); err == nil {
+		t.Error("LoadURL(ftp://) expected error")
+	} else if !strings.Contains(err.Error(), "unsupported URL scheme") {
+		t.Errorf("LoadURL(ftp://) error = %q, want 'unsupported URL scheme'", err)
 	}
 }
 

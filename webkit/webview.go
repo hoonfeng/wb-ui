@@ -147,7 +147,9 @@ func (wv *WebView) LoadHTML(src string) error {
 	}
 	return nil
 }
-// returns ErrNotImplemented.
+// LoadURL fetches the content at url (http://, https://, file://, or data:)
+// and loads it into the WebView as HTML. The actual loading is delegated to
+// the package-level fetchURL function.
 func (wv *WebView) LoadURL(url string) error {
 	src, err := fetchURL(url)
 	if err != nil {

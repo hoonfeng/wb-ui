@@ -44,6 +44,9 @@ type Resolver struct {
 	cache map[*dom.Element]*ComputedStyle
 	// keyframes stores @keyframes rules by name, for animation resolution.
 	keyframes map[string]*css.KeyframesRule
+	// mediaQueryCtx holds the current viewport/device context for media query
+	// evaluation. Updated by SetMediaQueryContext / SetViewportSize.
+	mediaQueryCtx css.MediaQueryContext
 }
 
 // NewResolver constructs an empty Resolver.
@@ -70,14 +73,25 @@ func (r *Resolver) LookupKeyframes(name string) *css.KeyframesRule {
 	return r.keyframes[name]
 }
 
+// SetViewportSize updates the viewport dimensions used for media query evaluation.
+// This is typically called when the FrameView is resized.
+func (r *Resolver) SetViewportSize(w, h int) {
+	r.mediaQueryCtx.Width = w
+	r.mediaQueryCtx.Height = h
+}
+
+// SetMediaQueryContext replaces the entire media query evaluation context.
+// Call this when device characteristics change (e.g. orientation, DPR).
+func (r *Resolver) SetMediaQueryContext(ctx css.MediaQueryContext) {
+	r.mediaQueryCtx = ctx
+}
+
 // AddStyleSheet adds a parsed stylesheet to the resolver's cascade. Sheets added
 // earlier have lower source order than sheets added later (within the same origin).
 func (r *Resolver) AddStyleSheet(sheet *css.CSSStyleSheet) {
 	r.sheets = append(r.sheets, sheet)
 	r.addKeyframesFromSheet(sheet)
 }
-
-// RemoveStyleSheet removes a previously added stylesheet from the resolver.
 // After removal the cache is cleared so the next ResolveElement call
 // recomputes styles without the removed sheet's rules.
 func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
@@ -201,9 +215,12 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 				order = r.collectDeclarations(v.NestedRules, origin, el, collected, order)
 			}
 		case *css.MediaRule:
-			// In this simplified port we always evaluate media queries as true
-			// (no viewport / device info available). Real-world cascades would
-			// evaluate the media query against the document's viewport.
+			// Evaluate media queries against the current device/viewport context.
+			// If the parsed query list is empty (parse error or unsupported syntax),
+			// fall through to always-include to match the pre-existing behaviour.
+			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+				continue // skip rules inside non-matching @media
+			}
 			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
 		case *css.SupportsRule:
 			// Supports is treated as always-true in this port.
@@ -264,8 +281,19 @@ func importanceRank(origin css.Origin, important bool) int {
 func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	name := strings.ToLower(d.Name)
 	valueString := d.ValueString()
+
+	// If the declaration value is a calc() expression, store the raw tokens so the
+	// layout engine can resolve them later with proper context (parent width, etc.).
+	// Simple px-only calc() expressions are resolved immediately by parseLength; the
+	// token storage here provides a fallback for relative-unit calc().
+	if css.IsCalcValue(d.Value) {
+		if cs.CalcValues == nil {
+			cs.CalcValues = map[string][]css.Token{}
+		}
+		cs.CalcValues[name] = d.Value
+	}
+
 	if strings.HasPrefix(name, "--") {
-		// CSS custom property; store as raw tokens.
 		cs.SetCustomProperty(name, d.Value)
 		if d.Important {
 			cs.ImportantProperties[name] = true
@@ -583,7 +611,27 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.Transition = valueString
 	case "animation":
 		cs.Animation = valueString
-		cs.AnimationName, cs.AnimationDuration, cs.AnimationIterationCount = parseAnimationShorthand(valueString)
+		cs.AnimationName, cs.AnimationDuration, cs.AnimationIterationCount, cs.AnimationDelay, cs.AnimationDirection, cs.AnimationFillMode, cs.AnimationTimingFunction = parseAnimationShorthand(valueString)
+	case "animation-name":
+		cs.AnimationName = valueString
+	case "animation-duration":
+		if v, err := strconv.ParseFloat(strings.TrimSuffix(valueString, "s"), 64); err == nil {
+			cs.AnimationDuration = v
+		}
+	case "animation-delay":
+		if v, err := strconv.ParseFloat(strings.TrimSuffix(valueString, "s"), 64); err == nil {
+			cs.AnimationDelay = v
+		}
+	case "animation-iteration-count":
+		if v, err := strconv.Atoi(valueString); err == nil {
+			cs.AnimationIterationCount = v
+		}
+	case "animation-direction":
+		cs.AnimationDirection = valueString
+	case "animation-fill-mode":
+		cs.AnimationFillMode = valueString
+	case "animation-timing-function":
+		cs.AnimationTimingFunction = valueString
 	case "filter":
 		cs.Filter = valueString
 	case "backdrop-filter":
@@ -650,28 +698,33 @@ func parseTextAlign(s string) TextAlignType {
 // it returns a px Length with the computed value. If it contains % and no context is
 // available, it returns ok=false so the caller can try an alternate interpretation.
 func parseLength(s string) (Length, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return Length{}, false
-	}
-
 	// Handle calc() expressions.
-	if isCalcValue(s) {
-		arg := extractCalcArg(s)
-		v, ok := EvalCalc(arg, 0) // context=0: % cannot be resolved here
-		if ok {
+	if isCalcValueS(s) {
+		argStr := extractCalcArgS(s)
+		// Re-tokenize the calc expression for EvalCalc.
+		calcTok := css.NewTokenizer(argStr)
+		calcTokens := calcTok.Tokenize()
+		// Strip EOF token.
+		if len(calcTokens) > 0 && calcTokens[len(calcTokens)-1].Type == css.TokenEOF {
+			calcTokens = calcTokens[:len(calcTokens)-1]
+		}
+		// Wrap with "calc(" prefix so IsCalcValue / extractCalcInner work.
+		fullExpr := "calc(" + argStr + ")"
+		fullTok := css.NewTokenizer(fullExpr)
+		fullTokens := fullTok.Tokenize()
+		if len(fullTokens) > 0 && fullTokens[len(fullTokens)-1].Type == css.TokenEOF {
+			fullTokens = fullTokens[:len(fullTokens)-1]
+		}
+		v, err := css.EvalCalc(fullTokens, css.CalcContext{})
+		if err == nil {
 			return Length{Value: v, Unit: "px"}, true
 		}
 		// If the calc contains % (unresolvable without context), still return ok=true
 		// with a marker unit so the layout engine can re-evaluate with context later.
-		if strings.Contains(arg, "%") {
+		if strings.Contains(argStr, "%") {
 			return Length{Value: 0, Unit: "calc"}, true
 		}
 		return Length{}, false
-	}
-
-	if s == "auto" || s == "none" || s == "inherit" || s == "initial" {
-		return Length{Unit: s}, true
 	}
 	// Find the boundary between number and unit.
 	i := 0
@@ -692,6 +745,43 @@ func parseLength(s string) (Length, bool) {
 	return Length{Value: num, Unit: s[i:]}, true
 }
 
+// isCalcValueS reports whether s starts with "calc(" (case-insensitive).
+func isCalcValueS(s string) bool {
+	s = strings.TrimSpace(s)
+	return len(s) >= 5 && (s[:5] == "calc(" || s[:5] == "CALC(" || strings.ToLower(s[:5]) == "calc(")
+}
+
+// extractCalcArgS returns the text between "calc(" and the matching ")".
+func extractCalcArgS(s string) string {
+	s = strings.TrimSpace(s)
+	if !isCalcValueS(s) {
+		return ""
+	}
+	// Find the opening paren position.
+	parenIdx := 4 // after "calc"
+	if len(s) > parenIdx && s[parenIdx] == '(' {
+		parenIdx++
+	}
+	// Walk to find the matching ')', tracking nested parens.
+	depth := 1
+	for i := parenIdx; i < len(s); i++ {
+		if s[i] == '(' {
+			depth++
+		} else if s[i] == ')' {
+			depth--
+			if depth == 0 {
+				return s[parenIdx:i]
+			}
+		}
+	}
+	// Fallback: return everything after "calc(" up to the last ')'.
+	if last := strings.LastIndex(s, ")"); last > parenIdx {
+		return s[parenIdx:last]
+	}
+	return s[parenIdx:]
+}
+
+// parseColor parses a CSS color value. Supports #rgb / #rrggbb / #rrggbbaa / rgb() /
 // parseColor parses a CSS color value. Supports #rgb / #rrggbb / #rrggbbaa / rgb() /
 // rgba() / hsl() / hsla() / named colors.
 func parseColor(s string) (Color, bool) {
@@ -1166,34 +1256,68 @@ func (r *Resolver) ResolveDocument(doc *dom.Document) map[*dom.Element]*Computed
 	return out
 }
 
-// parseAnimationShorthand parses the CSS animation shorthand into its name,
-// duration (seconds), and iteration-count (0 = infinite). Only the common
-// form "name duration iteration-count" is handled; timing-function / delay
-// are ignored for simplicity.
-func parseAnimationShorthand(s string) (name string, duration float64, iterationCount int) {
+// parseAnimationShorthand parses the CSS animation shorthand into its
+// component values. It handles name, duration, timing-function, delay,
+// iteration-count, direction, and fill-mode in any order.
+//
+// Recognised keywords:
+//
+//	duration/time:       0.5s, 500ms, 2s
+//	iteration-count:     3, infinite
+//	timing-function:     linear, ease, ease-in, ease-out, ease-in-out
+//	direction:           normal, reverse, alternate, alternate-reverse
+//	fill-mode:           none, forwards, backwards, both
+//	name:                any other identifier (first unrecognised token is treated as the name)
+func parseAnimationShorthand(s string) (name string, duration float64, iterationCount int, delay float64, direction string, fillMode string, timingFunction string) {
+	iterationCount = 1 // default per spec
 	parts := strings.Fields(s)
 	for _, p := range parts {
-		p = strings.ToLower(p)
+		pl := strings.ToLower(p)
 		switch {
-		case p == "infinite":
+		case pl == "infinite":
 			iterationCount = 0
-		case strings.HasSuffix(p, "s") && !strings.HasSuffix(p, "ms"):
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(p, "s"), 64); err == nil {
-				duration = v
+		case pl == "none":
+			// "none" as an animation name is reserved (no animation).
+			if name == "" {
+				name = "none"
 			}
-		case strings.HasSuffix(p, "ms"):
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(p, "ms"), 64); err == nil {
-				duration = v / 1000
+		case pl == "linear", pl == "ease", pl == "ease-in", pl == "ease-out", pl == "ease-in-out":
+			timingFunction = pl
+		case pl == "normal", pl == "reverse", pl == "alternate", pl == "alternate-reverse":
+			direction = pl
+		case pl == "forwards", pl == "backwards", pl == "both":
+			fillMode = pl
+		case strings.HasSuffix(pl, "ms"):
+			if v, err := strconv.ParseFloat(strings.TrimSuffix(pl, "ms"), 64); err == nil {
+				v /= 1000
+				if duration == 0 {
+					duration = v
+				} else if delay == 0 {
+					delay = v
+				}
+			} else if name == "" {
+				name = p
 			}
-		case strings.HasPrefix(p, "infinite"):
-			iterationCount = 0
+		case strings.HasSuffix(pl, "s"):
+			if v, err := strconv.ParseFloat(strings.TrimSuffix(pl, "s"), 64); err == nil {
+				if duration == 0 {
+					duration = v
+				} else if delay == 0 {
+					delay = v
+				}
+			} else if name == "" {
+				name = p
+			}
 		default:
-			if n, err := strconv.Atoi(p); err == nil {
+			if n, err := strconv.Atoi(pl); err == nil {
 				iterationCount = n
 			} else if name == "" {
 				name = p
 			}
 		}
+	}
+	if duration == 0 {
+		duration = 0 // 0s = no animation duration
 	}
 	return
 }
