@@ -94,7 +94,7 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
 	}
 
 	// Check if the animation has ended.
-	ended := !infinite && effectiveTime >= totalDuration
+	ended := !infinite && effectiveTime > totalDuration
 	if ended {
 		if st.AnimationFillMode == "forwards" || st.AnimationFillMode == "both" {
 			progress := 1.0
@@ -105,7 +105,15 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
 
 	// Compute which iteration and local progress.
 	iter := int(effectiveTime / duration)
-	localT := math.Mod(effectiveTime, duration)
+	// Clamp iteration to the last valid one (0-based) to ensure progress == 1.0
+	// at the exact end of the final iteration.
+	if !infinite && iter >= int(iterationCount) {
+		iter = int(iterationCount) - 1
+	}
+	localT := effectiveTime - float64(iter)*duration
+	if localT > duration {
+		localT = duration
+	}
 	progress := localT / duration
 
 	// Apply direction.
@@ -158,7 +166,7 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 	}
 
 	// Transform: scale / scaleX / scaleY
-	if s, ok := interpolateKeyframeFloat(kf, progress, "scale"); ok {
+	if s, ok := interpolateTransformScale(kf, progress); ok {
 		st.ScaleX = s
 		st.ScaleY = s
 	}
@@ -339,6 +347,11 @@ func interpolateTransformTranslate(kf *css.KeyframesRule, progress float64, func
 	return interpolateFloatAt(points, progress)
 }
 
+// interpolateTransformScale parses scale from transform declarations.
+func interpolateTransformScale(kf *css.KeyframesRule, progress float64) (float64, bool) {
+	return interpolateTransformTranslate(kf, progress, "scale")
+}
+
 // interpolateFloatAt does linear interpolation between sorted keyframe points.
 func interpolateFloatAt(points []keyframePointFloat, progress float64) (float64, bool) {
 	if len(points) == 0 {
@@ -484,7 +497,8 @@ func findTransformInDecls(decls []css.Declaration, funcName string) (float64, bo
 // function like translateX(10px), scale(1.5), rotate(45deg).
 func extractTransformFunc(input, funcName string) (float64, bool) {
 	lower := strings.ToLower(input)
-	idx := strings.Index(lower, funcName+"(")
+	search := strings.ToLower(funcName) + "("
+	idx := strings.Index(lower, search)
 	if idx < 0 {
 		return 0, false
 	}

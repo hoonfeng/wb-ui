@@ -141,6 +141,7 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		paintTextAreaText(info, el, st, x, y, w, h, op)
 		return true
 	case "progress":
+		paintProgressBar(info, x, y, w, h, el, op)
 		return true
 	case "meter":
 		paintMeterBar(info, x, y, w, h, el, op)
@@ -599,10 +600,13 @@ func paintSelectText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 	// Truncate text with "…" if too long.
 	displayText := selectedText
 	textW := graphics.MeasureText(font, displayText)
+	var runes []rune
 	if textW > maxTextW {
 		// Truncate rune by rune until it fits with "…"
-		runes := []rune(displayText)
-		runes = runes[:len(runes)-1]
+		runes = []rune(displayText)
+		if len(runes) > 0 {
+			runes = runes[:len(runes)-1]
+		}
 	}
 	if len(runes) == 0 {
 		displayText = "…"

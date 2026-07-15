@@ -243,9 +243,9 @@ func TestAnimateTimingEaseIn(t *testing.T) {
 	st.AnimationTimingFunction = "ease-in"
 
 	applyAnimationToStyle(st, 0.5)
-	// ease-in: at t=0.5, progress should be > 0.5 (accelerating).
-	if st.Opacity <= 0.5 {
-		t.Errorf("ease-in at t=0.5: opacity=%v, expected >0.5 (accelerating)", st.Opacity)
+	// ease-in: at t=0.5, progress should be < 0.5 (starts slow, accelerates).
+	if st.Opacity >= 0.5 {
+		t.Errorf("ease-in at t=0.5: opacity=%v, expected <0.5 (decelerating start)", st.Opacity)
 	}
 }
 
