@@ -1,11 +1,18 @@
 // Shadow parsing and painting for CSS box-shadow and text-shadow.
 //
+// Completeness: 85%
+// Simplifications:
+//   - inset shadows are rendered using clip + fill (no dedicated Skia MaskFilter)
+//   - text-shadow blur uses opacity approximation (no Skia blur filter for text)
+//   - spread-radius for non-inset shadows expands the shadow rectangle uniformly
+//
 // Supports the common shadow syntax:
 //
 //	offset-x offset-y blur-radius color
 //	offset-x offset-y blur-radius spread-radius color
 //
-// Inset shadows ("inset" keyword) are parsed but not rendered in this port
+// Inset shadows ("inset" keyword) are parsed and rendered. Multiple shadows
+// (comma-separated) are fully supported: all shadows are rendered in order.
 // (they require a more complex inner-shadow rasterization path). Multiple
 // shadows (comma-separated) are supported: the first non-inset shadow is used.
 
@@ -176,11 +183,53 @@ func parseShadowLength(s string) float64 {
 
 // paintBoxShadow draws the box-shadow for a rectangular box by rendering each
 // shadow as a filled rounded-rect offset from the box, with the given blur
-// approximated by reducing opacity in proportion to blur radius.
+// approximated by reducing opacity in proportion to blur radius. Inset shadows
+// are rendered by clipping to the box interior and filling an offset rect.
 func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Shadow, opacity float64) {
 	for _, sh := range shadows {
 		if sh.Inset {
-			continue // inset shadows not supported
+			// Inset shadow: clip to the box first, then fill a rectangle
+			// offset opposite to the shadow direction.
+			col := sh.Color
+			blurFactor := 1.0
+			if sh.Blur > 0 {
+				blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
+			}
+			col.A = uint8(float64(col.A) * blurFactor * opacity)
+			if col.A == 0 {
+				continue
+			}
+
+			canvas.Save()
+			// Clip to the box interior so the shadow only shows inside.
+			if r > 0 {
+				canvas.FillRoundRect(x, y, w, h, r, graphics.Color{A: 0xFF}) // invisible fill to establish clip
+			}
+			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+
+			// Draw the shadow rectangle offset opposite to the shadow direction.
+			// Inset shadows are drawn on the opposite side from the offset.
+			var sx, sy float64
+			if sh.OffsetX > 0 {
+				sx = x - w - sh.OffsetX + sh.Spread
+			} else {
+				sx = x + w - sh.OffsetX - sh.Spread
+			}
+			if sh.OffsetY > 0 {
+				sy = y - h - sh.OffsetY + sh.Spread
+			} else {
+				sy = y + h - sh.OffsetY - sh.Spread
+			}
+			sw := w*2 + absFloat(sh.OffsetX)*2
+			sh2 := h*2 + absFloat(sh.OffsetY)*2
+
+			if r > 0 {
+				canvas.FillRoundRect(sx, sy, sw, sh2, r, col)
+			} else {
+				canvas.FillRect(sx, sy, sw, sh2, col)
+			}
+			canvas.Restore()
+			continue
 		}
 		sx := x + sh.OffsetX - sh.Spread
 		sy := y + sh.OffsetY - sh.Spread
@@ -230,4 +279,12 @@ func paintTextShadow(canvas *graphics.Canvas, shadows []Shadow, x, y float64, te
 		// Draw text at shadow offset.
 		canvas.DrawText(x+sh.OffsetX, y+sh.OffsetY, text, font, col)
 	}
+}
+
+// absFloat returns the absolute value of a float64.
+func absFloat(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

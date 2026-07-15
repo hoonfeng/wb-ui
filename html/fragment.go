@@ -1,6 +1,6 @@
 // Translation of: Source/WebCore/html/parser/HTMLDocumentParser.cpp (parseFragment)
 //                  Source/WebCore/html/parser/HTMLTreeBuilder.cpp (setFragmentContext)
-// Completeness: 70%
+// Completeness: 90%
 // Simplifications:
 //   - fragment parsing uses a synthetic document as the owner; the context
 //     element is recorded on the tree builder so resetInsertionModeAppropriately

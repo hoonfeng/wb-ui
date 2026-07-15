@@ -33,6 +33,15 @@ type RenderView struct {
 	// editorRegistry manages <wb-editor> instances. It is lazily
 	// initialized on first access via EditorRegistry().
 	editorRegistry *widgets.EditorRegistry
+
+	// dirtyRect tracks the damaged area that needs repainting on the next
+	// Paint pass. A zero-width/height rect means nothing is dirty.
+	dirtyRect Rect
+
+	// scrollOffset tracks the current scroll position. The paint pipeline
+	// applies -scrollOffset as a canvas translate so content appears
+	// scrolled. Set via SetScrollOffset.
+	scrollOffsetX, scrollOffsetY float64
 }
 
 // NewRenderView constructs a RenderView for the given document. The viewport size is
@@ -72,6 +81,56 @@ func (v *RenderView) View() *RenderView { return v }
 // RenderView::viewWidth() / viewHeight().
 func (v *RenderView) ViewWidth() float64  { return v.viewWidth }
 func (v *RenderView) ViewHeight() float64 { return v.viewHeight }
+
+// MarkDirty marks the given rectangle as needing repainting. The new rect is
+// unioned with any existing dirty rect.
+func (v *RenderView) MarkDirty(r Rect) {
+	if v.dirtyRect.Width <= 0 || v.dirtyRect.Height <= 0 {
+		v.dirtyRect = r
+		return
+	}
+	// Union: expand to include r.
+	x0 := min2(v.dirtyRect.X, r.X)
+	y0 := min2(v.dirtyRect.Y, r.Y)
+	x1 := max2(v.dirtyRect.X+v.dirtyRect.Width, r.X+r.Width)
+	y1 := max2(v.dirtyRect.Y+v.dirtyRect.Height, r.Y+r.Height)
+	v.dirtyRect = Rect{X: x0, Y: y0, Width: x1 - x0, Height: y1 - y0}
+}
+
+// MarkAllDirty marks the entire viewport as needing repainting.
+func (v *RenderView) MarkAllDirty() {
+	v.dirtyRect = Rect{X: 0, Y: 0, Width: v.viewWidth, Height: v.viewHeight}
+}
+
+// ClearDirty clears the dirty rect (called after painting).
+func (v *RenderView) ClearDirty() {
+	v.dirtyRect = Rect{}
+}
+
+// GetDirtyRect returns the current dirty rect.
+func (v *RenderView) GetDirtyRect() Rect { return v.dirtyRect }
+
+// IsDirty reports whether any area needs repainting.
+func (v *RenderView) IsDirty() bool { return v.dirtyRect.Width > 0 && v.dirtyRect.Height > 0 }
+
+// SetScrollOffset sets the scroll position. The paint pipeline applies a
+// -scrollOffset translate so rendered content appears scrolled.
+func (v *RenderView) SetScrollOffset(x, y float64) {
+	v.scrollOffsetX = x
+	v.scrollOffsetY = y
+	// Mark the entire viewport as dirty so the next Paint re-renders.
+	if v.viewWidth > 0 && v.viewHeight > 0 {
+		v.MarkAllDirty()
+	} else {
+		// Fallback: mark a 1x1 area so IsDirty() returns true.
+		v.dirtyRect = Rect{X: 0, Y: 0, Width: 1, Height: 1}
+	}
+}
+
+// ScrollOffset returns the current scroll position.
+func (v *RenderView) ScrollOffset() (float64, float64) {
+	return v.scrollOffsetX, v.scrollOffsetY
+}
 
 // SetViewportSize sets the viewport dimensions, mirroring
 // RenderView::setFrameViewSize() (which propagates the frame view size).

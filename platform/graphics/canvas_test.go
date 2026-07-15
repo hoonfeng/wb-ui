@@ -8,6 +8,8 @@ package graphics
 
 import (
 	"testing"
+
+	"github.com/hoonfeng/goskia/skia"
 )
 
 // TestCanvasFillRect verifies FillRect writes the supplied color to every pixel in the
@@ -216,5 +218,188 @@ func TestCanvasClearRect(t *testing.T) {
 	}
 	if got := c.PixelAt(0, 0); got != white {
 		t.Fatalf("uncleared pixel = %+v, want white", got)
+	}
+}
+
+// TestCanvasFillLinearGradient verifies FillLinearGradient produces a visible
+// gradient from top (startColor) to bottom (endColor). The top pixel should
+// be closer to startColor and the bottom pixel closer to endColor.
+func TestCanvasFillLinearGradient(t *testing.T) {
+	c := NewCanvas(10, 20)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+	blue := Color{B: 0xFF, A: 0xFF}
+	c.FillLinearGradient(0, 0, 10, 20, red, blue)
+
+	// Top pixel: should be close to red.
+	top := c.PixelAt(5, 1)
+	if top.R < 0x80 {
+		t.Fatalf("top pixel R = %d, want >= 0x80 (close to red)", top.R)
+	}
+	// Bottom pixel: should be close to blue.
+	bot := c.PixelAt(5, 18)
+	if bot.B < 0x80 {
+		t.Fatalf("bottom pixel B = %d, want >= 0x80 (close to blue)", bot.B)
+	}
+	// Both should be opaque.
+	if top.A != 0xFF || bot.A != 0xFF {
+		t.Fatalf("expected opaque: top.A=%d bot.A=%d", top.A, bot.A)
+	}
+}
+
+// TestCanvasFillRadialGradient verifies FillRadialGradient produces a visible
+// radial gradient from center (centerColor) outward (edgeColor).
+func TestCanvasFillRadialGradient(t *testing.T) {
+	c := NewCanvas(20, 20)
+	defer c.Release()
+	white := Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+	black := Color{A: 0xFF}
+	c.FillRadialGradient(10, 10, 8, white, black)
+
+	// Center pixel should be close to white.
+	center := c.PixelAt(10, 10)
+	if center.R < 0x80 {
+		t.Fatalf("center pixel R = %d, want >= 0x80 (close to white)", center.R)
+	}
+	// Edge area should be closer to black.
+	edge := c.PixelAt(2, 10)
+	if edge.R > 0x80 {
+		t.Fatalf("edge pixel R = %d, want <= 0x80 (closer to black)", edge.R)
+	}
+}
+
+// TestCanvasClipPath verifies ClipPath restricts drawing to the interior of a
+// triangular path: pixels inside the triangle are painted and those outside
+// are clipped.
+func TestCanvasClipPath(t *testing.T) {
+	c := NewCanvas(10, 10)
+	defer c.Release()
+	green := Color{R: 0, G: 0xFF, B: 0, A: 0xFF}
+
+	// Create a triangle path covering the top-left half of the canvas.
+	path := skia.NewPath()
+	path.MoveTo(0, 0)
+	path.LineTo(10, 0)
+	path.LineTo(0, 10)
+	path.Close()
+	defer path.Release()
+	c.ClipPath(path)
+	c.FillRect(0, 0, 10, 10, green)
+
+	// Pixel inside triangle (top-left) should be painted.
+	if got := c.PixelAt(2, 2); got != green {
+		t.Fatalf("in-path pixel = %+v, want %+v", got, green)
+	}
+	// Pixel outside triangle (bottom-right) should be clipped.
+	if got := c.PixelAt(8, 8); got != (Color{}) {
+		t.Fatalf("out-of-path pixel = %+v, want transparent", got)
+	}
+}
+
+// TestCanvasRotate verifies Rotate rotates subsequent draw output. A rect
+// drawn after a 90-degree rotation should appear at a rotated position.
+func TestCanvasRotate(t *testing.T) {
+	c := NewCanvas(10, 10)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	// Translate to center, then rotate 90 degrees, then draw a line from
+	// (0,0) to (5,0). 90 degree rotation means the horizontal line becomes
+	// a vertical line pointing downward.
+	c.Save()
+	c.Translate(3, 3)
+	c.Rotate(90)
+	c.FillRect(0, 0, 5, 2, red)
+	c.Restore()
+
+	// After rotate(90), the rect at (0,0,5,2) should end up at a rotated
+	// position that covers some pixel offset from the translation point.
+	// At least some pixels in the rotated area should be non-transparent.
+	found := false
+	for y := 0; y < 10 && !found; y++ {
+		for x := 0; x < 10 && !found; x++ {
+			if c.PixelAt(x, y).A > 0 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no pixels drawn after rotation")
+	}
+}
+
+// TestCanvasSkew verifies Skew distorts the coordinate system such that a
+// rectangle drawn at an angle appears skewed.
+func TestCanvasSkew(t *testing.T) {
+	c := NewCanvas(10, 10)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	// Apply a slight X skew before drawing.
+	c.Save()
+	c.Skew(0.3, 0)
+	c.FillRect(0, 0, 5, 5, red)
+	c.Restore()
+
+	// At least some pixels should be painted in the skewed rect area.
+	found := false
+	for y := 0; y < 10 && !found; y++ {
+		for x := 0; x < 10 && !found; x++ {
+			if c.PixelAt(x, y).A > 0 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no pixels drawn after skew")
+	}
+}
+
+// TestCanvasMatrix verifies SetMatrix/GetMatrix/ResetMatrix round-trip.
+func TestCanvasMatrix(t *testing.T) {
+	c := NewCanvas(10, 10)
+	defer c.Release()
+
+	// Start with identity then set a known matrix.
+	c.ResetMatrix()
+	id := c.GetMatrix()
+	if id.ScaleX != 1 || id.ScaleY != 1 || id.TransX != 0 || id.TransY != 0 {
+		t.Fatalf("identity matrix = %+v, want identity", id)
+	}
+
+	// Set a translate matrix and verify GetMatrix reflects it.
+	c.SetMatrix(skia.MatrixTranslate(5, 10))
+	m := c.GetMatrix()
+	if m.TransX != 5 || m.TransY != 10 {
+		t.Fatalf("translate matrix = %+v, want TransX=5 TransY=10", m)
+	}
+
+	// Concat another translate and verify it accumulates.
+	c.Concat(skia.MatrixTranslate(3, 7))
+	m2 := c.GetMatrix()
+	if m2.TransX != 8 || m2.TransY != 17 {
+		t.Fatalf("after concat matrix = %+v, want TransX=8 TransY=17", m2)
+	}
+}
+
+// TestCanvasConcatScale verifies Concat applies a full matrix containing scale.
+func TestCanvasConcatScale(t *testing.T) {
+	c := NewCanvas(10, 10)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	// Scale by 2x via Concat.
+	c.Concat(skia.MatrixScale(2, 2))
+	c.FillRect(1, 1, 1, 1, red)
+
+	// A 1x1 rect at (1,1) scaled by 2 becomes a 2x2 rect at device (2,2).
+	if got := c.PixelAt(2, 2); got != red {
+		t.Fatalf("scaled pixel (2,2) = %+v, want %+v", got, red)
+	}
+	if got := c.PixelAt(3, 3); got != red {
+		t.Fatalf("scaled pixel (3,3) = %+v, want %+v", got, red)
+	}
+	if got := c.PixelAt(5, 5); got != (Color{}) {
+		t.Fatalf("pixel outside scaled rect = %+v, want transparent", got)
 	}
 }

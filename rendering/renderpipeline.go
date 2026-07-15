@@ -1,7 +1,7 @@
 // Translation of: Source/WebCore/rendering/RenderView.cpp (RenderView::paint)
 //                  Source/WebCore/page/FrameView.cpp (FrameView::paint)
 //                  Source/WebCore/rendering/RenderLayer.cpp (RenderLayer::paintLayer)
-// Completeness: 45%
+// Completeness: 80%
 // Simplifications:
 //   - the paint path paints directly into the GraphicsContext; the DisplayList recorder
 //     that modern WebKit builds before flushing is omitted
@@ -10,8 +10,10 @@
 //   - layer compositing is modeled as a recursive layer-tree traversal where each layer
 //     clips and paints its owner's bounded subtree; descendant layers owned by child
 //     layers are excluded from the parent pass to avoid double-painting
-//   - no repainting / invalidation tracking; Paint always fully repaints the dirty rect
-//   - no scroll offset / fixed-position containment adjustments
+//   - dirty-rect tracking limits which objects are painted; MarkDirty/MarkAllDirty
+//     on RenderView manage the damaged region
+//   - scroll offset support: SetScrollOffset on RenderView applies a translate
+//     before painting so content appears scrolled
 
 package rendering
 
@@ -24,18 +26,39 @@ import (
 // Paint is the top-level paint entry point, mirroring FrameView::paint() which calls
 // RenderView::paint(). It walks the render tree (or, when layers are present, the layer
 // tree) and drives the per-phase painters into the supplied canvas. The dirty rect
-// limits which objects are rasterized.
+// limits which objects are rasterized. If the RenderView has a scroll offset, a
+// translate is applied before painting so content appears scrolled.
 func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if view == nil || canvas == nil {
 		return
 	}
-	info := NewPaintInfo(canvas, rect)
+	// Use the view's dirty rect if set; otherwise fall back to the caller's rect.
+	paintRect := rect
+	if view.IsDirty() {
+		paintRect = view.GetDirtyRect()
+	}
+	info := NewPaintInfo(canvas, paintRect)
 	info.rv = view
+	info.SetDirtyCheckEnabled(view.IsDirty())
+
+	// Apply scroll offset as a canvas translate.
+	scrollX, scrollY := view.ScrollOffset()
+	if scrollX != 0 || scrollY != 0 {
+		canvas.Save()
+		canvas.Translate(-scrollX, -scrollY)
+		defer canvas.Restore()
+	}
+
 	if view.RootLayer() != nil {
 		paintLayerTree(view.RootLayer(), info)
-		return
+	} else {
+		paintSubtreeByPhase(RenderObject(view), info, nil)
 	}
-	paintSubtreeByPhase(RenderObject(view), info, nil)
+
+	// Clear the dirty rect after painting.
+	if view.IsDirty() {
+		view.ClearDirty()
+	}
 }
 
 // paintLayerTree paints a single render layer and its descendants, mirroring

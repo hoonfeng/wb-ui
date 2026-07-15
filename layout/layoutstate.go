@@ -1,6 +1,6 @@
 // Translation of: Source/WebCore/layout/LayoutState.h
 //                  Source/WebCore/layout/LayoutState.cpp
-// Completeness: 55%
+// Completeness: 80%
 // Simplifications:
 //   - no subpixel layout (integer pixels only)
 //   - no pagination/fragmentation
@@ -9,6 +9,7 @@
 //     viewport size, the quirks-mode flag and the float tracker for the current BFC
 //   - no per-formatting-context state objects (BlockFormattingState, etc.); each
 //     formatting context keeps its transient state as local variables during Layout
+//   - layout cache/dirty tracking on LayoutBox replaces the per-box geometry cache
 
 package layout
 

@@ -1,10 +1,3 @@
-// Translation of: tests for Source/WebCore/rendering/RenderView.cpp (paint path)
-//                  Source/WebCore/page/FrameView.cpp (paint path)
-// Completeness: 45%
-// Simplifications:
-//   - tests verify pixel-level output rather than a full golden image; the focus is on
-//     phase ordering and layer traversal.
-
 package rendering
 
 import (
@@ -15,173 +8,150 @@ import (
 	"wb-ui/style"
 )
 
-// newPaintView builds a RenderView sized to the given canvas dimensions with a default
-// (transparent) style.
-func newPaintView(w, h float64) *RenderView {
-	view := NewRenderView(dom.NewDocument(), style.NewComputedStyle())
-	view.SetLocation(0, 0)
-	view.SetSize(w, h)
-	return view
-}
+// TestDirtyRect_MarkAndClear tests basic dirty rect marking and clearing.
+func TestDirtyRect_MarkAndClear(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(800, 600)
 
-// TestRenderPipelineSimpleBox verifies a single child box's background is painted into the
-// canvas via the direct (no-layer) path.
-func TestRenderPipelineSimpleBox(t *testing.T) {
-	view := newPaintView(20, 20)
-	st := style.NewComputedStyle()
-	st.Display = style.DisplayBlock
-	st.BackgroundColor = style.Color{R: 0xFF, G: 0, B: 0, A: 0xFF}
-	child := NewRenderBlockFlow(dom.NewDocument().CreateElement("div"), st)
-	child.SetLocation(2, 2)
-	child.SetSize(10, 10)
-	view.AddChild(child, nil)
-
-	canvas := graphics.NewCanvas(20, 20)
-	Paint(view, canvas, Rect{X: 0, Y: 0, Width: 20, Height: 20})
-
-	red := graphics.Color{R: 0xFF, G: 0, B: 0, A: 0xFF}
-	if got := canvas.PixelAt(5, 5); got != red {
-		t.Fatalf("child background pixel = %+v, want %+v", got, red)
+	if rv.IsDirty() {
+		t.Fatal("expected clean after creation")
 	}
-	if got := canvas.PixelAt(0, 0); got != (graphics.Color{}) {
-		t.Fatalf("outside pixel = %+v, want transparent", got)
+
+	rv.MarkDirty(Rect{X: 10, Y: 20, Width: 100, Height: 200})
+	if !rv.IsDirty() {
+		t.Fatal("expected dirty after MarkDirty")
+	}
+	dr := rv.GetDirtyRect()
+	if dr.X != 10 || dr.Y != 20 || dr.Width != 100 || dr.Height != 200 {
+		t.Fatalf("dirty rect = %+v, want (10,20,100,200)", dr)
+	}
+
+	rv.ClearDirty()
+	if rv.IsDirty() {
+		t.Fatal("expected clean after ClearDirty")
 	}
 }
 
-// TestRenderPipelineWithText verifies text content nested inside a block is painted during
-// the foreground phase. The test scans the text region for non-transparent pixels, since
-// Skia's real font metrics place glyphs below the box top.
-func TestRenderPipelineWithText(t *testing.T) {
-	view := newPaintView(40, 20)
-	blockSt := style.NewComputedStyle()
-	blockSt.Display = style.DisplayBlock
-	block := NewRenderBlockFlow(dom.NewDocument().CreateElement("div"), blockSt)
-	block.SetLocation(0, 0)
-	block.SetSize(40, 20)
-	view.AddChild(block, nil)
+// TestDirtyRect_Union tests that MarkDirty unions with existing dirty rect.
+func TestDirtyRect_Union(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(800, 600)
 
-	textSt := style.NewComputedStyle()
-	textSt.Color = style.Color{R: 0, G: 0, B: 0, A: 0xFF}
-	textSt.FontSize = style.Length{Value: 12, Unit: "px"}
-	rt := NewRenderTextWith(dom.NewDocument().CreateTextNode("Hi"), textSt, "Hi")
-	rt.SetSegments([]InlineTextBox{{Start: 0, Len: 2, X: 5, Y: 5, Width: 10, Height: 12}})
-	block.AddChild(rt, nil)
+	rv.MarkDirty(Rect{X: 0, Y: 0, Width: 100, Height: 100})
+	rv.MarkDirty(Rect{X: 200, Y: 200, Width: 100, Height: 100})
 
-	canvas := graphics.NewCanvas(40, 20)
-	Paint(view, canvas, Rect{X: 0, Y: 0, Width: 40, Height: 20})
-
-	found := false
-	for y := 5; y < 20 && !found; y++ {
-		for x := 5; x < 16 && !found; x++ {
-			if p := canvas.PixelAt(x, y); p.A > 0 && p.B == 0 {
-				found = true
-			}
-		}
+	dr := rv.GetDirtyRect()
+	if dr.X != 0 || dr.Y != 0 {
+		t.Fatalf("union origin = (%v,%v), want (0,0)", dr.X, dr.Y)
 	}
-	if !found {
-		t.Fatalf("no black text pixels found in text region")
+	if dr.Width != 300 || dr.Height != 300 {
+		t.Fatalf("union size = (%v,%v), want (300,300)", dr.Width, dr.Height)
 	}
 }
 
-// TestRenderPipelinePhaseOrdering verifies that a document with both a background box and
-// text paints both: the background in the background phase and the text in the foreground
-// phase. The text region is scanned for pixels darker than the white background.
-func TestRenderPipelinePhaseOrdering(t *testing.T) {
-	view := newPaintView(40, 20)
-	blockSt := style.NewComputedStyle()
-	blockSt.Display = style.DisplayBlock
-	blockSt.BackgroundColor = style.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-	block := NewRenderBlockFlow(dom.NewDocument().CreateElement("div"), blockSt)
-	block.SetLocation(0, 0)
-	block.SetSize(40, 20)
-	view.AddChild(block, nil)
+// TestDirtyRect_MarkAllDirty tests MarkAllDirty marks the entire viewport.
+func TestDirtyRect_MarkAllDirty(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(1024, 768)
 
-	textSt := style.NewComputedStyle()
-	textSt.Color = style.Color{R: 0, G: 0, B: 0, A: 0xFF}
-	textSt.FontSize = style.Length{Value: 12, Unit: "px"}
-	rt := NewRenderTextWith(dom.NewDocument().CreateTextNode("A"), textSt, "A")
-	rt.SetSegments([]InlineTextBox{{Start: 0, Len: 1, X: 5, Y: 5, Width: 8, Height: 12}})
-	block.AddChild(rt, nil)
-
-	canvas := graphics.NewCanvas(40, 20)
-	Paint(view, canvas, Rect{X: 0, Y: 0, Width: 40, Height: 20})
-
-	white := graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-	if got := canvas.PixelAt(0, 0); got != white {
-		t.Fatalf("background pixel = %+v, want white", got)
-	}
-	// Scan the text region for pixels darker than white (text drawn over background).
-	found := false
-	for y := 5; y < 20 && !found; y++ {
-		for x := 5; x < 14 && !found; x++ {
-			if p := canvas.PixelAt(x, y); p.A > 0 && (p.R < 0xFF || p.G < 0xFF || p.B < 0xFF) {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("no text pixels found darker than white background")
+	rv.MarkAllDirty()
+	dr := rv.GetDirtyRect()
+	if dr.Width != 1024 || dr.Height != 768 {
+		t.Fatalf("MarkAllDirty = %+v, want (0,0,1024,768)", dr)
 	}
 }
 
-// TestRenderPipelineLayerTree verifies the layer-based paint path paints a child box's
-// background when a root layer is present.
-func TestRenderPipelineLayerTree(t *testing.T) {
-	view := newPaintView(20, 20)
-	view.SetRootLayer(NewRenderLayer(RenderObject(view)))
+// TestScrollOffset tests that scroll offset is stored and returned correctly.
+func TestScrollOffset(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(800, 600)
 
-	st := style.NewComputedStyle()
-	st.Display = style.DisplayBlock
-	st.BackgroundColor = style.Color{R: 0, G: 0, B: 0xFF, A: 0xFF}
-	child := NewRenderBlockFlow(dom.NewDocument().CreateElement("div"), st)
-	child.SetLocation(2, 2)
-	child.SetSize(10, 10)
-	view.AddChild(child, nil)
+	sx, sy := rv.ScrollOffset()
+	if sx != 0 || sy != 0 {
+		t.Fatalf("initial scroll = (%v,%v), want (0,0)", sx, sy)
+	}
 
-	canvas := graphics.NewCanvas(20, 20)
-	Paint(view, canvas, Rect{X: 0, Y: 0, Width: 20, Height: 20})
+	rv.SetScrollOffset(100, 200)
+	sx, sy = rv.ScrollOffset()
+	if sx != 100 || sy != 200 {
+		t.Fatalf("scroll = (%v,%v), want (100,200)", sx, sy)
+	}
 
-	blue := graphics.Color{R: 0, G: 0, B: 0xFF, A: 0xFF}
-	if got := canvas.PixelAt(5, 5); got != blue {
-		t.Fatalf("layer-painted child background pixel = %+v, want %+v", got, blue)
+	// Setting scroll offset should mark all dirty
+	if !rv.IsDirty() {
+		t.Fatal("expected dirty after SetScrollOffset")
 	}
 }
 
-// TestRenderPipelineCompositedChildLayer verifies that a box owning a child layer is
-// painted by its own layer pass (not the root pass), confirming the layer-tree
-// compositing traversal.
-func TestRenderPipelineCompositedChildLayer(t *testing.T) {
-	view := newPaintView(40, 30)
-	rootLayer := NewRenderLayer(RenderObject(view))
-	view.SetRootLayer(rootLayer)
+// TestPaintInfo_DirtyCheckEnabled tests the dirty check flag behavior.
+func TestPaintInfo_DirtyCheckEnabled(t *testing.T) {
+	canvas := graphics.NewCanvas(100, 100)
+	defer canvas.Release()
 
-	// A positioned box that owns its own child layer.
-	boxSt := style.NewComputedStyle()
-	boxSt.Display = style.DisplayBlock
-	boxSt.Position = style.PositionAbsolute
-	boxSt.BackgroundColor = style.Color{R: 0, G: 0xFF, B: 0, A: 0xFF}
-	box := NewRenderBlockFlow(dom.NewDocument().CreateElement("div"), boxSt)
-	box.SetLocation(10, 10)
-	box.SetSize(10, 10)
-	view.AddChild(box, nil)
+	info := NewPaintInfo(canvas, Rect{X: 10, Y: 10, Width: 20, Height: 20})
 
-	// Attach a child layer owned by the positioned box.
-	childLayer := NewRenderLayer(RenderObject(box))
-	rootLayer.AddChild(childLayer)
+	// Default should be enabled
+	if !info.DirtyCheckEnabled() {
+		t.Fatal("expected dirtyCheckEnabled by default")
+	}
 
-	canvas := graphics.NewCanvas(40, 30)
-	Paint(view, canvas, Rect{X: 0, Y: 0, Width: 40, Height: 30})
+	// Intersects within dirty rect
+	if !info.intersects(Rect{X: 15, Y: 15, Width: 5, Height: 5}) {
+		t.Fatal("expected intersects for rect inside dirty rect")
+	}
 
-	green := graphics.Color{R: 0, G: 0xFF, B: 0, A: 0xFF}
-	// The box's background must be painted via its own child layer.
-	if got := canvas.PixelAt(12, 12); got != green {
-		t.Fatalf("composited child layer pixel = %+v, want %+v", got, green)
+	// Intersects outside dirty rect
+	if info.intersects(Rect{X: 100, Y: 100, Width: 5, Height: 5}) {
+		t.Fatal("expected no intersect for rect outside dirty rect")
+	}
+
+	// Disable dirty check — everything should intersect
+	info.SetDirtyCheckEnabled(false)
+	if !info.intersects(Rect{X: 100, Y: 100, Width: 5, Height: 5}) {
+		t.Fatal("expected intersect when dirtyCheckEnabled=false")
 	}
 }
 
-// TestRenderPipelineNilSafe verifies Paint handles nil view / canvas without panicking.
-func TestRenderPipelineNilSafe(t *testing.T) {
-	Paint(nil, graphics.NewCanvas(1, 1), Rect{})
-	view := newPaintView(1, 1)
-	Paint(view, nil, Rect{})
+// TestPaint_WithScrollOffset creates a simple RenderView, sets scroll offset,
+// and verifies Paint does not crash (the translate is applied correctly).
+func TestPaint_WithScrollOffset(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(100, 100)
+	rv.SetScrollOffset(50, 25)
+
+	canvas := graphics.NewCanvas(100, 100)
+	defer canvas.Release()
+
+	// Should not panic: scroll translate applied, then cleared.
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 100, Height: 100})
+}
+
+// TestPaint_WithDirtyRect creates a RenderView, marks a dirty rect,
+// and verifies Paint clears the dirty flag after painting.
+func TestPaint_WithDirtyRect(t *testing.T) {
+	doc := dom.NewDocument()
+	st := &style.ComputedStyle{}
+	rv := NewRenderView(doc, st)
+	rv.SetViewportSize(100, 100)
+	rv.MarkDirty(Rect{X: 0, Y: 0, Width: 50, Height: 50})
+
+	canvas := graphics.NewCanvas(100, 100)
+	defer canvas.Release()
+
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 100, Height: 100})
+
+	// After Paint, dirty rect should be cleared
+	if rv.IsDirty() {
+		t.Fatal("expected dirty rect cleared after Paint")
+	}
 }

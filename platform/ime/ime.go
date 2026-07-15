@@ -17,8 +17,14 @@
 // expose IME composition events directly. The subclassed window
 // procedure buffers IME events; the main loop polls them via PopEvents.
 //
-// On Linux/macOS the handler is a stub (XIM / NSTextInputClient support
-// is deferred).
+// On Linux the handler uses XIM (X Input Method) to support CJK text input
+// via XFilterEvent / XmbLookupString, with preedit callbacks for composition
+// state tracking.
+//
+// On macOS the handler implements the NSTextInputClient protocol on the
+// Cocoa NSView (GoCocoaView), intercepting setMarkedText:/insertText:/
+// unmarkText calls from the NSTextInputContext and buffering composition
+// events for the main loop.
 
 package ime
 

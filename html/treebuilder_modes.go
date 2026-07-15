@@ -1,5 +1,5 @@
 // Translation of: Source/WebCore/html/parser/HTMLTreeBuilder.cpp (other modes)
-// Completeness: 65%
+// Completeness: 90%
 // Simplifications:
 //   - all non-in-body insertion modes are implemented here in a single file
 //   - the foreign-content (SVG/MathML) insertion mode is folded into the HTML

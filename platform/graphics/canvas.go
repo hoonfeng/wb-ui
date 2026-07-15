@@ -1,11 +1,11 @@
 // Translation of: Source/WebCore/platform/graphics/GraphicsContext.h
 //                  Source/WebCore/platform/graphics/GraphicsContext.cpp
-// Completeness: 70%
+// Completeness: 90%
 // Simplifications:
 //   - backed by Skia via goskia cgo bindings; real anti-aliased rasterization
-//   - no gradient / pattern fills, only flat colors
-//   - clip is a single axis-aligned rectangle (no path-based clipping)
-//   - transform is a translate + non-uniform scale (no rotation / skew / full matrix)
+//   - linear & radial gradient fills via Skia shader
+//   - clip is axis-aligned rectangle OR arbitrary path via ClipPath
+//   - transform supports translate, scale, rotate, skew, and full matrix via Concat
 //   - text uses Skia's real font rasterizer (FontCache / ComplexTextController
 //     are handled by Skia internally)
 
@@ -71,6 +71,10 @@ type Canvas struct {
 	// State tracking for HasClip/ClipRect queries.
 	state  canvasState
 	states []canvasState
+
+	// gradientPaint is a temporary Paint used by gradient fills to avoid
+	// overwriting the shared fillPaint's shader state in Save/Restore.
+	gradientPaint *skia.Paint
 
 	// Font cache: maps Font description to *skia.Font.
 	fontCache   map[fontKey]*skia.Font
@@ -139,6 +143,9 @@ func newCanvasFromSurface(surface *skia.Surface, width, height int, external boo
 	c.strokePaint.SetAntialias(true)
 	c.clearPaint.SetStyle(skia.PaintStyleFill)
 	c.clearPaint.SetBlendMode(skia.BlendModeClear)
+	c.gradientPaint = skia.NewPaint()
+	c.gradientPaint.SetStyle(skia.PaintStyleFill)
+	c.gradientPaint.SetAntialias(true)
 	c.state.scaleX = 1
 	c.state.scaleY = 1
 	c.state.fillColor = Color{R: 0, G: 0, B: 0, A: 0xFF}
@@ -268,6 +275,48 @@ func (c *Canvas) Scale(sx, sy float64) {
 	c.invalidatePixels()
 }
 
+// Rotate composes a rotation (clockwise degrees) into the current transform,
+// mirroring GraphicsContext::rotate(). The rotation is about the current origin.
+func (c *Canvas) Rotate(degrees float64) {
+	c.canvas.Rotate(float32(degrees))
+	c.invalidatePixels()
+}
+
+// Skew composes a skew transform into the current matrix, mirroring the
+// CSS skew() transform function. sx is the X skew angle in degrees;
+// sy is the Y skew angle in degrees.
+func (c *Canvas) Skew(sx, sy float64) {
+	c.canvas.Skew(float32(sx), float32(sy))
+	c.invalidatePixels()
+}
+
+// Concat post-multiplies the current transform by the given matrix,
+// mirroring GraphicsContext::concatCTM().
+func (c *Canvas) Concat(m skia.Matrix) {
+	c.canvas.Concat(m)
+	c.invalidatePixels()
+}
+
+// SetMatrix replaces the current transform matrix with m,
+// mirroring GraphicsContext::setCTM().
+func (c *Canvas) SetMatrix(m skia.Matrix) {
+	c.canvas.SetMatrix(m)
+	c.invalidatePixels()
+}
+
+// GetMatrix returns the current total transform matrix,
+// mirroring GraphicsContext::getCTM().
+func (c *Canvas) GetMatrix() skia.Matrix {
+	return c.canvas.GetMatrix()
+}
+
+// ResetMatrix sets the current transform to the identity matrix,
+// mirroring GraphicsContext::resetTransform().
+func (c *Canvas) ResetMatrix() {
+	c.canvas.ResetMatrix()
+	c.invalidatePixels()
+}
+
 // transform maps a world-space point to device space using the current transform.
 func (c *Canvas) transform(wx, wy float64) (x, y float64) {
 	return wx*c.state.scaleX + c.state.translateX,
@@ -299,6 +348,15 @@ func (c *Canvas) HasClip() bool { return c.state.hasClip }
 
 // ClipRect returns the current device-space clip rectangle and whether one is set.
 func (c *Canvas) ClipRect() (Rect, bool) { return c.state.clip, c.state.hasClip }
+
+// ClipPath intersects the current clip with the given world-space path, mirroring
+// GraphicsContext::clipPath(). The path is transformed by the current CTM and
+// then intersected with any existing clip. Uses Skia's anti-aliased path clipping.
+func (c *Canvas) ClipPath(path *skia.Path) {
+	c.canvas.ClipPath(path, skia.ClipOpIntersect, true)
+	c.state.hasClip = true
+	c.invalidatePixels()
+}
 
 // FillRect fills the given world-space rectangle with the supplied color, mirroring
 // GraphicsContext::fillRect(FloatRect, Color). The rectangle is drawn through the
@@ -385,6 +443,49 @@ func (c *Canvas) StrokeRoundRect(x, y, w, h, radius, strokeWidth float64, col Co
 	c.strokePaint.SetColor(colorToSkia(col))
 	c.strokePaint.SetStrokeWidth(float32(strokeWidth))
 	c.canvas.DrawRoundRect(r, rx, rx, c.strokePaint)
+	c.invalidatePixels()
+}
+
+// FillLinearGradient fills the given world-space rectangle with a linear gradient
+// from startColor to endColor, running top-to-bottom (0 degrees). This mirrors
+// the CSS linear-gradient(to bottom, startColor, endColor) shorthand and is the
+// most common gradient used in UI backgrounds.
+func (c *Canvas) FillLinearGradient(x, y, w, h float64, startColor, endColor Color) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	start := skia.Point{X: float32(x), Y: float32(y)}
+	end := skia.Point{X: float32(x), Y: float32(y + h)}
+	colors := []skia.Color{colorToSkia(startColor), colorToSkia(endColor)}
+	shader := skia.NewLinearGradient(start, end, colors, nil, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
+	c.canvas.DrawRect(r, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.invalidatePixels()
+}
+
+// FillRadialGradient fills a circle centered at (cx, cy) with a radial gradient
+// from centerColor at the center to edgeColor at the edge. This mirrors the CSS
+// radial-gradient(circle, centerColor, edgeColor) shorthand.
+func (c *Canvas) FillRadialGradient(cx, cy, radius float64, centerColor, edgeColor Color) {
+	if radius <= 0 {
+		return
+	}
+	center := skia.Point{X: float32(cx), Y: float32(cy)}
+	colors := []skia.Color{colorToSkia(centerColor), colorToSkia(edgeColor)}
+	shader := skia.NewRadialGradient(center, float32(radius), colors, nil, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	c.canvas.DrawCircle(float32(cx), float32(cy), float32(radius), c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
 	c.invalidatePixels()
 }
 
@@ -661,6 +762,10 @@ func (c *Canvas) Release() {
 	if c.clearPaint != nil {
 		c.clearPaint.Release()
 		c.clearPaint = nil
+	}
+	if c.gradientPaint != nil {
+		c.gradientPaint.Release()
+		c.gradientPaint = nil
 	}
 	if c.surface != nil && !c.external {
 		c.surface.Release()

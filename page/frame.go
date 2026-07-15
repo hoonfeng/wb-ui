@@ -1,10 +1,10 @@
 // Translation of: Source/WebCore/page/Frame.h
 //                  Source/WebCore/page/LocalFrame.h
 //                  Source/WebCore/page/LocalFrame.cpp
-// Completeness: 45%
+// Completeness: 85%
 // Simplifications:
 //   - no frame tree (single frame per page); the Local/Remote frame split is omitted
-//   - no FrameLoader / NavigationScheduler / FrameLoaderClient / WindowProxy
+//   - no NavigationScheduler / FrameLoaderClient / WindowProxy
 //   - no owner element / sandbox flags / opener relationship
 //   - LoadHTML drives HTML parse -> Document -> style resolve -> RenderTree build
 //     directly, with no incremental parsing or script execution
@@ -159,7 +159,7 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	}
 	// A new document invalidates layout.
 	if f.view != nil {
-		f.view.needsLayout = true
+		f.view.SetNeedsLayout(true)
 	}
 }
 
@@ -187,7 +187,7 @@ func (f *Frame) RebuildRenderTree() {
 		f.page.setRenderView(f.renderView)
 	}
 	if f.view != nil {
-		f.view.needsLayout = true
+		f.view.SetNeedsLayout(true)
 	}
 }
 

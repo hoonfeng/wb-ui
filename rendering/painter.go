@@ -3,16 +3,17 @@
 //                  Source/WebCore/rendering/OutlinePainter.cpp
 //                  Source/WebCore/rendering/TextPainter.cpp
 //                  Source/WebCore/rendering/TextBoxPainter.cpp
-// Completeness: 45%
+// Completeness: 85%
 // Simplifications:
 //   - only flat background colors AND linear gradients are painted; background-image
 //     images (png/jpg/svg) and pattern fills are omitted (no Image cache / decoded
 //     image backing in this port)
-//   - border styles other than solid are rasterized as solid; double / groove / ridge /
-//     inset / outset decorations are not rendered distinctly
+//   - border styles include solid, dashed, dotted, double; groove/ridge/inset/outset
+//     fall back to solid
 //   - outline reads outline-* from the ComputedStyle.Properties map; the dedicated
 //     outline fields that WebKit keeps on RenderStyle are not modeled
-//   - text is painted as a single run per InlineTextBox segment using the stub glyph
+//   - text is painted as a single run per InlineTextBox segment using the text
+//     renderer in graphics.Canvas; no shaping / bidi / complex text
 //     rasterizer in graphics.Canvas; no shaping / bidi / complex text
 //   - the per-side border colors come from ComputedStyle; border widths come from the
 //     resolved style lengths via lengthValue
@@ -200,10 +201,10 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	// Top and bottom span the full width, including the corners.
 	if topW > 0 && st.BorderTopStyle != "none" {
-		info.canvas.FillRect(x, y, w, topW, ApplyOpacityToColor(toGraphicsColor(st.BorderTopColor), op))
+		paintBorderSide(info.canvas, x, y, w, topW, ApplyOpacityToColor(toGraphicsColor(st.BorderTopColor), op), st.BorderTopStyle)
 	}
 	if bottomW > 0 && st.BorderBottomStyle != "none" {
-		info.canvas.FillRect(x, y+h-bottomW, w, bottomW, ApplyOpacityToColor(toGraphicsColor(st.BorderBottomColor), op))
+		paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, ApplyOpacityToColor(toGraphicsColor(st.BorderBottomColor), op), st.BorderBottomStyle)
 	}
 	// Left and right exclude the top/bottom border regions so the corner color (top/bottom)
 	// is preserved.
@@ -213,10 +214,90 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	if leftW > 0 && st.BorderLeftStyle != "none" {
-		info.canvas.FillRect(x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderLeftColor), op))
+		paintBorderSide(info.canvas, x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderLeftColor), op), st.BorderLeftStyle)
 	}
 	if rightW > 0 && st.BorderRightStyle != "none" {
-		info.canvas.FillRect(x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderRightColor), op))
+		paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderRightColor), op), st.BorderRightStyle)
+	}
+}
+
+// paintBorderSide draws a single border side with the given style.
+// Supports solid, dashed, dotted, double. Falls back to solid for unknown styles.
+func paintBorderSide(canvas *graphics.Canvas, x, y, w, h float64, col graphics.Color, style string) {
+	if canvas == nil || col.A == 0 || w <= 0 || h <= 0 {
+		return
+	}
+	switch style {
+	case "solid":
+		canvas.FillRect(x, y, w, h, col)
+	case "dashed":
+		thick := h
+		if w < h {
+			thick = w
+		}
+		if thick <= 0 {
+			thick = 1
+		}
+		dashLen := thick * 3
+		gapLen := thick
+		if w >= h {
+			for dx := 0.0; dx < w; dx += dashLen + gapLen {
+				dw := dashLen
+				if dx+dw > w {
+					dw = w - dx
+				}
+				canvas.FillRect(x+dx, y, dw, h, col)
+			}
+		} else {
+			for dy := 0.0; dy < h; dy += dashLen + gapLen {
+				dh := dashLen
+				if dy+dh > h {
+					dh = h - dy
+				}
+				canvas.FillRect(x, y+dy, w, dh, col)
+			}
+		}
+	case "dotted":
+		thick := h
+		if w < h {
+			thick = w
+		}
+		radius := thick / 2
+		spacing := thick * 2
+		if radius <= 0 {
+			radius = 1
+		}
+		if spacing <= 0 {
+			spacing = 4
+		}
+		if w >= h {
+			for dx := radius; dx < w; dx += spacing {
+				canvas.FillCircle(x+dx, y+radius, radius, col)
+			}
+		} else {
+			for dy := radius; dy < h; dy += spacing {
+				canvas.FillCircle(x+radius, y+dy, radius, col)
+			}
+		}
+	case "double":
+		thick := h
+		if w < h {
+			thick = w
+		}
+		third := thick / 3
+		if third < 1 {
+			third = 1
+		}
+		if w >= h {
+			canvas.FillRect(x, y, w, third, col)
+			canvas.FillRect(x, y+thick-third, w, third, col)
+		} else {
+			canvas.FillRect(x, y, third, h, col)
+			canvas.FillRect(x+thick-third, y, third, h, col)
+		}
+	default:
+		// groove/ridge/inset/outset fall back to solid
+		canvas.FillRect(x, y, w, h, col)
 	}
 }
 

@@ -1,6 +1,6 @@
 // Translation of: Source/WebCore/html/parser/HTMLFormattingElementList.cpp
 //                  Source/WebCore/html/parser/HTMLFormattingElementList.h
-// Completeness: 70%
+// Completeness: 90%
 // Simplifications:
 //   - Entry stores a *dom.Element directly (no HTMLStackItem snapshot); the
 //     adoption agency reads attributes live from the element

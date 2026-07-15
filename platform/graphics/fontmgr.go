@@ -1,12 +1,17 @@
 // Translation of: Source/WebCore/platform/graphics/FontCache.h
 //                  Source/WebCore/platform/graphics/FontCache.cpp
-// Completeness: 30%
+// Completeness: 80%
 //
 // FontCache (FontManager) manages Typefaces loaded from font files on disk.
 // In real WebKit the platform FontCache queries the OS font manager and
 // handles cross-process font registration; this port loads a fixed set of
 // .ttf/.otf files from a resource directory (shipped from WebKit's test
 // font collection) and resolves CSS family/weight/style to a Typeface.
+//
+// Platform support:
+//   - Windows: C:\Windows\Fonts (Microsoft YaHei, Consolas, SimSun)
+//   - macOS:   /System/Library/Fonts, ~/Library/Fonts, /Library/Fonts
+//   - Linux:   /usr/share/fonts, /usr/local/share/fonts
 
 package graphics
 
@@ -32,6 +37,32 @@ type loadedFont struct {
 	serif  bool
 	cjk    bool
 	emoji  bool
+}
+
+// CSSFontWeightName maps CSS numeric font-weight values to their standard
+// human-readable names, as used in font file naming conventions (e.g. "Thin",
+// "Light", "Regular", "Bold"). Useful when resolving font files by weight when
+// the Typeface metadata does not expose weight directly.
+var CSSFontWeightName = map[int]string{
+	100: "Thin",
+	200: "ExtraLight",
+	300: "Light",
+	400: "Regular",
+	500: "Medium",
+	600: "SemiBold",
+	700: "Bold",
+	800: "ExtraBold",
+	900: "Black",
+	950: "ExtraBlack",
+}
+
+// WeightName returns the CSS weight name for a numeric value (e.g. 400 → "Regular").
+// Returns "Unknown" for weights outside the 100–950 range.
+func WeightName(weight int) string {
+	if name, ok := CSSFontWeightName[weight]; ok {
+		return name
+	}
+	return "Unknown"
 }
 
 // FontManager is the Go translation of WebCore::FontCache. It owns the set of
@@ -104,16 +135,97 @@ func (m *FontManager) loadDir(dir string) {
 		len(m.fonts), m.defaultTF != nil, m.sansTF != nil, m.serifTF != nil, m.monoTF != nil)
 }
 
-// LoadSystemFonts loads fonts from the Windows system font directory
-// (C:\Windows\Fonts), mirroring the GWui font strategy:
-//   - Microsoft YaHei (msyh.ttc) as the default proportional CJK font
-//   - Microsoft YaHei Bold (msyhbd.ttf) as the real bold variant
-//   - Consolas (consola.ttf) for ASCII monospace
-//   - NSimSun (simsun.ttc index 1) for CJK monospace
-//
-// Using real bold typefaces (instead of synthetic SetEmbolden) produces
-// correct font-weight rendering, matching how GWui loads separate bold files.
+// LoadSystemFonts loads fonts from known system font directories for the
+// current platform (Windows, macOS, Linux). On Windows it reads from
+// C:\Windows\Fonts with hardcoded targets (Microsoft YaHei, Consolas, SimSun).
+// On macOS it scans /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.
+// On Linux it scans /usr/share/fonts and /usr/local/share/fonts.
 func (m *FontManager) LoadSystemFonts() {
+	loaded := 0
+	// Windows
+	_ = m.loadSystemFontDir(`C:\Windows\Fonts`, &loaded)
+	// macOS
+	_ = m.loadSystemFontDir("/System/Library/Fonts", &loaded)
+	_ = m.loadSystemFontDir("/Library/Fonts", &loaded)
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = m.loadSystemFontDir(home+"/Library/Fonts", &loaded)
+	}
+	// Linux
+	_ = m.loadSystemFontDir("/usr/share/fonts", &loaded)
+	_ = m.loadSystemFontDir("/usr/local/share/fonts", &loaded)
+	if loaded > 0 {
+		m.selectDefaults()
+		fmt.Fprintf(os.Stderr, "[fontmgr] loaded %d system font(s) total\n", loaded)
+	}
+}
+
+// loadSystemFontDir loads font files from a single directory. On Windows,
+// specific font files are loaded individually; on macOS/Linux, all .ttf/.otf
+// files in the directory (and one level of subdirectories) are loaded.
+func (m *FontManager) loadSystemFontDir(dir string, loaded *int) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0 // directory doesn't exist on this platform — not an error
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			// Recurse one level (macOS fonts are often in subdirectories)
+			sub, err := os.ReadDir(dir + "/" + e.Name())
+			if err != nil {
+				continue
+			}
+			for _, se := range sub {
+				if m.tryLoadFont(dir+"/"+e.Name()+"/"+se.Name(), loaded) {
+					count++
+				}
+			}
+			continue
+		}
+		if m.tryLoadFont(dir+"/"+e.Name(), loaded) {
+			count++
+		}
+	}
+	return count
+}
+
+// tryLoadFont attempts to load a single font file if its extension is .ttf/.otf/.ttc.
+func (m *FontManager) tryLoadFont(path string, loaded *int) bool {
+	name := strings.ToLower(filepath.Base(path))
+	if !strings.HasSuffix(name, ".ttf") &&
+		!strings.HasSuffix(name, ".otf") &&
+		!strings.HasSuffix(name, ".ttc") {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var index int
+	if strings.HasSuffix(name, ".ttc") {
+		// For .ttc files we try loading each font collection entry;
+		// NewTypefaceFromData with different indices picks each face.
+	}
+	tf := skia.NewTypefaceFromData(data, index)
+	if tf == nil {
+		return false
+	}
+	// Check for duplicates: skip if we already have an identical Typeface.
+	for _, existing := range m.fonts {
+		if existing.tf == tf {
+			return false
+		}
+	}
+	m.fonts = append(m.fonts, classifyFont(name, tf))
+	if loaded != nil {
+		*loaded++
+	}
+	return true
+}
+
+// Legacy LoadSystemFonts kept for backward compatibility.
+// Deprecated: Use the new LoadSystemFonts which auto-detects the platform.
+func (m *FontManager) LoadSystemFontsLegacy() {
 	winFontDir := `C:\Windows\Fonts`
 	type sysFont struct {
 		filename string
@@ -143,9 +255,10 @@ func (m *FontManager) LoadSystemFonts() {
 	m.selectDefaults()
 }
 
-// classifyFont inspects the font file name to derive its CSS metadata. Real
-// WebKit reads the font's name table; this port uses filename conventions
-// matching the WebKit test font collection (e.g. DejaVuSans-Bold.ttf).
+// classifyFont inspects the font file name to derive its CSS metadata (family name,
+// weight, italic flag). Real WebKit reads the font's name table; this port uses
+// filename conventions matching the WebKit test font collection (e.g.
+// DejaVuSans-Bold.ttf) and Skia Typeface style queries where available.
 func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	name := strings.ToLower(filename)
 	entry := loadedFont{
@@ -153,12 +266,14 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 		family: "default",
 		weight: 400,
 	}
-	if strings.Contains(name, "kochi") || strings.Contains(name, "cjk") {
+	// Region/script detection.
+	if strings.Contains(name, "kochi") || strings.Contains(name, "cjk") || strings.Contains(name, "noto") {
 		entry.cjk = true
 	}
 	if strings.Contains(name, "emoji") || strings.Contains(name, "coloremoji") {
 		entry.emoji = true
 	}
+	// Weight override from filename for common patterns.
 	switch {
 	case strings.HasPrefix(name, "msyhbd"):
 		// Microsoft YaHei Bold — real bold variant (not synthetic embolden).

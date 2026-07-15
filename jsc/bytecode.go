@@ -161,7 +161,7 @@ func CompileProgram(prog *Program) *FunctionBody {
 }
 
 // compileFunction compiles a function expression/declaration body into a FunctionBody.
-func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool) *FunctionBody {
+func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = isArrow
@@ -191,6 +191,7 @@ func compileFunction(name string, params []string, body []Stmt, isArrow bool, is
 		NumLocals:    len(g.scopeLocals),
 		IsArrow:      isArrow,
 		IsAsync:      isAsync,
+		IsGenerator:  isGenerator,
 	}
 }
 
@@ -246,7 +247,7 @@ func (g *BytecodeGenerator) here() int { return len(g.code) }
 
 // emitFunctionHoisted emits a NewClosure and StoreVar for a hoisted function declaration.
 func (g *BytecodeGenerator) emitFunctionHoisted(fd *FunctionDeclaration) {
-	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync)
+	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: fd.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: fd.Name})
 	g.emit(Instruction{Op: OpPop})
@@ -573,13 +574,13 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		}
 		g.emit(Instruction{Op: OpLoadObject, IntArg: len(n.Properties)})
 	case *FunctionExpression:
-		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync)
+		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync, n.IsGenerator)
 		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	case *ArrowFunction:
-		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync)
+		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync, n.IsGenerator)
 		if n.IsExpr {
 			// Wrap a concise-body expression so the function returns it.
-			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync)
+			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync, n.IsGenerator)
 		}
 		g.emit(Instruction{Op: OpNewClosure, Body: body})
 	case *TemplateLiteral:
@@ -623,7 +624,7 @@ func stmtsFromNode(body Node) []Stmt {
 }
 
 // compileArrowExpr compiles an arrow function with a concise expression body.
-func compileArrowExpr(params []string, body Expr, isAsync bool) *FunctionBody {
+func compileArrowExpr(params []string, body Expr, isAsync bool, isGenerator bool) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = true
@@ -632,7 +633,7 @@ func compileArrowExpr(params []string, body Expr, isAsync bool) *FunctionBody {
 	}
 	g.emitExpr(body)
 	g.emit(Instruction{Op: OpReturn})
-	return &FunctionBody{Name: "<arrow>", Params: params, Instructions: g.code, NumLocals: len(g.scopeLocals), IsArrow: true, IsAsync: isAsync}
+	return &FunctionBody{Name: "<arrow>", Params: params, Instructions: g.code, NumLocals: len(g.scopeLocals), IsArrow: true, IsAsync: isAsync, IsGenerator: isGenerator}
 }
 
 // emitLogical compiles && || ?? with short-circuit jumps.

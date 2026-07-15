@@ -48,11 +48,12 @@ func (p *Program) nodePos() (int, int) { return p.Line, p.Col }
 
 // FunctionDeclaration is a hoisted 'function name(params){...}' statement.
 type FunctionDeclaration struct {
-	Name      string
-	Params    []string
-	Body      []Stmt
-	IsAsync   bool
-	Line, Col int
+	Name        string
+	Params      []string
+	Body        []Stmt
+	IsAsync     bool
+	IsGenerator bool
+	Line, Col   int
 }
 
 func (n *FunctionDeclaration) nodePos() (int, int) { return n.Line, n.Col }
@@ -383,11 +384,12 @@ func (n *ObjectExpression) exprNode()           {}
 // ArrowFunction is '(params) => body'. Body is either a single Expr (concise) or a
 // BlockStatement (full body).
 type ArrowFunction struct {
-	Params    []string
-	Body      Node // Expr or Stmt
-	IsExpr    bool
-	IsAsync   bool
-	Line, Col int
+	Params      []string
+	Body        Node // Expr or Stmt
+	IsExpr      bool
+	IsAsync     bool
+	IsGenerator bool
+	Line, Col   int
 }
 
 func (n *ArrowFunction) nodePos() (int, int) { return n.Line, n.Col }
@@ -401,11 +403,12 @@ func (n *ThisExpression) exprNode()           {}
 
 // FunctionExpression is an anonymous 'function(params){...}' value.
 type FunctionExpression struct {
-	Name      string // may be empty
-	Params    []string
-	Body      []Stmt
-	IsAsync   bool
-	Line, Col int
+	Name        string // may be empty
+	Params      []string
+	Body        []Stmt
+	IsAsync     bool
+	IsGenerator bool
+	Line, Col   int
 }
 
 func (n *FunctionExpression) nodePos() (int, int) { return n.Line, n.Col }
@@ -719,17 +722,22 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 	return vd
 }
 
-// parseFunctionDeclaration parses 'function name(params){body}'.
+// parseFunctionDeclaration parses 'function name(params){body}' or 'function* name(params){body}'.
 func (p *Parser) parseFunctionDeclaration(isAsync bool) *FunctionDeclaration {
 	tok := p.current
 	p.advance() // 'function'
+	isGenerator := false
+	if p.current.Kind == TokenStar {
+		isGenerator = true
+		p.advance()
+	}
 	name := ""
 	if p.current.Kind == TokenIdentifier {
 		name = p.current.Lexeme
 		p.advance()
 	}
 	params, body := p.parseFunctionBody()
-	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, Line: tok.Line, Col: tok.Col}
+	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, Line: tok.Line, Col: tok.Col}
 }
 
 // parseFunctionBody parses '(params) { body }' and returns both.
@@ -1586,13 +1594,18 @@ func (p *Parser) parsePropertyTail(prop Property) Property {
 func (p *Parser) parseFunctionExpression(isAsync bool) *FunctionExpression {
 	tok := p.current
 	p.advance() // 'function'
+	isGenerator := false
+	if p.current.Kind == TokenStar {
+		isGenerator = true
+		p.advance()
+	}
 	name := ""
 	if p.current.Kind == TokenIdentifier {
 		name = p.current.Lexeme
 		p.advance()
 	}
 	params, body := p.parseFunctionBody()
-	return &FunctionExpression{Name: name, Params: params, Body: body, IsAsync: isAsync, Line: tok.Line, Col: tok.Col}
+	return &FunctionExpression{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, Line: tok.Line, Col: tok.Col}
 }
 
 // parseClassExpression parses 'class [Name] [extends Base] { body }' as a value.

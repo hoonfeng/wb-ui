@@ -1,3 +1,5 @@
+//go:build !linux && !darwin
+
 // Package window provides a GLFW-based window with a Skia GPU backend surface.
 // It is the Go translation of the WebKit chrome/client layer that hosts a
 // GraphicsContext on a platform window.
@@ -29,6 +31,8 @@ const (
 	EventKey
 	EventResize
 	EventScroll
+	EventDrop
+	EventTouch
 )
 
 // Event represents a single input event collected from the window.
@@ -41,7 +45,12 @@ type Event struct {
 	Mods    int // glfw.ModifierKey (for key / mouse events)
 	Width   int // for EventResize
 	Height  int
-	ScrollY float64 // for EventScroll (vertical wheel offset)
+	ScrollY float64  // for EventScroll (vertical wheel offset)
+	DropFiles []string // for EventDrop (files dropped on window)
+	// For EventTouch
+	TouchX, TouchY float64
+	TouchID        int
+	TouchAction    int // 0=end, 1=begin, 2=move
 }
 
 // Window is a GLFW window with a Skia GPU backend surface.
@@ -59,6 +68,7 @@ type Window struct {
 	eventsMu sync.Mutex
 
 	closeCallback func()
+	dropCallback  func([]string) // files dropped on window
 
 	// ime is the platform IME handler, used for input method
 	// (composition) support. On Windows it subclasses the HWND to
@@ -241,6 +251,18 @@ func (w *Window) setupCallbacks() {
 			w.closeCallback()
 		}
 	})
+	// SetDropCallback receives files dragged and dropped onto the window.
+	w.win.SetDropCallback(func(_ *glfw.Window, names []string) {
+		w.eventsMu.Lock()
+		w.events = append(w.events, Event{
+			Type:      EventDrop,
+			DropFiles: names,
+		})
+		w.eventsMu.Unlock()
+		if w.dropCallback != nil {
+			w.dropCallback(names)
+		}
+	})
 }
 
 // GPUSurface returns the Skia GPU surface backing this window. Callers can
@@ -320,6 +342,12 @@ func (w *Window) ContentScale() (float64, float64) {
 // SetCloseCallback sets a callback invoked when the window is asked to close.
 func (w *Window) SetCloseCallback(fn func()) {
 	w.closeCallback = fn
+}
+
+// SetDropCallback sets a callback invoked when files are dropped on the window.
+// The callback receives the list of dropped file paths.
+func (w *Window) SetDropCallback(fn func([]string)) {
+	w.dropCallback = fn
 }
 
 // Close destroys the window and releases resources.

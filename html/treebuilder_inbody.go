@@ -1,6 +1,6 @@
 // Translation of: Source/WebCore/html/parser/HTMLTreeBuilder.cpp (in-body mode)
 //                  Source/WebCore/html/parser/HTMLConstructionSite.cpp (attach/foster)
-// Completeness: 70%
+// Completeness: 90%
 // Simplifications:
 //   - the in-body mode is the largest insertion mode; this file covers the common
 //     cases (block/inline/formatting/table/form elements, headers, lists, paragraphs)

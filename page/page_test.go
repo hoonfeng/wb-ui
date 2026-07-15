@@ -212,7 +212,7 @@ func TestFrameViewLayout(t *testing.T) {
 func TestFrameViewResize(t *testing.T) {
 	f := NewFrame(nil)
 	view := f.View()
-	view.needsLayout = false // start clean
+	view.SetNeedsLayout(false) // start clean
 	view.SetWidth(1024)
 	if !view.NeedsLayout() {
 		t.Error("NeedsLayout() = false after SetWidth")
@@ -220,7 +220,7 @@ func TestFrameViewResize(t *testing.T) {
 	if view.Width() != 1024 {
 		t.Errorf("Width() = %v, want 1024", view.Width())
 	}
-	view.needsLayout = false
+	view.SetNeedsLayout(false)
 	view.SetHeight(768)
 	if !view.NeedsLayout() {
 		t.Error("NeedsLayout() = false after SetHeight")
@@ -229,14 +229,14 @@ func TestFrameViewResize(t *testing.T) {
 		t.Errorf("Height() = %v, want 768", view.Height())
 	}
 	// Setting the same value should not dirty the view.
-	view.needsLayout = false
+	view.SetNeedsLayout(false)
 	view.SetWidth(1024)
 	view.SetHeight(768)
 	if view.NeedsLayout() {
 		t.Error("NeedsLayout() = true after no-op resize")
 	}
 	// SetSize should dirty when one dimension changes.
-	view.needsLayout = false
+	view.SetNeedsLayout(false)
 	view.SetSize(1280, 768)
 	if !view.NeedsLayout() {
 		t.Error("NeedsLayout() = false after SetSize change")
@@ -254,7 +254,7 @@ func TestFrameLayoutNoRenderView(t *testing.T) {
 	// No document loaded yet: Layout should be a safe no-op.
 	mf.Layout()
 	view := mf.View()
-	view.needsLayout = false
+	view.SetNeedsLayout(false)
 	view.Layout()
 	if view.NeedsLayout() {
 		t.Error("NeedsLayout() = true after Layout() with no render view")

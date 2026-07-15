@@ -55,6 +55,11 @@ type PaintInfo struct {
 	// query the selection state (for inverted-color rendering of selected
 	// text) and to paint the caret. Set by the top-level Paint function.
 	rv *RenderView
+
+	// dirtyCheckEnabled controls whether the intersects() check restricts
+	// painting to the dirty rect. When false, intersects() always returns
+	// true (full repaint). Enabled by default.
+	dirtyCheckEnabled bool
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty
@@ -65,6 +70,7 @@ func NewPaintInfo(canvas *graphics.Canvas, rect Rect) *PaintInfo {
 		canvas:    canvas,
 		dirtyRect: rect,
 		phase:     PhaseBackground,
+		dirtyCheckEnabled: true,
 	}
 }
 
@@ -81,10 +87,21 @@ func (p *PaintInfo) Phase() PaintPhase { return p.phase }
 // the multi-pass paint order (background -> foreground -> outline).
 func (p *PaintInfo) SetPhase(ph PaintPhase) { p.phase = ph }
 
+// SetDirtyCheckEnabled enables or disables dirty-rect checking. When disabled,
+// intersects() returns true for all rectangles (full repaint).
+func (p *PaintInfo) SetDirtyCheckEnabled(enabled bool) { p.dirtyCheckEnabled = enabled }
+
+// DirtyCheckEnabled returns whether dirty-rect checking is active.
+func (p *PaintInfo) DirtyCheckEnabled() bool { return p.dirtyCheckEnabled }
+
 // intersects reports whether the dirty rect overlaps the given rectangle. Painters use
 // this to skip objects entirely outside the damaged region, mirroring the early-out in
-// WebKit's ObjectPainter / RenderBox::paint.
+// WebKit's ObjectPainter / RenderBox::paint. When dirtyCheckEnabled is false (full
+// repaint mode), a zero/negative dirty rect is treated as "paint everything".
 func (p *PaintInfo) intersects(r Rect) bool {
+	if !p.dirtyCheckEnabled {
+		return true
+	}
 	dr := p.dirtyRect
 	if dr.Width <= 0 || dr.Height <= 0 {
 		// A zero dirty rect means "paint everything" (no scissor set).

@@ -147,6 +147,55 @@ type LayoutBox struct {
 	// columnInfo stores multi-column layout geometry computed during layout.
 	// Non-nil only for boxes that participated in multi-column layout.
 	columnInfo *columnLayoutInfo
+
+	// layoutCache stores the last computed layout geometry to detect changes.
+	// When the style and children haven't changed, layout can be skipped.
+	layoutCache layoutResult
+}
+
+// layoutResult caches the most recent layout pass result for dirty-checking.
+type layoutResult struct {
+	width, height float64
+	x, y          float64
+	childCount    int
+	dirty         bool
+}
+
+// MarkDirty marks this box and all ancestors as needing re-layout.
+func (b *LayoutBox) MarkDirty() {
+	if b.layoutCache.dirty {
+		return // already dirty
+	}
+	b.layoutCache.dirty = true
+	b.layoutCache.childCount = len(b.Children)
+	if b.parent != nil {
+		b.parent.MarkDirty()
+	}
+}
+
+// IsDirty reports whether this box needs re-layout.
+func (b *LayoutBox) IsDirty() bool { return b.layoutCache.dirty }
+
+// MarkClean clears the dirty flag and caches current geometry.
+func (b *LayoutBox) MarkClean() {
+	b.layoutCache = layoutResult{
+		width:      b.Rect.Width,
+		height:     b.Rect.Height,
+		x:          b.Rect.X,
+		y:          b.Rect.Y,
+		childCount: len(b.Children),
+		dirty:      false,
+	}
+}
+
+// (b *LayoutBox) HasLayoutChanged returns true if the box's geometry or children
+// have changed since the last MarkClean call.
+func (b *LayoutBox) HasLayoutChanged() bool {
+	return b.layoutCache.width != b.Rect.Width ||
+		b.layoutCache.height != b.Rect.Height ||
+		b.layoutCache.x != b.Rect.X ||
+		b.layoutCache.y != b.Rect.Y ||
+		b.layoutCache.childCount != len(b.Children)
 }
 
 // NewLayoutBox constructs a leaf layout box with the given type and style.

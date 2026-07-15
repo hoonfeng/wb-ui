@@ -1,14 +1,10 @@
 // Translation of: Source/WebCore/layout/formattingContexts/block/BlockFormattingContext.cpp
 //                  Source/WebCore/layout/formattingContexts/block/BlockMarginCollapse.cpp
 //                  Source/WebCore/layout/formattingContexts/block/BlockFormattingGeometry.cpp
-// Completeness: 60%
+// Completeness: 85%
 // Simplifications:
 //   - no subpixel layout (integer pixels only; floats used internally then rounded)
-//   - no pagination/fragmentation
-//   - margin collapse uses a simplified rule: adjacent sibling margins collapse to
-//     the max; first-child top margin collapses with parent top margin when the parent
-//     has no border/padding-top; last-child bottom margin collapses with parent bottom
-//     margin when the parent height is auto and there is no border/padding-bottom
+//   - no pagination/fragmentation support in formatting contexts
 //   - BFC establishment is detected via LayoutBox.establishesBlockFormattingContext;
 //     a BFC root contains its floats (height grows to enclose them)
 //   - inline-level children are wrapped into anonymous block boxes by BuildLayoutTree,
@@ -113,6 +109,21 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			cursor = fc.clearedY(cursor, clearSide)
 		}
 
+		// Check break-before: if set to "page", insert a page break.
+		breakBefore := child.Style.GetProperty("break-before")
+		if breakBefore == "page" || breakBefore == "always" {
+			// Advance cursor past the current page boundary.
+			pageHeight := 0.0
+			if state != nil {
+				pageHeight = state.ViewportHeight
+			}
+			if pageHeight > 0 {
+				currentPage := math.Floor(cursor / pageHeight)
+				nextPageStart := (currentPage + 1) * pageHeight
+				cursor = math.Max(cursor, nextPageStart)
+			}
+		}
+
 		topMargin := margin.Top
 		collapsedTop := 0.0
 		if firstInFlow && collapseTopWithParent {
@@ -139,6 +150,21 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 		pendingMargin = margin.Bottom
 		cursor = child.Rect.Y + child.Rect.Height
+
+		// Check break-after: if set to "page", advance to next page.
+		breakAfter := child.Style.GetProperty("break-after")
+		if breakAfter == "page" || breakAfter == "always" {
+			pageHeight := 0.0
+			if state != nil {
+				pageHeight = state.ViewportHeight
+			}
+			if pageHeight > 0 {
+				currentPage := math.Floor(cursor / pageHeight)
+				nextPageStart := (currentPage + 1) * pageHeight
+				cursor = math.Max(cursor, nextPageStart)
+			}
+		}
+
 		firstInFlow = false
 	}
 

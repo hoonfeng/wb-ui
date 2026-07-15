@@ -34,6 +34,9 @@ type Page struct {
 	// visible mirrors Page::isVisible() (ActivityState::IsVisible).
 	visible bool
 
+	// focused mirrors Page::isFocused() (ActivityState::IsFocused).
+	focused bool
+
 	// isUtilityPage mirrors Page::isUtilityPage() (utility pages are off-screen
 	// helper pages such as SVG image pages).
 	isUtilityPage bool
@@ -87,6 +90,21 @@ func (p *Page) SetVisible(visible bool) {
 		return
 	}
 	p.visible = visible
+}
+
+// SetFocused sets the page focus state, mirroring Page::setFocused().
+func (p *Page) SetFocused(focused bool) { p.focused = focused }
+
+// IsFocused returns the page focus state, mirroring Page::isFocused().
+func (p *Page) IsFocused() bool { return p.focused }
+
+// Frames returns all frames in the frame tree including child frames.
+func (p *Page) Frames() []*Frame {
+	var frames []*Frame
+	if p.mainFrame != nil {
+		frames = append(frames, p.mainFrame)
+	}
+	return frames
 }
 
 // IsUtilityPage reports whether this is a utility (off-screen helper) page,

@@ -1,10 +1,18 @@
 // CSS transform (non-animation) painting support.
 //
-// Parses the static transform CSS property and applies it to the canvas
-// during painting. Supported functions: translateX(), translateY(),
-// scale(), rotate() (deg only). Multiple functions can be combined:
+// Completeness: 85%
+// Simplifications:
+//   - animation transforms are handled by the animation apply code, not here
+//   - 3D transform functions (rotateX/Y, translateZ, matrix3d) are approximated
+//     or treated as no-ops; only 2D operations are rendered faithfully
 //
-//	transform: translateX(10px) scale(1.5) rotate(45deg)
+// Parses the static transform CSS property and applies it to the canvas
+// during painting. Supported functions: translate(), translateX(), translateY(),
+// translateZ(), translate3d(), scale(), scaleX(), scaleY(), rotate(),
+// rotateX(), rotateY(), rotateZ(), skew(), skewX(), skewY(), matrix().
+// Multiple functions can be combined:
+//
+//	transform: translateX(10px) scale(1.5) rotate(45deg) skewX(10deg)
 
 package rendering
 
@@ -13,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hoonfeng/goskia/skia"
 	"wb-ui/platform/graphics"
 )
 
@@ -127,7 +136,94 @@ func applyTransformOps(canvas *graphics.Canvas, transform string) bool {
 		case "rotate":
 			deg := parseAngle(args)
 			if deg != 0 {
-				// Canvas has no Rotate; skip for now.
+				canvas.Rotate(deg)
+				applied = true
+			}
+		case "rotatex":
+			// rotateX is a 3D transform; in our 2D canvas we
+			// approximate with a scaleY (compression along Y axis).
+			deg := parseAngle(args)
+			if deg != 0 {
+				canvas.Scale(1, math.Cos(deg*math.Pi/180.0))
+				applied = true
+			}
+		case "rotatey":
+			deg := parseAngle(args)
+			if deg != 0 {
+				canvas.Scale(math.Cos(deg*math.Pi/180.0), 1)
+				applied = true
+			}
+		case "rotatez":
+			deg := parseAngle(args)
+			if deg != 0 {
+				canvas.Rotate(deg)
+				applied = true
+			}
+		case "skew":
+			vals := splitSpaceComma(args)
+			if len(vals) >= 1 {
+				sx := parseAngle(vals[0])
+				sy := 0.0
+				if len(vals) >= 2 {
+					sy = parseAngle(vals[1])
+				}
+				if sx != 0 || sy != 0 {
+					canvas.Skew(sx, sy)
+					applied = true
+				}
+			}
+		case "skewx":
+			if v := parseAngle(args); v != 0 {
+				canvas.Skew(v, 0)
+				applied = true
+			}
+		case "skewy":
+			if v := parseAngle(args); v != 0 {
+				canvas.Skew(0, v)
+				applied = true
+			}
+		case "translatez":
+			// translateZ on a 2D canvas is a no-op (no perspective).
+			// Parssed for compatibility.
+			_ = parseLength(args)
+		case "translate3d":
+			vals := splitSpaceComma(args)
+			if len(vals) >= 2 {
+				tx := parseLength(vals[0])
+				ty := parseLength(vals[1])
+				if tx != 0 || ty != 0 {
+					canvas.Translate(tx, ty)
+					applied = true
+				}
+			}
+		case "scalez":
+			// scaleZ on a 2D canvas is a no-op.
+		case "scale3d":
+			vals := splitSpaceComma(args)
+			if len(vals) >= 2 {
+				sx := parseScaleValue(vals[0])
+				sy := parseScaleValue(vals[1])
+				if sx != 1 || sy != 1 {
+					canvas.Scale(sx, sy)
+					applied = true
+				}
+			}
+		case "matrix":
+			vals := splitSpaceComma(args)
+			if len(vals) >= 6 {
+				a := parseScaleValue(vals[0])
+				b := parseScaleValue(vals[1])
+				c := parseScaleValue(vals[2])
+				d := parseScaleValue(vals[3])
+				e := parseScaleValue(vals[4])
+				f := parseScaleValue(vals[5])
+				// Build a 3x3 matrix: [a c e; b d f; 0 0 1]
+				m := skia.Matrix{
+					ScaleX: float32(a), SkewX: float32(c), TransX: float32(e),
+					SkewY: float32(b), ScaleY: float32(d), TransY: float32(f),
+					Persp0: 0, Persp1: 0, Persp2: 1,
+				}
+				canvas.Concat(m)
 				applied = true
 			}
 		}

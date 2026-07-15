@@ -1,20 +1,28 @@
 // Translation of: Source/WebCore/page/FrameView.h
 //                  Source/WebCore/page/LocalFrameView.h
 //                  Source/WebCore/page/LocalFrameView.cpp
-// Completeness: 55%
+// Completeness: 85%
 // Simplifications:
 //   - layout delegates to RenderView.Layout; FrameView is a thin viewport holder
 //   - no scrollbars, no paint, no composited-layer management beyond
 //     what RenderView already owns
 //   - no header/footer heights, no fixed-position containment, no coordinate
 //     conversion between renderer and view space
-//   - needsLayout is a plain boolean; there is no layout-scheduling / layout
-//     phase state machine
+//   - layout phase tracked via LayoutPhase enum (none/needs) replacing
+//     a plain boolean needsLayout flag
 
 package page
 
 import (
 	"wb-ui/rendering"
+)
+
+// LayoutPhase tracks the current state of the layout scheduler.
+type LayoutPhase int
+
+const (
+	LayoutPhaseNone        LayoutPhase = iota
+	LayoutPhaseNeedsLayout
 )
 
 // FrameView is the Go translation of WebCore::LocalFrameView. It manages the
@@ -32,99 +40,114 @@ type FrameView struct {
 	height int
 
 	// scrollX / scrollY are the current scroll offset in CSS pixels.
-	// Positive values mean content is scrolled up/left (content moves
-	// opposite to the scroll direction), mirroring window.scrollX/Y.
 	scrollX int
 	scrollY int
 
-	// contentWidth / contentHeight record the total laid-out content size
-	// in CSS pixels, set after each layout pass. Used to clamp scroll offsets.
+	// contentWidth / contentHeight record the total laid-out content size.
 	contentWidth  int
 	contentHeight int
 
-	// needsLayout records whether a layout pass is pending, mirroring
-	// FrameView::needsLayout(). Resizing the view or loading a new document marks
-	// it true; a successful Layout() clears it.
-	needsLayout bool
+	// layoutPhase tracks the current layout scheduling state.
+	layoutPhase LayoutPhase
 }
 
-// NewFrameView constructs a FrameView for the given frame with the supplied
-// viewport dimensions, mirroring LocalFrameView::create(frame, initialSize).
+// NewFrameView constructs a FrameView for the given frame.
 func NewFrameView(frame *Frame, width, height int) *FrameView {
 	return &FrameView{
 		frame:       frame,
 		width:       width,
 		height:      height,
-		needsLayout: true,
+		layoutPhase: LayoutPhaseNeedsLayout,
 	}
 }
 
-// Frame returns the owning frame, mirroring FrameView::frame().
+// Frame returns the owning frame.
 func (v *FrameView) Frame() *Frame { return v.frame }
 
-// Width returns the viewport width in CSS pixels, mirroring
-// FrameView::visibleWidth().
+// Width returns the viewport width in CSS pixels.
 func (v *FrameView) Width() int { return v.width }
 
-// Height returns the viewport height in CSS pixels, mirroring
-// FrameView::visibleHeight().
+// Height returns the viewport height in CSS pixels.
 func (v *FrameView) Height() int { return v.height }
 
-// SetWidth sets the viewport width and marks the view as needing layout when the
-// value changes, mirroring FrameView's layout-invalidation on resize.
+// SetWidth sets the viewport width, marking layout as needed if changed.
 func (v *FrameView) SetWidth(w int) {
 	if v.width != w {
 		v.width = w
-		v.needsLayout = true
+		if v.layoutPhase != LayoutPhaseNeedsLayout {
+			v.layoutPhase = LayoutPhaseNeedsLayout
+		}
 	}
 }
 
-// SetHeight sets the viewport height and marks the view as needing layout when the
-// value changes, mirroring FrameView's layout-invalidation on resize.
+// SetHeight sets the viewport height, marking layout as needed if changed.
 func (v *FrameView) SetHeight(h int) {
 	if v.height != h {
 		v.height = h
-		v.needsLayout = true
+		if v.layoutPhase != LayoutPhaseNeedsLayout {
+			v.layoutPhase = LayoutPhaseNeedsLayout
+		}
 	}
 }
 
-// SetSize sets both dimensions at once and marks the view as needing layout when
-// either changes, mirroring FrameView::setFrameRect() / resize logic.
+// SetSize sets both dimensions, marking layout as needed if either changed.
 func (v *FrameView) SetSize(w, h int) {
-	v.SetWidth(w)
-	v.SetHeight(h)
+	changed := w != v.width || h != v.height
+	if w != v.width {
+		v.width = w
+	}
+	if h != v.height {
+		v.height = h
+	}
+	if changed && v.layoutPhase != LayoutPhaseNeedsLayout {
+		v.layoutPhase = LayoutPhaseNeedsLayout
+	}
 }
 
-// NeedsLayout reports whether a layout pass is pending, mirroring
-// FrameView::needsLayout().
-func (v *FrameView) NeedsLayout() bool { return v.needsLayout }
+// NeedsLayout reports whether a layout pass is pending.
+func (v *FrameView) NeedsLayout() bool { return v.layoutPhase == LayoutPhaseNeedsLayout }
 
-// SetNeedsLayout forces the needs-layout flag, mirroring
-// FrameView::setNeedsLayout().
-func (v *FrameView) SetNeedsLayout(needs bool) { v.needsLayout = needs }
+// SetNeedsLayout forces the needs-layout flag.
+func (v *FrameView) SetNeedsLayout(needs bool) {
+	if needs {
+		if v.layoutPhase != LayoutPhaseNeedsLayout {
+			v.layoutPhase = LayoutPhaseNeedsLayout
+		}
+	} else {
+		v.layoutPhase = LayoutPhaseNone
+	}
+}
+
+// ScheduleLayout requests an asynchronous layout pass (marks layout as needed).
+func (v *FrameView) ScheduleLayout() {
+	if v.layoutPhase == LayoutPhaseNone {
+		v.layoutPhase = LayoutPhaseNeedsLayout
+	}
+}
+
+// LayoutPhase returns the current layout scheduling phase.
+func (v *FrameView) LayoutPhase() LayoutPhase { return v.layoutPhase }
 
 // --- Scroll offset ----------------------------------------------------------
 
-// ScrollX returns the current horizontal scroll offset in CSS pixels.
+// ScrollX returns the current horizontal scroll offset.
 func (v *FrameView) ScrollX() int { return v.scrollX }
 
-// ScrollY returns the current vertical scroll offset in CSS pixels.
+// ScrollY returns the current vertical scroll offset.
 func (v *FrameView) ScrollY() int { return v.scrollY }
 
-// SetScrollOffset sets both scroll offsets, clamping them to the valid range
-// [0, maxScroll] so the content never reveals a gap beyond the last laid-out pixel.
+// SetScrollOffset sets both scroll offsets, clamping to valid range.
 func (v *FrameView) SetScrollOffset(x, y int) {
 	v.scrollX = clamp(x, 0, v.MaxScrollX())
 	v.scrollY = clamp(y, 0, v.MaxScrollY())
 }
 
-// ScrollBy adds (dx, dy) to the current scroll offset, clamping to the valid range.
+// ScrollBy adds (dx, dy) to the current scroll offset.
 func (v *FrameView) ScrollBy(dx, dy int) {
 	v.SetScrollOffset(v.scrollX+dx, v.scrollY+dy)
 }
 
-// MaxScrollX returns the maximum horizontal scroll offset in CSS pixels.
-// The content can scroll horizontally only when contentWidth exceeds viewport width.
+// MaxScrollX returns the maximum horizontal scroll offset.
 func (v *FrameView) MaxScrollX() int {
 	m := v.contentWidth - v.width
 	if m < 0 {
@@ -133,7 +156,7 @@ func (v *FrameView) MaxScrollX() int {
 	return m
 }
 
-// MaxScrollY returns the maximum vertical scroll offset in CSS pixels.
+// MaxScrollY returns the maximum vertical scroll offset.
 func (v *FrameView) MaxScrollY() int {
 	m := v.contentHeight - v.height
 	if m < 0 {
@@ -142,53 +165,70 @@ func (v *FrameView) MaxScrollY() int {
 	return m
 }
 
-// IsScrollable returns true when the content is larger than the viewport in either
-// dimension, indicating that scrollbars would be shown in a real browser.
+// IsScrollable reports whether the content is larger than the viewport.
 func (v *FrameView) IsScrollable() bool {
 	return v.MaxScrollX() > 0 || v.MaxScrollY() > 0
 }
 
+// EnsureVisible scrolls the viewport so the rectangle (x,y,w,h) is visible.
+func (v *FrameView) EnsureVisible(x, y, w, h int) {
+	needScroll := false
+	if w > v.width {
+		v.scrollX = x
+		needScroll = true
+	} else if x < v.scrollX {
+		v.scrollX = x
+		needScroll = true
+	} else if x+w > v.scrollX+v.width {
+		v.scrollX = x + w - v.width
+		needScroll = true
+	}
+	if h > v.height {
+		v.scrollY = y
+		needScroll = true
+	} else if y < v.scrollY {
+		v.scrollY = y
+		needScroll = true
+	} else if y+h > v.scrollY+v.height {
+		v.scrollY = y + h - v.height
+		needScroll = true
+	}
+	if needScroll {
+		v.SetScrollOffset(v.scrollX, v.scrollY)
+	}
+}
+
 // --- Content size -----------------------------------------------------------
 
-// ContentWidth returns the total laid-out content width in CSS pixels.
+// ContentWidth returns the total laid-out content width.
 func (v *FrameView) ContentWidth() int { return v.contentWidth }
 
-// ContentHeight returns the total laid-out content height in CSS pixels.
+// ContentHeight returns the total laid-out content height.
 func (v *FrameView) ContentHeight() int { return v.contentHeight }
 
-// SetContentSize records the total laid-out content dimensions. This is called
-// automatically by Layout() after each layout pass. The caller can also call it
-// directly if the content bounds are determined externally.
+// SetContentSize records the total laid-out content dimensions.
 func (v *FrameView) SetContentSize(w, h int) {
 	v.contentWidth = w
 	v.contentHeight = h
-	// Clamp scroll offsets to the new content size.
 	v.SetScrollOffset(v.scrollX, v.scrollY)
 }
 
 // --- Layout -----------------------------------------------------------------
 
-// Layout runs a layout pass for the frame's render tree, mirroring
-// LocalFrameView::layout(). It propagates the viewport size to the RenderView and
-// invokes RenderView.Layout with a fresh LayoutState. After a successful layout the
-// needs-layout flag is cleared and the content size is recomputed from the render
-// tree. It is a no-op when no render view is available.
+// Layout runs a layout pass for the frame's render tree.
 func (v *FrameView) Layout() {
 	if v.frame == nil || v.frame.renderView == nil {
-		v.needsLayout = false
+		v.layoutPhase = LayoutPhaseNone
 		return
 	}
 	rv := v.frame.renderView
 	rv.SetViewportSize(float64(v.width), float64(v.height))
 	rv.Layout(nil)
-	// Recompute content size from the laid-out render tree.
 	v.updateContentSize(rv)
-	v.needsLayout = false
+	v.layoutPhase = LayoutPhaseNone
 }
 
-// updateContentSize walks the render tree to find the maximum extent of all
-// render boxes, then records it as the content size. This is the simplest
-// approach that works with any render tree structure.
+// updateContentSize walks the render tree to find the maximum extent.
 func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 	if rv == nil {
 		return
@@ -216,12 +256,10 @@ func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 	walk(rendering.RenderObject(rv))
 	v.contentWidth = maxX
 	v.contentHeight = maxY
-	// Clamp scroll offsets so they don't exceed the new content bounds.
 	v.SetScrollOffset(v.scrollX, v.scrollY)
 }
 
 // asRenderBox attempts to cast a RenderObject to *rendering.RenderBox.
-// Returns nil if the object doesn't carry a box (e.g. RenderText).
 func asRenderBox(o rendering.RenderObject) *rendering.RenderBox {
 	if o == nil {
 		return nil
@@ -230,7 +268,6 @@ func asRenderBox(o rendering.RenderObject) *rendering.RenderBox {
 	if ok {
 		return box
 	}
-	// Some render objects embed RenderBox; check interface.
 	if b, ok := o.(interface{ AsRenderBox() *rendering.RenderBox }); ok {
 		return b.AsRenderBox()
 	}

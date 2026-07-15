@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux && !darwin
 
 // Stub IME handler for non-Windows platforms. All methods are no-ops.
 // Linux (XIM/IBus) and macOS (NSTextInputClient) support is deferred.

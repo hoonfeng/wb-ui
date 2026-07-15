@@ -645,6 +645,9 @@ type FunctionBody struct {
 	// IsAsync marks async functions. When true the function execution wraps its
 	// result in a Promise and the await instruction can be used.
 	IsAsync bool
+	// IsGenerator marks generator functions. When true the function returns a
+	// Generator object that manages the suspended execution state.
+	IsGenerator bool
 }
 
 // String returns a debug representation of a JSValue's tag.

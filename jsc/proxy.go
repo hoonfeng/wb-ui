@@ -139,6 +139,116 @@ func proxyConstruct(in *Interpreter, proxy JSValue, args []JSValue) (JSValue, *j
 	return in.construct(pd.target, args)
 }
 
+// proxyOwnKeys implements [[OwnPropertyKeys]] for proxies.
+func proxyOwnKeys(in *Interpreter, proxy JSValue) []string {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "ownKeys", []JSValue{pd.target}); ok {
+		if res.IsObject() {
+			// Convert array-like result to []string
+			var keys []string
+			arr := res.AsObject()
+			if arr.IsArray {
+				for _, elem := range arr.Elements {
+					keys = append(keys, elem.String())
+				}
+			}
+			return keys
+		}
+	}
+	// Default: forward to target
+	if pd.target.IsObject() {
+		var keys []string
+		target := pd.target.AsObject()
+		for k := range target.Properties {
+			keys = append(keys, k)
+		}
+		return keys
+	}
+	return nil
+}
+
+// proxyGetOwnPropertyDescriptor implements [[GetOwnProperty]] for proxies.
+func proxyGetOwnPropertyDescriptor(in *Interpreter, proxy JSValue, prop string) (JSValue, bool) {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "getOwnPropertyDescriptor", []JSValue{pd.target, StringValue(prop)}); ok {
+		return res, true
+	}
+	// Default: no property descriptor
+	return Undefined(), false
+}
+
+// proxyDefineProperty implements [[DefineOwnProperty]] for proxies.
+func proxyDefineProperty(in *Interpreter, proxy JSValue, prop string, desc JSValue) bool {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "defineProperty", []JSValue{pd.target, StringValue(prop), desc}); ok {
+		return res.ToBoolean()
+	}
+	// Default: forward to target
+	if pd.target.IsObject() {
+		pd.target.AsObject().Set(prop, desc)
+		return true
+	}
+	return false
+}
+
+// proxyGetPrototypeOf implements [[GetPrototypeOf]] for proxies.
+func proxyGetPrototypeOf(in *Interpreter, proxy JSValue) *JSObject {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "getPrototypeOf", []JSValue{pd.target}); ok {
+		if res.IsObject() {
+			return res.AsObject()
+		}
+	}
+	// Default
+	if pd.target.IsObject() {
+		return pd.target.AsObject().Prototype
+	}
+	return nil
+}
+
+// proxySetPrototypeOf implements [[SetPrototypeOf]] for proxies.
+func proxySetPrototypeOf(in *Interpreter, proxy JSValue, proto *JSObject) bool {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	protoVal := Undefined()
+	if proto != nil {
+		protoVal = ObjectValue(proto)
+	}
+	if res, ok := callProxyTrap(in, handler, "setPrototypeOf", []JSValue{pd.target, protoVal}); ok {
+		return res.ToBoolean()
+	}
+	// Default
+	if pd.target.IsObject() {
+		pd.target.AsObject().Prototype = proto
+		return true
+	}
+	return false
+}
+
+// proxyPreventExtensions implements [[PreventExtensions]] for proxies.
+func proxyPreventExtensions(in *Interpreter, proxy JSValue) bool {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "preventExtensions", []JSValue{pd.target}); ok {
+		return res.ToBoolean()
+	}
+	return false
+}
+
+// proxyIsExtensible implements [[IsExtensible]] for proxies.
+func proxyIsExtensible(in *Interpreter, proxy JSValue) bool {
+	pd := proxy.AsObject().Internal.(*proxyData)
+	handler := &pd.handler
+	if res, ok := callProxyTrap(in, handler, "isExtensible", []JSValue{pd.target}); ok {
+		return res.ToBoolean()
+	}
+	return true
+}
+
 // newArgsArray creates a JS array from a Go []JSValue.
 func newArgsArray(in *Interpreter, args []JSValue) *JSObject {
 	elems := make([]JSValue, len(args))
