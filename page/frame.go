@@ -64,9 +64,16 @@ type Frame struct {
 	// StyleSheetLoader is an optional callback for loading external stylesheets
 	// referenced by <link rel="stylesheet" href="..."> elements. It receives the
 	// href URL and should return the CSS text, or an error. When nil, external
-	// stylesheets are silently skipped. The WebView sets this to a file-based
-	// loader that reads from the local filesystem.
+	// stylesheets are silently skipped UNLESS a ResourceLoader is set. The WebView
+	// sets this to a file-based loader that reads from the local filesystem.
 	StyleSheetLoader func(href string) (string, error)
+
+	// ResourceLoader is the CachedResourceLoader used to load external resources
+	// (stylesheets, scripts, images, fonts). When non-nil, extractAndAddStyles
+	// uses it to load <link rel="stylesheet"> elements via the async resource
+	// loading pipeline (MemoryCache + ResourceHandle), falling back to
+	// StyleSheetLoader only when ResourceLoader is nil.
+	ResourceLoader *CachedResourceLoader
 }
 
 // NewFrame constructs a Frame attached to the given Page. The frame is given a
@@ -224,7 +231,9 @@ func (f *Frame) extractAndAddStyles() {
 	}
 
 	// Process <link rel="stylesheet"> elements: resolve href via the
-	// StyleSheetLoader callback and add the parsed CSS to the resolver.
+	// ResourceLoader or StyleSheetLoader callback and add the parsed CSS to
+	// the resolver. When ResourceLoader is available it uses the async
+	// resource loading pipeline; otherwise it falls back to StyleSheetLoader.
 	linkElements := f.document.GetElementsByTagName("link")
 	for _, linkEl := range linkElements {
 		l, ok := html5.ToLinkElement(linkEl)
@@ -236,19 +245,68 @@ func (f *Frame) extractAndAddStyles() {
 			continue
 		}
 
-		// Use the custom loader if available; otherwise skip external sheets.
-		if f.StyleSheetLoader == nil {
-			continue
+		if f.ResourceLoader != nil {
+			// Use the async resource loading pipeline. The loaded CSS text
+			// is delivered asynchronously via NotifyFinished; a full async
+			// implementation would defer style resolution until the resource
+			// arrives, but for now the client adds the sheet to the resolver
+			// synchronously on the callback goroutine.
+			f.ResourceLoader.LoadStylesheet(href, &frameStyleSheetClient{
+				frame: f,
+				owner: linkEl,
+				href:  href,
+			})
+		} else if f.StyleSheetLoader != nil {
+			// Synchronous fallback: load and parse immediately.
+			cssText, err := f.StyleSheetLoader(href)
+			if err != nil || strings.TrimSpace(cssText) == "" {
+				continue
+			}
+			sheet := css.NewCSSStyleSheetWithOwner(linkEl, href)
+			p := css.NewParser(cssText)
+			p.ParseStyleSheetInto(sheet)
+			f.resolver.AddStyleSheet(sheet)
+			f.styleSheets = append(f.styleSheets, sheet)
 		}
-		cssText, err := f.StyleSheetLoader(href)
-		if err != nil || strings.TrimSpace(cssText) == "" {
-			continue
-		}
-		sheet := css.NewCSSStyleSheetWithOwner(linkEl, href)
-		p := css.NewParser(cssText)
-		p.ParseStyleSheetInto(sheet)
-		f.resolver.AddStyleSheet(sheet)
-		f.styleSheets = append(f.styleSheets, sheet)
+		// If both ResourceLoader and StyleSheetLoader are nil, skip
+		// external stylesheets silently.
+	}
+}
+
+// frameStyleSheetClient implements CachedResourceClient to handle the
+// asynchronous delivery of an externally loaded stylesheet. When the
+// resource finishes loading, its text content is parsed as CSS and added
+// to the frame's style resolver.
+type frameStyleSheetClient struct {
+	frame *Frame
+	owner dom.Node
+	href  string
+}
+
+// NotifyFinished implements CachedResourceClient. It is called when the
+// stylesheet resource completes loading (successfully or with an error).
+func (c *frameStyleSheetClient) NotifyFinished(resource *CachedResource) {
+	if resource.Status() != CachedResourceStatusLoaded {
+		return
+	}
+	data := resource.Data()
+	if len(data) == 0 {
+		return
+	}
+	cssText := string(data)
+	if strings.TrimSpace(cssText) == "" {
+		return
+	}
+
+	sheet := css.NewCSSStyleSheetWithOwner(c.owner, c.href)
+	p := css.NewParser(cssText)
+	p.ParseStyleSheetInto(sheet)
+	c.frame.resolver.AddStyleSheet(sheet)
+	c.frame.styleSheets = append(c.frame.styleSheets, sheet)
+
+	// Trigger a render tree rebuild so the new styles take effect.
+	if c.frame.renderView != nil {
+		c.frame.view.SetNeedsLayout(true)
 	}
 }
 
