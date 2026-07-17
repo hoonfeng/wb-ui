@@ -643,6 +643,58 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	// Reflect object.
 	g.Set("Reflect", ObjectValue(in.ReflectObject()))
 
+	// ─── Error constructors ────────────────────────────
+	makeError := func(name string) *JSFunction {
+		return NewNativeFunction(name, func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			msg := ""
+			if len(args) > 0 { msg = args[0].ToString() }
+			err := NewObject(in.objectProto)
+			err.Set("name", StringValue(name))
+			err.Set("message", StringValue(msg))
+			return ObjectValue(err)
+		}, 1)
+	}
+	errorCtor := makeError("Error")
+	errorCtor.properties.Set("prototype", ObjectValue(NewObject(in.objectProto)))
+	g.Set("Error", FunctionValue(errorCtor))
+	g.Set("TypeError", FunctionValue(makeError("TypeError")))
+	g.Set("RangeError", FunctionValue(makeError("RangeError")))
+	g.Set("SyntaxError", FunctionValue(makeError("SyntaxError")))
+	g.Set("ReferenceError", FunctionValue(makeError("ReferenceError")))
+
+	// ─── RegExp constructor ────────────────────────────
+	regCtor := NewNativeFunction("RegExp", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		pat := ""
+		flags := ""
+		if len(args) > 0 { pat = args[0].ToString() }
+		if len(args) > 1 { flags = args[1].ToString() }
+		re := NewObject(in.objectProto)
+		re.Set("source", StringValue(pat))
+		re.Set("flags", StringValue(flags))
+		re.Set("lastIndex", NumberValue(0))
+		re.ClassName = "RegExp"
+		return ObjectValue(re)
+	}, 2)
+	regCtor.properties.Set("prototype", ObjectValue(NewObject(in.objectProto)))
+	g.Set("RegExp", FunctionValue(regCtor))
+
+	// ─── Date constructor ──────────────────────────────
+	dateCtor := NewNativeFunction("Date", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		d := NewObject(in.objectProto)
+		d.ClassName = "Date"
+		if len(args) == 1 && args[0].IsNumber() {
+			d.Set("value", NumberValue(args[0].AsNumber()))
+		} else if len(args) > 0 {
+			// Simplified: parse first string arg only
+			d.Set("value", StringValue(args[0].ToString()))
+		} else {
+			d.Set("value", StringValue("(date)"))
+		}
+		return ObjectValue(d)
+	}, 7)
+	dateCtor.properties.Set("prototype", ObjectValue(NewObject(in.objectProto)))
+	g.Set("Date", FunctionValue(dateCtor))
+
 	// ─── Function.prototype methods ────────────────────
 	fnProto := in.functionProto
 	fnProto.Set("call", FunctionValue(NewNativeFunction("call",
