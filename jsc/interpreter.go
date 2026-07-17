@@ -424,6 +424,12 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 		case OpNewClosure:
 			fn := NewScriptFunction(inst.Name, inst.Body, frameEnv, len(inst.Body.Params))
 			fn.properties.Prototype = in.functionProto
+			// Every function has a 'prototype' property (an object with a 'constructor').
+			if _, hasProto := fn.properties.Properties["prototype"]; !hasProto {
+				proto := NewObject(in.objectProto)
+				proto.Set("constructor", FunctionValue(fn))
+				fn.properties.Set("prototype", ObjectValue(proto))
+			}
 			push(FunctionValue(fn))
 		case OpReturn:
 			v := pop()
@@ -855,7 +861,7 @@ func (in *Interpreter) construct(callee JSValue, args []JSValue) (JSValue, *jsEx
 	}
 	if fn.Closure != nil {
 		newObj := NewObject(in.objectProto)
-		newObj.Prototype = in.functionProto
+		newObj.Prototype = in.objectProto
 		// Set the instance's [[Prototype]] to fn.prototype if it is an object.
 		if proto, ok := fn.properties.Get("prototype"); ok && proto.IsObject() {
 			newObj.Prototype = proto.AsObject()
