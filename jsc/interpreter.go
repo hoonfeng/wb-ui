@@ -138,6 +138,31 @@ type Interpreter struct {
 // SetupGlobal must be called (or GlobalObject installed) before running scripts.
 func NewInterpreter() *Interpreter {
 	objectProto := &JSObject{Properties: make(map[string]JSValue), ClassName: "Object"}
+	// Install Object.prototype methods
+	objectProto.Set("toString", FunctionValue(NewNativeFunction("toString", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if this.IsUndefined() { return StringValue("undefined") }
+		if this.IsNull() { return StringValue("null") }
+		if this.IsString() { return this }
+		if this.IsNumber() { return StringValue(fmt.Sprintf("%g", this.AsNumber())) }
+		if this.IsBoolean() { return StringValue(fmt.Sprintf("%t", this.AsBoolean())) }
+		// For objects, return "[object ClassName]"
+		cn := "Object"
+		if this.IsObject() {
+			if o := this.AsObject(); o != nil && o.ClassName != "" {
+				cn = o.ClassName
+			}
+		}
+		return StringValue(fmt.Sprintf("[object %s]", cn))
+	}, 0)))
+	objectProto.Set("hasOwnProperty", FunctionValue(NewNativeFunction("hasOwnProperty", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if !this.IsObject() { return BooleanValue(false) }
+		key := ""
+		if len(args) > 0 { key = args[0].ToString() }
+		obj := this.AsObject()
+		if obj == nil { return BooleanValue(false) }
+		_, found := obj.Get(key)
+		return BooleanValue(found)
+	}, 1)))
 	functionProto := &JSObject{Properties: make(map[string]JSValue), Prototype: objectProto, ClassName: "Function"}
 	arrayProto := &JSObject{Properties: make(map[string]JSValue), Prototype: objectProto, ClassName: "Array"}
 	global := &JSObject{Properties: make(map[string]JSValue), ClassName: "Global"}
