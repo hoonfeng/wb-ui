@@ -325,6 +325,8 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 		g.emitForIn(n)
 	case *WhileStatement:
 		g.emitWhile(n)
+	case *DoWhileStatement:
+		g.emitDoWhile(n)
 	case *SwitchStatement:
 		g.emitSwitch(n)
 	case *ReturnStatement:
@@ -512,6 +514,26 @@ func (g *BytecodeGenerator) emitSwitch(n *SwitchStatement) {
 		g.patchJump(idx)
 	}
 	g.switchStack = g.switchStack[:switchBreakIdx]
+}
+
+// emitDoWhile compiles a do-while loop.
+func (g *BytecodeGenerator) emitDoWhile(n *DoWhileStatement) {
+	frame := &loopFrame{}
+	g.loopStack = append(g.loopStack, frame)
+	loopStart := g.here()
+	frame.startPC = loopStart
+	frame.continueTargets = append(frame.continueTargets, loopStart)
+	if n.Body != nil {
+		g.emitStmt(n.Body)
+	}
+	g.emitExpr(n.Test)
+	exitJump := g.emitJump(OpJumpIfFalse)
+	g.emitJumpTo(loopStart)
+	g.patchJump(exitJump)
+	for _, idx := range frame.breakTargets {
+		g.patchJump(idx)
+	}
+	g.loopStack = g.loopStack[:len(g.loopStack)-1]
 }
 
 // emitForIn compiles a for-in/for-of loop (string-key iteration only).

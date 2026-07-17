@@ -138,6 +138,16 @@ type WhileStatement struct {
 func (n *WhileStatement) nodePos() (int, int) { return n.Line, n.Col }
 func (n *WhileStatement) stmtNode()           {}
 
+// DoWhileStatement is 'do body while (test);'.
+type DoWhileStatement struct {
+	Body      Stmt
+	Test      Expr
+	Line, Col int
+}
+
+func (n *DoWhileStatement) nodePos() (int, int) { return n.Line, n.Col }
+func (n *DoWhileStatement) stmtNode()           {}
+
 // SwitchCase is a single case/default clause in a switch statement.
 type SwitchCase struct {
 	Test     Expr   // nil for default
@@ -648,12 +658,18 @@ func (p *Parser) parseStatement() Stmt {
 			return p.parseForStatement()
 		case KeywordWhile:
 			return p.parseWhileStatement()
+		case KeywordDo:
+			return p.parseDoWhileStatement()
 		case KeywordReturn:
 			return p.parseReturnStatement()
 		case KeywordSwitch:
 			return p.parseSwitchStatement()
 		case KeywordBreak:
 			p.advance()
+			// Handle optional label: 'break label'
+			if p.current.Kind == TokenIdentifier {
+				p.advance() // consume label
+			}
 			p.consumeSemicolon()
 			return &BreakStatement{Line: tok.Line, Col: tok.Col}
 		case KeywordContinue:
@@ -756,26 +772,38 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 				p.errorf("bad object destructuring pattern")
 				break
 			}
-			p.expect(TokenAssign)
-			rhs := p.parseAssignment()
-			for _, f := range fields {
-				init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
-				vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				rhs := p.parseAssignment()
+				for _, f := range fields {
+					init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
+				}
+			} else {
+				for _, f := range fields {
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: nil})
+				}
 			}
 		} else if p.current.Kind == TokenOpenBracket {
 			// Array destructuring: const [a, b] = arr
 			names, defaults := p.parseArrayDestructWithDefaults()
-			_ = defaults // ignore defaults for now
-			p.expect(TokenAssign)
-			rhs := p.parseAssignment()
-			for j, nm := range names {
-				var init Expr
-				if defaults != nil && j < len(defaults) && defaults[j] != nil {
-					init = defaults[j].(Expr)
-				} else {
-					init = &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+			_ = defaults
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				rhs := p.parseAssignment()
+				for j, nm := range names {
+					var init Expr
+					if defaults != nil && j < len(defaults) && defaults[j] != nil {
+						init = defaults[j].(Expr)
+					} else {
+						init = &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+					}
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: init})
 				}
-				vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: init})
+			} else {
+				for _, nm := range names {
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: nil})
+				}
 			}
 		} else if p.current.Kind != TokenIdentifier {
 			p.errorf("expected identifier in declaration")
@@ -1087,6 +1115,19 @@ func (p *Parser) parseWhileStatement() *WhileStatement {
 	p.expect(TokenCloseParen)
 	body := p.parseStatement()
 	return &WhileStatement{Test: test, Body: body, Line: tok.Line, Col: tok.Col}
+}
+
+// parseDoWhileStatement parses 'do body while (test);'.
+func (p *Parser) parseDoWhileStatement() *DoWhileStatement {
+	tok := p.current
+	p.advance() // 'do'
+	body := p.parseStatement()
+	p.expect(KeywordToken(KeywordWhile))
+	p.expect(TokenOpenParen)
+	test := p.parseExpression()
+	p.expect(TokenCloseParen)
+	p.consumeSemicolon()
+	return &DoWhileStatement{Body: body, Test: test, Line: tok.Line, Col: tok.Col}
 }
 
 // parseReturnStatement parses 'return [expr]'.
