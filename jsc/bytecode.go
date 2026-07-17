@@ -468,50 +468,85 @@ func (g *BytecodeGenerator) emitWhile(n *WhileStatement) {
 	g.loopStack = g.loopStack[:len(g.loopStack)-1]
 }
 
-// emitSwitch compiles a switch statement as a chained comparison with jumps.
+// emitSwitch compiles a switch statement as a chained if-else comparison.
+// Each test+body pair is emitted sequentially with proper jump targets,
+// matching JS engine behavior (fallthrough not yet supported — each body
+// jumps to end after completion).
 func (g *BytecodeGenerator) emitSwitch(n *SwitchStatement) {
 	switchBreakIdx := len(g.switchStack)
 	g.switchStack = append(g.switchStack, -1) // marker
 
-	// Load discriminant once and store in a temp var
+	// ── Phase 1: stash discriminant ──
 	g.emitExpr(n.Discriminant)
 	discTemp := "__sw" + strconv.Itoa(switchBreakIdx)
 	g.emit(Instruction{Op: OpDeclareVar, Name: discTemp})
 	g.emit(Instruction{Op: OpStoreVar, Name: discTemp})
 	g.emit(Instruction{Op: OpPop})
 
-	caseJumps := make([]int, 0, len(n.Cases))
-	for _, c := range n.Cases {
+	// ── Phase 2: emit case test+body pairs (if-else chain) ──
+	// Record the index of each case's first instruction (test) for patching fail jumps.
+	caseStarts := make([]int, len(n.Cases))
+	caseBodyEndJumps := make([]int, len(n.Cases)) // OpJump → end after each body
+	failJumps := make([]int, len(n.Cases))        // OpJumpIfFalse after each test
+	for i := range n.Cases {
+		caseStarts[i] = -1
+		caseBodyEndJumps[i] = -1
+		failJumps[i] = -1
+	}
+
+	for i, c := range n.Cases {
+		caseStarts[i] = g.here()
+
 		if c.Test != nil {
+			// Emit test: temp === testExpr
 			g.emit(Instruction{Op: OpLoadVar, Name: discTemp})
 			g.emitExpr(c.Test)
 			g.emit(Instruction{Op: OpBinOp, IntArg: int(TokenStrictEqual)})
-			caseJumps = append(caseJumps, g.emitJump(OpJumpIfFalse))
-		} else {
-			caseJumps = append(caseJumps, -1)
+			// If false (no match), skip this body → jump to next case
+			failJumps[i] = g.emitJump(OpJumpIfFalse)
 		}
-	}
-	endJump := g.emitJump(OpJump)
 
-	// Emit case bodies
-	for i, c := range n.Cases {
-		bodyStart := g.here()
-		if i > 0 && caseJumps[i-1] >= 0 {
-			g.patchJump(caseJumps[i-1])
-		}
+		// Emit case body
 		for _, st := range c.Body {
 			g.emitStmt(st)
 		}
-		if i < len(n.Cases)-1 {
-			g.emitJumpTo(bodyStart) // fallthrough
+
+		// After body, jump to end (prevents fallthrough into next case)
+		caseBodyEndJumps[i] = len(g.code)
+		g.emit(Instruction{Op: OpJump, IntArg: -1}) // patched to end below
+	}
+
+	// ── Phase 3: patch jumps ──
+	endPos := g.here()
+
+	// Patch each failJump to the start of the next case (skip this body)
+	for i, c := range n.Cases {
+		if c.Test == nil || failJumps[i] < 0 {
+			continue
+		}
+		// Find the next case to jump to on test failure
+		target := endPos
+		for j := i + 1; j < len(n.Cases); j++ {
+			if caseStarts[j] >= 0 {
+				target = caseStarts[j]
+				break
+			}
+		}
+		g.code[failJumps[i]].IntArg = target
+	}
+
+	// Patch each body-end jump to endPos
+	for _, idx := range caseBodyEndJumps {
+		if idx >= 0 {
+			g.code[idx].IntArg = endPos
 		}
 	}
 
-	g.patchJump(endJump)
-
 	// Patch break statements inside this switch
 	for _, idx := range g.switchStack[switchBreakIdx+1:] {
-		g.patchJump(idx)
+		if idx >= 0 && idx < len(g.code) {
+			g.code[idx].IntArg = endPos
+		}
 	}
 	g.switchStack = g.switchStack[:switchBreakIdx]
 }
