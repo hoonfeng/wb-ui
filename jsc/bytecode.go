@@ -12,6 +12,8 @@
 
 package jsc
 
+import "strconv"
+
 // Opcode enumerates the bytecode operations, mirroring the OpcodeID enum in
 // bytecode/Opcode.h. The Go port uses a flat enumeration; operands are carried in the
 // Instruction fields rather than packed into a tagged union.
@@ -161,13 +163,37 @@ func CompileProgram(prog *Program) *FunctionBody {
 }
 
 // compileFunction compiles a function expression/declaration body into a FunctionBody.
-func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool) *FunctionBody {
+func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool, destructs []DestructInfo) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = isArrow
 	// Parameters become local variables.
 	for _, p := range params {
 		g.declareVar(p)
+	}
+	// Emit destructuring code for array/object params.
+	for _, d := range destructs {
+		if d.IsArray {
+			for j, nm := range d.Names {
+				// nm = params[d.ParamIdx][j]
+				g.emit(Instruction{Op: OpLoadVar, Name: params[d.ParamIdx]})
+				g.emit(Instruction{Op: OpLoadConst, Value: NumberValue(float64(j))})
+				g.emit(Instruction{Op: OpLoadIndex})
+				g.emit(Instruction{Op: OpDeclareVar, Name: nm})
+				g.emit(Instruction{Op: OpStoreVar, Name: nm})
+				g.emit(Instruction{Op: OpPop})
+			}
+		} else {
+			for _, nm := range d.Names {
+				// nm = params[d.ParamIdx][nm]
+				g.emit(Instruction{Op: OpLoadVar, Name: params[d.ParamIdx]})
+				g.emit(Instruction{Op: OpLoadConst, Value: StringValue(nm)})
+				g.emit(Instruction{Op: OpLoadIndex})
+				g.emit(Instruction{Op: OpDeclareVar, Name: nm})
+				g.emit(Instruction{Op: OpStoreVar, Name: nm})
+				g.emit(Instruction{Op: OpPop})
+			}
+		}
 	}
 	// Hoist inner function declarations.
 	for _, st := range body {
@@ -203,6 +229,7 @@ type BytecodeGenerator struct {
 	isArrow     bool
 	scopeLocals map[string]bool
 	loopStack   []*loopFrame
+	switchStack []int   // break target indices for switch statements
 	tryDepth    int
 }
 
@@ -247,7 +274,7 @@ func (g *BytecodeGenerator) here() int { return len(g.code) }
 
 // emitFunctionHoisted emits a NewClosure and StoreVar for a hoisted function declaration.
 func (g *BytecodeGenerator) emitFunctionHoisted(fd *FunctionDeclaration) {
-	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator)
+	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator, nil)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: fd.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: fd.Name})
 	g.emit(Instruction{Op: OpPop})
@@ -298,6 +325,8 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 		g.emitForIn(n)
 	case *WhileStatement:
 		g.emitWhile(n)
+	case *SwitchStatement:
+		g.emitSwitch(n)
 	case *ReturnStatement:
 		if n.Argument != nil {
 			g.emitExpr(n.Argument)
@@ -306,12 +335,15 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 		}
 		g.emit(Instruction{Op: OpReturn})
 	case *BreakStatement:
-		if len(g.loopStack) == 0 {
-			return
+		if len(g.loopStack) > 0 {
+			frame := g.loopStack[len(g.loopStack)-1]
+			idx := g.emitJump(OpJump)
+			frame.breakTargets = append(frame.breakTargets, idx)
+		} else if len(g.switchStack) > 0 {
+			idx := g.emitJump(OpJump)
+			g.switchStack = append(g.switchStack, idx)
 		}
-		frame := g.loopStack[len(g.loopStack)-1]
-		idx := g.emitJump(OpJump)
-		frame.breakTargets = append(frame.breakTargets, idx)
+		// If neither loop nor switch context, break is a no-op (outer context).
 	case *ContinueStatement:
 		if len(g.loopStack) == 0 {
 			return
@@ -432,6 +464,54 @@ func (g *BytecodeGenerator) emitWhile(n *WhileStatement) {
 		g.patchJump(idx)
 	}
 	g.loopStack = g.loopStack[:len(g.loopStack)-1]
+}
+
+// emitSwitch compiles a switch statement as a chained comparison with jumps.
+func (g *BytecodeGenerator) emitSwitch(n *SwitchStatement) {
+	switchBreakIdx := len(g.switchStack)
+	g.switchStack = append(g.switchStack, -1) // marker
+
+	// Load discriminant once and store in a temp var
+	g.emitExpr(n.Discriminant)
+	discTemp := "__sw" + strconv.Itoa(switchBreakIdx)
+	g.emit(Instruction{Op: OpDeclareVar, Name: discTemp})
+	g.emit(Instruction{Op: OpStoreVar, Name: discTemp})
+	g.emit(Instruction{Op: OpPop})
+
+	caseJumps := make([]int, 0, len(n.Cases))
+	for _, c := range n.Cases {
+		if c.Test != nil {
+			g.emit(Instruction{Op: OpLoadVar, Name: discTemp})
+			g.emitExpr(c.Test)
+			g.emit(Instruction{Op: OpBinOp, IntArg: int(TokenStrictEqual)})
+			caseJumps = append(caseJumps, g.emitJump(OpJumpIfFalse))
+		} else {
+			caseJumps = append(caseJumps, -1)
+		}
+	}
+	endJump := g.emitJump(OpJump)
+
+	// Emit case bodies
+	for i, c := range n.Cases {
+		bodyStart := g.here()
+		if i > 0 && caseJumps[i-1] >= 0 {
+			g.patchJump(caseJumps[i-1])
+		}
+		for _, st := range c.Body {
+			g.emitStmt(st)
+		}
+		if i < len(n.Cases)-1 {
+			g.emitJumpTo(bodyStart) // fallthrough
+		}
+	}
+
+	g.patchJump(endJump)
+
+	// Patch break statements inside this switch
+	for _, idx := range g.switchStack[switchBreakIdx+1:] {
+		g.patchJump(idx)
+	}
+	g.switchStack = g.switchStack[:switchBreakIdx]
 }
 
 // emitForIn compiles a for-in/for-of loop (string-key iteration only).
@@ -563,6 +643,12 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		g.emit(Instruction{Op: OpLoadArray, IntArg: len(n.Elements)})
 	case *ObjectExpression:
 		for _, prop := range n.Properties {
+			if prop.Kind == "spread" {
+				// Spread properties: evaluate the expression but ignore result for now
+				g.emitExpr(prop.Spread)
+				g.emit(Instruction{Op: OpPop})
+				continue
+			}
 			// Property keys are names, not variable references. Identifier keys become
 			// string constants; literal (string/number) keys pass through unchanged.
 			if id, ok := prop.Key.(*Identifier); ok && !prop.Computed {
@@ -574,13 +660,13 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		}
 		g.emit(Instruction{Op: OpLoadObject, IntArg: len(n.Properties)})
 	case *FunctionExpression:
-		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync, n.IsGenerator)
+		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync, n.IsGenerator, nil)
 		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	case *ArrowFunction:
-		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync, n.IsGenerator)
+		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync, n.IsGenerator, n.Destructuring)
 		if n.IsExpr {
 			// Wrap a concise-body expression so the function returns it.
-			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync, n.IsGenerator)
+			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync, n.IsGenerator, n.Destructuring)
 		}
 		g.emit(Instruction{Op: OpNewClosure, Body: body})
 	case *TemplateLiteral:
@@ -624,12 +710,34 @@ func stmtsFromNode(body Node) []Stmt {
 }
 
 // compileArrowExpr compiles an arrow function with a concise expression body.
-func compileArrowExpr(params []string, body Expr, isAsync bool, isGenerator bool) *FunctionBody {
+func compileArrowExpr(params []string, body Expr, isAsync bool, isGenerator bool, destructs []DestructInfo) *FunctionBody {
 	g := newGenerator()
 	g.params = params
 	g.isArrow = true
 	for _, p := range params {
 		g.declareVar(p)
+	}
+	// Emit destructuring code for array/object params.
+	for _, d := range destructs {
+		if d.IsArray {
+			for j, nm := range d.Names {
+				g.emit(Instruction{Op: OpLoadVar, Name: params[d.ParamIdx]})
+				g.emit(Instruction{Op: OpLoadConst, Value: NumberValue(float64(j))})
+				g.emit(Instruction{Op: OpLoadIndex})
+				g.emit(Instruction{Op: OpDeclareVar, Name: nm})
+				g.emit(Instruction{Op: OpStoreVar, Name: nm})
+				g.emit(Instruction{Op: OpPop})
+			}
+		} else {
+			for _, nm := range d.Names {
+				g.emit(Instruction{Op: OpLoadVar, Name: params[d.ParamIdx]})
+				g.emit(Instruction{Op: OpLoadConst, Value: StringValue(nm)})
+				g.emit(Instruction{Op: OpLoadIndex})
+				g.emit(Instruction{Op: OpDeclareVar, Name: nm})
+				g.emit(Instruction{Op: OpStoreVar, Name: nm})
+				g.emit(Instruction{Op: OpPop})
+			}
+		}
 	}
 	g.emitExpr(body)
 	g.emit(Instruction{Op: OpReturn})

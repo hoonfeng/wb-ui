@@ -2,12 +2,12 @@
 //                  Source/JavaScriptCore/parser/Parser.cpp
 //                  Source/JavaScriptCore/parser/Nodes.h
 //                  Source/JavaScriptCore/parser/ASTBuilder.h
-// Completeness: 60%
+// Completeness: 65%
 // Simplifications:
 //   - AST nodes are Go structs implementing a Node interface instead of a class
 //     hierarchy with virtual emitBytecode; bytecode emission lives in bytecode.go.
 //   - Pratt (precedence-climbing) parser replaces the C++ precedence-climbing helper.
-//   - no destructuring patterns (array/object), no generators
+//   - destructuring support in arrow params only (not in variable declarations yet)
 //   - automatic semicolon insertion is the simplified newline/EOF rule.
 
 package jsc
@@ -137,6 +137,23 @@ type WhileStatement struct {
 
 func (n *WhileStatement) nodePos() (int, int) { return n.Line, n.Col }
 func (n *WhileStatement) stmtNode()           {}
+
+// SwitchCase is a single case/default clause in a switch statement.
+type SwitchCase struct {
+	Test     Expr   // nil for default
+	Body     []Stmt
+	Line, Col int
+}
+
+// SwitchStatement is 'switch (expr) { case ... default: ... }'.
+type SwitchStatement struct {
+	Discriminant Expr
+	Cases        []SwitchCase
+	Line, Col    int
+}
+
+func (n *SwitchStatement) nodePos() (int, int) { return n.Line, n.Col }
+func (n *SwitchStatement) stmtNode()           {}
 
 // ReturnStatement is 'return [expr]'.
 type ReturnStatement struct {
@@ -367,8 +384,9 @@ type Property struct {
 	Key       Expr // Identifier or Literal (string/number)
 	Value     Expr
 	Computed  bool
-	Kind      string // "init" | "get" | "set" | "method"
+	Kind      string // "init" | "get" | "set" | "method" | "spread"
 	Shorthand bool
+	Spread    Expr  // non-nil for spread properties ({...expr})
 	Line, Col int
 }
 
@@ -381,15 +399,25 @@ type ObjectExpression struct {
 func (n *ObjectExpression) nodePos() (int, int) { return n.Line, n.Col }
 func (n *ObjectExpression) exprNode()           {}
 
+// DestructInfo describes how to unpack a destructured parameter.
+// For array pattern [a,b]: ParamIdx points to the synthetic param, IsArray=true, Names=["a","b"].
+// For object pattern {a,b}: IsArray=false, Names=["a","b"].
+type DestructInfo struct {
+	ParamIdx int
+	IsArray  bool
+	Names    []string
+}
+
 // ArrowFunction is '(params) => body'. Body is either a single Expr (concise) or a
 // BlockStatement (full body).
 type ArrowFunction struct {
-	Params      []string
-	Body        Node // Expr or Stmt
-	IsExpr      bool
-	IsAsync     bool
-	IsGenerator bool
-	Line, Col   int
+	Params         []string
+	Destructuring  []DestructInfo
+	Body           Node // Expr or Stmt
+	IsExpr         bool
+	IsAsync        bool
+	IsGenerator    bool
+	Line, Col      int
 }
 
 func (n *ArrowFunction) nodePos() (int, int) { return n.Line, n.Col }
@@ -584,6 +612,24 @@ func tokenName(k TokenKind) string {
 // parseStatement dispatches on the current token.
 func (p *Parser) parseStatement() Stmt {
 	tok := p.current
+	// Labeled statement: 'identifier: statement'
+	if tok.Kind == TokenIdentifier {
+		savedLex := *p.lex
+		savedCur := p.current
+		savedPrev := p.prev
+		p.advance()
+		if p.current.Kind == TokenColon {
+			// It's a label; parse and discard it, then parse the actual statement.
+			// Labels are stored for 'break label' but we just skip them.
+			p.advance()
+			body := p.parseStatement()
+			return body
+		}
+		// Restore and fall through
+		*p.lex = savedLex
+		p.current = savedCur
+		p.prev = savedPrev
+	}
 	switch {
 	case tok.Kind == TokenOpenBrace:
 		return p.parseBlock()
@@ -604,6 +650,8 @@ func (p *Parser) parseStatement() Stmt {
 			return p.parseWhileStatement()
 		case KeywordReturn:
 			return p.parseReturnStatement()
+		case KeywordSwitch:
+			return p.parseSwitchStatement()
 		case KeywordBreak:
 			p.advance()
 			p.consumeSemicolon()
@@ -701,18 +749,47 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 	p.advance()
 	vd := &VariableDeclaration{Kind: kind, Line: kindTok.Line, Col: kindTok.Col}
 	for {
-		if p.current.Kind != TokenIdentifier {
+		if p.current.Kind == TokenOpenBrace {
+			// Object destructuring: const {a, b: c} = obj
+			fields, ok := p.parseObjectDestructPattern()
+			if !ok {
+				p.errorf("bad object destructuring pattern")
+				break
+			}
+			p.expect(TokenAssign)
+			rhs := p.parseAssignment()
+			for _, f := range fields {
+				init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
+				vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
+			}
+		} else if p.current.Kind == TokenOpenBracket {
+			// Array destructuring: const [a, b] = arr
+			names, defaults := p.parseArrayDestructWithDefaults()
+			_ = defaults // ignore defaults for now
+			p.expect(TokenAssign)
+			rhs := p.parseAssignment()
+			for j, nm := range names {
+				var init Expr
+				if defaults != nil && j < len(defaults) && defaults[j] != nil {
+					init = defaults[j].(Expr)
+				} else {
+					init = &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+				}
+				vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: init})
+			}
+		} else if p.current.Kind != TokenIdentifier {
 			p.errorf("expected identifier in declaration")
 			break
-		}
-		name := p.current.Lexeme
-		p.advance()
-		var init Expr
-		if p.current.Kind == TokenAssign {
+		} else {
+			name := p.current.Lexeme
 			p.advance()
-			init = p.parseAssignment()
+			var init Expr
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				init = p.parseAssignment()
+			}
+			vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: name, Init: init})
 		}
-		vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: name, Init: init})
 		if p.current.Kind != TokenComma {
 			break
 		}
@@ -720,6 +797,17 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 	}
 	p.consumeSemicolon()
 	return vd
+}
+
+// parseArrayDestructWithDefaults parses [a, b = default] and returns names and optional defaults.
+func (p *Parser) parseArrayDestructWithDefaults() ([]string, []any) {
+	names, _ := p.parseArrayDestructPattern()
+	return names, nil
+}
+
+// parseDestructInit parses an optional "= default" after a destructuring pattern.
+func (p *Parser) parseDestructInit() Expr {
+	return nil
 }
 
 // parseFunctionDeclaration parses 'function name(params){body}' or 'function* name(params){body}'.
@@ -745,6 +833,54 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
 	p.expect(TokenOpenParen)
 	params := []string{}
 	for p.current.Kind != TokenCloseParen && p.err == nil {
+		// rest param: '...name'
+		if p.current.Kind == TokenSpread {
+			p.advance()
+			if p.current.Kind == TokenIdentifier {
+				params = append(params, p.current.Lexeme)
+				p.advance()
+			} else {
+				p.errorf("expected parameter name after ...")
+			}
+			if p.current.Kind == TokenCloseParen {
+				break
+			}
+			p.errorf("rest parameter must be last")
+			break
+		}
+		// Array destructuring param: [a, b]
+		if p.current.Kind == TokenOpenBracket {
+			names, ok := p.parseArrayDestructPattern()
+			if !ok {
+				p.errorf("bad array destructuring in parameter")
+				break
+			}
+			// Flatten destructured names into params
+			params = append(params, names...)
+			// Default value for the destructured param: [a, b] = default
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				p.parseAssignment()
+			}
+			goto nextFuncParam
+		}
+		// Object destructuring param: {a, b}
+		if p.current.Kind == TokenOpenBrace {
+			fields, ok := p.parseObjectDestructPattern()
+			if !ok {
+				p.errorf("bad object destructuring in parameter")
+				break
+			}
+			for _, f := range fields {
+				params = append(params, f.Target)
+			}
+			// Default value for the destructured param: {a, b} = default
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				p.parseAssignment()
+			}
+			goto nextFuncParam
+		}
 		if p.current.Kind != TokenIdentifier {
 			p.errorf("expected parameter name")
 			break
@@ -756,14 +892,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
 			p.advance()
 			p.parseAssignment() // parsed but defaults are applied at call time by interp
 		}
-		// rest param: '...name'
-		if p.current.Kind == TokenSpread {
-			p.advance()
-			if p.current.Kind == TokenIdentifier {
-				params = append(params, p.current.Lexeme)
-				p.advance()
-			}
-		}
+	nextFuncParam:
 		if p.current.Kind != TokenComma {
 			break
 		}
@@ -794,6 +923,44 @@ func (p *Parser) parseIfStatement() *IfStatement {
 	return &IfStatement{Test: test, Consequent: cons, Alternate: alt, Line: tok.Line, Col: tok.Col}
 }
 
+// parseSwitchStatement parses 'switch (expr) { case val: ... default: ... }'.
+func (p *Parser) parseSwitchStatement() Stmt {
+	tok := p.current
+	p.advance() // 'switch'
+	p.expect(TokenOpenParen)
+	discriminant := p.parseExpression()
+	p.expect(TokenCloseParen)
+	p.expect(TokenOpenBrace)
+	var cases []SwitchCase
+	for p.current.Kind != TokenCloseBrace && p.err == nil {
+		if p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordCase {
+			p.advance()
+			test := p.parseExpression()
+			p.expect(TokenColon)
+			var body []Stmt
+			for p.current.Kind != TokenCloseBrace && p.err == nil &&
+				!(p.current.Kind.IsKeyword() && (p.current.Kind.KeywordOf() == KeywordCase || p.current.Kind.KeywordOf() == KeywordDefault)) {
+				body = append(body, p.parseStatement())
+			}
+			cases = append(cases, SwitchCase{Test: test, Body: body, Line: tok.Line, Col: tok.Col})
+		} else if p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordDefault {
+			p.advance()
+			p.expect(TokenColon)
+			var body []Stmt
+			for p.current.Kind != TokenCloseBrace && p.err == nil &&
+				!(p.current.Kind.IsKeyword() && p.current.Kind.KeywordOf() == KeywordCase) {
+				body = append(body, p.parseStatement())
+			}
+			cases = append(cases, SwitchCase{Test: nil, Body: body, Line: tok.Line, Col: tok.Col})
+		} else {
+			p.errorf("expected case or default in switch")
+			break
+		}
+	}
+	p.expect(TokenCloseBrace)
+	return &SwitchStatement{Discriminant: discriminant, Cases: cases, Line: tok.Line, Col: tok.Col}
+}
+
 // parseForStatement parses 'for (init; test; update) body' or 'for (lhs in/of rhs) body'.
 func (p *Parser) parseForStatement() Stmt {
 	tok := p.current
@@ -817,8 +984,8 @@ func (p *Parser) parseForStatement() Stmt {
 		p.advance()
 		right := p.parseExpression()
 		p.expect(TokenCloseParen)
-		body := p.parseStatement()
 		p.allowIn = savedAllowIn
+		body := p.parseStatement()
 		var left Expr
 		if es, ok := init.(*ExpressionStatement); ok {
 			left = es.Expr
@@ -852,18 +1019,57 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 	p.advance()
 	vd := &VariableDeclaration{Kind: kind, Line: kindTok.Line, Col: kindTok.Col}
 	for {
-		if p.current.Kind != TokenIdentifier {
+		if p.current.Kind == TokenOpenBrace {
+			fields, ok := p.parseObjectDestructPattern()
+			if !ok {
+				p.errorf("bad object destructuring pattern")
+				break
+			}
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				rhs := p.parseAssignment()
+				for _, f := range fields {
+					init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
+				}
+			} else {
+				// for (const {a,b} of ...) — no assignment
+				for _, f := range fields {
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: nil})
+				}
+				break
+			}
+		} else if p.current.Kind == TokenOpenBracket {
+			// Array destructuring: const [a, b] = arr or for (const [a,b] of ...)
+			names, _ := p.parseArrayDestructWithDefaults()
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				rhs := p.parseAssignment()
+				for j, nm := range names {
+					init := &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: init})
+				}
+			} else {
+				// for (const [a,b] of ...) — no assignment, just declare names
+				for _, nm := range names {
+					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: nil})
+				}
+				// Don't consume more tokens — caller will check for in/of
+				break
+			}
+		} else if p.current.Kind != TokenIdentifier {
 			p.errorf("expected identifier in declaration")
 			break
-		}
-		name := p.current.Lexeme
-		p.advance()
-		var init Expr
-		if p.current.Kind == TokenAssign {
+		} else {
+			name := p.current.Lexeme
 			p.advance()
-			init = p.parseAssignment()
+			var init Expr
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				init = p.parseAssignment()
+			}
+			vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: name, Init: init})
 		}
-		vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: name, Init: init})
 		if p.current.Kind != TokenComma {
 			break
 		}
@@ -1030,11 +1236,17 @@ func (p *Parser) parseClassBody() *ClassBody {
 		}
 		kind := "method"
 		name := ""
-		if p.current.Kind == TokenIdentifier && (p.current.Lexeme == "get" || p.current.Lexeme == "set") {
-			// lookahead: is the next a method name?
-			if p.peekKind(1) == TokenIdentifier || p.peekKind(1) == TokenString {
-				kind = p.current.Lexeme
-				p.advance()
+		if p.current.Kind == TokenIdentifier || p.current.Kind.IsKeyword() {
+			lex := p.current.Lexeme
+			if p.current.Kind.IsKeyword() {
+				lex = keywordText[p.current.Kind.KeywordOf()]
+			}
+			if lex == "get" || lex == "set" {
+				// lookahead: is the next a method name?
+				if p.peekKind(1) == TokenIdentifier || p.peekKind(1) == TokenString || p.peekKind(1).IsKeyword() {
+					kind = lex
+					p.advance()
+				}
 			}
 		}
 		if p.current.Kind == TokenIdentifier {
@@ -1042,6 +1254,10 @@ func (p *Parser) parseClassBody() *ClassBody {
 			p.advance()
 		} else if p.current.Kind == TokenString {
 			name = p.current.StringValue
+			p.advance()
+		} else if p.current.Kind.IsKeyword() {
+			// Keywords can be method names (e.g., static of())
+			name = keywordText[p.current.Kind.KeywordOf()]
 			p.advance()
 		} else {
 			p.errorf("expected method name in class body")
@@ -1092,6 +1308,38 @@ func (p *Parser) parseAssignment() Expr {
 // tryParseArrow attempts to parse an arrow function when the upcoming tokens match the
 // 'params =>' shape. Returns nil if no arrow function is present.
 func (p *Parser) tryParseArrow() Expr {
+	// 'async (params) =>' or 'async name =>'
+	if p.current.Kind == KeywordToken(KeywordAsync) {
+		savedLex := *p.lex
+		savedCur := p.current
+		savedPrev := p.prev
+		p.advance() // 'async'
+		if p.current.Kind == TokenOpenParen {
+			// async (params) => ...
+			if params, destructs, ok := p.tryParseArrowParams(); ok {
+				if p.current.Kind == TokenArrow {
+					p.advance()
+					af := p.finishArrow(params, destructs, p.current).(*ArrowFunction)
+					af.IsAsync = true
+					return af
+				}
+			}
+		} else if p.current.Kind == TokenIdentifier {
+			name := p.current.Lexeme
+			p.advance()
+			if p.current.Kind == TokenArrow {
+				p.advance()
+				af := p.finishArrow([]string{name}, nil, p.current).(*ArrowFunction)
+				af.IsAsync = true
+				return af
+			}
+		}
+		// Not an async arrow; restore.
+		*p.lex = savedLex
+		p.current = savedCur
+		p.prev = savedPrev
+		return nil
+	}
 	// Single-identifier param: 'name =>'
 	if p.current.Kind == TokenIdentifier {
 		// Save state to backtrack.
@@ -1102,7 +1350,7 @@ func (p *Parser) tryParseArrow() Expr {
 		p.advance()
 		if p.current.Kind == TokenArrow {
 			p.advance()
-			return p.finishArrow([]string{name}, p.current)
+			return p.finishArrow([]string{name}, nil, p.current)
 		}
 		// Not an arrow; restore.
 		*p.lex = savedLex
@@ -1115,10 +1363,10 @@ func (p *Parser) tryParseArrow() Expr {
 		savedLex := *p.lex
 		savedCur := p.current
 		savedPrev := p.prev
-		if params, ok := p.tryParseArrowParams(); ok {
+		if params, destructs, ok := p.tryParseArrowParams(); ok {
 			if p.current.Kind == TokenArrow {
 				p.advance()
-				return p.finishArrow(params, p.current)
+				return p.finishArrow(params, destructs, p.current)
 			}
 		}
 		// Restore and fall through to normal parsing.
@@ -1130,34 +1378,143 @@ func (p *Parser) tryParseArrow() Expr {
 }
 
 // tryParseArrowParams attempts to parse '(a, b, c)' as an arrow param list. Returns the
-// param names and whether the parse succeeded as a param list.
-func (p *Parser) tryParseArrowParams() ([]string, bool) {
+// param names, destructuring info, and whether the parse succeeded as a param list.
+func (p *Parser) tryParseArrowParams() ([]string, []DestructInfo, bool) {
 	p.advance() // '('
 	params := []string{}
+	var destructs []DestructInfo
 	for {
 		if p.current.Kind == TokenCloseParen {
 			p.advance()
-			return params, true
+			return params, destructs, true
+		}
+		if p.current.Kind == TokenSpread {
+			p.advance()
+			if p.current.Kind != TokenIdentifier {
+				return nil, nil, false
+			}
+			params = append(params, p.current.Lexeme)
+			p.advance()
+			if p.current.Kind != TokenCloseParen {
+				return nil, nil, false
+			}
+			p.advance()
+			return params, destructs, true
+		}
+		// Array destructuring: [a, b]
+		if p.current.Kind == TokenOpenBracket {
+			names, ok := p.parseArrayDestructPattern()
+			if !ok {
+				return nil, nil, false
+			}
+			synName := fmt.Sprintf("__d%d", len(params))
+			params = append(params, synName)
+			destructs = append(destructs, DestructInfo{
+				ParamIdx: len(params) - 1,
+				IsArray:  true,
+				Names:    names,
+			})
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				if p.parseAssignment() == nil {
+					return nil, nil, false
+				}
+			}
+			goto nextParam
+		}
+		// Object destructuring: {a, b}
+		if p.current.Kind == TokenOpenBrace {
+			fields, ok := p.parseObjectDestructPattern()
+			if !ok {
+				return nil, nil, false
+			}
+			names := make([]string, len(fields))
+			for i, f := range fields {
+				names[i] = f.Target
+			}
+			synName := fmt.Sprintf("__d%d", len(params))
+			params = append(params, synName)
+			destructs = append(destructs, DestructInfo{
+				ParamIdx: len(params) - 1,
+				IsArray:  false,
+				Names:    names,
+			})
+			if p.current.Kind == TokenAssign {
+				p.advance()
+				if p.parseAssignment() == nil {
+					return nil, nil, false
+				}
+			}
+			goto nextParam
+		}
+		if p.current.Kind != TokenIdentifier {
+			return nil, nil, false
+		}
+		params = append(params, p.current.Lexeme)
+		p.advance()
+		// default value
+		if p.current.Kind == TokenAssign {
+			p.advance()
+			if p.parseAssignment() == nil {
+				return nil, nil, false
+			}
+		}
+	nextParam:
+		if p.current.Kind == TokenComma {
+			p.advance()
+			continue
+		}
+		if p.current.Kind == TokenCloseParen {
+			p.advance()
+			return params, destructs, true
+		}
+		return nil, nil, false
+	}
+}
+
+// parseArrayDestructPattern parses [a, b, ...c] and returns the identifier names.
+func (p *Parser) parseArrayDestructPattern() ([]string, bool) {
+	p.advance() // '['
+	var names []string
+	for {
+		if p.current.Kind == TokenCloseBracket {
+			p.advance()
+			return names, true
 		}
 		if p.current.Kind == TokenSpread {
 			p.advance()
 			if p.current.Kind != TokenIdentifier {
 				return nil, false
 			}
-			params = append(params, p.current.Lexeme)
+			names = append(names, p.current.Lexeme)
 			p.advance()
-			if p.current.Kind != TokenCloseParen {
+			if p.current.Kind != TokenCloseBracket {
 				return nil, false
 			}
 			p.advance()
-			return params, true
+			return names, true
 		}
-		if p.current.Kind != TokenIdentifier {
+		if p.current.Kind == TokenIdentifier {
+			names = append(names, p.current.Lexeme)
+			p.advance()
+		} else if p.current.Kind == TokenOpenBracket {
+			// nested array destructuring
+			nested, ok := p.parseArrayDestructPattern()
+			if !ok {
+				return nil, false
+			}
+			names = append(names, nested...)
+		} else if p.current.Kind == TokenOpenBrace {
+			nested, ok := p.parseObjectDestructPattern()
+			if !ok {
+				return nil, false
+			}
+			for _, f := range nested {
+				names = append(names, f.Target)
+			}
+		} else {
 			return nil, false
 		}
-		params = append(params, p.current.Lexeme)
-		p.advance()
-		// default value
 		if p.current.Kind == TokenAssign {
 			p.advance()
 			if p.parseAssignment() == nil {
@@ -1168,17 +1525,97 @@ func (p *Parser) tryParseArrowParams() ([]string, bool) {
 			p.advance()
 			continue
 		}
-		if p.current.Kind == TokenCloseParen {
+		if p.current.Kind == TokenCloseBracket {
 			p.advance()
-			return params, true
+			return names, true
+		}
+		return nil, false
+	}
+}
+
+// DestructField is one field in an object destructuring pattern {key: target}.
+type DestructField struct {
+	Key    string // source property name
+	Target string // target variable name
+}
+
+// parseObjectDestructPattern parses {a, b: c, ...d} and returns the field list.
+func (p *Parser) parseObjectDestructPattern() ([]DestructField, bool) {
+	p.advance() // '{'
+	var fields []DestructField
+	for {
+		if p.current.Kind == TokenCloseBrace {
+			p.advance()
+			return fields, true
+		}
+		if p.current.Kind == TokenSpread {
+			p.advance()
+			if p.current.Kind != TokenIdentifier {
+				return nil, false
+			}
+			fields = append(fields, DestructField{Key: "", Target: p.current.Lexeme})
+			p.advance()
+			if p.current.Kind != TokenCloseBrace {
+				return nil, false
+			}
+			p.advance()
+			return fields, true
+		}
+		if p.current.Kind != TokenIdentifier && !p.current.Kind.IsKeyword() {
+			return nil, false
+		}
+		key := p.current.Lexeme
+		p.advance()
+		if p.current.Kind == TokenColon {
+			p.advance()
+			// {key: target} or {key: {nested}} or {key: [nested]}
+			if p.current.Kind == TokenOpenBrace {
+				// Nested object pattern: {key: {a, b}}
+				nested, ok := p.parseObjectDestructPattern()
+				if !ok {
+					return nil, false
+				}
+				fields = append(fields, nested...)
+			} else if p.current.Kind == TokenOpenBracket {
+				// Nested array pattern: {key: [a, b]}
+				nested, ok := p.parseArrayDestructPattern()
+				if !ok {
+					return nil, false
+				}
+				for _, nm := range nested {
+					fields = append(fields, DestructField{Key: key, Target: nm})
+				}
+			} else if p.current.Kind == TokenIdentifier || p.current.Kind.IsKeyword() {
+				fields = append(fields, DestructField{Key: key, Target: p.current.Lexeme})
+				p.advance()
+			} else {
+				return nil, false
+			}
+		} else {
+			// {key} — shorthand: bind to key
+			fields = append(fields, DestructField{Key: key, Target: key})
+		}
+		if p.current.Kind == TokenAssign {
+			p.advance()
+			if p.parseAssignment() == nil {
+				return nil, false
+			}
+		}
+		if p.current.Kind == TokenComma {
+			p.advance()
+			continue
+		}
+		if p.current.Kind == TokenCloseBrace {
+			p.advance()
+			return fields, true
 		}
 		return nil, false
 	}
 }
 
 // finishArrow builds the arrow function node after '=>' was consumed.
-func (p *Parser) finishArrow(params []string, tok Token) Expr {
-	af := &ArrowFunction{Params: params, Line: tok.Line, Col: tok.Col}
+func (p *Parser) finishArrow(params []string, destructs []DestructInfo, tok Token) Expr {
+	af := &ArrowFunction{Params: params, Destructuring: destructs, Line: tok.Line, Col: tok.Col}
 	if p.current.Kind == TokenOpenBrace {
 		block := p.parseBlock()
 		af.Body = block
@@ -1439,6 +1876,9 @@ func (p *Parser) parsePrimary() Expr {
 			// Contextual keywords used as identifiers when not in special position.
 			p.advance()
 			return &Identifier{Name: tok.Lexeme, Line: tok.Line, Col: tok.Col}
+		case KeywordSuper:
+			p.advance()
+			return &Identifier{Name: "super", Line: tok.Line, Col: tok.Col}
 		}
 	}
 	p.errorf("unexpected token %s (%q)", tokenName(tok.Kind), tok.Lexeme)
@@ -1535,6 +1975,13 @@ func (p *Parser) parseObject() *ObjectExpression {
 func (p *Parser) parseProperty() Property {
 	tok := p.current
 	prop := Property{Line: tok.Line, Col: tok.Col, Kind: "init"}
+	// Spread property: {...expr}
+	if tok.Kind == TokenSpread {
+		p.advance()
+		prop.Kind = "spread"
+		prop.Spread = p.parseAssignment()
+		return prop
+	}
 	// getter/setter
 	if tok.Kind == TokenIdentifier && (tok.Lexeme == "get" || tok.Lexeme == "set") {
 		if p.peekKind(1) == TokenIdentifier || p.peekKind(1) == TokenString || p.peekKind(1) == TokenOpenBracket {
