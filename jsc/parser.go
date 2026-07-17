@@ -1212,7 +1212,11 @@ func (p *Parser) parseBinary(minPrec int) Expr {
 		if op == KeywordToken(KeywordIn) && !p.allowIn {
 			break
 		}
-		prec := BinaryPrecedence(op)
+	// Convert instanceof keyword to plain token kind
+	if op.IsKeyword() && op.KeywordOf() == KeywordInstanceof {
+		op = TokenInstanceOf
+	}
+	prec := BinaryPrecedence(op)
 		if prec == 0 || prec < minPrec {
 			break
 		}
