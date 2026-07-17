@@ -1470,12 +1470,12 @@ func (p *Parser) parseTemplate() *TemplateLiteral {
 			break
 		}
 		exprSrc := raw[:endIdx]
-		if endIdx+3 >= len(raw) {
+		if endIdx+2 >= len(raw) {
 			// Expression may be empty or at end; skip gracefully.
 			raw = ""
 			continue
 		}
-		raw = raw[endIdx+3:]
+		raw = raw[endIdx+2:]
 		// Parse the substitution expression by re-entering the parser.
 		sub, err := Parse(exprSrc)
 		if err != nil || len(sub.Body) == 0 {

@@ -154,7 +154,7 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 		return jsc.Null()
 	}), nil)
 	obj.SetAccessor("title",
-		strAcc(doc.Title()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(doc.Title()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { doc.SetTitle(v.ToString()) })
 	obj.SetAccessor("URL", strAcc(doc.URL()), nil)
 	obj.SetAccessor("cookie", strAcc(""), nil)
@@ -244,13 +244,13 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	obj.Set("removeEventListener", jsc.FunctionValue(makeRemoveEventListener(el)))
 	obj.Set("dispatchEvent", jsc.FunctionValue(makeDispatchEvent(el)))
 
-	// Tree traversal
-	obj.SetAccessor("parentNode", nodeAcc(rt, el.ParentNode()), nil)
-	obj.SetAccessor("parentElement", nodeAcc(rt, el.ParentElement()), nil)
-	obj.SetAccessor("nextSibling", nodeAcc(rt, el.NextSibling()), nil)
-	obj.SetAccessor("previousSibling", nodeAcc(rt, el.PreviousSibling()), nil)
-	obj.SetAccessor("firstChild", nodeAcc(rt, el.FirstChild()), nil)
-	obj.SetAccessor("lastChild", nodeAcc(rt, el.LastChild()), nil)
+	// Tree traversal — dynamic getters so they reflect live DOM tree
+	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return el.ParentNode() }), nil)
+	obj.SetAccessor("parentElement", nodeAccFn(rt, func() dom.Node { return el.ParentElement() }), nil)
+	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return el.NextSibling() }), nil)
+	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return el.PreviousSibling() }), nil)
+	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return el.FirstChild() }), nil)
+	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return el.LastChild() }), nil)
 	obj.SetAccessor("childElementCount", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		n := 0
 		for c := el.FirstChild(); c != nil; c = c.NextSibling() {
@@ -295,17 +295,18 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 		return jsc.NumberValue(float64(el.NodeType()))
 	}), nil)
 	obj.SetAccessor("id",
-		strAcc(el.GetId()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetId()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetId(v.ToString()) })
 	obj.SetAccessor("className",
-		strAcc(el.GetClassName()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetClassName()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetClassName(v.ToString()) })
 	obj.SetAccessor("innerHTML",
-		strAcc(el.GetInnerHTML()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetInnerHTML()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetInnerHTML(v.ToString()) })
-	obj.SetAccessor("outerHTML", strAcc(el.GetOuterHTML()), nil)
+	obj.SetAccessor("outerHTML",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetOuterHTML()) }), nil)
 	obj.SetAccessor("textContent",
-		strAcc(el.TextContent()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.TextContent()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetTextContent(v.ToString()) })
 
 	return obj
@@ -519,6 +520,24 @@ func nodeAcc(rt *jsc.Interpreter, n dom.Node) getterFn {
 		}
 	}
 	return func(_ *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue { return jsc.Null() }
+}
+
+// nodeAccFn returns an accessor getter that calls fn() each time it is read,
+// so it stays in sync with the live DOM tree.
+func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
+	return func(in *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue {
+		n := fn()
+		if n == nil {
+			return jsc.Null()
+		}
+		switch v := n.(type) {
+		case *dom.Element:
+			return jsc.ObjectValue(wrapElement(in, v))
+		case *dom.Text:
+			return jsc.ObjectValue(wrapText(in, v))
+		}
+		return jsc.Null()
+	}
 }
 
 func funcVal(fn *jsc.JSFunction) jsc.JSValue { return jsc.FunctionValue(fn) }

@@ -178,4 +178,5 @@ func (wv *WebView) RebuildRenderTree() {
 var (
 	ErrNoDocument         = errors.New("webkit: no document loaded")
 	ErrJavaScriptDisabled = errors.New("webkit: JavaScript is disabled")
+	ErrNotImplemented     = errors.New("webkit: not implemented")
 )
