@@ -14,6 +14,7 @@ package page
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"wb-ui/css"
@@ -67,6 +68,14 @@ type Frame struct {
 	// stylesheets are silently skipped UNLESS a ResourceLoader is set. The WebView
 	// sets this to a file-based loader that reads from the local filesystem.
 	StyleSheetLoader func(href string) (string, error)
+
+	// ScriptLoader is an optional callback for loading external scripts
+	// referenced by <script src="..."> elements. It receives the src URL and
+	// should return the JS text, or an error. When nil AND ResourceLoader is
+	// also nil, external scripts are silently skipped. The WebView sets this
+	// to a file-based loader that reads from the local filesystem, matching
+	// the same pattern as StyleSheetLoader.
+	ScriptLoader func(src string) (string, error)
 
 	// ResourceLoader is the CachedResourceLoader used to load external resources
 	// (stylesheets, scripts, images, fonts). When non-nil, extractAndAddStyles
@@ -326,16 +335,37 @@ func (f *Frame) executeInlineScripts() {
 		if !ok {
 			continue
 		}
-		// Only execute standard JavaScript; skip modules and other types.
-		if s.Type() != "text/javascript" {
+		// Accept standard JS and ES modules; skip other types.
+		t := s.Type()
+		if t != "" && t != "text/javascript" && t != "module" {
 			continue
 		}
 
 		// External script: load via ResourceLoader, then execute.
-		if src := s.Src(); src != "" && f.ResourceLoader != nil {
-			f.ResourceLoader.LoadScript(src, &frameScriptClient{
-				frame: f,
-			})
+		if src := s.Src(); src != "" {
+			if f.ResourceLoader != nil {
+				f.ResourceLoader.LoadScript(src, &frameScriptClient{
+					frame: f,
+				})
+				continue
+			}
+			// Fallback: use ScriptLoader callback (set by WebView) for
+			// synchronous file-based loading, matching StyleSheetLoader.
+			if f.ScriptLoader != nil {
+				code, err := f.ScriptLoader(src)
+				if err != nil {
+					logError("external script load failed: %v", err)
+					continue
+				}
+				if strings.TrimSpace(code) == "" {
+					continue
+				}
+				if err := f.ScriptEngine(code); err != nil {
+					logError("external script execution failed: %v", err)
+				}
+				continue
+			}
+			// No resource loader available; skip external scripts.
 			continue
 		}
 
@@ -394,12 +424,9 @@ func (f *Frame) SetNeedsLayout(needs bool) {
 	}
 }
 
-// logError is a placeholder for production error logging.
-// In a real deployment, replace this with a proper logging framework
-// (e.g., zap, log/slog) or a dedicated package-level logger instance.
+// logError logs script/resource errors.
 func logError(format string, args ...interface{}) {
-	// In production: logger.Errorf(format, args...)
-	_ = fmt.Sprintf(format, args...)
+	fmt.Fprintf(os.Stderr, "[page] "+format+"\n", args...)
 }
 // Layout triggers a layout on the frame's view, mirroring the Frame-level
 // layout entry point (LocalFrameView::layout() reached via Frame::view()). It is a

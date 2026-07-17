@@ -426,6 +426,26 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	}, 1)
 	arrayCtor.properties.Prototype = in.functionProto
 	g.Set("Array", FunctionValue(arrayCtor))
+	// Array.isArray / Array.from
+	arrayCtor.properties.Set("isArray", FunctionValue(NewNativeFunction("isArray",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 { return BooleanValue(false) }
+			return BooleanValue(args[0].IsArray())
+		}, 1)))
+	arrayCtor.properties.Set("from", FunctionValue(NewNativeFunction("from",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			if !args[0].IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			src := args[0].AsObject()
+			var elems []JSValue
+			if src.IsArray { elems = append(elems, src.Elements...) } else
+			if l, ok := src.Properties["length"]; ok && l.IsNumber() {
+				for i := 0; i < int(l.AsNumber()); i++ {
+					if e, ok := src.Properties[strconv.Itoa(i)]; ok { elems = append(elems, e) }
+				}
+			}
+			return ObjectValue(NewArray(in.arrayProto, elems))
+		}, 1)))
 
 	objectCtor := NewNativeFunction("Object", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		if len(args) == 0 || args[0].IsUndefined() || args[0].IsNull() {
@@ -453,6 +473,24 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	}, 1)
 	numberCtor.properties.Prototype = in.functionProto
 	g.Set("Number", FunctionValue(numberCtor))
+	// Number.isNaN / isFinite / isInteger
+	numberCtor.properties.Set("isNaN", FunctionValue(NewNativeFunction("isNaN",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 { return BooleanValue(true) }
+			return BooleanValue(math.IsNaN(args[0].ToNumber()))
+		}, 1)))
+	numberCtor.properties.Set("isFinite", FunctionValue(NewNativeFunction("isFinite",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 { return BooleanValue(false) }
+			n := args[0].ToNumber()
+			return BooleanValue(!math.IsNaN(n) && !math.IsInf(n, 0))
+		}, 1)))
+	numberCtor.properties.Set("isInteger", FunctionValue(NewNativeFunction("isInteger",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 { return BooleanValue(false) }
+			n := args[0].ToNumber()
+			return BooleanValue(!math.IsNaN(n) && !math.IsInf(n, 0) && n == math.Trunc(n))
+		}, 1)))
 
 	booleanCtor := NewNativeFunction("Boolean", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		if len(args) == 0 {
@@ -519,11 +557,25 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		}
 		return ObjectValue(NewArray(in.arrayProto, pairs))
 	}, 1)))
+	objStatic.Set("assign", FunctionValue(NewNativeFunction("assign", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if len(args) == 0 { return ObjectValue(NewObject(in.objectProto)) }
+		target := args[0]
+		if !target.IsObject() { return target }
+		targetObj := target.AsObject()
+		for i := 1; i < len(args); i++ {
+			if !args[i].IsObject() { continue }
+			for k, v := range args[i].AsObject().Properties {
+				targetObj.Set(k, v)
+			}
+		}
+		return target
+	}, 2)))
 	g.Set("Object_static", ObjectValue(objStatic))
 	// Override bare 'Object' reference resolution: Object.keys etc. attach to the ctor.
 	objectCtor.properties.Set("keys", objStatic.GetOrZero("keys"))
 	objectCtor.properties.Set("values", objStatic.GetOrZero("values"))
 	objectCtor.properties.Set("entries", objStatic.GetOrZero("entries"))
+	objectCtor.properties.Set("assign", objStatic.GetOrZero("assign"))
 
 	// Symbol constructor.
 	symCtor := in.SymbolConstructor()
