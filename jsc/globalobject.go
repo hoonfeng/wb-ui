@@ -454,6 +454,8 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		return args[0]
 	}, 1)
 	objectCtor.properties.Prototype = in.functionProto
+	// Set Object.prototype to the shared objectProto
+	objectCtor.properties.Set("prototype", ObjectValue(in.objectProto))
 	g.Set("Object", FunctionValue(objectCtor))
 
 	stringCtor := NewNativeFunction("String", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
