@@ -572,12 +572,66 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		}
 		return target
 	}, 2)))
+	objStatic.Set("create", FunctionValue(NewNativeFunction("create", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		proto := in.objectProto
+		if len(args) > 0 && args[0].IsObject() {
+			proto = args[0].AsObject()
+		}
+		return ObjectValue(&JSObject{Properties: make(map[string]JSValue), Prototype: proto, ClassName: "Object"})
+	}, 1)))
+	objStatic.Set("defineProperty", FunctionValue(NewNativeFunction("defineProperty", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if len(args) < 2 || !args[0].IsObject() { return args[0] }
+		obj := args[0].AsObject()
+		key := args[1].ToString()
+		if len(args) > 2 && args[2].IsObject() {
+			desc := args[2].AsObject()
+			if v, ok := desc.Properties["value"]; ok {
+				obj.Properties[key] = v
+			}
+			if fn, ok := desc.Properties["get"]; ok && fn.IsFunction() {
+				getter := fn
+				obj.SetAccessor(key, func(_ *Interpreter, _ JSValue) JSValue {
+					r, _ := in.Call(getter, ObjectValue(obj))
+					return r
+				}, nil)
+			}
+			if fn, ok := desc.Properties["set"]; ok && fn.IsFunction() {
+				setter := fn
+				obj.SetAccessor(key, nil, func(_ *Interpreter, _ JSValue, v JSValue) {
+					in.Call(setter, ObjectValue(obj), v)
+				})
+			}
+		}
+		return args[0]
+	}, 3)))
+	objStatic.Set("freeze", FunctionValue(NewNativeFunction("freeze", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if len(args) > 0 { return args[0] }
+		return Undefined()
+	}, 1)))
+	objStatic.Set("getOwnPropertyDescriptor", FunctionValue(NewNativeFunction("getOwnPropertyDescriptor", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		if len(args) < 2 || !args[0].IsObject() { return Undefined() }
+		obj := args[0].AsObject()
+		key := args[1].ToString()
+		if v, ok := obj.Properties[key]; ok {
+			desc := NewObject(in.objectProto)
+			desc.Set("value", v)
+			desc.Set("writable", BooleanValue(true))
+			desc.Set("enumerable", BooleanValue(true))
+			desc.Set("configurable", BooleanValue(true))
+			return ObjectValue(desc)
+		}
+		return Undefined()
+	}, 2)))
 	g.Set("Object_static", ObjectValue(objStatic))
 	// Override bare 'Object' reference resolution: Object.keys etc. attach to the ctor.
 	objectCtor.properties.Set("keys", objStatic.GetOrZero("keys"))
 	objectCtor.properties.Set("values", objStatic.GetOrZero("values"))
 	objectCtor.properties.Set("entries", objStatic.GetOrZero("entries"))
 	objectCtor.properties.Set("assign", objStatic.GetOrZero("assign"))
+	objectCtor.properties.Set("create", objStatic.GetOrZero("create"))
+	objectCtor.properties.Set("defineProperty", objStatic.GetOrZero("defineProperty"))
+	objectCtor.properties.Set("freeze", objStatic.GetOrZero("freeze"))
+	objectCtor.properties.Set("getOwnPropertyDescriptor", objStatic.GetOrZero("getOwnPropertyDescriptor"))
 
 	// Symbol constructor.
 	symCtor := in.SymbolConstructor()
@@ -588,6 +642,215 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 
 	// Reflect object.
 	g.Set("Reflect", ObjectValue(in.ReflectObject()))
+
+	// ─── Array.prototype methods ────────────────────────
+	arrProto := in.arrayProto
+	arrProto.Set("toString", FunctionValue(NewNativeFunction("toString",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return StringValue("") }
+			arr := this.AsObject()
+			if !arr.IsArray { return StringValue("") }
+			var parts []string
+			for _, e := range arr.Elements {
+				if e.IsUndefined() || e.IsNull() { parts = append(parts, "") } else
+				if e.IsString() { parts = append(parts, e.AsString()) } else
+				if e.IsNumber() { parts = append(parts, fmt.Sprintf("%g", e.AsNumber())) } else
+				if e.IsBoolean() { parts = append(parts, fmt.Sprintf("%t", e.AsBoolean())) } else
+				{ parts = append(parts, e.ToString()) }
+			}
+			return StringValue(strings.Join(parts, ","))
+		}, 0)))
+	arrProto.Set("push", FunctionValue(NewNativeFunction("push",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return NumberValue(0) }
+			arr := this.AsObject()
+			arr.Elements = append(arr.Elements, args...)
+			return NumberValue(float64(len(arr.Elements)))
+		}, 1)))
+	arrProto.Set("pop", FunctionValue(NewNativeFunction("pop",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return Undefined() }
+			arr := this.AsObject()
+			if len(arr.Elements) == 0 { return Undefined() }
+			last := arr.Elements[len(arr.Elements)-1]
+			arr.Elements = arr.Elements[:len(arr.Elements)-1]
+			return last
+		}, 0)))
+	arrProto.Set("indexOf", FunctionValue(NewNativeFunction("indexOf",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return NumberValue(-1) }
+			arr := this.AsObject()
+			if !arr.IsArray { return NumberValue(-1) }
+			if len(args) == 0 { return NumberValue(-1) }
+			fromIdx := 0
+			if len(args) > 1 && args[1].IsNumber() { fromIdx = int(args[1].AsNumber()) }
+			for i := fromIdx; i < len(arr.Elements); i++ {
+				if arr.Elements[i].StrictEquals(args[0]) { return NumberValue(float64(i)) }
+			}
+			return NumberValue(-1)
+		}, 1)))
+	arrProto.Set("forEach", FunctionValue(NewNativeFunction("forEach",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return Undefined() }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return Undefined() }
+			fn := args[0]
+			for i, e := range arr.Elements {
+				in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+			}
+			return Undefined()
+		}, 1)))
+	arrProto.Set("map", FunctionValue(NewNativeFunction("map",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() {
+				return ObjectValue(NewArray(in.arrayProto, nil))
+			}
+			fn := args[0]
+			var result []JSValue
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				result = append(result, r)
+			}
+			return ObjectValue(NewArray(in.arrayProto, result))
+		}, 1)))
+	arrProto.Set("filter", FunctionValue(NewNativeFunction("filter",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() {
+				return ObjectValue(NewArray(in.arrayProto, nil))
+			}
+			fn := args[0]
+			var result []JSValue
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				if r.IsBoolean() && r.AsBoolean() { result = append(result, e) }
+			}
+			return ObjectValue(NewArray(in.arrayProto, result))
+		}, 1)))
+	arrProto.Set("some", FunctionValue(NewNativeFunction("some",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return BooleanValue(false) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return BooleanValue(false) }
+			fn := args[0]
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				if r.IsBoolean() && r.AsBoolean() { return BooleanValue(true) }
+			}
+			return BooleanValue(false)
+		}, 1)))
+	arrProto.Set("every", FunctionValue(NewNativeFunction("every",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return BooleanValue(false) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return BooleanValue(false) }
+			fn := args[0]
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				if !r.IsBoolean() || !r.AsBoolean() { return BooleanValue(false) }
+			}
+			return BooleanValue(true)
+		}, 1)))
+	arrProto.Set("includes", FunctionValue(NewNativeFunction("includes",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return BooleanValue(false) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 { return BooleanValue(false) }
+			for _, e := range arr.Elements {
+				if e.StrictEquals(args[0]) { return BooleanValue(true) }
+			}
+			return BooleanValue(false)
+		}, 1)))
+	arrProto.Set("find", FunctionValue(NewNativeFunction("find",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return Undefined() }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return Undefined() }
+			fn := args[0]
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				if r.IsBoolean() && r.AsBoolean() { return e }
+			}
+			return Undefined()
+		}, 1)))
+	arrProto.Set("reduce", FunctionValue(NewNativeFunction("reduce",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return Undefined() }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return Undefined() }
+			fn := args[0]
+			start := 0
+			acc := Undefined()
+			hasInit := false
+			if len(args) > 1 { acc = args[1]; hasInit = true }
+			if !hasInit {
+				if len(arr.Elements) == 0 { return Undefined() }
+				acc = arr.Elements[0]
+				start = 1
+			}
+			for i := start; i < len(arr.Elements); i++ {
+				r, _ := in.Call(fn, Undefined(), acc, arr.Elements[i], NumberValue(float64(i)), ObjectValue(arr))
+				acc = r
+			}
+			return acc
+		}, 1)))
+	arrProto.Set("concat", FunctionValue(NewNativeFunction("concat",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			var result []JSValue
+			result = append(result, arr.Elements...)
+			for _, a := range args {
+				if a.IsArray() {
+					result = append(result, a.AsObject().Elements...)
+				} else {
+					result = append(result, a)
+				}
+			}
+			return ObjectValue(NewArray(in.arrayProto, result))
+		}, 1)))
+	arrProto.Set("slice", FunctionValue(NewNativeFunction("slice",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			if !arr.IsArray { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			start, end := 0, len(arr.Elements)
+			if len(args) > 0 && args[0].IsNumber() { start = int(args[0].AsNumber()) }
+			if len(args) > 1 && args[1].IsNumber() { end = int(args[1].AsNumber()) }
+			if start < 0 { start = len(arr.Elements) + start; if start < 0 { start = 0 } }
+			if end < 0 { end = len(arr.Elements) + end }
+			if start > len(arr.Elements) { start = len(arr.Elements) }
+			if end > len(arr.Elements) { end = len(arr.Elements) }
+			if start > end { start = end }
+			var result []JSValue
+			result = append(result, arr.Elements[start:end]...)
+			return ObjectValue(NewArray(in.arrayProto, result))
+		}, 2)))
+	arrProto.Set("splice", FunctionValue(NewNativeFunction("splice",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			if !arr.IsArray { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			start := 0
+			if len(args) > 0 && args[0].IsNumber() { start = int(args[0].AsNumber()) }
+			deleteCount := len(arr.Elements) - start
+			if len(args) > 1 && args[1].IsNumber() { deleteCount = int(args[1].AsNumber()) }
+			if start < 0 { start = len(arr.Elements) + start; if start < 0 { start = 0 } }
+			if deleteCount < 0 { deleteCount = 0 }
+			if start > len(arr.Elements) { start = len(arr.Elements) }
+			if deleteCount > len(arr.Elements)-start { deleteCount = len(arr.Elements) - start }
+			var removed []JSValue
+			removed = append(removed, arr.Elements[start:start+deleteCount]...)
+			var newElems []JSValue
+			newElems = append(newElems, arr.Elements[:start]...)
+			if len(args) > 2 { newElems = append(newElems, args[2:]...) }
+			newElems = append(newElems, arr.Elements[start+deleteCount:]...)
+			arr.Elements = newElems
+			return ObjectValue(NewArray(in.arrayProto, removed))
+		}, 2)))
 }
 
 // GetOrZero returns the property or undefined.
