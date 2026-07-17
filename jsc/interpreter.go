@@ -121,6 +121,8 @@ type Interpreter struct {
 	arrayProto    *JSObject
 	mapProto      *JSObject
 	setProto      *JSObject
+	weakMapProto  *JSObject
+	weakSetProto  *JSObject
 	promiseProto  *JSObject
 	symbolProto   *JSObject
 	forInStack    []*forInIter
@@ -132,6 +134,99 @@ type Interpreter struct {
 	maxCallDepth int
 	depth        int
 	throwPending *jsException
+}
+
+// NewInterpreter constructs an interpreter with a fresh global object and environment.
+// SetupGlobal must be called (or GlobalObject installed) before running scripts.
+
+func (in *Interpreter) WeakMapPrototype() *JSObject {
+	if in.weakMapProto != nil {
+		return in.weakMapProto
+	}
+	proto := NewObject(in.objectProto)
+	proto.ClassName = "WeakMap"
+
+	proto.Set("set", FunctionValue(NewNativeFunction("set", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		m := mapThis(this)
+		if m == nil || len(args) == 0 || !args[0].IsObject() {
+			return this
+		}
+		key := mapKey(args[0])
+		val := Undefined()
+		if len(args) > 1 {
+			val = args[1]
+		}
+		m.set(key, val)
+		return this
+	}, 2)))
+
+	proto.Set("get", FunctionValue(NewNativeFunction("get", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		m := mapThis(this)
+		if m == nil || len(args) == 0 {
+			return Undefined()
+		}
+		v, ok := m.get(mapKey(args[0]))
+		if !ok {
+			return Undefined()
+		}
+		return v
+	}, 1)))
+
+	proto.Set("has", FunctionValue(NewNativeFunction("has", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		m := mapThis(this)
+		if m == nil || len(args) == 0 {
+			return BooleanValue(false)
+		}
+		return BooleanValue(m.has(mapKey(args[0])))
+	}, 1)))
+
+	proto.Set("delete", FunctionValue(NewNativeFunction("delete", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		m := mapThis(this)
+		if m == nil || len(args) == 0 {
+			return BooleanValue(false)
+		}
+		return BooleanValue(m.delete(mapKey(args[0])))
+	}, 1)))
+
+	in.weakMapProto = proto
+	return proto
+}
+
+// WeakSetPrototype returns the WeakSet.prototype object.
+func (in *Interpreter) WeakSetPrototype() *JSObject {
+	if in.weakSetProto != nil {
+		return in.weakSetProto
+	}
+	proto := NewObject(in.objectProto)
+	proto.ClassName = "WeakSet"
+
+	proto.Set("add", FunctionValue(NewNativeFunction("add", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := setThis(this)
+		if s == nil || len(args) == 0 || !args[0].IsObject() {
+			return this
+		}
+		s.add(mapKey(args[0]))
+		return this
+	}, 1)))
+
+	proto.Set("has", FunctionValue(NewNativeFunction("has", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := setThis(this)
+		if s == nil || len(args) == 0 {
+			return BooleanValue(false)
+		}
+		return BooleanValue(s.has(mapKey(args[0])))
+	}, 1)))
+
+	proto.Set("delete", FunctionValue(NewNativeFunction("delete", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := setThis(this)
+		if s == nil || len(args) == 0 {
+			return BooleanValue(false)
+		}
+		return BooleanValue(s.delete(mapKey(args[0])))
+	}, 1)))
+
+	in.weakSetProto = proto
+	return proto
 }
 
 // NewInterpreter constructs an interpreter with a fresh global object and environment.
@@ -272,6 +367,9 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 	// pop removes and returns the top of the stack.
 	pop := func() JSValue {
 		n := len(stack) - 1
+		if n < 0 {
+			return Undefined()
+		}
 		v := stack[n]
 		stack = stack[:n]
 		return v
@@ -818,7 +916,9 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		return proxyApply(in, callee, this, args)
 	}
 	if !callee.IsFunction() {
-		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function")}
+		tag := "unknown"
+		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "object" } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "boolean" }
+		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
 	}
 	fn := callee.fn
 	if fn.Native != nil {

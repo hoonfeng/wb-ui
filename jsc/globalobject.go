@@ -400,6 +400,30 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	setCtor.properties.Set("prototype", ObjectValue(setProto))
 	g.Set("Set", FunctionValue(setCtor))
 
+	// WeakMap constructor.
+	weakMapProto := in.WeakMapPrototype()
+	weakMapCtor := NewNativeFunction("WeakMap", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		obj := NewObject(weakMapProto)
+		obj.ClassName = "WeakMap"
+		obj.Internal = newMapStorage()
+		return ObjectValue(obj)
+	}, 0)
+	weakMapCtor.properties.Prototype = in.functionProto
+	weakMapCtor.properties.Set("prototype", ObjectValue(weakMapProto))
+	g.Set("WeakMap", FunctionValue(weakMapCtor))
+
+	// WeakSet constructor.
+	weakSetProto := in.WeakSetPrototype()
+	weakSetCtor := NewNativeFunction("WeakSet", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		obj := NewObject(weakSetProto)
+		obj.ClassName = "WeakSet"
+		obj.Internal = newSetStorage()
+		return ObjectValue(obj)
+	}, 0)
+	weakSetCtor.properties.Prototype = in.functionProto
+	weakSetCtor.properties.Set("prototype", ObjectValue(weakSetProto))
+	g.Set("WeakSet", FunctionValue(weakSetCtor))
+
 	// Promise constructor.
 	promiseProto := in.PromisePrototype()
 	promiseCtor := in.PromiseConstructor()
