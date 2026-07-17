@@ -695,6 +695,18 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		g.emit(Instruction{Op: OpNewClosure, Body: body})
 	case *TemplateLiteral:
 		g.emitTemplate(n)
+	case *TaggedTemplateExpression:
+		// Tagged template: emit tag function, then template args, then call.
+		g.emitExpr(n.Tag)
+		// Push template strings (quasis) and expressions as arguments.
+		for _, q := range n.Template.Quasis {
+			g.emit(Instruction{Op: OpLoadConst, Value: StringValue(q)})
+		}
+		for _, e := range n.Template.Expressions {
+			g.emitExpr(e)
+		}
+		argCount := len(n.Template.Quasis) + len(n.Template.Expressions)
+		g.emit(Instruction{Op: OpCall, IntArg: argCount})
 	case *RegexLiteral:
 		// Regex literal evaluates to a placeholder object: the source string.
 		g.emit(Instruction{Op: OpLoadConst, Value: StringValue("/" + n.Pattern + "/" + n.Flags)})

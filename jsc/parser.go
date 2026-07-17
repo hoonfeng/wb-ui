@@ -440,6 +440,16 @@ type YieldExpression struct {
 func (n *YieldExpression) nodePos() (int, int) { return n.Line, n.Col }
 func (n *YieldExpression) exprNode()           {}
 
+// TaggedTemplateExpression is 'tag\`...\`' — a function call with a template literal.
+type TaggedTemplateExpression struct {
+	Tag      Expr
+	Template *TemplateLiteral
+	Line, Col int
+}
+
+func (n *TaggedTemplateExpression) nodePos() (int, int) { return n.Line, n.Col }
+func (n *TaggedTemplateExpression) exprNode()           {}
+
 func (n *ArrowFunction) nodePos() (int, int) { return n.Line, n.Col }
 func (n *ArrowFunction) exprNode()           {}
 
@@ -535,6 +545,21 @@ func Parse(src string) (*Program, error) {
 		return prog, p.err
 	}
 	return prog, nil
+}
+
+// ParseExpression parses a single expression from src, used for template literal
+// interpolations where object literals must be recognized (not parsed as blocks).
+func ParseExpression(src string) (Expr, error) {
+	p := &Parser{
+		lex:     NewLexer(src),
+		allowIn: true,
+	}
+	p.advance()
+	expr := p.parseAssignment()
+	if p.err != nil {
+		return expr, p.err
+	}
+	return expr, nil
 }
 
 // parseProgram consumes statements until EOF.
@@ -942,11 +967,15 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
 		p.advance()
 	}
 	p.expect(TokenCloseParen)
+	// Restore allowIn for the function body (may have been set false by for-init).
+	savedIn := p.allowIn
+	p.allowIn = true
 	body := []Stmt{}
 	if p.current.Kind == TokenOpenBrace {
 		block := p.parseBlock()
 		body = block.Body
 	}
+	p.allowIn = savedIn
 	return params, body
 }
 
@@ -1028,6 +1057,10 @@ func (p *Parser) parseSwitchStatement() Stmt {
 func (p *Parser) parseForStatement() Stmt {
 	tok := p.current
 	p.advance() // 'for'
+	// Detect 'for await (lhs of rhs)' — same syntax as for-of, just with 'await' prefix
+	if p.current.Kind == KeywordToken(KeywordAwait) {
+		p.advance()
+	}
 	p.expect(TokenOpenParen)
 	// init: variable decl or expression
 	var init Stmt
@@ -1312,6 +1345,8 @@ func (p *Parser) parseClassBody() *ClassBody {
 		}
 		kind := "method"
 		name := ""
+		var _async bool
+		var _gen bool
 		if p.current.Kind == TokenIdentifier || p.current.Kind.IsKeyword() {
 			lex := p.current.Lexeme
 			if p.current.Kind.IsKeyword() {
@@ -1323,9 +1358,29 @@ func (p *Parser) parseClassBody() *ClassBody {
 					kind = lex
 					p.advance()
 				}
+			} else if lex == "async" {
+				// 'async' method: check that next token is a valid method name
+				if p.peekKind(1) == TokenIdentifier || p.peekKind(1) == TokenString || p.peekKind(1).IsKeyword() || p.peekKind(1) == TokenStar {
+					_async = true
+					p.advance() // consume 'async'
+				}
 			}
 		}
-		if p.current.Kind == TokenIdentifier {
+		// generator method: 'async *name' or '*name'
+		_gen = false
+		if p.current.Kind == TokenStar {
+			_gen = true
+			p.advance()
+		}
+		// Computed property name: [expr]
+		if p.current.Kind == TokenOpenBracket {
+			p.advance()
+			// Parse the expression inside brackets, but we just skip it for now
+			// and assign a placeholder name
+			_ = p.parseExpression()
+			p.expect(TokenCloseBracket)
+			name = "__computed"
+		} else if p.current.Kind == TokenIdentifier {
 			name = p.current.Lexeme
 			p.advance()
 		} else if p.current.Kind == TokenString {
@@ -1339,7 +1394,11 @@ func (p *Parser) parseClassBody() *ClassBody {
 			p.errorf("expected method name in class body")
 			break
 		}
+		savedGen := p.inGenerator
+		p.inGenerator = _gen
 		params, body := p.parseFunctionBody()
+		p.inGenerator = savedGen
+		_ = _async // async flag tracked for future use
 		cb.Methods = append(cb.Methods, ClassMethod{
 			Name: name, Params: params, Body: body, Kind: kind, Static: isStatic,
 			Line: p.current.Line, Col: p.current.Col,
@@ -1709,6 +1768,9 @@ func (p *Parser) parseObjectDestructPattern() ([]DestructField, bool) {
 // finishArrow builds the arrow function node after '=>' was consumed.
 func (p *Parser) finishArrow(params []string, destructs []DestructInfo, tok Token) Expr {
 	af := &ArrowFunction{Params: params, Destructuring: destructs, Line: tok.Line, Col: tok.Col}
+	// Arrow functions create a new scope: allowIn is restored inside the body.
+	savedIn := p.allowIn
+	p.allowIn = true
 	if p.current.Kind == TokenOpenBrace {
 		block := p.parseBlock()
 		af.Body = block
@@ -1717,6 +1779,7 @@ func (p *Parser) finishArrow(params []string, destructs []DestructInfo, tok Toke
 		af.Body = p.parseAssignment()
 		af.IsExpr = true
 	}
+	p.allowIn = savedIn
 	return af
 }
 
@@ -1843,6 +1906,10 @@ func (p *Parser) parseLeftHandSide() Expr {
 		case TokenOpenParen:
 			args := p.parseArgs()
 			expr = &CallExpression{Callee: expr, Arguments: args, Line: p.current.Line, Col: p.current.Col}
+		case TokenTemplate:
+			// Tagged template: expr\`...\`
+			tmpl := p.parseTemplate()
+			expr = &TaggedTemplateExpression{Tag: expr, Template: tmpl, Line: p.current.Line, Col: p.current.Col}
 		default:
 			return expr
 		}
@@ -1876,6 +1943,22 @@ func (p *Parser) parseArgs() []Expr {
 func (p *Parser) parseNewExpression() Expr {
 	tok := p.current
 	p.advance() // 'new'
+	// new.target meta-property
+	if p.current.Kind == TokenDot {
+		p.advance()
+		name := ""
+		if p.current.Kind == TokenIdentifier {
+			name = p.current.Lexeme
+		} else if p.current.Kind.IsKeyword() {
+			name = keywordText[p.current.Kind.KeywordOf()]
+		}
+		if name == "target" {
+			p.advance()
+			return &MemberExpression{Object: &Identifier{Name: "new"}, Name: "target", Computed: false, Line: tok.Line, Col: tok.Col}
+		}
+		p.errorf("expected 'target' after 'new.'")
+		return &Literal{Value: Undefined(), Line: tok.Line, Col: tok.Col}
+	}
 	callee := p.parsePrimary()
 	for {
 		switch p.current.Kind {
@@ -2013,14 +2096,15 @@ func (p *Parser) parseTemplate() *TemplateLiteral {
 			continue
 		}
 		raw = raw[endIdx+2:]
-		// Parse the substitution expression by re-entering the parser.
-		sub, err := Parse(exprSrc)
-		if err != nil || len(sub.Body) == 0 {
+		// Parse the substitution expression. Must parse as an expression, not a program,
+		// so that object literals like {a:1} are recognized (not parsed as labeled blocks).
+		subExpr, err := ParseExpression(exprSrc)
+		if err != nil {
 			p.errorf("bad template expression: %q", exprSrc)
 			continue
 		}
-		if es, ok := sub.Body[0].(*ExpressionStatement); ok {
-			tl.Expressions = append(tl.Expressions, es.Expr)
+		if subExpr != nil {
+			tl.Expressions = append(tl.Expressions, subExpr)
 		}
 	}
 	return tl
