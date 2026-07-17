@@ -643,6 +643,43 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	// Reflect object.
 	g.Set("Reflect", ObjectValue(in.ReflectObject()))
 
+	// ─── Function.prototype methods ────────────────────
+	fnProto := in.functionProto
+	fnProto.Set("call", FunctionValue(NewNativeFunction("call",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsFunction() { return Undefined() }
+			thisArg := Undefined()
+			if len(args) > 0 { thisArg = args[0] }
+			callArgs := args[1:]
+			r, _ := in.Call(this, thisArg, callArgs...)
+			return r
+		}, 1)))
+	fnProto.Set("apply", FunctionValue(NewNativeFunction("apply",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsFunction() { return Undefined() }
+			thisArg := Undefined()
+			if len(args) > 0 { thisArg = args[0] }
+			var callArgs []JSValue
+			if len(args) > 1 && args[1].IsObject() && args[1].AsObject().IsArray {
+				callArgs = args[1].AsObject().Elements
+			}
+			r, _ := in.Call(this, thisArg, callArgs...)
+			return r
+		}, 2)))
+	fnProto.Set("bind", FunctionValue(NewNativeFunction("bind",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsFunction() { return Undefined() }
+			fn := this
+			thisArg := Undefined()
+			if len(args) > 0 { thisArg = args[0] }
+			boundArgs := args[1:]
+			return FunctionValue(NewNativeFunction("bound", func(in *Interpreter, _ JSValue, callArgs []JSValue) JSValue {
+				fullArgs := append(boundArgs, callArgs...)
+				r, _ := in.Call(fn, thisArg, fullArgs...)
+				return r
+			}, 0))
+		}, 1)))
+
 	// ─── Array.prototype methods ────────────────────────
 	arrProto := in.arrayProto
 	arrProto.Set("toString", FunctionValue(NewNativeFunction("toString",
