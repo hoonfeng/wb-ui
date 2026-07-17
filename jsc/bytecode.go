@@ -111,6 +111,8 @@ const (
 	// an async function; the current function returns its Promise immediately
 	// (microtask scheduling not yet implemented).
 	OpAwait
+	// OpYield yields a value from a generator (simplified: acts as return).
+	OpYield
 )
 
 // Instruction is a single bytecode instruction. It mirrors the packed Instruction
@@ -708,6 +710,13 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 	case *AwaitExpression:
 		g.emitExpr(n.Argument)
 		g.emit(Instruction{Op: OpAwait})
+	case *YieldExpression:
+		if n.Argument != nil {
+			g.emitExpr(n.Argument)
+		} else {
+			g.emit(Instruction{Op: OpLoadUndefined})
+		}
+		g.emit(Instruction{Op: OpYield})
 	case *ClassDeclaration:
 		// Class expressions are parsed but not supported at runtime.
 		g.emit(Instruction{Op: OpLoadConst, Value: StringValue("class expressions are not implemented")})

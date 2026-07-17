@@ -585,9 +585,12 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 					push(val)
 				}
 			} else {
-				// await on non-thenable: evaluate to the value itself.
 				push(val)
 			}
+		case OpYield:
+			// yield expr: yield the value (simplified: pass-through, no suspension).
+			// Full generator semantics require GeneratorObject / .next() support.
+			push(pop())
 		default:
 			return Undefined(), &jsException{value: StringValue(fmt.Sprintf("unknown opcode %d", inst.Op))}
 		}

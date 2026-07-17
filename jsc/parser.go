@@ -430,6 +430,16 @@ type ArrowFunction struct {
 	Line, Col      int
 }
 
+// YieldExpression is 'yield [expr]' or 'yield* expr' in a generator.
+type YieldExpression struct {
+	Argument  Expr
+	Delegate  bool // true for yield*
+	Line, Col int
+}
+
+func (n *YieldExpression) nodePos() (int, int) { return n.Line, n.Col }
+func (n *YieldExpression) exprNode()           {}
+
 func (n *ArrowFunction) nodePos() (int, int) { return n.Line, n.Col }
 func (n *ArrowFunction) exprNode()           {}
 
@@ -505,11 +515,12 @@ func (n *ExportDeclaration) stmtNode()           {}
 // ---- Parser ----
 // recursive descent with precedence climbing (Pratt) for expressions.
 type Parser struct {
-	lex     *Lexer
-	current Token
-	prev    Token
-	err     error
-	allowIn bool
+	lex         *Lexer
+	current     Token
+	prev        Token
+	err         error
+	allowIn     bool
+	inGenerator bool
 }
 
 // Parse is the entry point: it tokenizes src and returns a Program AST.
@@ -786,8 +797,9 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 			}
 		} else if p.current.Kind == TokenOpenBracket {
 			// Array destructuring: const [a, b] = arr
-			names, defaults := p.parseArrayDestructWithDefaults()
+			names, indices, defaults := p.parseArrayDestructWithDefaults()
 			_ = defaults
+			_ = indices
 			if p.current.Kind == TokenAssign {
 				p.advance()
 				rhs := p.parseAssignment()
@@ -828,9 +840,9 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 }
 
 // parseArrayDestructWithDefaults parses [a, b = default] and returns names and optional defaults.
-func (p *Parser) parseArrayDestructWithDefaults() ([]string, []any) {
-	names, _ := p.parseArrayDestructPattern()
-	return names, nil
+func (p *Parser) parseArrayDestructWithDefaults() ([]string, []int, []any) {
+	names, indices, _ := p.parseArrayDestructPattern()
+	return names, indices, nil
 }
 
 // parseDestructInit parses an optional "= default" after a destructuring pattern.
@@ -852,7 +864,10 @@ func (p *Parser) parseFunctionDeclaration(isAsync bool) *FunctionDeclaration {
 		name = p.current.Lexeme
 		p.advance()
 	}
+	savedGen := p.inGenerator
+	p.inGenerator = isGenerator
 	params, body := p.parseFunctionBody()
+	p.inGenerator = savedGen
 	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, Line: tok.Line, Col: tok.Col}
 }
 
@@ -878,7 +893,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
 		}
 		// Array destructuring param: [a, b]
 		if p.current.Kind == TokenOpenBracket {
-			names, ok := p.parseArrayDestructPattern()
+			names, _, ok := p.parseArrayDestructPattern()
 			if !ok {
 				p.errorf("bad array destructuring in parameter")
 				break
@@ -949,6 +964,26 @@ func (p *Parser) parseIfStatement() *IfStatement {
 		alt = p.parseStatement()
 	}
 	return &IfStatement{Test: test, Consequent: cons, Alternate: alt, Line: tok.Line, Col: tok.Col}
+}
+
+// parseYieldExpression parses 'yield', 'yield expr', or 'yield* expr' in a generator.
+// Translated from WebKit Source/JavaScriptCore/parser/Parser.cpp parseYieldExpression.
+func (p *Parser) parseYieldExpression() *YieldExpression {
+	tok := p.current
+	p.advance() // 'yield'
+	// yield [no LineTerminator here] AssignmentExpression
+	// If there's a line terminator, it's just 'yield' (returns undefined).
+	if p.current.PrecedingNewline {
+		return &YieldExpression{Argument: nil, Delegate: false, Line: tok.Line, Col: tok.Col}
+	}
+	// yield* AssignmentExpression  (delegate)
+	delegate := false
+	if p.current.Kind == TokenStar {
+		delegate = true
+		p.advance()
+	}
+	arg := p.parseAssignment()
+	return &YieldExpression{Argument: arg, Delegate: delegate, Line: tok.Line, Col: tok.Col}
 }
 
 // parseSwitchStatement parses 'switch (expr) { case val: ... default: ... }'.
@@ -1069,7 +1104,7 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 			}
 		} else if p.current.Kind == TokenOpenBracket {
 			// Array destructuring: const [a, b] = arr or for (const [a,b] of ...)
-			names, _ := p.parseArrayDestructWithDefaults()
+			names, _, _ := p.parseArrayDestructWithDefaults()
 			if p.current.Kind == TokenAssign {
 				p.advance()
 				rhs := p.parseAssignment()
@@ -1444,7 +1479,7 @@ func (p *Parser) tryParseArrowParams() ([]string, []DestructInfo, bool) {
 		}
 		// Array destructuring: [a, b]
 		if p.current.Kind == TokenOpenBracket {
-			names, ok := p.parseArrayDestructPattern()
+			names, _, ok := p.parseArrayDestructPattern()
 			if !ok {
 				return nil, nil, false
 			}
@@ -1513,64 +1548,81 @@ func (p *Parser) tryParseArrowParams() ([]string, []DestructInfo, bool) {
 	}
 }
 
-// parseArrayDestructPattern parses [a, b, ...c] and returns the identifier names.
-func (p *Parser) parseArrayDestructPattern() ([]string, bool) {
+// parseArrayDestructPattern parses [a, b, ...c] and returns the identifier names
+// and their source indices. Holes (elisions) like [, a] are supported — a hole adds
+// no name but increments the source index.
+func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok bool) {
 	p.advance() // '['
-	var names []string
+	idx := 0
 	for {
 		if p.current.Kind == TokenCloseBracket {
 			p.advance()
-			return names, true
+			return names, indices, true
+		}
+		// Hole (elision): [, a, , b] — comma without preceding element
+		if p.current.Kind == TokenComma {
+			idx++
+			p.advance()
+			continue
 		}
 		if p.current.Kind == TokenSpread {
 			p.advance()
 			if p.current.Kind != TokenIdentifier {
-				return nil, false
+				return nil, nil, false
 			}
 			names = append(names, p.current.Lexeme)
+			indices = append(indices, idx)
+			idx++
 			p.advance()
 			if p.current.Kind != TokenCloseBracket {
-				return nil, false
+				return nil, nil, false
 			}
 			p.advance()
-			return names, true
+			return names, indices, true
 		}
 		if p.current.Kind == TokenIdentifier {
 			names = append(names, p.current.Lexeme)
+			indices = append(indices, idx)
+			idx++
 			p.advance()
 		} else if p.current.Kind == TokenOpenBracket {
 			// nested array destructuring
-			nested, ok := p.parseArrayDestructPattern()
+			nested, nestedIndices, ok := p.parseArrayDestructPattern()
 			if !ok {
-				return nil, false
+				return nil, nil, false
 			}
 			names = append(names, nested...)
+			indices = append(indices, nestedIndices...)
+			idx++
 		} else if p.current.Kind == TokenOpenBrace {
 			nested, ok := p.parseObjectDestructPattern()
 			if !ok {
-				return nil, false
+				return nil, nil, false
 			}
 			for _, f := range nested {
 				names = append(names, f.Target)
+				indices = append(indices, idx)
 			}
+			idx++
 		} else {
-			return nil, false
+			return nil, nil, false
 		}
 		if p.current.Kind == TokenAssign {
 			p.advance()
 			if p.parseAssignment() == nil {
-				return nil, false
+				return nil, nil, false
 			}
 		}
 		if p.current.Kind == TokenComma {
+			idx++
 			p.advance()
 			continue
 		}
 		if p.current.Kind == TokenCloseBracket {
 			p.advance()
-			return names, true
+			return names, indices, true
 		}
-		return nil, false
+		return nil, nil, false
 	}
 }
 
@@ -1619,7 +1671,7 @@ func (p *Parser) parseObjectDestructPattern() ([]DestructField, bool) {
 				fields = append(fields, nested...)
 			} else if p.current.Kind == TokenOpenBracket {
 				// Nested array pattern: {key: [a, b]}
-				nested, ok := p.parseArrayDestructPattern()
+				nested, _, ok := p.parseArrayDestructPattern()
 				if !ok {
 					return nil, false
 				}
@@ -1720,6 +1772,10 @@ func (p *Parser) parseBinary(minPrec int) Expr {
 // uniformly.
 func (p *Parser) parseUnary() Expr {
 	tok := p.current
+	// 'yield [expr]' or 'yield* expr' — only valid inside generators
+	if tok.Kind == KeywordToken(KeywordYield) && p.inGenerator {
+		return p.parseYieldExpression()
+	}
 	// 'await expr' — only valid inside async functions, but parsed regardless.
 	if tok.Kind == KeywordToken(KeywordAwait) {
 		p.advance()
