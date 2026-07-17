@@ -842,11 +842,14 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: nil})
 				}
 			}
-		} else if p.current.Kind != TokenIdentifier {
+		} else if p.current.Kind != TokenIdentifier && !p.current.Kind.IsKeyword() {
 			p.errorf("expected identifier in declaration")
 			break
 		} else {
 			name := p.current.Lexeme
+			if p.current.Kind.IsKeyword() {
+				name = keywordText[p.current.Kind.KeywordOf()]
+			}
 			p.advance()
 			var init Expr
 			if p.current.Kind == TokenAssign {
@@ -1153,11 +1156,14 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 				// Don't consume more tokens — caller will check for in/of
 				break
 			}
-		} else if p.current.Kind != TokenIdentifier {
+		} else if p.current.Kind != TokenIdentifier && !p.current.Kind.IsKeyword() {
 			p.errorf("expected identifier in declaration")
 			break
 		} else {
 			name := p.current.Lexeme
+			if p.current.Kind.IsKeyword() {
+				name = keywordText[p.current.Kind.KeywordOf()]
+			}
 			p.advance()
 			var init Expr
 			if p.current.Kind == TokenAssign {
