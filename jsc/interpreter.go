@@ -14,6 +14,7 @@ package jsc
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 )
 
@@ -123,10 +124,10 @@ type Interpreter struct {
 	setProto      *JSObject
 	weakMapProto  *JSObject
 	weakSetProto  *JSObject
+	stringProto   *JSObject
 	promiseProto  *JSObject
 	symbolProto   *JSObject
 	forInStack    []*forInIter
-	// moduleRegistry holds exported values from modules, keyed by module specifier.
 	moduleRegistry map[string]map[string]JSValue
 	// currentModuleName is the module name being executed (for OpExport).
 	currentModuleName string
@@ -287,6 +288,217 @@ func (in *Interpreter) ArrayPrototype() *JSObject { return in.arrayProto }
 
 // FunctionPrototype returns the Function.prototype for the interpreter.
 func (in *Interpreter) FunctionPrototype() *JSObject { return in.functionProto }
+
+// strVal extracts a Go string from a JSValue (handles both primitive strings and String objects).
+func strVal(v JSValue) string {
+	if v.IsString() {
+		return v.AsString()
+	}
+	if v.IsObject() {
+		return v.ToString()
+	}
+	return ""
+}
+
+// StringPrototype returns the String.prototype object with all String methods.
+func (in *Interpreter) StringPrototype() *JSObject {
+	if in.stringProto != nil {
+		return in.stringProto
+	}
+	proto := NewObject(in.objectProto)
+	proto.ClassName = "String"
+
+	proto.Set("startsWith", FunctionValue(NewNativeFunction("startsWith", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		search := ""
+		if len(args) > 0 { search = args[0].ToString() }
+		pos := 0
+		if len(args) > 1 && args[1].IsNumber() { pos = int(args[1].ToInt32()) }
+		if pos < 0 { pos = 0 }
+		return BooleanValue(pos <= len(s) && strings.HasPrefix(s[pos:], search))
+	}, 1)))
+
+	proto.Set("endsWith", FunctionValue(NewNativeFunction("endsWith", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		search := ""
+		if len(args) > 0 { search = args[0].ToString() }
+		l := len(s)
+		if len(args) > 1 && args[1].IsNumber() { l = int(args[1].ToInt32()) }
+		return BooleanValue(l >= len(search) && s[l-len(search):l] == search)
+	}, 1)))
+
+	proto.Set("includes", FunctionValue(NewNativeFunction("includes", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		search := ""
+		if len(args) > 0 { search = args[0].ToString() }
+		pos := 0
+		if len(args) > 1 && args[1].IsNumber() { pos = int(args[1].ToInt32()) }
+		if pos < 0 { pos = 0 }
+		if pos > len(s) { return BooleanValue(false) }
+		return BooleanValue(strings.Contains(s[pos:], search))
+	}, 1)))
+
+	proto.Set("trim", FunctionValue(NewNativeFunction("trim", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		return StringValue(strings.TrimSpace(strVal(this)))
+	}, 0)))
+
+	proto.Set("trimStart", FunctionValue(NewNativeFunction("trimStart", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		return StringValue(strings.TrimLeft(strVal(this), " \t\n\r\v\f"))
+	}, 0)))
+
+	proto.Set("trimEnd", FunctionValue(NewNativeFunction("trimEnd", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		return StringValue(strings.TrimRight(strVal(this), " \t\n\r\v\f"))
+	}, 0)))
+
+	proto.Set("charAt", FunctionValue(NewNativeFunction("charAt", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		pos := 0
+		if len(args) > 0 && args[0].IsNumber() { pos = int(args[0].ToInt32()) }
+		if pos < 0 || pos >= len(s) { return StringValue("") }
+		return StringValue(string(s[pos]))
+	}, 1)))
+
+	proto.Set("charCodeAt", FunctionValue(NewNativeFunction("charCodeAt", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		pos := 0
+		if len(args) > 0 && args[0].IsNumber() { pos = int(args[0].ToInt32()) }
+		if pos < 0 || pos >= len(s) { return NumberValue(math.NaN()) }
+		return NumberValue(float64(s[pos]))
+	}, 1)))
+
+	proto.Set("indexOf", FunctionValue(NewNativeFunction("indexOf", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		search := ""
+		if len(args) > 0 { search = args[0].ToString() }
+		from := 0
+		if len(args) > 1 && args[1].IsNumber() { from = int(args[1].ToInt32()) }
+		if from < 0 { from = 0 }
+		if from > len(s) { return NumberValue(-1) }
+		idx := strings.Index(s[from:], search)
+		if idx < 0 { return NumberValue(-1) }
+		return NumberValue(float64(from + idx))
+	}, 1)))
+
+	proto.Set("match", FunctionValue(NewNativeFunction("match", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		if len(args) == 0 { return Null() }
+		pat := args[0].ToString()
+		re, err := regexp.Compile(pat)
+		if err != nil { return Null() }
+		m := re.FindString(s)
+		if m == "" { return Null() }
+		return StringValue(m)
+	}, 1)))
+
+	proto.Set("replace", FunctionValue(NewNativeFunction("replace", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		if len(args) < 2 { return StringValue(s) }
+		search := args[0].ToString()
+		replacement := args[1].ToString()
+		return StringValue(strings.Replace(s, search, replacement, 1))
+	}, 2)))
+
+	proto.Set("replaceAll", FunctionValue(NewNativeFunction("replaceAll", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		if len(args) < 2 { return StringValue(s) }
+		search := args[0].ToString()
+		replacement := args[1].ToString()
+		return StringValue(strings.ReplaceAll(s, search, replacement))
+	}, 2)))
+
+	proto.Set("split", FunctionValue(NewNativeFunction("split", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		sep := ""
+		if len(args) > 0 { sep = args[0].ToString() }
+		limit := -1
+		if len(args) > 1 && args[1].IsNumber() { limit = int(args[1].ToInt32()) }
+		var parts []string
+		if sep == "" {
+			for _, r := range s { parts = append(parts, string(r)) }
+		} else {
+			parts = strings.Split(s, sep)
+		}
+		if limit >= 0 && limit < len(parts) { parts = parts[:limit] }
+		arr := make([]JSValue, len(parts))
+		for i, p := range parts { arr[i] = StringValue(p) }
+		return ObjectValue(NewArray(in.arrayProto, arr))
+	}, 2)))
+
+	proto.Set("slice", FunctionValue(NewNativeFunction("slice", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		start := 0
+		if len(args) > 0 && args[0].IsNumber() { start = int(args[0].ToInt32()) }
+		end := len(s)
+		if len(args) > 1 && args[1].IsNumber() { end = int(args[1].ToInt32()) }
+		// Handle negative indices
+		if start < 0 { start = max(0, len(s)+start) }
+		if end < 0 { end = max(0, len(s)+end) }
+		if start >= end || start >= len(s) { return StringValue("") }
+		if end > len(s) { end = len(s) }
+		return StringValue(s[start:end])
+	}, 2)))
+
+	proto.Set("substring", FunctionValue(NewNativeFunction("substring", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		start := 0
+		if len(args) > 0 && args[0].IsNumber() { start = int(args[0].ToInt32()) }
+		end := len(s)
+		if len(args) > 1 && args[1].IsNumber() { end = int(args[1].ToInt32()) }
+		if start < 0 { start = 0 }
+		if end < 0 { end = 0 }
+		if start > end { start, end = end, start }
+		if start > len(s) { start = len(s) }
+		if end > len(s) { end = len(s) }
+		return StringValue(s[start:end])
+	}, 2)))
+
+	proto.Set("toLowerCase", FunctionValue(NewNativeFunction("toLowerCase", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		return StringValue(strings.ToLower(strVal(this)))
+	}, 0)))
+
+	proto.Set("toUpperCase", FunctionValue(NewNativeFunction("toUpperCase", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		return StringValue(strings.ToUpper(strVal(this)))
+	}, 0)))
+
+	proto.Set("concat", FunctionValue(NewNativeFunction("concat", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		for _, a := range args { s += a.ToString() }
+		return StringValue(s)
+	}, 1)))
+
+	proto.Set("repeat", FunctionValue(NewNativeFunction("repeat", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		n := 0
+		if len(args) > 0 && args[0].IsNumber() { n = int(args[0].ToInt32()) }
+		if n <= 0 { return StringValue("") }
+		return StringValue(strings.Repeat(s, n))
+	}, 1)))
+
+	proto.Set("padStart", FunctionValue(NewNativeFunction("padStart", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		maxLen := 0
+		if len(args) > 0 && args[0].IsNumber() { maxLen = int(args[0].ToInt32()) }
+		fill := " "
+		if len(args) > 1 { fill = args[1].ToString() }
+		if len(s) >= maxLen { return StringValue(s) }
+		pad := strings.Repeat(fill, (maxLen-len(s)+len(fill)-1)/len(fill))
+		return StringValue(pad[:maxLen-len(s)] + s)
+	}, 2)))
+
+	proto.Set("padEnd", FunctionValue(NewNativeFunction("padEnd", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := strVal(this)
+		maxLen := 0
+		if len(args) > 0 && args[0].IsNumber() { maxLen = int(args[0].ToInt32()) }
+		fill := " "
+		if len(args) > 1 { fill = args[1].ToString() }
+		if len(s) >= maxLen { return StringValue(s) }
+		pad := strings.Repeat(fill, (maxLen-len(s)+len(fill)-1)/len(fill))
+		return StringValue(s + pad[:maxLen-len(s)])
+	}, 2)))
+
+	in.stringProto = proto
+	return proto
+}
 
 // SetMaxCallDepth configures the recursion limit.
 func (in *Interpreter) SetMaxCallDepth(n int) { in.maxCallDepth = n }
@@ -802,6 +1014,14 @@ func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
 		switch name {
 		case "length":
 			return NumberValue(float64(len(obj.str)))
+		default:
+			// Look up String.prototype methods
+			if in.stringProto != nil {
+				if v, ok := in.stringProto.Properties[name]; ok {
+					return v
+				}
+			}
+			return Undefined()
 		}
 		if fn := in.stringMethod(name); fn != nil {
 			return FunctionValue(fn)
@@ -824,6 +1044,12 @@ func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
 			return NumberValue(float64(obj.fn.length))
 		case "name":
 			return StringValue(obj.fn.Name)
+		}
+		// Walk Function.prototype chain
+		if in.functionProto != nil {
+			if v, ok := in.functionProto.Get(name); ok {
+				return v
+			}
 		}
 		return Undefined()
 	case TagUndefined, TagNull:
@@ -917,8 +1143,13 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 	}
 	if !callee.IsFunction() {
 		tag := "unknown"
-		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "object" } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "boolean" }
-		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
+		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "object(" + callee.AsObject().ClassName + ")" } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "boolean" }
+		// Try to get more context from the global object
+		detail := ""
+		if callee.IsObject() && callee.AsObject() != nil {
+			detail = " class=" + callee.AsObject().ClassName
+		}
+		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + detail + ")")}
 	}
 	fn := callee.fn
 	if fn.Native != nil {

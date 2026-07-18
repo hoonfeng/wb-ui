@@ -489,6 +489,8 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		return StringValue(args[0].ToString())
 	}, 1)
 	stringCtor.properties.Prototype = in.functionProto
+	stringProto := in.StringPrototype()
+	stringCtor.properties.Set("prototype", ObjectValue(stringProto))
 	g.Set("String", FunctionValue(stringCtor))
 
 	numberCtor := NewNativeFunction("Number", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
