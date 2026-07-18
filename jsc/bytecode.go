@@ -659,6 +659,13 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	}
 	body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
+	// If class extends a parent, bind parent as 'super' in current scope
+	if n.SuperClass != nil {
+		g.emitExpr(n.SuperClass)
+		g.emit(Instruction{Op: OpDeclareVar, Name: "super"})
+		g.emit(Instruction{Op: OpStoreVar, Name: "super"})
+		g.emit(Instruction{Op: OpPop})
+	}
 	// Store the constructor as the class variable.
 	g.emit(Instruction{Op: OpDeclareVar, Name: n.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: n.Name})

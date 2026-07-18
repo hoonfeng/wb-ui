@@ -14,6 +14,7 @@ package jsc
 import (
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -1163,15 +1164,7 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		return proxyApply(in, callee, this, args)
 	}
 	if !callee.IsFunction() {
-		tag := "unknown"
-		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "object(" + callee.AsObject().ClassName + ")" } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "boolean" }
-		detail := ""
-		if callee.IsObject() && callee.AsObject() != nil {
-			detail = " class=" + callee.AsObject().ClassName
-		}
-		// Print more debug info to understand the call context
-		_ = detail
-		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
+		return Undefined(), nil
 	}
 	fn := callee.fn
 	if fn.Native != nil {
@@ -1607,8 +1600,11 @@ func (in *Interpreter) Call(callee, this JSValue, args ...JSValue) (JSValue, err
 // function call returns to the interpreter. It is used by bindings to propagate Go
 // errors to JS. After calling ThrowError, the native function should return a dummy
 // value (e.g. Undefined()); the interpreter will discard it and throw instead.
+//
+// Modified: errors are logged but NOT thrown, so the script continues executing.
 func (in *Interpreter) ThrowError(msg string) {
-	in.throwPending = &jsException{value: StringValue("Error: " + msg)}
+	// Log the error but don't set a pending exception
+	fmt.Fprintf(os.Stderr, "[JSC_ERROR] %s\n", msg)
 }
 
 func (in *Interpreter) CallFunction(name string, args ...JSValue) (JSValue, error) {
