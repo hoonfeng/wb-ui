@@ -507,15 +507,15 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	c.UserSelect = parent.UserSelect
 	c.Opacity = parent.Opacity
 	c.WritingMode = parent.WritingMode
-	// Custom properties inherit.
-	if c.CustomProperties == nil {
-		c.CustomProperties = map[string][]css.Token{}
+	// Custom properties inherit. We always propagate parent custom properties
+	// since NewComputedStyle initializes CustomProperties to a non-nil empty map,
+	// making a nil check insufficient. Child properties are re-applied via
+	// applyDeclaration after InheritFrom, so parent values serve as defaults.
 	for k, v := range parent.CustomProperties {
 		if _, ok := c.CustomProperties[k]; !ok {
 			c.CustomProperties[k] = v
 		}
 	}
-}
 }
 
 // ResolveLengthValue evaluates a deferred calc() expression for the named property

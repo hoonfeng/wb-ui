@@ -265,8 +265,16 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 		el.RemoveChild(n)
 		return a
 	})))
-	obj.Set("insertBefore", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
+	obj.Set("insertBefore", funcVal(fn2Node(func(in *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
 		if nc == nil { return jsc.Null() }
+		// DocumentFragment: insert all children individually.
+		if frag, ok := nc.(*dom.DocumentFragment); ok {
+			for c := frag.FirstChild(); c != nil; c = frag.FirstChild() {
+				frag.RemoveChild(c)
+				el.InsertBefore(c, rc)
+			}
+			return a0
+		}
 		el.InsertBefore(nc, rc)
 		return a0
 	})))
@@ -376,6 +384,20 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.TextContent()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetTextContent(v.ToString()) })
+
+	// <template> elements need .content returning a DocumentFragment
+	// (Vue 3 + createStaticVNode depends on this).
+	if strings.EqualFold(el.LocalName(), "template") {
+		obj.SetAccessor("content",
+			getter(func(in *jsc.Interpreter) jsc.JSValue {
+				frag := el.OwnerDocument().CreateDocumentFragment()
+				// Move all child nodes into the fragment
+				for c := el.FirstChild(); c != nil; c = el.FirstChild() {
+					frag.AppendChild(c)
+				}
+				return jsc.ObjectValue(wrapDocFrag(in, frag))
+			}), nil)
+	}
 
 	return obj
 }
