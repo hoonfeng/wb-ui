@@ -261,7 +261,12 @@ func (b *RenderTreeBuilder) attachLayoutTree(view *RenderView, root *dom.Element
 		return
 	}
 	view.SetLayoutBox(layoutRoot)
-	b.linkLayoutBoxes(view, layoutRoot)
+	// Start from RenderView's first child (html element) to match with
+	// the layout root. RenderView itself should not be matched against
+	// layoutRoot's children (body etc) which would fail.
+	if firstChild := view.FirstChild(); firstChild != nil {
+		b.linkLayoutBoxes(firstChild, layoutRoot)
+	}
 }
 
 // linkLayoutBoxes recursively links layout boxes to render objects by matching the
