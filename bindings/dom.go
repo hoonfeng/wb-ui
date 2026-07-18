@@ -268,6 +268,10 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		return arrNode(in, el.ChildNodes())
 	}), nil)
+	// ownerDocument — needed by Vue 3 when checking element's document
+	obj.SetAccessor("ownerDocument", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return in.GlobalObject().GetOrZero("document")
+	}), nil)
 
 	// Position / dimension stubs (Vue needs these)
 	obj.Set("getBoundingClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",

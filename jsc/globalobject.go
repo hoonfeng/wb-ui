@@ -1280,6 +1280,11 @@ func (in *Interpreter) InstallStandardAPIs() {
 		// Error stack
 		`if(!Error.prototype.stack)Object.defineProperty(Error.prototype,'stack',{get:function(){return this.message||''}})`,
 
+		// Event constructors (needed by Vue 3 event system)
+		// Use direct assignment to window (not var) to ensure it overrides
+		`window.Event=window.Event||function(t,p){var e={type:t,bubbles:!!(p&&p.bubbles),cancelable:!!(p&&p.cancelable),defaultPrevented:false,stopPropagation:function(){},preventDefault:function(){this.defaultPrevented=true},composed:!!(p&&p.composed)};return e}`,
+		`window.CustomEvent=window.CustomEvent||function(t,p){p=p||{};var e=new window.Event(t,p);e.detail=p.detail;return e}`,
+
 		// Global eval
 		`if(typeof eval==='undefined')eval=function(s){var p;try{p=JSON.parse(s);if(typeof p!=='string')return p}catch(e){}return function(){return this}().constructor.constructor('return ('+s+')')()}`,
 	}
