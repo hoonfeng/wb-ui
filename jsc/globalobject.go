@@ -70,6 +70,7 @@ func (in *Interpreter) SetupGlobal(logger Logger) {
 	in.installJSON(g)
 	in.installConstructors(g)
 	in.installGlobals(g)
+	in.InstallStandardAPIs()
 }
 
 // installConsole creates the console object with log/error/warn/info.
@@ -1235,4 +1236,54 @@ func (in *Interpreter) installGlobals(g *JSObject) {
 // Eval parses and runs source in the global environment, returning the result.
 func (in *Interpreter) Eval(src string) (JSValue, error) {
 	return in.Run(src)
+}
+
+// InstallStandardAPIs adds all commonly used ES APIs that may be missing from the
+// core engine. This includes Object/Array/String/Number prototype methods and
+// static methods that Vue 3 and modern JS libraries depend on.
+// Must be called after SetupGlobal.
+func (in *Interpreter) InstallStandardAPIs() {
+	apis := []string{
+		// Object static methods
+		`if(!Object.is)Object.is=function(a,b){return a===b?0!==a||1/a===1/b:a!==a&&b!==b}`,
+		`if(!Object.getOwnPropertySymbols)Object.getOwnPropertySymbols=function(){return[]}`,
+		`if(!Object.defineProperties)Object.defineProperties=function(o,ps){var ks=Object.keys(ps);for(var i=0;i<ks.length;i++)Object.defineProperty(o,ks[i],ps[ks[i]]);return o}`,
+		`if(!Object.getOwnPropertyDescriptors)Object.getOwnPropertyDescriptors=function(o){var r={};var ks=Object.getOwnPropertyNames(o);for(var i=0;i<ks.length;i++)r[ks[i]]=Object.getOwnPropertyDescriptor(o,ks[i]);return r}`,
+		`if(!Object.fromEntries)Object.fromEntries=function(e){var r={};for(var i=0;e&&i<e.length;i++)r[e[i][0]]=e[i][1];return r}`,
+		// Number
+		`if(!Number.EPSILON)Number.EPSILON=2.220446049250313e-16`,
+		`if(!Number.MAX_SAFE_INTEGER)Number.MAX_SAFE_INTEGER=9007199254740991`,
+		`if(!Number.MIN_SAFE_INTEGER)Number.MIN_SAFE_INTEGER=-9007199254740991`,
+		`if(!Number.isSafeInteger)Number.isSafeInteger=function(n){return typeof n==='number'&&isFinite(n)&&Math.floor(n)===n&&Math.abs(n)<=Number.MAX_SAFE_INTEGER}`,
+		`if(!Number.parseFloat)Number.parseFloat=parseFloat`,
+		`if(!Number.parseInt)Number.parseInt=parseInt`,
+		// Array.prototype
+		`if(!Array.prototype.copyWithin)Array.prototype.copyWithin=function(t,s,e){var a=this;t=t<0?Math.max(a.length+t,0):Math.min(t,a.length);s=s<0?Math.max(a.length+s,0):Math.min(s,a.length);e=e===undefined?a.length:e<0?Math.max(a.length+e,0):Math.min(e,a.length);var c=e-s;if(c>0){var d=Math.min(c,a.length-t);for(var i=0;i<d;i++)a[t+i]=a[s+i]}return a}`,
+		`if(!Array.prototype.lastIndexOf)Array.prototype.lastIndexOf=function(s,f){var a=this;var l=a.length;var i=f===undefined?l-1:Math.min(Math.max(f,0),l-1);for(;i>=0;i--)if(a[i]===s)return i;return-1}`,
+		`if(!Array.prototype.unshift)Array.prototype.unshift=function(){var a=this;var n=arguments.length;for(var i=a.length-1;i>=0;i--)a[i+n]=a[i];for(var i=0;i<n;i++)a[i]=arguments[i];return a.length+n}`,
+		`if(!Array.prototype.shift)Array.prototype.shift=function(){var a=this;if(a.length===0)return undefined;var r=a[0];for(var i=1;i<a.length;i++)a[i-1]=a[i];a.length--;return r}`,
+		`if(!Array.prototype.values)Array.prototype.values=function(){var a=this;var i=0;return{next:function(){return i<a.length?{value:a[i++],done:false}:{done:true}},[Symbol.iterator]:function(){return this}}}`,
+		`if(!Array.prototype.entries)Array.prototype.entries=function(){var a=this;var i=0;return{next:function(){if(i<a.length){var v=[i,a[i]];i++;return{value:v,done:false}}return{done:true}},[Symbol.iterator]:function(){return this}}}`,
+		// String.prototype
+		`if(!String.prototype.startsWith)String.prototype.startsWith=function(s,p){p=p||0;return this.substring(p,p+s.length)===s}`,
+		`if(!String.prototype.endsWith)String.prototype.endsWith=function(s,p){p=p===undefined?this.length:p;return this.substring(p-s.length,p)===s}`,
+		`if(!String.prototype.includes)String.prototype.includes=function(s,p){return this.indexOf(s,p)!==-1}`,
+		`if(!String.prototype.repeat)String.prototype.repeat=function(n){n=Math.max(0,Math.floor(n));var r='';for(var i=0;i<n;i++)r+=this;return r}`,
+		`if(!String.prototype.padStart)String.prototype.padStart=function(l,s){s=s||' ';var r=this;while(r.length<l)r=s+r;return r}`,
+		`if(!String.prototype.padEnd)String.prototype.padEnd=function(l,s){s=s||' ';var r=this;while(r.length<l)r+=s;return r}`,
+		`if(!String.prototype.trimStart)String.prototype.trimStart=function(){return this.replace(/^\\s+/,'')}`,
+		`if(!String.prototype.trimEnd)String.prototype.trimEnd=function(){return this.replace(/\\s+$/,'')}`,
+		`if(!String.prototype.replaceAll)String.prototype.replaceAll=function(s,r){if(typeof s==='string')return this.split(s).join(r);return this.replace(s,r)}`,
+		`if(!String.prototype.codePointAt)String.prototype.codePointAt=function(i){var c=this.charCodeAt(i);if(c>=0xD800&&c<=0xDBFF){var n=this.charCodeAt(i+1);if(n>=0xDC00&&n<=0xDFFF)return(c-0xD800)*1024+(n-0xDC00)+0x10000}return c}`,
+		// Function.prototype
+		`if(!Function.prototype.toString)Function.prototype.toString=function(){return'function '+((this.name&&this.name!='')?this.name:'')+'() { [native code] }'}`,
+		// Error stack
+		`if(!Error.prototype.stack)Object.defineProperty(Error.prototype,'stack',{get:function(){return this.message||''}})`,
+
+		// Global eval
+		`if(typeof eval==='undefined')eval=function(s){var p;try{p=JSON.parse(s);if(typeof p!=='string')return p}catch(e){}return function(){return this}().constructor.constructor('return ('+s+')')()}`,
+	}
+	for _, api := range apis {
+		in.Run(api) //nolint:errcheck
+	}
 }
