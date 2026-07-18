@@ -1243,6 +1243,16 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 	if !callee.IsFunction() {
 		tag := "?"
 		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "obj:" + callee.AsObject().ClassName } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "bool" }
+		// Log detailed diagnostic for non-function callee
+		fmt.Fprintf(os.Stderr, "[CALL_ERR] depth=%d callee_tag=%s this_tag=%d args=%d\n", in.depth, tag, this.tag, len(args))
+		if callee.IsObject() {
+			obj := callee.AsObject()
+			fmt.Fprintf(os.Stderr, "[CALL_ERR]   obj.ClassName=%q IsArray=%v Internal=%v Properties=%d\n", obj.ClassName, obj.IsArray, obj.Internal != nil, len(obj.Properties))
+		}
+		// Go call stack
+		var stkbuf [1024]byte
+		n := runtime.Stack(stkbuf[:], false)
+		fmt.Fprintf(os.Stderr, "[CALL_ERR_STACK]\n%s\n", stkbuf[:n])
 		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
 	}
 	fn := callee.fn
