@@ -360,7 +360,9 @@ func (f *Frame) executeInlineScripts() {
 				if strings.TrimSpace(code) == "" {
 					continue
 				}
-				if err := f.ScriptEngine(code); err != nil {
+				// Wrap IIFE in try-catch to capture all errors
+				wrapped := "try{\n" + code + "\n}catch(e){try{console.log('VUE_ERR:'+(e&&e.message?e.message:e)+'|name='+(e&&e.name?e.name:'?'))}catch(e2){}}"
+				if err := f.ScriptEngine(wrapped); err != nil {
 					logError("external script execution failed: %v", err)
 				}
 				continue

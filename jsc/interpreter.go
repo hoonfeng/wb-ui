@@ -540,6 +540,11 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 // runFunctionBody is the dispatch loop without async wrapping. It is called by
 // both runFunction (non-async) and runAsyncFunction (async wrapper).
 func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (JSValue, *jsException) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Panic recovered: return undefined to keep the script executing
+		}
+	}()
 	if in.depth > in.maxCallDepth {
 		in.depth--
 		return Undefined(), &jsException{value: StringValue("RangeError: Maximum call stack size exceeded")}

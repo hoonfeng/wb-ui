@@ -449,6 +449,7 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		return ObjectValue(NewArray(in.arrayProto, args))
 	}, 1)
 	arrayCtor.properties.Prototype = in.functionProto
+	arrayCtor.properties.Set("prototype", ObjectValue(in.arrayProto))
 	g.Set("Array", FunctionValue(arrayCtor))
 	// Array.isArray / Array.from
 	arrayCtor.properties.Set("isArray", FunctionValue(NewNativeFunction("isArray",
@@ -500,6 +501,26 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		return NumberValue(args[0].ToNumber())
 	}, 1)
 	numberCtor.properties.Prototype = in.functionProto
+	numProto := NewObject(in.objectProto)
+	numProto.ClassName = "Number"
+	numProto.Set("toString", FunctionValue(NewNativeFunction("toString",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			n := 0.0
+			if this.IsNumber() { n = this.AsNumber() } else if this.IsObject() { n = this.ToNumber() }
+			radix := 10
+			if len(args) > 0 && args[0].IsNumber() { radix = int(args[0].AsNumber()) }
+			if radix == 10 { return StringValue(fmt.Sprintf("%g", n)) }
+			return StringValue(strconv.FormatInt(int64(n), radix))
+		}, 1)))
+	numProto.Set("toFixed", FunctionValue(NewNativeFunction("toFixed",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			n := 0.0
+			if this.IsNumber() { n = this.AsNumber() }
+			digits := 0
+			if len(args) > 0 && args[0].IsNumber() { digits = int(args[0].AsNumber()) }
+			return StringValue(strconv.FormatFloat(n, 'f', digits, 64))
+		}, 1)))
+	numberCtor.properties.Set("prototype", ObjectValue(numProto))
 	g.Set("Number", FunctionValue(numberCtor))
 	// Number.isNaN / isFinite / isInteger
 	numberCtor.properties.Set("isNaN", FunctionValue(NewNativeFunction("isNaN",
@@ -527,6 +548,15 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 		return BooleanValue(args[0].ToBoolean())
 	}, 1)
 	booleanCtor.properties.Prototype = in.functionProto
+	boolProto := NewObject(in.objectProto)
+	boolProto.ClassName = "Boolean"
+	boolProto.Set("toString", FunctionValue(NewNativeFunction("toString",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			b := false
+			if this.IsBoolean() { b = this.AsBoolean() }
+			return StringValue(fmt.Sprintf("%t", b))
+		}, 0)))
+	booleanCtor.properties.Set("prototype", ObjectValue(boolProto))
 	g.Set("Boolean", FunctionValue(booleanCtor))
 
 	// Object.keys / Object.values (static helpers).
@@ -966,6 +996,92 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 			arr.Elements = newElems
 			return ObjectValue(NewArray(in.arrayProto, removed))
 		}, 2)))
+	// ─── Additional Array.prototype methods ─────────────
+	arrProto.Set("findIndex", FunctionValue(NewNativeFunction("findIndex",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return NumberValue(-1) }
+			arr := this.AsObject()
+			if !arr.IsArray || len(args) == 0 || !args[0].IsFunction() { return NumberValue(-1) }
+			fn := args[0]
+			for i, e := range arr.Elements {
+				r, _ := in.Call(fn, Undefined(), e, NumberValue(float64(i)), ObjectValue(arr))
+				if r.IsBoolean() && r.AsBoolean() { return NumberValue(float64(i)) }
+			}
+			return NumberValue(-1)
+		}, 1)))
+	arrProto.Set("fill", FunctionValue(NewNativeFunction("fill",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return this }
+			arr := this.AsObject()
+			if !arr.IsArray { return this }
+			val := Undefined()
+			if len(args) > 0 { val = args[0] }
+			start := 0
+			if len(args) > 1 && args[1].IsNumber() { start = int(args[1].AsNumber()) }
+			end := len(arr.Elements)
+			if len(args) > 2 && args[2].IsNumber() { end = int(args[2].AsNumber()) }
+			if start < 0 { start = len(arr.Elements) + start; if start < 0 { start = 0 } }
+			if end < 0 { end = len(arr.Elements) + end }
+			if start > len(arr.Elements) { start = len(arr.Elements) }
+			if end > len(arr.Elements) { end = len(arr.Elements) }
+			for i := start; i < end; i++ { arr.Elements[i] = val }
+			return this
+		}, 1)))
+	arrProto.Set("flat", FunctionValue(NewNativeFunction("flat",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			arr := this.AsObject()
+			if !arr.IsArray { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			depth := 1
+			if len(args) > 0 && args[0].IsNumber() { depth = int(args[0].AsNumber()) }
+			var flatten func(elems []JSValue, d int) []JSValue
+			flatten = func(elems []JSValue, d int) []JSValue {
+				var result []JSValue
+				for _, e := range elems {
+					if d > 0 && e.IsObject() && e.AsObject() != nil && e.AsObject().IsArray {
+						result = append(result, flatten(e.AsObject().Elements, d-1)...)
+					} else {
+						result = append(result, e)
+					}
+				}
+				return result
+			}
+			return ObjectValue(NewArray(in.arrayProto, flatten(arr.Elements, depth)))
+		}, 1)))
+	arrProto.Set("sort", FunctionValue(NewNativeFunction("sort",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return this }
+			arr := this.AsObject()
+			if !arr.IsArray { return this }
+			// Simple insertion sort (stable, works for any comparator)
+			for i := 1; i < len(arr.Elements); i++ {
+				for j := i; j > 0; j-- {
+					a, b := arr.Elements[j-1], arr.Elements[j]
+					swap := false
+					if len(args) > 0 && args[0].IsFunction() {
+						r, _ := in.Call(args[0], Undefined(), a, b)
+						if r.IsNumber() && r.AsNumber() > 0 { swap = true }
+					} else {
+						sa, sb := a.ToString(), b.ToString()
+						if sa > sb { swap = true }
+					}
+					if swap {
+						arr.Elements[j-1], arr.Elements[j] = b, a
+					}
+				}
+			}
+			return this
+		}, 1)))
+	arrProto.Set("reverse", FunctionValue(NewNativeFunction("reverse",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsObject() { return this }
+			arr := this.AsObject()
+			if !arr.IsArray { return this }
+			for i, j := 0, len(arr.Elements)-1; i < j; i, j = i+1, j-1 {
+				arr.Elements[i], arr.Elements[j] = arr.Elements[j], arr.Elements[i]
+			}
+			return this
+		}, 0)))
 }
 
 // GetOrZero returns the property or undefined.

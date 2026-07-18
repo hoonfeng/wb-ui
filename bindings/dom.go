@@ -384,26 +384,25 @@ func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 			el.SetAttribute("style", v.ToString())
 		})
 
-	// setProperty / removeProperty
-	s.Set("setProperty", jsc.FunctionValue(jsc.NewNativeFunction("setProperty",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) < 2 { return jsc.Undefined() }
-			cssText := el.GetAttribute("style")
-			props := parseStyle(cssText)
-			props[args[0].ToString()] = args[1].ToString()
-			el.SetAttribute("style", joinStyle(props))
-			return jsc.Undefined()
-		}, 2)))
-	s.Set("removeProperty", jsc.FunctionValue(jsc.NewNativeFunction("removeProperty",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.StringValue("") }
-			cssText := el.GetAttribute("style")
-			props := parseStyle(cssText)
-			old := props[args[0].ToString()]
-			delete(props, args[0].ToString())
-			el.SetAttribute("style", joinStyle(props))
-			return jsc.StringValue(old)
-		}, 1)))
+		s.Set("setProperty", jsc.FunctionValue(jsc.NewNativeFunction("setProperty",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) < 2 { return jsc.Undefined() }
+				cssText := el.GetAttribute("style")
+				props := parseStyle(cssText)
+				props[args[0].ToString()] = args[1].ToString()
+				el.SetAttribute("style", joinStyle(props))
+				return jsc.Undefined()
+			}, 2)))
+		s.Set("removeProperty", jsc.FunctionValue(jsc.NewNativeFunction("removeProperty",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) == 0 { return jsc.StringValue("") }
+				cssText := el.GetAttribute("style")
+				props := parseStyle(cssText)
+				old := props[args[0].ToString()]
+				delete(props, args[0].ToString())
+				el.SetAttribute("style", joinStyle(props))
+				return jsc.StringValue(old)
+			}, 1)))
 
 	return s
 }

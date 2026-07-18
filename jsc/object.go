@@ -535,6 +535,10 @@ func (o *JSObject) GetIndex(i int) (JSValue, bool) {
 
 // SetIndex assigns an indexed element, growing the backing slice as needed.
 func (o *JSObject) SetIndex(i int, value JSValue) {
+	if i < 0 {
+		o.Set(strconv.Itoa(i), value)
+		return
+	}
 	if !o.IsArray {
 		o.IsArray = true
 		o.ClassName = "Array"
