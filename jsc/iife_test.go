@@ -6,22 +6,31 @@ import (
 	"testing"
 )
 
-func TestIIFEActual(t *testing.T) {
+func TestProxyPushDebug4(t *testing.T) {
 	vm := NewInterpreter()
 	logger := &BufferLogger{}
 	vm.SetupGlobal(logger)
-	
-	// Exact replacement pattern
+
 	code := `
-		var UV={use:function(x){return this},mount:function(el){console.log("MOUNT_CALLED:"+el)}};
-		var SHe=function(){return "router"};
-		var $Xe=function(){return "pinia"};
-		UV.use(SHe()),UV.use($Xe),(function(){console.log("M_MOUNT");try{UV.mount("#app");console.log("M_MOUNT_OK")}catch(_m){console.log("M_MOUNT_ERR:"+_m)}})();
-		console.log("AFTER_MOUNT");
-	`
+var t = [1, 2, 3];
+var h = { set: function(t,k,v,r) { console.log("SET:"+k); return Reflect.set(t,k,v,r); }, get: function(t,k,r) { console.log("GET:"+k); return Reflect.get(t,k,r); } };
+var p = new Proxy(t, h);
+
+// Simple test: just typeof p.push
+console.log("TYPEOF_PUSH: " + (typeof p.push));
+
+// Direct method call
+console.log("BEFORE_PUSH");
+var r = p.push(4);
+console.log("PUSH_RETURNED: " + r);
+console.log("AFTER: len=" + p.length);
+`
+	
 	_, err := vm.Run(code)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	fmt.Fprintf(os.Stderr, "Output:\n%s\n", logger.String())
+	
+	out := logger.String()
+	fmt.Fprintf(os.Stderr, "Output:\n%s\n", out)
 }

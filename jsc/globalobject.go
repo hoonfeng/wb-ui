@@ -566,6 +566,18 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 			return ObjectValue(NewArray(in.arrayProto, nil))
 		}
 		o := args[0].AsObject()
+		// Proxy support: call [[OwnPropertyKeys]] via handler's ownKeys trap
+		if IsProxy(args[0]) {
+			pkeys := proxyOwnKeys(in, args[0])
+			if pkeys == nil {
+				return ObjectValue(NewArray(in.arrayProto, nil))
+			}
+			keys := make([]JSValue, len(pkeys))
+			for i, k := range pkeys {
+				keys[i] = StringValue(k)
+			}
+			return ObjectValue(NewArray(in.arrayProto, keys))
+		}
 		var keys []JSValue
 		if o.IsArray {
 			for i := range o.Elements {

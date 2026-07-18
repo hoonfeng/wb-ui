@@ -875,14 +875,19 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 				// For-in: collect enumerable keys.
 				iter := &forInIter{}
 				if obj.IsObject() {
-					o := obj.object
-					if o.IsArray {
-						for i := range o.Elements {
-							iter.keys = append(iter.keys, fmt.Sprintf("%d", i))
+					// Proxy support: use [[OwnPropertyKeys]] via handler
+					if IsProxy(obj) {
+						iter.keys = proxyOwnKeys(in, obj)
+					} else {
+						o := obj.object
+						if o.IsArray {
+							for i := range o.Elements {
+								iter.keys = append(iter.keys, fmt.Sprintf("%d", i))
+							}
 						}
-					}
-					for k := range o.Properties {
-						iter.keys = append(iter.keys, k)
+						for k := range o.Properties {
+							iter.keys = append(iter.keys, k)
+						}
 					}
 				}
 				in.forInStack = append(in.forInStack, iter)
@@ -1411,8 +1416,26 @@ func (in *Interpreter) arrayMethod(name string) *JSFunction {
 	switch name {
 	case "push":
 		return NewNativeFunction("push", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			fmt.Fprintf(os.Stderr, "[PUSH_ENTER] this.tag=%d isObj=%v isProxy=%v\n", this.tag, this.IsObject(), IsProxy(this))
 			if !this.IsObject() {
+				fmt.Fprintf(os.Stderr, "[PUSH] this is not object tag=%d\n", this.tag)
 				return NumberValue(0)
+			}
+			fmt.Fprintf(os.Stderr, "[PUSH] isObject=true isProxy=%v className=%s\n", IsProxy(this), this.AsObject().ClassName)
+			// Proxy support: operate on target directly
+			if IsProxy(this) {
+				pd := this.AsObject().Internal.(*proxyData)
+				target := pd.target
+				fmt.Fprintf(os.Stderr, "[PUSH] proxy target tag=%d\n", target.tag)
+				if !target.IsObject() {
+					return NumberValue(0)
+				}
+				base := len(target.AsObject().Elements)
+				for i, a := range args {
+					in.setIndex(target, NumberValue(float64(base+i)), a)
+				}
+				target.AsObject().Set("length", NumberValue(float64(base+len(args))))
+				return NumberValue(float64(base + len(args)))
 			}
 			o := this.AsObject()
 			for _, a := range args {

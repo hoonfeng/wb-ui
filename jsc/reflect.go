@@ -19,13 +19,31 @@ func (in *Interpreter) ReflectObject() *JSObject {
 			return Undefined()
 		}
 		target := args[0]
-		prop := args[1].ToString()
+		prop := args[1]
+		propStr := prop.ToString()
 		if len(args) >= 3 {
-			// receiver is provided
+			// receiver is provided but for non-accessor properties it's unused
 			_ = args[2]
 		}
 		if target.IsObject() {
-			return in.getProperty(target, prop)
+			// For array numeric indices, use getIndex instead of getProperty
+			if target.IsObject() && target.AsObject().IsArray {
+				if prop.IsNumber() {
+					idx := int(prop.AsNumber())
+					if v, ok := target.AsObject().GetIndex(idx); ok {
+						return v
+					}
+					return Undefined()
+				}
+				// Also handle numeric string keys
+				if n, ok := numericIndex(propStr); ok && n >= 0 {
+					if v, ok := target.AsObject().GetIndex(n); ok {
+						return v
+					}
+					return Undefined()
+				}
+			}
+			return in.getProperty(target, propStr)
 		}
 		return Undefined()
 	}, 2)))
@@ -36,11 +54,31 @@ func (in *Interpreter) ReflectObject() *JSObject {
 			return BooleanValue(false)
 		}
 		target := args[0]
-		prop := args[1].ToString()
+		prop := args[1]
 		value := args[2]
+		propStr := prop.ToString()
 		if target.IsObject() {
-			targetObj := target.AsObject()
-			targetObj.Set(prop, value)
+			o := target.AsObject()
+			// For array numeric indices, use SetIndex
+			if o.IsArray {
+				if prop.IsNumber() {
+					idx := int(prop.AsNumber())
+					o.SetIndex(idx, value)
+					// Update length if index >= current length
+					if idx >= len(o.Elements) {
+						o.Set("length", NumberValue(float64(idx+1)))
+					}
+					return BooleanValue(true)
+				}
+				if n, ok := numericIndex(propStr); ok && n >= 0 {
+					o.SetIndex(n, value)
+					if n >= len(o.Elements) {
+						o.Set("length", NumberValue(float64(n+1)))
+					}
+					return BooleanValue(true)
+				}
+			}
+			o.Set(propStr, value)
 			return BooleanValue(true)
 		}
 		return BooleanValue(false)
