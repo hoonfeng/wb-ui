@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Logger is the Go-side sink for console.log/error/warn/info output. Implementations
@@ -1231,6 +1232,77 @@ func (in *Interpreter) installGlobals(g *JSObject) {
 		n := args[0].ToNumber()
 		return BooleanValue(!math.IsNaN(n) && !math.IsInf(n, 0))
 	}, 1)))
+
+	// Event constructor — standard DOM Event
+	g.Set("Event", FunctionValue(NewNativeFunction("Event", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		typ := ""
+		if len(args) > 0 {
+			typ = args[0].ToString()
+		}
+		opts := map[string]bool{}
+		if len(args) > 1 && args[1].IsObject() {
+			o := args[1].AsObject()
+			if v, ok := o.Properties["bubbles"]; ok { opts["bubbles"] = v.ToBoolean() }
+			if v, ok := o.Properties["cancelable"]; ok { opts["cancelable"] = v.ToBoolean() }
+			if v, ok := o.Properties["composed"]; ok { opts["composed"] = v.ToBoolean() }
+		}
+		obj := this
+		if !this.IsObject() {
+			obj = ObjectValue(NewObject(in.objectProto))
+		}
+		o := obj.AsObject()
+		o.Set("type", StringValue(typ))
+		o.Set("bubbles", BooleanValue(opts["bubbles"]))
+		o.Set("cancelable", BooleanValue(opts["cancelable"]))
+		o.Set("composed", BooleanValue(opts["composed"]))
+		o.Set("defaultPrevented", BooleanValue(false))
+		o.Set("target", Null())
+		o.Set("currentTarget", Null())
+		o.Set("eventPhase", NumberValue(0))
+		o.Set("timeStamp", NumberValue(float64(time.Now().UnixMilli())))
+		// Methods
+		o.Set("stopPropagation", FunctionValue(NewNativeFunction("stopPropagation", func(_ *Interpreter, _ JSValue, _ []JSValue) JSValue {
+			return Undefined()
+		}, 0)))
+		o.Set("preventDefault", FunctionValue(NewNativeFunction("preventDefault", func(_ *Interpreter, this JSValue, _ []JSValue) JSValue {
+			if this.IsObject() {
+				this.AsObject().Set("defaultPrevented", BooleanValue(true))
+			}
+			return Undefined()
+		}, 0)))
+		o.Set("stopImmediatePropagation", FunctionValue(NewNativeFunction("stopImmediatePropagation", func(_ *Interpreter, _ JSValue, _ []JSValue) JSValue {
+			return Undefined()
+		}, 0)))
+		return ObjectValue(o)
+	}, 2)))
+
+	// CustomEvent constructor — extends Event
+	g.Set("CustomEvent", FunctionValue(NewNativeFunction("CustomEvent", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		typ := ""
+		if len(args) > 0 {
+			typ = args[0].ToString()
+		}
+		detail := Undefined()
+		if len(args) > 1 && args[1].IsObject() {
+			if v, ok := args[1].AsObject().Properties["detail"]; ok {
+				detail = v
+			}
+		}
+		// Create base Event
+		eventFn := in.global.GetOrZero("Event")
+		var eventObj JSValue
+		if eventFn.IsFunction() {
+			res, _ := in.construct(eventFn, args)
+			eventObj = res
+		} else {
+			eventObj = ObjectValue(NewObject(in.objectProto))
+			eventObj.AsObject().Set("type", StringValue(typ))
+		}
+		if eventObj.IsObject() {
+			eventObj.AsObject().Set("detail", detail)
+		}
+		return eventObj
+	}, 2)))
 }
 
 // Eval parses and runs source in the global environment, returning the result.
@@ -1279,11 +1351,6 @@ func (in *Interpreter) InstallStandardAPIs() {
 		`if(!Function.prototype.toString)Function.prototype.toString=function(){return'function '+((this.name&&this.name!='')?this.name:'')+'() { [native code] }'}`,
 		// Error stack
 		`if(!Error.prototype.stack)Object.defineProperty(Error.prototype,'stack',{get:function(){return this.message||''}})`,
-
-		// Event constructors (needed by Vue 3 event system)
-		// Use direct assignment to window (not var) to ensure it overrides
-		`window.Event=window.Event||function(t,p){var e={type:t,bubbles:!!(p&&p.bubbles),cancelable:!!(p&&p.cancelable),defaultPrevented:false,stopPropagation:function(){},preventDefault:function(){this.defaultPrevented=true},composed:!!(p&&p.composed)};return e}`,
-		`window.CustomEvent=window.CustomEvent||function(t,p){p=p||{};var e=new window.Event(t,p);e.detail=p.detail;return e}`,
 
 		// Global eval
 		`if(typeof eval==='undefined')eval=function(s){var p;try{p=JSON.parse(s);if(typeof p!=='string')return p}catch(e){}return function(){return this}().constructor.constructor('return ('+s+')')()}`,
