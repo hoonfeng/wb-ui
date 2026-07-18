@@ -29,7 +29,45 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	loc.Set("search", jsc.StringValue(""))
 	loc.Set("hash", jsc.StringValue(""))
 	loc.Set("protocol", jsc.StringValue("file:"))
+	loc.Set("assign", jsc.FunctionValue(jsc.NewNativeFunction("assign",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 1)))
+	loc.Set("replace", jsc.FunctionValue(jsc.NewNativeFunction("replace",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 1)))
+	loc.Set("reload", jsc.FunctionValue(jsc.NewNativeFunction("reload",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 0)))
 	g.Set("location", jsc.ObjectValue(loc))
+
+	// window.history 桩 (vue-router 需要 pushState/replaceState)
+	hist := jsc.NewObject(rt.ObjectPrototype())
+	hist.Set("length", jsc.NumberValue(1))
+	hist.Set("state", jsc.Null())
+	hist.Set("pushState", jsc.FunctionValue(jsc.NewNativeFunction("pushState",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 3)))
+	hist.Set("replaceState", jsc.FunctionValue(jsc.NewNativeFunction("replaceState",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 3)))
+	hist.Set("go", jsc.FunctionValue(jsc.NewNativeFunction("go",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 1)))
+	hist.Set("back", jsc.FunctionValue(jsc.NewNativeFunction("back",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 0)))
+	hist.Set("forward", jsc.FunctionValue(jsc.NewNativeFunction("forward",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 0)))
+	g.Set("history", jsc.ObjectValue(hist))
 
 	// window.navigator 桩
 	nav := jsc.NewObject(rt.ObjectPrototype())
@@ -45,7 +83,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	screen.Set("height", jsc.NumberValue(800))
 	g.Set("screen", jsc.ObjectValue(screen))
 
-	// window.console 由 SetupGlobal 设置
+// window.console 由 SetupGlobal 设置
 
 	// window.matchMedia 桩
 	g.Set("matchMedia", jsc.FunctionValue(jsc.NewNativeFunction("matchMedia",
@@ -82,6 +120,16 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.Undefined()
 		}, 1)))
+
+	// window.addEventListener / removeEventListener (vue-router 需要 'popstate')
+	g.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 2)))
+	g.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined()
+		}, 2)))
 }
 
 type ElementWrapper struct {
