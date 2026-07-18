@@ -566,10 +566,10 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 		}
 	}()
 	if in.depth > in.maxCallDepth {
-		in.depth--
 		fmt.Fprintf(os.Stderr, "[STACK_OVERFLOW] depth=%d max=%d\n", in.depth, in.maxCallDepth)
 		return Undefined(), &jsException{value: StringValue("RangeError: Maximum call stack size exceeded")}
 	}
+	in.depth++
 	defer func() { in.depth-- }()
 
 	// Bind parameters into the function's environment (a child of the closure env).
@@ -1051,6 +1051,7 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 						in.Call(sfn, thisObj, v)
 					})
 				}
+				push(obj) // push object back so chain of method stores continues
 			}
 		default:
 			return Undefined(), &jsException{value: StringValue(fmt.Sprintf("unknown opcode %d", inst.Op))}

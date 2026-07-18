@@ -739,6 +739,13 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 		g.emit(Instruction{Op: OpLoadProp, Name: "prototype"})
 		for _, m := range n.Body.Methods {
 			if m.Name == "constructor" || m.Static { continue }
+			// Reload prototype before each method to keep stack consistent regardless
+			// of prior OpSetAccessor or OpStoreProp behavior.
+			if m.Kind != "get" && m.Kind != "set" {
+				// For regular methods, reload prototype each time (OpStoreProp consumes it).
+				g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
+				g.emit(Instruction{Op: OpLoadProp, Name: "prototype"})
+			}
 			mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil, "")
 			g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 			if m.Kind == "get" || m.Kind == "set" {
