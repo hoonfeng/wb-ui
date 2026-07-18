@@ -871,6 +871,41 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 			}, 0))
 		}, 1)))
 
+	// Function.prototype.toString (native, not polyfill)
+	fnProto.Set("toString", FunctionValue(NewNativeFunction("toString",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if !this.IsFunction() { return StringValue("[object Object]") }
+			name := ""
+			if this.IsFunction() {
+				if fn := this.AsFunction(); fn != nil {
+					if fn.Name != "" {
+						name = " " + fn.Name
+					}
+				}
+			}
+			return StringValue("function" + name + "() { [native code] }")
+		}, 0)))
+
+	// Register Function as a global constructor
+	funcCtor := NewNativeFunction("Function", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		// Function constructor: creates a function from source string
+		if len(args) > 0 {
+			body := ""
+			if len(args) > 1 {
+				body = args[len(args)-1].ToString()
+			}
+			return FunctionValue(NewNativeFunction("<eval>", func(in2 *Interpreter, _ JSValue, _ []JSValue) JSValue {
+				res, _ := in2.Run(body)
+				return res
+			}, 0))
+		}
+		return FunctionValue(NewNativeFunction("anonymous", func(_ *Interpreter, _ JSValue, _ []JSValue) JSValue {
+			return Undefined()
+		}, 0))
+	}, 1)
+	funcCtor.properties.Set("prototype", ObjectValue(in.functionProto))
+	g.Set("Function", FunctionValue(funcCtor))
+
 	// ─── Array.prototype methods ────────────────────────
 	arrProto := in.arrayProto
 	arrProto.Set("toString", FunctionValue(NewNativeFunction("toString",

@@ -247,6 +247,7 @@ func NewInterpreter() *Interpreter {
 		if this.IsString() { return this }
 		if this.IsNumber() { return StringValue(fmt.Sprintf("%g", this.AsNumber())) }
 		if this.IsBoolean() { return StringValue(fmt.Sprintf("%t", this.AsBoolean())) }
+		if this.IsFunction() { return StringValue("[object Function]") }
 		// For objects, return "[object ClassName]"
 		cn := "Object"
 		if this.IsObject() {
