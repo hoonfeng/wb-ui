@@ -230,6 +230,12 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// Resolve custom properties (var()) now that the cascade is complete.
 	r.resolveCustomProperties(cs)
 
+	// Resolve var() references in all regular properties (Properties map).
+	// Custom properties have already been resolved above; now we substitute
+	// var(--xxx) in property values like "background: var(--bg-primary)"
+	// and re-apply them to typed fields where applicable.
+	r.resolveVarInProperties(cs)
+
 	r.cache[el] = cs
 	return cs
 }
@@ -1317,6 +1323,112 @@ func identValue(tokens []css.Token) string {
 		}
 	}
 	return ""
+}
+
+// resolveVarInProperties resolves var() references in all regular property
+// values stored in cs.Properties. Custom properties (--xxx) have already been
+// resolved by resolveCustomProperties. After substitution, known properties
+// are re-applied to typed fields so the layout/paint engine can read them.
+func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
+	if len(cs.CustomProperties) == 0 {
+		return // nothing to substitute
+	}
+	for name, raw := range cs.Properties {
+		if !strings.Contains(raw, "var(") {
+			continue
+		}
+		// Tokenize the raw value and resolve var() references.
+		tok := css.NewTokenizer(raw)
+		tokens := tok.Tokenize()
+		if len(tokens) > 0 && tokens[len(tokens)-1].Type == css.TokenEOF {
+			tokens = tokens[:len(tokens)-1]
+		}
+		resolved := r.resolveVarInTokens(cs, tokens, map[string]bool{})
+		// Convert resolved tokens back to a string.
+		resolvedStr := tokensToString(resolved)
+		cs.Properties[name] = resolvedStr
+
+		// Re-apply to typed fields for known properties.
+		switch name {
+		case "background-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.BackgroundColor = c
+			}
+		case "color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.Color = c
+			}
+		case "font-family":
+			cs.FontFamily = resolvedStr
+		case "font-size":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.FontSize = l
+			}
+		case "width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.Width = l
+			}
+		case "height":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.Height = l
+			}
+		case "display":
+			cs.Display = LookupDisplayType(resolvedStr)
+			cs.DisplaySet = true
+		case "background":
+			// Shorthand: try to extract background-color.
+			parts := strings.Fields(resolvedStr)
+			for _, p := range parts {
+				if c, ok := parseColor(p); ok {
+					cs.BackgroundColor = c
+					break
+				}
+			}
+		}
+	}
+}
+
+// tokensToString converts a token slice back to a CSS value string.
+func tokensToString(tokens []css.Token) string {
+	var sb strings.Builder
+	for i, t := range tokens {
+		if i > 0 && t.Type != css.TokenComma && t.Type != css.TokenRightParenthesis {
+			prev := tokens[i-1]
+			if prev.Type != css.TokenLeftParenthesis && prev.Type != css.TokenComma {
+				sb.WriteByte(' ')
+			}
+		}
+		switch t.Type {
+		case css.TokenIdent, css.TokenFunction, css.TokenAtKeyword,
+			css.TokenURL, css.TokenBadURL, css.TokenString, css.TokenBadString:
+			sb.WriteString(t.Value)
+		case css.TokenHash:
+			sb.WriteByte('#')
+			sb.WriteString(t.Value)
+		case css.TokenNumber, css.TokenPercentage, css.TokenDimension:
+			s := strconv.FormatFloat(t.Numeric, 'f', -1, 64)
+			if t.Unit != "" {
+				s += t.Unit
+			}
+			if t.Type == css.TokenPercentage {
+				s += "%"
+			}
+			sb.WriteString(s)
+		case css.TokenDelimiter:
+			sb.WriteRune(t.Delimiter)
+		case css.TokenComma:
+			sb.WriteString(", ")
+		case css.TokenLeftParenthesis:
+			sb.WriteByte('(')
+		case css.TokenRightParenthesis:
+			sb.WriteByte(')')
+		case css.TokenNonNewlineWhitespace, css.TokenNewline:
+			sb.WriteByte(' ')
+		default:
+			sb.WriteString(t.Value)
+		}
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // parentElement returns the parent element of el, or nil if the parent is not an

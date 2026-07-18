@@ -134,6 +134,32 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		cursor += collapsedTop
 		child.Rect.Y = cursor
 
+		// Resolve non-auto height before children layout so nested percentage
+		// heights have the correct containing-block reference. CSS §10.5 says
+		// percentage heights resolve against the parent's used height; if the
+		// parent's height depends on its own children (auto), the percentage
+		// is treated as auto. But when the parent has a non-auto height that
+		// can be resolved against the grandparent's known height, we compute
+		// it here to break the circular dependency.
+		if !heightIsAuto(child) {
+			cbHeight := box.Rect.ContentHeight()
+			if cbHeight <= 0 && box.parent != nil {
+				// Parent height not yet computed — use grandparent.
+				cbHeight = box.parent.Rect.ContentHeight()
+			}
+			if cbHeight > 0 {
+				fs := fontSizeOf(child)
+				hv, ok := definiteHeight(child.Style.Height, cbHeight, fs)
+				if ok {
+					if isBorderBox(child) {
+						child.Rect.Height = hv
+					} else {
+						child.Rect.Height = hv + child.Rect.Border.Vertical() + child.Rect.Padding.Vertical()
+					}
+				}
+			}
+		}
+
 		// Lay out child's descendants.
 		childCtx := contextFor(child)
 		childCtx.Layout(child, state)
