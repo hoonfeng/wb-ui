@@ -53,6 +53,7 @@ type FunctionDeclaration struct {
 	Body        []Stmt
 	IsAsync     bool
 	IsGenerator bool
+	RestParam   string // name of rest parameter, empty if none
 	Line, Col   int
 }
 
@@ -417,7 +418,6 @@ type DestructInfo struct {
 	IsArray  bool
 	Names    []string
 }
-
 // ArrowFunction is '(params) => body'. Body is either a single Expr (concise) or a
 // BlockStatement (full body).
 type ArrowFunction struct {
@@ -427,6 +427,7 @@ type ArrowFunction struct {
 	IsExpr         bool
 	IsAsync        bool
 	IsGenerator    bool
+	RestParam      string // name of rest parameter, empty if none
 	Line, Col      int
 }
 
@@ -439,6 +440,7 @@ type YieldExpression struct {
 
 func (n *YieldExpression) nodePos() (int, int) { return n.Line, n.Col }
 func (n *YieldExpression) exprNode()           {}
+
 
 // TaggedTemplateExpression is 'tag\`...\`' — a function call with a template literal.
 type TaggedTemplateExpression struct {
@@ -466,6 +468,7 @@ type FunctionExpression struct {
 	Body        []Stmt
 	IsAsync     bool
 	IsGenerator bool
+	RestParam   string // name of rest parameter, empty if none
 	Line, Col   int
 }
 
@@ -894,20 +897,22 @@ func (p *Parser) parseFunctionDeclaration(isAsync bool) *FunctionDeclaration {
 	}
 	savedGen := p.inGenerator
 	p.inGenerator = isGenerator
-	params, body := p.parseFunctionBody()
+	params, body, restParam := p.parseFunctionBody()
 	p.inGenerator = savedGen
-	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, Line: tok.Line, Col: tok.Col}
+	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
 }
 
 // parseFunctionBody parses '(params) { body }' and returns both.
-func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
+func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 	p.expect(TokenOpenParen)
 	params := []string{}
+	restParam := ""
 	for p.current.Kind != TokenCloseParen && p.err == nil {
 		// rest param: '...name'
 		if p.current.Kind == TokenSpread {
 			p.advance()
 			if p.current.Kind == TokenIdentifier {
+				restParam = p.current.Lexeme
 				params = append(params, p.current.Lexeme)
 				p.advance()
 			} else {
@@ -979,9 +984,12 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt) {
 		body = block.Body
 	}
 	p.allowIn = savedIn
-	return params, body
+	return params, body, restParam
 }
 
+// parseFunctionName parses an optional function name (identifier).
+
+// parseIfStatement parses 'if (test) then else alt'.
 // parseIfStatement parses 'if (test) then else alt'.
 func (p *Parser) parseIfStatement() *IfStatement {
 	tok := p.current
@@ -1402,7 +1410,7 @@ func (p *Parser) parseClassBody() *ClassBody {
 		}
 		savedGen := p.inGenerator
 		p.inGenerator = _gen
-		params, body := p.parseFunctionBody()
+		params, body, _ := p.parseFunctionBody()
 		p.inGenerator = savedGen
 		_ = _async // async flag tracked for future use
 		cb.Methods = append(cb.Methods, ClassMethod{
@@ -2215,7 +2223,7 @@ func (p *Parser) parsePropertyKeyed(prop Property) Property {
 // parsePropertyTail handles ': value', '()' method, or shorthand.
 func (p *Parser) parsePropertyTail(prop Property) Property {
 	if p.current.Kind == TokenOpenParen {
-		params, body := p.parseFunctionBody()
+		params, body, _ := p.parseFunctionBody()
 		prop.Kind = "method"
 		prop.Value = &FunctionExpression{Params: params, Body: body, Line: prop.Line, Col: prop.Col}
 		return prop
@@ -2247,8 +2255,8 @@ func (p *Parser) parseFunctionExpression(isAsync bool) *FunctionExpression {
 		name = p.current.Lexeme
 		p.advance()
 	}
-	params, body := p.parseFunctionBody()
-	return &FunctionExpression{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, Line: tok.Line, Col: tok.Col}
+	params, body, restParam := p.parseFunctionBody()
+	return &FunctionExpression{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
 }
 
 // parseClassExpression parses 'class [Name] [extends Base] { body }' as a value.

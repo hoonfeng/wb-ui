@@ -169,8 +169,14 @@ func CompileProgram(prog *Program) *FunctionBody {
 }
 
 // compileFunction compiles a function expression/declaration body into a FunctionBody.
-func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool, destructs []DestructInfo) *FunctionBody {
+// restParam is the name of the rest parameter (e.g., "nums" for ...nums), empty if none.
+func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool, destructs []DestructInfo, restParam ...string) *FunctionBody {
+	var rp string
+	if len(restParam) > 0 {
+		rp = restParam[0]
+	}
 	g := newGenerator()
+	g.params = params
 	g.params = params
 	g.isArrow = isArrow
 	// Parameters become local variables.
@@ -224,6 +230,7 @@ func compileFunction(name string, params []string, body []Stmt, isArrow bool, is
 		IsArrow:      isArrow,
 		IsAsync:      isAsync,
 		IsGenerator:  isGenerator,
+		RestParam:    rp,
 	}
 }
 
@@ -280,7 +287,7 @@ func (g *BytecodeGenerator) here() int { return len(g.code) }
 
 // emitFunctionHoisted emits a NewClosure and StoreVar for a hoisted function declaration.
 func (g *BytecodeGenerator) emitFunctionHoisted(fd *FunctionDeclaration) {
-	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator, nil)
+	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator, nil, fd.RestParam)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: fd.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: fd.Name})
 	g.emit(Instruction{Op: OpPop})
@@ -309,7 +316,19 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 					g.emit(Instruction{Op: OpLoadUndefined})
 				}
 				g.emit(Instruction{Op: OpDeclareConst, Name: d.Name})
+			} else if n.Kind == "let" {
+				// let declarations must be declared in the current (block) scope,
+				// otherwise OpStoreVar will find an outer binding and overwrite it.
+				if d.Init != nil {
+					g.emitExpr(d.Init)
+				} else {
+					g.emit(Instruction{Op: OpLoadUndefined})
+				}
+				g.emit(Instruction{Op: OpDeclareVar, Name: d.Name})
+				g.emit(Instruction{Op: OpStoreVar, Name: d.Name})
+				g.emit(Instruction{Op: OpPop})
 			} else {
+				// var: hoisted declaration, init only at point of definition.
 				if d.Init != nil {
 					g.emitExpr(d.Init)
 					g.emit(Instruction{Op: OpStoreVar, Name: d.Name})
@@ -360,7 +379,12 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 		idx := g.emitJump(OpJump)
 		frame.continueTargets = append(frame.continueTargets, idx)
 	case *FunctionDeclaration:
-		// Already hoisted; nothing to emit inline.
+		// Emit function declaration inline for block-scoped declarations.
+		// Top-level declarations are also hoisted by CompileProgram, resulting in
+		// a duplicate emission. The first (hoisted) StoreVar succeeds; the second
+		// (inline) StoreVar overwrites the same binding with the same value, so
+		// the duplicate is harmless.
+		g.emitFunctionHoisted(n)
 	case *ThrowStatement:
 		g.emitExpr(n.Argument)
 		g.emit(Instruction{Op: OpThrow})
@@ -647,42 +671,75 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	// Safety check
 	if n == nil || n.Body == nil { return }
 	if n.Name == "" { return }
-	// Find constructor method.
-	var ctorParams []string
-	var ctorBody []Stmt
-	for _, m := range n.Body.Methods {
-		if m.Name == "constructor" {
-			ctorParams = m.Params
-			ctorBody = m.Body
-			break
-		}
-	}
+
+	// Step 1: Load superclass if present (makes "super" available in scope)
 	if n.SuperClass != nil {
 		g.emitExpr(n.SuperClass)
 		g.emit(Instruction{Op: OpDeclareVar, Name: "super"})
 		g.emit(Instruction{Op: OpStoreVar, Name: "super"})
 		g.emit(Instruction{Op: OpPop})
 	}
-	// Compile constructor with the parent class available for super()
-	body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil)
-	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
-	// Store the constructor as the class variable.
-	// IMPORTANT: Use OpStoreVar instead of OpPop so the class name is bound.
-	// Previously OpPop silently discarded the constructor, causing subsequent
-	// OpLoadVar of the class name to return undefined, which then panicked on
-	// the subsequent OpLoadProp("prototype") — the panic was swallowed by defer
-	// recover, resulting in silent stop at "class mne{".
+
+	// Step 2: Find or generate constructor
+	var ctorParams []string
+	var ctorBody []Stmt
+	var ctorRest string
+	hasExplicitCtor := false
+	for _, m := range n.Body.Methods {
+		if m.Name == "constructor" {
+			ctorParams = m.Params
+			ctorBody = m.Body
+			hasExplicitCtor = true
+			break
+		}
+	}
+
+	if n.SuperClass != nil && !hasExplicitCtor {
+		// Default constructor: constructor(...args) { super(...args); }
+		// Generate bytecode: push this, load super, load args[0], call via OpCallMethod
+		g2 := newGenerator()
+		g2.declareVar("args")
+		// OpCallMethod expects: [this, methodFn, args...]
+		g2.emit(Instruction{Op: OpLoadThis})       // push this (receiver)
+		g2.emit(Instruction{Op: OpLoadVar, Name: "super"})  // push super function
+		// Push args[0] (first argument)
+		g2.emit(Instruction{Op: OpLoadVar, Name: "args"})
+		g2.emit(Instruction{Op: OpLoadConst, Value: NumberValue(0)})
+		g2.emit(Instruction{Op: OpLoadIndex})
+		g2.emit(Instruction{Op: OpCallMethod, IntArg: 1, Name: "super"})
+		g2.emit(Instruction{Op: OpPop})
+		g2.emit(Instruction{Op: OpReturnUndefined})
+		g2.emit(Instruction{Op: OpReturnUndefined})
+		defBody := &FunctionBody{
+			Name:         n.Name,
+			Params:       []string{"args"},
+			Instructions: g2.code,
+			NumLocals:    1,
+			RestParam:    "args",
+		}
+		g.emit(Instruction{Op: OpNewClosure, Body: defBody, Name: n.Name})
+	} else {
+		// Use explicit constructor or empty constructor for non-extending classes
+		body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil, ctorRest)
+		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
+	}
+
+	// Step 3: Store constructor as class variable
 	g.declareVar(n.Name)
 	g.emit(Instruction{Op: OpStoreVar, Name: n.Name})
 	g.emit(Instruction{Op: OpPop})
-	// Attach prototype methods to Constructor.prototype.
-	if len(n.Body.Methods) > 1 || (len(n.Body.Methods) == 1 && n.Body.Methods[0].Name != "constructor") {
-		// Load ClassName.prototype
+
+	// Step 4: Attach prototype methods (non-static) to Constructor.prototype
+	hasProtoMethods := false
+	for _, m := range n.Body.Methods {
+		if m.Name != "constructor" && !m.Static { hasProtoMethods = true; break }
+	}
+	if hasProtoMethods {
 		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
 		g.emit(Instruction{Op: OpLoadProp, Name: "prototype"})
 		for _, m := range n.Body.Methods {
-			if m.Name == "constructor" { continue }
-			mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil)
+			if m.Name == "constructor" || m.Static { continue }
+			mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil, "")
 			g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 			if m.Kind == "get" || m.Kind == "set" {
 				isSetter := 0
@@ -694,6 +751,20 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 			}
 		}
 		g.emit(Instruction{Op: OpPop}) // pop prototype reference
+	}
+
+	// Step 5: Attach static methods to the constructor function itself
+	for _, m := range n.Body.Methods {
+		if m.Name == "constructor" || !m.Static { continue }
+		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
+		mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil, "")
+		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
+		g.emit(Instruction{Op: OpStoreVar, Name: "__static_" + m.Name})
+		g.emit(Instruction{Op: OpPop}) // pop class
+		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
+		g.emit(Instruction{Op: OpLoadVar, Name: "__static_" + m.Name})
+		g.emit(Instruction{Op: OpStoreProp, Name: m.Name})
+		g.emit(Instruction{Op: OpPop}) // pop class
 	}
 }
 
@@ -1084,14 +1155,16 @@ func (g *BytecodeGenerator) emitCall(n *CallExpression) {
 		g.emit(Instruction{Op: OpCallMethod, IntArg: len(n.Arguments), Name: me.Name})
 		return
 	}
-	// Regular call. Check for super() which needs OpNew semantics
+	// Regular call. Check for super() which needs to call parent constructor on current this
 	if id, ok := n.Callee.(*Identifier); ok && id.Name == "super" {
-		// super() in a constructor: load parent from "super" var and use OpNew
+		// super() in a constructor: need to call parent constructor with current this.
+		// Push current this (as receiver), load super function, push args, then use OpCallMethod.
+		g.emit(Instruction{Op: OpLoadThis})
 		g.emit(Instruction{Op: OpLoadVar, Name: "super"})
 		for _, a := range n.Arguments {
 			g.emitExpr(a)
 		}
-		g.emit(Instruction{Op: OpNew, IntArg: len(n.Arguments)})
+		g.emit(Instruction{Op: OpCallMethod, IntArg: len(n.Arguments), Name: "super"})
 		return
 	}
 	g.emitExpr(n.Callee)

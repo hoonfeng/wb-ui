@@ -55,6 +55,9 @@ func (b *BufferLogger) Log(level string, msg string) {
 	b.Lines = append(b.Lines, level+": "+msg)
 }
 
+// Clear resets the buffer.
+func (b *BufferLogger) Clear() { b.Lines = nil }
+
 // String returns the joined console output.
 func (b *BufferLogger) String() string { return strings.Join(b.Lines, "\n") }
 

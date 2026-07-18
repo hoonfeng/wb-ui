@@ -598,6 +598,9 @@ type Closure struct {
 	Env *Environment
 	// Name is the function name.
 	Name string
+	// This is the captured 'this' value for arrow functions.
+	// Arrow functions capture 'this' from the enclosing context at creation time.
+	This JSValue
 }
 
 // NewNativeFunction constructs a JSFunction backed by a Go callback.
@@ -654,6 +657,9 @@ type FunctionBody struct {
 	// IsGenerator marks generator functions. When true the function returns a
 	// Generator object that manages the suspended execution state.
 	IsGenerator bool
+	// RestParam is the name of the rest parameter (e.g., "nums" for ...nums).
+	// Empty string means no rest parameter.
+	RestParam string
 }
 
 // String returns a debug representation of a JSValue's tag.

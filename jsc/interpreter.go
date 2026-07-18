@@ -582,8 +582,20 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 		frameEnv = env
 	} else {
 		frameEnv = NewEnvironment(env)
+		// Count regular params (rest param is excluded from positional binding)
+		regularCount := len(body.Params)
+		if body.RestParam != "" {
+			regularCount--
+		}
 		for i, p := range body.Params {
-			if i < len(args) {
+			if body.RestParam != "" && p == body.RestParam {
+				// Rest param: bundle remaining args into an array
+				restArgs := make([]JSValue, 0, len(args)-i)
+				for j := i; j < len(args); j++ {
+					restArgs = append(restArgs, args[j])
+				}
+				frameEnv.Declare(p, ObjectValue(NewArray(in.arrayProto, restArgs)))
+			} else if i < len(args) {
 				frameEnv.Declare(p, args[i])
 			} else {
 				frameEnv.Declare(p, Undefined())
@@ -805,11 +817,16 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			proto := NewObject(in.objectProto)
 			proto.Set("constructor", FunctionValue(fn))
 			fn.properties.Set("prototype", ObjectValue(proto))
+			// Arrow functions capture 'this' from the enclosing context at creation time.
+			if inst.Body.IsArrow {
+				fn.Closure.This = this
+			}
 			// Log all closure creations for debugging
-			fmt.Fprintf(os.Stderr, "[CLOSURE] name=%q ninstr=%d\n", inst.Name, len(inst.Body.Instructions))
-			// If the constructor references "super", auto-bind from frameEnv
+			if false { fmt.Fprintf(os.Stderr, "[CLOSURE] name=%q ninstr=%d\n", inst.Name, len(inst.Body.Instructions)) }
+			// If the constructor references "super", ensure super is properly bound.
+			// Only use fallback if super is NOT already in the closure environment.
 			if inst.Body != nil && len(inst.Body.Instructions) > 0 && inst.Body.Instructions[0].Op == OpLoadVar && inst.Body.Instructions[0].Name == "super" {
-				if v, ok := frameEnv.Get("super"); !ok || v.IsUndefined() {
+				if _, ok := frameEnv.Get("super"); !ok {
 					// Check common parent classes in frameEnv
 					for _, parentName := range []string{"Ene", "Ee", "Oe", "Ae", "Re", "Ie", "Object"} {
 						if pv, ok := frameEnv.Get(parentName); ok && pv.IsFunction() {
@@ -817,17 +834,6 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 							frameEnv.Set("super", pv)
 							break
 						}
-					}
-				}
-			}
-			// If this is a class constructor, check for super binding
-			if inst.Name != "" && inst.Body != nil && len(inst.Body.Instructions) > 0 {
-				firstInst := inst.Body.Instructions[0]
-				if firstInst.Op == OpLoadVar && firstInst.Name == "super" {
-					// This function references "super" at the first instruction (typical constructor)
-					// Bind super from the current scope if available
-					if v, ok := frameEnv.Get("super"); ok {
-						_ = v // super is already captured via closure
 					}
 				}
 			}
@@ -1310,6 +1316,10 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		return res, nil
 	}
 	if fn.Closure != nil {
+		// Arrow functions use the captured 'this' from definition time.
+		if fn.Closure.Body.IsArrow {
+			this = fn.Closure.This
+		}
 		// If this is a constructor-like call (this is undefined/null and function is not arrow),
 		// create a new object for 'this' to allow super() calls to work.
 		if (this.IsUndefined() || this.IsNull()) && !fn.Closure.Body.IsArrow {
