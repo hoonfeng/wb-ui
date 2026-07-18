@@ -133,6 +133,10 @@ type Interpreter struct {
 	moduleRegistry map[string]map[string]JSValue
 	// currentModuleName is the module name being executed (for OpExport).
 	currentModuleName string
+	// currentBodyName tracks the current FunctionBody name for error diagnostics.
+	currentBodyName string
+	// currentPC tracks the current instruction index for error diagnostics.
+	currentPC int
 	// maxCallDepth bounds recursion to avoid runaway stack growth.
 	maxCallDepth int
 	depth        int
@@ -628,6 +632,8 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 	for pc < len(code) {
 		inst := code[pc]
 		pc++
+		in.currentBodyName = body.Name
+		in.currentPC = pc - 1
 		switch inst.Op {
 		case OpLoadConst:
 			push(inst.Value)
@@ -1272,12 +1278,13 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		tag := "?"
 		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "obj:" + callee.AsObject().ClassName } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "bool" }
 		// Log detailed diagnostic for non-function callee
-		fmt.Fprintf(os.Stderr, "[CALL_ERR] depth=%d callee_tag=%s this_tag=%d args=%d\n", in.depth, tag, this.tag, len(args))
+		fmt.Fprintf(os.Stderr, "[CALL_ERR] depth=%d body=%q pc=%d callee_tag=%s this_tag=%d args=%d\n", in.depth, in.currentBodyName, in.currentPC, tag, this.tag, len(args))
 		if callee.IsObject() {
 			obj := callee.AsObject()
 			fmt.Fprintf(os.Stderr, "[CALL_ERR]   obj.ClassName=%q IsArray=%v Internal=%v Properties=%d\n", obj.ClassName, obj.IsArray, obj.Internal != nil, len(obj.Properties))
 		}
-		// Go call stack
+		// Print JS call context: body name and pc of each frame
+		fmt.Fprintf(os.Stderr, "[CALL_ERR]   at %s (pc=%d)\n", in.currentBodyName, in.currentPC)
 		var stkbuf [4096]byte
 		n := runtime.Stack(stkbuf[:], false)
 		s := string(stkbuf[:n])
