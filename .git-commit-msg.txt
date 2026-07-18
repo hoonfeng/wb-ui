@@ -1,0 +1,4 @@
+\"fix(jsc): for-of destructuring and default params\"  
+\"\"  
+\"Core ES6 fixes: for...of array destructuring and function default parameters.\"  
+\"Vue 3 desktop now renders without bundle patches.\"  
