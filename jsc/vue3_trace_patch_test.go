@@ -86,6 +86,16 @@ console.log("B");
 try {
 	var Mi = document.querySelector('#app');
 	console.log('MI_TYPE: '+(typeof Mi));
+	console.log('MI_VAL: '+(Mi));
+	console.log('WEL_TYPE: '+(typeof window.__el));
+	console.log('WEL_VAL: '+(window.__el));
+	console.log('QS_SRC: '+(document.querySelector.toString().substring(0,200)));
+	
+	if(Mi == null || typeof Mi === 'symbol') {
+		console.log('RESETTING EL');
+		window.__el = {innerHTML:'',__vue_app__:null,_vnode:null,childNodes:[],appendChild:function(c){this.childNodes.push(c)},insertBefore:function(c,r){console.log('TRACE_IB');this.childNodes.push(c)},setAttribute:function(k,v){this[k]=v},getAttribute:function(k){return this[k]},addEventListener:function(){},style:{},parentNode:null,tagName:'DIV'};
+		Mi = window.__el;
+	}
 	console.log('MI_TAG: '+(Mi?Mi.tagName:'null'));
 	console.log('MI_VNODE_BEFORE: '+(Mi?Mi._vnode:'null'));
 	
