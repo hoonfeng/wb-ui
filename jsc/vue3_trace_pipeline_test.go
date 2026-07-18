@@ -7,14 +7,12 @@ import (
 	"testing"
 )
 
-func TestVue3MountTrace(t *testing.T) {
+func TestVue3TraceRenderPipeline(t *testing.T) {
 	vm := NewInterpreter()
 	logger := &BufferLogger{}
 	vm.SetupGlobal(logger)
 
-	// Polyfills (same as desktop)
-	// IMPORTANT: JSC's OpLoadVar silently returns undefined for undeclared variables
-	// (no ReferenceError). So window must be explicitly created first.
+	// 精确的 DOM polyfill - 追踪所有方法调用
 	pf := []string{
 		`window={process:{env:{NODE_ENV:"production"}}}`,
 		`Object.getOwnPropertyNames=function(o){if(!o)return[];var k=[];for(var n in o)k.push(n);return k}`,
@@ -29,20 +27,25 @@ func TestVue3MountTrace(t *testing.T) {
 		`if(!Object.setPrototypeOf)Object.setPrototypeOf=function(o,p){o.__proto__=p;return o}`,
 		`if(!Object.preventExtensions)Object.preventExtensions=function(o){return o}`,
 		`if(!Object.seal)Object.seal=function(o){return o}`,
-		// DOM stub: elements MUST have insertBefore (Vue's hostInsert calls it)
+		// DOM stub - 每个方法都有 console.log 追踪
+		`var __elCache={}`,
 		`document={}`,
-		`document.getElementById=function(s){return this.querySelector(s)}`,
-		`document.querySelector=function(s){var el={innerHTML:'',__vue_app__:null,_vnode:null,childNodes:[],appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},setAttribute:function(){},getAttribute:function(){return''},addEventListener:function(){},style:{},parentNode:null,tagName:'DIV'};return el}`,
-		`document.createElement=function(t){return{tagName:t.toUpperCase(),innerHTML:'',textContent:'',childNodes:[],setAttribute:function(){},getAttribute:function(){return''},appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},replaceChild:function(n,o){var i=this.childNodes.indexOf(o);if(i>-1)this.childNodes[i]=n},addEventListener:function(){},style:{},parentNode:null}}`,
-		`document.body={appendChild:function(c){},insertBefore:function(c,r){this.childNodes.push(c)},childNodes:[]}`,
+		`document.getElementById=function(s){return __elCache[s]||null}`,
+		`document.createElement=function(t){var el={tagName:t.toUpperCase(),childNodes:[],innerHTML:'',textContent:'',setAttribute:function(k,v){this[k]=v},getAttribute:function(k){return this[k]},appendChild:function(c){console.log('TRACE_APPENDCHILD: tag='+c.tagName+' this.tag='+this.tagName);this.childNodes.push(c)},insertBefore:function(c,r){console.log('TRACE_INSERTBEFORE: c='+c.tagName+' this.tag='+this.tagName);this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},replaceChild:function(n,o){var i=this.childNodes.indexOf(o);if(i>-1)this.childNodes[i]=n},addEventListener:function(){},style:{},parentNode:null};console.log('TRACE_CREATEELEMENT: '+t+' -> '+el.tagName);return el}`,
+		`document.body={appendChild:function(c){console.log('TRACE_BODYAPPEND: '+c.tagName)},insertBefore:function(c,r){this.childNodes.push(c)},childNodes:[]}`,
 		`document.createTextNode=function(t){return{nodeType:3,textContent:t,nodeValue:t}}`,
 		`document.createComment=function(t){return{nodeType:8,textContent:t,nodeValue:t}}`,
+		// 初始化 #app 元素
+		`document.querySelector=function(s){console.log('TRACE_QUERYSELECTOR: '+s);if(!__elCache[s]){var el=document.createElement('DIV');console.log('TRACE_QSNEW: creating new');__elCache[s]=el}return __elCache[s]}`,
 	}
 	for _, p := range pf {
 		if _, err := vm.Run(p); err != nil {
 			t.Fatalf("polyfill: %v", err)
 		}
 	}
+
+	// 先创建 #app
+	vm.Run(`var appEl=document.querySelector('#app');appEl.innerHTML='<p>placeholder</p>';console.log('APP_READY: tag='+appEl.tagName+' children='+appEl.childNodes.length)`)
 
 	// Read bundle
 	distDir := "F:/syproject/gou-ide/cmd/desktop/web-ui-minimal/dist/assets"
@@ -64,28 +67,28 @@ func TestVue3MountTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read error: %v", err)
 	}
+	bundleSrc := string(data)
 
-	// Run bundle
-	_, err = vm.Run(string(data))
+	// Run the bundle (the IIFE)
+	_, err = vm.Run(bundleSrc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bundle error: %v\n", err)
 	} else {
 		fmt.Fprintf(os.Stderr, "Bundle OK\n")
 	}
 
-	// Check interpreter state after bundle
-	vm.Run(`console.log('WIN: '+(typeof window))`)
-	vm.Run(`console.log('DOC: '+(typeof document))`)
-	vm.Run(`console.log('S1: '+(window.__S1__||'undef'))`)
-	vm.Run(`console.log('S7: '+(window.__S7__||'undef'))`)
-	vm.Run(`console.log('S9: '+(window.__S9__||'undef'))`)
-	vm.Run(`console.log('BEFORE: '+(window.__BEFORE_MOUNT__||'undef'))`)
-	
-	// Check mock DOM
-	vm.Run(`var a=document.querySelector('#app');console.log('MOCK_CHILDREN: '+a.childNodes.length);console.log('MOCK_HTML: '+a.innerHTML)`)
-	
+	// Post-mortem diagnostics
+	diagCode := `
+		console.log('=== POSTMORTEM ===');
+		var a = document.querySelector('#app');
+		console.log('APP_TAG: '+(a?a.tagName:'null'));
+		console.log('APP_CHILDREN: '+(a?a.childNodes.length:0));
+		console.log('APP_INNERHTML: "'+(a?a.innerHTML:'')+'"');
+		console.log('APP_VUE_APP: '+(a&&a.__vue_app__?'yes':'no'));
+		console.log('APP_VNODE: '+(a&&a._vnode?'yes':'no'));
+	`
+	vm.Run(diagCode)
+
 	out := logger.String()
-	if out != "" {
-		fmt.Fprintf(os.Stderr, "Console:\n%s\n", out)
-	}
+	fmt.Printf("=== OUTPUT ===\n%s\n=== END ===\n", out)
 }
