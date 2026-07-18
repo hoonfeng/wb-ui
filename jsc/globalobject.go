@@ -483,6 +483,59 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	objectCtor.properties.Prototype = in.functionProto
 	// Set Object.prototype to the shared objectProto
 	objectCtor.properties.Set("prototype", ObjectValue(in.objectProto))
+	// Object static methods
+	objectCtor.properties.Set("getPrototypeOf", FunctionValue(NewNativeFunction("getPrototypeOf",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 || !args[0].IsObject() { return Undefined() }
+			o := args[0].AsObject()
+			if o.Prototype != nil { return ObjectValue(o.Prototype) }
+			return Null()
+		}, 1)))
+	objectCtor.properties.Set("setPrototypeOf", FunctionValue(NewNativeFunction("setPrototypeOf",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) < 2 || !args[0].IsObject() { return args[0] }
+			o := args[0].AsObject()
+			if args[1].IsObject() || args[1].IsNull() {
+				o.Prototype = args[1].AsObject()
+			}
+			return args[0]
+		}, 2)))
+	objectCtor.properties.Set("getOwnPropertyNames", FunctionValue(NewNativeFunction("getOwnPropertyNames",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) == 0 || !args[0].IsObject() { return ObjectValue(NewArray(in.arrayProto, nil)) }
+			o := args[0].AsObject()
+			keys := make([]JSValue, 0, len(o.Properties))
+			for k := range o.Properties {
+				keys = append(keys, StringValue(k))
+			}
+			return ObjectValue(NewArray(in.arrayProto, keys))
+		}, 1)))
+	objectCtor.properties.Set("hasOwn", FunctionValue(NewNativeFunction("hasOwn",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			if len(args) < 2 || !args[0].IsObject() { return BooleanValue(false) }
+			_, ok := args[0].AsObject().Properties[args[1].ToString()]
+			return BooleanValue(ok)
+		}, 2)))
+	objectCtor.properties.Set("isExtensible", FunctionValue(NewNativeFunction("isExtensible",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			return BooleanValue(true)
+		}, 1)))
+	objectCtor.properties.Set("isSealed", FunctionValue(NewNativeFunction("isSealed",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			return BooleanValue(false)
+		}, 1)))
+	objectCtor.properties.Set("isFrozen", FunctionValue(NewNativeFunction("isFrozen",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			return BooleanValue(false)
+		}, 1)))
+	objectCtor.properties.Set("preventExtensions", FunctionValue(NewNativeFunction("preventExtensions",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			return args[0]
+		}, 1)))
+	objectCtor.properties.Set("seal", FunctionValue(NewNativeFunction("seal",
+		func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+			return args[0]
+		}, 1)))
 	g.Set("Object", FunctionValue(objectCtor))
 
 	stringCtor := NewNativeFunction("String", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
