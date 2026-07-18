@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -506,7 +507,16 @@ func (in *Interpreter) SetMaxCallDepth(n int) { in.maxCallDepth = n }
 
 // Run compiles and executes a source string at top level, returning the result of the
 // last expression statement (or undefined) and any thrown exception.
-func (in *Interpreter) Run(src string) (JSValue, error) {
+func (in *Interpreter) Run(src string) (result JSValue, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[JSC_RUN_PANIC] src_len=%d: %v\n", len(src), r)
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			fmt.Fprintf(os.Stderr, "[JSC_RUN_STACK]\n%s\n", buf[:n])
+			err = fmt.Errorf("InternalError: %v", r)
+		}
+	}()
 	prog, err := Parse(src)
 	if err != nil {
 		return Undefined(), err
@@ -540,10 +550,15 @@ func (in *Interpreter) runFunction(body *FunctionBody, env *Environment, this JS
 
 // runFunctionBody is the dispatch loop without async wrapping. It is called by
 // both runFunction (non-async) and runAsyncFunction (async wrapper).
-func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (JSValue, *jsException) {
+func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, this JSValue, args []JSValue) (result JSValue, exc *jsException) {
 	defer func() {
 		if r := recover(); r != nil {
-			// Panic recovered: return undefined to keep the script executing
+			// Log panic with stack trace instead of silently swallowing it
+			fmt.Fprintf(os.Stderr, "[JSC_PANIC] in function %q depth=%d: %v\n", body.Name, in.depth, r)
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			fmt.Fprintf(os.Stderr, "[JSC_STACK]\n%s\n", buf[:n])
+			exc = &jsException{value: StringValue(fmt.Sprintf("InternalError: %v", r))}
 		}
 	}()
 	if in.depth > in.maxCallDepth {
@@ -1133,7 +1148,11 @@ func (in *Interpreter) getProperty(obj JSValue, name string, receiver ...JSValue
 		}
 		return Undefined()
 	case TagUndefined, TagNull:
-		panic(fmt.Sprintf("Cannot read property %q of %s", name, obj.Typeof()))
+		// Return undefined instead of panicking — Vue 3 and other frameworks may
+		// access properties on undefined in guarded code paths. The JSC engine
+		// will naturally generate a TypeError when the result is used as a function
+		// or further dereferenced.
+		return Undefined()
 	}
 	return Undefined()
 }
