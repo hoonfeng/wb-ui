@@ -1,0 +1,1202 @@
+=== RUN   TestArrowMethodCall
+=== RUN   TestArrowMethodCall/direct_method_call
+--- direct_method_call ---
+DIRECT: 42
+=== RUN   TestArrowMethodCall/arrow_as_property
+--- arrow_as_property ---
+ARROW_PROP: no_this
+=== RUN   TestArrowMethodCall/arrow_captured_var
+--- arrow_captured_var ---
+CLOSURE: 100
+=== RUN   TestArrowMethodCall/replaced_method_arrow
+--- replaced_method_arrow ---
+MOUNT: mounted
+CONTAINER: test
+=== RUN   TestArrowMethodCall/real_vue_pattern
+[METH_STACK] depth=-44 stack_len=0
+[METH_CALL_ERR] body="" pc=6 callee=undefined args=1 depth=-44
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [1] op=16 name="" int=0
+[METH_CTX]   [2] op=23 name="" int=0
+[METH_CTX]   [3] op=6 name="createApp" int=0
+[METH_CTX]   [4] op=26 name="" int=0
+[METH_CTX]   [5] op=17 name="createApp" int=1
+[METH_CTX] > [6] op=2 name="t" int=0
+[METH_CTX]   [7] op=22 name="" int=0
+[METH_CTX]   [8] op=1 name="t" int=0
+[METH_CTX]   [9] op=6 name="mount" int=0
+[METH_CTX]   [10] op=2 name="s" int=0
+[CALL_ERR] depth=-44 body="" pc=5 callee_tag=undefined this_tag=6 args=1
+[CALL_ERR]   at  (pc=5)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 12 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8300, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8300, 0x1301ea4c4180, 0x1301ea25a120, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8300, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301ea4af650}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8300, 0x1301ea4c41e0, 0x1301ea25a120, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).RunBody(0x7ff75f203aa0?, 0x1?, 0x1301ea2e7f28?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...})
+	F:/syproject/wb-ui/jsc/interpreter.go:534 +0x85
+wb-ui/jsc.(*Interpreter).Run(0x1301ea2f8300, {0x7ff75f237a5f?, 0x0?})
+	F:/syproject/wb-ui/jsc/interpreter.go:529 +0x1b6
+wb-ui/jsc.TestArrowMethodCall.func1(0x1301ea252e00)
+	F:/syproject/wb-ui/jsc/arrow_method_call_test.go:128 +0x69
+testing.tRunner(0x1301ea252e00, 0x1301ea4b0aa0)
+	F:/go1.24.2/go/src/testing/testing.go:2036 +0xc3
+created by testing.(*T).Run in goroutine 7
+	F:/go1.24.2/go/src/testing/testing.go:2101 +0x4a9
+
+    arrow_method_call_test.go:129: run error: jsc exception: TypeError: value is not a function (type: undefined)
+=== RUN   TestArrowMethodCall/method_call_arrow_capture
+--- method_call_arrow_capture ---
+M1: no_this
+--- FAIL: TestArrowMethodCall (0.00s)
+    --- PASS: TestArrowMethodCall/direct_method_call (0.00s)
+    --- PASS: TestArrowMethodCall/arrow_as_property (0.00s)
+    --- PASS: TestArrowMethodCall/arrow_captured_var (0.00s)
+    --- PASS: TestArrowMethodCall/replaced_method_arrow (0.00s)
+    --- FAIL: TestArrowMethodCall/real_vue_pattern (0.00s)
+    --- PASS: TestArrowMethodCall/method_call_arrow_capture (0.00s)
+=== RUN   TestVue3MountMethodCall
+=== VUE MOUNT TEST ===
+S_TYPE: function
+S_NAME: ""
+S_LEN: 3
+J_TYPE: object
+J_KEYS: onUnmount,provide,mount,version,_container,_uid,unmount,directive,_instance,_component,runWithContext,_config,component,mixin,use
+M_TYPE: function
+BEFORE_CALL
+CALLED_MOUNT
+MOUNT_OK: ok
+CONTAINER: DIV
+=== END ===
+--- PASS: TestVue3MountMethodCall (0.00s)
+=== RUN   TestArrowMethodCallPrecise
+=== RUN   TestArrowMethodCallPrecise/arrow_in_closure_as_method
+--- arrow_in_closure_as_method ---
+RESULT: 42
+=== RUN   TestArrowMethodCallPrecise/vue_mount_pattern_arrow
+--- vue_mount_pattern_arrow ---
+M_TYPE: function
+RESULT: ok
+CONTAINER: div
+=== RUN   TestArrowMethodCallPrecise/iife_arrow_method
+--- iife_arrow_method ---
+A_TYPE: function
+A_RESULT: 1
+=== RUN   TestArrowMethodCallPrecise/dup_load_call_arrow
+--- dup_load_call_arrow ---
+G_TYPE: function
+G_VAL: secret_value
+=== RUN   TestArrowMethodCallPrecise/full_vue_pattern
+--- full_vue_pattern ---
+MTYPE: function
+MTYPE2: function
+SUCCESS: mounted:container
+STORED: container
+=== RUN   TestArrowMethodCallPrecise/destruct_then_arrow
+--- destruct_then_arrow ---
+T1: function
+T1_RES: 42
+--- PASS: TestArrowMethodCallPrecise (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/arrow_in_closure_as_method (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/vue_mount_pattern_arrow (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/iife_arrow_method (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/dup_load_call_arrow (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/full_vue_pattern (0.00s)
+    --- PASS: TestArrowMethodCallPrecise/destruct_then_arrow (0.00s)
+=== RUN   TestArrowThisBinding2
+Results:
+TOP_arrow: undefined
+IIFE_arrow: object
+IIFE_obj_arrow: object
+IIFE_call_arrow: object
+--- PASS: TestArrowThisBinding2 (0.00s)
+=== RUN   TestCallUndefined
+[MISSING] fn="<main>" pc=7 callee=undefined argc=0 args=0 code=72 depth=-60
+    [2] op=0 name="" int=0
+    [3] op=2 name="x" int=0
+    [4] op=22 name="" int=0
+    [5] op=1 name="x" int=0
+    [6] op=16 name="" int=0
+  > [7] op=22 name="" int=0
+    [8] op=29 name="" int=0
+    [9] op=38 name="" int=0
+    [10] op=12 name="" int=24
+    [11] op=2 name="e" int=0
+[CALL_ERR] depth=-60 body="<main>" pc=6 callee_tag=undefined this_tag=0 args=0
+[CALL_ERR]   at <main> (pc=6)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 70 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8780, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8780, 0x1301ea566c60, 0x1301ea8803f0, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).RunBody(0x8a?, 0x7ff75f231fcd?, 0x7a?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...})
+	F:/syproject/wb-ui/jsc/interpreter.go:534 +0x85
+wb-ui/jsc.(*Interpreter).Run(0x1301ea2f8780, {0x7ff75f234c48?, 0x1301ea32bf60?})
+	F:/syproject/wb-ui/jsc/interpreter.go:529 +0x1b6
+wb-ui/jsc.TestCallUndefined(0x1301ea89aa00?)
+	F:/syproject/wb-ui/jsc/call_undefined_test.go:17 +0x71
+testing.tRunner(0x1301ea89aa00, 0x7ff75f23ae70)
+	F:/go1.24.2/go/src/testing/testing.go:2036 +0xc3
+created by testing.(*T).Run in goroutine 1
+	F:/go1.24.2/go/src/testing/testing.go:2101 +0x4a9
+
+[METH_STACK] depth=-60 stack_len=0
+[METH_CALL_ERR] body="<main>" pc=33 callee=undefined args=0 depth=-60
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [28] op=22 name="" int=0
+[METH_CTX]   [29] op=1 name="obj" int=0
+[METH_CTX]   [30] op=23 name="" int=0
+[METH_CTX]   [31] op=6 name="nonexistent" int=0
+[METH_CTX]   [32] op=17 name="nonexistent" int=0
+[METH_CTX] > [33] op=22 name="" int=0
+[METH_CTX]   [34] op=29 name="" int=0
+[METH_CTX]   [35] op=38 name="" int=0
+[METH_CTX]   [36] op=12 name="" int=50
+[METH_CTX]   [37] op=2 name="e" int=0
+[CALL_ERR] depth=-60 body="<main>" pc=32 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at <main> (pc=32)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_STACK]
+goroutine 70 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8780, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8780, 0x1301ea566c60, 0x1301ea8803f0, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).RunBody(0x8a?, 0x7ff75f231fcd?, 0x7a?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...})
+	F:/syproject/wb-ui/jsc/interpreter.go:534 +0x85
+wb-ui/jsc.(*Interpreter).Run(0x1301ea2f8780, {0x7ff75f234c48?, 0x1301ea32bf60?})
+	F:/syproject/wb-ui/jsc/interpreter.go:529 +0x1b6
+wb-ui/jsc.TestCallUndefined(0x1301ea89aa00?)
+	F:/syproject/wb-ui/jsc/call_undefined_test.go:17 +0x71
+testing.tRunner(0x1301ea89aa00, 0x7ff75f23ae70)
+	F:/go1.24.2/go/src/testing/testing.go:2036 +0xc3
+created by testing.(*T).Run in goroutine 1
+	F:/go1.24.2/go/src/testing/testing.go:2101 +0x4a9
+
+[MISSING] fn="<main>" pc=54 callee=undefined argc=0 args=0 code=72 depth=-60
+    [49] op=38 name="" int=0
+    [50] op=37 name="" int=58
+    [51] op=28 name="" int=0
+    [52] op=0 name="" int=0
+    [53] op=16 name="" int=0
+  > [54] op=22 name="" int=0
+    [55] op=29 name="" int=0
+    [56] op=38 name="" int=0
+    [57] op=12 name="" int=71
+    [58] op=2 name="e" int=0
+[CALL_ERR] depth=-60 body="<main>" pc=53 callee_tag=undefined this_tag=0 args=0
+[CALL_ERR]   at <main> (pc=53)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 70 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8780, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8780, 0x1301ea566c60, 0x1301ea8803f0, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).RunBody(0x8a?, 0x7ff75f231fcd?, 0x7a?, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...})
+	F:/syproject/wb-ui/jsc/interpreter.go:534 +0x85
+wb-ui/jsc.(*Interpreter).Run(0x1301ea2f8780, {0x7ff75f234c48?, 0x1301ea32bf60?})
+	F:/syproject/wb-ui/jsc/interpreter.go:529 +0x1b6
+wb-ui/jsc.TestCallUndefined(0x1301ea89aa00?)
+	F:/syproject/wb-ui/jsc/call_undefined_test.go:17 +0x71
+testing.tRunner(0x1301ea89aa00, 0x7ff75f23ae70)
+	F:/go1.24.2/go/src/testing/testing.go:2036 +0xc3
+created by testing.(*T).Run in goroutine 1
+	F:/go1.24.2/go/src/testing/testing.go:2101 +0x4a9
+
+Results:
+ERR1: TypeError: value is not a function (type: undefined)
+ERR2: TypeError: value is not a function (type: undefined)
+ERR3: TypeError: value is not a function (type: undefined)
+--- PASS: TestCallUndefined (0.00s)
+=== RUN   TestClassJustConstructor
+--- PASS: TestClassJustConstructor (0.00s)
+=== RUN   TestClassMethodDeclaredOnly
+--- PASS: TestClassMethodDeclaredOnly (0.00s)
+=== RUN   TestClassCallMethod
+--- PASS: TestClassCallMethod (0.00s)
+=== RUN   TestClassGetterAccess
+--- PASS: TestClassGetterAccess (0.00s)
+=== RUN   TestES6Coverage
+[PASS] let_basic                      42
+[PASS] const_basic                    100
+[PASS] let_block_scope                2|1
+[PASS] destruct_array_basic           1|2|3
+[PASS] destruct_object_basic          Alice|30
+[PASS] destruct_object_default        Developer
+[PASS] destruct_rest                  1|3
+[PASS] arrow_basic                    25
+[PASS] arrow_multi_params             10
+[PASS] arrow_block_body               30
+[PASS] arrow_no_params                1
+[PASS] arrow_this_capture             objA
+[PASS] arrow_this_constructor         42
+[PASS] class_basic                    42
+[PASS] class_method                   77
+[PASS] class_getter                   99
+[PASS] class_static                   hello
+[PASS] class_extends                  Rex barks
+[PASS] class_super_call               1|2
+[PASS] spread_array                   4|5
+[PASS] spread_object                  1|3
+[PASS] rest_params                    10
+[PASS] map_basic                      1|2|no
+[PASS] set_basic                      2|yes
+[PASS] symbol_basic                   symbol
+[PASS] promise_basic                  created
+[PASS] object_assign                  1|2|3
+[PASS] object_keys                    3
+[PASS] object_values                  2|yes
+[PASS] object_entries                 name|Tom
+[PASS] array_find                     3
+[PASS] array_includes                 yes|no
+[PASS] array_flat                     4|1
+[PASS] string_includes                yes
+[PASS] string_startsWith              yes
+[PASS] string_repeat                  ababab
+[PASS] default_params_skip            default_params_skipped
+[PASS] nullish_coalescing             default|0
+[PASS] computed_property              red
+[PASS] math_trunc                     3
+[PASS] number_isNaN                   yes
+
+=== ES6 Coverage Summary ===
+Total: 41 | Passed: 41 | Failed: 0 | Coverage: 100.0%
+--- PASS: TestES6Coverage (0.00s)
+=== RUN   TestExactVuePattern
+=== EXACT VUE PATTERN ===
+M_TYP: function
+M_NAME: ""
+DIRECT_OK
+CONT: div
+=== END ===
+--- PASS: TestExactVuePattern (0.00s)
+=== RUN   TestCommaReturnPattern
+=== COMMA RETURN ===
+T: function
+R: 6
+=== END ===
+--- PASS: TestCommaReturnPattern (0.00s)
+=== RUN   TestGeneratorFunctionParsing
+--- PASS: TestGeneratorFunctionParsing (0.00s)
+=== RUN   TestProxyTrapGet
+--- PASS: TestProxyTrapGet (0.00s)
+=== RUN   TestProxyTrapSet
+--- PASS: TestProxyTrapSet (0.00s)
+=== RUN   TestProxyTrapHas
+--- PASS: TestProxyTrapHas (0.00s)
+=== RUN   TestProxyTrapApply
+[MISSING] fn="<main>" pc=23 callee=obj:Proxy argc=2 args=2 code=33 depth=-30
+    [18] op=22 name="" int=0
+    [19] op=1 name="p" int=0
+    [20] op=0 name="" int=0
+    [21] op=0 name="" int=0
+    [22] op=16 name="" int=2
+  > [23] op=30 name="result" int=0
+    [24] op=2 name="result" int=0
+    [25] op=22 name="" int=0
+    [26] op=1 name="console" int=0
+    [27] op=23 name="" int=0
+--- PASS: TestProxyTrapApply (0.00s)
+=== RUN   TestGeneratorIsNotCallableGeneratorObject
+--- PASS: TestGeneratorIsNotCallableGeneratorObject (0.00s)
+=== RUN   TestProxyPushDebug4
+Output:
+GET:push
+TYPEOF_PUSH: function
+BEFORE_PUSH
+GET:push
+SET:3
+SET:length
+PUSH_RETURNED: 4
+GET:length
+AFTER: len=4
+--- PASS: TestProxyPushDebug4 (0.00s)
+=== RUN   TestInterpreterArithmeticConsoleLog
+--- PASS: TestInterpreterArithmeticConsoleLog (0.00s)
+=== RUN   TestInterpreterVariablesAndArithmetic
+--- PASS: TestInterpreterVariablesAndArithmetic (0.00s)
+=== RUN   TestInterpreterFunctionCall
+--- PASS: TestInterpreterFunctionCall (0.00s)
+=== RUN   TestInterpreterClosure
+--- PASS: TestInterpreterClosure (0.00s)
+=== RUN   TestInterpreterArrowFunction
+--- PASS: TestInterpreterArrowFunction (0.00s)
+=== RUN   TestInterpreterArrayLiteral
+--- PASS: TestInterpreterArrayLiteral (0.00s)
+=== RUN   TestInterpreterObjectLiteral
+--- PASS: TestInterpreterObjectLiteral (0.00s)
+=== RUN   TestInterpreterIfElse
+--- PASS: TestInterpreterIfElse (0.00s)
+=== RUN   TestInterpreterForLoop
+--- PASS: TestInterpreterForLoop (0.00s)
+=== RUN   TestInterpreterWhileLoop
+--- PASS: TestInterpreterWhileLoop (0.00s)
+=== RUN   TestInterpreterStringConcatenation
+--- PASS: TestInterpreterStringConcatenation (0.00s)
+=== RUN   TestInterpreterMathObject
+--- PASS: TestInterpreterMathObject (0.00s)
+=== RUN   TestInterpreterJSON
+--- PASS: TestInterpreterJSON (0.00s)
+=== RUN   TestInterpreterTryCatch
+--- PASS: TestInterpreterTryCatch (0.00s)
+=== RUN   TestInterpreterComparisonOperators
+--- PASS: TestInterpreterComparisonOperators (0.00s)
+=== RUN   TestInterpreterLogicalOperators
+--- PASS: TestInterpreterLogicalOperators (0.00s)
+=== RUN   TestInterpreterRecursionFibonacci
+--- PASS: TestInterpreterRecursionFibonacci (0.00s)
+=== RUN   TestInterpreterObjectMethodThis
+--- PASS: TestInterpreterObjectMethodThis (0.00s)
+=== RUN   TestInterpreterNestedClosures
+--- PASS: TestInterpreterNestedClosures (0.00s)
+=== RUN   TestInterpreterForInLoop
+--- PASS: TestInterpreterForInLoop (0.00s)
+=== RUN   TestInterpreterConstReassignment
+--- PASS: TestInterpreterConstReassignment (0.00s)
+=== RUN   TestInterpreterStringMethods
+--- PASS: TestInterpreterStringMethods (0.00s)
+=== RUN   TestInterpreterArrayMethods
+--- PASS: TestInterpreterArrayMethods (0.00s)
+=== RUN   TestInterpreterConditionalExpression
+--- PASS: TestInterpreterConditionalExpression (0.01s)
+=== RUN   TestInterpreterCompoundAssignment
+--- PASS: TestInterpreterCompoundAssignment (0.00s)
+=== RUN   TestInterpreterTryCatchFinally
+--- PASS: TestInterpreterTryCatchFinally (0.01s)
+=== RUN   TestInterpreterTryCatchRethrow
+--- PASS: TestInterpreterTryCatchRethrow (0.00s)
+=== RUN   TestInterpreterTryFinally
+--- PASS: TestInterpreterTryFinally (0.00s)
+=== RUN   TestInterpreterNestedTryCatch
+--- PASS: TestInterpreterNestedTryCatch (0.00s)
+=== RUN   TestInterpreterStrictMode
+--- PASS: TestInterpreterStrictMode (0.00s)
+=== RUN   TestInterpreterThrowType
+--- PASS: TestInterpreterThrowType (0.00s)
+=== RUN   TestInterpreterTryCatchConditional
+--- PASS: TestInterpreterTryCatchConditional (0.00s)
+=== RUN   TestInterpreterMap
+--- PASS: TestInterpreterMap (0.00s)
+=== RUN   TestInterpreterMapChain
+--- PASS: TestInterpreterMapChain (0.00s)
+=== RUN   TestInterpreterSet
+--- PASS: TestInterpreterSet (0.00s)
+=== RUN   TestInterpreterSetChain
+--- PASS: TestInterpreterSetChain (0.00s)
+=== RUN   TestInterpreterMapIteration
+--- PASS: TestInterpreterMapIteration (0.00s)
+=== RUN   TestInterpreterPromiseResolve
+--- PASS: TestInterpreterPromiseResolve (0.00s)
+=== RUN   TestInterpreterPromiseReject
+--- PASS: TestInterpreterPromiseReject (0.00s)
+=== RUN   TestInterpreterPromiseChain
+--- PASS: TestInterpreterPromiseChain (0.00s)
+=== RUN   TestInterpreterPromiseAll
+--- PASS: TestInterpreterPromiseAll (0.00s)
+=== RUN   TestInterpreterPromiseRace
+--- PASS: TestInterpreterPromiseRace (0.00s)
+=== RUN   TestInterpreterPromiseStaticResolve
+--- PASS: TestInterpreterPromiseStaticResolve (0.00s)
+=== RUN   TestInterpreterPromiseStaticReject
+--- PASS: TestInterpreterPromiseStaticReject (0.00s)
+=== RUN   TestInterpreterPromiseFinally
+--- PASS: TestInterpreterPromiseFinally (0.00s)
+=== RUN   TestInterpreterPromiseThrowInExecutor
+--- PASS: TestInterpreterPromiseThrowInExecutor (0.00s)
+=== RUN   TestInterpreterAsyncFunction
+--- PASS: TestInterpreterAsyncFunction (0.00s)
+=== RUN   TestInterpreterSymbol
+--- PASS: TestInterpreterSymbol (0.00s)
+=== RUN   TestInterpreterForOf
+--- PASS: TestInterpreterForOf (0.00s)
+=== RUN   TestInterpreterForOfString
+--- PASS: TestInterpreterForOfString (0.00s)
+=== RUN   TestInterpreterForOfEmpty
+--- PASS: TestInterpreterForOfEmpty (0.01s)
+=== RUN   TestInterpreterProxyGet
+--- PASS: TestInterpreterProxyGet (0.00s)
+=== RUN   TestInterpreterProxySet
+--- PASS: TestInterpreterProxySet (0.00s)
+=== RUN   TestInterpreterProxyHas
+--- PASS: TestInterpreterProxyHas (0.00s)
+=== RUN   TestInterpreterReflect
+--- PASS: TestInterpreterReflect (0.00s)
+=== RUN   TestInterpreterProxyDefault
+--- PASS: TestInterpreterProxyDefault (0.00s)
+=== RUN   TestInterpreterProxyApply
+[MISSING] fn="<main>" pc=26 callee=obj:Proxy argc=2 args=2 code=29 depth=-30
+    [21] op=6 name="log" int=0
+    [22] op=1 name="proxy" int=0
+    [23] op=0 name="" int=0
+    [24] op=0 name="" int=0
+    [25] op=16 name="" int=2
+  > [26] op=17 name="log" int=1
+    [27] op=22 name="" int=0
+    [28] op=21 name="" int=0
+--- PASS: TestInterpreterProxyApply (0.00s)
+=== RUN   TestInterpreterReflectApply
+--- PASS: TestInterpreterReflectApply (0.00s)
+=== RUN   TestLexerIdentifier
+--- PASS: TestLexerIdentifier (0.00s)
+=== RUN   TestLexerKeywords
+--- PASS: TestLexerKeywords (0.00s)
+=== RUN   TestLexerLiteralsTrueFalseNull
+--- PASS: TestLexerLiteralsTrueFalseNull (0.00s)
+=== RUN   TestLexerDecimalNumber
+--- PASS: TestLexerDecimalNumber (0.00s)
+=== RUN   TestLexerFloatNumber
+--- PASS: TestLexerFloatNumber (0.00s)
+=== RUN   TestLexerExponentNumber
+--- PASS: TestLexerExponentNumber (0.00s)
+=== RUN   TestLexerHexNumber
+--- PASS: TestLexerHexNumber (0.00s)
+=== RUN   TestLexerBinaryNumber
+--- PASS: TestLexerBinaryNumber (0.00s)
+=== RUN   TestLexerOctalNumber
+--- PASS: TestLexerOctalNumber (0.00s)
+=== RUN   TestLexerStringDouble
+--- PASS: TestLexerStringDouble (0.00s)
+=== RUN   TestLexerStringEscapes
+--- PASS: TestLexerStringEscapes (0.00s)
+=== RUN   TestLexerTemplateLiteral
+--- PASS: TestLexerTemplateLiteral (0.00s)
+=== RUN   TestLexerRegexLiteral
+--- PASS: TestLexerRegexLiteral (0.00s)
+=== RUN   TestLexerOperators
+--- PASS: TestLexerOperators (0.00s)
+=== RUN   TestLexerArrowAndSpread
+--- PASS: TestLexerArrowAndSpread (0.00s)
+=== RUN   TestLexerComments
+--- PASS: TestLexerComments (0.00s)
+=== RUN   TestLexerLineColTracking
+--- PASS: TestLexerLineColTracking (0.00s)
+=== RUN   TestLexerPrecedingNewline
+--- PASS: TestLexerPrecedingNewline (0.00s)
+=== RUN   TestLexerEOF
+--- PASS: TestLexerEOF (0.00s)
+=== RUN   TestLexerDivideVsRegex
+--- PASS: TestLexerDivideVsRegex (0.00s)
+=== RUN   TestLexerUnterminatedString
+--- PASS: TestLexerUnterminatedString (0.00s)
+=== RUN   TestInterpreterModuleExportImport
+--- PASS: TestInterpreterModuleExportImport (0.00s)
+=== RUN   TestInterpreterModuleDefaultExport
+--- PASS: TestInterpreterModuleDefaultExport (0.00s)
+=== RUN   TestInterpreterModuleNamedExports
+--- PASS: TestInterpreterModuleNamedExports (0.00s)
+=== RUN   TestInterpreterModuleNotFound
+--- PASS: TestInterpreterModuleNotFound (0.00s)
+=== RUN   TestObjectGetProto
+=== Object API ===
+O_assign: function
+O_create: function
+O_keys: function
+O_defineProperty: function
+O_getPrototypeOf: function
+O_setPrototypeOf: function
+O_getOwnPropertyNames: function
+O_hasOwn: function
+O_fromEntries: function
+O_is: function
+O_preventExtensions: function
+O_seal: function
+O_freeze: function
+O_isExtensible: function
+O_isSealed: function
+O_isFrozen: function
+O_entries: function
+O_values: function
+O_getOwnPropertyDescriptor: function
+--- PASS: TestObjectGetProto (0.00s)
+=== RUN   TestOpCallMethodDebug
+=== RUN   TestOpCallMethodDebug/simple_method
+R: 42
+=== RUN   TestOpCallMethodDebug/arrow_final
+M_TYP: function
+RES: 999
+CONT: div
+=== RUN   TestOpCallMethodDebug/trace_call_fail
+TRY_DIRECT
+DIRECT_OK
+CONT: [object Object]
+=== RUN   TestOpCallMethodDebug/iife_destructure
+MTYP: function
+DIRECT_OK
+CONT: [object Object]
+--- PASS: TestOpCallMethodDebug (0.00s)
+    --- PASS: TestOpCallMethodDebug/simple_method (0.00s)
+    --- PASS: TestOpCallMethodDebug/arrow_final (0.00s)
+    --- PASS: TestOpCallMethodDebug/trace_call_fail (0.00s)
+    --- PASS: TestOpCallMethodDebug/iife_destructure (0.00s)
+=== RUN   TestParserNumberLiteral
+--- PASS: TestParserNumberLiteral (0.00s)
+=== RUN   TestParserStringLiteral
+--- PASS: TestParserStringLiteral (0.00s)
+=== RUN   TestParserBinaryExpression
+--- PASS: TestParserBinaryExpression (0.00s)
+=== RUN   TestParserPrecedence
+--- PASS: TestParserPrecedence (0.00s)
+=== RUN   TestParserParenGrouping
+--- PASS: TestParserParenGrouping (0.00s)
+=== RUN   TestParserPowerRightAssoc
+--- PASS: TestParserPowerRightAssoc (0.00s)
+=== RUN   TestParserAssignment
+--- PASS: TestParserAssignment (0.00s)
+=== RUN   TestParserFunctionDeclaration
+--- PASS: TestParserFunctionDeclaration (0.00s)
+=== RUN   TestParserArrowFunction
+--- PASS: TestParserArrowFunction (0.00s)
+=== RUN   TestParserArrowSingleParam
+--- PASS: TestParserArrowSingleParam (0.00s)
+=== RUN   TestParserIfStatement
+--- PASS: TestParserIfStatement (0.00s)
+=== RUN   TestParserForStatement
+--- PASS: TestParserForStatement (0.00s)
+=== RUN   TestParserObjectLiteral
+--- PASS: TestParserObjectLiteral (0.00s)
+=== RUN   TestParserArrayLiteral
+--- PASS: TestParserArrayLiteral (0.00s)
+=== RUN   TestParserArrayHoles
+--- PASS: TestParserArrayHoles (0.00s)
+=== RUN   TestParserMemberExpression
+--- PASS: TestParserMemberExpression (0.00s)
+=== RUN   TestParserComputedMember
+--- PASS: TestParserComputedMember (0.00s)
+=== RUN   TestParserCallExpression
+--- PASS: TestParserCallExpression (0.00s)
+=== RUN   TestParserMethodCall
+--- PASS: TestParserMethodCall (0.00s)
+=== RUN   TestParserVariableDeclaration
+--- PASS: TestParserVariableDeclaration (0.00s)
+=== RUN   TestParserConditionalExpression
+--- PASS: TestParserConditionalExpression (0.00s)
+=== RUN   TestParserUnaryExpression
+--- PASS: TestParserUnaryExpression (0.00s)
+=== RUN   TestParserUpdateExpression
+--- PASS: TestParserUpdateExpression (0.00s)
+=== RUN   TestParserTryCatch
+--- PASS: TestParserTryCatch (0.00s)
+=== RUN   TestParserTemplateLiteral
+--- PASS: TestParserTemplateLiteral (0.00s)
+=== RUN   TestParserWhileStatement
+--- PASS: TestParserWhileStatement (0.00s)
+=== RUN   TestParserNewExpression
+--- PASS: TestParserNewExpression (0.00s)
+=== RUN   TestParserParseError
+--- PASS: TestParserParseError (0.00s)
+=== RUN   TestCreateAppDiagnose
+Results:
+KEYS: setAttribute,textContent,insertBefore,childNodes,tagName
+TAG: div
+APPEND_CHILD: undefined
+INSERT_BEFORE: function
+APPEND_CHILD_AFTER: function
+CHILDREN: 1
+--- PASS: TestCreateAppDiagnose (0.00s)
+=== RUN   TestVue3CallDiag
+[METH_STACK] depth=-207 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-207
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-207 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 92 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea6e1200, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x53?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5feb40}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea6e1500, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x23?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5feea0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea6e1440, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x3a?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5fed80}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea6e1320, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x1301ea4d4275?, 0x1?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5fecf0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea400de0, 0x1301ea712af8, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb619bc0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea400d80, 0x1301ea712af8, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x18?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb619b30}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea400780, 0x1301ea712af8, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x6e?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8600, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb619350}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8600, 0x1301ea401a40, 0x1301ea712af8, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x8?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0},
+=== DIAG OUTPUT ===
+JE_TYPE: object
+JE_CLASS: no_cons
+JE_KEYS: _context,provide,onUnmount,mount,use,_component,_uid,version,unmount,directive,mixin,config,_props,runWithContext,component,_instance,_container
+M_IN: true
+M_HAS: true
+M_TYP: function
+M_BRK: function
+M_DESC: exists(function,undefined)
+M_VAL: function
+M_GET: undefined
+M_CONF: true
+M_ENUM: true
+MFN_TYP: function
+MFN_NAME: ""
+MFN_LEN: 1
+MFN_PROT: object
+CALL_OK: undefined
+S7: OK
+AFTER: none
+=== END ===
+--- PASS: TestVue3CallDiag (0.02s)
+=== RUN   TestVue3AutoDiagnose
+Bundle modified at end - mount wrapped with diagnostics
+[METH_STACK] depth=-210 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-210
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-210 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 111 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea2f1aa0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x11?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5e27e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea2f1da0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x52?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5e2b40}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea2f1ce0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x6d?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5e2a20}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea2f1bc0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x6?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5e2990}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eafa26c0, 0x1301ea712b10, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5ffa70}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eafa25a0, 0x1301ea712b10, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x22?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5ff9e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb7869c0, 0x1301ea712b10, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x10?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb5ff200}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea2f0960, 0x1301ea712b10, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x51?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x
+=== DIAGNOSTIC RESULTS ===
+DIAG_MOUNT_CALLING
+DIAG_MOUNT: container=DIV
+DIAG_MOUNT: this=object has_component
+DIAG_MOUNT_SUCCESS
+S1: 1
+S7: OK
+AFTER_ERR: undef
+--- PASS: TestVue3AutoDiagnose (0.01s)
+=== RUN   TestVue3MountErrorTrace
+[METH_STACK] depth=-209 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-209
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-209 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 226 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090ba0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x6c?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb292480}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090ea0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x8?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb2927e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090de0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x73?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb2926c0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090cc0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb292630}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb0040c0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x7ff75f20d4c0?, 0x1301eb13c838?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb307500}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb004060, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0xd?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb307470}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eacbeba0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x1301eb38cea0?, 0x55?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb306c90}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eacbf1a0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x5?, 0x58?, {0x6, 
+[METH_STACK] depth=-252 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-252
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-252 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 226 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090ba0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x6c?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb292480}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090ea0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x8?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb2927e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090de0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x73?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb2926c0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb090cc0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb292630}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb0040c0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb307500}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb004060, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0xd?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb307470}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eacbeba0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x55?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb306c90}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eacbf1a0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x5?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0},
+=== MOUNT ERROR TRACE ===
+METH1: <direct>
+METH1_ERR: TypeError: value is not a function (type: undefined)
+METH2: <call>
+MFN_TYP: function
+METH2_OK: undefined
+S7: OK
+AFTER: none
+=== END ===
+--- PASS: TestVue3MountErrorTrace (0.01s)
+=== RUN   TestVue3FinalFix
+FIX APPLIED
+[METH_STACK] depth=-210 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-210
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-210 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 136 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb07d440, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x6b?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb4c8f90}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb07d740, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x56?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb4c92f0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb07d680, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x26?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb4c91d0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb07d560, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x1301ead27d60?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb4c9140}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea41cd80, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x1301eb24caaf?, 0x2?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb520120}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea41cd20, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0xd?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb520090}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea41c720, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb4ed7a0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea41d9e0, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x16?, 0x58?, {0x6, 0x0, 0x0, 
+=== RESULTS ===
+S1: 1
+S7: OK
+AFTER_ERR: undef
+INSTANCE: null
+APP_CONTAINER: null
+APP_CHILDREN: 0
+--- PASS: TestVue3FinalFix (0.01s)
+=== RUN   TestVue3MountTrace
+[METH_STACK] depth=-220 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-220
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-220 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 227 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb330fc0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x4d?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb0037a0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb3312c0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x5a?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb003b00}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb331200, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x69?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb0039e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb3310e0, 0x1301ea712000, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb003950}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eaeb3680, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x7ff75f20d4c0?, 0x1301eb276838?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb08ca50}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eaeb3620, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x3f?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb08c9c0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eaeb3020, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x1301ea8d42b0?, 0x42?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea2f8240, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eb08c1e0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea2f8240, 0x1301eb330420, 0x1301ea712a68, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x19?, 0x58?, {0x
+Bundle OK
+Console:
+WIN: object
+DOC: object
+S1: 1
+S7: TypeError: value is not a function (type: undefined)
+S9: OK
+BEFORE: 1
+--- PASS: TestVue3MountTrace (0.02s)
+=== RUN   TestVue3TraceMountAccess
+DIAG INJECTED
+[METH_STACK] depth=-210 stack_len=0
+[METH_CALL_ERR] body="" pc=12 callee=undefined args=0 depth=-210
+[METH_CALL_ERR]   this_tag=6 class="Object"
+[METH_CTX]   [7] op=1 name="e" int=0
+[METH_CTX]   [8] op=6 name="scope" int=0
+[METH_CTX]   [9] op=23 name="" int=0
+[METH_CTX]   [10] op=6 name="on" int=0
+[METH_CTX]   [11] op=17 name="on" int=0
+[METH_CTX] > [12] op=22 name="" int=0
+[METH_CTX]   [13] op=19 name="" int=0
+[METH_CTX]   [14] op=20 name="" int=0
+[METH_CTX]   [15] op=29 name="" int=0
+[METH_CTX]   [16] op=21 name="" int=0
+[CALL_ERR] depth=-210 body="" pc=11 callee_tag=undefined this_tag=6 args=0
+[CALL_ERR]   at  (pc=11)
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_CTX] F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+[CALL_ERR_STACK]
+goroutine 242 [running]:
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x0, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1306 +0xa12
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb1f8540, 0x1301ea25a108, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:798 +0xbc1f
+wb-ui/jsc.(*Interpreter).runFunction(0x1?, 0x1a?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301ead84b70}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb0ee300, 0x1301ea25a108, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x5e?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301ead84ed0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb0ee240, 0x1301ea25a108, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x44?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301ead84db0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301eb0ee120, 0x1301ea25a108, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301ead84d20}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea5746c0, 0x1301ea25ab58, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x0?, 0x0?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eadd5bf0}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea574660, 0x1301ea25ab58, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x43?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eadd5b60}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea574060, 0x1301ea25ab58, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x5c?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:552 +0x1a5
+wb-ui/jsc.(*Interpreter).callValue(0x1301ea55e000, {0x7, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, 0x0, 0x1301eadd5380}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:1343 +0x1029
+wb-ui/jsc.(*Interpreter).runFunctionBody(0x1301ea55e000, 0x1301ea575320, 0x1301ea25ab58, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x0}, ...}, ...)
+	F:/syproject/wb-ui/jsc/interpreter.go:751 +0xcbf9
+wb-ui/jsc.(*Interpreter).runFunction(0x0?, 0x1e?, 0x58?, {0x6, 0x0, 0x0, {0x0, 0x0}, {0x0, 0x
+=== DIAG ===
+MTYPE1: function
+MKEYS1: _context,provide,component,use,config,onUnmount,mount,mixin,_container,_component,runWithContext,unmount,version,_instance,_props,directive,_uid
+MHAS1: true
+MPROTO: true
+MDIRECT: function
+MGET: [object Object]
+MSAVED: function
+MFN_NAME: 
+MFN_LEN: 1
+S7: TypeError: value is not a function (type: undefined)
+=== END ===
+--- PASS: TestVue3TraceMountAccess (0.01s)
+FAIL
+FAIL	wb-ui/jsc	0.186s
+FAIL
