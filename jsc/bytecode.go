@@ -667,6 +667,13 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	// Store the constructor as the class variable.
+	// IMPORTANT: Use OpStoreVar instead of OpPop so the class name is bound.
+	// Previously OpPop silently discarded the constructor, causing subsequent
+	// OpLoadVar of the class name to return undefined, which then panicked on
+	// the subsequent OpLoadProp("prototype") — the panic was swallowed by defer
+	// recover, resulting in silent stop at "class mne{".
+	g.declareVar(n.Name)
+	g.emit(Instruction{Op: OpStoreVar, Name: n.Name})
 	g.emit(Instruction{Op: OpPop})
 	// Attach prototype methods to Constructor.prototype.
 	if len(n.Body.Methods) > 1 || (len(n.Body.Methods) == 1 && n.Body.Methods[0].Name != "constructor") {
