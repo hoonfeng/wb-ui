@@ -402,6 +402,8 @@ func (v JSValue) Typeof() string {
 		return "object"
 	case TagFunction:
 		return "function"
+	case TagSymbol:
+		return "symbol"
 	}
 	return "undefined"
 }
