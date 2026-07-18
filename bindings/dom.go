@@ -162,12 +162,28 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	return obj
 }
 
+// ─── Element wrapper cache ─────────────────────────────
+// Ensures the same Go *dom.Element always maps to the same JS wrapper,
+// so JS-side properties (__vue_app__, _vnode) set on one wrapper are
+// visible through all DOM access methods (querySelector, getElementById, etc.)
+var elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+
+func clearElementCache() {
+	elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+}
+
 // ─── Element ───────────────────────────────────────────
 
 func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
+	// Return cached wrapper if available
+	if cached, ok := elementWrapperCache[el]; ok {
+		return cached
+	}
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.ClassName = "Element"
 	obj.Internal = el
+	// Cache before returning
+	elementWrapperCache[el] = obj
 
 	// Attributes
 	obj.Set("getAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {

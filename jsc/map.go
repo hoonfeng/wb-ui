@@ -11,11 +11,9 @@
 //   - Map.prototype.forEach and Iterator objects are omitted.
 
 package jsc
-
 import (
 	"fmt"
 	"math"
-	"strings"
 )
 
 // mapKey serialises a JSValue to a string key for Map/Set internal storage,
@@ -284,20 +282,12 @@ func mapUnkey(key string) JSValue {
 		if payload == "0" {
 			return NumberValue(0)
 		}
-		// Parse the number back.
 		var n float64
-		if strings.Contains(payload, ".") {
-			_, _ = fmt.Sscanf(payload, "%f", &n)
-		} else {
-			_, _ = fmt.Sscanf(payload, "%d", &n)
-		}
+		_, _ = fmt.Sscanf(payload, "%f", &n)
 		return NumberValue(n)
 	case "s:":
 		return StringValue(payload)
 	case "o:", "f:":
-		// We cannot recover the original pointer, but this is only used for
-		// keys()/entries() which return keys as-is in JS. For object keys
-		// we return a representative string.
 		return StringValue("[object MapKey]")
 	}
 	return Undefined()

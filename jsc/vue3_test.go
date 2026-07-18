@@ -80,6 +80,9 @@ func TestVue3MountTrace(t *testing.T) {
 	vm.Run(`console.log('S9: '+(window.__S9__||'undef'))`)
 	vm.Run(`console.log('BEFORE: '+(window.__BEFORE_MOUNT__||'undef'))`)
 	
+	// Check mock DOM
+	vm.Run(`var a=document.querySelector('#app');console.log('MOCK_CHILDREN: '+a.childNodes.length);console.log('MOCK_HTML: '+a.innerHTML)`)
+	
 	out := logger.String()
 	if out != "" {
 		fmt.Fprintf(os.Stderr, "Console:\n%s\n", out)
