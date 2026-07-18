@@ -972,7 +972,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 			}
 			goto nextFuncParam
 		}
-		if p.current.Kind != TokenIdentifier {
+		if p.current.Kind != TokenIdentifier && !p.current.Kind.IsKeyword() {
 			p.errorf("expected parameter name")
 			break
 		}
@@ -2110,7 +2110,7 @@ func (p *Parser) parsePrimary() Expr {
 			return p.parseNewExpression()
 		case KeywordClass:
 			return p.parseClassExpression()
-		case KeywordLet, KeywordYield, KeywordAwait, KeywordOf:
+		case KeywordLet, KeywordYield, KeywordAwait, KeywordOf, KeywordFrom, KeywordImport, KeywordExport, KeywordExtends:
 			// Contextual keywords used as identifiers when not in special position.
 			p.advance()
 			return &Identifier{Name: tok.Lexeme, Line: tok.Line, Col: tok.Col}
