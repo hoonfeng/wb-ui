@@ -372,8 +372,8 @@ func (f *Frame) executeInlineScripts() {
 				marked = strings.Replace(marked, `let Ja;`, `console.log("M_LET");let Ja;`, 1)
 				// Marker at class mne
 				marked = strings.Replace(marked, `class mne{`, `console.log("M_MNE");class mne{`, 1)
-				// Marker near end of IIFE (before last freeze)
-				marked = strings.Replace(marked, `Object.freeze(Object.defineProperty({__proto__:null,CynefinModule:`, `console.log("M_END");Object.freeze(Object.defineProperty({__proto__:null,CynefinModule:`, 1)
+				// Marker right after class mne (at let vne)
+				marked = strings.Replace(marked, `let vne=0,nk,ik;`, `console.log("M_POST_MNE");let vne=0,nk,ik;`, 1)
 				marked = strings.Replace(marked, `class yne{`, `console.log("M_YNE");class yne{`, 1)
 				// Marker at function bne (after classes)
 				marked = strings.Replace(marked, `function bne(`, `console.log("M_BNE");function bne(`, 1)

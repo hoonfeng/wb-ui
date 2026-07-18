@@ -756,6 +756,8 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			proto := NewObject(in.objectProto)
 			proto.Set("constructor", FunctionValue(fn))
 			fn.properties.Set("prototype", ObjectValue(proto))
+			// Log all closure creations for debugging
+			fmt.Fprintf(os.Stderr, "[CLOSURE] name=%q ninstr=%d\n", inst.Name, len(inst.Body.Instructions))
 			// If the constructor references "super", auto-bind from frameEnv
 			if inst.Body != nil && len(inst.Body.Instructions) > 0 && inst.Body.Instructions[0].Op == OpLoadVar && inst.Body.Instructions[0].Name == "super" {
 				if v, ok := frameEnv.Get("super"); !ok || v.IsUndefined() {
