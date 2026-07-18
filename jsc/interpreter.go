@@ -1041,7 +1041,15 @@ func numericIndex(s string) (int, bool) {
 
 // getProperty retrieves obj.name walking the prototype chain. Works for objects and
 // functions (function instance properties live on fn.properties).
-func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
+// Optional receiver: when set, accessor getters are called with receiver as `this`.
+func (in *Interpreter) getProperty(obj JSValue, name string, receiver ...JSValue) JSValue {
+	// Determine receiver for accessor this-binding
+	var recv JSValue
+	if len(receiver) > 0 {
+		recv = receiver[0]
+	} else {
+		recv = obj
+	}
 	// Proxy check: if obj is a Proxy, call the get trap.
 	if IsProxy(obj) {
 		return proxyGet(in, obj, name)
@@ -1049,10 +1057,17 @@ func (in *Interpreter) getProperty(obj JSValue, name string) JSValue {
 	switch obj.tag {
 	case TagObject:
 		// Walk the object + prototype chain, checking accessors first.
+		// For arrays, check arrayMethod first (before prototype chain) to ensure
+		// we use the Proxy-aware implementation.
+		if obj.object.IsArray {
+			if fn := in.arrayMethod(name); fn != nil {
+				return FunctionValue(fn)
+			}
+		}
 		cur := obj.object
 		for cur != nil {
 			if a := cur.Accessor(name); a != nil && a.Getter != nil {
-				return a.Getter(in, obj)
+				return a.Getter(in, recv)
 			}
 			if v, ok := cur.Properties[name]; ok {
 				return v
@@ -1416,25 +1431,22 @@ func (in *Interpreter) arrayMethod(name string) *JSFunction {
 	switch name {
 	case "push":
 		return NewNativeFunction("push", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
-			fmt.Fprintf(os.Stderr, "[PUSH_ENTER] this.tag=%d isObj=%v isProxy=%v\n", this.tag, this.IsObject(), IsProxy(this))
 			if !this.IsObject() {
-				fmt.Fprintf(os.Stderr, "[PUSH] this is not object tag=%d\n", this.tag)
 				return NumberValue(0)
 			}
-			fmt.Fprintf(os.Stderr, "[PUSH] isObject=true isProxy=%v className=%s\n", IsProxy(this), this.AsObject().ClassName)
-			// Proxy support: operate on target directly
+			// Proxy support: go through proxy so handler.set trap is called
 			if IsProxy(this) {
 				pd := this.AsObject().Internal.(*proxyData)
 				target := pd.target
-				fmt.Fprintf(os.Stderr, "[PUSH] proxy target tag=%d\n", target.tag)
 				if !target.IsObject() {
 					return NumberValue(0)
 				}
 				base := len(target.AsObject().Elements)
 				for i, a := range args {
-					in.setIndex(target, NumberValue(float64(base+i)), a)
+					in.setIndex(this, NumberValue(float64(base+i)), a)
 				}
-				target.AsObject().Set("length", NumberValue(float64(base+len(args))))
+				// Set length through proxy
+				proxySet(in, this, "length", NumberValue(float64(base+len(args))))
 				return NumberValue(float64(base + len(args)))
 			}
 			o := this.AsObject()

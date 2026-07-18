@@ -24,26 +24,22 @@ var h = {
 };
 var p = new Proxy(t, h);
 
-// Method 1: Direct push
-console.log("=== Method 1: p.push(4) ===");
-p.push(4);
-console.log("len=" + p.length + " p3=" + p[3]);
+// Test direct set: should trigger SET trap
+console.log("=== p[0] = 99 ===");
+p[0] = 99;
+console.log("p[0]=" + p[0] + " t[0]=" + t[0]);
 
-// Method 2: Re-get push each time
+// Test push through proxy: should trigger SET trap
+console.log("=== p.push(4) ===");
+p.push(4);
+console.log("len=" + p.length + " p[3]=" + p[3] + " t[3]=" + t[3]);
+
+// Test push on newly-created proxy
 var t2 = [1, 2, 3];
 var p2 = new Proxy(t2, h);
-console.log("=== Method 2: get push each time ===");
-p2["push"](4);
-console.log("len=" + p2.length + " p3=" + p2[3]);
-
-// Method 3: target approach
-var t3 = [1, 2, 3];
-var p3 = new Proxy(t3, h);
-console.log("=== Method 3: check target ===");
-var pushFn = Array.prototype.push;
-pushFn.call(p3, 4);
-console.log("len=" + p3.length + " p3=" + p3[3]);
-console.log("target_len=" + t3.length + " target_3=" + t3[3]);
+console.log("=== p2.push(5) ===");
+p2.push(5);
+console.log("len=" + p2.length + " p2[3]=" + p2[3] + " t2[3]=" + t2[3]);
 `
 	
 	_, err := vm.Run(code)

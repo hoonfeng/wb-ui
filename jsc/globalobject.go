@@ -649,6 +649,11 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	}, 1)))
 	objStatic.Set("defineProperty", FunctionValue(NewNativeFunction("defineProperty", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		if len(args) < 2 || !args[0].IsObject() { return args[0] }
+		// Proxy support: call defineProperty trap
+		if IsProxy(args[0]) {
+			proxyDefineProperty(in, args[0], args[1].ToString(), args[2])
+			return args[0]
+		}
 		obj := args[0].AsObject()
 		key := args[1].ToString()
 		if len(args) > 2 && args[2].IsObject() {
@@ -678,6 +683,14 @@ func (in *Interpreter) installConstructors(g *JSObject) {
 	}, 1)))
 	objStatic.Set("getOwnPropertyDescriptor", FunctionValue(NewNativeFunction("getOwnPropertyDescriptor", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		if len(args) < 2 || !args[0].IsObject() { return Undefined() }
+		// Proxy support: call getOwnPropertyDescriptor trap
+		if IsProxy(args[0]) {
+			res, ok := proxyGetOwnPropertyDescriptor(in, args[0], args[1].ToString())
+			if ok {
+				return res
+			}
+			return Undefined()
+		}
 		obj := args[0].AsObject()
 		key := args[1].ToString()
 		if v, ok := obj.Properties[key]; ok {

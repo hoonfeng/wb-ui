@@ -57,14 +57,19 @@ func callProxyTrap(in *Interpreter, handler *JSObject, trapName string, args []J
 }
 
 // proxyGet implements the [[Get]] internal method for proxies.
-func proxyGet(in *Interpreter, proxy JSValue, prop string) JSValue {
+// Optional receiver overrides the `this` passed to the get trap (defaults to proxy).
+func proxyGet(in *Interpreter, proxy JSValue, prop string, receiver ...JSValue) JSValue {
 	pd := proxy.AsObject().Internal.(*proxyData)
 	handler := &pd.handler
-	if res, ok := callProxyTrap(in, handler, "get", []JSValue{pd.target, StringValue(prop), proxy}); ok {
+	recv := proxy
+	if len(receiver) > 0 {
+		recv = receiver[0]
+	}
+	if res, ok := callProxyTrap(in, handler, "get", []JSValue{pd.target, StringValue(prop), recv}); ok {
 		return res
 	}
-	// Default: forward to target.
-	return in.getProperty(pd.target, prop)
+	// Default: forward to target with receiver binding for accessors.
+	return in.getProperty(pd.target, prop, recv)
 }
 
 // proxySet implements the [[Set]] internal method for proxies.
@@ -74,9 +79,24 @@ func proxySet(in *Interpreter, proxy JSValue, prop string, value JSValue) bool {
 	if res, ok := callProxyTrap(in, handler, "set", []JSValue{pd.target, StringValue(prop), value, proxy}); ok {
 		return res.ToBoolean()
 	}
-	// Default: forward to target.
+	// Default: forward to target with receiver binding for accessors.
 	if pd.target.IsObject() {
 		targetObj := pd.target.AsObject()
+		// Walk prototype chain to find accessor
+		cur := targetObj
+		for cur != nil {
+			if a := cur.Accessor(prop); a != nil {
+				if a.Setter != nil {
+					a.Setter(in, proxy, value)
+					return true
+				}
+				return false // accessor without setter
+			}
+			if _, ok := cur.Properties[prop]; ok {
+				break
+			}
+			cur = cur.Prototype
+		}
 		targetObj.Set(prop, value)
 		return true
 	}

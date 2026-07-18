@@ -21,9 +21,11 @@ func (in *Interpreter) ReflectObject() *JSObject {
 		target := args[0]
 		prop := args[1]
 		propStr := prop.ToString()
+		var recv JSValue
 		if len(args) >= 3 {
-			// receiver is provided but for non-accessor properties it's unused
-			_ = args[2]
+			recv = args[2]
+		} else {
+			recv = target
 		}
 		if target.IsObject() {
 			// For array numeric indices, use getIndex instead of getProperty
@@ -43,7 +45,7 @@ func (in *Interpreter) ReflectObject() *JSObject {
 					return Undefined()
 				}
 			}
-			return in.getProperty(target, propStr)
+			return in.getProperty(target, propStr, recv)
 		}
 		return Undefined()
 	}, 2)))
@@ -57,6 +59,10 @@ func (in *Interpreter) ReflectObject() *JSObject {
 		prop := args[1]
 		value := args[2]
 		propStr := prop.ToString()
+		receiver := target
+		if len(args) >= 4 {
+			receiver = args[3]
+		}
 		if target.IsObject() {
 			o := target.AsObject()
 			// For array numeric indices, use SetIndex
@@ -64,7 +70,6 @@ func (in *Interpreter) ReflectObject() *JSObject {
 				if prop.IsNumber() {
 					idx := int(prop.AsNumber())
 					o.SetIndex(idx, value)
-					// Update length if index >= current length
 					if idx >= len(o.Elements) {
 						o.Set("length", NumberValue(float64(idx+1)))
 					}
@@ -78,6 +83,23 @@ func (in *Interpreter) ReflectObject() *JSObject {
 					return BooleanValue(true)
 				}
 			}
+			// Walk prototype chain to find accessor with setter
+			cur := o
+			for cur != nil {
+				if a := cur.Accessor(propStr); a != nil {
+					if a.Setter != nil {
+						a.Setter(in, receiver, value)
+						return BooleanValue(true)
+					}
+					// Accessor without setter → return false per spec
+					return BooleanValue(false)
+				}
+				if _, ok := cur.Properties[propStr]; ok {
+					break
+				}
+				cur = cur.Prototype
+			}
+			// No accessor found: set directly on target
 			o.Set(propStr, value)
 			return BooleanValue(true)
 		}
