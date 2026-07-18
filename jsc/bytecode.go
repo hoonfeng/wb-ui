@@ -170,7 +170,7 @@ func CompileProgram(prog *Program) *FunctionBody {
 
 // compileFunction compiles a function expression/declaration body into a FunctionBody.
 // restParam is the name of the rest parameter (e.g., "nums" for ...nums), empty if none.
-func compileFunction(name string, params []string, body []Stmt, isArrow bool, isAsync bool, isGenerator bool, destructs []DestructInfo, restParam ...string) *FunctionBody {
+func compileFunction(name string, params []string, defaults []Expr, body []Stmt, isArrow bool, isAsync bool, isGenerator bool, destructs []DestructInfo, restParam ...string) *FunctionBody {
 	var rp string
 	if len(restParam) > 0 {
 		rp = restParam[0]
@@ -206,6 +206,21 @@ func compileFunction(name string, params []string, body []Stmt, isArrow bool, is
 				g.emit(Instruction{Op: OpPop})
 			}
 		}
+	}
+	// Emit default parameter checks: if param === undefined, assign default.
+	for i, def := range defaults {
+		if def == nil {
+			continue
+		}
+		// Generate: if (param === undefined) { param = default; }
+		g.emit(Instruction{Op: OpLoadVar, Name: params[i]})
+		g.emit(Instruction{Op: OpLoadUndefined})
+		g.emit(Instruction{Op: OpBinOp, OpTok: TokenStrictEqual})
+		skipJump := g.emitJump(OpJumpIfFalse)
+		g.emitExpr(def)
+		g.emit(Instruction{Op: OpStoreVar, Name: params[i]})
+		g.emit(Instruction{Op: OpPop})
+		g.patchJump(skipJump)
 	}
 	// Hoist inner function declarations.
 	for _, st := range body {
@@ -287,7 +302,7 @@ func (g *BytecodeGenerator) here() int { return len(g.code) }
 
 // emitFunctionHoisted emits a NewClosure and StoreVar for a hoisted function declaration.
 func (g *BytecodeGenerator) emitFunctionHoisted(fd *FunctionDeclaration) {
-	body := compileFunction(fd.Name, fd.Params, fd.Body, false, fd.IsAsync, fd.IsGenerator, nil, fd.RestParam)
+	body := compileFunction(fd.Name, fd.Params, fd.Defaults, fd.Body, false, fd.IsAsync, fd.IsGenerator, nil, fd.RestParam)
 	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: fd.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: fd.Name})
 	g.emit(Instruction{Op: OpPop})
@@ -529,7 +544,7 @@ func (g *BytecodeGenerator) emitSwitch(n *SwitchStatement) {
 			// Emit test: temp === testExpr
 			g.emit(Instruction{Op: OpLoadVar, Name: discTemp})
 			g.emitExpr(c.Test)
-			g.emit(Instruction{Op: OpBinOp, IntArg: int(TokenStrictEqual)})
+			g.emit(Instruction{Op: OpBinOp, OpTok: TokenStrictEqual})
 			// If false (no match), skip this body → jump to next case
 			failJumps[i] = g.emitJump(OpJumpIfFalse)
 		}
@@ -613,7 +628,28 @@ func (g *BytecodeGenerator) emitForIn(n *ForInStatement) {
 	frame.continueTargets = append(frame.continueTargets, loopStart)
 	exhaustedJump := g.emitJump(OpForInNext)
 	// Assign the current key to the loop variable.
-	if id, ok := n.Left.(*Identifier); ok {
+	if len(n.Declarators) > 0 && n.IsOf {
+		// for-of with destructuring: iterate value is array element
+		if n.IsArrayDestruct {
+			// Array destructuring [a,b]: a = iterValue[0], b = iterValue[1]
+			for j, d := range n.Declarators {
+				g.emit(Instruction{Op: OpDup})
+				g.emit(Instruction{Op: OpLoadConst, Value: NumberValue(float64(j))})
+				g.emit(Instruction{Op: OpLoadIndex})
+				g.emit(Instruction{Op: OpStoreVar, Name: d.Name})
+				g.emit(Instruction{Op: OpPop})
+			}
+		} else {
+			// Object destructuring {a,b}: a = iterValue.a, b = iterValue.b
+			for _, d := range n.Declarators {
+				g.emit(Instruction{Op: OpDup})
+				g.emit(Instruction{Op: OpLoadProp, Name: d.Name})
+				g.emit(Instruction{Op: OpStoreVar, Name: d.Name})
+				g.emit(Instruction{Op: OpPop})
+			}
+		}
+		g.emit(Instruction{Op: OpPop}) // consume original iteration value
+	} else if id, ok := n.Left.(*Identifier); ok {
 		g.emit(Instruction{Op: OpStoreVar, Name: id.Name})
 	} else if me, ok := n.Left.(*MemberExpression); ok {
 		// member assignment handled via StoreProp/StoreIndex
@@ -720,7 +756,7 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 		g.emit(Instruction{Op: OpNewClosure, Body: defBody, Name: n.Name})
 	} else {
 		// Use explicit constructor or empty constructor for non-extending classes
-		body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil, ctorRest)
+		body := compileFunction(n.Name, ctorParams, nil, ctorBody, false, false, false, nil, ctorRest)
 		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	}
 
@@ -746,7 +782,7 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 				g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
 				g.emit(Instruction{Op: OpLoadProp, Name: "prototype"})
 			}
-			mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil, "")
+			mbody := compileFunction(m.Name, m.Params, m.Defaults, m.Body, false, false, false, nil, "")
 			g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 			if m.Kind == "get" || m.Kind == "set" {
 				isSetter := 0
@@ -764,7 +800,8 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	for _, m := range n.Body.Methods {
 		if m.Name == "constructor" || !m.Static { continue }
 		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
-		mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil, "")
+		mbody := compileFunction(m.Name, m.Params, m.Defaults, m.Body, false, false, false, nil, "")
+		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 		g.emit(Instruction{Op: OpStoreVar, Name: "__static_" + m.Name})
 		g.emit(Instruction{Op: OpPop}) // pop class
@@ -853,10 +890,10 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		}
 		g.emit(Instruction{Op: OpLoadObject, IntArg: len(n.Properties)})
 	case *FunctionExpression:
-		body := compileFunction(n.Name, n.Params, n.Body, false, n.IsAsync, n.IsGenerator, nil)
+		body := compileFunction(n.Name, n.Params, n.Defaults, n.Body, false, n.IsAsync, n.IsGenerator, nil)
 		g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	case *ArrowFunction:
-		body := compileFunction("", n.Params, stmtsFromNode(n.Body), true, n.IsAsync, n.IsGenerator, n.Destructuring)
+		body := compileFunction("", n.Params, n.Defaults, stmtsFromNode(n.Body), true, n.IsAsync, n.IsGenerator, n.Destructuring)
 		if n.IsExpr {
 			// Wrap a concise-body expression so the function returns it.
 			body = compileArrowExpr(n.Params, n.Body.(Expr), n.IsAsync, n.IsGenerator, n.Destructuring)

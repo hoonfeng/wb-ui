@@ -50,6 +50,7 @@ func (p *Program) nodePos() (int, int) { return p.Line, p.Col }
 type FunctionDeclaration struct {
 	Name        string
 	Params      []string
+	Defaults    []Expr // default values for params (nil if no default)
 	Body        []Stmt
 	IsAsync     bool
 	IsGenerator bool
@@ -62,9 +63,10 @@ func (n *FunctionDeclaration) stmtNode()           {}
 
 // VariableDeclaration is 'let/const/var name = init' (may declare multiple).
 type VariableDeclaration struct {
-	Kind        string // "let" | "const" | "var"
-	Declarators []VariableDeclarator
-	Line, Col   int
+	Kind            string // "let" | "const" | "var"
+	Declarators     []VariableDeclarator
+	IsArrayDestruct bool   // true for [a,b] destructuring, false for {a,b}
+	Line, Col       int
 }
 
 // VariableDeclarator binds a name to an optional initializer.
@@ -119,11 +121,13 @@ func (n *ForStatement) stmtNode()           {}
 
 // ForInStatement is 'for (lhs in/of rhs) body'.
 type ForInStatement struct {
-	Left      Expr // the iteration target (Identifier or MemberExpression)
-	IsOf      bool // true for 'of', false for 'in'
-	Right     Expr
-	Body      Stmt
-	Line, Col int
+	Left            Expr // the iteration target (Identifier or MemberExpression)
+	IsOf            bool // true for 'of', false for 'in'
+	Right           Expr
+	Body            Stmt
+	Declarators     []VariableDeclarator // for-of destructuring: extra variables beyond Left
+	IsArrayDestruct bool                // true for [a,b], false for {a,b}
+	Line, Col       int
 }
 
 func (n *ForInStatement) nodePos() (int, int) { return n.Line, n.Col }
@@ -422,6 +426,7 @@ type DestructInfo struct {
 // BlockStatement (full body).
 type ArrowFunction struct {
 	Params         []string
+	Defaults       []Expr // default values for params (nil if no default)
 	Destructuring  []DestructInfo
 	Body           Node // Expr or Stmt
 	IsExpr         bool
@@ -465,6 +470,7 @@ func (n *ThisExpression) exprNode()           {}
 type FunctionExpression struct {
 	Name        string // may be empty
 	Params      []string
+	Defaults    []Expr // default values for params (nil if no default)
 	Body        []Stmt
 	IsAsync     bool
 	IsGenerator bool
@@ -486,6 +492,7 @@ type ClassBody struct {
 type ClassMethod struct {
 	Name      string
 	Params    []string
+	Defaults  []Expr // default values for params (nil if no default)
 	Body      []Stmt
 	Kind      string // "method" | "constructor" | "get" | "set"
 	Static    bool
@@ -912,15 +919,16 @@ func (p *Parser) parseFunctionDeclaration(isAsync bool) *FunctionDeclaration {
 	}
 	savedGen := p.inGenerator
 	p.inGenerator = isGenerator
-	params, body, restParam := p.parseFunctionBody()
+	params, defaults, body, restParam := p.parseFunctionBody()
 	p.inGenerator = savedGen
-	return &FunctionDeclaration{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
+	return &FunctionDeclaration{Name: name, Params: params, Defaults: defaults, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
 }
 
 // parseFunctionBody parses '(params) { body }' and returns both.
-func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
+func (p *Parser) parseFunctionBody() ([]string, []Expr, []Stmt, string) {
 	p.expect(TokenOpenParen)
 	params := []string{}
+	defaults := []Expr{}
 	restParam := ""
 	for p.current.Kind != TokenCloseParen && p.err == nil {
 		// rest param: '...name'
@@ -929,6 +937,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 			if p.current.Kind == TokenIdentifier {
 				restParam = p.current.Lexeme
 				params = append(params, p.current.Lexeme)
+				defaults = append(defaults, nil)
 				p.advance()
 			} else {
 				p.errorf("expected parameter name after ...")
@@ -948,6 +957,9 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 			}
 			// Flatten destructured names into params
 			params = append(params, names...)
+			for range names {
+				defaults = append(defaults, nil)
+			}
 			// Default value for the destructured param: [a, b] = default
 			if p.current.Kind == TokenAssign {
 				p.advance()
@@ -964,6 +976,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 			}
 			for _, f := range fields {
 				params = append(params, f.Target)
+				defaults = append(defaults, nil)
 			}
 			// Default value for the destructured param: {a, b} = default
 			if p.current.Kind == TokenAssign {
@@ -977,11 +990,12 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 			break
 		}
 		params = append(params, p.current.Lexeme)
+		defaults = append(defaults, nil)
 		p.advance()
 		// default values: 'param = expr'
 		if p.current.Kind == TokenAssign {
 			p.advance()
-			p.parseAssignment() // parsed but defaults are applied at call time by interp
+			defaults[len(defaults)-1] = p.parseAssignment()
 		}
 	nextFuncParam:
 		if p.current.Kind != TokenComma {
@@ -999,7 +1013,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 		body = block.Body
 	}
 	p.allowIn = savedIn
-	return params, body, restParam
+	return params, defaults, body, restParam
 }
 
 // parseFunctionName parses an optional function name (identifier).
@@ -1115,7 +1129,14 @@ func (p *Parser) parseForStatement() Stmt {
 			// 'for (let k in obj)' — the declarator name is the iteration target.
 			left = &Identifier{Name: vd.Declarators[0].Name, Line: vd.Line, Col: vd.Col}
 		}
-		return &ForInStatement{Left: left, IsOf: isOf, Right: right, Body: body, Line: tok.Line, Col: tok.Col}
+		var decls []VariableDeclarator
+		isArrayDestruct := false
+		if vd, ok := init.(*VariableDeclaration); ok && isOf && len(vd.Declarators) > 1 {
+			// for-of with destructuring: save all names for bytecode generation
+			decls = vd.Declarators
+			isArrayDestruct = vd.IsArrayDestruct
+		}
+		return &ForInStatement{Left: left, IsOf: isOf, Right: right, Body: body, Declarators: decls, IsArrayDestruct: isArrayDestruct, Line: tok.Line, Col: tok.Col}
 	}
 	p.expect(TokenSemicolon)
 	var test Expr
@@ -1142,6 +1163,7 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 	vd := &VariableDeclaration{Kind: kind, Line: kindTok.Line, Col: kindTok.Col}
 	for {
 		if p.current.Kind == TokenOpenBrace {
+			vd.IsArrayDestruct = false
 			fields, ok := p.parseObjectDestructPattern()
 			if !ok {
 				p.errorf("bad object destructuring pattern")
@@ -1174,6 +1196,7 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 				break
 			}
 		} else if p.current.Kind == TokenOpenBracket {
+			vd.IsArrayDestruct = true
 			// Array destructuring: const [a, b] = arr or for (const [a,b] of ...)
 			names, indices, restIdx := p.parseArrayDestructWithDefaults()
 			_ = indices
@@ -1446,11 +1469,11 @@ func (p *Parser) parseClassBody() *ClassBody {
 		}
 		savedGen := p.inGenerator
 		p.inGenerator = _gen
-		params, body, _ := p.parseFunctionBody()
+		params, defaults, body, _ := p.parseFunctionBody()
 		p.inGenerator = savedGen
 		_ = _async // async flag tracked for future use
 		cb.Methods = append(cb.Methods, ClassMethod{
-			Name: name, Params: params, Body: body, Kind: kind, Static: isStatic,
+			Name: name, Params: params, Defaults: defaults, Body: body, Kind: kind, Static: isStatic,
 			Line: p.current.Line, Col: p.current.Col,
 		})
 	}
@@ -2267,9 +2290,9 @@ func (p *Parser) parsePropertyKeyed(prop Property) Property {
 // parsePropertyTail handles ': value', '()' method, or shorthand.
 func (p *Parser) parsePropertyTail(prop Property) Property {
 	if p.current.Kind == TokenOpenParen {
-		params, body, _ := p.parseFunctionBody()
+		params, defaults, body, _ := p.parseFunctionBody()
 		prop.Kind = "method"
-		prop.Value = &FunctionExpression{Params: params, Body: body, Line: prop.Line, Col: prop.Col}
+		prop.Value = &FunctionExpression{Params: params, Defaults: defaults, Body: body, Line: prop.Line, Col: prop.Col}
 		return prop
 	}
 	if p.current.Kind == TokenColon {
@@ -2299,8 +2322,8 @@ func (p *Parser) parseFunctionExpression(isAsync bool) *FunctionExpression {
 		name = p.current.Lexeme
 		p.advance()
 	}
-	params, body, restParam := p.parseFunctionBody()
-	return &FunctionExpression{Name: name, Params: params, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
+	params, defaults, body, restParam := p.parseFunctionBody()
+	return &FunctionExpression{Name: name, Params: params, Defaults: defaults, Body: body, IsAsync: isAsync, IsGenerator: isGenerator, RestParam: restParam, Line: tok.Line, Col: tok.Col}
 }
 
 // parseClassExpression parses 'class [Name] [extends Base] { body }' as a value.

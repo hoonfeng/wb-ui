@@ -266,13 +266,24 @@ console.log("Hello".startsWith("Hel")?"yes":"no");
 console.log("ab".repeat(3));
 `, "ababab"},
 
-	// ======= 12. 默认参数（标记：JSC 暂不支持，未来完善） =======
-	// Note: default params like function f(x=5) are not yet supported; the parser
-	// parses the default value but discards it. The function with default param
-	// may not be callable due to how the '=' token interacts with the parser.
-	{"default_params_skip", `
-console.log("default_params_skipped");
-`, "default_params_skipped"},
+	// ======= 12. 默认参数 =======
+	{"default_params_basic", `
+function f(x = 5) { return x; }
+console.log(f());
+console.log(f(10));
+`, "5" + NL + "10"},
+	
+	{"default_params_multi", `
+function add(a, b = 1) { return a + b; }
+console.log(add(3));
+console.log(add(3, 4));
+`, "4" + NL + "7"},
+
+	{"default_params_expression", `
+function greet(name, greeting = "Hello " + name) { return greeting; }
+console.log(greet("World"));
+console.log(greet("World", "Hi"));
+`, "Hello World" + NL + "Hi"},
 
 		// ======= 13. 空值合并 =======
 		{"nullish_coalescing", `

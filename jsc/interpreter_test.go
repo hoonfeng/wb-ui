@@ -1120,7 +1120,69 @@ func TestInterpreterReflect(t *testing.T) {
 	}
 }
 
-// TestInterpreterProxyDefault verifies that when a trap is not defined,
+// TestInterpreterForOfArrayDestruct verifies for-of with array destructuring (const [a,b] of ...).
+func TestInterpreterForOfArrayDestruct(t *testing.T) {
+	vm := NewInterpreter()
+	log := &BufferLogger{}
+	vm.SetupGlobal(log)
+	_, err := vm.Run(`
+let result = "";
+for (const [k, v] of [["a",1],["b",2],["c",3]]) {
+  result += k + "=" + v + " ";
+}
+console.log(result.trim());
+`)
+	if err != nil {
+		t.Fatalf("for-of array destruct error: %v", err)
+	}
+	out := strings.TrimSpace(log.String())
+	if out != "a=1 b=2 c=3" {
+		t.Fatalf("for-of array destruct: got %q, want %q", out, "a=1 b=2 c=3")
+	}
+}
+
+// TestInterpreterForOfObjectEntries verifies for-of with Object.entries (real-world Vue 3 pattern).
+func TestInterpreterForOfObjectEntries(t *testing.T) {
+	vm := NewInterpreter()
+	log := &BufferLogger{}
+	vm.SetupGlobal(log)
+	_, err := vm.Run(`
+let props = [["render", function(){}], ["setup", function(){}]];
+let result = "";
+for (const [key, val] of props) {
+  result += key + " ";
+}
+console.log(result.trim());
+`)
+	if err != nil {
+		t.Fatalf("for-of Object.entries error: %v", err)
+	}
+	out := strings.TrimSpace(log.String())
+	if out != "render setup" {
+		t.Fatalf("for-of Object.entries: got %q, want %q", out, "render setup")
+	}
+}
+
+// TestInterpreterForOfObjectDestruct verifies for-of with object destructuring (const {a,b} of ...).
+func TestInterpreterForOfObjectDestruct(t *testing.T) {
+	vm := NewInterpreter()
+	log := &BufferLogger{}
+	vm.SetupGlobal(log)
+	_, err := vm.Run(`
+let result = "";
+for (const {name, age} of [{name:"Alice",age:30},{name:"Bob",age:25}]) {
+  result += name + age + " ";
+}
+console.log(result.trim());
+`)
+	if err != nil {
+		t.Fatalf("for-of object destruct error: %v", err)
+	}
+	out := strings.TrimSpace(log.String())
+	if out != "Alice30 Bob25" {
+		t.Fatalf("for-of object destruct: got %q, want %q", out, "Alice30 Bob25")
+	}
+}
 // the proxy forwards the operation to the target.
 func TestInterpreterProxyDefault(t *testing.T) {
 	out := runScript(t, `
