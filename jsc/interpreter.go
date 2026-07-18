@@ -1278,9 +1278,17 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 			fmt.Fprintf(os.Stderr, "[CALL_ERR]   obj.ClassName=%q IsArray=%v Internal=%v Properties=%d\n", obj.ClassName, obj.IsArray, obj.Internal != nil, len(obj.Properties))
 		}
 		// Go call stack
-		var stkbuf [1024]byte
+		var stkbuf [4096]byte
 		n := runtime.Stack(stkbuf[:], false)
-		fmt.Fprintf(os.Stderr, "[CALL_ERR_STACK]\n%s\n", stkbuf[:n])
+		s := string(stkbuf[:n])
+		// Find the runFunctionBody frame to extract body name and pc
+		lines := strings.Split(s, "\n")
+		for i, line := range lines {
+			if strings.Contains(line, "runFunctionBody") && i+1 < len(lines) {
+				fmt.Fprintf(os.Stderr, "[CALL_ERR_CTX] %s\n", strings.TrimSpace(lines[i+1]))
+			}
+		}
+		fmt.Fprintf(os.Stderr, "[CALL_ERR_STACK]\n%s\n", s)
 		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
 	}
 	fn := callee.fn
