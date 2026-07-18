@@ -13,8 +13,10 @@ func TestVue3MountTrace(t *testing.T) {
 	vm.SetupGlobal(logger)
 
 	// Polyfills (same as desktop)
+	// IMPORTANT: JSC's OpLoadVar silently returns undefined for undeclared variables
+	// (no ReferenceError). So window must be explicitly created first.
 	pf := []string{
-		`window.process={env:{NODE_ENV:"production"}}`,
+		`window={process:{env:{NODE_ENV:"production"}}}`,
 		`Object.getOwnPropertyNames=function(o){if(!o)return[];var k=[];for(var n in o)k.push(n);return k}`,
 		`Object.hasOwn=function(o,p){return Object.prototype.hasOwnProperty.call(o,p)}`,
 		`Object.fromEntries=function(e){var r={};for(var i=0;e&&i<e.length;i++)if(e[i])r[e[i][0]]=e[i][1];return r}`,
@@ -27,11 +29,11 @@ func TestVue3MountTrace(t *testing.T) {
 		`if(!Object.setPrototypeOf)Object.setPrototypeOf=function(o,p){o.__proto__=p;return o}`,
 		`if(!Object.preventExtensions)Object.preventExtensions=function(o){return o}`,
 		`if(!Object.seal)Object.seal=function(o){return o}`,
-		// DOM stub
+		// DOM stub: elements MUST have insertBefore (Vue's hostInsert calls it)
 		`document={}`,
 		`document.querySelector=function(s){var el={innerHTML:'',__vue_app__:null,_vnode:null,childNodes:[],appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},setAttribute:function(){},getAttribute:function(){return''},addEventListener:function(){},style:{},parentNode:null,tagName:'DIV'};return el}`,
 		`document.createElement=function(t){return{tagName:t.toUpperCase(),innerHTML:'',textContent:'',childNodes:[],setAttribute:function(){},getAttribute:function(){return''},appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},replaceChild:function(n,o){var i=this.childNodes.indexOf(o);if(i>-1)this.childNodes[i]=n},addEventListener:function(){},style:{},parentNode:null}}`,
-		`document.body={appendChild:function(c){}}`,
+		`document.body={appendChild:function(c){},insertBefore:function(c,r){this.childNodes.push(c)},childNodes:[]}`,
 		`document.createTextNode=function(t){return{nodeType:3,textContent:t,nodeValue:t}}`,
 		`document.createComment=function(t){return{nodeType:8,textContent:t,nodeValue:t}}`,
 	}
@@ -66,33 +68,20 @@ func TestVue3MountTrace(t *testing.T) {
 	_, err = vm.Run(string(data))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bundle error: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Bundle OK\n")
 	}
 
-	// Direct check: evaluate __S1__ in the SAME interpreter
-	if v, e := vm.Run("window.__S1__"); e == nil {
-		fmt.Fprintf(os.Stderr, "DIRECT_S1: %v (tag=%d)\n", v, v.tag)
-	} else {
-		fmt.Fprintf(os.Stderr, "DIRECT_S1 error: %v\n", e)
-	}
-	if v, e := vm.Run("window.__S7__"); e == nil {
-		fmt.Fprintf(os.Stderr, "DIRECT_S7: %v (tag=%d)\n", v, v.tag)
-	} else {
-		fmt.Fprintf(os.Stderr, "DIRECT_S7 error: %v\n", e)
-	}
-	
-	// Also test createApp directly with a simple component
-	vm.Run(`console.log('DIRECT_TEST: typeof createApp='+(typeof createApp))`)
-	vm.Run(`
-try {
-  var simpleComp = { template: '<div>hello</div>' };
-  var simpleApp = createApp(simpleComp);
-  console.log('SIMPLE_APP: created');
-  simpleApp.mount('#app');
-  console.log('SIMPLE_MOUNT: done');
-} catch(e) {
-  console.log('SIMPLE_ERR: ' + e);
-}`)
+	// Check interpreter state after bundle
+	vm.Run(`console.log('WIN: '+(typeof window))`)
+	vm.Run(`console.log('DOC: '+(typeof document))`)
+	vm.Run(`console.log('S1: '+(window.__S1__||'undef'))`)
+	vm.Run(`console.log('S7: '+(window.__S7__||'undef'))`)
+	vm.Run(`console.log('S9: '+(window.__S9__||'undef'))`)
+	vm.Run(`console.log('BEFORE: '+(window.__BEFORE_MOUNT__||'undef'))`)
 	
 	out := logger.String()
-	fmt.Fprintf(os.Stderr, "Results:\n%s\n", out)
+	if out != "" {
+		fmt.Fprintf(os.Stderr, "Console:\n%s\n", out)
+	}
 }
