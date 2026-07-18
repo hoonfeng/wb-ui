@@ -360,29 +360,10 @@ func (f *Frame) executeInlineScripts() {
 				if strings.TrimSpace(code) == "" {
 					continue
 				}
-				// Wrap IIFE in try-catch and inject markers to find execution stop point
-				marked := code
-				// Marker at the beginning of IIFE body
-				marked = strings.Replace(marked, `(function(){"use strict";`, `(function(){console.log("M_START");"use strict";`, 1)
-				// Marker after var declarations (before Ph function)
-				marked = strings.Replace(marked, `function Ph(t){`, `console.log("M_PH");function Ph(t){`, 1)
-				// Marker before const chain
-				marked = strings.Replace(marked, `const Gn={}`, `console.log("M_CONST");const Gn={}`, 1)
-				// Marker after let Ja (after const chain)
-				marked = strings.Replace(marked, `let Ja;`, `console.log("M_LET");let Ja;`, 1)
-				// Marker at class mne
-				marked = strings.Replace(marked, `class mne{`, `console.log("M_MNE");class mne{`, 1)
-				// Marker right after class mne (at let vne)
-				marked = strings.Replace(marked, `let vne=0,nk,ik;`, `console.log("M_POST_MNE");let vne=0,nk,ik;`, 1)
-				marked = strings.Replace(marked, `class yne{`, `console.log("M_YNE");class yne{`, 1)
-				// Marker at function bne (after classes)
-				marked = strings.Replace(marked, `function bne(`, `console.log("M_BNE");function bne(`, 1)
-				// Trace end of IIFE — log when the last statement finishes
-				marked = strings.Replace(marked, `})();`, `console.log("M_IIFE_END");})();`, 1)
-				marked = strings.Replace(marked, `})()` , `console.log("M_IIFE_END");})()`, 1)
-				// Marker at mount point
-				marked = strings.Replace(marked, `UV.mount("#app")`, `console.log("M_MOUNT");try{UV.mount("#app");console.log("M_MOUNT_OK")}catch(_m){console.log("M_MOUNT_ERR:"+_m)}`, 1)
-				wrapped := "try{\n" + marked + `}catch(e){console.log("VUE_ERR:"+e)}`
+				fmt.Fprintf(os.Stderr, "[SCRIPT] len=%d hasMount=%v\n", len(code), strings.Contains(code, `UV.mount("#app")`))
+				// Wrap in try-catch for error capture
+				wrapped := "try{\n" + code + `}catch(e){console.log("VUE_ERR:"+e)}`
+				_ = wrapped // will be used below
 				if err := f.ScriptEngine(wrapped); err != nil {
 					logError("external script execution failed: %v", err)
 				}
