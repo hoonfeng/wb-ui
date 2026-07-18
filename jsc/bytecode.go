@@ -643,10 +643,10 @@ func (g *BytecodeGenerator) emitTry(n *TryStatement) {
 	}
 }
 
-// emitClass compiles a class declaration. Creates a constructor function and
-// stores it as the class name. Prototype methods are attached to the constructor's
-// .prototype object so `new ClassName().method()` works.
 func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
+	// Safety check
+	if n == nil || n.Body == nil { return }
+	if n.Name == "" { return }
 	// Find constructor method.
 	var ctorParams []string
 	var ctorBody []Stmt

@@ -270,7 +270,7 @@ func NewInterpreter() *Interpreter {
 		objectProto:   objectProto,
 		functionProto: functionProto,
 		arrayProto:    arrayProto,
-		maxCallDepth:  1000,
+		maxCallDepth:  5000,
 		moduleRegistry: make(map[string]map[string]JSValue),
 	}
 }
@@ -548,6 +548,7 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 	}()
 	if in.depth > in.maxCallDepth {
 		in.depth--
+		fmt.Fprintf(os.Stderr, "[STACK_OVERFLOW] depth=%d max=%d\n", in.depth, in.maxCallDepth)
 		return Undefined(), &jsException{value: StringValue("RangeError: Maximum call stack size exceeded")}
 	}
 	defer func() { in.depth-- }()
