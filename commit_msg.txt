@@ -1,1 +1,0 @@
-Fix class getter breaking prototype chain (Vue3 mount)
