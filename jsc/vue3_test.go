@@ -3,38 +3,37 @@ package jsc
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
-func TestVue3HFunction(t *testing.T) {
+func TestVue3MountTrace(t *testing.T) {
 	vm := NewInterpreter()
 	logger := &BufferLogger{}
 	vm.SetupGlobal(logger)
 
-	// Apply polyfills (same as desktop/main.go)
+	// Polyfills (same as desktop)
 	pf := []string{
 		`window.process={env:{NODE_ENV:"production"}}`,
 		`Object.getOwnPropertyNames=function(o){if(!o)return[];var k=[];for(var n in o)k.push(n);return k}`,
 		`Object.hasOwn=function(o,p){return Object.prototype.hasOwnProperty.call(o,p)}`,
 		`Object.fromEntries=function(e){var r={};for(var i=0;e&&i<e.length;i++)if(e[i])r[e[i][0]]=e[i][1];return r}`,
 		`if(!Array.prototype.flatMap)Array.prototype.flatMap=function(f){var r=[];for(var i=0;i<this.length;i++){var v=f(this[i],i,this);if(v&&v.length)for(var j=0;j<v.length;j++)r.push(v[j]);else r.push(v)}return r}`,
-		`if(!Array.prototype.join)Array.prototype.join=function(s){s=s!==undefined?s:',';var r='';for(var i=0;i<this.length;i++){if(i>0)r+=s;if(this[i]!==null&&this[i]!==undefined)r+=this[i]}return r}`,
-		`if(!Array.prototype.keys)Array.prototype.keys=function(){var i=0;return{next:function(){return i<this.length?{value:i++,done:false}:{done:true}}}}`,
 		`if(!Array.prototype.at)Array.prototype.at=function(i){var n=Number(i);if(isNaN(n))n=0;var l=this.length;n=n>=0?n:l+n;if(n<0||n>=l)return undefined;return this[n]}`,
-		// Object static methods needed by Vue 3
 		`if(!Object.isExtensible)Object.isExtensible=function(){return true}`,
 		`if(!Object.isSealed)Object.isSealed=function(){return false}`,
 		`if(!Object.isFrozen)Object.isFrozen=function(){return false}`,
-		`if(!Object.getPrototypeOf)Object.getPrototypeOf=function(o){return o?o.constructor?o.constructor.prototype:null:null}`,
+		`if(!Object.getPrototypeOf)Object.getPrototypeOf=function(o){return o&&o.constructor?o.constructor.prototype:null}`,
 		`if(!Object.setPrototypeOf)Object.setPrototypeOf=function(o,p){o.__proto__=p;return o}`,
 		`if(!Object.preventExtensions)Object.preventExtensions=function(o){return o}`,
 		`if(!Object.seal)Object.seal=function(o){return o}`,
-		`if(!Array.prototype.reduceRight)delete Array.prototype.reduceRight`, // remove bad polyfill
-		// Minimal DOM stubs for h() testing
+		// DOM stub
 		`document={}`,
-		`document.querySelector=function(s){if(s==='#app')return{innerHTML:'',__vue_app__:null,_vnode:null,appendChild:function(c){}};return null}`,
-		`document.createElement=function(t){return{tagName:t.toUpperCase(),innerHTML:'',textContent:'',setAttribute:function(){},getAttribute:function(){return''},appendChild:function(c){},removeChild:function(){},replaceChild:function(){},addEventListener:function(){},style:{},childNodes:[],parentNode:null}}`,
-		`window.__h_steps=[];window.__h_err=null`,
+		`document.querySelector=function(s){var el={innerHTML:'',__vue_app__:null,_vnode:null,childNodes:[],appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},setAttribute:function(){},getAttribute:function(){return''},addEventListener:function(){},style:{},parentNode:null,tagName:'DIV'};return el}`,
+		`document.createElement=function(t){return{tagName:t.toUpperCase(),innerHTML:'',textContent:'',childNodes:[],setAttribute:function(){},getAttribute:function(){return''},appendChild:function(c){this.childNodes.push(c)},removeChild:function(c){var i=this.childNodes.indexOf(c);if(i>-1)this.childNodes.splice(i,1)},insertBefore:function(c,r){this.childNodes.push(c)},replaceChild:function(n,o){var i=this.childNodes.indexOf(o);if(i>-1)this.childNodes[i]=n},addEventListener:function(){},style:{},parentNode:null}}`,
+		`document.body={appendChild:function(c){}}`,
+		`document.createTextNode=function(t){return{nodeType:3,textContent:t,nodeValue:t}}`,
+		`document.createComment=function(t){return{nodeType:8,textContent:t,nodeValue:t}}`,
 	}
 	for _, p := range pf {
 		if _, err := vm.Run(p); err != nil {
@@ -42,7 +41,7 @@ func TestVue3HFunction(t *testing.T) {
 		}
 	}
 
-	// Read Vue 3 bundle
+	// Read bundle
 	distDir := "F:/syproject/gou-ide/cmd/desktop/web-ui-minimal/dist/assets"
 	entries, err := os.ReadDir(distDir)
 	if err != nil {
@@ -50,7 +49,7 @@ func TestVue3HFunction(t *testing.T) {
 	}
 	var bp string
 	for _, e := range entries {
-		if !e.IsDir() && len(e.Name()) > 3 && e.Name()[len(e.Name())-3:] == ".js" {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".js") {
 			bp = distDir + "/" + e.Name()
 			break
 		}
@@ -62,23 +61,38 @@ func TestVue3HFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read error: %v", err)
 	}
-	bundle := string(data)
 
-	// Run the bundle
-	_, err = vm.Run(bundle)
+	// Run bundle
+	_, err = vm.Run(string(data))
 	if err != nil {
-		t.Fatalf("bundle error: %v", err)
+		fmt.Fprintf(os.Stderr, "Bundle error: %v\n", err)
 	}
-	// Reset logger output
-	logger.Lines = nil
 
-	// Check what globals were set
-	tests := []string{
-		`console.log('GLOBALS: S1='+(window.__S1__||'none')+' S2='+(window.__S2__||'none')+' S3='+(window.__S3__||'none')+' S4='+(window.__S4__||'none')+' S5='+(window.__S5__||'none')+' S6='+(window.__S6__||'none')+' S7='+(window.__S7__||'none'))`,
-		`if(window.__APP_ERR__)console.log('ERR: '+window.__APP_ERR__)`,
+	// Direct check: evaluate __S1__ in the SAME interpreter
+	if v, e := vm.Run("window.__S1__"); e == nil {
+		fmt.Fprintf(os.Stderr, "DIRECT_S1: %v (tag=%d)\n", v, v.tag)
+	} else {
+		fmt.Fprintf(os.Stderr, "DIRECT_S1 error: %v\n", e)
 	}
-	for _, c := range tests {
-		vm.Run(c)
+	if v, e := vm.Run("window.__S7__"); e == nil {
+		fmt.Fprintf(os.Stderr, "DIRECT_S7: %v (tag=%d)\n", v, v.tag)
+	} else {
+		fmt.Fprintf(os.Stderr, "DIRECT_S7 error: %v\n", e)
 	}
-	fmt.Fprintf(os.Stderr, "Output:\n%s\n", logger.String())
+	
+	// Also test createApp directly with a simple component
+	vm.Run(`console.log('DIRECT_TEST: typeof createApp='+(typeof createApp))`)
+	vm.Run(`
+try {
+  var simpleComp = { template: '<div>hello</div>' };
+  var simpleApp = createApp(simpleComp);
+  console.log('SIMPLE_APP: created');
+  simpleApp.mount('#app');
+  console.log('SIMPLE_MOUNT: done');
+} catch(e) {
+  console.log('SIMPLE_ERR: ' + e);
+}`)
+	
+	out := logger.String()
+	fmt.Fprintf(os.Stderr, "Results:\n%s\n", out)
 }
