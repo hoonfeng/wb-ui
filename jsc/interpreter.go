@@ -734,12 +734,10 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 		case OpNewClosure:
 			fn := NewScriptFunction(inst.Name, inst.Body, frameEnv, len(inst.Body.Params))
 			fn.properties.Prototype = in.functionProto
-			// Every function has a 'prototype' property (an object with a 'constructor').
-			if _, hasProto := fn.properties.Properties["prototype"]; !hasProto {
-				proto := NewObject(in.objectProto)
-				proto.Set("constructor", FunctionValue(fn))
-				fn.properties.Set("prototype", ObjectValue(proto))
-			}
+			// Every function always gets a proper 'prototype' object.
+			proto := NewObject(in.objectProto)
+			proto.Set("constructor", FunctionValue(fn))
+			fn.properties.Set("prototype", ObjectValue(proto))
 			push(FunctionValue(fn))
 		case OpReturn:
 			v := pop()
@@ -932,6 +930,24 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			// yield expr: yield the value (simplified: pass-through, no suspension).
 			// Full generator semantics require GeneratorObject / .next() support.
 			push(pop())
+		case OpSetAccessor:
+			fn := pop()
+			obj := pop()
+			if obj.IsObject() && fn.IsFunction() {
+				name := inst.Name
+				if inst.IntArg == 0 { // getter
+					gfn := fn
+					obj.AsObject().SetAccessor(name, func(_ *Interpreter, thisObj JSValue) JSValue {
+						r, _ := in.Call(gfn, thisObj)
+						return r
+					}, nil)
+				} else { // setter
+					sfn := fn
+					obj.AsObject().SetAccessor(name, nil, func(_ *Interpreter, thisObj JSValue, v JSValue) {
+						in.Call(sfn, thisObj, v)
+					})
+				}
+			}
 		default:
 			return Undefined(), &jsException{value: StringValue(fmt.Sprintf("unknown opcode %d", inst.Op))}
 		}
@@ -1144,12 +1160,13 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 	if !callee.IsFunction() {
 		tag := "unknown"
 		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "object(" + callee.AsObject().ClassName + ")" } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "boolean" }
-		// Try to get more context from the global object
 		detail := ""
 		if callee.IsObject() && callee.AsObject() != nil {
 			detail = " class=" + callee.AsObject().ClassName
 		}
-		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + detail + ")")}
+		// Print more debug info to understand the call context
+		_ = detail
+		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
 	}
 	fn := callee.fn
 	if fn.Native != nil {

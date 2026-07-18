@@ -85,8 +85,18 @@ func (in *Interpreter) SymbolConstructor() *JSFunction {
 		return Undefined()
 	}, 1)))
 
-	// Symbol.iterator - well-known symbol stored as a Symbol value on the constructor.
+	// Well-known symbols
 	symCtor.properties.Set("iterator", SymbolValue("Symbol.iterator"))
+	symCtor.properties.Set("toStringTag", SymbolValue("Symbol.toStringTag"))
+	symCtor.properties.Set("hasInstance", SymbolValue("Symbol.hasInstance"))
+	symCtor.properties.Set("species", SymbolValue("Symbol.species"))
+	symCtor.properties.Set("toPrimitive", SymbolValue("Symbol.toPrimitive"))
+	symCtor.properties.Set("asyncIterator", SymbolValue("Symbol.asyncIterator"))
+	symCtor.properties.Set("match", SymbolValue("Symbol.match"))
+	symCtor.properties.Set("replace", SymbolValue("Symbol.replace"))
+	symCtor.properties.Set("search", SymbolValue("Symbol.search"))
+	symCtor.properties.Set("split", SymbolValue("Symbol.split"))
+	symCtor.properties.Set("unscopables", SymbolValue("Symbol.unscopables"))
 
 	return symCtor
 }

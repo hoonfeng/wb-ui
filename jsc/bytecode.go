@@ -113,6 +113,10 @@ const (
 	OpAwait
 	// OpYield yields a value from a generator (simplified: acts as return).
 	OpYield
+	// OpSetAccessor sets a getter/setter accessor on an object. Pops fn and obj,
+	// sets obj[Name] as an accessor with the given function as getter (IntArg=0)
+	// or setter (IntArg=1).
+	OpSetAccessor
 )
 
 // Instruction is a single bytecode instruction. It mirrors the packed Instruction
@@ -640,8 +644,8 @@ func (g *BytecodeGenerator) emitTry(n *TryStatement) {
 }
 
 // emitClass compiles a class declaration. Creates a constructor function and
-// stores it as the class name. Prototype methods are compiled but not yet attached
-// (simplified: just discard them). The key is that `new ClassName()` works.
+// stores it as the class name. Prototype methods are attached to the constructor's
+// .prototype object so `new ClassName().method()` works.
 func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	// Find constructor method.
 	var ctorParams []string
@@ -659,12 +663,25 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 	g.emit(Instruction{Op: OpDeclareVar, Name: n.Name})
 	g.emit(Instruction{Op: OpStoreVar, Name: n.Name})
 	g.emit(Instruction{Op: OpPop})
-	// Prototype methods: compile but discard (simplified).
-	for _, m := range n.Body.Methods {
-		if m.Name == "constructor" { continue }
-		mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil)
-		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
-		g.emit(Instruction{Op: OpPop})
+	// Attach prototype methods to Constructor.prototype.
+	if len(n.Body.Methods) > 1 || (len(n.Body.Methods) == 1 && n.Body.Methods[0].Name != "constructor") {
+		// Load ClassName.prototype
+		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
+		g.emit(Instruction{Op: OpLoadProp, Name: "prototype"})
+		for _, m := range n.Body.Methods {
+			if m.Name == "constructor" { continue }
+			mbody := compileFunction(m.Name, m.Params, m.Body, false, false, false, nil)
+			g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
+			if m.Kind == "get" || m.Kind == "set" {
+				isSetter := 0
+				if m.Kind == "set" { isSetter = 1 }
+				g.emit(Instruction{Op: OpSetAccessor, Name: m.Name, IntArg: isSetter})
+			} else {
+				g.emit(Instruction{Op: OpStoreProp, Name: m.Name})
+				g.emit(Instruction{Op: OpPop})
+			}
+		}
+		g.emit(Instruction{Op: OpPop}) // pop prototype reference
 	}
 }
 
