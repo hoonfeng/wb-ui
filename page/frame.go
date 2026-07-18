@@ -377,6 +377,9 @@ func (f *Frame) executeInlineScripts() {
 				marked = strings.Replace(marked, `class yne{`, `console.log("M_YNE");class yne{`, 1)
 				// Marker at function bne (after classes)
 				marked = strings.Replace(marked, `function bne(`, `console.log("M_BNE");function bne(`, 1)
+				// Trace end of IIFE — log when the last statement finishes
+				marked = strings.Replace(marked, `})();`, `console.log("M_IIFE_END");})();`, 1)
+				marked = strings.Replace(marked, `})()` , `console.log("M_IIFE_END");})()`, 1)
 				// Marker at mount point
 				marked = strings.Replace(marked, `UV.mount("#app")`, `console.log("M_MOUNT");try{UV.mount("#app");console.log("M_MOUNT_OK")}catch(_m){console.log("M_MOUNT_ERR:"+_m)}`, 1)
 				wrapped := "try{\n" + marked + `}catch(e){console.log("VUE_ERR:"+e)}`
