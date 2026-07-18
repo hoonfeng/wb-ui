@@ -715,11 +715,19 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			}
 			callee := pop()
 			if !callee.IsFunction() {
-				fmt.Fprintf(os.Stderr, "[MISSING] fn=%q pc=%d argc=%d args=%d code=%d\n", body.Name, pc, argc, len(args), len(body.Instructions))
-				// Print the instruction details and surrounding instructions
-				for j := 0; j < len(body.Instructions) && j < 6; j++ {
-					inst := body.Instructions[j]
-					fmt.Fprintf(os.Stderr, "  [%d] op=%d name=%q int=%d\n", j, inst.Op, inst.Name, inst.IntArg)
+				tag := "?"
+				if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "obj:" + callee.AsObject().ClassName } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "bool" }
+				fmt.Fprintf(os.Stderr, "[MISSING] fn=%q pc=%d callee=%s argc=%d args=%d code=%d depth=%d\n", body.Name, pc, tag, argc, len(args), len(body.Instructions), in.depth)
+				// Print surrounding instructions (±5 from pc)
+				start := pc - 5
+				if start < 0 { start = 0 }
+				end := pc + 5
+				if end > len(body.Instructions) { end = len(body.Instructions) }
+				for j := start; j < end; j++ {
+					mark := " "
+					if j == pc { mark = ">" }
+					inst2 := body.Instructions[j]
+					fmt.Fprintf(os.Stderr, "  %s [%d] op=%d name=%q int=%d\n", mark, j, inst2.Op, inst2.Name, inst2.IntArg)
 				}
 			}
 			res, exc := in.callValue(callee, Undefined(), args)
@@ -738,6 +746,26 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			}
 			fn := pop()
 			thisVal := pop()
+			// Diagnose non-function method calls with full context
+			if !fn.IsFunction() {
+				tag := "?"
+				if fn.IsUndefined() { tag = "undefined" } else if fn.IsNull() { tag = "null" } else if fn.IsObject() { tag = "obj:" + fn.AsObject().ClassName } else if fn.IsString() { tag = "string" } else if fn.IsNumber() { tag = "number" } else if fn.IsBoolean() { tag = "bool" }
+				fmt.Fprintf(os.Stderr, "[METH_CALL_ERR] body=%q pc=%d callee=%s args=%d depth=%d\n", body.Name, pc, tag, argc, in.depth)
+				fmt.Fprintf(os.Stderr, "[METH_CALL_ERR]   this_tag=%d", thisVal.tag)
+				if thisVal.IsObject() { fmt.Fprintf(os.Stderr, " class=%q", thisVal.AsObject().ClassName) }
+				fmt.Fprintf(os.Stderr, "\n")
+				// Print surrounding instructions (before and after current pc)
+				start := pc - 5
+				if start < 0 { start = 0 }
+				end := pc + 5
+				if end > len(body.Instructions) { end = len(body.Instructions) }
+				for j := start; j < end; j++ {
+					mark := " "
+					if j == pc { mark = ">" }
+					inst2 := body.Instructions[j]
+					fmt.Fprintf(os.Stderr, "[METH_CTX] %s [%d] op=%d name=%q int=%d\n", mark, j, inst2.Op, inst2.Name, inst2.IntArg)
+				}
+			}
 			res, exc := in.callValue(fn, thisVal, args)
 			if exc != nil {
 				if e := handleThrow(exc.value); e != nil {
