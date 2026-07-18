@@ -815,7 +815,19 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 				p.advance()
 				rhs := p.parseAssignment()
 				for _, f := range fields {
-					init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
+					init := Expr(&MemberExpression{Object: rhs, Name: f.Key, Computed: false})
+					// Support {key = default}: use default value when property is undefined
+					if f.Default != nil {
+						init = &ConditionalExpression{
+							Test: &BinaryExpression{
+								Op:    TokenStrictNotEqual,
+								Left:  &MemberExpression{Object: rhs, Name: f.Key, Computed: false},
+								Right: &Identifier{Name: "undefined"},
+							},
+							Consequent: &MemberExpression{Object: rhs, Name: f.Key, Computed: false},
+							Alternate:  f.Default,
+						}
+					}
 					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
 				}
 			} else {
@@ -825,16 +837,19 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 			}
 		} else if p.current.Kind == TokenOpenBracket {
 			// Array destructuring: const [a, b] = arr
-			names, indices, defaults := p.parseArrayDestructWithDefaults()
-			_ = defaults
+			names, indices, restIdx := p.parseArrayDestructWithDefaults()
 			_ = indices
 			if p.current.Kind == TokenAssign {
 				p.advance()
 				rhs := p.parseAssignment()
 				for j, nm := range names {
 					var init Expr
-					if defaults != nil && j < len(defaults) && defaults[j] != nil {
-						init = defaults[j].(Expr)
+					if j == restIdx {
+						// Rest element: [first, ...rest] — rhs.slice(indices[j])
+						init = &CallExpression{
+							Callee: &MemberExpression{Object: rhs, Name: "slice", Computed: false},
+						Arguments: []Expr{&Literal{Value: NumberValue(float64(j))}},
+						}
 					} else {
 						init = &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
 					}
@@ -871,9 +886,9 @@ func (p *Parser) parseVariableDeclaration() *VariableDeclaration {
 }
 
 // parseArrayDestructWithDefaults parses [a, b = default] and returns names and optional defaults.
-func (p *Parser) parseArrayDestructWithDefaults() ([]string, []int, []any) {
-	names, indices, _ := p.parseArrayDestructPattern()
-	return names, indices, nil
+func (p *Parser) parseArrayDestructWithDefaults() ([]string, []int, int) {
+	names, indices, restIdx, _ := p.parseArrayDestructPattern()
+	return names, indices, restIdx
 }
 
 // parseDestructInit parses an optional "= default" after a destructuring pattern.
@@ -926,7 +941,7 @@ func (p *Parser) parseFunctionBody() ([]string, []Stmt, string) {
 		}
 		// Array destructuring param: [a, b]
 		if p.current.Kind == TokenOpenBracket {
-			names, _, ok := p.parseArrayDestructPattern()
+			names, _, _, ok := p.parseArrayDestructPattern()
 			if !ok {
 				p.errorf("bad array destructuring in parameter")
 				break
@@ -1136,7 +1151,19 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 				p.advance()
 				rhs := p.parseAssignment()
 				for _, f := range fields {
-					init := &MemberExpression{Object: rhs, Name: f.Key, Computed: false}
+					init := Expr(&MemberExpression{Object: rhs, Name: f.Key, Computed: false})
+					// Support {key = default}: use default value when property is undefined
+					if f.Default != nil {
+						init = &ConditionalExpression{
+							Test: &BinaryExpression{
+								Op:    TokenStrictNotEqual,
+								Left:  &MemberExpression{Object: rhs, Name: f.Key, Computed: false},
+								Right: &Identifier{Name: "undefined"},
+							},
+							Consequent: &MemberExpression{Object: rhs, Name: f.Key, Computed: false},
+							Alternate:  f.Default,
+						}
+					}
 					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: f.Target, Init: init})
 				}
 			} else {
@@ -1148,12 +1175,21 @@ func (p *Parser) parseVariableDeclarationNoSemicolon() *VariableDeclaration {
 			}
 		} else if p.current.Kind == TokenOpenBracket {
 			// Array destructuring: const [a, b] = arr or for (const [a,b] of ...)
-			names, _, _ := p.parseArrayDestructWithDefaults()
+			names, indices, restIdx := p.parseArrayDestructWithDefaults()
+			_ = indices
 			if p.current.Kind == TokenAssign {
 				p.advance()
 				rhs := p.parseAssignment()
 				for j, nm := range names {
-					init := &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+					var init Expr
+					if j == restIdx {
+						init = &CallExpression{
+							Callee: &MemberExpression{Object: rhs, Name: "slice", Computed: false},
+							Arguments: []Expr{&Literal{Value: NumberValue(float64(j))}},
+						}
+					} else {
+						init = &MemberExpression{Object: rhs, Property: &Literal{Value: NumberValue(float64(j))}, Computed: true}
+					}
 					vd.Declarators = append(vd.Declarators, VariableDeclarator{Name: nm, Init: init})
 				}
 			} else {
@@ -1552,7 +1588,7 @@ func (p *Parser) tryParseArrowParams() ([]string, []DestructInfo, bool) {
 		}
 		// Array destructuring: [a, b]
 		if p.current.Kind == TokenOpenBracket {
-			names, _, ok := p.parseArrayDestructPattern()
+			names, _, _, ok := p.parseArrayDestructPattern()
 			if !ok {
 				return nil, nil, false
 			}
@@ -1624,13 +1660,14 @@ func (p *Parser) tryParseArrowParams() ([]string, []DestructInfo, bool) {
 // parseArrayDestructPattern parses [a, b, ...c] and returns the identifier names
 // and their source indices. Holes (elisions) like [, a] are supported — a hole adds
 // no name but increments the source index.
-func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok bool) {
+func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, restIdx int, ok bool) {
 	p.advance() // '['
+	restIdx = -1
 	idx := 0
 	for {
 		if p.current.Kind == TokenCloseBracket {
 			p.advance()
-			return names, indices, true
+			return names, indices, restIdx, true
 		}
 		// Hole (elision): [, a, , b] — comma without preceding element
 		if p.current.Kind == TokenComma {
@@ -1641,17 +1678,18 @@ func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok 
 		if p.current.Kind == TokenSpread {
 			p.advance()
 			if p.current.Kind != TokenIdentifier {
-				return nil, nil, false
+				return nil, nil, -1, false
 			}
+			restIdx = len(names)
 			names = append(names, p.current.Lexeme)
 			indices = append(indices, idx)
 			idx++
 			p.advance()
 			if p.current.Kind != TokenCloseBracket {
-				return nil, nil, false
+				return nil, nil, -1, false
 			}
 			p.advance()
-			return names, indices, true
+			return names, indices, restIdx, true
 		}
 		if p.current.Kind == TokenIdentifier {
 			names = append(names, p.current.Lexeme)
@@ -1660,9 +1698,9 @@ func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok 
 			p.advance()
 		} else if p.current.Kind == TokenOpenBracket {
 			// nested array destructuring
-			nested, nestedIndices, ok := p.parseArrayDestructPattern()
+			nested, nestedIndices, _, ok := p.parseArrayDestructPattern()
 			if !ok {
-				return nil, nil, false
+				return nil, nil, -1, false
 			}
 			names = append(names, nested...)
 			indices = append(indices, nestedIndices...)
@@ -1670,7 +1708,7 @@ func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok 
 		} else if p.current.Kind == TokenOpenBrace {
 			nested, ok := p.parseObjectDestructPattern()
 			if !ok {
-				return nil, nil, false
+				return nil, nil, -1, false
 			}
 			for _, f := range nested {
 				names = append(names, f.Target)
@@ -1678,12 +1716,12 @@ func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok 
 			}
 			idx++
 		} else {
-			return nil, nil, false
+			return nil, nil, -1, false
 		}
 		if p.current.Kind == TokenAssign {
 			p.advance()
 			if p.parseAssignment() == nil {
-				return nil, nil, false
+				return nil, nil, -1, false
 			}
 		}
 		if p.current.Kind == TokenComma {
@@ -1693,16 +1731,17 @@ func (p *Parser) parseArrayDestructPattern() (names []string, indices []int, ok 
 		}
 		if p.current.Kind == TokenCloseBracket {
 			p.advance()
-			return names, indices, true
+			return names, indices, restIdx, true
 		}
-		return nil, nil, false
+		return nil, nil, -1, false
 	}
 }
 
 // DestructField is one field in an object destructuring pattern {key: target}.
 type DestructField struct {
-	Key    string // source property name
-	Target string // target variable name
+	Key     string // source property name
+	Target  string // target variable name
+	Default Expr   // optional default value (from = default pattern)
 }
 
 // parseObjectDestructPattern parses {a, b: c, ...d} and returns the field list.
@@ -1744,7 +1783,7 @@ func (p *Parser) parseObjectDestructPattern() ([]DestructField, bool) {
 				fields = append(fields, nested...)
 			} else if p.current.Kind == TokenOpenBracket {
 				// Nested array pattern: {key: [a, b]}
-				nested, _, ok := p.parseArrayDestructPattern()
+				nested, _, _, ok := p.parseArrayDestructPattern()
 				if !ok {
 					return nil, false
 				}
@@ -1761,10 +1800,15 @@ func (p *Parser) parseObjectDestructPattern() ([]DestructField, bool) {
 			// {key} — shorthand: bind to key
 			fields = append(fields, DestructField{Key: key, Target: key})
 		}
+		// Parse and preserve default value for {key = default} patterns
 		if p.current.Kind == TokenAssign {
 			p.advance()
-			if p.parseAssignment() == nil {
+			defaultVal := p.parseAssignment()
+			if defaultVal == nil {
 				return nil, false
+			}
+			if len(fields) > 0 {
+				fields[len(fields)-1].Default = defaultVal
 			}
 		}
 		if p.current.Kind == TokenComma {
