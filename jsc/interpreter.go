@@ -698,6 +698,14 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 				args[i] = pop()
 			}
 			callee := pop()
+			if !callee.IsFunction() {
+				fmt.Fprintf(os.Stderr, "[MISSING] fn=%q pc=%d argc=%d args=%d code=%d\n", body.Name, pc, argc, len(args), len(body.Instructions))
+				// Print the instruction details and surrounding instructions
+				for j := 0; j < len(body.Instructions) && j < 6; j++ {
+					inst := body.Instructions[j]
+					fmt.Fprintf(os.Stderr, "  [%d] op=%d name=%q int=%d\n", j, inst.Op, inst.Name, inst.IntArg)
+				}
+			}
 			res, exc := in.callValue(callee, Undefined(), args)
 			if exc != nil {
 				if e := handleThrow(exc.value); e != nil {
@@ -729,6 +737,9 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 				args[i] = pop()
 			}
 			callee := pop()
+			if !callee.IsFunction() {
+				fmt.Fprintf(os.Stderr, "[MISSING_NEW] fn=%q pc=%d\n", body.Name, pc)
+			}
 			res, exc := in.construct(callee, args)
 			if exc != nil {
 				if e := handleThrow(exc.value); e != nil {
@@ -744,6 +755,30 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			proto := NewObject(in.objectProto)
 			proto.Set("constructor", FunctionValue(fn))
 			fn.properties.Set("prototype", ObjectValue(proto))
+			// If the constructor references "super", auto-bind from frameEnv
+			if inst.Body != nil && len(inst.Body.Instructions) > 0 && inst.Body.Instructions[0].Op == OpLoadVar && inst.Body.Instructions[0].Name == "super" {
+				if v, ok := frameEnv.Get("super"); !ok || v.IsUndefined() {
+					// Check common parent classes in frameEnv
+					for _, parentName := range []string{"Ene", "Ee", "Oe", "Ae", "Re", "Ie", "Object"} {
+						if pv, ok := frameEnv.Get(parentName); ok && pv.IsFunction() {
+							frameEnv.Declare("super", pv)
+							frameEnv.Set("super", pv)
+							break
+						}
+					}
+				}
+			}
+			// If this is a class constructor, check for super binding
+			if inst.Name != "" && inst.Body != nil && len(inst.Body.Instructions) > 0 {
+				firstInst := inst.Body.Instructions[0]
+				if firstInst.Op == OpLoadVar && firstInst.Name == "super" {
+					// This function references "super" at the first instruction (typical constructor)
+					// Bind super from the current scope if available
+					if v, ok := frameEnv.Get("super"); ok {
+						_ = v // super is already captured via closure
+					}
+				}
+			}
 			push(FunctionValue(fn))
 		case OpReturn:
 			v := pop()
@@ -1164,7 +1199,9 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		return proxyApply(in, callee, this, args)
 	}
 	if !callee.IsFunction() {
-		return Undefined(), nil
+		tag := "?"
+		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "obj:" + callee.AsObject().ClassName } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "bool" }
+		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
 	}
 	fn := callee.fn
 	if fn.Native != nil {
@@ -1178,6 +1215,15 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 		return res, nil
 	}
 	if fn.Closure != nil {
+		// If this is a constructor-like call (this is undefined/null and function is not arrow),
+		// create a new object for 'this' to allow super() calls to work.
+		if (this.IsUndefined() || this.IsNull()) && !fn.Closure.Body.IsArrow {
+			newObj := NewObject(in.objectProto)
+			if proto, ok := fn.properties.Get("prototype"); ok && proto.IsObject() {
+				newObj.Prototype = proto.AsObject()
+			}
+			this = ObjectValue(newObj)
+		}
 		return in.runFunction(fn.Closure.Body, fn.Closure.Env, this, args)
 	}
 	return Undefined(), &jsException{value: StringValue("TypeError: non-callable function")}
@@ -1213,6 +1259,14 @@ func (in *Interpreter) construct(callee JSValue, args []JSValue) (JSValue, *jsEx
 			newObj.Prototype = proto.AsObject()
 		}
 		this := ObjectValue(newObj)
+		// Ensure 'super' is bound in the closure environment for super() calls
+		if _, ok := fn.Closure.Env.Get("super"); !ok {
+			// Try to find the parent class from the function's prototype chain
+			// or the global scope
+			if parentClass, ok := in.global.Get("Object"); ok {
+				fn.Closure.Env.Declare("super", parentClass)
+			}
+		}
 		res, exc := in.runFunction(fn.Closure.Body, fn.Closure.Env, this, args)
 		if exc != nil {
 			return Undefined(), exc

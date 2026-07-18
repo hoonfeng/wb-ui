@@ -360,8 +360,9 @@ func (f *Frame) executeInlineScripts() {
 				if strings.TrimSpace(code) == "" {
 					continue
 				}
-				// Wrap IIFE in try-catch to capture all errors
-				wrapped := "try{\n" + code + "\n}catch(e){try{console.log('VUE_ERR:'+(e&&e.message?e.message:e)+'|name='+(e&&e.name?e.name:'?'))}catch(e2){}}"
+				// Wrap IIFE in try-catch and inject mount marker
+				marked := strings.Replace(code, `UV.mount("#app")`, `console.log("BEFORE_MOUNT");try{UV.mount("#app");console.log("MOUNT_OK")}catch(e){console.log("MOUNT_ERR:"+e)}`, 1)
+				wrapped := "try{\n" + marked + "\n}catch(e){try{console.log('VUE_ERR:'+(e&&e.message?e.message:e)+'|name='+(e&&e.name?e.name:'?'))}catch(e2){}}"
 				if err := f.ScriptEngine(wrapped); err != nil {
 					logError("external script execution failed: %v", err)
 				}

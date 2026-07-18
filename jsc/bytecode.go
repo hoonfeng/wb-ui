@@ -657,18 +657,16 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 			break
 		}
 	}
-	body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil)
-	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
-	// If class extends a parent, bind parent as 'super' in current scope
 	if n.SuperClass != nil {
 		g.emitExpr(n.SuperClass)
 		g.emit(Instruction{Op: OpDeclareVar, Name: "super"})
 		g.emit(Instruction{Op: OpStoreVar, Name: "super"})
 		g.emit(Instruction{Op: OpPop})
 	}
+	// Compile constructor with the parent class available for super()
+	body := compileFunction(n.Name, ctorParams, ctorBody, false, false, false, nil)
+	g.emit(Instruction{Op: OpNewClosure, Body: body, Name: n.Name})
 	// Store the constructor as the class variable.
-	g.emit(Instruction{Op: OpDeclareVar, Name: n.Name})
-	g.emit(Instruction{Op: OpStoreVar, Name: n.Name})
 	g.emit(Instruction{Op: OpPop})
 	// Attach prototype methods to Constructor.prototype.
 	if len(n.Body.Methods) > 1 || (len(n.Body.Methods) == 1 && n.Body.Methods[0].Name != "constructor") {
@@ -1079,7 +1077,16 @@ func (g *BytecodeGenerator) emitCall(n *CallExpression) {
 		g.emit(Instruction{Op: OpCallMethod, IntArg: len(n.Arguments), Name: me.Name})
 		return
 	}
-	// Regular call.
+	// Regular call. Check for super() which needs OpNew semantics
+	if id, ok := n.Callee.(*Identifier); ok && id.Name == "super" {
+		// super() in a constructor: load parent from "super" var and use OpNew
+		g.emit(Instruction{Op: OpLoadVar, Name: "super"})
+		for _, a := range n.Arguments {
+			g.emitExpr(a)
+		}
+		g.emit(Instruction{Op: OpNew, IntArg: len(n.Arguments)})
+		return
+	}
 	g.emitExpr(n.Callee)
 	for _, a := range n.Arguments {
 		g.emitExpr(a)
