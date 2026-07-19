@@ -5,7 +5,12 @@
 
 package runtime
 
-import "unsafe"
+
+
+import (
+	"fmt"
+	"unsafe"
+)
 
 // JSObject corresponds to JSC::JSObject. It stores named properties in a map
 // and has a prototype chain for inheritance.
@@ -13,10 +18,12 @@ type JSObject struct {
 	JSCell
 	properties map[string]JSValue
 }
+
 // StructureFlags for JSObject.
 const JSObjectStructureFlags uint32 = JSCellStructureFlags | OverridesGetOwnPropertySlot
 
-// NewJSObject creates a new JSObject with the given Structure.
+// JSNonFinalObjectStructureFlags is inherited from JSObject.
+const JSNonFinalObjectStructureFlags uint32 = JSObjectStructureFlags
 func NewJSObject(vm *VM, structure *Structure) *JSObject {
 	obj := &JSObject{
 		properties: make(map[string]JSValue),
@@ -202,7 +209,6 @@ func (o *JSObject) SetPrototype(globalObject *JSGlobalObject, value JSValue, sho
 	}
 	return false
 }
-
 // IsExtensible returns whether new properties can be added.
 func (o *JSObject) IsExtensible(globalObject *JSGlobalObject) bool {
 	_ = globalObject
@@ -224,6 +230,267 @@ func (o *JSObject) ClassName(globalObject *JSGlobalObject) string {
 	}
 	return "Object"
 }
+
+// JSObjectClassInfo returns the ClassInfo for JSObject.
+func JSObjectClassInfo() *ClassInfo {
+	return &ClassInfo{}
+}
+// JSObjectClassInfo returns the ClassInfo for JSObject.
+
+
+// PropertyName.String() convenience method.
+
+// putDirectWithoutTransition sets a property directly without structure transition.
+func (o *JSObject) putDirectWithoutTransition(vm *VM, name PropertyName, value JSValue, attributes uint8) {
+	_ = vm
+	_ = attributes
+	o.properties[name.String()] = value
+}
+
+// PutDirect is a public alias for putDirectWithoutTransition.
+func (o *JSObject) PutDirect(vm *VM, name PropertyName, value JSValue, attributes uint8) {
+	o.putDirectWithoutTransition(vm, name, value, attributes)
+}
+
+// PutDirectOffset stores a value at a known property offset (simplified — just sets in map).
+func (o *JSObject) PutDirectOffset(vm *VM, offset PropertyOffset, value JSValue) {
+	_ = vm
+	// In a real implementation, this would write to inline storage.
+	// For our simplified model, we use the offset as a key indicator.
+	o.properties[fmt.Sprintf("__offset_%d__", offset)] = value
+}
+
+// GetDirectOffset retrieves a value from a property offset.
+func (o *JSObject) GetDirectOffset(vm *VM, offset PropertyOffset) JSValue {
+	_ = vm
+	if val, ok := o.properties[fmt.Sprintf("__offset_%d__", offset)]; ok {
+		return val
+	}
+	return JSValueUndefined
+}
+
+// GetDirect retrieves a direct (own) property value.
+func (o *JSObject) GetDirect(name PropertyName) JSValue {
+	if val, ok := o.properties[name.String()]; ok {
+		return val
+	}
+	return JSValueUndefined
+}
+
+// finishCreation is called after construction to finalize object state.
+func (o *JSObject) finishCreation(vm *VM) {
+	_ = vm
+	// Default: no-op
+}
+
+// inherits checks if this object inherits from the given JSType range.
+func (o *JSObject) inherits(classInfo *ClassInfo) bool {
+	_ = classInfo
+	// Simplified: return true for all non-null classInfo
+	return true
+}
+
+// getIfPropertyExists returns a property if it exists, without walking prototype chain.
+func (o *JSObject) getIfPropertyExists(globalObject *JSGlobalObject, name PropertyName) JSValue {
+	_ = globalObject
+	if val, ok := o.properties[name.String()]; ok {
+		return val
+	}
+	return JSValueUndefined
+}
+
+// hasOwnProperty checks if the object has an own property with the given name.
+func (o *JSObject) hasOwnProperty(globalObject *JSGlobalObject, name PropertyName) bool {
+	_ = globalObject
+	_, ok := o.properties[name.String()]
+	return ok
+}
+
+// getOwnPropertyDescriptor returns the PropertyDescriptor for a property.
+func (o *JSObject) getOwnPropertyDescriptor(globalObject *JSGlobalObject, name PropertyName) (PropertyDescriptor, bool) {
+	_ = globalObject
+	val, ok := o.properties[name.String()]
+	if !ok {
+		return PropertyDescriptor{}, false
+	}
+	desc := NewPropertyDescriptor()
+	desc.SetValue(val)
+	desc.SetWritable(true)
+	desc.SetEnumerable(true)
+	desc.SetConfigurable(true)
+	return desc, true
+}
+
+// defineOwnProperty defines a property with the given descriptor.
+func (o *JSObject) defineOwnProperty(globalObject *JSGlobalObject, name PropertyName, desc PropertyDescriptor, shouldThrow bool) bool {
+	_ = globalObject
+	_ = shouldThrow
+	if desc.IsAccessorDescriptor() {
+		// Store getter/setter as a special property
+		key := name.String()
+		o.properties[key+"::getter"] = desc.Getter()
+		o.properties[key+"::setter"] = desc.Setter()
+		o.properties[key] = JSValueUndefined // placeholder
+	} else if desc.Value().IsNotUndefined() || desc.Value().IsNull() || desc.Value().IsBoolean() || desc.Value().IsNumber() || desc.Value().IsString() {
+		o.properties[name.String()] = desc.Value()
+	}
+	return true
+}
+
+// getPropertySlot retrieves a property via PropertySlot, walking the prototype chain.
+func (o *JSObject) getPropertySlot(globalObject *JSGlobalObject, name PropertyName, slot *PropertySlot) bool {
+	_ = globalObject
+	_ = slot
+	val, ok := o.properties[name.String()]
+	if ok {
+		slot.Value = val
+		return true
+	}
+	// Walk prototype chain
+	structure := o.Structure()
+	if structure != nil && structure.Prototype().IsObject() {
+		protoObj := structure.Prototype().GetObject()
+		if protoObj != nil {
+			return protoObj.getPropertySlot(globalObject, name, slot)
+		}
+	}
+	return false
+}
+
+// freeze freezes the object (makes all properties non-configurable, non-writable).
+func (o *JSObject) freeze(vm *VM) {
+	_ = vm
+	// Simplified: no-op
+}
+
+// seal seals the object (makes all properties non-configurable).
+func (o *JSObject) seal(vm *VM) {
+	_ = vm
+	// Simplified: no-op
+}
+
+// isSealed returns whether the object is sealed.
+func (o *JSObject) isSealed(vm *VM) bool {
+	_ = vm
+	return false // simplified
+}
+
+// isFrozen returns whether the object is frozen.
+func (o *JSObject) isFrozen(vm *VM) bool {
+	_ = vm
+	return false // simplified
+}
+
+// StructureExtensible returns whether the structure is extensible.
+func (o *JSObject) isStructureExtensible() bool {
+	return true // simplified
+}
+
+// canPerformFastPutInlineExcludingProto checks if fast put is possible (simplified).
+func (o *JSObject) canPerformFastPutInlineExcludingProto() bool {
+	return true
+}
+
+// staticPropertiesReified returns whether static properties are reified.
+func (o *JSObject) staticPropertiesReified() bool {
+	return true // simplified
+}
+
+// reifyAllStaticProperties reifies all static properties.
+func (o *JSObject) reifyAllStaticProperties(globalObject *JSGlobalObject) {
+	_ = globalObject
+	// No-op
+}
+
+// hasNonReifiedStaticProperties checks if there are non-reified static properties.
+func (o *JSObject) hasNonReifiedStaticProperties() bool {
+	return false
+}
+
+// canHaveExistingOwnIndexedProperties checks if there are existing own indexed properties.
+func (o *JSObject) canHaveExistingOwnIndexedProperties() bool {
+	return false // simplified
+}
+
+// canHaveExistingOwnIndexedGetterSetterProperties checks if there are indexed getter/setter properties.
+func (o *JSObject) canHaveExistingOwnIndexedGetterSetterProperties() bool {
+	return false
+}
+
+// putOwnDataPropertyMayBeIndex sets a data property that may be an index.
+func (o *JSObject) putOwnDataPropertyMayBeIndex(globalObject *JSGlobalObject, name PropertyName, value JSValue, slot PutPropertySlot) {
+	_ = globalObject
+	_ = slot
+	o.properties[name.String()] = value
+}
+
+// putOwnDataPropertyBatching sets multiple data properties at once.
+func (o *JSObject) putOwnDataPropertyBatching(vm *VM, propertyNames []interface{}, values []JSValue, count int) {
+	_ = vm
+	for i := 0; i < count && i < len(propertyNames) && i < len(values); i++ {
+		if name, ok := propertyNames[i].(string); ok {
+			o.properties[name] = values[i]
+		}
+	}
+}
+
+// enumerateProperties enumerates all own properties.
+func (o *JSObject) enumerateProperties() map[string]JSValue {
+	return o.properties
+}
+
+// forEachOwnIndexedProperty iterates over indexed properties.
+func (o *JSObject) forEachOwnIndexedProperty(sortMode interface{}, callback func(uint32, JSValue) IterationStatus) {
+	_ = sortMode
+	_ = callback
+	// No indexed properties by default
+}
+
+// iterationStatus type for forEachOwnIndexedProperty.
+type IterationStatus uint8
+
+const (
+	IterationStatusContinue IterationStatus = iota
+	IterationStatusDone
+)
+
+// putInline sets a property with inline fast path.
+func (o *JSObject) putInline(globalObject *JSGlobalObject, name PropertyName, value JSValue, slot PutPropertySlot) {
+	_ = globalObject
+	_ = slot
+	o.properties[name.String()] = value
+}
+
+// IndexingType returns the indexing type.
+func (o *JSObject) IndexingType() IndexingType {
+	return o.indexingTypeAndMisc
+}
+
+// StructureID returns the StructureID.
+func (o *JSObject) StructureID() StructureID {
+	return o.structureID
+}
+
+// AuditStructureID audits the structure ID (simplified).
+func (o *JSObject) auditStructureID() {
+	// No-op in simplified mode
+}
+
+// getString returns the object as a string if it's a string wrapper.
+func (o *JSObject) getString(globalObject *JSGlobalObject, name PropertyName) string {
+	_ = globalObject
+	val, ok := o.properties[name.String()]
+	if ok && val.IsString() {
+		return val.ToString()
+	}
+	return ""
+}
+
+
+
+
+
+
 
 // ToPrimitive converts to primitive.
 func (o *JSObject) ToPrimitive(globalObject *JSGlobalObject, preferred PreferredPrimitiveType) JSValue {

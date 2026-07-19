@@ -25,6 +25,9 @@ type JSFunction struct {
 // StructureFlags for JSFunction.
 const JSFunctionStructureFlags uint32 = JSObjectStructureFlags | OverridesGetCallData
 
+// InternalFunctionStructureFlags is the StructureFlags for InternalFunction.
+const InternalFunctionStructureFlags uint32 = JSObjectStructureFlags | OverridesGetCallData | ImplementsHasInstance | ImplementsDefaultHasInstance
+
 // NewJSFunction creates a JSFunction with a native Go callback.
 func NewJSFunction(vm *VM, globalObject *JSGlobalObject, name string, length int, fn func(*JSGlobalObject, JSValue, []JSValue) (JSValue, error)) *JSFunction {
 	_ = vm

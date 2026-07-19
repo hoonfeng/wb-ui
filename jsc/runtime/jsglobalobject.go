@@ -60,9 +60,45 @@ func (g *JSGlobalObject) SetEvalEnabled(enabled bool) { g.evalEnabled = enabled 
 func (g *JSGlobalObject) GetMethod(globalObject *JSGlobalObject, name PropertyName) JSValue {
 	val := g.Get(globalObject, name)
 	if val.IsFunction() {
-		return val
 	}
 	return JSValueUndefined
+}
+
+// objectProtoToStringFunction returns the Object.prototype.toString function.
+func (g *JSGlobalObject) objectProtoToStringFunction() JSValue {
+	fn := NewJSFunction(g.vm, g, "toString", 0, func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+		callFrame := NewExecState(g.vm)
+		callFrame.SetThisValue(thisValue)
+		if len(args) > 0 {
+			callFrame.SetArguments(args)
+		}
+		result := objectProtoFuncToString(globalObject, callFrame)
+		return result, nil
+	})
+	return NewJSValueObject(&fn.JSObject)
+}
+// objectStructureForObjectConstructor returns the Structure used when constructing
+// a plain Object via the Object() constructor.
+func (g *JSGlobalObject) objectStructureForObjectConstructor() *Structure {
+	typeInfo := NewTypeInfo(ObjectType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// arrayStructureForIndexingTypeDuringAllocation returns the array structure for the given indexing type.
+func (g *JSGlobalObject) arrayStructureForIndexingTypeDuringAllocation(indexingType IndexingType) *Structure {
+	_ = indexingType
+	typeInfo := NewTypeInfo(ArrayType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// originalArrayStructureForIndexingType returns the original array structure.
+func (g *JSGlobalObject) originalArrayStructureForIndexingType(indexingType IndexingType) *Structure {
+	return g.arrayStructureForIndexingTypeDuringAllocation(indexingType)
+}
+
+// isHavingABadTime returns whether the VM is having a bad time (Array transition).
+func (g *JSGlobalObject) isHavingABadTime() bool {
+	return false // simplified
 }
 
 // Type returns the JSType.

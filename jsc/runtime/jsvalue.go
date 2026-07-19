@@ -298,6 +298,103 @@ func (v JSValue) IsNumberOrBoolean() bool {
 	return v.tag == TagNumber || v.tag == TagBoolean
 }
 
+// IsUndefinedOrNull returns true if the value is undefined or null.
+func (v JSValue) IsUndefinedOrNull() bool {
+	return v.tag == TagUndefined || v.tag == TagNull
+}
+
+// IsNotUndefined returns true if the value is not undefined.
+func (v JSValue) IsNotUndefined() bool {
+	return v.tag != TagUndefined
+}
+
+// IsNaN returns true if this is a numeric NaN value.
+func (v JSValue) IsNaN() bool {
+	if v.tag != TagNumber {
+		return false
+	}
+	n, ok := v.payload.(float64)
+	if !ok {
+		return false
+	}
+	return math.IsNaN(n)
+}
+
+// Tag returns the JSValueTag.
+func (v JSValue) Tag() JSValueTag { return v.tag }
+
+// IsCallable returns true if the value is callable.
+func (v JSValue) IsCallable() bool {
+	return v.IsFunction()
+}
+
+// AsFunction returns this value as a JSFunction, or nil if not a function.
+func (v JSValue) AsFunction() *JSFunction {
+	if v.tag != TagObject {
+		return nil
+	}
+	obj := v.GetObject()
+	if obj == nil {
+		return nil
+	}
+	return dynamicDowncast[JSFunction](obj)
+}
+
+// ToThis returns the 'this' value, performing primitive wrapping if needed.
+func (v JSValue) ToThis(globalObject *JSGlobalObject, ecmaMode ECMAMode) JSValue {
+	_ = ecmaMode
+	if v.IsObject() {
+		return v
+	}
+	if ecmaMode == ECMAModeStrict {
+		return v
+	}
+	// In sloppy mode, wrap primitive to object
+	return NewJSValueObject(v.ToObject(globalObject))
+}
+// ToPropertyKey converts this value to a property key (Identifier) per ECMA-262 §7.1.14.
+func (v JSValue) ToPropertyKey(globalObject *JSGlobalObject) (Identifier, error) {
+	key := v.ToPrimitive(PreferString)
+	if key.IsString() {
+		return NewIdentifier(key.GetString()), nil
+	}
+	if key.IsSymbol() {
+		return NewIdentifier(""), nil // symbols handled differently
+	}
+	if key.IsNumber() {
+		return NewIdentifier(fmt.Sprintf("%v", key.GetNumber())), nil
+	}
+	if key.IsBoolean() {
+		if key.GetBool() {
+			return NewIdentifier("true"), nil
+		}
+		return NewIdentifier("false"), nil
+	}
+	_ = globalObject
+	return NewIdentifier(""), nil
+}
+
+// GetPrototype returns the prototype of this value, or null if no prototype.
+func (v JSValue) GetPrototype(globalObject *JSGlobalObject) JSValue {
+	if !v.IsObject() {
+		return JSValueNull
+	}
+	obj := v.GetObject()
+	if obj == nil {
+		return JSValueNull
+	}
+	return obj.GetPrototype(globalObject)
+}
+
+// toAtomString converts the string value to an atom string (simple alias).
+func (v JSValue) toAtomString(globalObject *JSGlobalObject) string {
+	_ = globalObject
+	if v.IsString() {
+		return v.GetString()
+	}
+	return v.ToString()
+}
+
 // IsFunction checks if this value is a callable function.
 func (v JSValue) IsFunction() bool {
 	if v.tag != TagObject {

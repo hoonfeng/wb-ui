@@ -111,6 +111,15 @@ func (e *ExecState) Callee() *JSObject { return e.callee }
 // SetCallee sets the callee object.
 func (e *ExecState) SetCallee(c *JSObject) { e.callee = c }
 
+// NewTarget returns the new.target value.
+func (e *ExecState) NewTarget() JSValue {
+	// Simplified: return undefined (no new.target support)
+	return JSValueUndefined
+}
+
+// jsCallee returns the callee as *JSObject (C++ compat).
+func (e *ExecState) jsCallee() *JSObject { return e.callee }
+
 // Scope returns the current scope.
 func (e *ExecState) Scope() *JSScope { return e.scope }
 
