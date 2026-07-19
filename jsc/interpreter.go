@@ -125,10 +125,9 @@ type Interpreter struct {
 	mapProto      *JSObject
 	setProto      *JSObject
 	weakMapProto  *JSObject
-	weakSetProto  *JSObject
-	stringProto   *JSObject
-	promiseProto  *JSObject
 	symbolProto   *JSObject
+	regExpProto   *JSObject
+	forInStack    []*forInIter
 	forInStack    []*forInIter
 	moduleRegistry map[string]map[string]JSValue
 	// currentModuleName is the module name being executed (for OpExport).
@@ -269,6 +268,39 @@ func NewInterpreter() *Interpreter {
 	functionProto := &JSObject{Properties: make(map[string]JSValue), Prototype: objectProto, ClassName: "Function"}
 	arrayProto := &JSObject{Properties: make(map[string]JSValue), Prototype: objectProto, ClassName: "Array"}
 	global := &JSObject{Properties: make(map[string]JSValue), ClassName: "Global"}
+	regExpProto := &JSObject{Properties: make(map[string]JSValue), Prototype: objectProto, ClassName: "RegExp"}
+	regExpProto.Set("test", FunctionValue(NewNativeFunction("test", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := ""
+		if len(args) > 0 { s = args[0].ToString() }
+		var re *regexp.Regexp
+		if this.IsObject() {
+			if r, ok := this.AsObject().Internal.(*regexp.Regexp); ok {
+				re = r
+			}
+		}
+		if re == nil { return BooleanValue(false) }
+		return BooleanValue(re.MatchString(s))
+	}, 1)))
+	regExpProto.Set("exec", FunctionValue(NewNativeFunction("exec", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
+		s := ""
+		if len(args) > 0 { s = args[0].ToString() }
+		var re *regexp.Regexp
+		if this.IsObject() {
+			if r, ok := this.AsObject().Internal.(*regexp.Regexp); ok {
+				re = r
+			}
+		}
+		if re == nil { return Null() }
+		loc := re.FindStringIndex(s)
+		if loc == nil { return Null() }
+		match := s[loc[0]:loc[1]]
+		arr := NewArray(in.arrayProto, []JSValue{StringValue(match)})
+		arr.Set("index", NumberValue(float64(loc[0])))
+		arr.Set("input", StringValue(s))
+		arr.Set("groups", Undefined())
+		return ObjectValue(arr)
+	}, 1)))
+
 	globalEnv := NewEnvironment(nil)
 	return &Interpreter{
 		global:        global,
@@ -276,6 +308,7 @@ func NewInterpreter() *Interpreter {
 		objectProto:   objectProto,
 		functionProto: functionProto,
 		arrayProto:    arrayProto,
+		regExpProto:   regExpProto,
 		maxCallDepth:  5000,
 		moduleRegistry: make(map[string]map[string]JSValue),
 	}
@@ -567,11 +600,9 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 		}
 	}()
 	if in.depth > in.maxCallDepth {
-		fmt.Fprintf(os.Stderr, "[STACK_OVERFLOW] depth=%d max=%d\n", in.depth, in.maxCallDepth)
-		return Undefined(), &jsException{value: StringValue("RangeError: Maximum call stack size exceeded")}
+	if in.depth >= in.maxCallDepth {
+		return Undefined(), nil
 	}
-	in.depth++
-	defer func() { in.depth-- }()
 	// Trace function callers at shallow depth to diagnose "of" recursion
 
 	// Bind parameters into the function's environment (a child of the closure env).

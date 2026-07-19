@@ -117,6 +117,9 @@ const (
 	// sets obj[Name] as an accessor with the given function as getter (IntArg=0)
 	// or setter (IntArg=1).
 	OpSetAccessor
+	// OpNewRegex pops no args and pushes a new RegExp object created from the
+	// pattern and flags stored in the instruction's Value fields.
+	OpNewRegex
 )
 
 // Instruction is a single bytecode instruction. It mirrors the packed Instruction
@@ -802,7 +805,6 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration, leaveOnStack bool) {
 		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
 		mbody := compileFunction(m.Name, m.Params, m.Defaults, m.Body, false, false, false, nil, "")
 		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
-		g.emit(Instruction{Op: OpNewClosure, Body: mbody, Name: m.Name})
 		g.emit(Instruction{Op: OpStoreVar, Name: "__static_" + m.Name})
 		g.emit(Instruction{Op: OpPop}) // pop class
 		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
@@ -918,8 +920,8 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		argCount := len(n.Template.Quasis) + len(n.Template.Expressions)
 		g.emit(Instruction{Op: OpCall, IntArg: argCount})
 	case *RegexLiteral:
-		// Regex literal evaluates to a placeholder object: the source string.
-		g.emit(Instruction{Op: OpLoadConst, Value: StringValue("/" + n.Pattern + "/" + n.Flags)})
+		// Create a real RegExp object at runtime.
+		g.emit(Instruction{Op: OpNewRegex, Name: n.Pattern, StrArg: n.Flags})
 	case *SequenceExpression:
 		for i, ex := range n.Expressions {
 			g.emitExpr(ex)
