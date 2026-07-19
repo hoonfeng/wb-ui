@@ -149,7 +149,7 @@ func GetCallData(cell *JSCell) CallData {
 	case JSFunctionType:
 		return CallData{Type: CallTypeJS}
 	case InternalFunctionType:
-		return CallData{Type: CallTypeHost}
+		return CallData{Type: CallTypeNative}
 	default:
 		return CallData{Type: CallTypeNone}
 	}
@@ -162,7 +162,7 @@ func GetConstructData(cell *JSCell) ConstructData {
 	case JSFunctionType:
 		return ConstructData{Type: ConstructTypeJS}
 	case InternalFunctionType:
-		return ConstructData{Type: ConstructTypeHost}
+		return ConstructData{Type: ConstructTypeNative}
 	default:
 		return ConstructData{Type: ConstructTypeNone}
 	}

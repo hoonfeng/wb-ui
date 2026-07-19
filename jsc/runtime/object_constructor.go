@@ -27,14 +27,14 @@ func NewObjectConstructor(vm *VM, globalObject *JSGlobalObject, structure *Struc
 	obj.typ = InternalFunctionType
 	obj.cellState = DefinitelyWhite
 	obj.properties = make(map[string]JSValue)
-	obj.finishCreation(vm, globalObject, objectPrototype)
+	obj.FinishCreation(vm, globalObject, objectPrototype)
 	return obj
 }
 
 // finishCreation sets up the ObjectConstructor with its static methods and properties.
-func (c *ObjectConstructor) finishCreation(vm *VM, globalObject *JSGlobalObject, objectPrototype *ObjectPrototype) {
+func (c *ObjectConstructor) FinishCreation(vm *VM, globalObject *JSGlobalObject, objectPrototype *ObjectPrototype) {
 	// Base::finishCreation(vm, 1, "Object", WithoutStructureTransition)
-	c.InternalFunction.finishCreation(vm, 1, "Object")
+	c.InternalFunction.FinishCreation(vm, 1, "Object")
 
 	// putDirectWithoutTransition prototype
 	c.putDirectWithoutTransition(vm, NewPropertyName("prototype"),
@@ -107,7 +107,7 @@ func objectConstructorSetPrototypeOf(globalObject *JSGlobalObject, callFrame *Ex
 
 	object := objectValue.ToObject(globalObject)
 	if object == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	shouldThrowIfCantSet := true
@@ -193,7 +193,7 @@ func objectConstructorKeys(globalObject *JSGlobalObject, callFrame *ExecState) J
 	_ = vm
 	object := callFrame.Argument(0).ToObject(globalObject)
 	if object == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 	result := ownPropertyKeys(globalObject, object, PropertyNameModeStrings, ExcludeDontEnumProperties)
 	return JSValueEncode(result)
@@ -205,7 +205,7 @@ func objectConstructorGetOwnPropertyNames(globalObject *JSGlobalObject, callFram
 	_ = vm
 	object := callFrame.Argument(0).ToObject(globalObject)
 	if object == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 	result := ownPropertyKeys(globalObject, object, PropertyNameModeStrings, IncludeDontEnumProperties)
 	return JSValueEncode(result)
@@ -217,7 +217,7 @@ func objectConstructorGetOwnPropertySymbols(globalObject *JSGlobalObject, callFr
 	_ = vm
 	object := callFrame.Argument(0).ToObject(globalObject)
 	if object == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 	result := ownPropertyKeys(globalObject, object, PropertyNameModeSymbols, IncludeDontEnumProperties)
 	return JSValueEncode(result)
@@ -301,7 +301,7 @@ func objectConstructorIs(globalObject *JSGlobalObject, callFrame *ExecState) JSV
 func objectConstructorHasOwn(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
 	base := callFrame.Argument(0).ToObject(globalObject)
 	if base == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 	propertyName, _ := callFrame.Argument(1).ToPropertyKey(globalObject)
 	result := objectPrototypeHasOwnProperty(globalObject, base, NewPropertyName(propertyName.String()))
@@ -477,7 +477,4 @@ func constructEmptyArray(globalObject *JSGlobalObject, prototype *JSObject) *JSA
 	array.structureID = structure.structureID
 	return array
 }
-// jsNumber creates a number JSValue.
-func jsNumber(n float64) JSValue {
-	return NewJSValueNumber(n)
-}
+

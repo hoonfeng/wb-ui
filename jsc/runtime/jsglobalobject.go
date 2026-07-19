@@ -104,6 +104,28 @@ func (g *JSGlobalObject) isHavingABadTime() bool {
 // Type returns the JSType.
 func (g *JSGlobalObject) Type() JSType { return GlobalObjectType }
 
+// ErrorStructure returns the structure for the given error type.
+func (g *JSGlobalObject) ErrorStructure(errType ErrorType) *Structure {
+	_ = errType
+	// Simplified - returns a basic Structure with ObjectType
+	typeInfo := NewTypeInfo(ObjectType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// booleanObjectStructure returns the structure for BooleanObject.
+func (g *JSGlobalObject) booleanObjectStructure() *Structure {
+	typeInfo := NewTypeInfo(ObjectType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// numberObjectStructure returns the structure for NumberObject.
+func (g *JSGlobalObject) numberObjectStructure() *Structure {
+	typeInfo := NewTypeInfo(ObjectType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// ToString returns "[object global]".
+
 // ToString returns "[object global]".
 func (g *JSGlobalObject) ToString() string {
 	return "[object global]"

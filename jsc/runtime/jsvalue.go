@@ -122,6 +122,9 @@ func (v JSValue) IsPrimitive() bool { return !v.IsObject() }
 // IsEmpty returns true if this is the zero value (undefined).
 func (v JSValue) IsEmpty() bool { return v.tag == TagUndefined && v.payload == nil }
 
+// IsValid returns true if this JSValue is not the zero value.
+func (v JSValue) IsValid() bool { return !v.IsEmpty() }
+
 // ToBoolean converts this value to a boolean per ECMA-262 ToBoolean().
 func (v JSValue) ToBoolean() bool {
 	switch v.tag {

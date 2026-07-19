@@ -47,7 +47,7 @@ func objectProtoFuncValueOf(globalObject *JSGlobalObject, callFrame *ExecState) 
 	thisValue := callFrame.ThisValue().ToThis(globalObject, ECMAModeStrict)
 	valueObj := thisValue.ToObject(globalObject)
 	if valueObj == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 	valueObj.auditStructureID()
 	return JSValueEncode(NewJSValueObject(valueObj))
@@ -77,7 +77,7 @@ func objectProtoFuncHasOwnProperty(globalObject *JSGlobalObject, callFrame *Exec
 
 	thisObject := base.ToThis(globalObject, ECMAModeStrict).ToObject(globalObject)
 	if thisObject == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	result := objectPrototypeHasOwnProperty(globalObject, thisObject, NewPropertyName(propertyKey.String()))
@@ -96,7 +96,7 @@ func objectProtoFuncIsPrototypeOf(globalObject *JSGlobalObject, callFrame *ExecS
 	thisValue := callFrame.ThisValue().ToThis(globalObject, ECMAModeStrict)
 	thisObj := thisValue.ToObject(globalObject)
 	if thisObj == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	v := callFrame.Argument(0).GetObject().GetPrototype(globalObject)
@@ -119,7 +119,7 @@ func objectProtoFuncDefineGetter(globalObject *JSGlobalObject, callFrame *ExecSt
 
 	thisObject := callFrame.ThisValue().ToThis(globalObject, ECMAModeStrict).ToObject(globalObject)
 	if thisObject == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	get := callFrame.Argument(1)
@@ -129,7 +129,7 @@ func objectProtoFuncDefineGetter(globalObject *JSGlobalObject, callFrame *ExecSt
 
 	propertyName, err := callFrame.Argument(0).ToPropertyKey(globalObject)
 	if err != nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	descriptor := NewPropertyDescriptor()
@@ -150,7 +150,7 @@ func objectProtoFuncDefineSetter(globalObject *JSGlobalObject, callFrame *ExecSt
 
 	thisObject := callFrame.ThisValue().ToThis(globalObject, ECMAModeStrict).ToObject(globalObject)
 	if thisObject == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	set := callFrame.Argument(1)
@@ -160,7 +160,7 @@ func objectProtoFuncDefineSetter(globalObject *JSGlobalObject, callFrame *ExecSt
 
 	propertyName, err := callFrame.Argument(0).ToPropertyKey(globalObject)
 	if err != nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	descriptor := NewPropertyDescriptor()
@@ -181,12 +181,12 @@ func objectProtoFuncPropertyIsEnumerable(globalObject *JSGlobalObject, callFrame
 
 	propertyName, err := callFrame.Argument(0).ToPropertyKey(globalObject)
 	if err != nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	thisObject := callFrame.ThisValue().ToThis(globalObject, ECMAModeStrict).ToObject(globalObject)
 	if thisObject == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	descriptor, ok := thisObject.getOwnPropertyDescriptor(globalObject, NewPropertyName(propertyName.String()))
@@ -207,7 +207,7 @@ func objectProtoFuncToLocaleString(globalObject *JSGlobalObject, callFrame *Exec
 	// 2. Let O be ToObject(V).
 	object := thisValue.ToThis(globalObject, ECMAModeStrict).ToObject(globalObject)
 	if object == nil {
-		return encodedJSValue()
+	return EncodedJSValue()
 	}
 
 	// 3. Let toString be O.[[Get]]("toString", V)
