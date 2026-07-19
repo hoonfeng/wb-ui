@@ -50,7 +50,7 @@ func (l *jsListener) HandleEvent(e dom.Event) {
 	ev := eventToJS(l.interp, e)
 	// 'this' for a bare function callback is undefined (matching addEventListener
 	// semantics where the callback is invoked as a plain call, not a method).
-	_, _ = l.interp.Call(l.fn, jsc.Undefined(), ev)
+	_, _ = l.interp.Call(l.fn, jsc.Undefined(), []jsc.JSValue{ev})
 }
 
 // makeAddEventListener returns a native JS function that registers a JS callback as a
@@ -132,7 +132,7 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		return jsc.Undefined()
 	}
 	obj := jsc.NewObject(in.ObjectPrototype())
-	obj.ClassName = "Event"
+	obj.SetClassName("Event")
 	obj.Internal = e
 	obj.Set("type", jsc.StringValue(e.Type()))
 	obj.Set("bubbles", jsc.BooleanValue(e.Bubbles()))
@@ -157,7 +157,7 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 			return jsc.Undefined()
 		}, 0)))
 	if me, ok := e.(*dom.MouseEvent); ok {
-		obj.ClassName = "MouseEvent"
+		obj.SetClassName("MouseEvent")
 		obj.Set("clientX", jsc.NumberValue(me.ClientX()))
 		obj.Set("clientY", jsc.NumberValue(me.ClientY()))
 		obj.Set("screenX", jsc.NumberValue(me.ScreenX()))
@@ -204,27 +204,27 @@ func jsToEvent(v jsc.JSValue) dom.Event {
 // --- property helpers on a JSObject ---
 
 func stringProp(o *jsc.JSObject, name string) string {
-	if v, ok := o.Get(name); ok {
+	if v, ok := o.GetByKey(name); ok {
 		return v.ToString()
 	}
 	return ""
 }
 
 func boolProp(o *jsc.JSObject, name string) bool {
-	if v, ok := o.Get(name); ok {
+	if v, ok := o.GetByKey(name); ok {
 		return v.ToBoolean()
 	}
 	return false
 }
 
 func numProp(o *jsc.JSObject, name string) float64 {
-	if v, ok := o.Get(name); ok {
+	if v, ok := o.GetByKey(name); ok {
 		return v.ToNumber()
 	}
 	return 0
 }
 
 func hasNumber(o *jsc.JSObject, name string) bool {
-	v, ok := o.Get(name)
+	v, ok := o.GetByKey(name)
 	return ok && v.IsNumber()
 }

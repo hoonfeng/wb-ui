@@ -81,7 +81,7 @@ func RegisterEditorJSBindings(rt *jsc.Interpreter) {
 
 		// Build the editor wrapper object with methods.
 		edObj := jsc.NewObject(in.ObjectPrototype())
-		edObj.ClassName = "Editor"
+		edObj.SetClassName("Editor")
 		edObj.Internal = &editorBindingsData{view: view}
 
 		// getValue()
@@ -161,7 +161,7 @@ func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 		return v.AsObject()
 	}
 	wb := jsc.NewObject(rt.ObjectPrototype())
-	wb.ClassName = "wb"
+	wb.SetClassName("wb")
 	g.Set("wb", jsc.ObjectValue(wb))
 	return wb
 }

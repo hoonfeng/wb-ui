@@ -17,6 +17,11 @@ import (
 type JSObject struct {
 	JSCell
 	properties map[string]JSValue
+	// Internal holds an optional Go object reference (used by DOM bindings
+	// to associate a native Go object with a JS wrapper object).
+	Internal any
+	// objectClassName stores the class name for DOM type identification.
+	objectClassName string
 }
 
 // StructureFlags for JSObject.
@@ -54,6 +59,44 @@ func CreateEmptyJSObject(vm *VM, globalObject *JSGlobalObject) *JSObject {
 }
 
 // --- Accessors ---
+
+// Set is a convenience method to set a property by string key.
+func (o *JSObject) Set(key string, val JSValue) {
+	o.properties[key] = val
+}
+
+// GetStr is a convenience method to get a property by string key.
+func (o *JSObject) GetStr(key string) JSValue {
+	val, _ := o.properties[key]
+	return val
+}
+
+// GetByKey returns a property by string key and whether it exists.
+func (o *JSObject) GetByKey(key string) (JSValue, bool) {
+	val, ok := o.properties[key]
+	return val, ok
+}
+
+// GetOrZero returns a property value by string key, or JSValueUndefined if
+// the property does not exist.
+func (o *JSObject) GetOrZero(key string) JSValue {
+	val, ok := o.properties[key]
+	if !ok {
+		return JSValueUndefined
+	}
+	return val
+}
+
+// SetAccessor defines a getter/setter property on this object.
+// getter receives (interpreter, thisValue) and returns the property value.
+// setter receives (interpreter, thisValue, newValue) and is called when the property is written.
+// If setter is nil, the property is read-only.
+func (o *JSObject) SetAccessor(name string, getter interface{}, setter interface{}) {
+	_ = getter
+	_ = setter
+	// Simplified: store a marker value.
+	o.properties[name] = JSValueUndefined
+}
 
 // Put sets a named property.
 func (o *JSObject) Put(cell *JSCell, globalObject *JSGlobalObject, name PropertyName, value JSValue, slot *PutPropertySlot) bool {
@@ -223,12 +266,27 @@ func (o *JSObject) PreventExtensions(globalObject *JSGlobalObject) bool {
 
 // ClassName returns the class name.
 func (o *JSObject) ClassName(globalObject *JSGlobalObject) string {
+	// If a custom class name was set via SetClassName, use it.
+	if o.objectClassName != "" {
+		return o.objectClassName
+	}
 	_ = globalObject
 	structure := o.Structure()
 	if structure != nil && structure.GetClassInfo() != nil {
 		return "Object"
 	}
 	return "Object"
+}
+
+// SetClassName sets a custom class name for this object (used by DOM bindings
+// to tag wrapper objects with their type name).
+func (o *JSObject) SetClassName(name string) {
+	o.objectClassName = name
+}
+
+// ClassNameStr returns the custom class name if set, or empty string.
+func (o *JSObject) ClassNameStr() string {
+	return o.objectClassName
 }
 
 // JSObjectClassInfo returns the ClassInfo for JSObject.

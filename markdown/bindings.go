@@ -26,7 +26,7 @@ func RegisterMarkdownJSBindings(rt *jsc.Interpreter) {
 	// wb.Markdown constructor.
 	wb.Set("Markdown", jsc.FunctionValue(jsc.NewNativeFunction("Markdown", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		mdObj := jsc.NewObject(in.ObjectPrototype())
-		mdObj.ClassName = "Markdown"
+		mdObj.SetClassName("Markdown")
 
 		// parse(src) — returns a DocumentFragment as a JS object.
 		mdObj.Set("parse", jsc.FunctionValue(jsc.NewNativeFunction("parse", func(in2 *jsc.Interpreter, _ jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
@@ -56,7 +56,7 @@ func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 		return v.AsObject()
 	}
 	wb := jsc.NewObject(rt.ObjectPrototype())
-	wb.ClassName = "wb"
+	wb.SetClassName("wb")
 	g.Set("wb", jsc.ObjectValue(wb))
 	return wb
 }
@@ -64,7 +64,7 @@ func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 // wrapFragment converts a dom.DocumentFragment to a JSObject for the JS side.
 func wrapFragment(in *jsc.Interpreter, fragment *dom.DocumentFragment) *jsc.JSObject {
 	obj := jsc.NewObject(in.ObjectPrototype())
-	obj.ClassName = "DocumentFragment"
+	obj.SetClassName("DocumentFragment")
 	obj.Internal = fragment
 	obj.Set("length", jsc.NumberValue(float64(len(fragment.ChildNodes()))))
 	return obj

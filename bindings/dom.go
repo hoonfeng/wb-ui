@@ -141,7 +141,7 @@ type ElementWrapper struct {
 
 func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "Document"
+	obj.SetClassName("Document")
 	obj.Internal = doc
 
 	obj.Set("getElementById", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
@@ -228,7 +228,7 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 		return cached
 	}
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "Element"
+	obj.SetClassName("Element")
 	obj.Internal = el
 	// Cache before returning
 	elementWrapperCache[el] = obj
@@ -462,7 +462,7 @@ func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 
 func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	s := jsc.NewObject(rt.ObjectPrototype())
-	s.ClassName = "CSSStyleDeclaration"
+	s.SetClassName("CSSStyleDeclaration")
 	s.Internal = el
 
 	// cssText getter/setter
@@ -523,7 +523,7 @@ func joinStyle(m map[string]string) string {
 
 func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "DocumentFragment"
+	obj.SetClassName("DocumentFragment")
 	obj.Internal = frag
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
@@ -537,7 +537,7 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 
 func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "Text"
+	obj.SetClassName("Text")
 	obj.Internal = t
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
@@ -562,7 +562,7 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 
 func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "Comment"
+	obj.SetClassName("Comment")
 	obj.Internal = c
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {

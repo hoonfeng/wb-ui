@@ -62,7 +62,7 @@ func RegisterFetch(rt *jsc.Interpreter) {
 			return rejectPromise(in, fmt.Errorf("fetch: read response failed: %w", err))
 		}
 		respObj := jsc.NewObject(in.ObjectPrototype())
-		respObj.ClassName = "Response"
+		respObj.SetClassName("Response")
 		respObj.Set("status", jsc.NumberValue(float64(resp.StatusCode)))
 		respObj.Set("ok", jsc.BooleanValue(resp.StatusCode >= 200 && resp.StatusCode < 300))
 		respObj.Set("statusText", jsc.StringValue(resp.Status))
@@ -93,7 +93,7 @@ func RegisterFetch(rt *jsc.Interpreter) {
 // RegisterXMLHttpRequest registers the XMLHttpRequest constructor on the JS interpreter.
 func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 	proto := jsc.NewObject(rt.ObjectPrototype())
-	proto.ClassName = "XMLHttpRequestPrototype"
+	proto.SetClassName("XMLHttpRequestPrototype")
 	proto.Set("UNSENT", jsc.NumberValue(0))
 	proto.Set("OPENED", jsc.NumberValue(1))
 	proto.Set("HEADERS_RECEIVED", jsc.NumberValue(2))
@@ -227,7 +227,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 
 	ctor := jsc.NewNativeFunction("XMLHttpRequest", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		xhr := jsc.NewObject(proto)
-		xhr.ClassName = "XMLHttpRequest"
+		xhr.SetClassName("XMLHttpRequest")
 		xhr.Set("readyState", jsc.NumberValue(0))
 		xhr.Set("status", jsc.NumberValue(0))
 		xhr.Set("statusText", jsc.StringValue(""))

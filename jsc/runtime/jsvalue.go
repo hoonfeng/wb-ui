@@ -331,6 +331,42 @@ func (v JSValue) IsCallable() bool {
 	return v.IsFunction()
 }
 
+// AsBoolean returns the boolean value, or false if not a boolean.
+func (v JSValue) AsBoolean() bool {
+	if v.tag != TagBoolean {
+		return false
+	}
+	b, _ := v.payload.(bool)
+	return b
+}
+
+// AsNumber returns the numeric value, or 0 if not a number.
+func (v JSValue) AsNumber() float64 {
+	if v.tag != TagNumber {
+		return 0
+	}
+	n, _ := v.payload.(float64)
+	return n
+}
+
+// AsString returns the string value, or "" if not a string.
+func (v JSValue) AsString() string {
+	if v.tag != TagString {
+		return ""
+	}
+	s, _ := v.payload.(string)
+	return s
+}
+
+// AsObject returns the *JSObject, or nil if not an object.
+func (v JSValue) AsObject() *JSObject {
+	if v.tag != TagObject {
+		return nil
+	}
+	obj, _ := v.payload.(*JSObject)
+	return obj
+}
+
 // AsFunction returns this value as a JSFunction, or nil if not a function.
 func (v JSValue) AsFunction() *JSFunction {
 	if v.tag != TagObject {

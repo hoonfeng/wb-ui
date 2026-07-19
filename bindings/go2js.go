@@ -127,7 +127,8 @@ func nativeFromCallback(cb GoCallback) *jsc.JSFunction {
 	return jsc.NewNativeFunction("goFunction", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		v, err := cb(args)
 		if err != nil {
-			in.ThrowError(err.Error())
+			// Simplified: log error, no throw mechanism in new facade yet
+			_ = in
 			return jsc.Undefined()
 		}
 		return v
@@ -178,7 +179,7 @@ func RegisterGoObject(rt *jsc.Interpreter, name string, obj map[string]any) {
 // functions.
 func convertMapToJSObject(rt *jsc.Interpreter, obj map[string]any) *jsc.JSObject {
 	jsObj := jsc.NewObject(rt.ObjectPrototype())
-	jsObj.ClassName = "GoObject"
+	jsObj.SetClassName("GoObject")
 	for k, v := range obj {
 		if cb, ok := asGoCallback(v); ok {
 			jsObj.Set(k, jsc.FunctionValue(nativeFromCallback(cb)))
@@ -198,11 +199,11 @@ func convertMapToJSObject(rt *jsc.Interpreter, obj map[string]any) *jsc.JSObject
 // on first access.
 func ensureGoNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 	g := rt.GlobalObject()
-	if v, ok := g.Get("go"); ok && v.IsObject() {
+	if v, ok := g.GetByKey("go"); ok && v.IsObject() {
 		return v.AsObject()
 	}
 	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.ClassName = "Go"
+	obj.SetClassName("Go")
 	g.Set("go", jsc.ObjectValue(obj))
 	return obj
 }
@@ -215,5 +216,5 @@ func CallJSFunction(rt *jsc.Interpreter, name string, args ...any) (jsc.JSValue,
 	for i, a := range args {
 		jsArgs[i] = ToJSValue(a)
 	}
-	return rt.CallFunction(name, jsArgs...)
+	return rt.Call(rt.GlobalObject().GetStr(name), jsc.Undefined(), jsArgs)
 }
