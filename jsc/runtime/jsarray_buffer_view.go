@@ -1,30 +1,76 @@
-// JSArrayBufferView corresponds to JSC::JSArrayBufferView.
+// Translation of: Source/JavaScriptCore/runtime/JSArrayBufferView.h/.cpp
 package runtime
 
 // JSArrayBufferView corresponds to JSC::JSArrayBufferView.
-// Base class for TypedArray views.
+// Base class for all typed array views and DataView.
 type JSArrayBufferView struct {
 	JSObject
-	buffer   *JSArrayBuffer
-	byteLen  uint32
+	buffer     *JSArrayBuffer
+	byteLen    uint32
 	byteOffset uint32
+	vector     []byte
+	isDetached bool
 }
 
-const ArrayBufferViewStructureFlags uint32 = JSObjectStructureFlags
+const JSArrayBufferViewStructureFlags uint32 = JSObjectStructureFlags
 
-func NewJSArrayBufferView(vm *VM, structure *Structure, buffer *JSArrayBuffer, byteOffset uint32, byteLen uint32) *JSArrayBufferView {
-	view := &JSArrayBufferView{
-		buffer:     buffer,
-		byteOffset: byteOffset,
-		byteLen:    byteLen,
+func NewJSArrayBufferView(vm *VM, structure *Structure) *JSArrayBufferView {
+	v := &JSArrayBufferView{}
+	v.structureID = structure.structureID
+	v.typ = structure.Type()
+	v.cellState = 1 // DefinitelyWhite
+	v.properties = make(map[string]JSValue)
+	return v
+}
+
+func (v *JSArrayBufferView) AttachBuffer(buffer *JSArrayBuffer, byteOffset uint32, byteLen uint32) {
+	v.buffer = buffer
+	v.byteOffset = byteOffset
+	v.byteLen = byteLen
+	if buffer != nil && !buffer.IsDetached() {
+		data := buffer.Data()
+		if uint32(len(data)) >= byteOffset+byteLen {
+			v.vector = data[byteOffset : byteOffset+byteLen]
+		} else {
+			v.vector = nil
+		}
+	} else {
+		v.vector = nil
 	}
-	view.structureID = structure.structureID
-	view.typ = ArrayBufferType
-	view.cellState = DefinitelyWhite
-	view.properties = make(map[string]JSValue)
-	return view
+	v.isDetached = false
 }
 
 func (v *JSArrayBufferView) Buffer() *JSArrayBuffer { return v.buffer }
-func (v *JSArrayBufferView) ByteLength() uint32     { return v.byteLen }
-func (v *JSArrayBufferView) ByteOffset() uint32     { return v.byteOffset }
+
+func (v *JSArrayBufferView) ByteLength() uint32 {
+	if v.isDetached {
+		return 0
+	}
+	return v.byteLen
+}
+
+func (v *JSArrayBufferView) ByteOffset() uint32 { return v.byteOffset }
+
+func (v *JSArrayBufferView) Vector() []byte {
+	if v.isDetached {
+		return nil
+	}
+	return v.vector
+}
+
+func (v *JSArrayBufferView) IsDetached() bool {
+	if v.isDetached {
+		return true
+	}
+	if v.buffer != nil && v.buffer.IsDetached() {
+		v.isDetached = true
+		return true
+	}
+	return false
+}
+
+func (v *JSArrayBufferView) DetachFromArrayBuffer() {
+	v.isDetached = true
+	v.vector = nil
+	v.byteLen = 0
+}
