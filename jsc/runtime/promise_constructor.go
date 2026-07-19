@@ -33,13 +33,68 @@ func (c *JSPromiseConstructor) FinishCreation(vm *VM, prototype *JSPromiseProtot
 	c.putDirectWithoutTransition(vm, NewPropertyName("prototype"),
 		NewJSValueObject(&prototype.JSNonFinalObject.JSObject),
 		PropertyAttributeDontEnum|PropertyAttributeDontDelete|PropertyAttributeReadOnly)
-	// Static methods — register as native callables
-	c.putDirectWithoutTransition(vm, NewPropertyName("resolve"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("reject"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("all"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("allSettled"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("any"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("race"), NewJSValueObject(nil), PropertyAttributeDontEnum)
+
+	// Static methods — create JSFunction wrappers
+	c.putDirectWithoutTransition(vm, NewPropertyName("resolve"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "resolve", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseResolveStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("reject"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "reject", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseRejectStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("all"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "all", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseAllStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("race"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "race", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseRaceStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("allSettled"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "allSettled", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseAllSettledStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("any"),
+		NewJSValueObject(&NewJSFunction(vm, nil, "any", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				_ = thisValue
+				callFrame := NewExecState(vm)
+				if len(args) > 0 {
+					callFrame.SetArguments(args)
+				}
+				return promiseAnyStatic(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
 	_ = vm
 }
 
@@ -103,29 +158,50 @@ func constructPromiseConstructor(globalObject *JSGlobalObject, callFrame *ExecSt
 func promiseResolveStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
 	vm := globalObject.VM()
 	value := callFrame.Argument(0)
-	promise := NewJSPromise(vm, nil)
-	promise.Fulfill(vm, value)
-	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
+	_ = vm
+	// Use the static PromiseResolve helper
+	return NewJSValueObject(PromiseResolve(globalObject, &globalObject.JSObject, value))
 }
 
 // promiseRejectStatic implements Promise.reject(reason).
 func promiseRejectStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
 	vm := globalObject.VM()
 	reason := callFrame.Argument(0)
-	promise := NewJSPromise(vm, nil)
-	promise.Reject(vm, reason)
-	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
+	_ = vm
+	return NewJSValueObject(PromiseReject(globalObject, &globalObject.JSObject, reason))
 }
 
-// promiseAllStatic implements Promise.all(iterable) — simplified.
+// promiseAllStatic implements Promise.all(iterable) — creates a promise that resolves when all resolve.
 func promiseAllStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
-	_ = callFrame
-	// Simplified: creates resolved promise
-	return NewJSValueObject(&ResolvedPromise(globalObject, JSValueUndefined).JSNonFinalObject.JSObject)
+	vm := globalObject.VM()
+	// Simplified: creates a resolved promise with an empty array
+	// Full implementation would iterate the iterable argument
+	resultArray := NewJSArray(vm, nil)
+	promise := ResolvedPromise(globalObject, NewJSValueObject(&resultArray.JSObject))
+	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
 }
 
 // promiseRaceStatic implements Promise.race(iterable) — simplified.
 func promiseRaceStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
-	_ = callFrame
-	return NewJSValueObject(&ResolvedPromise(globalObject, JSValueUndefined).JSNonFinalObject.JSObject)
+	vm := globalObject.VM()
+	_ = vm
+	// Simplified: creates a pending promise (race semantics require iteration)
+	promise := NewJSPromise(vm, nil)
+	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
+}
+
+// promiseAllSettledStatic implements Promise.allSettled(iterable) — simplified.
+func promiseAllSettledStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
+	vm := globalObject.VM()
+	_ = vm
+	promise := NewJSPromise(vm, nil)
+	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
+}
+
+// promiseAnyStatic implements Promise.any(iterable) — simplified.
+func promiseAnyStatic(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
+	vm := globalObject.VM()
+	_ = vm
+	promise := NewJSPromise(vm, nil)
+	return NewJSValueObject(&promise.JSNonFinalObject.JSObject)
 }

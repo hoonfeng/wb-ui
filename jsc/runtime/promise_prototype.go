@@ -24,9 +24,30 @@ func NewJSPromisePrototype(vm *VM, globalObject *JSGlobalObject, structure *Stru
 // FinishCreation completes JSPromisePrototype initialization.
 func (p *JSPromisePrototype) FinishCreation(vm *VM, globalObject *JSGlobalObject) {
 	// Instance methods — register with native function callbacks
-	p.putDirectWithoutTransition(vm, NewPropertyName("then"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	p.putDirectWithoutTransition(vm, NewPropertyName("catch"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	p.putDirectWithoutTransition(vm, NewPropertyName("finally"), NewJSValueObject(nil), PropertyAttributeDontEnum)
+	p.putDirectWithoutTransition(vm, NewPropertyName("then"),
+		NewJSValueObject(&NewJSFunction(vm, globalObject, "then", 2,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				callFrame := NewExecState(vm)
+				callFrame.SetThisValue(thisValue)
+				callFrame.SetArguments(args)
+				return promiseProtoThen(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	p.putDirectWithoutTransition(vm, NewPropertyName("catch"),
+		NewJSValueObject(&NewJSFunction(vm, globalObject, "catch", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				callFrame := NewExecState(vm)
+				callFrame.SetThisValue(thisValue)
+				callFrame.SetArguments(args)
+				return promiseProtoCatch(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
+	p.putDirectWithoutTransition(vm, NewPropertyName("finally"),
+		NewJSValueObject(&NewJSFunction(vm, globalObject, "finally", 1,
+			func(globalObject *JSGlobalObject, thisValue JSValue, args []JSValue) (JSValue, error) {
+				callFrame := NewExecState(vm)
+				callFrame.SetThisValue(thisValue)
+				callFrame.SetArguments(args)
+				return promiseProtoFinally(globalObject, callFrame), nil
+			}).JSObject), PropertyAttributeDontEnum)
 	_ = globalObject
 	_ = vm
 	// Symbol.toStringTag
