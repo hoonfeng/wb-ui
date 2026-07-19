@@ -120,7 +120,19 @@ func (g *JSGlobalObject) arrayStructureForIndexingTypeDuringAllocation(indexingT
 	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
 }
 
-// originalArrayStructureForIndexingType returns the original array structure.
+// proxyObjectStructure returns the Structure for a non-callable Proxy.
+func (g *JSGlobalObject) proxyObjectStructure() *Structure {
+	typeInfo := NewTypeInfo(ProxyObjectType, ProxyObjectStructureFlags)
+	return NewStructure(g.vm, g, JSValueNull, typeInfo, &ClassInfo{})
+}
+
+// callableProxyObjectStructure returns the Structure for a callable Proxy.
+func (g *JSGlobalObject) callableProxyObjectStructure() *Structure {
+	typeInfo := NewTypeInfo(ProxyObjectType, ProxyObjectStructureFlags)
+	return NewStructure(g.vm, g, JSValueNull, typeInfo, &ClassInfo{})
+}
+
+// ErrorStructure returns the structure for the given error type.
 func (g *JSGlobalObject) originalArrayStructureForIndexingType(indexingType IndexingType) *Structure {
 	return g.arrayStructureForIndexingTypeDuringAllocation(indexingType)
 }
