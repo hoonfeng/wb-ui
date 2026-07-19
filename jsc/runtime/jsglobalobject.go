@@ -18,6 +18,9 @@ type JSGlobalObject struct {
 
 	// eval cache
 	evalEnabled bool
+
+	// Structure for SymbolObject (wrapper for Symbol values).
+	symbolObjectStructure *Structure
 }
 
 // StructureFlags for JSGlobalObject.

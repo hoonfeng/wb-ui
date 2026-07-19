@@ -28,6 +28,9 @@ type VM struct {
 
 	// Whether the VM has been terminated.
 	isTerminated bool
+
+	// Structure for Symbol cells. Initialized during VM bootstrap.
+	symbolStructure *Structure
 }
 
 // SmallStrings caches common JSString values (single-char strings, common keywords).

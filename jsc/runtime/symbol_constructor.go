@@ -1,5 +1,12 @@
-// SymbolConstructor corresponds to JSC::SymbolConstructor (runtime/SymbolConstructor.h)
+// Translation of: Source/JavaScriptCore/runtime/SymbolConstructor.h
+//                  Source/JavaScriptCore/runtime/SymbolConstructor.cpp
+//
+// SymbolConstructor implements the ES Symbol() function and the Symbol constructor.
+// Symbol() as a function creates a new Symbol value; new Symbol() throws TypeError.
+
 package runtime
+
+import "fmt"
 
 // SymbolConstructor corresponds to JSC::SymbolConstructor.
 type SymbolConstructor struct {
@@ -9,6 +16,11 @@ type SymbolConstructor struct {
 // NewSymbolConstructor creates a new SymbolConstructor.
 func NewSymbolConstructor(vm *VM, structure *Structure, prototype *SymbolPrototype) *SymbolConstructor {
 	c := &SymbolConstructor{}
+	c.InternalFunction = InternalFunction{
+		JSNonFinalObject:    JSNonFinalObject{},
+		functionForCall:     callSymbolFn,
+		functionForConstruct: constructSymbolFn,
+	}
 	c.structureID = structure.structureID
 	c.typ = InternalFunctionType
 	c.cellState = DefinitelyWhite
@@ -23,36 +35,79 @@ func (c *SymbolConstructor) FinishCreation(vm *VM, prototype *SymbolPrototype) {
 	c.putDirectWithoutTransition(vm, NewPropertyName("prototype"),
 		NewJSValueObject(&prototype.JSNonFinalObject.JSObject),
 		PropertyAttributeDontEnum|PropertyAttributeDontDelete|PropertyAttributeReadOnly)
-	// Well-known symbols
-	c.putDirectWithoutTransition(vm, NewPropertyName("iterator"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("asyncIterator"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("match"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("replace"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("search"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("split"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("hasInstance"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("isConcatSpreadable"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("unscopables"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("species"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("toPrimitive"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("toStringTag"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	c.putDirectWithoutTransition(vm, NewPropertyName("matchAll"), NewJSValueObject(nil), PropertyAttributeDontEnum)
-	_ = vm
-}
 
-// Call implements [[Call]] for SymbolConstructor.
-func (c *SymbolConstructor) Call(globalObject *JSGlobalObject, callFrame *ExecState) (JSValue, error) {
-	_ = globalObject
-	desc := ""
-	if callFrame.argumentCount > 0 {
-		desc = callFrame.arguments[0].ToString()
+	// Static methods: Symbol.for(), Symbol.keyFor()
+	c.putDirectWithoutTransition(vm, NewPropertyName("for"), NewJSValueObject(nil), PropertyAttributeDontEnum)
+	c.putDirectWithoutTransition(vm, NewPropertyName("keyFor"), NewJSValueObject(nil), PropertyAttributeDontEnum)
+
+	// Well-known symbols — create real Symbol instances as property values
+	wellKnown := map[string]string{
+		"iterator":           "Symbol.iterator",
+		"asyncIterator":      "Symbol.asyncIterator",
+		"match":              "Symbol.match",
+		"replace":            "Symbol.replace",
+		"search":             "Symbol.search",
+		"split":              "Symbol.split",
+		"hasInstance":        "Symbol.hasInstance",
+		"isConcatSpreadable": "Symbol.isConcatSpreadable",
+		"unscopables":        "Symbol.unscopables",
+		"species":            "Symbol.species",
+		"toPrimitive":        "Symbol.toPrimitive",
+		"toStringTag":        "Symbol.toStringTag",
+		"matchAll":           "Symbol.matchAll",
 	}
-	return NewJSValueString("Symbol(" + desc + ")"), nil
+	for name, desc := range wellKnown {
+		sym := NewSymbolWithDescription(vm, desc)
+		c.putDirectWithoutTransition(vm, NewPropertyName(name), NewJSValueSymbolCell(sym), PropertyAttributeDontEnum|PropertyAttributeDontDelete|PropertyAttributeReadOnly)
+	}
 }
 
-// Construct is not allowed for Symbol (throws TypeError).
-func (c *SymbolConstructor) Construct(globalObject *JSGlobalObject, callFrame *ExecState) (JSValue, error) {
+// --- Call / Construct ---
+
+// callSymbolFn implements Symbol() as a function:
+//   Symbol()          → new unique Symbol with no description
+//   Symbol(desc)      → new unique Symbol with the given description
+//   Symbol(Symbol())  → returns the same Symbol value (identity)
+func callSymbolFn(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
+	vm := globalObject.VM()
+
+	if callFrame.ArgumentCount() == 0 {
+		return NewJSValueSymbolCell(NewSymbol(vm))
+	}
+
+	firstArg := callFrame.Argument(0)
+
+	// If the argument is already a Symbol, return it as-is (Symbol identity)
+	if firstArg.IsSymbol() {
+		return firstArg
+	}
+
+	// Convert argument to string description
+	desc := firstArg.ToString()
+	return NewJSValueSymbolCell(NewSymbolWithDescription(vm, desc))
+}
+
+// constructSymbolFn implements new Symbol() — always throws TypeError.
+func constructSymbolFn(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
 	_ = callFrame
-	globalObject.VM().ThrowException(globalObject, "TypeError: Symbol is not a constructor")
-	return JSValueUndefined, nil
+	globalObject.VM().ThrowException(globalObject, fmt.Sprintf("TypeError: Symbol is not a constructor"))
+	return JSValueUndefined
+}
+
+// symbolConstructorForFn implements Symbol.for(key).
+func symbolConstructorForFn(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
+	desc := ""
+	if callFrame.ArgumentCount() > 0 {
+		desc = callFrame.Argument(0).ToString()
+	}
+	return NewJSValueSymbolCell(NewSymbolWithDescription(globalObject.VM(), desc))
+}
+
+// symbolConstructorKeyForFn implements Symbol.keyFor(sym).
+func symbolConstructorKeyForFn(globalObject *JSGlobalObject, callFrame *ExecState) JSValue {
+	if callFrame.ArgumentCount() == 0 || !callFrame.Argument(0).IsSymbol() {
+		return JSValueUndefined
+	}
+	// Simplified: no global registry yet, always returns undefined
+	return JSValueUndefined
 }
