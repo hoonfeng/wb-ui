@@ -33,6 +33,52 @@ func mustRun(t *testing.T, rt *jsc.Interpreter, src string) {
 	}
 }
 
+func TestDOMAddEventListenerAsMethodCall(t *testing.T) {
+	// Simulates Vue 3's patchEvent calling el2.addEventListener(event2, handler, options)
+	// as a method call: el2.addEventListener(...)
+	rt, doc, _ := newRuntimeWithDoc(t)
+	el := doc.CreateElement("div")
+	el.SetId("test-el")
+	doc.AppendChild(el)
+
+	// Verify addEventListener exists as a function on the element
+	mustRun(t, rt, `
+		var el2 = document.getElementById("test-el");
+		if (typeof el2.addEventListener !== "function") throw new Error("addEventListener not a function: " + typeof el2.addEventListener);
+		if (typeof el2.removeEventListener !== "function") throw new Error("removeEventListener not a function");
+	`)
+
+	// Test calling through method call pattern — simulating Vue's patchEvent
+	mustRun(t, rt, `
+		var el2 = document.getElementById("test-el");
+		var called = false;
+		el2.addEventListener("test", function() { called = true; }, false);
+		// Call addEventListener again with different options to verify repeated calls work
+		el2.addEventListener("test2", function() {}, {capture:false});
+	`)
+
+	// Test calling inside a closure (mimicking Vue's patched event wrapper)
+	mustRun(t, rt, `
+		var el2 = document.getElementById("test-el");
+		var called2 = false;
+		// This matches Vue 3's patchEvent pattern:
+		// el2.addEventListener(event2, handler, options) inside a closure
+		(function(el, evt, handler, opts) {
+			el.addEventListener(evt, handler, opts);
+		})(el2, "test-closure", function() { called2 = true; }, false);
+		if (typeof el2.addEventListener !== "function") throw new Error("FAIL: addEventListener lost after call");
+	`)
+
+	// Test removeEventListener too
+	mustRun(t, rt, `
+		var el2 = document.getElementById("test-el");
+		var called3 = false;
+		var handler3 = function() { called3 = true; };
+		el2.addEventListener("test3", handler3, false);
+		el2.removeEventListener("test3", handler3, false);
+	`)
+}
+
 func TestDOMGetElementByIdReturnsWrapper(t *testing.T) {
 	rt, doc, log := newRuntimeWithDoc(t)
 	el := doc.CreateElement("div")

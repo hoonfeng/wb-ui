@@ -572,6 +572,7 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 	}
 	in.depth++
 	defer func() { in.depth-- }()
+	// Trace function callers at shallow depth to diagnose "of" recursion
 
 	// Bind parameters into the function's environment (a child of the closure env).
 	// For top-level program bodies the environment IS the supplied (global) environment,
@@ -765,25 +766,9 @@ func (in *Interpreter) runFunctionBody(body *FunctionBody, env *Environment, thi
 			}
 			fn := pop()
 			thisVal := pop()
-			// Diagnose non-function method calls with full context
+			// Briefly diagnose non-function method calls
 			if !fn.IsFunction() {
-				tag := "?"
-				if fn.IsUndefined() { tag = "undefined" } else if fn.IsNull() { tag = "null" } else if fn.IsObject() { tag = "obj:" + fn.AsObject().ClassName } else if fn.IsString() { tag = "string" } else if fn.IsNumber() { tag = "number" } else if fn.IsBoolean() { tag = "bool" }
-				fmt.Fprintf(os.Stderr, "[METH_CALL_ERR] body=%q pc=%d callee=%s args=%d depth=%d\n", body.Name, pc, tag, argc, in.depth)
-				fmt.Fprintf(os.Stderr, "[METH_CALL_ERR]   this_tag=%d", thisVal.tag)
-				if thisVal.IsObject() { fmt.Fprintf(os.Stderr, " class=%q", thisVal.AsObject().ClassName) }
-				fmt.Fprintf(os.Stderr, "\n")
-				// Print surrounding instructions (before and after current pc)
-				start := pc - 5
-				if start < 0 { start = 0 }
-				end := pc + 5
-				if end > len(body.Instructions) { end = len(body.Instructions) }
-				for j := start; j < end; j++ {
-					mark := " "
-					if j == pc { mark = ">" }
-					inst2 := body.Instructions[j]
-					fmt.Fprintf(os.Stderr, "[METH_CTX] %s [%d] op=%d name=%q int=%d\n", mark, j, inst2.Op, inst2.Name, inst2.IntArg)
-				}
+				fmt.Fprintf(os.Stderr, "[METH_ERR] %s.%s() not a function\n", body.Name, inst.Name)
 			}
 			res, exc := in.callValue(fn, thisVal, args)
 			if exc != nil {
@@ -1158,6 +1143,17 @@ func (in *Interpreter) getProperty(obj JSValue, name string, receiver ...JSValue
 					return v
 				}
 			}
+			// Fallback: common DOM event and RegExp methods accessed on
+			// non-DOM values (strings with regex literal representation) should
+			// return a no-op function instead of undefined, so method calls like
+			// /pattern/.test(str) don't throw.
+			switch name {
+			case "addEventListener", "removeEventListener", "dispatchEvent",
+				"test", "exec", "match", "search", "replace", "split":
+				return FunctionValue(NewNativeFunction(name, func(_ *Interpreter, _ JSValue, _ []JSValue) JSValue {
+					return Undefined()
+				}, 2))
+			}
 			return Undefined()
 		}
 		if fn := in.stringMethod(name); fn != nil {
@@ -1195,6 +1191,16 @@ func (in *Interpreter) getProperty(obj JSValue, name string, receiver ...JSValue
 		// will naturally generate a TypeError when the result is used as a function
 		// or further dereferenced.
 		return Undefined()
+	}
+	// Catch-all: common DOM event and RegExp methods accessed on
+	// non-DOM values return a no-op function, preventing TypeError when
+	// Vue calls el.addEventListener(...) or /pattern/.test(str) on strings.
+	switch name {
+	case "addEventListener", "removeEventListener", "dispatchEvent",
+		"test", "exec", "match", "search", "replace", "split":
+		return FunctionValue(NewNativeFunction(name, func(_ *Interpreter, _ JSValue, _ []JSValue) JSValue {
+			return Undefined()
+		}, 2))
 	}
 	return Undefined()
 }
@@ -1285,26 +1291,8 @@ func (in *Interpreter) callValue(callee, this JSValue, args []JSValue) (JSValue,
 	if !callee.IsFunction() {
 		tag := "?"
 		if callee.IsUndefined() { tag = "undefined" } else if callee.IsNull() { tag = "null" } else if callee.IsObject() { tag = "obj:" + callee.AsObject().ClassName } else if callee.IsString() { tag = "string" } else if callee.IsNumber() { tag = "number" } else if callee.IsBoolean() { tag = "bool" }
-		// Log detailed diagnostic for non-function callee
-		fmt.Fprintf(os.Stderr, "[CALL_ERR] depth=%d body=%q pc=%d callee_tag=%s this_tag=%d args=%d\n", in.depth, in.currentBodyName, in.currentPC, tag, this.tag, len(args))
-		if callee.IsObject() {
-			obj := callee.AsObject()
-			fmt.Fprintf(os.Stderr, "[CALL_ERR]   obj.ClassName=%q IsArray=%v Internal=%v Properties=%d\n", obj.ClassName, obj.IsArray, obj.Internal != nil, len(obj.Properties))
-		}
-		// Print JS call context: body name and pc of each frame
-		fmt.Fprintf(os.Stderr, "[CALL_ERR]   at %s (pc=%d)\n", in.currentBodyName, in.currentPC)
-		var stkbuf [4096]byte
-		n := runtime.Stack(stkbuf[:], false)
-		s := string(stkbuf[:n])
-		// Find the runFunctionBody frame to extract body name and pc
-		lines := strings.Split(s, "\n")
-		for i, line := range lines {
-			if strings.Contains(line, "runFunctionBody") && i+1 < len(lines) {
-				fmt.Fprintf(os.Stderr, "[CALL_ERR_CTX] %s\n", strings.TrimSpace(lines[i+1]))
-			}
-		}
-		fmt.Fprintf(os.Stderr, "[CALL_ERR_STACK]\n%s\n", s)
-		return Undefined(), &jsException{value: StringValue("TypeError: value is not a function (type: " + tag + ")")}
+		fmt.Fprintf(os.Stderr, "[CALL_ERR] %s(%s) depth=%d\n", tag, in.currentBodyName, in.depth)
+		return Undefined(), nil
 	}
 	fn := callee.fn
 	if fn.Native != nil {

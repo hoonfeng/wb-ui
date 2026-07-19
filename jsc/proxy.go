@@ -58,7 +58,19 @@ func callProxyTrap(in *Interpreter, handler *JSObject, trapName string, args []J
 
 // proxyGet implements the [[Get]] internal method for proxies.
 // Optional receiver overrides the `this` passed to the get trap (defaults to proxy).
+//
+// Recursion guard: proxyGetReentry prevents infinite loops when the handler's get
+// trap accesses the same proxy again (e.g. Vue 3 reactive Proxy + CodeMirror Text.of()).
+var proxyGetReentry int
+
 func proxyGet(in *Interpreter, proxy JSValue, prop string, receiver ...JSValue) JSValue {
+	// Guard against infinite re-entry (e.g. Vue reactive proxy → CodeMirror TextLeaf)
+	if proxyGetReentry > 10 {
+		return Undefined()
+	}
+	proxyGetReentry++
+	defer func() { proxyGetReentry-- }()
+	
 	pd := proxy.AsObject().Internal.(*proxyData)
 	handler := &pd.handler
 	recv := proxy

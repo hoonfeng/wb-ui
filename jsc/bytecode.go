@@ -406,7 +406,7 @@ func (g *BytecodeGenerator) emitStmt(st Stmt) {
 	case *TryStatement:
 		g.emitTry(n)
 	case *ClassDeclaration:
-		g.emitClass(n)
+		g.emitClass(n, false)
 	case *ImportDeclaration:
 		// import default from "mod": load module and store default binding.
 		// Note: default import always loads the "default" export, not the local name.
@@ -703,7 +703,7 @@ func (g *BytecodeGenerator) emitTry(n *TryStatement) {
 	}
 }
 
-func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
+func (g *BytecodeGenerator) emitClass(n *ClassDeclaration, leaveOnStack bool) {
 	// Safety check
 	if n == nil || n.Body == nil { return }
 	if n.Name == "" { return }
@@ -809,6 +809,10 @@ func (g *BytecodeGenerator) emitClass(n *ClassDeclaration) {
 		g.emit(Instruction{Op: OpLoadVar, Name: "__static_" + m.Name})
 		g.emit(Instruction{Op: OpStoreProp, Name: m.Name})
 		g.emit(Instruction{Op: OpPop}) // pop class
+	}
+	// For class expressions, push constructor back onto stack as expression value
+	if leaveOnStack {
+		g.emit(Instruction{Op: OpLoadVar, Name: n.Name})
 	}
 }
 
@@ -937,7 +941,7 @@ func (g *BytecodeGenerator) emitExpr(e Expr) {
 		g.emit(Instruction{Op: OpYield})
 	case *ClassDeclaration:
 		// Class expressions: compile similarly to class declarations.
-		g.emitClass(n)
+		g.emitClass(n, true)
 	default:
 		g.emit(Instruction{Op: OpLoadUndefined})
 	}
