@@ -25,13 +25,21 @@ func NewInternalFunction(vm *VM, structure *Structure, functionForCall func(*JSG
 	return fn
 }
 
-// FinishCreation completes InternalFunction initialization.
+// FinishCreation completes InternalFunction initialization with default structure transition.
 func (f *InternalFunction) FinishCreation(vm *VM, length int, name string) {
+	f.FinishCreationWithMode(vm, length, name, PropertyAdditionModeWithStructureTransition)
+}
+
+// FinishCreationWithMode completes InternalFunction initialization, controlling structure transition.
+func (f *InternalFunction) FinishCreationWithMode(vm *VM, length int, name string, mode PropertyAdditionMode) {
 	f.JSNonFinalObject.FinishCreation(vm)
 	f.originalName = name
 	// Set length and name properties
 	f.putDirectWithoutTransition(vm, NewPropertyName("length"), jsNumber(float64(length)), PropertyAttributeReadOnly|PropertyAttributeDontEnum)
-	f.putDirectWithoutTransition(vm, NewPropertyName("name"), NewJSValueString(name), PropertyAttributeReadOnly|PropertyAttributeDontEnum)
+	if name != "" {
+		f.putDirectWithoutTransition(vm, NewPropertyName("name"), NewJSValueString(name), PropertyAttributeReadOnly|PropertyAttributeDontEnum)
+	}
+	_ = mode
 }
 
 // GetCallData returns CallData for the InternalFunction.
@@ -74,7 +82,10 @@ func (f *InternalFunction) Construct(globalObject *JSGlobalObject, callFrame *Ex
 	return JSValueUndefined, nil
 }
 
-// NullSetterFunction corresponds to JSC::NullSetterFunction.
-type NullSetterFunction struct {
-	InternalFunction
-}
+// PropertyAdditionMode controls whether adding a property triggers structure transition.
+type PropertyAdditionMode int
+
+const (
+	PropertyAdditionModeWithStructureTransition    PropertyAdditionMode = iota
+	PropertyAdditionModeWithoutStructureTransition
+)

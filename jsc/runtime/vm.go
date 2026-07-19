@@ -31,6 +31,12 @@ type VM struct {
 
 	// Structure for Symbol cells. Initialized during VM bootstrap.
 	symbolStructure *Structure
+
+	// Structure for GetterSetter cells.
+	getterSetterStructure *Structure
+
+	// Structure for CustomGetterSetter cells.
+	customGetterSetterStructure *Structure
 }
 
 // SmallStrings caches common JSString values (single-char strings, common keywords).

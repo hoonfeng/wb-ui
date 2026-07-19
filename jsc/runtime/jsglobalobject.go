@@ -21,6 +21,9 @@ type JSGlobalObject struct {
 
 	// Structure for SymbolObject (wrapper for Symbol values).
 	symbolObjectStructure *Structure
+
+	// Structure for StringObject (wrapper for string primitives).
+	stringObjectStructureField *Structure
 }
 
 // StructureFlags for JSGlobalObject.
@@ -66,6 +69,29 @@ func (g *JSGlobalObject) GetMethod(globalObject *JSGlobalObject, name PropertyNa
 	}
 	return JSValueUndefined
 }
+
+// nullGetterFunction returns the NullGetterFunction singleton.
+func (g *JSGlobalObject) nullGetterFunction() *JSObject {
+	// In the full implementation, this is a singleton per JSGlobalObject.
+	// For now, create a new one each time.
+	fn := NewNullGetterFunction(g.vm, createNullGetterFunctionStructure(g.vm, g))
+	return &fn.JSObject
+}
+
+// nullSetterFunction returns the NullSetterFunction singleton.
+func (g *JSGlobalObject) nullSetterFunction() *JSObject {
+	fn := NewNullSetterFunction(g.vm, createNullSetterFunctionStructure(g.vm, g), ECMAModeSloppy)
+	return &fn.JSObject
+}
+
+// calleeStructure returns the Structure for JSCallee.
+func (g *JSGlobalObject) calleeStructure() *Structure {
+	typeInfo := NewTypeInfo(JSCalleeType, 0)
+	return NewStructure(g.vm, g, NewJSValueObject(&g.JSObject), typeInfo, &ClassInfo{})
+}
+
+// stringObjectStructure returns the Structure for StringObject.
+func (g *JSGlobalObject) stringObjectStructure() *Structure { return g.stringObjectStructureField }
 
 // objectProtoToStringFunction returns the Object.prototype.toString function.
 func (g *JSGlobalObject) objectProtoToStringFunction() JSValue {
