@@ -8,13 +8,3 @@ type InlineCallFrame struct {
 	kind             CallMode
 	argumentCount    int
 }
-
-type InlineCallFrameSet struct {
-	frames []InlineCallFrame
-}
-
-func (s *InlineCallFrameSet) Add(frame InlineCallFrame) {
-	s.frames = append(s.frames, frame)
-}
-
-func (s *InlineCallFrameSet) Size() int { return len(s.frames) }

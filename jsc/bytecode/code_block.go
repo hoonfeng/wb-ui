@@ -140,14 +140,4 @@ func (cb *CodeBlock) String() string {
 		cb.mode.String(), cb.kind.String(), cb.hash, cb.numParameters, cb.numVars)
 }
 
-// CodeBlockHash computes a hash for the code block.
-type CodeBlockHash struct {
-	hash uint32
-}
 
-func NewCodeBlockHash(h uint32) CodeBlockHash {
-	return CodeBlockHash{hash: h}
-}
-
-func (h CodeBlockHash) Hash() uint32 { return h.hash }
-func (h CodeBlockHash) String() string { return fmt.Sprintf("%08x", h.hash) }

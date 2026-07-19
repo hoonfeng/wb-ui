@@ -1,37 +1,15 @@
-// PropertyInlineCache / Inline cache for property access (JIT only)
+// Copyright (C) 2012-2019 Apple Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style license.
+//
+// Translated to Go from WebKit Source/JavaScriptCore/bytecode/PropertyInlineCache.h
+
 package bytecode
 
+// PropertyInlineCache tracks inline cache state for property access (JIT only).
 type PropertyInlineCache struct {
 	structureID uint64
-	lastOffset  uint32
-	hitCount    uint32
 }
 
-type PropertyInlineCacheClearingWatchpoint struct{}
-type PropertyInlineCacheSummary struct{}
-
-// PutByIdFlags - flags for put_by_id bytecode
-type PutByIdFlags uint8
-
-const (
-	PutByIdIsDirect  PutByIdFlags = 1 << 0
-	PutByIdIsStrict  PutByIdFlags = 1 << 1
-)
-
-// ReduceWhitespace - utility to reduce whitespace in strings
-func ReduceWhitespace(s string) string {
-	result := make([]byte, 0, len(s))
-	lastWasSpace := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r' {
-			if !lastWasSpace {
-				result = append(result, ' ')
-				lastWasSpace = true
-			}
-		} else {
-			result = append(result, s[i])
-			lastWasSpace = false
-		}
-	}
-	return string(result)
-}
+func NewPropertyInlineCache() *PropertyInlineCache     { return &PropertyInlineCache{} }
+func (c *PropertyInlineCache) StructureID() uint64       { return c.structureID }
+func (c *PropertyInlineCache) SetStructureID(id uint64)  { c.structureID = id }

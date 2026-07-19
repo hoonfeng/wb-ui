@@ -1,16 +1,12 @@
-// JIT-only: AccessCase.h - Inline cache access case for JIT.
-// In the interpreter, property access is handled directly.
+// Copyright (C) 2012-2019 Apple Inc. All rights reserved.
+// Use of this source code is governed by a BSD-style license.
+//
+// Translated to Go from WebKit Source/JavaScriptCore/bytecode/AccessCase.h
+
 package bytecode
 
 // AccessCase represents an inline cache access case (JIT only).
-type AccessCase struct {
-	// Stub for interpreter - property access done directly
-}
+// In the interpreter, property access is handled directly.
+type AccessCase struct{}
 
-type AccessCaseSnippetParams struct{}
-
-type GetterSetterAccessCase struct{ AccessCase }
-type InstanceOfAccessCase struct{ AccessCase }
-type IntrinsicGetterAccessCase struct{ AccessCase }
-type ModuleNamespaceAccessCase struct{ AccessCase }
-type ProxyableAccessCase struct{ AccessCase }
+func NewAccessCase() *AccessCase { return &AccessCase{} }

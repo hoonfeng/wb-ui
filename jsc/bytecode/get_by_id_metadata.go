@@ -17,7 +17,3 @@ type GetByIdMetadata struct {
 	modeMetadata GetByIdModeMetadata
 }
 
-// InlineAccess / InlineCacheCompiler / InlineCacheHandler (JIT IC)
-type InlineAccess struct{}
-type InlineCacheCompiler struct{}
-type InlineCacheHandler struct{}

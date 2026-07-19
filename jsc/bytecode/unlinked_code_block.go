@@ -109,19 +109,3 @@ func (ucb *UnlinkedCodeBlock) SourceURL() string { return ucb.sourceURL }
 func (ucb *UnlinkedCodeBlock) SetSourceURL(url string) { ucb.sourceURL = url }
 
 func (ucb *UnlinkedCodeBlock) Hash() uint32 { return ucb.hash }
-
-// UnlinkedCodeBlockGenerator generates an UnlinkedCodeBlock during compilation.
-type UnlinkedCodeBlockGenerator struct {
-	codeBlock *UnlinkedCodeBlock
-}
-
-func NewUnlinkedCodeBlockGenerator(codeType CodeType, kind CodeSpecializationKind, info ExecutableInfo) *UnlinkedCodeBlockGenerator {
-	return &UnlinkedCodeBlockGenerator{
-		codeBlock: NewUnlinkedCodeBlock(codeType, kind, info),
-	}
-}
-
-func (g *UnlinkedCodeBlockGenerator) CodeBlock() *UnlinkedCodeBlock { return g.codeBlock }
-func (g *UnlinkedCodeBlockGenerator) SetInstructions(inst *InstructionStream) {
-	g.codeBlock.SetInstructions(inst)
-}

@@ -23,22 +23,4 @@ func (c CodeOrigin) String() string {
 	return fmt.Sprintf("CodeOrigin(%d)", c.bytecodeIndex.Offset())
 }
 
-// FullCodeOrigin extends CodeOrigin with source position info.
-type FullCodeOrigin struct {
-	CodeOrigin
-	line   uint32
-	column uint32
-}
 
-func NewFullCodeOrigin(origin CodeOrigin, line, column uint32) FullCodeOrigin {
-	return FullCodeOrigin{CodeOrigin: origin, line: line, column: column}
-}
-
-func (f FullCodeOrigin) Line() uint32 { return f.line }
-func (f FullCodeOrigin) Column() uint32 { return f.column }
-
-// TerminatedCodeOrigin pairs a CodeOrigin with a termination watchpoint.
-type TerminatedCodeOrigin struct {
-	CodeOrigin
-	watchpoint InlineWatchpointSet
-}
