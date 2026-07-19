@@ -534,6 +534,9 @@ func (v JSValue) StrictEqual(other JSValue) bool {
 	}
 }
 
+// StrictEquals is an alias for StrictEqual (used by bindings tests).
+func (v JSValue) StrictEquals(other JSValue) bool { return v.StrictEqual(other) }
+
 // ToPrimitive converts this value to a primitive per ECMA-262 §7.1.1.
 func (v JSValue) ToPrimitive(preferred PreferredPrimitiveType) JSValue {
 	return JSValueUndefined

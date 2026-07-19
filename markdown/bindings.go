@@ -52,7 +52,7 @@ func RegisterMarkdownJSBindings(rt *jsc.Interpreter) {
 // ensureWBNamespace returns the global "wb" object, creating it on first access.
 func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 	g := rt.GlobalObject()
-	if v, ok := g.Get("wb"); ok && v.IsObject() {
+	if v, ok := g.GetByKey("wb"); ok && v.IsObject() {
 		return v.AsObject()
 	}
 	wb := jsc.NewObject(rt.ObjectPrototype())

@@ -34,13 +34,13 @@ func NewJSGlobalObject(vm *VM, structure *Structure) *JSGlobalObject {
 	global := &JSGlobalObject{
 		vm: vm,
 	}
-	global.structureID = structure.structureID
+	if structure != nil {
+		global.structureID = structure.structureID
+	}
 	global.typ = GlobalObjectType
 	global.cellState = DefinitelyWhite
 	global.properties = make(map[string]JSValue)
 	global.evalEnabled = true
-
-	_ = structure
 	return global
 }
 

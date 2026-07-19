@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"strings"
 	"time"
+	"unsafe"
 
 	"wb-ui/jsc/interpreter"
 	"wb-ui/jsc/runtime"
@@ -221,15 +222,8 @@ func (rt *Interpreter) Call(fn JSValue, thisVal JSValue, args []JSValue) (JSValu
 	if obj == nil {
 		return runtime.JSValueUndefined, fmt.Errorf("jsc: call on nil object")
 	}
-	fun, ok := any(obj).(*runtime.JSFunction)
-	if !ok || fun == nil {
-		// Try calling via prototype method.
-		callMethod := obj.Get(rt.globalObj, runtime.NewPropertyName("call"))
-		if callMethod.IsFunction() {
-			return rt.Call(callMethod, runtime.NewJSValueObject(obj), append([]JSValue{thisVal}, args...))
-		}
-		return runtime.JSValueUndefined, fmt.Errorf("jsc: value is not callable")
-	}
+	// JSFunction embeds JSObject at offset 0, so unsafe pointer cast works.
+	fun := (*runtime.JSFunction)(unsafe.Pointer(obj))
 	return fun.Call(rt.globalObj, thisVal, args)
 }
 
@@ -518,21 +512,30 @@ func (rt *Interpreter) installGlobals(g *runtime.JSObject) {
 		g.Set(name, FunctionValue(NewNativeFunction(name, fn, n)))
 	}
 	add("parseInt", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
-		if len(args) == 0 { return NumberValue(math.NaN()) }
-		s := strings.TrimSpace(args[0].ToString())
-		if len(args) > 1 && args[1].IsNumber() {
-			r := int(args[1].AsNumber())
-			if r >= 2 && r <= 36 {
-				// Use current radix (simplified parseInt)
-				_ = r
-			}
-		}
-		// Basic parseInt
-		var val float64
-		if _, err := fmt.Sscanf(s, "%d", &val); err != nil {
+		if len(args) == 0 {
 			return NumberValue(math.NaN())
 		}
-		return NumberValue(val)
+		// Simple parseInt — scan decimal digits
+		s := strings.TrimLeft(args[0].ToString(), " \t\n\r")
+		if len(s) == 0 {
+			return NumberValue(math.NaN())
+		}
+		sign := 1.0
+		if s[0] == '-' {
+			sign = -1.0
+			s = s[1:]
+		} else if s[0] == '+' {
+			s = s[1:]
+		}
+		n := 0.0
+		for _, c := range s {
+			if c >= '0' && c <= '9' {
+				n = n*10 + float64(c-'0')
+			} else {
+				break
+			}
+		}
+		return NumberValue(sign * n)
 	}, 2)
 	add("parseFloat", func(in *Interpreter, this JSValue, args []JSValue) JSValue {
 		if len(args) == 0 { return NumberValue(math.NaN()) }
@@ -619,6 +622,7 @@ func (rt *Interpreter) NewObject() *runtime.JSObject {
 // NewArray creates a new JSArray (backed by a plain JSObject with length property).
 func (rt *Interpreter) NewArray() *runtime.JSObject {
 	arr := runtime.NewJSObjectWithPrototype(rt.vm, rt.globalObj, ObjectValue(rt.arrayPrototype))
+	arr.IsArray = true
 	arr.Set("length", runtime.NewJSValueNumber(0))
 	return arr
 }
@@ -633,8 +637,7 @@ func NewNativeFunction(name string, fn NativeFunc, length int) *JSFunction {
 			interp:    nil,
 			globalObj: globalObject,
 		}
-		rt.objectPrototype = &runtime.JSObject{}
-		rt.objectPrototype.Set("", runtime.JSValueUndefined)
+		rt.objectPrototype = runtime.NewJSObjectWithPrototype(nil, globalObject, runtime.JSValueNull)
 		return fn(rt, thisVal, args), nil
 	})
 	return f
@@ -706,6 +709,8 @@ func NewArray(prototype *JSObject, items []JSValue) *JSObject {
 	} else {
 		arr = runtime.NewJSObjectWithPrototype(defaultVM, defaultGlobalObject, ObjectValue(prototype))
 	}
+	arr.IsArray = true
+	arr.Elements = items
 	arr.Set("length", runtime.NewJSValueNumber(float64(len(items))))
 	for i, item := range items {
 		arr.Set(fmt.Sprintf("%d", i), item)

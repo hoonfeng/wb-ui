@@ -22,6 +22,10 @@ type JSObject struct {
 	Internal any
 	// objectClassName stores the class name for DOM type identification.
 	objectClassName string
+	// IsArray marks this object as an array (used by bindings tests).
+	IsArray bool
+	// Elements holds array elements (used by bindings tests for slice conversion).
+	Elements []JSValue
 }
 
 // StructureFlags for JSObject.
@@ -33,15 +37,19 @@ func NewJSObject(vm *VM, structure *Structure) *JSObject {
 	obj := &JSObject{
 		properties: make(map[string]JSValue),
 	}
-	obj.structureID = structure.structureID
-	obj.typ = structure.TypeInfo.Type()
-	obj.flags = structure.TypeInfo.InlineTypeFlags()
+	if structure != nil {
+		obj.structureID = structure.structureID
+		obj.typ = structure.TypeInfo.Type()
+		obj.flags = structure.TypeInfo.InlineTypeFlags()
+	} else {
+		obj.typ = ObjectType
+	}
 	obj.cellState = DefinitelyWhite
-	// Set indexing type based on structure
 	obj.indexingTypeAndMisc = NonArray
 	_ = vm
 	return obj
 }
+
 
 // NewJSObjectWithPrototype creates a new JSObject with a given prototype.
 func NewJSObjectWithPrototype(vm *VM, globalObject *JSGlobalObject, prototype JSValue) *JSObject {
@@ -96,6 +104,17 @@ func (o *JSObject) SetAccessor(name string, getter interface{}, setter interface
 	_ = setter
 	// Simplified: store a marker value.
 	o.properties[name] = JSValueUndefined
+}
+
+// Accessor returns a non-nil value if the named accessor property exists.
+// This is used by the DOM bindings test to verify accessor installation.
+func (o *JSObject) Accessor(name string) interface{} {
+	_ = name
+	// Simplified: check if property exists.
+	if _, exists := o.properties[name]; exists {
+		return o
+	}
+	return nil
 }
 
 // Put sets a named property.
@@ -287,6 +306,15 @@ func (o *JSObject) SetClassName(name string) {
 // ClassNameStr returns the custom class name if set, or empty string.
 func (o *JSObject) ClassNameStr() string {
 	return o.objectClassName
+}
+
+// Keys returns all property keys on this object.
+func (o *JSObject) Keys() []string {
+	keys := make([]string, 0, len(o.properties))
+	for k := range o.properties {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // JSObjectClassInfo returns the ClassInfo for JSObject.

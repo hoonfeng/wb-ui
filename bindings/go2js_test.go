@@ -60,7 +60,7 @@ func TestToJSValueSliceAndMap(t *testing.T) {
 	if !mv.IsObject() {
 		t.Fatalf("map should become object")
 	}
-	name, ok := mv.AsObject().Get("name")
+	name, ok := mv.AsObject().GetByKey("name")
 	if !ok || !name.StrictEquals(jsc.StringValue("Alice")) {
 		t.Fatalf("name = %v, want Alice", name)
 	}
@@ -73,7 +73,7 @@ func TestToJSValueStruct(t *testing.T) {
 	if !v.IsObject() {
 		t.Fatalf("struct should become object")
 	}
-	x, _ := v.AsObject().Get("X")
+	x, _ := v.AsObject().GetByKey("X")
 	if !x.StrictEquals(jsc.NumberValue(1)) {
 		t.Fatalf("X = %v, want 1", x)
 	}

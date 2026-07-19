@@ -45,13 +45,13 @@ func RegisterEditorJSBindings(rt *jsc.Interpreter) {
 
 		if len(args) > 0 && args[0].IsObject() {
 			cfg := args[0].AsObject()
-			if v, ok := cfg.Get("language"); ok && v.IsString() {
+			if v, ok := cfg.GetByKey("language"); ok && v.IsString() {
 				lang = v.AsString()
 			}
-			if v, ok := cfg.Get("value"); ok && v.IsString() {
+			if v, ok := cfg.GetByKey("value"); ok && v.IsString() {
 				value = v.AsString()
 			}
-			if v, ok := cfg.Get("showLineNumbers"); ok {
+			if v, ok := cfg.GetByKey("showLineNumbers"); ok {
 				showLineNumbers = v.ToBoolean()
 			}
 		}
@@ -157,7 +157,7 @@ func RegisterEditorJSBindings(rt *jsc.Interpreter) {
 // ensureWBNamespace returns the global "wb" object, creating it on first access.
 func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 	g := rt.GlobalObject()
-	if v, ok := g.Get("wb"); ok && v.IsObject() {
+	if v, ok := g.GetByKey("wb"); ok && v.IsObject() {
 		return v.AsObject()
 	}
 	wb := jsc.NewObject(rt.ObjectPrototype())

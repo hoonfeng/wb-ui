@@ -27,17 +27,17 @@ func RegisterFetch(rt *jsc.Interpreter) {
 			if opts.IsObject() {
 				o := opts.AsObject()
 				if o != nil {
-					if m, ok := o.Get("method"); ok && !m.IsUndefined() && !m.IsNull() {
+					if m, ok := o.GetByKey("method"); ok && !m.IsUndefined() && !m.IsNull() {
 						method = jscToString(m)
 					}
-					if b, ok := o.Get("body"); ok && !b.IsUndefined() && !b.IsNull() {
+					if b, ok := o.GetByKey("body"); ok && !b.IsUndefined() && !b.IsNull() {
 						body = strings.NewReader(jscToString(b))
 					}
-					if h, ok := o.Get("headers"); ok && h.IsObject() {
+					if h, ok := o.GetByKey("headers"); ok && h.IsObject() {
 						hObj := h.AsObject()
 						if hObj != nil {
-							for key := range hObj.Properties {
-								if val, ok2 := hObj.Get(key); ok2 {
+						for _, key := range hObj.Keys() {
+								if val, ok2 := hObj.GetByKey(key); ok2 {
 									headers.Set(key, jscToString(val))
 								}
 							}
@@ -129,7 +129,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			return jsc.Undefined()
 		}
 		obj := this.AsObject()
-		hv, ok := obj.Get("_requestHeaders")
+	hv, ok := obj.GetByKey("_requestHeaders")
 		if ok && hv.IsObject() {
 			hObj := hv.AsObject()
 			name := jscToString(args[0])
@@ -155,11 +155,11 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			body = strings.NewReader(jscToString(args[0]))
 		}
 		headers := http.Header{}
-		hv, ok := obj.Get("_requestHeaders")
+	hv, ok := obj.GetByKey("_requestHeaders")
 		if ok && hv.IsObject() {
 			hObj := hv.AsObject()
-			for key := range hObj.Properties {
-				if val, ok2 := hObj.Get(key); ok2 {
+		for _, key := range hObj.Keys() {
+			if val, ok2 := hObj.GetByKey(key); ok2 {
 					headers.Set(key, jscToString(val))
 				}
 			}
@@ -200,7 +200,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		}
 		obj.Set("_responseHeaders", jsc.StringValue(strings.Join(hdrLines, "\r\n")))
 		getAllRespHeadersFn := jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			if v, ok := obj.Get("_responseHeaders"); ok {
+		if v, ok := obj.GetByKey("_responseHeaders"); ok {
 				return v
 			}
 			return jsc.StringValue("")
@@ -251,13 +251,14 @@ func jscToString(v jsc.JSValue) string {
 	}
 	return fmt.Sprintf("%v", v)
 }
-
 func jscToString2(obj *jsc.JSObject, key string) string {
-	if v, ok := obj.Get(key); ok {
+	if v, ok := obj.GetByKey(key); ok {
 		return jscToString(v)
 	}
 	return ""
 }
+
+
 
 func resolvePromise(in *jsc.Interpreter, val jsc.JSValue) jsc.JSValue {
 	return in.ResolvePromise(val)
@@ -268,9 +269,9 @@ func rejectPromise(in *jsc.Interpreter, err error) jsc.JSValue {
 }
 
 func xhrFireReadyStateChange(in *jsc.Interpreter, obj *jsc.JSObject) {
-	hVal, ok := obj.Get("onreadystatechange")
+		hVal, ok := obj.GetByKey("onreadystatechange")
 	if !ok || hVal.IsUndefined() || hVal.IsNull() {
 		return
 	}
-	in.Call(hVal, jsc.ObjectValue(obj))
+	in.Call(hVal, jsc.ObjectValue(obj), nil)
 }
