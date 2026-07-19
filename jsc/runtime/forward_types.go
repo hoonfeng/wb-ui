@@ -44,8 +44,6 @@ type JSGlobalProxy struct{ JSObject }
 // ProxyObject corresponds to JSC::ProxyObject.
 type ProxyObject struct{ JSObject }
 
-// RegExpObject corresponds to JSC::RegExpObject.
-type RegExpObject struct{ JSObject }
 
 // StringObject corresponds to JSC::StringObject.
 type StringObject struct{ JSObject }

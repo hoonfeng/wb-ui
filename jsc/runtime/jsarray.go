@@ -5,6 +5,9 @@
 
 package runtime
 
+// maxArrayLength is the maximum array length per ES spec (2^53 - 1).
+const maxArrayLength uint64 = 9007199254740991
+
 // JSArray corresponds to JSC::JSArray. It holds indexed elements.
 type JSArray struct {
 	JSObject
