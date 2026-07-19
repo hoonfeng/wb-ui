@@ -228,11 +228,15 @@ func (rt *Interpreter) Call(fn JSValue, thisVal JSValue, args []JSValue) (JSValu
 }
 
 // Run executes JavaScript source code and returns the result.
+// It uses the Tree-walk AST evaluator (see evaluator.go) to parse and
+// execute the source. This is a temporary simplification until the full
+// bytecode interpreter pipeline (parser → bytecompiler → interpreter)
+// is wired up.
 func (rt *Interpreter) Run(src string) (JSValue, error) {
-	_ = src
-	// Skeleton — full parser/bytecode compilation not wired yet.
-	// For now, return undefined.
-	return runtime.JSValueUndefined, nil
+	if strings.TrimSpace(src) == "" {
+		return runtime.JSValueUndefined, nil
+	}
+	return rt.runJS(src)
 }
 
 // RunScript is an alias for Run.
