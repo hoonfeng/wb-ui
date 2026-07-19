@@ -277,8 +277,10 @@ func (b *RenderTreeBuilder) linkLayoutBoxes(rObj RenderObject, lBox *layout.Layo
 	}
 	rObj.SetLayoutBox(lBox)
 	// Walk render children and layout children in parallel, matching by element
-	// identity.
-	lChildren := lBox.Children
+	// identity. MUST copy the slice before modifying it; append(l[:m], l[m+1:]...)
+	// shares the underlying array with lBox.Children and would corrupt it.
+	lChildren := make([]*layout.LayoutBox, len(lBox.Children))
+	copy(lChildren, lBox.Children)
 	for rc := rObj.FirstChild(); rc != nil && len(lChildren) > 0; rc = rc.NextSibling() {
 		matched := -1
 		for i, lc := range lChildren {

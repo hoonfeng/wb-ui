@@ -90,6 +90,20 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	} else {
 		mainSize, crossSize = contentHeight, contentWidth
 	}
+	// If the container's main-axis size is auto or unresolvable (0 due to
+	// circular dependency, e.g. column flex child of a row flex whose cross
+	// size hasn't been set yet), use a large sentinel so items are not shrunk
+	// to zero. The actual container size is determined from content at the
+	// end of Layout (see heightIsAuto block below).
+	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
+	// if a temporary cross size was set by the parent (e.g. via the
+	// cross-size pre-set in the outer flex loop), use that known value.
+	if !isRow && contentHeight <= 0 {
+		mainSize = 1e6
+	}
+	if isRow && contentWidth <= 0 {
+		mainSize = 1e6
+	}
 
 	// Line breaking (flex-wrap): pack items into lines by hypothetical main size.
 	lines := breakFlexLines(items, mainSize, wrap)
@@ -184,6 +198,13 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		for i := range freezeLine {
 			it := &freezeLine[i]
 			setItemBorderBox(it, isRow)
+			// 在布局子元素前，设置一个临时的交叉轴尺寸（容器在该轴上的内容尺寸），
+			// 使内部 flex/block 布局有正确的可参考高度/宽度。
+			if isRow {
+				it.box.Rect.Height = contentHeight
+			} else {
+				it.box.Rect.Width = contentWidth
+			}
 			it.box.Rect.X = 0
 			it.box.Rect.Y = 0
 			childCtx := contextFor(it.box)
@@ -678,6 +699,15 @@ func flexBasisIsContent(box *LayoutBox, isRow bool) bool {
 	}
 	h := resolveLengthAuto(box.Style.Height, 0, fs)
 	return h.Auto
+}
+
+// widthIsAuto reports whether the box has an auto width.
+func widthIsAuto(box *LayoutBox) bool {
+	if box.Style == nil {
+		return true
+	}
+	r := resolveLengthAuto(box.Style.Width, 0, 0)
+	return r.Auto
 }
 
 // mainSizeAvailable returns the available main-axis size for measurement.
