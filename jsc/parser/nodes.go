@@ -34,7 +34,6 @@ type RegisterID = bytecompiler.RegisterID
 type Label = bytecompiler.Label
 
 // ParserArena 前向声明（定义在 parser_arena.go）
-type ParserArena struct{}
 
 // JSTextPosition 表示文本位置（行、偏移、行起始偏移）
 type JSTextPosition struct {
@@ -54,6 +53,7 @@ type JSTokenLocation struct {
 	Offset          int
 	LineStartOffset int
 	StartOffset     int
+	EndOffset       int
 }
 
 // NewJSTokenLocation 创建新的 JSTokenLocation
@@ -61,32 +61,12 @@ func NewJSTokenLocation(line, lineStartOffset int) JSTokenLocation {
 	return JSTokenLocation{Line: line, LineStartOffset: lineStartOffset}
 }
 
-// ResultType 表示表达式结果类型
-type ResultType struct {
-	Bits uint8
-}
-
-func UnknownType() ResultType           { return ResultType{Bits: 0} }
-func (r ResultType) IsKnown() bool      { return false }
-
 // OpcodeID 操作码 ID（来自 bytecode 包，暂时用 uint32）
 type OpcodeID uint32
 
-// SourceCode 表示源代码
-type SourceCode struct{}
 
-func (s *SourceCode) ProviderID() uintptr { return 0 }
 
 // VariableEnvironment 变量环境
-type VariableEnvironment struct {
-	// 暂未实现完整字段
-}
-
-func (v *VariableEnvironment) HasUsingDeclaration() bool       { return false }
-func (v *VariableEnvironment) HasAwaitUsingDeclaration() bool  { return false }
-func (v *VariableEnvironment) UsingDeclarationCount() uint32   { return 0 }
-func (v *VariableEnvironment) HasCapturedVariables() bool      { return false }
-func (v *VariableEnvironment) Captures(uid runtime.UniquedStringImplPtr) bool { return false }
 
 // LexicallyScopedFeatures 词法作用域特征
 type LexicallyScopedFeatures uint32
@@ -135,26 +115,41 @@ const (
 	ImplementationVisibilityPrivate
 )
 
-// SourceParseMode 源码解析模式
+// SourceParseMode 源代码解析模式
 type SourceParseMode uint8
 
 const (
-	SourceParseModeNormal       SourceParseMode = iota
-	SourceParseModeArrowFunction
-	SourceParseModeGeneratorBody
-	SourceParseModeAsyncFunction
-	SourceParseModeAsyncArrowFunction
-	SourceParseModeAsyncGeneratorBody
-	SourceParseModeFunctionOverride
+	NormalFunctionMode                SourceParseMode = 0
+	GeneratorBodyMode                 SourceParseMode = 1
+	GeneratorWrapperFunctionMode      SourceParseMode = 2
+	GetterMode                        SourceParseMode = 3
+	SetterMode                        SourceParseMode = 4
+	MethodMode                        SourceParseMode = 5
+	ArrowFunctionMode                 SourceParseMode = 6
+	AsyncFunctionBodyMode             SourceParseMode = 7
+	AsyncArrowFunctionBodyMode        SourceParseMode = 8
+	AsyncFunctionMode                 SourceParseMode = 9
+	AsyncMethodMode                   SourceParseMode = 10
+	AsyncArrowFunctionMode            SourceParseMode = 11
+	ProgramMode                       SourceParseMode = 12
+	ModuleAnalyzeMode                 SourceParseMode = 13
+	ModuleEvaluateMode                SourceParseMode = 14
+	AsyncGeneratorBodyMode            SourceParseMode = 15
+	AsyncGeneratorWrapperFunctionMode SourceParseMode = 16
+	AsyncGeneratorWrapperMethodMode   SourceParseMode = 17
+	GeneratorWrapperMethodMode        SourceParseMode = 18
+	ClassFieldInitializerMode         SourceParseMode = 19
+	ClassStaticBlockMode              SourceParseMode = 20
 )
 
 // FunctionMode 函数模式
 type FunctionMode uint8
 
 const (
-	FunctionModeNormal     FunctionMode = iota
-	FunctionModeGetter     FunctionMode = 1
-	FunctionModeSetter     FunctionMode = 2
+	FunctionModeNone               FunctionMode = 0
+	FunctionModeFunctionExpression FunctionMode = 1
+	FunctionModeFunctionDeclaration FunctionMode = 2
+	FunctionModeMethodDefinition   FunctionMode = 3
 )
 
 // ConstructorKind 构造器种类
@@ -170,16 +165,16 @@ const (
 type SuperBinding uint8
 
 const (
-	SuperBindingNotNeeded SuperBinding = iota
-	SuperBindingNeeded    SuperBinding = 1
+	SuperBindingNeeded    SuperBinding = 0
+	SuperBindingNotNeeded SuperBinding = 1
 )
 
 // PrivateBrandRequirement 私有品牌要求
 type PrivateBrandRequirement uint8
 
 const (
-	PrivateBrandRequirementNone PrivateBrandRequirement = iota
-	PrivateBrandRequirementNeeded
+	PrivateBrandNone   PrivateBrandRequirement = 0
+	PrivateBrandNeeded PrivateBrandRequirement = 1
 )
 
 // FunctionParameters 函数参数
@@ -306,14 +301,14 @@ type ParserArenaDeletable struct{}
 
 type Node struct {
 	Position       JSTextPosition
-	EndOffset      int
+	endOffset      int
 	NeedsDebugHook bool
 }
 
 func NewNode(loc JSTokenLocation) *Node {
 	return &Node{
 		Position:  JSTextPosition{Line: loc.Line, Offset: loc.Offset, LineStartOffset: loc.LineStartOffset},
-		EndOffset: -1,
+		endOffset: -1,
 	}
 }
 
@@ -321,7 +316,8 @@ func (n *Node) FirstLine() int                        { return n.Position.Line }
 func (n *Node) StartOffset() int                      { return n.Position.Offset }
 func (n *Node) LineStartOffset() int                  { return n.Position.LineStartOffset }
 func (n *Node) GetPosition() JSTextPosition           { return n.Position }
-func (n *Node) SetEndOffset(offset int)               { n.EndOffset = offset }
+func (n *Node) EndOffset() int                       { return n.endOffset }
+func (n *Node) SetEndOffset(offset int)               { n.endOffset = offset }
 func (n *Node) SetStartOffset(offset int)             { n.Position.Offset = offset }
 func (n *Node) NeedsDebugHookFlag() bool              { return n.NeedsDebugHook }
 func (n *Node) SetNeedsDebugHook()                    { n.NeedsDebugHook = true }
@@ -3133,12 +3129,12 @@ func (s *ScopeNode) UsesArrowFunction() bool          { return s.Features&ArrowF
 func (s *ScopeNode) IsStrictMode() bool               { return s.LexicallyScopedFeaturesVal&StrictModeLexicallyScopedFeature != 0 }
 func (s *ScopeNode) UsesThis() bool                   { return s.Features&ThisFeature != 0 }
 func (s *ScopeNode) UsesSuperCall() bool              { return s.Features&SuperCallFeature != 0 }
-func (s *ScopeNode) UsesSuperProperty() bool          { return s.Features&SuperPropertyFeature != 0 }
+func (s *ScopeNode) Captures(uid runtime.UniquedStringImplPtr) bool { return s.VarDeclarations.CapturesUid(uintptr(uid)) }
 func (s *ScopeNode) UsesNewTarget() bool              { return s.Features&NewTargetFeature != 0 }
 func (s *ScopeNode) IsAsyncFunctionWithoutAwait() bool { return s.Features&AsyncFunctionWithoutAwaitFeature != 0 }
 func (s *ScopeNode) NeedsActivation() bool             { return s.HasCapturedVariables() || (s.Features&(EvalFeature|WithFeature) != 0) }
 func (s *ScopeNode) HasCapturedVariables() bool        { return s.VarDeclarations.HasCapturedVariables() }
-func (s *ScopeNode) Captures(uid runtime.UniquedStringImplPtr) bool { return s.VarDeclarations.Captures(uid) }
+
 func (s *ScopeNode) UsesNonSimpleParameterList() bool  { return s.Features&NonSimpleParameterListFeature != 0 }
 func (s *ScopeNode) NeedsNewTargetRegisterForThisScope() bool { return s.UsesSuperCall() || s.UsesNewTarget() }
 func (s *ScopeNode) VarDeclarationsRef() *VariableEnvironment { return &s.VarDeclarations }
@@ -3608,7 +3604,7 @@ type FuncExprNode struct {
 
 func NewFuncExprNode(loc JSTokenLocation, ident *runtime.Identifier, metadata *FunctionMetadataNode, source SourceCode) *FuncExprNode {
 	return &FuncExprNode{
-		BaseFuncExprNode: *NewBaseFuncExprNode(loc, ident, metadata, source, FunctionModeNormal),
+		BaseFuncExprNode: *NewBaseFuncExprNode(loc, ident, metadata, source, FunctionModeNone),
 	}
 }
 
@@ -3629,7 +3625,7 @@ type ArrowFuncExprNode struct {
 
 func NewArrowFuncExprNode(loc JSTokenLocation, ident *runtime.Identifier, metadata *FunctionMetadataNode, source SourceCode) *ArrowFuncExprNode {
 	return &ArrowFuncExprNode{
-		BaseFuncExprNode: *NewBaseFuncExprNode(loc, ident, metadata, source, FunctionModeNormal),
+		BaseFuncExprNode: *NewBaseFuncExprNode(loc, ident, metadata, source, FunctionModeNone),
 	}
 }
 
