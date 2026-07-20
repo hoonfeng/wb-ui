@@ -133,7 +133,7 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 	}
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.SetClassName("Event")
-	obj.Internal = e
+	obj.SetInternal(e)
 	obj.Set("type", jsc.StringValue(e.Type()))
 	obj.Set("bubbles", jsc.BooleanValue(e.Bubbles()))
 	obj.Set("cancelable", jsc.BooleanValue(e.Cancelable()))
