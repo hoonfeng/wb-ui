@@ -443,3 +443,26 @@ go test ./... → 20 包 PASS，1 个预存失败（bindings/TestVue3MountFinal:
 | bindings/dom_events.go | 修复 | listenerKey 改用 fnID 字符串 |
 | bindings/go2js.go | 修复 | nativeFromCallback 错误传播（panic GoError） |
 | page/fetcher.go | 修复 | XMLHttpRequest 改为 NewConstructor + prototype 链接 |
+
+## 2026-07-20
+
+### 排测：CSS 变量解析修复 + 浏览器渲染对齐验证
+
+#### 修复：CSS变量(var())跨元素解析
+**问题**：applyDeclaration没有把属性原始值存入cs.Properties map，导致resolveVarInProperties找不到var(--xxx)引用进行替换。同时tokensToString对TokenFunction类型缺少左括号输出。
+
+**修复**：
+1. style/resolver.go:applyDeclaration — 在switch前调用cs.SetProperty保存原始值
+2. style/resolver.go:tokensToString — TokenFunction追加左括号
+3. style/computedstyle.go:NewComputedStyle — 初始化CustomProperties/Properties防nil panic
+4. style/computedstyle.go:SetProperty — 添加nil-check
+
+#### 验证
+- CSS变量在style包层正确解析（BackgroundColor:#1e64c8）
+- CSS变量在Vue IDE静态布局中正确渲染（顶角#0d1117=--bg-primary）
+- 全量28个包go test ./...全部PASS
+
+#### 修改文件
+- style/resolver.go — applyDeclaration添加cs.SetProperty + tokensToString修复左括号
+- style/computedstyle.go — NewComputedStyle初始化maps + SetProperty nil-check
+

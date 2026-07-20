@@ -357,6 +357,11 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		}
 		return
 	}
+	// Store the raw value string so the var() resolution pass later
+	// (resolveVarInProperties) can find and substitute var(--xxx) references.
+	// Without this, Properties remains empty and CSS variables never get resolved.
+	cs.SetProperty(name, valueString)
+
 	switch name {
 	case "display":
 		cs.Display = LookupDisplayType(valueString)
@@ -1411,6 +1416,9 @@ func tokensToString(tokens []css.Token) string {
 		case css.TokenIdent, css.TokenFunction, css.TokenAtKeyword,
 			css.TokenURL, css.TokenBadURL, css.TokenString, css.TokenBadString:
 			sb.WriteString(t.Value)
+			if t.Type == css.TokenFunction {
+				sb.WriteByte('(')
+			}
 		case css.TokenHash:
 			sb.WriteByte('#')
 			sb.WriteString(t.Value)

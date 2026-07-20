@@ -455,6 +455,9 @@ func (c *ComputedStyle) GetProperty(name string) string {
 // is the fallback path for properties without a dedicated typed field; the typed
 // accessors are populated by the resolver, not by this method.
 func (c *ComputedStyle) SetProperty(name, value string) {
+	if c.Properties == nil {
+		c.Properties = map[string]string{}
+	}
 	c.Properties[strings.ToLower(name)] = value
 }
 
