@@ -5,6 +5,7 @@ package bindings
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"wb-ui/dom"
 	"wb-ui/jsc"
@@ -90,6 +91,151 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("screen", jsc.ObjectValue(screen))
 
 // window.console 由 SetupGlobal 设置
+
+	// localStorage / sessionStorage（内存存储，对标浏览器）
+	store := make(map[string]string)
+	g.Set("localStorage", jsc.ObjectValue(makeStorage(rt, store)))
+	g.Set("sessionStorage", jsc.ObjectValue(makeStorage(rt, store)))
+
+	// performance.now — 返回毫秒级高精度时间戳
+	g.Set("performance", jsc.ObjectValue(makePerformance(rt)))
+
+	// getComputedStyle — 返回元素的 inline style（简化实现）
+	g.Set("getComputedStyle", jsc.FunctionValue(jsc.NewNativeFunction("getComputedStyle",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 1 { return jsc.Null() }
+			// 返回元素的 style 对象作为 computed style 的近似
+			if obj := args[0].AsObject(); obj != nil {
+				if style := obj.GetStr("style"); !style.IsUndefined() {
+					return style
+				}
+			}
+			return jsc.Null()
+		}, 1)))
+
+	// CustomEvent 构造函数
+	g.Set("CustomEvent", jsc.FunctionValue(rt.NewConstructor("CustomEvent",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("detail", jsc.Null())
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("composed", jsc.BooleanValue(false))
+			if len(args) >= 1 { ev.Set("type", jsc.StringValue(args[0].ToString())) }
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					if v, ok := o.GetByKey("detail"); ok { ev.Set("detail", v) }
+					if v, ok := o.GetByKey("bubbles"); ok { ev.Set("bubbles", v) }
+					if v, ok := o.GetByKey("cancelable"); ok { ev.Set("cancelable", v) }
+				}
+			}
+			return ev
+		})))
+
+	// DOMParser
+	domParserDoc := document // capture for closures
+	g.Set("DOMParser", jsc.FunctionValue(rt.NewConstructor("DOMParser",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			obj := jsc.NewObject(in.ObjectPrototype())
+			obj.Set("parseFromString", jsc.FunctionValue(jsc.NewNativeFunction("parseFromString",
+				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 { return jsc.Null() }
+					html := a[0].ToString()
+					div := domParserDoc.CreateElement("div")
+					div.SetInnerHTML(html)
+					mockDoc := jsc.NewObject(interp.ObjectPrototype())
+					wrappedDiv := wrapElement(interp, div)
+					mockDoc.Set("documentElement", jsc.ObjectValue(wrappedDiv))
+					mockDoc.Set("body", jsc.ObjectValue(wrappedDiv))
+					mockDoc.Set("querySelector", wrappedDiv.GetStr("querySelector"))
+					mockDoc.Set("querySelectorAll", wrappedDiv.GetStr("querySelectorAll"))
+					return jsc.ObjectValue(mockDoc)
+				}, 2)))
+			return obj
+		})))
+
+	// URL / URLSearchParams
+	g.Set("URL", jsc.FunctionValue(rt.NewConstructor("URL",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			obj := jsc.NewObject(in.ObjectPrototype())
+			href := ""
+			if len(args) >= 1 { href = args[0].ToString() }
+			obj.Set("href", jsc.StringValue(href))
+			obj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.StringValue(href)
+				}, 0)))
+			// 简单 URL 解析
+			if href != "" {
+				if colonIdx := strings.Index(href, "://"); colonIdx > 0 {
+					obj.Set("protocol", jsc.StringValue(href[:colonIdx+1]))
+					rest := href[colonIdx+3:]
+					if pathIdx := strings.IndexByte(rest, '/'); pathIdx > 0 {
+						obj.Set("hostname", jsc.StringValue(rest[:pathIdx]))
+						obj.Set("pathname", jsc.StringValue(rest[pathIdx:]))
+					} else {
+						obj.Set("hostname", jsc.StringValue(rest))
+						obj.Set("pathname", jsc.StringValue("/"))
+					}
+				}
+			}
+			return obj
+		})))
+
+	// requestIdleCallback / cancelIdleCallback（GUI 模式下立即执行）
+	g.Set("requestIdleCallback", jsc.FunctionValue(jsc.NewNativeFunction("requestIdleCallback",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 1 || !args[0].IsCallable() {
+				return jsc.NumberValue(0)
+			}
+			el := in.EnsureEventLoop()
+			id := el.SetTimeout(args[0], 0) // 通过宏任务延迟执行
+			return jsc.NumberValue(float64(id))
+		}, 1)))
+	g.Set("cancelIdleCallback", jsc.FunctionValue(jsc.NewNativeFunction("cancelIdleCallback",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if el := in.GetEventLoop(); el != nil && len(args) > 0 && args[0].IsNumber() {
+				el.ClearTimeout(int(args[0].ToNumber()))
+			}
+			return jsc.Undefined()
+		}, 1)))
+
+	// crypto.randomUUID / crypto.getRandomValues（简化）
+	cryptoObj := jsc.NewObject(rt.ObjectPrototype())
+	cryptoObj.Set("randomUUID", jsc.FunctionValue(jsc.NewNativeFunction("randomUUID",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			// 生成 version 4 UUID
+			b := make([]byte, 16)
+			for i := range b { b[i] = byte(time.Now().UnixNano()>>(i*4)) & 0xFF }
+			// 设置 version 4 和 variant
+			b[6] = (b[6] & 0x0f) | 0x40
+			b[8] = (b[8] & 0x3f) | 0x80
+			uuid := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+				b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+			return jsc.StringValue(uuid)
+		}, 0)))
+	g.Set("crypto", jsc.ObjectValue(cryptoObj))
+
+	// CSS.escape / CSS.supports（简化桩）
+	cssObj := jsc.NewObject(rt.ObjectPrototype())
+	cssObj.Set("escape", jsc.FunctionValue(jsc.NewNativeFunction("escape",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) == 0 { return jsc.StringValue("") }
+			// 简单转义：替换特殊字符
+			s := strings.ReplaceAll(args[0].ToString(), "\\", "\\\\")
+			return jsc.StringValue(s)
+		}, 1)))
+	cssObj.Set("supports", jsc.FunctionValue(jsc.NewNativeFunction("supports",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) == 0 { return jsc.BooleanValue(false) }
+			// 简单检测：已知支持 flex, grid, css grid 等
+			s := strings.ToLower(args[0].ToString())
+			supported := strings.Contains(s, "display:") &&
+				(strings.Contains(s, "flex") || strings.Contains(s, "grid") || strings.Contains(s, "block") || strings.Contains(s, "none"))
+			return jsc.BooleanValue(supported)
+		}, 1)))
+	g.Set("CSS", jsc.ObjectValue(cssObj))
 
 	// window.matchMedia 桩
 	g.Set("matchMedia", jsc.FunctionValue(jsc.NewNativeFunction("matchMedia",
@@ -547,6 +693,67 @@ func makeDOMRect(in *jsc.Interpreter, x, y, w, h float64) *jsc.JSObject {
 	return r
 }
 
+// makeStorage 创建一个 localStorage/sessionStorage 对象。
+func makeStorage(rt *jsc.Interpreter, store map[string]string) *jsc.JSObject {
+	s := jsc.NewObject(rt.ObjectPrototype())
+	s.Set("setItem", jsc.FunctionValue(jsc.NewNativeFunction("setItem",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 2 { store[args[0].ToString()] = args[1].ToString() }
+			return jsc.Undefined()
+		}, 2)))
+	s.Set("getItem", jsc.FunctionValue(jsc.NewNativeFunction("getItem",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 1 {
+				if v, ok := store[args[0].ToString()]; ok {
+					return jsc.StringValue(v)
+				}
+			}
+			return jsc.Null()
+		}, 1)))
+	s.Set("removeItem", jsc.FunctionValue(jsc.NewNativeFunction("removeItem",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 1 { delete(store, args[0].ToString()) }
+			return jsc.Undefined()
+		}, 1)))
+	s.Set("clear", jsc.FunctionValue(jsc.NewNativeFunction("clear",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			for k := range store { delete(store, k) }
+			return jsc.Undefined()
+		}, 0)))
+	s.Set("key", jsc.FunctionValue(jsc.NewNativeFunction("key",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 1 {
+				idx := int(args[0].ToNumber())
+				i := 0
+				for k := range store {
+					if i == idx { return jsc.StringValue(k) }
+					i++
+				}
+			}
+			return jsc.Null()
+		}, 1)))
+	s.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(store)))
+	}), nil)
+	return s
+}
+
+// makePerformance 创建一个 performance 对象（简化版）。
+func makePerformance(rt *jsc.Interpreter) *jsc.JSObject {
+	p := jsc.NewObject(rt.ObjectPrototype())
+	start := rt.GetEventLoop()
+	var origin int64
+	if start != nil {
+		origin = time.Now().UnixMilli()
+	}
+	p.Set("now", jsc.FunctionValue(jsc.NewNativeFunction("now",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			elapsed := float64(time.Now().UnixMilli()-origin) / 1000.0 * 1000.0
+			return jsc.NumberValue(elapsed)
+		}, 0)))
+	return p
+}
+
 // ─── Element ───────────────────────────────────────────
 
 func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
@@ -733,6 +940,65 @@ obj.SetInternal(el)
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.Undefined()
 		}, 0)))
+	// element.remove() — self-removal from DOM
+	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if p := el.ParentNode(); p != nil { p.RemoveChild(el) }
+			return jsc.Undefined()
+		}, 0)))
+	// focus / blur stubs
+	obj.Set("focus", jsc.FunctionValue(jsc.NewNativeFunction("focus",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			el.SetFocused(true)
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("blur", jsc.FunctionValue(jsc.NewNativeFunction("blur",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			el.SetFocused(false)
+			return jsc.Undefined()
+		}, 0)))
+	// form control: value / checked / disabled / type
+	tag := strings.ToLower(el.LocalName())
+	if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" || tag == "option" {
+		obj.SetAccessor("value",
+			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				return jsc.StringValue(el.GetAttribute("value"))
+			}),
+			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+				el.SetAttribute("value", v.ToString())
+			})
+		if tag == "input" {
+			obj.SetAccessor("checked",
+				getter(func(_ *jsc.Interpreter) jsc.JSValue {
+					return jsc.BooleanValue(el.HasAttribute("checked"))
+				}),
+				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+					if v.ToBoolean() {
+						el.SetAttribute("checked", "checked")
+					} else {
+						el.RemoveAttribute("checked")
+					}
+				})
+			obj.SetAccessor("type",
+				getter(func(_ *jsc.Interpreter) jsc.JSValue {
+					return jsc.StringValue(el.GetAttribute("type"))
+				}),
+				nil)
+		}
+		if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" {
+			obj.SetAccessor("disabled",
+				getter(func(_ *jsc.Interpreter) jsc.JSValue {
+					return jsc.BooleanValue(el.HasAttribute("disabled"))
+				}),
+				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+					if v.ToBoolean() {
+						el.SetAttribute("disabled", "disabled")
+					} else {
+						el.RemoveAttribute("disabled")
+					}
+				})
+		}
+	}
 
 	// Accessors for string properties
 	obj.SetAccessor("tagName", strAcc(el.TagName()), nil)
