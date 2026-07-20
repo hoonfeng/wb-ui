@@ -38,7 +38,10 @@ func TestFromJSValuePrimitives(t *testing.T) {
 }
 
 func TestFromJSValueArray(t *testing.T) {
-	arr := jsc.ObjectValue(jsc.NewArray(nil, []jsc.JSValue{
+	// Use same interpreter for all objects to avoid cross-runtime issues
+	in := jsc.NewInterpreter()
+	proto := in.ObjectPrototype()
+	arr := jsc.ObjectValue(jsc.NewArray(proto, []jsc.JSValue{
 		jsc.NumberValue(1), jsc.StringValue("two"), jsc.BooleanValue(true),
 	}))
 	got, err := FromJSValue(arr)
@@ -52,8 +55,8 @@ func TestFromJSValueArray(t *testing.T) {
 	if len(out) != 3 {
 		t.Fatalf("len = %d, want 3", len(out))
 	}
-	if out[0] != 1.0 {
-		t.Fatalf("out[0] = %v, want 1.0", out[0])
+	if out[0] != 1.0 && out[0] != int64(1) {
+		t.Fatalf("out[0] = %v (%T), want 1.0", out[0], out[0])
 	}
 	if out[1] != "two" {
 		t.Fatalf("out[1] = %v, want two", out[1])
@@ -64,7 +67,8 @@ func TestFromJSValueArray(t *testing.T) {
 }
 
 func TestFromJSValueObject(t *testing.T) {
-	obj := jsc.NewObject(nil)
+	in := jsc.NewInterpreter()
+	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.Set("name", jsc.StringValue("Alice"))
 	obj.Set("age", jsc.NumberValue(30))
 	got, err := FromJSValue(jsc.ObjectValue(obj))
@@ -78,29 +82,31 @@ func TestFromJSValueObject(t *testing.T) {
 	if out["name"] != "Alice" {
 		t.Fatalf("name = %v, want Alice", out["name"])
 	}
-	if out["age"] != 30.0 {
-		t.Fatalf("age = %v, want 30", out["age"])
+	if out["age"] != 30.0 && out["age"] != int64(30) {
+		t.Fatalf("age = %v (%T), want 30", out["age"], out["age"])
 	}
 }
 
 func TestFromJSValueNested(t *testing.T) {
-	inner := jsc.NewObject(nil)
+	in := jsc.NewInterpreter()
+	proto := in.ObjectPrototype()
+	inner := jsc.NewObject(proto)
 	inner.Set("x", jsc.NumberValue(1))
-	outer := jsc.NewObject(nil)
+	outer := jsc.NewObject(proto)
 	outer.Set("nested", jsc.ObjectValue(inner))
-	outer.Set("list", jsc.ObjectValue(jsc.NewArray(nil, []jsc.JSValue{jsc.NumberValue(10), jsc.NumberValue(20)})))
+	outer.Set("list", jsc.ObjectValue(jsc.NewArray(proto, []jsc.JSValue{jsc.NumberValue(10), jsc.NumberValue(20)})))
 	got, err := FromJSValue(jsc.ObjectValue(outer))
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
 	out := got.(map[string]any)
 	nested := out["nested"].(map[string]any)
-	if nested["x"] != 1.0 {
-		t.Fatalf("nested.x = %v, want 1", nested["x"])
+	if nested["x"] != 1.0 && nested["x"] != int64(1) {
+		t.Fatalf("nested.x = %v (%T), want 1", nested["x"], nested["x"])
 	}
 	list := out["list"].([]any)
-	if list[1] != 20.0 {
-		t.Fatalf("list[1] = %v, want 20", list[1])
+	if list[1] != 20.0 && list[1] != int64(20) {
+		t.Fatalf("list[1] = %v (%T), want 20", list[1], list[1])
 	}
 }
 
@@ -126,7 +132,7 @@ func TestFromJSValueRoundTrip(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 	m := back.(map[string]any)
-	if m["a"] != 1.0 || m["b"] != "two" {
+	if (m["a"] != 1.0 && m["a"] != int64(1)) || m["b"] != "two" {
 		t.Fatalf("round-trip lost data: %#v", m)
 	}
 }

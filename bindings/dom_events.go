@@ -21,11 +21,12 @@ import (
 )
 
 // listenerKey identifies a registered JS callback by its (event type, JS function
-// identity). The function identity is the *JSFunction pointer, which is stable for a
-// given JS function value (a script closure or native function reference).
+// identity). The function identity is the *JSFunction.String() (which is a stable
+// pointer-based id like "js:0x..."), because AsFunction() creates a new *JSFunction
+// each call so pointer identity is unreliable.
 type listenerKey struct {
 	eventType string
-	fn        *jsc.JSFunction
+	fnID      string
 }
 
 // registeredListeners is the side-table mapping a listenerKey to the jsListener
@@ -75,7 +76,7 @@ func makeAddEventListener(target dom.EventTarget) *jsc.JSFunction {
 			// listener so removal can find the active instance.
 			target.AddEventListener(eventType, listener, capture)
 			if jsFn.IsFunction() {
-				key := listenerKey{eventType: eventType, fn: jsFn.AsFunction()}
+				key := listenerKey{eventType: eventType, fnID: jsFn.AsFunction().String()}
 				registeredListeners[key] = append(registeredListeners[key], listener)
 			}
 			return jsc.Undefined()
@@ -96,7 +97,7 @@ func makeRemoveEventListener(target dom.EventTarget) *jsc.JSFunction {
 			if len(args) >= 3 {
 				capture = args[2].ToBoolean()
 			}
-			key := listenerKey{eventType: eventType, fn: args[1].AsFunction()}
+			key := listenerKey{eventType: eventType, fnID: args[1].AsFunction().String()}
 			list := registeredListeners[key]
 			for i, l := range list {
 				if target.RemoveEventListener(eventType, l, capture) {

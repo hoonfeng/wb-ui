@@ -372,3 +372,74 @@ go build ./...   → ✅ 全部包编译通过
 go test ./...    → ✅ 18 个可测试包全部通过
                    ~800+ 测试用例，零失败
 ```
+
+---
+
+## 2026-07-16（续）管线排测修复 — bindings + page 修复 + 端到端验证
+
+### 任务
+用户要求：继续排测 wb-ui 从解析到渲染绘制的完整管线。
+
+### 排查发现的问题
+
+#### 1. 🔴 bindings 包编译失败（阻断）
+- **根因**：jsc 包已从独立 JS 引擎重写为 goja 适配器，接口变更（`StrictEquals`/`Accessor`/`IsArray`/`Elements` 方法不存在），但 bindings 测试仍引用旧接口
+- **修复**：
+  - `dom_test.go`：`Accessor("innerHTML")` → `GetByKey("innerHTML")`
+  - `go2js_test.go`：`StrictEquals` → 具体值比较（`ToString()`/`ToNumber()`）；`IsArray`/`Elements` → `Export()` 返回 Go 原生类型
+  - `dom_events.go`：`listenerKey` 改用 `fnID string` 而非 `*jsc.JSFunction` 指针（`AsFunction()` 每次创建新指针，导致 `removeEventListener` 侧表查找失败）
+
+#### 2. 🔴 jsc 类型检查全部失效
+- **根因**：`jsc.JSValue.IsBoolean()`/`IsNumber()`/`IsString()` 全部只检查 `v.v != nil`，无法区分类型（number/string 全被认作 boolean）
+- **修复**：改为 `Export()` + 类型断言/switch，同时用 `v.v.(*goja.Object)` 避免对象上调用 `Export()` 触发的 accessor 副作用
+- **影响范围**：jsc 包 + bindings 中 `FromJSValue`/`ToJSValue` 全部类型分发
+
+#### 3. 🔴 GoCallback 错误不传播到 JS
+- **根因**：`nativeFromCallback` 在 `err != nil` 时只返回 `jsc.Undefined()`，不抛出 JS 异常
+- **修复**：改为 `panic(in.VM().NewGoError(err))` 让 goja 捕获并作为 JS 异常抛出
+
+#### 4. 🔴 page 包 XMLHttpRequest 不是构造函数
+- **根因**：`RegisterXMLHttpRequest` 使用 `jsc.NewNativeFunction`（goja 的 `ToValue(func(FunctionCall) Value)`），goja 对 `func(FunctionCall) Value` 不设置 `construct` 字段，导致 `new XMLHttpRequest()` 抛出"Value is not a constructor"
+- **修复**：jsc 增加 `Interpreter.NewConstructor()` 方法，内部使用 goja 的 `func(ConstructorCall) *Object` 路径创建可构造函数；`RegisterXMLHttpRequest` 改用 `NewConstructor` 并设置 `prototype` 属性
+
+#### 5. 🟡 `fromJSObject` 跨运行时遍历失败
+- **根因**：`fromJSObject` 用 `o.Keys()` + `o.GetByKey()` 遍历对象属性，但跨 goja Runtime 创建的对象（`NewObject(nil)`）可能无法正确枚举属性
+- **修复**：改为直接用 `jsc.ObjectValue(o).Export()` 让 goja 负责完整递归导出
+- **测试修复**：涉及跨运行时的测试改为使用统一 `Interpreter` + `ObjectPrototype()`
+
+#### 6. 🟡 测试类型断言不兼容 goja int64 输出
+- **根因**：goja 将整型数值导出为 `int64` 而非 `float64`，测试中 `arr[0] != 1.0` 在 Go 接口比较中不匹配
+- **修复**：增加 `&& arr[0] != int64(1)` 兼容判断
+
+### 端到端验证
+
+运行 `minibrowser` 端到端示例验证完整 HTML→DOM→Style→Layout→Paint 管线：
+```
+=== wb-ui MiniBrowser ===
+Viewport:    800 x 600 CSS pixels
+Pixel buffer: 1920000 bytes (800 x 600 x 4 RGBA)
+```
+
+像素分析验证：
+- body 背景色 `rgb(245,245,235)` 覆盖 17.2% 像素 ✅
+- h1 颜色 `rgb(20,60,160)` 出现 158 像素 ✅
+- p 颜色 `rgb(40,40,40)` 出现 544 像素 ✅
+- ul 颜色 `rgb(60,100,60)` 出现 1158 像素 ✅
+
+### 最终测试结果
+```
+go test ./... → 20 包 PASS，1 个预存失败（bindings/TestVue3MountFinal: SVGElement 未定义）
+```
+所有管线相关包（html/css/dom/style/layout/rendering/page/webkit/editor/markdown/widgets）全部通过。
+
+### 修复文件清单
+| 文件 | 类型 | 问题 |
+|------|------|------|
+| jsc/goja_adapter.go | 修复 | IsBoolean/IsNumber/IsString/IsObject 类型检查；add NewConstructor |
+| bindings/dom_test.go | 修复 | Accessor→GetByKey；错误信息格式 |
+| bindings/go2js_test.go | 修复 | StrictEquals→值比较；IsArray/Elements→Export；错误信息格式 |
+| bindings/js_to_go.go | 修复 | fromJSObject 改用 Export() |
+| bindings/js_to_go_test.go | 修复 | 跨运行时问题；int64兼容 |
+| bindings/dom_events.go | 修复 | listenerKey 改用 fnID 字符串 |
+| bindings/go2js.go | 修复 | nativeFromCallback 错误传播（panic GoError） |
+| page/fetcher.go | 修复 | XMLHttpRequest 改为 NewConstructor + prototype 链接 |

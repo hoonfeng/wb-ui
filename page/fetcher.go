@@ -225,8 +225,8 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 	}, 0)
 	proto.Set("abort", jsc.FunctionValue(abortFn))
 
-	ctor := jsc.NewNativeFunction("XMLHttpRequest", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-		xhr := jsc.NewObject(proto)
+	ctor := rt.NewConstructor("XMLHttpRequest", func(_ *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+		xhr := this.AsObject()
 		xhr.SetClassName("XMLHttpRequest")
 		xhr.Set("readyState", jsc.NumberValue(0))
 		xhr.Set("status", jsc.NumberValue(0))
@@ -235,8 +235,12 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		xhr.Set("response", jsc.Null())
 		xhr.Set("timeout", jsc.NumberValue(0))
 		xhr.Set("withCredentials", jsc.BooleanValue(false))
-		return jsc.ObjectValue(xhr)
-	}, 0)
+		return xhr
+	})
+	// Link constructor.prototype = proto so new XMLHttpRequest() inherits methods
+	ctorObj := jsc.FunctionValue(ctor).AsObject()
+	ctorObj.Set("prototype", jsc.ObjectValue(proto))
+	proto.Set("constructor", jsc.FunctionValue(ctor))
 	rt.GlobalObject().Set("XMLHttpRequest", jsc.FunctionValue(ctor))
 }
 

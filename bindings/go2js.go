@@ -127,8 +127,10 @@ func nativeFromCallback(cb GoCallback) *jsc.JSFunction {
 	return jsc.NewNativeFunction("goFunction", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		v, err := cb(args)
 		if err != nil {
-			// Simplified: log error, no throw mechanism in new facade yet
-			_ = in
+			// panic with GoError to trigger JS exception in goja
+			if in != nil && in.VM() != nil {
+				panic(in.VM().NewGoError(err))
+			}
 			return jsc.Undefined()
 		}
 		return v

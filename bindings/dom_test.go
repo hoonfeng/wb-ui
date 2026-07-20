@@ -309,10 +309,10 @@ func TestElementWrapperStructExposesBothHalves(t *testing.T) {
 	if w.DOM == nil || w.JS == nil {
 		t.Fatalf("wrapper halves should be set")
 	}
-	if w.JS.Accessor("innerHTML") == nil {
+	if _, ok := w.JS.GetByKey("innerHTML"); !ok {
 		t.Fatalf("innerHTML accessor should be installed")
 	}
-	if w.JS.Accessor("innerHTML") == nil {
+	if _, ok := w.JS.GetByKey("innerHTML"); !ok {
 		t.Fatalf("innerHTML accessor should be installed")
 	}
 }
@@ -334,7 +334,7 @@ func TestDOMErrorPropagation(t *testing.T) {
 			console.log("caught:" + e);
 		}
 	`)
-	if got := strings.TrimSpace(log.String()); got != "caught:Error: dom error" {
-		t.Fatalf("got %q, want 'caught:Error: dom error'", got)
+	if got := strings.TrimSpace(log.String()); got != "caught:GoError: dom error" {
+		t.Fatalf("got %q, want 'caught:GoError: dom error'", got)
 	}
 }

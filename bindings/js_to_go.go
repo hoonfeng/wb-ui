@@ -12,7 +12,6 @@ package bindings
 
 import (
 	"errors"
-	"fmt"
 
 	"wb-ui/jsc"
 )
@@ -62,28 +61,14 @@ func fromJSObject(o *jsc.JSObject) (any, error) {
 	if o == nil {
 		return nil, nil
 	}
-	// Check if it's an array by looking for "length" property
-	lengthObj := o.GetStr("length")
-	if lengthObj.IsNumber() {
-		n := int(lengthObj.AsNumber())
-		out := make([]any, 0, n)
-		for i := 0; i < n; i++ {
-			key := fmt.Sprintf("%d", i)
-			if v, ok := o.GetByKey(key); ok {
-				conv, err := FromJSValue(v)
-				if err != nil {
-					return nil, err
-				}
-				out = append(out, conv)
-			}
-		}
-		return out, nil
+	// Use Export() to get the Go native representation.
+	// goja.Object.Export() returns:
+	//   - []interface{} for arrays
+	//   - map[string]interface{} for plain objects
+	//   - nil for null/undefined
+	exported := jsc.ObjectValue(o).Export()
+	if exported == nil {
+		return nil, nil
 	}
-	// Plain object: collect all string-keyed properties
-	out := make(map[string]any)
-	// We can't directly iterate the unexported properties map.
-	// Use a simple approach: return empty for now.
-	_ = o
-	_ = out
-	return map[string]any{}, nil
+	return exported, nil
 }

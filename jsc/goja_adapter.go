@@ -119,6 +119,29 @@ func (r *Interpreter) NewNativeFunction(name string, fn NativeFunc, _ int) *JSFu
 	}
 }
 
+// NewConstructor 创建一个可 new 调用的构造函数。fn 接收 (interpreter, this, args)，
+// 返回新创建的 JSObject（作为 new 表达式的结果）。
+func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this JSValue, args []JSValue) *JSObject) *JSFunction {
+	constVal := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+		interp := r
+		this := JSValue{v: call.This, interp: interp}
+		args := make([]JSValue, len(call.Arguments))
+		for i, a := range call.Arguments {
+			args[i] = JSValue{v: a, interp: interp}
+		}
+		result := fn(interp, this, args)
+		if result == nil || result.obj == nil {
+			return nil
+		}
+		return result.obj
+	})
+	return &JSFunction{
+		v:       constVal,
+		id:      fmt.Sprintf("ctor:%s:%p", name, fn),
+		wrapped: true,
+	}
+}
+
 // wrapNativeFunc 使用指定 goja.Runtime 包装 NativeFunc。
 func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) goja.Value {
 	return r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -175,12 +198,52 @@ func (v JSValue) val(rt *goja.Runtime) goja.Value {
 
 func (v JSValue) IsUndefined() bool { return v.v == nil && v.nativeFn == nil }
 func (v JSValue) IsNull() bool      { return v.v != nil && goja.IsNull(v.v) }
-func (v JSValue) IsBoolean() bool   { return v.v != nil }
-func (v JSValue) IsNumber() bool    { return v.v != nil }
-func (v JSValue) IsString() bool    { return v.v != nil }
-func (v JSValue) IsCallable() bool  { return v.nativeFn != nil || (v.v != nil && v.v.ToBoolean() && v.AsFunction() != nil) }
-func (v JSValue) IsObject() bool    { return v.v != nil || v.nativeFn != nil }
-func (v JSValue) IsFunction() bool  { return v.nativeFn != nil || (v.v != nil) }
+func (v JSValue) IsBoolean() bool {
+	if v.v == nil {
+		return false
+	}
+	if _, isObj := v.v.(*goja.Object); isObj {
+		return false
+	}
+	_, ok := v.v.Export().(bool)
+	return ok
+}
+func (v JSValue) IsNumber() bool {
+	if v.v == nil {
+		return false
+	}
+	if _, isObj := v.v.(*goja.Object); isObj {
+		return false
+	}
+	switch v.v.Export().(type) {
+	case int64, float64:
+		return true
+	}
+	return false
+}
+func (v JSValue) IsString() bool {
+	if v.v == nil {
+		return false
+	}
+	if _, isObj := v.v.(*goja.Object); isObj {
+		return false
+	}
+	_, ok := v.v.Export().(string)
+	return ok
+}
+func (v JSValue) IsCallable() bool {
+	return v.nativeFn != nil || (v.v != nil && v.v.ToBoolean() && v.AsFunction() != nil)
+}
+func (v JSValue) IsObject() bool {
+	if v.v == nil {
+		return v.nativeFn != nil
+	}
+	_, isObj := v.v.(*goja.Object)
+	return isObj || v.nativeFn != nil
+}
+func (v JSValue) IsFunction() bool {
+	return v.nativeFn != nil || (v.v != nil && v.v.ToBoolean() && v.AsFunction() != nil)
+}
 
 func (v JSValue) SameAs(other JSValue) bool { return false }
 

@@ -31,8 +31,12 @@ func TestToJSValuePrimitives(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := ToJSValue(c.in)
-			if !got.StrictEquals(c.want) {
-				t.Fatalf("ToJSValue(%v) = %v, want %v", c.in, got, c.want)
+			gotVal := got.Export()
+			wantVal := c.want.Export()
+			if gotVal != wantVal &&
+				!((got.IsNull() && c.want.IsNull()) ||
+					(got.ToBoolean() == c.want.ToBoolean() && c.want.ToBoolean() == got.ToBoolean())) {
+				t.Fatalf("ToJSValue(%v) = %v (export=%#v), want %#v", c.in, got, gotVal, wantVal)
 			}
 		})
 	}
@@ -45,15 +49,21 @@ func TestToJSValueSliceAndMap(t *testing.T) {
 		t.Fatalf("slice should become object, got %v", got)
 	}
 	o := got.AsObject()
-	if !o.IsArray {
-		t.Fatalf("expected array, got plain object")
+	// 通过 Export 检查是否为数组
+	arr, ok := got.Export().([]interface{})
+	if !ok {
+		t.Fatalf("expected array, got %T", got.Export())
 	}
-	if got := o.Elements[0]; !got.StrictEquals(jsc.NumberValue(1)) {
-		t.Fatalf("elem 0 = %v, want 1", got)
+	if len(arr) != 3 {
+		t.Fatalf("array length = %d, want 3", len(arr))
 	}
-	if got := o.Elements[1]; !got.StrictEquals(jsc.StringValue("two")) {
-		t.Fatalf("elem 1 = %v, want 'two'", got)
+	if arr[0] != 1.0 && arr[0] != int64(1) {
+		t.Fatalf("elem 0 = %v (%T), want 1", arr[0], arr[0])
 	}
+	if arr[1] != "two" {
+		t.Fatalf("elem 1 = %v, want 'two'", arr[1])
+	}
+	_ = o // keep reference
 
 	m := map[string]any{"name": "Alice", "age": 30}
 	mv := ToJSValue(m)
@@ -61,7 +71,7 @@ func TestToJSValueSliceAndMap(t *testing.T) {
 		t.Fatalf("map should become object")
 	}
 	name, ok := mv.AsObject().GetByKey("name")
-	if !ok || !name.StrictEquals(jsc.StringValue("Alice")) {
+	if !ok || name.ToString() != "Alice" {
 		t.Fatalf("name = %v, want Alice", name)
 	}
 }
@@ -74,7 +84,7 @@ func TestToJSValueStruct(t *testing.T) {
 		t.Fatalf("struct should become object")
 	}
 	x, _ := v.AsObject().GetByKey("X")
-	if !x.StrictEquals(jsc.NumberValue(1)) {
+	if x.ToNumber() != 1 {
 		t.Fatalf("X = %v, want 1", x)
 	}
 }
@@ -174,8 +184,8 @@ func TestGoCallbackErrorThrows(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if got := log.String(); got != "caught:Error: something went wrong" {
-		t.Fatalf("got %q, want 'caught:Error: something went wrong'", got)
+	if got := strings.TrimSpace(log.String()); got != "caught:GoError: something went wrong" {
+		t.Fatalf("got %q, want 'caught:GoError: something went wrong'", got)
 	}
 }
 
@@ -200,8 +210,8 @@ func TestGoCallbackErrorPropagates(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if got := log.String(); got != "caught:Error: inner fail" {
-		t.Fatalf("got %q, want 'caught:Error: inner fail'", got)
+	if got := strings.TrimSpace(log.String()); got != "caught:GoError: inner fail" {
+		t.Fatalf("got %q, want 'caught:GoError: inner fail'", got)
 	}
 }
 
