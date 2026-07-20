@@ -550,8 +550,8 @@ func TestResolver_EmptyStyleSheet(t *testing.T) {
 	if cs.Color.R != 0 || cs.Color.G != 0 || cs.Color.B != 0 {
 		t.Fatalf("color=%v want default black (0,0,0)", cs.Color)
 	}
-	if cs.Display != DisplayInline {
-		t.Fatalf("display=%v want default inline", cs.Display)
+	if cs.Display != DisplayBlock {
+		t.Fatalf("display=%v want DisplayBlock (p is a block element by default)", cs.Display)
 	}
 }
 

@@ -185,6 +185,12 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 		cs.InheritFrom(parentCS)
 	}
 
+	// Apply the HTML UA default display mapping before any author declarations, so
+	// that block-type elements (section, article, div, p, h1-h6, …) start with
+	// DisplayBlock — mirroring the browser UA stylesheet. Author declarations (CSS
+	// in <style> or the style attribute) override this default via the cascade.
+	applyDefaultDisplay(cs, el)
+
 	// Collect declarations in cascade order.
 	var collected []collectedDecl
 	for _, sheet := range r.sheets {
@@ -1446,6 +1452,41 @@ func tokensToString(tokens []css.Token) string {
 		}
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// applyDefaultDisplay sets the default display property based on the HTML tag name,
+// mirroring the browser's UA stylesheet default display mapping. This runs before
+// any author declarations so that CSS rules can override the default.
+func applyDefaultDisplay(cs *ComputedStyle, el *dom.Element) {
+	tag := strings.ToLower(el.LocalName())
+	switch tag {
+	// Block elements
+	case "html", "body", "main", "section", "article", "nav", "aside",
+		"header", "footer", "hgroup", "figure", "figcaption",
+		"div", "p", "hr", "pre", "blockquote", "address",
+		"h1", "h2", "h3", "h4", "h5", "h6",
+		"ul", "ol", "dl", "dt", "dd",
+		"table", "caption", "colgroup", "col", "tbody", "thead", "tfoot", "tr",
+		"fieldset", "legend", "form", "details", "summary", "dialog":
+		cs.Display = DisplayBlock
+		cs.DisplaySet = true
+	// Inline-block replaced elements
+	case "button", "input", "textarea", "select", "meter", "progress",
+		"img", "canvas", "video", "audio", "object", "embed":
+		cs.Display = DisplayInlineBlock
+		cs.DisplaySet = true
+	// Table-cell
+	case "td", "th":
+		cs.Display = DisplayTableCell
+		cs.DisplaySet = true
+	// List-item
+	case "li":
+		cs.Display = DisplayListItem
+		cs.DisplaySet = true
+	// Inline (default from NewComputedStyle, no-op)
+	default:
+		// keep DisplayInline from NewComputedStyle
+	}
 }
 
 // parentElement returns the parent element of el, or nil if the parent is not an
