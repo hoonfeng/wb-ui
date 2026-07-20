@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dop251/goja"
+	"wb-ui.com/goja"
 )
 
 // ─── BufferLogger ───────────────────────────────────────

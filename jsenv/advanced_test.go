@@ -30,7 +30,7 @@ func TestAdvancedES6(t *testing.T) {
 		{name: "Array.find", code: `[1,2,3].find(x => x > 1)`, want: "2", skipMsg: ""},
 		{name: "Array.flat", code: `[[1],[2],[3]].flat().length`, want: "3", skipMsg: ""},
 		{name: "async generator", code: `async function* f() { yield 1; }; const g = f(); g.next()`, want: "", skipMsg: "暂不测试"},
-		{name: "for-await-of", code: `async function f() { let s = 0; for await (const v of [1,2,3]) { s += v; }; return s; }; f()`, want: "", skipMsg: "暂不测试"},
+		{name: "for-await-of", code: `async function f() { let s = 0; for await (const v of [1,2,3]) { s += v; }; return s; }; f()`, want: "6", skipMsg: ""},
 		{name: "import()", code: `import('fs')`, want: "", skipMsg: "暂不测试"},
 	}
 

@@ -3,7 +3,7 @@ module wb-ui
 go 1.22
 
 require (
-	github.com/dop251/goja v0.0.0-20260627200808-0b76000cabdb
+	wb-ui.com/goja v0.0.0-00010101000000-000000000000
 )
 
-replace github.com/dop251/goja => F:\syproject\goja
+replace wb-ui.com/goja => ./goja
