@@ -113,6 +113,7 @@ type ImplementationVisibility uint8
 const (
 	ImplementationVisibilityPublic ImplementationVisibility = iota
 	ImplementationVisibilityPrivate
+	ImplementationVisibilityPrivateRecursive
 )
 
 // SourceParseMode 源代码解析模式

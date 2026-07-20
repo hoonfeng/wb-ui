@@ -1,18 +1,10 @@
 // 包 bytecompiler 是 JavaScriptCore bytecompiler 模块的 Go 翻译
-//
-// 从 WebKit Source/JavaScriptCore/bytecompiler/ 翻译为 Go
 package bytecompiler
 
-// BytecodeGenerator 字节码生成器
+// BytecodeGenerator 字节码生成器 (stub)
 type BytecodeGenerator struct{}
 
-// RegisterID 寄存器标识符
-type RegisterID struct{}
+// BytecodeGeneratorBase 字节码生成器基类 (stub)
+type BytecodeGeneratorBase struct{}
 
-// Label 表示字节码跳转标签
-type Label struct{}
-
-// NewLabel 创建新标签
-func NewLabel(ref *Label) *Label {
-	return &Label{}
-}
+func (b *BytecodeGeneratorBase) WriterPosition() int { return 0 }

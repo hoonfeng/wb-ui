@@ -78,7 +78,12 @@ const (
 	pneIsGetter uint16 = 1 << 1
 	pneIsSetter uint16 = 1 << 2
 	pneIsStatic uint16 = 1 << 3
+	pneIsField  uint16 = 1 << 4
 )
+
+func (e *PrivateNameEntry) SetMethod() { e.bits |= pneIsMethod }
+func (e *PrivateNameEntry) SetField()  { e.bits |= pneIsField }
+func (e *PrivateNameEntry) SetStatic() { e.bits |= pneIsStatic }
 
 func NewPrivateNameEntry(traits uint16) PrivateNameEntry {
 	return PrivateNameEntry{bits: traits}
@@ -152,10 +157,96 @@ func (env *VariableEnvironment) MarkVariableAsCaptured(ident string) {
 }
 
 func (env *VariableEnvironment) Captures(ident string) bool {
-	if entry, ok := env.variables[ident]; ok {
-		return entry.IsCaptured()
-	}
 	return false
+}
+
+// Convenience methods for VariableEnvironmentEntry delegation
+func (env *VariableEnvironment) Has(ident string) bool {
+	return env.Contains(ident)
+}
+
+func (env *VariableEnvironment) Get(ident string) *VariableEnvironmentEntry {
+	return env.Find(ident)
+}
+
+func (env *VariableEnvironment) SetIsVar(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsVar() }
+}
+
+func (env *VariableEnvironment) SetIsLet(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsLet() }
+}
+
+func (env *VariableEnvironment) SetIsConst(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsConst() }
+}
+
+func (env *VariableEnvironment) SetIsFunction(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsFunction() }
+}
+
+func (env *VariableEnvironment) SetIsFunctionDeclaration(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsFunctionDeclaration() }
+}
+
+func (env *VariableEnvironment) SetIsParameter(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsParameter() }
+}
+
+func (env *VariableEnvironment) SetIsExported(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsExported() }
+}
+
+func (env *VariableEnvironment) SetIsImported(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsImported() }
+}
+
+func (env *VariableEnvironment) SetIsImportedNamespace(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsImportedNamespace() }
+}
+
+func (env *VariableEnvironment) SetIsCaptured(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsCaptured() }
+}
+
+func (env *VariableEnvironment) SetIsUsing(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsUsing() }
+}
+
+func (env *VariableEnvironment) SetIsSloppyModeHoistedFunction(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsSloppyModeHoistedFunction() }
+}
+
+func (env *VariableEnvironment) SetIsPrivateField(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsPrivateField() }
+}
+
+func (env *VariableEnvironment) SetIsPrivateMethod(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.SetIsPrivateMethod() }
+}
+
+func (env *VariableEnvironment) ClearIsVar(ident string) {
+	if entry := env.Find(ident); entry != nil { entry.ClearIsVar() }
+}
+
+func (env *VariableEnvironment) IsVar(ident string) bool {
+	if entry := env.Find(ident); entry != nil { return entry.IsVar() }; return false
+}
+
+func (env *VariableEnvironment) IsParameter(ident string) bool {
+	if entry := env.Find(ident); entry != nil { return entry.IsParameter() }; return false
+}
+
+func (env *VariableEnvironment) IsFunctionDeclaration(ident string) bool {
+	if entry := env.Find(ident); entry != nil { return entry.IsFunctionDeclaration() }; return false
+}
+
+func (env *VariableEnvironment) IsCaptured(ident string) bool {
+	return env.Captures(ident)
+}
+
+func (env *VariableEnvironment) Map() map[string]*VariableEnvironmentEntry {
+	return env.variables
 }
 
 func (env *VariableEnvironment) CapturesUid(uid uintptr) bool {
@@ -225,6 +316,66 @@ func (env *VariableEnvironment) PrivateNamesSize() int {
 func (env *VariableEnvironment) HasPrivateName(ident string) bool {
 	_, ok := env.privateNames[ident]
 	return ok
+}
+
+// PrivateDeclarationResult
+type VariableEnvironmentPrivateDeclarationResult int
+const (
+	VariableEnvironmentPrivateDeclarationResultSuccess VariableEnvironmentPrivateDeclarationResult = iota
+	VariableEnvironmentPrivateDeclarationResultDuplicatedName
+	VariableEnvironmentPrivateDeclarationResultInvalidStaticNonStatic
+)
+
+func (env *VariableEnvironment) DeclarePrivateMethod(ident string) bool {
+	if _, ok := env.privateNames[ident]; ok { return false }
+	e := &PrivateNameEntry{}; e.SetMethod()
+	env.privateNames[ident] = e; return true
+}
+
+func (env *VariableEnvironment) DeclareStaticPrivateMethod(ident string) bool {
+	if _, ok := env.privateNames[ident]; ok { return false }
+	e := &PrivateNameEntry{}; e.SetMethod(); e.SetStatic()
+	env.privateNames[ident] = e; return true
+}
+
+func (env *VariableEnvironment) DeclarePrivateField(ident string) bool {
+	if _, ok := env.privateNames[ident]; ok { return false }
+	e := &PrivateNameEntry{}; e.SetField()
+	env.privateNames[ident] = e; return true
+}
+
+func (env *VariableEnvironment) DeclarePrivateSetter(ident string) VariableEnvironmentPrivateDeclarationResult {
+	if entry, ok := env.privateNames[ident]; ok {
+		if entry.bits&pneIsGetter != 0 { return VariableEnvironmentPrivateDeclarationResultInvalidStaticNonStatic }
+		return VariableEnvironmentPrivateDeclarationResultDuplicatedName
+	}
+	env.privateNames[ident] = &PrivateNameEntry{bits: pneIsSetter}; return VariableEnvironmentPrivateDeclarationResultSuccess
+}
+
+func (env *VariableEnvironment) DeclarePrivateGetter(ident string) VariableEnvironmentPrivateDeclarationResult {
+	if entry, ok := env.privateNames[ident]; ok {
+		if entry.bits&pneIsSetter != 0 { return VariableEnvironmentPrivateDeclarationResultInvalidStaticNonStatic }
+		return VariableEnvironmentPrivateDeclarationResultDuplicatedName
+	}
+	env.privateNames[ident] = &PrivateNameEntry{bits: pneIsGetter}; return VariableEnvironmentPrivateDeclarationResultSuccess
+}
+
+func (env *VariableEnvironment) DeclareStaticPrivateSetter(ident string) VariableEnvironmentPrivateDeclarationResult {
+	if entry, ok := env.privateNames[ident]; ok {
+		if entry.bits&pneIsGetter != 0 { return VariableEnvironmentPrivateDeclarationResultInvalidStaticNonStatic }
+		return VariableEnvironmentPrivateDeclarationResultDuplicatedName
+	}
+	e := &PrivateNameEntry{}; e.bits = pneIsSetter | pneIsStatic; env.privateNames[ident] = e
+	return VariableEnvironmentPrivateDeclarationResultSuccess
+}
+
+func (env *VariableEnvironment) DeclareStaticPrivateGetter(ident string) VariableEnvironmentPrivateDeclarationResult {
+	if entry, ok := env.privateNames[ident]; ok {
+		if entry.bits&pneIsSetter != 0 { return VariableEnvironmentPrivateDeclarationResultInvalidStaticNonStatic }
+		return VariableEnvironmentPrivateDeclarationResultDuplicatedName
+	}
+	e := &PrivateNameEntry{}; e.bits = pneIsGetter | pneIsStatic; env.privateNames[ident] = e
+	return VariableEnvironmentPrivateDeclarationResultSuccess
 }
 
 func (env *VariableEnvironment) Swap(other *VariableEnvironment) {
