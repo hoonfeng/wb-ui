@@ -20,6 +20,7 @@ package rendering
 import (
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
+	"wb-ui/style"
 	"wb-ui/widgets"
 )
 
@@ -115,35 +116,55 @@ func paintSubtreeByPhase(root RenderObject, info *PaintInfo, excluded map[Render
 		return
 	}
 	info.SetPhase(PhaseBackground)
-	walkSubtreeExcluded(root, excluded, func(o RenderObject) { paintObjectBackground(o, info) })
+	walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) { paintObjectBackground(o, info) })
 	// Paint selection highlight after backgrounds but before text, so text
 	// appears on top of the selection. Only done at the RenderView root.
 	if rv, ok := root.(*RenderView); ok {
 		PaintSelection(rv, info)
 	}
 	info.SetPhase(PhaseForeground)
-	walkSubtreeExcluded(root, excluded, func(o RenderObject) { paintObjectForeground(o, info) })
+	walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) { paintObjectForeground(o, info) })
 	// Paint the caret after the foreground so it appears on top of text.
 	if rv, ok := root.(*RenderView); ok {
 		PaintCaret(rv, info)
 	}
 	info.SetPhase(PhaseOutline)
-	walkSubtreeExcluded(root, excluded, func(o RenderObject) { paintObjectOutline(o, info) })
+	walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) { paintObjectOutline(o, info) })
 }
 
 // walkSubtreeExcluded performs a pre-order traversal of the subtree rooted at root,
 // invoking visit for each node except those in excluded (whose subtrees are also
-// skipped).
-func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, visit func(RenderObject)) {
+// skipped). When a box has overflow:hidden on both axes, the canvas is saved and
+// clipped to the box's padding box before traversing children, then restored
+// after all children are done.
+func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info *PaintInfo, visit func(RenderObject, *PaintInfo)) {
 	if root == nil {
 		return
 	}
 	if excluded[root] {
 		return
 	}
-	visit(root)
+	visit(root, info)
+
+	// Apply overflow:hidden clipping before traversing children.
+	var needsClipRestore bool
+	if box := asRenderBox(root); box != nil {
+		if st := box.Style(); st != nil && st.OverflowX == style.OverflowHidden && st.OverflowY == style.OverflowHidden {
+			if info != nil && info.canvas != nil {
+				info.canvas.Save()
+				pb := box.PaddingBoxRect()
+				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
+				needsClipRestore = true
+			}
+		}
+	}
+
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
-		walkSubtreeExcluded(c, excluded, visit)
+		walkSubtreeExcluded(c, excluded, info, visit)
+	}
+
+	if needsClipRestore {
+		info.canvas.Restore()
 	}
 }
 
