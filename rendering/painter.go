@@ -367,11 +367,14 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	content := text.OriginalText()
 	segments := text.Segments()
 	ascent := info.canvas.FontAscent(font)
+
+	// DEBUG: print segments info
+	debugContent := content
+	_ = debugContent
+
 	if len(segments) == 0 {
-		// No inline segments means this RenderText was not laid out (e.g.
-		// text inside a <select>'s <option> that should not be rendered).
-		// Skip painting — drawing at the origin would place text at the
-		// top-left corner of the window.
+		// Debug: log which RenderText has no segments
+		_ = content
 		return
 	}
 	runes := []rune(content)

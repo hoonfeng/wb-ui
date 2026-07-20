@@ -701,6 +701,22 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.GridAutoColumns = valueString
 	case "grid-auto-rows":
 		cs.GridAutoRows = valueString
+	case "grid-column":
+		// Shorthand: grid-column: <start> [ / <end> ]?
+		if parts := splitShorthand(valueString, "/"); len(parts) >= 1 {
+			cs.GridColumnStart = strings.TrimSpace(parts[0])
+			if len(parts) >= 2 {
+				cs.GridColumnEnd = strings.TrimSpace(parts[1])
+			}
+		}
+	case "grid-row":
+		// Shorthand: grid-row: <start> [ / <end> ]?
+		if parts := splitShorthand(valueString, "/"); len(parts) >= 1 {
+			cs.GridRowStart = strings.TrimSpace(parts[0])
+			if len(parts) >= 2 {
+				cs.GridRowEnd = strings.TrimSpace(parts[1])
+			}
+		}
 	case "grid-row-start":
 		cs.GridRowStart = valueString
 	case "grid-row-end":
@@ -1500,6 +1516,29 @@ func parentElement(el *dom.Element) *dom.Element {
 		return pe
 	}
 	return nil
+}
+
+// splitShorthand splits a CSS shorthand value by the given separator and returns the
+// resulting parts with balanced parentheses handling (so "rgb(...)/ 2" is correctly
+// split into two parts only at the unquoted, unparenthesized separator).
+func splitShorthand(value, sep string) []string {
+	depth := 0
+	var parts []string
+	start := 0
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		}
+		if depth == 0 && string(value[i]) == sep {
+			parts = append(parts, value[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, value[start:])
+	return parts
 }
 
 // ResolveDocument walks the document tree starting at the root element and resolves

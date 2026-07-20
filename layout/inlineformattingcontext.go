@@ -280,9 +280,18 @@ func collectInlineItems(box *LayoutBox) []inlineItem {
 		switch {
 		case child.IsTextRun():
 			items = appendTextItems(items, child, child.Text)
-		case child.IsInline() || child.IsReplaced():
+		case child.IsReplaced():
+			// Atomic inline-level replaced elements (img, input, select, etc.)
+			// are treated as a single opaque inline item.
 			adv := inlineBoxAdvance(child)
 			items = append(items, inlineItem{box: child, advance: adv})
+		case child.Type == BoxInline || child.Type == BoxAnonymous:
+			// Inline elements (span, label, a, em, strong, etc.) and anonymous
+			// wrappers (BoxAnonymous) are not atomic: their child text runs and
+			// nested inline boxes participate directly in the parent inline
+			// formatting context's line breaking and positioning, mirroring
+			// WebKit's InlineItemsBuilder flattening.
+			items = collectInlineItems(child)
 		default:
 			// Block-level boxes inside an inline context should not occur (the
 			// anonymous wrapper groups them); skip defensively.
