@@ -80,6 +80,12 @@ func (wv *WebView) LoadHTML(src string) error {
 	}
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
+		// Set up callback for dynamic <style> injection (Vue scoped CSS).
+		bindings.OnStyleNodeAdded = func(n dom.Node) {
+			if fr := wv.mainFrame.Frame(); fr != nil {
+				fr.RebuildRenderTree()
+			}
+		}
 	}
 	return nil
 }
@@ -117,6 +123,12 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 	wv.ensureJSRuntime()
 	if doc := wv.mainFrame.Document(); doc != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, doc)
+		// Ensure callback for dynamic <style> injection.
+		bindings.OnStyleNodeAdded = func(n dom.Node) {
+			if fr := wv.mainFrame.Frame(); fr != nil {
+				fr.RebuildRenderTree()
+			}
+		}
 	}
 	result, err := wv.jsInterpreter.RunJS(script)
 	if err != nil {

@@ -10,6 +10,12 @@ import (
 	"wb-ui/jsc"
 )
 
+// OnStyleNodeAdded is an optional callback invoked when a <style> element is
+// dynamically added to the DOM (via appendChild/insertBefore). The bindings
+// set this from webkit.WebView so the frame can re-extract and apply the new
+// styles. When nil, dynamic <style> injection is silently ignored.
+var OnStyleNodeAdded func(node dom.Node)
+
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	docObj := wrapDocument(rt, document)
 	rt.GlobalObject().Set("document", jsc.ObjectValue(docObj))
@@ -238,6 +244,13 @@ var elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
 
 func clearElementCache() {
 	elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+}
+
+// isStyleElement reports whether n is an HTML <style> element.
+func isStyleElement(n dom.Node) bool {
+	if n == nil { return false }
+	el, ok := n.(*dom.Element)
+	return ok && strings.EqualFold(el.TagName(), "style")
 }
 
 // ─── Element ───────────────────────────────────────────
@@ -548,6 +561,9 @@ obj.SetInternal(frag)
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		frag.AppendChild(n)
+		if OnStyleNodeAdded != nil && isStyleElement(n) {
+			OnStyleNodeAdded(n)
+		}
 		return a
 	})))
 	return obj

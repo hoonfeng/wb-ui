@@ -13,6 +13,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/html5"
+	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/platform/ime"
 	"wb-ui/platform/window"
@@ -102,12 +104,57 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	if wv == nil {
 		return nil, fmt.Errorf("app: WebView is nil")
 	}
+	// Initialize font manager if not already done. First try bundled resources,
+	// then load from system fonts (C:\Windows\Fonts on Windows).
+	if graphics.GetFontManager() == nil {
+		fontDir := findFontDir()
+		_ = graphics.InitFontManager(fontDir)
+		if mgr := graphics.GetFontManager(); mgr != nil {
+			mgr.LoadSystemFonts()
+		}
+	}
+	// Bridge Skia font metrics to the layout engine so inline text measurement
+	// uses real glyph widths instead of fallback estimates.
+	layout.MeasureTextFunc = func(family string, size float64, weight int, style, text string) float64 {
+		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style}, text)
+	}
+	layout.FontMetricsFunc = func(family string, size float64, weight int, style string) (float64, float64, float64) {
+		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style}
+		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
+	}
+
 	wv.Resize(width, height)
 	win, err := window.NewWindow(width, height, title)
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}
 	return &Host{win: win, wv: wv}, nil
+}
+
+// findFontDir searches for the wb-ui bundled font resources directory.
+// Tries several common locations relative to the executable and working dir.
+func findFontDir() string {
+	candidates := []string{
+		"resources/fonts",
+		filepath.Join("..", "resources", "fonts"),
+		filepath.Join("F:\\syproject\\wb-ui", "resources", "fonts"),
+	}
+	// Try relative to the executable.
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append([]string{
+			filepath.Join(exeDir, "resources", "fonts"),
+			filepath.Join(exeDir, "..", "..", "resources", "fonts"),
+			filepath.Join(exeDir, "..", "..", "..", "wb-ui", "resources", "fonts"),
+		}, candidates...)
+	}
+	for _, c := range candidates {
+		abs, _ := filepath.Abs(c)
+		if info, err := os.Stat(abs); err == nil && info.IsDir() {
+			return abs
+		}
+	}
+	return "resources/fonts"
 }
 
 // SetClickHandler installs the callback invoked for non-js: onclick hits.
