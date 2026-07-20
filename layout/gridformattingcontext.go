@@ -112,7 +112,9 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	}
 
 	// Size the rows: auto rows take the max content height of items in that row.
-	rowSizes := sizeTracks(rowTracks, 0, rowGap, func(idx int) float64 {
+	// Use the container's content height as the reference for fr tracks.
+	contentHeight := box.Rect.ContentHeight()
+	rowSizes := sizeTracks(rowTracks, contentHeight, rowGap, func(idx int) float64 {
 		return maxContentHeightOfTrack(items, itemHeights, idx)
 	})
 
@@ -124,6 +126,24 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			y += rowSizes[k] + rowGap
 		}
 		it.box.Rect.Y = y + it.box.Rect.Margin.Top
+	}
+
+	// Set item heights from row spans: the height of each item is the sum of
+	// the row sizes it spans (minus border/padding). Without this, items with
+	// explicit row tracks would have zero height when they have no content.
+	for i := range items {
+		it := &items[i]
+		spanH := 0.0
+		for k := it.rowStart; k < it.rowEnd; k++ {
+			spanH += rowSizes[k]
+			if k > it.rowStart {
+				spanH += rowGap
+			}
+		}
+		it.box.Rect.Height = spanH - it.box.Rect.Border.Vertical() - it.box.Rect.Padding.Vertical()
+		if it.box.Rect.Height < 0 {
+			it.box.Rect.Height = 0
+		}
 	}
 
 	// Auto height of the container: sum of row tracks + gaps.

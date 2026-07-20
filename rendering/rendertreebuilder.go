@@ -89,7 +89,9 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 	// paints as a block. This mirrors the layout package's buildFlexChildren
 	// so the render tree structure matches the layout tree and linkLayoutBoxes
 	// can pair them by DOM element identity.
-	if parent.Style() != nil && isFlexContainerDisplay(parent.Style().Display) {
+	if parent.Style() != nil && (isFlexContainerDisplay(parent.Style().Display) ||
+		parent.Style().Display == style.DisplayGrid ||
+		parent.Style().Display == style.DisplayInlineGrid) {
 		b.buildFlexChildren(parent, el)
 		return
 	}

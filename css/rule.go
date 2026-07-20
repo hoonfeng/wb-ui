@@ -91,8 +91,10 @@ func (d Declaration) ValueString() string {
 // sufficient for diagnostics and the resolver's value-string lookup.
 func serializeToken(t Token) string {
 	switch t.Type {
-	case TokenIdent, TokenAtKeyword, TokenString, TokenURL:
+	case TokenIdent, TokenAtKeyword:
 		return t.Value
+	case TokenString:
+		return "\"" + t.Value + "\""
 	case TokenFunction:
 		return t.Value + "("
 	case TokenHash:
