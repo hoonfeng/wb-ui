@@ -371,6 +371,15 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		if c, ok := parseColor(valueString); ok {
 			cs.BackgroundColor = c
 		}
+	case "background":
+		// Shorthand: try to extract background-color.
+		parts := strings.Fields(valueString)
+		for _, p := range parts {
+			if c, ok := parseColor(p); ok {
+				cs.BackgroundColor = c
+				break
+			}
+		}
 	case "font-family":
 		cs.FontFamily = valueString
 	case "font-size":

@@ -409,9 +409,13 @@ func flexWrapOf(box *LayoutBox) string {
 
 func alignContentOf(box *LayoutBox) string {
 	if box.Style == nil {
-		return ""
+		return "stretch"
 	}
-	return box.Style.AlignContent
+	v := box.Style.AlignContent
+	if v == "" {
+		return "stretch"
+	}
+	return v
 }
 
 func justifyContentOf(box *LayoutBox) string {
@@ -423,9 +427,13 @@ func justifyContentOf(box *LayoutBox) string {
 
 func alignItemsOf(box *LayoutBox) string {
 	if box.Style == nil {
-		return ""
+		return "stretch"
 	}
-	return box.Style.AlignItems
+	v := box.Style.AlignItems
+	if v == "" {
+		return "stretch"
+	}
+	return v
 }
 
 // collectFlexItems returns the visible in-flow children of a flex container as flex
@@ -534,6 +542,14 @@ func crossAxisSize(box *LayoutBox, isRow bool) float64 {
 	return box.Rect.Width
 }
 
+// crossAxisContentSize returns the content-box size on the cross axis.
+func crossAxisContentSize(box *LayoutBox, isRow bool) float64 {
+	if isRow {
+		return box.Rect.ContentHeight()
+	}
+	return box.Rect.ContentWidth()
+}
+
 // setItemPosition positions an item at the given main/cross offset (relative to the
 // flex container content box) applying align-self / align-items cross-axis alignment.
 func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, container *LayoutBox) {
@@ -543,11 +559,10 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	if align == "" || align == "auto" {
 		align = alignItemsOf(container)
 	}
-	// Cross size: stretch to line cross size when align is stretch.
-	lineCross := crossOffset
+	// Cross size: stretch to container cross size when align is stretch.
 	crossSize := it.crossSize
 	if align == "stretch" {
-		crossSize = lineCross - it.crossMargin
+		crossSize = crossAxisContentSize(container, isRow) - it.crossMargin
 		if crossSize < 0 {
 			crossSize = 0
 		}
@@ -561,9 +576,9 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	crossPos := crossOffset
 	switch align {
 	case "center":
-		crossPos = crossOffset + (lineCross-it.crossSize-it.crossMargin)/2
+		crossPos = crossOffset + (crossAxisContentSize(container, isRow)-it.crossSize-it.crossMargin)/2
 	case "flex-end":
-		crossPos = crossOffset + lineCross - it.crossSize - it.crossMargin
+		crossPos = crossOffset + crossAxisContentSize(container, isRow) - it.crossSize - it.crossMargin
 	}
 	if align != "stretch" {
 		if isRow {
