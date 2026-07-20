@@ -3,6 +3,7 @@ module wb-ui
 go 1.22
 
 require (
-	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20260406072232-3ac4aa2bb164
-	github.com/hoonfeng/goskia v0.0.0
+	github.com/dop251/goja v0.0.0-20260627200808-0b76000cabdb
 )
+
+replace github.com/dop251/goja => F:\syproject\goja
