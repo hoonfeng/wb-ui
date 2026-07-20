@@ -90,6 +90,23 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			mq := jsc.NewObject(in.ObjectPrototype())
 			mq.Set("matches", jsc.BooleanValue(false))
+			mq.Set("media", jsc.StringValue(""))
+			mq.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 2)))
+			mq.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 2)))
+			mq.Set("addListener", jsc.FunctionValue(jsc.NewNativeFunction("addListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 1)))
+			mq.Set("removeListener", jsc.FunctionValue(jsc.NewNativeFunction("removeListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 1)))
 			return jsc.ObjectValue(mq)
 		}, 1)))
 
@@ -151,6 +168,9 @@ obj.SetInternal(doc)
 		return jsc.Null()
 	})))
 	obj.Set("createElement", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
+		return jsc.ObjectValue(wrapElement(in, doc.CreateElement(arg)))
+	})))
+	obj.Set("createElementNS", funcVal(fn2(func(in *jsc.Interpreter, ns, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapElement(in, doc.CreateElement(arg)))
 	})))
 	obj.Set("createTextNode", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {

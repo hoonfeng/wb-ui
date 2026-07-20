@@ -361,9 +361,7 @@ func (f *Frame) executeInlineScripts() {
 					continue
 				}
 				fmt.Fprintf(os.Stderr, "[SCRIPT] len=%d hasMount=%v\n", len(code), strings.Contains(code, `UV.mount("#app")`))
-				// Wrap in try-catch for error capture
 				wrapped := "try{\n" + code + `}catch(e){console.log("VUE_ERR:"+e)}`
-				_ = wrapped // will be used below
 				if err := f.ScriptEngine(wrapped); err != nil {
 					logError("external script execution failed: %v", err)
 				}
