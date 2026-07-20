@@ -9,6 +9,10 @@
 package rendering
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"testing"
 
 	"wb-ui/dom"
@@ -204,6 +208,124 @@ func TestPaintOutlineNone(t *testing.T) {
 	}
 }
 
+// createTestPNG generates a tiny RGBA PNG in memory for testing PaintImage.
+func createTestPNG(t *testing.T, w, h int, r, g, b, a uint8) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	col := color.RGBA{R: r, G: g, B: b, A: a}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, col)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestPaintImage verifies that PaintImage draws a decoded image at the
+// content-box position and that a box with no image paints nothing.
+func TestPaintImage(t *testing.T) {
+	canvas := graphics.NewCanvas(30, 30)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 30, Height: 30})
+
+	// Create a 10x10 red PNG and attach it to a RenderBox representing <img>.
+	pngData := createTestPNG(t, 10, 10, 0xFF, 0, 0, 0xFF)
+	di := NewDecodedImage(pngData)
+	if di == nil {
+		t.Fatal("NewDecodedImage returned nil")
+	}
+	defer di.Release()
+
+	doc := dom.NewDocument()
+	el := doc.CreateElement("img")
+	st := style.NewComputedStyle()
+	box := NewRenderBox(el, st)
+	box.SetLocation(5, 5)
+	box.SetSize(20, 20)
+	box.SetDecodedImage(di)
+
+	painted := PaintImage(box, info)
+	if !painted {
+		t.Fatal("PaintImage returned false, want true (image should be painted)")
+	}
+
+	// Center of the box should be red (image drawn at content-box).
+	red := graphics.Color{R: 0xFF, A: 0xFF}
+	if got := canvas.PixelAt(15, 15); got != red {
+		t.Fatalf("center pixel = %+v, want %+v (red)", got, red)
+	}
+
+	// Outside the box should be transparent.
+	if got := canvas.PixelAt(2, 2); got != (graphics.Color{}) {
+		t.Fatalf("outside pixel = %+v, want transparent", got)
+	}
+}
+
+// TestPaintImageNoImage verifies that PaintImage returns false when the box
+// has no decoded image attached (not loaded yet).
+func TestPaintImageNoImage(t *testing.T) {
+	canvas := graphics.NewCanvas(20, 20)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 20, Height: 20})
+
+	doc := dom.NewDocument()
+	box := NewRenderBox(doc.CreateElement("img"), style.NewComputedStyle())
+	box.SetLocation(0, 0)
+	box.SetSize(16, 16)
+
+	painted := PaintImage(box, info)
+	if painted {
+		t.Fatal("PaintImage returned true, want false (no image attached)")
+	}
+
+	// Canvas should remain fully transparent.
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			if p := canvas.PixelAt(x, y); p.A > 0 {
+				t.Fatalf("unexpected pixel at (%d,%d): %+v", x, y, p)
+			}
+		}
+	}
+}
+
+// TestPaintImageScaled verifies that PaintImage scales the image to fill
+// the content-box when the box is larger than the image.
+func TestPaintImageScaled(t *testing.T) {
+	canvas := graphics.NewCanvas(40, 40)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 40, Height: 40})
+
+	// Create a tiny 2x2 green PNG.
+	pngData := createTestPNG(t, 2, 2, 0, 0xFF, 0, 0xFF)
+	di := NewDecodedImage(pngData)
+	if di == nil {
+		t.Fatal("NewDecodedImage returned nil")
+	}
+	defer di.Release()
+
+	doc := dom.NewDocument()
+	box := NewRenderBox(doc.CreateElement("img"), style.NewComputedStyle())
+	box.SetLocation(5, 5)
+	box.SetSize(30, 30)
+	box.SetDecodedImage(di)
+
+	painted := PaintImage(box, info)
+	if !painted {
+		t.Fatal("PaintImage returned false, want true")
+	}
+
+	// The 30x30 content area should be filled with green.
+	green := graphics.Color{G: 0xFF, A: 0xFF}
+	if got := canvas.PixelAt(20, 20); got != green {
+		t.Fatalf("center pixel = %+v, want %+v (green)", got, green)
+	}
+	// Corner of content box should also be green.
+	if got := canvas.PixelAt(6, 6); got != green {
+		t.Fatalf("content-box corner pixel = %+v, want %+v (green)", got, green)
+	}
+}
+
 // TestAsRenderBox verifies the embedded-box recovery for every box-bearing concrete type.
 func TestAsRenderBox(t *testing.T) {
 	doc := dom.NewDocument()
@@ -227,5 +349,127 @@ func TestAsRenderBox(t *testing.T) {
 	}
 	if asRenderBox(inline) != nil {
 		t.Error("asRenderBox(RenderInline) should be nil")
+	}
+}
+
+// saveRestoreSelection saves the global CurrentSelection and restores it
+// after the test completes, preventing interference between selection tests.
+func saveRestoreSelection(t *testing.T) {
+	t.Helper()
+	old := CurrentSelection
+	t.Cleanup(func() { CurrentSelection = old })
+}
+
+// TestPaintSelection verifies that PaintSelection draws semi-transparent blue
+// rectangles over selected text segments and that clearing the selection
+// produces no highlight.
+func TestPaintSelection(t *testing.T) {
+	saveRestoreSelection(t)
+
+	canvas := graphics.NewCanvas(100, 50)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 100, Height: 50})
+	doc := dom.NewDocument()
+	rv := NewRenderView(doc, style.NewComputedStyle())
+
+	// Create a RenderText with a segment covering "Hello" at (10,10) size 40x16.
+	rt := NewRenderTextWith(doc.CreateTextNode("Hello World"), style.NewComputedStyle(), "Hello World")
+	rt.SetSegments([]InlineTextBox{
+		{Start: 0, Len: 11, X: 10, Y: 10, Width: 80, Height: 16, LineY: 10, LineHeight: 20},
+	})
+	rv.AddChild(rt, nil)
+
+	// Select the first 5 characters ("Hello").
+	CurrentSelection = &Selection{
+		Start: TextPosition{RT: rt, Offset: 0},
+		End:   TextPosition{RT: rt, Offset: 5},
+	}
+
+	PaintSelection(rv, info)
+
+	// The selection highlight should produce non-transparent pixels in the
+	// selected area (around x=10..50, y=10..30).
+	found := false
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 50; x++ {
+			if p := canvas.PixelAt(x, y); p.A > 0 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no selection highlight pixels found in the selected area")
+	}
+}
+
+// TestPaintSelectionCleared verifies that after ClearSelection, PaintSelection
+// paints nothing.
+func TestPaintSelectionCleared(t *testing.T) {
+	saveRestoreSelection(t)
+
+	canvas := graphics.NewCanvas(100, 50)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 100, Height: 50})
+	doc := dom.NewDocument()
+	rv := NewRenderView(doc, style.NewComputedStyle())
+
+	CurrentSelection = nil // explicitly cleared
+	PaintSelection(rv, info)
+
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 100; x++ {
+			if p := canvas.PixelAt(x, y); p.A > 0 {
+				t.Fatalf("unexpected pixel at (%d,%d): %+v", x, y, p)
+			}
+		}
+	}
+}
+
+// TestPaintSelectionMultiSegment verifies that when a selection spans multiple
+// segments on the same RenderText, each segment draws highlight rectangles.
+func TestPaintSelectionMultiSegment(t *testing.T) {
+	saveRestoreSelection(t)
+
+	canvas := graphics.NewCanvas(200, 50)
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 200, Height: 50})
+	doc := dom.NewDocument()
+	rv := NewRenderView(doc, style.NewComputedStyle())
+
+	// Two segments: "Hello" at (10,10) and "World" at (90,10).
+	rt := NewRenderTextWith(doc.CreateTextNode("Hello World"), style.NewComputedStyle(), "Hello World")
+	rt.SetSegments([]InlineTextBox{
+		{Start: 0, Len: 5, X: 10, Y: 10, Width: 40, Height: 16, LineY: 10, LineHeight: 20},
+		{Start: 6, Len: 5, X: 90, Y: 10, Width: 40, Height: 16, LineY: 10, LineHeight: 20},
+	})
+	rv.AddChild(rt, nil)
+
+	// Select the full range (both segments).
+	CurrentSelection = &Selection{
+		Start: TextPosition{RT: rt, Offset: 0},
+		End:   TextPosition{RT: rt, Offset: 11},
+	}
+
+	PaintSelection(rv, info)
+
+	// Both segment areas should have non-transparent pixels.
+	firstSeg := false
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 50; x++ {
+			if p := canvas.PixelAt(x, y); p.A > 0 {
+				firstSeg = true
+			}
+		}
+	}
+	if !firstSeg {
+		t.Fatal("no highlight pixels found in first segment")
+	}
+	secondSeg := false
+	for y := 10; y < 30; y++ {
+		for x := 90; x < 130; x++ {
+			if p := canvas.PixelAt(x, y); p.A > 0 {
+				secondSeg = true
+			}
+		}
+	}
+	if !secondSeg {
+		t.Fatal("no highlight pixels found in second segment")
 	}
 }
