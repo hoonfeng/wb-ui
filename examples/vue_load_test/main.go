@@ -40,7 +40,6 @@ func main() {
 		`if(!Array.prototype.flatMap)Array.prototype.flatMap=function(f){var r=[];for(var i=0;i<this.length;i++){var v=f(this[i],i,this);if(v&&v.length)for(var j=0;j<v.length;j++)r.push(v[j]);else r.push(v)}return r}`,
 		`if(!Array.prototype.at)Array.prototype.at=function(i){var n=Number(i);if(isNaN(n))n=0;var l=this.length;n=n>=0?n:l+n;if(n<0||n>=l)return undefined;return this[n]}`,
 		`if(!Object.isExtensible)Object.isExtensible=function(){return true}`,
-		// 浏览器全局对象桩（供 Vue 引用，instanceof 暂不精确）
 		`class Node{}`,
 		`class Element extends Node{}`,
 		`class Document extends Node{}`,
@@ -77,7 +76,6 @@ func main() {
 		`class MutationObserver{constructor(c){this.cb=c}observe(t,o){}disconnect(){}takeRecords(){return[]}}`,
 		`class IntersectionObserver{constructor(c,o){}observe(t){}unobserve(t){}disconnect(){}takeRecords(){return[]}}`,
 		`class ResizeObserver{constructor(c){}observe(t){}unobserve(t){}disconnect(){}}`,
-		// Performance 桩
 		`window.performance={now:function(){return Date.now()},mark:function(){},measure:function(){},getEntries:function(){return[]},getEntriesByType:function(){return[]}}`,
 	}
 	for _, p := range polyfills {
@@ -88,7 +86,7 @@ func main() {
 	}
 
 	// 4. Load full Vue bundle
-	bundlePath := `F:\syproject\gou-ide\cmd\desktop\web-ui-minimal\dist\assets\app-BzCHJTR_.js`
+	bundlePath := `F:\syproject\gou-ide\cmd\desktop\web-ui-minimal\dist\assets\app-CpekGwAS.js`
 	data, err := os.ReadFile(bundlePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read bundle: %v\n", err)
@@ -106,12 +104,17 @@ func main() {
 
 	// 6. Check result
 	fmt.Println("\n=== Vue Bundle Load Test ===")
-	fmt.Printf("#app children: %d\n", len(appEl.ChildNodes()))
-	inner := appEl.GetInnerHTML()
-	if len(inner) > 500 {
-		inner = inner[:500]
+	appHTML, err := rt.RunJS("document.getElementById('app').innerHTML")
+	if err == nil {
+		html := appHTML.ToString()
+		fmt.Printf("#app innerHTML (%d chars):\n", len(html))
+		if len(html) > 500 {
+			fmt.Printf("%s ...\n", html[:500])
+		} else {
+			fmt.Printf("%s\n", html)
+		}
 	}
-	fmt.Printf("#app innerHTML: %s\n", inner)
+
 	fmt.Println("\n=== Console ===")
 	fmt.Println(log.String())
 	fmt.Println("\n=== SUCCESS ===")

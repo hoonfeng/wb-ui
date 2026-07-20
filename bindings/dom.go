@@ -563,7 +563,7 @@ obj.SetInternal(t)
 func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.SetClassName("Comment")
-obj.SetInternal(c)
+	obj.SetInternal(c)
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			if p := c.ParentNode(); p != nil { p.RemoveChild(c) }
@@ -572,6 +572,23 @@ obj.SetInternal(c)
 	obj.SetAccessor("data",
 		strAcc(c.Data()),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { c.SetData(v.ToString()) })
+	obj.SetAccessor("textContent",
+		strAcc(c.Data()),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { c.SetData(v.ToString()) })
+	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(c.NodeType()))
+	}), nil)
+	obj.SetAccessor("nodeName", strAcc(c.NodeName()), nil)
+
+	// 树遍历属性（Vue 3 渲染器需要）
+	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return c.ParentNode() }), nil)
+	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return c.NextSibling() }), nil)
+	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return c.PreviousSibling() }), nil)
+	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return c.FirstChild() }), nil)
+	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return c.LastChild() }), nil)
+	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrNode(in, c.ChildNodes())
+	}), nil)
 	return obj
 }
 
@@ -624,6 +641,10 @@ func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
 			return jsc.ObjectValue(wrapElement(in, v))
 		case *dom.Text:
 			return jsc.ObjectValue(wrapText(in, v))
+		case *dom.Comment:
+			return jsc.ObjectValue(wrapComment(in, v))
+		case *dom.DocumentFragment:
+			return jsc.ObjectValue(wrapDocFrag(in, v))
 		}
 		return jsc.Null()
 	}
@@ -680,21 +701,23 @@ func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 			return jsc.ObjectValue(wrapElement(in, v))
 		case *dom.Text:
 			return jsc.ObjectValue(wrapText(in, v))
+		case *dom.Comment:
+			return jsc.ObjectValue(wrapComment(in, v))
+		case *dom.DocumentFragment:
+			return jsc.ObjectValue(wrapDocFrag(in, v))
 		}
 		return jsc.Null()
 	})
 }
-
+func arrayValue(in *jsc.Interpreter, n int, fn func(int) jsc.JSValue) jsc.JSValue {
+	arr := make([]jsc.JSValue, n)
+	for i := 0; i < n; i++ { arr[i] = fn(i) }
+	return jsc.ObjectValue(jsc.NewArrayForInterp(in, arr))
+}
 func arrJS(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	return arrayValue(in, len(els), func(i int) jsc.JSValue {
 		return jsc.ObjectValue(wrapElement(in, els[i]))
 	})
-}
-
-func arrayValue(_ *jsc.Interpreter, n int, fn func(int) jsc.JSValue) jsc.JSValue {
-	arr := make([]jsc.JSValue, n)
-	for i := 0; i < n; i++ { arr[i] = fn(i) }
-	return jsc.ObjectValue(jsc.NewArray(nil, arr))
 }
 
 // Silence unused import warning

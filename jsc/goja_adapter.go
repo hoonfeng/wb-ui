@@ -404,11 +404,23 @@ func NewArray(proto *JSObject, items []JSValue) *JSObject {
 	} else {
 		interp = &Interpreter{vm: goja.New()}
 	}
-	gojaItems := make([]goja.Value, len(items))
+	gojaItems := make([]interface{}, len(items))
 	for i, item := range items {
 		gojaItems[i] = item.val(interp.vm)
 	}
-	return &JSObject{obj: interp.vm.NewArray(gojaItems), interp: interp}
+	return &JSObject{obj: interp.vm.NewArray(gojaItems...), interp: interp}
+}
+
+// NewArrayForInterp 在指定 Interpreter 的运行时中创建数组，避免跨运行时问题。
+func NewArrayForInterp(in *Interpreter, items []JSValue) *JSObject {
+	if in == nil || in.vm == nil {
+		return NewArray(nil, items)
+	}
+	gojaItems := make([]interface{}, len(items))
+	for i, item := range items {
+		gojaItems[i] = item.val(in.vm)
+	}
+	return &JSObject{obj: in.vm.NewArray(gojaItems...), interp: in}
 }
 
 // NewNativeFunction 创建原生 JS 函数（包级函数）。
