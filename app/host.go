@@ -430,7 +430,26 @@ func (h *Host) Run() {
 		h.win.Present()
 
 		h.processEvents(rv)
+
+		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
+		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
+		h.processEventLoop()
 	}
+}
+
+// processEventLoop 驱动 JS 事件循环（对标浏览器事件循环模型）。
+// 在渲染循环中每帧调用，处理到期的宏任务、微任务和动画帧回调。
+func (h *Host) processEventLoop() {
+	interp := h.wv.JSInterpreter()
+	if interp == nil {
+		return
+	}
+	el := interp.GetEventLoop()
+	if el == nil {
+		return
+	}
+	elapsedMs := time.Since(h.animStart).Milliseconds()
+	el.ProcessTasks(elapsedMs)
 }
 
 // processEvents drains the platform event queue and dispatches each event.

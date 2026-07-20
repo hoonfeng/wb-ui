@@ -37,7 +37,8 @@ type NativeFunc func(in *Interpreter, this JSValue, args []JSValue) JSValue
 // ─── Interpreter ────────────────────────────────────────
 
 type Interpreter struct {
-	vm *goja.Runtime
+	vm        *goja.Runtime
+	eventLoop *EventLoop
 }
 
 func NewInterpreter() *Interpreter {

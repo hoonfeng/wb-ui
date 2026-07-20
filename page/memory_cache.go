@@ -18,9 +18,10 @@ import (
 	"time"
 )
 
-// DefaultMemoryCacheCapacity is the default maximum cache size in bytes (50 MB),
-// matching the WebKit default of ~50 MB for the shared memory cache.
-const DefaultMemoryCacheCapacity = 50 * 1024 * 1024 // 50 MB
+// DefaultMemoryCacheCapacity is the default maximum cache size in bytes (10 MB),
+// reduced from WebKit's 50 MB since wb-ui targets local GUI applications where
+// cached resources are typically local files that can be re-read quickly.
+const DefaultMemoryCacheCapacity = 10 * 1024 * 1024 // 10 MB
 
 // MemoryCache is the Go translation of WebCore::MemoryCache. It is a global
 // LRU (least-recently-used) cache for CachedResources, keyed by URL. The

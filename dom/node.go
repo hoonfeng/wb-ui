@@ -325,6 +325,8 @@ func (b *nodeBase) AppendChild(newChild Node) error {
 	if b.isInDocumentTree() {
 		b.adoptSubtree(newChild, b.documentForAdoption())
 	}
+	// MutationObserver: notify childList
+	NotifyChildList(b.self, []Node{newChild}, nil, b.lastChild, nil)
 	return nil
 }
 
@@ -449,6 +451,8 @@ func (b *nodeBase) RemoveChild(child Node) error {
 	cb.parentNode = nil
 	cb.prevSibling = nil
 	cb.nextSibling = nil
+	// MutationObserver: notify childList
+	NotifyChildList(b.self, nil, []Node{child}, prev, next)
 	return nil
 }
 

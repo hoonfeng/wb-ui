@@ -91,20 +91,28 @@ func (e *Element) GetAttribute(name string) string {
 // A new attribute is appended to the insertion order.
 func (e *Element) SetAttribute(name, value string) {
 	key := strings.ToLower(name)
+	oldValue, existed := e.attrs[key]
 	if _, exists := e.attrs[key]; !exists {
 		e.attrOrder = append(e.attrOrder, key)
 	}
 	e.attrs[key] = value
+	// MutationObserver: notify attributes
+	if !existed || oldValue != value {
+		NotifyAttributes(e, key, oldValue)
+	}
 }
 
 // RemoveAttribute removes an attribute, mirroring Element::removeAttribute(name). It
 // returns whether an attribute was removed.
 func (e *Element) RemoveAttribute(name string) bool {
 	key := strings.ToLower(name)
-	if _, ok := e.attrs[key]; !ok {
+	oldValue, ok := e.attrs[key]
+	if !ok {
 		return false
 	}
 	delete(e.attrs, key)
+	// MutationObserver: notify attributes removed
+	NotifyAttributes(e, key, oldValue)
 	return true
 }
 
@@ -256,9 +264,74 @@ func (e *Element) SetInnerHTML(html string) error {
 // Element::outerHTML.
 func (e *Element) GetOuterHTML() string { return serializeNode(e) }
 
+// InsertAdjacentHTML parses html and inserts the resulting nodes at the given
+// position relative to this element, mirroring Element::insertAdjacentHTML().
+// Valid positions: "beforebegin", "afterbegin", "beforeend", "afterend".
+func (e *Element) InsertAdjacentHTML(position, html string) error {
+	frag := parseFragment(html, e.ownerDoc)
+	children := frag.ChildNodes()
+	switch position {
+	case "beforebegin":
+		parent := e.ParentNode()
+		if parent == nil {
+			return ErrHierarchyRequest
+		}
+		for _, c := range children {
+			if err := parent.InsertBefore(c, e); err != nil {
+				return err
+			}
+		}
+	case "afterbegin":
+		ref := e.FirstChild()
+		for _, c := range children {
+			if ref == nil {
+				if err := e.AppendChild(c); err != nil {
+					return err
+				}
+			} else {
+				if err := e.InsertBefore(c, ref); err != nil {
+					return err
+				}
+			}
+		}
+	case "beforeend":
+		for _, c := range children {
+			if err := e.AppendChild(c); err != nil {
+				return err
+			}
+		}
+	case "afterend":
+		parent := e.ParentNode()
+		if parent == nil {
+			return ErrHierarchyRequest
+		}
+		ref := e.NextSibling()
+		for _, c := range children {
+			if ref == nil {
+				if err := parent.AppendChild(c); err != nil {
+					return err
+				}
+			} else {
+				if err := parent.InsertBefore(c, ref); err != nil {
+					return err
+				}
+			}
+		}
+	default:
+		return ErrNotSupported
+	}
+	return nil
+}
+
 // walkDescendants performs a pre-order traversal of the subtree rooted at e, invoking
 // fn for each node. Returning false from fn stops the traversal.
 func (e *Element) walkDescendants(fn func(Node) bool) {
+	e.WalkDescendants(fn)
+}
+
+// WalkDescendants is the exported version of walkDescendants, used by external
+// packages (e.g., bindings) to traverse the element's subtree.
+func (e *Element) WalkDescendants(fn func(Node) bool) {
 	var walk func(n Node) bool
 	walk = func(n Node) bool {
 		if !fn(n) {
