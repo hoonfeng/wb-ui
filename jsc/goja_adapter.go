@@ -84,6 +84,15 @@ func (r *Interpreter) Run(code string) (interface{}, error) {
 	return val.Export(), nil
 }
 
+// RunJS 执行代码并返回 JSValue。
+func (r *Interpreter) RunJS(code string) (JSValue, error) {
+	val, err := r.vm.RunString(code)
+	if err != nil {
+		return JSValue{}, err
+	}
+	return JSValue{v: val, interp: r}, nil
+}
+
 func (r *Interpreter) Evaluate(code string) (interface{}, error) {
 	return r.Run(code)
 }
@@ -126,6 +135,18 @@ func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) goja.Va
 	})
 }
 
+func (r *Interpreter) ResolvePromise(val JSValue) JSValue {
+	p, resolve, _ := r.vm.NewPromise()
+	_ = resolve(val.Export())
+	return JSValue{v: p.PromiseObj(), interp: r}
+}
+
+func (r *Interpreter) RejectPromise(errStr JSValue) JSValue {
+	p, _, reject := r.vm.NewPromise()
+	_ = reject(errStr.Export())
+	return JSValue{v: p.PromiseObj(), interp: r}
+}
+
 func (r *Interpreter) VM() *goja.Runtime { return r.vm }
 
 // ─── JSValue ────────────────────────────────────────────
@@ -157,8 +178,11 @@ func (v JSValue) IsNull() bool      { return v.v != nil && goja.IsNull(v.v) }
 func (v JSValue) IsBoolean() bool   { return v.v != nil }
 func (v JSValue) IsNumber() bool    { return v.v != nil }
 func (v JSValue) IsString() bool    { return v.v != nil }
+func (v JSValue) IsCallable() bool  { return v.nativeFn != nil || (v.v != nil && v.v.ToBoolean() && v.AsFunction() != nil) }
 func (v JSValue) IsObject() bool    { return v.v != nil || v.nativeFn != nil }
 func (v JSValue) IsFunction() bool  { return v.nativeFn != nil || (v.v != nil) }
+
+func (v JSValue) SameAs(other JSValue) bool { return false }
 
 func (v JSValue) ToString() string {
 	if v.v == nil || goja.IsUndefined(v.v) || goja.IsNull(v.v) {
@@ -308,6 +332,13 @@ func (o *JSObject) SetAccessor(prop string, getter, setter interface{}) {
 	if gfn != nil {
 		_ = o.obj.DefineAccessorProperty(prop, gfn, sfn, goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
+}
+
+func (o *JSObject) Keys() []string {
+	if o == nil || o.obj == nil {
+		return nil
+	}
+	return o.obj.Keys()
 }
 
 func (o *JSObject) SetClassName(name string) {

@@ -77,7 +77,7 @@ func RegisterFetch(rt *jsc.Interpreter) {
 			if err != nil {
 				return rejectPromise(in2, fmt.Errorf("fetch: json parse failed: %w", err))
 			}
-			return resolvePromise(in2, val)
+			return resolvePromise(in2, jsc.StringValue(fmt.Sprintf("%v", val)))
 		}, 0)
 		respObj.Set("json", jsc.FunctionValue(jsonFn))
 		headersObj := jsc.NewObject(in.ObjectPrototype())
@@ -247,9 +247,9 @@ func jscToString(v jsc.JSValue) string {
 		return ""
 	}
 	if v.IsString() {
-		return v.String()
+		return v.ToString()
 	}
-	return fmt.Sprintf("%v", v)
+	return fmt.Sprintf("%v", v.Export())
 }
 func jscToString2(obj *jsc.JSObject, key string) string {
 	if v, ok := obj.GetByKey(key); ok {

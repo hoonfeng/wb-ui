@@ -118,7 +118,7 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 	if doc := wv.mainFrame.Document(); doc != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, doc)
 	}
-	result, err := wv.jsInterpreter.Run(script)
+	result, err := wv.jsInterpreter.RunJS(script)
 	if err != nil {
 		return jsc.Undefined(), fmt.Errorf("webkit: JS eval failed: %w", err)
 	}

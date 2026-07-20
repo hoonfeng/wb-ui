@@ -65,7 +65,7 @@ func ensureWBNamespace(rt *jsc.Interpreter) *jsc.JSObject {
 func wrapFragment(in *jsc.Interpreter, fragment *dom.DocumentFragment) *jsc.JSObject {
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.SetClassName("DocumentFragment")
-	obj.Internal = fragment
+	obj.SetInternal(fragment)
 	obj.Set("length", jsc.NumberValue(float64(len(fragment.ChildNodes()))))
 	return obj
 }

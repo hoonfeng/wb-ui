@@ -82,7 +82,7 @@ func RegisterEditorJSBindings(rt *jsc.Interpreter) {
 		// Build the editor wrapper object with methods.
 		edObj := jsc.NewObject(in.ObjectPrototype())
 		edObj.SetClassName("Editor")
-		edObj.Internal = &editorBindingsData{view: view}
+		edObj.SetInternal(&editorBindingsData{view: view})
 
 		// getValue()
 		edObj.Set("getValue", jsc.FunctionValue(jsc.NewNativeFunction("getValue", func(in2 *jsc.Interpreter, this2 jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
@@ -172,10 +172,10 @@ func dataFromThis(this jsc.JSValue) *editorBindingsData {
 		return nil
 	}
 	o := this.AsObject()
-	if o.Internal == nil {
+	if o.Internal() == nil {
 		return nil
 	}
-	d, ok := o.Internal.(*editorBindingsData)
+	d, ok := o.Internal().(*editorBindingsData)
 	if !ok {
 		return nil
 	}
