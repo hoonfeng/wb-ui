@@ -345,7 +345,7 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 	respObj.Set("text", jsc.FunctionValue(textFn))
 
 	jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		val, err := in2.Run(bodyText)
+	val, err := in2.RunJS(bodyText)
 		if err != nil {
 			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
 		}
