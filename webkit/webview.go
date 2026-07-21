@@ -43,12 +43,20 @@ func NewWebView() *WebView {
 	wv.mainFrame = NewWebFrame(wv, p.MainFrame())
 	if mf := p.MainFrame(); mf != nil {
 		mf.StyleSheetLoader = func(href string) (string, error) {
+			// Support http(s), file, and data URLs
+			if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "data:") {
+				return fetchURL(href)
+			}
 			fp := strings.TrimPrefix(href, "file://")
 			d, e := os.ReadFile(fp)
 			if e != nil { return "", fmt.Errorf("load stylesheet %q: %w", href, e) }
 			return string(d), nil
 		}
 		mf.ScriptLoader = func(src string) (string, error) {
+			// Support http(s), file, and data URLs
+			if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "data:") {
+				return fetchURL(src)
+			}
 			fp := strings.TrimPrefix(src, "file://")
 			d, e := os.ReadFile(fp)
 			if e != nil { return "", fmt.Errorf("load script %q: %w", src, e) }

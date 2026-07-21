@@ -50,31 +50,159 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}, 0)))
 	g.Set("location", jsc.ObjectValue(loc))
 
-	// window.history 桩 (vue-router 需要 pushState/replaceState)
+	// ─── Navigation State ───
+	type navEntry struct {
+		state map[string]interface{}
+		title string
+		url   string
+	}
+	navState := struct {
+		entries      []navEntry
+		index        int
+		popListeners []struct {
+			fn      jsc.JSValue
+			capture bool
+		}
+	}{
+		entries: []navEntry{{url: "/"}},
+	}
+	updateLocation := func(url string) {
+		loc.Set("href", jsc.StringValue(url))
+		if idx := strings.Index(url, "?"); idx >= 0 {
+			loc.Set("pathname", jsc.StringValue(url[:idx]))
+			loc.Set("search", jsc.StringValue(url[idx:]))
+		} else if idx := strings.Index(url, "#"); idx >= 0 {
+			loc.Set("pathname", jsc.StringValue(url[:idx]))
+			loc.Set("hash", jsc.StringValue(url[idx:]))
+		} else {
+			loc.Set("pathname", jsc.StringValue(url))
+			loc.Set("search", jsc.StringValue(""))
+			loc.Set("hash", jsc.StringValue(""))
+		}
+	}
+
+	// ─── window.history (real implementation) ───
 	hist := jsc.NewObject(rt.ObjectPrototype())
-	hist.Set("length", jsc.NumberValue(1))
-	hist.Set("state", jsc.Null())
+	updateHistState := func() {
+		if navState.index >= 0 && navState.index < len(navState.entries) {
+			e := navState.entries[navState.index]
+			if e.state != nil {
+				hist.Set("state", jsc.StringValue(fmt.Sprintf("%v", e.state)))
+			} else {
+				hist.Set("state", jsc.Null())
+			}
+		}
+		hist.Set("length", jsc.NumberValue(float64(len(navState.entries))))
+	}
+	dispatchPopstate := func() {
+		if len(navState.popListeners) == 0 {
+			return
+		}
+		stateVal := jsc.Null()
+		if navState.index >= 0 && navState.index < len(navState.entries) && navState.entries[navState.index].state != nil {
+			stateVal = jsc.StringValue(fmt.Sprintf("%v", navState.entries[navState.index].state))
+		}
+		for _, l := range navState.popListeners {
+			ev := jsc.NewObject(rt.ObjectPrototype())
+			ev.Set("type", jsc.StringValue("popstate"))
+			ev.Set("state", stateVal)
+			rt.Call(l.fn, jsc.Undefined(), []jsc.JSValue{jsc.ObjectValue(ev)})
+		}
+	}
+
 	hist.Set("pushState", jsc.FunctionValue(jsc.NewNativeFunction("pushState",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			var state map[string]interface{}
+			var urlStr string
+			if len(args) >= 1 && args[0].IsObject() {
+				state = make(map[string]interface{})
+				if obj := args[0].AsObject(); obj != nil {
+					for _, k := range obj.Keys() {
+						if v, ok := obj.GetByKey(k); ok {
+							state[k] = v.ToString()
+						}
+					}
+				}
+			}
+			if len(args) >= 3 {
+				urlStr = args[2].ToString()
+			}
+			navState.entries = navState.entries[:navState.index+1]
+			navState.entries = append(navState.entries, navEntry{state: state, url: urlStr})
+			navState.index = len(navState.entries) - 1
+			updateHistState()
+			if urlStr != "" {
+				updateLocation(urlStr)
+			}
 			return jsc.Undefined()
 		}, 3)))
 	hist.Set("replaceState", jsc.FunctionValue(jsc.NewNativeFunction("replaceState",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if navState.index < 0 || navState.index >= len(navState.entries) {
+				return jsc.Undefined()
+			}
+			if len(args) >= 1 && args[0].IsObject() {
+				state := make(map[string]interface{})
+				if obj := args[0].AsObject(); obj != nil {
+					for _, k := range obj.Keys() {
+						if v, ok := obj.GetByKey(k); ok {
+							state[k] = v.ToString()
+						}
+					}
+				}
+				navState.entries[navState.index].state = state
+			}
+			if len(args) >= 3 {
+				urlStr := args[2].ToString()
+				navState.entries[navState.index].url = urlStr
+				updateLocation(urlStr)
+			}
+			updateHistState()
 			return jsc.Undefined()
 		}, 3)))
 	hist.Set("go", jsc.FunctionValue(jsc.NewNativeFunction("go",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			delta := 0
+			if len(args) >= 1 && args[0].IsNumber() {
+				delta = int(args[0].ToNumber())
+			}
+			newIdx := navState.index + delta
+			if newIdx < 0 || newIdx >= len(navState.entries) {
+				return jsc.Undefined()
+			}
+			navState.index = newIdx
+			updateHistState()
+			updateLocation(navState.entries[navState.index].url)
+			dispatchPopstate()
 			return jsc.Undefined()
 		}, 1)))
 	hist.Set("back", jsc.FunctionValue(jsc.NewNativeFunction("back",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if navState.index <= 0 {
+				return jsc.Undefined()
+			}
+			navState.index--
+			updateHistState()
+			updateLocation(navState.entries[navState.index].url)
+			dispatchPopstate()
 			return jsc.Undefined()
 		}, 0)))
 	hist.Set("forward", jsc.FunctionValue(jsc.NewNativeFunction("forward",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if navState.index >= len(navState.entries)-1 {
+				return jsc.Undefined()
+			}
+			navState.index++
+			updateHistState()
+			updateLocation(navState.entries[navState.index].url)
+			dispatchPopstate()
 			return jsc.Undefined()
 		}, 0)))
+	updateHistState()
 	g.Set("history", jsc.ObjectValue(hist))
+
+	// window.navigator 桩
+
 
 	// window.navigator 桩
 	nav := jsc.NewObject(rt.ObjectPrototype())
@@ -336,15 +464,43 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.Undefined()
 		}, 1)))
 
-	// window.addEventListener / removeEventListener (vue-router 需要 'popstate')
+	// window.addEventListener / removeEventListener (real, for popstate/hashchange)
 	g.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 2 || !args[1].IsCallable() {
+				return jsc.Undefined()
+			}
+			eventType := args[0].ToString()
+			capture := len(args) >= 3 && args[2].ToBoolean()
+			if eventType == "popstate" || eventType == "hashchange" {
+				navState.popListeners = append(navState.popListeners, struct {
+					fn      jsc.JSValue
+					capture bool
+				}{fn: args[1], capture: capture})
+			}
 			return jsc.Undefined()
 		}, 2)))
 	g.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 2 || !args[1].IsCallable() {
+				return jsc.Undefined()
+			}
+			eventType := args[0].ToString()
+			if eventType == "popstate" || eventType == "hashchange" {
+				targetID := args[1].AsFunction().String()
+				for i := len(navState.popListeners) - 1; i >= 0; i-- {
+					if navState.popListeners[i].fn.AsFunction().String() == targetID {
+						navState.popListeners = append(navState.popListeners[:i], navState.popListeners[i+1:]...)
+					}
+				}
+			}
 			return jsc.Undefined()
 		}, 2)))
+	// window.dispatchEvent — basic stub that always returns true
+	g.Set("dispatchEvent", jsc.FunctionValue(jsc.NewNativeFunction("dispatchEvent",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.BooleanValue(true)
+		}, 1)))
 
 	// MutationObserver 构造函数
 	g.Set("MutationObserver", jsc.FunctionValue(rt.NewConstructor("MutationObserver",
