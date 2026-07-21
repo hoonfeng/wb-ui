@@ -1162,6 +1162,9 @@ obj.SetInternal(el)
 	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(el.NodeType()))
 	}), nil)
+	obj.SetAccessor("nodeValue", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.Null()
+	}), nil)
 	obj.SetAccessor("id",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetId()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetId(v.ToString()) })
@@ -1434,10 +1437,13 @@ obj.SetInternal(t)
 			return jsc.Undefined()
 		}, 0)))
 	obj.SetAccessor("data",
-		strAcc(t.Data()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
 	obj.SetAccessor("textContent",
-		strAcc(t.Data()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
+	obj.SetAccessor("nodeValue",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
 	obj.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(t.Length()))
@@ -1459,10 +1465,13 @@ func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 			return jsc.Undefined()
 		}, 0)))
 	obj.SetAccessor("data",
-		strAcc(c.Data()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(c.Data()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { c.SetData(v.ToString()) })
 	obj.SetAccessor("textContent",
-		strAcc(c.Data()),
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(c.Data()) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { c.SetData(v.ToString()) })
+	obj.SetAccessor("nodeValue",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(c.Data()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { c.SetData(v.ToString()) })
 	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(c.NodeType()))
