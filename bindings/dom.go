@@ -27,7 +27,23 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
 
-	// window.location 桩
+	// DOM 构造函数桩 — RegisterDOMBindings 注册后全局可用
+	// Vue 3 / 前端框架依赖 instanceof 检查这些构造函数。
+	// 通过 JS 注入确保 prototype 链正确。
+	rt.RunJS(`(function(){
+		if(typeof Node==='undefined'){Node=function Node(){}}
+		if(typeof Element==='undefined'){Element=function Element(){};Element.prototype=Object.create(Node.prototype)}
+		if(typeof HTMLElement==='undefined'){HTMLElement=function HTMLElement(){};HTMLElement.prototype=Object.create(Element.prototype)}
+		if(typeof SVGElement==='undefined'){SVGElement=function SVGElement(){};SVGElement.prototype=Object.create(Element.prototype)}
+		if(typeof Text==='undefined'){Text=function Text(){};Text.prototype=Object.create(Node.prototype)}
+		if(typeof Comment==='undefined'){Comment=function Comment(){};Comment.prototype=Object.create(Node.prototype)}
+		if(typeof DocumentFragment==='undefined'){DocumentFragment=function DocumentFragment(){};DocumentFragment.prototype=Object.create(Node.prototype)}
+		if(typeof Attr==='undefined'){Attr=function Attr(){};Attr.prototype=Object.create(Node.prototype)}
+	})()`)
+
+
+
+	// location 桩
 	loc := jsc.NewObject(rt.ObjectPrototype())
 	loc.Set("href", jsc.StringValue("about:blank"))
 	loc.Set("origin", jsc.StringValue(""))
@@ -1185,7 +1201,12 @@ obj.SetInternal(el)
 	if strings.EqualFold(el.LocalName(), "template") {
 		obj.SetAccessor("content",
 			getter(func(in *jsc.Interpreter) jsc.JSValue {
-				frag := el.OwnerDocument().CreateDocumentFragment()
+				doc := el.OwnerDocument()
+				if doc == nil {
+					// Fallback: use a detached fragment if no owner document
+					return jsc.ObjectValue(wrapDocFrag(in, dom.NewDocumentFragment(nil)))
+				}
+				frag := doc.CreateDocumentFragment()
 				// Move all child nodes into the fragment
 				for c := el.FirstChild(); c != nil; c = el.FirstChild() {
 					frag.AppendChild(c)
@@ -1413,7 +1434,35 @@ func joinStyle(m map[string]string) string {
 func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.SetClassName("DocumentFragment")
-obj.SetInternal(frag)
+	obj.SetInternal(frag)
+
+	// DOM tree navigation — needed by Vue 3 insertStaticContent
+	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(frag.NodeType()))
+	}), nil)
+	obj.SetAccessor("nodeName", strAcc(frag.NodeName()), nil)
+
+	// Tree traversal — dynamic live getters
+	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return frag.ParentNode() }), nil)
+	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return frag.NextSibling() }), nil)
+	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return frag.PreviousSibling() }), nil)
+	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return frag.FirstChild() }), nil)
+	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return frag.LastChild() }), nil)
+	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrNode(in, frag.ChildNodes())
+	}), nil)
+	obj.SetAccessor("childElementCount", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		n := 0
+		for c := frag.FirstChild(); c != nil; c = c.NextSibling() {
+			if _, ok := c.(*dom.Element); ok { n++ }
+		}
+		return jsc.NumberValue(float64(n))
+	}), nil)
+	obj.SetAccessor("textContent",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(frag.TextContent()) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { frag.SetTextContent(v.ToString()) })
+
+	// appendChild
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		frag.AppendChild(n)
@@ -1422,6 +1471,33 @@ obj.SetInternal(frag)
 		}
 		return a
 	})))
+	// removeChild — Vue 3 insertStaticContent uses this
+	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
+		if n == nil { return jsc.Null() }
+		frag.RemoveChild(n)
+		return a
+	})))
+	// insertBefore — Vue 3 insertStaticContent uses this to insert template content
+	obj.Set("insertBefore", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
+		if nc == nil { return jsc.Null() }
+		frag.InsertBefore(nc, rc)
+		return a0
+	})))
+	// hasChildNodes
+	obj.Set("hasChildNodes", funcVal(fn0(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.BooleanValue(frag.HasChildNodes())
+	})))
+	// cloneNode
+	obj.Set("cloneNode", jsc.FunctionValue(jsc.NewNativeFunction("cloneNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			deep := len(args) > 0 && args[0].ToBoolean()
+			cloned := frag.CloneNode(deep)
+			if df, ok := cloned.(*dom.DocumentFragment); ok {
+				return jsc.ObjectValue(wrapDocFrag(in, df))
+			}
+			return jsc.Null()
+		}, 1)))
+
 	return obj
 }
 
