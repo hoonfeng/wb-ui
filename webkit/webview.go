@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"wb-ui/bindings"
+	"wb-ui/bridge"
 	"wb-ui/dom"
 	"wb-ui/jsc"
 	"wb-ui/page"
@@ -83,6 +84,22 @@ func (wv *WebView) LoadHTML(src string) error {
 			fr.ScriptEngine = fn
 		}
 	}
+	// Ensure JS runtime is initialized and inject bridge + fetch before
+	// page scripts execute. This makes Go-registered API routes available
+	// as fetch() intercepts in GUI mode.
+	wv.ensureJSRuntime()
+	page.RegisterFetch(wv.jsInterpreter)
+	page.RegisterXMLHttpRequest(wv.jsInterpreter)
+	bridge.InjectAll(wv.jsInterpreter)
+
+	// Inject the bridge SDK script as inline JS before any page scripts.
+	// This SDK wraps fetch() to intercept registered API routes.
+	if sdk := bridge.InjectSDK(); sdk != "" {
+		if _, err := wv.jsInterpreter.RunJS(sdk); err != nil {
+			fmt.Fprintf(os.Stderr, "[wb-ui] bridge SDK injection failed: %v\n", err)
+		}
+	}
+
 	if err := wv.mainFrame.LoadHTML(src); err != nil {
 		return err
 	}

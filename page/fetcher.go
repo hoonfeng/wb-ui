@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"wb-ui/bridge"
 	"wb-ui/jsc"
 )
 
@@ -19,6 +20,14 @@ func RegisterFetch(rt *jsc.Interpreter) {
 		if url == "" {
 			return rejectPromise(in, fmt.Errorf("fetch: url must be a non-empty string"))
 		}
+
+		// Check bridge routes first (GUI-mode API interception).
+		// If the URL matches a registered Go handler, call it directly
+		// instead of making an HTTP request.
+		if route := bridge.Match(url); route != nil {
+			return bridgeFetch(in, args, url, route)
+		}
+
 		method := "GET"
 		var body io.Reader
 		headers := http.Header{}
@@ -278,4 +287,75 @@ func xhrFireReadyStateChange(in *jsc.Interpreter, obj *jsc.JSObject) {
 		return
 	}
 	in.Call(hVal, jsc.ObjectValue(obj), nil)
+}
+
+// bridgeFetch handles a fetch() call that matched a registered bridge route.
+// It calls the Go handler directly and returns a synthetic Response.
+func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bridge.Route) jsc.JSValue {
+	// Build handler args: [body, method, headers, url]
+	var handlerArgs []jsc.JSValue
+	if len(args) >= 2 && args[1].IsObject() {
+		o := args[1].AsObject()
+		if o != nil {
+			// Pass the fetch options object as the first argument
+			handlerArgs = append(handlerArgs, args[1])
+		}
+	}
+	if len(handlerArgs) == 0 {
+		handlerArgs = append(handlerArgs, jsc.Null())
+	}
+
+	// Call the Go handler.
+	result, err := route.Handler(handlerArgs)
+	if err != nil {
+		return rejectPromise(in, fmt.Errorf("bridge: handler error: %w", err))
+	}
+
+	// Build a synthetic Response.
+	var bodyText string
+	if result.IsString() {
+		bodyText = result.ToString()
+	} else if result.IsUndefined() || result.IsNull() {
+		bodyText = "null"
+	} else {
+		// Try to convert to string representation
+		if result.IsObject() {
+			obj := result.AsObject()
+			if obj != nil {
+				// Use the object's toString or JSON representation
+				bodyText = fmt.Sprintf("%v", result.Export())
+			} else {
+				bodyText = fmt.Sprintf("%v", result.Export())
+			}
+		} else {
+			bodyText = fmt.Sprintf("%v", result.Export())
+		}
+	}
+
+	respObj := jsc.NewObject(in.ObjectPrototype())
+	respObj.SetClassName("Response")
+	respObj.Set("status", jsc.NumberValue(200))
+	respObj.Set("ok", jsc.BooleanValue(true))
+	respObj.Set("statusText", jsc.StringValue("OK (bridge)"))
+	respObj.Set("url", jsc.StringValue(url))
+
+	textFn := jsc.NewNativeFunction("text", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+		return resolvePromise(in2, jsc.StringValue(bodyText))
+	}, 0)
+	respObj.Set("text", jsc.FunctionValue(textFn))
+
+	jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+		val, err := in2.Run(bodyText)
+		if err != nil {
+			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
+		}
+		return resolvePromise(in2, val)
+	}, 0)
+	respObj.Set("json", jsc.FunctionValue(jsonFn))
+
+	headersObj := jsc.NewObject(in.ObjectPrototype())
+	headersObj.Set("Content-Type", jsc.StringValue("application/json"))
+	respObj.Set("headers", jsc.ObjectValue(headersObj))
+
+	return resolvePromise(in, jsc.ObjectValue(respObj))
 }
