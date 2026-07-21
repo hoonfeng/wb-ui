@@ -1439,6 +1439,73 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 					break
 				}
 			}
+		case "box-shadow":
+			cs.BoxShadow = resolvedStr
+		case "margin":
+			// Shorthand — store as string for now
+			cs.SetProperty("margin", resolvedStr)
+		case "margin-top":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.MarginTop = l
+			}
+		case "margin-right":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.MarginRight = l
+			}
+		case "margin-bottom":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.MarginBottom = l
+			}
+		case "margin-left":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.MarginLeft = l
+			}
+		case "padding-top":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.PaddingTop = l
+			}
+		case "padding-right":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.PaddingRight = l
+			}
+		case "padding-bottom":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.PaddingBottom = l
+			}
+		case "padding-left":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.PaddingLeft = l
+			}
+		case "border-top-width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.BorderTopWidth = l
+			}
+		case "border-right-width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.BorderRightWidth = l
+			}
+		case "border-bottom-width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.BorderBottomWidth = l
+			}
+		case "border-left-width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.BorderLeftWidth = l
+			}
+		case "border-radius":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.BorderRadius = l
+			}
+		case "flex-basis":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.FlexBasis = l
+			}
+		case "gap":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.Gap = l
+			}
+		case "transition":
+			cs.Transition = resolvedStr
 		}
 	}
 }
