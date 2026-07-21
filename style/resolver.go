@@ -749,6 +749,15 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.Transform = valueString
 	case "transition":
 		cs.Transition = valueString
+		cs.TransitionProperty, cs.TransitionDuration, cs.TransitionTimingFunction, cs.TransitionDelay = parseTransitionShorthand(valueString)
+	case "transition-property":
+		cs.TransitionProperty = valueString
+	case "transition-duration":
+		cs.TransitionDuration = parseSeconds(valueString)
+	case "transition-timing-function":
+		cs.TransitionTimingFunction = valueString
+	case "transition-delay":
+		cs.TransitionDelay = parseSeconds(valueString)
 	case "animation":
 		cs.Animation = valueString
 		cs.AnimationName, cs.AnimationDuration, cs.AnimationIterationCount, cs.AnimationDelay, cs.AnimationDirection, cs.AnimationFillMode, cs.AnimationTimingFunction = parseAnimationShorthand(valueString)
@@ -1627,4 +1636,70 @@ func parseAnimationShorthand(s string) (name string, duration float64, iteration
 		duration = 0 // 0s = no animation duration
 	}
 	return
+}
+
+// parseTransitionShorthand parses the CSS transition shorthand:
+//   transition: <property> <duration> <timing-function> <delay>
+// Examples: "all 0.3s ease", "opacity 0.2s", "transform 0.5s ease-in-out"
+func parseTransitionShorthand(s string) (prop string, duration float64, timing string, delay float64) {
+	if s == "" || s == "none" {
+		return "all", 0, "ease", 0
+	}
+	// Defaults
+	prop = "all"
+	duration = 0
+	timing = "ease"
+	delay = 0
+
+	parts := strings.Fields(s)
+	for _, p := range parts {
+		pl := strings.ToLower(p)
+		switch {
+		case pl == "all" || pl == "none" || pl == "opacity" || pl == "transform" ||
+			pl == "color" || pl == "background-color" || pl == "width" || pl == "height" ||
+			pl == "left" || pl == "top" || pl == "right" || pl == "bottom":
+			prop = pl
+		case pl == "linear" || pl == "ease" || pl == "ease-in" ||
+			pl == "ease-out" || pl == "ease-in-out":
+			timing = pl
+		case strings.HasSuffix(pl, "s"):
+			if v, err := strconv.ParseFloat(strings.TrimSuffix(pl, "s"), 64); err == nil {
+				if duration == 0 {
+					duration = v
+				} else if delay == 0 {
+					delay = v
+				}
+			}
+		case strings.HasSuffix(pl, "ms"):
+			if v, err := strconv.ParseFloat(strings.TrimSuffix(pl, "ms"), 64); err == nil {
+				v /= 1000 // convert ms to s
+				if duration == 0 {
+					duration = v
+				} else if delay == 0 {
+					delay = v
+				}
+			}
+		}
+	}
+	return
+}
+
+// parseSeconds parses a CSS time value like "0.3s" or "150ms" into seconds.
+func parseSeconds(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if strings.HasSuffix(s, "ms") {
+		v, err := strconv.ParseFloat(strings.TrimSuffix(s, "ms"), 64)
+		if err != nil {
+			return 0
+		}
+		return v / 1000
+	}
+	v, err := strconv.ParseFloat(strings.TrimSuffix(s, "s"), 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }

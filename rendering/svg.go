@@ -137,6 +137,27 @@ func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 }
 
+// svgUse represents an SVG <use> element that references another by id.
+type svgUse struct {
+	refID string
+	x, y  float64
+}
+
+func (s *svgUse) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {}
+
+// svgTranslatedShape applies x/y offset to a referenced shape (for <use>).
+type svgTranslatedShape struct {
+	shape svgShape
+	dx, dy float64
+}
+
+func (s *svgTranslatedShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	canvas.Save()
+	canvas.Translate(s.dx, s.dy)
+	s.shape.paint(canvas, ctx)
+	canvas.Restore()
+}
+
 type pathCmd struct {
 	kind byte
 	args []float64
@@ -150,26 +171,43 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	fill := ctx.fill
 	var pts []graphics.Point
+	var firstPoint graphics.Point
+	hasFirst := false
+
 	for _, cmd := range s.commands {
 		switch cmd.kind {
 		case 'M', 'm':
 			if len(cmd.args) >= 2 {
-				pts = append(pts, graphics.Point{X: cmd.args[0], Y: cmd.args[1]})
+				p := graphics.Point{X: cmd.args[0], Y: cmd.args[1]}
+				pts = append(pts, p)
+				if !hasFirst {
+					firstPoint = p
+					hasFirst = true
+				}
 			}
 		case 'L', 'l':
 			if len(cmd.args) >= 2 {
 				pts = append(pts, graphics.Point{X: cmd.args[0], Y: cmd.args[1]})
 			}
 		case 'Z', 'z':
-			if len(pts) >= 3 && fill.A > 0 {
-				canvas.FillTriangle(pts[0].X, pts[0].Y,
-					pts[len(pts)-2].X, pts[len(pts)-2].Y,
-					pts[len(pts)-1].X, pts[len(pts)-1].Y, fill)
+			if hasFirst {
+				pts = append(pts, firstPoint)
 			}
 		}
 	}
+	// Triangle fan fill
+	if fill.A > 0 && len(pts) >= 3 {
+		for i := 1; i < len(pts)-1; i++ {
+			canvas.FillTriangle(pts[0].X, pts[0].Y, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, fill)
+		}
+	}
+	// Stroke as line segments
+	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(pts) >= 2 {
+		for i := 0; i < len(pts)-1; i++ {
+			canvas.StrokeLine(pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke)
+		}
+	}
 }
-
 // --- SVG Text ---
 
 type svgText struct {
@@ -226,11 +264,12 @@ func (s *svgText) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 // --- SVG Document ---
 
 type svgDocument struct {
-	shapes   []svgShape
-	width    float64
-	height   float64
-	viewBox  [4]float64 // x, y, w, h (0 if not set)
-	hasVB    bool
+	shapes      []svgShape
+	width       float64
+	height      float64
+	viewBox     [4]float64 // x, y, w, h (0 if not set)
+	hasVB       bool
+	elementByID map[string]*dom.Element // used by <use> references
 }
 
 // --- Parsing helpers ---
@@ -460,6 +499,17 @@ func parseSVGElement(el *dom.Element) svgShape {
 			stroke:      parseColorAttribute(getAttr("stroke")),
 			strokeWidth: parseSVGCoord(getAttr("stroke-width")),
 		}
+	case "use":
+		href := el.GetAttribute("href")
+		if href == "" {
+			href = el.GetAttribute("xlink:href")
+		}
+		if refID := parseURLReference(href); refID != "" {
+			return &svgUse{refID: refID,
+				x: parseSVGCoord(el.GetAttribute("x")),
+				y: parseSVGCoord(el.GetAttribute("y"))}
+		}
+		return nil
 	}
 	return nil
 }
@@ -571,8 +621,9 @@ func parseClipPathElement(el *dom.Element) []svgShape {
 
 func buildSVGDocument(el *dom.Element) *svgDocument {
 	doc := &svgDocument{
-		width:  parseSVGCoord(el.GetAttribute("width")),
-		height: parseSVGCoord(el.GetAttribute("height")),
+		width:       parseSVGCoord(el.GetAttribute("width")),
+		height:      parseSVGCoord(el.GetAttribute("height")),
+		elementByID: make(map[string]*dom.Element),
 	}
 	if vb := el.GetAttribute("viewBox"); vb != "" {
 		doc.viewBox = parseViewBox(vb)
@@ -583,6 +634,23 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 		doc.width = doc.viewBox[2]
 		doc.height = doc.viewBox[3]
 	}
+
+	// First pass: collect all elements with id attributes (for <use> references)
+	var collectIDs func(dom.Node)
+	collectIDs = func(n dom.Node) {
+		if n == nil {
+			return
+		}
+		if childEl, ok := n.(*dom.Element); ok {
+			if id := childEl.GetAttribute("id"); id != "" {
+				doc.elementByID[id] = childEl
+			}
+			for c := childEl.FirstChild(); c != nil; c = c.NextSibling() {
+				collectIDs(c)
+			}
+		}
+	}
+	collectIDs(el)
 
 	var walk func(dom.Node, *svgPaintContext)
 	walk = func(n dom.Node, ctx *svgPaintContext) {
@@ -676,6 +744,29 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 				// Clip path shapes will be applied during paint
 				_ = clipShapes
 			}
+		}
+
+		// Handle <use> elements: look up referenced element and clone its shape
+		if tag == "use" {
+			href := childEl.GetAttribute("href")
+			if href == "" {
+				href = childEl.GetAttribute("xlink:href")
+			}
+			if refID := parseURLReference(href); refID != "" {
+				if refEl, ok := doc.elementByID[refID]; ok {
+					refShape := parseSVGElement(refEl)
+					if refShape != nil {
+						// Apply <use> x/y offset
+						dx := parseSVGCoord(childEl.GetAttribute("x"))
+						dy := parseSVGCoord(childEl.GetAttribute("y"))
+						if dx != 0 || dy != 0 {
+							refShape = &svgTranslatedShape{shape: refShape, dx: dx, dy: dy}
+						}
+						doc.shapes = append(doc.shapes, refShape)
+					}
+				}
+			}
+			return // <use> resolved, skip children
 		}
 
 		// Parse the shape

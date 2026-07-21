@@ -273,6 +273,10 @@ type ComputedStyle struct {
 	TextShadow              string
 	Transform               string
 	Transition              string
+	TransitionProperty      string  // "all" (default), "opacity", "transform", etc.
+	TransitionDuration      float64 // seconds; 0 = instant
+	TransitionTimingFunction string // "ease" (default), "linear", "ease-in", "ease-out", "ease-in-out"
+	TransitionDelay         float64 // seconds; 0 = no delay
 	Animation               string
 	AnimationName           string
 	AnimationDuration       float64 // seconds
