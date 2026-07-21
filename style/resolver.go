@@ -1506,6 +1506,15 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			}
 		case "transition":
 			cs.Transition = resolvedStr
+		case "border":
+			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+				cs.BorderTopWidth, cs.BorderRightWidth = w, w
+				cs.BorderBottomWidth, cs.BorderLeftWidth = w, w
+				cs.BorderTopStyle, cs.BorderRightStyle = s, s
+				cs.BorderBottomStyle, cs.BorderLeftStyle = s, s
+				cs.BorderTopColor, cs.BorderRightColor = c, c
+				cs.BorderBottomColor, cs.BorderLeftColor = c, c
+			}
 		}
 	}
 }
