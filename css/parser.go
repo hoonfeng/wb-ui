@@ -704,8 +704,13 @@ func (p *Parser) parseComplexSelector() (ComplexSelector, bool) {
 				p.consume()
 				rel = RelationIndirectAdjacent
 			default:
-				// Unknown combinator — bail.
-				return cs, false
+			// Not a combinator delimiter (> + ~). This is the start of the next
+			// compound selector (e.g. .class or *universal). If whitespace
+			// preceded it, treat as a descendant combinator (do NOT consume).
+			if !hadWhitespace {
+				return cs, true
+			}
+			rel = RelationDescendant
 			}
 		default:
 			if !hadWhitespace {

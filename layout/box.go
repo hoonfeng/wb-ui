@@ -531,7 +531,10 @@ func buildFlexChildren(box *LayoutBox, el *dom.Element, resolver *style.Resolver
 				continue
 			}
 			// Non-whitespace text becomes an anonymous block-level flex item.
-			run := &LayoutBox{Type: BoxTextRun, Text: data, Style: box.Style}
+			// Use inheritedOrNew to avoid leaking non-inheritable properties
+			// (like display:flex) into the text run, which would cause it to
+			// be incorrectly laid out as a flex container.
+			run := &LayoutBox{Type: BoxTextRun, Text: data, Style: inheritedOrNew(box.Style)}
 			box.AddChild(run)
 		}
 	}

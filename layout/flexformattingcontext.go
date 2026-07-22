@@ -206,16 +206,32 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			setItemBorderBox(it, isRow)
 			// 在布局子元素前，设置一个临时的交叉轴尺寸（容器在该轴上的内容尺寸），
 			// 使内部 flex/block 布局有正确的可参考高度/宽度。
+			// 仅对 block-level 子元素预设（flex/grid/block 容器需要），
+			// 文本和内联元素的高度应由内容决定，不应膨胀到容器高度。
 			if isRow {
-				it.box.Rect.Height = contentHeight
+				if it.box.Type != BoxTextRun && !it.box.IsInline() {
+					it.box.Rect.Height = contentHeight
+				}
 			} else {
-				it.box.Rect.Width = contentWidth
+				if it.box.Type != BoxTextRun && !it.box.IsInline() {
+					it.box.Rect.Width = contentWidth
+				}
 			}
 			it.box.Rect.X = 0
 			it.box.Rect.Y = 0
 			childCtx := contextFor(it.box)
 			childCtx.Layout(it.box, state)
-			it.crossSize = crossAxisSize(it.box, isRow)
+			// Use content-based cross-size measurement for text/inline items
+			// instead of the rect dimension which may hold the pre-set value.
+			if it.box.Type == BoxTextRun || it.box.IsInline() {
+				if isRow {
+					it.crossSize = maxContentBottom(it.box) - it.box.Rect.ContentY()
+				} else {
+					it.crossSize = maxContentWidth(it.box)
+				}
+			} else {
+				it.crossSize = crossAxisSize(it.box, isRow)
+			}
 		}
 		// Cross size of the line is the max cross size of items.
 		ln.crossSize = 0
@@ -330,10 +346,16 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// Auto height of the container: the cross size is the line stack height.
 	if heightIsAuto(box) {
 		if isRow {
-			box.Rect.Height = cursorCross
+			// cursorCross accumulates line cross-sizes (content heights), so add
+			// the container's vertical padding/border to get the border-box height.
+			box.Rect.Height = cursorCross + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
+				box.Rect.Border.Top + box.Rect.Border.Bottom
 		} else {
 			// column direction: main axis is vertical; height encloses all lines' main.
-			box.Rect.Height = totalLineMain(lines)
+			// totalLineMain sums items' border-box sizes + margins, so add the
+			// container's vertical padding/border.
+			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
+				box.Rect.Border.Top + box.Rect.Border.Bottom
 		}
 	}
 }
