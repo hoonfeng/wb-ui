@@ -40,91 +40,47 @@ func main() {
 		return re.ReplaceAllString(string(data), ""), nil
 	}
 
-	// ── HEAVY DUTY POLYFILLS ──
-	polyfills := []string{
+	// ── POLYFILLS ──
+	for _, p := range []string{
 		`if(!Object.getPrototypeOf)Object.getPrototypeOf=function(o){return o&&o.constructor?o.constructor.prototype:null}`,
 		`if(!Object.setPrototypeOf)Object.setPrototypeOf=function(o,p){o.__proto__=p;return o}`,
-		`if(typeof TextEncoder==='undefined')TextEncoder=function(){this.encode=function(s){var a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}}`,
-		`if(typeof TextDecoder==='undefined')TextDecoder=function(){this.decode=function(a){return String.fromCharCode.apply(null,a)}}`,
-		`if(typeof structuredClone==='undefined')structuredClone=function(o){return JSON.parse(JSON.stringify(o))}`,
-		`if(typeof crypto==='undefined')crypto={getRandomValues:function(arr){for(var i=0;i<arr.length;i++)arr[i]=Math.floor(Math.random()*256)}}`,
-		`if(typeof fetch==='undefined')fetch=function(){return Promise.reject(new Error('fetch not available'))}`,
-		`if(typeof WebSocket==='undefined')WebSocket=function(){}`,
-		`if(typeof CustomEvent==='undefined')CustomEvent=function(){return{}}`,
-		`if(typeof ResizeObserver==='undefined')ResizeObserver=function(){}`,
-		`if(typeof MutationObserver==='undefined')MutationObserver=function(){}`,
-		`if(typeof requestAnimationFrame==='undefined')requestAnimationFrame=function(fn){return setTimeout(fn,16)}`,
-		`if(typeof cancelAnimationFrame==='undefined')cancelAnimationFrame=function(id){clearTimeout(id)}`,
-		`if(typeof performance==='undefined')performance={now:function(){return Date.now()}}`,
-		`if(typeof navigator==='undefined')navigator={userAgent:'PairCode Desktop'}`,
-		`if(typeof queueMicrotask==='undefined')queueMicrotask=function(fn){Promise.resolve().then(fn)}`,
-		// Fix Array.from
+		`if(typeof TextEncoder=='undefined')TextEncoder=function(){this.encode=function(s){var a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}}`,
+		`if(typeof TextDecoder=='undefined')TextDecoder=function(){this.decode=function(a){return String.fromCharCode.apply(null,a)}}`,
+		`if(typeof structuredClone=='undefined')structuredClone=function(o){return JSON.parse(JSON.stringify(o))}`,
+		`if(typeof crypto=='undefined')crypto={getRandomValues:function(arr){for(var i=0;i<arr.length;i++)arr[i]=Math.floor(Math.random()*256)}}`,
+		`if(typeof fetch=='undefined')fetch=function(){return Promise.reject(new Error('fetch not available'))}`,
+		`if(typeof WebSocket=='undefined')WebSocket=function(){}`,
+		`if(typeof CustomEvent=='undefined')CustomEvent=function(){return{}}`,
+		`if(typeof ResizeObserver=='undefined')ResizeObserver=function(){}`,
+		`if(typeof MutationObserver=='undefined')MutationObserver=function(){}`,
+		`if(typeof requestAnimationFrame=='undefined')requestAnimationFrame=function(fn){return setTimeout(fn,16)}`,
+		`if(typeof cancelAnimationFrame=='undefined')cancelAnimationFrame=function(id){clearTimeout(id)}`,
+		`if(typeof performance=='undefined')performance={now:function(){return Date.now()}}`,
+		`if(typeof navigator=='undefined')navigator={userAgent:'PairCode Desktop'}`,
+		`if(typeof queueMicrotask=='undefined')queueMicrotask=function(fn){Promise.resolve().then(fn)}`,
+		`if(typeof Event=='undefined'){(function(){Event=function(t,e){this.type=t};Event.prototype={constructor:Event};window.Event=Event})()}`,
 		`if(!Array.from)Array.from=function(a,fn,ctx){var r=[];for(var i=0;i<a.length;i++)r.push(fn?fn.call(ctx||null,a[i],i):a[i]);return r}`,
-	}
-	for _, p := range polyfills {
+		`if(typeof window.getSelection=='undefined')window.getSelection=function(){return{anchorNode:null,anchorOffset:0,focusNode:null,focusOffset:0,rangeCount:0,getRangeAt:function(){return null},addRange:function(){},removeAllRanges:function(){}}}`,
+		`if(typeof Range=='undefined')Range=function(){this.collapsed=true;this.startOffset=0;this.endOffset=0}`,
+		`if(typeof document.createRange=='undefined')document.createRange=function(){return new Range()}`,
+		// Error.stack support (goja doesn't set it automatically)
+		`if(typeof Error.prototype.stack=='undefined'){Error.prototype.stack='';var _errCtor=Error;var newErr=function(m){var e=_errCtor(m);e.stack='';return e};window.Error=newErr}`,
+	} {
 		wv.EvalJS(p)
 	}
 
-	// ── Error trap: override console to catch ALL errors ──
+	// DEBUG: catch Object method misuse
 	wv.EvalJS(`(function(){
-		var _log = console.log;
-		var _err = console.error;
-		console.error = function() {
-			var parts = [];
-			for (var i = 0; i < arguments.length; i++) {
-				var a = arguments[i];
-				if (a instanceof Error && a.stack) parts.push(a.stack);
-				else if (typeof a === 'object') parts.push(JSON.stringify(a));
-				else parts.push(String(a));
-			}
-			_log.call(console, 'ERR:', parts.join(' '));
-		};
-		// Also trap unhandled errors
-		if (typeof window !== 'undefined') {
-			var _oe = window.onerror;
-			window.onerror = function(msg, src, line, col, err) {
-				_log.call(console, 'WINDOW_ERR:', msg, 'line='+line, 'col='+col, 'stack='+(err&&err.stack?err.stack:''));
-				return true; // prevent default
-			};
-		}
+		var _gp=Object.getPrototypeOf;
+		Object.getPrototypeOf=function(o){if(o===null||o===undefined){console.log('[DEBUG] getPrototypeOf('+o+')');throw new TypeError('getPrototypeOf('+o+')');}return _gp(o);};
+		var _ks=Object.keys;
+		Object.keys=function(o){if(o===null||o===undefined){console.log('[DEBUG] keys('+o+')');throw new TypeError('keys('+o+')');}return _ks(o);};
 	})()`)
 
-	// ── DEBUG: wrap Object methods to find what gets null/undefined ──
+	// Trap console
 	wv.EvalJS(`(function(){
-		var _getProto = Object.getPrototypeOf;
-		Object.getPrototypeOf = function(o) {
-			if (o === null || o === undefined) {
-				console.log('Object.getPrototypeOf called with ' + o);
-				throw new TypeError('Object.getPrototypeOf called with ' + o);
-			}
-			return _getProto(o);
-		};
-		var _keys = Object.keys;
-		Object.keys = function(o) {
-			if (o === null || o === undefined) {
-				console.log('Object.keys called with ' + o);
-				throw new TypeError('Object.keys called with ' + o);
-			}
-			return _keys(o);
-		};
-		var _assign = Object.assign;
-		Object.assign = function(t) {
-			if (t === null || t === undefined) {
-				console.log('Object.assign called with target=' + t);
-				throw new TypeError('Object.assign called with target=' + t);
-			}
-			var args = [t];
-			for (var i = 1; i < arguments.length; i++) args.push(arguments[i]);
-			return _assign.apply(null, args);
-		};
-		var _defineProp = Object.defineProperty;
-		Object.defineProperty = function(o, p, d) {
-			if (o === null || o === undefined) {
-				console.log('Object.defineProperty called with obj=' + o + ' prop=' + p);
-				throw new TypeError('Object.defineProperty called with obj=' + o);
-			}
-			return _defineProp(o, p, d);
-		};
+		var _log=console.log;
+		console.error=function(){var a=[];for(var i=0;i<arguments.length;i++){var v=arguments[i];if(v instanceof Error) a.push(v.message+'\n'+v.stack);else a.push(String(v));} _log.call(console,'ERR:',a.join(' '));};
 	})()`)
 
 	// Load HTML
@@ -139,20 +95,18 @@ func main() {
 	doc := mf.Document()
 	bindings.RegisterDOMBindings(rt, doc)
 
-	// Execute scripts
 	fmt.Println("=== Executing scripts ===")
 	fr.ExecuteScripts()
 
-	// Check
 	r, _ := wv.EvalJS(`(function(){
 		var r=[];
 		r.push('Vue='+typeof Vue);
-		if(typeof Vue!=='undefined')r.push('version='+Vue.version);
+		if(typeof Vue!='undefined')r.push('version='+Vue.version);
 		var a=document.getElementById('app');
 		r.push('app.children='+a.childElementCount+' htmlLen='+a.innerHTML.length);
 		return r.join('\n');
 	})()`)
 	fmt.Println(r)
-	fmt.Println("\nConsole errors:")
+	fmt.Println("\n=== Console ===")
 	fmt.Println(wv.ConsoleOutput())
 }

@@ -1172,6 +1172,72 @@ obj.SetInternal(el)
 		}
 	}
 
+	// ── <select> specific ──
+	// ── <select> specific ──
+	if tag == "select" {
+		obj.SetAccessor("multiple",
+			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				return jsc.BooleanValue(el.HasAttribute("multiple"))
+			}),
+			nil)
+		obj.SetAccessor("selectedIndex",
+			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				idx := 0
+				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+					if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+						if opt.HasAttribute("selected") {
+							return jsc.NumberValue(float64(idx))
+						}
+						idx++
+					}
+				}
+				return jsc.NumberValue(-1)
+			}),
+			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+				selIdx := int(v.ToNumber())
+				idx := 0
+				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+					if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+						if idx == selIdx {
+							opt.SetAttribute("selected", "selected")
+						} else {
+							opt.RemoveAttribute("selected")
+						}
+						idx++
+					}
+				}
+			})
+		// options: returns an HTMLOptionsCollection-like object (NodeList of option elements)
+		obj.SetAccessor("options", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			var opts []jsc.JSValue
+			for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+				if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+					opts = append(opts, jsc.ObjectValue(wrapElement(in, opt)))
+				}
+			}
+			arr := jsc.NewArray(in.ObjectPrototype(), opts)
+			arr.Set("length", jsc.NumberValue(float64(len(opts))))
+			return jsc.ObjectValue(arr)
+		}), nil)
+	}
+
+	// ── <option> specific ──
+	if tag == "option" {
+		obj.SetAccessor("selected",
+			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				return jsc.BooleanValue(el.HasAttribute("selected"))
+			}),
+			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+				if v.ToBoolean() {
+					el.SetAttribute("selected", "selected")
+				} else {
+					el.RemoveAttribute("selected")
+				}
+			})
+	}
+
+	// Accessors for string properties
+
 	// Accessors for string properties
 	obj.SetAccessor("tagName", strAcc(el.TagName()), nil)
 	obj.SetAccessor("nodeName", strAcc(el.NodeName()), nil)
