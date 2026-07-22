@@ -123,6 +123,12 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				lineMain += freezeLine[i].mainSize
 			}
 			free := mainSize - lineMain - lineMainMargins(freezeLine)
+			// When the container's main size is indefinite (auto / sentinel 1e6),
+			// do not distribute positive free space via flex-grow. Growing into
+			// infinite space would balloon flex-grow items to unrealistic sizes.
+			if free > 0 && mainSize >= 1e5 {
+				free = 0
+			}
 			if math.Abs(free) < 1e-6 {
 				break
 			}
@@ -562,9 +568,15 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	// Cross size: stretch to container cross size when align is stretch.
 	crossSize := it.crossSize
 	if align == "stretch" {
-		crossSize = crossAxisContentSize(container, isRow) - it.crossMargin
-		if crossSize < 0 {
-			crossSize = 0
+		// Only stretch when the container has a definite cross-axis size.
+		// When the container's cross size is auto (0), stretching the
+		// child to 0 would collapse its content-based size.
+		containerCross := crossAxisContentSize(container, isRow)
+		if containerCross > 0 {
+			crossSize = containerCross - it.crossMargin
+			if crossSize < 0 {
+				crossSize = 0
+			}
 		}
 		if isRow {
 			it.box.Rect.Height = crossSize
