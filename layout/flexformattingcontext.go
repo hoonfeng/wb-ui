@@ -87,7 +87,15 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		// zero main size (plus border/padding), which is wrong for e.g. buttons
 		// whose width should follow their text content.
 		if flexBasisIsContent(it.box, isRow) {
-			basis = measureFlexItemContentMain(it.box, mainSizeAvailable(isRow, contentWidth, contentHeight), isRow, state)
+			measW := mainSizeAvailable(isRow, contentWidth, contentHeight)
+			if !isRow {
+				// Column-direction: use the container's content width (cross-axis)
+				// for measurement, not the contentHeight (main-axis). The height
+				// may be auto (0) or very large (after previous re-layouts), but
+				// text and inline children need the correct width to flow.
+				measW = contentWidth
+			}
+			basis = measureFlexItemContentMain(it.box, measW, isRow, state)
 		}
 		it.hypotheticalMain = basis + it.mainBorderPadding
 	}
@@ -372,6 +380,29 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				box.Rect.Border.Top + box.Rect.Border.Bottom
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
+		}
+	}
+
+	// Re-lay-out flex/grid container items whose children were measured at a
+	// provisional width during the measurement pass (measureFlexItemContentMain).
+	// The children's sizes need to be recalculated at the final width determined
+	// by setItemPosition stretch. This only applies to non-leaf items that have
+	// their own formatting context.
+	for i := range items {
+		it := &items[i]
+		if needsContentRelayout(it.box) {
+			// Before re-lay-out, ensure the item's cross-axis size matches the
+			// container's cross-axis content size. savedRect in
+			// measureFlexItemContentMain may have restored the item's width/height
+			// to 0, but the actual cross-axis size (width for column, height for
+			// row) was already determined by setItemPosition stretch.
+			if !isRow {
+				it.box.Rect.Width = box.Rect.ContentWidth()
+			} else {
+				it.box.Rect.Height = box.Rect.ContentHeight()
+			}
+			ctx := contextFor(it.box)
+			ctx.Layout(it.box, state)
 		}
 	}
 
@@ -828,7 +859,14 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 		// Column container: give generous width (cross axis) so text flows
 		// naturally, but leave height auto so cross-axis stretch on inner
 		// flex containers does not inflate the content height measurement.
-		box.Rect.Width = availableMain
+		// availableMain for column-direction items should be the container's
+		// contentWidth (cross-axis), set by the caller. Fall back to 1280
+		// when the container has an auto/sentinel width.
+		w := availableMain
+		if w <= 0 || w >= 1e5 {
+			w = 1280
+		}
+		box.Rect.Width = w
 	}
 	box.Rect.X = 0
 	box.Rect.Y = 0
@@ -902,4 +940,19 @@ func contentSpanWidth(box *LayoutBox) float64 {
 		cw = 0
 	}
 	return cw
+}
+
+// needsContentRelayout reports whether a flex/grid item's content needs to be
+// re-laid-out after the item receives its final position and cross-axis size
+// from the parent flex/grid layout. This is needed because
+// measureFlexItemContentMain lays out children at a provisional width; after
+// the outer layout determines the final width (via stretch), the children must
+// be re-laid-out at the correct size. Only applies to non-leaf containers
+// (flex/grid) whose cross-axis size was stretched to a different value.
+func needsContentRelayout(box *LayoutBox) bool {
+	if box.Style == nil {
+		return false
+	}
+	disp := box.Style.Display
+	return disp == style.DisplayFlex || disp == style.DisplayInlineFlex
 }
