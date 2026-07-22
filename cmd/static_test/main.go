@@ -9,6 +9,7 @@ import (
 
 	"wb-ui/css"
 	"wb-ui/dom"
+	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/rendering"
 	"wb-ui/style"
@@ -17,17 +18,16 @@ import (
 func main() {
 	cssText := `* { margin:0; padding:0; box-sizing:border-box; }
 body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px; }
-.header { background:#161b22; height:48px; display:flex; align-items:center; padding:0 16px; border-bottom:1px solid #30363d; font-size:14px; font-weight:bold; color:#e6edf3; }
+.header { background:#161b22; height:48px; display:flex; align-items:center; padding:0 16px; border-bottom:1px solid #30363d; font-size:14px; font-weight:bold; }
 .layout { display:flex; }
 .sidebar { width:200px; background:#161b22; border-right:1px solid #30363d; padding:12px; display:flex; flex-direction:column; }
-.sidebar .item { padding:6px 8px; border-radius:6px; color:#e6edf3; font-size:13px; }
-.sidebar .item.active { background:#1f6feb; color:#fff; }
+.sidebar .item { padding:6px 8px; color:#e6edf3; font-size:13px; }
+.sidebar .item.active { background:#1f6feb; color:#fff; border-radius:6px; }
 .main { flex:1; display:flex; flex-direction:column; }
 .toolbar { background:#161b22; height:36px; display:flex; align-items:center; padding:0 12px; border-bottom:1px solid #30363d; }
 .toolbar .tab { padding:4px 12px; border-radius:4px; font-size:12px; color:#8b949e; }
 .toolbar .tab.active { background:#1f6feb; color:#fff; }
-.content { flex:1; background:#0d1117; padding:16px; font-family:monospace; font-size:13px; line-height:1.6; color:#e6edf3; }
-.content .line { padding:2px 0; }
+.content { flex:1; background:#0d1117; padding:16px; font-family:monospace; font-size:13px; line-height:1.6; }
 .content .keyword { color:#ff7b72; }
 .content .string { color:#a5d6ff; }
 .content .comment { color:#8b949e; }
@@ -37,15 +37,12 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 .badge.green { background:#238636; color:#fff; }
 .badge.blue { background:#1f6feb; color:#fff; }
 `
-
 	doc := dom.NewDocument()
 	htmlEl := dom.NewElement(doc, "html")
 	doc.AppendChild(htmlEl)
-
 	styleEl := dom.NewElement(doc, "style")
 	styleEl.SetTextContent(cssText)
 	htmlEl.AppendChild(styleEl)
-
 	bodyEl := dom.NewElement(doc, "body")
 	htmlEl.AppendChild(bodyEl)
 
@@ -54,13 +51,13 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 	h.AppendChild(doc.CreateTextNode("IDE Header"))
 	bodyEl.AppendChild(h)
 
-	layout := dom.NewElement(doc, "div")
-	layout.SetClassName("layout")
-	bodyEl.AppendChild(layout)
+	layoutEl := dom.NewElement(doc, "div")
+	layoutEl.SetClassName("layout")
+	bodyEl.AppendChild(layoutEl)
 
 	sb := dom.NewElement(doc, "div")
 	sb.SetClassName("sidebar")
-	layout.AppendChild(sb)
+	layoutEl.AppendChild(sb)
 	for _, it := range []struct{ t, c string }{
 		{"Files", "item active"}, {"Search", "item"}, {"Debug", "item"}, {"Settings", "item"},
 	} {
@@ -72,7 +69,7 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 
 	mainEl := dom.NewElement(doc, "div")
 	mainEl.SetClassName("main")
-	layout.AppendChild(mainEl)
+	layoutEl.AppendChild(mainEl)
 
 	tb := dom.NewElement(doc, "div")
 	tb.SetClassName("toolbar")
@@ -90,14 +87,13 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 	ct.SetClassName("content")
 	mainEl.AppendChild(ct)
 	for _, l := range []struct{ cls, text string }{
-		{"keyword", "package main"},
-		{"comment", "// Hello World"},
+		{"keyword", "package"},
+		{"comment", "// Hello"},
 		{"", "fmt.Println("},
-		{"string", "\"Hello PairCode!\""},
+		{"string", "\"Hello!\""},
 		{"", ")"},
 	} {
 		line := dom.NewElement(doc, "div")
-		line.SetClassName("line")
 		span := dom.NewElement(doc, "span")
 		if l.cls != "" {
 			span.SetClassName(l.cls)
@@ -111,8 +107,7 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 	st.SetClassName("statusbar")
 	mainEl.AppendChild(st)
 	for _, it := range []struct{ t, c string }{
-		{"Go 1.26", ""}, {"UTF-8", ""},
-		{"OK", "badge green"}, {"3 files", "badge blue"}, {"0 err", "badge red"},
+		{"Go 1.26", ""}, {"UTF-8", ""}, {"OK", "badge green"}, {"3 files", "badge blue"}, {"0 err", "badge red"},
 	} {
 		el := dom.NewElement(doc, "span")
 		if it.c != "" {
@@ -132,13 +127,19 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 		fmt.Println("ERROR: RenderView is nil")
 		return
 	}
+
+	lb := rv.LayoutBox()
+	fmt.Println("=== LAYOUT TREE (pre-layout) ===")
+	dumpLB(lb, 0)
+
 	rv.SetViewportSize(800, 600)
 	rv.Layout(nil)
 
-	fmt.Println("=== RENDER TREE ===")
-	dumpTree(rv, 0)
-	fmt.Println("\n=== LAYOUT ===")
-	dumpLayout(rv, 0)
+	fmt.Println("\n=== LAYOUT TREE (post-layout) ===")
+	dumpLB(lb, 0)
+
+	fmt.Println("\n=== RENDER TREE (post-layout) ===")
+	dumpRO(rv, 0)
 
 	canvas := graphics.NewCanvas(800, 600)
 	defer canvas.Release()
@@ -164,71 +165,64 @@ body { background:#0d1117; color:#e6edf3; font-family:sans-serif; font-size:13px
 	}
 }
 
-func tagName(ro rendering.RenderObject) string {
-	n := ro.Node()
-	if n == nil {
-		return fmt.Sprintf("RO(%d)", ro.Type())
+func elName(el *dom.Element) string {
+	s := el.LocalName()
+	if c := el.ClassName(); c != "" {
+		s += "." + c
 	}
-	if el, ok := n.(*dom.Element); ok {
-		t := el.TagName()
-		if c := el.ClassName(); c != "" {
-			t += "." + c
-		}
-		return t
-	}
-	if _, ok := n.(*dom.Text); ok {
-		return "#text"
-	}
-	return fmt.Sprintf("N(%T)", n)
+	return s
 }
 
-func dumpTree(ro rendering.RenderObject, depth int) {
-	pref := ""
-	for i := 0; i < depth; i++ {
-		pref += "  "
-	}
-	fmt.Print(pref + tagName(ro))
-	if box, ok := ro.(*rendering.RenderBox); ok {
-		fr := box.FrameRect()
-		fmt.Printf("  (%d,%d) %dx%d vis=%v",
-			int(fr.X), int(fr.Y), int(fr.Width), int(fr.Height), box.IsVisible())
-	}
-	fmt.Println()
-	for ch := ro.FirstChild(); ch != nil; ch = ch.NextSibling() {
-		dumpTree(ch, depth+1)
-	}
-}
-
-func dumpLayout(ro rendering.RenderObject, depth int) {
-	pref := ""
-	for i := 0; i < depth; i++ {
-		pref += "  "
-	}
-	cs := ro.Style()
-	if cs == nil {
-		fmt.Printf("%s%-20s (no style)\n", pref, tagName(ro))
+func dumpLB(lb *layout.LayoutBox, depth int) {
+	if lb == nil {
 		return
 	}
-	bg := "none"
-	if cs.BackgroundColor.A > 0 {
-		bg = fmt.Sprintf("#%02x%02x%02x",
-			cs.BackgroundColor.R, cs.BackgroundColor.G, cs.BackgroundColor.B)
+	pref := ""
+	for i := 0; i < depth; i++ {
+		pref += "  "
 	}
-	clr := "none"
-	if cs.Color.A > 0 {
-		clr = fmt.Sprintf("#%02x%02x%02x",
-			cs.Color.R, cs.Color.G, cs.Color.B)
+	elStr := "(anon)"
+	if lb.Element != nil {
+		elStr = elName(lb.Element)
+	}
+	disp := "nil"
+	if lb.Style != nil {
+		disp = fmt.Sprintf("%v", lb.Style.Display)
+	}
+	fmt.Printf("%s%-18s %-6s (%5.0f,%5.0f) %5.0fx%5.0f disp=%s\n",
+		pref, elStr, lb.Type, lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height, disp)
+	for _, c := range lb.Children {
+		dumpLB(c, depth+1)
+	}
+}
+
+func dumpRO(ro rendering.RenderObject, depth int) {
+	pref := ""
+	for i := 0; i < depth; i++ {
+		pref += "  "
+	}
+	n := ro.Node()
+	elStr := "(none)"
+	if n != nil {
+		if el, ok := n.(*dom.Element); ok {
+			elStr = elName(el)
+		} else if _, ok := n.(*dom.Text); ok {
+			elStr = "#text"
+		}
+	}
+	lb := ro.LayoutBox()
+	lbStr := "no-lb"
+	frStr := ""
+	if lb != nil {
+		lbStr = fmt.Sprintf("lb=(%5.0f,%5.0f %5.0fx%5.0f)", lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height)
 	}
 	if box, ok := ro.(*rendering.RenderBox); ok {
 		fr := box.FrameRect()
-		fmt.Printf("%s%-20s (%4.0f,%4.0f) %4.0fx%4.0f %-6s bg=%s clr=%s\n",
-			pref, tagName(ro), fr.X, fr.Y, fr.Width, fr.Height, cs.Display, bg, clr,
-		)
-	} else {
-		fmt.Printf("%s%-20s %-6s bg=%s clr=%s\n", pref, tagName(ro), cs.Display, bg, clr)
+		frStr = fmt.Sprintf("  fr=(%5.0f,%5.0f %5.0fx%5.0f) vis=%v", fr.X, fr.Y, fr.Width, fr.Height, box.IsVisible())
 	}
+	fmt.Printf("%s%-18s %s%s\n", pref, elStr, lbStr, frStr)
 	for ch := ro.FirstChild(); ch != nil; ch = ch.NextSibling() {
-		dumpLayout(ch, depth+1)
+		dumpRO(ch, depth+1)
 	}
 }
 
