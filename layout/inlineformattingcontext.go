@@ -81,8 +81,22 @@ func (c *InlineFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	for _, child := range box.Children {
 		child.TextSegments = nil
 	}
-	items := collectInlineItems(box)
 
+	// Fast path: when the box itself is a leaf text run (e.g. direct text child of
+	// a flex container), generate a single segment inline.
+	if box.Type == BoxTextRun && len(box.Children) == 0 && box.Text != "" {
+		w := measureText(box, box.Text)
+		baseline := contentY + vCenterOffset + ascent
+		box.TextSegments = []TextSegment{
+			{Start: 0, Len: len(box.Text), X: contentX, Y: baseline, Width: w, Height: ascent + descent, LineY: contentY, LineHeight: lineHeight},
+		}
+		if box.Rect.Height < lineHeight {
+			box.Rect.Height = lineHeight
+		}
+		return
+	}
+
+	items := collectInlineItems(box)
 	// Greedy line breaking.
 	cursorY := contentY
 	cursorX := contentX

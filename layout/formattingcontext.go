@@ -34,10 +34,9 @@ type FormattingContext interface {
 // GridFormattingContext; tables use TableLayout. Multi-column containers
 // (column-count > 0 or column-width set) use MultiColumnFormattingContext.
 func contextFor(box *LayoutBox) FormattingContext {
-	// Anonymous boxes wrap inline-level content (produced by BuildLayoutTree when a
-	// block container mixes inline and block children); they are laid out by the
-	// inline formatting context.
-	if box.Type == BoxAnonymous {
+	// Anonymous boxes and text runs wrap inline-level content; they are laid out
+	// by the inline formatting context regardless of inherited display.
+	if box.Type == BoxAnonymous || box.Type == BoxTextRun || box.IsInline() {
 		return &InlineFormattingContext{}
 	}
 	if box.Style == nil {
@@ -57,8 +56,6 @@ func contextFor(box *LayoutBox) FormattingContext {
 		return &BlockFormattingContext{}
 	}
 }
-
-// layoutInFlowChildren recursively lays out box's in-flow children. Each child is
 // positioned by the formatting context that owns it. Out-of-flow (floated / absolute)
 // children are handled by the parent formatting context separately.
 func layoutInFlowChildren(box *LayoutBox, state *LayoutState) {
