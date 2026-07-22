@@ -868,21 +868,22 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	defer func() { box.Rect.X, box.Rect.Y = savedX, savedY }()
 	if isRow {
 		box.Rect.Width = availableMain
+		box.Rect.X = 0
+		box.Rect.Y = 0
 	} else {
-		// Column container: give generous width (cross axis) so text flows
-		// naturally, but leave height auto so cross-axis stretch on inner
-		// flex containers does not inflate the content height measurement.
-		// availableMain for column-direction items should be the container's
-		// contentWidth (cross-axis), set by the caller. Fall back to 1280
-		// when the container has an auto/sentinel width.
-		w := availableMain
-		if w <= 0 || w >= 1e5 {
-			w = 1280
+		// Column container: main axis is Y (height). Set height to availableMain
+		// as an approximation of the main-axis size, and give a generous width
+		// (cross-axis) so text content flows naturally. The exact cross-axis
+		// width will be set by setItemPosition stretch in the main layout pass.
+		h := availableMain
+		if h <= 0 || h >= 1e5 {
+			h = 1280
 		}
-		box.Rect.Width = w
+		box.Rect.Height = h
+		box.Rect.Width = 1280
+		box.Rect.X = 0
+		box.Rect.Y = 0
 	}
-	box.Rect.X = 0
-	box.Rect.Y = 0
 	ctx := contextFor(box)
 	ctx.Layout(box, state)
 	if isRow {
