@@ -385,7 +385,7 @@ func (f *Frame) executeInlineScripts() {
 					Logf("ScriptLoad", "[%d] empty content", i)
 					continue
 				}
-				Logf("ScriptLoad", "[%d] exec: len=%d", i, len(code))
+				Logf("ScriptLoad", "[%d] exec: src=%q len=%d", i, src, len(code))
 				// Execute directly — no try/catch wrapper.
 				if err := f.ScriptEngine(code); err != nil {
 					Logf("ScriptLoad", "[%d] EXEC FAIL: %v", i, err)
