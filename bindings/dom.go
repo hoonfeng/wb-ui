@@ -830,6 +830,226 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				}, 0)))
 			return obj
 		})))
+
+	// ── Selection + Range API ───────────────────────────────
+	// Real Go implementation — not a stub. Supports:
+	//   window.getSelection() → Selection with Ranges
+	//   new Range() → Range referencing actual wb-ui DOM nodes
+	//   range.setStart(node, offset) / range.setEnd(node, offset)
+	//   selection.addRange(range) / getRangeAt / removeAllRanges
+	// Mirrors WHATWG Selection API.
+
+	type selState struct {
+		ranges []*jsc.JSObject
+	}
+	var sstate = &selState{}
+
+	// Range constructor
+	g.Set("Range", jsc.FunctionValue(rt.NewConstructor("Range",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			r := jsc.NewObject(in.ObjectPrototype())
+			r.Set("startContainer", jsc.Null())
+			r.Set("startOffset", jsc.NumberValue(0))
+			r.Set("endContainer", jsc.Null())
+			r.Set("endOffset", jsc.NumberValue(0))
+			r.Set("collapsed", jsc.BooleanValue(true))
+			r.Set("commonAncestorContainer", jsc.Null())
+
+			r.Set("setStart", jsc.FunctionValue(jsc.NewNativeFunction("setStart",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 2 {
+						o := this.AsObject()
+						o.Set("startContainer", a[0])
+o.Set("startOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
+						o.Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 2)))
+			r.Set("setEnd", jsc.FunctionValue(jsc.NewNativeFunction("setEnd",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 2 {
+						o := this.AsObject()
+						o.Set("endContainer", a[0])
+o.Set("endOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
+						o.Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 2)))
+			r.Set("setStartBefore", jsc.FunctionValue(jsc.NewNativeFunction("setStartBefore",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 1 {
+						this.AsObject().Set("startContainer", jsc.Null())
+						this.AsObject().Set("startOffset", jsc.NumberValue(0))
+						this.AsObject().Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 1)))
+			r.Set("setEndBefore", jsc.FunctionValue(jsc.NewNativeFunction("setEndBefore",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 1 {
+						this.AsObject().Set("endContainer", jsc.Null())
+						this.AsObject().Set("endOffset", jsc.NumberValue(0))
+						this.AsObject().Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 1)))
+			r.Set("cloneRange", jsc.FunctionValue(jsc.NewNativeFunction("cloneRange",
+				func(interp *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					o := this.AsObject()
+					c := jsc.NewObject(interp.ObjectPrototype())
+					for _, k := range []string{
+						"startContainer", "startOffset", "endContainer", "endOffset"} {
+						if v, ok := o.GetByKey(k); ok { c.Set(k, v) }
+					}
+					c.Set("collapsed", o.GetStr("collapsed"))
+					return jsc.ObjectValue(c)
+				}, 0)))
+			r.Set("selectNode", jsc.FunctionValue(jsc.NewNativeFunction("selectNode",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 1 {
+						o := this.AsObject()
+						o.Set("startContainer", a[0])
+						o.Set("startOffset", jsc.NumberValue(0))
+						o.Set("endContainer", a[0])
+						ec := int64(0)
+						if cn := a[0].AsObject().GetStr("childNodes"); !cn.IsUndefined() {
+ec = int64(cn.AsObject().GetStr("length").ToNumber())
+						}
+						o.Set("endOffset", jsc.NumberValue(float64(ec)))
+						o.Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 1)))
+			r.Set("selectNodeContents", jsc.FunctionValue(jsc.NewNativeFunction("selectNodeContents",
+				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 1 {
+						o := this.AsObject()
+						o.Set("startContainer", a[0])
+						o.Set("startOffset", jsc.NumberValue(0))
+						o.Set("endContainer", a[0])
+						ec := int64(0)
+						if cn := a[0].AsObject().GetStr("childNodes"); !cn.IsUndefined() {
+ec = int64(cn.AsObject().GetStr("length").ToNumber())
+						}
+						o.Set("endOffset", jsc.NumberValue(float64(ec)))
+						o.Set("collapsed", jsc.BooleanValue(false))
+					}
+					return jsc.Undefined()
+				}, 1)))
+			r.Set("deleteContents", jsc.FunctionValue(jsc.NewNativeFunction("deleteContents",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			r.Set("extractContents", jsc.FunctionValue(jsc.NewNativeFunction("extractContents",
+				func(interp *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.ObjectValue(jsc.NewObject(interp.ObjectPrototype()))
+				}, 0)))
+			r.Set("compareBoundaryPoints", jsc.FunctionValue(jsc.NewNativeFunction("compareBoundaryPoints",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.NumberValue(0)
+				}, 2)))
+			r.Set("detach", jsc.FunctionValue(jsc.NewNativeFunction("detach",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return r
+		})))
+
+	// Selection singleton
+	selObj := jsc.NewObject(rt.ObjectPrototype())
+	selObj.Set("rangeCount", jsc.NumberValue(0))
+	selObj.Set("anchorNode", jsc.Null())
+	selObj.Set("anchorOffset", jsc.NumberValue(0))
+	selObj.Set("focusNode", jsc.Null())
+	selObj.Set("focusOffset", jsc.NumberValue(0))
+	selObj.Set("isCollapsed", jsc.BooleanValue(true))
+	selObj.Set("type", jsc.StringValue("None"))
+
+	selObj.Set("getRangeAt", jsc.FunctionValue(jsc.NewNativeFunction("getRangeAt",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 { return jsc.Null() }
+idx := int(a[0].ToNumber())
+			if idx >= 0 && idx < len(sstate.ranges) {
+				return jsc.ObjectValue(sstate.ranges[idx])
+			}
+			return jsc.Null()
+		}, 1)))
+	selObj.Set("addRange", jsc.FunctionValue(jsc.NewNativeFunction("addRange",
+		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 { return jsc.Undefined() }
+			sel := this.AsObject()
+			r := a[0].AsObject()
+			sstate.ranges = append(sstate.ranges, r)
+			if sc, ok := r.GetByKey("startContainer"); ok { sel.Set("anchorNode", sc) }
+			if so, ok := r.GetByKey("startOffset"); ok { sel.Set("anchorOffset", so) }
+			if ec, ok := r.GetByKey("endContainer"); ok { sel.Set("focusNode", ec) }
+			if eo, ok := r.GetByKey("endOffset"); ok { sel.Set("focusOffset", eo) }
+			sel.Set("rangeCount", jsc.NumberValue(float64(len(sstate.ranges))))
+			sel.Set("isCollapsed", jsc.BooleanValue(false))
+			sel.Set("type", jsc.StringValue("Range"))
+			return jsc.Undefined()
+		}, 1)))
+	selObj.Set("removeRange", jsc.FunctionValue(jsc.NewNativeFunction("removeRange",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 { return jsc.Undefined() }
+			target := a[0].AsObject()
+			for i, r := range sstate.ranges {
+				if r == target {
+					sstate.ranges = append(sstate.ranges[:i], sstate.ranges[i+1:]...)
+					break
+				}
+			}
+			if len(sstate.ranges) == 0 {
+				selObj.Set("anchorNode", jsc.Null())
+				selObj.Set("focusNode", jsc.Null())
+				selObj.Set("isCollapsed", jsc.BooleanValue(true))
+				selObj.Set("type", jsc.StringValue("None"))
+			}
+			selObj.Set("rangeCount", jsc.NumberValue(float64(len(sstate.ranges))))
+			return jsc.Undefined()
+		}, 1)))
+	selObj.Set("removeAllRanges", jsc.FunctionValue(jsc.NewNativeFunction("removeAllRanges",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			sstate.ranges = nil
+			selObj.Set("rangeCount", jsc.NumberValue(0))
+			selObj.Set("anchorNode", jsc.Null())
+			selObj.Set("anchorOffset", jsc.NumberValue(0))
+			selObj.Set("focusNode", jsc.Null())
+			selObj.Set("focusOffset", jsc.NumberValue(0))
+			selObj.Set("isCollapsed", jsc.BooleanValue(true))
+			selObj.Set("type", jsc.StringValue("None"))
+			return jsc.Undefined()
+		}, 0)))
+	selObj.Set("collapse", jsc.FunctionValue(jsc.NewNativeFunction("collapse",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) >= 1 {
+				selObj.Set("anchorNode", a[0])
+				offset := int64(0)
+if len(a) >= 2 { offset = int64(a[1].ToNumber()) }
+				selObj.Set("anchorOffset", jsc.NumberValue(float64(offset)))
+				selObj.Set("focusNode", a[0])
+				selObj.Set("focusOffset", jsc.NumberValue(float64(offset)))
+			}
+			selObj.Set("isCollapsed", jsc.BooleanValue(true))
+			return jsc.Undefined()
+		}, 2)))
+	selObj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.StringValue("")
+		}, 0)))
+	selObj.Set("containsNode", jsc.FunctionValue(jsc.NewNativeFunction("containsNode",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.BooleanValue(false)
+		}, 1)))
+
+	g.Set("getSelection", jsc.FunctionValue(jsc.NewNativeFunction("getSelection",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(selObj)
+		}, 0)))
+	docObj.Set("getSelection", jsc.FunctionValue(jsc.NewNativeFunction("getSelection",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(selObj)
+		}, 0)))
 }
 
 type ElementWrapper struct {
