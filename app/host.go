@@ -12,6 +12,7 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -401,11 +402,22 @@ func (h *Host) Run() {
 			h.caretBlinkTime = time.Now()
 		}
 
-			bgColor := findBodyBgColor(rendering.RenderObject(rv))
-			if bgColor.A == 0 {
-				bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+		bgColor := findBodyBgColor(rendering.RenderObject(rv))
+		if bgColor.A == 0 {
+			log.Printf("[bg] NOT FOUND, fallback to white")
+			bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+		} else {
+			log.Printf("[bg] OK #%02x%02x%02x a=%d", bgColor.R, bgColor.G, bgColor.B, bgColor.A)
+		}
+		gpuCanvas.Clear(bgColor)
+
+		// Diagnostic: log body frame rect on first frame
+		if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), h.wv.MainFrame().Document().Body()); bodyRO != nil {
+			if box, ok := bodyRO.(*rendering.RenderBox); ok {
+				fr := box.FrameRect()
+				log.Printf("[paint] body frame=(%.0f,%.0f %.0fx%.0f)", fr.X, fr.Y, fr.Width, fr.Height)
 			}
-			gpuCanvas.Clear(bgColor)
+		}
 
 			// Clamp scroll offset to valid range after layout.
 			scrollY := frameView.ScrollY()
