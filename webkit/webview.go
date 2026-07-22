@@ -196,6 +196,11 @@ func (wv *WebView) ensureJSRuntime() {
 	wv.jsInterpreter = jsc.NewInterpreter()
 	wv.jsLogger = &jsc.BufferLogger{}
 	wv.jsInterpreter.SetupGlobal(wv.jsLogger)
+	// Create event loop (needed by setTimeout/requestAnimationFrame).
+	_ = jsc.NewEventLoop(wv.jsInterpreter)
+	// Inject browser globals (TextEncoder, setTimeout, crypto, navigator, etc.)
+	// BEFORE any page scripts execute.
+	wv.jsInterpreter.InjectBrowserEnv()
 }
 
 func (wv *WebView) JSInterpreter() *jsc.Interpreter {
