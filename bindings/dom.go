@@ -19,6 +19,11 @@ import (
 // styles. When nil, dynamic <style> injection is silently ignored.
 var OnStyleNodeAdded func(node dom.Node)
 
+// OnInlineStyleChanged is an optional callback invoked when an element's
+// style attribute is changed via the JS style proxy (el.style.xxx = ...).
+// The embedder should re-resolve styles and rebuild the render tree.
+var OnInlineStyleChanged func(node dom.Node)
+
 // DOM prototype objects — set by RegisterDOMBindings, used by wrappers.
 var (
 	domElementProto *jsc.JSObject // Element.prototype
@@ -1887,7 +1892,7 @@ func (s *styleProxy) Get(key string) goja.Value {
 	default:
 		// CSS property: return the value from the style attribute
 		props := parseStyle(s.el.GetAttribute("style"))
-		if v, ok := props[key]; ok {
+		if v, ok := props[camelToKebab(key)]; ok {
 			return vm.ToValue(v)
 		}
 		return vm.ToValue("")
@@ -1899,6 +1904,9 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 	case "cssText":
 		s.el.SetAttribute("style", val.String())
 		fmt.Fprintf(os.Stderr, "[styleProxy] cssText=%q\n", val.String())
+		if OnInlineStyleChanged != nil {
+			OnInlineStyleChanged(s.el)
+		}
 		return true
 	case "setProperty", "removeProperty":
 		return false // let goja handle as a regular property (function assignment)
@@ -1906,14 +1914,18 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		// CSS property write: parse existing style, update, write back
 		props := parseStyle(s.el.GetAttribute("style"))
 		strVal := val.String()
+		ckey := camelToKebab(key)
 		if strVal == "" || strVal == "undefined" || strVal == "null" {
-			delete(props, key)
+			delete(props, ckey)
 		} else {
-			props[key] = strVal
+			props[ckey] = strVal
 		}
 		s.el.SetAttribute("style", joinStyle(props))
 		fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
 			key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
+		if OnInlineStyleChanged != nil {
+			OnInlineStyleChanged(s.el)
+		}
 		return true
 	}
 }

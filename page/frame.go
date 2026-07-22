@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"wb-ui/css"
@@ -251,7 +252,7 @@ func (f *Frame) extractAndAddStyles() {
 	}
 	f.styleSheets = nil
 	Logf("extractAndAddStyles", "removedPrevSheets=%d", removed)
-
+	var dataVRe *regexp.Regexp
 	styleElements := f.document.GetElementsByTagName("style")
 	Logf("extractAndAddStyles", "styleElementCount=%d", len(styleElements))
 	for i, styleEl := range styleElements {
@@ -260,8 +261,13 @@ func (f *Frame) extractAndAddStyles() {
 			Logf("extractAndAddStyles", "style[%d]: empty, skip", i)
 			continue
 		}
+		// Strip Vue scoped [data-v-...] selectors from inline <style> elements too
+		if dataVRe == nil {
+			dataVRe = regexp.MustCompile(`\[data-v-[a-f0-9]+\]`)
+		}
+		cleaned := dataVRe.ReplaceAllString(cssText, "")
 		sheet := css.NewCSSStyleSheetWithOwner(styleEl, "")
-		p := css.NewParser(cssText)
+		p := css.NewParser(cleaned)
 		p.ParseStyleSheetInto(sheet)
 		rules := sheet.Rules()
 		f.resolver.AddStyleSheet(sheet)

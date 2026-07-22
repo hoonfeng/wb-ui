@@ -114,6 +114,12 @@ func (wv *WebView) LoadHTML(src string) error {
 				fr.RebuildRenderTree()
 			}
 		}
+		// Set up callback for inline style changes (el.style.xxx = ...).
+		bindings.OnInlineStyleChanged = func(n dom.Node) {
+			if fr := wv.mainFrame.Frame(); fr != nil {
+				fr.RebuildRenderTree()
+			}
+		}
 	}
 	// Execute page scripts AFTER DOM bindings are registered.
 	// Scripts (Vue/React) may mutate the DOM — rebuild the render tree

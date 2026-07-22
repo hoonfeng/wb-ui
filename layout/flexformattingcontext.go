@@ -412,13 +412,28 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	var scanLB func(b *LayoutBox, depth int)
 	scanLB = func(b *LayoutBox, depth int) {
 		if b.Element != nil {
-			if cls := b.Element.GetAttribute("class"); cls == "rp-body" || cls == "file-explorer" || cls == "rp-header" || cls == "content" {
+			if cls := b.Element.GetAttribute("class"); cls == "rp-body" || cls == "file-explorer" || cls == "rp-header" || cls == "content" || cls == "chat-area" {
 				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=%s x=%.0f y=%.0f w=%.0f h=%.0f\n",
 					cls, b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
 			} else if b.Element != nil && b.Element.GetAttribute("id") == "app" {
 				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=#app x=%.0f y=%.0f w=%.0f h=%.0f\n",
 					b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
 			}
+		}
+		// Deep scan: for nodes at depth 4+, dump ALL classes/ids with their rect
+		if depth >= 4 {
+			name := "(anon)"
+			if b.Element != nil {
+				if cls := b.Element.GetAttribute("class"); cls != "" {
+					name = cls
+				} else if id := b.Element.GetAttribute("id"); id != "" {
+					name = "#" + id
+				} else {
+					name = b.Element.LocalName()
+				}
+			}
+			fmt.Fprintf(os.Stderr, "[FLEX_END:d%d] %s x=%.0f y=%.0f w=%.0f h=%.0f\n",
+				depth, name, b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
 		}
 		for _, c := range b.Children {
 			scanLB(c, depth+1)
@@ -674,13 +689,23 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	if align == "" || align == "auto" {
 		align = alignItemsOf(container)
 	}
+	// Log for chat-area debug
+	if it.box.Element != nil {
+		if cls := it.box.Element.GetAttribute("class"); cls == "chat-area" {
+			cw := container.Rect.ContentWidth()
+			ch := container.Rect.ContentHeight()
+			fmt.Fprintf(os.Stderr, "[SETPOS] cls=%s align=%s cw=%.0f ch=%.0f crossSize=%.0fi crossMargin=%.0f cw=%.0f padH=%.0f borderH=%.0f\n",
+				cls, align, cw, ch, it.crossSize, it.crossMargin, container.Rect.Width,
+				container.Rect.Padding.Horizontal(), container.Rect.Border.Horizontal())
+		}
+	}
 	// Cross size: stretch to container cross size when align is stretch.
 	crossSize := it.crossSize
 	if align == "stretch" {
 		// Only stretch when the container has a definite cross-axis size.
 		// When the container's cross size is auto (0), stretching the
 		// child to 0 would collapse its content-based size.
-		containerCross := crossAxisContentSize(container, isRow)
+		containerCross := container.Rect.Width - container.Rect.Border.Horizontal() - container.Rect.Padding.Horizontal()
 		if containerCross > 0 {
 			crossSize = containerCross - it.crossMargin
 			if crossSize < 0 {
@@ -691,6 +716,13 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 			it.box.Rect.Height = crossSize
 		} else {
 			it.box.Rect.Width = crossSize
+		}
+		// Log AFTER setting the width
+		if it.box.Element != nil {
+			if cls := it.box.Element.GetAttribute("class"); cls == "chat-area" {
+				fmt.Fprintf(os.Stderr, "[AFTER_SETPOS] cls=%s containerCross=%.0f crossSize=%.0f itWidth=%.0f itHeight=%.0f\n",
+					cls, containerCross, crossSize, it.box.Rect.Width, it.box.Rect.Height)
+			}
 		}
 	}
 	// Cross alignment.
