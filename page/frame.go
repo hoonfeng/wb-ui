@@ -153,9 +153,6 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	f.document = doc
 	if f.resolver == nil {
 		f.resolver = style.NewResolver()
-		// Inject the UA default stylesheet for HTML form controls (mirrors
-		// WebCore/css/html.css). It must be added before author sheets so
-		// the cascade gives author styles higher priority.
 		f.resolver.AddStyleSheet(html5.NewUAStyleSheet())
 		Logf("SetDocument", "created new resolver + UA sheet")
 	} else {
@@ -163,15 +160,7 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 		Logf("SetDocument", "cleared resolver cache")
 	}
 
-	// Extract CSS from <style> elements in the document and add them to the
-	// resolver. This mirrors the WebKit path where StyleEngine collects inline
-	// stylesheets from <style> elements after the HTML parser emits them.
 	f.extractAndAddStyles()
-	// Execute inline <script> elements found in the document.
-	// NOTE: Script execution is deferred to Frame.ExecuteScripts() so the caller
-	// can register DOM bindings (bindings.RegisterDOMBindings) between setting
-	// the document and executing scripts. This is required for JS frameworks
-	// (Vue/React) that need document.getElementById / querySelector at boot time.
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(doc)
 	objCount := 0
@@ -182,7 +171,6 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	if f.page != nil {
 		f.page.setRenderView(f.renderView)
 	}
-	// A new document invalidates layout.
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
@@ -211,9 +199,6 @@ func (f *Frame) RebuildRenderTree() {
 		return
 	}
 	if f.resolver != nil {
-		// Re-extract styles from <style> elements before rebuilding. This
-		// catches dynamically added/modified <style> elements whose CSS text
-		// may have changed since the last render-tree build.
 		f.extractAndAddStyles()
 		f.resolver.ClearCache()
 	}
@@ -260,8 +245,6 @@ func (f *Frame) extractAndAddStyles() {
 		return
 	}
 
-	// Remove previously extracted dynamic stylesheets to prevent stale rules
-	// from accumulating.
 	removed := len(f.styleSheets)
 	for _, sheet := range f.styleSheets {
 		f.resolver.RemoveStyleSheet(sheet)
@@ -269,7 +252,6 @@ func (f *Frame) extractAndAddStyles() {
 	f.styleSheets = nil
 	Logf("extractAndAddStyles", "removedPrevSheets=%d", removed)
 
-	// Find all <style> elements and add their content as new sheets.
 	styleElements := f.document.GetElementsByTagName("style")
 	Logf("extractAndAddStyles", "styleElementCount=%d", len(styleElements))
 	for i, styleEl := range styleElements {
@@ -287,10 +269,6 @@ func (f *Frame) extractAndAddStyles() {
 		Logf("extractAndAddStyles", "style[%d]: cssLen=%d rules=%d", i, len(cssText), len(rules))
 	}
 
-	// Process <link rel="stylesheet"> elements: resolve href via the
-	// ResourceLoader or StyleSheetLoader callback and add the parsed CSS to
-	// the resolver. When ResourceLoader is available it uses the async
-	// resource loading pipeline; otherwise it falls back to StyleSheetLoader.
 	linkElements := f.document.GetElementsByTagName("link")
 	linkCount := 0
 	for _, linkEl := range linkElements {
@@ -329,17 +307,13 @@ func (f *Frame) extractAndAddStyles() {
 }
 
 // frameStyleSheetClient implements CachedResourceClient to handle the
-// asynchronous delivery of an externally loaded stylesheet. When the
-// resource finishes loading, its text content is parsed as CSS and added
-// to the frame's style resolver.
+// asynchronous delivery of an externally loaded stylesheet.
 type frameStyleSheetClient struct {
 	frame *Frame
 	owner dom.Node
 	href  string
 }
 
-// NotifyFinished implements CachedResourceClient. It is called when the
-// stylesheet resource completes loading (successfully or with an error).
 func (c *frameStyleSheetClient) NotifyFinished(resource *CachedResource) {
 	if resource.Status() != CachedResourceStatusLoaded {
 		Logf("extractAndAddStyles", "async: href=%q status=%d (not loaded)", c.href, resource.Status())
@@ -364,111 +338,117 @@ func (c *frameStyleSheetClient) NotifyFinished(resource *CachedResource) {
 	c.frame.styleSheets = append(c.frame.styleSheets, sheet)
 	Logf("extractAndAddStyles", "async: href=%q loaded len=%d rules=%d", c.href, len(cssText), len(rules))
 
-	// Trigger a render tree rebuild so the new styles take effect.
 	if c.frame.renderView != nil {
 		c.frame.view.SetNeedsLayout(true)
 		Logf("extractAndAddStyles", "async: setNeedsLayout")
 	}
 }
 
-// executeInlineScripts finds all inline <script> elements (no src attribute,
-// type="text/javascript" or no type) and executes them via the ScriptEngine
-// callback (if set). External scripts and non-JS types are skipped.
-// This mirrors the HTML parsing step where scripts are encountered and
-// executed in order (though this port does not block parsing on script
-// execution).
+// executeInlineScripts finds all <script> elements and executes them.
+// External scripts are loaded via ScriptLoader or ResourceLoader.
+// Inline scripts are executed directly — NO try/catch wrapper (real errors
+// propagate to the frame's error log).
 func (f *Frame) executeInlineScripts() {
 	if f.document == nil || f.ScriptEngine == nil {
 		return
 	}
 	scriptElements := f.document.GetElementsByTagName("script")
-	for _, el := range scriptElements {
+	Logf("ScriptLoad", "start: scripts=%d", len(scriptElements))
+	for i, el := range scriptElements {
 		s, ok := html5.ToScriptElement(el)
 		if !ok {
 			continue
 		}
-		// Accept standard JS and ES modules; skip other types.
 		t := s.Type()
 		if t != "" && t != "text/javascript" && t != "module" {
+			Logf("ScriptLoad", "[%d] skip: type=%q", i, t)
 			continue
 		}
 
-		// External script: load via ResourceLoader, then execute.
 		if src := s.Src(); src != "" {
+			Logf("ScriptLoad", "[%d] external: src=%q type=%q", i, src, t)
 			if f.ResourceLoader != nil {
 				f.ResourceLoader.LoadScript(src, &frameScriptClient{
 					frame: f,
+					src:   src,
 				})
+				Logf("ScriptLoad", "[%d] async queued", i)
 				continue
 			}
-			// Fallback: use ScriptLoader callback (set by WebView) for
-			// synchronous file-based loading, matching StyleSheetLoader.
 			if f.ScriptLoader != nil {
 				code, err := f.ScriptLoader(src)
 				if err != nil {
-					logError("external script load failed: %v", err)
+					Logf("ScriptLoad", "[%d] LOAD FAIL: %v", i, err)
 					continue
 				}
 				if strings.TrimSpace(code) == "" {
+					Logf("ScriptLoad", "[%d] empty content", i)
 					continue
 				}
-				fmt.Fprintf(os.Stderr, "[SCRIPT] len=%d hasMount=%v\n", len(code), strings.Contains(code, `UV.mount("#app")`))
-				wrapped := "try{\n" + code + `}catch(e){console.log("VUE_ERR:"+e)}`
-				if err := f.ScriptEngine(wrapped); err != nil {
-					logError("external script execution failed: %v", err)
+				Logf("ScriptLoad", "[%d] exec: len=%d", i, len(code))
+				// Execute directly — no try/catch wrapper.
+				if err := f.ScriptEngine(code); err != nil {
+					Logf("ScriptLoad", "[%d] EXEC FAIL: %v", i, err)
+				} else {
+					Logf("ScriptLoad", "[%d] OK", i)
 				}
 				continue
 			}
-			// No resource loader available; skip external scripts.
+			Logf("ScriptLoad", "[%d] no loader, skip", i)
 			continue
 		}
 
 		// Inline script: execute directly.
 		code := s.Text()
 		if strings.TrimSpace(code) == "" {
+			Logf("ScriptLoad", "[%d] inline empty", i)
 			continue
 		}
-		// Execute via the ScriptEngine callback (set by WebView).
+		Logf("ScriptLoad", "[%d] inline: len=%d", i, len(code))
 		if err := f.ScriptEngine(code); err != nil {
-			// Log the error but continue executing remaining scripts,
-			// matching browser behavior where one script failure does
-			// not block subsequent scripts.
-			logError("script execution failed: %v", err)
+			Logf("ScriptLoad", "[%d] INLINE FAIL: %v", i, err)
+		} else {
+			Logf("ScriptLoad", "[%d] inline OK", i)
 		}
 	}
+	Logf("ScriptLoad", "done")
 }
 
-// frameScriptClient implements CachedResourceClient to handle the
-// asynchronous delivery of an externally loaded JavaScript file.
+// frameScriptClient implements CachedResourceClient for async script loading.
 type frameScriptClient struct {
 	frame *Frame
+	src   string
 }
 
 func (c *frameScriptClient) NotifyFinished(resource *CachedResource) {
 	if resource.Status() != CachedResourceStatusLoaded {
+		Logf("ScriptLoad", "async FAIL: src=%q status=%d", c.src, resource.Status())
 		return
 	}
 	data := resource.Data()
 	if len(data) == 0 {
+		Logf("ScriptLoad", "async empty: src=%q", c.src)
 		return
 	}
 	code := string(data)
 	if strings.TrimSpace(code) == "" {
+		Logf("ScriptLoad", "async whitespace: src=%q", c.src)
 		return
 	}
+	Logf("ScriptLoad", "async exec: src=%q len=%d", c.src, len(code))
 	if err := c.frame.ScriptEngine(code); err != nil {
-		logError("external script execution failed: %v", err)
+		Logf("ScriptLoad", "async EXEC FAIL: src=%q %v", c.src, err)
+	} else {
+		Logf("ScriptLoad", "async OK: src=%q", c.src)
 	}
 }
 
-// logError logs script/resource errors.
+// logError logs script/resource errors (legacy; prefer Logf).
 func logError(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[page] "+format+"\n", args...)
 }
 
-// Layout triggers a layout on the frame's view, mirroring the Frame-level
-// layout entry point (LocalFrameView::layout() reached via Frame::view()). It is a
-// no-op when no view or render view is present.
+// Layout triggers a layout on the frame's view.
 func (f *Frame) Layout() {
 	if f.view != nil {
 		f.view.Layout()
