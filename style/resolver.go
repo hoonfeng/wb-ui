@@ -711,6 +711,23 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.GridAutoColumns = valueString
 	case "grid-auto-rows":
 		cs.GridAutoRows = valueString
+	case "grid-area":
+		// Shorthand: grid-area: <name> | <row-start> / <col-start> / <row-end> / <col-end>
+		if parts := splitShorthand(valueString, "/"); len(parts) >= 1 {
+			cs.GridTemplateAreas = strings.TrimSpace(parts[0])
+			if len(parts) >= 2 {
+				cs.GridRowStart = strings.TrimSpace(parts[1])
+			}
+			if len(parts) >= 3 {
+				cs.GridColumnStart = strings.TrimSpace(parts[2])
+			}
+			if len(parts) >= 4 {
+				cs.GridRowEnd = strings.TrimSpace(parts[3])
+			}
+			if len(parts) >= 5 {
+				cs.GridColumnEnd = strings.TrimSpace(parts[4])
+			}
+		}
 	case "grid-column":
 		// Shorthand: grid-column: <start> [ / <end> ]?
 		if parts := splitShorthand(valueString, "/"); len(parts) >= 1 {

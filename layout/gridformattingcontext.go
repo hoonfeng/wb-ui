@@ -51,6 +51,28 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// Collect visible in-flow items and resolve their grid spans.
 	items := collectGridItems(box, areaMap)
 
+	// Convert explicit positive 1-based indices to 0-based for auto-placement.
+	// Negative indices (e.g. -1 = last line) stay raw; they'll be resolved later.
+	for i := range items {
+		// Named-area items (all non-zero) are already 0-based from parseGridAreas.
+		// Items from parseGridLine: positive = explicit 1-based, 0 = auto, negative = count-from-end.
+		if items[i].areaName != "" {
+			continue
+		}
+		if items[i].colStart > 0 {
+			items[i].colStart--
+		}
+		if items[i].colEnd > 0 {
+			items[i].colEnd--
+		}
+		if items[i].rowStart > 0 {
+			items[i].rowStart--
+		}
+		if items[i].rowEnd > 0 {
+			items[i].rowEnd--
+		}
+	}
+
 	// Auto-place items that have no explicit column/row placement.
 	autoPlaceItems(items, len(colTracks), len(rowTracks))
 
@@ -70,6 +92,10 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	for len(rowTracks) < maxRow {
 		rowTracks = append(rowTracks, gridTrack{size: "auto"})
 	}
+
+	// Resolve all items to 0-based indices. Negatives like -1 are now
+	// resolved against the final track count.
+	toZeroBased(items, len(colTracks), len(rowTracks))
 
 	// Size the columns: resolve px / % / auto, then distribute fr leftover.
 	colSizes := sizeTracks(colTracks, contentWidth, colGap, func(idx int) float64 {
@@ -198,8 +224,8 @@ func collectGridItems(box *LayoutBox, areaMap map[string][4]int) []gridItem {
 	return out
 }
 
-// parseGridLine resolves the start/end line indices for a single axis. Lines are 1-based;
-// a negative index counts from the end. An empty value is treated as auto (placed later).
+// parseGridLine resolves the start/end line indices for a single axis.
+// Returns raw 1-based values: positive=explicit, 0=auto, negative=count-from-end.
 func parseGridLine(start, end string) (int, int) {
 	s := parseLineIndex(start)
 	e := parseLineIndex(end)
@@ -209,13 +235,7 @@ func parseGridLine(start, end string) (int, int) {
 	if e > 0 && s == 0 {
 		s = e - 1
 	}
-	if s <= 0 {
-		s = 0
-	}
-	if e <= 0 {
-		e = 0
-	}
-	return s - 1, e - 1
+	return s, e
 }
 
 func parseLineIndex(s string) int {
@@ -227,7 +247,40 @@ func parseLineIndex(s string) int {
 	if err != nil {
 		return 0
 	}
-	return n
+	return n // may be negative: -1 counts from end
+}
+
+// toZeroBased resolves any remaining negative indices to 0-based,
+// and ensures colEnd > colStart and rowEnd > rowStart.
+// Called AFTER autoPlaceItems and track count finalization.
+// At this point, auto-placed items are already 0-based; only items
+// with explicit negative indices (e.g. grid-column: 1 / -1) need conversion.
+func toZeroBased(items []gridItem, nCols, nRows int) {
+	to0 := func(raw, n int) int {
+		if raw < 0 {
+			// -1 (1-based) = last line = n (0-based, since there are n tracks and n+1 lines)
+			return n + raw + 1
+		}
+		return raw // already 0-based or 0 (auto, but autoPlaceItems already resolved)
+	}
+	for i := range items {
+		if items[i].areaName != "" {
+			continue // already 0-based from parseGridAreas
+		}
+		items[i].colStart = to0(items[i].colStart, nCols)
+		items[i].colEnd = to0(items[i].colEnd, nCols)
+		items[i].rowStart = to0(items[i].rowStart, nRows)
+		items[i].rowEnd = to0(items[i].rowEnd, nRows)
+		items[i].colEnd = to0(items[i].colEnd, nCols)
+		items[i].rowStart = to0(items[i].rowStart, nRows)
+		items[i].rowEnd = to0(items[i].rowEnd, nRows)
+		if items[i].colEnd <= items[i].colStart {
+			items[i].colEnd = items[i].colStart + 1
+		}
+		if items[i].rowEnd <= items[i].rowStart {
+			items[i].rowEnd = items[i].rowStart + 1
+		}
+	}
 }
 
 // autoPlaceItems assigns auto-placed items to the next available grid cell (sparse
@@ -254,10 +307,11 @@ func autoPlaceItems(items []gridItem, nCols, nRows int) {
 		it := &items[i]
 		spanR := max(1, it.rowEnd-it.rowStart)
 		spanC := max(1, it.colEnd-it.colStart)
-		if it.colStart < 0 || it.colEnd <= 0 {
+		// Both 0 = auto (needs placement). Negative = explicit count-from-end.
+		if it.colStart == 0 && it.colEnd == 0 {
 			it.colStart, it.colEnd = -1, 0
 		}
-		if it.rowStart < 0 || it.rowEnd <= 0 {
+		if it.rowStart == 0 && it.rowEnd == 0 {
 			it.rowStart, it.rowEnd = -1, 0
 		}
 		// Resolve auto column.
