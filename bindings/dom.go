@@ -17,6 +17,14 @@ import (
 // styles. When nil, dynamic <style> injection is silently ignored.
 var OnStyleNodeAdded func(node dom.Node)
 
+// DOM prototype objects — set by RegisterDOMBindings, used by wrappers.
+var (
+	domElementProto *jsc.JSObject // Element.prototype
+	domTextProto    *jsc.JSObject // Text.prototype
+	domCommentProto *jsc.JSObject // Comment.prototype
+	domDocFragProto *jsc.JSObject // DocumentFragment.prototype
+)
+
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	docObj := wrapDocument(rt, document)
 	rt.GlobalObject().Set("document", jsc.ObjectValue(docObj))
@@ -27,20 +35,67 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
 
-	// DOM 构造函数桩 — RegisterDOMBindings 注册后全局可用
-	// Vue 3 / 前端框架依赖 instanceof 检查这些构造函数。
-	// 通过 JS 注入确保 prototype 链正确。
-	rt.RunJS(`(function(){
-		if(typeof Node==='undefined'){Node=function Node(){}}
-		if(typeof Element==='undefined'){Element=function Element(){};Element.prototype=Object.create(Node.prototype)}
-		if(typeof HTMLElement==='undefined'){HTMLElement=function HTMLElement(){};HTMLElement.prototype=Object.create(Element.prototype)}
-		if(typeof SVGElement==='undefined'){SVGElement=function SVGElement(){};SVGElement.prototype=Object.create(Element.prototype)}
-		if(typeof Text==='undefined'){Text=function Text(){};Text.prototype=Object.create(Node.prototype)}
-		if(typeof Comment==='undefined'){Comment=function Comment(){};Comment.prototype=Object.create(Node.prototype)}
-		if(typeof DocumentFragment==='undefined'){DocumentFragment=function DocumentFragment(){};DocumentFragment.prototype=Object.create(Node.prototype)}
-		if(typeof Attr==='undefined'){Attr=function Attr(){};Attr.prototype=Object.create(Node.prototype)}
-	})()`)
+	// ── DOM Constructors (Go 原生) ─────────────────────────
+	// Each constructor's .prototype is extracted and used by the
+	// corresponding wrapper function so that `el instanceof Element`
+	// and `txt instanceof Text` work correctly (real prototype chain).
 
+	// Prototype objects — used by wrapElement / wrapText / etc.
+	var nodeProto, elementProto, htmlElementProto, svgElementProto *jsc.JSObject
+	var textProto, commentProto, docFragProto, attrProto *jsc.JSObject
+
+	emptyCtor := func(in *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
+		return this.AsObject()
+	}
+
+	nodeCtor := rt.NewConstructor("Node", emptyCtor)
+	g.Set("Node", jsc.FunctionValue(nodeCtor))
+
+	eltCtor := rt.NewConstructor("Element", emptyCtor)
+	g.Set("Element", jsc.FunctionValue(eltCtor))
+
+	htmlCtor := rt.NewConstructor("HTMLElement", emptyCtor)
+	g.Set("HTMLElement", jsc.FunctionValue(htmlCtor))
+
+	svgCtor := rt.NewConstructor("SVGElement", emptyCtor)
+	g.Set("SVGElement", jsc.FunctionValue(svgCtor))
+
+	textCtor := rt.NewConstructor("Text", emptyCtor)
+	g.Set("Text", jsc.FunctionValue(textCtor))
+
+	commentCtor := rt.NewConstructor("Comment", emptyCtor)
+	g.Set("Comment", jsc.FunctionValue(commentCtor))
+
+	fragCtor := rt.NewConstructor("DocumentFragment", emptyCtor)
+	g.Set("DocumentFragment", jsc.FunctionValue(fragCtor))
+
+	attrCtor := rt.NewConstructor("Attr", emptyCtor)
+	g.Set("Attr", jsc.FunctionValue(attrCtor))
+
+	// Extract .prototype objects
+	nodeProto = jsc.FunctionValue(nodeCtor).AsObject().GetStr("prototype").AsObject()
+	elementProto = jsc.FunctionValue(eltCtor).AsObject().GetStr("prototype").AsObject()
+	htmlElementProto = jsc.FunctionValue(htmlCtor).AsObject().GetStr("prototype").AsObject()
+	svgElementProto = jsc.FunctionValue(svgCtor).AsObject().GetStr("prototype").AsObject()
+	textProto = jsc.FunctionValue(textCtor).AsObject().GetStr("prototype").AsObject()
+	commentProto = jsc.FunctionValue(commentCtor).AsObject().GetStr("prototype").AsObject()
+	docFragProto = jsc.FunctionValue(fragCtor).AsObject().GetStr("prototype").AsObject()
+	attrProto = jsc.FunctionValue(attrCtor).AsObject().GetStr("prototype").AsObject()
+
+	// Build prototype chain via __proto__ (goja supports __proto__).
+	elementProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	htmlElementProto.Set("__proto__", jsc.ObjectValue(elementProto))
+	svgElementProto.Set("__proto__", jsc.ObjectValue(elementProto))
+	textProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	commentProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	docFragProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	attrProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+
+	// Store for wrapper functions (package-level).
+	domElementProto = elementProto
+	domTextProto = textProto
+	domCommentProto = commentProto
+	domDocFragProto = docFragProto
 
 
 	// location 桩
@@ -1280,7 +1335,11 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	if cached, ok := elementWrapperCache[el]; ok {
 		return cached
 	}
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	proto := rt.ObjectPrototype()
+	if domElementProto != nil {
+		proto = domElementProto
+	}
+	obj := jsc.NewObject(proto)
 	obj.SetClassName("Element")
 obj.SetInternal(el)
 	// Cache before returning
@@ -1845,7 +1904,11 @@ func joinStyle(m map[string]string) string {
 // ─── DocumentFragment ──────────────────────────────────
 
 func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	proto := rt.ObjectPrototype()
+	if domDocFragProto != nil {
+		proto = domDocFragProto
+	}
+	obj := jsc.NewObject(proto)
 	obj.SetClassName("DocumentFragment")
 	obj.SetInternal(frag)
 
@@ -1917,7 +1980,11 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 // ─── Text / Comment ────────────────────────────────────
 
 func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	proto := rt.ObjectPrototype()
+	if domTextProto != nil {
+		proto = domTextProto
+	}
+	obj := jsc.NewObject(proto)
 	obj.SetClassName("Text")
 obj.SetInternal(t)
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
@@ -1945,7 +2012,11 @@ obj.SetInternal(t)
 }
 
 func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	proto := rt.ObjectPrototype()
+	if domCommentProto != nil {
+		proto = domCommentProto
+	}
+	obj := jsc.NewObject(proto)
 	obj.SetClassName("Comment")
 	obj.SetInternal(c)
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
