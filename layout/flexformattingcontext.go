@@ -282,6 +282,12 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		if mainFree < 0 {
 			mainFree = 0
 		}
+		// When the container's main size is the sentinel 1e6 (auto/unresolvable),
+		// do not distribute phantom free space for alignment — it would produce
+		// enormous offsets (e.g. center = 500000+).
+		if mainSize >= 1e5 {
+			mainFree = 0
+		}
 		just := justifyContentOf(box)
 		mainCursor, mainGap := justifyStart(just, mainFree, len(ln.items))
 		switch just {
@@ -591,6 +597,11 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 		crossPos = crossOffset + (crossAxisContentSize(container, isRow)-it.crossSize-it.crossMargin)/2
 	case "flex-end":
 		crossPos = crossOffset + crossAxisContentSize(container, isRow) - it.crossSize - it.crossMargin
+	}
+	// Clamp to prevent negative cross-axis position when item is larger than
+	// the container's cross axis content size (center alignment overflow).
+	if crossPos < 0 {
+		crossPos = 0
 	}
 	if align != "stretch" {
 		if isRow {
