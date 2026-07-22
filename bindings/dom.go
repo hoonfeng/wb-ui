@@ -1183,6 +1183,12 @@ obj.SetInternal(doc)
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { doc.SetTitle(v.ToString()) })
 	obj.SetAccessor("URL", strAcc(doc.URL()), nil)
 	obj.SetAccessor("cookie", strAcc(""), nil)
+	obj.SetAccessor("compatMode", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if doc.Quirks() {
+			return jsc.StringValue("BackCompat")
+		}
+		return jsc.StringValue("CSS1Compat")
+	}), nil)
 
 	return obj
 }

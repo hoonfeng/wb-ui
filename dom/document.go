@@ -102,6 +102,13 @@ func (d *Document) CreateEvent(eventInterface string) Event {
 	return nil
 }
 
+// Quirks returns whether the document is in quirks mode, mirroring
+// Document::inQuirksMode(). In standards mode (CSS1Compat) this returns false.
+func (d *Document) Quirks() bool { return d.quirks }
+
+// SetQuirks sets the document's quirks mode flag.
+func (d *Document) SetQuirks(v bool) { d.quirks = v }
+
 // DocumentElement returns the root element of the document (typically <html>),
 // mirroring Document::documentElement(). It is the first Element child of the document.
 func (d *Document) DocumentElement() *Element {
