@@ -11,6 +11,7 @@
 package rendering
 
 import (
+	"log"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -249,8 +250,19 @@ func syncChildren(parentRO RenderObject, parentLB *layout.LayoutBox) {
 		if matched >= 0 {
 			syncOne(rc, lChildren[matched])
 			lChildren = append(lChildren[:matched], lChildren[matched+1:]...)
+		} else if roIsAnonymous(rc) {
+			// Anonymous render wrapper has no counterpart in the layout tree.
+			// Skip without removing from layout children list so subsequent
+			// render children match correctly.
+			continue
 		}
 	}
+}
+
+// roIsAnonymous reports whether a render object is an anonymous wrapper with
+// no backing DOM element.
+func roIsAnonymous(ro RenderObject) bool {
+	return ro.Node() == nil
 }
 
 // syncOne copies geometry from the layout box into the render box frame, then recurses.
@@ -275,6 +287,15 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	// Assign layout box to anonymous render objects not matched at build time.
 	if ro.LayoutBox() == nil {
 		ro.SetLayoutBox(lb)
+	} else if ro.LayoutBox() != lb {
+		// Debug: layout box mismatch. This happens when linkLayoutBoxes paired
+		// the render object with a different layout box (from attachLayoutTree),
+		// but syncGeometry passes a different lb (from layout root traversal).
+		if el := domElementOf(ro); el != nil {
+			log.Printf("[SYNC] MISMATCH cls=%s have=%p want=%p w_have=%.0f w_want=%.0f",
+				el.GetAttribute("class"), ro.LayoutBox(), lb,
+				ro.LayoutBox().Rect.Width, lb.Rect.Width)
+		}
 	}
 	// Sync text segments for RenderText (mirrors the line-box list on RenderText).
 	// Boxes created by the layout tree may wrap text runs in BoxAnonymous boxes;
