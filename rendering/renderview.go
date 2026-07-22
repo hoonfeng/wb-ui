@@ -286,9 +286,15 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 		ro.SetLayoutBox(lb)
 	}
 	// Sync text segments for RenderText (mirrors the line-box list on RenderText).
-	if rt, ok := ro.(*RenderText); ok && len(lb.TextSegments) > 0 {
-		segs := make([]InlineTextBox, len(lb.TextSegments))
-		for i, s := range lb.TextSegments {
+	// Boxes created by the layout tree may wrap text runs in BoxAnonymous boxes;
+	// search recursively for the inner BoxTextRun to retrieve laid-out segments.
+	textLB := lb
+	if len(textLB.TextSegments) == 0 {
+		textLB = findTextRun(textLB)
+	}
+	if rt, ok := ro.(*RenderText); ok && textLB != nil && len(textLB.TextSegments) > 0 {
+		segs := make([]InlineTextBox, len(textLB.TextSegments))
+		for i, s := range textLB.TextSegments {
 			segs[i] = InlineTextBox{
 				Start: s.Start, Len: s.Len,
 				X: s.X, Y: s.Y, Width: s.Width, Height: s.Height,
@@ -308,4 +314,22 @@ func domElementOf(ro RenderObject) *dom.Element {
 	}
 	el, _ := ro.Node().(*dom.Element)
 	return el
+}
+
+// findTextRun recursively searches a layout box subtree for the first BoxTextRun
+// with non-empty TextSegments. Used to retrieve text segment data when the
+// sync matching paired a RenderText with an anonymous wrapper.
+func findTextRun(lb *layout.LayoutBox) *layout.LayoutBox {
+	if lb == nil {
+		return nil
+	}
+	if len(lb.TextSegments) > 0 {
+		return lb
+	}
+	for _, c := range lb.Children {
+		if found := findTextRun(c); found != nil {
+			return found
+		}
+	}
+	return nil
 }

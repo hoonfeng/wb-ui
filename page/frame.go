@@ -91,7 +91,7 @@ type Frame struct {
 // LocalFrame.
 func NewFrame(page *Page) *Frame {
 	f := &Frame{page: page}
-	f.view = NewFrameView(f, 800, 600)
+	f.view = NewFrameView(f, 1280, 800)
 	return f
 }
 

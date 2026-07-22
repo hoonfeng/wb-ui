@@ -299,13 +299,22 @@ func (b *RenderTreeBuilder) linkLayoutBoxes(rObj RenderObject, lBox *layout.Layo
 }
 
 // sameOwner reports whether the render object and layout box share a DOM owner.
+// For element-backed nodes the match is by DOM element pointer identity.
+// For non-element nodes (text, anonymous wrappers) the match falls back to
+// position-based pairing (sibling index) so that RenderText ↔ BoxTextRun and
+// anonymous wrappers are correctly linked.
 func sameOwner(rObj RenderObject, lBox *layout.LayoutBox) bool {
 	if lBox.Element != nil {
 		if el, ok := rObj.Node().(*dom.Element); ok {
 			return el == lBox.Element
 		}
+		return false
 	}
-	return false
+	// Both sides have no DOM element: match by position.
+	// The render tree and layout tree are built from the same DOM in the same
+	// order, so anonymous nodes appear at matching positions.
+	_, rHasEl := rObj.Node().(*dom.Element)
+	return !rHasEl
 }
 
 // inheritedStyle returns a style suitable for an anonymous child: it creates a
