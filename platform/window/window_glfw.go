@@ -320,9 +320,11 @@ func (w *Window) PollEvents() []Event {
 }
 
 // ShouldClose reports whether the window has been asked to close.
-func (w *Window) ShouldClose() bool {
-	return w.win.ShouldClose()
-}
+func (w *Window) ShouldClose() bool { return w.win.ShouldClose() }
+
+// Focus brings the window to the foreground and gives it input focus.
+// Call this after creating the window to ensure it appears on top.
+func (w *Window) Focus() { w.win.Focus(); w.win.Show() }
 
 // Width / Height return the window size in logical (CSS) pixels.
 func (w *Window) Width() int  { return w.width }

@@ -1010,15 +1010,24 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 	if o == nil {
 		return graphics.Color{}
 	}
+	// Use the DOM Body() method for direct access to the body element,
+	// then find its corresponding RenderObject via render-tree walk.
+	if rv := o.View(); rv != nil {
+		if doc := rv.Document(); doc != nil {
+			if body := doc.Body(); body != nil {
+				if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), body); bodyRO != nil {
+					if st := bodyRO.Style(); st != nil && st.BackgroundColor.A > 0 {
+						return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
+					}
+				}
+			}
+		}
+	}
+	// Fallback: walk the render tree (handles <body> not being the document body).
 	if n := o.Node(); n != nil {
 		if el, ok := n.(*dom.Element); ok && strings.EqualFold(el.TagName(), "body") {
 			if st := o.Style(); st != nil && st.BackgroundColor.A > 0 {
-				return graphics.Color{
-					R: st.BackgroundColor.R,
-					G: st.BackgroundColor.G,
-					B: st.BackgroundColor.B,
-					A: st.BackgroundColor.A,
-				}
+				return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
 			}
 		}
 	}
@@ -1028,4 +1037,21 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 		}
 	}
 	return graphics.Color{}
+}
+
+// findRenderObjectForNode searches the render tree for the RenderObject
+// that corresponds to the given DOM node.
+func findRenderObjectForNode(ro rendering.RenderObject, target dom.Node) rendering.RenderObject {
+	if ro == nil {
+		return nil
+	}
+	if ro.Node() == target {
+		return ro
+	}
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		if found := findRenderObjectForNode(c, target); found != nil {
+			return found
+		}
+	}
+	return nil
 }

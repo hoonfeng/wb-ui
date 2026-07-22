@@ -269,6 +269,15 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	if ro == nil || lb == nil {
 		return
 	}
+	// Clamp negative dimensions: some layout edge cases can produce negative
+	// widths/heights (e.g. inline text in a narrow flex container). A negative
+	// frame rect causes downstream issues in paint clipping and hit-testing.
+	if lb.Rect.Width < 0 {
+		lb.Rect.Width = 0
+	}
+	if lb.Rect.Height < 0 {
+		lb.Rect.Height = 0
+	}
 	if box := asRenderBox(ro); box != nil {
 		box.frame = lb.Rect
 	}
