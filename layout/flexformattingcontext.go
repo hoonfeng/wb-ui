@@ -766,7 +766,10 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	if isRow {
 		box.Rect.Width = availableMain
 	} else {
-		box.Rect.Height = availableMain
+		// Column container: give generous width (cross axis) so text flows
+		// naturally, but leave height auto so cross-axis stretch on inner
+		// flex containers does not inflate the content height measurement.
+		box.Rect.Width = availableMain
 	}
 	box.Rect.X = 0
 	box.Rect.Y = 0
