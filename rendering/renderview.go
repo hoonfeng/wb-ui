@@ -272,6 +272,10 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	if box := asRenderBox(ro); box != nil {
 		box.frame = lb.Rect
 	}
+	// Assign layout box to anonymous render objects not matched at build time.
+	if ro.LayoutBox() == nil {
+		ro.SetLayoutBox(lb)
+	}
 	// Sync text segments for RenderText (mirrors the line-box list on RenderText).
 	if rt, ok := ro.(*RenderText); ok && len(lb.TextSegments) > 0 {
 		segs := make([]InlineTextBox, len(lb.TextSegments))
