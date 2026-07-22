@@ -412,8 +412,11 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	var scanLB func(b *LayoutBox, depth int)
 	scanLB = func(b *LayoutBox, depth int) {
 		if b.Element != nil {
-			if cls := b.Element.GetAttribute("class"); cls == "rp-body" {
-				fmt.Fprintf(os.Stderr, "[FLEX_END] rp-body: x=%.0f y=%.0f w=%.0f h=%.0f\n",
+			if cls := b.Element.GetAttribute("class"); cls == "rp-body" || cls == "file-explorer" || cls == "rp-header" || cls == "content" {
+				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=%s x=%.0f y=%.0f w=%.0f h=%.0f\n",
+					cls, b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
+			} else if b.Element != nil && b.Element.GetAttribute("id") == "app" {
+				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=#app x=%.0f y=%.0f w=%.0f h=%.0f\n",
 					b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
 			}
 		}
