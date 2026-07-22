@@ -430,12 +430,30 @@ func asLength(s string) style.Length {
 // recursion. BoxTextRun children are skipped for the direct width contribution
 // because their content width is already captured by their TextSegments
 // (adding their Rect.Width would double-count).
+//
+// Important: anonymous inline wrappers often have their Rect.Width set to the
+// containing block width during IFC layout, which can mask the real content
+// width. We detect this case: if a child is an inline/anonymous box whose
+// TextSegments exist (directly or in descendants), we use only the text
+// segment widths and skip the Rect.Width contribution.
 func maxContentWidth(box *LayoutBox) float64 {
 	if box == nil {
 		return 0
 	}
 	lineWidths := map[float64]float64{}
 	var scan func(*LayoutBox)
+	var hasTextSegments func(bb *LayoutBox) bool
+	hasTextSegments = func(bb *LayoutBox) bool {
+		if len(bb.TextSegments) > 0 {
+			return true
+		}
+		for _, c := range bb.Children {
+			if hasTextSegments(c) {
+				return true
+			}
+		}
+		return false
+	}
 	scan = func(b *LayoutBox) {
 		for _, seg := range b.TextSegments {
 			lineWidths[seg.Y] += seg.Width
@@ -457,7 +475,11 @@ func maxContentWidth(box *LayoutBox) float64 {
 			// Inline-level replaced / element box: its border-box width
 			// contributes to the line it sits on. Recurse to pick up any
 			// text segments inside it.
-			if c.Rect.Width > 0 {
+			// BUT: if this inline box is an anonymous wrapper whose width
+			// was inherited from the parent container, skip the Rect.Width
+			// to avoid masking the real text content width.
+			isAnonInline := c.Type == BoxAnonymous || (c.IsInline() && hasTextSegments(c))
+			if c.Rect.Width > 0 && !isAnonInline {
 				lineWidths[c.Rect.Y] += c.Rect.Width
 			}
 			scan(c)

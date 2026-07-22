@@ -232,7 +232,8 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			childCtx.Layout(it.box, state)
 			// Use content-based cross-size measurement for text/inline items
 			// instead of the rect dimension which may hold the pre-set value.
-			if it.box.Type == BoxTextRun || it.box.IsInline() {
+			// Also covers BoxBlock with display:inline (e.g., inline wrappers).
+			if it.box.Type == BoxTextRun || it.box.IsInline() || it.box.IsInlineLevel() {
 				if isRow {
 					it.crossSize = maxContentBottom(it.box) - it.box.Rect.ContentY()
 				} else {

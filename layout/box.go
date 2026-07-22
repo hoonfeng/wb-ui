@@ -277,7 +277,7 @@ func (b *LayoutBox) establishesBlockFormattingContext() bool {
 }
 
 // isInlineLevel reports whether b generates an inline-level box per its display.
-func (b *LayoutBox) isInlineLevel() bool {
+func (b *LayoutBox) IsInlineLevel() bool {
 	if b.Style == nil {
 		return false
 	}
@@ -467,7 +467,7 @@ func buildChildren(box *LayoutBox, el *dom.Element, resolver *style.Resolver) {
 				continue
 			}
 			child := newBoxForElement(v, cs)
-			if child.isInlineLevel() {
+			if child.IsInlineLevel() {
 				buildChildren(child, v, resolver)
 				inlineRun = append(inlineRun, child)
 			} else {
