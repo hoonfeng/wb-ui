@@ -535,6 +535,7 @@ func maxContentWidthOfTrack(items []gridItem, idx int) float64 {
 	best := 0.0
 	for _, it := range items {
 		if it.colStart <= idx && it.colEnd > idx {
+			// First try maxContentWidth (reads TextSegments after layout).
 			cw := maxContentWidth(it.box)
 			if cw > 0 {
 				if cw > best {
@@ -542,10 +543,12 @@ func maxContentWidthOfTrack(items []gridItem, idx int) float64 {
 				}
 				continue
 			}
-			if it.box.Style != nil && it.box.Style.Width.Value > 0 {
-				r := resolveLength(it.box.Style.Width, 0, fontSizeOf(it.box))
-				if !r.Auto && r.Value > best {
-					best = r.Value
+			// Fallback: compute intrinsic width from text at infinite width.
+			// Required for auto tracks where items haven't been laid out yet.
+			if it.box.Style != nil {
+				iw := computeIntrinsicWidth(it.box)
+				if iw > best {
+					best = iw
 				}
 			}
 		}

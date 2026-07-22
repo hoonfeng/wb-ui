@@ -495,6 +495,62 @@ func maxContentWidth(box *LayoutBox) float64 {
 	return max
 }
 
+// computeIntrinsicWidth recursively measures the maximum intrinsic content width of
+// box's subtree at infinite available width, without requiring a prior layout pass.
+// Unlike maxContentWidth which reads TextSegments (set during inline layout), this
+// function directly measures text content using MeasureTextFunc. This is critical for
+// CSS Grid auto track sizing where items haven't been laid out yet.
+func computeIntrinsicWidth(box *LayoutBox) float64 {
+	if box == nil {
+		return 0
+	}
+	type lineAcc struct {
+		w float64
+	}
+	lines := []lineAcc{{}}
+	var lastWasBlock bool
+	var scan func(b *LayoutBox, depth int)
+	scan = func(b *LayoutBox, depth int) {
+		if b.Text != "" {
+			tw := measureText(b, b.Text)
+			if lastWasBlock {
+				lines = append(lines, lineAcc{})
+				lastWasBlock = false
+			}
+			lines[len(lines)-1].w += tw
+		}
+		for _, c := range b.Children {
+			if c.IsBlock() || c.Type == BoxAnonymous {
+				cw := computeIntrinsicWidth(c)
+				if cw > lines[len(lines)-1].w {
+					lines[len(lines)-1].w = cw
+				}
+				lastWasBlock = true
+				continue
+			}
+			if lastWasBlock {
+				lines = append(lines, lineAcc{})
+				lastWasBlock = false
+			}
+			if c.Text != "" {
+				lines[len(lines)-1].w += measureText(c, c.Text)
+			}
+			scan(c, depth+1)
+		}
+	}
+	scan(box, 0)
+	max := 0.0
+	for _, ln := range lines {
+		if ln.w > max {
+			max = ln.w
+		}
+	}
+	if box.Text != "" {
+		max += box.Rect.Border.Horizontal() + box.Rect.Padding.Horizontal()
+	}
+	return max
+}
+
 // maxContentBottom returns the bottommost content edge among box's descendants and
 // its text segments, measured along the vertical axis. Used for column-direction
 // flex items whose content height must be measured from descendant edges. Unlike
