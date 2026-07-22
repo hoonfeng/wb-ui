@@ -230,6 +230,10 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			it.box.Rect.Y = 0
 			childCtx := contextFor(it.box)
 			childCtx.Layout(it.box, state)
+			// Restore main-axis size from flex-grow/shrink resolution. The
+			// child's own Layout may have recomputed its height/width via
+			// heightIsAuto, overwriting the resolved flex-grow result.
+			setItemBorderBox(it, isRow)
 			// Use content-based cross-size measurement for text/inline items
 			// instead of the rect dimension which may hold the pre-set value.
 			// Also covers BoxBlock with display:inline (e.g., inline wrappers).
