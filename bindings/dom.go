@@ -4,9 +4,11 @@ package bindings
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"wb-ui.com/goja"
 	"wb-ui/dom"
 	"wb-ui/jsc"
 )
@@ -1848,41 +1850,104 @@ func kebabToCamel(s string) string {
 // ─── style object ──────────────────────────────────────
 // A live CSSStyleDeclaration that reads/writes the element's style attribute.
 
-func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
-	s := jsc.NewObject(rt.ObjectPrototype())
-	s.SetClassName("CSSStyleDeclaration")
-s.SetInternal(el)
+// styleProxy implements goja.DynamicObject to intercept property-level style assignments
+// (e.g. style.width = '280px') used by Vue 3's patchStyle, while still supporting
+// the standard cssText / setProperty / removeProperty methods.
+type styleProxy struct {
+	el *dom.Element
+	vm *goja.Runtime
+}
 
-	// cssText getter/setter
-	s.SetAccessor("cssText",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue {
-			return jsc.StringValue(el.GetAttribute("style"))
-		}),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			el.SetAttribute("style", v.ToString())
+func (s *styleProxy) Get(key string) goja.Value {
+	vm := s.vm
+	switch key {
+	case "cssText":
+		return vm.ToValue(s.el.GetAttribute("style"))
+	case "setProperty":
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 2 {
+				return goja.Undefined()
+			}
+			props := parseStyle(s.el.GetAttribute("style"))
+			props[call.Arguments[0].String()] = call.Arguments[1].String()
+			s.el.SetAttribute("style", joinStyle(props))
+			return goja.Undefined()
 		})
+	case "removeProperty":
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return vm.ToValue("")
+			}
+			props := parseStyle(s.el.GetAttribute("style"))
+			old := props[call.Arguments[0].String()]
+			delete(props, call.Arguments[0].String())
+			s.el.SetAttribute("style", joinStyle(props))
+			return vm.ToValue(old)
+		})
+	default:
+		// CSS property: return the value from the style attribute
+		props := parseStyle(s.el.GetAttribute("style"))
+		if v, ok := props[key]; ok {
+			return vm.ToValue(v)
+		}
+		return vm.ToValue("")
+	}
+}
 
-		s.Set("setProperty", jsc.FunctionValue(jsc.NewNativeFunction("setProperty",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-				if len(args) < 2 { return jsc.Undefined() }
-				cssText := el.GetAttribute("style")
-				props := parseStyle(cssText)
-				props[args[0].ToString()] = args[1].ToString()
-				el.SetAttribute("style", joinStyle(props))
-				return jsc.Undefined()
-			}, 2)))
-		s.Set("removeProperty", jsc.FunctionValue(jsc.NewNativeFunction("removeProperty",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-				if len(args) == 0 { return jsc.StringValue("") }
-				cssText := el.GetAttribute("style")
-				props := parseStyle(cssText)
-				old := props[args[0].ToString()]
-				delete(props, args[0].ToString())
-				el.SetAttribute("style", joinStyle(props))
-				return jsc.StringValue(old)
-			}, 1)))
+func (s *styleProxy) Set(key string, val goja.Value) bool {
+	switch key {
+	case "cssText":
+		s.el.SetAttribute("style", val.String())
+		fmt.Fprintf(os.Stderr, "[styleProxy] cssText=%q\n", val.String())
+		return true
+	case "setProperty", "removeProperty":
+		return false // let goja handle as a regular property (function assignment)
+	default:
+		// CSS property write: parse existing style, update, write back
+		props := parseStyle(s.el.GetAttribute("style"))
+		strVal := val.String()
+		if strVal == "" || strVal == "undefined" || strVal == "null" {
+			delete(props, key)
+		} else {
+			props[key] = strVal
+		}
+		s.el.SetAttribute("style", joinStyle(props))
+		fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
+			key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
+		return true
+	}
+}
 
-	return s
+func (s *styleProxy) Has(key string) bool {
+	switch key {
+	case "cssText", "setProperty", "removeProperty":
+		return true
+	}
+	props := parseStyle(s.el.GetAttribute("style"))
+	_, ok := props[key]
+	return ok
+}
+
+func (s *styleProxy) Keys() []string {
+	props := parseStyle(s.el.GetAttribute("style"))
+	keys := []string{"cssText", "setProperty", "removeProperty"}
+	for k := range props {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (s *styleProxy) Delete(key string) bool {
+	props := parseStyle(s.el.GetAttribute("style"))
+	delete(props, key)
+	s.el.SetAttribute("style", joinStyle(props))
+	return true
+}
+
+func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
+	pr := &styleProxy{el: el, vm: rt.VM()}
+	gojaObj := rt.VM().NewDynamicObject(pr)
+	return jsc.WrapObject(gojaObj, rt)
 }
 
 // parseStyle parses "color:red;font-size:16px" → map

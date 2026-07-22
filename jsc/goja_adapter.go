@@ -461,6 +461,12 @@ func NewObject(proto *JSObject) *JSObject {
 	return &JSObject{obj: vm.NewObject(), interp: &Interpreter{vm: vm}}
 }
 
+// WrapObject wraps an existing goja.Object (e.g. from NewDynamicObject) as a JSObject.
+// The object must belong to the same runtime as the interpreter.
+func WrapObject(obj *goja.Object, interp *Interpreter) *JSObject {
+	return &JSObject{obj: obj, interp: interp}
+}
+
 func NewArray(proto *JSObject, items []JSValue) *JSObject {
 	var interp *Interpreter
 	if proto != nil && proto.interp != nil {
