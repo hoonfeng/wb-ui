@@ -19,7 +19,9 @@
 package layout
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -95,7 +97,22 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 
 	// Resolve all items to 0-based indices. Negatives like -1 are now
 	// resolved against the final track count.
+	fmt.Fprintf(os.Stderr, "[GRID-PRE] nCols=%d maxCol=%d\n", len(colTracks), maxCol)
+	for i := range items {
+		if items[i].box.Style != nil && items[i].box.Style.BackgroundColor.A > 0 {
+			tag := ""
+			if items[i].box.Text != "" { tag = items[i].box.Text; if len(tag) > 20 { tag = tag[:20] } }
+			fmt.Fprintf(os.Stderr, "[GRID-PRE] %d col=(%d,%d)\n", i, items[i].colStart, items[i].colEnd)
+		}
+	}
 	toZeroBased(items, len(colTracks), len(rowTracks))
+	for i := range items {
+		if items[i].box.Style != nil && items[i].box.Style.BackgroundColor.A > 0 {
+			tag := ""
+			if items[i].box.Text != "" { tag = items[i].box.Text; if len(tag) > 20 { tag = tag[:20] } }
+			fmt.Fprintf(os.Stderr, "[GRID-POST] %d col=(%d,%d)\n", i, items[i].colStart, items[i].colEnd)
+		}
+	}
 
 	// Size the columns: resolve px / % / auto, then distribute fr leftover.
 	colSizes := sizeTracks(colTracks, contentWidth, colGap, func(idx int) float64 {
@@ -130,6 +147,17 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		it.box.Rect.Width = spanW - border.Horizontal() - padding.Horizontal()
 		if it.box.Rect.Width < 0 {
 			it.box.Rect.Width = 0
+		}
+		if it.box.Style != nil && it.box.Style.BackgroundColor.A > 0 {
+			tag := ""
+			if it.box.Text != "" {
+				tag = it.box.Text
+				if len(tag) > 20 {
+					tag = tag[:20]
+				}
+			}
+			fmt.Fprintf(os.Stderr, "[GRID] item #%d tag=%q col=(%d,%d) x=%.0f spanW=%.0f bw=%.0f pw=%.0f mw=%.0f → w=%.0f\n",
+				i, tag, it.colStart, it.colEnd, x, spanW, border.Horizontal(), padding.Horizontal(), margin.Left, it.box.Rect.Width)
 		}
 		// Lay out content against this width.
 		childCtx := contextFor(it.box)
