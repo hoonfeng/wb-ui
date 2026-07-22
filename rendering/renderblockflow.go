@@ -64,12 +64,19 @@ func (b *RenderBlockFlow) RenderName() string { return "RenderBlockFlow" }
 
 // Layout lays out the block flow and its children. It dispatches to the inline
 // formatting context when childrenInline is true, or to the block formatting context
-// otherwise. This mirrors RenderBlockFlow::layout().
 func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 	if b.layoutBox == nil || state == nil {
 		b.ClearNeedsLayout()
 		return
 	}
+	// Dispatch flex containers to FlexFormattingContext.
+	if b.layoutBox.Style != nil && b.layoutBox.Style.Display == style.DisplayFlex {
+		ctx := &layout.FlexFormattingContext{}
+		ctx.Layout(b.layoutBox, state)
+		b.ClearNeedsLayout()
+		return
+	}
+	// Default: dispatch to block or inline formatting context based on childrenInline.
 	if b.childrenInline {
 		b.layoutInlineChildren(state)
 	} else {
@@ -77,14 +84,6 @@ func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 	}
 	b.ClearNeedsLayout()
 }
-
-// layoutBlockChildren lays out the block-level children of this block flow by invoking
-// the block formatting context, mirroring RenderBlockFlow::layoutBlockChildren().
-func (b *RenderBlockFlow) layoutBlockChildren(state *layout.LayoutState) {
-	ctx := &layout.BlockFormattingContext{}
-	ctx.Layout(b.layoutBox, state)
-}
-
 // layoutInlineChildren lays out the inline-level children of this block flow by invoking
 // the inline formatting context, mirroring RenderBlockFlow::layoutInlineChildren().
 func (b *RenderBlockFlow) layoutInlineChildren(state *layout.LayoutState) {
