@@ -535,13 +535,24 @@ func maxContentWidthOfTrack(items []gridItem, idx int) float64 {
 	best := 0.0
 	for _, it := range items {
 		if it.colStart <= idx && it.colEnd > idx {
-			if it.box.Rect.Width > best {
-				best = it.box.Rect.Width
+			cw := maxContentWidth(it.box)
+			if cw > 0 {
+				if cw > best {
+					best = cw
+				}
+				continue
+			}
+			if it.box.Style != nil && it.box.Style.Width.Value > 0 {
+				r := resolveLength(it.box.Style.Width, 0, fontSizeOf(it.box))
+				if !r.Auto && r.Value > best {
+					best = r.Value
+				}
 			}
 		}
 	}
 	return best
 }
+
 
 func maxContentHeightOfTrack(items []gridItem, heights []float64, idx int) float64 {
 	best := 0.0
