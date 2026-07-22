@@ -103,6 +103,9 @@ func (wv *WebView) LoadHTML(src string) error {
 	if err := wv.mainFrame.LoadHTML(src); err != nil {
 		return err
 	}
+	// DOM bindings MUST be registered BEFORE executing page scripts so that
+	// JS frameworks (Vue/React) have access to document.getElementById,
+	// querySelector, Element.appendChild, etc. at boot time.
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
 		// Set up callback for dynamic <style> injection (Vue scoped CSS).
@@ -111,6 +114,13 @@ func (wv *WebView) LoadHTML(src string) error {
 				fr.RebuildRenderTree()
 			}
 		}
+	}
+	// Execute page scripts AFTER DOM bindings are registered.
+	// Scripts (Vue/React) may mutate the DOM — rebuild the render tree
+	// so that newly created elements are included in layout/paint.
+	if fr := wv.mainFrame.Frame(); fr != nil {
+		fr.ExecuteScripts()
+		fr.RebuildRenderTree()
 	}
 	return nil
 }

@@ -162,12 +162,11 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	// resolver. This mirrors the WebKit path where StyleEngine collects inline
 	// stylesheets from <style> elements after the HTML parser emits them.
 	f.extractAndAddStyles()
-
 	// Execute inline <script> elements found in the document.
-	// This runs before the render tree is built so that scripts can mutate
-	// the DOM before the first paint, matching browser behavior.
-	f.executeInlineScripts()
-
+	// NOTE: Script execution is deferred to Frame.ExecuteScripts() so the caller
+	// can register DOM bindings (bindings.RegisterDOMBindings) between setting
+	// the document and executing scripts. This is required for JS frameworks
+	// (Vue/React) that need document.getElementById / querySelector at boot time.
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(doc)
 	if f.page != nil {
@@ -177,6 +176,14 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
+}
+
+// ExecuteScripts walks the document's <script> elements and executes both
+// inline and external scripts via the ScriptEngine callback. Callers should
+// invoke this AFTER RegisterDOMBindings so the JS runtime has access to the
+// complete DOM API (document / window / Element etc.).
+func (f *Frame) ExecuteScripts() {
+	f.executeInlineScripts()
 }
 
 // RebuildRenderTree reconstructs the render tree from the current DOM without
