@@ -232,32 +232,23 @@ func (v *RenderView) syncGeometry() {
 // copies geometry. Both trees are produced by the same buildChildren logic, so their
 // sibling sequences are identical. Named elements match by DOM element identity;
 // anonymous wrappers (no DOM element) match to layout children with nil Element by
-// position.
+// position, using sameOwner for robust pairing.
 func syncChildren(parentRO RenderObject, parentLB *layout.LayoutBox) {
-	// Build a lookup: for each named (element-backed) layout child, map by element ptr.
-	elMap := make(map[*dom.Element]*layout.LayoutBox)
-	var anonCandidates []*layout.LayoutBox
-	for _, lc := range parentLB.Children {
-		if lc.Element != nil {
-			elMap[lc.Element] = lc
-		} else {
-			anonCandidates = append(anonCandidates, lc)
-		}
-	}
-	// Iterate render children and match.
-	anonIdx := 0
-	for rc := parentRO.FirstChild(); rc != nil; rc = rc.NextSibling() {
-		rcEl := domElementOf(rc)
-		if rcEl != nil {
-			if lc, ok := elMap[rcEl]; ok {
-				syncOne(rc, lc)
-				continue
+	// Copy layout children so we can remove matched ones.
+	lChildren := make([]*layout.LayoutBox, len(parentLB.Children))
+	copy(lChildren, parentLB.Children)
+
+	for rc := parentRO.FirstChild(); rc != nil && len(lChildren) > 0; rc = rc.NextSibling() {
+		matched := -1
+		for i, lc := range lChildren {
+			if sameOwner(rc, lc) {
+				matched = i
+				break
 			}
 		}
-		// No element match: match against next anonymous layout child.
-		if anonIdx < len(anonCandidates) {
-			syncOne(rc, anonCandidates[anonIdx])
-			anonIdx++
+		if matched >= 0 {
+			syncOne(rc, lChildren[matched])
+			lChildren = append(lChildren[:matched], lChildren[matched+1:]...)
 		}
 	}
 }
