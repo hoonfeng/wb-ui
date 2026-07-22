@@ -11,6 +11,8 @@
 package rendering
 
 import (
+	"fmt"
+	"os"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -187,7 +189,30 @@ func (v *RenderView) Layout(state *layout.LayoutState) {
 	// Sync geometry from layout boxes back to render boxes so that the paint
 	// pipeline reads the correct positions. Layout writes to layoutBox.Rect but
 	// painters read from RenderBox.frame; this step bridges the gap.
-	v.syncGeometry()
+	// Debug: verify rp-body layout box after syncGeometry
+	func() {
+		var walk func(ro RenderObject, depth int)
+		walk = func(ro RenderObject, depth int) {
+			if ro == nil {
+				return
+			}
+			if el := domElementOf(ro); el != nil {
+				if cls := el.GetAttribute("class"); cls == "rp-body" || cls == "right-panel" {
+					lb := ro.LayoutBox()
+					fn := "nil"
+					if lb != nil {
+						fn = fmt.Sprintf("%.0fx%.0f", lb.Rect.Width, lb.Rect.Height)
+					}
+					fmt.Fprintf(os.Stderr, "[POSTSYNC] cls=%s ro=%p lb=%p lb.rect=%s node=%v\n",
+						cls, ro, lb, fn, ro.Node() != nil)
+				}
+			}
+			for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+				walk(c, depth+1)
+			}
+		}
+		walk(v, 0)
+	}()
 	// Update compositing layers after layout.
 	if v.compositor != nil {
 		v.compositor.UpdateCompositingLayers()
