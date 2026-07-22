@@ -257,6 +257,133 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.Null()
 		}, 1)))
 
+	// Event 基类构造函数
+	g.Set("Event", jsc.FunctionValue(rt.NewConstructor("Event",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("composed", jsc.BooleanValue(false))
+			ev.Set("target", jsc.Null())
+			ev.Set("currentTarget", jsc.Null())
+			ev.Set("defaultPrevented", jsc.BooleanValue(false))
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					if v, ok := o.GetByKey("bubbles"); ok {
+						ev.Set("bubbles", v)
+					}
+					if v, ok := o.GetByKey("cancelable"); ok {
+						ev.Set("cancelable", v)
+					}
+					if v, ok := o.GetByKey("composed"); ok {
+						ev.Set("composed", v)
+					}
+				}
+			}
+			ev.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					this.AsObject().Set("defaultPrevented", jsc.BooleanValue(true))
+					return jsc.Undefined()
+				}, 0)))
+			ev.Set("stopPropagation", jsc.FunctionValue(jsc.NewNativeFunction("stopPropagation",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return ev
+		})))
+
+	// MouseEvent 构造函数
+	g.Set("MouseEvent", jsc.FunctionValue(rt.NewConstructor("MouseEvent",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("target", jsc.Null())
+			ev.Set("clientX", jsc.NumberValue(0))
+			ev.Set("clientY", jsc.NumberValue(0))
+			ev.Set("screenX", jsc.NumberValue(0))
+			ev.Set("screenY", jsc.NumberValue(0))
+			ev.Set("button", jsc.NumberValue(0))
+			ev.Set("buttons", jsc.NumberValue(0))
+			ev.Set("ctrlKey", jsc.BooleanValue(false))
+			ev.Set("shiftKey", jsc.BooleanValue(false))
+			ev.Set("altKey", jsc.BooleanValue(false))
+			ev.Set("metaKey", jsc.BooleanValue(false))
+			ev.Set("defaultPrevented", jsc.BooleanValue(false))
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					for _, k := range []string{"bubbles", "cancelable", "clientX", "clientY",
+						"screenX", "screenY", "button", "buttons",
+						"ctrlKey", "shiftKey", "altKey", "metaKey"} {
+						if v, ok := o.GetByKey(k); ok {
+							ev.Set(k, v)
+						}
+					}
+				}
+			}
+			ev.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					this.AsObject().Set("defaultPrevented", jsc.BooleanValue(true))
+					return jsc.Undefined()
+				}, 0)))
+			ev.Set("stopPropagation", jsc.FunctionValue(jsc.NewNativeFunction("stopPropagation",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return ev
+		})))
+
+	// KeyboardEvent 构造函数
+	g.Set("KeyboardEvent", jsc.FunctionValue(rt.NewConstructor("KeyboardEvent",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("target", jsc.Null())
+			ev.Set("key", jsc.StringValue(""))
+			ev.Set("code", jsc.StringValue(""))
+			ev.Set("ctrlKey", jsc.BooleanValue(false))
+			ev.Set("shiftKey", jsc.BooleanValue(false))
+			ev.Set("altKey", jsc.BooleanValue(false))
+			ev.Set("metaKey", jsc.BooleanValue(false))
+			ev.Set("repeat", jsc.BooleanValue(false))
+			ev.Set("isComposing", jsc.BooleanValue(false))
+			ev.Set("defaultPrevented", jsc.BooleanValue(false))
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					for _, k := range []string{"bubbles", "cancelable",
+						"key", "code", "ctrlKey", "shiftKey", "altKey", "metaKey",
+						"repeat", "isComposing"} {
+						if v, ok := o.GetByKey(k); ok {
+							ev.Set(k, v)
+						}
+					}
+				}
+			}
+			ev.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					this.AsObject().Set("defaultPrevented", jsc.BooleanValue(true))
+					return jsc.Undefined()
+				}, 0)))
+			ev.Set("stopPropagation", jsc.FunctionValue(jsc.NewNativeFunction("stopPropagation",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return ev
+		})))
+
 	// CustomEvent 构造函数
 	g.Set("CustomEvent", jsc.FunctionValue(rt.NewConstructor("CustomEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {

@@ -198,9 +198,10 @@ func (wv *WebView) ensureJSRuntime() {
 	wv.jsInterpreter.SetupGlobal(wv.jsLogger)
 	// Create event loop (needed by setTimeout/requestAnimationFrame).
 	_ = jsc.NewEventLoop(wv.jsInterpreter)
-	// Inject browser globals (TextEncoder, setTimeout, crypto, navigator, etc.)
-	// BEFORE any page scripts execute.
+	// Inject browser globals from Go implementations:
+	// EventLoop timers (InjectBrowserEnv) + Web APIs (RegisterWebAPIs).
 	wv.jsInterpreter.InjectBrowserEnv()
+	wv.jsInterpreter.RegisterWebAPIs()
 }
 
 func (wv *WebView) JSInterpreter() *jsc.Interpreter {
