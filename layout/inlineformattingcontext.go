@@ -114,6 +114,11 @@ func (c *InlineFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		// height:50px) expand the line box so the parent container grows to
 		// contain them, matching browser behavior.
 		actualLineHeight := lineHeight
+		// Ensure the line box is at least as tall as the text itself,
+		// matching browser behavior when font metrics exceed line-height.
+		if textHeight := ascent + descent; textHeight > actualLineHeight {
+			actualLineHeight = textHeight
+		}
 		for j := lineStartIdx; j < endIdx; j++ {
 			it := &items[j]
 			if it.box != nil && (it.box.IsReplaced() || isInlineBlock(it.box)) {
