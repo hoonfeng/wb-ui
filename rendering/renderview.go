@@ -11,7 +11,6 @@
 package rendering
 
 import (
-	"log"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -284,19 +283,9 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	if box := asRenderBox(ro); box != nil {
 		box.frame = lb.Rect
 	}
-	// Assign layout box to anonymous render objects not matched at build time.
-	if ro.LayoutBox() == nil {
-		ro.SetLayoutBox(lb)
-	} else if ro.LayoutBox() != lb {
-		// Debug: layout box mismatch. This happens when linkLayoutBoxes paired
-		// the render object with a different layout box (from attachLayoutTree),
-		// but syncGeometry passes a different lb (from layout root traversal).
-		if el := domElementOf(ro); el != nil {
-			log.Printf("[SYNC] MISMATCH cls=%s have=%p want=%p w_have=%.0f w_want=%.0f",
-				el.GetAttribute("class"), ro.LayoutBox(), lb,
-				ro.LayoutBox().Rect.Width, lb.Rect.Width)
-		}
-	}
+	// Always update the layout box to reflect the laid-out geometry from
+	// this layout pass (overwrites any stale pointer from linkLayoutBoxes).
+	ro.SetLayoutBox(lb)
 	// Sync text segments for RenderText (mirrors the line-box list on RenderText).
 	// Boxes created by the layout tree may wrap text runs in BoxAnonymous boxes;
 	// search recursively for the inner BoxTextRun to retrieve laid-out segments.

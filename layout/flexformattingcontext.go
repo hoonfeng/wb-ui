@@ -22,9 +22,10 @@
 package layout
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"sort"
-
 	"wb-ui/style"
 )
 
@@ -407,6 +408,20 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		cb := containingBlockForAbsolute(child, root)
 		layoutAbsolute(child, cb, root, state)
 	}
+	// Debug: find rp-body and log its width right after layout
+	var scanLB func(b *LayoutBox, depth int)
+	scanLB = func(b *LayoutBox, depth int) {
+		if b.Element != nil {
+			if cls := b.Element.GetAttribute("class"); cls == "rp-body" {
+				fmt.Fprintf(os.Stderr, "[FLEX_END] rp-body: x=%.0f y=%.0f w=%.0f h=%.0f\n",
+					b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
+			}
+		}
+		for _, c := range b.Children {
+			scanLB(c, depth+1)
+		}
+	}
+	scanLB(box, 0)
 }
 
 // flexItem captures the resolved flex properties and geometry of a single flex item.
