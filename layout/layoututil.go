@@ -405,6 +405,11 @@ func asLength(s string) style.Length {
 	}
 	if unitPart == "" {
 		// Bare numbers (e.g. for line-height) stay unit-less.
+		// Exception: "0" without a unit is equivalent to "0px" for lengths
+		// like width/height/insets, per CSS spec.
+		if v == 0 {
+			return style.Length{Value: 0, Unit: "px"}
+		}
 		return style.Length{Value: v}
 	}
 	return style.Length{Value: v, Unit: unitPart}

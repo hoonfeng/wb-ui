@@ -47,6 +47,15 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	isReverse := effectiveIsReverse(box)
 	wrap := flexWrapOf(box)
 
+	// Collect absolutely positioned children (deferred until after in-flow
+	// items are laid out, matching BFC behaviour).
+	var deferredAbsolutes []*LayoutBox
+	for _, child := range box.Children {
+		if child.IsAbsolutelyPositioned() {
+			deferredAbsolutes = append(deferredAbsolutes, child)
+		}
+	}
+
 	// Collect visible in-flow flex items, sorted by order.
 	items := collectFlexItems(box)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
@@ -356,7 +365,16 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			// container's vertical padding/border.
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
+			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
+				box.Rect.Border.Top + box.Rect.Border.Bottom
 		}
+	}
+
+	// Lay out absolutely-positioned descendants (same as BFC).
+	root := stateRoot(box)
+	for _, child := range deferredAbsolutes {
+		cb := containingBlockForAbsolute(child, root)
+		layoutAbsolute(child, cb, root, state)
 	}
 }
 

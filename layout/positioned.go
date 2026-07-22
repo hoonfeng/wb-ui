@@ -27,7 +27,9 @@ import (
 // none is found the initial containing block (the viewport, represented by the root
 // box) is used.
 func containingBlockForAbsolute(box *LayoutBox, root *LayoutBox) *LayoutBox {
-	for cur := box; cur != nil; cur = cur.parent {
+	// Walk up from the parent, not the box itself (the box may have
+	// position: fixed/absolute, which would cause it to match itself).
+	for cur := box.parent; cur != nil; cur = cur.parent {
 		if cur == root {
 			return root
 		}
@@ -55,7 +57,7 @@ func resolveOffset(l style.Length, cbSize float64) (float64, bool) {
 	if r.Auto {
 		return 0, true
 	}
-	return r.Value, r.Definite && !r.Auto
+	return r.Value, false
 }
 
 // layoutAbsolute sizes and positions an absolutely (or fixed) positioned box against
