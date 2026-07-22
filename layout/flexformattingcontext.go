@@ -837,7 +837,7 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	if isRow {
 		// Measure by line width so text-align (center/right) does not inflate
 		// the max-content size of the item.
-		return maxContentWidth(box)
+		return contentSpanWidth(box)
 	}
 	// column: measure content height (max bottom edge).
 	contentTop := box.Rect.ContentY()
@@ -846,4 +846,60 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 		h = 0
 	}
 	return h
+}
+
+// contentSpanWidth returns the total main-axis span of all children in a layout box,
+// measured as the maximum child right-edge minus minimum child left-edge. This is used
+// by flex item measurement to correctly report the intrinsic width of a flex container
+// child (e.g. a wrapper holding multiple icon buttons), whose children are block-level
+// so maxContentWidth would not include their Rect.Width.
+func contentSpanWidth(box *LayoutBox) float64 {
+	minLeft := math.MaxFloat64
+	maxRight := 0.0
+	found := false
+	var scan func(b *LayoutBox)
+	scan = func(b *LayoutBox) {
+		for _, c := range b.Children {
+			if c.IsAbsolutelyPositioned() {
+				continue
+			}
+			// Use child's border-box span: x + width.
+			if c.Rect.Width > 0 || c.Rect.Height > 0 {
+				left := c.Rect.X
+				right := c.Rect.X + c.Rect.Width
+				if left < minLeft {
+					minLeft = left
+				}
+				if right > maxRight {
+					maxRight = right
+				}
+				found = true
+			}
+			// Recurse into children to pick up text segments.
+			for _, seg := range c.TextSegments {
+				left := c.Rect.X + seg.X
+				right := left + seg.Width
+				if left < minLeft {
+					minLeft = left
+				}
+				if right > maxRight {
+					maxRight = right
+				}
+				found = true
+			}
+			scan(c)
+		}
+	}
+	scan(box)
+	if !found {
+		return maxContentWidth(box)
+	}
+	if minLeft < 0 {
+		minLeft = 0
+	}
+	cw := maxRight - minLeft
+	if cw < 0 {
+		cw = 0
+	}
+	return cw
 }
