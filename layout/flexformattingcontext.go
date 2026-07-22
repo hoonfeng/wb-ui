@@ -504,11 +504,25 @@ func resolveFlexBasis(box *LayoutBox, cbW, cbH float64, isRow bool) float64 {
 	if isRow {
 		w, ok := definiteWidth(box.Style.Width, cbW, fs)
 		if ok {
+			// For border-box sizing, the declared width includes padding+border.
+			// Flex-basis is always the content-box size, so subtract them.
+			if isBorderBox(box) {
+				w -= box.Rect.Border.Horizontal() + box.Rect.Padding.Horizontal()
+				if w < 0 {
+					w = 0
+				}
+			}
 			return w
 		}
 	} else {
 		h, ok := definiteHeight(box.Style.Height, cbH, fs)
 		if ok {
+			if isBorderBox(box) {
+				h -= box.Rect.Border.Vertical() + box.Rect.Padding.Vertical()
+				if h < 0 {
+					h = 0
+				}
+			}
 			return h
 		}
 	}
