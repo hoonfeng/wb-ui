@@ -404,10 +404,7 @@ func (h *Host) Run() {
 
 		bgColor := findBodyBgColor(rendering.RenderObject(rv))
 		if bgColor.A == 0 {
-			log.Printf("[bg] NOT FOUND, fallback to white")
 			bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-		} else {
-			log.Printf("[bg] OK #%02x%02x%02x a=%d", bgColor.R, bgColor.G, bgColor.B, bgColor.A)
 		}
 		gpuCanvas.Clear(bgColor)
 
@@ -1028,8 +1025,17 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 		if doc := rv.Document(); doc != nil {
 			if body := doc.Body(); body != nil {
 				if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), body); bodyRO != nil {
-					if st := bodyRO.Style(); st != nil && st.BackgroundColor.A > 0 {
-						return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
+					if st := bodyRO.Style(); st != nil {
+						if st.BackgroundColor.A > 0 {
+							return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
+						}
+						// Body bg is transparent — search children directly
+						// (NOT findBodyBgColor which re-enters doc.Body() path).
+						for c := bodyRO.FirstChild(); c != nil; c = c.NextSibling() {
+							if col := firstNonTransBg(c); col.A > 0 {
+								return col
+							}
+						}
 					}
 				}
 			}
@@ -1045,6 +1051,24 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 	}
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
 		if col := findBodyBgColor(c); col.A > 0 {
+			return col
+		}
+	}
+	return graphics.Color{}
+}
+
+// firstNonTransBg walks a render subtree and returns the first non-transparent
+// background color found. Used when body bg is transparent to find the effective
+// viewport background from body's children (e.g. #app div).
+func firstNonTransBg(o rendering.RenderObject) graphics.Color {
+	if o == nil {
+		return graphics.Color{}
+	}
+	if st := o.Style(); st != nil && st.BackgroundColor.A > 0 {
+		return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		if col := firstNonTransBg(c); col.A > 0 {
 			return col
 		}
 	}
