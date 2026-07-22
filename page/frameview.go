@@ -217,8 +217,11 @@ func (v *FrameView) SetContentSize(w, h int) {
 
 // Layout runs a layout pass for the frame's render tree.
 func (v *FrameView) Layout() {
+	Logf("Layout", "start viewport=%dx%d needsLayout=%v",
+		v.width, v.height, v.layoutPhase == LayoutPhaseNeedsLayout)
 	if v.frame == nil || v.frame.renderView == nil {
 		v.layoutPhase = LayoutPhaseNone
+		Logf("Layout", "skip: no frame/renderView")
 		return
 	}
 	rv := v.frame.renderView
@@ -226,7 +229,10 @@ func (v *FrameView) Layout() {
 	rv.Layout(nil)
 	v.updateContentSize(rv)
 	v.layoutPhase = LayoutPhaseNone
+	Logf("Layout", "done contentSize=%dx%d", v.contentWidth, v.contentHeight)
 }
+
+// updateContentSize
 
 // updateContentSize walks the render tree to find the maximum extent.
 func (v *FrameView) updateContentSize(rv *rendering.RenderView) {

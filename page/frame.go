@@ -132,10 +132,12 @@ func (f *Frame) LoadHTML(src string) error {
 	if src == "" {
 		return errors.New("page: empty HTML input")
 	}
+	Logf("LoadHTML", "start input_size=%d", len(src))
 	doc, err := html.Parse(src)
 	if err != nil {
 		return err
 	}
+	Logf("LoadHTML", "parsed tagCount=%d elementCount=%d", countTags(doc), len(doc.GetElementsByTagName("*")))
 	f.SetDocument(doc)
 	return nil
 }
@@ -147,6 +149,7 @@ func (f *Frame) LoadHTML(src string) error {
 // the render tree via rendering.RenderTreeBuilder. The Page's main-frame RenderView
 // is kept in sync.
 func (f *Frame) SetDocument(doc *dom.Document) {
+	Logf("SetDocument", "start hasResolver=%v", f.resolver != nil)
 	f.document = doc
 	if f.resolver == nil {
 		f.resolver = style.NewResolver()
@@ -154,8 +157,10 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 		// WebCore/css/html.css). It must be added before author sheets so
 		// the cascade gives author styles higher priority.
 		f.resolver.AddStyleSheet(html5.NewUAStyleSheet())
+		Logf("SetDocument", "created new resolver + UA sheet")
 	} else {
 		f.resolver.ClearCache()
+		Logf("SetDocument", "cleared resolver cache")
 	}
 
 	// Extract CSS from <style> elements in the document and add them to the
@@ -169,6 +174,11 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	// (Vue/React) that need document.getElementById / querySelector at boot time.
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(doc)
+	objCount := 0
+	if f.renderView != nil {
+		objCount = countRenderObjects(rendering.RenderObject(f.renderView))
+	}
+	Logf("SetDocument", "renderObjectCount=%d", objCount)
 	if f.page != nil {
 		f.page.setRenderView(f.renderView)
 	}
@@ -176,6 +186,7 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
+	Logf("SetDocument", "done")
 }
 
 // ExecuteScripts walks the document's <script> elements and executes both
@@ -194,7 +205,9 @@ func (f *Frame) ExecuteScripts() {
 // next layout pass sees an up-to-date render tree. It also clears the style
 // resolver cache so new/changed inline styles take effect.
 func (f *Frame) RebuildRenderTree() {
+	Logf("RebuildRenderTree", "start hasDocument=%v hasResolver=%v", f.document != nil, f.resolver != nil)
 	if f.document == nil {
+		Logf("RebuildRenderTree", "skip: no document")
 		return
 	}
 	if f.resolver != nil {
@@ -206,44 +219,72 @@ func (f *Frame) RebuildRenderTree() {
 	}
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(f.document)
+	objCount := 0
+	if f.renderView != nil {
+		objCount = countRenderObjects(rendering.RenderObject(f.renderView))
+	}
+	Logf("RebuildRenderTree", "renderObjectCount=%d", objCount)
 	if f.page != nil {
 		f.page.setRenderView(f.renderView)
 	}
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
+	Logf("RebuildRenderTree", "done")
 }
 
 // NeedsLayout reports whether the frame's view requires a layout pass, mirroring
+// the per-frame layout-pending check in WebKit (FrameView::needsLayout()).
+func (f *Frame) NeedsLayout() bool {
+	return f.view != nil && f.view.NeedsLayout()
+}
+
+// SetNeedsLayout marks the frame's view as needing (or not needing) a layout
+// pass, mirroring FrameView::setNeedsLayout(). Embedders should call this
+// after mutating the DOM outside of a style recalc so the next EnsureLayout
+// rebuilds/relayouts the render tree.
+func (f *Frame) SetNeedsLayout(needs bool) {
+	if f.view != nil {
+		f.view.SetNeedsLayout(needs)
+	}
+}
 
 // extractAndAddStyles finds all <style> elements in the current document,
 // parses their CSS text, and adds the resulting stylesheets to the style
 // resolver. Previously extracted stylesheets are removed first so that
 // dynamically changed style content is reflected correctly.
 func (f *Frame) extractAndAddStyles() {
+	Logf("extractAndAddStyles", "start docOk=%v resolverOk=%v", f.document != nil, f.resolver != nil)
 	if f.document == nil || f.resolver == nil {
+		Logf("extractAndAddStyles", "skip: no doc/resolver")
 		return
 	}
 
 	// Remove previously extracted dynamic stylesheets to prevent stale rules
 	// from accumulating.
+	removed := len(f.styleSheets)
 	for _, sheet := range f.styleSheets {
 		f.resolver.RemoveStyleSheet(sheet)
 	}
 	f.styleSheets = nil
+	Logf("extractAndAddStyles", "removedPrevSheets=%d", removed)
 
 	// Find all <style> elements and add their content as new sheets.
 	styleElements := f.document.GetElementsByTagName("style")
-	for _, styleEl := range styleElements {
+	Logf("extractAndAddStyles", "styleElementCount=%d", len(styleElements))
+	for i, styleEl := range styleElements {
 		cssText := styleEl.TextContent()
 		if strings.TrimSpace(cssText) == "" {
+			Logf("extractAndAddStyles", "style[%d]: empty, skip", i)
 			continue
 		}
 		sheet := css.NewCSSStyleSheetWithOwner(styleEl, "")
 		p := css.NewParser(cssText)
 		p.ParseStyleSheetInto(sheet)
+		rules := sheet.Rules()
 		f.resolver.AddStyleSheet(sheet)
 		f.styleSheets = append(f.styleSheets, sheet)
+		Logf("extractAndAddStyles", "style[%d]: cssLen=%d rules=%d", i, len(cssText), len(rules))
 	}
 
 	// Process <link rel="stylesheet"> elements: resolve href via the
@@ -251,6 +292,7 @@ func (f *Frame) extractAndAddStyles() {
 	// the resolver. When ResourceLoader is available it uses the async
 	// resource loading pipeline; otherwise it falls back to StyleSheetLoader.
 	linkElements := f.document.GetElementsByTagName("link")
+	linkCount := 0
 	for _, linkEl := range linkElements {
 		l, ok := html5.ToLinkElement(linkEl)
 		if !ok || !l.IsStyleSheet() {
@@ -260,22 +302,19 @@ func (f *Frame) extractAndAddStyles() {
 		if href == "" {
 			continue
 		}
-
+		linkCount++
+		Logf("extractAndAddStyles", "link[%d]: href=%q", linkCount, href)
 		if f.ResourceLoader != nil {
-			// Use the async resource loading pipeline. The loaded CSS text
-			// is delivered asynchronously via NotifyFinished; a full async
-			// implementation would defer style resolution until the resource
-			// arrives, but for now the client adds the sheet to the resolver
-			// synchronously on the callback goroutine.
 			f.ResourceLoader.LoadStylesheet(href, &frameStyleSheetClient{
 				frame: f,
 				owner: linkEl,
 				href:  href,
 			})
+			Logf("extractAndAddStyles", "link[%d]: async load queued", linkCount)
 		} else if f.StyleSheetLoader != nil {
-			// Synchronous fallback: load and parse immediately.
 			cssText, err := f.StyleSheetLoader(href)
 			if err != nil || strings.TrimSpace(cssText) == "" {
+				Logf("extractAndAddStyles", "link[%d]: load failed err=%v", linkCount, err)
 				continue
 			}
 			sheet := css.NewCSSStyleSheetWithOwner(linkEl, href)
@@ -283,10 +322,10 @@ func (f *Frame) extractAndAddStyles() {
 			p.ParseStyleSheetInto(sheet)
 			f.resolver.AddStyleSheet(sheet)
 			f.styleSheets = append(f.styleSheets, sheet)
+			Logf("extractAndAddStyles", "link[%d]: sync loaded len=%d", linkCount, len(cssText))
 		}
-		// If both ResourceLoader and StyleSheetLoader are nil, skip
-		// external stylesheets silently.
 	}
+	Logf("extractAndAddStyles", "done: totalStyleSheets=%d linkCount=%d", len(f.styleSheets), linkCount)
 }
 
 // frameStyleSheetClient implements CachedResourceClient to handle the
@@ -303,26 +342,32 @@ type frameStyleSheetClient struct {
 // stylesheet resource completes loading (successfully or with an error).
 func (c *frameStyleSheetClient) NotifyFinished(resource *CachedResource) {
 	if resource.Status() != CachedResourceStatusLoaded {
+		Logf("extractAndAddStyles", "async: href=%q status=%d (not loaded)", c.href, resource.Status())
 		return
 	}
 	data := resource.Data()
 	if len(data) == 0 {
+		Logf("extractAndAddStyles", "async: href=%q empty data", c.href)
 		return
 	}
 	cssText := string(data)
 	if strings.TrimSpace(cssText) == "" {
+		Logf("extractAndAddStyles", "async: href=%q whitespace only", c.href)
 		return
 	}
 
 	sheet := css.NewCSSStyleSheetWithOwner(c.owner, c.href)
 	p := css.NewParser(cssText)
 	p.ParseStyleSheetInto(sheet)
+	rules := sheet.Rules()
 	c.frame.resolver.AddStyleSheet(sheet)
 	c.frame.styleSheets = append(c.frame.styleSheets, sheet)
+	Logf("extractAndAddStyles", "async: href=%q loaded len=%d rules=%d", c.href, len(cssText), len(rules))
 
 	// Trigger a render tree rebuild so the new styles take effect.
 	if c.frame.renderView != nil {
 		c.frame.view.SetNeedsLayout(true)
+		Logf("extractAndAddStyles", "async: setNeedsLayout")
 	}
 }
 
@@ -416,27 +461,11 @@ func (c *frameScriptClient) NotifyFinished(resource *CachedResource) {
 	}
 }
 
-// NeedsLayout reports whether the frame's view requires a layout pass, mirroring
-// NeedsLayout reports whether the frame's view requires a layout pass, mirroring
-// the per-frame layout-pending check in WebKit (FrameView::needsLayout()).
-func (f *Frame) NeedsLayout() bool {
-	return f.view != nil && f.view.NeedsLayout()
-}
-
-// SetNeedsLayout marks the frame's view as needing (or not needing) a layout
-// pass, mirroring FrameView::setNeedsLayout(). Embedders should call this
-// after mutating the DOM outside of a style recalc so the next EnsureLayout
-// rebuilds/relayouts the render tree.
-func (f *Frame) SetNeedsLayout(needs bool) {
-	if f.view != nil {
-		f.view.SetNeedsLayout(needs)
-	}
-}
-
 // logError logs script/resource errors.
 func logError(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[page] "+format+"\n", args...)
 }
+
 // Layout triggers a layout on the frame's view, mirroring the Frame-level
 // layout entry point (LocalFrameView::layout() reached via Frame::view()). It is a
 // no-op when no view or render view is present.
@@ -444,4 +473,57 @@ func (f *Frame) Layout() {
 	if f.view != nil {
 		f.view.Layout()
 	}
+}
+
+// ─── Verbose logging helpers ─────────────────────────────
+
+func countTags(doc *dom.Document) int {
+	count := 0
+	walk := func(n dom.Node) {
+		if _, ok := n.(*dom.Element); ok {
+			count++
+		}
+	}
+	walkNode(doc, walk)
+	return count
+}
+
+func countRenderObjects(ro rendering.RenderObject) int {
+	count := 0
+	var walkRO func(r rendering.RenderObject)
+	walkRO = func(r rendering.RenderObject) {
+		count++
+		for c := r.FirstChild(); c != nil; c = c.NextSibling() {
+			walkRO(c)
+		}
+	}
+	walkRO(ro)
+	return count
+}
+
+func walkNode(n dom.Node, fn func(dom.Node)) {
+	fn(n)
+	switch v := n.(type) {
+	case *dom.Document:
+		if el := v.DocumentElement(); el != nil {
+			walkNode(el, fn)
+		}
+		if b := v.Head(); b != nil {
+			walkNode(b, fn)
+		}
+		if b := v.Body(); b != nil {
+			walkNode(b, fn)
+		}
+	case *dom.Element:
+		for c := v.FirstChild(); c != nil; c = c.NextSibling() {
+			walkNode(c, fn)
+		}
+	}
+}
+
+func trimForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
