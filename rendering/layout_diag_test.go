@@ -31,7 +31,13 @@ body {
 func layoutInfo(ro RenderObject) (x, y, w, h float64) {
 	lb := ro.LayoutBox()
 	if lb != nil {
-		return lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height
+		if rv := ro.View(); rv != nil {
+			ls := rv.LayoutState()
+			if ls != nil {
+				g := ls.GeometryForBox(lb)
+				return g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
+			}
+		}
 	}
 	switch v := ro.(type) {
 	case *RenderBox:
@@ -72,6 +78,38 @@ func TestLayout_ViewportFillsFullArea(t *testing.T) {
 	}
 	rv.SetViewportSize(1280, 800)
 	rv.Layout(nil)
+
+	t.Log("=== LAYOUT DIAGNOSTIC ===")
+	if htmlRO := rv.FirstChild(); htmlRO != nil {
+		lb := htmlRO.LayoutBox()
+		if lb != nil {
+			t.Logf("DEBUG: html layout box children=%d", len(lb.Children()))
+			for i, c := range lb.Children() {
+				t.Logf("  child[%d]: nodeType=%d", i, c.NodeType())
+			}
+		}
+	}
+	// Debug: check body's layout box
+	var walk func(ro RenderObject)
+	walk = func(ro RenderObject) {
+		if el, ok := ro.Node().(*dom.Element); ok && el.TagName() == "BODY" {
+			lb := ro.LayoutBox()
+			if lb != nil {
+				ls := rv.LayoutState()
+				if ls != nil {
+					g := ls.GeometryForBox(lb)
+					t.Logf("DEBUG BODY geometry: content=(%.0f,%.0f) %.0fx%.0f  left=%.0f top=%.0f bw=%.0f bh=%.0f",
+						g.ContentBoxLeft(), g.ContentBoxTop(),
+						g.ContentWidth(), g.ContentHeight(),
+						g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight())
+				}
+			}
+		}
+		for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(rv)
 
 	t.Log("=== LAYOUT DIAGNOSTIC ===")
 	t.Logf("Viewport: 1280 x 800")
@@ -235,7 +273,13 @@ func walkAllLayoutBoxes(ro RenderObject, t *testing.T) {
 	}
 	lb := ro.LayoutBox()
 	if lb != nil {
-		r := lb.Rect
+		var lx, ly, lw, lh float64
+		if rv := ro.View(); rv != nil {
+			if ls := rv.LayoutState(); ls != nil {
+				g := ls.GeometryForBox(lb)
+				lx, ly, lw, lh = g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
+			}
+		}
 		cs := ro.Style()
 		tag := ""
 		if el, ok := ro.Node().(*dom.Element); ok {
@@ -256,7 +300,7 @@ func walkAllLayoutBoxes(ro RenderObject, t *testing.T) {
 			ch = cs.Height.String()
 		}
 		t.Logf("  <%-30s> rect=(%6.0f,%6.0f) %4.0fx%-4.0f w=%s h=%s bg=%s",
-			tag, r.X, r.Y, r.Width, r.Height, cw, ch, bg)
+			tag, lx, ly, lw, lh, cw, ch, bg)
 	}
 	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
 		walkAllLayoutBoxes(c, t)

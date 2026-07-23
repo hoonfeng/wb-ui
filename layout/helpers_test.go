@@ -7,98 +7,98 @@ import (
 )
 
 // mkBlock returns a block-level box with a default ComputedStyle (display: block).
-func mkBlock() *LayoutBox {
+func mkBlock() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayBlock
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
 }
 
 // mkColumnBlock returns a block box with multi-column layout (column-count: N).
-func mkColumnBlock(colCount int) *LayoutBox {
+func mkColumnBlock(colCount int) *ElementBox {
 	b := mkBlock()
-	b.Style.ColumnCount = colCount
-	b.Style.ColumnGap = style.Length{Value: 16, Unit: "px"}
+	b.style.ColumnCount = colCount
+	b.style.ColumnGap = style.Length{Value: 16, Unit: "px"}
 	return b
 }
 
 // mkVerticalBlock returns a block box with vertical writing-mode.
-func mkVerticalBlock(wm string) *LayoutBox {
+func mkVerticalBlock(wm string) *ElementBox {
 	b := mkBlock()
-	b.Style.WritingMode = wm
+	b.style.WritingMode = wm
 	return b
 }
 
 // mkBlockWH returns a block box with the given width and height in px.
-func mkBlockWH(w, h float64) *LayoutBox {
+func mkBlockWH(w, h float64) *ElementBox {
 	b := mkBlock()
 	if w > 0 {
-		b.Style.Width = style.Length{Value: w, Unit: "px"}
+		b.style.Width = style.Length{Value: w, Unit: "px"}
 	}
 	if h > 0 {
-		b.Style.Height = style.Length{Value: h, Unit: "px"}
+		b.style.Height = style.Length{Value: h, Unit: "px"}
 	}
 	return b
 }
 
 // mkFlex returns a flex container box.
-func mkFlex() *LayoutBox {
+func mkFlex() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayFlex
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
 }
 
 // mkGrid returns a grid container box.
-func mkGrid() *LayoutBox {
+func mkGrid() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayGrid
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
 }
 
 // mkTable returns a table box.
-func mkTable() *LayoutBox {
+func mkTable() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayTable
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeTableBox, style: cs}
 }
 
 // mkTableRow returns a table-row box.
-func mkTableRow() *LayoutBox {
+func mkTableRow() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayTableRow
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeTableWrapperBox, style: cs}
 }
 
 // mkTableCell returns a table-cell box.
-func mkTableCell() *LayoutBox {
+func mkTableCell() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayTableCell
-	return &LayoutBox{Type: BoxBlock, Style: cs}
+	return &ElementBox{nodeType: NodeTableWrapperBox, style: cs}
 }
 
 // mkAnon returns an anonymous block wrapper (for inline content).
-func mkAnon() *LayoutBox {
+func mkAnon() *ElementBox {
 	cs := style.NewComputedStyle()
 	cs.Display = style.DisplayBlock
-	return &LayoutBox{Type: BoxAnonymous, Style: cs}
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
 }
 
 // mkTextRun returns a text-run box holding the given text.
-func mkTextRun(text string) *LayoutBox {
+func mkTextRun(text string) *ElementBox {
 	cs := style.NewComputedStyle()
-	return &LayoutBox{Type: BoxTextRun, Text: text, Style: cs}
+	return &ElementBox{nodeType: NodeText, style: cs}
 }
 
 // setMargin sets the four margin sides of box to v px.
-func setMargin(box *LayoutBox, v float64) {
-	box.Style.MarginTop = style.Length{Value: v, Unit: "px"}
-	box.Style.MarginRight = style.Length{Value: v, Unit: "px"}
-	box.Style.MarginBottom = style.Length{Value: v, Unit: "px"}
-	box.Style.MarginLeft = style.Length{Value: v, Unit: "px"}
+func setMargin(box *ElementBox, v float64) {
+	box.style.MarginTop = style.Length{Value: v, Unit: "px"}
+	box.style.MarginRight = style.Length{Value: v, Unit: "px"}
+	box.style.MarginBottom = style.Length{Value: v, Unit: "px"}
+	box.style.MarginLeft = style.Length{Value: v, Unit: "px"}
 }
 
 // setProp sets a raw string property on box.Style (for properties without typed fields).
-func setProp(box *LayoutBox, name, value string) {
-	box.Style.Properties[name] = value
+func setProp(box *ElementBox, name, value string) {
+	box.style.Properties[name] = value
 }
 
 // approxEq reports whether a and b differ by less than 0.5 (sub-pixel tolerance).
@@ -116,4 +116,10 @@ func assertApprox(t *testing.T, name string, got, want float64) {
 	if !approxEq(got, want) {
 		t.Errorf("%s = %g, want %g", name, got, want)
 	}
+}
+
+// rectOf returns the border-box geometry of a box for use in test assertions.
+func rectOf(box *ElementBox, state *LayoutState) (x, y, w, h float64) {
+	g := state.GeometryForBox(box)
+	return g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
 }

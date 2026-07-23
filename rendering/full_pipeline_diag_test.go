@@ -45,13 +45,18 @@ func TestBodySync(t *testing.T) {
 
 	// Check layout tree structure
 	layoutRoot := layout.BuildLayoutTree(doc.DocumentElement(), resolver)
-	t.Logf("layoutRoot.Children=%d", len(layoutRoot.Children))
-	for i, ch := range layoutRoot.Children {
-		tag := "?"
-		if ch.Element != nil {
-			tag = ch.Element.TagName()
+	rootEb, ok := layoutRoot.(*layout.ElementBox)
+	if ok {
+		t.Logf("layoutRoot children=%d", len(rootEb.Children()))
+		for i, ch := range rootEb.Children() {
+			tag := "?"
+			if eb, ok := ch.(*layout.ElementBox); ok {
+				if el := eb.Element(); el != nil {
+					tag = el.TagName()
+				}
+			}
+			t.Logf("  [%d] type=%d tag=%s", i, ch.NodeType(), tag)
 		}
-		t.Logf("  [%d] type=%d tag=%s w=%.0f", i, ch.Type, tag, ch.Rect.Width)
 	}
 
 	rv := NewRenderTreeBuilder(resolver).Build(doc)
@@ -78,7 +83,11 @@ func TestBodySync(t *testing.T) {
 		}
 		lb := bodyRO.LayoutBox()
 		if lb != nil {
-			t.Logf("body layout box: (%.0f,%.0f %.0fx%.0f)", lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height)
+			state := rv.LayoutState()
+			if state != nil {
+				g := state.GeometryForBox(lb)
+				t.Logf("body layout box: (%.0f,%.0f %.0fx%.0f)", g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight())
+			}
 		}
 	}
 

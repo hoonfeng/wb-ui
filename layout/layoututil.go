@@ -127,12 +127,17 @@ func clampSize(size, minV, maxV float64, minAuto, maxAuto bool) float64 {
 func resolveMinMax(minL, maxL style.Length, reference, fontSize float64) (minV, maxV float64, minAuto, maxAuto bool) {
 	r := resolveLengthAuto(minL, reference, fontSize)
 	minV, minAuto = r.Value, r.Auto
-	if minAuto { minV = 0 }
-	if maxL.Unit == "none" {
+	if minAuto {
+		minV = 0
+	}
+	if maxL.Unit == "" || maxL.Unit == "none" {
 		maxAuto = true
 	} else {
-		r = resolveLengthAuto(maxL, reference, fontSize)
-		if maxAuto { maxV = 0 }
+		r := resolveLengthAuto(maxL, reference, fontSize)
+		maxV, maxAuto = r.Value, r.Auto
+		if maxAuto {
+			maxV = 0
+		}
 	}
 	return
 }

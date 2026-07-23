@@ -138,13 +138,13 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 		fs := fontSizeOf(childEb)
 		if isVerticalWM {
-			minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, 0, fs)
+			minW, maxW, minWAuto, maxWAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, 0, fs)
 			bw := ch.BorderBoxWidth()
-			ch.SetContentWidth(clampSize(bw, minW, maxW, false, false) - border.Horizontal() - padding.Horizontal())
+			ch.SetContentWidth(clampSize(bw, minW, maxW, minWAuto, maxWAuto) - border.Horizontal() - padding.Horizontal())
 		} else {
-			minH, maxH, _, _ := resolveMinMax(cs.MinHeight, cs.MaxHeight, 0, fs)
+			minH, maxH, minHAuto, maxHAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, 0, fs)
 			bh := ch.BorderBoxHeight()
-			ch.SetContentHeight(clampSize(bh, minH, maxH, false, false) - border.Vertical() - padding.Vertical())
+			ch.SetContentHeight(clampSize(bh, minH, maxH, minHAuto, maxHAuto) - border.Vertical() - padding.Vertical())
 		}
 		pendingMargin = margin.Bottom
 		cursor = ch.Top() + ch.BorderBoxHeight()
@@ -217,8 +217,8 @@ func computeBlockChildBorderBoxWidth(child *ElementBox, cbContentWidth float64, 
 	if !ok {
 		width := cbContentWidth - margin.Horizontal()
 		if width < 0 { width = 0 }
-		minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
-		return clampSize(width, minW, maxW, false, false)
+		minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+		return clampSize(width, minW, maxW, minAuto, maxAuto)
 	}
 	var borderBox float64
 	if isBorderBoxForBox(child) {
@@ -226,12 +226,14 @@ func computeBlockChildBorderBoxWidth(child *ElementBox, cbContentWidth float64, 
 	} else {
 		borderBox = w + border.Horizontal() + padding.Horizontal()
 	}
-	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+	minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
 	if !isBorderBoxForBox(child) {
 		minW += border.Horizontal() + padding.Horizontal()
-		if maxW > 0 { maxW += border.Horizontal() + padding.Horizontal() }
+		if maxAuto || maxW > 0 {
+			maxW += border.Horizontal() + padding.Horizontal()
+		}
 	}
-	return clampSize(borderBox, minW, maxW, false, false)
+	return clampSize(borderBox, minW, maxW, minAuto, maxAuto)
 }
 
 func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *floatContext, state *LayoutState) {

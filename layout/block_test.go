@@ -15,30 +15,33 @@ func TestBlock_SimpleStack(t *testing.T) {
 	root.AddChild(a)
 	root.AddChild(b)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
-	assertApprox(t, "a.Y", a.Rect.Y, 0)
-	assertApprox(t, "a.Height", a.Rect.Height, 30)
-	assertApprox(t, "a.Width", a.Rect.Width, 800)
-	assertApprox(t, "b.Y", b.Rect.Y, 30)
-	assertApprox(t, "b.Height", b.Rect.Height, 50)
-	assertApprox(t, "root.Height", root.Rect.Height, 80)
+	_, ay, _, ah := rectOf(a, state)
+	_, by, _, bh := rectOf(b, state)
+	_, _, _, rh := rectOf(root, state)
+	assertApprox(t, "a.Y", ay, 0)
+	assertApprox(t, "a.Height", ah, 30)
+	assertApprox(t, "b.Y", by, 30)
+	assertApprox(t, "b.Height", bh, 50)
+	assertApprox(t, "root.Height", rh, 80)
 }
 
 // TestBlock_FillWidth verifies that an auto-width block child fills the container
 // content width.
 func TestBlock_FillWidth(t *testing.T) {
 	root := mkBlock()
-	root.Style.PaddingLeft = style.Length{Value: 20, Unit: "px"}
-	root.Style.PaddingRight = style.Length{Value: 20, Unit: "px"}
+	root.style.PaddingLeft = style.Length{Value: 20, Unit: "px"}
+	root.style.PaddingRight = style.Length{Value: 20, Unit: "px"}
 	child := mkBlockWH(0, 10)
 	root.AddChild(child)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
+	cx, _, cw, _ := rectOf(child, state)
 
 	// content width = 800 - 40 = 760
-	assertApprox(t, "child.Width", child.Rect.Width, 760)
-	assertApprox(t, "child.X", child.Rect.X, 20)
+	assertApprox(t, "child.Width", cw, 760)
+	assertApprox(t, "child.X", cx, 20)
 }
 
 // TestBlock_SpecifiedWidth verifies that a child with an explicit width is sized to
@@ -48,12 +51,14 @@ func TestBlock_SpecifiedWidth(t *testing.T) {
 	child := mkBlockWH(200, 40)
 	root.AddChild(child)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
+	cx, cy, cw, _ := rectOf(child, state)
+	_, _, _, rh := rectOf(root, state)
 
-	assertApprox(t, "child.Width", child.Rect.Width, 200)
-	assertApprox(t, "child.X", child.Rect.X, 0)
-	assertApprox(t, "child.Y", child.Rect.Y, 0)
-	assertApprox(t, "root.Height", root.Rect.Height, 40)
+	assertApprox(t, "child.Width", cw, 200)
+	assertApprox(t, "child.X", cx, 0)
+	assertApprox(t, "child.Y", cy, 0)
+	assertApprox(t, "root.Height", rh, 40)
 }
 
 // TestBlock_MarginCollapse verifies that adjacent sibling vertical margins collapse to
@@ -61,38 +66,44 @@ func TestBlock_SpecifiedWidth(t *testing.T) {
 func TestBlock_MarginCollapse(t *testing.T) {
 	root := mkBlock()
 	a := mkBlockWH(0, 20)
-	a.Style.MarginBottom = style.Length{Value: 30, Unit: "px"}
+	a.style.MarginBottom = style.Length{Value: 30, Unit: "px"}
 	b := mkBlockWH(0, 20)
-	b.Style.MarginTop = style.Length{Value: 10, Unit: "px"}
+	b.style.MarginTop = style.Length{Value: 10, Unit: "px"}
 	root.AddChild(a)
 	root.AddChild(b)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
+
+	_, by, _, _ := rectOf(b, state)
+	_, _, _, rh := rectOf(root, state)
 
 	// a occupies [0, 20), its bottom margin 30 collapses with b's top margin 10 -> 30.
-	assertApprox(t, "b.Y", b.Rect.Y, 20+30)
+	assertApprox(t, "b.Y", by, 20+30)
 	// root height encloses b's bottom (20+30+20 = 70); b's bottom margin collapses
 	// with root's bottom margin (auto height, no border/padding).
-	assertApprox(t, "root.Height", root.Rect.Height, 70)
+	assertApprox(t, "root.Height", rh, 70)
 }
 
 // TestBlock_BFCContainsFloats verifies that a flow-root container (which establishes
 // a BFC) grows to enclose its floated children.
 func TestBlock_BFCContainsFloats(t *testing.T) {
 	root := mkBlock()
-	root.Style.Display = style.DisplayFlowRoot
+	root.style.Display = style.DisplayFlowRoot
 	floated := mkBlockWH(100, 50)
-	floated.Style.Float = "left"
+	floated.style.Float = "left"
 	root.AddChild(floated)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
+
+	_, _, _, rh := rectOf(root, state)
+	fx, _, fw, _ := rectOf(floated, state)
 
 	// The BFC root must enclose the float: height >= 50.
-	if root.Rect.Height < 50 {
-		t.Errorf("BFC root height = %g, want >= 50 (must contain floats)", root.Rect.Height)
+	if rh < 50 {
+		t.Errorf("BFC root height = %g, want >= 50 (must contain floats)", rh)
 	}
-	assertApprox(t, "floated.Width", floated.Rect.Width, 100)
-	assertApprox(t, "floated.X", floated.Rect.X, 0)
+	assertApprox(t, "floated.Width", fw, 100)
+	assertApprox(t, "floated.X", fx, 0)
 }
 
 // TestBlock_NestedBlocks verifies nested block layout: a child containing its own
@@ -106,30 +117,39 @@ func TestBlock_NestedBlocks(t *testing.T) {
 	middle.AddChild(leaf2)
 	root.AddChild(middle)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
-	assertApprox(t, "leaf1.Y", leaf1.Rect.Y, 0)
-	assertApprox(t, "leaf2.Y", leaf2.Rect.Y, 15)
-	assertApprox(t, "middle.Height", middle.Rect.Height, 40)
-	assertApprox(t, "middle.Y", middle.Rect.Y, 0)
-	assertApprox(t, "root.Height", root.Rect.Height, 40)
+	l1x, l1y, _, _ := rectOf(leaf1, state)
+	_, l2y, _, _ := rectOf(leaf2, state)
+	_, my, _, mh := rectOf(middle, state)
+	_, _, _, rh := rectOf(root, state)
+
+	_ = l1x // leaf1 X is not tested
+	assertApprox(t, "leaf1.Y", l1y, 0)
+	assertApprox(t, "leaf2.Y", l2y, 15)
+	assertApprox(t, "middle.Height", mh, 40)
+	assertApprox(t, "middle.Y", my, 0)
+	assertApprox(t, "root.Height", rh, 40)
 }
 
 // TestBlock_PaddingAffectsContent verifies that padding on the container offsets the
 // children and grows the container height.
 func TestBlock_PaddingAffectsContent(t *testing.T) {
 	root := mkBlock()
-	root.Style.PaddingTop = style.Length{Value: 10, Unit: "px"}
-	root.Style.PaddingBottom = style.Length{Value: 5, Unit: "px"}
+	root.style.PaddingTop = style.Length{Value: 10, Unit: "px"}
+	root.style.PaddingBottom = style.Length{Value: 5, Unit: "px"}
 	child := mkBlockWH(0, 20)
 	root.AddChild(child)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
+
+	_, cy, _, _ := rectOf(child, state)
+	_, _, _, rh := rectOf(root, state)
 
 	// child starts after padding-top (10).
-	assertApprox(t, "child.Y", child.Rect.Y, 10)
+	assertApprox(t, "child.Y", cy, 10)
 	// root height = padding-top + child + padding-bottom = 10 + 20 + 5 = 35.
-	assertApprox(t, "root.Height", root.Rect.Height, 35)
+	assertApprox(t, "root.Height", rh, 35)
 }
 
 // TestBlock_MinMaxWidth verifies that min-width/max-width constrain the
@@ -138,18 +158,20 @@ func TestBlock_MinMaxWidth(t *testing.T) {
 	// Subtest A: explicit width 100, min-width 200 → used width = 200.
 	root := mkBlock()
 	a := mkBlockWH(100, 20)
-	a.Style.MinWidth = style.Length{Value: 200, Unit: "px"}
+	a.style.MinWidth = style.Length{Value: 200, Unit: "px"}
 	root.AddChild(a)
-	Layout(root, 800, 600)
-	assertApprox(t, "min-width 200 overrides width 100", a.Rect.Width, 200)
+	state := Layout(root, 800, 600)
+	_, _, aw, _ := rectOf(a, state)
+	assertApprox(t, "min-width 200 overrides width 100", aw, 200)
 
 	// Subtest B: explicit width 500, max-width 300 → used width = 300.
 	root2 := mkBlock()
 	b := mkBlockWH(500, 20)
-	b.Style.MaxWidth = style.Length{Value: 300, Unit: "px"}
+	b.style.MaxWidth = style.Length{Value: 300, Unit: "px"}
 	root2.AddChild(b)
-	Layout(root2, 800, 600)
-	assertApprox(t, "max-width 300 overrides width 500", b.Rect.Width, 300)
+	state2 := Layout(root2, 800, 600)
+	_, _, bw, _ := rectOf(b, state2)
+	assertApprox(t, "max-width 300 overrides width 500", bw, 300)
 }
 
 // TestBlock_MinMaxHeight verifies that min-height/max-height constrain the
@@ -158,18 +180,20 @@ func TestBlock_MinMaxHeight(t *testing.T) {
 	// Subtest A: explicit height 30, min-height 60 → used height = 60.
 	root := mkBlock()
 	a := mkBlockWH(100, 30)
-	a.Style.MinHeight = style.Length{Value: 60, Unit: "px"}
+	a.style.MinHeight = style.Length{Value: 60, Unit: "px"}
 	root.AddChild(a)
-	Layout(root, 800, 600)
-	assertApprox(t, "min-height 60 clamps height 30", a.Rect.Height, 60)
+	state := Layout(root, 800, 600)
+	_, _, _, ah := rectOf(a, state)
+	assertApprox(t, "min-height 60 clamps height 30", ah, 60)
 
 	// Subtest B: explicit height 80, max-height 40 → used height = 40.
 	root2 := mkBlock()
 	b := mkBlockWH(100, 80)
-	b.Style.MaxHeight = style.Length{Value: 40, Unit: "px"}
+	b.style.MaxHeight = style.Length{Value: 40, Unit: "px"}
 	root2.AddChild(b)
-	Layout(root2, 800, 600)
-	assertApprox(t, "max-height 40 clamps height 80", b.Rect.Height, 40)
+	state2 := Layout(root2, 800, 600)
+	_, _, _, bh := rectOf(b, state2)
+	assertApprox(t, "max-height 40 clamps height 80", bh, 40)
 }
 
 // TestBlock_OverflowScroll verifies that a container with overflow:scroll
@@ -178,22 +202,24 @@ func TestBlock_MinMaxHeight(t *testing.T) {
 // BFC establishment rather than scrollbar sizing.
 func TestBlock_OverflowScroll(t *testing.T) {
 	root := mkBlock()
-	root.Style.OverflowX = style.OverflowScroll
-	root.Style.OverflowY = style.OverflowScroll
-	root.Style.Width = style.Length{Value: 200, Unit: "px"}
-	root.Style.Height = style.Length{Value: 100, Unit: "px"}
+	root.style.OverflowX = style.OverflowScroll
+	root.style.OverflowY = style.OverflowScroll
+	root.style.Width = style.Length{Value: 200, Unit: "px"}
+	root.style.Height = style.Length{Value: 100, Unit: "px"}
 
 	// A floated child that would normally escape a non-BFC container.
 	floated := mkBlockWH(150, 50)
-	floated.Style.Float = "left"
+	floated.style.Float = "left"
 	root.AddChild(floated)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
-	// With overflow:scroll, root is a BFC and should contain the float.
-	assertApprox(t, "floated.X", floated.Rect.X, 0)
+	fx, _, _, _ := rectOf(floated, state)
+	_, _, _, rh := rectOf(root, state)
+
+	assertApprox(t, "floated.X", fx, 0)
 	// The root must enclose its float (height ≥ 50).
-	if root.Rect.Height < 50 {
-		t.Errorf("overflow:scroll root height = %g, want >= 50", root.Rect.Height)
+	if rh < 50 {
+		t.Errorf("overflow:scroll root height = %g, want >= 50", rh)
 	}
 }

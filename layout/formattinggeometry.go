@@ -88,14 +88,14 @@ func (fg *FormattingGeometry) ComputedHeight(box *ElementBox, cbHeight float64) 
 
 // ClampByMinMaxWidth returns width clamped by min/max-width.
 func (fg *FormattingGeometry) ClampByMinMaxWidth(box *ElementBox, w, cbWidth float64) float64 {
-	minW, maxW, _, _ := resolveMinMax(box.Style().MinWidth, box.Style().MaxWidth, cbWidth, fontSizeOf(box))
-	return clampSize(w, minW, maxW, false, false)
+	minW, maxW, minAuto, maxAuto := resolveMinMax(box.Style().MinWidth, box.Style().MaxWidth, cbWidth, fontSizeOf(box))
+	return clampSize(w, minW, maxW, minAuto, maxAuto)
 }
 
 // ClampByMinMaxHeight returns height clamped by min/max-height.
 func (fg *FormattingGeometry) ClampByMinMaxHeight(box *ElementBox, h, cbHeight float64) float64 {
-	minH, maxH, _, _ := resolveMinMax(box.Style().MinHeight, box.Style().MaxHeight, cbHeight, fontSizeOf(box))
-	return clampSize(h, minH, maxH, false, false)
+	minH, maxH, minAuto, maxAuto := resolveMinMax(box.Style().MinHeight, box.Style().MaxHeight, cbHeight, fontSizeOf(box))
+	return clampSize(h, minH, maxH, minAuto, maxAuto)
 }
 
 // ContentWidthForWidth resolves the content width for box given its containing
@@ -111,15 +111,15 @@ func (fg *FormattingGeometry) ContentWidthForWidth(box *ElementBox, cbContentWid
 		if isBorderBox(box) {
 			w -= border.Horizontal() + padding.Horizontal()
 		}
-		minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
-		return clampSize(w, minW, maxW, false, false), true
+		minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+		return clampSize(w, minW, maxW, minAuto, maxAuto), true
 	}
 	avail := cbContentWidth - margin.Horizontal() - border.Horizontal()
 	if avail < 0 {
 		avail = 0
 	}
-	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
-	return clampSize(avail, minW, maxW, false, false), false
+	minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+	return clampSize(avail, minW, maxW, minAuto, maxAuto), false
 }
 
 func maxF(a, b float64) float64 {

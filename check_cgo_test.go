@@ -1,10 +1,9 @@
 package main
 
 import (
-	"fmt"
-	_ "github.com/hoonfeng/goskia/skia"
+	"testing"
 )
 
-func main() {
-	fmt.Println("If we get here, CGo compiled")
+func TestCGoEnabled(t *testing.T) {
+	t.Log("CGo is enabled and compiled")
 }

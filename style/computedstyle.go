@@ -233,6 +233,11 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	}
 	// Copy all inherited fields.
 	c.InheritedData = parent.InheritedData
+	// CSS custom properties are inherited — copy them from parent
+	// so that var(--xxx) references in child elements resolve correctly.
+	for k, v := range parent.CustomProperties {
+		c.SetCustomProperty(k, v)
+	}
 	c.syncRefs()
 }
 

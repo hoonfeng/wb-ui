@@ -47,19 +47,22 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	width, wAuto := resolveOffset(cs.Width, cbWidth)
 	height, hAuto := resolveOffset(cs.Height, cbHeight)
 	fs := fontSizeOf(box)
-	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
-	minH, maxH, _, _ := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fs)
+	minW, maxW, minWAuto, maxWAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
+	minH, maxH, minHAuto, maxHAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fs)
 
 	if wAuto {
 		width = shrinkToFitWidthForBox(box, cbWidth, margin, border, padding)
 	}
 	if isBorderBoxForBox(box) {
-		width = clampSize(width, minW, maxW, false, false)
+		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
 	} else {
 		width -= border.Horizontal() + padding.Horizontal()
-		width = clampSize(width, minW, maxW, false, false)
+		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
 	}
 	g.SetContentWidth(width)
+
+	_ = minHAuto
+	_ = maxHAuto
 
 	cbg := state.GeometryForBox(cb)
 	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)

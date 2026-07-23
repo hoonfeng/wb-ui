@@ -260,11 +260,12 @@ func (b *RenderTreeBuilder) attachLayoutTree(view *RenderView, root *dom.Element
 	}
 	layoutRoot := layout.BuildLayoutTree(root, b.resolver)
 	if layoutRoot == nil {
+		return
+	}
 	rootEb, _ := layoutRoot.(*layout.ElementBox)
 	view.SetLayoutBox(rootEb)
 	if firstChild := view.FirstChild(); firstChild != nil {
 		b.linkLayoutBoxes(firstChild, rootEb)
-	}
 	}
 }
 
