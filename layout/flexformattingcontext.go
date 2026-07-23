@@ -122,7 +122,7 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
 	// if a temporary cross size was set by the parent (e.g. via the
 	// cross-size pre-set in the outer flex loop), use that known value.
-	// If the container's main-axis size is auto or unresolvable (0 due to
+	// When the container's main-axis size is auto or unresolvable (0 due to
 	// circular dependency, e.g. column flex child of a row flex whose cross
 	// size hasn't been set yet), use the viewport height so items are not shrunk
 	// to zero or inflated to infinity. The actual container size is determined
@@ -409,6 +409,17 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			// container's vertical padding/border.
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
+		}
+		// Safety clamp: auto-height should never exceed the total content area.
+		// Massive heights (>100k) indicate cascading inflation from unconstrained
+		// flex-grow or circular dependencies. Clamp to viewport height when the
+		// state is available, or 5x the cross-size as a last resort.
+		if box.Rect.Height > 100000 {
+			if state != nil && state.ViewportHeight > 0 {
+				box.Rect.Height = state.ViewportHeight
+			} else {
+				box.Rect.Height = 5000
+			}
 		}
 	}
 
@@ -1084,6 +1095,22 @@ func stateHeight(state *LayoutState) float64 {
 		return state.ViewportHeight
 	}
 	return 800
+}
+
+// idAttr returns the id attribute of the layout box element, or "".
+func idAttr(box *LayoutBox) string {
+	if box.Element != nil {
+		return box.Element.GetAttribute("id")
+	}
+	return ""
+}
+
+// classAttr returns the class attribute of the layout box element, or "".
+func classAttr(box *LayoutBox) string {
+	if box.Element != nil {
+		return box.Element.GetAttribute("class")
+	}
+	return ""
 }
 
 // needsContentRelayout reports whether a flex/grid item's content needs to be
