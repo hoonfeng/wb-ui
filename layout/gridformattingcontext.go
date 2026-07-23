@@ -172,6 +172,17 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
+	// Re-layout items with their resolved row height so nested flex/grid
+	// containers get the correct containing-block height for percentage
+	// height resolution and flex stretch. Items whose height changed after
+	// the first layout pass need their children re-laid-out at the final
+	// height.
+	for i := range items {
+		it := &items[i]
+		childCtx := contextFor(it.box)
+		childCtx.Layout(it.box, state)
+	}
+
 	// Auto height of the container: sum of row tracks + gaps.
 	if heightIsAuto(box) {
 		h := sumSizes(rowSizes) + rowGap*float64(max(0, len(rowSizes)-1))

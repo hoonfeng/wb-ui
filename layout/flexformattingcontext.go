@@ -736,7 +736,14 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 		// Only stretch when the container has a definite cross-axis size.
 		// When the container's cross size is auto (0), stretching the
 		// child to 0 would collapse its content-based size.
-		containerCross := container.Rect.Width - container.Rect.Border.Horizontal() - container.Rect.Padding.Horizontal()
+		var containerCross float64
+		if isRow {
+			// Row: cross axis is height.
+			containerCross = container.Rect.Height - container.Rect.Border.Vertical() - container.Rect.Padding.Vertical()
+		} else {
+			// Column: cross axis is width.
+			containerCross = container.Rect.Width - container.Rect.Border.Horizontal() - container.Rect.Padding.Horizontal()
+		}
 		if containerCross > 0 {
 			crossSize = containerCross - it.crossMargin
 			if crossSize < 0 {
@@ -959,6 +966,12 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	h := maxContentBottom(box) - contentTop
 	if h < 0 {
 		h = 0
+	}
+	// Clamp measured height to 4096 to prevent cascading height inflation
+	// in nested column flex containers. During the final layout pass the
+	// container's actual height constraint will correctly size everything.
+	if h > 4096 {
+		h = 4096
 	}
 	return h
 }

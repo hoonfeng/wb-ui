@@ -141,12 +141,11 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		// is treated as auto. But when the parent has a non-auto height that
 		// can be resolved against the grandparent's known height, we compute
 		// it here to break the circular dependency.
+		cbHeight := box.Rect.ContentHeight()
+		if cbHeight <= 0 && box.parent != nil {
+			cbHeight = box.parent.Rect.ContentHeight()
+		}
 		if !heightIsAuto(child) {
-			cbHeight := box.Rect.ContentHeight()
-			if cbHeight <= 0 && box.parent != nil {
-				// Parent height not yet computed — use grandparent.
-				cbHeight = box.parent.Rect.ContentHeight()
-			}
 			if cbHeight > 0 {
 				fs := fontSizeOf(child)
 				hv, ok := definiteHeight(child.Style.Height, cbHeight, fs)
@@ -157,6 +156,15 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 						child.Rect.Height = hv + child.Rect.Border.Vertical() + child.Rect.Padding.Vertical()
 					}
 				}
+			}
+		} else if cbHeight > 0 {
+			// Any auto-height child inside a definite-height block container
+			// gets a provisional height set to the remaining available space.
+			// This prevents nested flex/grid/block layouts from falling back
+			// to the 1e6 sentinel when they see contentHeight=0.
+			remaining := cbHeight - (cursor - box.Rect.ContentY())
+			if remaining > 0 {
+				child.Rect.Height = remaining
 			}
 		}
 

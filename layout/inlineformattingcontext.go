@@ -187,6 +187,9 @@ func (c *InlineFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			it.box.Rect.Y = it.y
 			if it.box.Type == BoxInline {
 				it.box.Rect.Height = lineHeight
+			} else if it.box.Type == BoxTextRun {
+				it.box.Rect.Width = it.advance
+				it.box.Rect.Height = ascent + descent
 			}
 		}
 	}

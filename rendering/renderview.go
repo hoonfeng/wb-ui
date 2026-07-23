@@ -311,6 +311,13 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 			}
 		}
 		rt.SetSegments(segs)
+		// RenderText frame is usually paired with an anonymous wrapper that
+		// has w=0/h=0. Override the frame dimensions from the first text
+		// segment so the paint pipeline uses correct dimensions.
+		if box := asRenderBox(ro); box != nil && len(segs) > 0 {
+			box.frame.Width = segs[0].Width
+			box.frame.Height = segs[0].Height
+		}
 	}
 	syncChildren(ro, lb)
 }
