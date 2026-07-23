@@ -170,6 +170,14 @@ func (v *RenderView) Layout(state *layout.LayoutState) {
 	v.frame.Y = 0
 	v.frame.Width = v.viewWidth
 	v.frame.Height = v.viewHeight
+	// Also stretch the root layout box so the formatting context has
+	// correct containing block dimensions.
+	if lb := v.LayoutBox(); lb != nil {
+		lb.Rect.X = 0
+		lb.Rect.Y = 0
+		lb.Rect.Width = v.viewWidth
+		lb.Rect.Height = v.viewHeight
+	}
 
 	// 降级保护：如果 LayoutBox 未设置，尝试从 document 构建
 	if v.LayoutBox() == nil && v.document != nil {

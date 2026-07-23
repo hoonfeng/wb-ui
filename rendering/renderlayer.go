@@ -151,7 +151,7 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 	if l.owner == nil {
 		return
 	}
-	if box, ok := l.owner.(*RenderBox); ok {
+	if box := asRenderBox(l.owner); box != nil {
 		layerRect = box.BorderBoxRect()
 	} else {
 		layerRect = layout.LayoutRect{}
@@ -162,8 +162,8 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 		if cur.owner == nil {
 			continue
 		}
-		cb, ok := cur.owner.(*RenderBox)
-		if !ok {
+		cb := asRenderBox(cur.owner)
+		if cb == nil {
 			continue
 		}
 		cs := cur.owner.Style()
