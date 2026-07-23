@@ -217,7 +217,7 @@ func (c *FlexFormattingContext) distributeLines(lines []flexLine, mainSize float
 				if freezeLine[i].frozen {
 					continue
 				}
-				min, max := flexMinMax(freezeLine[i], isRow)
+				min, max := flexMinMax(freezeLine[i], isRow, mainSize)
 				if freezeLine[i].mainSize < min {
 					freezeLine[i].mainSize = min
 					freezeLine[i].frozen = true
@@ -770,12 +770,16 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 }
 
 // flexMinMax returns the (min, max) main-axis size for an item.
-func flexMinMax(it flexItem, isRow bool) (float64, float64) {
+func flexMinMax(it flexItem, isRow bool, containerMainSize float64) (float64, float64) {
 	fs := fontSizeOf(it.box)
 	st := it.box.Style
-	minV, maxV, minAuto, maxAuto := resolveMinMax(st.MinWidth, st.MaxWidth, 0, fs)
+	ref := containerMainSize
+	if ref <= 0 {
+		ref = 0
+	}
+	minV, maxV, minAuto, maxAuto := resolveMinMax(st.MinWidth, st.MaxWidth, ref, fs)
 	if !isRow {
-		minV, maxV, minAuto, maxAuto = resolveMinMax(st.MinHeight, st.MaxHeight, 0, fs)
+		minV, maxV, minAuto, maxAuto = resolveMinMax(st.MinHeight, st.MaxHeight, ref, fs)
 	}
 	if minAuto {
 		minV = 0
