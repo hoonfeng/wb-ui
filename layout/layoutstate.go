@@ -56,6 +56,16 @@ type LayoutState struct {
 	MainSizeDefinite bool
 	MainSizeFallback float64
 
+	// CrossAxisRelayout indicates the current layout call is a cross-axis
+	// re-layout triggered by a parent flex/grid container's stretch.
+	// When true, FFC.positionAndFinalize MUST skip the auto-height step (3d)
+	// because the container's main-axis size was already set by flex-grow
+	// heights (which is wrong when flex-grow should give the item more space).
+	CrossAxisRelayout bool
+
+	// saved stores previous values when Push/pop is used.
+	// heights (which is wrong when flex-grow should give the item more space).
+
 	// saved stores previous values when Push/pop is used.
 	savedCrossDefinite bool
 	savedCrossFallback float64

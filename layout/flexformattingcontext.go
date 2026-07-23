@@ -422,7 +422,23 @@ func (c *FlexFormattingContext) positionAndFinalize(
 	}
 
 	// 3d. Auto height of the container.
-	if heightIsAuto(box) {
+	if state != nil && state.CrossAxisRelayout {
+		// 交叉轴重排模式：从 children 的实际内容计算 auto-height，
+		// 而不是使用 flex system 的 mainSize（skipDistribution=true 时为 0）。
+		if heightIsAuto(box) {
+			if isRow {
+				box.Rect.Height = cursorCross + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
+					box.Rect.Border.Top + box.Rect.Border.Bottom
+			} else {
+				ch := contentHeightOfBox(box)
+				if ch > 0 {
+					box.Rect.Height = ch + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
+						box.Rect.Border.Top + box.Rect.Border.Bottom
+				}
+				// 如果 ch == 0，保留主轴尺寸不变（由父 flex-grow 设置）
+			}
+		}
+	} else if heightIsAuto(box) {
 		if isRow {
 			box.Rect.Height = cursorCross + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
@@ -466,12 +482,15 @@ func (c *FlexFormattingContext) positionAndFinalize(
 				// Parent is column: set child's cross-axis (width) to container content width.
 				it.box.Rect.Width = finalContentW
 			}
-			// 在重排期间启用 stretch：容器最终高度已知（auto-height 或 explicit）
+			// 在重排期间启用 stretch 和交叉轴重排标记
 			savedDef := state.CrossSizeDefinite
+			savedRelayout := state.CrossAxisRelayout
 			state.CrossSizeDefinite = true
+			state.CrossAxisRelayout = true
 			ctx := contextFor(it.box)
 			ctx.Layout(it.box, state)
 			state.CrossSizeDefinite = savedDef
+			state.CrossAxisRelayout = savedRelayout
 			// 恢复位置和主轴尺寸
 			it.box.Rect.X = savedX
 			it.box.Rect.Y = savedY
@@ -830,11 +849,50 @@ func totalLineMain(lines []flexLine) float64 {
 	s := 0.0
 	for _, ln := range lines {
 		for _, it := range ln.items {
-			s += it.mainSize + it.mainMargin
+			// When mainSize is 0 (auto-height container with skipDistribution=true),
+			// use the actual box height (computed by IFC/BFC during measurement)
+			// as the fallback content size.
+			h := it.mainSize
+			if h <= 0 {
+				h = it.box.Rect.Height
+				if h <= 0 {
+					h = contentHeightOfBox(it.box)
+				}
+			}
+			s += h + it.mainMargin
 		}
 	}
 	return s
 }
+
+// contentHeightOfBox returns the actual content height of box by walking the
+// subtree and finding the max (child.Y + child.Height). It uses text segments
+// (IFC-computed positions) for inline text and children's Rect for block-level
+// boxes. Absolutely-positioned descendants are excluded.
+func contentHeightOfBox(box *LayoutBox) float64 {
+	if box == nil {
+		return 0
+	}
+	maxBottom := 0.0
+	var walk func(b *LayoutBox)
+	walk = func(b *LayoutBox) {
+		for _, seg := range b.TextSegments {
+			if seg.Y >= 0 && !math.IsNaN(seg.Y) && !math.IsInf(seg.Y, 0) {
+				bottom := seg.Y + seg.Height
+				if bottom > maxBottom && bottom < 1e7 {
+					maxBottom = bottom
+		for _, c := range b.Children {
+			if c.IsAbsolutelyPositioned() {
+				continue
+			}
+			if c.Rect.Y >= 0 && !math.IsNaN(c.Rect.Y) && c.Rect.Height >= 0 && !math.IsNaN(c.Rect.Height) {
+				bottom := c.Rect.Y + c.Rect.Height
+				if bottom > maxBottom && bottom < 1e7 {
+					maxBottom = bottom
+				}
+			}
+			walk(c)
+		}
 
 // offsetSubtree shifts a layout box and all its descendants by (dx, dy).
 func offsetSubtree(box *LayoutBox, dx, dy float64) {
@@ -850,6 +908,7 @@ func offsetSubtree(box *LayoutBox, dx, dy float64) {
 	for _, child := range box.Children {
 		offsetSubtree(child, dx, dy)
 	}
+}
 }
 
 // offsetItemSubtree offsets the descendants of a flex item without moving the item
