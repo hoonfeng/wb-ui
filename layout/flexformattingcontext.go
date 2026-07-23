@@ -453,25 +453,41 @@ func (c *FlexFormattingContext) positionAndFinalize(
 	finalContentH := box.Rect.ContentHeight()
 	for i := range items {
 		it := &items[i]
-		if needsContentRelayout(it.box) {
-			it.box.Rect.X = 0
-			it.box.Rect.Y = 0
-			if isRow {
-				// Parent is row: set child's cross-axis (height) to container content height.
-				// Keep child's main-axis (width) unchanged — it was set by flex-grow.
-				it.box.Rect.Height = finalContentH
-			} else {
-				// Parent is column: set child's cross-axis (width) to container content width.
-				// Keep child's main-axis (height) unchanged — it was set by flex-grow.
-				it.box.Rect.Width = finalContentW
-			}
-			// 在重排期间启用 stretch：容器最终高度已知（auto-height 或 explicit）
-			savedDef := state.CrossSizeDefinite
-			state.CrossSizeDefinite = true
-			ctx := contextFor(it.box)
-			ctx.Layout(it.box, state)
-			state.CrossSizeDefinite = savedDef
+		// ★ 核心修复 2026-07: 当子项交叉轴被 stretch 改变时，重排整个子树。
+		// 测量阶段（Phase 1）用临时宽度布局了子项，setItemBorderBox 设置最终
+		// 宽度后，子项的子树宽度仍然是测量时的错误值。
+		// 不仅 flex/grid 容器需要重排——display:block 容器内含 flex 子项时
+		// （如 sidebar-content→file-explorer），其子项宽度也需更新。
+		//
+		// 检查标准：子项有 children 且不是绝对定位的叶子节点。
+		if len(it.box.Children) == 0 {
+			continue
 		}
+		// Skip absolutely positioned items — they are handled in 3f.
+		if it.box.IsAbsolutelyPositioned() {
+			continue
+		}
+		// 保存位置——ctx.Layout 会重置 contentX/Y，但我们要保留最终的
+		// 位置（已在 3c 中正确设置）。
+		savedX, savedY := it.box.Rect.X, it.box.Rect.Y
+		if isRow {
+			// Parent is row: set child's cross-axis (height) to container content height.
+			// Keep child's main-axis (width) unchanged — it was set by flex-grow.
+			it.box.Rect.Height = finalContentH
+		} else {
+			// Parent is column: set child's cross-axis (width) to container content width.
+			// Keep child's main-axis (height) unchanged — it was set by flex-grow.
+			it.box.Rect.Width = finalContentW
+		}
+		// 在重排期间启用 stretch：容器最终高度已知（auto-height 或 explicit）
+		savedDef := state.CrossSizeDefinite
+		state.CrossSizeDefinite = true
+		ctx := contextFor(it.box)
+		ctx.Layout(it.box, state)
+		state.CrossSizeDefinite = savedDef
+		// 恢复位置
+		it.box.Rect.X = savedX
+		it.box.Rect.Y = savedY
 	}
 
 	// 3f. Lay out absolutely-positioned descendants.
