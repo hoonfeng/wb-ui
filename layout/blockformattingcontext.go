@@ -83,7 +83,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
 		ch.SetContentWidth(borderBoxWidth - border.Horizontal() - padding.Horizontal())
-		ch.SetTopLeft(g.ContentBoxLeft()+margin.Left, 0) // Y set below
+		ch.SetTopLeft(0, g.ContentBoxLeft()+margin.Left) // Y set below
 
 		clearSide := clearSideOf(childEb)
 		if clearSide != "" && fc != nil {
