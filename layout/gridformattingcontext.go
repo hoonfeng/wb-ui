@@ -174,26 +174,42 @@ func (c *GridFormattingContext) layoutItemsAndMeasureHeights(box *LayoutBox, ite
 		}
 		it.box.Rect.Width = contentW
 
-		// Set a provisional Y so flex children have a vertical position reference.
+		// Set provisional Y so flex children have a vertical position reference.
 		it.box.Rect.Y = contentY + margin.Top
 
-		// Set a provisional height to give flex/grid children a non-zero
-		// cross-axis constraint. Without this, child flex layouts see
-		// contentHeight=0 and set ALL items' heights to 0, cascading
-		// zero-height through the entire subtree.
-		// Use the grid container's height, falling back to viewport height.
+		// ── 约束：高度是 auto（indefinite），宽度是 definite ──
+		// 告诉子项（例如 flex 容器）高度未定，不要拉伸到 viewport 高度。
+		// 用 grid 容器的高度作为 fallback 供测量用。
 		provH := box.Rect.Height
 		if provH <= 0 && state != nil {
 			provH = float64(state.ViewportHeight)
 		}
-		it.box.Rect.Height = provH
+		// 保存/设置 cross-axis 约束（宽度 definite=true，高度 definite=false）
+		savedDef := state.CrossSizeDefinite
+		savedFb := state.CrossSizeFallback
+		state.CrossSizeDefinite = false // 高度 auto，非 definite
+		state.CrossSizeFallback = provH  // fallback 供测量用
+
+		// 保存/设置 main-axis 约束（列宽 definite）
+		savedMainDef := state.MainSizeDefinite
+		savedMainFb := state.MainSizeFallback
+		state.MainSizeDefinite = true // 宽度是 definite（来自 grid 列）
+		state.MainSizeFallback = 0
 
 		// ── LAY OUT ONCE ──
 		// This is the ONLY layout pass for this item. Its width is now known
 		// from the grid column sizing. The resulting height will be used for
 		// row sizing, and the item keeps its content layout — no re-layout.
+		// 注意：不设 it.box.Rect.Height！子项从 state.CrossSizeFallback
+		// 读取 fallback 进行测量，但不会拉伸到 fallback 高度。
 		childCtx := contextFor(it.box)
 		childCtx.Layout(it.box, state)
+
+		// 恢复约束状态
+		state.CrossSizeDefinite = savedDef
+		state.CrossSizeFallback = savedFb
+		state.MainSizeDefinite = savedMainDef
+		state.MainSizeFallback = savedMainFb
 
 		// Measure total height including border/padding for row sizing.
 		heights[i] = it.box.Rect.Height + border.Vertical() + padding.Vertical()

@@ -261,19 +261,29 @@ func (c *FlexFormattingContext) positionAndFinalize(
 			// Pre-set provisional cross-axis so inner formatting contexts
 			// have a reference for percentage sizing. Only for block-level
 			// containers (text/inline should use content-based sizing).
+			//
+			// When the parent's cross-axis is indefinite (contentHeight=0 for
+			// row, contentWidth=0 for column and CrossSizeDefinite=false),
+			// use CrossSizeFallback for measurement so children have room
+			// to compute their natural sizes. The cross-axis is restored to
+			// 0 after measurement so stretch is correctly skipped in Phase 3c.
+			crossDefinite := false
 			if isRow {
+				crossDefinite = contentHeight > 0 && state.CrossSizeDefinite
 				if it.box.Type != BoxTextRun && !it.box.IsInline() {
-					if contentHeight > 0 {
+					if crossDefinite {
 						it.box.Rect.Height = contentHeight
+					} else if state.CrossSizeFallback > 0 {
+						it.box.Rect.Height = state.CrossSizeFallback
 					}
-					// contentHeight <= 0: container height not yet known (e.g.
-					// parent grid hasn't assigned rows yet). Keep item's own
-					// height (0 = auto) so child content is not constrained.
 				}
 			} else {
+				crossDefinite = contentWidth > 0 && state.CrossSizeDefinite
 				if it.box.Type != BoxTextRun && !it.box.IsInline() {
-					if contentWidth > 0 {
+					if crossDefinite {
 						it.box.Rect.Width = contentWidth
+					} else if state.CrossSizeFallback > 0 {
+						it.box.Rect.Width = state.CrossSizeFallback
 					}
 				}
 			}
@@ -297,6 +307,16 @@ func (c *FlexFormattingContext) positionAndFinalize(
 				}
 			} else {
 				it.crossSize = crossAxisSize(it.box, isRow)
+			}
+
+			// If cross-size is indefinite and fallback was used, restore item's
+			// provisional cross-axis to 0 so stretch is skipped in Phase 3c.
+			if !crossDefinite {
+				if isRow {
+					it.box.Rect.Height = 0
+				} else {
+					it.box.Rect.Width = 0
+				}
 			}
 		}
 		// Line cross size = max of item cross sizes.
@@ -426,6 +446,11 @@ func (c *FlexFormattingContext) positionAndFinalize(
 	// NOTE: we do NOT reset the main-axis size (height for column parent,
 	// width for row parent). The main-axis was set by Phase 2 flex-grow
 	// or by the parent's stretch and is the correct used size.
+	//
+	// CRITICAL: use the POST-auto-height content dimensions, not the
+	// Phase 3a values (which may be 0 for indefinite cross-axis).
+	finalContentW := box.Rect.ContentWidth()
+	finalContentH := box.Rect.ContentHeight()
 	for i := range items {
 		it := &items[i]
 		if needsContentRelayout(it.box) {
@@ -434,15 +459,18 @@ func (c *FlexFormattingContext) positionAndFinalize(
 			if isRow {
 				// Parent is row: set child's cross-axis (height) to container content height.
 				// Keep child's main-axis (width) unchanged — it was set by flex-grow.
-				it.box.Rect.Height = contentHeight
+				it.box.Rect.Height = finalContentH
 			} else {
 				// Parent is column: set child's cross-axis (width) to container content width.
 				// Keep child's main-axis (height) unchanged — it was set by flex-grow.
-				it.box.Rect.Width = contentWidth
+				it.box.Rect.Width = finalContentW
 			}
-			// Re-lay-out the item's content at the corrected cross-axis.
+			// 在重排期间启用 stretch：容器最终高度已知（auto-height 或 explicit）
+			savedDef := state.CrossSizeDefinite
+			state.CrossSizeDefinite = true
 			ctx := contextFor(it.box)
 			ctx.Layout(it.box, state)
+			state.CrossSizeDefinite = savedDef
 		}
 	}
 

@@ -30,6 +30,37 @@ type LayoutState struct {
 	// floats tracks the placed floats for the currently-active block formatting
 	// context so that subsequent in-flow content can be shortened to avoid overlaps.
 	floats *floatContext
+
+	// ─── 约束传播（Constraint Propagation） ──────────────────────────
+	// These fields communicate parent-to-child sizing information through the
+	// formatting context chain. A parent that knows its content size (e.g. a
+	// fixed-sized grid cell) sets Definite=true. A parent with auto/unknown size
+	// (e.g. an auto-height grid row) sets Definite=false and provides a Fallback
+	// value so children can run a provisional measurement pass.
+	//
+	// Flex: reads CrossSizeDefinite to decide whether to apply stretch.
+	// Grid: sets CrossSizeDefinite=false for auto-height rows.
+	// Block: uses FallbackHeight for percentage-based child sizing.
+
+	// CrossSizeDefinite indicates the current containing block has a definite
+	// cross-axis size. Flex containers skip stretch when false.
+	CrossSizeDefinite bool
+	// CrossSizeFallback provides a provisional cross-axis size when the
+	// actual size is indefinite. Child formatting contexts use this for
+	// measurement but must NOT treat it as the final size.
+	CrossSizeFallback float64
+
+	// MainSizeDefinite / MainSizeFallback — same concept for the main axis.
+	// Used by column flex containers whose container's main axis (height)
+	// is indefinite.
+	MainSizeDefinite bool
+	MainSizeFallback float64
+
+	// saved stores previous values when Push/pop is used.
+	savedCrossDefinite bool
+	savedCrossFallback float64
+	savedMainDefinite  bool
+	savedMainFallback  float64
 }
 
 // NewLayoutState constructs a LayoutState with the given viewport size and standards
@@ -60,3 +91,34 @@ func (s *LayoutState) restoreFloatContext(prev *floatContext) {
 
 // currentFloatContext returns the active float context, or nil when none.
 func (s *LayoutState) currentFloatContext() *floatContext { return s.floats }
+
+// ─── 约束传播方法 ──────────────────────────────────────────
+
+// PushCrossConstraint saves the current cross-axis constraint and installs
+// the given definite/fallback values. Callers MUST defer PopCrossConstraint().
+func (s *LayoutState) PushCrossConstraint(definite bool, fallback float64) {
+	s.savedCrossDefinite = s.CrossSizeDefinite
+	s.savedCrossFallback = s.CrossSizeFallback
+	s.CrossSizeDefinite = definite
+	s.CrossSizeFallback = fallback
+}
+
+// PopCrossConstraint restores the previous cross-axis constraint.
+func (s *LayoutState) PopCrossConstraint() {
+	s.CrossSizeDefinite = s.savedCrossDefinite
+	s.CrossSizeFallback = s.savedCrossFallback
+}
+
+// PushMainConstraint saves and installs main-axis constraint values.
+func (s *LayoutState) PushMainConstraint(definite bool, fallback float64) {
+	s.savedMainDefinite = s.MainSizeDefinite
+	s.savedMainFallback = s.MainSizeFallback
+	s.MainSizeDefinite = definite
+	s.MainSizeFallback = fallback
+}
+
+// PopMainConstraint restores the previous main-axis constraint.
+func (s *LayoutState) PopMainConstraint() {
+	s.MainSizeDefinite = s.savedMainDefinite
+	s.MainSizeFallback = s.savedMainFallback
+}
