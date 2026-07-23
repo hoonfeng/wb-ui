@@ -444,8 +444,21 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		if needsContentRelayout(it.box) {
 			if !isRow {
 				it.box.Rect.Width = box.Rect.ContentWidth()
+				// For auto-height items, also reset height so the re-layout
+				// computes content-based height from scratch, avoiding
+				// cascading inflation from a previous flex-grow result.
+				if heightIsAuto(it.box) {
+					it.box.Rect.Height = 0
+				}
 			} else {
 				it.box.Rect.Height = box.Rect.ContentHeight()
+				// For auto-width items, reset width.
+				if it.box.Style != nil {
+					r := resolveLengthAuto(it.box.Style.Width, 0, 0)
+					if r.Auto {
+						it.box.Rect.Width = 0
+					}
+				}
 			}
 			ctx := contextFor(it.box)
 			ctx.Layout(it.box, state)
