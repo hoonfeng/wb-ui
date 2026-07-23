@@ -80,38 +80,6 @@ func TestLayout_ViewportFillsFullArea(t *testing.T) {
 	rv.Layout(nil)
 
 	t.Log("=== LAYOUT DIAGNOSTIC ===")
-	if htmlRO := rv.FirstChild(); htmlRO != nil {
-		lb := htmlRO.LayoutBox()
-		if lb != nil {
-			t.Logf("DEBUG: html layout box children=%d", len(lb.Children()))
-			for i, c := range lb.Children() {
-				t.Logf("  child[%d]: nodeType=%d", i, c.NodeType())
-			}
-		}
-	}
-	// Debug: check body's layout box
-	var walk func(ro RenderObject)
-	walk = func(ro RenderObject) {
-		if el, ok := ro.Node().(*dom.Element); ok && el.TagName() == "BODY" {
-			lb := ro.LayoutBox()
-			if lb != nil {
-				ls := rv.LayoutState()
-				if ls != nil {
-					g := ls.GeometryForBox(lb)
-					t.Logf("DEBUG BODY geometry: content=(%.0f,%.0f) %.0fx%.0f  left=%.0f top=%.0f bw=%.0f bh=%.0f",
-						g.ContentBoxLeft(), g.ContentBoxTop(),
-						g.ContentWidth(), g.ContentHeight(),
-						g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight())
-				}
-			}
-		}
-		for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c)
-		}
-	}
-	walk(rv)
-
-	t.Log("=== LAYOUT DIAGNOSTIC ===")
 	t.Logf("Viewport: 1280 x 800")
 	dumpLayoutTree(rv, 0, t)
 

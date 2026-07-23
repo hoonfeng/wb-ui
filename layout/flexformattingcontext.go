@@ -60,6 +60,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	for _, it := range items {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
 		it.hypothetical = it.baseSize
+		it.targetSize = it.baseSize // Initialize before distribution; frozen items keep this.
 	}
 
 	c.distributeFreeSpace(items, mainSize, isRow)
@@ -166,15 +167,46 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 }
 
 func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState) {
+	containerCS := c.Root().Style()
+	alignItems := "stretch"
+	if containerCS != nil && containerCS.AlignItems != "" {
+		alignItems = containerCS.AlignItems
+	}
 	for _, it := range items {
 		cs := it.box.Style()
 		if cs == nil { continue }
+		g := state.GeometryForBox(it.box)
+		// Determine effective align-self for this item.
+		align := alignItems
+		if cs.AlignSelf != "" && cs.AlignSelf != "auto" {
+			align = cs.AlignSelf
+		}
 		if isRow {
+			// Cross axis = height
 			r := resolveLengthAuto(cs.Height, cbHeight, fontSizeOf(it.box))
-			if !r.Auto && r.Definite { state.GeometryForBox(it.box).SetContentHeight(r.Value) }
+			if !r.Auto && r.Definite {
+				g.SetContentHeight(r.Value)
+			} else if align == "stretch" {
+				// Stretch to fill cross axis (minus cross-axis margin).
+				stretchH := cbHeight - it.marginCross
+				if stretchH < 0 {
+					stretchH = 0
+				}
+				g.SetContentHeight(stretchH)
+			}
 		} else {
+			// Cross axis = width
 			r := resolveLengthAuto(cs.Width, cbWidth, fontSizeOf(it.box))
-			if !r.Auto && r.Definite { state.GeometryForBox(it.box).SetContentWidth(r.Value) }
+			if !r.Auto && r.Definite {
+				g.SetContentWidth(r.Value)
+			} else if align == "stretch" {
+				// Stretch to fill cross axis (minus cross-axis margin).
+				stretchW := cbWidth - it.marginCross
+				if stretchW < 0 {
+					stretchW = 0
+				}
+				g.SetContentWidth(stretchW)
+			}
 		}
 	}
 }
@@ -218,11 +250,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 		if isRow {
 			if isReverse { mainPos -= g.BorderBoxWidth() }
-			g.SetTopLeft(mainPos, crossPos)
+			g.SetTopLeft(crossPos, mainPos)
 			if !isReverse { mainPos += g.BorderBoxWidth() }
 		} else {
 			if isReverse { mainPos -= g.BorderBoxHeight() }
-			g.SetTopLeft(crossPos, mainPos)
+			g.SetTopLeft(mainPos, crossPos)
 			if !isReverse { mainPos += g.BorderBoxHeight() }
 		}
 
