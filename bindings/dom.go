@@ -24,6 +24,16 @@ var OnStyleNodeAdded func(node dom.Node)
 // The embedder should re-resolve styles and rebuild the render tree.
 var OnInlineStyleChanged func(node dom.Node)
 
+// OnNodeInserted is an optional callback invoked when a DOM node is added to
+// the document (via appendChild / insertBefore / replaceChild). The embedder
+// should rebuild the render tree so the new node appears in layout/paint.
+var OnNodeInserted func(node dom.Node)
+
+// OnNodeRemoved is an optional callback invoked when a DOM node is removed
+// from the document (via removeChild / replaceChild). The embedder should
+// rebuild the render tree.
+var OnNodeRemoved func(node dom.Node)
+
 // DOM prototype objects — set by RegisterDOMBindings, used by wrappers.
 var (
 	domElementProto *jsc.JSObject // Element.prototype
@@ -1383,11 +1393,14 @@ obj.SetInternal(el)
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		el.AppendChild(n)
+		if OnNodeInserted != nil { OnNodeInserted(n) }
+		if OnStyleNodeAdded != nil && isStyleElement(n) { OnStyleNodeAdded(n) }
 		return a
 	})))
 	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		el.RemoveChild(n)
+		if OnNodeRemoved != nil { OnNodeRemoved(n) }
 		return a
 	})))
 	obj.Set("insertBefore", funcVal(fn2Node(func(in *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
@@ -1397,15 +1410,19 @@ obj.SetInternal(el)
 			for c := frag.FirstChild(); c != nil; c = frag.FirstChild() {
 				frag.RemoveChild(c)
 				el.InsertBefore(c, rc)
+				if OnNodeInserted != nil { OnNodeInserted(c) }
 			}
 			return a0
 		}
 		el.InsertBefore(nc, rc)
+		if OnNodeInserted != nil { OnNodeInserted(nc) }
 		return a0
 	})))
 	obj.Set("replaceChild", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, oc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
 		if nc == nil || oc == nil { return jsc.Null() }
 		el.ReplaceChild(nc, oc)
+		if OnNodeRemoved != nil { OnNodeRemoved(oc) }
+		if OnNodeInserted != nil { OnNodeInserted(nc) }
 		return a1
 	})))
 	obj.Set("contains", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, _ jsc.JSValue) jsc.JSValue {
@@ -2025,6 +2042,7 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		frag.AppendChild(n)
+		if OnNodeInserted != nil { OnNodeInserted(n) }
 		if OnStyleNodeAdded != nil && isStyleElement(n) {
 			OnStyleNodeAdded(n)
 		}
@@ -2034,12 +2052,14 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.Null() }
 		frag.RemoveChild(n)
+		if OnNodeRemoved != nil { OnNodeRemoved(n) }
 		return a
 	})))
 	// insertBefore — Vue 3 insertStaticContent uses this to insert template content
 	obj.Set("insertBefore", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
 		if nc == nil { return jsc.Null() }
 		frag.InsertBefore(nc, rc)
+		if OnNodeInserted != nil { OnNodeInserted(nc) }
 		return a0
 	})))
 	// hasChildNodes

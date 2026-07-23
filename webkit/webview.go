@@ -120,6 +120,17 @@ func (wv *WebView) LoadHTML(src string) error {
 				fr.RebuildRenderTree()
 			}
 		}
+		// Set up callbacks for DOM mutations (appendChild / removeChild / etc.).
+		bindings.OnNodeInserted = func(n dom.Node) {
+			if fr := wv.mainFrame.Frame(); fr != nil {
+				fr.RebuildRenderTree()
+			}
+		}
+		bindings.OnNodeRemoved = func(n dom.Node) {
+			if fr := wv.mainFrame.Frame(); fr != nil {
+				fr.RebuildRenderTree()
+			}
+		}
 	}
 	// Execute page scripts AFTER DOM bindings are registered.
 	// Scripts (Vue/React) may mutate the DOM — rebuild the render tree
