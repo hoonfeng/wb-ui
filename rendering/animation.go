@@ -179,10 +179,10 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 
 	// Color
 	if c, ok := interpolateKeyframeColor(kf, progress, "color"); ok {
-		st.AnimatedColor = c
+		st.AnimatedColor = style.Color{R: c.R, G: c.G, B: c.B, A: c.A}
 	}
 	if bg, ok := interpolateKeyframeColor(kf, progress, "background-color"); ok {
-		st.AnimatedBackgroundColor = bg
+		st.AnimatedBackgroundColor = style.Color{R: bg.R, G: bg.G, B: bg.B, A: bg.A}
 	}
 }
 

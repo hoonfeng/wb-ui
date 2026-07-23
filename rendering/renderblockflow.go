@@ -43,10 +43,7 @@ func (b *RenderBlockFlow) Type() RenderObjectType { return ObjectBlockFlow }
 // RenderObject::isRenderBlockFlow().
 func (b *RenderBlockFlow) IsRenderBlockFlow() bool { return true }
 
-// IsInline reports whether this block flow represents an atomic inline-level box
-// (inline-block / inline-flex / inline-grid / inline-table). WebKit models these as
-// RenderBlockFlow whose IsInline() returns true, so the parent's childrenInline flag is
-// set correctly when such a box is inserted as a child. A plain block flow returns false.
+// IsInline reports whether this block flow represents an atomic inline-level box.
 func (b *RenderBlockFlow) IsInline() bool {
 	if b.style == nil {
 		return false
@@ -62,21 +59,19 @@ func (b *RenderBlockFlow) IsInline() bool {
 // RenderName returns a debug name for the block flow.
 func (b *RenderBlockFlow) RenderName() string { return "RenderBlockFlow" }
 
-// Layout lays out the block flow and its children. It dispatches to the inline
-// formatting context when childrenInline is true, or to the block formatting context
+// Layout lays out the block flow and its children.
 func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 	if b.layoutBox == nil || state == nil {
 		b.ClearNeedsLayout()
 		return
 	}
-	// Dispatch flex containers to FlexFormattingContext.
 	if b.layoutBox.Style() != nil && b.layoutBox.Style().Display == style.DisplayFlex {
 		ctx := &layout.FlexFormattingContext{}
+		ctx.InitBase(b.layoutBox, state)
 		ctx.Layout(b.layoutBox, state)
 		b.ClearNeedsLayout()
 		return
 	}
-	// Default: dispatch to block or inline formatting context based on childrenInline.
 	if b.childrenInline {
 		b.layoutInlineChildren(state)
 	} else {
@@ -84,21 +79,23 @@ func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 	}
 	b.ClearNeedsLayout()
 }
-// layoutInlineChildren lays out the inline-level children of this block flow by invoking
-// the inline formatting context, mirroring RenderBlockFlow::layoutInlineChildren().
+
+// layoutInlineChildren lays out the inline-level children.
 func (b *RenderBlockFlow) layoutInlineChildren(state *layout.LayoutState) {
 	ctx := &layout.InlineFormattingContext{}
+	ctx.InitBase(b.layoutBox, state)
 	ctx.Layout(b.layoutBox, state)
 }
 
-// AddChild overrides the base to track whether the child is inline-level, mirroring
-// RenderBlockFlow's child-insertion logic that sets childrenInline. When a block flow
-// receives an inline child it flips childrenInline to true; a block-level child flips
-// it to false (a block container holds either all-block or all-inline children after
-// anonymous-box generation by the builder).
+// AddChild overrides the base to track whether the child is inline-level.
 func (b *RenderBlockFlow) AddChild(child RenderObject, beforeChild RenderObject) {
 	b.renderObjectBase.AddChild(child, beforeChild)
 	if child.IsInline() {
 		b.childrenInline = true
 	}
+}
+
+// LastChildIsInline reports whether the last child of the block is inline.
+func (b *RenderBlockFlow) LastChildIsInline() bool {
+	return b.LastChild() != nil && b.LastChild().IsInline()
 }

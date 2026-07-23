@@ -79,9 +79,9 @@ func (b *RenderBlock) layoutBlockChildren(state *layout.LayoutState) {
 		return
 	}
 	ctx := &layout.BlockFormattingContext{}
+	ctx.InitBase(b.layoutBox, state)
 	ctx.Layout(b.layoutBox, state)
 }
-
 // CanHaveChildren reports whether this block may hold render children, mirroring
 // RenderElement::canHaveChildren(). Blocks always can.
 func (b *RenderBlock) CanHaveChildren() bool { return true }
