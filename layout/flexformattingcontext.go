@@ -913,7 +913,14 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 			}
 		}
 		box.Rect.Height = h
-		box.Rect.Width = stateWidth(state)
+		// FIX: 列 flex 子项测量时宽度=父容器 content width，不是视口宽度！
+		// 旧代码用 stateWidth(state)=视口宽度(1280)，导致子项(如 file-explorer)
+		// 测量宽度=1280 而非 Grid 列宽(167)，布局全部错乱。
+		crossW := stateWidth(state)
+		if box.parent != nil && box.parent.Rect.ContentWidth() > 0 {
+			crossW = box.parent.Rect.ContentWidth()
+		}
+		box.Rect.Width = crossW
 		box.Rect.X = 0
 		box.Rect.Y = 0
 	}
@@ -1012,15 +1019,28 @@ func needsContentRelayout(box *LayoutBox) bool {
 	if box.Style == nil {
 		return false
 	}
-	disp := box.Style.Display
-	if disp != style.DisplayFlex && disp != style.DisplayInlineFlex {
-		return false
-	}
-	// Only re-layout if the container has children whose layout could be
-	// affected by the cross-axis change. A leaf flex container (no children)
-	// would just reset its auto-sized height/width to 0.
 	if len(box.Children) == 0 {
 		return false
 	}
-	return true
+	// Flex/grid containers always need re-layout after stretch.
+	disp := box.Style.Display
+	if disp == style.DisplayFlex || disp == style.DisplayInlineFlex ||
+		disp == style.DisplayGrid || disp == style.DisplayInlineGrid {
+		return true
+	}
+	// Block containers with flex/grid children also need re-layout.
+	// Without this, display:block containers (e.g. sidebar-content) that
+	// contain flex/grid children (e.g. file-explorer) are never re-laid-out
+	// after the flex layout sets their cross-size, so their children keep
+	// the measurement width (viewport width) instead of the constrained width.
+	for _, c := range box.Children {
+		if c.Style != nil {
+			cd := c.Style.Display
+			if cd == style.DisplayFlex || cd == style.DisplayInlineFlex ||
+				cd == style.DisplayGrid || cd == style.DisplayInlineGrid {
+				return true
+			}
+		}
+	}
+	return false
 }
