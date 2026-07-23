@@ -122,35 +122,18 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
 	// if a temporary cross size was set by the parent (e.g. via the
 	// cross-size pre-set in the outer flex loop), use that known value.
-	// When the container's main-axis size is auto or unresolvable (0 due to
-	// circular dependency, e.g. column flex child of a row flex whose cross
-	// size hasn't been set yet), use the viewport height so items are not shrunk
-	// to zero or inflated to infinity. The actual container size is determined
-	// from content at the end of Layout (see heightIsAuto block below).
-	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
-	// if a temporary cross size was set by the parent (e.g. via the
-	// cross-size pre-set in the outer flex loop), use that known value.
-	if !isRow && contentHeight <= 0 {
-		if state != nil && state.ViewportHeight > 0 {
-			mainSize = state.ViewportHeight
-		} else if containerHeight := box.Rect.ContentHeight(); containerHeight > 0 {
-			mainSize = containerHeight
-		} else if cbW := box.Rect.ContentWidth(); cbW > 0 {
-			mainSize = cbW
-		} else {
-			mainSize = 800
+	// When the container's main axis size is auto (CSS height/width:auto), 
+	// flex-grow and flex-shrink do NOT apply per spec — items keep their
+	// content-based sizes. This prevents cascading inflation in deeply 
+	// nested flex containers.
+	skipDistribution := false
+	if isRow {
+		if box.Style != nil {
+			r := resolveLengthAuto(box.Style.Width, 0, 0)
+			skipDistribution = r.Auto
 		}
-	}
-	if isRow && contentWidth <= 0 {
-		if state != nil && state.ViewportWidth > 0 {
-			mainSize = state.ViewportWidth
-		} else if containerWidth := box.Rect.ContentWidth(); containerWidth > 0 {
-			mainSize = containerWidth
-		} else if cbH := box.Rect.ContentHeight(); cbH > 0 {
-			mainSize = cbH
-		} else {
-			mainSize = 1280
-		}
+	} else {
+		skipDistribution = heightIsAuto(box)
 	}
 
 	// Line breaking (flex-wrap): pack items into lines by hypothetical main size.
@@ -164,19 +147,14 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		for i := range freezeLine {
 			freezeLine[i].mainSize = freezeLine[i].hypotheticalMain
 		}
-		// Grow if line has positive free space; shrink if negative.
-		for pass := 0; pass < 2; pass++ {
+		if !skipDistribution {
+			// Grow if line has positive free space; shrink if negative.
+			for pass := 0; pass < 2; pass++ {
 			lineMain := 0.0
 			for i := range freezeLine {
 				lineMain += freezeLine[i].mainSize
 			}
 			free := mainSize - lineMain - lineMainMargins(freezeLine)
-			// When the container's main size is indefinite (auto / sentinel),
-			// do not distribute positive free space via flex-grow. Growing into
-			// viewport-sized space would balloon flex-grow items.
-			if free > 0 && mainSize >= 800 {
-				free = 0
-			}
 			if math.Abs(free) < 1e-6 {
 				break
 			}
@@ -247,6 +225,7 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		for i := range freezeLine {
 			freezeLine[i].frozen = true
 		}
+	}
 		// Resolve cross size: lay out each item to get its content, then stretch if
 		// align-items is stretch.
 		for i := range freezeLine {
@@ -410,16 +389,15 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
 		}
-		// Safety clamp: auto-height should never exceed the total content area.
-		// Massive heights (>100k) indicate cascading inflation from unconstrained
-		// flex-grow or circular dependencies. Clamp to viewport height when the
-		// state is available, or 5x the cross-size as a last resort.
-		if box.Rect.Height > 100000 {
-			if state != nil && state.ViewportHeight > 0 {
-				box.Rect.Height = state.ViewportHeight
-			} else {
-				box.Rect.Height = 5000
-			}
+		// Safety clamp: auto-height should never exceed the viewport height.
+		// Massively inflated heights indicate cascading flex-grow or circular
+		// dependencies in deeply nested auto containers.
+		maxAutoH := 800.0
+		if state != nil && state.ViewportHeight > 0 {
+			maxAutoH = state.ViewportHeight
+		}
+		if box.Rect.Height > maxAutoH {
+			box.Rect.Height = maxAutoH
 		}
 	}
 
