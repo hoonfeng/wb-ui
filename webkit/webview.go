@@ -109,26 +109,32 @@ func (wv *WebView) LoadHTML(src string) error {
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
 		// Set up callback for dynamic <style> injection (Vue scoped CSS).
+		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
 		bindings.OnStyleNodeAdded = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
-				fr.RebuildRenderTree()
+				fr.MarkRenderTreeDirty()
+				fr.SetNeedsLayout(true)
 			}
 		}
 		// Set up callback for inline style changes (el.style.xxx = ...).
 		bindings.OnInlineStyleChanged = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
-				fr.RebuildRenderTree()
+				fr.MarkRenderTreeDirty()
+				fr.SetNeedsLayout(true)
 			}
 		}
 		// Set up callbacks for DOM mutations (appendChild / removeChild / etc.).
+		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
 		bindings.OnNodeInserted = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
-				fr.RebuildRenderTree()
+				fr.MarkRenderTreeDirty()
+				fr.SetNeedsLayout(true)
 			}
 		}
 		bindings.OnNodeRemoved = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
-				fr.RebuildRenderTree()
+				fr.MarkRenderTreeDirty()
+				fr.SetNeedsLayout(true)
 			}
 		}
 	}

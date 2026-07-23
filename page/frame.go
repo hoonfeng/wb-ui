@@ -78,12 +78,13 @@ type Frame struct {
 	// the same pattern as StyleSheetLoader.
 	ScriptLoader func(src string) (string, error)
 
-	// ResourceLoader is the CachedResourceLoader used to load external resources
-	// (stylesheets, scripts, images, fonts). When non-nil, extractAndAddStyles
-	// uses it to load <link rel="stylesheet"> elements via the async resource
-	// loading pipeline (MemoryCache + ResourceHandle), falling back to
-	// StyleSheetLoader only when ResourceLoader is nil.
 	ResourceLoader *CachedResourceLoader
+
+	// needsRenderTreeRebuild is set by MarkRenderTreeDirty when DOM mutations
+	// (appendChild / removeChild / style changes) occur. The flag is flushed
+	// at the start of the next layout pass, batching multiple mutations into
+	// a single full render-tree rebuild.
+	needsRenderTreeRebuild bool
 }
 
 // NewFrame constructs a Frame attached to the given Page. The frame is given a
@@ -217,6 +218,24 @@ func (f *Frame) RebuildRenderTree() {
 		f.view.SetNeedsLayout(true)
 	}
 	Logf("RebuildRenderTree", "done")
+}
+
+// MarkRenderTreeDirty marks the frame as needing a render tree rebuild in the
+// next layout. Multiple DOM mutations are batched into a single full rebuild.
+func (f *Frame) MarkRenderTreeDirty() {
+	f.needsRenderTreeRebuild = true
+}
+
+// RebuildRenderTreeIfNeeded rebuilds the render tree if MarkRenderTreeDirty was
+// called since the last check. It returns true when a rebuild was performed.
+// FrameView.Layout() calls this automatically before laying out.
+func (f *Frame) RebuildRenderTreeIfNeeded() bool {
+	if !f.needsRenderTreeRebuild {
+		return false
+	}
+	f.needsRenderTreeRebuild = false
+	f.RebuildRenderTree()
+	return true
 }
 
 // NeedsLayout reports whether the frame's view requires a layout pass, mirroring

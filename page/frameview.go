@@ -224,6 +224,8 @@ func (v *FrameView) Layout() {
 		Logf("Layout", "skip: no frame/renderView")
 		return
 	}
+	// Flush any pending render-tree rebuild from DOM mutations before layout.
+	v.frame.RebuildRenderTreeIfNeeded()
 	rv := v.frame.renderView
 	rv.SetViewportSize(float64(v.width), float64(v.height))
 	rv.Layout(nil)
