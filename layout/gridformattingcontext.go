@@ -2,7 +2,7 @@
 //                  Source/WebCore/layout/formattingContexts/grid/GridLayout.cpp
 //                  Source/WebCore/layout/formattingContexts/grid/TrackSizingAlgorithm.cpp
 //                  Source/WebCore/rendering/RenderGrid.cpp
-// Completeness: 45%
+// Completeness: 50%
 // Simplifications:
 //   - no subpixel layout (integer pixels only; floats used internally then rounded)
 //   - no pagination/fragmentation
@@ -13,8 +13,24 @@
 //   - dense packing / sparse auto-placement is simplified to the sparse algorithm
 //   - baseline alignment is approximated as start alignment
 //   - subgrid, masonry, container-orientation are not supported
-//   - the track sizing algorithm runs a single grow-free-space pass; the iterative
-//     "increase to satisfy min-content" passes of the spec are collapsed
+//   - the track sizing algorithm runs a single resolve-and-distribute pass;
+//     the iterative "increase to satisfy min-content" passes of the spec are collapsed
+//
+// Architecture note (2026-07 refactoring):
+//   GridFormattingContext.Layout() is split into four phases so that items are laid
+//   out ONLY ONCE — after column sizes are known. No re-layout happens after row
+//   sizing, which eliminates the sentinel-propagation cascade that caused grid items
+//   with flex children to balloon to 47619px.
+//
+//     Phase 1: placeItems  — parse tracks, collect items, auto-place, resolve indices
+//     Phase 2: sizeColumns — resolve column track sizes using intrinsic width
+//                            measurement (computeIntrinsicWidth). Does NOT lay out items.
+//     Phase 3: layoutAndSizeRows — lay out items ONCE at final column width, measure
+//                            actual heights, resolve row tracks
+//     Phase 4: finalize    — set item Y/Height from row spans, container auto-height.
+//                            NO re-layout — items keep their Phase 3 content layout.
+//
+//   Layout() calls all four phases in order.
 
 package layout
 
@@ -31,31 +47,56 @@ import (
 // Layout Module Level 1.
 type GridFormattingContext struct{}
 
-// Layout lays out box's grid items. The caller sets box's border-box position and
-// width; Layout resolves the column and row tracks, places the items into their grid
-// areas and computes the container's auto height.
+// Layout lays out box's grid items in four phases.
 func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	if box.Style == nil {
 		box.Style = style.NewComputedStyle()
 	}
+
 	contentX := box.Rect.ContentX()
 	contentY := box.Rect.ContentY()
 	contentWidth := box.Rect.ContentWidth()
 
-	// Parse tracks and the area name map.
-	colTracks := parseGridTracks(box.Style.GridTemplateColumns, contentWidth)
-	rowTracks := parseGridTracks(box.Style.GridTemplateRows, 0)
-	areaMap, _ := parseGridAreas(box.Style.GridTemplateAreas)
-	rowGap, colGap := resolveGap(box, contentWidth)
+	// ─── Phase 1: Placement ──────────────────────────────────────────
+	colTracks, rowTracks, colGap, rowGap, items := c.placeItems(box, contentWidth, contentHeightOrMax(box, state))
 
-	// Collect visible in-flow items and resolve their grid spans.
-	items := collectGridItems(box, areaMap)
+	// ─── Phase 2: Size Columns ───────────────────────────────────────
+	// Use intrinsic width measurement — do NOT lay out items.
+	colSizes := sizeTracks(colTracks, contentWidth, colGap, func(idx int) float64 {
+		return maxContentWidthOfTrack(items, idx)
+	})
+
+	// ─── Phase 3: Layout Items + Size Rows ───────────────────────────
+	// Set each item's column width, lay out ONCE, then compute row sizes
+	// from actual laid-out heights.
+	itemHeights := c.layoutItemsAndMeasureHeights(box, items, colSizes, colGap, contentX, contentY, state)
+
+	// Reference height for row fr tracks: use the container's content height,
+	// or the sum of row auto heights as a fallback.
+	rowRef := box.Rect.ContentHeight()
+	if rowRef <= 0 {
+		rowRef = sumSizes(itemHeights) + rowGap*float64(max(0, len(itemHeights)-1))
+	}
+	rowSizes := sizeTracks(rowTracks, rowRef, rowGap, func(idx int) float64 {
+		return maxContentHeightOfTrack(items, itemHeights, idx)
+	})
+
+	// ─── Phase 4: Finalize ───────────────────────────────────────────
+	c.finalizePositions(items, rowSizes, rowGap, contentY, box)
+}
+
+// placeItems parses tracks, collects items, auto-places them, and resolves all
+// indices to 0-based. Returns the parsed tracks, gaps, and placed items.
+func (c *GridFormattingContext) placeItems(box *LayoutBox, contentWidth, fallbackHeight float64) (colTracks, rowTracks []gridTrack, colGap, rowGap float64, items []gridItem) {
+	colTracks = parseGridTracks(box.Style.GridTemplateColumns, contentWidth)
+	rowTracks = parseGridTracks(box.Style.GridTemplateRows, 0)
+	areaMap, _ := parseGridAreas(box.Style.GridTemplateAreas)
+	rowGap, colGap = resolveGap(box, contentWidth)
+
+	items = collectGridItems(box, areaMap)
 
 	// Convert explicit positive 1-based indices to 0-based for auto-placement.
-	// Negative indices (e.g. -1 = last line) stay raw; they'll be resolved later.
 	for i := range items {
-		// Named-area items (all non-zero) are already 0-based from parseGridAreas.
-		// Items from parseGridLine: positive = explicit 1-based, 0 = auto, negative = count-from-end.
 		if items[i].areaName != "" {
 			continue
 		}
@@ -73,10 +114,9 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
-	// Auto-place items that have no explicit column/row placement.
 	autoPlaceItems(items, len(colTracks), len(rowTracks))
 
-	// Ensure enough tracks exist for the placed items.
+	// Ensure enough tracks exist for placed items.
 	maxCol, maxRow := 0, 0
 	for i := range items {
 		if items[i].colEnd > maxCol {
@@ -93,28 +133,28 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		rowTracks = append(rowTracks, gridTrack{size: "auto"})
 	}
 
-	// Resolve all items to 0-based indices. Negatives like -1 are now
-	// resolved against the final track count.
 	toZeroBased(items, len(colTracks), len(rowTracks))
+	return
+}
 
-	// Size the columns: resolve px / % / auto, then distribute fr leftover.
-	colSizes := sizeTracks(colTracks, contentWidth, colGap, func(idx int) float64 {
-		return maxContentWidthOfTrack(items, idx)
-	})
-	usedCols := sumSizes(colSizes) + colGap*float64(max(0, len(colSizes)-1))
-	if usedCols > contentWidth {
-		// Tracks overflow; scale down is not done (content may overflow visually).
-	}
-
-	// Lay out items along the columns first (so their width is known), then size rows.
-	// Set each item's width and lay out its content; then compute row sizes from content.
-	itemHeights := make([]float64, len(items))
+// layoutItemsAndMeasureHeights sets each item's column position and width,
+// lays it out ONCE, and returns the measured content heights (including
+// border/padding) per item. This is Phase 3 of the grid layout algorithm.
+//
+// IMPORTANT: items are laid out exactly once. The function does NOT
+// re-layout items after row sizing, which prevents the sentinel cascade
+// that occurred when a second layout pass hit flex children with
+// unresolved container widths.
+func (c *GridFormattingContext) layoutItemsAndMeasureHeights(box *LayoutBox, items []gridItem, colSizes []float64, colGap, contentX, contentY float64, state *LayoutState) []float64 {
+	heights := make([]float64, len(items))
 	for i := range items {
 		it := &items[i]
-		margin, padding, border := computeBoxModel(it.box, contentWidth, fontSizeOf(it.box))
+		margin, padding, border := computeBoxModel(it.box, contentX+colSizes[0], fontSizeOf(it.box))
 		it.box.Rect.Margin = margin
 		it.box.Rect.Padding = padding
 		it.box.Rect.Border = border
+
+		// Compute column X and span width.
 		x := contentX
 		for k := 0; k < it.colStart; k++ {
 			x += colSizes[k] + colGap
@@ -126,25 +166,35 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				spanW += colGap
 			}
 		}
+
 		it.box.Rect.X = x + margin.Left
-		it.box.Rect.Width = spanW - border.Horizontal() - padding.Horizontal()
-		if it.box.Rect.Width < 0 {
-			it.box.Rect.Width = 0
+		contentW := spanW - border.Horizontal() - padding.Horizontal()
+		if contentW < 0 {
+			contentW = 0
 		}
-		// Lay out content against this width.
+		it.box.Rect.Width = contentW
+
+		// Set a provisional Y so flex children have a vertical position reference.
+		it.box.Rect.Y = contentY + margin.Top
+
+		// ── LAY OUT ONCE ──
+		// This is the ONLY layout pass for this item. Its width is now known
+		// from the grid column sizing. The resulting height will be used for
+		// row sizing, and the item keeps its content layout — no re-layout.
 		childCtx := contextFor(it.box)
 		childCtx.Layout(it.box, state)
-		itemHeights[i] = it.box.Rect.Height + border.Vertical() + padding.Vertical()
+
+		// Measure total height including border/padding for row sizing.
+		heights[i] = it.box.Rect.Height + border.Vertical() + padding.Vertical()
 	}
+	return heights
+}
 
-	// Size the rows: auto rows take the max content height of items in that row.
-	// Use the container's content height as the reference for fr tracks.
-	contentHeight := box.Rect.ContentHeight()
-	rowSizes := sizeTracks(rowTracks, contentHeight, rowGap, func(idx int) float64 {
-		return maxContentHeightOfTrack(items, itemHeights, idx)
-	})
-
-	// Position items vertically.
+// finalizePositions sets each item's Y coordinate from row sizes, applies
+// the row-span height, and computes the container's auto height.
+// NO re-layout happens — items keep their Phase 3 content layout.
+func (c *GridFormattingContext) finalizePositions(items []gridItem, rowSizes []float64, rowGap, contentY float64, box *LayoutBox) {
+	// Position items vertically from row sizes.
 	for i := range items {
 		it := &items[i]
 		y := contentY
@@ -154,9 +204,7 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		it.box.Rect.Y = y + it.box.Rect.Margin.Top
 	}
 
-	// Set item heights from row spans: the height of each item is the sum of
-	// the row sizes it spans (minus border/padding). Without this, items with
-	// explicit row tracks would have zero height when they have no content.
+	// Set item height from row spans.
 	for i := range items {
 		it := &items[i]
 		spanH := 0.0
@@ -166,29 +214,45 @@ func (c *GridFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				spanH += rowGap
 			}
 		}
-		it.box.Rect.Height = spanH - it.box.Rect.Border.Vertical() - it.box.Rect.Padding.Vertical()
-		if it.box.Rect.Height < 0 {
-			it.box.Rect.Height = 0
+		h := spanH - it.box.Rect.Border.Vertical() - it.box.Rect.Padding.Vertical()
+		if h < 0 {
+			h = 0
 		}
+		it.box.Rect.Height = h
 	}
 
-	// Re-layout items with their resolved row height so nested flex/grid
-	// containers get the correct containing-block height for percentage
-	// height resolution and flex stretch. Items whose height changed after
-	// the first layout pass need their children re-laid-out at the final
-	// height.
-	for i := range items {
-		it := &items[i]
-		childCtx := contextFor(it.box)
-		childCtx.Layout(it.box, state)
-	}
-
-	// Auto height of the container: sum of row tracks + gaps.
+	// Auto height of the container.
 	if heightIsAuto(box) {
-		h := sumSizes(rowSizes) + rowGap*float64(max(0, len(rowSizes)-1))
-		box.Rect.Height = h
+		maxY := 0.0
+		for i := range items {
+			bottom := items[i].box.Rect.Y + items[i].box.Rect.Height +
+				items[i].box.Rect.Margin.Bottom + items[i].box.Rect.Border.Bottom +
+				items[i].box.Rect.Padding.Bottom
+			if bottom > maxY {
+				maxY = bottom
+			}
+		}
+	if maxY > 0 {
+		box.Rect.Height = maxY - box.Rect.ContentY()
+	}
 	}
 }
+
+// contentHeightOrMax returns the container's content height, or a
+// reasonable fallback (viewport height) when the container height is auto.
+func contentHeightOrMax(box *LayoutBox, state *LayoutState) float64 {
+	ch := box.Rect.ContentHeight()
+	if ch > 0 {
+		return ch
+	}
+	// Use viewport height as fallback for fr row resolution.
+	if state != nil {
+		return state.ViewportHeight
+	}
+	return 800
+}
+
+// ─── gridItem ─────────────────────────────────────────────────────────
 
 // gridItem captures the placement of a single grid item.
 type gridItem struct {
@@ -198,10 +262,14 @@ type gridItem struct {
 	areaName           string
 }
 
+// ─── gridTrack ────────────────────────────────────────────────────────
+
 // gridTrack describes a single grid track (column or row).
 type gridTrack struct {
 	size string
 }
+
+// ─── Collection ───────────────────────────────────────────────────────
 
 // collectGridItems returns the visible in-flow children of a grid container with their
 // resolved grid placement. Items referencing a named area are resolved against areaMap.
@@ -215,7 +283,6 @@ func collectGridItems(box *LayoutBox, areaMap map[string][4]int) []gridItem {
 			child.Style = style.NewComputedStyle()
 		}
 		gi := gridItem{box: child}
-		// grid-area can be a name or <row-start> / <col-start> / <row-end> / <col-end>.
 		area := child.Style.GridTemplateAreas
 		if area == "" {
 			area = child.Style.Properties["grid-area"]
@@ -234,6 +301,8 @@ func collectGridItems(box *LayoutBox, areaMap map[string][4]int) []gridItem {
 	}
 	return out
 }
+
+// ─── Line Index Parsing ───────────────────────────────────────────────
 
 // parseGridLine resolves the start/end line indices for a single axis.
 // Returns raw 1-based values: positive=explicit, 0=auto, negative=count-from-end.
@@ -258,30 +327,23 @@ func parseLineIndex(s string) int {
 	if err != nil {
 		return 0
 	}
-	return n // may be negative: -1 counts from end
+	return n
 }
 
 // toZeroBased resolves any remaining negative indices to 0-based,
 // and ensures colEnd > colStart and rowEnd > rowStart.
-// Called AFTER autoPlaceItems and track count finalization.
-// At this point, auto-placed items are already 0-based; only items
-// with explicit negative indices (e.g. grid-column: 1 / -1) need conversion.
 func toZeroBased(items []gridItem, nCols, nRows int) {
 	to0 := func(raw, n int) int {
 		if raw < 0 {
-			// -1 (1-based) = last line = n (0-based, since there are n tracks and n+1 lines)
 			return n + raw + 1
 		}
-		return raw // already 0-based or 0 (auto, but autoPlaceItems already resolved)
+		return raw
 	}
 	for i := range items {
 		if items[i].areaName != "" {
-			continue // already 0-based from parseGridAreas
+			continue
 		}
 		items[i].colStart = to0(items[i].colStart, nCols)
-		items[i].colEnd = to0(items[i].colEnd, nCols)
-		items[i].rowStart = to0(items[i].rowStart, nRows)
-		items[i].rowEnd = to0(items[i].rowEnd, nRows)
 		items[i].colEnd = to0(items[i].colEnd, nCols)
 		items[i].rowStart = to0(items[i].rowStart, nRows)
 		items[i].rowEnd = to0(items[i].rowEnd, nRows)
@@ -293,6 +355,8 @@ func toZeroBased(items []gridItem, nCols, nRows int) {
 		}
 	}
 }
+
+// ─── Auto-placement ───────────────────────────────────────────────────
 
 // autoPlaceItems assigns auto-placed items to the next available grid cell (sparse
 // algorithm). Items with a definite column but auto row go into the next free row of
@@ -318,14 +382,12 @@ func autoPlaceItems(items []gridItem, nCols, nRows int) {
 		it := &items[i]
 		spanR := max(1, it.rowEnd-it.rowStart)
 		spanC := max(1, it.colEnd-it.colStart)
-		// Both 0 = auto (needs placement). Negative = explicit count-from-end.
 		if it.colStart == 0 && it.colEnd == 0 {
 			it.colStart, it.colEnd = -1, 0
 		}
 		if it.rowStart == 0 && it.rowEnd == 0 {
 			it.rowStart, it.rowEnd = -1, 0
 		}
-		// Resolve auto column.
 		if it.colStart < 0 {
 			r := max(0, it.rowStart)
 			for {
@@ -347,7 +409,6 @@ func autoPlaceItems(items []gridItem, nCols, nRows int) {
 			}
 			continue
 		}
-		// Resolve auto row.
 		if it.rowStart < 0 {
 			for r := 0; ; r++ {
 				if claim(r, it.colStart, spanR, spanC) {
@@ -359,14 +420,11 @@ func autoPlaceItems(items []gridItem, nCols, nRows int) {
 			claim(it.rowStart, it.colStart, spanR, spanC)
 		}
 	}
-	// Normalize negative indices (count-from-end not supported; default to 0).
 	for i := range items {
 		if items[i].colStart < 0 {
 			items[i].colStart = 0
 		}
 		if items[i].colEnd < 0 {
-			// Negative colEnd (e.g. -1 = last line) is a valid count-from-end
-			// marker that will be resolved by toZeroBased later. Leave it alone.
 		} else if items[i].colEnd <= items[i].colStart {
 			items[i].colEnd = items[i].colStart + 1
 		}
@@ -374,12 +432,13 @@ func autoPlaceItems(items []gridItem, nCols, nRows int) {
 			items[i].rowStart = 0
 		}
 		if items[i].rowEnd < 0 {
-			// Same for rowEnd.
 		} else if items[i].rowEnd <= items[i].rowStart {
 			items[i].rowEnd = items[i].rowStart + 1
 		}
 	}
 }
+
+// ─── Track Parsing ────────────────────────────────────────────────────
 
 // parseGridTracks parses a grid-template-columns / grid-rows value into tracks.
 // Supports px, %, fr, auto and minmax(a, b).
@@ -423,14 +482,12 @@ func splitGridSpec(spec string) []string {
 }
 
 // parseGridAreas parses grid-template-areas into a name -> [rowStart, colStart, rowEnd, colEnd]
-// map (0-based, half-open intervals). The areas string uses rows separated by newlines
-// or quoted strings; columns within a row are space-separated names ("." = empty).
+// map (0-based, half-open intervals).
 func parseGridAreas(spec string) (map[string][4]int, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" || spec == "none" {
 		return nil, nil
 	}
-	// Split into rows by quotes / newlines.
 	var rows []string
 	cur := strings.Builder{}
 	inQuote := false
@@ -483,6 +540,8 @@ func parseGridAreas(spec string) (map[string][4]int, error) {
 	return areaMap, nil
 }
 
+// ─── Track Sizing ─────────────────────────────────────────────────────
+
 // sizeTracks resolves each track to a pixel size. px / % tracks use their declared
 // size; auto tracks use the max-content size reported by maxContent; fr tracks share
 // the leftover free space after the other tracks are sized.
@@ -499,7 +558,6 @@ func sizeTracks(tracks []gridTrack, reference, gap float64, maxContent func(idx 
 			totalFr += fr
 		}
 	}
-	// Account for gaps between tracks.
 	used += gap * float64(max(0, len(tracks)-1))
 	free := reference - used
 	if free < 0 {
@@ -527,9 +585,6 @@ func resolveTrackSize(spec string, reference, maxContent float64) (float64, floa
 		inner := spec[len("minmax(") : len(spec)-1]
 		parts := strings.SplitN(inner, ",", 2)
 		if len(parts) == 2 {
-			// Use the maximum of min and (the smaller of max / max-content) per spec
-			// simplification: just use the max track as the base.
-			_, _, _ = parts, inner, spec
 			min := parseLen(strings.TrimSpace(parts[0]), reference)
 			max := parseLen(strings.TrimSpace(parts[1]), reference)
 			if max > 0 {
@@ -572,6 +627,8 @@ func parseLen(spec string, reference float64) float64 {
 	return 0
 }
 
+// ─── Gap ──────────────────────────────────────────────────────────────
+
 // resolveGap returns the row / column gap resolved to pixels against the container
 // content width.
 func resolveGap(box *LayoutBox, reference float64) (rowGap, colGap float64) {
@@ -593,6 +650,8 @@ func resolveGap(box *LayoutBox, reference float64) (rowGap, colGap float64) {
 	return
 }
 
+// ─── Utility ──────────────────────────────────────────────────────────
+
 func sumSizes(s []float64) float64 {
 	s2 := 0.0
 	for _, v := range s {
@@ -601,32 +660,28 @@ func sumSizes(s []float64) float64 {
 	return s2
 }
 
+// maxContentWidthOfTrack returns the largest intrinsic content width among items
+// that span the given track column index.
+//
+// Uses computeIntrinsicWidth (pre-layout measurement) rather than maxContentWidth
+// (which reads TextSegments set during layout). This is critical because column
+// sizing happens BEFORE any item has been laid out.
 func maxContentWidthOfTrack(items []gridItem, idx int) float64 {
 	best := 0.0
 	for _, it := range items {
 		if it.colStart <= idx && it.colEnd > idx {
-			// First try maxContentWidth (reads TextSegments after layout).
-			cw := maxContentWidth(it.box)
-			if cw > 0 {
-				if cw > best {
-					best = cw
-				}
-				continue
-			}
-			// Fallback: compute intrinsic width from text at infinite width.
-			// Required for auto tracks where items haven't been laid out yet.
-			if it.box.Style != nil {
-				iw := computeIntrinsicWidth(it.box)
-				if iw > best {
-					best = iw
-				}
+			iw := computeIntrinsicWidth(it.box)
+			if iw > best {
+				best = iw
 			}
 		}
 	}
 	return best
 }
 
-
+// maxContentHeightOfTrack returns the largest laid-out height among items that span
+// the given track row index. heights[i] is the full height (incl. border/padding)
+// of items[i] from the Phase 3 layout pass.
 func maxContentHeightOfTrack(items []gridItem, heights []float64, idx int) float64 {
 	best := 0.0
 	for i := range items {
