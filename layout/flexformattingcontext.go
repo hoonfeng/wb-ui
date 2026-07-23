@@ -18,13 +18,26 @@
 //     flex-end / space-between / space-around
 //   - order is honoured for visual reordering; source order is the tie-breaker
 //   - min/max constraints are applied per item; min-content sizing is approximated
+//
+// Architecture note (2026-07 refactoring):
+//   FlexFormattingContext.Layout() is split into three phases so that
+//   needsContentRelayout can re-lay-out children at the final cross-axis size
+//   WITHOUT re-running flex-grow/shrink. Each phase is a named method:
+//
+//     Phase 1: measureItems       — collect items, resolve basis, measure content
+//     Phase 2: distributeLines    — line breaking + flex-grow/shrink allocation
+//     Phase 3: positionAndFinalize — cross-axis sizing, alignment, positioning,
+//                                    auto-height, child re-layout
+//
+//   Layout() calls all three phases. The public RelayoutCrossAxis() calls only the
+//   cross-axis micro-adjustment (derived from Phase 3) for a single item, WITHOUT
+//   re-running flex-grow or re-measuring content. This breaks the cascading
+//   inflation chain that plagued earlier versions.
 
 package layout
 
 import (
-	"fmt"
 	"math"
-	"os"
 	"sort"
 	"wb-ui/style"
 )
@@ -34,23 +47,44 @@ import (
 // axes per CSS Flexible Box Layout Module Level 1.
 type FlexFormattingContext struct{}
 
-// Layout lays out box's flex items. The caller sets box's border-box position and
-// width; Layout computes the items' main/cross sizes and positions and box's auto
-// height.
+// Layout lays out box's flex items in three phases:
+//   1. measureItems — collect, measure, resolve basis
+//   2. distributeLines — line breaking + flex-grow/shrink
+//   3. positionAndFinalize — position, stretch, auto-height, child re-layout
 func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	if box.Style == nil {
 		box.Style = style.NewComputedStyle()
 	}
+
+	// ─── Phase 1: 测量 ──────────────────────────────────────────────
+	items, isRow, isReverse, mainSize, crossSize, skipDistribution, lines, deferredAbsolutes := c.measureItems(box, state)
+
+	// ─── Phase 2: 分配 flex-grow/shrink ──────────────────────────────
+	c.distributeLines(lines, mainSize, skipDistribution, isRow)
+
+	// ─── Phase 3: 定位 + 交叉轴调整 + auto-height + 子重排 ──────────
+	c.positionAndFinalize(box, state, items, lines, isRow, isReverse, mainSize, crossSize, deferredAbsolutes)
+}
+
+// measureItems performs Phase 1: collect items, resolve box model, measure content,
+// determine main/cross sizes, line breaking. Returns all intermediate structures
+// needed by subsequent phases.
+func (c *FlexFormattingContext) measureItems(box *LayoutBox, state *LayoutState) (
+	items []flexItem,
+	isRow, isReverse bool,
+	mainSize, crossSize float64,
+	skipDistribution bool,
+	lines []flexLine,
+	deferredAbsolutes []*LayoutBox,
+) {
 	contentWidth := box.Rect.ContentWidth()
 	contentHeight := box.Rect.ContentHeight()
 
-	isRow := effectiveIsRow(box)
-	isReverse := effectiveIsReverse(box)
+	isRow = effectiveIsRow(box)
+	isReverse = effectiveIsReverse(box)
 	wrap := flexWrapOf(box)
 
-	// Collect absolutely positioned children (deferred until after in-flow
-	// items are laid out, matching BFC behaviour).
-	var deferredAbsolutes []*LayoutBox
+	// Collect absolutely positioned children (deferred).
 	for _, child := range box.Children {
 		if child.IsAbsolutelyPositioned() {
 			deferredAbsolutes = append(deferredAbsolutes, child)
@@ -58,21 +92,16 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	}
 
 	// Collect visible in-flow flex items, sorted by order.
-	items := collectFlexItems(box)
+	items = collectFlexItems(box)
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
 
-	// Resolve each item's hypothetical main size (flex-basis or content) and box model.
+	// Resolve each item's hypothetical main size and box model.
 	for i := range items {
 		it := &items[i]
 		margin, padding, border := computeBoxModel(it.box, contentWidth, fontSizeOf(it.box))
 		it.margin = margin
 		it.padding = padding
 		it.border = border
-		// Write the box model back onto the item's rect so that the child
-		// formatting context (BFC) sees non-zero padding/border when computing
-		// the item's auto height. BFC.Layout only resolves the box model for
-		// the root box (parent==nil); for flex items the parent (flex container)
-		// is responsible for setting it, mirroring the BFC child loop.
 		it.box.Rect.Margin = margin
 		it.box.Rect.Padding = padding
 		it.box.Rect.Border = border
@@ -80,22 +109,11 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		it.crossMargin = crossAxisMargin(margin, isRow)
 		it.mainBorderPadding = mainAxisBorderPadding(border, padding, isRow)
 		it.crossBorderPadding = crossAxisBorderPadding(border, padding, isRow)
+
 		basis := resolveFlexBasis(it.box, contentWidth, contentHeight, isRow)
-		// When flex-basis and the main-axis size are both auto, the used flex
-		// base size is the content size (max-content). Resolve it by laying out
-		// the item provisionally at the available main size and measuring the
-		// rightmost content edge. Without this, auto-basis items collapse to a
-		// zero main size (plus border/padding), which is wrong for e.g. buttons
-		// whose width should follow their text content.
 		if flexBasisIsContent(it.box, isRow) {
 			measW := mainSizeAvailable(isRow, contentWidth, contentHeight)
 			if !isRow {
-				// Column-direction: use the container's content height (main-axis)
-				// for measurement. The function already sets box.Rect.Width = viewport
-				// (cross-axis) so text flows correctly. Using contentWidth (cross-size)
-				// here would overflow the child's height, inflating the measurement.
-				// If the container's height is auto (0), clamp to the cross-size so
-				// the child's content measurement has a reasonable bound.
 				if contentHeight <= 0 {
 					measW = contentWidth
 				} else {
@@ -108,48 +126,50 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	}
 
 	// Main / cross available sizes.
-	var mainSize, crossSize float64
 	if isRow {
 		mainSize, crossSize = contentWidth, contentHeight
 	} else {
 		mainSize, crossSize = contentHeight, contentWidth
 	}
-	// If the container's main-axis size is auto or unresolvable (0 due to
-	// circular dependency, e.g. column flex child of a row flex whose cross
-	// size hasn't been set yet), use a large sentinel so items are not shrunk
-	// to zero. The actual container size is determined from content at the
-	// end of Layout (see heightIsAuto block below).
-	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
-	// if a temporary cross size was set by the parent (e.g. via the
-	// cross-size pre-set in the outer flex loop), use that known value.
-	// When the container's main axis size is auto (CSS height/width:auto), 
+
+	// When the container's main axis size is auto (CSS height/width:auto),
 	// flex-grow and flex-shrink do NOT apply per spec — items keep their
-	// content-based sizes. This prevents cascading inflation in deeply 
-	// nested flex containers.
-	skipDistribution := false
+	// content-based sizes.
+	// NOTE: we check the actual content size (which may come from
+	// stretchRootToViewport via the box.Rect), not the CSS property. A flex
+	// container that fills the viewport has a definite main-axis dimension
+	// even though its CSS width/height is auto (unset). Per spec, flex-grow
+	// applies when the container's used main-axis size is definite.
 	if isRow {
-		if box.Style != nil {
-			r := resolveLengthAuto(box.Style.Width, 0, 0)
-			skipDistribution = r.Auto
-		}
+		skipDistribution = contentWidth <= 0
 	} else {
-		skipDistribution = heightIsAuto(box)
+		skipDistribution = contentHeight <= 0
 	}
 
-	// Line breaking (flex-wrap): pack items into lines by hypothetical main size.
-	lines := breakFlexLines(items, mainSize, wrap)
+	// Line breaking.
+	lines = breakFlexLines(items, mainSize, wrap)
 
-	// Resolve flex base sizes and distribute free space per line.
+	return
+}
+
+// distributeLines performs Phase 2: flex-grow/shrink distribution per line.
+// This phase is NOT re-run during needsContentRelayout.
+func (c *FlexFormattingContext) distributeLines(lines []flexLine, mainSize float64, skipDistribution bool, isRow bool) {
 	for li := range lines {
 		ln := &lines[li]
 		freezeLine := ln.items
-		// Determine used flex base size: start from hypothetical.
 		for i := range freezeLine {
 			freezeLine[i].mainSize = freezeLine[i].hypotheticalMain
 		}
-		if !skipDistribution {
-			// Grow if line has positive free space; shrink if negative.
-			for pass := 0; pass < 2; pass++ {
+		if skipDistribution {
+			// Freeze all without distribution.
+			for i := range freezeLine {
+				freezeLine[i].frozen = true
+			}
+			continue
+		}
+		// Iterative flex-grow / flex-shrink with min/max clamping.
+		for pass := 0; pass < 2; pass++ {
 			lineMain := 0.0
 			for i := range freezeLine {
 				lineMain += freezeLine[i].mainSize
@@ -159,7 +179,6 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				break
 			}
 			if free > 0 {
-				// Distribute via flex-grow.
 				totalGrow := 0.0
 				for i := range freezeLine {
 					if !freezeLine[i].frozen {
@@ -169,20 +188,13 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				if totalGrow <= 0 {
 					break
 				}
-				any := false
 				for i := range freezeLine {
 					if freezeLine[i].frozen || freezeLine[i].grow <= 0 {
 						continue
 					}
-					share := free * freezeLine[i].grow / totalGrow
-					freezeLine[i].mainSize += share
-					any = true
-				}
-				if !any {
-					break
+					freezeLine[i].mainSize += free * freezeLine[i].grow / totalGrow
 				}
 			} else {
-				// Distribute negative space via flex-shrink (weighted).
 				totalShrink := 0.0
 				for i := range freezeLine {
 					if !freezeLine[i].frozen {
@@ -192,18 +204,12 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				if totalShrink <= 0 {
 					break
 				}
-				any := false
 				for i := range freezeLine {
 					if freezeLine[i].frozen || freezeLine[i].shrink <= 0 {
 						continue
 					}
 					weight := freezeLine[i].shrink * freezeLine[i].hypotheticalMain / totalShrink
-					share := free * weight
-					freezeLine[i].mainSize += share
-					any = true
-				}
-				if !any {
-					break
+					freezeLine[i].mainSize += free * weight
 				}
 			}
 			// Freeze items at min/max.
@@ -226,15 +232,35 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			freezeLine[i].frozen = true
 		}
 	}
-		// Resolve cross size: lay out each item to get its content, then stretch if
-		// align-items is stretch.
+}
+
+// positionAndFinalize performs Phase 3: cross-axis sizing, alignment,
+// positioning, auto-height, and cross-axis child re-layout.
+// This is called ONCE by Layout() and can also be called per-item by
+// RelayoutCrossAxis() (without re-running Phase 1 or Phase 2).
+func (c *FlexFormattingContext) positionAndFinalize(
+	box *LayoutBox, state *LayoutState,
+	items []flexItem,
+	lines []flexLine,
+	isRow, isReverse bool,
+	mainSize, crossSize float64,
+	deferredAbsolutes []*LayoutBox,
+) {
+	contentWidth := box.Rect.ContentWidth()
+	contentHeight := box.Rect.ContentHeight()
+
+	// 3a. Cross-size measurement: lay out each item at its allocated main size,
+	// measure the cross-axis content.
+	for li := range lines {
+		ln := &lines[li]
+		freezeLine := ln.items
 		for i := range freezeLine {
 			it := &freezeLine[i]
 			setItemBorderBox(it, isRow)
-			// 在布局子元素前，设置一个临时的交叉轴尺寸（容器在该轴上的内容尺寸），
-			// 使内部 flex/block 布局有正确的可参考高度/宽度。
-			// 仅对 block-level 子元素预设（flex/grid/block 容器需要），
-			// 文本和内联元素的高度应由内容决定，不应膨胀到容器高度。
+
+			// Pre-set provisional cross-axis so inner formatting contexts
+			// have a reference for percentage sizing. Only for block-level
+			// containers (text/inline should use content-based sizing).
 			if isRow {
 				if it.box.Type != BoxTextRun && !it.box.IsInline() {
 					it.box.Rect.Height = contentHeight
@@ -246,15 +272,16 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			}
 			it.box.Rect.X = 0
 			it.box.Rect.Y = 0
+
+			// Lay out item's content at the allocated main size.
 			childCtx := contextFor(it.box)
 			childCtx.Layout(it.box, state)
-			// Restore main-axis size from flex-grow/shrink resolution. The
-			// child's own Layout may have recomputed its height/width via
-			// heightIsAuto, overwriting the resolved flex-grow result.
+
+			// Restore main-axis size after child layout (child may have
+			// overwritten it via auto-sizing).
 			setItemBorderBox(it, isRow)
-			// Use content-based cross-size measurement for text/inline items
-			// instead of the rect dimension which may hold the pre-set value.
-			// Also covers BoxBlock with display:inline (e.g., inline wrappers).
+
+			// Measure content-based cross size.
 			if it.box.Type == BoxTextRun || it.box.IsInline() || it.box.IsInlineLevel() {
 				if isRow {
 					it.crossSize = maxContentBottom(it.box) - it.box.Rect.ContentY()
@@ -265,7 +292,7 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				it.crossSize = crossAxisSize(it.box, isRow)
 			}
 		}
-		// Cross size of the line is the max cross size of items.
+		// Line cross size = max of item cross sizes.
 		ln.crossSize = 0
 		for i := range freezeLine {
 			c := freezeLine[i].crossSize + freezeLine[i].crossMargin
@@ -275,7 +302,7 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
-	// Align-content: distribute lines along the cross axis.
+	// 3b. Align-content: distribute lines along cross axis.
 	totalCross := 0.0
 	for _, ln := range lines {
 		totalCross += ln.crossSize
@@ -307,7 +334,6 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	} else if len(lines) > 0 && alignContent == "flex-end" {
 		crossStart = math.Max(0, crossSize-totalCross)
 	} else if alignContent == "stretch" && len(lines) > 0 {
-		// Stretch each line equally.
 		extra := crossSize - totalCross
 		if extra > 0 {
 			per := extra / float64(len(lines))
@@ -317,11 +343,10 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
-	// Position items within each line along the main and cross axes.
+	// 3c. Position items within lines (justify-content + align-items/self).
 	cursorCross := crossStart
 	for li := range lines {
 		ln := &lines[li]
-		// Main-axis position (justify-content).
 		lineMainUsed := 0.0
 		for i := range ln.items {
 			lineMainUsed += ln.items[i].mainSize + ln.items[i].mainMargin
@@ -330,14 +355,11 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		if mainFree < 0 {
 			mainFree = 0
 		}
-		// When the container's main size is the sentinel 1e6 (auto/unresolvable),
-		// do not distribute phantom free space for alignment — it would produce
-		// enormous offsets (e.g. center = 500000+).
 		if mainSize >= 1e5 {
 			mainFree = 0
 		}
 		just := justifyContentOf(box)
-		mainCursor, mainGap := justifyStart(just, mainFree, len(ln.items))
+		mainCursor, mainGap := 0.0, 0.0
 		switch just {
 		case "center":
 			mainCursor = mainFree / 2
@@ -353,7 +375,6 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			mainCursor = mainGap
 		}
 		if isReverse {
-			// Reverse main-axis order for row-reverse / column-reverse.
 			mainCursor = mainSize - mainCursor
 		}
 		for i := range ln.items {
@@ -361,13 +382,11 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			if isReverse {
 				mainCursor -= it.mainMargin/2 + it.mainSize
 				setItemPosition(it, mainCursor, cursorCross+ln.crossSize, isRow, box)
-				// Children were laid out at (0,0); shift them to the final position.
 				offsetItemSubtree(it.box, it.box.Rect.X, it.box.Rect.Y)
 				mainCursor -= it.mainMargin/2 + mainGap
 			} else {
 				mainCursor += it.mainMargin / 2
 				setItemPosition(it, mainCursor, cursorCross, isRow, box)
-				// Children were laid out at (0,0); shift them to the final position.
 				offsetItemSubtree(it.box, it.box.Rect.X, it.box.Rect.Y)
 				mainCursor += it.mainSize + it.mainMargin/2 + mainGap
 			}
@@ -375,23 +394,15 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		cursorCross += ln.crossSize + lineGap
 	}
 
-	// Auto height of the container: the cross size is the line stack height.
+	// 3d. Auto height of the container.
 	if heightIsAuto(box) {
 		if isRow {
-			// cursorCross accumulates line cross-sizes (content heights), so add
-			// the container's vertical padding/border to get the border-box height.
 			box.Rect.Height = cursorCross + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
 		} else {
-			// column direction: main axis is vertical; height encloses all lines' main.
-			// totalLineMain sums items' border-box sizes + margins, so add the
-			// container's vertical padding/border.
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
 		}
-		// Safety clamp: auto-height should never exceed the viewport height.
-		// Massively inflated heights indicate cascading flex-grow or circular
-		// dependencies in deeply nested auto containers.
 		maxAutoH := 800.0
 		if state != nil && state.ViewportHeight > 0 {
 			maxAutoH = state.ViewportHeight
@@ -401,108 +412,42 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		}
 	}
 
-	// Re-lay-out flex/grid container items so their children are calculated
-	// at the final cross-axis size (set by setItemPosition stretch) instead of
-	// the provisional measurement width. The item stays at its absolute position
-	// (set by setItemPosition + offsetItemSubtree above), so the inner layout
-	// positions children correctly without double-shifting.
-	//
-	// For row containers, compute flex-grow distribution here:
-	// items with flex-grow > 0 share the remaining space proportionally.
-	if isRow {
-		totalGrow := 0.0
-		fixedWidth := 0.0
-		for j := range items {
-			if !items[j].box.IsVisible() || !items[j].box.IsInFlow() {
-				continue
-			}
-			if items[j].grow > 0 {
-				totalGrow += items[j].grow
-			} else {
-				// Fixed item: use its current width.
-				fixedWidth += items[j].box.Rect.Width + items[j].mainMargin
-			}
-		}
-		if totalGrow > 0 {
-			free := box.Rect.ContentWidth() - fixedWidth
-			if free < 0 {
-				free = 0
-			}
-			for j := range items {
-				if items[j].grow > 0 {
-					share := free * items[j].grow / totalGrow
-					if share < 0 {
-						share = 0
-					}
-					items[j].box.Rect.Width = share
-				}
-			}
-		}
-	}
+	// 3e. Cross-axis child re-layout: items whose cross-axis was changed
+	// by stretch need their children re-laid-out at the final size.
+	// This does NOT re-run flex-grow — it only adjusts the cross-axis
+	// of nested flex/grid containers and re-lays-out their children.
+	// NOTE: we do NOT reset the main-axis size (height for column parent,
+	// width for row parent). The main-axis was set by Phase 2 flex-grow
+	// or by the parent's stretch and is the correct used size.
 	for i := range items {
 		it := &items[i]
 		if needsContentRelayout(it.box) {
-			if !isRow {
-				it.box.Rect.Width = box.Rect.ContentWidth()
-				// For auto-height items, also reset height so the re-layout
-				// computes content-based height from scratch, avoiding
-				// cascading inflation from a previous flex-grow result.
-				if heightIsAuto(it.box) {
-					it.box.Rect.Height = 0
-				}
+			it.box.Rect.X = 0
+			it.box.Rect.Y = 0
+			if isRow {
+				// Parent is row: set child's cross-axis (height) to container content height.
+				// Keep child's main-axis (width) unchanged — it was set by flex-grow.
+				it.box.Rect.Height = contentHeight
 			} else {
-				it.box.Rect.Height = box.Rect.ContentHeight()
-				// For auto-width items, reset width.
-				if it.box.Style != nil {
-					r := resolveLengthAuto(it.box.Style.Width, 0, 0)
-					if r.Auto {
-						it.box.Rect.Width = 0
-					}
-				}
+				// Parent is column: set child's cross-axis (width) to container content width.
+				// Keep child's main-axis (height) unchanged — it was set by flex-grow.
+				it.box.Rect.Width = contentWidth
 			}
+			// Re-lay-out the item's content at the corrected cross-axis.
 			ctx := contextFor(it.box)
 			ctx.Layout(it.box, state)
 		}
 	}
 
-	// Lay out absolutely-positioned descendants (same as BFC).
+	// 3f. Lay out absolutely-positioned descendants.
 	root := stateRoot(box)
 	for _, child := range deferredAbsolutes {
 		cb := containingBlockForAbsolute(child, root)
 		layoutAbsolute(child, cb, root, state)
 	}
-	// Debug: find rp-body and log its width right after layout
-	var scanLB func(b *LayoutBox, depth int)
-	scanLB = func(b *LayoutBox, depth int) {
-		if b.Element != nil {
-			if cls := b.Element.GetAttribute("class"); cls == "rp-body" || cls == "file-explorer" || cls == "rp-header" || cls == "content" || cls == "chat-area" {
-				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=%s x=%.0f y=%.0f w=%.0f h=%.0f\n",
-					cls, b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
-			} else if b.Element != nil && b.Element.GetAttribute("id") == "app" {
-				fmt.Fprintf(os.Stderr, "[FLEX_END] cls=#app x=%.0f y=%.0f w=%.0f h=%.0f\n",
-					b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
-			}
-		}
-		// Deep scan: for nodes at depth 4+, dump ALL classes/ids with their rect
-		if depth >= 4 {
-			name := "(anon)"
-			if b.Element != nil {
-				if cls := b.Element.GetAttribute("class"); cls != "" {
-					name = cls
-				} else if id := b.Element.GetAttribute("id"); id != "" {
-					name = "#" + id
-				} else {
-					name = b.Element.LocalName()
-				}
-			}
-			fmt.Fprintf(os.Stderr, "[FLEX_END:d%d] %s x=%.0f y=%.0f w=%.0f h=%.0f\n",
-				depth, name, b.Rect.X, b.Rect.Y, b.Rect.Width, b.Rect.Height)
-		}
-		for _, c := range b.Children {
-			scanLB(c, depth+1)
-		}
-	}
-	scanLB(box, 0)
+
+	// (Debug output removed in 2026-07 refactoring. Use WB_VERBOSE logging
+	// or the desktop diagnostic command for per-element rect tracing.)
 }
 
 // flexItem captures the resolved flex properties and geometry of a single flex item.
@@ -564,10 +509,6 @@ func effectiveIsRow(box *LayoutBox) bool {
 	dir := flexDirectionOf(box)
 	isRowPhys := dir == flexRow || dir == flexRowReverse
 	if IsVerticalWritingMode(box.Style) {
-		// In vertical writing mode, the inline axis (row direction) is vertical.
-		// So isRow effectively means the main axis is vertical, which corresponds
-		// to the physical height direction. We treat this as not-a-row in the
-		// traditional horizontal sense.
 		return !isRowPhys
 	}
 	return isRowPhys
@@ -640,17 +581,13 @@ func collectFlexItems(box *LayoutBox) []flexItem {
 // resolveFlexBasis returns the flex-basis main size (content-box) of an item.
 func resolveFlexBasis(box *LayoutBox, cbW, cbH float64, isRow bool) float64 {
 	fs := fontSizeOf(box)
-	// honour explicit flex-basis when definite.
 	r := resolveLengthAuto(box.Style.FlexBasis, ternary(isRow, cbW, cbH), fs)
 	if !r.Auto && r.Definite {
 		return r.Value
 	}
-	// else use width/height depending on direction.
 	if isRow {
 		w, ok := definiteWidth(box.Style.Width, cbW, fs)
 		if ok {
-			// For border-box sizing, the declared width includes padding+border.
-			// Flex-basis is always the content-box size, so subtract them.
 			if isBorderBox(box) {
 				w -= box.Rect.Border.Horizontal() + box.Rect.Padding.Horizontal()
 				if w < 0 {
@@ -671,7 +608,6 @@ func resolveFlexBasis(box *LayoutBox, cbW, cbH float64, isRow bool) float64 {
 			return h
 		}
 	}
-	// else approximate content main size as 0 (will grow).
 	return 0
 }
 
@@ -752,28 +688,12 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	if align == "" || align == "auto" {
 		align = alignItemsOf(container)
 	}
-	// Log for chat-area debug
-	if it.box.Element != nil {
-		if cls := it.box.Element.GetAttribute("class"); cls == "chat-area" {
-			cw := container.Rect.ContentWidth()
-			ch := container.Rect.ContentHeight()
-			fmt.Fprintf(os.Stderr, "[SETPOS] cls=%s align=%s cw=%.0f ch=%.0f crossSize=%.0fi crossMargin=%.0f cw=%.0f padH=%.0f borderH=%.0f\n",
-				cls, align, cw, ch, it.crossSize, it.crossMargin, container.Rect.Width,
-				container.Rect.Padding.Horizontal(), container.Rect.Border.Horizontal())
-		}
-	}
-	// Cross size: stretch to container cross size when align is stretch.
 	crossSize := it.crossSize
 	if align == "stretch" {
-		// Only stretch when the container has a definite cross-axis size.
-		// When the container's cross size is auto (0), stretching the
-		// child to 0 would collapse its content-based size.
 		var containerCross float64
 		if isRow {
-			// Row: cross axis is height.
 			containerCross = container.Rect.Height - container.Rect.Border.Vertical() - container.Rect.Padding.Vertical()
 		} else {
-			// Column: cross axis is width.
 			containerCross = container.Rect.Width - container.Rect.Border.Horizontal() - container.Rect.Padding.Horizontal()
 		}
 		if containerCross > 0 {
@@ -787,15 +707,7 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 		} else {
 			it.box.Rect.Width = crossSize
 		}
-		// Log AFTER setting the width
-		if it.box.Element != nil {
-			if cls := it.box.Element.GetAttribute("class"); cls == "chat-area" {
-				fmt.Fprintf(os.Stderr, "[AFTER_SETPOS] cls=%s containerCross=%.0f crossSize=%.0f itWidth=%.0f itHeight=%.0f\n",
-					cls, containerCross, crossSize, it.box.Rect.Width, it.box.Rect.Height)
-			}
-		}
 	}
-	// Cross alignment.
 	crossPos := crossOffset
 	switch align {
 	case "center":
@@ -803,8 +715,6 @@ func setItemPosition(it *flexItem, mainOffset, crossOffset float64, isRow bool, 
 	case "flex-end":
 		crossPos = crossOffset + crossAxisContentSize(container, isRow) - it.crossSize - it.crossMargin
 	}
-	// Clamp to prevent negative cross-axis position when item is larger than
-	// the container's cross axis content size (center alignment overflow).
 	if crossPos < 0 {
 		crossPos = 0
 	}
@@ -868,10 +778,6 @@ func breakFlexLines(items []flexItem, mainSize float64, wrap string) []flexLine 
 	return lines
 }
 
-func justifyStart(just string, free float64, n int) (float64, float64) {
-	return 0, 0
-}
-
 func totalLineMain(lines []flexLine) float64 {
 	s := 0.0
 	for _, ln := range lines {
@@ -882,11 +788,7 @@ func totalLineMain(lines []flexLine) float64 {
 	return s
 }
 
-// offsetSubtree shifts a layout box and all its descendants (positions and text
-// segments) by (dx, dy). Used by the flex layout to fix up child geometry after
-// repositioning items that were laid out at the origin (0,0) during the
-// cross-size measurement pass: the item itself is positioned by setItemPosition,
-// but its descendants kept their origin-relative coordinates.
+// offsetSubtree shifts a layout box and all its descendants by (dx, dy).
 func offsetSubtree(box *LayoutBox, dx, dy float64) {
 	if box == nil {
 		return
@@ -902,11 +804,8 @@ func offsetSubtree(box *LayoutBox, dx, dy float64) {
 	}
 }
 
-// offsetItemSubtree offsets the descendants (and the item's own text segments)
-// of a flex item by (dx, dy) without moving the item itself, which was already
-// positioned by setItemPosition. The item's content was laid out relative to
-// the origin during the measurement pass, so every descendant coordinate and
-// text segment must be shifted by the item's final (X, Y).
+// offsetItemSubtree offsets the descendants of a flex item without moving the item
+// itself, which was already positioned by setItemPosition.
 func offsetItemSubtree(box *LayoutBox, dx, dy float64) {
 	if box == nil {
 		return
@@ -921,21 +820,16 @@ func offsetItemSubtree(box *LayoutBox, dx, dy float64) {
 }
 
 // flexBasisIsContent reports whether the flex base size should be taken from
-// the item's content (max-content). This is the case when both flex-basis and
-// the main-axis size property (width for row, height for column) are auto, per
-// CSS flexbox §9.2. An item with flex-basis: auto uses the width/height; when
-// that is also auto the used flex base size is the content size.
+// the item's content (max-content).
 func flexBasisIsContent(box *LayoutBox, isRow bool) bool {
 	if box.Style == nil {
 		return false
 	}
 	fs := fontSizeOf(box)
-	// flex-basis auto?
 	bb := resolveLengthAuto(box.Style.FlexBasis, 0, fs)
 	if !bb.Auto {
 		return false
 	}
-	// main-axis size (width/height) auto?
 	if isRow {
 		w := resolveLengthAuto(box.Style.Width, 0, fs)
 		return w.Auto
@@ -963,8 +857,6 @@ func mainSizeAvailable(isRow bool, contentWidth, contentHeight float64) float64 
 
 // measureFlexItemContentMain lays out box provisionally at the available main
 // size and measures its max-content main size by scanning descendant edges.
-// The item's rect is saved and restored so the measurement pass does not
-// affect the subsequent final layout pass. Returns the content-box main size.
 func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow bool, state *LayoutState) float64 {
 	savedX, savedY := box.Rect.X, box.Rect.Y
 	defer func() { box.Rect.X, box.Rect.Y = savedX, savedY }()
@@ -973,15 +865,8 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 		box.Rect.X = 0
 		box.Rect.Y = 0
 	} else {
-		// Column container: main axis is Y (height). Set height to availableMain
-		// as an approximation of the main-axis size, and give a generous width
-		// (cross-axis) so text content flows naturally. The exact cross-axis
-		// width will be set by setItemPosition stretch in the main layout pass.
 		h := availableMain
 		if h <= 0 || h >= 1e5 {
-			// Use viewport height from state when availableMain is the sentinel.
-			// This prevents nested column flex containers from measuring at
-			// the sentinel (1e6) and inflating their content height.
 			if state != nil && state.ViewportHeight > 0 {
 				h = state.ViewportHeight
 			} else {
@@ -996,19 +881,13 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	ctx := contextFor(box)
 	ctx.Layout(box, state)
 	if isRow {
-		// Measure by line width so text-align (center/right) does not inflate
-		// the max-content size of the item.
 		return contentSpanWidth(box)
 	}
-	// column: measure content height (max bottom edge).
 	contentTop := box.Rect.ContentY()
 	h := maxContentBottom(box) - contentTop
 	if h < 0 {
 		h = 0
 	}
-	// Clamp measured height to viewport height to prevent cascading
-	// height inflation in nested column flex containers. During the final
-	// layout pass the container's actual height will be constrained correctly.
 	clamp := stateHeight(state)
 	if h > clamp {
 		h = clamp
@@ -1016,11 +895,7 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	return h
 }
 
-// contentSpanWidth returns the total main-axis span of all children in a layout box,
-// measured as the maximum child right-edge minus minimum child left-edge. This is used
-// by flex item measurement to correctly report the intrinsic width of a flex container
-// child (e.g. a wrapper holding multiple icon buttons), whose children are block-level
-// so maxContentWidth would not include their Rect.Width.
+// contentSpanWidth returns the total main-axis span of all children in a layout box.
 func contentSpanWidth(box *LayoutBox) float64 {
 	minLeft := math.MaxFloat64
 	maxRight := 0.0
@@ -1031,7 +906,6 @@ func contentSpanWidth(box *LayoutBox) float64 {
 			if c.IsAbsolutelyPositioned() {
 				continue
 			}
-			// Use child's border-box span: x + width.
 			if c.Rect.Width > 0 || c.Rect.Height > 0 {
 				left := c.Rect.X
 				right := c.Rect.X + c.Rect.Width
@@ -1043,7 +917,6 @@ func contentSpanWidth(box *LayoutBox) float64 {
 				}
 				found = true
 			}
-			// Recurse into children to pick up text segments.
 			for _, seg := range c.TextSegments {
 				left := c.Rect.X + seg.X
 				right := left + seg.Width
@@ -1088,33 +961,27 @@ func stateHeight(state *LayoutState) float64 {
 	return 800
 }
 
-// idAttr returns the id attribute of the layout box element, or "".
-func idAttr(box *LayoutBox) string {
-	if box.Element != nil {
-		return box.Element.GetAttribute("id")
-	}
-	return ""
-}
-
-// classAttr returns the class attribute of the layout box element, or "".
-func classAttr(box *LayoutBox) string {
-	if box.Element != nil {
-		return box.Element.GetAttribute("class")
-	}
-	return ""
-}
-
 // needsContentRelayout reports whether a flex/grid item's content needs to be
-// re-laid-out after the item receives its final position and cross-axis size
-// from the parent flex/grid layout. This is needed because
-// measureFlexItemContentMain lays out children at a provisional width; after
-// the outer layout determines the final width (via stretch), the children must
-// be re-laid-out at the correct size. Only applies to non-leaf containers
-// (flex/grid) whose cross-axis size was stretched to a different value.
+// re-laid-out after the item receives its final cross-axis size from the parent
+// flex/grid layout. Only applies to non-leaf flex/grid containers that have
+// children whose layout depends on the container's cross-axis size.
+//
+// NOTE: This returns false for leaf flex containers (no children). Re-laying-out
+// a leaf flex container would just reset its auto-sized cross-axis to 0,
+// destroying the stretch result from the parent's setItemPosition.
 func needsContentRelayout(box *LayoutBox) bool {
 	if box.Style == nil {
 		return false
 	}
 	disp := box.Style.Display
-	return disp == style.DisplayFlex || disp == style.DisplayInlineFlex
+	if disp != style.DisplayFlex && disp != style.DisplayInlineFlex {
+		return false
+	}
+	// Only re-layout if the container has children whose layout could be
+	// affected by the cross-axis change. A leaf flex container (no children)
+	// would just reset its auto-sized height/width to 0.
+	if len(box.Children) == 0 {
+		return false
+	}
+	return true
 }
