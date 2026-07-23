@@ -297,10 +297,10 @@ func (b *RenderBox) Layout(state *layout.LayoutState) {
 // This mirrors the layout package's internal contextFor but is exposed here so the
 // render tree can dispatch layout without reaching into unexported layout internals.
 func contextForBox(box *layout.LayoutBox) layout.FormattingContext {
-	if box.Style == nil {
+	if box.Style() == nil {
 		return &layout.BlockFormattingContext{}
 	}
-	switch box.Style.Display {
+	switch box.Style().Display {
 	case style.DisplayFlex, style.DisplayInlineFlex:
 		return &layout.FlexFormattingContext{}
 	case style.DisplayGrid, style.DisplayInlineGrid:

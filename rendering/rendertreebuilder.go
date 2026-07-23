@@ -260,61 +260,56 @@ func (b *RenderTreeBuilder) attachLayoutTree(view *RenderView, root *dom.Element
 	}
 	layoutRoot := layout.BuildLayoutTree(root, b.resolver)
 	if layoutRoot == nil {
-		return
-	}
-	view.SetLayoutBox(layoutRoot)
-	// Start from RenderView's first child (html element) to match with
-	// the layout root. RenderView itself should not be matched against
-	// layoutRoot's children (body etc) which would fail.
+	rootEb, _ := layoutRoot.(*layout.ElementBox)
+	view.SetLayoutBox(rootEb)
 	if firstChild := view.FirstChild(); firstChild != nil {
-		b.linkLayoutBoxes(firstChild, layoutRoot)
+		b.linkLayoutBoxes(firstChild, rootEb)
+	}
 	}
 }
 
 // linkLayoutBoxes recursively links layout boxes to render objects by matching the
-// owning DOM element.
-func (b *RenderTreeBuilder) linkLayoutBoxes(rObj RenderObject, lBox *layout.LayoutBox) {
-	if rObj == nil || lBox == nil {
-		return
-	}
+func (b *RenderTreeBuilder) linkLayoutBoxes(rObj RenderObject, lBox *layout.ElementBox) {
+	if rObj == nil || lBox == nil { return }
 	rObj.SetLayoutBox(lBox)
-	// Walk render children and layout children in parallel, matching by element
-	// identity. MUST copy the slice before modifying it; append(l[:m], l[m+1:]...)
-	// shares the underlying array with lBox.Children and would corrupt it.
-	lChildren := make([]*layout.LayoutBox, len(lBox.Children))
-	copy(lChildren, lBox.Children)
+	lChildren := make([]layout.Box, 0, len(lBox.Children()))
+	lChildren = append(lChildren, lBox.Children()...)
 	for rc := rObj.FirstChild(); rc != nil && len(lChildren) > 0; rc = rc.NextSibling() {
 		matched := -1
 		for i, lc := range lChildren {
-			if sameOwner(rc, lc) {
-				matched = i
-				break
+			if childEb, ok := lc.(*layout.ElementBox); ok {
+				if sameOwner(rc, childEb) { matched = i; break }
 			}
 		}
 		if matched >= 0 {
-			b.linkLayoutBoxes(rc, lChildren[matched])
+			if childEb, ok := lChildren[matched].(*layout.ElementBox); ok {
+				b.linkLayoutBoxes(rc, childEb)
+			}
 			lChildren = append(lChildren[:matched], lChildren[matched+1:]...)
 		}
 	}
 }
 
 // sameOwner reports whether the render object and layout box share a DOM owner.
+
+// sameOwner reports whether the render object and layout box share a DOM owner.
+// sameOwner reports whether the render object and layout box share a DOM owner.
 // For element-backed nodes the match is by DOM element pointer identity.
 // For non-element nodes (text, anonymous wrappers) the match falls back to
 // position-based pairing (sibling index) so that RenderText ↔ BoxTextRun and
 // anonymous wrappers are correctly linked.
-func sameOwner(rObj RenderObject, lBox *layout.LayoutBox) bool {
-	if lBox.Element != nil {
+func sameOwner(rObj RenderObject, lBox *layout.ElementBox) bool {
+	if lBox.Element() != nil {
 		if el, ok := rObj.Node().(*dom.Element); ok {
-			return el == lBox.Element
+			return el == lBox.Element()
 		}
 		return false
 	}
-	// Both sides have no DOM element: match by position.
-	// The render tree and layout tree are built from the same DOM in the same
-	// order, so anonymous nodes appear at matching positions.
-	_, rHasEl := rObj.Node().(*dom.Element)
-	return !rHasEl
+	return false
+}
+
+func roIsAnonymous(ro RenderObject) bool {
+	return ro.Node() == nil
 }
 
 // inheritedStyle returns a style suitable for an anonymous child: it creates a

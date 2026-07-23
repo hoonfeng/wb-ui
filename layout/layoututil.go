@@ -132,13 +132,15 @@ func resolveMinMax(minL, maxL style.Length, reference, fontSize float64) (minV, 
 		maxAuto = true
 	} else {
 		r = resolveLengthAuto(maxL, reference, fontSize)
-		maxV, maxAuto = r.Value, r.Auto
 		if maxAuto { maxV = 0 }
 	}
 	return
 }
 
-// computeBoxModelForBox is an alias for computeBoxModel with *ElementBox.
+var FontMetricsFunc func(family string, size float64, weight int, style string) (float64, float64, float64)
+
+// MeasureTextFunc measures the advance width of text. Set by the embedder.
+var MeasureTextFunc func(family string, size float64, weight int, style, text string) float64
 func computeBoxModelForBox(box *ElementBox, cbContentWidth, fontSizeVal float64) (margin, padding, border Edges) {
 	return computeBoxModel(box, cbContentWidth, fontSizeVal)
 }
@@ -188,13 +190,7 @@ func fontStyleOf(box *ElementBox) string {
 	if cs == nil { return "normal" }
 	return cs.FontStyle
 }
-
-// ── Text measurement ─────────────────────────────────────────
-
-var MeasureTextFunc func(family string, size float64, weight int, style, text string) float64
-
 func measureText(box *ElementBox, text string) float64 {
-	if text == "" { return 0 }
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
 	family := fontFamilyOf(box)

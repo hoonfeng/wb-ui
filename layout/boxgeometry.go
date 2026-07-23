@@ -1,6 +1,4 @@
 // Translation of: Source/WebCore/layout/layouttree/BoxGeometry.h
-//                  Source/WebCore/layout/layouttree/BoxGeometry.cpp
-//
 // BoxGeometry stores computed geometry separate from the layout tree node.
 // Accessed via state.GeometryForBox(box).
 
@@ -16,6 +14,22 @@ type Edges struct {
 func (e Edges) IsZero() bool        { return e.Top == 0 && e.Right == 0 && e.Bottom == 0 && e.Left == 0 }
 func (e Edges) Horizontal() float64 { return e.Left + e.Right }
 func (e Edges) Vertical() float64   { return e.Top + e.Bottom }
+
+// LayoutRect is a transitional type retained for the rendering/ package.
+type LayoutRect struct {
+	X, Y          float64
+	Width, Height float64
+	Margin        Edges
+	Padding       Edges
+	Border        Edges
+}
+
+func (r LayoutRect) ContentX() float64      { return r.X + r.Border.Left + r.Padding.Left }
+func (r LayoutRect) ContentY() float64      { return r.Y + r.Border.Top + r.Padding.Top }
+func (r LayoutRect) ContentWidth() float64  { return r.Width - r.Border.Horizontal() - r.Padding.Horizontal() }
+func (r LayoutRect) ContentHeight() float64 { return r.Height - r.Border.Vertical() - r.Padding.Vertical() }
+func (r LayoutRect) MarginBoxWidth() float64  { return r.Width + r.Margin.Horizontal() }
+func (r LayoutRect) MarginBoxHeight() float64 { return r.Height + r.Margin.Vertical() }
 
 // BoxGeometry mirrors WebCore::Layout::BoxGeometry.
 // For horizontal writing-mode with LTR: before=top, after=bottom, start=left, end=right.
@@ -145,3 +159,17 @@ func (g *BoxGeometry) Round() {
 	g.paddingBottom = math.Round(g.paddingBottom)
 	g.paddingLeft = math.Round(g.paddingLeft)
 }
+
+// ToRect converts BoxGeometry to the legacy LayoutRect for rendering sync.
+func (g *BoxGeometry) ToRect() LayoutRect {
+	return LayoutRect{
+		X: g.left, Y: g.top,
+		Width:  g.BorderBoxWidth(),
+		Height: g.BorderBoxHeight(),
+		Margin: Edges{Top: g.marginBefore, Right: g.marginAfter, Bottom: g.marginEnd, Left: g.marginStart},
+		Padding: Edges{Top: g.paddingTop, Right: g.paddingRight, Bottom: g.paddingBottom, Left: g.paddingLeft},
+		Border:  Edges{Top: g.borderTop, Right: g.borderRight, Bottom: g.borderBottom, Left: g.borderLeft},
+	}
+}
+
+// ── rounding ──

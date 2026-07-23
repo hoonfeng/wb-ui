@@ -70,7 +70,7 @@ func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 		return
 	}
 	// Dispatch flex containers to FlexFormattingContext.
-	if b.layoutBox.Style != nil && b.layoutBox.Style.Display == style.DisplayFlex {
+	if b.layoutBox.Style() != nil && b.layoutBox.Style().Display == style.DisplayFlex {
 		ctx := &layout.FlexFormattingContext{}
 		ctx.Layout(b.layoutBox, state)
 		b.ClearNeedsLayout()
