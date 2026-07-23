@@ -288,6 +288,14 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	if lb.Rect.Height < 0 {
 		lb.Rect.Height = 0
 	}
+	// Clamp negative X/Y to 0 — negative positions push render objects
+	// outside the viewport, making them invisible.
+	if lb.Rect.X < 0 {
+		lb.Rect.X = 0
+	}
+	if lb.Rect.Y < 0 {
+		lb.Rect.Y = 0
+	}
 	if box := asRenderBox(ro); box != nil {
 		box.frame = lb.Rect
 	}

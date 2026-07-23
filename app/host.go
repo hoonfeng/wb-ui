@@ -404,7 +404,10 @@ func (h *Host) Run() {
 
 		bgColor := findBodyBgColor(rendering.RenderObject(rv))
 		if bgColor.A == 0 {
+			log.Printf("[bg] NOT FOUND, fallback to white\n")
 			bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+		} else {
+			log.Printf("[bg] OK #%02x%02x%02x a=%d\n", bgColor.R, bgColor.G, bgColor.B, bgColor.A)
 		}
 		gpuCanvas.Clear(bgColor)
 
@@ -1029,28 +1032,23 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 						if st.BackgroundColor.A > 0 {
 							return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
 						}
-						// Body bg is transparent — search children directly
+						// Body bg is transparent — search children recursively
 						// (NOT findBodyBgColor which re-enters doc.Body() path).
-						for c := bodyRO.FirstChild(); c != nil; c = c.NextSibling() {
-							if col := firstNonTransBg(c); col.A > 0 {
-								return col
-							}
+						if col := firstNonTransBg(bodyRO); col.A > 0 {
+							return col
 						}
 					}
 				}
 			}
-		}
-	}
-	// Fallback: walk the render tree (handles <body> not being the document body).
-	if n := o.Node(); n != nil {
-		if el, ok := n.(*dom.Element); ok && strings.EqualFold(el.TagName(), "body") {
-			if st := o.Style(); st != nil && st.BackgroundColor.A > 0 {
-				return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
 			}
-		}
 	}
+	// Fallback 1: walk from o's own subtree.
+	if col := firstNonTransBg(o); col.A > 0 {
+		return col
+	}
+	// Fallback 2: if o is a RenderView, walk from its first child (the <html> root).
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-		if col := findBodyBgColor(c); col.A > 0 {
+		if col := firstNonTransBg(c); col.A > 0 {
 			return col
 		}
 	}
@@ -1064,9 +1062,11 @@ func firstNonTransBg(o rendering.RenderObject) graphics.Color {
 	if o == nil {
 		return graphics.Color{}
 	}
+	// Check the element itself first.
 	if st := o.Style(); st != nil && st.BackgroundColor.A > 0 {
 		return graphics.Color{R: st.BackgroundColor.R, G: st.BackgroundColor.G, B: st.BackgroundColor.B, A: st.BackgroundColor.A}
 	}
+	// Recurse into children.
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
 		if col := firstNonTransBg(c); col.A > 0 {
 			return col
