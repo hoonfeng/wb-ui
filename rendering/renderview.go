@@ -11,8 +11,6 @@
 package rendering
 
 import (
-	"fmt"
-	"os"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -182,7 +180,6 @@ func (v *RenderView) Layout(state *layout.LayoutState) {
 	// 降级保护：如果 LayoutBox 未设置，尝试从 document 构建
 	if v.LayoutBox() == nil && v.document != nil {
 		if root := v.document.DocumentElement(); root != nil {
-			// 使用默认 resolver（注意：这里可能没有完整的样式信息，但至少让布局能跑）
 			defaultResolver := style.NewResolver()
 			defaultResolver.AddStyleSheet(html5.NewUAStyleSheet())
 			layoutRoot := layout.BuildLayoutTree(root, defaultResolver)
@@ -194,39 +191,15 @@ func (v *RenderView) Layout(state *layout.LayoutState) {
 
 	// Dispatch to the block flow layout for children.
 	v.RenderBlockFlow.Layout(state)
-	// Sync geometry from layout boxes back to render boxes so that the paint
-	// pipeline reads the correct positions. Layout writes to layoutBox.Rect but
-	// painters read from RenderBox.frame; this step bridges the gap.
-	// Debug: verify rp-body layout box after syncGeometry
-	func() {
-		var walk func(ro RenderObject, depth int)
-		walk = func(ro RenderObject, depth int) {
-			if ro == nil {
-				return
-			}
-			if el := domElementOf(ro); el != nil {
-				if cls := el.GetAttribute("class"); cls == "rp-body" || cls == "right-panel" {
-					lb := ro.LayoutBox()
-					fn := "nil"
-					if lb != nil {
-						fn = fmt.Sprintf("%.0fx%.0f", lb.Rect.Width, lb.Rect.Height)
-					}
-					fmt.Fprintf(os.Stderr, "[POSTSYNC] cls=%s ro=%p lb=%p lb.rect=%s node=%v\n",
-						cls, ro, lb, fn, ro.Node() != nil)
-				}
-			}
-			for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
-				walk(c, depth+1)
-			}
-		}
-		walk(v, 0)
-	}()
-	// Update compositing layers after layout.
+	// Sync geometry from layout tree to render tree so paint reads correct frames.
+	v.syncGeometry()
 	if v.compositor != nil {
 		v.compositor.UpdateCompositingLayers()
 	}
 }
 
+// LayoutState returns the layout state from the last layout pass, mirroring
+// RenderView::layoutState().
 // LayoutState returns the layout state from the last layout pass, mirroring
 // RenderView::layoutState().
 func (v *RenderView) LayoutState() *layout.LayoutState { return v.layoutState }
@@ -242,7 +215,6 @@ func (v *RenderView) LayoutState() *layout.LayoutState { return v.layoutState }
 // When LayoutBox is nil (no layout tree was built), this is a no-op. The Layout method
 // should have already handled the nil case by either self-healing or setting a default
 // frame and returning early, so in practice syncGeometry should only be called when a
-// layout tree exists.
 func (v *RenderView) syncGeometry() {
 	layoutRoot := v.LayoutBox()
 	if layoutRoot == nil {
@@ -258,12 +230,15 @@ func (v *RenderView) syncGeometry() {
 		syncOne(rc, layoutRoot)
 		// Only one direct child expected; break after first.
 		break
-	}
+}
 }
 
 // syncChildren pairs parentRO's children with parentLB's children in sibling order and
+// syncChildren pairs parentRO's children with parentLB's children in sibling order and
 // copies geometry. Both trees are produced by the same buildChildren logic, so their
 // sibling sequences are identical. Named elements match by DOM element identity;
+// anonymous wrappers (no DOM element) match to layout children with nil Element by
+// position, using sameOwner for robust pairing.
 // anonymous wrappers (no DOM element) match to layout children with nil Element by
 // position, using sameOwner for robust pairing.
 func syncChildren(parentRO RenderObject, parentLB *layout.LayoutBox) {
