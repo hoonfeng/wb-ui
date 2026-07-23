@@ -263,11 +263,18 @@ func (c *FlexFormattingContext) positionAndFinalize(
 			// containers (text/inline should use content-based sizing).
 			if isRow {
 				if it.box.Type != BoxTextRun && !it.box.IsInline() {
-					it.box.Rect.Height = contentHeight
+					if contentHeight > 0 {
+						it.box.Rect.Height = contentHeight
+					}
+					// contentHeight <= 0: container height not yet known (e.g.
+					// parent grid hasn't assigned rows yet). Keep item's own
+					// height (0 = auto) so child content is not constrained.
 				}
 			} else {
 				if it.box.Type != BoxTextRun && !it.box.IsInline() {
-					it.box.Rect.Width = contentWidth
+					if contentWidth > 0 {
+						it.box.Rect.Width = contentWidth
+					}
 				}
 			}
 			it.box.Rect.X = 0
