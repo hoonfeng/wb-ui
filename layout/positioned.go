@@ -129,7 +129,7 @@ func layoutAbsoluteHeightForBox(box *ElementBox, state *LayoutState) float64 {
 }
 
 func layoutBoxContentForBox(box *ElementBox, state *LayoutState) {
-	ctx := contextFor(box)
+	ctx := contextFor(box, state)
 	ctx.Layout(box, state)
 }
 

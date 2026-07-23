@@ -7,7 +7,9 @@ package layout
 
 import "math"
 
-type MultiColumnFormattingContext struct{}
+type MultiColumnFormattingContext struct {
+	FormattingContextBase
+}
 
 func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	cs := box.Style()
@@ -18,7 +20,9 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 	colGap := resolveColumnGap(box)
 	if colCount <= 1 {
 		ctx := &BlockFormattingContext{}
+		ctx.InitBase(box, state)
 		ctx.Layout(box, state)
+		return
 		return
 	}
 
@@ -47,10 +51,8 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 	tg.SetContentWidth(colWidth)
 	tg.SetContentHeight(1e6)
 	tg.SetPadding(g.PaddingTop(), g.PaddingRight(), g.PaddingBottom(), g.PaddingLeft())
-	tg.SetBorder(g.BorderTop(), g.BorderRight(), g.BorderBottom(), g.BorderLeft())
-
 	blockCtx := &BlockFormattingContext{}
-	blockCtx.Layout(tempBox, state)
+	blockCtx.InitBase(tempBox, state)
 
 	totalChildHeight := 0.0
 	for _, c := range tempBox.Children() {

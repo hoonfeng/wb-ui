@@ -10,7 +10,9 @@ import (
 	"wb-ui/style"
 )
 
-type FlexFormattingContext struct{}
+type FlexFormattingContext struct {
+	FormattingContextBase
+}
 
 type flexItem struct {
 	box             *ElementBox
@@ -224,7 +226,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			if !isReverse { mainPos += g.BorderBoxHeight() }
 		}
 
-		ctx := contextFor(it.box)
+		ctx := contextFor(it.box, state)
 		ctx.Layout(it.box, state)
 	}
 }

@@ -10,7 +10,9 @@ import (
 	"wb-ui/style"
 )
 
-type TableFormattingContext struct{}
+type TableFormattingContext struct {
+	FormattingContextBase
+}
 
 func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	cs := box.Style()
@@ -64,7 +66,7 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			cg.SetContentWidth(colWidth - cg.MarginStart() - cg.MarginEnd())
 
 			// Layout cell content.
-			cellCtx := contextFor(cell)
+			cellCtx := contextFor(cell, state)
 			cellCtx.Layout(cell, state)
 
 			cellH := cg.BorderBoxHeight()

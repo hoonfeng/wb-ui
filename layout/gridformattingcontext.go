@@ -10,7 +10,9 @@ import (
 	"wb-ui/style"
 )
 
-type GridFormattingContext struct{}
+type GridFormattingContext struct {
+	FormattingContextBase
+}
 
 type gridItem struct {
 	box    *ElementBox
@@ -64,7 +66,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		itg.SetContentHeight(rowH - itg.MarginBefore() - itg.MarginAfter())
 
 		// Content layout.
-		ctx := contextFor(it.box)
+		ctx := contextFor(it.box, state)
 		ctx.Layout(it.box, state)
 	}
 

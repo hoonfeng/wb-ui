@@ -27,7 +27,7 @@ func stretchRootToViewport(box *ElementBox, state *LayoutState) {
 
 // LayoutRoot dispatches root box to its formatting context.
 func LayoutRoot(box *ElementBox, state *LayoutState) {
-	ctx := contextFor(box)
+	ctx := contextFor(box, state)
 	ctx.Layout(box, state)
 }
 

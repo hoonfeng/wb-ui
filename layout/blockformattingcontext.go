@@ -10,7 +10,9 @@ import (
 	"wb-ui/style"
 )
 
-type BlockFormattingContext struct{}
+type BlockFormattingContext struct {
+	FormattingContextBase
+}
 
 func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if box.Style() == nil {
@@ -131,7 +133,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 		}
 
-		childCtx := contextFor(childEb)
+		childCtx := contextFor(childEb, state)
 		childCtx.Layout(childEb, state)
 
 		fs := fontSizeOf(childEb)
@@ -259,7 +261,7 @@ func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *f
 	x, y := fc.placeFloat(child, isLeft, borderBox, 0)
 	ch.SetTopLeft(x, y)
 
-	childCtx := contextFor(child)
+	childCtx := contextFor(child, state)
 	childCtx.Layout(child, state)
 
 	for i := range fc.floats {

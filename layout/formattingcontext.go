@@ -1,34 +1,74 @@
 // Translation of: Source/WebCore/layout/formattingContexts/FormattingContext.h
 //
-// A FormattingContext lays out the in-flow children of its root ElementBox.
-// Geometry is written via state.GeometryForBox().
+// FormattingContext — abstract base for all formatting contexts.
 
 package layout
-
-import "wb-ui/style"
 
 // FormattingContext is the Go translation of WebCore::Layout::FormattingContext.
 type FormattingContext interface {
 	Layout(box *ElementBox, state *LayoutState)
+	Root() *ElementBox
+	LayoutState() *LayoutState
+	FormattingGeometry() *FormattingGeometry
+	FormattingQuirks() *FormattingQuirks
 }
 
+// FormattingContextBase provides shared fields/methods for all formatting contexts.
+type FormattingContextBase struct {
+	root        *ElementBox
+	layoutState *LayoutState
+	geometry    *FormattingGeometry
+	quirks      *FormattingQuirks
+}
+
+// InitBase initialises the base fields. Called by each formatting context.
+func (b *FormattingContextBase) InitBase(root *ElementBox, state *LayoutState) {
+	b.root = root
+	b.layoutState = state
+}
+
+func (b *FormattingContextBase) Root() *ElementBox                     { return b.root }
+func (b *FormattingContextBase) LayoutState() *LayoutState              { return b.layoutState }
+func (b *FormattingContextBase) FormattingGeometry() *FormattingGeometry { return b.geometry }
+func (b *FormattingContextBase) FormattingQuirks() *FormattingQuirks     { return b.quirks }
+
+// SetGeometry installs the formatting-context-specific geometry helper.
+func (b *FormattingContextBase) SetGeometry(g *FormattingGeometry) { b.geometry = g }
+
+// SetQuirks installs the formatting-context-specific quirks helper.
+func (b *FormattingContextBase) SetQuirks(q *FormattingQuirks) { b.quirks = q }
+
+// ── contextFor dispatches ──
+
 // contextFor returns the formatting context for an ElementBox based on its style.
-func contextFor(box Box) FormattingContext {
+func contextFor(box Box, state *LayoutState) FormattingContext {
+	eb, ok := box.(*ElementBox)
+	if !ok || eb == nil {
+		return nil
+	}
+	var ctx FormattingContext
 	switch {
 	case box.IsTextRun():
-		return &InlineFormattingContext{}
+		ctx = &InlineFormattingContext{}
 	case box.EstablishesFlexFormattingContext():
-		return &FlexFormattingContext{}
+		ctx = &FlexFormattingContext{}
 	case box.EstablishesGridFormattingContext():
-		return &GridFormattingContext{}
+		ctx = &GridFormattingContext{}
 	case box.EstablishesTableFormattingContext():
-		return &TableFormattingContext{}
+		ctx = &TableFormattingContext{}
 	default:
-		if HasColumns(box) {
-			return &MultiColumnFormattingContext{}
+		if HasColumns(eb) {
+			ctx = &MultiColumnFormattingContext{}
+		} else {
+			ctx = &BlockFormattingContext{}
 		}
-		return &BlockFormattingContext{}
 	}
+	if ctx != nil {
+		if base, ok := ctx.(interface{ InitBase(*ElementBox, *LayoutState) }); ok {
+			base.InitBase(eb, state)
+		}
+	}
+	return ctx
 }
 
 // layoutInFlowChildren lays out all in-flow visible children of box.
@@ -38,10 +78,10 @@ func layoutInFlowChildren(box *ElementBox, state *LayoutState) {
 			continue
 		}
 		if eb, ok := child.(*ElementBox); ok {
-			ctx := contextFor(eb)
-			ctx.Layout(eb, state)
+			ctx := contextFor(eb, state)
+			if ctx != nil {
+				ctx.Layout(eb, state)
+			}
 		}
 	}
 }
-
-var _ = style.DisplayFlex

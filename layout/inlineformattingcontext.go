@@ -7,7 +7,9 @@ import (
 	"wb-ui/style"
 )
 
-type InlineFormattingContext struct{}
+type InlineFormattingContext struct {
+	FormattingContextBase
+}
 
 func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	cs := box.Style()
@@ -51,7 +53,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
-			childCtx := contextFor(cld)
+			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
 			cldW := cldG.BorderBoxWidth()
