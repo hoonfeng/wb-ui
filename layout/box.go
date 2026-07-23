@@ -409,14 +409,16 @@ func buildChildren(box *LayoutBox, el *dom.Element, resolver *style.Resolver) {
 	if isReplacedElement(el.LocalName()) {
 		return
 	}
-	// Flex / grid containers: per CSS (flexbox §4) every element child of a flex
-	// container becomes a flex item directly — no anonymous block wrappers are
-	// generated around inline-level children. Inline-level children are
-	// "blockified": their display is treated as block-level for layout so the
-	// flex formatting context sees each item as a direct block child. Pure
-	// whitespace text nodes between items are ignored (they do not generate
-	// flex items); non-whitespace text would become an anonymous flex item.
-	if box.Style != nil && isFlexContainerDisplay(box.Style.Display) {
+	// Flex / grid containers: per CSS (flexbox §4 / grid §3) every element child
+	// becomes a flex/grid item directly — no anonymous block wrappers are generated
+	// around inline-level children. Inline-level children are "blockified": their
+	// display is treated as block-level for layout so the formatting context sees
+	// each item as a direct block child. Pure whitespace text nodes between items
+	// are ignored (they do not generate items); non-whitespace text becomes an
+	// anonymous flex/grid item.
+	if box.Style != nil && (isFlexContainerDisplay(box.Style.Display) ||
+		box.Style.Display == style.DisplayGrid ||
+		box.Style.Display == style.DisplayInlineGrid) {
 		buildFlexChildren(box, el, resolver)
 		return
 	}

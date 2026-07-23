@@ -288,15 +288,6 @@ func syncOne(ro RenderObject, lb *layout.LayoutBox) {
 	if lb.Rect.Height < 0 {
 		lb.Rect.Height = 0
 	}
-	// Clamp massive heights: cascading flex-grow inflation in deeply nested
-	// auto-height containers can produce absurd heights. Clamp to the viewport
-	// height so paint doesn't try to cover millions of pixels.
-	if ro.View() != nil {
-		vh := ro.View().ViewHeight()
-		if vh > 0 && lb.Rect.Height > vh*2 {
-			lb.Rect.Height = vh
-		}
-	}
 	if box := asRenderBox(ro); box != nil {
 		box.frame = lb.Rect
 	}
