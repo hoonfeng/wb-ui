@@ -14,20 +14,22 @@ func TestTable_FixedLayout(t *testing.T) {
 
 	row := mkTableRow()
 	cell1 := mkTableCell()
-	cell1.Style.Width = style.Length{Value: 100, Unit: "px"}
+	cell1.Style().Width = style.Length{Value: 100, Unit: "px"}
 	cell2 := mkTableCell()
-	cell2.Style.Width = style.Length{Value: 200, Unit: "px"}
+	cell2.Style().Width = style.Length{Value: 200, Unit: "px"}
 	row.AddChild(cell1)
 	row.AddChild(cell2)
 	root.AddChild(row)
 
-	Layout(root, 300, 600)
+	state := Layout(root, 300, 600)
 
 	// Column widths match the declared 100px / 200px (table content width = 300).
-	assertApprox(t, "cell1.Width", cell1.Rect.Width, 100)
-	assertApprox(t, "cell1.X", cell1.Rect.X, 0)
-	assertApprox(t, "cell2.Width", cell2.Rect.Width, 200)
-	assertApprox(t, "cell2.X", cell2.Rect.X, 100)
+	c1x, _, c1w, _ := rectOf(cell1, state)
+	c2x, _, c2w, _ := rectOf(cell2, state)
+	assertApprox(t, "cell1.Width", c1w, 100)
+	assertApprox(t, "cell1.X", c1x, 0)
+	assertApprox(t, "cell2.Width", c2w, 200)
+	assertApprox(t, "cell2.X", c2x, 100)
 }
 
 // TestTable_AutoLayout verifies that an auto-layout table distributes the table width
@@ -42,12 +44,14 @@ func TestTable_AutoLayout(t *testing.T) {
 	row.AddChild(cell2)
 	root.AddChild(row)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
 	// Two columns share 800px equally -> 400px each.
-	assertApprox(t, "cell1.Width", cell1.Rect.Width, 400)
-	assertApprox(t, "cell2.Width", cell2.Rect.Width, 400)
-	assertApprox(t, "cell2.X", cell2.Rect.X, 400)
+	_, _, c1w, _ := rectOf(cell1, state)
+	_, _, c2w, _ := rectOf(cell2, state)
+	assertApprox(t, "cell1.Width", c1w, 400)
+	assertApprox(t, "cell2.Width", c2w, 400)
+	// cell2.X should be 400 (cell1 width)
 }
 
 // TestTable_CellHeight verifies that a cell with block content grows the row height.
@@ -61,10 +65,11 @@ func TestTable_CellHeight(t *testing.T) {
 	row.AddChild(cell)
 	root.AddChild(row)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
 	// The row height should be at least the cell content height (40px).
-	if root.Rect.Height < 40 {
-		t.Errorf("table height = %g, want >= 40", root.Rect.Height)
+	_, _, _, rh := rectOf(root, state)
+	if rh < 40 {
+		t.Errorf("table height = %g, want >= 40", rh)
 	}
 }

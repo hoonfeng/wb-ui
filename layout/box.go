@@ -183,6 +183,25 @@ func (b *ElementBox) IsBlockLevel() bool {
 	return false
 }
 
+// ── Grid item placement ──
+
+func (b *ElementBox) GridColumnStart() string {
+	if b.style == nil { return "" }
+	return b.style.GridColumnStart
+}
+func (b *ElementBox) GridColumnEnd() string {
+	if b.style == nil { return "" }
+	return b.style.GridColumnEnd
+}
+func (b *ElementBox) GridRowStart() string {
+	if b.style == nil { return "" }
+	return b.style.GridRowStart
+}
+func (b *ElementBox) GridRowEnd() string {
+	if b.style == nil { return "" }
+	return b.style.GridRowEnd
+}
+
 func (b *ElementBox) AddChild(child Box) {
 	if child == nil { return }
 	b.children = append(b.children, child)

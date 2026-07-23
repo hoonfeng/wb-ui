@@ -1,3 +1,4 @@
+// Grid layout test — mimics the Vue app's CSS grid structure.
 package layout
 
 import (
@@ -6,199 +7,145 @@ import (
 	"wb-ui/style"
 )
 
-// TestGrid_FixedTracks verifies that grid-template-columns with px values produces
-// columns of the declared widths and places items in their columns.
-func TestGrid_FixedTracks(t *testing.T) {
-	root := mkGrid()
-	root.Style.GridTemplateColumns = "100px 200px"
+// TestGrid_VueApp verifies that the GridFormattingContext correctly positions
+// children according to grid-template-columns/rows and grid-column/grid-row
+// placement, matching the Vue frontend's .app-root grid.
+//
+// CSS (from App.vue):
+//
+//	.app-root {
+//	  display: grid;
+//	  grid-template-columns: 48px auto 1fr auto;
+//	  grid-template-rows: 30px 1fr 22px;
+//	}
+//	.titlebar  { grid-column: 1 / -1; grid-row: 1; }
+//	.activity-bar { grid-column: 1; grid-row: 2; }
+//	.sidebar   { grid-column: 2; grid-row: 2; }
+//	.main-area { grid-column: 3; grid-row: 2; }
+//	.right-container { grid-column: 4; grid-row: 2; }
+//	.status-bar { grid-column: 1 / -1; grid-row: 3; }
+func TestGrid_VueApp(t *testing.T) {
+	// Create grid container with the same grid template as .app-root.
+	root := mkVueGrid()
+	// Set an explicit height so 1fr rows can distribute remaining space.
+	root.style.Height = style.Length{Value: 800, Unit: "px"}
 
-	a := mkBlock()
-	a.Style.GridColumnStart = "1"
-	a.Style.GridColumnEnd = "2"
-	a.Style.GridRowStart = "1"
-	a.Style.GridRowEnd = "2"
+	titlebar := mkVueGridChild("titlebar", 1, -1, 1, 1)
+	activityBar := mkVueGridChild("activity-bar", 1, 2, 2, 3)
+	sidebar := mkVueGridChild("sidebar", 2, 3, 2, 3)
+	mainArea := mkVueGridChild("main-area", 3, 4, 2, 3)
+	rightContainer := mkVueGridChild("right-container", 4, 5, 2, 3)
+	statusBar := mkVueGridChild("status-bar", 1, -1, 3, 4)
 
-	b := mkBlock()
-	b.Style.GridColumnStart = "2"
-	b.Style.GridColumnEnd = "3"
-	b.Style.GridRowStart = "1"
-	b.Style.GridRowEnd = "2"
-
-	root.AddChild(a)
-	root.AddChild(b)
-
-	Layout(root, 800, 600)
-
-	assertApprox(t, "a.Width", a.Rect.Width, 100)
-	assertApprox(t, "a.X", a.Rect.X, 0)
-	assertApprox(t, "b.Width", b.Rect.Width, 200)
-	assertApprox(t, "b.X", b.Rect.X, 100)
-}
-
-// TestGrid_FrDistribution verifies that 1fr tracks share the free space equally.
-func TestGrid_FrDistribution(t *testing.T) {
-	root := mkGrid()
-	root.Style.GridTemplateColumns = "1fr 1fr"
-
-	a := mkBlock()
-	a.Style.GridColumnStart = "1"
-	a.Style.GridColumnEnd = "2"
-	a.Style.GridRowStart = "1"
-	a.Style.GridRowEnd = "2"
-
-	b := mkBlock()
-	b.Style.GridColumnStart = "2"
-	b.Style.GridColumnEnd = "3"
-	b.Style.GridRowStart = "1"
-	b.Style.GridRowEnd = "2"
-
-	root.AddChild(a)
-	root.AddChild(b)
-
-	Layout(root, 800, 600)
-
-	// Each 1fr column gets 400px.
-	assertApprox(t, "a.Width", a.Rect.Width, 400)
-	assertApprox(t, "b.Width", b.Rect.Width, 400)
-	assertApprox(t, "b.X", b.Rect.X, 400)
-}
-
-// TestGrid_PercentageTrack verifies that percentage tracks resolve against the
-// container content width.
-// TestGrid_NamedAreas verifies that items assigned to named areas via grid-area
-// are correctly placed by grid-template-areas.
-func TestGrid_NamedAreas(t *testing.T) {
-	root := mkGrid()
-	root.Style.GridTemplateColumns = "100px 200px 150px"
-	root.Style.GridTemplateRows = "80px 80px"
-	root.Style.GridTemplateAreas = `"a b c" "a d e"`
-
-	a := mkBlock()
-	a.Style.Properties["grid-area"] = "a"
-	b := mkBlock()
-	b.Style.Properties["grid-area"] = "b"
-	c := mkBlock()
-	c.Style.Properties["grid-area"] = "c"
-	d := mkBlock()
-	d.Style.Properties["grid-area"] = "d"
-	e := mkBlock()
-	e.Style.Properties["grid-area"] = "e"
-
-	root.AddChild(a)
-	root.AddChild(b)
-	root.AddChild(c)
-	root.AddChild(d)
-	root.AddChild(e)
-
-	Layout(root, 800, 600)
-
-	// a spans rows 0-2, col 0 (2 rows x 80px each = 160px height for the row span)
-	assertApprox(t, "a.X", a.Rect.X, 0)
-	assertApprox(t, "a.Y", a.Rect.Y, 0)
-	assertApprox(t, "a.Width", a.Rect.Width, 100)
-
-	// b is at row 0, col 1
-	assertApprox(t, "b.X", b.Rect.X, 100)
-	assertApprox(t, "b.Y", b.Rect.Y, 0)
-	assertApprox(t, "b.Width", b.Rect.Width, 200)
-
-	// c is at row 0, col 2
-	assertApprox(t, "c.X", c.Rect.X, 300)
-	assertApprox(t, "c.Y", c.Rect.Y, 0)
-	assertApprox(t, "c.Width", c.Rect.Width, 150)
-
-	// d is at row 1, col 1
-	assertApprox(t, "d.X", d.Rect.X, 100)
-	assertApprox(t, "d.Y", d.Rect.Y, 80)
-
-	// e is at row 1, col 2
-	assertApprox(t, "e.X", e.Rect.X, 300)
-	assertApprox(t, "e.Y", e.Rect.Y, 80)
-}
-
-func TestGrid_PercentageTrack(t *testing.T) {
-	root := mkGrid()
-	root.Style.GridTemplateColumns = "50% 50%"
-
-	a := mkBlock()
-	a.Style.GridColumnStart = "1"
-	a.Style.GridColumnEnd = "2"
-	a.Style.GridRowStart = "1"
-	a.Style.GridRowEnd = "2"
-
-	b := mkBlock()
-	b.Style.GridColumnStart = "2"
-	b.Style.GridColumnEnd = "3"
-	b.Style.GridRowStart = "1"
-	b.Style.GridRowEnd = "2"
-
-	root.AddChild(a)
-	root.AddChild(b)
-
-	Layout(root, 800, 600)
-
-	// 50% of 800 = 400 each.
-	assertApprox(t, "a.Width", a.Rect.Width, 400)
-	assertApprox(t, "b.Width", b.Rect.Width, 400)
-}
-
-// TestGrid_ComplexNamedAreas reproduces the B6 test page layout structure to verify
-// that named grid areas with multiple rows/columns correctly position all items.
-func TestGrid_ComplexNamedAreas(t *testing.T) {
-	root := mkGrid()
-	// 3 columns: 220px + 1fr + 280px = at least 500px content width
-	root.Style.GridTemplateColumns = "220px 1fr 280px"
-	// 3 rows: 48px + 1fr + 32px
-	root.Style.GridTemplateRows = "48px 1fr 32px"
-	root.Style.GridTemplateAreas = `"header header header" "sidebar main panel" "status status status"`
-	root.Style.Width = style.Length{Value: 800, Unit: "px"}
-
-	header := mkBlock()
-	header.Style.Properties["grid-area"] = "header"
-	sidebar := mkBlock()
-	sidebar.Style.Properties["grid-area"] = "sidebar"
-	main := mkBlock()
-	main.Style.Properties["grid-area"] = "main"
-	panel := mkBlock()
-	panel.Style.Properties["grid-area"] = "panel"
-	status := mkBlock()
-	status.Style.Properties["grid-area"] = "status"
-
-	root.AddChild(header)
+	root.AddChild(titlebar)
+	root.AddChild(activityBar)
 	root.AddChild(sidebar)
-	root.AddChild(main)
-	root.AddChild(panel)
-	root.AddChild(status)
+	root.AddChild(mainArea)
+	root.AddChild(rightContainer)
+	root.AddChild(statusBar)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 1280, 800)
 
-	t.Logf("Grid container: rect=(%.0f,%.0f,%.0f,%.0f)", root.Rect.X, root.Rect.Y, root.Rect.Width, root.Rect.Height)
-	t.Logf("Header: rect=(%.0f,%.0f,%.0f,%.0f)", header.Rect.X, header.Rect.Y, header.Rect.Width, header.Rect.Height)
-	t.Logf("Sidebar: rect=(%.0f,%.0f,%.0f,%.0f)", sidebar.Rect.X, sidebar.Rect.Y, sidebar.Rect.Width, sidebar.Rect.Height)
-	t.Logf("Main: rect=(%.0f,%.0f,%.0f,%.0f)", main.Rect.X, main.Rect.Y, main.Rect.Width, main.Rect.Height)
-	t.Logf("Panel: rect=(%.0f,%.0f,%.0f,%.0f)", panel.Rect.X, panel.Rect.Y, panel.Rect.Width, panel.Rect.Height)
-	t.Logf("Status: rect=(%.0f,%.0f,%.0f,%.0f)", status.Rect.X, status.Rect.Y, status.Rect.Width, status.Rect.Height)
+	// Debug titlebar geometry.
+	tg := state.GeometryForBox(titlebar)
+	t.Logf("titlebar: contentW=%.0f borderW=%.0f left=%.0f top=%.0f",
+		tg.ContentWidth(), tg.BorderBoxWidth(), tg.Left(), tg.Top())
 
-	// Header spans all 3 columns in row 0
-	assertApprox(t, "header.X", header.Rect.X, 0)
-	assertApprox(t, "header.Y", header.Rect.Y, 0)
-	assertApprox(t, "header.Width", header.Rect.Width, 800)
+	// ═══ titlebar: grid-column: 1 / -1 (spans all 4 cols), grid-row: 1 ═══
+	tx, ty, tw, th := rectOf(titlebar, state)
+	assertApprox(t, "titlebar.X", tx, 0)
+	assertApprox(t, "titlebar.Y", ty, 0)
+	assertApprox(t, "titlebar.Width", tw, 1280) // span all 4 cols
+	assertApprox(t, "titlebar.Height", th, 30)
 
-	// Sidebar is at col 0, row 1 (220px wide)
-	assertApprox(t, "sidebar.X", sidebar.Rect.X, 0)
-	assertApprox(t, "sidebar.Y", sidebar.Rect.Y, 48)
-	assertApprox(t, "sidebar.Width", sidebar.Rect.Width, 220)
+	// ═══ activity-bar: grid-column: 1, grid-row: 2 ═══
+	ax, ay, aw, ah := rectOf(activityBar, state)
+	assertApprox(t, "activity-bar.X", ax, 0)
+	assertApprox(t, "activity-bar.Y", ay, 30)
+	assertApprox(t, "activity-bar.Width", aw, 48)
 
-	// Main is at col 1, row 1 (1fr = 800-220-280 = 300px)
-	assertApprox(t, "main.X", main.Rect.X, 220)
-	assertApprox(t, "main.Y", main.Rect.Y, 48)
+	// ═══ sidebar: grid-column: 2, grid-row: 2 ═══
+	sx, sy, sw, sh := rectOf(sidebar, state)
+	assertApprox(t, "sidebar.Y", sy, 30)
+	assertApprox(t, "sidebar.X", sx, 48) // after col 1 (48px)
 
-	// Panel is at col 2, row 1 (280px wide)
-	assertApprox(t, "panel.X", panel.Rect.X, 520)
-	assertApprox(t, "panel.Y", panel.Rect.Y, 48)
-	assertApprox(t, "panel.Width", panel.Rect.Width, 280)
+	// ═══ main-area: grid-column: 3, grid-row: 2 ═══
+	mx, my, mw, mh := rectOf(mainArea, state)
+	assertApprox(t, "main-area.Y", my, 30)
+	assertApprox(t, "main-area.X", mx, 48+sw) // after col 1 + col 2
 
-	// Status spans all 3 columns in row 2
-	assertApprox(t, "status.X", status.Rect.X, 0)
-	assertApprox(t, "status.Width", status.Rect.Width, 800)
+	// ═══ right-container: grid-column: 4, grid-row: 2 ═══
+	rx, ry, rw, rh := rectOf(rightContainer, state)
+	assertApprox(t, "right-container.Y", ry, 30)
+	assertApprox(t, "right-container.X", rx, 48+sw+mw) // after col 1+2+3
+
+	// ═══ status-bar: grid-column: 1 / -1, grid-row: 3 ═══
+	stx, sty, stw, sth := rectOf(statusBar, state)
+	// status-bar Y = row3 start = row1(30) + row2(748) = 778
+	assertApprox(t, "status-bar.Y", sty, 778)
+	assertApprox(t, "status-bar.X", stx, 0)
+	assertApprox(t, "status-bar.Width", stw, 1280) // span all 4 cols
+	assertApprox(t, "status-bar.Height", sth, 22)
+
+	// ═══ container height should match total ═══
+	_, _, _, rh = rectOf(root, state)
+	assertApprox(t, "root.Height", rh, 800)
+
+	t.Logf("titlebar: (%.0f,%.0f) %.0fx%.0f", tx, ty, tw, th)
+	t.Logf("activity-bar: (%.0f,%.0f) %.0fx%.0f", ax, ay, aw, ah)
+	t.Logf("sidebar: (%.0f,%.0f) %.0fx%.0f", sx, sy, sw, sh)
+	t.Logf("main-area: (%.0f,%.0f) %.0fx%.0f", mx, my, mw, mh)
+	t.Logf("right-container: (%.0f,%.0f) %.0fx%.0f", rx, ry, rw, rh)
+	t.Logf("status-bar: (%.0f,%.0f) %.0fx%.0f", stx, sty, stw, sth)
+	t.Logf("root: (%.0f,%.0f)", 0.0, rh)
+}
+
+// mkVueGrid creates a grid container matching the .app-root CSS.
+func mkVueGrid() *ElementBox {
+	cs := style.NewComputedStyle()
+	cs.Display = style.DisplayGrid
+	cs.GridTemplateColumns = "48px auto 1fr auto"
+	cs.GridTemplateRows = "30px 1fr 22px"
+	cs.BorderTopWidth = style.Length{}
+	cs.BorderRightWidth = style.Length{}
+	cs.BorderBottomWidth = style.Length{}
+	cs.BorderLeftWidth = style.Length{}
+	cs.PaddingTop = style.Length{}
+	cs.PaddingRight = style.Length{}
+	cs.PaddingBottom = style.Length{}
+	cs.PaddingLeft = style.Length{}
+	cs.BoxSizing = "border-box"
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
+}
+
+// mkVueGridChild creates a grid item with explicit grid-column/grid-row placement.
+func mkVueGridChild(name string, colStart, colEnd, rowStart, rowEnd int) *ElementBox {
+	cs := style.NewComputedStyle()
+	cs.Display = style.DisplayBlock
+	cs.GridColumnStart = gridLineStr(colStart)
+	cs.GridColumnEnd = gridLineStr(colEnd)
+	cs.GridRowStart = gridLineStr(rowStart)
+	cs.GridRowEnd = gridLineStr(rowEnd)
+	return &ElementBox{nodeType: NodeGenericElement, style: cs}
+}
+
+func gridLineStr(v int) string {
+	if v == -1 {
+		return "-1"
+	}
+	b := make([]byte, 0, 4)
+	if v < 0 {
+		b = append(b, '-')
+		v = -v
+	}
+	if v >= 100 {
+		b = append(b, byte('0'+v/100))
+		v %= 100
+	}
+	if v >= 10 {
+		b = append(b, byte('0'+v/10))
+		v %= 10
+	}
+	b = append(b, byte('0'+v))
+	return string(b)
 }

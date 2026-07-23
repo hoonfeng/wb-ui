@@ -14,10 +14,11 @@ func TestInline_SingleLine(t *testing.T) {
 	anon.AddChild(mkTextRun("hi"))
 	root.AddChild(anon)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
 	// Default font-size 16, line-height 1.2 -> 19.2.
-	assertApprox(t, "anon.Height", anon.Rect.Height, 19.2)
+	_, _, _, ah := rectOf(anon, state)
+	assertApprox(t, "anon.Height", ah, 19.2)
 }
 
 // TestInline_TextWraps verifies that long text wraps across multiple lines when it
@@ -30,13 +31,14 @@ func TestInline_TextWraps(t *testing.T) {
 	anon.AddChild(mkTextRun("hello world"))
 	root.AddChild(anon)
 
-	Layout(root, 80, 600)
+	state := Layout(root, 80, 600)
 
 	// Two lines: line 1 "hello ", line 2 "world". Height = 2 * 19.2 = 38.4.
-	if anon.Rect.Height < 30 {
-		t.Errorf("expected wrapped text to span multiple lines, height = %g", anon.Rect.Height)
+	_, _, _, ah := rectOf(anon, state)
+	if ah < 30 {
+		t.Errorf("expected wrapped text to span multiple lines, height = %g", ah)
 	}
-	assertApprox(t, "anon.Height", anon.Rect.Height, 38.4)
+	assertApprox(t, "anon.Height", ah, 38.4)
 }
 
 // TestInline_TextAlignCenter verifies that text-align: center shifts the line content
@@ -44,18 +46,19 @@ func TestInline_TextWraps(t *testing.T) {
 func TestInline_TextAlignCenter(t *testing.T) {
 	root := mkBlock()
 	anon := mkAnon()
-	anon.Style.TextAlign = style.TextAlignCenter
+	anon.Style().TextAlign = style.TextAlignCenter
 	anon.AddChild(mkTextRun("hi"))
 	root.AddChild(anon)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
 	// The text item "hi" (2 chars) has advance 2*9.6 = 19.2. Centred in 800 means
 	// it starts at (800 - 19.2)/2 = 390.4.
-	for _, c := range anon.Children {
+	for _, c := range anon.Children() {
 		if c.IsTextRun() {
-			if c.Rect.X < 300 {
-				t.Errorf("centred text X = %g, expected >= 300", c.Rect.X)
+			cx, _, _, _ := rectOf(c.(*ElementBox), state)
+			if cx < 300 {
+				t.Errorf("centred text X = %g, expected >= 300", cx)
 			}
 		}
 	}
@@ -70,8 +73,9 @@ func TestInline_MultipleRuns(t *testing.T) {
 	anon.AddChild(mkTextRun("cd"))
 	root.AddChild(anon)
 
-	Layout(root, 800, 600)
+	state := Layout(root, 800, 600)
 
 	// Both runs fit on one line; container height is one line.
-	assertApprox(t, "anon.Height", anon.Rect.Height, 19.2)
+	_, _, _, ah := rectOf(anon, state)
+	assertApprox(t, "anon.Height", ah, 19.2)
 }
