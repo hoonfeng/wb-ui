@@ -16,13 +16,12 @@ import (
 	"sync"
 
 	"github.com/hoonfeng/goskia/skia"
+	"wb-ui/wtf"
 )
 
 // Color is the Go translation of WebCore::Color (the 8-bit-per-channel RGBA subset).
-// It mirrors the color representation used by the style package.
-type Color struct {
-	R, G, B, A uint8
-}
+// It is an alias to wtf.Color, so style and rendering share the same type.
+type Color = wtf.Color
 
 // Font is the Go translation of the subset of FontCascade / FontDescription needed by
 // the paint pipeline. Real WebKit carries a full FontCascade with platform font

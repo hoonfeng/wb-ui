@@ -16,6 +16,6 @@ func main() {
 	}
 	defer s.Release()
 	c := s.Canvas()
-	c.Clear(skia.NewColor(255, 0, 0, 255))
+	c.Clear(skia.RGBA(255, 0, 0, 255))
 	fmt.Println("OK")
 }
