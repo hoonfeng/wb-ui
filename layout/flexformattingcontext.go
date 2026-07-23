@@ -90,11 +90,17 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		if flexBasisIsContent(it.box, isRow) {
 			measW := mainSizeAvailable(isRow, contentWidth, contentHeight)
 			if !isRow {
-				// Column-direction: use the container's content width (cross-axis)
-				// for measurement, not the contentHeight (main-axis). The height
-				// may be auto (0) or very large (after previous re-layouts), but
-				// text and inline children need the correct width to flow.
-				measW = contentWidth
+				// Column-direction: use the container's content height (main-axis)
+				// for measurement. The function already sets box.Rect.Width = viewport
+				// (cross-axis) so text flows correctly. Using contentWidth (cross-size)
+				// here would overflow the child's height, inflating the measurement.
+				// If the container's height is auto (0), clamp to the cross-size so
+				// the child's content measurement has a reasonable bound.
+				if contentHeight <= 0 {
+					measW = contentWidth
+				} else {
+					measW = contentHeight
+				}
 			}
 			basis = measureFlexItemContentMain(it.box, measW, isRow, state)
 		}
@@ -116,11 +122,35 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
 	// if a temporary cross size was set by the parent (e.g. via the
 	// cross-size pre-set in the outer flex loop), use that known value.
+	// If the container's main-axis size is auto or unresolvable (0 due to
+	// circular dependency, e.g. column flex child of a row flex whose cross
+	// size hasn't been set yet), use the viewport height so items are not shrunk
+	// to zero or inflated to infinity. The actual container size is determined
+	// from content at the end of Layout (see heightIsAuto block below).
+	// Only fire when contentHeight/contentWidth is truly 0/unavailable;
+	// if a temporary cross size was set by the parent (e.g. via the
+	// cross-size pre-set in the outer flex loop), use that known value.
 	if !isRow && contentHeight <= 0 {
-		mainSize = 1e6
+		if state != nil && state.ViewportHeight > 0 {
+			mainSize = state.ViewportHeight
+		} else if containerHeight := box.Rect.ContentHeight(); containerHeight > 0 {
+			mainSize = containerHeight
+		} else if cbW := box.Rect.ContentWidth(); cbW > 0 {
+			mainSize = cbW
+		} else {
+			mainSize = 800
+		}
 	}
 	if isRow && contentWidth <= 0 {
-		mainSize = 1e6
+		if state != nil && state.ViewportWidth > 0 {
+			mainSize = state.ViewportWidth
+		} else if containerWidth := box.Rect.ContentWidth(); containerWidth > 0 {
+			mainSize = containerWidth
+		} else if cbH := box.Rect.ContentHeight(); cbH > 0 {
+			mainSize = cbH
+		} else {
+			mainSize = 1280
+		}
 	}
 
 	// Line breaking (flex-wrap): pack items into lines by hypothetical main size.
@@ -141,10 +171,10 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 				lineMain += freezeLine[i].mainSize
 			}
 			free := mainSize - lineMain - lineMainMargins(freezeLine)
-			// When the container's main size is indefinite (auto / sentinel 1e6),
+			// When the container's main size is indefinite (auto / sentinel),
 			// do not distribute positive free space via flex-grow. Growing into
-			// infinite space would balloon flex-grow items to unrealistic sizes.
-			if free > 0 && mainSize >= 1e5 {
+			// viewport-sized space would balloon flex-grow items.
+			if free > 0 && mainSize >= 800 {
 				free = 0
 			}
 			if math.Abs(free) < 1e-6 {
@@ -947,10 +977,17 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 		// width will be set by setItemPosition stretch in the main layout pass.
 		h := availableMain
 		if h <= 0 || h >= 1e5 {
-			h = 1280
+			// Use viewport height from state when availableMain is the sentinel.
+			// This prevents nested column flex containers from measuring at
+			// the sentinel (1e6) and inflating their content height.
+			if state != nil && state.ViewportHeight > 0 {
+				h = state.ViewportHeight
+			} else {
+				h = 1280
+			}
 		}
 		box.Rect.Height = h
-		box.Rect.Width = 1280
+		box.Rect.Width = stateWidth(state)
 		box.Rect.X = 0
 		box.Rect.Y = 0
 	}
@@ -967,11 +1004,12 @@ func measureFlexItemContentMain(box *LayoutBox, availableMain float64, isRow boo
 	if h < 0 {
 		h = 0
 	}
-	// Clamp measured height to 4096 to prevent cascading height inflation
-	// in nested column flex containers. During the final layout pass the
-	// container's actual height constraint will correctly size everything.
-	if h > 4096 {
-		h = 4096
+	// Clamp measured height to viewport height to prevent cascading
+	// height inflation in nested column flex containers. During the final
+	// layout pass the container's actual height will be constrained correctly.
+	clamp := stateHeight(state)
+	if h > clamp {
+		h = clamp
 	}
 	return h
 }
@@ -1030,6 +1068,22 @@ func contentSpanWidth(box *LayoutBox) float64 {
 		cw = 0
 	}
 	return cw
+}
+
+// stateWidth returns the viewport width from the layout state, defaulting to 1280.
+func stateWidth(state *LayoutState) float64 {
+	if state != nil && state.ViewportWidth > 0 {
+		return state.ViewportWidth
+	}
+	return 1280
+}
+
+// stateHeight returns the viewport height from the layout state, defaulting to 800.
+func stateHeight(state *LayoutState) float64 {
+	if state != nil && state.ViewportHeight > 0 {
+		return state.ViewportHeight
+	}
+	return 800
 }
 
 // needsContentRelayout reports whether a flex/grid item's content needs to be

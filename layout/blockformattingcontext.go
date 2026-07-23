@@ -157,11 +157,10 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 					}
 				}
 			}
-		} else if cbHeight > 0 {
-			// Any auto-height child inside a definite-height block container
-			// gets a provisional height set to the remaining available space.
-			// This prevents nested flex/grid/block layouts from falling back
-			// to the 1e6 sentinel when they see contentHeight=0.
+		} else if cbHeight > 0 && childNeedsHeightConstraint(child) {
+			// Auto-height flex/grid containers inside a definite-height block:
+			// set a provisional height to the remaining space so the child's
+			// own layout does not fall back to the 1e6 sentinel.
 			remaining := cbHeight - (cursor - box.Rect.ContentY())
 			if remaining > 0 {
 				child.Rect.Height = remaining
@@ -347,6 +346,27 @@ func heightIsAuto(box *LayoutBox) bool {
 	}
 	r := resolveLengthAuto(box.Style.Height, 0, 0)
 	return r.Auto
+}
+
+// childNeedsHeightConstraint reports whether a block child needs a provisional
+// height constraint because its own layout engine (flex/grid) would otherwise
+// use the 1e6 sentinel when contentHeight is 0.
+func childNeedsHeightConstraint(box *LayoutBox) bool {
+	if box == nil || box.Style == nil {
+		return false
+	}
+	// Column flex containers: main axis is height; auto-height falls to sentinel.
+	if box.Style.Display == style.DisplayFlex || box.Style.Display == style.DisplayInlineFlex {
+		fd := box.Style.FlexDirection
+		if fd == "column" || fd == "column-reverse" {
+			return true
+		}
+	}
+	// Grid containers: need height for row track sizing.
+	if box.Style.Display == style.DisplayGrid || box.Style.Display == style.DisplayInlineGrid {
+		return true
+	}
+	return false
 }
 
 // stateRoot walks the parent chain to find the layout root (the box with no parent).
