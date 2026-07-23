@@ -107,7 +107,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			collapsedTop = math.Max(pendingMargin, topMargin)
 		}
 		cursor += collapsedTop
-		ch.SetTopLeft(ch.Left(), cursor)
+		ch.SetTopLeft(cursor, ch.Left())
 
 		cbHeight := g.ContentHeight()
 		if cbHeight <= 0 && box.Parent() != nil {
@@ -261,7 +261,7 @@ func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *f
 
 	isLeft := cs.Float != "right"
 	x, y := fc.placeFloat(child, isLeft, borderBox, 0)
-	ch.SetTopLeft(x, y)
+	ch.SetTopLeft(y, x)
 
 	childCtx := contextFor(child, state)
 	childCtx.Layout(child, state)

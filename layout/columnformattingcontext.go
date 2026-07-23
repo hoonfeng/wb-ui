@@ -87,13 +87,13 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 		if !ok { continue }
 		cg := state.GeometryForBox(childEb)
 
-		cg.SetTopLeft(colX+cg.MarginStart(), colYStart+cg.MarginBefore())
+cg.SetTopLeft(colYStart+cg.MarginBefore(), colX+cg.MarginStart())
 
 		childBottom := cg.Top() + cg.BorderBoxHeight() + cg.MarginAfter()
 		if childBottom > colYStart+colHeight && colIndex < colCount-1 {
 			colIndex++
 			colX = colXStart + float64(colIndex)*(colWidth+colGap)
-			cg.SetTopLeft(colX+cg.MarginStart(), colYStart+cg.MarginBefore())
+cg.SetTopLeft(colYStart+cg.MarginBefore(), colX+cg.MarginStart())
 		}
 
 		bw := cg.BorderBoxWidth()

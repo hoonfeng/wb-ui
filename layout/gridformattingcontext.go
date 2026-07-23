@@ -61,7 +61,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		itg := state.GeometryForBox(it.box)
 		x := g.ContentBoxLeft() + float64(it.col)*colW
 		y := g.ContentBoxTop() + float64(it.row)*rowH
-		itg.SetTopLeft(x, y)
+		itg.SetTopLeft(y, x)
 		itg.SetContentWidth(colW - itg.MarginStart() - itg.MarginEnd())
 		itg.SetContentHeight(rowH - itg.MarginBefore() - itg.MarginAfter())
 

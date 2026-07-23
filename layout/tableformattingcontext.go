@@ -62,7 +62,7 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		x := g.ContentBoxLeft()
 		for ci, cell := range row.cells {
 			cg := state.GeometryForBox(cell)
-			cg.SetTopLeft(x, y)
+			cg.SetTopLeft(y, x)
 			cg.SetContentWidth(colWidth - cg.MarginStart() - cg.MarginEnd())
 
 			// Layout cell content.
@@ -85,7 +85,7 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 		}
 
-		rg.SetTopLeft(g.ContentBoxLeft(), y)
+		rg.SetTopLeft(y, g.ContentBoxLeft())
 		rg.SetContentWidth(cw)
 		rg.SetContentHeight(rowH)
 		y += rowH

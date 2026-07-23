@@ -79,7 +79,7 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		x = cbg.ContentBoxLeft() + margin.Left
 	}
 	g.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
-	g.SetTopLeft(x, 0) // Y set below
+	g.SetTopLeft(0, x) // Y set below
 
 	if hAuto {
 		height = layoutAbsoluteHeightForBox(box, state)
@@ -102,7 +102,7 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	default:
 		y = cbg.ContentBoxTop() + margin.Top
 	}
-	g.SetTopLeft(g.Left(), y)
+	g.SetTopLeft(y, x)
 
 	layoutBoxContentForBox(box, state)
 }
@@ -156,7 +156,7 @@ func applyRelativeOffsetForBox(box *ElementBox, cbWidth, cbHeight float64, state
 	} else if !bottomAuto {
 		y -= bottom
 	}
-	g.SetTopLeft(x, y)
+	g.SetTopLeft(y, x)
 }
 
 func resolveOffset(l style.Length, cbSize float64) (float64, bool) {

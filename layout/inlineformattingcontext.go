@@ -61,7 +61,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				lines = append(lines, currentLine)
 				currentLine = &line{x: contentX, y: currentLine.y + lineHeight, width: contentWidth}
 			}
-			cldG.SetTopLeft(currentLine.x, currentLine.y)
+			cldG.SetTopLeft(currentLine.y, currentLine.x)
 			currentLine.x += cldW
 		}
 	}

@@ -25,7 +25,7 @@ body {
   font-family: var(--font-ui); font-size: var(--font-size-base);
   color: var(--text-primary); background-color: var(--bg-primary);
 }
-#app { background-color: var(--bg-primary); }
+#app { display: flex; flex-direction: column; background-color: var(--bg-primary); }
 `
 
 func layoutInfo(ro RenderObject) (x, y, w, h float64) {
