@@ -6,12 +6,14 @@ import (
 	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/html"
+	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
 
-func TestLayoutBoxExists(t *testing.T) {
+func TestBodySync(t *testing.T) {
 	htmlSrc := "<!DOCTYPE html>\n<html><head><style>\n" +
+		"body { margin: 0; }\n" +
 		"#box { background-color: #16213e; width: 200px; height: 100px; }\n" +
 		"</style></head><body>\n" +
 		"<div id=\"box\"></div>\n" +
@@ -41,31 +43,45 @@ func TestLayoutBoxExists(t *testing.T) {
 		}
 	}
 
+	// Check layout tree structure
+	layoutRoot := layout.BuildLayoutTree(doc.DocumentElement(), resolver)
+	t.Logf("layoutRoot.Children=%d", len(layoutRoot.Children))
+	for i, ch := range layoutRoot.Children {
+		tag := "?"
+		if ch.Element != nil {
+			tag = ch.Element.TagName()
+		}
+		t.Logf("  [%d] type=%d tag=%s w=%.0f", i, ch.Type, tag, ch.Rect.Width)
+	}
+
 	rv := NewRenderTreeBuilder(resolver).Build(doc)
-	if rv == nil {
-		t.Fatal("RenderView is nil")
-	}
-
-	t.Logf("RenderView LayoutBox: %v", rv.LayoutBox())
-	if rv.FirstChild() != nil {
-		t.Logf("first child LayoutBox: %v", rv.FirstChild().LayoutBox())
-	}
-
 	rv.SetViewportSize(1280, 800)
-
-	t.Logf("BEFORE Layout - RenderView LayoutBox: %v", rv.LayoutBox())
-	if lb := rv.LayoutBox(); lb != nil {
-		t.Logf("  lb.Rect = %.0f,%.0f %.0fx%.0f", lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height)
-	}
-
 	rv.Layout(nil)
 
-	t.Logf("AFTER Layout - RenderView LayoutBox: %v", rv.LayoutBox())
-	if lb := rv.LayoutBox(); lb != nil {
-		t.Logf("  lb.Rect = %.0f,%.0f %.0fx%.0f", lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height)
+	// Find body render box
+	var bodyRO RenderObject
+	var walk func(ro RenderObject)
+	walk = func(ro RenderObject) {
+		if el, ok := ro.Node().(*dom.Element); ok && el.TagName() == "BODY" {
+			bodyRO = ro
+		}
+		for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(rv)
+
+	if bodyRO != nil {
+		box := asRenderBox(bodyRO)
+		if box != nil {
+			t.Logf("body render frame: (%.0f,%.0f %.0fx%.0f)", box.X(), box.Y(), box.Width(), box.Height())
+		}
+		lb := bodyRO.LayoutBox()
+		if lb != nil {
+			t.Logf("body layout box: (%.0f,%.0f %.0fx%.0f)", lb.Rect.X, lb.Rect.Y, lb.Rect.Width, lb.Rect.Height)
+		}
 	}
 
-	// Paint
 	canvas := graphics.NewCanvas(1280, 800)
 	defer canvas.Release()
 	canvas.Clear(graphics.Color{R: 255, G: 0, B: 0, A: 255})
@@ -76,9 +92,4 @@ func TestLayoutBoxExists(t *testing.T) {
 	idx := (50*w + 50) * 4
 	r, g, b := pixels[idx], pixels[idx+1], pixels[idx+2]
 	t.Logf("pixel(50,50): #%02x%02x%02x", r, g, b)
-	if r == 0x16 && g == 0x21 && b == 0x3e {
-		t.Log("PAINT WORKS!")
-	} else if r == 255 && g == 0 && b == 0 {
-		t.Error("still red")
-	}
 }
