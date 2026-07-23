@@ -379,8 +379,7 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			// container's vertical padding/border.
 			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
 				box.Rect.Border.Top + box.Rect.Border.Bottom
-			box.Rect.Height = totalLineMain(lines) + box.Rect.Padding.Top + box.Rect.Padding.Bottom +
-				box.Rect.Border.Top + box.Rect.Border.Bottom
+		}
 	}
 
 	// Re-lay-out flex/grid container items so their children are calculated
@@ -388,6 +387,39 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 	// the provisional measurement width. The item stays at its absolute position
 	// (set by setItemPosition + offsetItemSubtree above), so the inner layout
 	// positions children correctly without double-shifting.
+	//
+	// For row containers, compute flex-grow distribution here:
+	// items with flex-grow > 0 share the remaining space proportionally.
+	if isRow {
+		totalGrow := 0.0
+		fixedWidth := 0.0
+		for j := range items {
+			if !items[j].box.IsVisible() || !items[j].box.IsInFlow() {
+				continue
+			}
+			if items[j].grow > 0 {
+				totalGrow += items[j].grow
+			} else {
+				// Fixed item: use its current width.
+				fixedWidth += items[j].box.Rect.Width + items[j].mainMargin
+			}
+		}
+		if totalGrow > 0 {
+			free := box.Rect.ContentWidth() - fixedWidth
+			if free < 0 {
+				free = 0
+			}
+			for j := range items {
+				if items[j].grow > 0 {
+					share := free * items[j].grow / totalGrow
+					if share < 0 {
+						share = 0
+					}
+					items[j].box.Rect.Width = share
+				}
+			}
+		}
+	}
 	for i := range items {
 		it := &items[i]
 		if needsContentRelayout(it.box) {
@@ -399,7 +431,6 @@ func (c *FlexFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			ctx := contextFor(it.box)
 			ctx.Layout(it.box, state)
 		}
-	}
 	}
 
 	// Lay out absolutely-positioned descendants (same as BFC).
