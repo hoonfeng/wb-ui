@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"wb-ui/css"
-	"wb-ui/platform/graphics"
+	"wb-ui/wtf"
 )
 
 // DisplayType mirrors WebCore::DisplayType.
@@ -296,8 +296,8 @@ type ComputedStyle struct {
 	ScaleY     float64
 
 	// Animated color properties (set by the animation engine for @keyframes color/background-color).
-	AnimatedColor           graphics.Color
-	AnimatedBackgroundColor graphics.Color
+	AnimatedColor           wtf.Color
+	AnimatedBackgroundColor wtf.Color
 
 	// Inherited bit. Most font/text/color properties inherit; the resolver sets this
 	// when copying from the parent.

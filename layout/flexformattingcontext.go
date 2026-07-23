@@ -881,6 +881,9 @@ func contentHeightOfBox(box *LayoutBox) float64 {
 				bottom := seg.Y + seg.Height
 				if bottom > maxBottom && bottom < 1e7 {
 					maxBottom = bottom
+				}
+			}
+		}
 		for _, c := range b.Children {
 			if c.IsAbsolutelyPositioned() {
 				continue
@@ -893,6 +896,10 @@ func contentHeightOfBox(box *LayoutBox) float64 {
 			}
 			walk(c)
 		}
+	}
+	walk(box)
+	return maxBottom
+}
 
 // offsetSubtree shifts a layout box and all its descendants by (dx, dy).
 func offsetSubtree(box *LayoutBox, dx, dy float64) {
@@ -908,7 +915,6 @@ func offsetSubtree(box *LayoutBox, dx, dy float64) {
 	for _, child := range box.Children {
 		offsetSubtree(child, dx, dy)
 	}
-}
 }
 
 // offsetItemSubtree offsets the descendants of a flex item without moving the item
