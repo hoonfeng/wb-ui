@@ -1,18 +1,8 @@
-// Translation of: Source/WebCore/rendering/RenderBox.cpp (positioned layout parts)
-//                  Source/WebCore/rendering/RenderBoxModelObject.cpp (relative offsets)
-//                  Source/WebCore/layout/formattingContexts/block/BlockMarginCollapse.cpp
-// Completeness: 45%
-// Simplifications:
-//   - no subpixel layout (integer pixels only)
-//   - no pagination/fragmentation
-//   - WebKit resolves out-of-flow boxes through a static/absolute/fixed positioner
-//     that walks the containing-block chain; this port folds the cases into a small
-//     set of free functions invoked by the block formatting context after in-flow
-//     layout completes
-//   - sticky positioning is treated as relative for layout purposes (the sticky
-//     constraint is not applied since there is no scroll)
-//   - percentage offsets resolve against the containing-block padding box (per spec)
-//   - z-index ordering is not applied; out-of-flow boxes are painted in DOM order
+// Translation of: Source/WebCore/layout/formattingContexts/block/BlockFormattingContext.cpp
+//   (out-of-flow layout helpers) + Source/WebCore/rendering/RenderBox.cpp
+//   (relative positioning)
+//
+// Absolute and relative positioning helpers adapted for Box interface + BoxGeometry.
 
 package layout
 
@@ -21,22 +11,18 @@ import (
 	"wb-ui/style"
 )
 
-// containingBlockForAbsolute returns the nearest ancestor box that establishes a
-// containing block for absolutely-positioned descendants. Per CSS 2.1 this is the
-// nearest ancestor with position != static (relative/absolute/fixed/sticky). When
-// none is found the initial containing block (the viewport, represented by the root
-// box) is used.
-func containingBlockForAbsolute(box *LayoutBox, root *LayoutBox) *LayoutBox {
-	// Walk up from the parent, not the box itself (the box may have
-	// position: fixed/absolute, which would cause it to match itself).
-	for cur := box.parent; cur != nil; cur = cur.parent {
+// containingBlockForAbsolute walks from box's parent to find the nearest positioned
+// ancestor (or root). Returns root if none found.
+func containingBlockForAbsolute(box *ElementBox, root *ElementBox) *ElementBox {
+	for cur := box.Parent(); cur != nil; cur = cur.Parent() {
 		if cur == root {
 			return root
 		}
-		if cur.Style == nil {
+		cs := cur.Style()
+		if cs == nil {
 			continue
 		}
-		switch cur.Style.Position {
+		switch cs.Position {
 		case style.PositionRelative, style.PositionAbsolute,
 			style.PositionFixed, style.PositionSticky:
 			return cur
@@ -45,173 +31,135 @@ func containingBlockForAbsolute(box *LayoutBox, root *LayoutBox) *LayoutBox {
 	return root
 }
 
-// parent field is added on LayoutBox via a helper walk: since LayoutBox has no parent
-// pointer, the block formatting context passes a chain. To keep this file decoupled,
-// positionAbsoluteBox takes the containing block explicitly and the caller resolves
-// the chain. The relativeOffset helper below also takes the containing block.
-
-// resolveOffset resolves a single inset (top/right/bottom/left) for an absolutely
-// positioned box. It returns the pixel value and whether it is "auto" (unset).
-func resolveOffset(l style.Length, cbSize float64) (float64, bool) {
-	r := resolveLengthAuto(l, cbSize, 0)
-	if r.Auto {
-		return 0, true
+// layoutAbsolute sizes and positions an absolutely-positioned box.
+func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *LayoutState) {
+	cs := box.Style()
+	if cs == nil {
+		return
 	}
-	return r.Value, false
-}
-
-// layoutAbsolute sizes and positions an absolutely (or fixed) positioned box against
-// its containing block. cb is the containing-block box whose padding box defines the
-// reference; root is the layout root used as the initial containing block for fixed
-// positioning. The function lays out box content and writes its border-box origin and
-// size onto box.Rect.
-func layoutAbsolute(box *LayoutBox, cb *LayoutBox, root *LayoutBox, state *LayoutState) {
-	if box.Style == nil {
-		box.Style = style.NewComputedStyle()
-	}
-	// Reference size for percentage offsets/widths is the containing-block padding
-	// box (CSS 2.1 10.1). For the initial containing block (root) use the viewport.
-	cbWidth, cbHeight := cbContentBoxSize(cb, root, state)
+	g := state.GeometryForBox(box)
+	cbWidth, cbHeight := cbContentBoxSizeForBox(cb, root, state)
 
 	margin, padding, border := computeBoxModel(box, cbWidth, fontSizeOf(box))
-	box.Rect.Padding = padding
-	box.Rect.Border = border
+	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 
-	// Resolve width.
-	width, wAuto := resolveOffset(box.Style.Width, cbWidth)
-	height, hAuto := resolveOffset(box.Style.Height, cbHeight)
-	minW, maxW, minWAuto, maxWAuto := resolveMinMax(box.Style.MinWidth, box.Style.MaxWidth, cbWidth, fontSizeOf(box))
-	minH, maxH, minHAuto, maxHAuto := resolveMinMax(box.Style.MinHeight, box.Style.MaxHeight, cbHeight, fontSizeOf(box))
+	width, wAuto := resolveOffset(cs.Width, cbWidth)
+	height, hAuto := resolveOffset(cs.Height, cbHeight)
+	fs := fontSizeOf(box)
+	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
+	minH, maxH, _, _ := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fs)
 
 	if wAuto {
-		// Shrink-to-fit: use the preferred (max-content) width clamped to the
-		// available width. Without intrinsic sizing we fall back to filling the
-		// containing block minus insets/margins.
-		width = shrinkToFitWidth(box, cbWidth, margin, border, padding)
+		width = shrinkToFitWidthForBox(box, cbWidth, margin, border, padding)
 	}
-	if isBorderBox(box) {
-		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
+	if isBorderBoxForBox(box) {
+		width = clampSize(width, minW, maxW, false, false)
 	} else {
 		width -= border.Horizontal() + padding.Horizontal()
-		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
+		width = clampSize(width, minW, maxW, false, false)
 	}
-	box.Rect.Width = width
+	g.SetContentWidth(width)
 
-	// Horizontal position: left + margin-left + ... + right against the containing
-	// block. If both left and right are auto, default to the static position (after
-	// the previous sibling), approximated here as the containing-block content origin.
-	left, leftAuto := resolveOffset(asLength(box.Style.Properties["left"]), cbWidth)
-	right, rightAuto := resolveOffset(asLength(box.Style.Properties["right"]), cbWidth)
-	x := cb.Rect.ContentX()
+	cbg := state.GeometryForBox(cb)
+	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
+	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
+	x := cbg.ContentBoxLeft()
 	switch {
 	case !leftAuto && !rightAuto:
-		// Over-constrained: honour left (LTR) and ignore right.
-		x = cb.Rect.ContentX() + left + margin.Left
+		x = cbg.ContentBoxLeft() + left + margin.Left
 	case !leftAuto:
-		x = cb.Rect.ContentX() + left + margin.Left
+		x = cbg.ContentBoxLeft() + left + margin.Left
 	case !rightAuto:
-		x = cb.Rect.ContentX() + cbWidth - right - margin.Right - box.Rect.Width
+		x = cbg.ContentBoxLeft() + cbWidth - right - margin.Right - g.BorderBoxWidth()
 	default:
-		x = cb.Rect.ContentX() + margin.Left
+		x = cbg.ContentBoxLeft() + margin.Left
 	}
-	box.Rect.X = x
-	box.Rect.Margin = margin
+	g.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+	g.SetTopLeft(x, 0) // Y set below
 
-	// Vertical size.
 	if hAuto {
-		height = layoutAbsoluteHeight(box, state)
-	} else if !isBorderBox(box) {
+		height = layoutAbsoluteHeightForBox(box, state)
+	} else if !isBorderBoxForBox(box) {
 		height -= border.Vertical() + padding.Vertical()
 	}
-	height = clampSize(height, minH, maxH, minHAuto, maxHAuto)
-	box.Rect.Height = height
+	height = clampSize(height, minH, maxH, false, false)
+	g.SetContentHeight(height)
 
-	// Vertical position.
-	top, topAuto := resolveOffset(asLength(box.Style.Properties["top"]), cbHeight)
-	bottom, bottomAuto := resolveOffset(asLength(box.Style.Properties["bottom"]), cbHeight)
-	y := cb.Rect.ContentY()
+	top, topAuto := resolveOffset(asLength(cs.Properties["top"]), cbHeight)
+	bottom, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), cbHeight)
+	y := cbg.ContentBoxTop()
 	switch {
 	case !topAuto && !bottomAuto:
-		y = cb.Rect.ContentY() + top + margin.Top
+		y = cbg.ContentBoxTop() + top + margin.Top
 	case !topAuto:
-		y = cb.Rect.ContentY() + top + margin.Top
+		y = cbg.ContentBoxTop() + top + margin.Top
 	case !bottomAuto:
-		y = cb.Rect.ContentY() + cbHeight - bottom - margin.Bottom - box.Rect.Height
+		y = cbg.ContentBoxTop() + cbHeight - bottom - margin.Bottom - g.BorderBoxHeight()
 	default:
-		y = cb.Rect.ContentY() + margin.Top
+		y = cbg.ContentBoxTop() + margin.Top
 	}
-	box.Rect.Y = y
+	g.SetTopLeft(g.Left(), y)
 
-	// Lay out content against the resolved border box.
-	layoutBoxContent(box, state)
+	layoutBoxContentForBox(box, state)
 }
 
-// cbContentBoxSize returns the content-box size of the containing block for an
-// out-of-flow box. For the initial containing block (== root) the viewport size is
-// used; otherwise the containing-block content box is used.
-func cbContentBoxSize(cb *LayoutBox, root *LayoutBox, state *LayoutState) (float64, float64) {
+func cbContentBoxSizeForBox(cb *ElementBox, root *ElementBox, state *LayoutState) (float64, float64) {
 	if cb == root {
 		return state.ViewportWidth, state.ViewportHeight
 	}
-	return cb.Rect.ContentWidth(), cb.Rect.ContentHeight()
+	g := state.GeometryForBox(cb)
+	return g.ContentWidth(), g.ContentHeight()
 }
 
-// shrinkToFitWidth computes the shrink-to-fit width of an auto-width absolutely
-// positioned box. Without intrinsic sizing this approximates the preferred width as
-// the content width of the containing block minus the horizontal insets and margins.
-func shrinkToFitWidth(box *LayoutBox, cbWidth float64, margin, border, padding Edges) float64 {
+func shrinkToFitWidthForBox(box *ElementBox, cbWidth float64, margin, border, padding Edges) float64 {
 	avail := cbWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
-	if avail < 0 {
-		return 0
-	}
+	if avail < 0 { return 0 }
 	return avail
 }
 
-// layoutAbsoluteHeight lays out box content and returns the resulting content height
-// plus padding/border (the border-box height for an auto-height absolute box).
-func layoutAbsoluteHeight(box *LayoutBox, state *LayoutState) float64 {
-	layoutBoxContent(box, state)
-	h := box.Rect.Height
+func layoutAbsoluteHeightForBox(box *ElementBox, state *LayoutState) float64 {
+	layoutBoxContentForBox(box, state)
+	g := state.GeometryForBox(box)
+	h := g.BorderBoxHeight()
 	if h == 0 {
-		// No block children produced height; use the inline content height.
-		h = box.Rect.ContentHeight() + box.Rect.Padding.Vertical() + box.Rect.Border.Vertical()
+		h = g.ContentHeight() + g.VerticalPadding() + g.VerticalBorder()
 	}
 	return h
 }
 
-// layoutBoxContent lays out box children by dispatching to the formatting context
-// appropriate for box display. It is shared by the absolute-positioner and the table
-// cell layout so the inner content fills the resolved border box.
-func layoutBoxContent(box *LayoutBox, state *LayoutState) {
+func layoutBoxContentForBox(box *ElementBox, state *LayoutState) {
 	ctx := contextFor(box)
 	ctx.Layout(box, state)
 }
 
-// applyRelativeOffset shifts a relatively-positioned box by its top/right/bottom/left
-// offsets without affecting its in-flow position. The offset is resolved against the
-// containing block (the parent content box) and applied after in-flow layout has
-// placed the box. This mirrors RenderBoxModelObject::relativePositionOffsetX/Y.
-func applyRelativeOffset(box *LayoutBox, cbWidth, cbHeight float64) {
-	if box.Style == nil {
-		return
-	}
-	left, leftAuto := resolveOffset(asLength(box.Style.Properties["left"]), cbWidth)
-	right, rightAuto := resolveOffset(asLength(box.Style.Properties["right"]), cbWidth)
+func applyRelativeOffsetForBox(box *ElementBox, cbWidth, cbHeight float64, state *LayoutState) {
+	cs := box.Style()
+	if cs == nil { return }
+	g := state.GeometryForBox(box)
+	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
+	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
+	x := g.Left()
 	if !leftAuto {
-		box.Rect.X += left
+		x += left
 	} else if !rightAuto {
-		box.Rect.X -= right
+		x -= right
 	}
-	top, topAuto := resolveOffset(asLength(box.Style.Properties["top"]), cbHeight)
-	bottom, bottomAuto := resolveOffset(asLength(box.Style.Properties["bottom"]), cbHeight)
+	top, topAuto := resolveOffset(asLength(cs.Properties["top"]), cbHeight)
+	bottom, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), cbHeight)
+	y := g.Top()
 	if !topAuto {
-		box.Rect.Y += top
+		y += top
 	} else if !bottomAuto {
-		box.Rect.Y -= bottom
+		y -= bottom
 	}
+	g.SetTopLeft(x, y)
 }
 
-// resolveOffsetsFromElementAttributes is a no-op kept for API symmetry with the DOM
-// path; absolutely positioned boxes read their insets from ComputedStyle.Properties
-// since the resolver stores non-typed properties there.
+func resolveOffset(l style.Length, cbSize float64) (float64, bool) {
+	r := resolveLengthAuto(l, cbSize, 0)
+	if r.Auto { return 0, true }
+	return r.Value, false
+}
+
 func resolveOffsetsFromElementAttributes(_ *dom.Element) {}

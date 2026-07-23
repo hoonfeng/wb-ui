@@ -1,17 +1,6 @@
 // Translation of: Source/WebCore/layout/formattingContexts/block/BlockFormattingContext.cpp
-//                  Source/WebCore/layout/formattingContexts/block/BlockMarginCollapse.cpp
-//                  Source/WebCore/layout/formattingContexts/block/BlockFormattingGeometry.cpp
-// Completeness: 85%
-// Simplifications:
-//   - no subpixel layout (integer pixels only; floats used internally then rounded)
-//   - no pagination/fragmentation support in formatting contexts
-//   - BFC establishment is detected via LayoutBox.establishesBlockFormattingContext;
-//     a BFC root contains its floats (height grows to enclose them)
-//   - inline-level children are wrapped into anonymous block boxes by BuildLayoutTree,
-//     so the block formatting context only sees block-level children directly; the
-//     anonymous wrapper dispatches to InlineFormattingContext for its inline children
-//   - clear is applied by advancing the cursor past matching floats
-//   - relative positioning is applied after in-flow layout
+// BlockFormattingContext lays out in-flow children vertically (or horizontally in
+// vertical writing mode), with margin collapse and float containment.
 
 package layout
 
@@ -21,47 +10,36 @@ import (
 	"wb-ui/style"
 )
 
-// BlockFormattingContext is the Go translation of WebCore::Layout::BlockFormattingContext.
-// It lays out a block container's in-flow children vertically, applying margin collapse
-// and containing floats when the root establishes a new BFC.
 type BlockFormattingContext struct{}
 
-// Layout lays out box's in-flow descendants. The caller is responsible for box's own
-// border-box position (X/Y) and width (and margin/padding/border) before invoking; for
-// the root box these are set by the top-level Layout function. If box's height is auto
-// it is computed from the in-flow content.
-//
-// Supports both horizontal-tb (default) and vertical-rl/vertical-lr writing modes.
-// In vertical modes the block axis is horizontal and the inline axis is vertical.
-func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
-	if box.Style == nil {
-		box.Style = style.NewComputedStyle()
+func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	if box.Style() == nil {
+		// Can't set Style() through the interface; skip default assignment
 	}
-	// The root box (no parent) has its box model resolved here since no parent did it.
-	if box.parent == nil {
-		margin, padding, border := computeBoxModel(box, state.ViewportWidth, fontSizeOf(box))
-		box.Rect.Margin = margin
-		box.Rect.Padding = padding
-		box.Rect.Border = border
-		box.Rect.Width = state.ViewportWidth
-		box.Rect.Height = state.ViewportHeight
+	g := state.GeometryForBox(box)
+	if box.Parent() == nil {
+		margin, padding, border := computeBoxModelForBox(box, state.ViewportWidth, fontSizeOf(box))
+		g.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+		g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+		g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+		g.SetContentWidth(state.ViewportWidth - border.Horizontal() - padding.Horizontal())
+		if state.ViewportHeight > 0 {
+			g.SetContentHeight(state.ViewportHeight - border.Vertical() - padding.Vertical())
+		}
 	}
 
-	isVerticalWM := IsVerticalWritingMode(box.Style)
-	contentX := box.Rect.ContentX()
-	contentY := box.Rect.ContentY()
-	contentWidth := box.Rect.ContentWidth()
+	style := box.Style()
+	isVerticalWM := IsVerticalWritingMode(style)
+	contentX := g.ContentBoxLeft()
+	contentY := g.ContentBoxTop()
+	contentWidth := g.ContentWidth()
 
-	// In vertical writing mode:
-	//   - block axis = horizontal (contentX, content width)
-	//   - inline axis = vertical (contentY, content height)
-	blockStart := box.Rect.ContentY()
+	blockStart := g.ContentBoxTop()
 	if isVerticalWM {
-		blockStart = box.Rect.ContentX()
+		blockStart = g.ContentBoxLeft()
 	}
 
-	// A BFC root contains its floats and does not collapse its margins with children.
-	establishesBFC := box.establishesBlockFormattingContext()
+	establishesBFC := box.EstablishesBlockFormattingContext()
 	var fc *floatContext
 	if establishesBFC {
 		fc = newFloatContext(contentX, contentY, contentWidth)
@@ -71,56 +49,51 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		fc = state.currentFloatContext()
 	}
 
-	// Lay out in-flow children, stacking them along the block axis.
 	cursor := blockStart
 	pendingMargin := 0.0
-	collapseTopWithParent := !establishesBFC &&
-		box.Rect.Border.Top == 0 && box.Rect.Padding.Top == 0
+	collapseTopWithParent := !establishesBFC && g.BorderTop() == 0 && g.PaddingTop() == 0
 	firstInFlow := true
 
-	var deferredAbsolutes []*LayoutBox
+	var deferredAbsolutes []*ElementBox
 
-	for _, child := range box.Children {
+	for _, child := range box.Children() {
 		if !child.IsVisible() {
 			continue
 		}
+		childEb, childIsEb := child.(*ElementBox)
+		if !childIsEb {
+			continue
+		}
 		if child.IsFloated() {
-			layoutFloatedChild(child, contentX, contentWidth, fc, state)
+			layoutFloatedChild(childEb, contentX, contentWidth, fc, state)
 			continue
 		}
 		if child.IsAbsolutelyPositioned() {
-			deferredAbsolutes = append(deferredAbsolutes, child)
+			deferredAbsolutes = append(deferredAbsolutes, childEb)
 			continue
 		}
 
-		margin, padding, border := computeBoxModel(child, contentWidth, fontSizeOf(child))
-		child.Rect.Margin = margin
-		child.Rect.Padding = padding
-		child.Rect.Border = border
+		ch := state.GeometryForBox(childEb)
+		margin, padding, border := computeBoxModelForBox(childEb, contentWidth, fontSizeOf(childEb))
+		ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+		ch.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+		ch.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 
-		// Width: block boxes fill the containing block unless a width is specified.
-		borderBoxWidth := computeBlockChildBorderBoxWidth(child, contentWidth, margin, border, padding)
-		child.Rect.Width = borderBoxWidth
-		child.Rect.X = contentX + margin.Left
+		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
+		ch.SetContentWidth(borderBoxWidth - border.Horizontal() - padding.Horizontal())
+		ch.SetTopLeft(g.ContentBoxLeft()+margin.Left, 0) // Y set below
 
-		// Vertical position with margin collapse.
-		clearSide := clearSideOf(child)
+		clearSide := clearSideOf(childEb)
 		if clearSide != "" && fc != nil {
 			cursor = fc.clearedY(cursor, clearSide)
 		}
 
-		// Check break-before: if set to "page", insert a page break.
-		breakBefore := child.Style.GetProperty("break-before")
+		breakBefore := child.Style().GetProperty("break-before")
 		if breakBefore == "page" || breakBefore == "always" {
-			// Advance cursor past the current page boundary.
-			pageHeight := 0.0
-			if state != nil {
-				pageHeight = state.ViewportHeight
-			}
+			pageHeight := state.ViewportHeight
 			if pageHeight > 0 {
 				currentPage := math.Floor(cursor / pageHeight)
-				nextPageStart := (currentPage + 1) * pageHeight
-				cursor = math.Max(cursor, nextPageStart)
+				cursor = math.Max(cursor, (currentPage+1)*pageHeight)
 			}
 		}
 
@@ -132,79 +105,64 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 			collapsedTop = math.Max(pendingMargin, topMargin)
 		}
 		cursor += collapsedTop
-		child.Rect.Y = cursor
+		ch.SetTopLeft(ch.Left(), cursor)
 
-		// Resolve non-auto height before children layout so nested percentage
-		// heights have the correct containing-block reference. CSS §10.5 says
-		// percentage heights resolve against the parent's used height; if the
-		// parent's height depends on its own children (auto), the percentage
-		// is treated as auto. But when the parent has a non-auto height that
-		// can be resolved against the grandparent's known height, we compute
-		// it here to break the circular dependency.
-		cbHeight := box.Rect.ContentHeight()
-		if cbHeight <= 0 && box.parent != nil {
-			cbHeight = box.parent.Rect.ContentHeight()
+		cbHeight := g.ContentHeight()
+		if cbHeight <= 0 && box.Parent() != nil {
+			cbHeight = state.GeometryForBox(box.Parent()).ContentHeight()
 		}
-		if !heightIsAuto(child) {
+		cs := child.Style()
+		if !heightIsAutoForBox(childEb) {
 			if cbHeight > 0 {
-				fs := fontSizeOf(child)
-				hv, ok := definiteHeight(child.Style.Height, cbHeight, fs)
+				fs := fontSizeOf(childEb)
+				hv, ok := definiteHeight(cs.Height, cbHeight, fs)
 				if ok {
-					if isBorderBox(child) {
-						child.Rect.Height = hv
+					if isBorderBoxForBox(childEb) {
+						ch.SetContentHeight(hv - border.Vertical() - padding.Vertical())
 					} else {
-						child.Rect.Height = hv + child.Rect.Border.Vertical() + child.Rect.Padding.Vertical()
+						ch.SetContentHeight(hv)
 					}
 				}
 			}
-		} else if cbHeight > 0 && childNeedsHeightConstraint(child) {
-			// Auto-height flex/grid containers inside a definite-height block:
-			// set a provisional height to the remaining space so the child's
-			// own layout does not fall back to the 1e6 sentinel.
-			remaining := cbHeight - (cursor - box.Rect.ContentY())
+		} else if cbHeight > 0 && childNeedsHeightConstraintForBox(childEb) {
+			remaining := cbHeight - (cursor - g.ContentBoxTop())
 			if remaining > 0 {
-				child.Rect.Height = remaining
+				ch.SetContentHeight(remaining)
 			}
 		}
 
-		// Lay out child's descendants.
-		childCtx := contextFor(child)
-		childCtx.Layout(child, state)
+		childCtx := contextFor(childEb)
+		childCtx.Layout(childEb, state)
 
-		// Clamp child height to min-height/max-height constraints.
-		fs := fontSizeOf(child)
+		fs := fontSizeOf(childEb)
 		if isVerticalWM {
-			// In vertical mode, clamp the inline size (width), not block size.
-			minW, maxW, minAuto, maxAuto := resolveMinMax(child.Style.MinWidth, child.Style.MaxWidth, 0, fs)
-			child.Rect.Width = clampSize(child.Rect.Width, minW, maxW, minAuto, maxAuto)
+			minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, 0, fs)
+			bw := ch.BorderBoxWidth()
+			ch.SetContentWidth(clampSize(bw, minW, maxW, false, false) - border.Horizontal() - padding.Horizontal())
 		} else {
-			minH, maxH, minAuto, maxAuto := resolveMinMax(child.Style.MinHeight, child.Style.MaxHeight, 0, fs)
-			child.Rect.Height = clampSize(child.Rect.Height, minH, maxH, minAuto, maxAuto)
+			minH, maxH, _, _ := resolveMinMax(cs.MinHeight, cs.MaxHeight, 0, fs)
+			bh := ch.BorderBoxHeight()
+			ch.SetContentHeight(clampSize(bh, minH, maxH, false, false) - border.Vertical() - padding.Vertical())
 		}
 		pendingMargin = margin.Bottom
-		cursor = child.Rect.Y + child.Rect.Height
+		cursor = ch.Top() + ch.BorderBoxHeight()
 
-		// Check break-after: if set to "page", advance to next page.
-		breakAfter := child.Style.GetProperty("break-after")
+		breakAfter := child.Style().GetProperty("break-after")
 		if breakAfter == "page" || breakAfter == "always" {
-			pageHeight := 0.0
-			if state != nil {
-				pageHeight = state.ViewportHeight
-			}
+			pageHeight := state.ViewportHeight
 			if pageHeight > 0 {
 				currentPage := math.Floor(cursor / pageHeight)
-				nextPageStart := (currentPage + 1) * pageHeight
-				cursor = math.Max(cursor, nextPageStart)
+				cursor = math.Max(cursor, (currentPage+1)*pageHeight)
 			}
 		}
-
 		firstInFlow = false
 	}
 
 	// Resolve box block size (height for horizontal-tb, width for vertical WM).
-	if heightIsAuto(box) {
+	cs := box.Style()
+	if heightIsAutoForBox(box) {
 		blockSize := cursor - blockStart
-		if !establishesBFC && box.Rect.Border.Bottom == 0 && box.Rect.Padding.Bottom == 0 {
+		if !establishesBFC && g.BorderBottom() == 0 && g.PaddingBottom() == 0 {
 			// pendingMargin collapses out
 		} else {
 			blockSize += pendingMargin
@@ -217,165 +175,127 @@ func (c *BlockFormattingContext) Layout(box *LayoutBox, state *LayoutState) {
 		if blockSize < 0 {
 			blockSize = 0
 		}
-		box.Rect.Height = blockSize + box.Rect.Border.Vertical() + box.Rect.Padding.Vertical()
-	} else {
-		if box.parent != nil {
-			fs := fontSizeOf(box)
-			cbHeight := box.parent.Rect.ContentHeight()
-			hv, ok := definiteHeight(box.Style.Height, cbHeight, fs)
-			if ok {
-				if isBorderBox(box) {
-					box.Rect.Height = hv
-				} else {
-					box.Rect.Height = hv + box.Rect.Border.Vertical() + box.Rect.Padding.Vertical()
-				}
+		g.SetContentHeight(blockSize)
+	} else if box.Parent() != nil {
+		fs := fontSizeOf(box)
+		cbHeight := state.GeometryForBox(box.Parent()).ContentHeight()
+		hv, ok := definiteHeight(cs.Height, cbHeight, fs)
+		if ok {
+			if isBorderBoxForBox(box) {
+				g.SetContentHeight(hv - g.VerticalBorder() - g.VerticalPadding())
+			} else {
+				g.SetContentHeight(hv)
 			}
 		}
 	}
 
 	// Apply relative offsets to in-flow children.
-	for _, child := range box.Children {
-		if child.IsRelativelyPositioned() && child.IsInFlow() {
-			applyRelativeOffset(child, contentWidth, box.Rect.ContentHeight())
+	for _, child := range box.Children() {
+		if childEb, ok := child.(*ElementBox); ok {
+			if childEb.IsRelativelyPositioned() && childEb.IsInFlow() {
+				applyRelativeOffsetForBox(childEb, contentWidth, g.ContentHeight(), state)
+			}
 		}
 	}
 
 	// Lay out absolutely-positioned descendants.
-	root := stateRoot(box)
+
+	root := stateRootForBox(box)
 	for _, child := range deferredAbsolutes {
 		cb := containingBlockForAbsolute(child, root)
 		layoutAbsolute(child, cb, root, state)
 	}
 }
 
-// computeBlockChildBorderBoxWidth resolves the border-box width of a block-level
-// child against the containing-block content width. For auto width the child fills
-// the container (minus its margins); for a specified width the box-sizing property
-// decides whether the value is the content-box or border-box width. min/max are
-// applied.
-func computeBlockChildBorderBoxWidth(child *LayoutBox, cbContentWidth float64, margin, border, padding Edges) float64 {
+// computeBlockChildBorderBoxWidth resolves border-box width of a block child.
+func computeBlockChildBorderBoxWidth(child *ElementBox, cbContentWidth float64, margin, border, padding Edges, state *LayoutState) float64 {
 	fs := fontSizeOf(child)
-	w, ok := definiteWidth(child.Style.Width, cbContentWidth, fs)
+	cs := child.Style()
+	w, ok := definiteWidth(cs.Width, cbContentWidth, fs)
 	if !ok {
-		// auto: border-box fills the container minus horizontal margins.
 		width := cbContentWidth - margin.Horizontal()
-		if width < 0 {
-			width = 0
-		}
-		minW, maxW, minAuto, maxAuto := resolveMinMax(child.Style.MinWidth, child.Style.MaxWidth, cbContentWidth, fs)
-		return clampSize(width, minW, maxW, minAuto, maxAuto)
+		if width < 0 { width = 0 }
+		minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+		return clampSize(width, minW, maxW, false, false)
 	}
 	var borderBox float64
-	if isBorderBox(child) {
+	if isBorderBoxForBox(child) {
 		borderBox = w
 	} else {
 		borderBox = w + border.Horizontal() + padding.Horizontal()
 	}
-	minW, maxW, minAuto, maxAuto := resolveMinMax(child.Style.MinWidth, child.Style.MaxWidth, cbContentWidth, fs)
-	// min/max for content-box sizing refer to the content-box; convert.
-	if !isBorderBox(child) {
+	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
+	if !isBorderBoxForBox(child) {
 		minW += border.Horizontal() + padding.Horizontal()
-		if !maxAuto {
-			maxW += border.Horizontal() + padding.Horizontal()
-		}
+		if maxW > 0 { maxW += border.Horizontal() + padding.Horizontal() }
 	}
-	return clampSize(borderBox, minW, maxW, minAuto, maxAuto)
+	return clampSize(borderBox, minW, maxW, false, false)
 }
 
-// layoutFloatedChild positions a floated child within the active float context and
-// lays out its content. The float's width is computed (shrink-to-fit for auto) and
-// its border-box position is recorded so subsequent in-flow content can avoid it.
-func layoutFloatedChild(child *LayoutBox, contentX, contentWidth float64, fc *floatContext, state *LayoutState) {
+func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *floatContext, state *LayoutState) {
 	if fc == nil {
-		// No float context (should not happen for in-flow floats): lay out inline.
 		fc = newFloatContext(contentX, 0, contentWidth)
 	}
-	margin, padding, border := computeBoxModel(child, contentWidth, fontSizeOf(child))
-	child.Rect.Margin = margin
-	child.Rect.Padding = padding
-	child.Rect.Border = border
+	ch := state.GeometryForBox(child)
+	margin, padding, border := computeBoxModelForBox(child, contentWidth, fontSizeOf(child))
+	ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+	ch.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+	ch.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 
+	cs := child.Style()
 	fs := fontSizeOf(child)
-	w, ok := definiteWidth(child.Style.Width, contentWidth, fs)
+	w, ok := definiteWidth(cs.Width, contentWidth, fs)
 	if !ok {
-		// Shrink-to-fit: approximate max-content by the container width.
 		w = contentWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
-		if w < 0 {
-			w = 0
-		}
+		if w < 0 { w = 0 }
 	}
 	borderBox := w
-	if !isBorderBox(child) {
+	if !isBorderBoxForBox(child) {
 		borderBox = w + border.Horizontal() + padding.Horizontal()
 	}
-	child.Rect.Width = borderBox
+	ch.SetContentWidth(borderBox - border.Horizontal() - padding.Horizontal())
 
-	// Place the float at the top of the current content area; the float context
-	// resolves overlaps with existing floats.
-	isLeft := child.Style.Float != "right"
+	isLeft := cs.Float != "right"
 	x, y := fc.placeFloat(child, isLeft, borderBox, 0)
-	child.Rect.X = x
-	child.Rect.Y = y
+	ch.SetTopLeft(x, y)
 
-	// Lay out the float's content to determine its height.
 	childCtx := contextFor(child)
 	childCtx.Layout(child, state)
 
-	// Update the placed float's height now that content is laid out.
 	for i := range fc.floats {
 		if fc.floats[i].box == child {
-			fc.floats[i].h = child.Rect.Height
+			fc.floats[i].h = ch.BorderBoxHeight()
 			fc.floats[i].w = borderBox
 			break
 		}
 	}
 }
 
-// clearSideOf returns the clear side ("left"/"right"/"both"/"") for box.
-func clearSideOf(box *LayoutBox) string {
-	if box.Style == nil {
-		return ""
-	}
-	return box.Style.Clear
+func clearSideOf(box *ElementBox) string {
+	if box.Style() == nil { return "" }
+	return box.Style().Clear
 }
 
-// heightIsAuto reports whether box has an auto (unset) height.
-func heightIsAuto(box *LayoutBox) bool {
-	if box.Style == nil {
-		return true
-	}
-	r := resolveLengthAuto(box.Style.Height, 0, 0)
+func heightIsAutoForBox(box *ElementBox) bool {
+	if box.Style() == nil { return true }
+	r := resolveLengthAuto(box.Style().Height, 0, 0)
 	return r.Auto
 }
 
-// childNeedsHeightConstraint reports whether a block child needs a provisional
-// height constraint because its own layout engine (flex/grid) would otherwise
-// use the 1e6 sentinel when contentHeight is 0.
-func childNeedsHeightConstraint(box *LayoutBox) bool {
-	if box == nil || box.Style == nil {
-		return false
+func childNeedsHeightConstraintForBox(box *ElementBox) bool {
+	if box == nil || box.Style() == nil { return false }
+	cs := box.Style()
+	if cs.Display == style.DisplayFlex || cs.Display == style.DisplayInlineFlex {
+		fd := cs.FlexDirection
+		if fd == "column" || fd == "column-reverse" { return true }
 	}
-	// Column flex containers: main axis is height; auto-height falls to sentinel.
-	if box.Style.Display == style.DisplayFlex || box.Style.Display == style.DisplayInlineFlex {
-		fd := box.Style.FlexDirection
-		if fd == "column" || fd == "column-reverse" {
-			return true
-		}
-	}
-	// Grid containers: need height for row track sizing.
-	if box.Style.Display == style.DisplayGrid || box.Style.Display == style.DisplayInlineGrid {
-		return true
-	}
+	if cs.Display == style.DisplayGrid || cs.Display == style.DisplayInlineGrid { return true }
 	return false
 }
 
-// stateRoot walks the parent chain to find the layout root (the box with no parent).
-// It is used as the initial containing block for fixed positioning and as the fallback
-// containing block for absolutes with no positioned ancestor.
-func stateRoot(box *LayoutBox) *LayoutBox {
+func stateRootForBox(box *ElementBox) *ElementBox {
 	cur := box
-	for cur.parent != nil {
-		cur = cur.parent
-	}
+	for cur.Parent() != nil { cur = cur.Parent() }
 	return cur
 }
+
