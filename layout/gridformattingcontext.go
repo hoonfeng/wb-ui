@@ -177,6 +177,17 @@ func (c *GridFormattingContext) layoutItemsAndMeasureHeights(box *LayoutBox, ite
 		// Set a provisional Y so flex children have a vertical position reference.
 		it.box.Rect.Y = contentY + margin.Top
 
+		// Set a provisional height to give flex/grid children a non-zero
+		// cross-axis constraint. Without this, child flex layouts see
+		// contentHeight=0 and set ALL items' heights to 0, cascading
+		// zero-height through the entire subtree.
+		// Use the grid container's height, falling back to viewport height.
+		provH := box.Rect.Height
+		if provH <= 0 && state != nil {
+			provH = float64(state.ViewportHeight)
+		}
+		it.box.Rect.Height = provH
+
 		// ── LAY OUT ONCE ──
 		// This is the ONLY layout pass for this item. Its width is now known
 		// from the grid column sizing. The resulting height will be used for
