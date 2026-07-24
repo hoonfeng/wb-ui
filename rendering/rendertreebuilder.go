@@ -181,14 +181,20 @@ func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Eleme
 				continue
 			}
 			// Pure whitespace text nodes between flex items do not generate
-			// flex items; non-whitespace text would become an anonymous item.
 			if isWhitespaceOnly(data) {
 				continue
 			}
+			// Text nodes inside flex containers must be wrapped in an anonymous
+			// flex items that are block-level).
+			anonStyle := inheritedStyle(parent.Style())
+			anonStyle.Display = style.DisplayBlock
+			anon := NewRenderBlockFlow(nil, anonStyle)
+
 			rt := NewRenderText(v, inheritedStyle(parent.Style()))
-			parent.AddChild(rt, nil)
-		}
+			anon.AddChild(rt, nil)
+			parent.AddChild(anon, nil)
 	}
+}
 }
 
 // isFlexContainerDisplay reports whether the display value produces a flex

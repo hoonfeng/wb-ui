@@ -40,10 +40,6 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	isReverse := cs.FlexDirection == "row-reverse" || cs.FlexDirection == "column-reverse"
 
 	g := state.GeometryForBox(box)
-	_, padding, border := computeBoxModel(box, g.ContentWidth(), fontSizeOf(box))
-	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
-	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
-	g.SetContentWidth(g.ContentWidth() - padding.Left - padding.Right - border.Left - border.Right)
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
 
@@ -366,21 +362,26 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 			// Propagate auto cross-size from children.
 			if heightIsAutoForBox(it.box) {
-				oldTop := g.Top()
-				bh2 := g.BorderBoxHeight()
-				newCross := crossPos
-				switch align {
-				case "center":
-					newCross = crossPos + (ch-bh2)/2
-				case "flex-end":
-					newCross = crossPos + ch - bh2
-				}
-				delta := newCross - oldTop
-				if delta != 0 {
-					shiftBoxAndDescendants(it.box, delta, 0, state)
-				}
+				childMaxH := maxChildContentHeight(it.box, state)
+				if childMaxH >= g.ContentHeight() {
 
-
+					oldTop := g.Top()
+					g.SetContentHeight(childMaxH)
+					// Re-center: recalculate cross-axis position.
+					bh2 := g.BorderBoxHeight()
+					newCross := crossPos
+					switch align {
+					case "center":
+						newCross = crossPos + (ch-bh2)/2
+					case "flex-end":
+						newCross = crossPos + ch - bh2
+					}
+					delta := newCross - oldTop
+					if delta != 0 {
+						shiftBoxAndDescendants(it.box, delta, 0, state)
+					}
+					g.SetTopLeft(newCross, g.Left())
+				}
 			}
 		} else {
 			if isReverse { mainPos -= g.BorderBoxHeight() }
