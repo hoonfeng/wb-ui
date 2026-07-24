@@ -34,6 +34,8 @@ type LayoutState struct {
 }
 
 func NewLayoutState(vw, vh float64) *LayoutState {
+	currentViewportWidth = vw
+	currentViewportHeight = vh
 	return &LayoutState{
 		ViewportWidth:  vw,
 		ViewportHeight: vh,

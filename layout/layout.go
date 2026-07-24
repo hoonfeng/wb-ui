@@ -3,10 +3,20 @@ package layout
 
 import "math"
 
+// currentViewportHeight stores the viewport height for vh unit resolution.
+// Set by Layout() before any layout pass begins. Safe because layout is
+// single-threaded.
+var (
+	currentViewportHeight float64
+	currentViewportWidth  float64
+)
+
 // Layout is the top-level entry point. It sizes rootBox within viewport and lays
 // out its descendants. Returns LayoutState with computed geometry.
 func Layout(rootBox *ElementBox, viewportWidth, viewportHeight int) *LayoutState {
 	state := NewLayoutState(float64(viewportWidth), float64(viewportHeight))
+	currentViewportHeight = float64(viewportHeight)
+	currentViewportWidth = float64(viewportWidth)
 	if rootBox == nil { return state }
 	stretchRootToViewport(rootBox, state)
 	LayoutRoot(rootBox, state)

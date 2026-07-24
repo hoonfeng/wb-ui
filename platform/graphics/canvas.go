@@ -568,7 +568,9 @@ type Point struct {
 // DrawText renders text at the given world-space baseline origin using the supplied
 // font and color, mirroring GraphicsContext::drawText() (via FontCascade::drawText).
 // Uses Skia's real font rasterizer for proper glyph outlines, hinting, and
-// anti-aliasing.
+// anti-aliasing. Emoji characters are automatically rendered using the emoji
+// fallback font (Segoe UI Emoji / Noto Color Emoji) when the primary font lacks
+// the glyph.
 func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	if col.A == 0 || len(text) == 0 {
 		return
@@ -578,8 +580,43 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 		return
 	}
 	c.fillPaint.SetColor(colorToSkia(col))
+
+	// If text contains emoji, split into runs and draw each with the correct font.
+	if containsEmoji(text) {
+		c.drawTextWithFallback(x, y, text, font, skFont, col)
+		c.invalidatePixels()
+		return
+	}
+
 	c.canvas.DrawText(text, float32(x), float32(y), skFont, c.fillPaint)
 	c.invalidatePixels()
+}
+
+// drawTextWithFallback splits text into runs of emoji/non-emoji characters and
+// draws each run with the appropriate font.
+func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
+	emojiSkFont := c.getEmojiSkiaFont(font)
+	runes := []rune(text)
+	cx := float32(x)
+	i := 0
+	for i < len(runes) {
+		// Find the next non-emoji run.
+		start := i
+		isEmoji := isEmojiRune(runes[i])
+		for i < len(runes) && isEmojiRune(runes[i]) == isEmoji {
+			i++
+		}
+		seg := string(runes[start:i])
+		segFont := primarySkFont
+		if isEmoji && emojiSkFont != nil {
+			segFont = emojiSkFont
+		}
+		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
+		// Advance x by the width of this segment.
+		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
+			cx += w
+		}
+	}
 }
 
 // FontAscent returns the ascent (distance from baseline up to the top of the
@@ -668,7 +705,71 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 	return f
 }
 
-// PixelAt returns the RGBA color at the given device pixel, mirroring the read path of
+// getEmojiSkiaFont returns a *skia.Font using the emoji Typeface (Segoe UI
+// Emoji / Noto Color Emoji) at the same size as font, or nil if no emoji
+// font is available.
+func (c *Canvas) getEmojiSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil || mgr.EmojiTypeface() == nil {
+		return nil
+	}
+	return c.makeSkiaFont(mgr.EmojiTypeface(), font.Size)
+}
+
+// makeSkiaFont creates a *skia.Font from a Typeface and size, sharing the
+// cache logic of getSkiaFont but with a given Typeface.
+func (c *Canvas) makeSkiaFont(tf *skia.Typeface, size float64) *skia.Font {
+	if tf == nil {
+		return nil
+	}
+	if size <= 0 {
+		size = 16
+	}
+	f := skia.NewFont(tf, float32(size))
+	if f == nil {
+		return nil
+	}
+	f.SetEdging(skia.FontEdgingAntialias)
+	f.SetSubpixel(true)
+	return f
+}
+
+// isEmojiRune reports whether r is likely an emoji character that should be
+// rendered with an emoji font. Covers the common emoji ranges.
+func isEmojiRune(r rune) bool {
+	switch {
+	case r > 0xFFFF:
+		// Supplementary Multilingual Plane: most emoji live here
+		// (U+1F000–U+1FFFF). Exclude Private Use Area (U+F0000+).
+		return r >= 0x1F000 && r <= 0x1FFFF
+	case r >= 0x2600 && r <= 0x27BF:
+		// Miscellaneous Symbols, Dingbats
+		return true
+	case r >= 0x2300 && r <= 0x23FF:
+		// Miscellaneous Technical (watch, clock, buttons, etc.)
+		return true
+	case r >= 0x24C0 && r <= 0x24FF:
+		// Enclosed Alphanumerics (Ⓜ, etc.)
+		return true
+	case r >= 0x2930 && r <= 0x2BFF:
+		// Arrows, Supplemental Arrows, Various Symbols
+		return true
+	case r == 0x200D || r == 0xFE0F:
+		// ZWJ and Variation Selector-16 (emoji presentation)
+		return true
+	}
+	return false
+}
+
+// containsEmoji reports whether text contains any emoji-range characters.
+func containsEmoji(text string) bool {
+	for _, r := range text {
+		if isEmojiRune(r) {
+			return true
+		}
+	}
+	return false
+}
 // ImageBuffer::getImageData() for a single pixel. Out-of-range reads return transparent
 // black.
 func (c *Canvas) PixelAt(px, py int) Color {
@@ -871,14 +972,66 @@ func globalSkiaFont(font Font) *skia.Font {
 // MeasureText returns the advance width of text rendered with the given font,
 // using Skia's real font rasterizer. Exposed for the layout package to measure
 // text width before painting (via layout.MeasureTextFunc). Returns 0 when the
-// font cannot be loaded.
+// font cannot be loaded. Emoji characters are measured using the emoji fallback
+// font when the primary font lacks the glyph.
 func MeasureText(font Font, text string) float64 {
 	skFont := globalSkiaFont(font)
 	if skFont == nil {
 		return 0
 	}
-	w, _ := skFont.MeasureText(text, globalMeasurePaintInstance())
-	return float64(w)
+	if !containsEmoji(text) {
+		w, _ := skFont.MeasureText(text, globalMeasurePaintInstance())
+		return float64(w)
+	}
+	// Emoji present: measure segment by segment with the correct font.
+	emojiSkFont := globalEmojiSkiaFont(font)
+	total := float64(0)
+	runes := []rune(text)
+	i := 0
+	paint := globalMeasurePaintInstance()
+	for i < len(runes) {
+		start := i
+		isEmoji := isEmojiRune(runes[i])
+		for i < len(runes) && isEmojiRune(runes[i]) == isEmoji {
+			i++
+		}
+		seg := string(runes[start:i])
+		f := skFont
+		if isEmoji && emojiSkFont != nil {
+			f = emojiSkFont
+		}
+		if w, _ := f.MeasureText(seg, paint); w > 0 {
+			total += float64(w)
+		}
+	}
+	return total
+}
+
+// globalEmojiSkiaFont returns a cached *skia.Font using the emoji Typeface at
+// the given font size, or nil if no emoji font is loaded.
+func globalEmojiSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil || mgr.EmojiTypeface() == nil {
+		return nil
+	}
+	size := font.Size
+	if size <= 0 {
+		size = 16
+	}
+	key := fontKey{family: "_emoji", size: float32(size), weight: 400}
+	globalFontCacheMu.Lock()
+	defer globalFontCacheMu.Unlock()
+	if f, ok := globalFontCache[key]; ok {
+		return f
+	}
+	f := skia.NewFont(mgr.EmojiTypeface(), float32(size))
+	if f == nil {
+		return nil
+	}
+	f.SetEdging(skia.FontEdgingAntialias)
+	f.SetSubpixel(true)
+	globalFontCache[key] = f
+	return f
 }
 
 // GlobalFontAscent returns the ascent (positive distance from baseline to the

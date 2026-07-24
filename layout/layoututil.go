@@ -42,11 +42,33 @@ func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
 		if reference > 0 { return lengthResult{Value: l.Value * reference / 100, Definite: true} }
 		return lengthResult{Definite: false}
 	case "vw":
-		return lengthResult{Value: l.Value * 9.6, Definite: true}
+		if currentViewportWidth > 0 {
+			return lengthResult{Value: l.Value * currentViewportWidth / 100, Definite: true}
+		}
+		return lengthResult{Definite: false}
 	case "vh":
-		return lengthResult{Value: l.Value * 10.8, Definite: true}
-	case "vmin", "vmax":
-		return lengthResult{Value: l.Value * 9.6, Definite: true}
+		if currentViewportHeight > 0 {
+			return lengthResult{Value: l.Value * currentViewportHeight / 100, Definite: true}
+		}
+		return lengthResult{Definite: false}
+	case "vmin":
+		v := currentViewportWidth
+		if currentViewportHeight < v {
+			v = currentViewportHeight
+		}
+		if v > 0 {
+			return lengthResult{Value: l.Value * v / 100, Definite: true}
+		}
+		return lengthResult{Definite: false}
+	case "vmax":
+		v := currentViewportWidth
+		if currentViewportHeight > v {
+			v = currentViewportHeight
+		}
+		if v > 0 {
+			return lengthResult{Value: l.Value * v / 100, Definite: true}
+		}
+		return lengthResult{Definite: false}
 	default:
 		return lengthResult{Definite: true}
 	}

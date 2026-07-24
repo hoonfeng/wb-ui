@@ -76,6 +76,7 @@ type FontManager struct {
 	sansTF    *skia.Typeface  // generic sans-serif
 	monoTF    *skia.Typeface  // generic monospace
 	serifTF   *skia.Typeface  // generic serif
+	emojiTF   *skia.Typeface  // emoji font (Segoe UI Emoji / Noto Color Emoji)
 }
 
 var (
@@ -304,7 +305,7 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	if strings.Contains(name, "kochi") || strings.Contains(name, "cjk") || strings.Contains(name, "noto") {
 		entry.cjk = true
 	}
-	if strings.Contains(name, "emoji") || strings.Contains(name, "coloremoji") {
+	if strings.Contains(name, "emoji") || strings.Contains(name, "coloremoji") || strings.Contains(name, "seguiemj") {
 		entry.emoji = true
 	}
 	// Weight override from filename for common patterns.
@@ -414,6 +415,24 @@ func (m *FontManager) selectDefaults() {
 	m.defaultTF = m.sansTF
 	if m.defaultTF == nil {
 		m.defaultTF = m.monoTF
+	}
+	// emoji: find the first font with emoji flag set (e.g. Segoe UI Emoji
+	// on Windows, Noto Color Emoji on Linux/macOS).
+	m.emojiTF = nil
+	for _, f := range m.fonts {
+		if f.emoji {
+			m.emojiTF = f.tf
+			break
+		}
+	}
+	// Fallback: try to find by family name if no font was flagged as emoji.
+	if m.emojiTF == nil {
+		for _, name := range []string{"segoe ui emoji", "noto color emoji", "apple color emoji"} {
+			m.emojiTF = m.findBest(name, 400, false)
+			if m.emojiTF != nil {
+				break
+			}
+		}
 	}
 }
 
@@ -561,6 +580,15 @@ func (m *FontManager) DefaultTypeface() *skia.Typeface {
 		return nil
 	}
 	return m.defaultTF
+}
+
+// EmojiTypeface returns the loaded emoji Typeface (e.g. Segoe UI Emoji), or
+// nil if no emoji font is available.
+func (m *FontManager) EmojiTypeface() *skia.Typeface {
+	if m == nil {
+		return nil
+	}
+	return m.emojiTF
 }
 
 // TypefaceWeight returns the CSS weight of the loaded Typeface (400 for regular,

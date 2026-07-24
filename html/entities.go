@@ -181,27 +181,27 @@ func decodeNumericEntity(body string, isHex bool) (string, bool) {
 		return "\ufffd", false
 	}
 	var code uint64
-	for i := 0; i < len(body); i++ {
-		c := body[i]
-		var v byte
-		switch {
-		case c >= '0' && c <= '9':
-			v = c - '0'
-		case isHex && c >= 'a' && c <= 'f':
-			v = c - 'a' + 10
-		case isHex && c >= 'A' && c <= 'F':
-			v = c - 'A' + 10
-		default:
-			return "\ufffd", false
+	if isHex {
+		for i := 0; i < len(body); i++ {
+			c := body[i]
+			var v byte
+			switch {
+			case c >= '0' && c <= '9':
+				v = c - '0'
+			case c >= 'a' && c <= 'f':
+				v = c - 'a' + 10
+			case c >= 'A' && c <= 'F':
+				v = c - 'A' + 10
+			default:
+				return "\ufffd", false
+			}
+			code = code*16 + uint64(v)
+			if code > 0x10FFFF {
+				return "\ufffd", false
+			}
 		}
-		code = code*16 + uint64(v)
-		if code > 0x10FFFF {
-			return "\ufffd", false
-		}
-	}
-	if !isHex {
-		// Decimal: recompute base 10. We re-parse to avoid the hex multiplier above.
-		code = 0
+	} else {
+		// Decimal: parse base 10.
 		for i := 0; i < len(body); i++ {
 			c := body[i]
 			if c < '0' || c > '9' {
