@@ -404,8 +404,40 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
-			// Note: column flex auto cross-size propagation (width from content)
-			// is not yet implemented.
+
+			// Propagate auto cross-size (width) from children.
+			oldLeft := g.Left()
+			bw2 := g.BorderBoxWidth()
+			newCross := crossPos
+			switch align {
+			case "center":
+				newCross = crossPos + (cw-bw2)/2
+			case "flex-end":
+				newCross = crossPos + cw - bw2
+			}
+			delta := newCross - oldLeft
+			if delta != 0 {
+				shiftBoxAndDescendants(it.box, 0, delta, state)
+			}
+
+			// Propagate auto main-size (height) from children.
+			// For column flex, main axis = Y. justify-content:center/flex-end
+			// may need re-centering after child layout determines actual height.
+			if heightIsAutoForBox(it.box) {
+				oldTop := g.Top()
+				bh2 := g.BorderBoxHeight()
+				newMain := cy
+				switch justify {
+				case "center":
+					newMain = cy + (ch-bh2)/2
+				case "flex-end":
+					newMain = cy + ch - bh2
+				}
+				delta2 := newMain - oldTop
+				if delta2 != 0 {
+					shiftBoxAndDescendants(it.box, delta2, 0, state)
+				}
+			}
 		}
 	}
 }
