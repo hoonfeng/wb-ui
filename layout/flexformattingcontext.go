@@ -211,6 +211,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 	mainPos := cx
 	crossPos := cy
+	if !isRow {
+		// Column flex: main axis is Y (vertical), cross axis is X (horizontal)
+		mainPos = cy
+		crossPos = cx
+	}
 	if isReverse {
 		if isRow { mainPos = cx + cw } else { mainPos = cy + ch }
 	}
@@ -241,10 +246,12 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 		if isRow {
 			if isReverse { mainPos -= g.BorderBoxWidth() }
+			// Row: mainPos = X, crossPos = Y; SetTopLeft(top=Y, left=X)
 			g.SetTopLeft(crossPos, mainPos)
 			if !isReverse { mainPos += g.BorderBoxWidth() }
 		} else {
 			if isReverse { mainPos -= g.BorderBoxHeight() }
+			// Column: mainPos = Y, crossPos = X; SetTopLeft(top=Y, left=X)
 			g.SetTopLeft(mainPos, crossPos)
 			if !isReverse { mainPos += g.BorderBoxHeight() }
 		}
