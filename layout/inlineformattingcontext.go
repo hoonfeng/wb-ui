@@ -2,8 +2,6 @@
 package layout
 
 import (
-	"strings"
-
 	"wb-ui/style"
 )
 
@@ -34,15 +32,27 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		case *InlineTextBox:
 			text := cld.Text()
 			if text == "" { continue }
-			words := strings.Fields(text)
-			if len(words) == 0 { continue }
-			for _, word := range words {
+			runes := []rune(text)
+			cursor := 0
+			for cursor < len(runes) {
+				// Skip whitespace runs (inter-word spaces)
+				for cursor < len(runes) && isInlineWhitespace(runes[cursor]) {
+					cursor++
+				}
+				if cursor >= len(runes) { break }
+				wordStart := cursor
+				for cursor < len(runes) && !isInlineWhitespace(runes[cursor]) {
+					cursor++
+				}
+				wordEnd := cursor
+				word := string(runes[wordStart:wordEnd])
 				wordWidth := measureText(box, word)
 				if currentLine.x+wordWidth > contentX+contentWidth && currentLine.x > contentX {
 					lines = append(lines, currentLine)
 					currentLine = &line{x: contentX, y: currentLine.y + lineHeight, width: contentWidth}
 				}
 				seg := TextSegment{
+					Start: wordStart, Len: wordEnd - wordStart,
 					X: currentLine.x, Y: currentLine.y,
 					Width: wordWidth, Height: lineHeight,
 					LineY: currentLine.y, LineHeight: lineHeight,
@@ -77,6 +87,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if totalHeight > g.ContentHeight() {
 		g.SetContentHeight(totalHeight)
 	}
+}
+
+// isInlineWhitespace reports whether r is a CSS whitespace character that
+// separates words in inline layout.
+func isInlineWhitespace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
 }
 
 var _ = style.DisplayInline
