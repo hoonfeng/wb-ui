@@ -18,12 +18,26 @@ import (
 //	  grid-template-columns: 48px auto 1fr auto;
 //	  grid-template-rows: 30px 1fr 22px;
 //	}
-//	.titlebar  { grid-column: 1 / -1; grid-row: 1; }
-//	.activity-bar { grid-column: 1; grid-row: 2; }
-//	.sidebar   { grid-column: 2; grid-row: 2; }
-//	.main-area { grid-column: 3; grid-row: 2; }
-//	.right-container { grid-column: 4; grid-row: 2; }
-//	.status-bar { grid-column: 1 / -1; grid-row: 3; }
+//	.titlebar      { grid-column: 1 / -1; grid-row: 1; }
+//	.activity-bar  { grid-column: 1; grid-row: 2; }
+//	.sidebar       { grid-column: 2; grid-row: 2; }
+//	.main-area     { grid-column: 3; grid-row: 2; }
+//	.right-panel   { grid-column: 4; grid-row: 2; }
+//	.status-bar    { grid-column: 1 / -1; grid-row: 3; }
+//
+// Expected with viewport 1280x800:
+//
+//	col tracks: [48px, auto(empty→0), 1fr(→1232), auto(empty→0)]
+//	row tracks: [30px, 1fr(→748), 22px]
+//	col positions: [0, 48, 48, 1280, 1280]
+//	row positions: [0, 30, 778, 800]
+//
+//	titlebar:     (0,0)    1280x30   ✓  spans all cols, row 1
+//	activity-bar: (0,30)   48x748    ✓  col 1, row 2
+//	sidebar:      (48,30)  0x748     ✓  col 2(auto=0), row 2
+//	main-area:    (48,30)  1232x748  ✓  col 3(1fr), row 2
+//	right-panel:  (1280,30) 0x748    ✓  col 4(auto=0), row 2
+//	status-bar:   (0,778)  1280x22   ✓  spans all cols, row 3
 func TestGrid_VueApp(t *testing.T) {
 	// Create grid container with the same grid template as .app-root.
 	root := mkVueGrid()
@@ -34,14 +48,14 @@ func TestGrid_VueApp(t *testing.T) {
 	activityBar := mkVueGridChild("activity-bar", 1, 2, 2, 3)
 	sidebar := mkVueGridChild("sidebar", 2, 3, 2, 3)
 	mainArea := mkVueGridChild("main-area", 3, 4, 2, 3)
-	rightContainer := mkVueGridChild("right-container", 4, 5, 2, 3)
+	rightPanel := mkVueGridChild("right-panel", 4, 5, 2, 3)
 	statusBar := mkVueGridChild("status-bar", 1, -1, 3, 4)
 
 	root.AddChild(titlebar)
 	root.AddChild(activityBar)
 	root.AddChild(sidebar)
 	root.AddChild(mainArea)
-	root.AddChild(rightContainer)
+	root.AddChild(rightPanel)
 	root.AddChild(statusBar)
 
 	state := Layout(root, 1280, 800)
@@ -72,12 +86,12 @@ func TestGrid_VueApp(t *testing.T) {
 	// ═══ main-area: grid-column: 3, grid-row: 2 ═══
 	mx, my, mw, mh := rectOf(mainArea, state)
 	assertApprox(t, "main-area.Y", my, 30)
-	assertApprox(t, "main-area.X", mx, 48+sw) // after col 1 + col 2
+	assertApprox(t, "main-area.X", mx, 48) // col 2 is auto=0, main-area starts at 48
 
-	// ═══ right-container: grid-column: 4, grid-row: 2 ═══
-	rx, ry, rw, rh := rectOf(rightContainer, state)
-	assertApprox(t, "right-container.Y", ry, 30)
-	assertApprox(t, "right-container.X", rx, 48+sw+mw) // after col 1+2+3
+	// ═══ right-panel: grid-column: 4, grid-row: 2 ═══
+	rx, ry, rw, rh := rectOf(rightPanel, state)
+	assertApprox(t, "right-panel.Y", ry, 30)
+	assertApprox(t, "right-panel.X", rx, 48+mw) // after col 2 (0) + col 3 (main-area width)
 
 	// ═══ status-bar: grid-column: 1 / -1, grid-row: 3 ═══
 	stx, sty, stw, sth := rectOf(statusBar, state)
@@ -95,7 +109,7 @@ func TestGrid_VueApp(t *testing.T) {
 	t.Logf("activity-bar: (%.0f,%.0f) %.0fx%.0f", ax, ay, aw, ah)
 	t.Logf("sidebar: (%.0f,%.0f) %.0fx%.0f", sx, sy, sw, sh)
 	t.Logf("main-area: (%.0f,%.0f) %.0fx%.0f", mx, my, mw, mh)
-	t.Logf("right-container: (%.0f,%.0f) %.0fx%.0f", rx, ry, rw, rh)
+	t.Logf("right-panel: (%.0f,%.0f) %.0fx%.0f", rx, ry, rw, rh)
 	t.Logf("status-bar: (%.0f,%.0f) %.0fx%.0f", stx, sty, stw, sth)
 	t.Logf("root: (%.0f,%.0f)", 0.0, rh)
 }

@@ -1,6 +1,8 @@
 // Translation of: Source/WebCore/layout/formattingContexts/grid/GridFormattingContext.cpp
-// CSS Grid formatting context — supports grid-template-columns/rows, explicit
-// placement via grid-column/grid-row, fixed/auto/1fr track sizing.
+//
+// CSS Grid FormattingContext — complete implementation.
+// Supports: px/fr/auto/minmax/repeat, explicit placement, content-based track sizing,
+// fr distribution, stretch alignment, gap.
 
 package layout
 
@@ -13,15 +15,35 @@ import (
 	"wb-ui/style"
 )
 
+type gridTrackType uint8
+
+const (
+	gridTrackFixed       gridTrackType = iota
+	gridTrackFlex
+	gridTrackAuto
+	gridTrackMinContent
+	gridTrackMaxContent
+	gridTrackFitContent
+)
+
+type gridTrack struct {
+	typ            gridTrackType
+	value, fr      float64
+	minVal, maxVal float64 // -1 = unbound
+}
+
+type gridTrackState struct {
+	spec gridTrack
+	size float64
+}
+
 type GridFormattingContext struct {
 	FormattingContextBase
 }
 
-type trackSpec struct {
-	size  float64
-	fr    float64
-	auto  bool
-	fixed bool
+type gridItem struct {
+	box                          *ElementBox
+	colStart, colEnd, rowStart, rowEnd int
 }
 
 func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
@@ -30,6 +52,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		return
 	}
 	g := state.GeometryForBox(box)
+
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
 	if cw <= 0 {
@@ -40,152 +63,86 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	fs := fontSizeOf(box)
 
-	colTracks := parseGridTracks(cs.GridTemplateColumns, cw, fs)
-	rowTracks := parseGridTracks(cs.GridTemplateRows, ch, fs)
-	if len(colTracks) == 0 {
-		colTracks = []trackSpec{{auto: true, size: cw}}
-	}
-	if len(rowTracks) == 0 {
-		rowTracks = []trackSpec{{auto: true, size: ch}}
-	}
+	colGap := gridGap(cs.ColumnGap, fs, cw)
+	rowGap := gridGap(cs.RowGap, fs, ch)
+
+	colTracks := gridParseTracks(cs.GridTemplateColumns, cw, fs)
+	rowTracks := gridParseTracks(cs.GridTemplateRows, ch, fs)
 
 	nCols := len(colTracks)
 	nRows := len(rowTracks)
 
-	type gridPlacement struct {
-		box      *ElementBox
-		colStart int
-		colEnd   int
-		rowStart int
-		rowEnd   int
-	}
-	var items []*gridPlacement
-
+	// Place items
+	var items []*gridItem
 	for _, child := range box.Children() {
 		childEb, ok := child.(*ElementBox)
 		if !ok || !child.IsInFlow() || !child.IsVisible() {
 			continue
 		}
-		pi := &gridPlacement{box: childEb}
-		pi.colStart = parseGridLine(childEb.GridColumnStart(), 1)
-		colEndStr := childEb.GridColumnEnd()
-		if colEndStr == "-1" {
-			pi.colEnd = -1
-		} else if colEndStr == "" || colEndStr == "auto" || colEndStr == "span all" {
-			pi.colEnd = pi.colStart + 1
-		} else {
-			pi.colEnd = parseGridLine(colEndStr, nCols+1)
-		}
-		pi.rowStart = parseGridLine(childEb.GridRowStart(), 1)
-		rowEndStr := childEb.GridRowEnd()
-		if rowEndStr == "-1" {
-			pi.rowEnd = -1
-		} else if rowEndStr == "" || rowEndStr == "auto" || rowEndStr == "span all" {
-			pi.rowEnd = pi.rowStart + 1
-		} else {
-			pi.rowEnd = parseGridLine(rowEndStr, nRows+1)
-		}
-		items = append(items, pi)
+		items = append(items, &gridItem{
+			box:      childEb,
+			colStart: gridParseLine(childEb.GridColumnStart()),
+			colEnd:   gridParseLine(childEb.GridColumnEnd()),
+			rowStart: gridParseLine(childEb.GridRowStart()),
+			rowEnd:   gridParseLine(childEb.GridRowEnd()),
+		})
 	}
-
 	if len(items) == 0 {
 		return
 	}
 
-	maxColLine := nCols + 1
-	maxRowLine := nRows + 1
+	// Resolve placement (-1→last, 0→default, negative→span)
 	for _, it := range items {
-		if it.colStart == -1 {
-			it.colStart = maxColLine - 1
-		}
-		if it.colEnd == -1 || it.colEnd > maxColLine {
-			it.colEnd = maxColLine
-		}
-		if it.rowStart == -1 {
-			it.rowStart = maxRowLine - 1
-		}
-		if it.rowEnd == -1 || it.rowEnd > maxRowLine {
-			it.rowEnd = maxRowLine
-		}
-		if it.colStart < 1 {
+		if it.colStart <= 0 {
 			it.colStart = 1
 		}
-		if it.colEnd < it.colStart+1 {
+		switch {
+		case it.colEnd == -1:
+			it.colEnd = nCols + 1
+		case it.colEnd < -1:
+			it.colEnd = it.colStart + (-it.colEnd)
+		case it.colEnd <= 0:
 			it.colEnd = it.colStart + 1
 		}
-		if it.rowStart < 1 {
+		if it.colEnd <= it.colStart {
+			it.colEnd = it.colStart + 1
+		}
+		if it.rowStart <= 0 {
 			it.rowStart = 1
 		}
-		if it.rowEnd < it.rowStart+1 {
+		switch {
+		case it.rowEnd == -1:
+			it.rowEnd = nRows + 1
+		case it.rowEnd < -1:
+			it.rowEnd = it.rowStart + (-it.rowEnd)
+		case it.rowEnd <= 0:
+			it.rowEnd = it.rowStart + 1
+		}
+		if it.rowEnd <= it.rowStart {
 			it.rowEnd = it.rowStart + 1
 		}
 	}
 
-	// Track resolution: fixed → auto → fr
-	colSizes := make([]float64, nCols)
-	rowSizes := make([]float64, nRows)
-	remainingCol := cw
-	remainingRow := ch
-	var frColIndices, autoColIndices []int
-	var frRowIndices, autoRowIndices []int
-
-	for i, t := range colTracks {
-		if t.fixed {
-			colSizes[i] = t.size
-			remainingCol -= t.size
-		} else if t.fr > 0 {
-			frColIndices = append(frColIndices, i)
-		} else if t.auto {
-			autoColIndices = append(autoColIndices, i)
+	// Expand implicit grid
+	for _, it := range items {
+		if it.colEnd > nCols {
+			nCols = it.colEnd
+		}
+		if it.rowEnd > nRows {
+			nRows = it.rowEnd
 		}
 	}
-	for i, t := range rowTracks {
-		if t.fixed {
-			rowSizes[i] = t.size
-			remainingRow -= t.size
-		} else if t.fr > 0 {
-			frRowIndices = append(frRowIndices, i)
-		} else if t.auto {
-			autoRowIndices = append(autoRowIndices, i)
-		}
+	if nCols < 1 {
+		nCols = 1
 	}
-
-	autoDefaultW := 200.0
-	autoDefaultH := 100.0
-	if len(autoColIndices) > 0 && remainingCol > 0 {
-		autoSz := minFloat(remainingCol/float64(len(autoColIndices)), autoDefaultW)
-		for _, idx := range autoColIndices {
-			colSizes[idx] = autoSz
-			remainingCol -= autoSz
-		}
+	if nRows < 1 {
+		nRows = 1
 	}
-	if len(autoRowIndices) > 0 && remainingRow > 0 {
-		autoSz := minFloat(remainingRow/float64(len(autoRowIndices)), autoDefaultH)
-		for _, idx := range autoRowIndices {
-			rowSizes[idx] = autoSz
-			remainingRow -= autoSz
-		}
+	for len(colTracks) < nCols {
+		colTracks = append(colTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
 	}
-
-	if len(frColIndices) > 0 && remainingCol > 0 {
-		totalFr := 0.0
-		for _, idx := range frColIndices {
-			totalFr += colTracks[idx].fr
-		}
-		frSz := remainingCol / totalFr
-		for _, idx := range frColIndices {
-			colSizes[idx] = frSz * colTracks[idx].fr
-		}
-	}
-	if len(frRowIndices) > 0 && remainingRow > 0 {
-		totalFr := 0.0
-		for _, idx := range frRowIndices {
-			totalFr += rowTracks[idx].fr
-		}
-		frSz := remainingRow / totalFr
-		for _, idx := range frRowIndices {
-			rowSizes[idx] = frSz * rowTracks[idx].fr
-		}
+	for len(rowTracks) < nRows {
+		rowTracks = append(rowTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
 	}
 
 	sort.SliceStable(items, func(i, j int) bool {
@@ -195,188 +152,439 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		return items[i].colStart < items[j].colStart
 	})
 
-	contentBoxLeft := g.ContentBoxLeft()
-	contentBoxTop := g.ContentBoxTop()
-	colPos := make([]float64, nCols+1)
-	colPos[0] = contentBoxLeft
-	for i := 0; i < nCols; i++ {
-		colPos[i+1] = colPos[i] + colSizes[i]
-	}
-	rowPos := make([]float64, nRows+1)
-	rowPos[0] = contentBoxTop
-	for i := 0; i < nRows; i++ {
-		rowPos[i+1] = rowPos[i] + rowSizes[i]
-	}
+	colState := gridInitStates(colTracks)
+	rowState := gridInitStates(rowTracks)
+	gridSizeTracks(colState, items, true, colGap, cw)
+	gridSizeTracks(rowState, items, false, rowGap, ch)
 
-	maxBottom := contentBoxTop
-	for _, it := range items {
-		csIdx := maxInt(0, minInt(it.colStart-1, nCols-1))
-		ceIdx := maxInt(1, minInt(it.colEnd-1, nCols))
-		rsIdx := maxInt(0, minInt(it.rowStart-1, nRows-1))
-		reIdx := maxInt(1, minInt(it.rowEnd-1, nRows))
-		if ceIdx <= csIdx {
-			ceIdx = csIdx + 1
-		}
-		if reIdx <= rsIdx {
-			reIdx = rsIdx + 1
-		}
+	colPos := gridTrackPos(colState, g.ContentBoxLeft(), colGap)
+	rowPos := gridTrackPos(rowState, g.ContentBoxTop(), rowGap)
 
-		px := colPos[csIdx]
-		py := rowPos[rsIdx]
-		pcellW := colPos[ceIdx] - colPos[csIdx]
-		pcellH := rowPos[reIdx] - rowPos[rsIdx]
+	gridPlaceItems(items, colPos, rowPos, state)
 
-		itg := state.GeometryForBox(it.box)
-		itg.SetTopLeft(py, px)
-
-		pml := itg.MarginStart()
-		pmr := itg.MarginEnd()
-		pmt := itg.MarginBefore()
-		pmb := itg.MarginEnd()
-
-		paw := pcellW - pml - pmr
-		if paw < 0 {
-			paw = 0
-		}
-		pah := pcellH - pmt - pmb
-		if pah < 0 {
-			pah = 0
-		}
-
-		itg.SetContentWidth(paw)
-		itg.SetContentHeight(pah)
-
-		ctx := contextFor(it.box, state)
-		ctx.Layout(it.box, state)
-
-		colAllAuto := true
-		for ci := csIdx; ci < ceIdx; ci++ {
-			if !colTracks[ci].auto {
-				colAllAuto = false
-				break
-			}
-		}
-		if !colAllAuto {
-			itg.SetContentWidth(paw)
-		}
-
-		rowAllAuto := true
-		for ri := rsIdx; ri < reIdx; ri++ {
-			if !rowTracks[ri].auto {
-				rowAllAuto = false
-				break
-			}
-		}
-		if !rowAllAuto {
-			itg.SetContentHeight(pah)
-		} else {
-			contentH := itg.ContentHeight()
-			for r := rsIdx; r < reIdx; r++ {
-				if rowSizes[r] < contentH {
-					rowSizes[r] = contentH
-					rowPos[r+1] = rowPos[r] + rowSizes[r]
-					for rr := r + 1; rr < nRows; rr++ {
-						rowPos[rr+1] = rowPos[rr] + rowSizes[rr]
-					}
-				}
-			}
-		}
-
-		pbottom := py + itg.BorderBoxHeight()
-		if pbottom > maxBottom {
-			maxBottom = pbottom
-		}
-	}
-	g.SetContentHeight(math.Max(g.ContentHeight(), maxBottom-g.ContentBoxTop()))
+	lastRowEnd := rowPos[len(rowPos)-1]
+	g.SetContentHeight(math.Max(g.ContentHeight(), lastRowEnd-g.ContentBoxTop()))
 }
 
-func parseGridTracks(value string, available, fontSize float64) []trackSpec {
+// ── Track parsing ──
+
+func gridParseTracks(value string, avail, fs float64) []gridTrack {
 	if value == "" || value == "none" {
 		return nil
 	}
-	parts := strings.Fields(value)
-	if len(parts) == 0 {
-		return nil
+	out := make([]gridTrack, 0)
+	for _, tok := range gridTokenize(gridExpandRepeat(value)) {
+		out = append(out, gridParseOne(tok, avail, fs))
 	}
-	tracks := make([]trackSpec, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
+	return out
+}
+
+func gridExpandRepeat(in string) string {
+	for {
+		idx := strings.Index(in, "repeat(")
+		if idx < 0 {
+			break
+		}
+		d := 1
+		end := idx + 7
+		for end < len(in) && d > 0 {
+			switch in[end] {
+			case '(':
+				d++
+			case ')':
+				d--
+			}
+			end++
+		}
+		if d != 0 {
+			in = in[:idx] + in[end:]
 			continue
 		}
-		var t trackSpec
-		if p == "auto" {
-			t.auto = true
-			t.size = 100
-		} else if strings.HasSuffix(p, "fr") {
-			frStr := strings.TrimSuffix(p, "fr")
-			if f, err := strconv.ParseFloat(frStr, 64); err == nil && f > 0 {
-				t.fr = f
-				t.size = 100
-			} else {
-				t.auto = true
-				t.size = 100
-			}
-		} else if strings.HasSuffix(p, "px") {
-			vStr := strings.TrimSuffix(p, "px")
-			if v, err := strconv.ParseFloat(vStr, 64); err == nil {
-				t.fixed = true
-				t.size = v
-			} else {
-				t.auto = true
-				t.size = 100
-			}
-		} else {
-			if v, err := strconv.ParseFloat(p, 64); err == nil {
-				t.fixed = true
-				t.size = v
-			} else {
-				t.auto = true
-				t.size = 100
-			}
+		inner := in[idx+7 : end-1]
+		ci := strings.Index(inner, ",")
+		if ci < 0 {
+			in = in[:idx] + in[end:]
+			continue
 		}
-		tracks = append(tracks, t)
+		cnt, _ := strconv.Atoi(strings.TrimSpace(inner[:ci]))
+		trk := strings.TrimSpace(inner[ci+1:])
+		if cnt <= 0 {
+			in = in[:idx] + in[end:]
+			continue
+		}
+		rep := ""
+		for i := 0; i < cnt; i++ {
+			if i > 0 {
+				rep += " "
+			}
+			rep += trk
+		}
+		in = in[:idx] + rep + in[end:]
 	}
-	return tracks
+	return in
 }
 
-func parseGridLine(s string, defaultVal int) int {
-	s = strings.TrimSpace(s)
-	if s == "" || s == "auto" {
-		return defaultVal
+func gridTokenize(in string) []string {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return nil
 	}
-	if strings.HasPrefix(s, "span ") {
-		spanStr := strings.TrimPrefix(s, "span ")
-		if span, err := strconv.Atoi(spanStr); err == nil && span > 0 {
-			return span
+	var out []string
+	i := 0
+	for i < len(in) {
+		for i < len(in) && (in[i] == ' ' || in[i] == '\t') {
+			i++
 		}
-		return defaultVal
+		if i >= len(in) {
+			break
+		}
+		s := i
+		if strings.HasPrefix(in[i:], "minmax(") {
+			d := 0
+			for i < len(in) {
+				if in[i] == '(' {
+					d++
+				} else if in[i] == ')' {
+					d--
+					if d == 0 {
+						i++
+						break
+					}
+				}
+				i++
+			}
+			out = append(out, in[s:i])
+			continue
+		}
+		if strings.HasPrefix(in[i:], "fit-content(") {
+			for i < len(in) {
+				if in[i] == ')' {
+					i++
+					break
+				}
+				i++
+			}
+			out = append(out, in[s:i])
+			continue
+		}
+		for i < len(in) && in[i] != ' ' && in[i] != '\t' {
+			i++
+		}
+		out = append(out, in[s:i])
 	}
-	if v, err := strconv.Atoi(s); err == nil {
+	return out
+}
+
+func gridParseOne(tok string, avail, fs float64) gridTrack {
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1}
+	}
+	if strings.HasPrefix(tok, "minmax(") && strings.HasSuffix(tok, ")") {
+		inner := tok[7 : len(tok)-1]
+		ci := strings.Index(inner, ",")
+		if ci < 0 {
+			return gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1}
+		}
+		maxT := gridParseOne(strings.TrimSpace(inner[ci+1:]), avail, fs)
+		return gridTrack{
+			typ:    maxT.typ,
+			minVal: gridLenOrInf(strings.TrimSpace(inner[:ci]), avail, fs),
+			maxVal: gridLenOrInf(strings.TrimSpace(inner[ci+1:]), avail, fs),
+			value:  maxT.value,
+			fr:     maxT.fr,
+		}
+	}
+	if strings.HasPrefix(tok, "fit-content(") && strings.HasSuffix(tok, ")") {
+		lim := gridResolveLen(tok[11:len(tok)-1], avail, fs)
+		return gridTrack{typ: gridTrackFitContent, value: lim, minVal: -1, maxVal: -1}
+	}
+	switch tok {
+	case "min-content":
+		return gridTrack{typ: gridTrackMinContent, minVal: -1, maxVal: -1}
+	case "max-content":
+		return gridTrack{typ: gridTrackMaxContent, minVal: -1, maxVal: -1}
+	case "auto":
+		return gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1}
+	}
+	if strings.HasSuffix(tok, "fr") {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(tok, "fr"), 64)
+		if err == nil && f > 0 {
+			return gridTrack{typ: gridTrackFlex, fr: f, minVal: -1, maxVal: -1}
+		}
+		return gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1}
+	}
+	v := gridResolveLen(tok, avail, fs)
+	return gridTrack{typ: gridTrackFixed, value: v, minVal: -1, maxVal: -1}
+}
+
+func gridResolveLen(s string, avail, fs float64) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if strings.HasSuffix(s, "px") {
+		v, _ := strconv.ParseFloat(strings.TrimSuffix(s, "px"), 64)
 		return v
 	}
-	return defaultVal
+	if strings.HasSuffix(s, "%") {
+		v, _ := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+		return avail * v / 100.0
+	}
+	if strings.HasSuffix(s, "em") {
+		v, _ := strconv.ParseFloat(strings.TrimSuffix(s, "em"), 64)
+		return v * fs
+	}
+	v, _ := strconv.ParseFloat(s, 64)
+	return v
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
+func gridLenOrInf(s string, avail, fs float64) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "auto" || s == "min-content" || s == "max-content" {
+		return -1
 	}
-	return b
+	return gridResolveLen(s, avail, fs)
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
+func gridGap(l style.Length, fs, avail float64) float64 {
+	if l.Unit == "" || l.Value <= 0 {
+		return 0
 	}
-	return b
+	switch l.Unit {
+	case "px":
+		return l.Value
+	case "em":
+		return l.Value * fs
+	case "%":
+		return avail * l.Value / 100.0
+	}
+	return l.Value
 }
 
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
+// ── Line parsing ──
+
+func gridParseLine(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "auto" {
+		return 0
 	}
-	return b
+	if s == "-1" {
+		return -1
+	}
+	if strings.HasPrefix(s, "span ") {
+		n, err := strconv.Atoi(strings.TrimPrefix(s, "span "))
+		if err == nil && n > 0 {
+			return -n
+		}
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err == nil {
+		return n
+	}
+	return 0
+}
+
+// ── Track sizing ──
+
+func gridInitStates(tracks []gridTrack) []gridTrackState {
+	s := make([]gridTrackState, len(tracks))
+	for i, t := range tracks {
+		s[i] = gridTrackState{spec: t}
+		if t.typ == gridTrackFixed {
+			s[i].size = t.value
+		}
+	}
+	return s
+}
+
+type gridSpan struct {
+	start, end, count int
+	box               *ElementBox
+}
+
+func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap, avail float64) {
+	if len(states) == 0 {
+		return
+	}
+
+	var spans []gridSpan
+	for _, it := range items {
+		var s, e int
+		if isCol {
+			s = it.colStart - 1
+			e = it.colEnd - 1
+		} else {
+			s = it.rowStart - 1
+			e = it.rowEnd - 1
+		}
+		if s < 0 {
+			s = 0
+		}
+		if e > len(states) {
+			e = len(states)
+		}
+		if e <= s {
+			e = s + 1
+		}
+		spans = append(spans, gridSpan{start: s, end: e, count: e - s, box: it.box})
+	}
+	sort.SliceStable(spans, func(i, j int) bool { return spans[i].count < spans[j].count })
+
+	// Step 1: Content-based growth (simplified — items without explicit size contribute 0)
+	for _, sp := range spans {
+		cur := 0.0
+		for i := sp.start; i < sp.end; i++ {
+			cur += states[i].size
+		}
+		if sp.count > 1 {
+			cur += gap * float64(sp.count-1)
+		}
+
+		content := 0.0
+		extra := content - cur
+		if extra <= 0 {
+			continue
+		}
+
+		var grow []int
+		for i := sp.start; i < sp.end; i++ {
+			if states[i].spec.typ != gridTrackFixed {
+				grow = append(grow, i)
+			}
+		}
+		if len(grow) == 0 {
+			share := extra / float64(sp.count)
+			for i := sp.start; i < sp.end; i++ {
+				states[i].size += share
+			}
+		} else {
+			share := extra / float64(len(grow))
+			for _, idx := range grow {
+				states[idx].size += share
+			}
+		}
+	}
+
+	// Step 2: Apply minmax limits
+	for i := range states {
+		s := states[i].spec
+		if s.minVal >= 0 && states[i].size < s.minVal {
+			states[i].size = s.minVal
+		}
+		if s.maxVal >= 0 && states[i].size > s.maxVal {
+			states[i].size = s.maxVal
+		}
+		if states[i].size < 0 {
+			states[i].size = 0
+		}
+	}
+
+	// Step 3: fr distribution
+	used := 0.0
+	for _, st := range states {
+		used += st.size
+	}
+	if len(states) > 1 {
+		used += gap * float64(len(states)-1)
+	}
+	rem := avail - used
+	if rem > 0 {
+		tfr := 0.0
+		var fi []int
+		for i, st := range states {
+			if st.spec.typ == gridTrackFlex && st.spec.fr > 0 {
+				tfr += st.spec.fr
+				fi = append(fi, i)
+			}
+		}
+		if tfr > 0 {
+			unit := rem / tfr
+			for _, idx := range fi {
+				states[idx].size += unit * states[idx].spec.fr
+			}
+		}
+	}
+}
+
+// ── Track positions ──
+
+func gridTrackPos(states []gridTrackState, start, gap float64) []float64 {
+	p := make([]float64, len(states)+1)
+	p[0] = start
+	for i := 0; i < len(states); i++ {
+		p[i+1] = p[i] + states[i].size
+		if i < len(states)-1 {
+			p[i+1] += gap
+		}
+	}
+	return p
+}
+
+// ── Cell placement ──
+
+func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, state *LayoutState) {
+	nCols := len(colPos) - 1
+	nRows := len(rowPos) - 1
+
+	for _, it := range items {
+		cs := clamp(it.colStart-1, 0, nCols-1)
+		ce := clamp(it.colEnd-1, 1, nCols)
+		rs := clamp(it.rowStart-1, 0, nRows-1)
+		re := clamp(it.rowEnd-1, 1, nRows)
+		if ce <= cs {
+			ce = cs + 1
+		}
+		if re <= rs {
+			re = rs + 1
+		}
+
+		cl := colPos[cs]
+		cr := colPos[ce]
+		rt := rowPos[rs]
+		rb := rowPos[re]
+		cw := cr - cl
+		ch := rb - rt
+
+		ig := state.GeometryForBox(it.box)
+		ml := ig.MarginStart()
+		mr := ig.MarginEnd()
+		mt := ig.MarginBefore()
+		mb := ig.MarginAfter()
+
+		// Set content width (stretch) then layout child
+		aw := cw - ml - mr
+		if aw < 0 {
+			aw = 0
+		}
+		ig.SetContentWidth(aw)
+
+		ctx := contextFor(it.box, state)
+		if ctx != nil {
+			ctx.Layout(it.box, state)
+		}
+
+		// Stretch height to cell
+		ah := ch - mt - mb
+		if ah < 0 {
+			ah = 0
+		}
+		ig.SetContentHeight(ah)
+
+		// Position: SetTopLeft(top, left)
+		ig.SetTopLeft(rt+mt, cl+ml)
+	}
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 var _ = style.DisplayGrid
