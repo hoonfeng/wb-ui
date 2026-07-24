@@ -102,7 +102,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		topMargin := margin.Top
 		collapsedTop := 0.0
 		if firstInFlow && collapseTopWithParent {
-			collapsedTop = 0
+			collapsedTop = topMargin
 		} else {
 			collapsedTop = math.Max(pendingMargin, topMargin)
 		}

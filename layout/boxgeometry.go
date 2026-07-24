@@ -96,7 +96,7 @@ func (g *BoxGeometry) SetMarginAfter(v float64)  { g.marginEnd = v }
 func (g *BoxGeometry) SetMarginStart(v float64)  { g.marginStart = v }
 func (g *BoxGeometry) SetMarginEnd(v float64)    { g.marginAfter = v }
 func (g *BoxGeometry) SetMargin(top, right, bottom, left float64) {
-	g.marginBefore, g.marginAfter = top, bottom
+	g.marginBefore, g.marginEnd = top, bottom
 	g.marginStart, g.marginAfter = left, right
 }
 
