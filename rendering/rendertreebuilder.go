@@ -287,6 +287,16 @@ func (b *RenderTreeBuilder) linkLayoutBoxes(rObj RenderObject, lBox *layout.Elem
 				b.linkLayoutBoxes(rc, childEb)
 			}
 			lChildren = append(lChildren[:matched], lChildren[matched+1:]...)
+		} else if rc.Node() == nil {
+			// Anonymous render child: match with the next anonymous layout child
+			// by position (no DOM element to compare).
+			for i, lc := range lChildren {
+				if childEb, ok := lc.(*layout.ElementBox); ok && childEb.Element() == nil {
+					b.linkLayoutBoxes(rc, childEb)
+					lChildren = append(lChildren[:i], lChildren[i+1:]...)
+					break
+				}
+			}
 		}
 	}
 }

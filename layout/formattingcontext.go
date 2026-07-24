@@ -59,6 +59,8 @@ func contextFor(box Box, state *LayoutState) FormattingContext {
 	default:
 		if HasColumns(eb) {
 			ctx = &MultiColumnFormattingContext{}
+		} else if hasInlineChildren(eb) {
+			ctx = &InlineFormattingContext{}
 		} else {
 			ctx = &BlockFormattingContext{}
 		}

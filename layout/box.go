@@ -274,6 +274,17 @@ type TextSegment struct {
 	LineY, LineHeight float64
 }
 
+// hasInlineChildren reports whether box directly holds InlineTextBox children
+// (i.e., its children are inline-level text runs that need InlineFormattingContext).
+func hasInlineChildren(box *ElementBox) bool {
+	for _, c := range box.children {
+		if _, ok := c.(*InlineTextBox); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // ─────────────────────────────────────────────────────────────
 //  BuildLayoutTree
 // ─────────────────────────────────────────────────────────────

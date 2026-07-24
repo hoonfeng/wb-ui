@@ -130,12 +130,15 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 	ro.SetLayoutBox(lb)
 
 	textLB := lb
-	if len(textLB.TextSegments) == 0 {
-		textLB = findTextRun(textLB)
+	var textSegments []layout.TextSegment
+	if len(textLB.TextSegments) > 0 {
+		textSegments = textLB.TextSegments
+	} else {
+		textSegments = findTextSegments(textLB)
 	}
-	if rt, ok := ro.(*RenderText); ok && textLB != nil && len(textLB.TextSegments) > 0 {
-		segs := make([]InlineTextBox, len(textLB.TextSegments))
-		for i, s := range textLB.TextSegments {
+	if rt, ok := ro.(*RenderText); ok && len(textSegments) > 0 {
+		segs := make([]InlineTextBox, len(textSegments))
+		for i, s := range textSegments {
 			segs[i] = InlineTextBox{
 				Start: s.Start, Len: s.Len,
 				X: s.X, Y: s.Y, Width: s.Width, Height: s.Height,
@@ -146,6 +149,23 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 		if box := asRenderBox(ro); box != nil && len(segs) > 0 {
 			box.frame.Width = segs[0].Width
 			box.frame.Height = segs[0].Height
+		}
+	} else if len(textSegments) > 0 {
+		// ro is NOT a RenderText (e.g. anonymous wrapper). Propagate
+		// segments to the first RenderText child.
+		for rc := ro.FirstChild(); rc != nil; rc = rc.NextSibling() {
+			if rt, ok := rc.(*RenderText); ok {
+				segs := make([]InlineTextBox, len(textSegments))
+				for i, s := range textSegments {
+					segs[i] = InlineTextBox{
+						Start: s.Start, Len: s.Len,
+						X: s.X, Y: s.Y, Width: s.Width, Height: s.Height,
+						LineY: s.LineY, LineHeight: s.LineHeight,
+					}
+				}
+				rt.SetSegments(segs)
+				break
+			}
 		}
 	}
 	syncChildren(ro, lb, state)
@@ -165,18 +185,33 @@ func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *lay
 				syncOne(rc, childEb, state)
 			}
 			lChildren = append(lChildren[:matched], lChildren[matched+1:]...)
-		} else if roIsAnonymous(rc) { continue }
+		} else if rc.Node() == nil {
+			// Anonymous render child: match with next anonymous layout child.
+			for i, lc := range lChildren {
+				if childEb, ok := lc.(*layout.ElementBox); ok && childEb.Element() == nil {
+					syncOne(rc, childEb, state)
+					lChildren = append(lChildren[:i], lChildren[i+1:]...)
+					break
+				}
+			}
+		}
 	}
 }
 
 
-// findTextRun searches layout box subtree for the first ElementBox with TextSegments.
-func findTextRun(lb *layout.ElementBox) *layout.ElementBox {
+// findTextSegments walks the layout tree to find TextSegments, checking both
+// ElementBox.TextSegments and InlineTextBox.TextSegments at each level.
+func findTextSegments(lb *layout.ElementBox) []layout.TextSegment {
 	if lb == nil { return nil }
-	if len(lb.TextSegments) > 0 { return lb }
+	if len(lb.TextSegments) > 0 { return lb.TextSegments }
 	for _, c := range lb.Children() {
+		if tb, ok := c.(*layout.InlineTextBox); ok && len(tb.TextSegments) > 0 {
+			return tb.TextSegments
+		}
 		if childEb, ok := c.(*layout.ElementBox); ok {
-			if found := findTextRun(childEb); found != nil { return found }
+			if segs := findTextSegments(childEb); segs != nil {
+				return segs
+			}
 		}
 	}
 	return nil
