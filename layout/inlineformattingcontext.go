@@ -33,13 +33,23 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			text := cld.Text()
 			if text == "" { continue }
 			runes := []rune(text)
+			spaceWidth := measureText(box, " ")
 			cursor := 0
+			firstWord := true
 			for cursor < len(runes) {
-				// Skip whitespace runs (inter-word spaces)
+				// Skip leading whitespace.
 				for cursor < len(runes) && isInlineWhitespace(runes[cursor]) {
 					cursor++
+					if firstWord {
+						// Preserve leading spaces as word separation:
+						// a leading space before the first word on the line
+						// collapses to nothing per CSS white-space:normal.
+					}
 				}
 				if cursor >= len(runes) { break }
+				if !firstWord {
+					currentLine.x += spaceWidth
+				}
 				wordStart := cursor
 				for cursor < len(runes) && !isInlineWhitespace(runes[cursor]) {
 					cursor++
@@ -50,6 +60,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				if currentLine.x+wordWidth > contentX+contentWidth && currentLine.x > contentX {
 					lines = append(lines, currentLine)
 					currentLine = &line{x: contentX, y: currentLine.y + lineHeight, width: contentWidth}
+					// After wrapping, the first word does NOT get a leading space.
+					// The space that triggered the wrap is consumed by the wrap.
+					firstWord = true
 				}
 				seg := TextSegment{
 					Start: wordStart, Len: wordEnd - wordStart,
@@ -59,6 +72,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				}
 				cld.TextSegments = append(cld.TextSegments, seg)
 				currentLine.x += wordWidth
+				firstWord = false
 			}
 		case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
