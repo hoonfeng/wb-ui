@@ -516,7 +516,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "microsoft yahei", true // generic — always available
 		case "serif", "times", "times new roman", "ui-serif":
 			return "kochi mincho", true // generic — always available
-		case "monospace", "mono", "courier", "courier new", "consolas", "ui-monospace":
+		case "monospace", "mono", "ui-monospace":
 			return "nsimsun", true // generic — always available
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
@@ -547,7 +547,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 				return m.sansTF
 			case "serif", "times", "times new roman", "ui-serif":
 				return m.serifTF
-			case "monospace", "mono", "courier", "courier new", "consolas", "ui-monospace":
+			case "monospace", "mono", "ui-monospace":
 				return m.monoTF
 			}
 		}

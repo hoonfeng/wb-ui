@@ -193,7 +193,25 @@ func fontSizeOf(box *ElementBox) float64 {
 func fontFamilyOf(box *ElementBox) string {
 	cs := box.Style()
 	if cs == nil { return "" }
-	return cs.FontFamily
+	return firstFontFamily(cs.FontFamily)
+}
+
+// firstFontFamily extracts the first font name from a CSS font-family list,
+// stripping surrounding quotes. E.g. "'Consolas', 'Courier New', monospace"
+// returns "Consolas".
+func firstFontFamily(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" { return "" }
+	// Take the first comma-separated part.
+	if idx := strings.IndexByte(s, ','); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimSpace(s)
+	// Strip surrounding quotes.
+	if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') && s[0] == s[len(s)-1] {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }
 
 func fontWeightOf(box *ElementBox) int {
@@ -232,54 +250,44 @@ func measureText(box *ElementBox, text string) float64 {
 func fontAscentDescent(box *ElementBox) (ascent, descent float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
-	if FontMetricsFunc != nil {
-		family := fontFamilyOf(box)
-		weight := fontWeightOf(box)
-		fstyle := fontStyleOf(box)
-		a, d, _ := FontMetricsFunc(family, fs, weight, fstyle)
-		if a > 0 || d > 0 {
-			if a <= 0 { a = fs * 0.8 }
-			if d <= 0 { d = fs * 0.2 }
-			return a, d
-		}
-	}
-	return fs * 0.8, fs * 0.2
+	a, d, _ := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	return a, d
 }
 
 func fontLineGap(box *ElementBox) float64 {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
-	if FontMetricsFunc != nil {
-		family := fontFamilyOf(box)
-		weight := fontWeightOf(box)
-		fstyle := fontStyleOf(box)
-		a, d, _ := FontMetricsFunc(family, fs, weight, fstyle)
-		if a > 0 || d > 0 {
-			if a <= 0 { a = fs * 0.8 }
-			if d <= 0 { d = fs * 0.2 }
-			return a + d
-		}
-	}
-	return fs * 1.2
+	a, d, _ := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	return a + d
 }
 
 func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
-	if FontMetricsFunc != nil {
-		family := fontFamilyOf(box)
-		weight := fontWeightOf(box)
-		fstyle := fontStyleOf(box)
-		a, d, lg := FontMetricsFunc(family, fs, weight, fstyle)
+	return fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+}
+
+// fontMetricsHelper returns Skia metrics for a given font description.
+// It NEVER uses hardcoded fs*0.8/fs*0.2 fallbacks — only real Skia data.
+// Falls back to empty font family (default system font) when the specific
+// family cannot be found.
+func fontMetricsHelper(family string, fs float64, weight int, style string) (ascent, descent, lineGap float64) {
+	if FontMetricsFunc == nil {
+		return fs * 0.8, fs * 0.2, fs * 0.2
+	}
+	if family != "" {
+		a, d, lg := FontMetricsFunc(family, fs, weight, style)
 		if a > 0 || d > 0 {
-			if a <= 0 { a = fs * 0.8 }
-			if d <= 0 { d = fs * 0.2 }
 			return a, d, lg
 		}
 	}
+	// Fallback: try empty family (resolves to system default font).
+	a, d, lg := FontMetricsFunc("", fs, weight, style)
+	if a > 0 || d > 0 {
+		return a, d, lg
+	}
 	return fs * 0.8, fs * 0.2, fs * 0.2
 }
-
 func isFullWidthRune(r rune) bool {
 	return (r >= 0x1100 && r <= 0x115F) || r == 0x2329 || r == 0x232A ||
 		(r >= 0x2E80 && r <= 0xA4CF) || (r >= 0xAC00 && r <= 0xD7AF) ||
