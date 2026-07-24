@@ -247,33 +247,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 		if isRow {
 			if isReverse { mainPos -= g.BorderBoxWidth() }
-		} else {
-			if isReverse { mainPos -= g.BorderBoxHeight() }
-		}
-
-		// Layout child content FIRST so we know its intrinsic size.
-		ctx := contextFor(it.box, state)
-		ctx.Layout(it.box, state)
-
-		// Propagate auto cross-size from children.
-		if isRow {
-			if heightIsAutoForBox(it.box) {
-				childMaxH := maxChildContentHeight(it.box, state)
-				if childMaxH > g.ContentHeight() {
-					g.SetContentHeight(childMaxH)
-					// Re-layout children now that container has the correct cross size.
-					ctx = contextFor(it.box, state)
-					ctx.Layout(it.box, state)
-				}
-			}
-		}
-		// Note: column flex auto cross-size propagation (width from content)
-		// is not yet implemented.
-
-		// NOW calculate cross-axis position with final cross size.
-		bh := g.BorderBoxHeight()
-		bw := g.BorderBoxWidth()
-		if isRow {
+			// Set position FIRST so children use correct absolute coordinates.
+			bh := g.BorderBoxHeight()
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
 			switch align {
@@ -284,7 +259,36 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
 			if !isReverse { mainPos += g.BorderBoxWidth() }
+
+			ctx := contextFor(it.box, state)
+			ctx.Layout(it.box, state)
+
+			// Propagate auto cross-size from children.
+			if heightIsAutoForBox(it.box) {
+				childMaxH := maxChildContentHeight(it.box, state)
+				if childMaxH > g.ContentHeight() {
+					oldTop := g.Top()
+					g.SetContentHeight(childMaxH)
+					// Re-center: recalculate cross-axis position.
+					bh2 := g.BorderBoxHeight()
+					newCross := crossPos
+					switch align {
+					case "center":
+						newCross = crossPos + (ch-bh2)/2
+					case "flex-end":
+						newCross = crossPos + ch - bh2
+					}
+					delta := newCross - oldTop
+					if delta != 0 {
+						shiftBoxAndDescendants(it.box, delta, 0, state)
+					}
+					g.SetTopLeft(newCross, g.Left())
+				}
+			}
 		} else {
+			if isReverse { mainPos -= g.BorderBoxHeight() }
+			// Set position FIRST.
+			bw := g.BorderBoxWidth()
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
 			switch align {
@@ -295,6 +299,35 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
 			if !isReverse { mainPos += g.BorderBoxHeight() }
+
+			ctx := contextFor(it.box, state)
+			ctx.Layout(it.box, state)
+			// Note: column flex auto cross-size propagation (width from content)
+			// is not yet implemented.
+		}
+	}
+}
+
+// shiftBoxAndDescendants adds (dy, dx) to the geometry top-left position of box
+// and all its layout descendants, including text segment coordinates.
+func shiftBoxAndDescendants(box *ElementBox, dy, dx float64, state *LayoutState) {
+	if box == nil { return }
+	g := state.GeometryForBox(box)
+	g.SetTopLeft(g.Top()+dy, g.Left()+dx)
+	// Shift text segment positions too.
+	for i := range box.TextSegments {
+		box.TextSegments[i].X += dx
+		box.TextSegments[i].Y += dy
+	}
+	for _, child := range box.Children() {
+		switch c := child.(type) {
+		case *ElementBox:
+			shiftBoxAndDescendants(c, dy, dx, state)
+		case *InlineTextBox:
+			for i := range c.TextSegments {
+				c.TextSegments[i].X += dx
+				c.TextSegments[i].Y += dy
+			}
 		}
 	}
 }

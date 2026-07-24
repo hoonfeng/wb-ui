@@ -32,6 +32,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		case *InlineTextBox:
 			text := cld.Text()
 			if text == "" { continue }
+			// Clear segments from any previous layout pass (e.g. auto-height
+			// re-layout in flex formatting context).
+			cld.TextSegments = cld.TextSegments[:0]
 			runes := []rune(text)
 			spaceWidth := measureText(box, " ")
 			cursor := 0
