@@ -208,6 +208,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	cy := cg.ContentBoxTop()
 	cw := cg.ContentWidth()
 	ch := cg.ContentHeight()
+	containerCS := container.Style()
 
 	mainPos := cx
 	crossPos := cy
@@ -246,19 +247,82 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 		if isRow {
 			if isReverse { mainPos -= g.BorderBoxWidth() }
+			// Cross-axis alignment (Y for row flex)
+			bh := g.BorderBoxHeight()
+			align := alignOf(it.box, containerCS)
+			crossAdjusted := crossPos
+			switch align {
+			case "center":
+				crossAdjusted = crossPos + (ch-bh)/2
+			case "flex-end":
+				crossAdjusted = crossPos + ch - bh
+			}
 			// Row: mainPos = X, crossPos = Y; SetTopLeft(top=Y, left=X)
-			g.SetTopLeft(crossPos, mainPos)
+			g.SetTopLeft(crossAdjusted, mainPos)
 			if !isReverse { mainPos += g.BorderBoxWidth() }
 		} else {
 			if isReverse { mainPos -= g.BorderBoxHeight() }
+			// Cross-axis alignment (X for column flex)
+			bw := g.BorderBoxWidth()
+			align := alignOf(it.box, containerCS)
+			crossAdjusted := crossPos
+			switch align {
+			case "center":
+				crossAdjusted = crossPos + (cw-bw)/2
+			case "flex-end":
+				crossAdjusted = crossPos + cw - bw
+			}
 			// Column: mainPos = Y, crossPos = X; SetTopLeft(top=Y, left=X)
-			g.SetTopLeft(mainPos, crossPos)
+			g.SetTopLeft(mainPos, crossAdjusted)
 			if !isReverse { mainPos += g.BorderBoxHeight() }
 		}
 
 		ctx := contextFor(it.box, state)
 		ctx.Layout(it.box, state)
+
+		// After laying out the child's content, propagate auto cross-size.
+		if isRow {
+			// Row flex: cross-size is height (auto → content-based)
+			if heightIsAutoForBox(it.box) {
+				childMaxH := maxChildContentHeight(it.box, state)
+				if childMaxH > g.ContentHeight() {
+					g.SetContentHeight(childMaxH)
+				}
+			}
+		}
 	}
+}
+
+// maxChildContentHeight returns the maximum bottom edge of all children relative
+// to the box's content-box top, used to determine auto height from content.
+func maxChildContentHeight(box *ElementBox, state *LayoutState) float64 {
+	ct := state.GeometryForBox(box).ContentBoxTop()
+	maxB := 0.0
+	for _, child := range box.Children() {
+		if !child.IsInFlow() {
+			continue
+		}
+		if eb, ok := child.(*ElementBox); ok {
+			g := state.GeometryForBox(eb)
+			bottom := g.Top() + g.BorderBoxHeight() - ct
+			if bottom > maxB {
+				maxB = bottom
+			}
+		}
+	}
+	return maxB
+}
+
+// alignOf returns the effective align-self value for box in its flex container.
+func alignOf(box *ElementBox, containerCS *style.ComputedStyle) string {
+	cs := box.Style()
+	if cs != nil && cs.AlignSelf != "" && cs.AlignSelf != "auto" {
+		return cs.AlignSelf
+	}
+	if containerCS != nil && containerCS.AlignItems != "" {
+		return containerCS.AlignItems
+	}
+	return "stretch"
 }
 
 var _ = style.DisplayFlex

@@ -1532,6 +1532,38 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.BorderTopColor, cs.BorderRightColor = c, c
 				cs.BorderBottomColor, cs.BorderLeftColor = c, c
 			}
+		case "border-top":
+			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+				cs.BorderTopWidth, cs.BorderTopStyle, cs.BorderTopColor = w, s, c
+			}
+		case "border-right":
+			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+				cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+			}
+		case "border-bottom":
+			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+				cs.BorderBottomWidth, cs.BorderBottomStyle, cs.BorderBottomColor = w, s, c
+			}
+		case "border-left":
+			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+				cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+			}
+		case "border-top-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.BorderTopColor = c
+			}
+		case "border-right-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.BorderRightColor = c
+			}
+		case "border-bottom-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.BorderBottomColor = c
+			}
+		case "border-left-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.BorderLeftColor = c
+			}
 		}
 	}
 }
