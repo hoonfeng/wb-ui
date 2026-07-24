@@ -60,7 +60,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	for _, it := range items {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
 		it.hypothetical = it.baseSize
-		it.targetSize = it.baseSize // Initialize before distribution; frozen items keep this.
+		it.targetSize = it.baseSize
 	}
 
 	c.distributeFreeSpace(items, mainSize, isRow)
@@ -176,35 +176,26 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 		cs := it.box.Style()
 		if cs == nil { continue }
 		g := state.GeometryForBox(it.box)
-		// Determine effective align-self for this item.
 		align := alignItems
 		if cs.AlignSelf != "" && cs.AlignSelf != "auto" {
 			align = cs.AlignSelf
 		}
 		if isRow {
-			// Cross axis = height
 			r := resolveLengthAuto(cs.Height, cbHeight, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
 				g.SetContentHeight(r.Value)
 			} else if align == "stretch" {
-				// Stretch to fill cross axis (minus cross-axis margin).
 				stretchH := cbHeight - it.marginCross
-				if stretchH < 0 {
-					stretchH = 0
-				}
+				if stretchH < 0 { stretchH = 0 }
 				g.SetContentHeight(stretchH)
 			}
 		} else {
-			// Cross axis = width
 			r := resolveLengthAuto(cs.Width, cbWidth, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
 				g.SetContentWidth(r.Value)
 			} else if align == "stretch" {
-				// Stretch to fill cross axis (minus cross-axis margin).
 				stretchW := cbWidth - it.marginCross
-				if stretchW < 0 {
-					stretchW = 0
-				}
+				if stretchW < 0 { stretchW = 0 }
 				g.SetContentWidth(stretchW)
 			}
 		}

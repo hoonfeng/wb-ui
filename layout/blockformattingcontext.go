@@ -177,6 +177,11 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if blockSize < 0 {
 			blockSize = 0
 		}
+		// Preserve any height already set by parent formatting context (e.g. flex cross-axis stretch).
+		// Only for non-root boxes — root uses viewport as initial height which must be replaced.
+		if box.Parent() != nil && blockSize < g.ContentHeight() {
+			blockSize = g.ContentHeight()
+		}
 		g.SetContentHeight(blockSize)
 	} else if box.Parent() != nil {
 		fs := fontSizeOf(box)
