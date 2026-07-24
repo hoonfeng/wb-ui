@@ -107,11 +107,44 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float64 {
 	base := it.flexBasis
-	if base <= 0 { base = 150 }
+	if base <= 0 {
+		// CSS default: flex-basis:auto + width:auto → max-content size.
+		// For now compute a simple intrinsic width from the box's children.
+		base = intrinsicContentWidth(it.box, isRow)
+		if base <= 0 { base = 0 }
+	}
 	if isRow {
 		return clampSize(base, it.minWidth, it.maxWidth, it.minWidth <= 0, it.maxWidth <= 0)
 	}
 	return clampSize(base, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
+}
+
+// intrinsicContentWidth returns the max-content width of a box by inspecting
+// its children without performing full layout. For ElementBox children it
+// recurses; for InlineTextBox children it measures the text.
+func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
+	maxW := 0.0
+	for _, child := range box.Children() {
+		switch c := child.(type) {
+		case *InlineTextBox:
+			w := measureText(box, c.Text())
+			if w > maxW { maxW = w }
+		case *ElementBox:
+			// For block-level children the intrinsic width is the child's own
+			// intrinsic width; for inline-level children (atomic inlines) it's
+			// their border-box.
+			if c.IsInlineLevel() {
+				cw := intrinsicContentWidth(c, isRow)
+				// Add margin/border/padding for inline atomic boxes.
+				// TODO: compute margin/border/padding here.
+				if cw > maxW { maxW = cw }
+			} else {
+				cw := intrinsicContentWidth(c, isRow)
+				if cw > maxW { maxW = cw }
+			}
+		}
+	}
+	return maxW
 }
 
 func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, containerMainSize float64, isRow bool) {
@@ -219,6 +252,35 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	}
 	if isReverse {
 		if isRow { mainPos = cx + cw } else { mainPos = cy + ch }
+	}
+
+	// Apply justify-content by adjusting initial mainPos.
+	justify := "flex-start"
+	if containerCS != nil && containerCS.JustifyContent != "" {
+		justify = containerCS.JustifyContent
+	}
+	totalMain := 0.0
+	for _, it := range items {
+		totalMain += it.marginMain + it.finalMainSize
+	}
+	if isRow {
+		if totalMain < cw && (justify == "center" || justify == "flex-end") {
+			gap := cw - totalMain
+			if justify == "center" {
+				if isReverse { mainPos -= gap / 2 } else { mainPos += gap / 2 }
+			} else { // flex-end
+				if isReverse { mainPos -= gap } else { mainPos += gap }
+			}
+		}
+	} else {
+		if totalMain < ch && (justify == "center" || justify == "flex-end") {
+			gap := ch - totalMain
+			if justify == "center" {
+				if isReverse { mainPos -= gap / 2 } else { mainPos += gap / 2 }
+			} else { // flex-end
+				if isReverse { mainPos -= gap } else { mainPos += gap }
+			}
+		}
 	}
 
 	for _, it := range items {
