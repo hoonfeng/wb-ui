@@ -403,9 +403,12 @@ func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolve
 		case *dom.Text:
 			data := v.Data()
 			if strings.TrimSpace(data) == "" { continue }
+			// Anonymous wrapper must NOT inherit display:flex from parent.
+			anonStyle := *box.style
+			anonStyle.Display = style.DisplayBlock
 			anon := &ElementBox{
-				nodeType: NodeGenericElement, style: box.style,
-				children: []Box{&InlineTextBox{text: data, style: box.style}},
+				nodeType: NodeGenericElement, style: &anonStyle,
+				children: []Box{&InlineTextBox{text: data, style: &anonStyle}},
 			}
 			box.AddChild(anon)
 		}

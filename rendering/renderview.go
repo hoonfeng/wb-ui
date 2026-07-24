@@ -210,6 +210,46 @@ func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *lay
 					break
 				}
 			}
+		} else if rt, ok := rc.(*RenderText); ok {
+			// RenderText: match either direct InlineTextBox or anonymous-wrapper-wrapped one.
+			for i, lc := range lChildren {
+				// Case 1: direct InlineTextBox child.
+				if tb, ok := lc.(*layout.InlineTextBox); ok && tb.Text() == rt.OriginalText() {
+					if len(tb.TextSegments) > 0 {
+						segs := make([]InlineTextBox, len(tb.TextSegments))
+						for j, s := range tb.TextSegments {
+							segs[j] = InlineTextBox{
+								Start: s.Start, Len: s.Len,
+								X: s.X, Y: s.Y, Width: s.Width, Height: s.Height,
+								LineY: s.LineY, LineHeight: s.LineHeight,
+							}
+						}
+						rt.SetSegments(segs)
+					}
+					lChildren = append(lChildren[:i], lChildren[i+1:]...)
+					break
+				}
+				// Case 2: anonymous ElementBox wrapper around InlineTextBox.
+				if childEb, ok := lc.(*layout.ElementBox); ok && childEb.Element() == nil {
+					for _, cc := range childEb.Children() {
+						if tb, ok := cc.(*layout.InlineTextBox); ok && tb.Text() == rt.OriginalText() {
+							if len(tb.TextSegments) > 0 {
+								segs := make([]InlineTextBox, len(tb.TextSegments))
+								for j, s := range tb.TextSegments {
+									segs[j] = InlineTextBox{
+										Start: s.Start, Len: s.Len,
+										X: s.X, Y: s.Y, Width: s.Width, Height: s.Height,
+										LineY: s.LineY, LineHeight: s.LineHeight,
+									}
+								}
+								rt.SetSegments(segs)
+							}
+							lChildren = append(lChildren[:i], lChildren[i+1:]...)
+							break
+						}
+					}
+				}
+			}
 		}
 	}
 }

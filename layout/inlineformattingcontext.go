@@ -73,6 +73,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
+			// ═══ FIX: Position BEFORE layout so children use correct coordinates ═══
+			cldG.SetTopLeft(currentLine.x, currentLine.y)
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
@@ -80,8 +82,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if currentLine.x+cldW > contentX+contentWidth && currentLine.x > contentX {
 				lines = append(lines, currentLine)
 				currentLine = &line{x: contentX, y: currentLine.y + lineHeight, width: contentWidth}
+				// Re-position after line break.
+				cldG.SetTopLeft(currentLine.x, currentLine.y)
 			}
-			cldG.SetTopLeft(currentLine.y, currentLine.x)
 			currentLine.x += cldW
 		}
 	}
