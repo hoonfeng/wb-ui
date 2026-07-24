@@ -350,6 +350,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			if isReverse { mainPos -= g.BorderBoxWidth() }
 			// Set position FIRST so children use correct absolute coordinates.
 			bh := g.BorderBoxHeight()
+			if bh <= 0 {
+				// Estimate intrinsic cross-size from text children for initial
+				// positioning before child layout (post-layout corrects it).
+				bh = fontLineGap(it.box)
+			}
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
 			switch align {
