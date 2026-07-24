@@ -16,8 +16,10 @@ import (
 	"wb-ui/app"
 	"wb-ui/bindings"
 	"wb-ui/dom"
+	"wb-ui/editor"
 	"wb-ui/jsc"
 	"wb-ui/layout"
+	"wb-ui/markdown"
 	"wb-ui/platform/graphics"
 	"wb-ui/platform/ime"
 	"wb-ui/webkit"
@@ -64,7 +66,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ===== 2. 注册 Go 函数供 JS 调用（go.namespace） =====
+	// ===== 2. 注册自定义元素（编辑器 + Markdown） =====
+	editor.RegisterEditorElement()
+	markdown.RegisterMarkdownElement()
+
+	// ===== 3. 注册 Go 函数供 JS 调用（go.namespace） =====
 	interp := wv.JSInterpreter()
 	bindings.RegisterDOMBindings(interp, wv.Document())
 	bindings.RegisterGoFunction(interp, "getGreeting", func(args []jsc.JSValue) (jsc.JSValue, error) {
@@ -125,8 +131,14 @@ func main() {
 
 	// ===== 4. 执行页面中的 <script> =====
 	runScripts(wv)
+	// 初始化自定义元素（编辑器 + Markdown），替换 <wb-editor>/<wb-markdown> 占位节点。
+	doc := wv.Document()
+	if doc != nil {
+		editor.InitEditorElements(doc)
+		markdown.InitMarkdownElements(doc)
+	}
 	fmt.Println("=== wb-ui 综合测试窗口已启动 ===")
-	fmt.Println("测试项: CSS布局 / CSS样式 / CSS动画 / Go函数 / JS函数 / 标签事件处理 / IME输入法")
+	fmt.Println("测试项: CSS布局 / CSS样式 / CSS动画 / Go函数 / JS函数 / 标签事件处理 / IME输入法 / 代码编辑器 / Markdown渲染")
 	fmt.Println("JS 控制台输出:")
 	fmt.Println(wv.ConsoleOutput())
 

@@ -70,8 +70,10 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth, cbHeight float64, state *LayoutState) *flexItem {
 	cs := box.Style()
-	_ = state.GeometryForBox(box)
-	margin, _, _ := computeBoxModel(box, cbWidth, fontSizeOf(box))
+	g := state.GeometryForBox(box)
+	margin, padding, border := computeBoxModel(box, cbWidth, fontSizeOf(box))
+	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 
 	mm, mc := margin.Left+margin.Right, margin.Top+margin.Bottom
 	if !isRow { mm, mc = margin.Top+margin.Bottom, margin.Left+margin.Right }
@@ -123,19 +125,48 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 // its children without performing full layout. For ElementBox children it
 // recurses; for InlineTextBox children it measures the text.
 func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
+	cs := box.Style()
+	// For row-direction flex containers, the max-content inline size is the SUM
+	// of children (plus gap), matching CSS-FLEXBOX §9.9.2. For block/non-flex
+	// containers it's the max of children.
+	isFlexRow := cs != nil && box.EstablishesFlexFormattingContext() &&
+		cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
+
+	total := 0.0
 	maxW := 0.0
 	for _, child := range box.Children() {
+		if !child.IsInFlow() { continue }
 		switch c := child.(type) {
 		case *InlineTextBox:
 			w := measureText(box, c.Text())
+			if isFlexRow { total += w }
 			if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
+			if isFlexRow { total += cw }
 			if cw > maxW { maxW = cw }
 		}
 	}
+	if isFlexRow {
+		maxW = total
+		// Add gap between flex items.
+		if cs.Gap.Value > 0 || cs.ColumnGap.Value > 0 {
+			gapV := cs.Gap.Value
+			if gapV <= 0 { gapV = cs.ColumnGap.Value }
+			unit := cs.Gap.Unit
+			if unit == "" { unit = cs.ColumnGap.Unit }
+			gap := gapV
+			if unit == "em" { gap *= fontSizeOf(box) }
+			if gap > 0 {
+				count := 0
+				for _, child := range box.Children() {
+					if child.IsInFlow() { count++ }
+				}
+				maxW += gap * float64(count-1)
+			}
+		}
+	}
 	// Add the box's own padding + border (inline direction).
-	cs := box.Style()
 	if cs != nil {
 		fs := fontSizeOf(box)
 		_, p, b := computeBoxModel(box, maxW, fs)

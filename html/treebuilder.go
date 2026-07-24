@@ -180,7 +180,22 @@ func (tb *TreeBuilder) currentInsertionNode() dom.Node {
 
 // createElementForToken creates a dom.Element from a start-tag token, copying the
 // token's attributes. The tag name is lower-cased by the tokenizer already.
+// If a custom element constructor is registered for the tag name, it is called
+// instead of the default doc.CreateElement.
 func (tb *TreeBuilder) createElementForToken(tok *Token) *dom.Element {
+	// Check custom element registry first.
+	if ctor, ok := lookupCustomElement(tok.Data); ok {
+		attrs := map[string]string{}
+		for _, a := range tok.Attributes {
+			if a.Name != "" {
+				if _, exists := attrs[a.Name]; !exists {
+					attrs[a.Name] = a.Value
+				}
+			}
+		}
+		return ctor(tb.doc, tok.Data, attrs)
+	}
+	// Fallback to default creation.
 	e := tb.doc.CreateElement(tok.Data)
 	for _, a := range tok.Attributes {
 		if a.Name == "" {
