@@ -553,27 +553,34 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, state *LayoutSt
 		mt := ig.MarginBefore()
 		mb := ig.MarginAfter()
 
-		// Set content width (stretch) then layout child
+		// Set content width/height before layout, then layout child
 		aw := cw - ml - mr
 		if aw < 0 {
 			aw = 0
 		}
+		ah := ch - mt - mb
+		if ah < 0 {
+			ah = 0
+		}
 		ig.SetContentWidth(aw)
+		ig.SetContentHeight(ah)
+
+		// Position BEFORE layout, so child layout sees correct absolute coordinates.
+		ig.SetTopLeft(rt+mt, cl+ml)
 
 		ctx := contextFor(it.box, state)
 		if ctx != nil {
 			ctx.Layout(it.box, state)
 		}
 
-		// Stretch height to cell
-		ah := ch - mt - mb
-		if ah < 0 {
-			ah = 0
+		// Apply min/max height constraints after layout
+		minH, maxH, minAuto, maxAuto := resolveMinMax(it.box.Style().MinHeight, it.box.Style().MaxHeight, ah, fontSizeOf(it.box))
+		if !minAuto && minH > ig.ContentHeight() {
+			ig.SetContentHeight(minH)
 		}
-		ig.SetContentHeight(ah)
-
-		// Position: SetTopLeft(top, left)
-		ig.SetTopLeft(rt+mt, cl+ml)
+		if !maxAuto && maxH < ig.ContentHeight() {
+			ig.SetContentHeight(maxH)
+		}
 	}
 }
 
