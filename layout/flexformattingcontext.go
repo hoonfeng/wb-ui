@@ -130,19 +130,16 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 			w := measureText(box, c.Text())
 			if w > maxW { maxW = w }
 		case *ElementBox:
-			// For block-level children the intrinsic width is the child's own
-			// intrinsic width; for inline-level children (atomic inlines) it's
-			// their border-box.
-			if c.IsInlineLevel() {
-				cw := intrinsicContentWidth(c, isRow)
-				// Add margin/border/padding for inline atomic boxes.
-				// TODO: compute margin/border/padding here.
-				if cw > maxW { maxW = cw }
-			} else {
-				cw := intrinsicContentWidth(c, isRow)
-				if cw > maxW { maxW = cw }
-			}
+			cw := intrinsicContentWidth(c, isRow)
+			if cw > maxW { maxW = cw }
 		}
+	}
+	// Add the box's own padding + border (inline direction).
+	cs := box.Style()
+	if cs != nil {
+		fs := fontSizeOf(box)
+		_, p, b := computeBoxModel(box, maxW, fs)
+		maxW += p.Left + p.Right + b.Left + b.Right
 	}
 	return maxW
 }
