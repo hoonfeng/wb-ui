@@ -5,9 +5,25 @@ import (
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
+	"wb-ui/platform/graphics"
 	"wb-ui/style"
 	"wb-ui/widgets"
 )
+
+func init() {
+	// Set layout font metrics callback using Skia's actual font metrics.
+	// This ensures line-height and text positioning match what Skia renders.
+	layout.FontMetricsFunc = func(family string, size float64, weight int, style2 string) (float64, float64, float64) {
+		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}
+		a := graphics.GlobalFontAscent(f)
+		d := graphics.GlobalFontDescent(f)
+		lg := graphics.GlobalFontLineGap(f)
+		return a, d, lg
+	}
+	layout.MeasureTextFunc = func(family string, size float64, weight int, style2, text string) float64 {
+		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}, text)
+	}
+}
 
 type RenderView struct {
 	RenderBlockFlow

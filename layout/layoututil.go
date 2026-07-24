@@ -210,18 +210,51 @@ func measureText(box *ElementBox, text string) float64 {
 func fontAscentDescent(box *ElementBox) (ascent, descent float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
+	if FontMetricsFunc != nil {
+		family := fontFamilyOf(box)
+		weight := fontWeightOf(box)
+		fstyle := fontStyleOf(box)
+		a, d, _ := FontMetricsFunc(family, fs, weight, fstyle)
+		if a > 0 || d > 0 {
+			if a <= 0 { a = fs * 0.8 }
+			if d <= 0 { d = fs * 0.2 }
+			return a, d
+		}
+	}
 	return fs * 0.8, fs * 0.2
 }
 
 func fontLineGap(box *ElementBox) float64 {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
+	if FontMetricsFunc != nil {
+		family := fontFamilyOf(box)
+		weight := fontWeightOf(box)
+		fstyle := fontStyleOf(box)
+		a, d, _ := FontMetricsFunc(family, fs, weight, fstyle)
+		if a > 0 || d > 0 {
+			if a <= 0 { a = fs * 0.8 }
+			if d <= 0 { d = fs * 0.2 }
+			return a + d
+		}
+	}
 	return fs * 1.2
 }
 
 func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
+	if FontMetricsFunc != nil {
+		family := fontFamilyOf(box)
+		weight := fontWeightOf(box)
+		fstyle := fontStyleOf(box)
+		a, d, lg := FontMetricsFunc(family, fs, weight, fstyle)
+		if a > 0 || d > 0 {
+			if a <= 0 { a = fs * 0.8 }
+			if d <= 0 { d = fs * 0.2 }
+			return a, d, lg
+		}
+	}
 	return fs * 0.8, fs * 0.2, fs * 0.2
 }
 
