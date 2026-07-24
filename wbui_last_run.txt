@@ -1,0 +1,12 @@
+# wb-ui/platform/graphics
+platform\graphics\canvas.go:60:22: undefined: skia.Surface
+platform\graphics\canvas.go:61:22: undefined: skia.Canvas
+platform\graphics\canvas.go:62:22: undefined: skia.Paint
+platform\graphics\canvas.go:63:22: undefined: skia.Paint
+platform\graphics\canvas.go:64:22: undefined: skia.Paint
+platform\graphics\canvas.go:76:22: undefined: skia.Paint
+platform\graphics\canvas.go:79:32: undefined: skia.Font
+platform\graphics\fontmgr.go:32:15: undefined: skia.Typeface
+platform\graphics\fontmgr.go:74:29: undefined: skia.Typeface
+platform\graphics\fontmgr.go:75:18: undefined: skia.Typeface
+platform\graphics\fontmgr.go:75:18: too many errors
