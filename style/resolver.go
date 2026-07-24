@@ -912,6 +912,10 @@ func parseLength(s string) (Length, bool) {
 	}
 	if i == 0 {
 		// No leading number: not a length (e.g. "solid", "#e5e7eb", "red").
+		// CSS keywords like "auto" are valid for margins.
+		if s == "auto" {
+			return Length{Unit: "auto"}, true
+		}
 		return Length{}, false
 	}
 	num, err := strconv.ParseFloat(s[:i], 64)

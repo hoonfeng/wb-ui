@@ -314,6 +314,13 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	for _, it := range items {
 		g := state.GeometryForBox(it.box)
 		cs := it.box.Style()
+		// Auto main-axis margin: absorb remaining free space (CSS-FLEXBOX §9.5).
+		if cs != nil && isRow && cs.MarginLeft.Unit == "auto" {
+			if rem := cw - totalMain; rem > 0 { mainPos += rem }
+		} else if cs != nil && !isRow && cs.MarginTop.Unit == "auto" {
+			if rem := ch - totalMain; rem > 0 { mainPos += rem }
+		}
+
 
 		if isRow {
 			ms := it.finalMainSize
@@ -356,7 +363,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// Propagate auto cross-size from children.
 			if heightIsAutoForBox(it.box) {
 				childMaxH := maxChildContentHeight(it.box, state)
-				if childMaxH > g.ContentHeight() {
+				if childMaxH >= g.ContentHeight() {
+
 					oldTop := g.Top()
 					g.SetContentHeight(childMaxH)
 					// Re-center: recalculate cross-axis position.
