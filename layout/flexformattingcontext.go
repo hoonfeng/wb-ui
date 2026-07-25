@@ -31,6 +31,7 @@ type flexItem struct {
 	marginMain      float64
 	marginCross     float64
 	order           int
+	baselineOffset  float64
 }
 
 func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
@@ -388,6 +389,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 		}
 	}
+	// Pre-compute baseline offsets for align-items:baseline support.
+	maxBO := 0.0
+	for _, it := range items {
+		align := alignOf(it.box, containerCS)
+		if align == "baseline" {
+			it.baselineOffset = baselineOffset(it.box, state)
+			if it.baselineOffset > maxBO {
+				maxBO = it.baselineOffset
+			}
+		}
+	}
 
 	for _, it := range items {
 		g := state.GeometryForBox(it.box)
@@ -446,6 +458,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				switch align {
 				case "center":
 					crossAdjusted = crossPos + (ch-bh)/2
+				case "baseline":
+					crossAdjusted = crossPos + (maxBO - it.baselineOffset)
 				case "flex-end":
 					crossAdjusted = crossPos + ch - bh
 				}
@@ -465,6 +479,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 					switch align {
 					case "center":
 						newCross = crossPos + (ch-bh2)/2
+					case "baseline":
+						newCross = crossPos + (maxBO - it.baselineOffset)
 					case "flex-end":
 						newCross = crossPos + ch - bh2
 					}
@@ -473,6 +489,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 					switch align {
 					case "center":
 						newCross = crossPos
+					case "baseline":
+						newCross = crossPos + (maxBO - it.baselineOffset)
 					case "flex-end":
 						newCross = crossPos
 					}
@@ -493,6 +511,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			switch align {
 			case "center":
 				crossAdjusted = crossPos + (cw-bw)/2
+			case "baseline":
+				crossAdjusted = crossPos + (maxBO - it.baselineOffset)
 			case "flex-end":
 				crossAdjusted = crossPos + cw - bw
 			}
@@ -509,6 +529,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			switch align {
 			case "center":
 				newCross = crossPos + (cw-bw2)/2
+			case "baseline":
+				newCross = crossPos + (maxBO - it.baselineOffset)
 			case "flex-end":
 				newCross = crossPos + cw - bw2
 			}
@@ -621,3 +643,36 @@ func flexGap(cs *style.ComputedStyle, isRow bool, fontSize float64) float64 {
 
 var _ = style.DisplayFlex
 var _ = math.Max
+
+// baselineOffset returns the distance from a box's border-box top edge to its
+// text baseline, used for align-items:baseline alignment in flex layout.
+// For a flex container, we walk the first in-flow child to find the real
+// text baseline, accounting for nested padding/border.
+func baselineOffset(box *ElementBox, state *LayoutState) float64 {
+	return baselineOffsetRec(box, state, 0)
+}
+
+func baselineOffsetRec(box *ElementBox, state *LayoutState, depth int) float64 {
+	g := state.GeometryForBox(box)
+	padTop := g.PaddingTop() + g.BorderTop()
+
+	// For flex/grid containers, recurse into the first in-flow child.
+	if depth < 10 && (box.EstablishesFlexFormattingContext() || box.EstablishesGridFormattingContext()) {
+		for _, child := range box.Children() {
+			if !child.IsInFlow() || child.IsAbsolutelyPositioned() {
+				continue
+			}
+			if eb, ok := child.(*ElementBox); ok {
+				return padTop + baselineOffsetRec(eb, state, depth+1)
+			}
+			if tb, ok := child.(*InlineTextBox); ok && len(tb.TextSegments) > 0 {
+				return padTop + tb.TextSegments[0].Height
+			}
+			break
+		}
+	}
+
+	// Default: use font ascent from this box's resolved font.
+	ascent, _ := fontAscentDescent(box)
+	return padTop + ascent
+}
