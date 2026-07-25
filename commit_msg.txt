@@ -1,0 +1,9 @@
+fix: inline content width + flex gap 两个 bug
+
+1. inlineformattingcontext.go: 内联 ElementBox 子项布局后未设置内容宽度
+   导致 span.code-keyword 宽度为 0，后续括号文本重叠。
+   新增 computeInlineContentWidth 函数从 text segments 计算宽度。
+
+2. flexformattingcontext.go: 列 flex auto-height 重居中 newMain 缺少
+   default 分支（newMain=oldTop），导致 editor-content 被移回重叠。
+   同时新增 flexGap 支持 CSS gap 属性在 flex 布局中的应用。
