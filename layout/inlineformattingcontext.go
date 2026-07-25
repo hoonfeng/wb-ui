@@ -109,6 +109,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
+			// Compute inline child's content width from text segments.
+			// Without this, cldW=0 and subsequent text on same line overlaps.
+			if cldG.BorderBoxWidth() <= 0 {
+				if cw := computeInlineContentWidth(cld, state); cw > 0 {
+					cldG.SetContentWidth(cw)
+				}
+			}
 			cldW := cldG.BorderBoxWidth()
 			if currentLine.widthUsed+cldW > contentWidth && currentLine.widthUsed > 0 {
 				lines = append(lines, currentLine)
@@ -194,6 +201,36 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 // separates words in inline layout.
 func isInlineWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+}
+// computeInlineContentWidth computes the inline content width of an ElementBox
+// from its text segments. InlineFormattingContext.Layout sets ContentHeight but
+// not ContentWidth, so inline ElementBox children would get zero width causing
+// subsequent text to overlap.
+func computeInlineContentWidth(box *ElementBox, state *LayoutState) float64 {
+	g := state.GeometryForBox(box)
+	base := g.ContentBoxLeft()
+	maxRight := 0.0
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, c := range b.Children() {
+			if itb, ok := c.(*InlineTextBox); ok {
+				for _, seg := range itb.TextSegments {
+					r := seg.X + seg.Width
+					if r > maxRight {
+						maxRight = r
+					}
+				}
+			}
+			if eb, ok := c.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(box)
+	if maxRight <= base {
+		return 0
+	}
+	return maxRight - base
 }
 
 var _ = style.DisplayInline

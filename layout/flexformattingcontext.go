@@ -315,22 +315,29 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	for _, it := range items {
 		totalMain += it.marginMain + it.finalMainSize
 	}
+
+	// CSS gap (flex gap) between items.
+	gap := 0.0
+	if containerCS != nil {
+		gap = flexGap(containerCS, isRow, fontSizeOf(container))
+	}
+
 	if isRow {
 		if totalMain < cw && (justify == "center" || justify == "flex-end") {
-			gap := cw - totalMain
+			freeGap := cw - totalMain
 			if justify == "center" {
-				if isReverse { mainPos -= gap / 2 } else { mainPos += gap / 2 }
+				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
 			} else { // flex-end
-				if isReverse { mainPos -= gap } else { mainPos += gap }
+				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
 			}
 		}
 	} else {
 		if totalMain < ch && (justify == "center" || justify == "flex-end") {
-			gap := ch - totalMain
+			freeGap := ch - totalMain
 			if justify == "center" {
-				if isReverse { mainPos -= gap / 2 } else { mainPos += gap / 2 }
+				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
 			} else { // flex-end
-				if isReverse { mainPos -= gap } else { mainPos += gap }
+				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
 			}
 		}
 	}
@@ -393,7 +400,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + ch - bh
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
-			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) }
+			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
@@ -429,7 +436,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + cw - bw
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) }
+			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
@@ -529,6 +536,26 @@ func alignOf(box *ElementBox, containerCS *style.ComputedStyle) string {
 		return containerCS.AlignItems
 	}
 	return "stretch"
+}
+
+// flexGap returns the effective gap for the flex container.
+func flexGap(cs *style.ComputedStyle, isRow bool, fontSize float64) float64 {
+	var gapV float64
+	if isRow {
+		gapV = cs.ColumnGap.Value
+		if cs.Gap.Value > 0 {
+			gapV = cs.Gap.Value
+		}
+	} else {
+		gapV = cs.RowGap.Value
+		if cs.Gap.Value > 0 {
+			gapV = cs.Gap.Value
+		}
+	}
+	if cs.Gap.Unit == "em" {
+		gapV *= fontSize
+	}
+	return gapV
 }
 
 var _ = style.DisplayFlex
