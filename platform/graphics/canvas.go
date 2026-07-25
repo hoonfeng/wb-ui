@@ -701,6 +701,15 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 	if weight >= 600 && (mgr == nil || mgr.TypefaceWeight(tf) < 600) {
 		f.SetEmbolden(true)
 	}
+	// Apply synthetic italic (faux italic) via SkewX when the requested style
+	// is italic/oblique but the resolved Typeface is not actually slanted.
+	// Many CJK fonts (Microsoft YaHei, NSimSun, etc.) lack an italic variant,
+	// so the FontManager returns a regular face. In that case we shear the
+	// glyphs (-0.2 radians ≈ 11.3°) to simulate italic — matching the behavior
+	// of browsers that apply font-style: italic to non-italic fonts.
+	if (font.Style == "italic" || font.Style == "oblique") && (mgr == nil || !mgr.TypefaceIsItalic(tf)) {
+		f.SetSkewX(-0.2)
+	}
 	c.fontCache[key] = f
 	return f
 }
@@ -964,6 +973,10 @@ func globalSkiaFont(font Font) *skia.Font {
 	// Apply synthetic bold only when no real bold Typeface was resolved.
 	if weight >= 600 && (mgr == nil || mgr.TypefaceWeight(tf) < 600) {
 		f.SetEmbolden(true)
+	}
+	// Apply synthetic italic when requested but Typeface isn't slanted.
+	if (font.Style == "italic" || font.Style == "oblique") && (mgr == nil || !mgr.TypefaceIsItalic(tf)) {
+		f.SetSkewX(-0.2)
 	}
 	globalFontCache[key] = f
 	return f

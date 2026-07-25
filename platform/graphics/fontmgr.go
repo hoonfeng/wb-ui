@@ -610,6 +610,22 @@ func (m *FontManager) TypefaceWeight(tf *skia.Typeface) int {
 	return 0
 }
 
+// TypefaceIsItalic reports whether the typeface is an italic/oblique variant.
+// Returns false when the typeface is not found in the manager.
+func (m *FontManager) TypefaceIsItalic(tf *skia.Typeface) bool {
+	if m == nil || tf == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, f := range m.fonts {
+		if f.tf == tf {
+			return f.italic
+		}
+	}
+	return false
+}
+
 // GetGlobalDebugLogger is a hook reserved for debug logging; returns nil when
 // no logger is installed. Kept here so the package compiles without a logger
 // dependency.
