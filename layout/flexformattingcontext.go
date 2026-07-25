@@ -44,7 +44,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	_, padding, border := computeBoxModel(box, g.ContentWidth(), fontSizeOf(box))
 	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
-	g.SetContentWidth(g.ContentWidth() - padding.Left - padding.Right - border.Left - border.Right)
+	// g.ContentWidth() is already the content area width (set by parent).
+	// Do NOT subtract padding/border here - the content area is what children
+	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
 
