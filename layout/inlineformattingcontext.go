@@ -2,6 +2,8 @@
 package layout
 
 import (
+	"math"
+
 	"wb-ui/style"
 )
 
@@ -23,6 +25,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
+	boxHeight := g.ContentHeight()
 	contentWidth := g.ContentWidth()
 	fs := fontSizeOf(box)
 	lineHeight := fontLineGap(box)
@@ -217,10 +220,29 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if len(lines) > 0 {
 		lastLine := lines[len(lines)-1]
 		totalHeight = (lastLine.y - contentY) + lineHeight
-
-
 	}
-	g.SetContentHeight(totalHeight)
+
+	// Vertically center single-line content when box is taller than the text.
+	if len(lines) <= 1 && totalHeight > 0 && len(pending) > 0 {
+		shift := (boxHeight - totalHeight) / 2
+		if shift < 0 {
+			shift = 0 // text taller than box; keep at top
+		}
+		if shift > 0 {
+			for i := range pending {
+				pending[i].seg.Y += shift
+			}
+			// Also shift inline ElementBox children on this line.
+			for _, child := range box.Children() {
+				if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
+					ebG := state.GeometryForBox(eb)
+					ebG.SetTopLeft(ebG.Top()+shift, ebG.Left())
+				}
+			}
+		}
+	}
+
+	g.SetContentHeight(math.Max(boxHeight, totalHeight))
 }
 
 // isInlineWhitespace reports whether r is a CSS whitespace character that

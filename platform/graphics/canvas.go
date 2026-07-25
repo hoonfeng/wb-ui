@@ -618,12 +618,9 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 				segFont = emojiSkFont
 			}
 		case runeSymbol:
-			// Symbols: try primary font first, check if glyph exists.
-			if emojiSkFont != nil {
-				if w, _ := primarySkFont.MeasureText(seg, c.fillPaint); w <= 0 {
-					segFont = emojiSkFont
-				}
-			}
+			// Symbols: always use primary font. Don't fall back to emoji even
+			// if the primary font lacks the glyph — rendering as a box (tofu)
+			// is less misleading than a wrong-color emoji glyph.
 		}
 		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
 		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
@@ -1050,11 +1047,6 @@ func MeasureText(font Font, text string) float64 {
 				f = emojiSkFont
 			}
 		case runeSymbol:
-			if emojiSkFont != nil {
-				if w, _ := skFont.MeasureText(seg, paint); w <= 0 {
-					f = emojiSkFont
-				}
-			}
 		}
 		if w, _ := f.MeasureText(seg, paint); w > 0 {
 			total += float64(w)
