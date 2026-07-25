@@ -247,6 +247,44 @@ func measureText(box *ElementBox, text string) float64 {
 	return float64(utf8.RuneCountInString(text)) * fs * 0.5
 }
 
+// measureTextWordSum measures text as individual words separated by whitespace,
+// summing their widths + inter-word space widths. This matches how
+// InlineFormattingContext.Layout processes text, preventing the "sum of parts
+// exceeds whole" discrepancy that causes unwanted line wraps.
+func measureTextWordSum(box *ElementBox, text string, spaceWidth float64) float64 {
+	fs := fontSizeOf(box)
+	if fs <= 0 { fs = defaultFontSize }
+	family := fontFamilyOf(box)
+	weight := fontWeightOf(box)
+	fstyle := fontStyleOf(box)
+	if MeasureTextFunc == nil {
+		return float64(utf8.RuneCountInString(text)) * fs * 0.5
+	}
+	runes := []rune(text)
+	total := 0.0
+	firstWord := true
+	i := 0
+	for i < len(runes) {
+		// Skip whitespace.
+		for i < len(runes) && isInlineWhitespace(runes[i]) {
+			i++
+		}
+		if i >= len(runes) { break }
+		start := i
+		for i < len(runes) && !isInlineWhitespace(runes[i]) {
+			i++
+		}
+		word := string(runes[start:i])
+		w := MeasureTextFunc(family, fs, weight, fstyle, word)
+		if !firstWord {
+			total += spaceWidth
+		}
+		total += w
+		firstWord = false
+	}
+	return total
+}
+
 func fontAscentDescent(box *ElementBox) (ascent, descent float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }

@@ -68,6 +68,39 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	c.distributeFreeSpace(items, mainSize, isRow)
+
+	// Before resolving cross sizes and positions, compute a preliminary
+	// container content height from children so that cross-axis centering
+	// and flex-end alignment work correctly when the container has auto-height.
+	// Without this, ch=0 causes negative offsets (children float above parent).
+	if heightIsAutoForBox(box) {
+		if isRow {
+			// Row flex: estimate auto height from the tallest child.
+			estH := 0.0
+			for _, it := range items {
+				childH := fontLineGap(it.box)
+				if childH > estH {
+					estH = childH
+				}
+			}
+			if estH > ch {
+				estH += float64(len(items)) // small fudge for padding
+				g.SetContentHeight(estH)
+				ch = estH
+			}
+		} else {
+			// Column flex: estimate auto height from the sum of child main-sizes.
+			estH := 0.0
+			for _, it := range items {
+				estH += it.finalMainSize + it.marginMain
+			}
+			if estH > ch {
+				g.SetContentHeight(estH)
+				ch = estH
+			}
+		}
+	}
+
 	c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state)
 	c.applyPositions(items, box, isRow, isReverse, false, state)
 
@@ -147,7 +180,9 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 
 // intrinsicContentWidth returns the max-content width of a box by inspecting
 // its children without performing full layout. For ElementBox children it
-// recurses; for InlineTextBox children it measures the text.
+// recurses; for InlineTextBox children it measures each word individually
+// (matching InlineFormattingContext behavior) to avoid the "sum of parts
+// exceeds whole" discrepancy that causes unwanted line wraps.
 func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	cs := box.Style()
 	// For row-direction flex containers, the max-content inline size is the SUM
@@ -158,13 +193,19 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 
 	total := 0.0
 	maxW := 0.0
+	spaceW := measureText(box, " ")
+	if spaceW <= 0 {
+		spaceW = measureText(box, " ")
+	}
 	for _, child := range box.Children() {
 		if !child.IsInFlow() { continue }
 		switch c := child.(type) {
-		case *InlineTextBox:
-			w := measureText(box, c.Text())
-			if isFlexRow { total += w }
-			if w > maxW { maxW = w }
+			case *InlineTextBox:
+				// Measure word-by-word (matching IFC behavior) so the flex item
+				// width matches what InlineFormattingContext.Layout expects.
+				w := measureTextWordSum(box, c.Text(), spaceW)
+				if isFlexRow { total += w }
+				if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
 			if isFlexRow { total += cw }
@@ -393,11 +434,15 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
-			switch align {
-			case "center":
-				crossAdjusted = crossPos + (ch-bh)/2
-			case "flex-end":
-				crossAdjusted = crossPos + ch - bh
+			// When container auto-height (ch=0), defer centering/flex-end
+			// until after child layout so we can use the actual child height.
+			if ch > 0 {
+				switch align {
+				case "center":
+					crossAdjusted = crossPos + (ch-bh)/2
+				case "flex-end":
+					crossAdjusted = crossPos + ch - bh
+				}
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
 			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
@@ -410,11 +455,21 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				oldTop := g.Top()
 				bh2 := g.BorderBoxHeight()
 				newCross := crossPos
-				switch align {
-				case "center":
-					newCross = crossPos + (ch-bh2)/2
-				case "flex-end":
-					newCross = crossPos + ch - bh2
+				if ch > 0 {
+					switch align {
+					case "center":
+						newCross = crossPos + (ch-bh2)/2
+					case "flex-end":
+						newCross = crossPos + ch - bh2
+					}
+				} else {
+					// Container auto-height: center within actual child height.
+					switch align {
+					case "center":
+						newCross = crossPos
+					case "flex-end":
+						newCross = crossPos
+					}
 				}
 				delta := newCross - oldTop
 				if delta != 0 {

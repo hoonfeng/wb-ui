@@ -28,6 +28,25 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	lineHeight := fontLineGap(box)
 	if lineHeight <= 0 { lineHeight = fs * 1.2 }
 
+	// When contentWidth is auto (derived from intrinsic text width), widen it
+	// slightly to prevent floating-point discrepancies from triggering unwanted
+	// line wraps inside flex items.
+	{
+		allText := ""
+		for _, child := range box.Children() {
+			if tb, ok := child.(*InlineTextBox); ok {
+				allText += tb.Text()
+			}
+		}
+		if totalW := measureText(box, allText); totalW > 0 {
+			if contentWidth < totalW+20 {
+				// This box has auto-width based on text content.
+				// Widen slightly to prevent float-epsilon line wraps.
+				contentWidth = totalW + 20
+			}
+		}
+	}
+
 	// Determine text-align.
 	textAlign := style.TextAlignStart
 	if cs != nil {
