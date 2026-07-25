@@ -40,18 +40,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	isReverse := cs.FlexDirection == "row-reverse" || cs.FlexDirection == "column-reverse"
 
 	g := state.GeometryForBox(box)
-	_, padding, border := computeBoxModel(box, g.ContentWidth(), fontSizeOf(box))
-	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
-	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
-	g.SetContentWidth(g.ContentWidth() - padding.Left - padding.Right - border.Left - border.Right)
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
-	ch := g.ContentHeight()
 
-	fmt.Printf("[FLEX-TRACE] class=%q display=%d children=%d cw=%.0f ch=%.0f\n",
-		box.ElementClass(), box.Style().Display, len(box.Children()), cw, ch)
-
-	var items []*flexItem
 	var items []*flexItem
 	for _, child := range box.Children() {
 		if childEb, ok := child.(*ElementBox); ok && child.IsInFlow() && child.IsVisible() {
@@ -75,34 +66,12 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	c.distributeFreeSpace(items, mainSize, isRow)
 	c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state)
 	c.applyPositions(items, box, isRow, isReverse, false, state)
-
-	// Compute auto container height from children.
-	// Preserve any height already set by parent formatting context (e.g. grid row height).
-	if heightIsAutoForBox(box) {
-		contentTop := g.ContentBoxTop()
-		maxChildBottom := contentTop
-		for _, it := range items {
-			cg := state.GeometryForBox(it.box)
-			if bottom := cg.Top() + cg.BorderBoxHeight(); bottom > maxChildBottom {
-				maxChildBottom = bottom
-			}
-		}
-		blockSize := maxChildBottom - contentTop
-		if blockSize < 0 { blockSize = 0 }
-		// If parent set a larger height (e.g. grid row), keep it.
-		if box.Parent() != nil && blockSize < g.ContentHeight() {
-			blockSize = g.ContentHeight()
-		}
-		g.SetContentHeight(blockSize)
-	}
 }
 
 func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth, cbHeight float64, state *LayoutState) *flexItem {
 	cs := box.Style()
-	g := state.GeometryForBox(box)
-	margin, padding, border := computeBoxModel(box, cbWidth, fontSizeOf(box))
-	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
-	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+	_ = state.GeometryForBox(box)
+	margin, _, _ := computeBoxModel(box, cbWidth, fontSizeOf(box))
 
 	mm, mc := margin.Left+margin.Right, margin.Top+margin.Bottom
 	if !isRow { mm, mc = margin.Top+margin.Bottom, margin.Left+margin.Right }
@@ -154,52 +123,26 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 // its children without performing full layout. For ElementBox children it
 // recurses; for InlineTextBox children it measures the text.
 func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
-	cs := box.Style()
-	// For row-direction flex containers, the max-content inline size is the SUM
-	// of children (plus gap), matching CSS-FLEXBOX §9.9.2. For block/non-flex
-	// containers it's the max of children.
-	isFlexRow := cs != nil && box.EstablishesFlexFormattingContext() &&
-		cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
-
-	total := 0.0
 	maxW := 0.0
 	for _, child := range box.Children() {
-		if !child.IsInFlow() { continue }
 		switch c := child.(type) {
 		case *InlineTextBox:
 			w := measureText(box, c.Text())
-			if isFlexRow { total += w }
 			if w > maxW { maxW = w }
 		case *ElementBox:
-			cw := intrinsicContentWidth(c, isRow)
-			if isFlexRow { total += cw }
-			if cw > maxW { maxW = cw }
-		}
-	}
-	if isFlexRow {
-		maxW = total
-		// Add gap between flex items.
-		if cs.Gap.Value > 0 || cs.ColumnGap.Value > 0 {
-			gapV := cs.Gap.Value
-			if gapV <= 0 { gapV = cs.ColumnGap.Value }
-			unit := cs.Gap.Unit
-			if unit == "" { unit = cs.ColumnGap.Unit }
-			gap := gapV
-			if unit == "em" { gap *= fontSizeOf(box) }
-			if gap > 0 {
-				count := 0
-				for _, child := range box.Children() {
-					if child.IsInFlow() { count++ }
-				}
-				maxW += gap * float64(count-1)
+			// For block-level children the intrinsic width is the child's own
+			// intrinsic width; for inline-level children (atomic inlines) it's
+			// their border-box.
+			if c.IsInlineLevel() {
+				cw := intrinsicContentWidth(c, isRow)
+				// Add margin/border/padding for inline atomic boxes.
+				// TODO: compute margin/border/padding here.
+				if cw > maxW { maxW = cw }
+			} else {
+				cw := intrinsicContentWidth(c, isRow)
+				if cw > maxW { maxW = cw }
 			}
 		}
-	}
-	// Add the box's own padding + border (inline direction).
-	if cs != nil {
-		fs := fontSizeOf(box)
-		_, p, b := computeBoxModel(box, maxW, fs)
-		maxW += p.Left + p.Right + b.Left + b.Right
 	}
 	return maxW
 }
@@ -343,22 +286,6 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	for _, it := range items {
 		g := state.GeometryForBox(it.box)
 		cs := it.box.Style()
-		fs := fontSizeOf(it.box)
-		// Fixed main-axis margin: shift position by margin-start before item.
-		if cs != nil {
-			if isRow {
-				mainPos += resolveOrZero(cs.MarginLeft, cw, fs)
-			} else {
-				mainPos += resolveOrZero(cs.MarginTop, cw, fs)
-			}
-		}
-		// Auto main-axis margin: absorb remaining free space (CSS-FLEXBOX §9.5).
-		if cs != nil && isRow && cs.MarginLeft.Unit == "auto" {
-			if rem := cw - totalMain; rem > 0 { mainPos += rem }
-		} else if cs != nil && !isRow && cs.MarginTop.Unit == "auto" {
-			if rem := ch - totalMain; rem > 0 { mainPos += rem }
-		}
-
 
 		if isRow {
 			ms := it.finalMainSize
@@ -384,11 +311,6 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			if isReverse { mainPos -= g.BorderBoxWidth() }
 			// Set position FIRST so children use correct absolute coordinates.
 			bh := g.BorderBoxHeight()
-			if bh <= 0 {
-				// Estimate intrinsic cross-size from text children for initial
-				// positioning before child layout (post-layout corrects it).
-				bh = fontLineGap(it.box)
-			}
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
 			switch align {
@@ -398,28 +320,32 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + ch - bh
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
-			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) }
+			if !isReverse { mainPos += g.BorderBoxWidth() }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
 			// Propagate auto cross-size from children.
 			if heightIsAutoForBox(it.box) {
-				oldTop := g.Top()
-				bh2 := g.BorderBoxHeight()
-				newCross := crossPos
-				switch align {
-				case "center":
-					newCross = crossPos + (ch-bh2)/2
-				case "flex-end":
-					newCross = crossPos + ch - bh2
+				childMaxH := maxChildContentHeight(it.box, state)
+				if childMaxH > g.ContentHeight() {
+					oldTop := g.Top()
+					g.SetContentHeight(childMaxH)
+					// Re-center: recalculate cross-axis position.
+					bh2 := g.BorderBoxHeight()
+					newCross := crossPos
+					switch align {
+					case "center":
+						newCross = crossPos + (ch-bh2)/2
+					case "flex-end":
+						newCross = crossPos + ch - bh2
+					}
+					delta := newCross - oldTop
+					if delta != 0 {
+						shiftBoxAndDescendants(it.box, delta, 0, state)
+					}
+					g.SetTopLeft(newCross, g.Left())
 				}
-				delta := newCross - oldTop
-				if delta != 0 {
-					shiftBoxAndDescendants(it.box, delta, 0, state)
-				}
-
-
 			}
 		} else {
 			if isReverse { mainPos -= g.BorderBoxHeight() }
@@ -434,44 +360,12 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + cw - bw
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) }
+			if !isReverse { mainPos += g.BorderBoxHeight() }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
-
-			// Propagate auto cross-size (width) from children.
-			oldLeft := g.Left()
-			bw2 := g.BorderBoxWidth()
-			newCross := crossPos
-			switch align {
-			case "center":
-				newCross = crossPos + (cw-bw2)/2
-			case "flex-end":
-				newCross = crossPos + cw - bw2
-			}
-			delta := newCross - oldLeft
-			if delta != 0 {
-				shiftBoxAndDescendants(it.box, 0, delta, state)
-			}
-
-			// Propagate auto main-size (height) from children.
-			// For column flex, main axis = Y. justify-content:center/flex-end
-			// may need re-centering after child layout determines actual height.
-			if heightIsAutoForBox(it.box) {
-				oldTop := g.Top()
-				bh2 := g.BorderBoxHeight()
-				newMain := cy
-				switch justify {
-				case "center":
-					newMain = cy + (ch-bh2)/2
-				case "flex-end":
-					newMain = cy + ch - bh2
-				}
-				delta2 := newMain - oldTop
-				if delta2 != 0 {
-					shiftBoxAndDescendants(it.box, delta2, 0, state)
-				}
-			}
+			// Note: column flex auto cross-size propagation (width from content)
+			// is not yet implemented.
 		}
 	}
 }
