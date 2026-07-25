@@ -37,6 +37,7 @@ type loadedFont struct {
 	serif  bool
 	cjk    bool
 	emoji  bool
+	symbol bool // symbol font (geometric shapes, arrows, etc.)
 }
 
 // CSSFontWeightName maps CSS numeric font-weight values to their standard
@@ -77,6 +78,7 @@ type FontManager struct {
 	monoTF    *skia.Typeface  // generic monospace
 	serifTF   *skia.Typeface  // generic serif
 	emojiTF   *skia.Typeface  // emoji font (Segoe UI Emoji / Noto Color Emoji)
+	symbolTF  *skia.Typeface // symbol font (Segoe UI Symbol) for geometric shapes/arrows
 }
 
 var (
@@ -308,6 +310,9 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	if strings.Contains(name, "emoji") || strings.Contains(name, "coloremoji") || strings.Contains(name, "seguiemj") {
 		entry.emoji = true
 	}
+	if strings.Contains(name, "symbol") || strings.Contains(name, "seguisym") {
+		entry.symbol = true
+	}
 	// Weight override from filename for common patterns.
 	switch {
 	case strings.HasPrefix(name, "msyhbd"):
@@ -440,6 +445,23 @@ func (m *FontManager) selectDefaults() {
 		for _, name := range []string{"segoe ui emoji", "noto color emoji", "apple color emoji"} {
 			m.emojiTF = m.findBest(name, 400, false)
 			if m.emojiTF != nil {
+				break
+			}
+		}
+	}
+	// symbol: find the first font with symbol flag set (e.g. Segoe UI Symbol).
+	m.symbolTF = nil
+	for _, f := range m.fonts {
+		if f.symbol {
+			m.symbolTF = f.tf
+			break
+		}
+	}
+	// Fallback: try common symbol font family names.
+	if m.symbolTF == nil {
+		for _, name := range []string{"segoe ui symbol", "segoe ui", "arial"} {
+			m.symbolTF = m.findBest(name, 400, false)
+			if m.symbolTF != nil {
 				break
 			}
 		}
@@ -599,6 +621,16 @@ func (m *FontManager) EmojiTypeface() *skia.Typeface {
 		return nil
 	}
 	return m.emojiTF
+}
+
+// SymbolTypeface returns the loaded symbol Typeface (e.g. Segoe UI Symbol), or
+// nil if no symbol font is available. Used to render geometric shapes, arrows,
+// and other symbols that the primary font may lack.
+func (m *FontManager) SymbolTypeface() *skia.Typeface {
+	if m == nil {
+		return nil
+	}
+	return m.symbolTF
 }
 
 // TypefaceWeight returns the CSS weight of the loaded Typeface (400 for regular,

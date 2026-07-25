@@ -596,10 +596,11 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 // drawTextWithFallback splits text into runs by character type (emoji, symbol,
 // plain) and draws each run with the appropriate font. Plain ASCII uses the
 // primary font. Emoji uses the emoji fallback font. Symbols (geometric shapes,
-// arrows, etc.) try the primary font first; if it lacks the glyph, fall back
-// to the emoji font.
+// arrows, etc.) try the primary font first using UnicharToGlyph; if it lacks
+// the glyph, fall back to the symbol font (Segoe UI Symbol), then to emoji.
 func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
 	emojiSkFont := c.getEmojiSkiaFont(font)
+	symbolSkFont := c.getSymbolSkiaFont(font)
 	runes := []rune(text)
 	cx := float32(x)
 	i := 0
@@ -618,9 +619,15 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 				segFont = emojiSkFont
 			}
 		case runeSymbol:
-			// Symbols: always use primary font. Don't fall back to emoji even
-			// if the primary font lacks the glyph — rendering as a box (tofu)
-			// is less misleading than a wrong-color emoji glyph.
+			// Symbols: check primary font first. If it lacks the glyph, try
+			// symbol font, then emoji font as last resort.
+			if primarySkFont.UnicharToGlyph(runes[start]) == 0 {
+				if symbolSkFont != nil {
+					segFont = symbolSkFont
+				} else if emojiSkFont != nil {
+					segFont = emojiSkFont
+				}
+			}
 		}
 		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
 		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
@@ -752,6 +759,25 @@ func (c *Canvas) makeSkiaFont(tf *skia.Typeface, size float64) *skia.Font {
 	f.SetSubpixel(true)
 	return f
 }
+
+// getSymbolSkiaFont returns a *skia.Font using the symbol Typeface (Segoe UI
+// Symbol) at the same size as font, or nil if no symbol font is available.
+func (c *Canvas) getSymbolSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil || mgr.SymbolTypeface() == nil {
+		return nil
+	}
+	return c.makeSkiaFont(mgr.SymbolTypeface(), font.Size)
+		return nil
+	return c.makeSkiaFont(mgr.SymbolTypeface(), font.Size)
+}
+
+// runeClass categorizes a Unicode rune for font fallback purposes.
+
+// runeClass categorizes a Unicode rune for font fallback purposes.
+
+
+// runeClass categorizes a Unicode rune for font fallback purposes.
 
 // runeClass categorizes a Unicode rune for font fallback purposes.
 type runeClass int
@@ -1029,6 +1055,7 @@ func MeasureText(font Font, text string) float64 {
 	}
 	// Non-ASCII present: measure segment by segment with the correct font.
 	emojiSkFont := globalEmojiSkiaFont(font)
+	symbolSkFont := globalSymbolSkiaFont(font)
 	total := float64(0)
 	runes := []rune(text)
 	i := 0
@@ -1047,6 +1074,14 @@ func MeasureText(font Font, text string) float64 {
 				f = emojiSkFont
 			}
 		case runeSymbol:
+			// If primary font lacks the glyph, use symbol font.
+			if skFont.UnicharToGlyph(runes[start]) == 0 {
+				if symbolSkFont != nil {
+					f = symbolSkFont
+				} else if emojiSkFont != nil {
+					f = emojiSkFont
+				}
+			}
 		}
 		if w, _ := f.MeasureText(seg, paint); w > 0 {
 			total += float64(w)
@@ -1073,6 +1108,33 @@ func globalEmojiSkiaFont(font Font) *skia.Font {
 		return f
 	}
 	f := skia.NewFont(mgr.EmojiTypeface(), float32(size))
+	if f == nil {
+		return nil
+	}
+	f.SetEdging(skia.FontEdgingAntialias)
+	f.SetSubpixel(true)
+	globalFontCache[key] = f
+	return f
+}
+
+// globalSymbolSkiaFont returns a cached *skia.Font using the symbol Typeface
+// (Segoe UI Symbol) at the given font size, or nil if not available.
+func globalSymbolSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil || mgr.SymbolTypeface() == nil {
+		return nil
+	}
+	size := font.Size
+	if size <= 0 {
+		size = 16
+	}
+	key := fontKey{family: "_symbol", size: float32(size), weight: 400}
+	globalFontCacheMu.Lock()
+	defer globalFontCacheMu.Unlock()
+	if f, ok := globalFontCache[key]; ok {
+		return f
+	}
+	f := skia.NewFont(mgr.SymbolTypeface(), float32(size))
 	if f == nil {
 		return nil
 	}
