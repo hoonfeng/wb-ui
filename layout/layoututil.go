@@ -244,6 +244,7 @@ func measureText(box *ElementBox, text string) float64 {
 	if MeasureTextFunc != nil {
 		return MeasureTextFunc(family, fs, weight, fstyle, text)
 	}
+	// Fallback (should not happen in production — set by rendering init).
 	return float64(utf8.RuneCountInString(text)) * fs * 0.5
 }
 
@@ -295,8 +296,8 @@ func fontAscentDescent(box *ElementBox) (ascent, descent float64) {
 func fontLineGap(box *ElementBox) float64 {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
-	a, d, _ := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
-	return a + d
+	a, d, lg := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	return a + d + lg
 }
 
 func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
@@ -311,6 +312,9 @@ func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
 // family cannot be found.
 func fontMetricsHelper(family string, fs float64, weight int, style string) (ascent, descent, lineGap float64) {
 	if FontMetricsFunc == nil {
+		// Should never happen in production — FontMetricsFunc is set by
+		// rendering/renderview.go init() and by all test executables.
+		// Return safe defaults as last resort.
 		return fs * 0.8, fs * 0.2, fs * 0.2
 	}
 	if family != "" {
