@@ -57,6 +57,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if spaceWidth <= 0 { spaceWidth = measureText(box, " ") }
 			cursor := 0
 			firstWord := true
+			// If this text node starts with whitespace and there's already
+			// content on the current line, advance by spaceWidth. This handles
+			// both pure-whitespace text nodes (" " between inline elements)
+			// and leading-whitespace text nodes (" main" after </span>).
+			if len(runes) > 0 && isInlineWhitespace(runes[0]) && currentLine.widthUsed > 0 {
+				currentLine.widthUsed += spaceWidth
+			}
 			for cursor < len(runes) {
 				// Skip leading whitespace.
 				for cursor < len(runes) && isInlineWhitespace(runes[cursor]) {
@@ -102,7 +109,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				currentLine.widthUsed = nextX + wordWidth
 				firstWord = false
 			}
-		case *ElementBox:
+			case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
 			cldG.SetTopLeft(currentLine.y, contentX+currentLine.widthUsed)
@@ -202,7 +209,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 func isInlineWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
 }
-// computeInlineContentWidth computes the inline content width of an ElementBox
+
+// computeInlineContentWidth computes the inline content width of an ElementBox
 // from its text segments. InlineFormattingContext.Layout sets ContentHeight but
 // not ContentWidth, so inline ElementBox children would get zero width causing
 // subsequent text to overlap.
