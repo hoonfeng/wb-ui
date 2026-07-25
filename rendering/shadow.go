@@ -187,58 +187,85 @@ func parseShadowLength(s string) float64 {
 // are rendered by clipping to the box interior and filling an offset rect.
 func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Shadow, opacity float64) {
 	for _, sh := range shadows {
+		col := sh.Color
+		blurFactor := 1.0
+		if sh.Blur > 0 {
+			blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
+		}
+		col.A = uint8(float64(col.A) * blurFactor * opacity)
+		if col.A == 0 {
+			continue
+		}
+
 		if sh.Inset {
-			// Inset shadow: clip to the box first, then fill a rectangle
-			// offset opposite to the shadow direction.
-			col := sh.Color
-			blurFactor := 1.0
-			if sh.Blur > 0 {
-				blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
-			}
-			col.A = uint8(float64(col.A) * blurFactor * opacity)
-			if col.A == 0 {
+			// Inset shadow: clip to the box interior, then fill the affected
+			// edge strip with the shadow color. The offset direction determines
+			// which edge is shadowed:
+			//   offsetX > 0 → shadow on LEFT edge   (ox px wide)
+			//   offsetX < 0 → shadow on RIGHT edge  (|ox| px wide)
+			//   offsetY > 0 → shadow on TOP edge    (oy px high)
+			//   offsetY < 0 → shadow on BOTTOM edge (|oy| px high)
+			canvas.Save()
+			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+
+			// When blur==0 and spread==0, we only fill the edge strip.
+			// The strip width/height equals |offset|.
+			dx, dy := sh.OffsetX, sh.OffsetY
+			if dx == 0 && dy == 0 {
+				canvas.Restore()
 				continue
 			}
 
-			canvas.Save()
-			// Clip to the box interior so the shadow only shows inside.
-			if r > 0 {
-				canvas.FillRoundRect(x, y, w, h, r, graphics.Color{A: 0xFF}) // invisible fill to establish clip
+			var fx, fy, fw, fh float64
+			// Horizontal strip from edge opposite to offsetX direction
+			if dx > 0 {
+				// Shadow on LEFT: fill (x, y, dx, h)
+				fx, fw = x, dx
+				if dx > w {
+					dx = w
+				}
+			} else if dx < 0 {
+				// Shadow on RIGHT: fill (x+w+dx, y, -dx, h)
+				fx = x + w + dx // dx is negative, so x+w+dx < x+w
+				fw = -dx
+			} else {
+				fx, fw = x, w
 			}
-			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+			if dy > 0 {
+				// Shadow on TOP: fill (x, y, w, dy)
+				fy, fh = y, dy
+			} else if dy < 0 {
+				// Shadow on BOTTOM: fill (x, y+h+dy, w, -dy)
+				fy = y + h + dy // dy is negative
+				fh = -dy
+			} else {
+				fy, fh = y, h
+			}
+			// Clamp to box bounds.
+			if fw < 0 {
+				fw = 0
+			}
+			if fh < 0 {
+				fh = 0
+			}
 
-			// Draw the shadow rectangle offset opposite to the shadow direction.
-			// Inset shadows are drawn on the opposite side from the offset.
-			var sx, sy float64
-			if sh.OffsetX > 0 {
-				sx = x - w - sh.OffsetX + sh.Spread
-			} else {
-				sx = x + w - sh.OffsetX - sh.Spread
-			}
-			if sh.OffsetY > 0 {
-				sy = y - h - sh.OffsetY + sh.Spread
-			} else {
-				sy = y + h - sh.OffsetY - sh.Spread
-			}
-			sw := w*2 + absFloat(sh.OffsetX)*2
-			sh2 := h*2 + absFloat(sh.OffsetY)*2
-
 			if r > 0 {
-				canvas.FillRoundRect(sx, sy, sw, sh2, r, col)
+				canvas.FillRoundRect(fx, fy, fw, fh, r, col)
 			} else {
-				canvas.FillRect(sx, sy, sw, sh2, col)
+				canvas.FillRect(fx, fy, fw, fh, col)
 			}
 			canvas.Restore()
 			continue
 		}
+		// Non-inset shadow.
 		sx := x + sh.OffsetX - sh.Spread
 		sy := y + sh.OffsetY - sh.Spread
 		sw := w + 2*sh.Spread
 		sh2 := h + 2*sh.Spread
 
 		// Blur approximation: reduce alpha proportionally to blur radius.
-		col := sh.Color
-		blurFactor := 1.0
+		col = sh.Color
+		blurFactor = 1.0
 		if sh.Blur > 0 {
 			blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
 		}
