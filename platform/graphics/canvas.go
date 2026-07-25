@@ -568,9 +568,9 @@ type Point struct {
 // DrawText renders text at the given world-space baseline origin using the supplied
 // font and color, mirroring GraphicsContext::drawText() (via FontCascade::drawText).
 // Uses Skia's real font rasterizer for proper glyph outlines, hinting, and
-// anti-aliasing. Emoji characters are automatically rendered using the emoji
-// fallback font (Segoe UI Emoji / Noto Color Emoji) when the primary font lacks
-// the glyph.
+// anti-aliasing. Emoji and symbol characters outside ASCII are automatically
+// rendered using fallback fonts (Segoe UI Emoji / Segoe UI Symbol) when the
+// primary font lacks the glyph.
 func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	if col.A == 0 || len(text) == 0 {
 		return
@@ -581,8 +581,9 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	}
 	c.fillPaint.SetColor(colorToSkia(col))
 
-	// If text contains emoji, split into runs and draw each with the correct font.
-	if containsEmoji(text) {
+	// Always use fallback path when text contains non-ASCII characters,
+	// since CJK fallback fonts often lack geometric/dingbat symbols.
+	if containsNonASCII(text) {
 		c.drawTextWithFallback(x, y, text, font, skFont, col)
 		c.invalidatePixels()
 		return
@@ -592,27 +593,30 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	c.invalidatePixels()
 }
 
-// drawTextWithFallback splits text into runs of emoji/non-emoji characters and
-// draws each run with the appropriate font.
+// drawTextWithFallback splits text into runs by character type (emoji, symbol,
+// plain) and draws each run with the appropriate font. Plain ASCII uses the
+// primary font. Emoji uses the emoji fallback font. Symbols (geometric shapes,
+// dingbats, etc.) also use the emoji font since Segoe UI Emoji on Windows
+// covers most of the Unicode symbol ranges.
 func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
 	emojiSkFont := c.getEmojiSkiaFont(font)
 	runes := []rune(text)
 	cx := float32(x)
 	i := 0
 	for i < len(runes) {
-		// Find the next non-emoji run.
 		start := i
-		isEmoji := isEmojiRune(runes[i])
-		for i < len(runes) && isEmojiRune(runes[i]) == isEmoji {
+		rtype := classifyRune(runes[i])
+		for i < len(runes) && classifyRune(runes[i]) == rtype {
 			i++
 		}
 		seg := string(runes[start:i])
 		segFont := primarySkFont
-		if isEmoji && emojiSkFont != nil {
+		if rtype != runeASCII && emojiSkFont != nil {
+			// For ALL non-ASCII characters (emoji, symbols), use the emoji
+			// font as fallback since CJK fonts don't cover these ranges.
 			segFont = emojiSkFont
 		}
 		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
-		// Advance x by the width of this segment.
 		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
 			cx += w
 		}
@@ -743,37 +747,57 @@ func (c *Canvas) makeSkiaFont(tf *skia.Typeface, size float64) *skia.Font {
 	return f
 }
 
-// isEmojiRune reports whether r is likely an emoji character that should be
-// rendered with an emoji font. Covers the common emoji ranges.
-func isEmojiRune(r rune) bool {
-	switch {
-	case r > 0xFFFF:
-		// Supplementary Multilingual Plane: most emoji live here
-		// (U+1F000–U+1FFFF). Exclude Private Use Area (U+F0000+).
-		return r >= 0x1F000 && r <= 0x1FFFF
-	case r >= 0x2600 && r <= 0x27BF:
-		// Miscellaneous Symbols, Dingbats
-		return true
-	case r >= 0x2300 && r <= 0x23FF:
-		// Miscellaneous Technical (watch, clock, buttons, etc.)
-		return true
-	case r >= 0x24C0 && r <= 0x24FF:
-		// Enclosed Alphanumerics (�? etc.)
-		return true
-	case r >= 0x2930 && r <= 0x2BFF:
-		// Arrows, Supplemental Arrows, Various Symbols
-		return true
-	case r == 0x200D || r == 0xFE0F:
-		// ZWJ and Variation Selector-16 (emoji presentation)
-		return true
+// runeClass categorizes a Unicode rune for font fallback purposes.
+type runeClass int
+
+const (
+	runeASCII  runeClass = iota // ASCII printable (0x20-0x7E)
+	runeEmoji                   // Emoji / SMP symbols
+	runeSymbol                  // Other non-ASCII symbols (geometric shapes, arrows, etc.)
+)
+
+// classifyRune categorizes r for font fallback routing.
+func classifyRune(r rune) runeClass {
+	if r >= 0x20 && r <= 0x7E {
+		return runeASCII
 	}
-	return false
+	if r > 0xFFFF {
+		// Supplementary Multilingual Plane: emoji and SMP symbols
+		return runeEmoji
+	}
+	// Emoji and common symbol ranges
+	switch {
+	case r >= 0x2190 && r <= 0x21FF: // Arrows
+		return runeEmoji
+	case r >= 0x2300 && r <= 0x23FF: // Miscellaneous Technical
+		return runeEmoji
+	case r >= 0x2400 && r <= 0x243F: // Control Pictures
+		return runeEmoji
+	case r >= 0x2440 && r <= 0x245F: // OCR
+		return runeEmoji
+	case r >= 0x2460 && r <= 0x24FF: // Enclosed Alphanumerics
+		return runeEmoji
+	case r >= 0x2500 && r <= 0x257F: // Box Drawing
+		return runeEmoji
+	case r >= 0x2580 && r <= 0x259F: // Block Elements
+		return runeEmoji
+	case r >= 0x25A0 && r <= 0x25FF: // Geometric Shapes (▼ U+25BC, ▶ U+25B6)
+		return runeEmoji
+	case r >= 0x2600 && r <= 0x27BF: // Miscellaneous Symbols, Dingbats
+		return runeEmoji
+	case r >= 0x2930 && r <= 0x2BFF: // Supplemental Arrows, Various Symbols
+		return runeEmoji
+	case r == 0x200D || r == 0xFE0F: // ZWJ, Variation Selector
+		return runeEmoji
+	}
+	return runeSymbol
 }
 
-// containsEmoji reports whether text contains any emoji-range characters.
-func containsEmoji(text string) bool {
+// containsNonASCII reports whether text contains any character outside ASCII
+// printable range (0x20-0x7E).
+func containsNonASCII(text string) bool {
 	for _, r := range text {
-		if isEmojiRune(r) {
+		if r > 0x7E || (r < 0x20 && r != '\n' && r != '\t') {
 			return true
 		}
 	}
@@ -985,18 +1009,19 @@ func globalSkiaFont(font Font) *skia.Font {
 // MeasureText returns the advance width of text rendered with the given font,
 // using Skia's real font rasterizer. Exposed for the layout package to measure
 // text width before painting (via layout.MeasureTextFunc). Returns 0 when the
-// font cannot be loaded. Emoji characters are measured using the emoji fallback
-// font when the primary font lacks the glyph.
+// font cannot be loaded. Non-ASCII characters (emoji, symbols, geometric
+// shapes) are measured using the emoji fallback font when the primary font
+// lacks the glyph.
 func MeasureText(font Font, text string) float64 {
 	skFont := globalSkiaFont(font)
 	if skFont == nil {
 		return 0
 	}
-	if !containsEmoji(text) {
+	if !containsNonASCII(text) {
 		w, _ := skFont.MeasureText(text, globalMeasurePaintInstance())
 		return float64(w)
 	}
-	// Emoji present: measure segment by segment with the correct font.
+	// Non-ASCII present: measure segment by segment with the correct font.
 	emojiSkFont := globalEmojiSkiaFont(font)
 	total := float64(0)
 	runes := []rune(text)
@@ -1004,13 +1029,14 @@ func MeasureText(font Font, text string) float64 {
 	paint := globalMeasurePaintInstance()
 	for i < len(runes) {
 		start := i
-		isEmoji := isEmojiRune(runes[i])
-		for i < len(runes) && isEmojiRune(runes[i]) == isEmoji {
+		rtype := classifyRune(runes[i])
+		for i < len(runes) && classifyRune(runes[i]) == rtype {
 			i++
 		}
 		seg := string(runes[start:i])
 		f := skFont
-		if isEmoji && emojiSkFont != nil {
+		if rtype != runeASCII && emojiSkFont != nil {
+			// Use emoji font for all non-ASCII (emoji + symbol).
 			f = emojiSkFont
 		}
 		if w, _ := f.MeasureText(seg, paint); w > 0 {
