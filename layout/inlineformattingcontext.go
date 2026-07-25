@@ -222,6 +222,33 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		totalHeight = (lastLine.y - contentY) + lineHeight
 	}
 
+	// Update content width to match the actual text content width. This
+	// ensures the layout box geometry reflects the real text extent so that
+	// syncOne sets the correct frame width. Without this, flex items with
+	// overflow:hidden would clip the text because their frame is narrower
+	// than the actual text content.
+	var totalWidth float64
+	for _, ps := range pending {
+		right := ps.seg.X + ps.seg.Width - contentX
+		if right > totalWidth {
+			totalWidth = right
+		}
+	}
+	// Also include inline ElementBox children's widths (e.g. span > anonymous
+	// wrapper > text). These children may have their own content width updated
+	// by their IFC, but the parent box's width needs to encompass them.
+	for _, child := range box.Children() {
+		if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
+			cg := state.GeometryForBox(eb)
+			if right := cg.Left() + cg.BorderBoxWidth() - contentX; right > totalWidth {
+				totalWidth = right
+			}
+		}
+	}
+	if totalWidth > 0 {
+		g.SetContentWidth(totalWidth)
+	}
+
 	// Vertically center single-line content when box is taller than the text.
 	if len(lines) <= 1 && totalHeight > 0 && len(pending) > 0 {
 		shift := (boxHeight - totalHeight) / 2

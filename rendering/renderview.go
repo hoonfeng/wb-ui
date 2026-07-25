@@ -180,11 +180,62 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 					}
 				}
 				rt.SetSegments(segs)
+				// Expand the wrapper frame to encompass text content.
+				if box := asRenderBox(ro); box != nil && len(segs) > 0 {
+					textRight := segs[0].X + segs[0].Width
+					frameRight := box.frame.X + box.frame.Width
+					if textRight > frameRight {
+						box.frame.Width = textRight - box.frame.X
+					}
+					textBottom := segs[0].Y + segs[0].Height
+					frameBottom := box.frame.Y + box.frame.Height
+					if textBottom > frameBottom {
+						box.frame.Height = textBottom - box.frame.Y
+					}
+				}
 				break
 			}
 		}
 	}
 	syncChildren(ro, lb, state)
+
+	// After children are synced, expand this box's frame to encompass
+	// any child text that extends beyond the geometry-based frame. This
+	// prevents overflow:hidden from clipping text in flex items whose
+	// layout geometry is narrower than actual text content.
+	if box := asRenderBox(ro); box != nil && box.Parent() != nil {
+		var maxRight, maxBottom float64
+		frameRight := box.frame.X + box.frame.Width
+		frameBottom := box.frame.Y + box.frame.Height
+		for rc := ro.FirstChild(); rc != nil; rc = rc.NextSibling() {
+			if rt, ok := rc.(*RenderText); ok {
+				segs := rt.Segments()
+				if len(segs) > 0 {
+					s := segs[0]
+					if r := s.X + s.Width; r > maxRight { maxRight = r }
+					if b := s.Y + s.Height; b > maxBottom { maxBottom = b }
+				}
+			}
+			if rbf, ok := rc.(*RenderBlockFlow); ok {
+				for cc := rbf.FirstChild(); cc != nil; cc = cc.NextSibling() {
+					if rt, ok := cc.(*RenderText); ok {
+						segs := rt.Segments()
+						if len(segs) > 0 {
+							s := segs[0]
+							if r := s.X + s.Width; r > maxRight { maxRight = r }
+							if b := s.Y + s.Height; b > maxBottom { maxBottom = b }
+						}
+					}
+				}
+			}
+		}
+		if maxRight > frameRight {
+			box.frame.Width = maxRight - box.frame.X
+		}
+		if maxBottom > frameBottom {
+			box.frame.Height = maxBottom - box.frame.Y
+		}
+	}
 }
 
 func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *layout.LayoutState) {

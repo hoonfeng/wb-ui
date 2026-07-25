@@ -475,10 +475,20 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				}
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
+		bw := g.BorderBoxWidth()
 			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
+
+			// Post-layout: inline content (IFC) may have expanded the content
+			// width. Adjust mainPos for the next sibling accordingly.
+			if isRow {
+				newBW := g.BorderBoxWidth()
+				if newBW > bw {
+					mainPos += newBW - bw
+				}
+			}
 
 			// Propagate auto cross-size from children.
 			if heightIsAutoForBox(it.box) {
