@@ -70,6 +70,26 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	c.distributeFreeSpace(items, mainSize, isRow)
 	c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state)
 	c.applyPositions(items, box, isRow, isReverse, false, state)
+
+	// Compute auto container height from children.
+	// Preserve any height already set by parent formatting context (e.g. grid row height).
+	if heightIsAutoForBox(box) {
+		contentTop := g.ContentBoxTop()
+		maxChildBottom := contentTop
+		for _, it := range items {
+			cg := state.GeometryForBox(it.box)
+			if bottom := cg.Top() + cg.BorderBoxHeight(); bottom > maxChildBottom {
+				maxChildBottom = bottom
+			}
+		}
+		blockSize := maxChildBottom - contentTop
+		if blockSize < 0 { blockSize = 0 }
+		// If parent set a larger height (e.g. grid row), keep it.
+		if box.Parent() != nil && blockSize < g.ContentHeight() {
+			blockSize = g.ContentHeight()
+		}
+		g.SetContentHeight(blockSize)
+	}
 }
 
 func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth, cbHeight float64, state *LayoutState) *flexItem {
@@ -318,6 +338,15 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	for _, it := range items {
 		g := state.GeometryForBox(it.box)
 		cs := it.box.Style()
+		fs := fontSizeOf(it.box)
+		// Fixed main-axis margin: shift position by margin-start before item.
+		if cs != nil {
+			if isRow {
+				mainPos += resolveOrZero(cs.MarginLeft, cw, fs)
+			} else {
+				mainPos += resolveOrZero(cs.MarginTop, cw, fs)
+			}
+		}
 		// Auto main-axis margin: absorb remaining free space (CSS-FLEXBOX §9.5).
 		if cs != nil && isRow && cs.MarginLeft.Unit == "auto" {
 			if rem := cw - totalMain; rem > 0 { mainPos += rem }
@@ -364,7 +393,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + ch - bh
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
-			if !isReverse { mainPos += g.BorderBoxWidth() }
+			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
@@ -400,7 +429,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + cw - bw
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-			if !isReverse { mainPos += g.BorderBoxHeight() }
+			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
