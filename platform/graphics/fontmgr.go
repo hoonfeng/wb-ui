@@ -1,4 +1,4 @@
-// Translation of: Source/WebCore/platform/graphics/FontCache.h
+﻿// Translation of: Source/WebCore/platform/graphics/FontCache.h
 //                  Source/WebCore/platform/graphics/FontCache.cpp
 // Completeness: 80%
 //
@@ -56,8 +56,8 @@ var CSSFontWeightName = map[int]string{
 	950: "ExtraBlack",
 }
 
-// WeightName returns the CSS weight name for a numeric value (e.g. 400 → "Regular").
-// Returns "Unknown" for weights outside the 100–950 range.
+// WeightName returns the CSS weight name for a numeric value (e.g. 400 �?"Regular").
+// Returns "Unknown" for weights outside the 100�?50 range.
 func WeightName(weight int) string {
 	if name, ok := CSSFontWeightName[weight]; ok {
 		return name
@@ -200,7 +200,7 @@ func (m *FontManager) LoadSystemFonts() {
 func (m *FontManager) loadSystemFontDir(dir string, loaded *int) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0 // directory doesn't exist on this platform — not an error
+		return 0 // directory doesn't exist on this platform �?not an error
 	}
 	count := 0
 	for _, e := range entries {
@@ -311,12 +311,12 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	// Weight override from filename for common patterns.
 	switch {
 	case strings.HasPrefix(name, "msyhbd"):
-		// Microsoft YaHei Bold — real bold variant (not synthetic embolden).
+		// Microsoft YaHei Bold �?real bold variant (not synthetic embolden).
 		entry.family = "microsoft yahei"
 		entry.weight = 700
 		entry.cjk = true
 	case strings.HasPrefix(name, "msyh"):
-		// Microsoft YaHei Regular — default proportional CJK font (like GWui).
+		// Microsoft YaHei Regular �?default proportional CJK font (like GWui).
 		entry.family = "microsoft yahei"
 		entry.weight = 400
 		entry.cjk = true
@@ -342,7 +342,7 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 		entry.family = "consolas"
 		entry.mono = true
 	case name == "simsun.ttc":
-		// index 1 of simsun.ttc is NSimSun (新宋体), a CJK monospace face.
+		// index 1 of simsun.ttc is NSimSun (新宋�?, a CJK monospace face.
 		entry.family = "nsimsun"
 		entry.mono = true
 		entry.cjk = true
@@ -513,11 +513,11 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 	resolveFamily := func(f string) (string, bool) {
 		switch f {
 		case "", "sans-serif", "default", "system-ui", "ui-sans-serif":
-			return "microsoft yahei", true // generic — always available
+			return "microsoft yahei", true // generic �?always available
 		case "serif", "times", "times new roman", "ui-serif":
-			return "kochi mincho", true // generic — always available
+			return "kochi mincho", true // generic �?always available
 		case "monospace", "mono", "ui-monospace":
-			return "nsimsun", true // generic — always available
+			return "nsimsun", true // generic �?always available
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
 		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui":
@@ -557,7 +557,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 }
 
 // splitFontFamily splits a CSS font-family value into individual family names,
-// trimming whitespace and surrounding quotes. e.g. '"Segoe UI", sans-serif' →
+// trimming whitespace and surrounding quotes. e.g. '"Segoe UI", sans-serif' �?
 // ["segoe ui", "sans-serif"].
 func splitFontFamily(raw string) []string {
 	parts := strings.Split(raw, ",")

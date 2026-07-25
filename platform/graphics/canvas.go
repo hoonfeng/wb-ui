@@ -1,4 +1,4 @@
-// Translation of: Source/WebCore/platform/graphics/GraphicsContext.h
+﻿// Translation of: Source/WebCore/platform/graphics/GraphicsContext.h
 //                  Source/WebCore/platform/graphics/GraphicsContext.cpp
 // Completeness: 90%
 // Simplifications:
@@ -214,7 +214,7 @@ func (c *Canvas) Save() {
 }
 
 // SaveLayerWithOpacity pushes an offscreen layer that is composited with the
-// given opacity (0.0–1.0) when Restore is called. This mirrors
+// given opacity (0.0�?.0) when Restore is called. This mirrors
 // GraphicsContext::beginTransparencyLayer() and is used for CSS opacity.
 func (c *Canvas) SaveLayerWithOpacity(opacity float64) {
 	c.states = append(c.states, c.state)
@@ -705,7 +705,7 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 	// is italic/oblique but the resolved Typeface is not actually slanted.
 	// Many CJK fonts (Microsoft YaHei, NSimSun, etc.) lack an italic variant,
 	// so the FontManager returns a regular face. In that case we shear the
-	// glyphs (-0.2 radians ≈ 11.3°) to simulate italic — matching the behavior
+	// glyphs (-0.2 radians �?11.3°) to simulate italic �?matching the behavior
 	// of browsers that apply font-style: italic to non-italic fonts.
 	if (font.Style == "italic" || font.Style == "oblique") && (mgr == nil || !mgr.TypefaceIsItalic(tf)) {
 		f.SetSkewX(-0.2)
@@ -758,7 +758,7 @@ func isEmojiRune(r rune) bool {
 		// Miscellaneous Technical (watch, clock, buttons, etc.)
 		return true
 	case r >= 0x24C0 && r <= 0x24FF:
-		// Enclosed Alphanumerics (Ⓜ, etc.)
+		// Enclosed Alphanumerics (�? etc.)
 		return true
 	case r >= 0x2930 && r <= 0x2BFF:
 		// Arrows, Supplemental Arrows, Various Symbols
