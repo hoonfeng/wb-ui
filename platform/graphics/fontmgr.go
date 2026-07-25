@@ -384,8 +384,18 @@ func (m *FontManager) selectDefaults() {
 		m.monoTF = m.findBest("dejavu sans mono", 400, false)
 	}
 	// sans-serif: prefer Microsoft YaHei (proportional CJK, like GWui), then
-	// fall back to other sans-serif families.
-	m.sansTF = m.findBest("microsoft yahei", 400, false)
+	// fall back to other sans-serif families. Use OS font name lookup first
+	// (skia.NewTypeface) because NewTypefaceFromData on TTC files may return
+	// a valid Typeface that fails to render glyphs.
+	if dt := skia.NewTypeface("Arial", skia.FontStyle{Weight: 400, Width: 5, Slant: 0}); dt != nil {
+		m.sansTF = dt
+	}
+	if m.sansTF == nil {
+		m.sansTF = skia.NewTypeface("Times New Roman", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	}
+	if m.sansTF == nil {
+		m.sansTF = m.findBest("microsoft yahei", 400, false)
+	}
 	if m.sansTF == nil {
 		m.sansTF = m.findBest("kochi gothic", 400, false)
 	}
