@@ -180,7 +180,12 @@ func isBorderBoxForBox(box *ElementBox) bool {
 
 func fontSizeOf(box *ElementBox) float64 {
 	cs := box.Style()
-	if cs == nil { return defaultFontSize }
+	if cs == nil {
+		if p := box.Parent(); p != nil {
+			return fontSizeOf(p)
+		}
+		return defaultFontSize
+	}
 	ref := 0.0
 	if cs.FontSize.Unit == "%" && box.Parent() != nil {
 		ref = fontSizeOf(box.Parent())
@@ -192,7 +197,12 @@ func fontSizeOf(box *ElementBox) float64 {
 
 func fontFamilyOf(box *ElementBox) string {
 	cs := box.Style()
-	if cs == nil { return "" }
+	if cs == nil {
+		if p := box.Parent(); p != nil {
+			return fontFamilyOf(p)
+		}
+		return ""
+	}
 	return firstFontFamily(cs.FontFamily)
 }
 
@@ -216,7 +226,12 @@ func firstFontFamily(s string) string {
 
 func fontWeightOf(box *ElementBox) int {
 	cs := box.Style()
-	if cs == nil { return 400 }
+	if cs == nil {
+		if p := box.Parent(); p != nil {
+			return fontWeightOf(p)
+		}
+		return 400
+	}
 	return parseFontWeight(cs.FontWeight)
 }
 
