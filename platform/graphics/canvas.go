@@ -596,8 +596,8 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 // drawTextWithFallback splits text into runs by character type (emoji, symbol,
 // plain) and draws each run with the appropriate font. Plain ASCII uses the
 // primary font. Emoji uses the emoji fallback font. Symbols (geometric shapes,
-// dingbats, etc.) also use the emoji font since Segoe UI Emoji on Windows
-// covers most of the Unicode symbol ranges.
+// arrows, etc.) try the primary font first; if it lacks the glyph, fall back
+// to the emoji font.
 func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
 	emojiSkFont := c.getEmojiSkiaFont(font)
 	runes := []rune(text)
@@ -611,10 +611,19 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 		}
 		seg := string(runes[start:i])
 		segFont := primarySkFont
-		if rtype != runeASCII && emojiSkFont != nil {
-			// For ALL non-ASCII characters (emoji, symbols), use the emoji
-			// font as fallback since CJK fonts don't cover these ranges.
-			segFont = emojiSkFont
+		switch rtype {
+		case runeEmoji:
+			// Emoji: always use emoji font if available.
+			if emojiSkFont != nil {
+				segFont = emojiSkFont
+			}
+		case runeSymbol:
+			// Symbols: try primary font first, check if glyph exists.
+			if emojiSkFont != nil {
+				if w, _ := primarySkFont.MeasureText(seg, c.fillPaint); w <= 0 {
+					segFont = emojiSkFont
+				}
+			}
 		}
 		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
 		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
@@ -778,11 +787,11 @@ func classifyRune(r rune) runeClass {
 	case r >= 0x2460 && r <= 0x24FF: // Enclosed Alphanumerics
 		return runeEmoji
 	case r >= 0x2500 && r <= 0x257F: // Box Drawing
-		return runeEmoji
+		return runeSymbol
 	case r >= 0x2580 && r <= 0x259F: // Block Elements
-		return runeEmoji
+		return runeSymbol
 	case r >= 0x25A0 && r <= 0x25FF: // Geometric Shapes (▼ U+25BC, ▶ U+25B6)
-		return runeEmoji
+		return runeSymbol
 	case r >= 0x2600 && r <= 0x27BF: // Miscellaneous Symbols, Dingbats
 		return runeEmoji
 	case r >= 0x2930 && r <= 0x2BFF: // Supplemental Arrows, Various Symbols
@@ -1035,9 +1044,17 @@ func MeasureText(font Font, text string) float64 {
 		}
 		seg := string(runes[start:i])
 		f := skFont
-		if rtype != runeASCII && emojiSkFont != nil {
-			// Use emoji font for all non-ASCII (emoji + symbol).
-			f = emojiSkFont
+		switch rtype {
+		case runeEmoji:
+			if emojiSkFont != nil {
+				f = emojiSkFont
+			}
+		case runeSymbol:
+			if emojiSkFont != nil {
+				if w, _ := skFont.MeasureText(seg, paint); w <= 0 {
+					f = emojiSkFont
+				}
+			}
 		}
 		if w, _ := f.MeasureText(seg, paint); w > 0 {
 			total += float64(w)

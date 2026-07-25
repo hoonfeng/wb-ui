@@ -426,6 +426,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			avail := cw - it.marginMain
 			if ms > avail { ms = avail }
 			g.SetContentWidth(ms)
+			// box-sizing: border-box → convert total to content.
+			if isBorderBox(it.box) {
+				hp := g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+				g.SetContentWidth(math.Max(0, ms - hp))
+			}
 			if cs != nil {
 				r := resolveLengthAuto(cs.Height, ch, fontSizeOf(it.box))
 				if r.Definite && !r.Auto { g.SetContentHeight(r.Value) }
@@ -435,6 +440,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			avail := ch - it.marginMain
 			if ms > avail { ms = avail }
 			g.SetContentHeight(ms)
+			// box-sizing: border-box for column flex.
+			if isBorderBox(it.box) {
+				vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
+				g.SetContentHeight(math.Max(0, ms - vp))
+			}
 			if cs != nil {
 				r := resolveLengthAuto(cs.Width, cw, fontSizeOf(it.box))
 				if r.Definite && !r.Auto { g.SetContentWidth(r.Value) }
