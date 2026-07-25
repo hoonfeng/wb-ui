@@ -75,24 +75,30 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// Without this, ch=0 causes negative offsets (children float above parent).
 	if heightIsAutoForBox(box) {
 		if isRow {
-			// Row flex: estimate auto height from the tallest child.
+			// Row flex: estimate auto height from the tallest child,
+			// including each child's actual vertical padding and border.
 			estH := 0.0
 			for _, it := range items {
 				childH := fontLineGap(it.box)
+				cg := state.GeometryForBox(it.box)
+				childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
 				if childH > estH {
 					estH = childH
 				}
 			}
 			if estH > ch {
-				estH += float64(len(items)) // small fudge for padding
 				g.SetContentHeight(estH)
 				ch = estH
 			}
 		} else {
-			// Column flex: estimate auto height from the sum of child main-sizes.
+			// Column flex: estimate auto height from the sum of child main-sizes,
+			// including each child's actual start/end padding and border.
 			estH := 0.0
 			for _, it := range items {
-				estH += it.finalMainSize + it.marginMain
+				childH := it.finalMainSize + it.marginMain
+				cg := state.GeometryForBox(it.box)
+				childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
+				estH += childH
 			}
 			if estH > ch {
 				g.SetContentHeight(estH)
