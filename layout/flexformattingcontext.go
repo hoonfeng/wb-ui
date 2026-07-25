@@ -46,7 +46,12 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	g.SetContentWidth(g.ContentWidth() - padding.Left - padding.Right - border.Left - border.Right)
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
+	ch := g.ContentHeight()
 
+	fmt.Printf("[FLEX-TRACE] class=%q display=%d children=%d cw=%.0f ch=%.0f\n",
+		box.ElementClass(), box.Style().Display, len(box.Children()), cw, ch)
+
+	var items []*flexItem
 	var items []*flexItem
 	for _, child := range box.Children() {
 		if childEb, ok := child.(*ElementBox); ok && child.IsInFlow() && child.IsVisible() {
