@@ -423,8 +423,6 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 		if isRow {
 			ms := it.finalMainSize
-			avail := cw - it.marginMain
-			if ms > avail { ms = avail }
 			g.SetContentWidth(ms)
 			// box-sizing: border-box → convert total to content.
 			if isBorderBox(it.box) {
@@ -437,8 +435,6 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 		} else {
 			ms := it.finalMainSize
-			avail := ch - it.marginMain
-			if ms > avail { ms = avail }
 			g.SetContentHeight(ms)
 			// box-sizing: border-box for column flex.
 			if isBorderBox(it.box) {
