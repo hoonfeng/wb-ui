@@ -145,6 +145,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					cldG.SetContentWidth(cw)
 				}
 			}
+			// Expand lineHeight to match the inline child's actual height.
+			// The child (e.g. anonymous wrapper around text) may use a
+			// different font-size (inherited or from CSS), producing a
+			// taller line than fontLineGap(box) estimates.
+			if cldBH := cldG.BorderBoxHeight(); cldBH > lineHeight {
+				lineHeight = cldBH
+			}
 			cldW := cldG.BorderBoxWidth()
 			if currentLine.widthUsed+cldW > contentWidth && currentLine.widthUsed > 0 {
 				lines = append(lines, currentLine)
