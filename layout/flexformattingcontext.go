@@ -618,10 +618,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + cw - bw
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
+
+			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 
 			// Propagate auto cross-size (width) from children.
 			oldLeft := g.Left()
