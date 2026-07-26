@@ -97,6 +97,17 @@ type Host struct {
 	// move events), used for hit-testing on scroll events.
 	cursorX, cursorY float64
 
+	// scrollbarDrag tracks an active scrollbar thumb drag.
+	scrollbarDragging bool
+	// scrollbarDragBox is the scroll container being dragged.
+	scrollbarDragBox *rendering.RenderBox
+	// scrollbarDragAxis: true = vertical, false = horizontal.
+	scrollbarDragAxis bool
+	// scrollbarDragStartY is the cursor Y at drag start (CSS pixels).
+	scrollbarDragStart float64
+	// scrollbarDragOffsetY is the scroll offset at drag start.
+	scrollbarDragScroll float64
+
 	// caretBlinkTime tracks the last caret visibility toggle for blinking.
 	caretBlinkTime time.Time
 }
@@ -515,6 +526,59 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 
 		case window.EventCursorMove:
 			h.cursorX, h.cursorY = ev.X, ev.Y
+			// Update RenderView cursor for scrollbar hover highlight.
+			if rv != nil {
+				csX, csY := h.win.ContentScale()
+				if csX <= 0 { csX = 1 }
+				if csY <= 0 { csY = 1 }
+				cssX := ev.X / csX
+				cssY := ev.Y / csY
+				rv.SetCursorPos(cssX, cssY)
+			}
+			// Handle scrollbar thumb drag.
+			if h.scrollbarDragging && rv != nil && h.scrollbarDragBox != nil {
+				csX, csY := h.win.ContentScale()
+				if csX <= 0 { csX = 1 }
+				if csY <= 0 { csY = 1 }
+				cssX := ev.X / csX
+				cssY := ev.Y / csY
+				if h.scrollbarDragAxis {
+					// Vertical drag: cursor delta → scroll offset delta
+					dy := cssY - h.scrollbarDragStart
+					pb := h.scrollbarDragBox.PaddingBoxRect()
+					vh := pb.Height
+					_, ch := rv.BoxContentSize(h.scrollbarDragBox)
+					if ch > pb.Height {
+						trackH := vh - 14.0 // scrollW
+						thumbH := trackH * pb.Height / ch
+						if thumbH < 14.0*1.5 { thumbH = 14.0 * 1.5 }
+						scale := (ch - pb.Height) / (trackH - thumbH)
+						newSy := h.scrollbarDragScroll + dy*scale
+						if newSy < 0 { newSy = 0 }
+						maxY := ch - pb.Height
+						if newSy > maxY { newSy = maxY }
+						rv.SetBoxScrollOffset(h.scrollbarDragBox, 0, newSy)
+					}
+				} else {
+					// Horizontal drag: cursor delta → scroll offset delta
+					dx := cssX - h.scrollbarDragStart
+					pb := h.scrollbarDragBox.PaddingBoxRect()
+					hw := pb.Width
+					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
+					if cw > pb.Width {
+						trackW := hw - 14.0
+						thumbW := trackW * pb.Width / cw
+						if thumbW < 14.0*1.5 { thumbW = 14.0 * 1.5 }
+						scale := (cw - pb.Width) / (trackW - thumbW)
+						newSx := h.scrollbarDragScroll + dx*scale
+						if newSx < 0 { newSx = 0 }
+						maxX := cw - pb.Width
+						if newSx > maxX { newSx = maxX }
+						rv.SetBoxScrollOffset(h.scrollbarDragBox, newSx, 0)
+					}
+				}
+				rv.MarkAllDirty()
+			}
 		case window.EventMouseButton:
 			csX, csY := h.win.ContentScale()
 			if csX <= 0 {
@@ -527,6 +591,29 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
+				// Check for scrollbar thumb drag start.
+				scrollHit := rendering.HitTestScrollbar(rv, cssX, cssY)
+				if scrollHit != nil && !scrollHit.IsCorner {
+					if scrollHit.IsVThumb {
+						h.scrollbarDragging = true
+						h.scrollbarDragBox = scrollHit.Box
+						h.scrollbarDragAxis = true // vertical
+						_, sy := rv.BoxScrollOffset(scrollHit.Box)
+						h.scrollbarDragStart = cssY
+						h.scrollbarDragScroll = sy
+						break
+					}
+					if scrollHit.IsHThumb {
+						h.scrollbarDragging = true
+						h.scrollbarDragBox = scrollHit.Box
+						h.scrollbarDragAxis = false // horizontal
+						sx, _ := rv.BoxScrollOffset(scrollHit.Box)
+						h.scrollbarDragStart = cssX
+						h.scrollbarDragScroll = sx
+						break
+					}
+				}
+
 				now := time.Now()
 				dx := ev.X - h.lastClickX
 				dy := ev.Y - h.lastClickY
@@ -590,6 +677,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		} else if ev.Action == int(glfw.Release) {
+			// End scrollbar drag if active.
+			if h.scrollbarDragging {
+				h.scrollbarDragging = false
+				h.scrollbarDragBox = nil
+			}
 			if h.selecting {
 				csX, csY := h.win.ContentScale()
 				if csX <= 0 {
@@ -621,6 +713,54 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 		}
 	case window.EventKey:
+			// Keyboard scrolling for PageUp/PageDown/Arrow keys.
+			if ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat) {
+				if rv != nil {
+					csX, csY := h.win.ContentScale()
+					if csX <= 0 { csX = 1 }
+					if csY <= 0 { csY = 1 }
+					cssX := h.cursorX / csX
+					cssY := h.cursorY / csY
+					scrollBox := rv.HitTestScrollContainer(cssX, cssY)
+					if scrollBox != nil {
+						sx, sy := rv.BoxScrollOffset(scrollBox)
+						pb := scrollBox.PaddingBoxRect()
+						pageH := pb.Height
+						delta := 0.0
+						switch ev.Key {
+						case int(glfw.KeyPageUp):
+							delta = -pageH * 0.8
+						case int(glfw.KeyPageDown):
+							delta = pageH * 0.8
+						case int(glfw.KeyUp):
+							delta = -60.0
+						case int(glfw.KeyDown):
+							delta = 60.0
+						case int(glfw.KeyLeft):
+							delta = -40.0
+						case int(glfw.KeyRight):
+							delta = 40.0
+						}
+						if delta != 0 {
+							if ev.Key == int(glfw.KeyLeft) || ev.Key == int(glfw.KeyRight) {
+								newSx := sx + delta
+								cw, _ := rv.BoxContentSize(scrollBox)
+								if newSx < 0 { newSx = 0 }
+								if maxSx := cw - pb.Width; newSx > maxSx { newSx = maxSx }
+								rv.SetBoxScrollOffset(scrollBox, newSx, sy)
+							} else {
+								newSy := sy + delta
+								_, ch := rv.BoxContentSize(scrollBox)
+								if newSy < 0 { newSy = 0 }
+								if maxSy := ch - pb.Height; newSy > maxSy { newSy = maxSy }
+								rv.SetBoxScrollOffset(scrollBox, sx, newSy)
+							}
+							rv.MarkAllDirty()
+							break
+						}
+					}
+				}
+			}
 			if ev.Action == int(glfw.Press) && (ev.Mods&int(glfw.ModControl)) != 0 {
 				switch ev.Key {
 				case int(glfw.KeyV):

@@ -45,6 +45,10 @@ type RenderView struct {
 	// Populated during syncGeometry() so hit-test and scroll container lookup
 	// can go from DOM element → RenderBox without O(n) tree traversal.
 	nodeRenderMap map[dom.Node]RenderObject
+
+	// cursorX/cursorY track the last known cursor position in CSS pixels,
+	// used by paint code for scrollbar hover highlighting.
+	cursorX, cursorY float64
 }
 
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
@@ -212,9 +216,135 @@ func walkRenderChildren(root RenderObject, fn func(RenderObject)) {
 	}
 }
 
+// ScrollbarHit describes which scrollbar element was hit at a given point.
+type ScrollbarHit struct {
+	Box       *RenderBox
+	IsVThumb  bool // vertical thumb hit
+	IsVTrack  bool // vertical track (non-thumb area)
+	IsHThumb  bool // horizontal thumb hit
+	IsHTrack  bool // horizontal track (non-thumb area)
+	IsCorner  bool // corner overlap area
+}
+
+// HitTestScrollbar checks whether (x,y) hits a scrollbar thumb or track
+// of any scrollable box in the render tree. Returns nil if nothing hit.
+func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
+	if rv == nil {
+		return nil
+	}
+	// First find the deepest element at (x,y), then find its scroll container.
+	el := HitTest(rv, x, y, "")
+	if el == nil {
+		return nil
+	}
+	scrollBox := rv.FindScrollContainerForNode(el)
+	if scrollBox == nil {
+		return nil
+	}
+	// Check if (x,y) is within the scrollbar area of scrollBox.
+	st := scrollBox.Style()
+	if st == nil {
+		return nil
+	}
+	pb := scrollBox.PaddingBoxRect()
+	scrollW := 14.0
+	if pb.Width <= scrollW*3 || pb.Height <= scrollW*3 {
+		return nil
+	}
+
+	// Compute scrollbar track rectangles (same logic as paint code).
+	contentW := pb.Width
+	contentH := pb.Height
+
+	// Compute content bounding box from children.
+	var minX, minY, maxX, maxY float64
+	hasChild := false
+	for c := scrollBox.FirstChild(); c != nil; c = c.NextSibling() {
+		if cb := asRenderBox(c); cb != nil {
+			cg := cb.FrameRect()
+			if !hasChild {
+				minX, minY, maxX, maxY = cg.X, cg.Y, cg.X+cg.Width, cg.Y+cg.Height
+				hasChild = true
+			} else {
+				if cg.X < minX { minX = cg.X }
+				if cg.Y < minY { minY = cg.Y }
+				if cg.X+cg.Width > maxX { maxX = cg.X + cg.Width }
+				if cg.Y+cg.Height > maxY { maxY = cg.Y + cg.Height }
+			}
+		}
+	}
+	if !hasChild {
+		return nil
+	}
+	totalW := maxX - minX
+	totalH := maxY - minY
+	needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
+	needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
+
+	// Vertical track rect
+	vx := pb.X + pb.Width - scrollW
+	vy := pb.Y
+	vh := pb.Height
+	if needsH { vh -= scrollW }
+
+	// Horizontal track rect
+	hx := pb.X
+	hy := pb.Y + pb.Height - scrollW
+	hw := pb.Width
+	if needsV { hw -= scrollW }
+
+	// Is point on scrollbar corner?
+	if needsV && needsH {
+		cx := pb.X + pb.Width - scrollW
+		cy := pb.Y + pb.Height - scrollW
+		if x >= cx && x <= cx+scrollW && y >= cy && y <= cy+scrollW {
+			return &ScrollbarHit{Box: scrollBox, IsCorner: true}
+		}
+	}
+
+	// Get scroll offsets for thumb position calculations.
+	sx, sy := rv.BoxScrollOffset(scrollBox)
+
+	// Is point on vertical scrollbar?
+	if needsV && x >= vx && x <= vx+scrollW && y >= vy && y <= vy+vh {
+		h := &ScrollbarHit{Box: scrollBox, IsVTrack: true}
+		// Compute thumb rect (same as paint code)
+		if totalH > contentH && vh > scrollW*3 {
+			thumbH := vh * contentH / totalH
+			if thumbH < scrollW * 1.5 { thumbH = scrollW * 1.5 }
+			if thumbH > vh-scrollW { thumbH = vh - scrollW }
+			maxSy := totalH - contentH
+			if maxSy <= 0 { maxSy = 1 }
+			syRatio := sy / maxSy
+			thumbTrackSpace := vh - thumbH
+			thumbY := vy + syRatio*thumbTrackSpace
+			if y >= thumbY && y <= thumbY+thumbH {
+				h.IsVThumb = true
+			}
+		}
+		return h
+	}
+
+	// Is point on horizontal scrollbar?
+	if needsH && y >= hy && y <= hy+scrollW && x >= hx && x <= hx+hw {
+		h := &ScrollbarHit{Box: scrollBox, IsHTrack: true}
+		// TODO: horizontal thumb hit check
+		_, _ = sx, sy
+		return h
+	}
+
+	return nil
+}
+
 func (v *RenderView) SetViewportSize(w, h float64) {
 	if v.viewWidth != w || v.viewHeight != h { v.viewWidth, v.viewHeight = w, h; v.Dirty() }
 }
+
+// CursorPos returns the last tracked cursor position in CSS pixels.
+func (v *RenderView) CursorPos() (float64, float64) { return v.cursorX, v.cursorY }
+
+// SetCursorPos records the cursor position (CSS pixels) for scrollbar hover highlight.
+func (v *RenderView) SetCursorPos(x, y float64) { v.cursorX, v.cursorY = x, y }
 
 func (v *RenderView) RootLayer() *RenderLayer          { return v.rootLayer }
 func (v *RenderView) SetRootLayer(l *RenderLayer)       { v.rootLayer = l }

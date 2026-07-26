@@ -239,9 +239,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			}
 
 			// Paint scroll bars for overflow:scroll / overflow:auto (when
-			// content overflows).  Simplified: tracks are painted as dark
-			// rectangles at the right and bottom edges; thumbs are proportional
-			// to the visible fraction of content.
+			// content overflows). Tracks are painted as dark rectangles at
+			// the right and bottom edges; thumbs are proportional to the
+			// visible fraction of content and positioned according to the
+			// current scroll offset. Hovered thumbs render brighter.
 			if st != nil && (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto) {
 				pb := box.PaddingBoxRect()
@@ -269,16 +270,26 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						contentH := pb.Height
 						totalW := maxX - minX
 						totalH := maxY - minY
-						needsV := (st.OverflowX == style.OverflowScroll || totalH > contentH) && !(st.OverflowY == style.OverflowHidden)
-						needsH := (st.OverflowY == style.OverflowScroll || totalW > contentW) && !(st.OverflowX == style.OverflowHidden)
+						// Correct axis-check for needsV/needsH:
+						//   OverflowY → vertical scrollbar, OverflowX → horizontal.
+						needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
+						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 						if needsV || needsH {
 							// Browser-style scroll bar colors
-							// Track: very dark / transparent
 							trackCol := graphics.Color{R: 15, G: 18, B: 22, A: 60}
-							// Thumb: semi-transparent dark gray
 							thumbCol := graphics.Color{R: 70, G: 76, B: 84, A: 160}
-							// Scroll bar gutter in the corner
+							thumbHoverCol := graphics.Color{R: 110, G: 120, B: 130, A: 200}
 							cornerCol := graphics.Color{R: 15, G: 18, B: 22, A: 120}
+
+							// Current scroll offset for this box.
+							sx, sy := float64(0), float64(0)
+							if info.rv != nil {
+								sx, sy = info.rv.BoxScrollOffset(box)
+							}
+							cursorX, cursorY := float64(0), float64(0)
+							if info.rv != nil {
+								cursorX, cursorY = info.rv.CursorPos()
+							}
 
 							if needsV {
 								// Vertical scroll bar track at right edge
@@ -288,12 +299,23 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsH { vh -= scrollW }
 								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 								// Vertical thumb — round-rect like browser
-								if totalH > 0 && vh > scrollW*3 {
+								if totalH > contentH && vh > scrollW*3 {
 									thumbH := vh * contentH / totalH
 									if thumbH < scrollW * 1.5 { thumbH = scrollW * 1.5 }
 									if thumbH > vh-scrollW { thumbH = vh - scrollW }
-									pad := 2.0 // gap between thumb and track edges
-									info.canvas.FillRoundRect(vx+pad, vy+pad, scrollW-pad*2, thumbH-pad*2, 2.0, thumbCol)
+									pad := 2.0
+									// Thumb Y position proportional to scroll ratio
+									maxSy := totalH - contentH
+									if maxSy <= 0 { maxSy = 1 }
+									syRatio := sy / maxSy
+									thumbTrackSpace := vh - thumbH
+									thumbY := vy + syRatio*thumbTrackSpace
+									// Hover highlight
+									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
+										cursorY >= thumbY && cursorY <= thumbY+thumbH
+									col := thumbCol
+									if isHover { col = thumbHoverCol }
+									info.canvas.FillRoundRect(vx+pad, thumbY+pad, scrollW-pad*2, thumbH-pad*2, 2.0, col)
 								}
 							}
 							if needsH {
@@ -304,12 +326,23 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV { hw -= scrollW }
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 								// Horizontal thumb
-								if totalW > 0 && hw > scrollW*3 {
+								if totalW > contentW && hw > scrollW*3 {
 									thumbW := hw * contentW / totalW
 									if thumbW < scrollW * 1.5 { thumbW = scrollW * 1.5 }
 									if thumbW > hw-scrollW { thumbW = hw - scrollW }
 									pad := 2.0
-									info.canvas.FillRoundRect(hx+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 2.0, thumbCol)
+									// Thumb X position proportional to scroll ratio
+									maxSx := totalW - contentW
+									if maxSx <= 0 { maxSx = 1 }
+									sxRatio := sx / maxSx
+									thumbTrackSpace := hw - thumbW
+									thumbX := hx + sxRatio*thumbTrackSpace
+									// Hover highlight
+									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
+										cursorX >= thumbX && cursorX <= thumbX+thumbW
+									col := thumbCol
+									if isHover { col = thumbHoverCol }
+									info.canvas.FillRoundRect(thumbX+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 2.0, col)
 								}
 							}
 							// Corner area (overlap of V and H)
