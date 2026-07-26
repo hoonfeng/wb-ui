@@ -40,12 +40,18 @@ type RenderView struct {
 	// Keyed by the RenderBox pointer; only boxes that have been scrolled
 	// appear in this map.
 	boxScrollOffsets map[*RenderBox]graphics.Point
+
+	// nodeRenderMap maps DOM nodes to their corresponding RenderObject.
+	// Populated during syncGeometry() so hit-test and scroll container lookup
+	// can go from DOM element → RenderBox without O(n) tree traversal.
+	nodeRenderMap map[dom.Node]RenderObject
 }
 
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
 	rv := &RenderView{
 		document:         doc,
 		boxScrollOffsets: make(map[*RenderBox]graphics.Point),
+		nodeRenderMap:    make(map[dom.Node]RenderObject),
 	}
 	rv.initBase(rv, doc, st)
 	rv.compositor = NewRenderLayerCompositor(rv)
@@ -107,6 +113,103 @@ func (v *RenderView) BoxScrollOffset(box *RenderBox) (float64, float64) {
 		return 0, 0
 	}
 	return float64(p.X), float64(p.Y)
+}
+
+// FindRenderBoxForNode returns the RenderBox for a given DOM node, or nil
+func (v *RenderView) FindRenderBoxForNode(n dom.Node) *RenderBox {
+	if v.nodeRenderMap == nil || n == nil {
+		return nil
+	}
+	ro, ok := v.nodeRenderMap[n]
+	if !ok {
+		return nil
+	}
+	return asRenderBox(ro)
+}
+
+// FindScrollContainerForNode walks up from node (through DOM ancestors)
+// looking for the first element whose RenderBox has overflow:scroll or
+func (v *RenderView) FindScrollContainerForNode(n dom.Node) *RenderBox {
+	for cur := n; cur != nil; cur = cur.ParentNode() {
+		box := v.FindRenderBoxForNode(cur)
+		if box == nil {
+			continue
+		}
+		st := box.Style()
+		if st == nil {
+			continue
+		}
+		isScroll := (st.OverflowX == style.OverflowScroll || st.OverflowX == style.OverflowAuto) &&
+			(st.OverflowY == style.OverflowScroll || st.OverflowY == style.OverflowAuto)
+		if isScroll {
+			return box
+		}
+	}
+	return nil
+}
+
+// HitTestScrollContainer hit-tests the render tree at (x, y) and walks up
+// to find the nearest scrollable ancestor RenderBox. Returns nil if no
+// scroll container is found.
+func (v *RenderView) HitTestScrollContainer(x, y float64) *RenderBox {
+	el := HitTest(v, x, y, "")
+	if el == nil {
+		return nil
+	}
+	return v.FindScrollContainerForNode(el)
+}
+
+// BoxContentSize returns the content width and height of a scrollable box,
+// computed as the bounding box of all render children relative to the
+// padding box. Returns (0,0) if no children.
+func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
+	pb := box.PaddingBoxRect()
+	var maxRight, maxBottom float64
+	found := false
+	walkRenderChildren(box, func(child RenderObject) {
+		if cb := asRenderBox(child); cb != nil {
+			if r := cb.frame.X + cb.frame.Width; r > maxRight {
+				maxRight = r
+			}
+			if b := cb.frame.Y + cb.frame.Height; b > maxBottom {
+				maxBottom = b
+			}
+			found = true
+		}
+		if _, ok := child.(*RenderText); ok {
+			if rt, ok2 := child.(*RenderText); ok2 {
+				for _, seg := range rt.Segments() {
+					if r := seg.X + seg.Width; r > maxRight {
+						maxRight = r
+					}
+					if b := seg.Y + seg.Height; b > maxBottom {
+						maxBottom = b
+					}
+					found = true
+				}
+			}
+		}
+	})
+	if !found {
+		return pb.Width, pb.Height
+	}
+	cw := maxRight - pb.X
+	ch := maxBottom - pb.Y
+	if cw < pb.Width {
+		cw = pb.Width
+	}
+	if ch < pb.Height {
+		ch = pb.Height
+	}
+	return cw, ch
+}
+
+// walkRenderChildren recursively visits all descendants of root.
+func walkRenderChildren(root RenderObject, fn func(RenderObject)) {
+	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
+		fn(c)
+		walkRenderChildren(c, fn)
+	}
 }
 
 func (v *RenderView) SetViewportSize(w, h float64) {
@@ -171,6 +274,11 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 	if rect.Y < 0 { rect.Y = 0 }
 	if box := asRenderBox(ro); box != nil { box.frame = rect }
 	ro.SetLayoutBox(lb)
+
+	// Populate node render map for hit-test / scroll container lookup.
+	if rv := ro.View(); rv != nil && ro.Node() != nil {
+		rv.nodeRenderMap[ro.Node()] = ro
+	}
 
 	textLB := lb
 	var textSegments []layout.TextSegment

@@ -480,7 +480,38 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		case window.EventScroll:
 			// GLFW: ScrollY > 0 when scrolling up (away from user).
 			// Browser: scroll up → see content above → scrollY decreases.
-			h.wv.Page().MainFrame().View().ScrollBy(0, -int(ev.ScrollY*40))
+			// Try per-box scroll first: hit-test under cursor for overflow:scroll/auto.
+			csX, csY := h.win.ContentScale()
+			if csX <= 0 {
+				csX = 1
+			}
+			if csY <= 0 {
+				csY = 1
+			}
+			cssX := h.cursorX / csX
+			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
+			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
+				sx, sy := rv.BoxScrollOffset(scrollBox)
+				delta := -int(ev.ScrollY * 40)
+				newSy := int(sy) + delta
+				// Clamp to valid range.
+				if newSy < 0 {
+					newSy = 0
+				}
+				_, ch := rv.BoxContentSize(scrollBox)
+				pb := scrollBox.PaddingBoxRect()
+				maxY := int(ch - pb.Height)
+				if maxY < 0 {
+					maxY = 0
+				}
+				if newSy > maxY {
+					newSy = maxY
+				}
+				rv.SetBoxScrollOffset(scrollBox, sx, float64(newSy))
+				rv.MarkAllDirty()
+			} else {
+				h.wv.Page().MainFrame().View().ScrollBy(0, -int(ev.ScrollY*40))
+			}
 
 		case window.EventCursorMove:
 			h.cursorX, h.cursorY = ev.X, ev.Y
