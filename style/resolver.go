@@ -438,6 +438,8 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.TextTransform = valueString
 	case "white-space":
 		cs.WhiteSpace = LookupWhiteSpace(valueString)
+	case "text-overflow":
+		cs.TextOverflow = LookupTextOverflow(valueString)
 	case "direction":
 		cs.Direction = valueString
 	case "unicode-bidi":

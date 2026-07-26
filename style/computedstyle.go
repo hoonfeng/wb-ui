@@ -76,7 +76,13 @@ const (
 	WhiteSpaceBreakSpaces
 )
 
-// TextAlignType mirrors WebCore::TextAlignType.
+// TextOverflowType mirrors WebCore::TextOverflowType.
+type TextOverflowType int
+
+const (
+	TextOverflowClip TextOverflowType = iota
+	TextOverflowEllipsis
+)
 type TextAlignType int
 
 const (
@@ -643,5 +649,27 @@ func LookupOverflow(s string) OverflowType {
 		return OverflowAuto
 	default:
 		return OverflowVisible
+	}
+}
+
+// TextOverflowTypeName returns the CSS string for a TextOverflowType.
+func TextOverflowTypeName(t TextOverflowType) string {
+	switch t {
+	case TextOverflowClip:
+		return "clip"
+	case TextOverflowEllipsis:
+		return "ellipsis"
+	default:
+		return "clip"
+	}
+}
+
+// LookupTextOverflow returns the TextOverflowType for a CSS text-overflow string.
+func LookupTextOverflow(s string) TextOverflowType {
+	switch s {
+	case "ellipsis":
+		return TextOverflowEllipsis
+	default:
+		return TextOverflowClip
 	}
 }

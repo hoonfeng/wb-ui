@@ -120,7 +120,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				if !firstWord {
 					nextX += spaceWidth
 				}
-				if nextX+wordWidth > contentWidth && currentLine.widthUsed > 0 {
+				if nextX+wordWidth > contentWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 					// Line wrap: record line, start new line.
 					lines = append(lines, currentLine)
 					currentLine = lineInfo{
@@ -233,7 +233,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				lineHeight = cldBH
 			}
 			cldW := cldG.BorderBoxWidth()
-			if currentLine.widthUsed+cldW > contentWidth && currentLine.widthUsed > 0 {
+			if currentLine.widthUsed+cldW > contentWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 				lines = append(lines, currentLine)
 				currentLine = lineInfo{
 					y: currentLine.y + lineHeight,

@@ -27,6 +27,7 @@ type InheritedData struct {
 	TextDecoration  string
 	TextTransform   string
 	WhiteSpace      WhiteSpaceType
+	TextOverflow    TextOverflowType
 	Direction       string
 	UnicodeBidi     string
 
@@ -61,6 +62,7 @@ func DefaultInheritedData() *InheritedData {
 		LineHeight:          Length{Value: 1.2, Unit: ""},
 		TextAlign:           TextAlignStart,
 		WhiteSpace:          WhiteSpaceNormal,
+	TextOverflow:        TextOverflowClip,
 		Direction:           "ltr",
 		Visibility:          "visible",
 		Cursor:              "auto",

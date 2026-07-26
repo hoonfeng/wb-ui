@@ -172,6 +172,33 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	}
 
 	if needsClipRestore {
+		// After painting children (with clip active), paint text-overflow:
+		// ellipsis at the right edge of boxes that have it set.
+		if box := asRenderBox(root); box != nil && info.Phase() == PhaseForeground {
+			if st := box.Style(); st != nil && st.TextOverflow == style.TextOverflowEllipsis {
+				pb := box.PaddingBoxRect()
+				if pb.Width > 20 && pb.Height > 10 {
+					ellipsis := "..."
+					font := toGraphicsFont(st)
+					ellipsisW := graphics.MeasureText(font, ellipsis)
+					if ellipsisW <= 0 {
+						ellipsisW = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
+					}
+					ellipsisX := pb.X + pb.Width - ellipsisW
+					if ellipsisX < pb.X {
+						ellipsisX = pb.X
+					}
+					// Use white color for ellipsis if st.Color is transparent
+					ellipsisCol := toGraphicsColor(st.Color)
+					if ellipsisCol.A == 0 {
+						ellipsisCol = graphics.Color{R: 230, G: 237, B: 243, A: 255}
+					}
+					ascent := info.canvas.FontAscent(font)
+					baseline := pb.Y + ascent
+					info.canvas.DrawText(ellipsisX, baseline, ellipsis, font, ellipsisCol)
+				}
+			}
+		}
 		info.canvas.Restore()
 	}
 }
