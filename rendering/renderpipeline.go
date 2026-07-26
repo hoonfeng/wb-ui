@@ -146,10 +146,18 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	}
 	visit(root, info)
 
-	// Apply overflow:hidden clipping before traversing children.
+	// Apply overflow clipping before traversing children.
+	// Matches browser behavior: overflow:hidden, overflow:auto, overflow:scroll
+	// all create a clipping container at the padding-box boundary.
 	var needsClipRestore bool
 	if box := asRenderBox(root); box != nil {
-		if st := box.Style(); st != nil && st.OverflowX == style.OverflowHidden && st.OverflowY == style.OverflowHidden {
+		if st := box.Style(); st != nil &&
+			(st.OverflowX == style.OverflowHidden ||
+				st.OverflowX == style.OverflowAuto ||
+				st.OverflowX == style.OverflowScroll) &&
+			(st.OverflowY == style.OverflowHidden ||
+				st.OverflowY == style.OverflowAuto ||
+				st.OverflowY == style.OverflowScroll) {
 			if info != nil && info.canvas != nil {
 				info.canvas.Save()
 				pb := box.PaddingBoxRect()
