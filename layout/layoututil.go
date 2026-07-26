@@ -343,6 +343,27 @@ func fontLineGap(box *ElementBox) float64 {
 	return a + d + lg
 }
 
+// cssLineHeight returns the resolved CSS line-height value for the box.
+// It handles px values, unitless numbers (multiplied by font-size), and
+// percentages. Returns 0 if line-height is not explicitly set.
+func cssLineHeight(box *ElementBox) float64 {
+	cs := box.Style()
+	if cs == nil { return 0 }
+	fs := fontSizeOf(box)
+	if fs <= 0 { fs = defaultFontSize }
+	lh := cs.LineHeight
+	switch lh.Unit {
+	case "px":
+		if lh.Value > 0 { return lh.Value }
+	case "%":
+		if lh.Value > 0 { return lh.Value / 100 * fs }
+	case "":
+		// Unitless number (e.g. 1.2) — multiply by font-size.
+		if lh.Value > 0 { return lh.Value * fs }
+	}
+	return 0
+}
+
 func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }

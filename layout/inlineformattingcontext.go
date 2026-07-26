@@ -30,6 +30,21 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	fs := fontSizeOf(box)
 	lineHeight := fontLineGap(box)
 	if lineHeight <= 0 { lineHeight = fs * 1.2 }
+	// Use CSS line-height if explicitly set (overrides font metrics).
+	cssLH := cssLineHeight(box)
+	if cssLH > 0 {
+		lineHeight = cssLH
+	}
+	// Text segment height should be the actual font metrics height, not CSS
+	// line-height. The line-height determines line spacing and centering.
+	textHeight := fontLineGap(box)
+	if textHeight <= 0 { textHeight = fs * 1.2 }
+	// Compute the vertical centering offset: when line-height > font metrics,
+	// shift text down so it appears vertically centered within the line.
+	centeringOffset := 0.0
+	if cssLH > 0 && textHeight < cssLH {
+		centeringOffset = (cssLH - textHeight) / 2
+	}
 
 	// When contentWidth is auto (derived from intrinsic text width), widen it
 	// slightly to prevent floating-point discrepancies from triggering unwanted
@@ -122,8 +137,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					textBox: cld,
 					seg: TextSegment{
 						Start: wordStart, Len: wordEnd - wordStart,
-						X: contentX + nextX, Y: currentLine.y,
-						Width: wordWidth, Height: lineHeight,
+						X: contentX + nextX, Y: currentLine.y + centeringOffset,
+						Width: wordWidth, Height: textHeight,
 						LineY: currentLine.y, LineHeight: lineHeight,
 					},
 					lineIdx: len(lines), // current (in-progress) line
@@ -134,7 +149,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
-			cldG.SetTopLeft(currentLine.y, contentX+currentLine.widthUsed)
+			cldG.SetTopLeft(currentLine.y+centeringOffset, contentX+currentLine.widthUsed)
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
@@ -226,7 +241,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					segStart: len(pending),
 					widthUsed: 0,
 				}
-				cldG.SetTopLeft(currentLine.y, contentX+currentLine.widthUsed)
+				cldG.SetTopLeft(currentLine.y+centeringOffset, contentX+currentLine.widthUsed)
 			}
 			// Apply relative offset to inline-level elements that are
 			// relatively positioned (e.g. position:relative with top/left).

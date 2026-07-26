@@ -145,21 +145,44 @@ func applyRelativeOffsetForBox(box *ElementBox, cbWidth, cbHeight float64, state
 	g := state.GeometryForBox(box)
 	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
 	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
-	x := g.Left()
+	dx := 0.0
 	if !leftAuto {
-		x += left
+		dx = left
 	} else if !rightAuto {
-		x -= right
+		dx = -right
 	}
 	top, topAuto := resolveOffset(asLength(cs.Properties["top"]), cbHeight)
 	bottom, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), cbHeight)
-	y := g.Top()
+	dy := 0.0
 	if !topAuto {
-		y += top
+		dy = top
 	} else if !bottomAuto {
-		y -= bottom
+		dy = -bottom
 	}
-	g.SetTopLeft(y, x)
+	if dx == 0 && dy == 0 { return }
+	g.SetTopLeft(g.Top()+dy, g.Left()+dx)
+
+	// Recursively offset all descendant geometries so children follow.
+	offsetDescendants(box, dx, dy, state)
+}
+
+// offsetDescendants recursively applies (dx, dy) to all descendant geometries.
+func offsetDescendants(box *ElementBox, dx, dy float64, state *LayoutState) {
+	for _, child := range box.Children() {
+		switch c := child.(type) {
+		case *ElementBox:
+			cg := state.GeometryForBox(c)
+			cg.SetTopLeft(cg.Top()+dy, cg.Left()+dx)
+			offsetDescendants(c, dx, dy, state)
+		case *InlineTextBox:
+			// Offset each text segment's position.
+			for i := range c.TextSegments {
+				c.TextSegments[i].X += dx
+				c.TextSegments[i].Y += dy
+				c.TextSegments[i].LineY += dy
+			}
+		}
+	}
 }
 
 func resolveOffset(l style.Length, cbSize float64) (float64, bool) {
