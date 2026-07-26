@@ -176,9 +176,13 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float64 {
 	base := it.flexBasis
 	if base <= 0 {
-		// CSS default: flex-basis:auto + width:auto → max-content size.
-		// For now compute a simple intrinsic width from the box's children.
-		base = intrinsicContentWidth(it.box, isRow)
+		if isRow {
+			// Row flex: main axis = width → use intrinsic content width.
+			base = intrinsicContentWidth(it.box, isRow)
+		} else {
+			// Column flex: main axis = height → use intrinsic content height.
+			base = intrinsicContentHeight(it.box)
+		}
 		if base <= 0 { base = 0 }
 	}
 	if isRow {
@@ -249,6 +253,54 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	return maxW
 }
 
+func intrinsicContentHeight(box *ElementBox) float64 {
+	cs := box.Style()
+	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&
+		(cs.FlexDirection == "column" || cs.FlexDirection == "column-reverse")
+
+	total := 0.0
+	maxH := 0.0
+	for _, child := range box.Children() {
+		if !child.IsInFlow() { continue }
+		switch c := child.(type) {
+		case *ElementBox:
+			h := fontLineGap(c)
+			if isColFlex { total += h }
+			if h > maxH { maxH = h }
+		case *InlineTextBox:
+			h := fontLineGap(box)
+			if isColFlex { total += h }
+			if h > maxH { maxH = h }
+		}
+	}
+	if isColFlex {
+		maxH = total
+		if cs.Gap.Value > 0 || cs.RowGap.Value > 0 {
+			gapV := cs.Gap.Value
+			if gapV <= 0 { gapV = cs.RowGap.Value }
+			unit := cs.Gap.Unit
+			if unit == "" { unit = cs.RowGap.Unit }
+			gap := gapV
+			if unit == "em" { gap *= fontSizeOf(box) }
+			if gap > 0 {
+				count := 0
+				for _, child := range box.Children() {
+					if child.IsInFlow() { count++ }
+				}
+				maxH += gap * float64(count-1)
+			}
+		}
+	}
+	if cs != nil {
+		fs := fontSizeOf(box)
+		_, p, b := computeBoxModel(box, 0, fs)
+		maxH += p.Top + p.Bottom + b.Top + b.Bottom
+	}
+	return maxH
+}
+
+
+
 func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, containerMainSize float64, isRow bool) {
 	totalFlexGrow := 0.0
 	totalBaseSize := 0.0
@@ -315,12 +367,13 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 		if cs.AlignSelf != "" && cs.AlignSelf != "auto" {
 			align = cs.AlignSelf
 		}
+
 		if isRow {
 			r := resolveLengthAuto(cs.Height, cbHeight, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
 				g.SetContentHeight(r.Value)
 			} else if align == "stretch" {
-				stretchH := cbHeight - it.marginCross
+				stretchH := cbHeight - it.marginCross - g.VerticalBorderAndPadding()
 				if stretchH < 0 { stretchH = 0 }
 				g.SetContentHeight(stretchH)
 			}
@@ -329,7 +382,7 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 			if !r.Auto && r.Definite {
 				g.SetContentWidth(r.Value)
 			} else if align == "stretch" {
-				stretchW := cbWidth - it.marginCross
+				stretchW := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
 				if stretchW < 0 { stretchW = 0 }
 				g.SetContentWidth(stretchW)
 			}
@@ -373,21 +426,39 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	}
 
 	if isRow {
-		if totalMain < cw && (justify == "center" || justify == "flex-end") {
+		if totalMain < cw && justify != "flex-start" {
 			freeGap := cw - totalMain
-			if justify == "center" {
+			switch justify {
+			case "center":
 				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
-			} else { // flex-end
+			case "flex-end":
 				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+			case "space-between", "space-around":
+				itemCount := len(items)
+				if itemCount > 1 {
+					divisor := float64(itemCount - 1)
+					if justify == "space-around" { divisor = float64(itemCount) }
+					extraGap := freeGap / divisor
+					gap += extraGap
+				}
 			}
 		}
 	} else {
-		if totalMain < ch && (justify == "center" || justify == "flex-end") {
+		if totalMain < ch && justify != "flex-start" {
 			freeGap := ch - totalMain
-			if justify == "center" {
+			switch justify {
+			case "center":
 				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
-			} else { // flex-end
+			case "flex-end":
 				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+			case "space-between", "space-around":
+				itemCount := len(items)
+				if itemCount > 1 {
+					divisor := float64(itemCount - 1)
+					if justify == "space-around" { divisor = float64(itemCount) }
+					extraGap := freeGap / divisor
+					gap += extraGap
+				}
 			}
 		}
 	}
