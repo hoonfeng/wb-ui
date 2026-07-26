@@ -552,7 +552,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "nsimsun", true // generic �?always available
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
-		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui":
+		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system":
 			return "microsoft yahei", false
 		case "roboto":
 			return "roboto", false

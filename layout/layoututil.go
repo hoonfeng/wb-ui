@@ -203,7 +203,7 @@ func fontFamilyOf(box *ElementBox) string {
 		}
 		return ""
 	}
-	return firstFontFamily(cs.FontFamily)
+	return cs.FontFamily
 }
 
 // firstFontFamily extracts the first font name from a CSS font-family list,
