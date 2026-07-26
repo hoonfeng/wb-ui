@@ -137,6 +137,14 @@ func paintSubtreeByPhase(root RenderObject, info *PaintInfo, excluded map[Render
 // skipped). When a box has overflow:hidden on both axes, the canvas is saved and
 // clipped to the box's padding box before traversing children, then restored
 // after all children are done.
+//
+// Save hierarchy (two-level nesting):
+//   Level 1 (outer): clip to padding box (overflow: hidden/auto/scroll)
+//   Level 2 (inner): translate for per-box scroll offset
+// Children are painted with both clip + translate active.
+// After restoring Level 2, overflow controls (scrollbars, text-overflow ellipsis)
+// are painted at Level 1 (clipped but NOT translated), matching browser behavior
+// where scrollbars stay fixed at the padding-box edges regardless of scroll offset.
 func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info *PaintInfo, visit func(RenderObject, *PaintInfo)) {
 	if root == nil {
 		return
@@ -146,10 +154,9 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	}
 	visit(root, info)
 
-	// Apply overflow clipping before traversing children.
-	// Matches browser behavior: overflow:hidden, overflow:auto, overflow:scroll
-	// all create a clipping container at the padding-box boundary.
-	var needsClipRestore bool
+	// Determine overflow/clip and scroll offset for this box.
+	var clipBox *RenderBox
+	var scrollSX, scrollSY float64
 	if box := asRenderBox(root); box != nil {
 		if st := box.Style(); st != nil &&
 			(st.OverflowX == style.OverflowHidden ||
@@ -158,48 +165,59 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			(st.OverflowY == style.OverflowHidden ||
 				st.OverflowY == style.OverflowAuto ||
 				st.OverflowY == style.OverflowScroll) {
-			if info != nil && info.canvas != nil {
-				info.canvas.Save()
-				pb := box.PaddingBoxRect()
-				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
-				needsClipRestore = true
-			}
+			clipBox = box
 		}
-	}
-
-	// Apply per-box scroll offset (overflow:scroll) before painting children.
-	var needsScrollRestore bool
-	if info.rv != nil {
-		if box := asRenderBox(root); box != nil {
+		if info.rv != nil {
 			sx, sy := info.rv.BoxScrollOffset(box)
 			if sx != 0 || sy != 0 {
-				// Save canvas and translate so children appear scrolled.
-				if needsClipRestore {
-					// Already inside a Save from clip above; just translate.
-					info.canvas.Translate(-sx, -sy)
-				} else {
-					info.canvas.Save()
-					info.canvas.Translate(-sx, -sy)
-					needsScrollRestore = true
-				}
+				scrollSX, scrollSY = sx, sy
 			}
 		}
 	}
 
+	// Level 1: apply overflow clip (outer save).
+	needsClipRestore := false
+	if clipBox != nil && info != nil && info.canvas != nil {
+		info.canvas.Save()
+		pb := clipBox.PaddingBoxRect()
+		info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
+		needsClipRestore = true
+	}
+
+	// Level 2: apply scroll translate (inner save — nested inside clip save).
+	needsScrollRestore := false
+	if (scrollSX != 0 || scrollSY != 0) && info != nil && info.canvas != nil {
+		if needsClipRestore {
+			info.canvas.Save() // nested inside clip Save
+			info.canvas.Translate(-scrollSX, -scrollSY)
+			needsScrollRestore = true
+		} else {
+			info.canvas.Save()
+			info.canvas.Translate(-scrollSX, -scrollSY)
+			needsScrollRestore = true
+		}
+	}
+
+	// Paint children (inside clip + translate).
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 		walkSubtreeExcluded(c, excluded, info, visit)
 	}
 
+	// Restore Level 2 (scroll translate) — now we're back in clip-only state.
 	if needsScrollRestore {
 		info.canvas.Restore()
 	}
 
-	if needsClipRestore {
-		// After painting children (with clip active), paint text-overflow:
-		// ellipsis at the right edge of boxes that have it set.
-		if box := asRenderBox(root); box != nil && info.Phase() == PhaseForeground {
+	// ── Overflow controls (painted in clip-only state, no translate) ──
+	if needsClipRestore && info.Phase() == PhaseForeground {
+		if box := asRenderBox(root); box != nil {
 			st := box.Style()
-			if st != nil && st.TextOverflow == style.TextOverflowEllipsis {
+			if st == nil {
+				goto restoreClip
+			}
+
+			// ── Text-overflow: ellipsis ──
+			if st.TextOverflow == style.TextOverflowEllipsis {
 				pb := box.PaddingBoxRect()
 				if pb.Width > 20 && pb.Height > 10 {
 					ellipsis := "..."
@@ -212,25 +230,19 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 					if ellipsisX < pb.X {
 						ellipsisX = pb.X
 					}
-					// Use white color for ellipsis if st.Color is transparent
 					ellipsisCol := toGraphicsColor(st.Color)
 					if ellipsisCol.A == 0 {
 						ellipsisCol = graphics.Color{R: 230, G: 237, B: 243, A: 255}
 					}
 					ascent := info.canvas.FontAscent(font)
-					// Find the actual text baseline from the first text segment
-					// inside this box, so the ellipsis aligns with the text.
 					baseline := pb.Y + ascent
-					_ = walkRenderTextForBaseline // suppress unused warning
-				outer:
 					for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 						segY := walkRenderTextForBaseline(c)
 						if segY != 0 {
 							baseline = segY + ascent
-							break outer
+							break
 						}
 					}
-					// Fallback: if no text segment found, use a centering estimate.
 					if baseline == pb.Y+ascent && pb.Height > ascent+2 {
 						baseline = pb.Y + (pb.Height/2) + (ascent/2)
 					}
@@ -238,114 +250,105 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				}
 			}
 
-			// Paint scroll bars for overflow:scroll / overflow:auto (when
-			// content overflows). Tracks are painted as dark rectangles at
-			// the right and bottom edges; thumbs are proportional to the
-			// visible fraction of content and positioned according to the
-			// current scroll offset. Hovered thumbs render brighter.
-			if st != nil && (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
-				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto) {
+			// ── Scroll bars ──
+			needsScroll := (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
+				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
+			if needsScroll {
 				pb := box.PaddingBoxRect()
-				scrollW := 14.0 // scroll bar width / height
+				const scrollW = 14.0 // scroll bar width / height
 				if pb.Width > scrollW*3 && pb.Height > scrollW*3 {
-					// Compute content bounding box from children.
-					var minX, minY, maxX, maxY float64
-					hasChild := false
-					for c := root.FirstChild(); c != nil; c = c.NextSibling() {
-						if cb := asRenderBox(c); cb != nil {
-							cg := cb.FrameRect()
-							if !hasChild {
-								minX, minY, maxX, maxY = cg.X, cg.Y, cg.X+cg.Width, cg.Y+cg.Height
-								hasChild = true
-							} else {
-								if cg.X < minX { minX = cg.X }
-								if cg.Y < minY { minY = cg.Y }
-								if cg.X+cg.Width > maxX { maxX = cg.X + cg.Width }
-								if cg.Y+cg.Height > maxY { maxY = cg.Y + cg.Height }
-							}
-						}
-					}
-					if hasChild {
+					if info.rv != nil {
+						cw, ch := info.rv.BoxContentSize(box)
+						totalW := cw
+						totalH := ch
 						contentW := pb.Width
 						contentH := pb.Height
-						totalW := maxX - minX
-						totalH := maxY - minY
-						// Correct axis-check for needsV/needsH:
-						//   OverflowY → vertical scrollbar, OverflowX → horizontal.
+
 						needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
-						if needsV || needsH {
-							// Browser-style scroll bar colors
-							trackCol := graphics.Color{R: 15, G: 18, B: 22, A: 60}
-							thumbCol := graphics.Color{R: 70, G: 76, B: 84, A: 160}
-							thumbHoverCol := graphics.Color{R: 110, G: 120, B: 130, A: 200}
-							cornerCol := graphics.Color{R: 15, G: 18, B: 22, A: 120}
 
-							// Current scroll offset for this box.
+						if needsV || needsH {
+							// Colors: GitHub-dark style
+							trackCol := graphics.Color{R: 22, G: 27, B: 34, A: 255}
+							thumbCol := graphics.Color{R: 48, G: 54, B: 61, A: 255}
+							thumbHoverCol := graphics.Color{R: 110, G: 118, B: 129, A: 255}
+							cornerCol := graphics.Color{R: 22, G: 27, B: 34, A: 255}
+
 							sx, sy := float64(0), float64(0)
-							if info.rv != nil {
-								sx, sy = info.rv.BoxScrollOffset(box)
-							}
 							cursorX, cursorY := float64(0), float64(0)
 							if info.rv != nil {
+								sx, sy = info.rv.BoxScrollOffset(box)
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 
 							if needsV {
-								// Vertical scroll bar track at right edge
 								vx := pb.X + pb.Width - scrollW
 								vy := pb.Y
 								vh := pb.Height
-								if needsH { vh -= scrollW }
+								if needsH {
+									vh -= scrollW
+								}
 								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
-								// Vertical thumb — round-rect like browser
-								if totalH > contentH && vh > scrollW*3 {
+								if totalH > contentH && vh > scrollW*2 {
 									thumbH := vh * contentH / totalH
-									if thumbH < scrollW * 1.5 { thumbH = scrollW * 1.5 }
-									if thumbH > vh-scrollW { thumbH = vh - scrollW }
-									pad := 2.0
-									// Thumb Y position proportional to scroll ratio
+									if thumbH < scrollW*1.2 {
+										thumbH = scrollW * 1.2
+									}
+									if thumbH > vh-scrollW {
+										thumbH = vh - scrollW
+									}
 									maxSy := totalH - contentH
-									if maxSy <= 0 { maxSy = 1 }
+									if maxSy <= 0 {
+										maxSy = 1
+									}
 									syRatio := sy / maxSy
 									thumbTrackSpace := vh - thumbH
 									thumbY := vy + syRatio*thumbTrackSpace
-									// Hover highlight
+									pad := 2.0
 									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
 										cursorY >= thumbY && cursorY <= thumbY+thumbH
 									col := thumbCol
-									if isHover { col = thumbHoverCol }
-									info.canvas.FillRoundRect(vx+pad, thumbY+pad, scrollW-pad*2, thumbH-pad*2, 2.0, col)
+									if isHover {
+										col = thumbHoverCol
+									}
+									info.canvas.FillRoundRect(vx+pad, thumbY+pad, scrollW-pad*2, thumbH-pad*2, 3, col)
 								}
 							}
+
 							if needsH {
-								// Horizontal scroll bar track at bottom edge
 								hx := pb.X
 								hy := pb.Y + pb.Height - scrollW
 								hw := pb.Width
-								if needsV { hw -= scrollW }
+								if needsV {
+									hw -= scrollW
+								}
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
-								// Horizontal thumb
-								if totalW > contentW && hw > scrollW*3 {
+								if totalW > contentW && hw > scrollW*2 {
 									thumbW := hw * contentW / totalW
-									if thumbW < scrollW * 1.5 { thumbW = scrollW * 1.5 }
-									if thumbW > hw-scrollW { thumbW = hw - scrollW }
-									pad := 2.0
-									// Thumb X position proportional to scroll ratio
+									if thumbW < scrollW*1.2 {
+										thumbW = scrollW * 1.2
+									}
+									if thumbW > hw-scrollW {
+										thumbW = hw - scrollW
+									}
 									maxSx := totalW - contentW
-									if maxSx <= 0 { maxSx = 1 }
+									if maxSx <= 0 {
+										maxSx = 1
+									}
 									sxRatio := sx / maxSx
 									thumbTrackSpace := hw - thumbW
 									thumbX := hx + sxRatio*thumbTrackSpace
-									// Hover highlight
+									pad := 2.0
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+thumbW
 									col := thumbCol
-									if isHover { col = thumbHoverCol }
-									info.canvas.FillRoundRect(thumbX+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 2.0, col)
+									if isHover {
+										col = thumbHoverCol
+									}
+									info.canvas.FillRoundRect(thumbX+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 3, col)
 								}
 							}
-							// Corner area (overlap of V and H)
+
 							if needsV && needsH {
 								cx := pb.X + pb.Width - scrollW
 								cy := pb.Y + pb.Height - scrollW
@@ -356,6 +359,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				}
 			}
 		}
+	}
+
+restoreClip:
+	if needsClipRestore {
 		info.canvas.Restore()
 	}
 }

@@ -38,13 +38,15 @@ func boxCoords(o RenderObject) (x, y, w, h float64, ok bool) {
 func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
 	var best *dom.Element
 	var bestArea float64 = -1
-	hitTestWalk(RenderObject(rv), x, y, attrName, &best, &bestArea)
+	hitTestWalk(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
 	return best
 }
 
 // hitTestWalk recursively visits render objects, tracking the smallest (deepest)
-// matching element.
-func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64) {
+// matching element. When descending into children of a scroll container with a
+// per-box scroll offset (sx, sy), the hit-test point is adjusted by (sx, sy)
+// so that visually scrolled children can still be hit at their apparent position.
+func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView) {
 	if o == nil {
 		return
 	}
@@ -78,7 +80,23 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 			}
 		}
 	}
+
+	// Determine if this box has a per-box scroll offset.
+	// If it does, children are visually shifted by (-sx, -sy),
+	// so we must add (sx, sy) to the hit-test point for children
+	// to correctly map visual clicks to layout positions.
+	childX, childY := x, y
+	if rv != nil {
+		if box := asRenderBox(o); box != nil {
+			sx, sy := rv.BoxScrollOffset(box)
+			if sx != 0 || sy != 0 {
+				childX = x + sx
+				childY = y + sy
+			}
+		}
+	}
+
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-		hitTestWalk(c, x, y, attrName, best, bestArea)
+		hitTestWalk(c, childX, childY, attrName, best, bestArea, rv)
 	}
 }
