@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	"wb-ui/app"
+	"wb-ui/layout"
+	"wb-ui/platform/graphics"
 	"wb-ui/rendering"
 	"wb-ui/webkit"
 )
@@ -28,6 +30,23 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: read HTML: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Init font manager (required for Skia font metrics)
+	fontDir := locateFontDir()
+	graphics.InitFontManager(fontDir)
+	if mgr := graphics.GetFontManager(); mgr != nil {
+		mgr.LoadSystemFonts()
+	}
+
+	// Hook Skia text measurement to layout pipeline so the IFC uses real
+	// glyph widths rather than monospace estimation.
+	layout.MeasureTextFunc = func(family string, size float64, weight int, style2, text string) float64 {
+		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}, text)
+	}
+	layout.FontMetricsFunc = func(family string, size float64, weight int, style2 string) (float64, float64, float64) {
+		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}
+		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
 	wv := webkit.NewWebView()
@@ -66,7 +85,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Dump render tree
+	wv.EnsureLayout()
+
+	// Dump render tree after layout
 	if rv := wv.RenderView(); rv != nil {
 		fmt.Println("=== RENDER TREE ===")
 		dumpRO(rv, 0)
@@ -78,7 +99,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	wv.EnsureLayout()
 	fmt.Println("Window opened. Close the window to exit.")
 	host.Run()
 	fmt.Println("Done.")
@@ -110,4 +130,26 @@ func dumpRO(ro rendering.RenderObject, depth int) {
 	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
 		dumpRO(c, depth+1)
 	}
+}
+
+func locateFontDir() string {
+	candidates := []string{}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "resources", "fonts"),
+			filepath.Join(dir, "..", "..", "resources", "fonts"),
+		)
+	}
+	candidates = append(candidates,
+		filepath.Join("resources", "fonts"),
+		filepath.Join("..", "..", "resources", "fonts"),
+		`f:\syproject\wb-ui\resources\fonts`,
+	)
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			return c
+		}
+	}
+	return filepath.Join("resources", "fonts")
 }

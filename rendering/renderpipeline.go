@@ -167,8 +167,31 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		}
 	}
 
+	// Apply per-box scroll offset (overflow:scroll) before painting children.
+	var needsScrollRestore bool
+	if info.rv != nil {
+		if box := asRenderBox(root); box != nil {
+			sx, sy := info.rv.BoxScrollOffset(box)
+			if sx != 0 || sy != 0 {
+				// Save canvas and translate so children appear scrolled.
+				if needsClipRestore {
+					// Already inside a Save from clip above; just translate.
+					info.canvas.Translate(-sx, -sy)
+				} else {
+					info.canvas.Save()
+					info.canvas.Translate(-sx, -sy)
+					needsScrollRestore = true
+				}
+			}
+		}
+	}
+
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 		walkSubtreeExcluded(c, excluded, info, visit)
+	}
+
+	if needsScrollRestore {
+		info.canvas.Restore()
 	}
 
 	if needsClipRestore {
@@ -195,7 +218,18 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						ellipsisCol = graphics.Color{R: 230, G: 237, B: 243, A: 255}
 					}
 					ascent := info.canvas.FontAscent(font)
+					// Find the actual text baseline from the first text segment
+					// inside this box, so the ellipsis aligns with the text.
 					baseline := pb.Y + ascent
+					_ = walkRenderTextForBaseline // suppress unused warning
+				outer:
+					for c := root.FirstChild(); c != nil; c = c.NextSibling() {
+						segY := walkRenderTextForBaseline(c)
+						if segY != 0 {
+							baseline = segY + ascent
+							break outer
+						}
+					}
 					info.canvas.DrawText(ellipsisX, baseline, ellipsis, font, ellipsisCol)
 				}
 			}
@@ -234,10 +268,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsV := (st.OverflowX == style.OverflowScroll || totalH > contentH) && !(st.OverflowY == style.OverflowHidden)
 						needsH := (st.OverflowY == style.OverflowScroll || totalW > contentW) && !(st.OverflowX == style.OverflowHidden)
 						if needsV || needsH {
-							// Track color
-							trackCol := graphics.Color{R: 22, G: 27, B: 34, A: 200}   // #161b22 semi-transparent
-							thumbCol := graphics.Color{R: 48, G: 54, B: 61, A: 220}    // #30363d
-							thumbBorder := graphics.Color{R: 58, G: 64, B: 72, A: 220} // #3a4048
+							// Browser-style scroll bar colors
+							// Track: very dark / transparent
+							trackCol := graphics.Color{R: 15, G: 18, B: 22, A: 60}
+							// Thumb: semi-transparent dark gray
+							thumbCol := graphics.Color{R: 70, G: 76, B: 84, A: 160}
+							// Scroll bar gutter in the corner
+							cornerCol := graphics.Color{R: 15, G: 18, B: 22, A: 120}
 
 							if needsV {
 								// Vertical scroll bar track at right edge
@@ -246,14 +283,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								vh := pb.Height
 								if needsH { vh -= scrollW }
 								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
-								// Vertical thumb
-								if totalH > 0 && vh > scrollW*2 {
+								// Vertical thumb — round-rect like browser
+								if totalH > 0 && vh > scrollW*3 {
 									thumbH := vh * contentH / totalH
-									if thumbH < scrollW { thumbH = scrollW }
+									if thumbH < scrollW * 1.5 { thumbH = scrollW * 1.5 }
 									if thumbH > vh-scrollW { thumbH = vh - scrollW }
-									thumbY := vy
-									info.canvas.FillRect(vx+2, thumbY+2, scrollW-4, thumbH-4, thumbCol)
-									info.canvas.FillRect(vx+1, thumbY+1, scrollW-2, thumbH-2, thumbBorder)
+									pad := 2.0 // gap between thumb and track edges
+									info.canvas.FillRoundRect(vx+pad, vy+pad, scrollW-pad*2, thumbH-pad*2, 2.0, thumbCol)
 								}
 							}
 							if needsH {
@@ -264,14 +300,19 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV { hw -= scrollW }
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 								// Horizontal thumb
-								if totalW > 0 && hw > scrollW*2 {
+								if totalW > 0 && hw > scrollW*3 {
 									thumbW := hw * contentW / totalW
-									if thumbW < scrollW { thumbW = scrollW }
+									if thumbW < scrollW * 1.5 { thumbW = scrollW * 1.5 }
 									if thumbW > hw-scrollW { thumbW = hw - scrollW }
-									thumbX := hx
-									info.canvas.FillRect(thumbX+2, hy+2, thumbW-4, scrollW-4, thumbCol)
-									info.canvas.FillRect(thumbX+1, hy+1, thumbW-2, scrollW-2, thumbBorder)
+									pad := 2.0
+									info.canvas.FillRoundRect(hx+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 2.0, thumbCol)
 								}
+							}
+							// Corner area (overlap of V and H)
+							if needsV && needsH {
+								cx := pb.X + pb.Width - scrollW
+								cy := pb.Y + pb.Height - scrollW
+								info.canvas.FillRect(cx, cy, scrollW, scrollW, cornerCol)
 							}
 						}
 					}
@@ -378,4 +419,25 @@ func PaintRenderObject(o RenderObject, info *PaintInfo) {
 	case PhaseOutline:
 		paintObjectOutline(o, info)
 	}
+}
+
+// walkRenderTextForBaseline walks the render subtree to find the first text
+// segment and returns its Y position (0 if none found). Used to align the
+// text-overflow ellipsis with the actual text baseline.
+func walkRenderTextForBaseline(ro RenderObject) float64 {
+	if ro == nil {
+		return 0
+	}
+	if rt, ok := ro.(*RenderText); ok {
+		segs := rt.Segments()
+		if len(segs) > 0 {
+			return segs[0].Y
+		}
+	}
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		if y := walkRenderTextForBaseline(c); y != 0 {
+			return y
+		}
+	}
+	return 0
 }

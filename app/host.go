@@ -93,6 +93,10 @@ type Host struct {
 	lastClickX     float64
 	lastClickY     float64
 
+	// cursorX, cursorY track the last known cursor position (from mouse
+	// move events), used for hit-testing on scroll events.
+	cursorX, cursorY float64
+
 	// caretBlinkTime tracks the last caret visibility toggle for blinking.
 	caretBlinkTime time.Time
 }
@@ -477,6 +481,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// GLFW: ScrollY > 0 when scrolling up (away from user).
 			// Browser: scroll up → see content above → scrollY decreases.
 			h.wv.Page().MainFrame().View().ScrollBy(0, -int(ev.ScrollY*40))
+
+		case window.EventCursorMove:
+			h.cursorX, h.cursorY = ev.X, ev.Y
 		case window.EventMouseButton:
 			csX, csY := h.win.ContentScale()
 			if csX <= 0 {

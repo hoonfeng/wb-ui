@@ -36,10 +36,17 @@ type RenderView struct {
 	editorRegistry *widgets.EditorRegistry
 	dirtyRect   Rect
 	scrollOffsetX, scrollOffsetY float64
+	// scrollOffsets stores per-box scroll offsets for overflow:scroll/auto.
+	// Keyed by the RenderBox pointer; only boxes that have been scrolled
+	// appear in this map.
+	boxScrollOffsets map[*RenderBox]graphics.Point
 }
 
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
-	rv := &RenderView{document: doc}
+	rv := &RenderView{
+		document:         doc,
+		boxScrollOffsets: make(map[*RenderBox]graphics.Point),
+	}
 	rv.initBase(rv, doc, st)
 	rv.compositor = NewRenderLayerCompositor(rv)
 	rv.editorRegistry = widgets.NewEditorRegistry()
@@ -81,6 +88,26 @@ func (v *RenderView) SetScrollOffset(x, y float64) {
 }
 
 func (v *RenderView) ScrollOffset() (float64, float64) { return v.scrollOffsetX, v.scrollOffsetY }
+
+// SetBoxScrollOffset stores a scroll offset for an overflow:scroll box.
+func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
+	if v.boxScrollOffsets == nil {
+		v.boxScrollOffsets = make(map[*RenderBox]graphics.Point)
+	}
+	v.boxScrollOffsets[box] = graphics.Point{X: x, Y: y}
+}
+
+// BoxScrollOffset returns the stored scroll offset for an overflow:scroll box.
+func (v *RenderView) BoxScrollOffset(box *RenderBox) (float64, float64) {
+	if v.boxScrollOffsets == nil {
+		return 0, 0
+	}
+	p, ok := v.boxScrollOffsets[box]
+	if !ok {
+		return 0, 0
+	}
+	return float64(p.X), float64(p.Y)
+}
 
 func (v *RenderView) SetViewportSize(w, h float64) {
 	if v.viewWidth != w || v.viewHeight != h { v.viewWidth, v.viewHeight = w, h; v.Dirty() }
