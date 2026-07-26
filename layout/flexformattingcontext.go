@@ -392,6 +392,11 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				stretchW := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
 				if stretchW < 0 { stretchW = 0 }
 				g.SetContentWidth(stretchW)
+			} else {
+				// Non-stretch: set available width for child BFC
+				availW := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
+				if availW < 0 { availW = 0 }
+				g.SetContentWidth(availW)
 			}
 		}
 	}
