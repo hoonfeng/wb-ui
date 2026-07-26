@@ -49,18 +49,25 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// When contentWidth is auto (derived from intrinsic text width), widen it
 	// slightly to prevent floating-point discrepancies from triggering unwanted
 	// line wraps inside flex items.
+	//
+	// Only auto-width boxes get this widening: boxes with an explicit CSS width
+	// (or width:auto) should respect their declared width so that overflow
+	// clipping (overflow:hidden, text-overflow:ellipsis) works correctly.
 	{
-		allText := ""
-		for _, child := range box.Children() {
-			if tb, ok := child.(*InlineTextBox); ok {
-				allText += tb.Text()
+		hasExplicitWidth := cs != nil && cs.Width.Unit != "" && cs.Width.Unit != "auto"
+		if !hasExplicitWidth {
+			allText := ""
+			for _, child := range box.Children() {
+				if tb, ok := child.(*InlineTextBox); ok {
+					allText += tb.Text()
+				}
 			}
-		}
-		if totalW := measureText(box, allText); totalW > 0 {
-			if contentWidth < totalW+20 {
-				// This box has auto-width based on text content.
-				// Widen slightly to prevent float-epsilon line wraps.
-				contentWidth = totalW + 20
+			if totalW := measureText(box, allText); totalW > 0 {
+				if contentWidth < totalW+20 {
+					// This box has auto-width based on text content.
+					// Widen slightly to prevent float-epsilon line wraps.
+					contentWidth = totalW + 20
+				}
 			}
 		}
 	}
@@ -132,7 +139,6 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					firstWord = true
 					nextX = 0
 				}
-				if !firstWord { nextX += spaceWidth }
 				pending = append(pending, pendingSeg{
 					textBox: cld,
 					seg: TextSegment{

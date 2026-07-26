@@ -175,7 +175,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		// After painting children (with clip active), paint text-overflow:
 		// ellipsis at the right edge of boxes that have it set.
 		if box := asRenderBox(root); box != nil && info.Phase() == PhaseForeground {
-			if st := box.Style(); st != nil && st.TextOverflow == style.TextOverflowEllipsis {
+			st := box.Style()
+			if st != nil && st.TextOverflow == style.TextOverflowEllipsis {
 				pb := box.PaddingBoxRect()
 				if pb.Width > 20 && pb.Height > 10 {
 					ellipsis := "..."
@@ -196,6 +197,84 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 					ascent := info.canvas.FontAscent(font)
 					baseline := pb.Y + ascent
 					info.canvas.DrawText(ellipsisX, baseline, ellipsis, font, ellipsisCol)
+				}
+			}
+
+			// Paint scroll bars for overflow:scroll / overflow:auto (when
+			// content overflows).  Simplified: tracks are painted as dark
+			// rectangles at the right and bottom edges; thumbs are proportional
+			// to the visible fraction of content.
+			if st != nil && (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
+				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto) {
+				pb := box.PaddingBoxRect()
+				scrollW := 14.0 // scroll bar width / height
+				if pb.Width > scrollW*3 && pb.Height > scrollW*3 {
+					// Compute content bounding box from children.
+					var minX, minY, maxX, maxY float64
+					hasChild := false
+					for c := root.FirstChild(); c != nil; c = c.NextSibling() {
+						if cb := asRenderBox(c); cb != nil {
+							cg := cb.FrameRect()
+							if !hasChild {
+								minX, minY, maxX, maxY = cg.X, cg.Y, cg.X+cg.Width, cg.Y+cg.Height
+								hasChild = true
+							} else {
+								if cg.X < minX { minX = cg.X }
+								if cg.Y < minY { minY = cg.Y }
+								if cg.X+cg.Width > maxX { maxX = cg.X + cg.Width }
+								if cg.Y+cg.Height > maxY { maxY = cg.Y + cg.Height }
+							}
+						}
+					}
+					if hasChild {
+						contentW := pb.Width
+						contentH := pb.Height
+						totalW := maxX - minX
+						totalH := maxY - minY
+						needsV := (st.OverflowX == style.OverflowScroll || totalH > contentH) && !(st.OverflowY == style.OverflowHidden)
+						needsH := (st.OverflowY == style.OverflowScroll || totalW > contentW) && !(st.OverflowX == style.OverflowHidden)
+						if needsV || needsH {
+							// Track color
+							trackCol := graphics.Color{R: 22, G: 27, B: 34, A: 200}   // #161b22 semi-transparent
+							thumbCol := graphics.Color{R: 48, G: 54, B: 61, A: 220}    // #30363d
+							thumbBorder := graphics.Color{R: 58, G: 64, B: 72, A: 220} // #3a4048
+
+							if needsV {
+								// Vertical scroll bar track at right edge
+								vx := pb.X + pb.Width - scrollW
+								vy := pb.Y
+								vh := pb.Height
+								if needsH { vh -= scrollW }
+								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+								// Vertical thumb
+								if totalH > 0 && vh > scrollW*2 {
+									thumbH := vh * contentH / totalH
+									if thumbH < scrollW { thumbH = scrollW }
+									if thumbH > vh-scrollW { thumbH = vh - scrollW }
+									thumbY := vy
+									info.canvas.FillRect(vx+2, thumbY+2, scrollW-4, thumbH-4, thumbCol)
+									info.canvas.FillRect(vx+1, thumbY+1, scrollW-2, thumbH-2, thumbBorder)
+								}
+							}
+							if needsH {
+								// Horizontal scroll bar track at bottom edge
+								hx := pb.X
+								hy := pb.Y + pb.Height - scrollW
+								hw := pb.Width
+								if needsV { hw -= scrollW }
+								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
+								// Horizontal thumb
+								if totalW > 0 && hw > scrollW*2 {
+									thumbW := hw * contentW / totalW
+									if thumbW < scrollW { thumbW = scrollW }
+									if thumbW > hw-scrollW { thumbW = hw - scrollW }
+									thumbX := hx
+									info.canvas.FillRect(thumbX+2, hy+2, thumbW-4, scrollW-4, thumbCol)
+									info.canvas.FillRect(thumbX+1, hy+1, thumbW-2, scrollW-2, thumbBorder)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
