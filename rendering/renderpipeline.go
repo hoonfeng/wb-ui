@@ -230,6 +230,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							break outer
 						}
 					}
+					// Fallback: if no text segment found, use a centering estimate.
+					if baseline == pb.Y+ascent && pb.Height > ascent+2 {
+						baseline = pb.Y + (pb.Height/2) + (ascent/2)
+					}
 					info.canvas.DrawText(ellipsisX, baseline, ellipsis, font, ellipsisCol)
 				}
 			}
