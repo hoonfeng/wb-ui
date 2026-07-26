@@ -46,6 +46,7 @@ type Event struct {
 	Width   int // for EventResize
 	Height  int
 	ScrollY float64  // for EventScroll (vertical wheel offset)
+	ScrollX float64  // for EventScroll (horizontal wheel offset, e.g. shift+scroll or trackpad)
 	DropFiles []string // for EventDrop (files dropped on window)
 	// For EventTouch
 	TouchX, TouchY float64
@@ -243,6 +244,7 @@ func (w *Window) setupCallbacks() {
 		w.events = append(w.events, Event{
 			Type:    EventScroll,
 			ScrollY: yoff,
+			ScrollX: xoff,
 		})
 		w.eventsMu.Unlock()
 	})

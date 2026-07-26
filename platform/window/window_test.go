@@ -16,7 +16,7 @@ func TestEventTypeValues(t *testing.T) {
 		{EventCursorMove, 1},
 		{EventKey, 2},
 		{EventResize, 3},
-		{EventScroll, 4},
+\t{EventScroll, 4, ScrollX: 0},
 		{EventDrop, 5},
 		{EventTouch, 6},
 	}

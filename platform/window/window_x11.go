@@ -53,7 +53,7 @@ type Event struct {
 	Mods    int
 	Width   int // for EventResize
 	Height  int
-	ScrollY float64  // for EventScroll (vertical wheel offset)
+\tScrollY float64  // for EventScroll (vertical wheel offset)\n\tScrollX float64  // for EventScroll (horizontal wheel offset)
 	DropFiles []string // for EventDrop
 	// Touch
 	TouchX, TouchY float64

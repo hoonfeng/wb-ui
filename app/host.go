@@ -489,8 +489,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())
 		case window.EventScroll:
-			// GLFW: ScrollY > 0 when scrolling up (away from user).
+			// GLFW: ScrollY > 0 when scrolling up (away from user), ScrollX > 0 when scrolling right.
 			// Browser: scroll up → see content above → scrollY decreases.
+			//          scroll right → see content to the right → scrollX increases.
 			// Try per-box scroll first: hit-test under cursor for overflow:scroll/auto.
 			csX, csY := h.win.ContentScale()
 			if csX <= 0 {
@@ -503,14 +504,26 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
 				sx, sy := rv.BoxScrollOffset(scrollBox)
-				delta := -int(ev.ScrollY * 40)
-				newSy := int(sy) + delta
+				deltaX := int(ev.ScrollX * 40)  // positive = right → sx increases
+				deltaY := -int(ev.ScrollY * 40) // positive = up → sy decreases
+				newSx := int(sx) + deltaX
+				newSy := int(sy) + deltaY
 				// Clamp to valid range.
 				if newSy < 0 {
 					newSy = 0
 				}
-				_, ch := rv.BoxContentSize(scrollBox)
+				if newSx < 0 {
+					newSx = 0
+				}
+				cw, ch := rv.BoxContentSize(scrollBox)
 				pb := scrollBox.PaddingBoxRect()
+				maxX := int(cw - pb.Width)
+				if maxX < 0 {
+					maxX = 0
+				}
+				if newSx > maxX {
+					newSx = maxX
+				}
 				maxY := int(ch - pb.Height)
 				if maxY < 0 {
 					maxY = 0
@@ -518,10 +531,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if newSy > maxY {
 					newSy = maxY
 				}
-				rv.SetBoxScrollOffset(scrollBox, sx, float64(newSy))
+				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
 				rv.MarkAllDirty()
 			} else {
-				h.wv.Page().MainFrame().View().ScrollBy(0, -int(ev.ScrollY*40))
+				h.wv.Page().MainFrame().View().ScrollBy(-int(ev.ScrollX*40), -int(ev.ScrollY*40))
 			}
 
 		case window.EventCursorMove:
