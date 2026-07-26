@@ -104,7 +104,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
 				estH += childH
 			}
-			if estH > ch {
+			if box.Parent() != nil && initialContentHeight > 0 {
+				// Parent set height - don't inflate
+			} else if estH > ch {
 				g.SetContentHeight(estH)
 				ch = estH
 			}
