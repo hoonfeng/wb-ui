@@ -562,6 +562,18 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, state *LayoutSt
 		if ah < 0 {
 			ah = 0
 		}
+
+		// Compute padding/border from style for box-sizing: border-box.
+		_, padding, border := computeBoxModel(it.box, aw, fontSizeOf(it.box))
+		ig.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+		ig.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+
+		if isBorderBox(it.box) {
+			hp := padding.Left + padding.Right + border.Left + border.Right
+			vp := padding.Top + padding.Bottom + border.Top + border.Bottom
+			aw = math.Max(0, aw-hp)
+			ah = math.Max(0, ah-vp)
+		}
 		ig.SetContentWidth(aw)
 		ig.SetContentHeight(ah)
 
