@@ -49,6 +49,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
+	initialContentHeight := ch
 
 	var items []*flexItem
 	for _, child := range box.Children() {
@@ -127,10 +128,14 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		blockSize := maxChildBottom - contentTop
 		if blockSize < 0 { blockSize = 0 }
 		// If parent set a larger height (e.g. grid row), keep it.
-		if box.Parent() != nil && blockSize < g.ContentHeight() {
-			blockSize = g.ContentHeight()
+		// If parent set a SMALLER height, also keep it (don't overflow).
+		if box.Parent() != nil {
+			if blockSize > initialContentHeight {
+				g.SetContentHeight(blockSize)
+			}
+		} else {
+			g.SetContentHeight(blockSize)
 		}
-		g.SetContentHeight(blockSize)
 	}
 }
 
