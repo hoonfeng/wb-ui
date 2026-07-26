@@ -393,10 +393,14 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				if stretchW < 0 { stretchW = 0 }
 				g.SetContentWidth(stretchW)
 			} else {
-				// Non-stretch: set available width for child BFC
-				availW := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
-				if availW < 0 { availW = 0 }
-				g.SetContentWidth(availW)
+				// Non-stretch: use intrinsic content width (shrink-to-fit) so that
+				// cross-axis centering formula (cw-bw)/2 in applyPositions works correctly.
+				iw := intrinsicContentWidth(it.box, false)
+				if iw > cbWidth-it.marginCross-g.HorizontalBorderAndPadding() {
+					iw = cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
+				}
+				if iw < 0 { iw = 0 }
+				g.SetContentWidth(iw)
 			}
 		}
 	}
@@ -618,9 +622,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				crossAdjusted = crossPos + cw - bw
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-
+			
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
+
+
 
 			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 

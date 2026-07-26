@@ -57,6 +57,7 @@ input[type="month"], input[type="week"], input[type="datetime-local"] {
 	border: 1px solid #c0c0c0;
 	background-color: #ffffff;
 	box-sizing: border-box;
+	min-height: 1.2em;
 }
 
 textarea {

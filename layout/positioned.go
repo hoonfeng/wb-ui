@@ -64,6 +64,16 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	_ = minHAuto
 	_ = maxHAuto
 
+	// First pass: compute explicit height so we can position.
+	if hAuto {
+		height = layoutAbsoluteHeightForBox(box, state)
+	} else if !isBorderBoxForBox(box) {
+		height -= border.Vertical() + padding.Vertical()
+	}
+	height = clampSize(height, minH, maxH, minHAuto, maxHAuto)
+	g.SetContentHeight(height)
+
+	// Calculate x from left/right.
 	cbg := state.GeometryForBox(cb)
 	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
 	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
@@ -79,16 +89,8 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		x = cbg.ContentBoxLeft() + margin.Left
 	}
 	g.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
-	g.SetTopLeft(0, x) // Y set below
 
-	if hAuto {
-		height = layoutAbsoluteHeightForBox(box, state)
-	} else if !isBorderBoxForBox(box) {
-		height -= border.Vertical() + padding.Vertical()
-	}
-	height = clampSize(height, minH, maxH, false, false)
-	g.SetContentHeight(height)
-
+	// Calculate y from top/bottom, using the known border-box height.
 	top, topAuto := resolveOffset(asLength(cs.Properties["top"]), cbHeight)
 	bottom, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), cbHeight)
 	y := cbg.ContentBoxTop()
@@ -104,6 +106,7 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	}
 	g.SetTopLeft(y, x)
 
+	// Layout content now that position and size are fully known.
 	layoutBoxContentForBox(box, state)
 }
 

@@ -257,13 +257,16 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 				for _, sel := range v.Selectors.Selectors {
 					if r.checker.Match(sel, el) {
 						// Skip selectors that consist ONLY of pseudo-elements
-						// (e.g. ::selection, ::-webkit-scrollbar-thumb).
+						// (e.g. ::selection, ::-webkit-scrollbar-thumb),
+						// OR selectors that CONTAIN pseudo-elements
+						// (e.g. .clearfix::after).
 						// These should not apply declarations to the element itself
 						// — they only apply when the resolver resolves the element
 						// FOR the pseudo-element. Without this check, rules like
-						// ::selection { color: #fff; } would leak into the base
-						// element's computed style.
-						if isPseudoElementOnly(&sel) {
+						// ::selection { color: #fff; } or
+						// .clearfix::after { display: table; } would leak into
+						// the base element's computed style.
+						if isPseudoElementOnly(&sel) || hasPseudoElement(&sel) {
 							continue
 						}
 						spec := css.SpecificityOfComplex(sel)
@@ -1674,6 +1677,24 @@ func isPseudoElementOnly(sel *css.ComplexSelector) bool {
 		}
 	}
 	return true
+}
+
+// hasPseudoElement reports whether any compound in the complex selector contains
+// a pseudo-element simple selector (e.g. ::after, ::before, ::selection).
+// Selectors with pseudo-elements should not apply their declarations to the base
+// element — they only apply when the resolver resolves for the pseudo-element.
+func hasPseudoElement(sel *css.ComplexSelector) bool {
+	if sel == nil {
+		return false
+	}
+	for _, comp := range sel.Compounds {
+		for _, s := range comp.Selectors {
+			if s.Match == css.MatchPseudoElement {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parentElement(el *dom.Element) *dom.Element {

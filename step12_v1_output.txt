@@ -1,0 +1,611 @@
+PNG: dev/pixel_probe/test_html/step12_wbui.png
+=== LAYOUT TREE ===
+RenderView  (0,0) 800x600 bg=#000000
+  RenderBlockFlow <html.theme-dark> (0,0) 800x600 bg=#000000
+    RenderBlockFlow <body> (0,0) 800x600 bg=#0d1117
+      RenderBlockFlow <div#app> (0,0) 800x600 bg=#0d1117
+        RenderBlockFlow <div.titlebar> (0,0) 800x30 bg=#21262d
+          RenderBlockFlow <span.titlebar-title> (619,7) 173x16 bg=#000000
+            RenderBlockFlow  (619,7) 173x16 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.activity-bar> (0,30) 48x548 bg=#0d1117
+          RenderBlockFlow <div.activity-btn active> (4,38) 40x36 bg=#000000
+            RenderBlockFlow  (17,49) 13x15 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.activity-btn> (4,78) 40x36 bg=#000000
+            RenderBlockFlow  (17,89) 14x15 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.activity-btn> (4,118) 40x36 bg=#000000
+            RenderBlockFlow  (16,129) 16x15 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.activity-btn> (4,158) 40x36 bg=#000000
+            RenderBlockFlow  (17,169) 15x15 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.sidebar> (48,30) 280x548 bg=#161b22
+          RenderBlockFlow <div.sidebar-header> (48,30) 279x28 bg=#000000
+            RenderBlockFlow <span> (64,36) 43x15 bg=#000000
+              RenderBlockFlow  (64,36) 43x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span> (303,36) 8x15 bg=#000000
+              RenderBlockFlow  (303,36) 8x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.file-tree> (48,58) 279x520 bg=#000000
+            RenderBlockFlow <div.tree-item> (48,62) 279x24 bg=#000000
+              RenderBlockFlow <span.tree-arrow> (60,67) 16x13 bg=#000000
+                RenderBlockFlow  (60,67) 13x13 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span.tree-icon dir> (80,66) 16x16 bg=#000000
+                RenderBlockFlow  (80,66) 11x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (100,65) 18x17 bg=#000000
+                RenderBlockFlow  (100,65) 18x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.tree-item tree-depth-1 active> (48,86) 279x24 bg=#21262d
+              RenderBlockFlow <span.tree-arrow> (76,98) 16x0 bg=#000000
+              RenderBlockFlow <span.tree-icon go> (96,90) 16x16 bg=#000000
+                RenderBlockFlow  (96,90) 12x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (116,89) 51x17 bg=#000000
+                RenderBlockFlow  (116,89) 51x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.tree-item tree-depth-1> (48,110) 279x24 bg=#000000
+              RenderBlockFlow <span.tree-arrow> (76,122) 16x0 bg=#000000
+              RenderBlockFlow <span.tree-icon go> (96,114) 16x16 bg=#000000
+                RenderBlockFlow  (96,114) 12x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (116,113) 44x17 bg=#000000
+                RenderBlockFlow  (116,113) 44x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.tree-item> (48,134) 279x24 bg=#000000
+              RenderBlockFlow <span.tree-arrow> (60,139) 16x13 bg=#000000
+                RenderBlockFlow  (60,139) 12x13 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span.tree-icon dir> (80,138) 16x16 bg=#000000
+                RenderBlockFlow  (80,138) 11x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (100,137) 78x17 bg=#000000
+                RenderBlockFlow  (100,137) 78x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.tree-item> (48,158) 279x24 bg=#000000
+              RenderBlockFlow <span.tree-arrow> (60,170) 16x0 bg=#000000
+              RenderBlockFlow <span.tree-icon go> (80,162) 16x16 bg=#000000
+                RenderBlockFlow  (80,162) 10x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (100,161) 81x17 bg=#000000
+                RenderBlockFlow  (100,161) 81x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.tree-item> (48,182) 279x24 bg=#000000
+              RenderBlockFlow <span.tree-arrow> (60,194) 16x0 bg=#000000
+              RenderBlockFlow <span.tree-icon> (80,186) 16x16 bg=#000000
+                RenderBlockFlow  (80,186) 12x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <span> (100,185) 78x17 bg=#000000
+                RenderBlockFlow  (100,185) 78x17 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.main-area> (328,30) 472x368 bg=#0d1117
+          RenderBlockFlow <div.editor-tabs> (328,30) 472x35 bg=#161b22
+            RenderBlockFlow <div.editor-tab active> (328,30) 76x34 bg=#0d1117
+              RenderBlockFlow  (342,39) 47x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.editor-tab> (404,30) 69x34 bg=#000000
+              RenderBlockFlow  (418,39) 40x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.editor-content> (328,65) 472x333 bg=#000000
+            RenderBlockFlow <div.line-numbers> (328,65) 48x333 bg=#161b22
+              RenderBlockFlow <div.ln> (336,73) 31x20 bg=#000000
+                RenderBlockFlow  (336,73) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,92) 31x20 bg=#000000
+                RenderBlockFlow  (336,92) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,112) 31x20 bg=#000000
+                RenderBlockFlow  (336,112) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,132) 31x20 bg=#000000
+                RenderBlockFlow  (336,132) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,151) 31x20 bg=#000000
+                RenderBlockFlow  (336,151) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,170) 31x20 bg=#000000
+                RenderBlockFlow  (336,170) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,190) 31x20 bg=#000000
+                RenderBlockFlow  (336,190) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,210) 31x20 bg=#000000
+                RenderBlockFlow  (336,210) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.ln> (336,229) 31x20 bg=#000000
+                RenderBlockFlow  (336,229) 31x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.code-lines> (376,65) 424x333 bg=#000000
+              RenderBlockFlow <div.cl> (392,73) 392x20 bg=#000000
+                RenderBlockFlow  (392,73) 86x20 bg=#000000
+                  RenderInline <span.kw> (392,75) 50x15 bg=#000000
+                    RenderBlockFlow  (392,73) 50x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,92) 392x20 bg=#000000
+              RenderBlockFlow <div.cl> (392,112) 392x20 bg=#000000
+                RenderBlockFlow  (392,112) 57x20 bg=#000000
+                  RenderInline <span.kw> (392,114) 43x15 bg=#000000
+                    RenderBlockFlow  (392,112) 43x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,132) 392x20 bg=#000000
+                RenderBlockFlow  (392,132) 57x20 bg=#000000
+                  RenderInline <span.str> (413,132) 36x15 bg=#000000
+                    RenderBlockFlow  (413,132) 36x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,151) 392x20 bg=#000000
+                RenderBlockFlow  (392,151) 93x20 bg=#000000
+                  RenderInline <span.str> (413,151) 71x15 bg=#000000
+                    RenderBlockFlow  (413,151) 71x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,170) 392x20 bg=#000000
+                RenderBlockFlow  (392,170) 7x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,190) 392x20 bg=#000000
+              RenderBlockFlow <div.cl> (392,210) 392x20 bg=#000000
+                RenderBlockFlow  (392,210) 100x20 bg=#000000
+                  RenderInline <span.kw> (392,212) 29x15 bg=#000000
+                    RenderBlockFlow  (392,210) 29x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+                  RenderInline <span.fn> (435,212) 29x15 bg=#000000
+                    RenderBlockFlow  (435,210) 29x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow <div.cl> (392,229) 392x20 bg=#000000
+                RenderBlockFlow  (392,229) 179x20 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+                  RenderInline <span.str> (492,231) 71x15 bg=#000000
+                    RenderBlockFlow  (492,229) 71x15 bg=#000000
+                      RenderText  (0,0) 0x0 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.terminal-panel> (328,398) 472x182 bg=#0d1117
+          RenderBlockFlow <div.terminal-header> (328,399) 472x25 bg=#21262d
+            RenderBlockFlow <div.terminal-tabs> (340,400) 81x20 bg=#000000
+              RenderBlockFlow <div.terminal-tab active> (340,400) 81x20 bg=#0d1117
+                RenderBlockFlow  (350,402) 61x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-body> (328,424) 472x156 bg=#000000
+            RenderBlockFlow <div> (340,428) 448x15 bg=#000000
+              RenderBlockFlow  (340,428) 114x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+                RenderInline <span.info> (354,428) 100x15 bg=#000000
+                  RenderBlockFlow  (354,428) 100x15 bg=#000000
+                    RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div> (340,443) 448x15 bg=#000000
+              RenderBlockFlow  (340,443) 117x15 bg=#000000
+                RenderInline <span.green> (340,443) 10x15 bg=#000000
+                  RenderBlockFlow  (340,443) 10x15 bg=#000000
+                    RenderText  (0,0) 0x0 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div> (340,458) 448x15 bg=#000000
+              RenderBlockFlow  (340,458) 71x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div> (340,474) 448x15 bg=#000000
+              RenderBlockFlow  (340,474) 164x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.statusbar> (0,578) 800x22 bg=#21262d
+          RenderBlockFlow <div.sb-group> (8,582) 152x16 bg=#000000
+            RenderBlockFlow <div.sb-item> (8,582) 47x16 bg=#000000
+              RenderBlockFlow  (8,582) 47x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (67,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (80,582) 17x16 bg=#000000
+              RenderBlockFlow  (80,582) 17x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (108,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (121,582) 40x16 bg=#000000
+              RenderBlockFlow <span.green> (121,582) 8x16 bg=#000000
+                RenderBlockFlow  (121,582) 8x16 bg=#000000
+                  RenderText  (0,0) 0x0 bg=#000000
+              RenderBlockFlow  (133,582) 32x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.sb-right> (462,582) 330x16 bg=#000000
+            RenderBlockFlow <div.sb-item> (462,582) 60x16 bg=#000000
+              RenderBlockFlow  (462,582) 60x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (534,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (547,582) 53x16 bg=#000000
+              RenderBlockFlow  (547,582) 53x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (612,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (625,582) 34x16 bg=#000000
+              RenderBlockFlow  (625,582) 34x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (672,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (685,582) 44x16 bg=#000000
+              RenderBlockFlow  (685,582) 44x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.sb-divider> (741,582) 1x14 bg=#30363d
+            RenderBlockFlow <div.sb-item> (754,582) 42x16 bg=#000000
+              RenderBlockFlow  (754,582) 42x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+
+=== PAINT GRID (8x8, viewport=800x600) ===
+y=0 | (0,#21262d) (100,#21262d) (200,#21262d) (300,#21262d) (400,#21262d) (500,#21262d) (600,#21262d) (700,#21262d)
+y=75 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=150 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=225 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=300 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=375 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=450 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=525 | (0,#0d1117) (100,#161b22) (200,#161b22) (300,#161b22) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+
+=== PIXEL PROBES (9-point sweep) ===
+  TL (0,0) = #21262dff
+  TC (400,0) = #21262dff
+  TR (799,0) = #21262dff
+  ML (0,300) = #0d1117ff
+  MC (400,300) = #0d1117ff
+  MR (799,300) = #0d1117ff
+  BL (0,599) = #21262dff
+  BC (400,300) = #0d1117ff
+  BR (799,599) = #21262dff
+
+=== TITLEBAR SCAN (y=0..29, sample every 2px) ===
+y= 0 |******************************
+y= 2 |******************************
+y= 4 |******************************
+y= 6 |******************************
+y= 8 |******************************
+y=10 |******************************
+y=12 |******************************
+y=14 |******************************
+y=16 |******************************
+y=18 |******************************
+y=20 |******************************
+y=22 |******************************
+y=24 |******************************
+y=26 |******************************
+y=28 |******************************
+
+=== TEXT SEGMENTS ===
+              RenderText "PairCode IDE — wb-ui WebKit" len=27 segs=5
+                seg[0]: start=0 len=8 x=618.8 y=6.6 w=51.9 h=15.8
+                seg[1]: start=9 len=3 x=674.2 y=6.6 w=19.3 h=15.8
+                seg[2]: start=13 len=1 x=697.1 y=6.6 w=13.0 h=15.8
+                seg[3]: start=15 len=5 x=713.6 y=6.6 w=32.9 h=15.8
+                seg[4]: start=21 len=6 x=750.0 y=6.6 w=42.0 h=15.8
+              RenderText "[F]" len=3 segs=1
+                seg[0]: start=0 len=3 x=17.4 y=48.7 w=13.2 h=14.5
+              RenderText "[S]" len=3 segs=1
+                seg[0]: start=0 len=3 x=17.2 y=88.7 w=13.7 h=14.5
+              RenderText "[G]" len=3 segs=1
+                seg[0]: start=0 len=3 x=16.2 y=128.7 w=15.5 h=14.5
+              RenderText "[R]" len=3 segs=1
+                seg[0]: start=0 len=3 x=16.7 y=168.7 w=14.5 h=14.5
+                RenderText "EXPLORER" len=8 segs=1
+                  seg[0]: start=0 len=8 x=64.0 y=36.0 w=43.2 h=14.5
+                RenderText "..." len=3 segs=1
+                  seg[0]: start=0 len=3 x=303.1 y=36.0 w=7.9 h=14.5
+                  RenderText "▼" len=1 segs=1
+                    seg[0]: start=0 len=1 x=63.1 y=66.9 w=9.9 h=13.2
+                  RenderText "F" len=1 segs=1
+                    seg[0]: start=0 len=1 x=84.8 y=65.6 w=6.4 h=15.8
+                  RenderText "src" len=3 segs=1
+                    seg[0]: start=0 len=3 x=100.0 y=64.9 w=17.5 h=17.2
+                  RenderText "G" len=1 segs=1
+                    seg[0]: start=0 len=1 x=99.5 y=89.6 w=8.9 h=15.8
+                  RenderText "main.go" len=7 segs=1
+                    seg[0]: start=0 len=7 x=116.0 y=88.9 w=50.5 h=17.2
+                  RenderText "G" len=1 segs=1
+                    seg[0]: start=0 len=1 x=99.5 y=113.6 w=8.9 h=15.8
+                  RenderText "app.go" len=6 segs=1
+                    seg[0]: start=0 len=6 x=116.0 y=112.9 w=43.5 h=17.2
+                  RenderText "▶" len=1 segs=1
+                    seg[0]: start=0 len=1 x=63.7 y=138.9 w=8.6 h=13.2
+                  RenderText "F" len=1 segs=1
+                    seg[0]: start=0 len=1 x=84.8 y=137.6 w=6.4 h=15.8
+                  RenderText "components" len=10 segs=1
+                    seg[0]: start=0 len=10 x=100.0 y=136.9 w=77.8 h=17.2
+                  RenderText "J" len=1 segs=1
+                    seg[0]: start=0 len=1 x=85.6 y=161.6 w=4.8 h=15.8
+                  RenderText "package.json" len=12 segs=1
+                    seg[0]: start=0 len=12 x=100.0 y=160.9 w=80.9 h=17.2
+                  RenderText "#" len=1 segs=1
+                    seg[0]: start=0 len=1 x=84.2 y=185.6 w=7.7 h=15.8
+                  RenderText "README.md" len=9 segs=1
+                    seg[0]: start=0 len=9 x=100.0 y=184.9 w=78.2 h=17.2
+                RenderText "main.go" len=7 segs=1
+                  seg[0]: start=0 len=7 x=342.0 y=39.1 w=46.7 h=15.8
+                RenderText "app.go" len=6 segs=1
+                  seg[0]: start=0 len=6 x=417.7 y=39.1 w=40.2 h=15.8
+                  RenderText "1" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=73.0 w=6.6 h=14.1
+                  RenderText "2" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=92.5 w=6.6 h=14.1
+                  RenderText "3" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=112.0 w=6.6 h=14.1
+                  RenderText "4" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=131.5 w=6.6 h=14.1
+                  RenderText "5" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=151.0 w=6.6 h=14.1
+                  RenderText "6" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=170.5 w=6.6 h=14.1
+                  RenderText "7" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=190.0 w=6.6 h=14.1
+                  RenderText "8" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=209.5 w=6.6 h=14.1
+                  RenderText "9" len=1 segs=1
+                    seg[0]: start=0 len=1 x=360.4 y=229.0 w=6.6 h=14.1
+                      RenderText "package" len=7 segs=1
+                        seg[0]: start=0 len=7 x=392.0 y=73.0 w=50.0 h=15.2
+                  RenderText " main" len=5 segs=1
+                    seg[0]: start=1 len=4 x=449.2 y=73.0 w=28.6 h=15.2
+                      RenderText "import" len=6 segs=1
+                        seg[0]: start=0 len=6 x=392.0 y=112.0 w=42.9 h=15.2
+                  RenderText " (" len=2 segs=1
+                    seg[0]: start=1 len=1 x=442.0 y=112.0 w=7.1 h=15.2
+                      RenderText "\"fmt\"" len=5 segs=1
+                        seg[0]: start=0 len=5 x=413.4 y=131.5 w=35.7 h=15.2
+                      RenderText "\"net/http\"" len=10 segs=1
+                        seg[0]: start=0 len=10 x=413.4 y=151.0 w=71.5 h=15.2
+                  RenderText ")" len=1 segs=1
+                    seg[0]: start=0 len=1 x=392.0 y=170.5 w=7.1 h=15.2
+                      RenderText "func" len=4 segs=1
+                        seg[0]: start=0 len=4 x=392.0 y=209.5 w=28.6 h=15.2
+                  RenderText " " len=1 segs=1
+                    seg[0]: start=0 len=4 x=392.0 y=209.5 w=28.6 h=15.2
+                      RenderText "main" len=4 segs=1
+                        seg[0]: start=0 len=4 x=434.9 y=209.5 w=28.6 h=15.2
+                  RenderText "() {" len=4 segs=2
+                    seg[0]: start=0 len=2 x=463.5 y=209.5 w=14.3 h=15.2
+                    seg[1]: start=3 len=1 x=484.9 y=209.5 w=7.1 h=15.2
+                  RenderText "  fmt.Println(" len=14 segs=1
+                    seg[0]: start=2 len=12 x=406.3 y=229.0 w=85.8 h=15.2
+                      RenderText "\"wb-ui OK\"" len=10 segs=2
+                        seg[0]: start=0 len=6 x=492.1 y=229.0 w=42.9 h=15.2
+                        seg[1]: start=7 len=3 x=542.1 y=229.0 w=21.4 h=15.2
+                  RenderText ")" len=1 segs=1
+                    seg[0]: start=0 len=1 x=563.5 y=229.0 w=7.1 h=15.2
+                  RenderText "TERMINAL" len=8 segs=1
+                    seg[0]: start=0 len=8 x=350.0 y=402.0 w=60.9 h=15.8
+                RenderText "$ " len=2 segs=1
+                  seg[0]: start=0 len=1 x=340.0 y=427.8 w=7.1 h=15.2
+                    RenderText "go build ./..." len=14 segs=3
+                      seg[0]: start=0 len=2 x=354.3 y=427.8 w=14.3 h=15.2
+                      seg[1]: start=3 len=5 x=375.7 y=427.8 w=35.7 h=15.2
+                      seg[2]: start=9 len=5 x=418.6 y=427.8 w=35.7 h=15.2
+                    RenderText "✓" len=1 segs=1
+                      seg[0]: start=0 len=1 x=340.0 y=443.1 w=9.7 h=15.2
+                RenderText " build complete" len=15 segs=2
+                  seg[0]: start=1 len=5 x=356.9 y=443.1 w=35.7 h=15.2
+                  seg[1]: start=7 len=8 x=399.8 y=443.1 w=57.2 h=15.2
+                RenderText "$ go run ." len=10 segs=4
+                  seg[0]: start=0 len=1 x=340.0 y=458.3 w=7.1 h=15.2
+                  seg[1]: start=2 len=2 x=354.3 y=458.3 w=14.3 h=15.2
+                  seg[2]: start=5 len=3 x=375.7 y=458.3 w=21.4 h=15.2
+                  seg[3]: start=9 len=1 x=404.3 y=458.3 w=7.1 h=15.2
+                RenderText "Server started on :9090" len=23 segs=4
+                  seg[0]: start=0 len=6 x=340.0 y=473.5 w=42.9 h=15.2
+                  seg[1]: start=7 len=7 x=390.0 y=473.5 w=50.0 h=15.2
+                  seg[2]: start=15 len=2 x=447.2 y=473.5 w=14.3 h=15.2
+                  seg[3]: start=18 len=5 x=468.7 y=473.5 w=35.7 h=15.2
+                RenderText "main.go" len=7 segs=1
+                  seg[0]: start=0 len=7 x=8.0 y=581.6 w=46.7 h=15.8
+                RenderText "Go" len=2 segs=1
+                  seg[0]: start=0 len=2 x=79.7 y=581.6 w=16.6 h=15.8
+                  RenderText "●" len=1 segs=1
+                    seg[0]: start=0 len=1 x=121.2 y=581.6 w=7.8 h=15.8
+                RenderText " main" len=5 segs=1
+                  seg[0]: start=1 len=4 x=136.6 y=581.6 w=28.5 h=15.8
+                RenderText "Ln 1, Col 1" len=11 segs=4
+                  seg[0]: start=0 len=2 x=462.1 y=581.6 w=13.6 h=15.8
+                  seg[1]: start=3 len=2 x=479.2 y=581.6 w=9.9 h=15.8
+                  seg[2]: start=6 len=3 x=492.7 y=581.6 w=18.8 h=15.8
+                  seg[3]: start=10 len=1 x=515.1 y=581.6 w=7.0 h=15.8
+                RenderText "Spaces: 2" len=9 segs=2
+                  seg[0]: start=0 len=7 x=547.1 y=581.6 w=42.5 h=15.8
+                  seg[1]: start=8 len=1 x=593.2 y=581.6 w=7.0 h=15.8
+                RenderText "UTF-8" len=5 segs=1
+                  seg[0]: start=0 len=5 x=625.2 y=581.6 w=34.4 h=15.8
+                RenderText "Go 1.26" len=7 segs=2
+                  seg[0]: start=0 len=2 x=684.6 y=581.6 w=16.6 h=15.8
+                  seg[1]: start=3 len=4 x=704.7 y=581.6 w=24.0 h=15.8
+                RenderText "Prettier" len=8 segs=1
+                  seg[0]: start=0 len=8 x=753.7 y=581.6 w=42.3 h=15.8
+
+=== HORIZONTAL SCAN y=16 ===
+y=16 |(0#21262d)(1#21262d)(2#21262d)(3#21262d)(4#21262d)(5#21262d)(6#21262d)(7#21262d)(8#21262d)(9#21262d)(10#21262d)(11#21262d)(12#21262d)(13#21262d)(14#21262d)(15#21262d)(16#21262d)(17#21262d)(18#21262d)(19#21262d)(20#21262d)(21#21262d)(22#21262d)(23#21262d)(24#21262d)(25#21262d)(26#21262d)(27#21262d)(28#21262d)(29#21262d)(30#21262d)(31#21262d)(32#21262d)(33#21262d)(34#21262d)(35#21262d)(36#21262d)(37#21262d)(38#21262d)(39#21262d)(40#21262d)(41#21262d)(42#21262d)(43#21262d)(44#21262d)(45#21262d)(46#21262d)(47#21262d)
+
+=== ACTIVITY BAR FULL SCAN (y=30..90, x=0..47) ===
+y= 30 |................................................
+y= 31 |................................................
+y= 32 |................................................
+y= 33 |................................................
+y= 34 |................................................
+y= 35 |................................................
+y= 36 |................................................
+y= 37 |................................................
+y= 38 |................................................
+y= 39 |................................................
+y= 40 |................................................
+y= 41 |................................................
+y= 42 |................................................
+y= 43 |................................................
+y= 44 |................................................
+y= 45 |................................................
+y= 46 |................................................
+y= 47 |................................................
+y= 48 |................................................
+y= 49 |................................................
+y= 50 |................................................
+y= 51 |................................................
+y= 52 |..................*(19,58a6ff)(20,58a6ff).(22,58a6ff)(23,58a6ff)(24,58a6ff)(25,58a6ff)**(28,58a6ff)*..................
+y= 53 |..................**..(22,58a6ff)*....**..................
+y= 54 |..................**..(22,58a6ff)*....**..................
+y= 55 |..................**..(22,58a6ff)*....**..................
+y= 56 |..................**..(22,58a6ff)(23,58a6ff)(24,58a6ff)(25,58a6ff)*.**..................
+y= 57 |..................**..(22,58a6ff)*....**..................
+y= 58 |..................**..(22,58a6ff)*....**..................
+y= 59 |..................**..(22,58a6ff)*....**..................
+y= 60 |..................**........**..................
+y= 61 |..................*(19,58a6ff)(20,58a6ff)......*(28,58a6ff)*..................
+y= 62 |................................................
+y= 63 |................................................
+y= 64 |................................................
+y= 65 |................................................
+y= 66 |................................................
+y= 67 |................................................
+y= 68 |................................................
+y= 69 |................................................
+y= 70 |................................................
+y= 71 |................................................
+y= 72 |................................................
+y= 73 |................................................
+y= 74 |................................................
+y= 75 |................................................
+y= 76 |................................................
+y= 77 |................................................
+y= 78 |................................................
+y= 79 |................................................
+y= 80 |................................................
+y= 81 |................................................
+y= 82 |................................................
+y= 83 |................................................
+y= 84 |................................................
+y= 85 |................................................
+y= 86 |................................................
+y= 87 |................................................
+y= 88 |................................................
+y= 89 |................................................
+y= 90 |................................................
+
+=== EDITOR TAB X-BTN SCAN (x=365..380, y=40..52) ===
+y= 40 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 41 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 42 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 43 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 44 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 45 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 46 |(365,999fa5)(366,e6edf3)(367,e6edf3)(368,d9e0e6)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,d9e0e6)(376,e6edf3)(377,e6edf3)(378,adb3b9)(379,d9e0e6)(380,0d1117)
+y= 47 |(365,d9e0e6)(366,0d1117)(367,0d1117)(368,e6edf3)(369,999fa5)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,cbd2d8)(375,bdc3c9)(376,0d1117)(377,0d1117)(378,cbd2d8)(379,d9e0e6)(380,0d1117)
+y= 48 |(365,82878d)(366,0d1117)(367,0d1117)(368,bdc3c9)(369,adb3b9)(370,0d1117)(371,0d1117)(372,0d1117)(373,61676c)(374,e6edf3)(375,0d1117)(376,0d1117)(377,0d1117)(378,82878d)(379,d9e0e6)(380,0d1117)
+y= 49 |(365,82878d)(366,0d1117)(367,0d1117)(368,bdc3c9)(369,adb3b9)(370,0d1117)(371,0d1117)(372,0d1117)(373,61676c)(374,e6edf3)(375,0d1117)(376,0d1117)(377,0d1117)(378,82878d)(379,d9e0e6)(380,0d1117)
+y= 50 |(365,82878d)(366,0d1117)(367,0d1117)(368,bdc3c9)(369,adb3b9)(370,0d1117)(371,cbd2d8)(372,bdc3c9)(373,0d1117)(374,d9e0e6)(375,adb3b9)(376,0d1117)(377,0d1117)(378,cbd2d8)(379,d9e0e6)(380,0d1117)
+y= 51 |(365,82878d)(366,0d1117)(367,0d1117)(368,bdc3c9)(369,adb3b9)(370,0d1117)(371,cbd2d8)(372,bdc3c9)(373,0d1117)(374,61676c)(375,e6edf3)(376,e6edf3)(377,e6edf3)(378,adb3b9)(379,d9e0e6)(380,0d1117)
+y= 52 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,999fa5)(379,cbd2d8)(380,0d1117)
+
+=== SIDEBAR VERTICAL SCAN: x=100, y=770..800 ===
+  y=770 = #00000000
+  y=771 = #00000000
+  y=772 = #00000000
+  y=773 = #00000000
+  y=774 = #00000000
+  y=775 = #00000000
+  y=776 = #00000000
+  y=777 = #00000000
+  y=778 = #00000000
+  y=779 = #00000000
+  y=780 = #00000000
+  y=781 = #00000000
+  y=782 = #00000000
+  y=783 = #00000000
+  y=784 = #00000000
+  y=785 = #00000000
+  y=786 = #00000000
+  y=787 = #00000000
+  y=788 = #00000000
+  y=789 = #00000000
+  y=790 = #00000000
+  y=791 = #00000000
+  y=792 = #00000000
+  y=793 = #00000000
+  y=794 = #00000000
+  y=795 = #00000000
+  y=796 = #00000000
+  y=797 = #00000000
+  y=798 = #00000000
+  y=799 = #00000000
+  y=800 = #00000000
+
+=== ACTIVITY BAR SCAN: x=10, y=30..800 ===
+  y= 30 = #0d1117ff
+  y= 70 = #0d1117ff
+  y=110 = #0d1117ff
+  y=150 = #0d1117ff
+  y=190 = #0d1117ff
+  y=230 = #0d1117ff
+  y=270 = #0d1117ff
+  y=310 = #0d1117ff
+  y=350 = #0d1117ff
+  y=390 = #0d1117ff
+  y=430 = #0d1117ff
+  y=470 = #0d1117ff
+  y=510 = #0d1117ff
+  y=550 = #0d1117ff
+  y=590 = #41474fff
+  y=630 = #00000000
+  y=670 = #00000000
+  y=710 = #00000000
+  y=750 = #00000000
+  y=790 = #00000000
+
+=== FONT METRICS ===
+  RenderText="PairCode IDE — wb-ui WebKit" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="[F]" fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="[S]" fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="[G]" fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="[R]" fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="EXPLORER" fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="..." fontSize=11.0 layoutAscent=8.8 skiaAscent=11.6 layoutDescent=2.2 skiaDescent=2.9 layoutLineH=13.2 skiaLineH=14.5 diff=1.3
+  RenderText="▼" fontSize=10.0 layoutAscent=8.0 skiaAscent=10.6 layoutDescent=2.0 skiaDescent=2.6 layoutLineH=12.0 skiaLineH=13.2 diff=1.2
+  RenderText="F" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="src" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="G" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="main.go" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="G" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="app.go" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="▶" fontSize=10.0 layoutAscent=8.0 skiaAscent=10.6 layoutDescent=2.0 skiaDescent=2.6 layoutLineH=12.0 skiaLineH=13.2 diff=1.2
+  RenderText="F" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="components" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="J" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="package.json" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="#" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="README.md" fontSize=13.0 layoutAscent=10.4 skiaAscent=13.8 layoutDescent=2.6 skiaDescent=3.4 layoutLineH=15.6 skiaLineH=17.2 diff=1.6
+  RenderText="main.go" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="app.go" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="1" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="2" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="3" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="4" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="5" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="6" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="7" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="8" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="9" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="package" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=" main" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="import" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=" (" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\"fmt\"" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\"net/http\"" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=")" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="func" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=" " fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="main" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="() {" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="  fmt.Println(" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\"wb-ui OK\"" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=")" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="TERMINAL" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="$ " fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="go build ./..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="✓" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=" build complete" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ go run ." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="Server started on :9090" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="main.go" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="Go" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="●" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText=" main" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="Ln 1, Col 1" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="Spaces: 2" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="UTF-8" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="Go 1.26" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="Prettier" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4

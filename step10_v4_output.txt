@@ -1,0 +1,570 @@
+PNG: dev/pixel_probe/test_html/step10_wbui.png
+=== LAYOUT TREE ===
+RenderView  (0,0) 800x600 bg=#000000
+  RenderBlockFlow <html.theme-dark> (0,0) 800x600 bg=#000000
+    RenderBlockFlow <body> (0,0) 800x600 bg=#0d1117
+      RenderBlockFlow <div#app> (0,0) 800x600 bg=#0d1117
+        RenderBlockFlow <div.terminal-header> (0,0) 800x27 bg=#21262d
+          RenderBlockFlow <div.terminal-tabs> (12,2) 298x20 bg=#000000
+            RenderBlockFlow <div.terminal-tab active> (12,2) 84x20 bg=#0d1117
+              RenderBlockFlow  (22,4) 64x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.terminal-tab> (98,2) 69x20 bg=#000000
+              RenderBlockFlow  (108,4) 49x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.terminal-tab active> (169,2) 81x20 bg=#0d1117
+              RenderBlockFlow  (179,4) 61x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <div.terminal-tab> (252,2) 59x20 bg=#000000
+              RenderBlockFlow  (262,4) 39x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-actions> (750,4) 38x16 bg=#000000
+            RenderBlockFlow <span> (750,4) 9x16 bg=#000000
+              RenderBlockFlow  (750,4) 9x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span> (767,4) 5x16 bg=#000000
+              RenderBlockFlow  (767,4) 5x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span> (780,4) 8x16 bg=#000000
+              RenderBlockFlow  (780,4) 8x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.terminal-content> (0,27) 800x577 bg=#0d1117
+          RenderBlockFlow <div.terminal-line> (0,35) 800x17 bg=#000000
+            RenderBlockFlow <span.dim> (12,36) 350x15 bg=#000000
+              RenderBlockFlow  (12,36) 350x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,52) 800x17 bg=#000000
+            RenderBlockFlow <span.dim> (12,53) 172x15 bg=#000000
+              RenderBlockFlow  (12,53) 172x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,69) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,86) 800x17 bg=#000000
+            RenderBlockFlow <span.path> (12,86) 93x15 bg=#000000
+              RenderBlockFlow  (12,86) 93x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.dim> (105,86) 43x15 bg=#000000
+              RenderBlockFlow  (105,86) 43x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,103) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,103) 114x15 bg=#000000
+              RenderBlockFlow  (12,103) 114x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,119) 800x17 bg=#000000
+            RenderBlockFlow <span.info> (12,120) 350x15 bg=#000000
+              RenderBlockFlow  (12,120) 350x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,136) 800x17 bg=#000000
+            RenderBlockFlow <span.info> (12,137) 372x15 bg=#000000
+              RenderBlockFlow  (12,137) 372x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,153) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,154) 100x15 bg=#000000
+              RenderBlockFlow  (12,154) 100x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,170) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,171) 122x15 bg=#000000
+              RenderBlockFlow  (12,171) 122x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,187) 800x17 bg=#000000
+            RenderBlockFlow <span.green> (12,188) 10x15 bg=#000000
+              RenderBlockFlow  (12,188) 10x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (22,188) 200x15 bg=#000000
+              RenderBlockFlow  (22,188) 200x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,204) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,221) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,222) 157x15 bg=#000000
+              RenderBlockFlow  (12,222) 157x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,238) 800x17 bg=#000000
+            RenderBlockFlow <span.green> (12,239) 10x15 bg=#000000
+              RenderBlockFlow  (12,239) 10x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (22,239) 157x15 bg=#000000
+              RenderBlockFlow  (22,239) 157x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,255) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,256) 179x15 bg=#000000
+              RenderBlockFlow  (12,256) 179x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,272) 800x17 bg=#000000
+            RenderBlockFlow <span.green> (12,273) 10x15 bg=#000000
+              RenderBlockFlow  (12,273) 10x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (22,273) 179x15 bg=#000000
+              RenderBlockFlow  (22,273) 179x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,289) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,305) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,306) 100x15 bg=#000000
+              RenderBlockFlow  (12,306) 100x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,322) 800x17 bg=#000000
+            RenderBlockFlow <span.warn> (12,323) 207x15 bg=#000000
+              RenderBlockFlow  (12,323) 207x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (219,323) 222x15 bg=#000000
+              RenderBlockFlow  (219,323) 236x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,339) 800x17 bg=#000000
+            RenderBlockFlow <span.warn> (12,340) 179x15 bg=#000000
+              RenderBlockFlow  (12,340) 179x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (191,340) 114x15 bg=#000000
+              RenderBlockFlow  (191,340) 129x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,356) 800x17 bg=#000000
+            RenderBlockFlow <span.red> (12,357) 29x15 bg=#000000
+              RenderBlockFlow  (12,357) 29x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (41,357) 164x15 bg=#000000
+              RenderBlockFlow  (41,357) 164x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,373) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,390) 800x17 bg=#000000
+            RenderBlockFlow <span.output> (12,391) 64x15 bg=#000000
+              RenderBlockFlow  (12,391) 107x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+                RenderInline <span.warn> (26,391) 21x15 bg=#000000
+                  RenderBlockFlow  (26,391) 21x15 bg=#000000
+                    RenderText  (0,0) 0x0 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,407) 800x17 bg=#000000
+            RenderBlockFlow <span.info> (12,408) 136x15 bg=#000000
+              RenderBlockFlow  (12,408) 136x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,424) 800x17 bg=#000000
+            RenderBlockFlow <span.info> (12,425) 86x15 bg=#000000
+              RenderBlockFlow  (12,425) 86x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,441) 800x17 bg=#000000
+            RenderBlockFlow <span.green> (12,442) 10x15 bg=#000000
+              RenderBlockFlow  (12,442) 10x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.output> (22,442) 93x15 bg=#000000
+              RenderBlockFlow  (22,442) 93x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,458) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,475) 800x17 bg=#000000
+            RenderBlockFlow <span.dim> (12,475) 386x15 bg=#000000
+              RenderBlockFlow  (12,475) 386x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,492) 800x17 bg=#000000
+            RenderBlockFlow <span.dim> (12,492) 329x15 bg=#000000
+              RenderBlockFlow  (12,492) 329x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,508) 800x17 bg=#000000
+            RenderBlockFlow <span.error> (12,509) 393x15 bg=#000000
+              RenderBlockFlow  (12,509) 393x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,525) 800x17 bg=#000000
+            RenderBlockFlow <span.warn> (12,526) 314x15 bg=#000000
+              RenderBlockFlow  (12,526) 314x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,542) 800x17 bg=#000000
+          RenderBlockFlow <div.terminal-line> (0,559) 800x17 bg=#000000
+            RenderBlockFlow <span.dim> (12,560) 207x15 bg=#000000
+              RenderBlockFlow  (12,560) 207x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <div.terminal-input-line> (0,576) 800x19 bg=#000000
+            RenderBlockFlow <span.prompt> (12,578) 7x15 bg=#000000
+              RenderBlockFlow  (12,578) 7x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.input> (27,578) 136x15 bg=#000000
+              RenderBlockFlow  (27,578) 136x15 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderBlockFlow <span.terminal-cursor> (164,579) 8x14 bg=#58a6ff
+
+=== PAINT GRID (8x8, viewport=800x600) ===
+y=0 | (0,#21262d) (100,#21262d) (200,#21262d) (300,#21262d) (400,#21262d) (500,#21262d) (600,#21262d) (700,#21262d)
+y=75 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=150 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=225 | (0,#0d1117) (100,#8b949e) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=300 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=375 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=450 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+y=525 | (0,#0d1117) (100,#0d1117) (200,#0d1117) (300,#0d1117) (400,#0d1117) (500,#0d1117) (600,#0d1117) (700,#0d1117)
+
+=== PIXEL PROBES (9-point sweep) ===
+  TL (0,0) = #21262dff
+  TC (400,0) = #21262dff
+  TR (799,0) = #21262dff
+  ML (0,300) = #0d1117ff
+  MC (400,300) = #0d1117ff
+  MR (799,300) = #0d1117ff
+  BL (0,599) = #0d1117ff
+  BC (400,300) = #0d1117ff
+  BR (799,599) = #0d1117ff
+
+=== TITLEBAR SCAN (y=0..29, sample every 2px) ===
+y= 0 |******************************
+y= 2 |******************************
+y= 4 |******************************
+y= 6 |******************************
+y= 8 |************(24,e6edf3)(26,e6edf3)*(30,c1c7cd)(32,e6edf3)(34,e6edf3)**(40,e6edf3)(42,e6edf3)(44,a0a7ad)*(48,dae1e7)(50,e6edf3)(52,c1c7cd)*(56,dae1e7)*
+y=10 |************(24,a0a7ad)*(28,ced4db)(30,c1c7cd)*(34,8b9197)*(38,ced4db)**(44,6e737a)*(48,dae1e7)*(52,ced4db)*(56,dae1e7)*
+y=12 |************(24,a0a7ad)*(28,a0a7ad)(30,c1c7cd)(32,e6edf3)(34,a0a7ad)*(38,e6edf3)***(46,a0a7ad)(48,dae1e7)(50,e6edf3)(52,b2b8bf)*(56,dae1e7)*
+y=14 |************(24,a0a7ad)**(30,c1c7cd)*(34,dae1e7)*(38,ced4db)**(44,6e737a)*(48,dae1e7)*(52,a0a7ad)*(56,dae1e7)*
+y=16 |************(24,a0a7ad)**(30,c1c7cd)**(36,dae1e7)*(40,e6edf3)(42,e6edf3)(44,8b9197)*(48,dae1e7)(50,e6edf3)(52,ced4db)*(56,e6edf3)(58,e6edf3)
+y=18 |******************************
+y=20 |******************************
+y=22 |******************************
+y=24 |******************************
+y=26 |******************************
+y=28 |..............................
+
+=== TEXT SEGMENTS ===
+                RenderText "PROBLEMS" len=8 segs=1
+                  seg[0]: start=0 len=8 x=22.0 y=4.0 w=63.9 h=15.8
+                RenderText "OUTPUT" len=6 segs=1
+                  seg[0]: start=0 len=6 x=107.9 y=4.0 w=48.8 h=15.8
+                RenderText "TERMINAL" len=8 segs=1
+                  seg[0]: start=0 len=8 x=178.7 y=4.0 w=60.9 h=15.8
+                RenderText "PORTS" len=5 segs=1
+                  seg[0]: start=0 len=5 x=261.6 y=4.0 w=38.8 h=15.8
+                RenderText "+" len=1 segs=1
+                  seg[0]: start=0 len=1 x=750.0 y=4.0 w=8.9 h=15.8
+                RenderText "_" len=1 segs=1
+                  seg[0]: start=0 len=1 x=766.9 y=4.0 w=5.4 h=15.8
+                RenderText "X" len=1 segs=1
+                  seg[0]: start=0 len=1 x=780.3 y=4.0 w=7.7 h=15.8
+                RenderText "The terminal process terminated with exit code: 0" len=49 segs=8
+                  seg[0]: start=0 len=3 x=12.0 y=35.7 w=21.4 h=15.2
+                  seg[1]: start=4 len=8 x=40.6 y=35.7 w=57.2 h=15.2
+                  seg[2]: start=13 len=7 x=104.9 y=35.7 w=50.0 h=15.2
+                  seg[3]: start=21 len=10 x=162.1 y=35.7 w=71.5 h=15.2
+                  seg[4]: start=32 len=4 x=240.7 y=35.7 w=28.6 h=15.2
+                  seg[5]: start=37 len=4 x=276.5 y=35.7 w=28.6 h=15.2
+                  seg[6]: start=42 len=5 x=312.2 y=35.7 w=35.7 h=15.2
+                  seg[7]: start=48 len=1 x=355.1 y=35.7 w=7.1 h=15.2
+                RenderText "Starting new terminal..." len=24 segs=3
+                  seg[0]: start=0 len=8 x=12.0 y=52.6 w=57.2 h=15.2
+                  seg[1]: start=9 len=3 x=76.3 y=52.6 w=21.4 h=15.2
+                  seg[2]: start=13 len=11 x=104.9 y=52.6 w=78.6 h=15.2
+                RenderText "C:\\work\\wb-ui" len=13 segs=1
+                  seg[0]: start=0 len=13 x=12.0 y=86.4 w=92.9 h=15.2
+                RenderText "(main)" len=6 segs=1
+                  seg[0]: start=0 len=6 x=104.9 y=86.4 w=42.9 h=15.2
+                RenderText "$ go build ./..." len=16 segs=4
+                  seg[0]: start=0 len=1 x=12.0 y=103.3 w=7.1 h=15.2
+                  seg[1]: start=2 len=2 x=26.3 y=103.3 w=14.3 h=15.2
+                  seg[2]: start=5 len=5 x=47.7 y=103.3 w=35.7 h=15.2
+                  seg[3]: start=11 len=5 x=90.6 y=103.3 w=35.7 h=15.2
+                RenderText "go: downloading github.com/hoonfeng/goskia v0.4.0" len=49 segs=4
+                  seg[0]: start=0 len=3 x=12.0 y=120.3 w=21.4 h=15.2
+                  seg[1]: start=4 len=11 x=40.6 y=120.3 w=78.6 h=15.2
+                  seg[2]: start=16 len=26 x=126.4 y=120.3 w=185.8 h=15.2
+                  seg[3]: start=43 len=6 x=319.3 y=120.3 w=42.9 h=15.2
+                RenderText "go: downloading github.com/dop251/goja v0.0.0-202503" len=52 segs=4
+                  seg[0]: start=0 len=3 x=12.0 y=137.2 w=21.4 h=15.2
+                  seg[1]: start=4 len=11 x=40.6 y=137.2 w=78.6 h=15.2
+                  seg[2]: start=16 len=22 x=126.4 y=137.2 w=157.2 h=15.2
+                  seg[3]: start=39 len=13 x=290.8 y=137.2 w=92.9 h=15.2
+                RenderText "# wb-ui/layout" len=14 segs=2
+                  seg[0]: start=0 len=1 x=12.0 y=154.1 w=7.1 h=15.2
+                  seg[1]: start=2 len=12 x=26.3 y=154.1 w=85.8 h=15.2
+                RenderText "# wb-ui/rendering" len=17 segs=2
+                  seg[0]: start=0 len=1 x=12.0 y=171.0 w=7.1 h=15.2
+                  seg[1]: start=2 len=15 x=26.3 y=171.0 w=107.2 h=15.2
+                RenderText "✓" len=1 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=187.9 w=9.7 h=15.2
+                RenderText "Build complete (12 packages)" len=28 segs=4
+                  seg[0]: start=0 len=5 x=21.7 y=187.9 w=35.7 h=15.2
+                  seg[1]: start=6 len=8 x=64.6 y=187.9 w=57.2 h=15.2
+                  seg[2]: start=15 len=3 x=128.9 y=187.9 w=21.4 h=15.2
+                  seg[3]: start=19 len=9 x=157.5 y=187.9 w=64.3 h=15.2
+                RenderText "$ go test ./layout/..." len=22 segs=4
+                  seg[0]: start=0 len=1 x=12.0 y=221.8 w=7.1 h=15.2
+                  seg[1]: start=2 len=2 x=26.3 y=221.8 w=14.3 h=15.2
+                  seg[2]: start=5 len=4 x=47.7 y=221.8 w=28.6 h=15.2
+                  seg[3]: start=10 len=12 x=83.5 y=221.8 w=85.8 h=15.2
+                RenderText "✓" len=1 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=238.7 w=9.7 h=15.2
+                RenderText "ok  wb-ui/layout  0.423s" len=24 segs=3
+                  seg[0]: start=0 len=2 x=21.7 y=238.7 w=14.3 h=15.2
+                  seg[1]: start=4 len=12 x=43.2 y=238.7 w=85.8 h=15.2
+                  seg[2]: start=18 len=6 x=136.1 y=238.7 w=42.9 h=15.2
+                RenderText "$ go test ./rendering/..." len=25 segs=4
+                  seg[0]: start=0 len=1 x=12.0 y=255.6 w=7.1 h=15.2
+                  seg[1]: start=2 len=2 x=26.3 y=255.6 w=14.3 h=15.2
+                  seg[2]: start=5 len=4 x=47.7 y=255.6 w=28.6 h=15.2
+                  seg[3]: start=10 len=15 x=83.5 y=255.6 w=107.2 h=15.2
+                RenderText "✓" len=1 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=272.5 w=9.7 h=15.2
+                RenderText "ok  wb-ui/rendering  0.512s" len=27 segs=3
+                  seg[0]: start=0 len=2 x=21.7 y=272.5 w=14.3 h=15.2
+                  seg[1]: start=4 len=15 x=43.2 y=272.5 w=107.2 h=15.2
+                  seg[2]: start=21 len=6 x=157.5 y=272.5 w=42.9 h=15.2
+                RenderText "$ go vet ./..." len=14 segs=4
+                  seg[0]: start=0 len=1 x=12.0 y=306.3 w=7.1 h=15.2
+                  seg[1]: start=2 len=2 x=26.3 y=306.3 w=14.3 h=15.2
+                  seg[2]: start=5 len=3 x=47.7 y=306.3 w=21.4 h=15.2
+                  seg[3]: start=9 len=5 x=76.3 y=306.3 w=35.7 h=15.2
+                RenderText "wb-ui/style/resolver.go:142:2" len=29 segs=1
+                  seg[0]: start=0 len=29 x=12.0 y=323.2 w=207.3 h=15.2
+                RenderText "  ineffectual assignment to field" len=33 segs=4
+                  seg[0]: start=2 len=11 x=233.6 y=323.2 w=78.6 h=15.2
+                  seg[1]: start=14 len=10 x=319.3 y=323.2 w=71.5 h=15.2
+                  seg[2]: start=25 len=2 x=398.0 y=323.2 w=14.3 h=15.2
+                  seg[3]: start=28 len=5 x=419.4 y=323.2 w=35.7 h=15.2
+                RenderText "wb-ui/layout/flex.go:89:6" len=25 segs=1
+                  seg[0]: start=0 len=25 x=12.0 y=340.2 w=178.7 h=15.2
+                RenderText "  unused parameter" len=18 segs=2
+                  seg[0]: start=2 len=6 x=205.0 y=340.2 w=42.9 h=15.2
+                  seg[1]: start=9 len=9 x=255.0 y=340.2 w=64.3 h=15.2
+                RenderText "FAIL" len=4 segs=1
+                  seg[0]: start=0 len=4 x=12.0 y=357.1 w=28.6 h=15.2
+                RenderText "go vet found 2 warnings" len=23 segs=5
+                  seg[0]: start=0 len=2 x=40.6 y=357.1 w=14.3 h=15.2
+                  seg[1]: start=3 len=3 x=62.0 y=357.1 w=21.4 h=15.2
+                  seg[2]: start=7 len=5 x=90.6 y=357.1 w=35.7 h=15.2
+                  seg[3]: start=13 len=1 x=133.5 y=357.1 w=7.1 h=15.2
+                  seg[4]: start=15 len=8 x=147.8 y=357.1 w=57.2 h=15.2
+                RenderText "$ " len=2 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=390.9 w=7.1 h=15.2
+                    RenderText "npm" len=3 segs=1
+                      seg[0]: start=0 len=3 x=26.3 y=390.9 w=21.4 h=15.2
+                RenderText " run build" len=10 segs=2
+                  seg[0]: start=1 len=3 x=54.9 y=390.9 w=21.4 h=15.2
+                  seg[1]: start=5 len=5 x=83.5 y=390.9 w=35.7 h=15.2
+                RenderText "> wb-ui@1.0.0 build" len=19 segs=3
+                  seg[0]: start=0 len=1 x=12.0 y=407.8 w=7.1 h=15.2
+                  seg[1]: start=2 len=11 x=26.3 y=407.8 w=78.6 h=15.2
+                  seg[2]: start=14 len=5 x=112.1 y=407.8 w=35.7 h=15.2
+                RenderText "> vite build" len=12 segs=3
+                  seg[0]: start=0 len=1 x=12.0 y=424.7 w=7.1 h=15.2
+                  seg[1]: start=2 len=4 x=26.3 y=424.7 w=28.6 h=15.2
+                  seg[2]: start=7 len=5 x=62.0 y=424.7 w=35.7 h=15.2
+                RenderText "✓" len=1 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=441.7 w=9.7 h=15.2
+                RenderText "built in 2.3s" len=13 segs=3
+                  seg[0]: start=0 len=5 x=21.7 y=441.7 w=35.7 h=15.2
+                  seg[1]: start=6 len=2 x=64.6 y=441.7 w=14.3 h=15.2
+                  seg[2]: start=9 len=4 x=86.1 y=441.7 w=28.6 h=15.2
+                RenderText "[Info] 2026-07-24 09:15:22 Server started on port 9090" len=54 segs=8
+                  seg[0]: start=0 len=6 x=12.0 y=475.5 w=42.9 h=15.2
+                  seg[1]: start=7 len=10 x=62.0 y=475.5 w=71.5 h=15.2
+                  seg[2]: start=18 len=8 x=140.7 y=475.5 w=57.2 h=15.2
+                  seg[3]: start=27 len=6 x=205.0 y=475.5 w=42.9 h=15.2
+                  seg[4]: start=34 len=7 x=255.0 y=475.5 w=50.0 h=15.2
+                  seg[5]: start=42 len=2 x=312.2 y=475.5 w=14.3 h=15.2
+                  seg[6]: start=45 len=4 x=333.6 y=475.5 w=28.6 h=15.2
+                  seg[7]: start=50 len=4 x=369.4 y=475.5 w=28.6 h=15.2
+                RenderText "[Info] 2026-07-24 09:15:23 Connected client #1" len=46 segs=6
+                  seg[0]: start=0 len=6 x=12.0 y=492.4 w=42.9 h=15.2
+                  seg[1]: start=7 len=10 x=62.0 y=492.4 w=71.5 h=15.2
+                  seg[2]: start=18 len=8 x=140.7 y=492.4 w=57.2 h=15.2
+                  seg[3]: start=27 len=9 x=205.0 y=492.4 w=64.3 h=15.2
+                  seg[4]: start=37 len=6 x=276.5 y=492.4 w=42.9 h=15.2
+                  seg[5]: start=44 len=2 x=326.5 y=492.4 w=14.3 h=15.2
+                RenderText "[Error] 2026-07-24 09:15:25 Failed to load: /api/config" len=55 segs=7
+                  seg[0]: start=0 len=7 x=12.0 y=509.3 w=50.0 h=15.2
+                  seg[1]: start=8 len=10 x=69.2 y=509.3 w=71.5 h=15.2
+                  seg[2]: start=19 len=8 x=147.8 y=509.3 w=57.2 h=15.2
+                  seg[3]: start=28 len=6 x=212.1 y=509.3 w=42.9 h=15.2
+                  seg[4]: start=35 len=2 x=262.2 y=509.3 w=14.3 h=15.2
+                  seg[5]: start=38 len=5 x=283.6 y=509.3 w=35.7 h=15.2
+                  seg[6]: start=44 len=11 x=326.5 y=509.3 w=78.6 h=15.2
+                RenderText "[Warn]  2026-07-24 09:15:30 Retry attempt 2/3" len=45 segs=6
+                  seg[0]: start=0 len=6 x=12.0 y=526.2 w=42.9 h=15.2
+                  seg[1]: start=8 len=10 x=62.0 y=526.2 w=71.5 h=15.2
+                  seg[2]: start=19 len=8 x=140.7 y=526.2 w=57.2 h=15.2
+                  seg[3]: start=28 len=5 x=205.0 y=526.2 w=35.7 h=15.2
+                  seg[4]: start=34 len=7 x=247.9 y=526.2 w=50.0 h=15.2
+                  seg[5]: start=42 len=3 x=305.0 y=526.2 w=21.4 h=15.2
+                RenderText "Process returned exit code: 0" len=29 segs=5
+                  seg[0]: start=0 len=7 x=12.0 y=560.1 w=50.0 h=15.2
+                  seg[1]: start=8 len=8 x=69.2 y=560.1 w=57.2 h=15.2
+                  seg[2]: start=17 len=4 x=133.5 y=560.1 w=28.6 h=15.2
+                  seg[3]: start=22 len=5 x=169.2 y=560.1 w=35.7 h=15.2
+                  seg[4]: start=28 len=1 x=212.1 y=560.1 w=7.1 h=15.2
+                RenderText "$" len=1 segs=1
+                  seg[0]: start=0 len=1 x=12.0 y=578.1 w=7.1 h=15.2
+                RenderText "go run ./cmd/server" len=19 segs=3
+                  seg[0]: start=0 len=2 x=27.1 y=578.1 w=14.3 h=15.2
+                  seg[1]: start=3 len=3 x=48.6 y=578.1 w=21.4 h=15.2
+                  seg[2]: start=7 len=12 x=77.2 y=578.1 w=85.8 h=15.2
+
+=== HORIZONTAL SCAN y=16 ===
+y=16 |(0#21262d)(1#21262d)(2#21262d)(3#21262d)(4#21262d)(5#21262d)(6#21262d)(7#21262d)(8#21262d)(9#21262d)(10#21262d)(11#21262d)(12#21262d)(13#21262d)(14#21262d)(15#21262d)(16#21262d)(17#21262d)(18#21262d)(19#21262d)(20#21262d)(21#21262d)(22#21262d)(23#dae1e7)(24#a0a7ad)(25#21262d)(26#21262d)(27#21262d)(28#21262d)(29#21262d)(30#c1c7cd)(31#c1c7cd)(32#21262d)(33#21262d)(34#21262d)(35#ced4db)(36#dae1e7)(37#21262d)(38#21262d)(39#21262d)(40#e6edf3)(41#e6edf3)(42#e6edf3)(43#e6edf3)(44#8b9197)(45#21262d)(46#21262d)(47#21262d)
+
+=== ACTIVITY BAR FULL SCAN (y=30..90, x=0..47) ===
+y= 30 |................................................
+y= 31 |................................................
+y= 32 |................................................
+y= 33 |................................................
+y= 34 |................................................
+y= 35 |................................................
+y= 36 |................................................
+y= 37 |................................................
+y= 38 |................................................
+y= 39 |....................**..........................
+y= 40 |............*******.**....................**....
+y= 41 |...............*....**....................**....
+y= 42 |...............*....*****...****.........******.
+y= 43 |...............*....**..**.**..**.........**....
+y= 44 |...............*....**..**.******.........**....
+y= 45 |...............*....**..**.*..............**....
+y= 46 |...............*....**..**.**.............**....
+y= 47 |...............*....**..**..*****..........****.
+y= 48 |................................................
+y= 49 |................................................
+y= 50 |................................................
+y= 51 |................................................
+y= 52 |................................................
+y= 53 |................................................
+y= 54 |................................................
+y= 55 |................................................
+y= 56 |................................................
+y= 57 |.............*****...**...................**....
+y= 58 |.............**......**...................**....
+y= 59 |.............*.....*******.*****..******.******.
+y= 60 |.............***.....**........**.***..*..**....
+y= 61 |...............***...**.....*****.**......**....
+y= 62 |.................**..**....**..**.**......**....
+y= 63 |.................**..**....**.***.**......**....
+y= 64 |............******....****.******.**.......****.
+y= 65 |................................................
+y= 66 |................................................
+y= 67 |................................................
+y= 68 |................................................
+y= 69 |................................................
+y= 70 |................................................
+y= 71 |................................................
+y= 72 |................................................
+y= 73 |................................................
+y= 74 |................................................
+y= 75 |................................................
+y= 76 |................................................
+y= 77 |................................................
+y= 78 |................................................
+y= 79 |................................................
+y= 80 |................................................
+y= 81 |................................................
+y= 82 |................................................
+y= 83 |................................................
+y= 84 |................................................
+y= 85 |................................................
+y= 86 |................................................
+y= 87 |................................................
+y= 88 |................................................
+y= 89 |...........................**...................
+y= 90 |..............(14,4c8dd8)(15,58a6ff)(16,58a6ff)(17,58a6ff)*........*(28,58a6ff)...................
+
+=== EDITOR TAB X-BTN SCAN (x=365..380, y=40..52) ===
+y= 40 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 41 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 42 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 43 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 44 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 45 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 46 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 47 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 48 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 49 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 50 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 51 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 52 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+
+=== SIDEBAR VERTICAL SCAN: x=100, y=770..800 ===
+  y=770 = #00000000
+  y=771 = #00000000
+  y=772 = #00000000
+  y=773 = #00000000
+  y=774 = #00000000
+  y=775 = #00000000
+  y=776 = #00000000
+  y=777 = #00000000
+  y=778 = #00000000
+  y=779 = #00000000
+  y=780 = #00000000
+  y=781 = #00000000
+  y=782 = #00000000
+  y=783 = #00000000
+  y=784 = #00000000
+  y=785 = #00000000
+  y=786 = #00000000
+  y=787 = #00000000
+  y=788 = #00000000
+  y=789 = #00000000
+  y=790 = #00000000
+  y=791 = #00000000
+  y=792 = #00000000
+  y=793 = #00000000
+  y=794 = #00000000
+  y=795 = #00000000
+  y=796 = #00000000
+  y=797 = #00000000
+  y=798 = #00000000
+  y=799 = #00000000
+  y=800 = #00000000
+
+=== ACTIVITY BAR SCAN: x=10, y=30..800 ===
+  y= 30 = #0d1117ff
+  y= 70 = #0d1117ff
+  y=110 = #0d1117ff
+  y=150 = #0d1117ff
+  y=190 = #0d1117ff
+  y=230 = #0d1117ff
+  y=270 = #0d1117ff
+  y=310 = #0d1117ff
+  y=350 = #0d1117ff
+  y=390 = #0d1117ff
+  y=430 = #0d1117ff
+  y=470 = #0d1117ff
+  y=510 = #0d1117ff
+  y=550 = #0d1117ff
+  y=590 = #0d1117ff
+  y=630 = #00000000
+  y=670 = #00000000
+  y=710 = #00000000
+  y=750 = #00000000
+  y=790 = #00000000
+
+=== FONT METRICS ===
+  RenderText="PROBLEMS" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="OUTPUT" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="TERMINAL" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="PORTS" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="+" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="_" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="X" fontSize=12.0 layoutAscent=9.6 skiaAscent=12.7 layoutDescent=2.4 skiaDescent=3.1 layoutLineH=14.4 skiaLineH=15.8 diff=1.4
+  RenderText="The terminal process terminated with exit code: 0" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="Starting new terminal..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="C:\\work\\wb-ui" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="(main)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ go build ./..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="go: downloading github.com/hoonfeng/goskia v0.4.0" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="go: downloading github.com/dop251/goja v0.0.0-202503" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="# wb-ui/layout" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="# wb-ui/rendering" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="✓" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="Build complete (12 packages)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ go test ./layout/..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="✓" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="ok  wb-ui/layout  0.423s" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ go test ./rendering/..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="✓" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="ok  wb-ui/rendering  0.512s" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ go vet ./..." fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="wb-ui/style/resolver.go:142:2" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="  ineffectual assignment to field" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="wb-ui/layout/flex.go:89:6" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="  unused parameter" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="FAIL" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="go vet found 2 warnings" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$ " fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="npm" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText=" run build" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="> wb-ui@1.0.0 build" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="> vite build" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="✓" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="built in 2.3s" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="[Info] 2026-07-24 09:15:22 Server started on port 9090" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="[Info] 2026-07-24 09:15:23 Connected client #1" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="[Error] 2026-07-24 09:15:25 Failed to load: /api/config" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="[Warn]  2026-07-24 09:15:30 Retry attempt 2/3" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="Process returned exit code: 0" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="$" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="go run ./cmd/server" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4

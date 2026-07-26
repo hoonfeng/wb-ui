@@ -138,6 +138,71 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
+			// If the inline-level element has a definite CSS width/height, ensure
+			// the geometry reflects it. This is critical for replaced elements
+			// (input, select, img) whose layout box has no children and thus may
+			// not set content width/height during context.Layout().
+			if cldG.ContentWidth() <= 0 {
+				cs := cld.Style()
+				fs := fontSizeOf(cld)
+				if cs != nil {
+					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
+						if isBorderBoxForBox(cld) {
+							b := cldG.BorderLeft() + cldG.BorderRight()
+							p := cldG.PaddingLeft() + cldG.PaddingRight()
+							cldG.SetContentWidth(w - b - p)
+						} else {
+							cldG.SetContentWidth(w)
+						}
+					}
+				}
+				// Fallback: for replaced input/button elements without explicit CSS
+				// width, derive width from the HTML value attribute text.
+				if cldG.ContentWidth() <= 0 && cld.IsReplaced() {
+					if el := cld.Element(); el != nil && el.NodeName() == "INPUT" {
+						val := el.GetAttribute("value")
+						if val == "" {
+							// Default labels for submit/reset if no value given.
+							switch el.GetAttribute("type") {
+							case "submit":
+								val = "Submit"
+							case "reset":
+								val = "Reset"
+							case "button":
+								val = "Button"
+							}
+						}
+						if val != "" {
+							textW := measureText(cld, val)
+							if textW > 0 {
+								cldG.SetContentWidth(textW)
+								// Also set content height if still 0, using line height.
+								if cldG.ContentHeight() <= 0 {
+									lineH := fontLineGap(cld)
+									if lineH <= 0 { lineH = fs * 1.2 }
+									cldG.SetContentHeight(lineH)
+								}
+							}
+						}
+					}
+				}
+			}
+			if cldG.ContentHeight() <= 0 {
+				cs := cld.Style()
+				fs := fontSizeOf(cld)
+				if cs != nil {
+					if h, ok := definiteHeight(cs.Height, contentWidth, fs); ok && h > 0 {
+						if isBorderBoxForBox(cld) {
+							b := cldG.BorderTop() + cldG.BorderBottom()
+							p := cldG.PaddingTop() + cldG.PaddingBottom()
+							cldG.SetContentHeight(h - b - p)
+						} else {
+							cldG.SetContentHeight(h)
+						}
+					}
+				}
+			}
+
 			// Compute inline child's content width from text segments.
 			// Without this, cldW=0 and subsequent text on same line overlaps.
 			if cldG.BorderBoxWidth() <= 0 {
@@ -162,6 +227,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					widthUsed: 0,
 				}
 				cldG.SetTopLeft(currentLine.y, contentX+currentLine.widthUsed)
+			}
+			// Apply relative offset to inline-level elements that are
+			// relatively positioned (e.g. position:relative with top/left).
+			if cld.IsRelativelyPositioned() && cld.IsInFlow() {
+				applyRelativeOffsetForBox(cld, contentWidth, lineHeight, state)
 			}
 			currentLine.widthUsed += cldW
 		}

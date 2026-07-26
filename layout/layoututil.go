@@ -91,8 +91,36 @@ func asLength(v interface{}) style.Length {
 	switch x := v.(type) {
 	case style.Length:
 		return x
+	case string:
+		return parseCSSLength(x)
 	}
 	return style.Length{Unit: "auto"}
+}
+
+// parseCSSLength parses a CSS length string ("10px", "2em", "auto", "50%") into
+// a style.Length struct. This is needed because asLength receives raw string
+// values from cs.Properties["top"/"left"/etc.].
+func parseCSSLength(s string) style.Length {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "auto" {
+		return style.Length{Unit: "auto"}
+	}
+	// Find the boundary between numeric part and unit.
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	for i < len(s) && ((s[i] >= '0' && s[i] <= '9') || s[i] == '.') {
+		i++
+	}
+	if i == 0 {
+		return style.Length{Unit: "auto"}
+	}
+	num, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil {
+		return style.Length{Unit: "auto"}
+	}
+	return style.Length{Value: num, Unit: s[i:]}
 }
 
 

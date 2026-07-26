@@ -145,6 +145,29 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		rowTracks = append(rowTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
 	}
 
+	// Auto-placement: assign unique column positions to items that were not
+	// explicitly placed (colStart == 1 && rowStart == 1, the default).
+	// Use a simple cursor that advances column-by-column, wrapping to the next
+	// row when columns are exhausted.
+	autoCol := 1
+	autoRow := 1
+	for _, it := range items {
+		if it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2 {
+			// This item has default placement; assign the next auto slot.
+			it.colStart = autoCol
+			it.colEnd = autoCol + 1
+			it.rowStart = autoRow
+			it.rowEnd = autoRow + 1
+			autoCol++
+			if autoCol > nCols && nCols > 0 {
+				// For explicit tracks, wrap to next row if col > nCols.
+				// For implicit-only grids (no explicit tracks), nCols may be 0.
+				autoCol = 1
+				autoRow++
+			}
+		}
+	}
+
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].rowStart != items[j].rowStart {
 			return items[i].rowStart < items[j].rowStart

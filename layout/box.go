@@ -355,7 +355,7 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 	hasContent:
 		kids := append([]Box(nil), inlineRun...)
 		wrap := &ElementBox{nodeType: NodeGenericElement, style: box.style, children: kids}
-		// Anonymous inline wrappers should not inherit padding/border from
+		// Anonymous inline wrappers should not inherit padding/border/margin from
 		// parent — those belong to the parent box's content-box boundaries.
 		anonStyle := *wrap.style
 		anonStyle.PaddingTop = style.Length{}
@@ -366,6 +366,12 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		anonStyle.BorderRightWidth = style.Length{}
 		anonStyle.BorderBottomWidth = style.Length{}
 		anonStyle.BorderLeftWidth = style.Length{}
+		anonStyle.MarginTop = style.Length{}
+		anonStyle.MarginRight = style.Length{}
+		anonStyle.MarginBottom = style.Length{}
+		anonStyle.MarginLeft = style.Length{}
+		anonStyle.Position = style.PositionStatic
+		anonStyle.Float = "none"
 		wrap.style = &anonStyle
 		for _, k := range kids {
 			switch c := k.(type) {

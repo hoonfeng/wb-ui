@@ -113,12 +113,28 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if cbHeight <= 0 && box.Parent() != nil {
 			cbHeight = state.GeometryForBox(box.Parent()).ContentHeight()
 		}
+		if cbHeight <= 0 {
+			cbHeight = 0 // will still try to apply definite height below
+		}
 		cs := child.Style()
 		if !heightIsAutoForBox(childEb) {
 			if cbHeight > 0 {
 				fs := fontSizeOf(childEb)
 				hv, ok := definiteHeight(cs.Height, cbHeight, fs)
 				if ok {
+					if isBorderBoxForBox(childEb) {
+						ch.SetContentHeight(hv - border.Vertical() - padding.Vertical())
+					} else {
+						ch.SetContentHeight(hv)
+					}
+				}
+			} else {
+				// Even when cbHeight is 0 (parent not yet sized), apply a
+				// definite px/em height from CSS. This is critical for replaced
+				// elements (input, select) whose height is set via CSS.
+				fs := fontSizeOf(childEb)
+				hv, ok := definiteHeight(cs.Height, 100, fs)
+				if ok && hv > 0 {
 					if isBorderBoxForBox(childEb) {
 						ch.SetContentHeight(hv - border.Vertical() - padding.Vertical())
 					} else {
@@ -211,6 +227,18 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	for _, child := range deferredAbsolutes {
 		cb := containingBlockForAbsolute(child, root)
 		layoutAbsolute(child, cb, root, state)
+	}
+
+	// If this replaced element still has 0 content height (no children),
+	// apply a minimum intrinsic height so it's visible. This handles
+	// <input>, <select>, and other replaced elements without explicit
+	// CSS height that are laid out directly via BFC (from IFC).
+	if box.IsReplaced() && g.ContentHeight() <= 0 && heightIsAutoForBox(box) {
+		fs := fontSizeOf(box)
+		if fs <= 0 { fs = 16 }
+		lineH := fontLineGap(box)
+		if lineH <= 0 { lineH = fs * 1.2 }
+		g.SetContentHeight(lineH)
 	}
 }
 
