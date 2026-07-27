@@ -81,6 +81,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	collapseTopWithParent := !establishesBFC && g.BorderTop() == 0 && g.PaddingTop() == 0
 	firstInFlow := true
 
+	fmt.Fprintf(diagFloats, "> layoutBlockChildren: box=%s contentX=%.0f contentY=%.0f contentWidth=%.0f childCount=%d\n",
+		elementName(box), contentX, contentY, contentWidth, len(box.Children()))
+
 	var deferredAbsolutes []*ElementBox
 
 	for _, child := range box.Children() {
@@ -328,8 +331,8 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 		w = contentWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
 		if w < 0 { w = 0 }
 	}
-	fmt.Fprintf(diagFloats, "  child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t\n",
-		cs.Display, cs.Float, cs.Width, contentWidth, w, ok)
+	fmt.Fprintf(diagFloats, "  child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t el=%s\n",
+		cs.Display, cs.Float, cs.Width, contentWidth, w, ok, elementName(child))
 	borderBox := w
 	if !isBorderBoxForBox(child) {
 		borderBox = w + border.Horizontal() + padding.Horizontal()
@@ -410,5 +413,12 @@ func stateRootForBox(box *ElementBox) *ElementBox {
 	cur := box
 	for cur.Parent() != nil { cur = cur.Parent() }
 	return cur
+}
+
+func elementName(box *ElementBox) string {
+	if box == nil { return "nil" }
+	el := box.Element()
+	if el == nil { return "anonymous" }
+	return fmt.Sprintf("%v", el)
 }
 
