@@ -450,55 +450,61 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		}
 		baseline := seg.Y + ascent
 
-		// text-overflow:ellipsis — clip this segment to the content box minus ellipsis width.
-		if toCB != nil && seg.X+seg.Width > toCB.X+toCB.Width-textEllipsisW && seg.X < toCB.X+toCB.Width {
-			maxSegRight := toCB.X + toCB.Width - textEllipsisW
-			if seg.X >= maxSegRight {
-				// Entire segment is beyond the visible area; skip it.
-				continue
-			}
-			// Find how many characters fit within [seg.X, maxSegRight).
-			subRunes := runes[seg.Start:end]
-			visibleW := 0.0
-			truncateAt := 0
-			for i, r := range subRunes {
-				rw := graphics.MeasureText(font, string(r))
-				if visibleW+rw > maxSegRight-seg.X {
+	// ── text-overflow:ellipsis ──
+		// Walk segments sequentially from the left. Track cumulative width from the
+		// content box start. Once a segment's right edge exceeds the available width
+		// (content-box-width minus ellipsis-width), truncate it character-by-character,
+		// append "..." using the same font, and skip all remaining segments.
+		if toCB != nil {
+			segRelX := seg.X - toCB.X // segment X relative to content box origin
+			segRight := segRelX + seg.Width
+			maxTextRight := toCB.Width - textEllipsisW // max allowed from content box origin
+
+			if segRight > maxTextRight {
+				// This segment overflows into the "..." zone.
+				if segRelX >= toCB.Width {
 					break
 				}
-				visibleW += rw
-				truncateAt = i + 1
-			}
-			if truncateAt > 0 {
-				visibleText := string(subRunes[:truncateAt])
-				sub := collapseWhitespace(visibleText)
-				if sub != "" {
-					info.canvas.DrawText(seg.X, baseline, sub, font, col)
-					paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
+				// How many characters of this segment fit within [segRelX, maxTextRight)?
+				remaining := maxTextRight - segRelX
+				if remaining <= 0 {
+					break
 				}
-			}
-			// Draw ellipsis when truncation occurred, using filled circles for
-			// compact spacing (avoids font side-bearing gaps between "." glyphs).
-			if truncateAt < len(subRunes) {
-				var ellipsisX float64
-				if truncateAt > 0 {
-					ellipsisX = seg.X + visibleW
-				} else {
-					// No character fits — place ellipsis at content box right edge.
-					ellipsisX = maxSegRight
+				subRunes := runes[seg.Start:end]
+				visibleW := 0.0
+				lastFit := 0
+				for i, r := range subRunes {
+					rw := graphics.MeasureText(font, string(r))
+					if visibleW+rw > remaining {
+						// Show the first character even if it slightly overflows,
+						// so the text isn't completely blank.
+						if i == 0 {
+							visibleW += rw
+							lastFit = 1
+						}
+						break
+					}
+					visibleW += rw
+					lastFit = i + 1
 				}
-				dotR := font.Size * 0.12
-				if dotR < 1.5 {
-					dotR = 1.5
+				if lastFit > 0 {
+					visibleText := string(subRunes[:lastFit])
+					sub := collapseWhitespace(visibleText)
+					if sub != "" {
+						info.canvas.DrawText(seg.X, baseline, sub, font, col)
+						paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
+					}
 				}
-				dotGap := dotR * 2.5
-				for i := 0; i < 3; i++ {
-					info.canvas.FillCircle(ellipsisX+float64(i)*dotGap, baseline-dotR, dotR, col)
+				// Draw "..." right after the last visible character.
+				ellipsisX := seg.X + visibleW
+				if lastFit == 0 {
+					ellipsisX = toCB.X + toCB.Width - textEllipsisW
 				}
+				info.canvas.DrawText(ellipsisX, baseline, "...", font, col)
 				info.textOverflowEllipsisPainted = true
-				continue
+				break
 			}
-			continue
+			// Segments that fully fit before the overflow point are drawn normally below.
 		}
 
 		// Determine selected range within this segment for inverted-color rendering.

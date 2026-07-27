@@ -217,52 +217,6 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				goto restoreClip
 			}
 
-			// ── Text-overflow: ellipsis ──
-			if st.TextOverflow == style.TextOverflowEllipsis && !info.textOverflowEllipsisPainted {
-				pb := box.PaddingBoxRect()
-				if pb.Width > 20 && pb.Height > 10 {
-					ellipsis := "..."
-					font := toGraphicsFont(st)
-					ellipsisW := graphics.MeasureText(font, ellipsis)
-					if ellipsisW <= 0 {
-						ellipsisW = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
-					}
-					// Place ellipsis immediately after the last visible text
-					// segment's right edge, matching browser behavior where "..." 
-					// follows the last visible character rather than being fixed
-					// at the padding-box right edge.
-					lastSegRight := findLastTextSegmentRight(root)
-					ellipsisX := lastSegRight
-					if ellipsisX < pb.X {
-						ellipsisX = pb.X
-					}
-					if ellipsisX+ellipsisW > pb.X+pb.Width {
-						cb := box.ContentBoxRect()
-						ellipsisX = cb.X + cb.Width - ellipsisW
-					}
-					if ellipsisX < pb.X {
-						ellipsisX = pb.X
-					}
-					ellipsisCol := toGraphicsColor(st.Color)
-					if ellipsisCol.A == 0 {
-						ellipsisCol = graphics.Color{R: 230, G: 237, B: 243, A: 255}
-					}
-					ascent := info.canvas.FontAscent(font)
-					baseline := pb.Y + ascent
-					for c := root.FirstChild(); c != nil; c = c.NextSibling() {
-						segY := walkRenderTextForBaseline(c)
-						if segY != 0 {
-							baseline = segY + ascent
-							break
-						}
-					}
-					if baseline == pb.Y+ascent && pb.Height > ascent+2 {
-						baseline = pb.Y + (pb.Height/2) + (ascent/2)
-					}
-					info.canvas.DrawText(ellipsisX, baseline, ellipsis, font, ellipsisCol)
-				}
-			}
-
 			// ── Scroll bars ──
 			needsScroll := (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
