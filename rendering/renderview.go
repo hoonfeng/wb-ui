@@ -557,7 +557,13 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 }
 
 func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *layout.LayoutState) {
-	lChildren := parentLB.Children()
+	// Must copy the slice to avoid mutating parentLB.children's backing array.
+	// lChildren := parentLB.Children() shares the backing array; any
+	// append(lChildren[:i], lChildren[i+1:]...) will overwrite the original
+	// array, corrupting the layout tree (e.g. col-left gets replaced by col-right).
+	orig := parentLB.Children()
+	lChildren := make([]layout.Box, len(orig))
+	copy(lChildren, orig)
 	for rc := parentRO.FirstChild(); rc != nil && len(lChildren) > 0; rc = rc.NextSibling() {
 		matched := -1
 		for i, lc := range lChildren {
