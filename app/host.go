@@ -446,10 +446,14 @@ func (h *Host) Run() {
 				scrollY = 0
 			}
 			if maxY := frameView.MaxScrollY(); scrollY > maxY {
+				if maxY > 0 {
+					log.Printf("[scroll] clamp scrollY from %d to %d (maxY=%d contentH=%d viewportH=%d)\n",
+						scrollY, maxY, maxY, frameView.ContentHeight(), frameView.Height())
+				}
 				scrollY = maxY
 			}
 			if scrollY != 0 {
-				fmt.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
+				log.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
 					scrollY, frameView.MaxScrollY(), frameView.ContentHeight(), frameView.Height())
 			}
 			frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
@@ -513,6 +517,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssX := h.cursorX / csX
 			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
+				log.Printf("[scroll] per-box hit at (%.0f,%.0f) cssY=%d scrollY=%d\n",
+					cssX, cssY, h.wv.Page().MainFrame().View().ScrollY())
 				sx, sy := rv.BoxScrollOffset(scrollBox)
 				deltaX := int(ev.ScrollX * 40)  // positive = right → sx increases
 				deltaY := -int(ev.ScrollY * 40) // positive = up → sy decreases
@@ -544,6 +550,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
 				rv.MarkAllDirty()
 			} else {
+				log.Printf("[scroll] FrameView.ScrollBy(dx=%d, dy=%d) scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
+					-int(ev.ScrollX*40), -int(ev.ScrollY*40),
+					h.frameView.ScrollY(), h.frameView.MaxScrollY(),
+					h.frameView.ContentHeight(), h.frameView.Height())
 				h.frameView.ScrollBy(-int(ev.ScrollX*40), -int(ev.ScrollY*40))
 			}
 

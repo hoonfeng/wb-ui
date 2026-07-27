@@ -85,6 +85,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set viewport to match the requested window size BEFORE first layout,
+	// otherwise the FrameView defaults to 1280x800 (set in NewFrame).
+	wv.Resize(*width, *height)
 	wv.EnsureLayout()
 
 	// Dump render tree after layout
