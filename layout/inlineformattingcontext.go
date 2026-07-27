@@ -282,7 +282,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 			// Compute inline child's content width from text segments.
 			// Without this, cldW=0 and subsequent text on same line overlaps.
-			if cldG.BorderBoxWidth() <= 0 {
+			if cldG.ContentWidth() <= 0 {
 				if cw := computeInlineContentWidth(cld, state); cw > 0 {
 					cldG.SetContentWidth(cw)
 				}
