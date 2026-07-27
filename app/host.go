@@ -370,12 +370,6 @@ func (h *Host) SetIMECompositionPos(cssX, cssY float64) {
 // Each iteration: layouts the WebView, paints onto the GPU surface, presents,
 // then processes input events (resize / scroll / mouse click / IME).
 func (h *Host) Run() {
-	gpuSurf := h.win.GPUSurface()
-	if gpuSurf == nil {
-		fmt.Println("app: GPU surface is nil")
-		return
-	}
-
 	// Set up the keyframes lookup bridge so the rendering package can find
 	// @keyframes rules stored in the style resolver.
 	if mf := h.wv.MainFrame(); mf != nil {
@@ -399,6 +393,14 @@ func (h *Host) Run() {
 	h.frameView = frameView
 
 	for !h.win.ShouldClose() {
+		// Fetch the GPU surface fresh each frame: resize callbacks release
+		// and recreate the surface, so the cached pointer would be dangling.
+		gpuSurf := h.win.GPUSurface()
+		if gpuSurf == nil {
+			h.processEvents(nil)
+			h.processEventLoop()
+			continue
+		}
 		gpuCanvas := graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
 
 		h.wv.EnsureLayout()
