@@ -239,11 +239,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 
 						if needsV || needsH {
 
-							// Modern flat colors for dark theme.
-							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 10}  // barely visible track
-							thumbCol := graphics.Color{R: 255, G: 255, B: 255, A: 38}  // ~15% white
-							thumbHoverCol := graphics.Color{R: 255, G: 255, B: 255, A: 64} // ~25% white
-							arrowCol := graphics.Color{R: 255, G: 255, B: 255, A: 76}   // ~30% white arrow
+							// Opaque light gray scrollbar colors.
+							trackCol := graphics.Color{R: 240, G: 240, B: 240, A: 255}   // #F0F0F0 track
+							thumbCol := graphics.Color{R: 192, G: 192, B: 192, A: 255}   // #C0C0C0 thumb
+							thumbHoverCol := graphics.Color{R: 160, G: 160, B: 160, A: 255} // #A0A0A0 hover
+							arrowCol := graphics.Color{R: 128, G: 128, B: 128, A: 255}   // #808080 arrow
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)
@@ -265,7 +265,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								}
 
 								// Track background.
-								info.canvas.FillRoundRect(vx, vy, scrollW, vh, 3, trackCol)
+								info.canvas.FillRoundRect(vx, vy, scrollW, vh, 6, trackCol)
 
 								// Up arrow: small triangle, no button background.
 								upBtnY := vy
@@ -295,7 +295,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									tCol := thumbCol
 									if isHover { tCol = thumbHoverCol }
 
-									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, thumbLen, 3, tCol)
+									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, thumbLen, 4, tCol)
 								}
 							}
 							endV:
@@ -313,7 +313,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								}
 
 								// Track background.
-								info.canvas.FillRoundRect(hx, hy, hw, scrollW, 3, trackCol)
+								info.canvas.FillRoundRect(hx, hy, hw, scrollW, 6, trackCol)
 
 								// Left arrow.
 								ltBtnX := hx
@@ -341,7 +341,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									tCol := thumbCol
 									if isHover { tCol = thumbHoverCol }
 
-									info.canvas.FillRoundRect(thumbX, hy+2, thumbLen, scrollW-4, 3, tCol)
+									info.canvas.FillRoundRect(thumbX, hy+2, thumbLen, scrollW-4, 4, tCol)
 								}
 							}
 							endH:
