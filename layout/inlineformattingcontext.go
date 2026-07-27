@@ -200,20 +200,19 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
 			cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
-			childCtx := contextFor(cld, state)
-			childCtx.Layout(cld, state)
 
-			// If the inline-level element has a definite CSS width/height, ensure
-			// the geometry reflects it. This is critical for replaced elements
-			// (input, select, img) whose layout box has no children and thus may
-			// not set content width/height during context.Layout().
-			//
-			// Compute border/padding for inline-level boxes so box-sizing:border-box
-			// can correctly deduct them from CSS width/height.
+			// Compute border/padding BEFORE the child's Layout so the child's
+			// formatting context (e.g. BFC.Layout for inline-block) sees the
+			// correct ContentBoxLeft/ContentBoxTop. Without this, padding/border
+			// are treated as zero and text inside the child gets positioned at
+			// the child's border-box top-left instead of its content-box origin.
 			fs := fontSizeOf(cld)
 			_, padding, border := computeBoxModelForBox(cld, contentWidth, fs)
 			cldG.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 			cldG.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+
+			// Set CSS width if definite BEFORE Layout so box-sizing:border-box
+			// correctly limits the content width used by the child's Layout.
 			if cldG.ContentWidth() <= 0 {
 				cs := cld.Style()
 				if cs != nil {
@@ -227,32 +226,34 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						}
 					}
 				}
-				// Fallback: for replaced input/button elements without explicit CSS
-				// width, derive width from the HTML value attribute text.
-				if cldG.ContentWidth() <= 0 && cld.IsReplaced() {
-					if el := cld.Element(); el != nil && el.NodeName() == "INPUT" {
-						val := el.GetAttribute("value")
-						if val == "" {
-							// Default labels for submit/reset if no value given.
-							switch el.GetAttribute("type") {
-							case "submit":
-								val = "Submit"
-							case "reset":
-								val = "Reset"
-							case "button":
-								val = "Button"
-							}
+			}
+
+			childCtx := contextFor(cld, state)
+			childCtx.Layout(cld, state)
+
+			// Fallback: for replaced input/button elements without explicit CSS
+			// width, derive width from the HTML value attribute text.
+			if cldG.ContentWidth() <= 0 && cld.IsReplaced() {
+				if el := cld.Element(); el != nil && el.NodeName() == "INPUT" {
+					val := el.GetAttribute("value")
+					if val == "" {
+						switch el.GetAttribute("type") {
+						case "submit":
+							val = "Submit"
+						case "reset":
+							val = "Reset"
+						case "button":
+							val = "Button"
 						}
-						if val != "" {
-							textW := measureText(cld, val)
-							if textW > 0 {
-								cldG.SetContentWidth(textW)
-								// Also set content height if still 0, using line height.
-								if cldG.ContentHeight() <= 0 {
-									lineH := fontLineGap(cld)
-									if lineH <= 0 { lineH = fs * 1.2 }
-									cldG.SetContentHeight(lineH)
-								}
+					}
+					if val != "" {
+						textW := measureText(cld, val)
+						if textW > 0 {
+							cldG.SetContentWidth(textW)
+							if cldG.ContentHeight() <= 0 {
+								lineH := fontLineGap(cld)
+								if lineH <= 0 { lineH = fs * 1.2 }
+								cldG.SetContentHeight(lineH)
 							}
 						}
 					}
