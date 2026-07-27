@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -102,16 +103,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	f, _ := os.Create("resize_dump_log.txt")
+	if f != nil {
+		defer f.Close()
+		if rv2 := wv.RenderView(); rv2 != nil {
+			fmt.Fprintf(f, "=== RENDER TREE (start) ===\n")
+			dumpROTo(f, rv2, 0)
+		}
+	}
+
 	fmt.Println("Window opened. Close the window to exit.\n\n=== RESIZE DUMP ACTIVE ===\nMaximize the window to trigger re-layout dump.")
 	app.DumpRTCallback = func(rv *rendering.RenderView) {
-		fmt.Println("\n=== RENDER TREE (after resize) ===")
-		dumpRO(rv, 0)
+		if f != nil {
+			fmt.Fprintf(f, "\n=== RENDER TREE (after resize viewport=%dx%d) ===\n", *width, *height)
+			dumpROTo(f, rv, 0)
+			f.Sync()
+		}
 	}
 	host.Run()
 	fmt.Println("Done.")
 }
 
 func dumpRO(ro rendering.RenderObject, depth int) {
+	dumpROTo(nil, ro, depth)
+}
+
+func dumpROTo(wrt io.Writer, ro rendering.RenderObject, depth int) {
+	if wrt == nil {
+		wrt = os.Stdout
+	}
 	if ro == nil {
 		return
 	}
@@ -120,12 +140,12 @@ func dumpRO(ro rendering.RenderObject, depth int) {
 		pad += "  "
 	}
 	name := ro.RenderName()
-	var x, y, w, h float64
+	var xx, yy, ww, hh float64
 	if lb := ro.LayoutBox(); lb != nil {
 		if rv := ro.View(); rv != nil {
 			if ls := rv.LayoutState(); ls != nil {
 				g := ls.GeometryForBox(lb)
-				x, y, w, h = g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
+				xx, yy, ww, hh = g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
 			}
 		}
 	}
@@ -133,9 +153,9 @@ func dumpRO(ro rendering.RenderObject, depth int) {
 	if cs := ro.Style(); cs != nil {
 		bg = fmt.Sprintf(" bg=#%02x%02x%02x", cs.BackgroundColor.R, cs.BackgroundColor.G, cs.BackgroundColor.B)
 	}
-	fmt.Printf("%s%s (%.0f,%.0f) %.0fx%.0f%s\n", pad, name, x, y, w, h, bg)
+	fmt.Fprintf(wrt, "%s%s (%.0f,%.0f) %.0fx%.0f%s\n", pad, name, xx, yy, ww, hh, bg)
 	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
-		dumpRO(c, depth+1)
+		dumpROTo(wrt, c, depth+1)
 	}
 }
 

@@ -512,6 +512,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			if DumpRTCallback != nil && rv != nil {
 				DumpRTCallback(rv)
 			}
+			// Also dump on the first frame after resize: compare scroll and content sizes
+			if rv != nil && rv.LayoutState() != nil {
+				lb := rv.LayoutBox()
+				if lb != nil {
+					log.Printf("[resize-diag] viewport=%dx%d layoutRoot=(%.0f,%.0f %.0fx%.0f)",
+						h.win.Width(), h.win.Height(),
+						rv.LayoutState().GeometryForBox(lb).ContentBoxLeft(),
+						rv.LayoutState().GeometryForBox(lb).ContentBoxTop(),
+						rv.LayoutState().GeometryForBox(lb).ContentWidth(),
+						rv.LayoutState().GeometryForBox(lb).ContentHeight())
+				}
+			}
 		case window.EventScroll:
 			if rv == nil {
 				break
