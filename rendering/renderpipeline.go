@@ -180,14 +180,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	if clipBox != nil && info != nil && info.canvas != nil {
 		info.canvas.Save()
 		pb := clipBox.PaddingBoxRect()
-		if st := clipBox.Style(); st != nil && st.TextOverflow == style.TextOverflowEllipsis {
-			// text-overflow:ellipsis clips to content box (horizontally)
-			// so overflowing text is hidden before "..." is painted.
-			cb := clipBox.ContentBoxRect()
-			info.canvas.Clip(graphics.Rect{X: cb.X, Y: pb.Y, Width: cb.Width, Height: pb.Height})
-		} else {
-			info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
-		}
+		info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
 		needsClipRestore = true
 	}
 

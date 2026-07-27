@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
@@ -52,6 +53,39 @@ func asRenderBox(o RenderObject) *RenderBox {
 // same 8-bit RGBA layout, so this is a field-for-field copy.
 func toGraphicsColor(c style.Color) graphics.Color {
 	return graphics.Color{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
+// findTextOverflowAncestor walks up the render tree from the given RenderObject
+// to find the nearest ancestor with text-overflow:ellipsis. Returns its content
+// box rect and the ellipsis width, or (nil, 0) if none found.
+func findTextOverflowAncestor(ro RenderObject) (cb *layout.LayoutRect, ellipsisW float64) {
+	for p := ro.Parent(); p != nil; p = p.Parent() {
+		st := p.Style()
+		if st == nil {
+			continue
+		}
+		if st.TextOverflow != style.TextOverflowEllipsis {
+			continue
+		}
+		// Must also have overflow:hidden/auto/scroll (inheriting text-overflow
+		// alone doesn't make an element the truncation container).
+		if st.OverflowX != style.OverflowHidden &&
+			st.OverflowX != style.OverflowAuto &&
+			st.OverflowX != style.OverflowScroll {
+			continue
+		}
+		if box := asRenderBox(p); box != nil {
+			cbr := box.ContentBoxRect()
+			font := toGraphicsFont(st)
+			ew := graphics.MeasureText(font, "...")
+			if ew <= 0 {
+				ew = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
+			}
+			tmp := cbr
+			return &tmp, ew
+		}
+	}
+	return nil, 0
 }
 
 // BoxGeometry returns the border-box position and size of a render object, or
@@ -400,6 +434,12 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
 		}
 	}
+	
+	// text-overflow:ellipsis truncation: find ancestor with this property.
+	toCB, toEllipsisW := findTextOverflowAncestor(text)
+	if toCB != nil {
+		println("DEBUG text-overflow: text=", content, " cb.X=", int(toCB.X), " cb.W=", int(toCB.Width), " ew=", int(toEllipsisW), " segX=", int(segments[0].X))
+	}
 
 	for _, seg := range segments {
 		end := seg.Start + seg.Len
@@ -410,6 +450,36 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			continue
 		}
 		baseline := seg.Y + ascent
+
+		// text-overflow:ellipsis — clip this segment to the content box minus ellipsis width.
+		if toCB != nil && seg.X+seg.Width > toCB.X+toCB.Width-toEllipsisW && seg.X < toCB.X+toCB.Width {
+			maxSegRight := toCB.X + toCB.Width - toEllipsisW
+			if seg.X >= maxSegRight {
+				// Entire segment is beyond the visible area; skip it.
+				continue
+			}
+			// Find how many characters fit within [seg.X, maxSegRight).
+			subRunes := runes[seg.Start:end]
+			visibleW := 0.0
+			truncateAt := 0
+			for i, r := range subRunes {
+				rw := graphics.MeasureText(font, string(r))
+				if visibleW+rw > maxSegRight-seg.X {
+					break
+				}
+				visibleW += rw
+				truncateAt = i + 1
+			}
+			if truncateAt > 0 {
+				visibleText := string(subRunes[:truncateAt])
+				sub := collapseWhitespace(visibleText)
+				if sub != "" {
+					info.canvas.DrawText(seg.X, baseline, sub, font, col)
+					paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
+				}
+			}
+			continue
+		}
 
 		// Determine selected range within this segment for inverted-color rendering.
 		selFrom, selTo, hasSel := -1, -1, false
