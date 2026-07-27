@@ -81,19 +81,24 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	collapseTopWithParent := !establishesBFC && g.BorderTop() == 0 && g.PaddingTop() == 0
 	firstInFlow := true
 
-	fmt.Fprintf(diagFloats, "> layoutBlockChildren: box=%s contentX=%.0f contentY=%.0f contentWidth=%.0f childCount=%d\n",
+		fmt.Fprintf(diagFloats, "> layoutBlockChildren: box=%s contentX=%.0f contentY=%.0f contentWidth=%.0f childCount=%d\n",
 		elementName(box), contentX, contentY, contentWidth, len(box.Children()))
 
 	var deferredAbsolutes []*ElementBox
 
 	for _, child := range box.Children() {
 		if !child.IsVisible() {
+			fmt.Fprintf(diagFloats, "  !invisible child=%s\n", elementNameOf(child))
 			continue
 		}
 		childEb, childIsEb := child.(*ElementBox)
 		if !childIsEb {
+			fmt.Fprintf(diagFloats, "  !notEb child=%T\n", child)
 			continue
 		}
+		childCs := childEb.Style()
+		fmt.Fprintf(diagFloats, "  -- child=%s float=%q width=%v display=%d\n",
+			elementName(childEb), childCs.Float, childCs.Width, childCs.Display)
 		if child.IsFloated() {
 			layoutFloatedChild(childEb, contentX, contentY, contentWidth, fc, state)
 			continue
@@ -420,5 +425,13 @@ func elementName(box *ElementBox) string {
 	el := box.Element()
 	if el == nil { return "anonymous" }
 	return fmt.Sprintf("%v", el)
+}
+
+func elementNameOf(box Box) string {
+	if box == nil { return "nil" }
+	if eb, ok := box.(*ElementBox); ok {
+		return elementName(eb)
+	}
+	return fmt.Sprintf("%T", box)
 }
 
