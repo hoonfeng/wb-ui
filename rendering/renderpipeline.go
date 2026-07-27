@@ -226,7 +226,19 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 					if ellipsisW <= 0 {
 						ellipsisW = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
 					}
-					ellipsisX := pb.X + pb.Width - ellipsisW
+					// Place ellipsis immediately after the last visible text
+					// segment's right edge, matching browser behavior where "..." 
+					// follows the last visible character rather than being fixed
+					// at the padding-box right edge.
+					lastSegRight := findLastTextSegmentRight(root)
+					ellipsisX := lastSegRight
+					if ellipsisX < pb.X {
+						ellipsisX = pb.X
+					}
+					if ellipsisX+ellipsisW > pb.X+pb.Width {
+						cb := box.ContentBoxRect()
+						ellipsisX = cb.X + cb.Width - ellipsisW
+					}
 					if ellipsisX < pb.X {
 						ellipsisX = pb.X
 					}
@@ -484,4 +496,59 @@ func walkRenderTextForBaseline(ro RenderObject) float64 {
 		}
 	}
 	return 0
+}
+
+// findLastTextSegmentRight walks the render subtree and returns the rightmost
+// X coordinate of the last text segment found. Returns 0 if no text exists.
+// Used by text-overflow:ellipsis to position "..." immediately after the last
+// visible text, matching browser behavior.
+func findLastTextSegmentRight(ro RenderObject) float64 {
+	if ro == nil {
+		return 0
+	}
+	if rt, ok := ro.(*RenderText); ok {
+		segs := rt.Segments()
+		if len(segs) > 0 {
+			last := segs[len(segs)-1]
+			return last.X + last.Width
+		}
+	}
+	var right float64
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		if r := findLastTextSegmentRight(c); r > right {
+			right = r
+		}
+	}
+	return right
+}
+
+// findLastTextSegmentRightBounded is like findLastTextSegmentRight but only
+// considers segments whose X falls within [boundLeft, boundRight). Pass
+// boundLeft=boundRight=0 to skip bounds checking.
+func findLastTextSegmentRightBounded(ro RenderObject, boundLeft, boundRight float64) float64 {
+	if ro == nil {
+		return 0
+	}
+	if rt, ok := ro.(*RenderText); ok {
+		segs := rt.Segments()
+		if len(segs) > 0 {
+			for i := len(segs) - 1; i >= 0; i-- {
+				seg := segs[i]
+				if boundLeft == 0 && boundRight == 0 {
+					return seg.X + seg.Width
+				}
+				if seg.X >= boundLeft && seg.X < boundRight {
+					return seg.X + seg.Width
+				}
+			}
+			return 0
+		}
+	}
+	var right float64
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		if r := findLastTextSegmentRightBounded(c, boundLeft, boundRight); r > right {
+			right = r
+		}
+	}
+	return right
 }
