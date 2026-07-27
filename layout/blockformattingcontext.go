@@ -86,19 +86,19 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	var deferredAbsolutes []*ElementBox
 
-	for _, child := range box.Children() {
+	for i, child := range box.Children() {
 		if !child.IsVisible() {
-			fmt.Fprintf(diagFloats, "  !invisible child=%s\n", elementNameOf(child))
+			fmt.Fprintf(diagFloats, "  [!INVIS i=%d child=%s type=%T]\n", i, elementNameOf(child), child)
 			continue
 		}
 		childEb, childIsEb := child.(*ElementBox)
 		if !childIsEb {
-			fmt.Fprintf(diagFloats, "  !notEb child=%T\n", child)
+			fmt.Fprintf(diagFloats, "  [!NOTEB i=%d child=%T]\n", i, child)
 			continue
 		}
 		childCs := childEb.Style()
-		fmt.Fprintf(diagFloats, "  -- child=%s float=%q width=%v display=%d\n",
-			elementName(childEb), childCs.Float, childCs.Width, childCs.Display)
+		fmt.Fprintf(diagFloats, "  [i=%d] child=%s float=%q width=%v display=%d style=%p\n",
+			i, elementName(childEb), childCs.Float, childCs.Width, childCs.Display, childCs)
 		if child.IsFloated() {
 			layoutFloatedChild(childEb, contentX, contentY, contentWidth, fc, state)
 			continue
