@@ -115,7 +115,8 @@ func main() {
 	fmt.Println("Window opened. Close the window to exit.\n\n=== RESIZE DUMP ACTIVE ===\nMaximize the window to trigger re-layout dump.")
 	app.DumpRTCallback = func(rv *rendering.RenderView) {
 		if f != nil {
-			fmt.Fprintf(f, "\n=== RENDER TREE (after resize viewport=%dx%d) ===\n", *width, *height)
+			fmt.Fprintf(f, "\n=== RENDER TREE (after resize) viewport=%.0fx%.0f ===\n",
+				rv.ViewWidth(), rv.ViewHeight())
 			dumpROTo(f, rv, 0)
 			f.Sync()
 		}

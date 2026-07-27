@@ -75,6 +75,10 @@ type Host struct {
 	// the animation clock (AnimationTime) each frame.
 	animStart time.Time
 
+	// needsResizeDump is set true on EventResize, cleared after DumpRTCallback fires
+	// once on the re-laid-out tree. Prevents dumping every frame.
+	needsResizeDump bool
+
 	// Selection state. Text selection is tracked as CSS-pixel coordinates
 	// (not RenderText pointers) so it survives render tree rebuilds. Each
 	// frame, updateSelection converts these coordinates into a
@@ -412,6 +416,10 @@ func (h *Host) Run() {
 
 		h.wv.EnsureLayout()
 		rv := h.wv.RenderView()
+		if DumpRTCallback != nil && rv != nil && h.needsResizeDump {
+			DumpRTCallback(rv)
+			h.needsResizeDump = false
+		}
 		if rv != nil {
 			// Drive CSS animations: update the global animation clock and
 			// apply animated opacity to elements' ComputedStyle before paint.
@@ -509,9 +517,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		switch ev.Type {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())
-			if DumpRTCallback != nil && rv != nil {
-				DumpRTCallback(rv)
-			}
+			h.needsResizeDump = true
 			// Also dump on the first frame after resize: compare scroll and content sizes
 			if rv != nil && rv.LayoutState() != nil {
 				lb := rv.LayoutBox()
