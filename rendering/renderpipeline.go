@@ -223,8 +223,9 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			if needsScroll {
 				pb := box.PaddingBoxRect()
 				// Modern flat scrollbar: 12px wide, subtle arrow buttons, rounded rect thumb.
-				const scrollW = 12.0    // total scrollbar width
-				const arrowSize = 12.0  // arrow button height/width
+const scrollW = 12.0    // total scrollbar width
+						const arrowSize = 12.0  // arrow button height/width
+						const arrowGap = 5.0   // gap between arrow buttons and thumb track
 
 				if pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
@@ -243,6 +244,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
 							thumbCol := graphics.Color{R: 192, G: 192, B: 192, A: 255}   // #C0C0C0 thumb
 							thumbHoverCol := graphics.Color{R: 160, G: 160, B: 160, A: 255} // #A0A0A0 hover
+													arrowBtnCol := graphics.Color{R: 220, G: 220, B: 220, A: 255} // button bg
 							arrowCol := graphics.Color{R: 128, G: 128, B: 128, A: 255}   // #808080 arrow
 
 							sx, sy := float64(0), float64(0)
@@ -252,55 +254,57 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 
-							// ── Vertical scrollbar ──
-							if needsV {
-								vx := pb.X + pb.Width - scrollW
-								vy := pb.Y
-								vh := pb.Height
-								if needsH {
-									vh -= scrollW
-								}
-								if vh <= arrowSize*2 {
-									goto endV
-								}
-
-								// Track background.
-								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
-
-								// Up arrow: small triangle, no button background.
-								upBtnY := vy
-								acx := vx + scrollW/2
-								acy := upBtnY + arrowSize/2
-								info.canvas.FillTriangle(acx, acy-3, acx-4, acy+3, acx+4, acy+3, arrowCol)
-
-								// Down arrow.
-								dnBtnY := vy + vh - arrowSize
-								dcy := dnBtnY + arrowSize/2
-								info.canvas.FillTriangle(acx, dcy+3, acx-4, dcy-3, acx+4, dcy-3, arrowCol)
-
-								// Thumb (rounded rect, not fully pill).
-								if totalH > contentH {
-									trackH := vh - arrowSize*2
-									thumbLen := trackH * contentH / totalH
-									if thumbLen < 18 { thumbLen = 18 }
-									if thumbLen > trackH-4 { thumbLen = trackH - 4 }
-									maxSy := totalH - contentH
-									if maxSy <= 0 { maxSy = 1 }
-									syRatio := sy / maxSy
-									thumbTrackSpace := trackH - thumbLen
-									thumbY := vy + arrowSize + syRatio*thumbTrackSpace
-
-									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
-										cursorY >= thumbY && cursorY <= thumbY+thumbLen
-									tCol := thumbCol
-									if isHover { tCol = thumbHoverCol }
-
-									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, thumbLen, 4, tCol)
-								}
+// ── Vertical scrollbar ──
+						if needsV {
+							vx := pb.X + pb.Width - scrollW
+							vy := pb.Y
+							vh := pb.Height
+							if needsH {
+								vh -= scrollW
 							}
-							endV:
+							if vh <= arrowSize*2+arrowGap*2 {
+								goto endV
+							}
 
-							// ── Horizontal scrollbar ──
+							// Track background.
+							info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+
+							// Up arrow button: rounded rect background + triangle.
+							upBtnY := vy
+							info.canvas.FillRoundRect(vx+1, upBtnY+1, scrollW-2, arrowSize-2, 3, arrowBtnCol)
+							acx := vx + scrollW/2
+							acy := upBtnY + arrowSize/2
+							info.canvas.FillTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, arrowCol)
+
+							// Down arrow button.
+							dnBtnY := vy + vh - arrowSize
+							info.canvas.FillRoundRect(vx+1, dnBtnY+1, scrollW-2, arrowSize-2, 3, arrowBtnCol)
+							dcy := dnBtnY + arrowSize/2
+							info.canvas.FillTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, arrowCol)
+
+							// Thumb (rounded rect, pill shape).
+							if totalH > contentH {
+								trackH := vh - arrowSize*2 - arrowGap*2
+								thumbLen := trackH * contentH / totalH
+								if thumbLen < 18 { thumbLen = 18 }
+								if thumbLen > trackH-4 { thumbLen = trackH - 4 }
+								maxSy := totalH - contentH
+								if maxSy <= 0 { maxSy = 1 }
+								syRatio := sy / maxSy
+								thumbTrackSpace := trackH - thumbLen
+								thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
+
+								isHover := cursorX >= vx && cursorX <= vx+scrollW &&
+									cursorY >= thumbY && cursorY <= thumbY+thumbLen
+								tCol := thumbCol
+								if isHover { tCol = thumbHoverCol }
+
+								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, thumbLen, 5, tCol)
+							}
+						}
+						endV:
+
+													// ── Horizontal scrollbar ──
 							if needsH {
 								hx := pb.X
 								hy := pb.Y + pb.Height - scrollW
@@ -308,25 +312,27 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV {
 									hw -= scrollW
 								}
-								if hw <= arrowSize*2 {
+								if hw <= arrowSize*2+arrowGap*2 {
 									goto endH
 								}
 
 								// Track background.
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 
-								// Left arrow.
+								// Left arrow button.
 								ltBtnX := hx
 								aCy := hy + scrollW/2
-								info.canvas.FillTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-4, aCy-4, ltBtnX+arrowSize-4, aCy+4, arrowCol)
+								info.canvas.FillRoundRect(ltBtnX+1, hy+1, arrowSize-2, scrollW-2, 3, arrowBtnCol)
+								info.canvas.FillTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-4, aCy-3, ltBtnX+arrowSize-4, aCy+3, arrowCol)
 
-								// Right arrow.
+								// Right arrow button.
 								rtBtnX := hx + hw - arrowSize
-								info.canvas.FillTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+4, aCy-4, rtBtnX+4, aCy+4, arrowCol)
+								info.canvas.FillRoundRect(rtBtnX+1, hy+1, arrowSize-2, scrollW-2, 3, arrowBtnCol)
+								info.canvas.FillTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+4, aCy-3, rtBtnX+4, aCy+3, arrowCol)
 
 								// Thumb.
 								if totalW > contentW {
-									trackW := hw - arrowSize*2
+									trackW := hw - arrowSize*2 - arrowGap*2
 									thumbLen := trackW * contentW / totalW
 									if thumbLen < 18 { thumbLen = 18 }
 									if thumbLen > trackW-4 { thumbLen = trackW - 4 }
@@ -334,14 +340,14 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									if maxSx <= 0 { maxSx = 1 }
 									sxRatio := sx / maxSx
 									thumbTrackSpace := trackW - thumbLen
-									thumbX := hx + arrowSize + sxRatio*thumbTrackSpace
+									thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
 
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+thumbLen
 									tCol := thumbCol
 									if isHover { tCol = thumbHoverCol }
 
-									info.canvas.FillRoundRect(thumbX, hy+2, thumbLen, scrollW-4, 4, tCol)
+									info.canvas.FillRoundRect(thumbX, hy+2, thumbLen, scrollW-4, 5, tCol)
 								}
 							}
 							endH:
