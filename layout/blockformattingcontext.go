@@ -44,6 +44,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	establishesBFC := box.EstablishesBlockFormattingContext()
 	var fc *floatContext
 	if establishesBFC {
+		// Only BFC-establishing boxes create their own float context.
+		// Non-BFC boxes inherit the parent's FC, so floats placed by
+		// siblings are visible to inline content for text wrapping.
 		fc = newFloatContext(contentX, contentY, contentWidth)
 		prev := state.setFloatContext(fc)
 		defer state.restoreFloatContext(prev)
@@ -297,13 +300,26 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 	ch.SetContentWidth(borderBox - border.Horizontal() - padding.Horizontal())
 
 	isLeft := cs.Float != "right"
-	x, y := fc.placeFloat(child, isLeft, borderBox, 0)
-	// Adjust for coordinate offset between FC origin and container content box.
-	// When using an inherited FC (non-BFC container), placeFloat returns positions
-	// relative to the BFC root's content box. We shift by the difference between
-	// the container's content box and the FC origin so positions become container-relative.
+	// Use container's FC-relative y as startY so placeFloat's collision
+	// detection correctly sees sibling floats at the same y level.
+	fcY := contentY - fc.originY
+	x, y := fc.placeFloat(child, isLeft, borderBox, 0, fcY)
+	// Adjust x for coordinate offset between FC origin and container content box.
+	// y from placeFloat is already FC-relative (starts at fcY). Convert to
+	// absolute by adding fc.originY so it matches the page coordinate system.
 	x += contentX - fc.originX
-	y += contentY - fc.originY
+	y += fc.originY
+
+	// Clamp float position to container content area when using inherited FC.
+	// Without a BFC, the inherited FC may have wider bounds (viewport width)
+	// causing floats to escape the container. This keeps them visually contained.
+	rightEdge := contentX + contentWidth
+	if x+borderBox > rightEdge && rightEdge > contentX {
+		x = rightEdge - borderBox
+	}
+	if x < contentX {
+		x = contentX
+	}
 	ch.SetTopLeft(y, x)
 
 	childCtx := contextFor(child, state)
@@ -313,6 +329,14 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 		if fc.floats[i].box == child {
 			fc.floats[i].h = ch.BorderBoxHeight()
 			fc.floats[i].w = borderBox
+			// Update the FC-relative y to match the actual rendered position.
+			// placeFloat starts at fc.originY, but the rendered y after the
+			// contentY - fc.originY adjustment may differ. Keeping the FC y
+			// correct ensures IFC queries (contentEdgesAt) find floats at
+			// the right vertical position.
+			// NOTE: FC x is NOT updated here because placeFloat's collision
+			// detection uses FC-relative x (before contentX adjustment).
+			fc.floats[i].y = ch.Top() - fc.originY
 			break
 		}
 	}

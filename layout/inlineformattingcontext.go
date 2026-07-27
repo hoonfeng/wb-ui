@@ -85,7 +85,19 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// When floats intrude at this Y, the line is narrowed accordingly.
 	availableLineWidth := func(lineY float64) (lineContentX, lineWidth float64) {
 		if fc != nil {
-			left, right := fc.contentEdgesAt(lineY)
+			// fcY is in FC-relative coordinates. Since lineY is absolute
+			// (contentY = g.ContentBoxTop() is absolute), convert to FC-relative.
+			fcY := lineY - fc.originY
+			left, right := fc.contentEdgesAt(fcY)
+			// Shift from FC-relative to container-relative coordinates.
+			// contentEdgesAt returns edges relative to fc.originX, but the
+			// container's content box starts at contentX. The offset between
+			// the two must be applied before clamping to the container bounds.
+			if fc.originX != contentX {
+				dx := contentX - fc.originX
+				left += dx
+				right += dx
+			}
 			if left < contentX {
 				left = contentX
 			}

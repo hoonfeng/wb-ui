@@ -51,9 +51,13 @@ func newFloatContext(originX, originY, contentWidth float64) *floatContext {
 // its side until it fits within the remaining content width, mirroring the CSS 2.1
 // left/right float placement rules (simplified: no negative margins, no clearance
 // collapsing). The float own width must already be computed by the caller.
-func (fc *floatContext) placeFloat(box *LayoutBox, left bool, width, height float64) (x, y float64) {
-	// Start at the top of the content area.
-	y = fc.originY
+// startY is the FC-relative y at which this float should be placed (typically the
+// container's contentY minus fc.originY). Using the correct startY ensures floats
+// from the same container share the same y level for proper horizontal stacking.
+func (fc *floatContext) placeFloat(box *LayoutBox, left bool, width, height, startY float64) (x, y float64) {
+	// Start at the given FC-relative y instead of fc.originY so that floats
+	// from the same container share the same y level for collision detection.
+	y = startY
 	for {
 		// Compute the available horizontal range at y for a float on the given side.
 		leftEdge, rightEdge := fc.contentEdgesAt(y)
