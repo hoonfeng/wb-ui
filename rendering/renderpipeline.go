@@ -265,7 +265,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								}
 
 								// Track background.
-								info.canvas.FillRoundRect(vx, vy, scrollW, vh, 2, trackCol)
+								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 
 								// Up arrow: small triangle, no button background.
 								upBtnY := vy
@@ -313,7 +313,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								}
 
 								// Track background.
-								info.canvas.FillRoundRect(hx, hy, hw, scrollW, 2, trackCol)
+								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 
 								// Left arrow.
 								ltBtnX := hx
@@ -350,7 +350,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							if needsV && needsH {
 								cx := pb.X + pb.Width - scrollW
 								cy := pb.Y + pb.Height - scrollW
-								info.canvas.FillRect(cx, cy, scrollW, scrollW, graphics.Color{R: 0, G: 0, B: 0, A: 0})
+								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)
 							}
 						}
 					}
