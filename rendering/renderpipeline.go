@@ -217,16 +217,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				goto restoreClip
 			}
 
-			// ── Scroll bars ──
+			// ── Scroll bars (classic Windows style) ──
 			needsScroll := (st.OverflowX == style.OverflowScroll || st.OverflowY == style.OverflowScroll ||
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
 			if needsScroll {
 				pb := box.PaddingBoxRect()
-				// Chrome/Edge modern thin scrollbar: 6px wide, pill-shaped 6px thumb.
-				const scrollW = 6.0    // track width
-				const thumbR = scrollW / 2 // 3px → fully rounded pill
+				// Classic Windows scrollbar: 17px wide, arrow buttons, pill thumb.
+				const scrollW = 17.0    // total scrollbar width
+				const arrowSize = 17.0  // arrow button height/width
 
-				if pb.Width > scrollW*3 && pb.Height > scrollW*3 {
+				if pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
 						cw, ch := info.rv.BoxContentSize(box)
 						totalW := cw
@@ -238,14 +238,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
-							isScroll := st.OverflowY == style.OverflowScroll || st.OverflowX == style.OverflowScroll
 
-							// Thumb colors — WebKit Adwaita dark theme alpha values:
-							//   default: alpha 0.2 (51/255), hover: alpha 0.4 (102/255)
-							thumbCol := graphics.Color{R: 255, G: 255, B: 255, A: 51}
-							thumbHoverCol := graphics.Color{R: 255, G: 255, B: 255, A: 102}
-							// Track background: for overflow:scroll always visible; for overflow:auto only on hover.
-							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 15} // rgba(255,255,255,0.06)
+							// Classic Windows scrollbar colors.
+							faceCol := graphics.Color{R: 240, G: 240, B: 240, A: 255}
+							highlightCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}
+							shadowCol := graphics.Color{R: 128, G: 128, B: 128, A: 128}
+							thumbCol := graphics.Color{R: 196, G: 196, B: 196, A: 255}
+							thumbHoverCol := graphics.Color{R: 180, G: 180, B: 180, A: 255}
+							arrowCol := graphics.Color{R: 80, G: 80, B: 80, A: 255}
+							trackCol := graphics.Color{R: 220, G: 220, B: 220, A: 255}
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)
@@ -254,6 +255,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 
+							// ── Vertical scrollbar ──
 							if needsV {
 								vx := pb.X + pb.Width - scrollW
 								vy := pb.Y
@@ -261,36 +263,66 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsH {
 									vh -= scrollW
 								}
-								// Track: always visible for overflow:scroll, only on hover for overflow:auto
-								if isScroll || (cursorX >= vx && cursorX <= vx+scrollW && cursorY >= vy && cursorY <= vy+vh) {
-									info.canvas.FillRoundRect(vx, vy, scrollW, vh, thumbR, trackCol)
+								if vh <= arrowSize*2 {
+									goto endV
 								}
-								// Thumb
-								if totalH > contentH && vh > 30 {
-									thumbLen := vh * contentH / totalH
-									if thumbLen < 18 {
-										thumbLen = 18
-									}
-									if thumbLen > vh-4 {
-										thumbLen = vh - 4
-									}
+
+								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+								info.canvas.FillRect(vx, vy, scrollW, 1, shadowCol)
+								info.canvas.FillRect(vx, vy+vh-1, scrollW, 1, highlightCol)
+
+								// Up arrow button.
+								upBtnY := vy
+								upHover := cursorX >= vx && cursorX <= vx+scrollW && cursorY >= upBtnY && cursorY <= upBtnY+arrowSize
+								upCol := faceCol
+								if upHover { upCol = thumbHoverCol }
+								info.canvas.FillRect(vx+2, upBtnY+2, scrollW-4, arrowSize-4, upCol)
+								info.canvas.FillRect(vx, upBtnY, scrollW, 1, highlightCol)
+								info.canvas.FillRect(vx, upBtnY, 1, arrowSize, highlightCol)
+								info.canvas.FillRect(vx, upBtnY+arrowSize-1, scrollW, 1, shadowCol)
+								info.canvas.FillRect(vx+scrollW-1, upBtnY, 1, arrowSize, shadowCol)
+								acx := vx + scrollW/2
+								acy := upBtnY + arrowSize/2
+								info.canvas.FillTriangle(acx, acy-4, acx-5, acy+4, acx+5, acy+4, arrowCol)
+
+								// Down arrow button.
+								dnBtnY := vy + vh - arrowSize
+								dnHover := cursorX >= vx && cursorX <= vx+scrollW && cursorY >= dnBtnY && cursorY <= dnBtnY+arrowSize
+								dnCol := faceCol
+								if dnHover { dnCol = thumbHoverCol }
+								info.canvas.FillRect(vx+2, dnBtnY+2, scrollW-4, arrowSize-4, dnCol)
+								info.canvas.FillRect(vx, dnBtnY, scrollW, 1, highlightCol)
+								info.canvas.FillRect(vx, dnBtnY, 1, arrowSize, highlightCol)
+								info.canvas.FillRect(vx, dnBtnY+arrowSize-1, scrollW, 1, shadowCol)
+								info.canvas.FillRect(vx+scrollW-1, dnBtnY, 1, arrowSize, shadowCol)
+								info.canvas.FillTriangle(acx, acy+4, acx-5, acy-4, acx+5, acy-4, arrowCol)
+
+								// Thumb (pill shape)
+								if totalH > contentH {
+									trackH := vh - arrowSize*2
+									thumbLen := trackH * contentH / totalH
+									if thumbLen < arrowSize { thumbLen = arrowSize }
+									if thumbLen > trackH-4 { thumbLen = trackH - 4 }
 									maxSy := totalH - contentH
-									if maxSy <= 0 {
-										maxSy = 1
-									}
+									if maxSy <= 0 { maxSy = 1 }
 									syRatio := sy / maxSy
-									thumbTrackSpace := vh - thumbLen
-									thumbY := vy + syRatio*thumbTrackSpace
+									thumbTrackSpace := trackH - thumbLen
+									thumbY := vy + arrowSize + syRatio*thumbTrackSpace
+
 									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
 										cursorY >= thumbY && cursorY <= thumbY+thumbLen
-									col := thumbCol
-									if isHover {
-										col = thumbHoverCol
-									}
-									info.canvas.FillRoundRect(vx, thumbY, scrollW, thumbLen, thumbR, col)
+									tCol := thumbCol
+									if isHover { tCol = thumbHoverCol }
+
+									r := scrollW / 2
+									info.canvas.FillRoundRect(vx, thumbY, scrollW, thumbLen, r, tCol)
+									info.canvas.FillRect(vx, thumbY, 1, thumbLen, graphics.Color{R: 255, G: 255, B: 255, A: 60})
+									info.canvas.FillRect(vx+scrollW-2, thumbY, 1, thumbLen, graphics.Color{R: 0, G: 0, B: 0, A: 30})
 								}
 							}
+							endV:
 
+							// ── Horizontal scrollbar ──
 							if needsH {
 								hx := pb.X
 								hy := pb.Y + pb.Height - scrollW
@@ -298,41 +330,71 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV {
 									hw -= scrollW
 								}
-								// Track
-								if isScroll || (cursorY >= hy && cursorY <= hy+scrollW && cursorX >= hx && cursorX <= hx+hw) {
-									info.canvas.FillRoundRect(hx, hy, hw, scrollW, thumbR, trackCol)
+								if hw <= arrowSize*2 {
+									goto endH
 								}
+
+								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
+								info.canvas.FillRect(hx, hy, 1, scrollW, shadowCol)
+								info.canvas.FillRect(hx+hw-1, hy, 1, scrollW, highlightCol)
+
+								// Left arrow button.
+								ltBtnX := hx
+								ltHover := cursorY >= hy && cursorY <= hy+scrollW && cursorX >= ltBtnX && cursorX <= ltBtnX+arrowSize
+								ltCol := faceCol
+								if ltHover { ltCol = thumbHoverCol }
+								info.canvas.FillRect(ltBtnX+2, hy+2, arrowSize-4, scrollW-4, ltCol)
+								info.canvas.FillRect(ltBtnX, hy, arrowSize, 1, highlightCol)
+								info.canvas.FillRect(ltBtnX, hy, 1, scrollW, highlightCol)
+								info.canvas.FillRect(ltBtnX+arrowSize-1, hy, 1, scrollW, shadowCol)
+								info.canvas.FillRect(ltBtnX, hy+scrollW-1, arrowSize, 1, shadowCol)
+								aCy := hy + scrollW/2
+								info.canvas.FillTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-4, aCy-5, ltBtnX+arrowSize-4, aCy+5, arrowCol)
+
+								// Right arrow button.
+								rtBtnX := hx + hw - arrowSize
+								rtHover := cursorY >= hy && cursorY <= hy+scrollW && cursorX >= rtBtnX && cursorX <= rtBtnX+arrowSize
+								rtCol := faceCol
+								if rtHover { rtCol = thumbHoverCol }
+								info.canvas.FillRect(rtBtnX+2, hy+2, arrowSize-4, scrollW-4, rtCol)
+								info.canvas.FillRect(rtBtnX+arrowSize-1, hy, 1, scrollW, highlightCol)
+								info.canvas.FillRect(rtBtnX, hy, 1, scrollW, shadowCol)
+								info.canvas.FillRect(rtBtnX, hy+scrollW-1, arrowSize, 1, shadowCol)
+								info.canvas.FillRect(rtBtnX, hy, arrowSize, 1, highlightCol)
+								info.canvas.FillTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+4, aCy-5, rtBtnX+4, aCy+5, arrowCol)
+
 								// Thumb
-								if totalW > contentW && hw > 30 {
-									thumbLen := hw * contentW / totalW
-									if thumbLen < 18 {
-										thumbLen = 18
-									}
-									if thumbLen > hw-4 {
-										thumbLen = hw - 4
-									}
+								if totalW > contentW {
+									trackW := hw - arrowSize*2
+									thumbLen := trackW * contentW / totalW
+									if thumbLen < arrowSize { thumbLen = arrowSize }
+									if thumbLen > trackW-4 { thumbLen = trackW - 4 }
 									maxSx := totalW - contentW
-									if maxSx <= 0 {
-										maxSx = 1
-									}
+									if maxSx <= 0 { maxSx = 1 }
 									sxRatio := sx / maxSx
-									thumbTrackSpace := hw - thumbLen
-									thumbX := hx + sxRatio*thumbTrackSpace
+									thumbTrackSpace := trackW - thumbLen
+									thumbX := hx + arrowSize + sxRatio*thumbTrackSpace
+
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+thumbLen
-									col := thumbCol
-									if isHover {
-										col = thumbHoverCol
-									}
-									info.canvas.FillRoundRect(thumbX, hy, thumbLen, scrollW, thumbR, col)
+									tCol := thumbCol
+									if isHover { tCol = thumbHoverCol }
+
+									r := scrollW / 2
+									info.canvas.FillRoundRect(thumbX, hy, thumbLen, scrollW, r, tCol)
+									info.canvas.FillRect(thumbX, hy, thumbLen, 1, graphics.Color{R: 255, G: 255, B: 255, A: 60})
+									info.canvas.FillRect(thumbX, hy+scrollW-2, thumbLen, 1, graphics.Color{R: 0, G: 0, B: 0, A: 30})
 								}
 							}
+							endH:
 
-							// Corner: only fill for overflow:scroll (with track color)
-							if needsV && needsH && isScroll {
+							// Corner: fill where vertical and horizontal meet.
+							if needsV && needsH {
 								cx := pb.X + pb.Width - scrollW
 								cy := pb.Y + pb.Height - scrollW
-								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)
+								info.canvas.FillRect(cx, cy, scrollW, scrollW, faceCol)
+								info.canvas.FillRect(cx, cy, scrollW, 1, shadowCol)
+								info.canvas.FillRect(cx, cy, 1, scrollW, shadowCol)
 							}
 						}
 					}

@@ -584,10 +584,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					vh := pb.Height
 					_, ch := rv.BoxContentSize(h.scrollbarDragBox)
 					if ch > pb.Height {
-						scrollW := 6.0
-						trackH := vh - scrollW
+						const arrowSize = 17.0
+						trackH := vh - arrowSize*2
 						thumbH := trackH * pb.Height / ch
-						if thumbH < 18.0 { thumbH = 18.0 }
+						if thumbH < arrowSize { thumbH = arrowSize }
 						scale := (ch - pb.Height) / (trackH - thumbH)
 						newSy := h.scrollbarDragScroll + dy*scale
 						if newSy < 0 { newSy = 0 }
@@ -602,10 +602,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					hw := pb.Width
 					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
 					if cw > pb.Width {
-						scrollW := 6.0
-						trackW := hw - scrollW
+						const arrowSize = 17.0
+						trackW := hw - arrowSize*2
 						thumbW := trackW * pb.Width / cw
-						if thumbW < 18.0 { thumbW = 18.0 }
+						if thumbW < arrowSize { thumbW = arrowSize }
 						scale := (cw - pb.Width) / (trackW - thumbW)
 						newSx := h.scrollbarDragScroll + dx*scale
 						if newSx < 0 { newSx = 0 }
@@ -627,25 +627,97 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
-				// Check for scrollbar thumb drag start.
+				// Check for scrollbar interaction.
 				scrollHit := rendering.HitTestScrollbar(rv, cssX, cssY)
 				if scrollHit != nil && !scrollHit.IsCorner {
+					box := scrollHit.Box
+					// ── Thumb drag ──
 					if scrollHit.IsVThumb {
 						h.scrollbarDragging = true
-						h.scrollbarDragBox = scrollHit.Box
+						h.scrollbarDragBox = box
 						h.scrollbarDragAxis = true // vertical
-						_, sy := rv.BoxScrollOffset(scrollHit.Box)
+						_, sy := rv.BoxScrollOffset(box)
 						h.scrollbarDragStart = cssY
 						h.scrollbarDragScroll = sy
 						break
 					}
 					if scrollHit.IsHThumb {
 						h.scrollbarDragging = true
-						h.scrollbarDragBox = scrollHit.Box
+						h.scrollbarDragBox = box
 						h.scrollbarDragAxis = false // horizontal
-						sx, _ := rv.BoxScrollOffset(scrollHit.Box)
+						sx, _ := rv.BoxScrollOffset(box)
 						h.scrollbarDragStart = cssX
 						h.scrollbarDragScroll = sx
+						break
+					}
+					// ── Arrow buttons → line scroll ──
+					const lineStep = 16.0
+					if scrollHit.IsVUpArrow {
+						sx, sy := rv.BoxScrollOffset(box)
+						rv.SetBoxScrollOffset(box, sx, sy-lineStep)
+						break
+					}
+					if scrollHit.IsVDownArrow {
+						sx, sy := rv.BoxScrollOffset(box)
+						rv.SetBoxScrollOffset(box, sx, sy+lineStep)
+						break
+					}
+					if scrollHit.IsHLeftArrow {
+						sx, sy := rv.BoxScrollOffset(box)
+						rv.SetBoxScrollOffset(box, sx-lineStep, sy)
+						break
+					}
+					if scrollHit.IsHRightArrow {
+						sx, sy := rv.BoxScrollOffset(box)
+						rv.SetBoxScrollOffset(box, sx+lineStep, sy)
+						break
+					}
+					// ── Track click (non-thumb) → page scroll ──
+					if scrollHit.IsVTrack {
+						sx, sy := rv.BoxScrollOffset(box)
+						pb := box.PaddingBoxRect()
+						pageH := pb.Height
+						// Determine click position relative to thumb center.
+						_, ch := rv.BoxContentSize(box)
+						totalH := ch
+						contentH := pb.Height
+						trackH := pb.Height - 17.0*2 // arrowSize
+						thumbLen := trackH * contentH / totalH
+						if thumbLen < 17.0 { thumbLen = 17.0 }
+						if thumbLen > trackH-4 { thumbLen = trackH - 4 }
+						maxSy := totalH - contentH
+						if maxSy <= 0 { maxSy = 1 }
+						syRatio := sy / maxSy
+						thumbTrackSpace := trackH - thumbLen
+						thumbCenterY := pb.Y + 17.0 + syRatio*thumbTrackSpace + thumbLen/2
+						if cssY < thumbCenterY {
+							rv.SetBoxScrollOffset(box, sx, sy-pageH)
+						} else {
+							rv.SetBoxScrollOffset(box, sx, sy+pageH)
+						}
+						break
+					}
+					if scrollHit.IsHTrack {
+						sx, sy := rv.BoxScrollOffset(box)
+						pb := box.PaddingBoxRect()
+						pageW := pb.Width
+						cw, _ := rv.BoxContentSize(box)
+						totalW := cw
+						contentW := pb.Width
+						trackW := pb.Width - 17.0*2
+						thumbLen := trackW * contentW / totalW
+						if thumbLen < 17.0 { thumbLen = 17.0 }
+						if thumbLen > trackW-4 { thumbLen = trackW - 4 }
+						maxSx := totalW - contentW
+						if maxSx <= 0 { maxSx = 1 }
+						sxRatio := sx / maxSx
+						thumbTrackSpace := trackW - thumbLen
+						thumbCenterX := pb.X + 17.0 + sxRatio*thumbTrackSpace + thumbLen/2
+						if cssX < thumbCenterX {
+							rv.SetBoxScrollOffset(box, sx-pageW, sy)
+						} else {
+							rv.SetBoxScrollOffset(box, sx+pageW, sy)
+						}
 						break
 					}
 				}

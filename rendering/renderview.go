@@ -218,12 +218,16 @@ func walkRenderChildren(root RenderObject, fn func(RenderObject)) {
 
 // ScrollbarHit describes which scrollbar element was hit at a given point.
 type ScrollbarHit struct {
-	Box       *RenderBox
-	IsVThumb  bool // vertical thumb hit
-	IsVTrack  bool // vertical track (non-thumb area)
-	IsHThumb  bool // horizontal thumb hit
-	IsHTrack  bool // horizontal track (non-thumb area)
-	IsCorner  bool // corner overlap area
+	Box         *RenderBox
+	IsVThumb    bool // vertical thumb hit
+	IsVTrack    bool // vertical track (non-thumb, non-arrow area)
+	IsVUpArrow  bool // vertical up arrow button
+	IsVDownArrow bool // vertical down arrow button
+	IsHThumb    bool // horizontal thumb hit
+	IsHTrack    bool // horizontal track (non-thumb, non-arrow area)
+	IsHLeftArrow  bool // horizontal left arrow button
+	IsHRightArrow bool // horizontal right arrow button
+	IsCorner    bool // corner overlap area
 }
 
 // HitTestScrollbar checks whether (x,y) hits a scrollbar thumb or track
@@ -247,8 +251,9 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 	pb := scrollBox.PaddingBoxRect()
-	scrollW := 6.0
-	if pb.Width <= scrollW*3 || pb.Height <= scrollW*3 {
+	scrollW := 17.0
+	arrowSize := 17.0
+	if pb.Width <= scrollW*2 || pb.Height <= scrollW*2 {
 		return nil
 	}
 
@@ -281,19 +286,22 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
 	needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
-	// Vertical track rect
+	// Vertical scrollbar rect
 	vx := pb.X + pb.Width - scrollW
 	vy := pb.Y
 	vh := pb.Height
 	if needsH { vh -= scrollW }
 
-	// Horizontal track rect
+	// Horizontal scrollbar rect
 	hx := pb.X
 	hy := pb.Y + pb.Height - scrollW
 	hw := pb.Width
 	if needsV { hw -= scrollW }
 
-	// Is point on scrollbar corner?
+	// Get scroll offsets for thumb position calculations.
+	sx, sy := rv.BoxScrollOffset(scrollBox)
+
+	// Corner: check first so it takes priority over individual bar hits.
 	if needsV && needsH {
 		cx := pb.X + pb.Width - scrollW
 		cy := pb.Y + pb.Height - scrollW
@@ -302,21 +310,37 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		}
 	}
 
-	// Get scroll offsets for thumb position calculations.
-	sx, sy := rv.BoxScrollOffset(scrollBox)
-
-	// Is point on vertical scrollbar?
+	// ── Vertical scrollbar hit test ──
 	if needsV && x >= vx && x <= vx+scrollW && y >= vy && y <= vy+vh {
-		h := &ScrollbarHit{Box: scrollBox, IsVTrack: true}
-		if totalH > contentH && vh > 30 {
-			thumbLen := vh * contentH / totalH
-			if thumbLen < 18 { thumbLen = 18 }
-			if thumbLen > vh-4 { thumbLen = vh - 4 }
+		h := &ScrollbarHit{Box: scrollBox}
+		if vh <= arrowSize*2 {
+			return nil
+		}
+		upBtnY := vy
+		dnBtnY := vy + vh - arrowSize
+
+		// Check arrow buttons first.
+		if y >= upBtnY && y < upBtnY+arrowSize {
+			h.IsVUpArrow = true
+			return h
+		}
+		if y >= dnBtnY && y < dnBtnY+arrowSize {
+			h.IsVDownArrow = true
+			return h
+		}
+
+		// Track (non-thumb area) or thumb.
+		h.IsVTrack = true
+		if totalH > contentH {
+			trackH := vh - arrowSize*2
+			thumbLen := trackH * contentH / totalH
+			if thumbLen < arrowSize { thumbLen = arrowSize }
+			if thumbLen > trackH-4 { thumbLen = trackH - 4 }
 			maxSy := totalH - contentH
 			if maxSy <= 0 { maxSy = 1 }
 			syRatio := sy / maxSy
-			thumbTrackSpace := vh - thumbLen
-			thumbY := vy + syRatio*thumbTrackSpace
+			thumbTrackSpace := trackH - thumbLen
+			thumbY := vy + arrowSize + syRatio*thumbTrackSpace
 			if y >= thumbY && y <= thumbY+thumbLen {
 				h.IsVThumb = true
 			}
@@ -324,18 +348,37 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return h
 	}
 
-	// Is point on horizontal scrollbar?
+	// ── Horizontal scrollbar hit test ──
 	if needsH && y >= hy && y <= hy+scrollW && x >= hx && x <= hx+hw {
-		h := &ScrollbarHit{Box: scrollBox, IsHTrack: true}
-		if totalW > contentW && hw > 30 {
-			thumbLen := hw * contentW / totalW
-			if thumbLen < 18 { thumbLen = 18 }
-			if thumbLen > hw-4 { thumbLen = hw - 4 }
+		h := &ScrollbarHit{Box: scrollBox}
+		if hw <= arrowSize*2 {
+			return nil
+		}
+		ltBtnX := hx
+		rtBtnX := hx + hw - arrowSize
+
+		// Check arrow buttons first.
+		if x >= ltBtnX && x < ltBtnX+arrowSize {
+			h.IsHLeftArrow = true
+			return h
+		}
+		if x >= rtBtnX && x < rtBtnX+arrowSize {
+			h.IsHRightArrow = true
+			return h
+		}
+
+		// Track or thumb.
+		h.IsHTrack = true
+		if totalW > contentW {
+			trackW := hw - arrowSize*2
+			thumbLen := trackW * contentW / totalW
+			if thumbLen < arrowSize { thumbLen = arrowSize }
+			if thumbLen > trackW-4 { thumbLen = trackW - 4 }
 			maxSx := totalW - contentW
 			if maxSx <= 0 { maxSx = 1 }
 			sxRatio := sx / maxSx
-			thumbTrackSpace := hw - thumbLen
-			thumbX := hx + sxRatio*thumbTrackSpace
+			thumbTrackSpace := trackW - thumbLen
+			thumbX := hx + arrowSize + sxRatio*thumbTrackSpace
 			if x >= thumbX && x <= thumbX+thumbLen {
 				h.IsHThumb = true
 			}
