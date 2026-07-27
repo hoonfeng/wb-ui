@@ -222,12 +222,9 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
 			if needsScroll {
 				pb := box.PaddingBoxRect()
-				// Match modern Chromium/Edge overlay scrollbar: 8px wide, pill-shaped 6px thumb.
-				const scrollW = 8.0    // total scrollbar track width
-				const thumbW = 6.0     // actual thumb width (centered in track)
-				const thumbPad = (scrollW - thumbW) / 2 // 1px inset from track edge
-				const thumbR = thumbW / 2 // 3px corner radius → fully rounded pill
-				const minThumb = 20.0   // minimum thumb length
+				// Chrome/Edge modern thin scrollbar: 6px wide, pill-shaped 6px thumb.
+				const scrollW = 6.0    // track width
+				const thumbR = scrollW / 2 // 3px → fully rounded pill
 
 				if pb.Width > scrollW*3 && pb.Height > scrollW*3 {
 					if info.rv != nil {
@@ -241,12 +238,14 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
+							isScroll := st.OverflowY == style.OverflowScroll || st.OverflowX == style.OverflowScroll
+
 							// Thumb colors — WebKit Adwaita dark theme alpha values:
-							//   default: alpha 0.2 (51/255), hover: alpha 0.4 (102/255), pressed: alpha 0.6 (153/255)
-							thumbCol := graphics.Color{R: 255, G: 255, B: 255, A: 51}     // rgba(255,255,255,0.2)
-							thumbHoverCol := graphics.Color{R: 255, G: 255, B: 255, A: 102}  // rgba(255,255,255,0.4)
-							// Trough (track background) - white alpha 0.1, only visible on hover
-							troughCol := graphics.Color{R: 255, G: 255, B: 255, A: 25}    // rgba(255,255,255,0.1)
+							//   default: alpha 0.2 (51/255), hover: alpha 0.4 (102/255)
+							thumbCol := graphics.Color{R: 255, G: 255, B: 255, A: 51}
+							thumbHoverCol := graphics.Color{R: 255, G: 255, B: 255, A: 102}
+							// Track background: for overflow:scroll always visible; for overflow:auto only on hover.
+							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 15} // rgba(255,255,255,0.06)
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)
@@ -262,36 +261,33 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsH {
 									vh -= scrollW
 								}
-								// Track background (very subtle, only to indicate scrollable area)
-								isVTroughHover := cursorX >= vx && cursorX <= vx+scrollW && cursorY >= vy && cursorY <= vy+vh
-								if isVTroughHover {
-									info.canvas.FillRoundRect(vx, vy, scrollW, vh, thumbR, troughCol)
+								// Track: always visible for overflow:scroll, only on hover for overflow:auto
+								if isScroll || (cursorX >= vx && cursorX <= vx+scrollW && cursorY >= vy && cursorY <= vy+vh) {
+									info.canvas.FillRoundRect(vx, vy, scrollW, vh, thumbR, trackCol)
 								}
-								if totalH > contentH && vh > minThumb+thumbPad*2 {
+								// Thumb
+								if totalH > contentH && vh > 30 {
 									thumbLen := vh * contentH / totalH
-									if thumbLen < minThumb {
-										thumbLen = minThumb
+									if thumbLen < 18 {
+										thumbLen = 18
 									}
-									if thumbLen > vh-thumbPad*2 {
-										thumbLen = vh - thumbPad*2
+									if thumbLen > vh-4 {
+										thumbLen = vh - 4
 									}
 									maxSy := totalH - contentH
 									if maxSy <= 0 {
 										maxSy = 1
 									}
 									syRatio := sy / maxSy
-									thumbTrackSpace := vh - thumbLen - thumbPad*2
-									if thumbTrackSpace < 0 {
-										thumbTrackSpace = 0
-									}
-									thumbY := vy + thumbPad + syRatio*thumbTrackSpace
+									thumbTrackSpace := vh - thumbLen
+									thumbY := vy + syRatio*thumbTrackSpace
 									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
 										cursorY >= thumbY && cursorY <= thumbY+thumbLen
 									col := thumbCol
 									if isHover {
 										col = thumbHoverCol
 									}
-									info.canvas.FillRoundRect(vx+thumbPad, thumbY, thumbW, thumbLen, thumbR, col)
+									info.canvas.FillRoundRect(vx, thumbY, scrollW, thumbLen, thumbR, col)
 								}
 							}
 
@@ -302,40 +298,42 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV {
 									hw -= scrollW
 								}
-								// Track background (very subtle)
-								isHTroughHover := cursorY >= hy && cursorY <= hy+scrollW && cursorX >= hx && cursorX <= hx+hw
-								if isHTroughHover {
-									info.canvas.FillRoundRect(hx, hy, hw, scrollW, thumbR, troughCol)
+								// Track
+								if isScroll || (cursorY >= hy && cursorY <= hy+scrollW && cursorX >= hx && cursorX <= hx+hw) {
+									info.canvas.FillRoundRect(hx, hy, hw, scrollW, thumbR, trackCol)
 								}
-								if totalW > contentW && hw > minThumb+thumbPad*2 {
+								// Thumb
+								if totalW > contentW && hw > 30 {
 									thumbLen := hw * contentW / totalW
-									if thumbLen < minThumb {
-										thumbLen = minThumb
+									if thumbLen < 18 {
+										thumbLen = 18
 									}
-									if thumbLen > hw-thumbPad*2 {
-										thumbLen = hw - thumbPad*2
+									if thumbLen > hw-4 {
+										thumbLen = hw - 4
 									}
 									maxSx := totalW - contentW
 									if maxSx <= 0 {
 										maxSx = 1
 									}
 									sxRatio := sx / maxSx
-									thumbTrackSpace := hw - thumbLen - thumbPad*2
-									if thumbTrackSpace < 0 {
-										thumbTrackSpace = 0
-									}
-									thumbX := hx + thumbPad + sxRatio*thumbTrackSpace
+									thumbTrackSpace := hw - thumbLen
+									thumbX := hx + sxRatio*thumbTrackSpace
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+thumbLen
 									col := thumbCol
 									if isHover {
 										col = thumbHoverCol
 									}
-									info.canvas.FillRoundRect(thumbX, hy+thumbPad, thumbLen, thumbW, thumbR, col)
+									info.canvas.FillRoundRect(thumbX, hy, thumbLen, scrollW, thumbR, col)
 								}
 							}
 
-							// Corner is transparent (no fill) — browsers leave it uncovered.
+							// Corner: only fill for overflow:scroll (with track color)
+							if needsV && needsH && isScroll {
+								cx := pb.X + pb.Width - scrollW
+								cy := pb.Y + pb.Height - scrollW
+								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)
+							}
 						}
 					}
 				}

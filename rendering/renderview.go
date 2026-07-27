@@ -247,10 +247,7 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 	pb := scrollBox.PaddingBoxRect()
-	scrollW := 8.0
-	thumbW := 6.0
-	thumbPad := (scrollW - thumbW) / 2 // 1px
-	minThumb := 20.0
+	scrollW := 6.0
 	if pb.Width <= scrollW*3 || pb.Height <= scrollW*3 {
 		return nil
 	}
@@ -311,16 +308,15 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	// Is point on vertical scrollbar?
 	if needsV && x >= vx && x <= vx+scrollW && y >= vy && y <= vy+vh {
 		h := &ScrollbarHit{Box: scrollBox, IsVTrack: true}
-		if totalH > contentH && vh > minThumb+thumbPad*2 {
+		if totalH > contentH && vh > 30 {
 			thumbLen := vh * contentH / totalH
-			if thumbLen < minThumb { thumbLen = minThumb }
-			if thumbLen > vh-thumbPad*2 { thumbLen = vh - thumbPad*2 }
+			if thumbLen < 18 { thumbLen = 18 }
+			if thumbLen > vh-4 { thumbLen = vh - 4 }
 			maxSy := totalH - contentH
 			if maxSy <= 0 { maxSy = 1 }
 			syRatio := sy / maxSy
-			thumbTrackSpace := vh - thumbLen - thumbPad*2
-			if thumbTrackSpace < 0 { thumbTrackSpace = 0 }
-			thumbY := vy + thumbPad + syRatio*thumbTrackSpace
+			thumbTrackSpace := vh - thumbLen
+			thumbY := vy + syRatio*thumbTrackSpace
 			if y >= thumbY && y <= thumbY+thumbLen {
 				h.IsVThumb = true
 			}
@@ -331,16 +327,15 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	// Is point on horizontal scrollbar?
 	if needsH && y >= hy && y <= hy+scrollW && x >= hx && x <= hx+hw {
 		h := &ScrollbarHit{Box: scrollBox, IsHTrack: true}
-		if totalW > contentW && hw > minThumb+thumbPad*2 {
+		if totalW > contentW && hw > 30 {
 			thumbLen := hw * contentW / totalW
-			if thumbLen < minThumb { thumbLen = minThumb }
-			if thumbLen > hw-thumbPad*2 { thumbLen = hw - thumbPad*2 }
+			if thumbLen < 18 { thumbLen = 18 }
+			if thumbLen > hw-4 { thumbLen = hw - 4 }
 			maxSx := totalW - contentW
 			if maxSx <= 0 { maxSx = 1 }
 			sxRatio := sx / maxSx
-			thumbTrackSpace := hw - thumbLen - thumbPad*2
-			if thumbTrackSpace < 0 { thumbTrackSpace = 0 }
-			thumbX := hx + thumbPad + sxRatio*thumbTrackSpace
+			thumbTrackSpace := hw - thumbLen
+			thumbX := hx + sxRatio*thumbTrackSpace
 			if x >= thumbX && x <= thumbX+thumbLen {
 				h.IsHThumb = true
 			}

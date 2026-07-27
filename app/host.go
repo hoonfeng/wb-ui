@@ -584,10 +584,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					vh := pb.Height
 					_, ch := rv.BoxContentSize(h.scrollbarDragBox)
 					if ch > pb.Height {
-						scrollW := 8.0
+						scrollW := 6.0
 						trackH := vh - scrollW
 						thumbH := trackH * pb.Height / ch
-						if thumbH < 20.0 { thumbH = 20.0 }
+						if thumbH < 18.0 { thumbH = 18.0 }
 						scale := (ch - pb.Height) / (trackH - thumbH)
 						newSy := h.scrollbarDragScroll + dy*scale
 						if newSy < 0 { newSy = 0 }
@@ -602,10 +602,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					hw := pb.Width
 					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
 					if cw > pb.Width {
-						scrollW := 8.0
+						scrollW := 6.0
 						trackW := hw - scrollW
 						thumbW := trackW * pb.Width / cw
-						if thumbW < 20.0 { thumbW = 20.0 }
+						if thumbW < 18.0 { thumbW = 18.0 }
 						scale := (cw - pb.Width) / (trackW - thumbW)
 						newSx := h.scrollbarDragScroll + dx*scale
 						if newSx < 0 { newSx = 0 }
