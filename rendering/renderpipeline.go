@@ -269,16 +269,16 @@ const scrollW = 12.0    // total scrollbar width
 							// Track background.
 							info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 
-// Up arrow: rounded triangle (fill + circles at vertices).
+// Up arrow: rounded triangle matching horizontal arrow size.
 						upBtnY := vy
 						acx := vx + scrollW/2
-												acy := upBtnY + arrowSize/2
-						info.canvas.FillRoundedTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, 1.2, arrowCol)
+						acy := upBtnY + arrowSize/2
+						info.canvas.FillRoundedTriangle(acx, acy-4, acx-4, acy+4, acx+4, acy+4, 0.8, arrowCol)
 
 						// Down arrow.
 						dnBtnY := vy + vh - arrowSize
 						dcy := dnBtnY + arrowSize/2
-						info.canvas.FillRoundedTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(acx, dcy+4, acx-4, dcy-4, acx+4, dcy-4, 0.8, arrowCol)
 
 							// Thumb (rounded rect, pill shape).
 							if totalH > contentH {
