@@ -434,11 +434,11 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// Compute ellipsis width: three tightly-spaced filled circles.
 	textEllipsisW := float64(0)
 	if toCB != nil {
-		ellipsisDotR := font.Size * 0.10
-		if ellipsisDotR < 1.0 {
-			ellipsisDotR = 1.0
+		ellipsisDotR := font.Size * 0.07
+		if ellipsisDotR < 0.8 {
+			ellipsisDotR = 0.8
 		}
-		ellipsisGap := ellipsisDotR * 2.6 // ~1px gap between dots for 14px font
+		ellipsisGap := ellipsisDotR * 3.2 // ~1.2px gap between dot edges for 14px
 		textEllipsisW = ellipsisGap*2 + ellipsisDotR*2
 	}
 
@@ -504,11 +504,11 @@ func PaintText(text *RenderText, info *PaintInfo) {
 				if lastFit == 0 {
 					ellipsisX = toCB.X + toCB.Width - textEllipsisW
 				}
-				dotR := font.Size * 0.10
-				if dotR < 1.0 {
-					dotR = 1.0
+				dotR := font.Size * 0.07
+				if dotR < 0.8 {
+					dotR = 0.8
 				}
-				dotGap := dotR * 2.6 // ~1px gap between dot edges for 14px font
+				dotGap := dotR * 3.2 // ~1.2px gap between dot edges for 14px font
 				for i := 0; i < 3; i++ {
 					info.canvas.FillCircle(ellipsisX+float64(i)*dotGap, baseline-dotR, dotR, col)
 				}

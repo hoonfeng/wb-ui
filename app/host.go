@@ -551,7 +551,6 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					newSy = maxY
 				}
 				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
-				rv.MarkAllDirty()
 			} else {
 				log.Printf("[scroll] FrameView.ScrollBy(dx=%d, dy=%d) scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
 					-int(ev.ScrollX*40), -int(ev.ScrollY*40),
@@ -613,7 +612,6 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						rv.SetBoxScrollOffset(h.scrollbarDragBox, newSx, 0)
 					}
 				}
-				rv.MarkAllDirty()
 			}
 		case window.EventMouseButton:
 			csX, csY := h.win.ContentScale()
@@ -789,9 +787,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								_, ch := rv.BoxContentSize(scrollBox)
 								if newSy < 0 { newSy = 0 }
 								if maxSy := ch - pb.Height; newSy > maxSy { newSy = maxSy }
-								rv.SetBoxScrollOffset(scrollBox, sx, newSy)
-							}
-							rv.MarkAllDirty()
+							rv.SetBoxScrollOffset(scrollBox, sx, newSy)
+						}
 							break
 						}
 					} else {
