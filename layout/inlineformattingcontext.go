@@ -207,9 +207,15 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// the geometry reflects it. This is critical for replaced elements
 			// (input, select, img) whose layout box has no children and thus may
 			// not set content width/height during context.Layout().
+			//
+			// Compute border/padding for inline-level boxes so box-sizing:border-box
+			// can correctly deduct them from CSS width/height.
+			fs := fontSizeOf(cld)
+			_, padding, border := computeBoxModelForBox(cld, contentWidth, fs)
+			cldG.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
+			cldG.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 			if cldG.ContentWidth() <= 0 {
 				cs := cld.Style()
-				fs := fontSizeOf(cld)
 				if cs != nil {
 					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
 						if isBorderBoxForBox(cld) {
@@ -254,7 +260,6 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			if cldG.ContentHeight() <= 0 {
 				cs := cld.Style()
-				fs := fontSizeOf(cld)
 				if cs != nil {
 					if h, ok := definiteHeight(cs.Height, contentWidth, fs); ok && h > 0 {
 						if isBorderBoxForBox(cld) {
@@ -266,6 +271,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						}
 					}
 				}
+			}
+
+			// If content height is still 0 (no CSS height), use line height.
+			if cldG.ContentHeight() <= 0 {
+				lineH := fontLineGap(cld)
+				if lineH <= 0 { lineH = fs * 1.2 }
+				cldG.SetContentHeight(lineH)
 			}
 
 			// Compute inline child's content width from text segments.
