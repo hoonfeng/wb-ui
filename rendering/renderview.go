@@ -247,7 +247,7 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 	pb := scrollBox.PaddingBoxRect()
-	scrollW := 14.0
+	scrollW := 10.0
 	if pb.Width <= scrollW*3 || pb.Height <= scrollW*3 {
 		return nil
 	}
@@ -311,7 +311,7 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		// Compute thumb rect (same as paint code)
 		if totalH > contentH && vh > scrollW*3 {
 			thumbH := vh * contentH / totalH
-			if thumbH < scrollW * 1.5 { thumbH = scrollW * 1.5 }
+			if thumbH < scrollW * 2.0 { thumbH = scrollW * 2.0 }
 			if thumbH > vh-scrollW { thumbH = vh - scrollW }
 			maxSy := totalH - contentH
 			if maxSy <= 0 { maxSy = 1 }

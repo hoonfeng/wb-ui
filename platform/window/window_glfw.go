@@ -239,7 +239,16 @@ func (w *Window) setupCallbacks() {
 		w.eventsMu.Unlock()
 		w.recreateSurface()
 	})
-	w.win.SetScrollCallback(func(_ *glfw.Window, xoff, yoff float64) {
+	w.win.SetScrollCallback(func(win *glfw.Window, xoff, yoff float64) {
+		// Shift+scroll wheel → horizontal scroll (Windows standard behavior).
+		if xoff == 0 && yoff != 0 {
+			shift := win.GetKey(glfw.KeyLeftShift) == glfw.Press ||
+				win.GetKey(glfw.KeyRightShift) == glfw.Press
+			if shift {
+				xoff = yoff
+				yoff = 0
+			}
+		}
 		w.eventsMu.Lock()
 		w.events = append(w.events, Event{
 			Type:    EventScroll,

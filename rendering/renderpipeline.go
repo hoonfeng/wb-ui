@@ -222,7 +222,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
 			if needsScroll {
 				pb := box.PaddingBoxRect()
-				const scrollW = 14.0 // scroll bar width / height
+				const scrollW = 10.0 // scroll bar width / height (browser-like)
 				if pb.Width > scrollW*3 && pb.Height > scrollW*3 {
 					if info.rv != nil {
 						cw, ch := info.rv.BoxContentSize(box)
@@ -278,7 +278,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									if isHover {
 										col = thumbHoverCol
 									}
-									info.canvas.FillRoundRect(vx+pad, thumbY+pad, scrollW-pad*2, thumbH-pad*2, 3, col)
+									info.canvas.FillRoundRect(vx+pad, thumbY+pad, scrollW-pad*2, thumbH-pad*2, 4, col)
 								}
 							}
 
@@ -312,7 +312,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									if isHover {
 										col = thumbHoverCol
 									}
-									info.canvas.FillRoundRect(thumbX+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 3, col)
+									info.canvas.FillRoundRect(thumbX+pad, hy+pad, thumbW-pad*2, scrollW-pad*2, 4, col)
 								}
 							}
 
