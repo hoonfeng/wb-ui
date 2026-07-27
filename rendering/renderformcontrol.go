@@ -134,9 +134,11 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 	case "input":
 		return paintInput(el, info, st, x, y, w, h, op)
 	case "button":
-		paintButtonBox(info, st, x, y, w, h, op)
-		paintButtonText(info, el, st, x, y, w, h, op)
-		return true
+		// Button is NOT a replaced element — its children (RenderText)
+		// are laid out normally to determine width. The background and
+		// border are painted by the normal PhaseBackground path using
+		// the resolved CSS style. Skip PaintFormControl handling.
+		return false
 	case "textarea":
 		paintTextAreaText(info, el, st, x, y, w, h, op)
 		return true
@@ -616,12 +618,23 @@ func paintSelectText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 }
 
 // paintButtonBox draws the background and border of a <button> element.
+
 func paintButtonBox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, op float64) {
 	c := info.canvas
-	bg := applyOpacity(graphics.Color{R: 240, G: 240, B: 240, A: 255}, op)
+	// Use the style's background-color if set, otherwise default to #f0f0f0.
+	bg := toGraphicsColor(st.BackgroundColor)
+	if bg.A == 0 {
+		bg = graphics.Color{R: 240, G: 240, B: 240, A: 255}
+	}
+	bg = applyOpacity(bg, op)
 	radius := 3.0
 	c.FillRoundRect(x, y, w, h, radius, bg)
-	borderCol := applyOpacity(graphics.Color{R: 204, G: 204, B: 204, A: 255}, op)
+	// Border: use style's border color if available, or a default gray.
+	borderCol := toGraphicsColor(st.BorderTopColor)
+	if borderCol.A == 0 {
+		borderCol = graphics.Color{R: 204, G: 204, B: 204, A: 255}
+	}
+	borderCol = applyOpacity(borderCol, op)
 	c.StrokeRoundRect(x+0.5, y+0.5, w-1, h-1, radius, 1, borderCol)
 }
 

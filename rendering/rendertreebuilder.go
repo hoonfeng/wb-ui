@@ -405,7 +405,7 @@ func defaultDisplayForTag(localName string) style.DisplayType {
 // the normal text paint path).
 func isReplacedElement(localName string) bool {
 	switch localName {
-	case "img", "iframe", "video", "canvas", "embed", "object", "svg", "input", "select":
+	case "img", "iframe", "video", "canvas", "embed", "object", "svg", "input", "select", "textarea":
 		return true
 	}
 	return false

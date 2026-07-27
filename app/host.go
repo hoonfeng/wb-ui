@@ -229,12 +229,15 @@ func (h *Host) FocusElement(el *dom.Element) {
 }
 
 // focusedElementValue returns the current text of a focused element. For
-// <input>/<textarea> it reads the "value" attribute; for other elements it
-// reads textContent. Mirrors the value() accessor on
+// <input> it reads the "value" attribute; for <textarea> it reads textContent;
+// for other elements it reads textContent. Mirrors the value() accessor on
 // HTMLTextFormControlElement.
 func focusedElementValue(el *dom.Element) string {
 	if el == nil {
 		return ""
+	}
+	if el.LocalName() == "textarea" {
+		return el.TextContent()
 	}
 	if isTextFormControl(el) {
 		return el.GetAttribute("value")
@@ -243,10 +246,14 @@ func focusedElementValue(el *dom.Element) string {
 }
 
 // setFocusedElementValue writes the text back to a focused element. For
-// <input>/<textarea> it sets the "value" attribute; for other elements it
-// sets textContent.
+// <input> it sets the "value" attribute; for <textarea> it sets textContent;
+// for other elements it sets textContent.
 func setFocusedElementValue(el *dom.Element, text string) {
 	if el == nil {
+		return
+	}
+	if el.LocalName() == "textarea" {
+		el.SetTextContent(text)
 		return
 	}
 	if isTextFormControl(el) {
@@ -791,6 +798,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				h.caretBlinkTime = time.Now()
 				rendering.CaretVisible = true
 				rendering.CaretVisibleControl = true
+
+				// HitTest the click position to find the element under cursor.
+				// If it's a form control (input/textarea/select), set focus.
+				if rv != nil {
+					hitEl := rendering.HitTest(rv, cssX, cssY, "type")
+					if hitEl != nil && isTextFormControl(hitEl) {
+						if hitEl != h.imeFocusedEl {
+							h.FocusElement(hitEl)
+						}
+					} else if hitEl != nil && (hitEl.LocalName() == "select" || hitEl.LocalName() == "button") {
+						if hitEl != h.imeFocusedEl {
+							h.FocusElement(hitEl)
+						}
+					} else if h.imeFocusedEl != nil {
+						h.Unfocus()
+					}
+				}
 
 				// If the click is on a text form control, calculate the
 				// character offset and set the form-control selection.

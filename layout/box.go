@@ -328,14 +328,14 @@ func newBoxForElement(el *dom.Element, cs *style.ComputedStyle) *ElementBox {
 	return &ElementBox{nodeType: nt, style: cs, element: el}
 }
 
+
 func isReplacedElement(localName string) bool {
 	switch localName {
-	case "img", "iframe", "video", "canvas", "embed", "object", "svg", "input", "select":
+	case "img", "iframe", "video", "canvas", "embed", "object", "svg", "input", "select", "textarea":
 		return true
 	}
 	return false
 }
-
 func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 	if isReplacedElement(el.LocalName()) { return }
 	if box.style != nil && (isFlexContainerDisplay(box.style.Display) ||
