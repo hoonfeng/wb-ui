@@ -49,6 +49,10 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		defer state.restoreFloatContext(prev)
 	} else {
 		fc = state.currentFloatContext()
+		if fc == nil {
+			fc = newFloatContext(contentX, contentY, contentWidth)
+			state.setFloatContext(fc)
+		}
 	}
 
 	cursor := blockStart
@@ -67,7 +71,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			continue
 		}
 		if child.IsFloated() {
-			layoutFloatedChild(childEb, contentX, contentWidth, fc, state)
+			layoutFloatedChild(childEb, contentX, contentY, contentWidth, fc, state)
 			continue
 		}
 		if child.IsAbsolutelyPositioned() {
@@ -269,7 +273,7 @@ func computeBlockChildBorderBoxWidth(child *ElementBox, cbContentWidth float64, 
 	return clampSize(borderBox, minW, maxW, minAuto, maxAuto)
 }
 
-func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *floatContext, state *LayoutState) {
+func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth float64, fc *floatContext, state *LayoutState) {
 	if fc == nil {
 		fc = newFloatContext(contentX, 0, contentWidth)
 	}
@@ -294,6 +298,12 @@ func layoutFloatedChild(child *ElementBox, contentX, contentWidth float64, fc *f
 
 	isLeft := cs.Float != "right"
 	x, y := fc.placeFloat(child, isLeft, borderBox, 0)
+	// Adjust for coordinate offset between FC origin and container content box.
+	// When using an inherited FC (non-BFC container), placeFloat returns positions
+	// relative to the BFC root's content box. We shift by the difference between
+	// the container's content box and the FC origin so positions become container-relative.
+	x += contentX - fc.originX
+	y += contentY - fc.originY
 	ch.SetTopLeft(y, x)
 
 	childCtx := contextFor(child, state)

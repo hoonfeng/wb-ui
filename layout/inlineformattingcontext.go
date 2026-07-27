@@ -78,15 +78,38 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		textAlign = cs.TextAlign
 	}
 
+	// Get float context for text wrapping around floats.
+	fc := state.currentFloatContext()
+
+	// availableLineWidth returns the usable width for a line at the given page Y.
+	// When floats intrude at this Y, the line is narrowed accordingly.
+	availableLineWidth := func(lineY float64) (lineContentX, lineWidth float64) {
+		if fc != nil {
+			left, right := fc.contentEdgesAt(lineY)
+			if left < contentX {
+				left = contentX
+			}
+			if right > contentX+contentWidth {
+				right = contentX + contentWidth
+			}
+			return left, right - left
+		}
+		return contentX, contentWidth
+	}
+
 	type lineInfo struct {
 		y, contentX float64    // line Y position and content start X
 		segStart    int        // index into pending (first seg on this line)
 		widthUsed   float64    // actual used width (contentX .. last-right-edge)
+		availWidth  float64    // available width for this line (adjusted for floats)
 	}
+
+	// Initialize first line with float-aware available width.
+	lineCx, lineCw := availableLineWidth(contentY)
 	var lines []lineInfo
 	var pending []pendingSeg
 
-	currentLine := lineInfo{y: contentY, contentX: contentX, segStart: 0, widthUsed: 0}
+	currentLine := lineInfo{y: contentY, contentX: lineCx, segStart: 0, widthUsed: 0, availWidth: lineCw}
 
 	for _, child := range box.Children() {
 		switch cld := child.(type) {
@@ -127,14 +150,17 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				if !firstWord {
 					nextX += spaceWidth
 				}
-				if nextX+wordWidth > contentWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
-					// Line wrap: record line, start new line.
+				if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+					// Line wrap: record line, start new line with float-aware width.
 					lines = append(lines, currentLine)
+					newY := currentLine.y + lineHeight
+					newCx, newCw := availableLineWidth(newY)
 					currentLine = lineInfo{
-						y: currentLine.y + lineHeight,
-						contentX: contentX,
+						y: newY,
+						contentX: newCx,
 						segStart: len(pending),
 						widthUsed: 0,
+						availWidth: newCw,
 					}
 					firstWord = true
 					nextX = 0
@@ -143,7 +169,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					textBox: cld,
 					seg: TextSegment{
 						Start: wordStart, Len: wordEnd - wordStart,
-						X: contentX + nextX, Y: currentLine.y + centeringOffset,
+						X: currentLine.contentX + nextX, Y: currentLine.y + centeringOffset,
 						Width: wordWidth, Height: textHeight,
 						LineY: currentLine.y, LineHeight: lineHeight,
 					},
@@ -155,7 +181,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
-			cldG.SetTopLeft(currentLine.y+centeringOffset, contentX+currentLine.widthUsed)
+			cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
@@ -239,15 +265,18 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				lineHeight = cldBH
 			}
 			cldW := cldG.BorderBoxWidth()
-			if currentLine.widthUsed+cldW > contentWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 				lines = append(lines, currentLine)
+				newY := currentLine.y + lineHeight
+				newCx, newCw := availableLineWidth(newY)
 				currentLine = lineInfo{
-					y: currentLine.y + lineHeight,
-					contentX: contentX,
+					y: newY,
+					contentX: newCx,
 					segStart: len(pending),
 					widthUsed: 0,
+					availWidth: newCw,
 				}
-				cldG.SetTopLeft(currentLine.y+centeringOffset, contentX+currentLine.widthUsed)
+				cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
 			}
 			// Apply relative offset to inline-level elements that are
 			// relatively positioned (e.g. position:relative with top/left).
