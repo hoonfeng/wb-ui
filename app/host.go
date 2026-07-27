@@ -24,6 +24,7 @@ import (
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
+	"wb-ui/page"
 	"wb-ui/platform/graphics"
 	"wb-ui/platform/ime"
 	"wb-ui/platform/window"
@@ -110,6 +111,10 @@ type Host struct {
 
 	// caretBlinkTime tracks the last caret visibility toggle for blinking.
 	caretBlinkTime time.Time
+
+	// frameView is the page's FrameView, cached for scroll operations in
+	// processEvents (where Run's local variable is out of scope).
+	frameView *page.FrameView
 }
 
 // NewHost creates a Host that drives the given WebView inside a new platform
@@ -391,6 +396,8 @@ func (h *Host) Run() {
 		return
 	}
 
+	h.frameView = frameView
+
 	for !h.win.ShouldClose() {
 		gpuCanvas := graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
 
@@ -419,10 +426,7 @@ func (h *Host) Run() {
 
 		bgColor := findBodyBgColor(rendering.RenderObject(rv))
 		if bgColor.A == 0 {
-			log.Printf("[bg] NOT FOUND, fallback to white\n")
 			bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-		} else {
-			log.Printf("[bg] OK #%02x%02x%02x a=%d\n", bgColor.R, bgColor.G, bgColor.B, bgColor.A)
 		}
 		gpuCanvas.Clear(bgColor)
 
@@ -534,7 +538,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
 				rv.MarkAllDirty()
 			} else {
-				h.wv.Page().MainFrame().View().ScrollBy(-int(ev.ScrollX*40), -int(ev.ScrollY*40))
+				h.frameView.ScrollBy(-int(ev.ScrollX*40), -int(ev.ScrollY*40))
 			}
 
 		case window.EventCursorMove:
@@ -770,6 +774,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							}
 							rv.MarkAllDirty()
 							break
+						}
+					} else {
+						// FrameView-level keyboard scroll.
+						delta := 0
+						vh := h.frameView.Height()
+						switch ev.Key {
+						case int(glfw.KeyPageUp):
+							delta = -int(float64(vh) * 0.8)
+						case int(glfw.KeyPageDown):
+							delta = int(float64(vh) * 0.8)
+						case int(glfw.KeyUp):
+							delta = -60
+						case int(glfw.KeyDown):
+							delta = 60
+						}
+						if delta != 0 {
+							h.frameView.ScrollBy(0, delta)
 						}
 					}
 				}
