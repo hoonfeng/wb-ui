@@ -323,51 +323,6 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		lines = append(lines, currentLine)
 	}
 
-	// Apply text-align adjustment to pending segments.
-	if textAlign != style.TextAlignLeft && len(lines) > 0 {
-		// For each completed line (all but possibly the last in-progress one),
-		// compute the shift and apply to segments whose lineIdx matches.
-		for li, ln := range lines {
-			var used float64
-			if li < len(lines)-1 {
-				// Get width used from the next line's segStart.
-				used = 0
-				for i := ln.segStart; i < lines[li+1].segStart && i < len(pending); i++ {
-					s := pending[i].seg
-					r := s.X + s.Width - contentX
-					if r > used { used = r }
-				}
-			} else {
-				used = ln.widthUsed
-			}
-
-			var shift float64
-			switch textAlign {
-			case style.TextAlignCenter:
-				shift = (contentWidth - used) / 2
-			case style.TextAlignRight, style.TextAlignEnd:
-				shift = contentWidth - used
-			}
-			if shift > 0 {
-				for i := ln.segStart; i < len(pending); i++ {
-					if pending[i].lineIdx != li && i >= (func() int { if li+1 < len(lines) { return lines[li+1].segStart }; return len(pending) })() {
-						break
-					}
-					pending[i].seg.X += shift
-				}
-				// Also shift the inline ElementBox children on this line.
-				for _, child := range box.Children() {
-					if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
-						ebG := state.GeometryForBox(eb)
-						if ebG.Top() >= ln.y && ebG.Top() < ln.y+lineHeight {
-							ebG.SetTopLeft(ebG.Top(), ebG.Left()+shift)
-						}
-					}
-				}
-			}
-		}
-	}
-
 	// Flush pending segments to their InlineTextBoxes.
 	for _, ps := range pending {
 		ps.textBox.TextSegments = append(ps.textBox.TextSegments, ps.seg)
@@ -405,6 +360,50 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	if totalWidth > 0 {
 		g.SetContentWidth(totalWidth)
+	}
+
+	// Apply text-align adjustment AFTER setting content width so the shift
+	// is computed against the final (non-expanded) content width rather than
+	// the expanded auto-width estimate. Without this, text-align:center inside
+	// buttons lands the text at the wrong X because contentWidth was widened
+	// by +20 during auto-width expansion but then corrected to totalWidth.
+	contentWidth = totalWidth
+	if textAlign != style.TextAlignLeft && len(lines) > 0 {
+		for li, ln := range lines {
+			var used float64
+			if li < len(lines)-1 {
+				for i := ln.segStart; i < lines[li+1].segStart && i < len(pending); i++ {
+					s := pending[i].seg
+					r := s.X + s.Width - contentX
+					if r > used { used = r }
+				}
+			} else {
+				used = ln.widthUsed
+			}
+
+			var shift float64
+			switch textAlign {
+			case style.TextAlignCenter:
+				shift = (contentWidth - used) / 2
+			case style.TextAlignRight, style.TextAlignEnd:
+				shift = contentWidth - used
+			}
+			if shift > 0 {
+				for i := ln.segStart; i < len(pending); i++ {
+					if pending[i].lineIdx != li && i >= (func() int { if li+1 < len(lines) { return lines[li+1].segStart }; return len(pending) })() {
+						break
+					}
+					pending[i].seg.X += shift
+				}
+				// Also shift the inline ElementBox children on this line.
+				for _, child := range box.Children() {
+					if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
+						ebG := state.GeometryForBox(eb)
+						ebG.SetTopLeft(ebG.Top(), ebG.Left()+shift)
+					}
+				}
+			}
+		}
 	}
 
 	// Vertically center single-line content when box is taller than the text.

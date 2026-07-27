@@ -104,6 +104,11 @@ type Host struct {
 	// move events), used for hit-testing on scroll events.
 	cursorX, cursorY float64
 
+	// hoveredEl tracks the element currently under the mouse cursor.
+	hoveredEl *dom.Element
+	// activeEl tracks the element being pressed (mousedown → :active).
+	activeEl *dom.Element
+
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
@@ -211,7 +216,19 @@ func (h *Host) WebView() *webkit.WebView { return h.wv }
 // for other elements, text content is used (the legacy div-based editable
 // element behavior).
 func (h *Host) FocusElement(el *dom.Element) {
+	if h.imeFocusedEl != nil && h.imeFocusedEl != el {
+		h.imeFocusedEl.SetFocused(false)
+	}
+	if el != nil {
+		el.SetFocused(true)
+	}
 	h.imeFocusedEl = el
+	// Mark frame dirty so :focus style updates.
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.MarkRenderTreeDirty()
+		}
+	}
 	if el != nil {
 		h.imeInputText = focusedElementValue(el)
 	}
@@ -353,6 +370,7 @@ func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
 // Call this when the user clicks outside an editable element.
 func (h *Host) Unfocus() {
 	if h.imeFocusedEl != nil {
+		h.imeFocusedEl.SetFocused(false)
 		h.imeFocusedEl = nil
 		h.imeInputText = ""
 		h.imeComposing = false
@@ -649,6 +667,22 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						rv.SetBoxScrollOffset(h.scrollbarDragBox, newSx, 0)
 					}
 				}
+				// ── Hover tracking ──
+				newEl := rendering.HitTest(rv, cssX, cssY, "")
+				if newEl != h.hoveredEl {
+					if h.hoveredEl != nil {
+						h.hoveredEl.SetHovered(false)
+					}
+					if newEl != nil {
+						newEl.SetHovered(true)
+					}
+					h.hoveredEl = newEl
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
 			}
 		case window.EventMouseButton:
 			csX, csY := h.win.ContentScale()
@@ -662,6 +696,19 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
+				// ── Active state ──
+				if rv != nil {
+					activeEl := rendering.HitTest(rv, cssX, cssY, "")
+					if activeEl != nil {
+						activeEl.SetActive(true)
+						h.activeEl = activeEl
+						if mf := h.wv.MainFrame(); mf != nil {
+							if fr := mf.Frame(); fr != nil {
+								fr.MarkRenderTreeDirty()
+							}
+						}
+					}
+				}
 				// Check for scrollbar interaction.
 				scrollHit := rendering.HitTestScrollbar(rv, cssX, cssY)
 				if scrollHit != nil && !scrollHit.IsCorner {
@@ -837,6 +884,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		} else if ev.Action == int(glfw.Release) {
+			// ── Clear active state ──
+			if h.activeEl != nil {
+				h.activeEl.SetActive(false)
+				h.activeEl = nil
+				if mf := h.wv.MainFrame(); mf != nil {
+					if fr := mf.Frame(); fr != nil {
+						fr.MarkRenderTreeDirty()
+					}
+				}
+			}
 			// End scrollbar drag if active.
 			if h.scrollbarDragging {
 				h.scrollbarDragging = false

@@ -1,0 +1,479 @@
+
+=== TEXT-OVERFLOW ELLIPSIS SCAN (y=645..652, x=150..200 every pixel) ===
+y=645 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=646 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=647 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=648 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=649 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=650 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=651 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+y=652 |(150,161b22)(151,161b22)(152,161b22)(153,161b22)(154,161b22)(155,161b22)(156,161b22)(157,161b22)(158,161b22)(159,161b22)(160,161b22)(161,161b22)(162,161b22)(163,161b22)(164,161b22)(165,161b22)(166,161b22)(167,161b22)(168,161b22)(169,161b22)(170,161b22)(171,161b22)(172,161b22)(173,161b22)(174,161b22)(175,161b22)(176,161b22)(177,161b22)(178,161b22)(179,161b22)(180,161b22)(181,161b22)(182,161b22)(183,161b22)(184,161b22)(185,161b22)(186,161b22)(187,161b22)(188,161b22)(189,161b22)(190,161b22)(191,161b22)(192,161b22)(193,161b22)(194,161b22)(195,161b22)(196,161b22)(197,161b22)(198,161b22)(199,161b22)(200,161b22)
+
+=== LAYOUT TREE ===
+RenderView  (0,0) 900x1215 bg=#000000
+  RenderBlockFlow <html> (0,0) 900x1215 bg=#000000
+    RenderBlockFlow <body> (0,0) 900x1215 bg=#0d1117
+      RenderBlockFlow <h2> (20,20) 860x19 bg=#000000
+        RenderBlockFlow  (20,20) 194x19 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,51) 860x224 bg=#161b22
+        RenderBlockFlow <div.label> (37,68) 826x17 bg=#000000
+          RenderBlockFlow  (37,68) 85x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.input-group> (37,85) 826x50 bg=#000000
+          RenderBlockFlow <label> (37,85) 826x14 bg=#000000
+            RenderBlockFlow  (37,85) 53x14 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow  (37,101) 826x33 bg=#000000
+            RenderBox <input> (37,102) 826x33 bg=#0d1117
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.input-group> (37,143) 826x50 bg=#000000
+          RenderBlockFlow <label> (37,143) 826x14 bg=#000000
+            RenderBlockFlow  (37,143) 53x14 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow  (37,159) 826x33 bg=#000000
+            RenderBox <input> (37,159) 826x33 bg=#0d1117
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.input-group> (37,200) 826x50 bg=#000000
+          RenderBlockFlow <label> (37,200) 826x14 bg=#000000
+            RenderBlockFlow  (37,200) 33x14 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow  (37,217) 826x33 bg=#000000
+            RenderBox <input> (37,217) 826x33 bg=#0d1117
+            RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,305) 860x111 bg=#161b22
+        RenderBlockFlow <div.label> (37,322) 826x17 bg=#000000
+          RenderBlockFlow  (37,322) 62x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow  (37,339) 826x60 bg=#000000
+          RenderBox <textarea> (37,339) 826x60 bg=#0d1117
+          RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,446) 860x84 bg=#161b22
+        RenderBlockFlow <div.label> (37,463) 826x17 bg=#000000
+          RenderBlockFlow  (37,463) 54x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow  (37,479) 422x34 bg=#000000
+          RenderBlockFlow <button.primary> (37,480) 84x34 bg=#1f6feb
+            RenderBlockFlow  (54,489) 50x16 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <button> (129,480) 84x34 bg=#21262d
+            RenderBlockFlow  (146,489) 50x16 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+          RenderBlockFlow <button> (220,480) 77x34 bg=#21262d
+            RenderBlockFlow  (237,489) 43x16 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+          RenderBox <input> (305,480) 77x33 bg=#21262d
+          RenderText  (0,0) 0x0 bg=#000000
+          RenderBox <input> (390,480) 70x33 bg=#21262d
+          RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,560) 860x133 bg=#161b22
+        RenderBlockFlow <div.label> (37,577) 826x17 bg=#000000
+          RenderBlockFlow  (37,577) 77x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,602) 826x17 bg=#000000
+          RenderBlockFlow  (37,602) 150x17 bg=#000000
+            RenderBox <input> (37,602) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,602) 129x16 bg=#000000
+              RenderBlockFlow  (59,602) 129x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,627) 826x17 bg=#000000
+          RenderBlockFlow  (37,627) 165x17 bg=#000000
+            RenderBox <input> (37,627) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,627) 143x16 bg=#000000
+              RenderBlockFlow  (59,627) 143x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,651) 826x17 bg=#000000
+          RenderBlockFlow  (37,651) 150x17 bg=#000000
+            RenderBox <input> (37,652) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,652) 129x16 bg=#000000
+              RenderBlockFlow  (59,652) 129x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,723) 860x133 bg=#161b22
+        RenderBlockFlow <div.label> (37,740) 826x17 bg=#000000
+          RenderBlockFlow  (37,740) 100x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,765) 826x17 bg=#000000
+          RenderBlockFlow  (37,765) 150x17 bg=#000000
+            RenderBox <input> (37,765) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,765) 129x16 bg=#000000
+              RenderBlockFlow  (59,765) 129x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,790) 826x17 bg=#000000
+          RenderBlockFlow  (37,790) 72x17 bg=#000000
+            RenderBox <input> (37,790) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,790) 50x16 bg=#000000
+              RenderBlockFlow  (59,790) 50x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow <div.checkbox-group> (37,815) 826x17 bg=#000000
+          RenderBlockFlow  (37,815) 72x17 bg=#000000
+            RenderBox <input> (37,815) 14x14 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+            RenderInline <label> (59,815) 50x16 bg=#000000
+              RenderBlockFlow  (59,815) 50x16 bg=#000000
+                RenderText  (0,0) 0x0 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,886) 860x80 bg=#161b22
+        RenderBlockFlow <div.label> (37,903) 826x17 bg=#000000
+          RenderBlockFlow  (37,903) 131x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow  (37,920) 200x29 bg=#000000
+          RenderBox <select> (37,920) 200x29 bg=#0d1117
+          RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,996) 860x71 bg=#161b22
+        RenderBlockFlow <div.label> (37,1013) 826x17 bg=#000000
+          RenderBlockFlow  (37,1013) 92x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow  (37,1030) 826x20 bg=#000000
+          RenderBlockFlow <progress> (37,1030) 826x20 bg=#000000
+            RenderBlockFlow  (37,1030) 23x20 bg=#000000
+              RenderText  (0,0) 0x0 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+      RenderBlockFlow <div.section> (20,1097) 860x68 bg=#161b22
+        RenderBlockFlow <div.label> (37,1114) 826x17 bg=#000000
+          RenderBlockFlow  (37,1114) 92x17 bg=#000000
+            RenderText  (0,0) 0x0 bg=#000000
+        RenderBlockFlow  (37,1131) 826x17 bg=#000000
+          RenderBox <input> (37,1131) 826x17 bg=#000000
+          RenderText  (0,0) 0x0 bg=#000000
+
+=== PAINT GRID (8x8, viewport=900x700) ===
+y=0 | (0,#0d1117) (112,#0d1117) (225,#0d1117) (337,#0d1117) (450,#0d1117) (562,#0d1117) (675,#0d1117) (787,#0d1117)
+y=87 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+y=175 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+y=262 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+y=350 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+y=437 | (0,#0d1117) (112,#0d1117) (225,#0d1117) (337,#0d1117) (450,#0d1117) (562,#0d1117) (675,#0d1117) (787,#0d1117)
+y=525 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+y=612 | (0,#0d1117) (112,#161b22) (225,#161b22) (337,#161b22) (450,#161b22) (562,#161b22) (675,#161b22) (787,#161b22)
+
+=== PIXEL PROBES (9-point sweep) ===
+  TL (0,0) = #0d1117ff
+  TC (450,0) = #0d1117ff
+  TR (899,0) = #0d1117ff
+  ML (0,350) = #0d1117ff
+  MC (450,350) = #161b22ff
+  MR (899,350) = #0d1117ff
+  BL (0,699) = #0d1117ff
+  BC (450,350) = #161b22ff
+  BR (899,699) = #0d1117ff
+
+=== TITLEBAR SCAN (y=0..29, sample every 2px) ===
+y= 0 |..............................
+y= 2 |..............................
+y= 4 |..............................
+y= 6 |..............................
+y= 8 |..............................
+y=10 |..............................
+y=12 |..............................
+y=14 |..............................
+y=16 |..............................
+y=18 |..............................
+y=20 |..............................
+y=22 |..............................
+y=24 |..............................
+y=26 |................(32,4c8dd8)............(58,4c8dd8)
+y=28 |...........(22,3d70aa)(24,58a6ff)(26,58a6ff).(30,58a6ff)(32,58a6ff)(34,58a6ff)(36,345e8f).(40,58a6ff)(42,58a6ff)..(48,58a6ff)(50,58a6ff)(52,58a6ff)...
+
+=== TEXT SEGMENTS ===
+          RenderText "step17 — Form Controls" len=22 segs=4
+            seg[0]: start=0 len=6 x=20.0 y=20.2 w=52.8 h=18.7
+            seg[1]: start=7 len=1 x=81.6 y=20.2 w=8.8 h=18.7
+            seg[2]: start=9 len=4 x=99.2 y=20.2 w=35.2 h=18.7
+            seg[3]: start=14 len=8 x=143.2 y=20.2 w=70.4 h=18.7
+            RenderText "Text inputs" len=11 segs=2
+              seg[0]: start=0 len=4 x=37.0 y=68.4 w=30.8 h=16.4
+              seg[1]: start=5 len=6 x=75.5 y=68.4 w=46.2 h=16.4
+              RenderText "Username" len=8 segs=1
+                seg[0]: start=0 len=8 x=37.0 y=85.2 w=52.8 h=14.1
+            RenderText "\n    " len=5 segs=0
+              RenderText "Password" len=8 segs=1
+                seg[0]: start=0 len=8 x=37.0 y=142.8 w=52.8 h=14.1
+            RenderText "\n    " len=5 segs=0
+              RenderText "Email" len=5 segs=1
+                seg[0]: start=0 len=5 x=37.0 y=200.4 w=33.0 h=14.1
+            RenderText "\n    " len=5 segs=0
+            RenderText "Textarea" len=8 segs=1
+              seg[0]: start=0 len=8 x=37.0 y=322.1 w=61.6 h=16.4
+          RenderText "  " len=2 segs=0
+            RenderText "Buttons" len=7 segs=1
+              seg[0]: start=0 len=7 x=37.0 y=462.9 w=53.9 h=16.4
+              RenderText "Primary" len=7 segs=1
+                seg[0]: start=0 len=7 x=54.0 y=488.9 w=50.0 h=15.2
+          RenderText "\n    " len=5 segs=1
+            seg[0]: start=0 len=7 x=54.0 y=488.9 w=50.0 h=15.2
+              RenderText "Default" len=7 segs=1
+                seg[0]: start=0 len=7 x=145.7 y=488.9 w=50.0 h=15.2
+          RenderText "\n    " len=5 segs=0
+              RenderText "Cancel" len=6 segs=1
+                seg[0]: start=0 len=6 x=237.5 y=488.9 w=42.9 h=15.2
+          RenderText "\n    " len=5 segs=0
+          RenderText "\n    " len=5 segs=0
+          RenderText "\n  " len=3 segs=0
+            RenderText "Checkboxes" len=10 segs=1
+              seg[0]: start=0 len=10 x=37.0 y=577.3 w=77.0 h=16.4
+            RenderText " " len=1 segs=3
+              seg[0]: start=0 len=6 x=58.7 y=602.3 w=42.9 h=15.2
+              seg[1]: start=7 len=1 x=108.7 y=602.3 w=7.1 h=15.2
+              seg[2]: start=9 len=9 x=123.0 y=602.3 w=64.3 h=15.2
+                RenderText "Option A (checked)" len=18 segs=3
+                  seg[0]: start=0 len=6 x=58.7 y=602.3 w=42.9 h=15.2
+                  seg[1]: start=7 len=1 x=108.7 y=602.3 w=7.1 h=15.2
+                  seg[2]: start=9 len=9 x=123.0 y=602.3 w=64.3 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText " " len=1 segs=3
+              seg[0]: start=0 len=6 x=58.7 y=627.1 w=42.9 h=15.2
+              seg[1]: start=7 len=1 x=108.7 y=627.1 w=7.1 h=15.2
+              seg[2]: start=9 len=11 x=123.0 y=627.1 w=78.6 h=15.2
+                RenderText "Option B (unchecked)" len=20 segs=3
+                  seg[0]: start=0 len=6 x=58.7 y=627.1 w=42.9 h=15.2
+                  seg[1]: start=7 len=1 x=108.7 y=627.1 w=7.1 h=15.2
+                  seg[2]: start=9 len=11 x=123.0 y=627.1 w=78.6 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText " " len=1 segs=3
+              seg[0]: start=0 len=6 x=58.7 y=651.9 w=42.9 h=15.2
+              seg[1]: start=7 len=1 x=108.7 y=651.9 w=7.1 h=15.2
+              seg[2]: start=9 len=9 x=123.0 y=651.9 w=64.3 h=15.2
+                RenderText "Option C (checked)" len=18 segs=3
+                  seg[0]: start=0 len=6 x=58.7 y=651.9 w=42.9 h=15.2
+                  seg[1]: start=7 len=1 x=108.7 y=651.9 w=7.1 h=15.2
+                  seg[2]: start=9 len=9 x=123.0 y=651.9 w=64.3 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText "Radio buttons" len=13 segs=2
+              seg[0]: start=0 len=5 x=37.0 y=740.5 w=38.5 h=16.4
+              seg[1]: start=6 len=7 x=83.2 y=740.5 w=53.9 h=16.4
+            RenderText " " len=1 segs=3
+              seg[0]: start=0 len=5 x=58.7 y=765.5 w=35.7 h=15.2
+              seg[1]: start=6 len=1 x=101.6 y=765.5 w=7.1 h=15.2
+              seg[2]: start=8 len=10 x=115.9 y=765.5 w=71.5 h=15.2
+                RenderText "Radio 1 (selected)" len=18 segs=3
+                  seg[0]: start=0 len=5 x=58.7 y=765.5 w=35.7 h=15.2
+                  seg[1]: start=6 len=1 x=101.6 y=765.5 w=7.1 h=15.2
+                  seg[2]: start=8 len=10 x=115.9 y=765.5 w=71.5 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText " " len=1 segs=2
+              seg[0]: start=0 len=5 x=58.7 y=790.3 w=35.7 h=15.2
+              seg[1]: start=6 len=1 x=101.6 y=790.3 w=7.1 h=15.2
+                RenderText "Radio 2" len=7 segs=2
+                  seg[0]: start=0 len=5 x=58.7 y=790.3 w=35.7 h=15.2
+                  seg[1]: start=6 len=1 x=101.6 y=790.3 w=7.1 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText " " len=1 segs=2
+              seg[0]: start=0 len=5 x=58.7 y=815.1 w=35.7 h=15.2
+              seg[1]: start=6 len=1 x=101.6 y=815.1 w=7.1 h=15.2
+                RenderText "Radio 3" len=7 segs=2
+                  seg[0]: start=0 len=5 x=58.7 y=815.1 w=35.7 h=15.2
+                  seg[1]: start=6 len=1 x=101.6 y=815.1 w=7.1 h=15.2
+            RenderText "\n    " len=5 segs=0
+            RenderText "Select / Dropdown" len=17 segs=3
+              seg[0]: start=0 len=6 x=37.0 y=903.7 w=46.2 h=16.4
+              seg[1]: start=7 len=1 x=90.9 y=903.7 w=7.7 h=16.4
+              seg[2]: start=9 len=8 x=106.3 y=903.7 w=61.6 h=16.4
+          RenderText "\n  " len=3 segs=0
+            RenderText "Progress bar" len=12 segs=2
+              seg[0]: start=0 len=8 x=37.0 y=1013.7 w=61.6 h=16.4
+              seg[1]: start=9 len=3 x=106.3 y=1013.7 w=23.1 h=16.4
+              RenderText "60%" len=3 segs=1
+                seg[0]: start=0 len=3 x=37.0 y=1030.7 w=23.1 h=16.4
+          RenderText "\n  " len=3 segs=1
+            seg[0]: start=0 len=3 x=37.0 y=1030.7 w=23.1 h=16.4
+            RenderText "Range slider" len=12 segs=2
+              seg[0]: start=0 len=5 x=37.0 y=1114.5 w=38.5 h=16.4
+              seg[1]: start=6 len=6 x=83.2 y=1114.5 w=46.2 h=16.4
+          RenderText "\n  " len=3 segs=0
+
+=== HORIZONTAL SCAN y=16 ===
+y=16 |................................................
+
+=== ACTIVITY BAR FULL SCAN (y=30..90, x=0..47) ===
+y= 30 |.....................*(22,58a6ff)*.......*(32,4c8dd8).....*(39,529aeb)....(44,58a6ff)*.*
+y= 31 |......................*(23,58a6ff)(24,58a6ff)(25,58a6ff)*....*(32,4c8dd8).....*(39,58a6ff)(40,58a6ff)(41,58a6ff)(42,58a6ff)(43,58a6ff)(44,58a6ff)*.*
+y= 32 |.........................*(26,58a6ff)*...*(32,4c8dd8).....*(39,529aeb).......*
+y= 33 |..........................(26,58a6ff)*...*(32,58a6ff)*....*(39,58a6ff)*......*
+y= 34 |.....................*(22,58a6ff)(23,58a6ff)(24,58a6ff)(25,58a6ff)*.....(32,4c8dd8)(33,58a6ff)(34,58a6ff)(35,58a6ff)*..*(40,58a6ff)(41,58a6ff)(42,58a6ff)(43,58a6ff)(44,58a6ff)..*
+y= 35 |...............................................*
+y= 36 |...............................................*
+y= 37 |...............................................*
+y= 38 |................................................
+y= 39 |................................................
+y= 40 |................................................
+y= 41 |................................................
+y= 42 |................................................
+y= 43 |................................................
+y= 44 |................................................
+y= 45 |................................................
+y= 46 |................................................
+y= 47 |................................................
+y= 48 |................................................
+y= 49 |................................................
+y= 50 |................................................
+y= 51 |....................****************************
+y= 52 |....................****************************
+y= 53 |....................*...........................
+y= 54 |....................*...........................
+y= 55 |....................*...........................
+y= 56 |....................*...........................
+y= 57 |....................*...........................
+y= 58 |....................*...........................
+y= 59 |....................*...........................
+y= 60 |....................*...........................
+y= 61 |....................*...........................
+y= 62 |....................*...........................
+y= 63 |....................*...........................
+y= 64 |....................*...........................
+y= 65 |....................*...........................
+y= 66 |....................*...........................
+y= 67 |....................*...........................
+y= 68 |....................*...........................
+y= 69 |....................*...........................
+y= 70 |....................*...........................
+y= 71 |....................*...........................
+y= 72 |....................*................*(38,e6edf3)(39,e6edf3)(40,e6edf3)(41,e6edf3)(42,e6edf3)(43,e6edf3)*...
+y= 73 |....................*...................(40,ccd3d9)*......
+y= 74 |....................*...................(40,ccd3d9)*.....(47,e6edf3)
+y= 75 |....................*...................(40,ccd3d9)*....(46,d9e0e6)*
+y= 76 |....................*...................(40,ccd3d9)*...*(46,d9e0e6).
+y= 77 |....................*...................(40,ccd3d9)*...*(46,e6edf3)(47,e6edf3)
+y= 78 |....................*...................(40,ccd3d9)*...*(46,ccd3d9).
+y= 79 |....................*...................(40,ccd3d9)*....(46,e6edf3)*
+y= 80 |....................*...................(40,ccd3d9)*....*(47,e6edf3)
+y= 81 |....................*...........................
+y= 82 |....................*...........................
+y= 83 |....................*...........................
+y= 84 |....................*...........................
+y= 85 |....................*...........................
+y= 86 |....................*...........................
+y= 87 |....................*...........................
+y= 88 |....................*................**..**.....
+y= 89 |....................*................**..**.....
+y= 90 |....................*................**..**..***
+
+=== EDITOR TAB X-BTN SCAN (x=365..380, y=40..52) ===
+y= 40 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 41 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 42 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 43 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 44 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 45 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 46 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 47 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 48 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 49 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 50 |(365,0d1117)(366,0d1117)(367,0d1117)(368,0d1117)(369,0d1117)(370,0d1117)(371,0d1117)(372,0d1117)(373,0d1117)(374,0d1117)(375,0d1117)(376,0d1117)(377,0d1117)(378,0d1117)(379,0d1117)(380,0d1117)
+y= 51 |(365,2b3138)(366,2b3138)(367,2b3138)(368,2b3138)(369,2b3138)(370,2b3138)(371,2b3138)(372,2b3138)(373,2b3138)(374,2b3138)(375,2b3138)(376,2b3138)(377,2b3138)(378,2b3138)(379,2b3138)(380,2b3138)
+y= 52 |(365,1c2128)(366,1c2128)(367,1c2128)(368,1c2128)(369,1c2128)(370,1c2128)(371,1c2128)(372,1c2128)(373,1c2128)(374,1c2128)(375,1c2128)(376,1c2128)(377,1c2128)(378,1c2128)(379,1c2128)(380,1c2128)
+
+=== SIDEBAR VERTICAL SCAN: x=100, y=770..800 ===
+  y=770 = #00000000
+  y=771 = #00000000
+  y=772 = #00000000
+  y=773 = #00000000
+  y=774 = #00000000
+  y=775 = #00000000
+  y=776 = #00000000
+  y=777 = #00000000
+  y=778 = #00000000
+  y=779 = #00000000
+  y=780 = #00000000
+  y=781 = #00000000
+  y=782 = #00000000
+  y=783 = #00000000
+  y=784 = #00000000
+  y=785 = #00000000
+  y=786 = #00000000
+  y=787 = #00000000
+  y=788 = #00000000
+  y=789 = #00000000
+  y=790 = #00000000
+  y=791 = #00000000
+  y=792 = #00000000
+  y=793 = #00000000
+  y=794 = #00000000
+  y=795 = #00000000
+  y=796 = #00000000
+  y=797 = #00000000
+  y=798 = #00000000
+  y=799 = #00000000
+  y=800 = #00000000
+
+=== ACTIVITY BAR SCAN: x=10, y=30..800 ===
+  y= 30 = #0d1117ff
+  y= 70 = #0d1117ff
+  y=110 = #0d1117ff
+  y=150 = #0d1117ff
+  y=190 = #0d1117ff
+  y=230 = #0d1117ff
+  y=270 = #0d1117ff
+  y=310 = #0d1117ff
+  y=350 = #0d1117ff
+  y=390 = #0d1117ff
+  y=430 = #0d1117ff
+  y=470 = #0d1117ff
+  y=510 = #0d1117ff
+  y=550 = #0d1117ff
+  y=590 = #0d1117ff
+  y=630 = #0d1117ff
+  y=670 = #0d1117ff
+  y=710 = #00000000
+  y=750 = #00000000
+  y=790 = #00000000
+
+=== FONT METRICS ===
+  RenderText="step17 — Form Controls" fontSize=16.0 layoutAscent=12.8 skiaAscent=14.7 layoutDescent=3.2 skiaDescent=4.0 layoutLineH=19.2 skiaLineH=18.7 diff=-0.5
+  RenderText="Text inputs" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Username" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Password" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Email" fontSize=12.0 layoutAscent=9.6 skiaAscent=11.0 layoutDescent=2.4 skiaDescent=3.0 layoutLineH=14.4 skiaLineH=14.1 diff=-0.3
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Textarea" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="  " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Buttons" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Primary" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Default" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Cancel" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="\n  " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Checkboxes" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Option A (checked)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Option B (unchecked)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Option C (checked)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Radio buttons" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Radio 1 (selected)" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Radio 2" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText=" " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Radio 3" fontSize=13.0 layoutAscent=10.4 skiaAscent=12.0 layoutDescent=2.6 skiaDescent=3.3 layoutLineH=15.6 skiaLineH=15.2 diff=-0.4
+  RenderText="\n    " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Select / Dropdown" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="\n  " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Progress bar" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="60%" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="\n  " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="Range slider" fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
+  RenderText="\n  " fontSize=14.0 layoutAscent=11.2 skiaAscent=12.9 layoutDescent=2.8 skiaDescent=3.5 layoutLineH=16.8 skiaLineH=16.4 diff=-0.4
