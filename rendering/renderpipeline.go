@@ -244,7 +244,7 @@ const scrollW = 12.0    // total scrollbar width
 							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
 							thumbCol := graphics.Color{R: 192, G: 192, B: 192, A: 255}   // #C0C0C0 thumb
 							thumbHoverCol := graphics.Color{R: 160, G: 160, B: 160, A: 255} // #A0A0A0 hover
-													arrowBtnCol := graphics.Color{R: 220, G: 220, B: 220, A: 255} // button bg
+
 							arrowCol := graphics.Color{R: 128, G: 128, B: 128, A: 255}   // #808080 arrow
 
 							sx, sy := float64(0), float64(0)
@@ -269,18 +269,22 @@ const scrollW = 12.0    // total scrollbar width
 							// Track background.
 							info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 
-							// Up arrow button: rounded rect background + triangle.
-							upBtnY := vy
-							info.canvas.FillRoundRect(vx+1, upBtnY+1, scrollW-2, arrowSize-2, 3, arrowBtnCol)
-							acx := vx + scrollW/2
-							acy := upBtnY + arrowSize/2
-							info.canvas.FillTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, arrowCol)
+// Up arrow: rounded triangle (fill + circles at vertices).
+						upBtnY := vy
+						acx := vx + scrollW/2
+						acy := upBtnY + arrowSize/2
+						info.canvas.FillTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, arrowCol)
+						info.canvas.FillCircle(acx, acy-2, 1.2, arrowCol)
+						info.canvas.FillCircle(acx-3, acy+3, 1.2, arrowCol)
+						info.canvas.FillCircle(acx+3, acy+3, 1.2, arrowCol)
 
-							// Down arrow button.
-							dnBtnY := vy + vh - arrowSize
-							info.canvas.FillRoundRect(vx+1, dnBtnY+1, scrollW-2, arrowSize-2, 3, arrowBtnCol)
-							dcy := dnBtnY + arrowSize/2
-							info.canvas.FillTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, arrowCol)
+						// Down arrow.
+						dnBtnY := vy + vh - arrowSize
+						dcy := dnBtnY + arrowSize/2
+						info.canvas.FillTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, arrowCol)
+						info.canvas.FillCircle(acx, dcy+2, 1.2, arrowCol)
+						info.canvas.FillCircle(acx-3, dcy-3, 1.2, arrowCol)
+						info.canvas.FillCircle(acx+3, dcy-3, 1.2, arrowCol)
 
 							// Thumb (rounded rect, pill shape).
 							if totalH > contentH {
@@ -319,16 +323,20 @@ const scrollW = 12.0    // total scrollbar width
 								// Track background.
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 
-								// Left arrow button.
-								ltBtnX := hx
-								aCy := hy + scrollW/2
-								info.canvas.FillRoundRect(ltBtnX+1, hy+1, arrowSize-2, scrollW-2, 3, arrowBtnCol)
-								info.canvas.FillTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-4, aCy-3, ltBtnX+arrowSize-4, aCy+3, arrowCol)
+// Left arrow: rounded triangle.
+						ltBtnX := hx
+						aCy := hy + scrollW/2
+						info.canvas.FillTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-6, aCy-3, ltBtnX+arrowSize-6, aCy+3, arrowCol)
+						info.canvas.FillCircle(ltBtnX+5, aCy, 1.2, arrowCol)
+						info.canvas.FillCircle(ltBtnX+arrowSize-6, aCy-3, 1.2, arrowCol)
+						info.canvas.FillCircle(ltBtnX+arrowSize-6, aCy+3, 1.2, arrowCol)
 
-								// Right arrow button.
-								rtBtnX := hx + hw - arrowSize
-								info.canvas.FillRoundRect(rtBtnX+1, hy+1, arrowSize-2, scrollW-2, 3, arrowBtnCol)
-								info.canvas.FillTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+4, aCy-3, rtBtnX+4, aCy+3, arrowCol)
+						// Right arrow.
+						rtBtnX := hx + hw - arrowSize
+						info.canvas.FillTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+6, aCy-3, rtBtnX+6, aCy+3, arrowCol)
+						info.canvas.FillCircle(rtBtnX+arrowSize-5, aCy, 1.2, arrowCol)
+						info.canvas.FillCircle(rtBtnX+6, aCy-3, 1.2, arrowCol)
+						info.canvas.FillCircle(rtBtnX+6, aCy+3, 1.2, arrowCol)
 
 								// Thumb.
 								if totalW > contentW {
