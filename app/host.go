@@ -396,6 +396,11 @@ func (h *Host) Run() {
 		// Fetch the GPU surface fresh each frame: resize callbacks release
 		// and recreate the surface, so the cached pointer would be dangling.
 		gpuSurf := h.win.GPUSurface()
+		// Ensure the viewport matches the current window size. This is called
+		// every frame and is a no-op (FrameView.SetSize checks for actual change)
+		// but catches resize events that the FramebufferSizeCallback may have
+		// missed (e.g. maximize/un-maximize on some GLFW/platform combos).
+		h.wv.Resize(h.win.Width(), h.win.Height())
 		if gpuSurf == nil {
 			h.processEvents(nil)
 			h.processEventLoop()

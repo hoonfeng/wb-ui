@@ -239,24 +239,6 @@ func (w *Window) setupCallbacks() {
 		w.eventsMu.Unlock()
 		w.recreateSurface()
 	})
-	w.win.SetSizeCallback(func(_ *glfw.Window, winW, winH int) {
-		// Window size callback fires for maximize/un-maximize/drag-resize in
-		// screen coordinates (logical pixels). On some systems the framebuffer
-		// callback might not fire for maximize via the title-bar button, so
-		// this ensures we always catch size changes.
-		w.eventsMu.Lock()
-		oldW, oldH := w.width, w.height
-		w.width = winW
-		w.height = winH
-		if winW != oldW || winH != oldH {
-			w.events = append(w.events, Event{
-				Type:   EventResize,
-				Width:  winW,
-				Height: winH,
-			})
-		}
-		w.eventsMu.Unlock()
-	})
 	w.win.SetScrollCallback(func(win *glfw.Window, xoff, yoff float64) {
 		// Shift+scroll wheel → horizontal scroll (Windows standard behavior).
 		if xoff == 0 && yoff != 0 {
