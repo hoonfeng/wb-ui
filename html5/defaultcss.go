@@ -200,6 +200,32 @@ details:not([open]) > :not(summary) {
 	display: none !important;
 }
 
+/* ── Table element defaults (mirrors WebCore/css/html.css table section) ── */
+table {
+	display: table;
+	border-collapse: separate;
+	text-indent: 0;
+	box-sizing: border-box;
+}
+caption {
+	display: table-caption;
+	text-align: center;
+}
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
+tr { display: table-row; }
+col { display: table-column; }
+colgroup { display: table-column-group; }
+th, td {
+	display: table-cell;
+	padding: 1px;
+}
+th {
+	font-weight: bold;
+	text-align: center;
+}
+
 /* Dialog. */
 dialog {
 	display: block;
