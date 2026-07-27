@@ -446,6 +446,10 @@ func (h *Host) Run() {
 			if maxY := frameView.MaxScrollY(); scrollY > maxY {
 				scrollY = maxY
 			}
+			if scrollY != 0 {
+				fmt.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
+					scrollY, frameView.MaxScrollY(), frameView.ContentHeight(), frameView.Height())
+			}
 			frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
 
 			gpuCanvas.Save()

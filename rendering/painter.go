@@ -477,11 +477,26 @@ func PaintText(text *RenderText, info *PaintInfo) {
 					paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 				}
 			}
-			// Draw ellipsis after the last visible character, using the same font.
-			if truncateAt < len(subRunes) && truncateAt > 0 {
-				ellipsisX := seg.X + visibleW
-				info.canvas.DrawText(ellipsisX, baseline, "...", font, col)
+			// Draw ellipsis when truncation occurred, using filled circles for
+			// compact spacing (avoids font side-bearing gaps between "." glyphs).
+			if truncateAt < len(subRunes) {
+				var ellipsisX float64
+				if truncateAt > 0 {
+					ellipsisX = seg.X + visibleW
+				} else {
+					// No character fits — place ellipsis at content box right edge.
+					ellipsisX = maxSegRight
+				}
+				dotR := font.Size * 0.12
+				if dotR < 1.5 {
+					dotR = 1.5
+				}
+				dotGap := dotR * 2.5
+				for i := 0; i < 3; i++ {
+					info.canvas.FillCircle(ellipsisX+float64(i)*dotGap, baseline-dotR, dotR, col)
+				}
 				info.textOverflowEllipsisPainted = true
+				continue
 			}
 			continue
 		}
