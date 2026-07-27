@@ -197,6 +197,23 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				blockSize = fb - contentY
 			}
 		}
+		// Even without BFC, expand height to encompass this container's own
+		// float children (clearfix behavior). Without this, a container whose
+		// only children are floats would have zero height.
+		if !establishesBFC {
+			maxFloatBottom := 0.0
+			for _, child := range box.Children() {
+				if eb, ok := child.(*ElementBox); ok && eb.IsFloated() {
+					ch := state.GeometryForBox(eb)
+					if b := ch.Top() + ch.BorderBoxHeight(); b > maxFloatBottom {
+						maxFloatBottom = b
+					}
+				}
+			}
+			if maxFloatBottom > contentY+blockSize {
+				blockSize = maxFloatBottom - contentY
+			}
+		}
 		if blockSize < 0 {
 			blockSize = 0
 		}
@@ -303,16 +320,21 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 	// Use container's FC-relative y as startY so placeFloat's collision
 	// detection correctly sees sibling floats at the same y level.
 	fcY := contentY - fc.originY
-	x, y := fc.placeFloat(child, isLeft, borderBox, 0, fcY)
-	// Adjust x for coordinate offset between FC origin and container content box.
+	// Include margin in the width passed to placeFloat so subsequent floats
+	// are spaced apart by their margins (not placing right against each other).
+	marginBoxW := borderBox + margin.Horizontal()
+	x, y := fc.placeFloat(child, isLeft, marginBoxW, 0, fcY)
+	// Adjust x for coordinate offset between FC origin and container content box,
+	// plus margin-left so the float's border box starts at the correct position.
 	// y from placeFloat is already FC-relative (starts at fcY). Convert to
 	// absolute by adding fc.originY so it matches the page coordinate system.
-	x += contentX - fc.originX
+	x += contentX - fc.originX + margin.Left
 	y += fc.originY
 
 	// Clamp float position to container content area when using inherited FC.
 	// Without a BFC, the inherited FC may have wider bounds (viewport width)
 	// causing floats to escape the container. This keeps them visually contained.
+	// Use marginBoxW for clamping because margin was already added to x.
 	rightEdge := contentX + contentWidth
 	if x+borderBox > rightEdge && rightEdge > contentX {
 		x = rightEdge - borderBox
@@ -328,7 +350,7 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 	for i := range fc.floats {
 		if fc.floats[i].box == child {
 			fc.floats[i].h = ch.BorderBoxHeight()
-			fc.floats[i].w = borderBox
+			fc.floats[i].w = marginBoxW // store margin-box width for correct collision detection
 			// Update the FC-relative y to match the actual rendered position.
 			// placeFloat starts at fc.originY, but the rendered y after the
 			// contentY - fc.originY adjustment may differ. Keeping the FC y

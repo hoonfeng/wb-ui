@@ -56,17 +56,23 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	{
 		hasExplicitWidth := cs != nil && cs.Width.Unit != "" && cs.Width.Unit != "auto"
 		if !hasExplicitWidth {
-			allText := ""
-			for _, child := range box.Children() {
-				if tb, ok := child.(*InlineTextBox); ok {
-					allText += tb.Text()
+			// Auto-width expansion: only expand for auto-width inline-level
+			// boxes (e.g. span, inline-block). Block-level children get their
+			// width from the parent BFC and must not be expanded, otherwise
+			// text would not wrap (causing overflow beyond the container).
+			if box.IsInlineLevel() {
+				allText := ""
+				for _, child := range box.Children() {
+					if tb, ok := child.(*InlineTextBox); ok {
+						allText += tb.Text()
+					}
 				}
-			}
-			if totalW := measureText(box, allText); totalW > 0 {
-				if contentWidth < totalW+20 {
-					// This box has auto-width based on text content.
-					// Widen slightly to prevent float-epsilon line wraps.
-					contentWidth = totalW + 20
+				if totalW := measureText(box, allText); totalW > 0 {
+					if contentWidth < totalW+20 {
+						// This box has auto-width based on text content.
+						// Widen slightly to prevent float-epsilon line wraps.
+						contentWidth = totalW + 20
+					}
 				}
 			}
 		}
