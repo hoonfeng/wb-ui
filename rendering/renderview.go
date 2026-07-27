@@ -251,8 +251,8 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 	pb := scrollBox.PaddingBoxRect()
-	scrollW := 17.0
-	arrowSize := 17.0
+	scrollW := 12.0
+	arrowSize := 12.0
 	if pb.Width <= scrollW*2 || pb.Height <= scrollW*2 {
 		return nil
 	}

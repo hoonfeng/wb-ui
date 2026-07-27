@@ -584,7 +584,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					vh := pb.Height
 					_, ch := rv.BoxContentSize(h.scrollbarDragBox)
 					if ch > pb.Height {
-						const arrowSize = 17.0
+						const arrowSize = 12.0
 						trackH := vh - arrowSize*2
 						thumbH := trackH * pb.Height / ch
 						if thumbH < arrowSize { thumbH = arrowSize }
@@ -602,7 +602,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					hw := pb.Width
 					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
 					if cw > pb.Width {
-						const arrowSize = 17.0
+						const arrowSize = 12.0
 						trackW := hw - arrowSize*2
 						thumbW := trackW * pb.Width / cw
 						if thumbW < arrowSize { thumbW = arrowSize }
@@ -681,15 +681,15 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						_, ch := rv.BoxContentSize(box)
 						totalH := ch
 						contentH := pb.Height
-						trackH := pb.Height - 17.0*2 // arrowSize
+						trackH := pb.Height - 12.0*2 // arrowSize
 						thumbLen := trackH * contentH / totalH
-						if thumbLen < 17.0 { thumbLen = 17.0 }
+	if thumbLen < 12.0 { thumbLen = 12.0 }
 						if thumbLen > trackH-4 { thumbLen = trackH - 4 }
 						maxSy := totalH - contentH
 						if maxSy <= 0 { maxSy = 1 }
 						syRatio := sy / maxSy
 						thumbTrackSpace := trackH - thumbLen
-						thumbCenterY := pb.Y + 17.0 + syRatio*thumbTrackSpace + thumbLen/2
+						thumbCenterY := pb.Y + 12.0 + syRatio*thumbTrackSpace + thumbLen/2
 						if cssY < thumbCenterY {
 							rv.SetBoxScrollOffset(box, sx, sy-pageH)
 						} else {
@@ -704,15 +704,15 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						cw, _ := rv.BoxContentSize(box)
 						totalW := cw
 						contentW := pb.Width
-						trackW := pb.Width - 17.0*2
+						trackW := pb.Width - 12.0*2
 						thumbLen := trackW * contentW / totalW
-						if thumbLen < 17.0 { thumbLen = 17.0 }
+	if thumbLen < 12.0 { thumbLen = 12.0 }
 						if thumbLen > trackW-4 { thumbLen = trackW - 4 }
 						maxSx := totalW - contentW
 						if maxSx <= 0 { maxSx = 1 }
 						sxRatio := sx / maxSx
 						thumbTrackSpace := trackW - thumbLen
-						thumbCenterX := pb.X + 17.0 + sxRatio*thumbTrackSpace + thumbLen/2
+						thumbCenterX := pb.X + 12.0 + sxRatio*thumbTrackSpace + thumbLen/2
 						if cssX < thumbCenterX {
 							rv.SetBoxScrollOffset(box, sx-pageW, sy)
 						} else {
