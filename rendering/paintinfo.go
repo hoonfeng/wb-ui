@@ -60,6 +60,11 @@ type PaintInfo struct {
 	// painting to the dirty rect. When false, intersects() always returns
 	// true (full repaint). Enabled by default.
 	dirtyCheckEnabled bool
+
+// textOverflowEllipsisPainted is set by PaintText when it draws the
+	// ellipsis during text-overflow:ellipsis truncation, so that
+	// walkSubtreeExcluded skips its own ellipsis paint for this container.
+	textOverflowEllipsisPainted bool
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty

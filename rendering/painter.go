@@ -57,8 +57,8 @@ func toGraphicsColor(c style.Color) graphics.Color {
 
 // findTextOverflowAncestor walks up the render tree from the given RenderObject
 // to find the nearest ancestor with text-overflow:ellipsis. Returns its content
-// box rect and the ellipsis width, or (nil, 0) if none found.
-func findTextOverflowAncestor(ro RenderObject) (cb *layout.LayoutRect, ellipsisW float64) {
+// box rect, or nil if none found.
+func findTextOverflowAncestor(ro RenderObject) *layout.LayoutRect {
 	for p := ro.Parent(); p != nil; p = p.Parent() {
 		st := p.Style()
 		if st == nil {
@@ -76,16 +76,10 @@ func findTextOverflowAncestor(ro RenderObject) (cb *layout.LayoutRect, ellipsisW
 		}
 		if box := asRenderBox(p); box != nil {
 			cbr := box.ContentBoxRect()
-			font := toGraphicsFont(st)
-			ew := graphics.MeasureText(font, "...")
-			if ew <= 0 {
-				ew = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
-			}
-			tmp := cbr
-			return &tmp, ew
+			return &cbr
 		}
 	}
-	return nil, 0
+	return nil
 }
 
 // BoxGeometry returns the border-box position and size of a render object, or
@@ -436,9 +430,14 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	}
 	
 	// text-overflow:ellipsis truncation: find ancestor with this property.
-	toCB, toEllipsisW := findTextOverflowAncestor(text)
+	toCB := findTextOverflowAncestor(text)
+	// Compute ellipsis width using the same font as the text being painted.
+	textEllipsisW := float64(0)
 	if toCB != nil {
-		println("DEBUG text-overflow: text=", content, " cb.X=", int(toCB.X), " cb.W=", int(toCB.Width), " ew=", int(toEllipsisW), " segX=", int(segments[0].X))
+		textEllipsisW = graphics.MeasureText(font, "...")
+		if textEllipsisW <= 0 {
+			textEllipsisW = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
+		}
 	}
 
 	for _, seg := range segments {
@@ -452,8 +451,8 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		baseline := seg.Y + ascent
 
 		// text-overflow:ellipsis — clip this segment to the content box minus ellipsis width.
-		if toCB != nil && seg.X+seg.Width > toCB.X+toCB.Width-toEllipsisW && seg.X < toCB.X+toCB.Width {
-			maxSegRight := toCB.X + toCB.Width - toEllipsisW
+		if toCB != nil && seg.X+seg.Width > toCB.X+toCB.Width-textEllipsisW && seg.X < toCB.X+toCB.Width {
+			maxSegRight := toCB.X + toCB.Width - textEllipsisW
 			if seg.X >= maxSegRight {
 				// Entire segment is beyond the visible area; skip it.
 				continue
@@ -477,6 +476,12 @@ func PaintText(text *RenderText, info *PaintInfo) {
 					info.canvas.DrawText(seg.X, baseline, sub, font, col)
 					paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 				}
+			}
+			// Draw ellipsis after the last visible character, using the same font.
+			if truncateAt < len(subRunes) && truncateAt > 0 {
+				ellipsisX := seg.X + visibleW
+				info.canvas.DrawText(ellipsisX, baseline, "...", font, col)
+				info.textOverflowEllipsisPainted = true
 			}
 			continue
 		}

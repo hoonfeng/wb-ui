@@ -210,6 +210,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 
 	// ── Overflow controls (painted in clip-only state, no translate) ──
 	if needsClipRestore && info.Phase() == PhaseForeground {
+		info.textOverflowEllipsisPainted = false
 		if box := asRenderBox(root); box != nil {
 			st := box.Style()
 			if st == nil {
@@ -217,7 +218,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			}
 
 			// ── Text-overflow: ellipsis ──
-			if st.TextOverflow == style.TextOverflowEllipsis {
+			if st.TextOverflow == style.TextOverflowEllipsis && !info.textOverflowEllipsisPainted {
 				pb := box.PaddingBoxRect()
 				if pb.Width > 20 && pb.Height > 10 {
 					ellipsis := "..."
