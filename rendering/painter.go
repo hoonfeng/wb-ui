@@ -431,13 +431,15 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	
 	// text-overflow:ellipsis truncation: find ancestor with this property.
 	toCB := findTextOverflowAncestor(text)
-	// Compute ellipsis width using the same font as the text being painted.
+	// Compute ellipsis width: three tightly-spaced filled circles.
 	textEllipsisW := float64(0)
 	if toCB != nil {
-		textEllipsisW = graphics.MeasureText(font, "...")
-		if textEllipsisW <= 0 {
-			textEllipsisW = graphics.MeasureText(graphics.Font{Family: "Consolas", Size: 14, Weight: 400, Style: "normal"}, "...")
+		ellipsisDotR := font.Size * 0.10
+		if ellipsisDotR < 1.0 {
+			ellipsisDotR = 1.0
 		}
+		ellipsisGap := ellipsisDotR * 2.6 // ~1px gap between dots for 14px font
+		textEllipsisW = ellipsisGap*2 + ellipsisDotR*2
 	}
 
 	for _, seg := range segments {
@@ -495,12 +497,21 @@ func PaintText(text *RenderText, info *PaintInfo) {
 						paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 					}
 				}
-				// Draw "..." right after the last visible character.
+				// Draw "…" right after the last visible character using tightly
+				// spaced filled circles, matching browser rendering where three
+				// dots are approximately 1-2 px apart (no font side-bearing gaps).
 				ellipsisX := seg.X + visibleW
 				if lastFit == 0 {
 					ellipsisX = toCB.X + toCB.Width - textEllipsisW
 				}
-				info.canvas.DrawText(ellipsisX, baseline, "...", font, col)
+				dotR := font.Size * 0.10
+				if dotR < 1.0 {
+					dotR = 1.0
+				}
+				dotGap := dotR * 2.6 // ~1px gap between dot edges for 14px font
+				for i := 0; i < 3; i++ {
+					info.canvas.FillCircle(ellipsisX+float64(i)*dotGap, baseline-dotR, dotR, col)
+				}
 				info.textOverflowEllipsisPainted = true
 				break
 			}
