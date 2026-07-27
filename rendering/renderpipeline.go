@@ -272,19 +272,13 @@ const scrollW = 12.0    // total scrollbar width
 // Up arrow: rounded triangle (fill + circles at vertices).
 						upBtnY := vy
 						acx := vx + scrollW/2
-						acy := upBtnY + arrowSize/2
-						info.canvas.FillTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, arrowCol)
-						info.canvas.FillCircle(acx, acy-2, 1.2, arrowCol)
-						info.canvas.FillCircle(acx-3, acy+3, 1.2, arrowCol)
-						info.canvas.FillCircle(acx+3, acy+3, 1.2, arrowCol)
+												acy := upBtnY + arrowSize/2
+						info.canvas.FillRoundedTriangle(acx, acy-2, acx-3, acy+3, acx+3, acy+3, 1.2, arrowCol)
 
 						// Down arrow.
 						dnBtnY := vy + vh - arrowSize
 						dcy := dnBtnY + arrowSize/2
-						info.canvas.FillTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, arrowCol)
-						info.canvas.FillCircle(acx, dcy+2, 1.2, arrowCol)
-						info.canvas.FillCircle(acx-3, dcy-3, 1.2, arrowCol)
-						info.canvas.FillCircle(acx+3, dcy-3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(acx, dcy+2, acx-3, dcy-3, acx+3, dcy-3, 1.2, arrowCol)
 
 							// Thumb (rounded rect, pill shape).
 							if totalH > contentH {
@@ -323,20 +317,14 @@ const scrollW = 12.0    // total scrollbar width
 								// Track background.
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 
-// Left arrow: rounded triangle.
+												// Left arrow.
 						ltBtnX := hx
 						aCy := hy + scrollW/2
-						info.canvas.FillTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-6, aCy-3, ltBtnX+arrowSize-6, aCy+3, arrowCol)
-						info.canvas.FillCircle(ltBtnX+5, aCy, 1.2, arrowCol)
-						info.canvas.FillCircle(ltBtnX+arrowSize-6, aCy-3, 1.2, arrowCol)
-						info.canvas.FillCircle(ltBtnX+arrowSize-6, aCy+3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-6, aCy-3, ltBtnX+arrowSize-6, aCy+3, 1.2, arrowCol)
 
 						// Right arrow.
 						rtBtnX := hx + hw - arrowSize
-						info.canvas.FillTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+6, aCy-3, rtBtnX+6, aCy+3, arrowCol)
-						info.canvas.FillCircle(rtBtnX+arrowSize-5, aCy, 1.2, arrowCol)
-						info.canvas.FillCircle(rtBtnX+6, aCy-3, 1.2, arrowCol)
-						info.canvas.FillCircle(rtBtnX+6, aCy+3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+6, aCy-3, rtBtnX+6, aCy+3, 1.2, arrowCol)
 
 								// Thumb.
 								if totalW > contentW {

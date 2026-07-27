@@ -542,6 +542,77 @@ func (c *Canvas) FillTriangle(x0, y0, x1, y1, x2, y2 float64, col Color) {
 	c.invalidatePixels()
 }
 
+// FillRoundedTriangle fills a triangle with rounded corners using QuadTo bezier
+// curves at each vertex. radius controls the corner rounding amount.
+func (c *Canvas) FillRoundedTriangle(x0, y0, x1, y1, x2, y2, radius float64, col Color) {
+	if col.A == 0 || radius <= 0 {
+		c.FillTriangle(x0, y0, x1, y1, x2, y2, col)
+		return
+	}
+	// Clamp radius to half the shortest edge.
+	type pt struct{ x, y float64 }
+	v := []pt{{x0, y0}, {x1, y1}, {x2, y2}}
+	minHalfEdge := radius
+	for i := 0; i < 3; i++ {
+		j := (i + 1) % 3
+		dx := v[j].x - v[i].x
+		dy := v[j].y - v[i].y
+		half := float64(math.Sqrt(float64(dx*dx+dy*dy))) / 2.0
+		if half < minHalfEdge {
+			minHalfEdge = half
+		}
+	}
+	r := float32(math.Min(float64(radius), float64(minHalfEdge)))
+	if r <= 0 {
+		c.FillTriangle(x0, y0, x1, y1, x2, y2, col)
+		return
+	}
+
+	path := skia.NewPath()
+	// For each vertex, find the point r distance along each incident edge.
+	// Build the path: start at first edge-end of vertex 0, then for each vertex
+	// do QuadTo(vertex, next-edge-start) + LineTo(next-edge-end).
+	var starts, ends [3]skia.Point
+	for i := 0; i < 3; i++ {
+		prev := (i + 2) % 3
+		next := (i + 1) % 3
+		// Edge from vertex i to vertex next.
+		dx1 := v[next].x - v[i].x
+		dy1 := v[next].y - v[i].y
+		l1 := float32(math.Sqrt(float64(dx1*dx1 + dy1*dy1)))
+		// Edge from vertex prev to vertex i.
+		dx2 := v[i].x - v[prev].x
+		dy2 := v[i].y - v[prev].y
+		l2 := float32(math.Sqrt(float64(dx2*dx2 + dy2*dy2)))
+		if l1 <= 0 || l2 <= 0 {
+			c.FillTriangle(x0, y0, x1, y1, x2, y2, col)
+			path.Release()
+			return
+		}
+		// Point along edge prev->i at distance r from vertex i.
+		starts[i] = skia.Point{
+			X: float32(v[i].x) - r*float32(dx2)/l2,
+			Y: float32(v[i].y) - r*float32(dy2)/l2,
+		}
+		// Point along edge i->next at distance r from vertex i.
+		ends[i] = skia.Point{
+			X: float32(v[i].x) + r*float32(dx1)/l1,
+			Y: float32(v[i].y) + r*float32(dy1)/l1,
+		}
+	}
+	path.MoveTo(starts[0].X, starts[0].Y)
+	for i := 0; i < 3; i++ {
+		path.QuadTo(float32(v[i].x), float32(v[i].y), ends[i].X, ends[i].Y)
+		next := (i + 1) % 3
+		path.LineTo(starts[next].X, starts[next].Y)
+	}
+	path.Close()
+	c.fillPaint.SetColor(colorToSkia(col))
+	c.canvas.DrawPath(path, c.fillPaint)
+	c.invalidatePixels()
+	path.Release()
+}
+
 // FillPolygon fills a closed polygon defined by the given points with the supplied
 // color. Used for arbitrary filled shapes (e.g. the select arrow). Points are connected
 // in order and the path is closed.
