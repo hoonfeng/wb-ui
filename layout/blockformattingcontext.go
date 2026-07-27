@@ -5,11 +5,19 @@
 package layout
 
 import (
-	"log"
+	"fmt"
 	"math"
+	"os"
 
 	"wb-ui/style"
 )
+
+var diagFloats *os.File
+
+func init() {
+	diagFloats, _ = os.Create("diag_floats.txt")
+	diagFloats.WriteString("=== float layout diagnostics ===\n")
+}
 
 type BlockFormattingContext struct {
 	FormattingContextBase
@@ -62,8 +70,8 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// DIAG: log container geometry for boxes with floats
 	for _, ch := range box.Children() {
 		if eb, ok := ch.(*ElementBox); ok && eb.IsFloated() {
-			log.Printf("[diag-float] parent=%q contentX=%.0f contentY=%.0f contentWidth=%.0f bfc=%t fc=%p",
-				box.Style().Display, contentX, contentY, contentWidth, establishesBFC, fc)
+			fmt.Fprintf(diagFloats, "parent=%q contentX=%.0f contentY=%.0f contentWidth=%.0f bfc=%t\n",
+				box.Style().Display, contentX, contentY, contentWidth, establishesBFC)
 			break
 		}
 	}
@@ -320,7 +328,7 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 		w = contentWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
 		if w < 0 { w = 0 }
 	}
-	log.Printf("[diag-float] child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t",
+	fmt.Fprintf(diagFloats, "  child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t\n",
 		cs.Display, cs.Float, cs.Width, contentWidth, w, ok)
 	borderBox := w
 	if !isBorderBoxForBox(child) {
