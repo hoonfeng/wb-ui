@@ -235,10 +235,9 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
-							// Colors: GitHub-dark style
-							trackCol := graphics.Color{R: 22, G: 27, B: 34, A: 255}
-							thumbCol := graphics.Color{R: 48, G: 54, B: 61, A: 255}
-							thumbHoverCol := graphics.Color{R: 110, G: 118, B: 129, A: 255}
+							// Colors: modern browser overlay style (transparent track, semi-transparent thumb)
+							thumbCol := graphics.Color{R: 110, G: 118, B: 129, A: 96}   // alpha 0.38 default
+							thumbHoverCol := graphics.Color{R: 110, G: 118, B: 129, A: 200} // alpha 0.78 hover
 							cornerCol := graphics.Color{R: 22, G: 27, B: 34, A: 255}
 
 							sx, sy := float64(0), float64(0)
@@ -255,7 +254,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsH {
 									vh -= scrollW
 								}
-								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+							// No track fill — browsers use overlay scrollbars (track is transparent).
+							// info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 								if totalH > contentH && vh > scrollW*2 {
 									thumbH := vh * contentH / totalH
 									if thumbH < scrollW*1.2 {
@@ -289,7 +289,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if needsV {
 									hw -= scrollW
 								}
-								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
+							// No track fill — overlay style.
+							// info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 								if totalW > contentW && hw > scrollW*2 {
 									thumbW := hw * contentW / totalW
 									if thumbW < scrollW*1.2 {

@@ -328,8 +328,19 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	// Is point on horizontal scrollbar?
 	if needsH && y >= hy && y <= hy+scrollW && x >= hx && x <= hx+hw {
 		h := &ScrollbarHit{Box: scrollBox, IsHTrack: true}
-		// TODO: horizontal thumb hit check
-		_, _ = sx, sy
+		if totalW > contentW && hw > scrollW*3 {
+			thumbW := hw * contentW / totalW
+			if thumbW < scrollW*2.0 { thumbW = scrollW * 2.0 }
+			if thumbW > hw-scrollW { thumbW = hw - scrollW }
+			maxSx := totalW - contentW
+			if maxSx <= 0 { maxSx = 1 }
+			sxRatio := sx / maxSx
+			thumbTrackSpace := hw - thumbW
+			thumbX := hx + sxRatio*thumbTrackSpace
+			if x >= thumbX && x <= thumbX+thumbW {
+				h.IsHThumb = true
+			}
+		}
 		return h
 	}
 

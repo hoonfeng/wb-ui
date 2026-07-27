@@ -245,7 +245,7 @@ func (w *Window) setupCallbacks() {
 			shift := win.GetKey(glfw.KeyLeftShift) == glfw.Press ||
 				win.GetKey(glfw.KeyRightShift) == glfw.Press
 			if shift {
-				xoff = yoff
+				xoff = -yoff // negate: scroll up (yoff>0) → scroll left (xoff<0)
 				yoff = 0
 			}
 		}

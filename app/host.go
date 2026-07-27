@@ -567,7 +567,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if csX <= 0 { csX = 1 }
 				if csY <= 0 { csY = 1 }
 				cssX := ev.X / csX
-				cssY := ev.Y / csY
+				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // page coords for scrollbar hover
 				rv.SetCursorPos(cssX, cssY)
 			}
 			// Handle scrollbar thumb drag.
@@ -576,7 +576,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if csX <= 0 { csX = 1 }
 				if csY <= 0 { csY = 1 }
 				cssX := ev.X / csX
-				cssY := ev.Y / csY
+				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // match EventMouseButton coordinate space
 				if h.scrollbarDragAxis {
 					// Vertical drag: cursor delta → scroll offset delta
 					dy := cssY - h.scrollbarDragStart
