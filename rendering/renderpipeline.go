@@ -240,12 +240,12 @@ const scrollW = 12.0    // total scrollbar width
 
 						if needsV || needsH {
 
-							// Opaque light gray scrollbar colors.
+							// Darker scrollbar colors (better contrast vs white track).
 							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
-							thumbCol := graphics.Color{R: 192, G: 192, B: 192, A: 255}   // #C0C0C0 thumb
-							thumbHoverCol := graphics.Color{R: 160, G: 160, B: 160, A: 255} // #A0A0A0 hover
+							thumbCol := graphics.Color{R: 160, G: 160, B: 160, A: 255}   // #A0A0A0 thumb (was #C0C0C0)
+							thumbHoverCol := graphics.Color{R: 128, G: 128, B: 128, A: 255} // #808080 hover (was #A0A0A0)
 
-							arrowCol := graphics.Color{R: 128, G: 128, B: 128, A: 255}   // #808080 arrow
+							arrowCol := graphics.Color{R: 96, G: 96, B: 96, A: 255}     // #606060 arrow (was #808080)
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)
@@ -320,11 +320,11 @@ const scrollW = 12.0    // total scrollbar width
 												// Left arrow.
 						ltBtnX := hx
 						aCy := hy + scrollW/2
-						info.canvas.FillRoundedTriangle(ltBtnX+5, aCy, ltBtnX+arrowSize-6, aCy-3, ltBtnX+arrowSize-6, aCy+3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-3, aCy-4, ltBtnX+arrowSize-3, aCy+4, 0.8, arrowCol)
 
 						// Right arrow.
 						rtBtnX := hx + hw - arrowSize
-						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-5, aCy, rtBtnX+6, aCy-3, rtBtnX+6, aCy+3, 1.2, arrowCol)
+						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
 
 								// Thumb.
 								if totalW > contentW {
