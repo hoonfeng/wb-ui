@@ -32,6 +32,8 @@ import (
 	"wb-ui/webkit"
 )
 
+var DumpRTCallback func(rv *rendering.RenderView)
+
 // ClickHandler is invoked when the user clicks an element whose onclick
 // attribute does not use the "js:" prefix. el is the deepest hit-tested
 // element with an onclick attribute (may be nil if nothing was hit), and
@@ -507,6 +509,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		switch ev.Type {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())
+			if DumpRTCallback != nil && rv != nil {
+				DumpRTCallback(rv)
+			}
 		case window.EventScroll:
 			if rv == nil {
 				break
