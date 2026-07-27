@@ -240,7 +240,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						if needsV || needsH {
 
 							// Opaque light gray scrollbar colors.
-							trackCol := graphics.Color{R: 240, G: 240, B: 240, A: 255}   // #F0F0F0 track
+							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
 							thumbCol := graphics.Color{R: 192, G: 192, B: 192, A: 255}   // #C0C0C0 thumb
 							thumbHoverCol := graphics.Color{R: 160, G: 160, B: 160, A: 255} // #A0A0A0 hover
 							arrowCol := graphics.Color{R: 128, G: 128, B: 128, A: 255}   // #808080 arrow
