@@ -503,6 +503,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())
 		case window.EventScroll:
+			if rv == nil {
+				break
+			}
 			// GLFW: ScrollY > 0 when scrolling up (away from user), ScrollX > 0 when scrolling right.
 			// Browser: scroll up → see content above → scrollY decreases.
 			//          scroll right → see content to the right → scrollX increases.

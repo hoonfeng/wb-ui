@@ -46,6 +46,13 @@ func (b *RenderBox) Type() RenderObjectType { return ObjectBox }
 // IsBox reports that this object generates a box, mirroring RenderObject::isBox().
 func (b *RenderBox) IsBox() bool { return true }
 
+// AsRenderBox returns the RenderBox pointer for any box-bearing render object.
+// This is needed because Go type assertion cannot cast *RenderBlockFlow → *RenderBox
+// (they are different concrete types despite embedding). By implementing this method
+// on RenderBox, it gets promoted to all embedding types (RenderBlock, RenderBlockFlow,
+// RenderView) so asRenderBox can recover the *RenderBox via interface assertion.
+func (b *RenderBox) AsRenderBox() *RenderBox { return b }
+
 // X / Y / Width / Height mirror RenderBox::x() / y() / width() / height().
 func (b *RenderBox) X() float64 { return b.frame.X }
 func (b *RenderBox) Y() float64 { return b.frame.Y }
