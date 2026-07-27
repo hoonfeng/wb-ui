@@ -219,6 +219,16 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			x += cellTotalWidth
 		}
 
+		// Equalize all cells in this row to the computed row height.
+		for _, cell := range row.cells {
+			cg2 := state.GeometryForBox(cell)
+			cellContentH := rowH - cg2.VerticalBorderAndPadding()
+			if cellContentH < 1 {
+				cellContentH = 1
+			}
+			cg2.SetContentHeight(cellContentH)
+		}
+
 		// Set row geometry.
 		rg.SetTopLeft(y, contentLeft)
 		rg.SetContentWidth(cw)
