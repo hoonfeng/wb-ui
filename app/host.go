@@ -113,11 +113,6 @@ type Host struct {
 	// Cleared on mouseup. Enables :active pseudo-class matching.
 	activeEl *dom.Element
 
-	// hoveredEl tracks the element currently under the mouse cursor.
-	hoveredEl *dom.Element
-	// activeEl tracks the element being pressed (mousedown → :active).
-	activeEl *dom.Element
-
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
