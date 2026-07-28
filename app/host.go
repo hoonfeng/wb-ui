@@ -91,8 +91,8 @@ type Host struct {
 	selStartY      float64
 	selEndX        float64 // end position (drag/shift+click target)
 	selEndY        float64
-	selecting      bool // mouse button held during drag
-	shiftSelecting bool // shift+click extending selection
+	selecting      bool    // mouse button held during drag
+	shiftSelecting bool    // shift+click extending selection
 	mouseDownX     float64 // press position for hysteresis
 	mouseDownY     float64
 	hysteresisMet  bool // drag threshold (3px) exceeded
@@ -103,6 +103,15 @@ type Host struct {
 	// cursorX, cursorY track the last known cursor position (from mouse
 	// move events), used for hit-testing on scroll events.
 	cursorX, cursorY float64
+
+	// hoveredEl tracks the element currently under the mouse cursor.
+	// On each mouse-move, HitTest locates the deepest element and updates
+	// its IsHovered state accordingly. This enables :hover pseudo-class
+	// matching in the style resolver.
+	hoveredEl *dom.Element
+	// activeEl tracks the element being pressed (mousedown → :active).
+	// Cleared on mouseup. Enables :active pseudo-class matching.
+	activeEl *dom.Element
 
 	// hoveredEl tracks the element currently under the mouse cursor.
 	hoveredEl *dom.Element
@@ -227,6 +236,7 @@ func (h *Host) FocusElement(el *dom.Element) {
 	if mf := h.wv.MainFrame(); mf != nil {
 		if fr := mf.Frame(); fr != nil {
 			fr.MarkRenderTreeDirty()
+			fr.SetNeedsLayout(true)
 		}
 	}
 	if el != nil {
@@ -362,9 +372,6 @@ func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
 	return foundX
 }
 
-
-
-
 // Unfocus clears the IME focus and disables text input on the platform
 // window. It removes the blinking caret and clears the form control selection.
 // Call this when the user clicks outside an editable element.
@@ -390,6 +397,7 @@ func (h *Host) updateSelection(rv *rendering.RenderView) {
 	// during mouse event processing. This method exists as a hook for future
 	// selection-change event dispatch.
 }
+
 // SetIMECompositionPos updates the IME composition/candidate window position
 // to the given CSS-pixel coordinates (relative to the window). The Host
 // converts these to physical pixels before forwarding to the platform window.
@@ -452,33 +460,33 @@ func (h *Host) Run() {
 			rendering.ApplyAnimations(rv)
 
 			// Update text selection from stored coordinates against the
-		// current render tree (robust to rebuilds).
-		h.updateSelection(rv)
+			// current render tree (robust to rebuilds).
+			h.updateSelection(rv)
 
-		// Blink the caret at ~500ms intervals, mirroring WebKit's
-		// caret blink cycle. The caret is only visible when an IME
-		// focus target is set or a non-selection click positioned it.
-		// CaretVisibleControl follows the same cycle for form-control
-		// carets (which are drawn by paintFormControlCaret, not PaintCaret).
-		if time.Since(h.caretBlinkTime) > 500*time.Millisecond {
-			rendering.CaretVisible = !rendering.CaretVisible
-			rendering.CaretVisibleControl = rendering.CaretVisible
-			h.caretBlinkTime = time.Now()
-		}
-
-		bgColor := findBodyBgColor(rendering.RenderObject(rv))
-		if bgColor.A == 0 {
-			bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-		}
-		gpuCanvas.Clear(bgColor)
-
-		// Diagnostic: log body frame rect on first frame
-		if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), h.wv.MainFrame().Document().Body()); bodyRO != nil {
-			if box, ok := bodyRO.(*rendering.RenderBox); ok {
-				fr := box.FrameRect()
-				log.Printf("[paint] body frame=(%.0f,%.0f %.0fx%.0f)", fr.X, fr.Y, fr.Width, fr.Height)
+			// Blink the caret at ~500ms intervals, mirroring WebKit's
+			// caret blink cycle. The caret is only visible when an IME
+			// focus target is set or a non-selection click positioned it.
+			// CaretVisibleControl follows the same cycle for form-control
+			// carets (which are drawn by paintFormControlCaret, not PaintCaret).
+			if time.Since(h.caretBlinkTime) > 500*time.Millisecond {
+				rendering.CaretVisible = !rendering.CaretVisible
+				rendering.CaretVisibleControl = rendering.CaretVisible
+				h.caretBlinkTime = time.Now()
 			}
-		}
+
+			bgColor := findBodyBgColor(rendering.RenderObject(rv))
+			if bgColor.A == 0 {
+				bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+			}
+			gpuCanvas.Clear(bgColor)
+
+			// Diagnostic: log body frame rect on first frame
+			if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), h.wv.MainFrame().Document().Body()); bodyRO != nil {
+				if box, ok := bodyRO.(*rendering.RenderBox); ok {
+					fr := box.FrameRect()
+					log.Printf("[paint] body frame=(%.0f,%.0f %.0fx%.0f)", fr.X, fr.Y, fr.Width, fr.Height)
+				}
+			}
 
 			// Clamp scroll offset to valid range after layout.
 			scrollY := frameView.ScrollY()
@@ -617,8 +625,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// Update RenderView cursor for scrollbar hover highlight.
 			if rv != nil {
 				csX, csY := h.win.ContentScale()
-				if csX <= 0 { csX = 1 }
-				if csY <= 0 { csY = 1 }
+				if csX <= 0 {
+					csX = 1
+				}
+				if csY <= 0 {
+					csY = 1
+				}
 				cssX := ev.X / csX
 				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // page coords for scrollbar hover
 				rv.SetCursorPos(cssX, cssY)
@@ -626,8 +638,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// Handle scrollbar thumb drag.
 			if h.scrollbarDragging && rv != nil && h.scrollbarDragBox != nil {
 				csX, csY := h.win.ContentScale()
-				if csX <= 0 { csX = 1 }
-				if csY <= 0 { csY = 1 }
+				if csX <= 0 {
+					csX = 1
+				}
+				if csY <= 0 {
+					csY = 1
+				}
 				cssX := ev.X / csX
 				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // match EventMouseButton coordinate space
 				if h.scrollbarDragAxis {
@@ -640,12 +656,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						const arrowSize = 12.0
 						trackH := vh - arrowSize*2
 						thumbH := trackH * pb.Height / ch
-						if thumbH < arrowSize { thumbH = arrowSize }
+						if thumbH < arrowSize {
+							thumbH = arrowSize
+						}
 						scale := (ch - pb.Height) / (trackH - thumbH)
 						newSy := h.scrollbarDragScroll + dy*scale
-						if newSy < 0 { newSy = 0 }
+						if newSy < 0 {
+							newSy = 0
+						}
 						maxY := ch - pb.Height
-						if newSy > maxY { newSy = maxY }
+						if newSy > maxY {
+							newSy = maxY
+						}
 						rv.SetBoxScrollOffset(h.scrollbarDragBox, 0, newSy)
 					}
 				} else {
@@ -658,12 +680,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						const arrowSize = 12.0
 						trackW := hw - arrowSize*2
 						thumbW := trackW * pb.Width / cw
-						if thumbW < arrowSize { thumbW = arrowSize }
+						if thumbW < arrowSize {
+							thumbW = arrowSize
+						}
 						scale := (cw - pb.Width) / (trackW - thumbW)
 						newSx := h.scrollbarDragScroll + dx*scale
-						if newSx < 0 { newSx = 0 }
+						if newSx < 0 {
+							newSx = 0
+						}
 						maxX := cw - pb.Width
-						if newSx > maxX { newSx = maxX }
+						if newSx > maxX {
+							newSx = maxX
+						}
 						rv.SetBoxScrollOffset(h.scrollbarDragBox, newSx, 0)
 					}
 				}
@@ -765,10 +793,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						contentH := pb.Height
 						trackH := pb.Height - 12.0*2 // arrowSize
 						thumbLen := trackH * contentH / totalH
-	if thumbLen < 12.0 { thumbLen = 12.0 }
-						if thumbLen > trackH-4 { thumbLen = trackH - 4 }
+						if thumbLen < 12.0 {
+							thumbLen = 12.0
+						}
+						if thumbLen > trackH-4 {
+							thumbLen = trackH - 4
+						}
 						maxSy := totalH - contentH
-						if maxSy <= 0 { maxSy = 1 }
+						if maxSy <= 0 {
+							maxSy = 1
+						}
 						syRatio := sy / maxSy
 						thumbTrackSpace := trackH - thumbLen
 						thumbCenterY := pb.Y + 12.0 + syRatio*thumbTrackSpace + thumbLen/2
@@ -788,10 +822,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						contentW := pb.Width
 						trackW := pb.Width - 12.0*2
 						thumbLen := trackW * contentW / totalW
-	if thumbLen < 12.0 { thumbLen = 12.0 }
-						if thumbLen > trackW-4 { thumbLen = trackW - 4 }
+						if thumbLen < 12.0 {
+							thumbLen = 12.0
+						}
+						if thumbLen > trackW-4 {
+							thumbLen = trackW - 4
+						}
 						maxSx := totalW - contentW
-						if maxSx <= 0 { maxSx = 1 }
+						if maxSx <= 0 {
+							maxSx = 1
+						}
 						sxRatio := sx / maxSx
 						thumbTrackSpace := trackW - thumbLen
 						thumbCenterX := pb.X + 12.0 + sxRatio*thumbTrackSpace + thumbLen/2
@@ -841,101 +881,105 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					h.shiftSelecting = true
 					h.selecting = false
 				} else {
-				// Reset caret blink so the caret is immediately visible on focus.
-				h.caretBlinkTime = time.Now()
-				rendering.CaretVisible = true
-				rendering.CaretVisibleControl = true
+					// Reset caret blink so the caret is immediately visible on focus.
+					h.caretBlinkTime = time.Now()
+					rendering.CaretVisible = true
+					rendering.CaretVisibleControl = true
 
-				// HitTest the click position to find the element under cursor.
-				// If it's a form control (input/textarea/select), set focus.
-				if rv != nil {
-					hitEl := rendering.HitTest(rv, cssX, cssY, "type")
-					if hitEl != nil && isTextFormControl(hitEl) {
-						if hitEl != h.imeFocusedEl {
-							h.FocusElement(hitEl)
+					// HitTest the click position to find the element under cursor.
+					// If it's a form control (input/textarea/select), set focus.
+					if rv != nil {
+						hitEl := rendering.HitTest(rv, cssX, cssY, "type")
+						if hitEl != nil && isTextFormControl(hitEl) {
+							if hitEl != h.imeFocusedEl {
+								h.FocusElement(hitEl)
+							}
+						} else if hitEl != nil && (hitEl.LocalName() == "select" || hitEl.LocalName() == "button") {
+							if hitEl != h.imeFocusedEl {
+								h.FocusElement(hitEl)
+							}
+						} else if h.imeFocusedEl != nil {
+							h.Unfocus()
 						}
-					} else if hitEl != nil && (hitEl.LocalName() == "select" || hitEl.LocalName() == "button") {
-						if hitEl != h.imeFocusedEl {
-							h.FocusElement(hitEl)
+					}
+
+					// If the click is on a text form control, calculate the
+					// character offset and set the form-control selection.
+					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+						if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
+							// Shift+Click extends form-control selection.
+							rendering.FocusedFormControlSel.End = offset
+							rendering.FocusedFormControlSel.Active = true
+						} else {
+							rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+								Start:  offset,
+								End:    offset,
+								Active: true,
+							}
 						}
 					} else if h.imeFocusedEl != nil {
-						h.Unfocus()
+						// Click outside a text control clears the form-control selection.
+						rendering.FocusedFormControlSel = nil
 					}
 				}
-
-				// If the click is on a text form control, calculate the
-				// character offset and set the form-control selection.
-				if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
-					if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
-						// Shift+Click extends form-control selection.
-						rendering.FocusedFormControlSel.End = offset
-						rendering.FocusedFormControlSel.Active = true
-					} else {
-						rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-							Start:  offset,
-							End:    offset,
-							Active: true,
+			} else if ev.Action == int(glfw.Release) {
+				// ── Clear active state ──
+				if h.activeEl != nil {
+					h.activeEl.SetActive(false)
+					h.activeEl = nil
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
 						}
 					}
-				} else if h.imeFocusedEl != nil {
-					// Click outside a text control clears the form-control selection.
-					rendering.FocusedFormControlSel = nil
 				}
-			}
-		} else if ev.Action == int(glfw.Release) {
-			// ── Clear active state ──
-			if h.activeEl != nil {
-				h.activeEl.SetActive(false)
-				h.activeEl = nil
-				if mf := h.wv.MainFrame(); mf != nil {
-					if fr := mf.Frame(); fr != nil {
-						fr.MarkRenderTreeDirty()
+				// End scrollbar drag if active.
+				if h.scrollbarDragging {
+					h.scrollbarDragging = false
+					h.scrollbarDragBox = nil
+				}
+				if h.selecting {
+					csX, csY := h.win.ContentScale()
+					if csX <= 0 {
+						csX = 1
 					}
-				}
-			}
-			// End scrollbar drag if active.
-			if h.scrollbarDragging {
-				h.scrollbarDragging = false
-				h.scrollbarDragBox = nil
-			}
-			if h.selecting {
-				csX, csY := h.win.ContentScale()
-				if csX <= 0 {
-					csX = 1
-				}
-				if csY <= 0 {
-					csY = 1
-				}
-				cssX := ev.X / csX
-				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
+					if csY <= 0 {
+						csY = 1
+					}
+					cssX := ev.X / csX
+					cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
-				// Hysteresis: only start dragging after moving > 3px from
-				// mouseDown.
-				if !h.hysteresisMet {
-					dx := cssX - h.mouseDownX
-					dy := cssY - h.mouseDownY
-					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
-						continue // not yet dragging
+					// Hysteresis: only start dragging after moving > 3px from
+					// mouseDown.
+					if !h.hysteresisMet {
+						dx := cssX - h.mouseDownX
+						dy := cssY - h.mouseDownY
+						if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+							continue // not yet dragging
+						}
+					}
+					// Update the cursor-move selection end point.
+					// The anchor (sel start) stays at the mouse-down point.
+					if rendering.FocusedFormControlSel != nil &&
+						rendering.FocusedFormControlSel.Active &&
+						h.imeFocusedEl != nil {
+						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+						rendering.FocusedFormControlSel.End = offset
 					}
 				}
-				// Update the cursor-move selection end point.
-				// The anchor (sel start) stays at the mouse-down point.
-				if rendering.FocusedFormControlSel != nil &&
-					rendering.FocusedFormControlSel.Active &&
-					h.imeFocusedEl != nil {
-					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
-					rendering.FocusedFormControlSel.End = offset
-				}
 			}
-		}
-	case window.EventKey:
+		case window.EventKey:
 			// Keyboard scrolling for PageUp/PageDown/Arrow keys.
 			if ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat) {
 				if rv != nil {
 					csX, csY := h.win.ContentScale()
-					if csX <= 0 { csX = 1 }
-					if csY <= 0 { csY = 1 }
+					if csX <= 0 {
+						csX = 1
+					}
+					if csY <= 0 {
+						csY = 1
+					}
 					cssX := h.cursorX / csX
 					cssY := h.cursorY / csY
 					scrollBox := rv.HitTestScrollContainer(cssX, cssY)
@@ -962,16 +1006,24 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if ev.Key == int(glfw.KeyLeft) || ev.Key == int(glfw.KeyRight) {
 								newSx := sx + delta
 								cw, _ := rv.BoxContentSize(scrollBox)
-								if newSx < 0 { newSx = 0 }
-								if maxSx := cw - pb.Width; newSx > maxSx { newSx = maxSx }
+								if newSx < 0 {
+									newSx = 0
+								}
+								if maxSx := cw - pb.Width; newSx > maxSx {
+									newSx = maxSx
+								}
 								rv.SetBoxScrollOffset(scrollBox, newSx, sy)
 							} else {
 								newSy := sy + delta
 								_, ch := rv.BoxContentSize(scrollBox)
-								if newSy < 0 { newSy = 0 }
-								if maxSy := ch - pb.Height; newSy > maxSy { newSy = maxSy }
-							rv.SetBoxScrollOffset(scrollBox, sx, newSy)
-						}
+								if newSy < 0 {
+									newSy = 0
+								}
+								if maxSy := ch - pb.Height; newSy > maxSy {
+									newSy = maxSy
+								}
+								rv.SetBoxScrollOffset(scrollBox, sx, newSy)
+							}
 							break
 						}
 					} else {
@@ -1029,9 +1081,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		}
-			}
-		}
-
+	}
+}
 
 // handleSelection processes text selection based on granularity and drag state.
 func (h *Host) handleSelection(rv *rendering.RenderView, pos rendering.TextPosition) {
@@ -1451,7 +1502,7 @@ func findBodyBgColor(o rendering.RenderObject) graphics.Color {
 					}
 				}
 			}
-			}
+		}
 	}
 	// Fallback 1: walk from o's own subtree.
 	if col := firstNonTransBg(o); col.A > 0 {

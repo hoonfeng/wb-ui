@@ -1,0 +1,364 @@
+=== float layout diagnostics ===
+> layoutBlockChildren: box=&{{0x2bece542c420 1 0x2bece542c2c0 0x2bece542c2c0 0x2bece548f170 <nil> 0x2bece548f200 0x2bece542c630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=900 childCount=1
+  [i=0] child=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2bece6172008
+> layoutBlockChildren: box=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=860 childCount=9
+  [i=0] child=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2bece6172808
+> layoutBlockChildren: box=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=860 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6292008
+  [i=1] child=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece6178008
+> layoutBlockChildren: box=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece6178808
+> layoutBlockChildren: box=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6292808
+  [i=1] child=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece6182008
+> layoutBlockChildren: box=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece6182808
+> layoutBlockChildren: box=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6293008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6293808
+> layoutBlockChildren: box=&{{0x2bece542ca50 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f950 0x2bece548f9e0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=800 childCount=0
+  [i=2] child=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece6189808
+> layoutBlockChildren: box=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece6194008
+> layoutBlockChildren: box=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6294008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6294808
+> layoutBlockChildren: box=&{{0x2bece542cc60 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fc20 0x2bece548fcb0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=800 childCount=0
+  [i=3] child=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece619d008
+> layoutBlockChildren: box=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece619d808
+> layoutBlockChildren: box=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6295008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6295808
+> layoutBlockChildren: box=&{{0x2bece542ce70 1 0x2bece542c2c0 0x2bece542cd10 0x2bece5f2e000 0x2bece5f2e090 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=800 childCount=0
+  [i=2] child=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece61ac808
+> layoutBlockChildren: box=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece61ad008
+> layoutBlockChildren: box=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6296008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6296808
+> layoutBlockChildren: box=&{{0x2bece542d080 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e360 0x2bece5f2e480 0x2bece5f2e3f0 0x2bece5f2e3f0 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=800 childCount=0
+  [i=3] child=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece61bc008
+> layoutBlockChildren: box=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece61bc808
+> layoutBlockChildren: box=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece6297008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece629b008
+> layoutBlockChildren: box=&{{0x2bece542d290 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e6c0 0x2bece5f2e7e0 0x2bece5f2e750 0x2bece5f2e750 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece6297808
+> layoutBlockChildren: box=&{{0x2bece542d340 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e7e0 0x2bece5f2e900 0x2bece5f2e870 0x2bece5f2e870 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece629a008
+> layoutBlockChildren: box=&{{0x2bece542d3f0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e900 0x2bece5f2ea20 0x2bece5f2e990 0x2bece5f2e990 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece629a808
+> layoutBlockChildren: box=&{{0x2bece542d4a0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2ea20 0x2bece5f2eab0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d550 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2eab0 0x2bece5f2eb40 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
+  [i=4] child=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece61f2808
+> layoutBlockChildren: box=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece61f3008
+> layoutBlockChildren: box=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece629b808
+  [i=1] child=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece61fc808
+> layoutBlockChildren: box=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece629e808
+> layoutBlockChildren: box=&{{0x2bece542d810 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2ee10 0x2bece5f2eea0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d8c0 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2eea0 0x2bece5f2efc0 0x2bece5f2ef30 0x2bece5f2ef30 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece629e008
+  [i=2] child=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece620e808
+> layoutBlockChildren: box=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece629f808
+> layoutBlockChildren: box=&{{0x2bece542da20 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f0e0 0x2bece5f2f170 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dad0 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f170 0x2bece5f2f290 0x2bece5f2f200 0x2bece5f2f200 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece629f008
+  [i=3] child=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece621e808
+> layoutBlockChildren: box=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a0808
+> layoutBlockChildren: box=&{{0x2bece542dc30 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f3b0 0x2bece5f2f440 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dce0 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f440 0x2bece5f2f560 0x2bece5f2f4d0 0x2bece5f2f4d0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece62a0008
+  [i=5] child=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece622e808
+> layoutBlockChildren: box=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece622f008
+> layoutBlockChildren: box=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a1008
+  [i=1] child=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece6234808
+> layoutBlockChildren: box=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a2008
+> layoutBlockChildren: box=&{{0x2bece5f360b0 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f8c0 0x2bece5f2f950 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36160 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f950 0x2bece5f2fa70 0x2bece5f2f9e0 0x2bece5f2f9e0 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece62a1808
+  [i=2] child=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece6242808
+> layoutBlockChildren: box=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a3008
+> layoutBlockChildren: box=&{{0x2bece5f362c0 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fb90 0x2bece5f2fc20 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36370 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fc20 0x2bece5f2fd40 0x2bece5f2fcb0 0x2bece5f2fcb0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece62a2808
+  [i=3] child=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece6254808
+> layoutBlockChildren: box=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a4008
+> layoutBlockChildren: box=&{{0x2bece5f364d0 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f2fe60 0x2bece5f38000 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36580 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f38000 0x2bece5f38120 0x2bece5f38090 0x2bece5f38090 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece62a3808
+  [i=6] child=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece6266808
+> layoutBlockChildren: box=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece6267008
+> layoutBlockChildren: box=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a4808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece62a5008
+> layoutBlockChildren: box=&{{0x2bece5f36790 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f383f0 0x2bece5f38990 0x2bece5f38480 0x2bece5f38900 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
+  [i=7] child=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece6274008
+> layoutBlockChildren: box=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece6274808
+> layoutBlockChildren: box=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a5808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece62a6808
+> layoutBlockChildren: box=&{{0x2bece5f36c60 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38bd0 0x2bece5f38cf0 0x2bece5f38c60 0x2bece5f38c60 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=100% display=2 style=0x2bece62a6008
+  [i=8] child=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece6284808
+> layoutBlockChildren: box=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece6285008
+> layoutBlockChildren: box=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece62a7008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece62a7808
+> layoutBlockChildren: box=&{{0x2bece5f36e70 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38f30 0x2bece5f38fc0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=826 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542c420 1 0x2bece542c2c0 0x2bece542c2c0 0x2bece548f170 <nil> 0x2bece548f200 0x2bece542c630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=0 childCount=1
+  [i=0] child=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2bece6116808
+> layoutBlockChildren: box=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=-40 childCount=9
+  [i=0] child=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2bece5548008
+> layoutBlockChildren: box=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece571f808
+  [i=1] child=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5549808
+> layoutBlockChildren: box=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} contentX=37 contentY=126 contentWidth=-34 childCount=4
+  [i=0] child=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece554a008
+> layoutBlockChildren: box=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} contentX=37 contentY=126 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5736008
+  [i=1] child=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece554b808
+> layoutBlockChildren: box=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=159 contentWidth=0 childCount=2
+  [i=0] child=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece555e008
+> layoutBlockChildren: box=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} contentX=37 contentY=159 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5736808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5737008
+> layoutBlockChildren: box=&{{0x2bece542ca50 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f950 0x2bece548f9e0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=185 contentWidth=0 childCount=0
+  [i=2] child=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece556b008
+> layoutBlockChildren: box=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=217 contentWidth=0 childCount=2
+  [i=0] child=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece556b808
+> layoutBlockChildren: box=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} contentX=37 contentY=217 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5737808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5798008
+> layoutBlockChildren: box=&{{0x2bece542cc60 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fc20 0x2bece548fcb0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=243 contentWidth=0 childCount=0
+  [i=3] child=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece556e808
+> layoutBlockChildren: box=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=275 contentWidth=0 childCount=2
+  [i=0] child=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece556f008
+> layoutBlockChildren: box=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} contentX=37 contentY=275 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5798808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5799008
+> layoutBlockChildren: box=&{{0x2bece542ce70 1 0x2bece542c2c0 0x2bece542cd10 0x2bece5f2e000 0x2bece5f2e090 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=300 contentWidth=0 childCount=0
+  [i=2] child=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece557a008
+> layoutBlockChildren: box=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} contentX=37 contentY=396 contentWidth=-34 childCount=2
+  [i=0] child=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece557a808
+> layoutBlockChildren: box=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=396 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5799808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6117808
+> layoutBlockChildren: box=&{{0x2bece542d080 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e360 0x2bece5f2e480 0x2bece5f2e3f0 0x2bece5f2e3f0 map[]} textarea [] map[] false false false} contentX=50 contentY=422 contentWidth=0 childCount=0
+  [i=3] child=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5477808
+> layoutBlockChildren: box=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=537 contentWidth=-34 childCount=2
+  [i=0] child=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5478008
+> layoutBlockChildren: box=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=537 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579a008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece579c008
+> layoutBlockChildren: box=&{{0x2bece542d290 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e6c0 0x2bece5f2e7e0 0x2bece5f2e750 0x2bece5f2e750 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=563 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579a808
+> layoutBlockChildren: box=&{{0x2bece542d340 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e7e0 0x2bece5f2e900 0x2bece5f2e870 0x2bece5f2e870 map[]} button [] map[] false false false} contentX=146 contentY=563 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579b008
+> layoutBlockChildren: box=&{{0x2bece542d3f0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e900 0x2bece5f2ea20 0x2bece5f2e990 0x2bece5f2e990 map[]} button [] map[] false false false} contentX=146 contentY=597 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579b808
+> layoutBlockChildren: box=&{{0x2bece542d4a0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2ea20 0x2bece5f2eab0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=139 contentY=630 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d550 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2eab0 0x2bece5f2eb40 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=139 contentY=664 contentWidth=0 childCount=0
+  [i=4] child=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece54fa008
+> layoutBlockChildren: box=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=786 contentWidth=-34 childCount=4
+  [i=0] child=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece54fa808
+> layoutBlockChildren: box=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=786 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579c808
+  [i=1] child=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5502008
+> layoutBlockChildren: box=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=811 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579d808
+> layoutBlockChildren: box=&{{0x2bece542d810 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2ee10 0x2bece5f2eea0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=811 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d8c0 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2eea0 0x2bece5f2efc0 0x2bece5f2ef30 0x2bece5f2ef30 map[]} label [] map[] false false false} contentX=59 contentY=811 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579d008
+  [i=2] child=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece551c008
+> layoutBlockChildren: box=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=912 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579e808
+> layoutBlockChildren: box=&{{0x2bece542da20 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f0e0 0x2bece5f2f170 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=912 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dad0 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f170 0x2bece5f2f290 0x2bece5f2f200 0x2bece5f2f200 map[]} label [] map[] false false false} contentX=59 contentY=912 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579e008
+  [i=3] child=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5520008
+> layoutBlockChildren: box=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=1014 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579f808
+> layoutBlockChildren: box=&{{0x2bece542dc30 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f3b0 0x2bece5f2f440 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=1014 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dce0 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f440 0x2bece5f2f560 0x2bece5f2f4d0 0x2bece5f2f4d0 map[]} label [] map[] false false false} contentX=59 contentY=1014 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579f008
+  [i=5] child=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5534008
+> layoutBlockChildren: box=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1179 contentWidth=-34 childCount=4
+  [i=0] child=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5534808
+> layoutBlockChildren: box=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1179 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a0008
+  [i=1] child=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5554008
+> layoutBlockChildren: box=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=1221 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a1008
+> layoutBlockChildren: box=&{{0x2bece5f360b0 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f8c0 0x2bece5f2f950 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=1221 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36160 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f950 0x2bece5f2fa70 0x2bece5f2f9e0 0x2bece5f2f9e0 map[]} label [] map[] false false false} contentX=59 contentY=1221 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a0808
+  [i=2] child=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5580008
+> layoutBlockChildren: box=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=1323 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a2008
+> layoutBlockChildren: box=&{{0x2bece5f362c0 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fb90 0x2bece5f2fc20 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=1323 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36370 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fc20 0x2bece5f2fd40 0x2bece5f2fcb0 0x2bece5f2fcb0 map[]} label [] map[] false false false} contentX=59 contentY=1323 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a1808
+  [i=3] child=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece558e008
+> layoutBlockChildren: box=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=1393 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a3008
+> layoutBlockChildren: box=&{{0x2bece5f364d0 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f2fe60 0x2bece5f38000 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=1393 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36580 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f38000 0x2bece5f38120 0x2bece5f38090 0x2bece5f38090 map[]} label [] map[] false false false} contentX=59 contentY=1393 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a2808
+  [i=6] child=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece55a2008
+> layoutBlockChildren: box=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1527 contentWidth=-34 childCount=2
+  [i=0] child=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece55a2808
+> layoutBlockChildren: box=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1527 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a3808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a4008
+> layoutBlockChildren: box=&{{0x2bece5f36790 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f383f0 0x2bece5f38990 0x2bece5f38480 0x2bece5f38900 map[]} select [] map[] false false false} contentX=48 contentY=1585 contentWidth=178 childCount=0
+  [i=7] child=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece55ad808
+> layoutBlockChildren: box=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1671 contentWidth=-34 childCount=2
+  [i=0] child=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece55b8008
+> layoutBlockChildren: box=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1671 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a4808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a5808
+> layoutBlockChildren: box=&{{0x2bece5f36c60 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38bd0 0x2bece5f38cf0 0x2bece5f38c60 0x2bece5f38c60 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1705 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=100% display=2 style=0x2bece57a5008
+  [i=8] child=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5712008
+> layoutBlockChildren: box=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1789 contentWidth=-34 childCount=2
+  [i=0] child=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5712808
+> layoutBlockChildren: box=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1789 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a6008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a6808
+> layoutBlockChildren: box=&{{0x2bece5f36e70 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38f30 0x2bece5f38fc0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1822 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542c420 1 0x2bece542c2c0 0x2bece542c2c0 0x2bece548f170 <nil> 0x2bece548f200 0x2bece542c630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=900 childCount=1
+  [i=0] child=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2bece6116808
+> layoutBlockChildren: box=&{{0x2bece542c630 1 0x2bece542c2c0 0x2bece542c420 0x2bece548f440 <nil> 0x2bece548f4d0 0x2bece5f39050 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=860 childCount=9
+  [i=0] child=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2bece5548008
+> layoutBlockChildren: box=&{{0x2bece542c6e0 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f4d0 0x2bece548f5f0 0x2bece548f560 0x2bece548f560 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=860 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece571f808
+  [i=1] child=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5549808
+> layoutBlockChildren: box=&{{0x2bece542c790 1 0x2bece542c2c0 0x2bece542c630 0x2bece548f5f0 0x2bece5f2e1b0 0x2bece548f680 0x2bece5f2e120 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece554a008
+> layoutBlockChildren: box=&{{0x2bece542c840 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f680 0x2bece548f7a0 0x2bece548f710 0x2bece548f710 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5736008
+  [i=1] child=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece554b808
+> layoutBlockChildren: box=&{{0x2bece542c8f0 1 0x2bece542c2c0 0x2bece542c790 0x2bece548f7a0 0x2bece548fa70 0x2bece548f830 0x2bece548f9e0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece555e008
+> layoutBlockChildren: box=&{{0x2bece542c9a0 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f830 0x2bece548f950 0x2bece548f8c0 0x2bece548f8c0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5736808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5737008
+> layoutBlockChildren: box=&{{0x2bece542ca50 1 0x2bece542c2c0 0x2bece542c8f0 0x2bece548f950 0x2bece548f9e0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=800 childCount=0
+  [i=2] child=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece556b008
+> layoutBlockChildren: box=&{{0x2bece542cb00 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fa70 0x2bece548fd40 0x2bece548fb00 0x2bece548fcb0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece556b808
+> layoutBlockChildren: box=&{{0x2bece542cbb0 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fb00 0x2bece548fc20 0x2bece548fb90 0x2bece548fb90 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5737808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5798008
+> layoutBlockChildren: box=&{{0x2bece542cc60 1 0x2bece542c2c0 0x2bece542cb00 0x2bece548fc20 0x2bece548fcb0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=800 childCount=0
+  [i=3] child=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2bece556e808
+> layoutBlockChildren: box=&{{0x2bece542cd10 1 0x2bece542c2c0 0x2bece542c790 0x2bece548fd40 0x2bece5f2e120 0x2bece548fdd0 0x2bece5f2e090 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2bece556f008
+> layoutBlockChildren: box=&{{0x2bece542cdc0 1 0x2bece542c2c0 0x2bece542cd10 0x2bece548fdd0 0x2bece5f2e000 0x2bece548fe60 0x2bece548fe60 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5798808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece5799008
+> layoutBlockChildren: box=&{{0x2bece542ce70 1 0x2bece542c2c0 0x2bece542cd10 0x2bece5f2e000 0x2bece5f2e090 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=800 childCount=0
+  [i=2] child=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece557a008
+> layoutBlockChildren: box=&{{0x2bece542cf20 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e1b0 0x2bece5f2e510 0x2bece5f2e240 0x2bece5f2e480 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece557a808
+> layoutBlockChildren: box=&{{0x2bece542cfd0 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e240 0x2bece5f2e360 0x2bece5f2e2d0 0x2bece5f2e2d0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece5799808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece6117808
+> layoutBlockChildren: box=&{{0x2bece542d080 1 0x2bece542c2c0 0x2bece542cf20 0x2bece5f2e360 0x2bece5f2e480 0x2bece5f2e3f0 0x2bece5f2e3f0 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=800 childCount=0
+  [i=3] child=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5477808
+> layoutBlockChildren: box=&{{0x2bece542d130 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2e510 0x2bece5f2ebd0 0x2bece5f2e5a0 0x2bece5f2eb40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5478008
+> layoutBlockChildren: box=&{{0x2bece542d1e0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e5a0 0x2bece5f2e6c0 0x2bece5f2e630 0x2bece5f2e630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579a008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece579c008
+> layoutBlockChildren: box=&{{0x2bece542d290 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e6c0 0x2bece5f2e7e0 0x2bece5f2e750 0x2bece5f2e750 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579a808
+> layoutBlockChildren: box=&{{0x2bece542d340 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e7e0 0x2bece5f2e900 0x2bece5f2e870 0x2bece5f2e870 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579b008
+> layoutBlockChildren: box=&{{0x2bece542d3f0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2e900 0x2bece5f2ea20 0x2bece5f2e990 0x2bece5f2e990 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2bece579b808
+> layoutBlockChildren: box=&{{0x2bece542d4a0 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2ea20 0x2bece5f2eab0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d550 1 0x2bece542c2c0 0x2bece542d130 0x2bece5f2eab0 0x2bece5f2eb40 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
+  [i=4] child=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece54fa008
+> layoutBlockChildren: box=&{{0x2bece542d600 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2ebd0 0x2bece5f2f680 0x2bece5f2ec60 0x2bece5f2f5f0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece54fa808
+> layoutBlockChildren: box=&{{0x2bece542d6b0 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ec60 0x2bece5f2ed80 0x2bece5f2ecf0 0x2bece5f2ecf0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579c808
+  [i=1] child=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5502008
+> layoutBlockChildren: box=&{{0x2bece542d760 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2ed80 0x2bece5f2f050 0x2bece5f2ee10 0x2bece5f2efc0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579d808
+> layoutBlockChildren: box=&{{0x2bece542d810 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2ee10 0x2bece5f2eea0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542d8c0 1 0x2bece542c2c0 0x2bece542d760 0x2bece5f2eea0 0x2bece5f2efc0 0x2bece5f2ef30 0x2bece5f2ef30 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579d008
+  [i=2] child=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece551c008
+> layoutBlockChildren: box=&{{0x2bece542d970 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f050 0x2bece5f2f320 0x2bece5f2f0e0 0x2bece5f2f290 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579e808
+> layoutBlockChildren: box=&{{0x2bece542da20 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f0e0 0x2bece5f2f170 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dad0 1 0x2bece542c2c0 0x2bece542d970 0x2bece5f2f170 0x2bece5f2f290 0x2bece5f2f200 0x2bece5f2f200 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579e008
+  [i=3] child=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5520008
+> layoutBlockChildren: box=&{{0x2bece542db80 1 0x2bece542c2c0 0x2bece542d600 0x2bece5f2f320 0x2bece5f2f5f0 0x2bece5f2f3b0 0x2bece5f2f560 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece579f808
+> layoutBlockChildren: box=&{{0x2bece542dc30 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f3b0 0x2bece5f2f440 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece542dce0 1 0x2bece542c2c0 0x2bece542db80 0x2bece5f2f440 0x2bece5f2f560 0x2bece5f2f4d0 0x2bece5f2f4d0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece579f008
+  [i=5] child=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5534008
+> layoutBlockChildren: box=&{{0x2bece542dd90 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f2f680 0x2bece5f38240 0x2bece5f2f710 0x2bece5f381b0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=826 childCount=4
+  [i=0] child=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5534808
+> layoutBlockChildren: box=&{{0x2bece542de40 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f710 0x2bece5f2f830 0x2bece5f2f7a0 0x2bece5f2f7a0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a0008
+  [i=1] child=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5554008
+> layoutBlockChildren: box=&{{0x2bece5f36000 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2f830 0x2bece5f2fb00 0x2bece5f2f8c0 0x2bece5f2fa70 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a1008
+> layoutBlockChildren: box=&{{0x2bece5f360b0 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f8c0 0x2bece5f2f950 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36160 1 0x2bece542c2c0 0x2bece5f36000 0x2bece5f2f950 0x2bece5f2fa70 0x2bece5f2f9e0 0x2bece5f2f9e0 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a0808
+  [i=2] child=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece5580008
+> layoutBlockChildren: box=&{{0x2bece5f36210 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fb00 0x2bece5f2fdd0 0x2bece5f2fb90 0x2bece5f2fd40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a2008
+> layoutBlockChildren: box=&{{0x2bece5f362c0 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fb90 0x2bece5f2fc20 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36370 1 0x2bece542c2c0 0x2bece5f36210 0x2bece5f2fc20 0x2bece5f2fd40 0x2bece5f2fcb0 0x2bece5f2fcb0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a1808
+  [i=3] child=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2bece558e008
+> layoutBlockChildren: box=&{{0x2bece5f36420 1 0x2bece542c2c0 0x2bece542dd90 0x2bece5f2fdd0 0x2bece5f381b0 0x2bece5f2fe60 0x2bece5f38120 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a3008
+> layoutBlockChildren: box=&{{0x2bece5f364d0 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f2fe60 0x2bece5f38000 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2bece5f36580 1 0x2bece542c2c0 0x2bece5f36420 0x2bece5f38000 0x2bece5f38120 0x2bece5f38090 0x2bece5f38090 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2bece57a2808
+  [i=6] child=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece55a2008
+> layoutBlockChildren: box=&{{0x2bece5f36630 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38240 0x2bece5f38a20 0x2bece5f382d0 0x2bece5f38990 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece55a2808
+> layoutBlockChildren: box=&{{0x2bece5f366e0 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f382d0 0x2bece5f383f0 0x2bece5f38360 0x2bece5f38360 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a3808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a4008
+> layoutBlockChildren: box=&{{0x2bece5f36790 1 0x2bece542c2c0 0x2bece5f36630 0x2bece5f383f0 0x2bece5f38990 0x2bece5f38480 0x2bece5f38900 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
+  [i=7] child=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece55ad808
+> layoutBlockChildren: box=&{{0x2bece5f36b00 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38a20 0x2bece5f38d80 0x2bece5f38ab0 0x2bece5f38cf0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece55b8008
+> layoutBlockChildren: box=&{{0x2bece5f36bb0 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38ab0 0x2bece5f38bd0 0x2bece5f38b40 0x2bece5f38b40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a4808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a5808
+> layoutBlockChildren: box=&{{0x2bece5f36c60 1 0x2bece542c2c0 0x2bece5f36b00 0x2bece5f38bd0 0x2bece5f38cf0 0x2bece5f38c60 0x2bece5f38c60 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=100% display=2 style=0x2bece57a5008
+  [i=8] child=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2bece5712008
+> layoutBlockChildren: box=&{{0x2bece5f36d10 1 0x2bece542c2c0 0x2bece542c630 0x2bece5f38d80 0x2bece5f39050 0x2bece5f38e10 0x2bece5f38fc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=826 childCount=2
+  [i=0] child=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2bece5712808
+> layoutBlockChildren: box=&{{0x2bece5f36dc0 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38e10 0x2bece5f38f30 0x2bece5f38ea0 0x2bece5f38ea0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=826 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2bece57a6008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2bece57a6808
+> layoutBlockChildren: box=&{{0x2bece5f36e70 1 0x2bece542c2c0 0x2bece5f36d10 0x2bece5f38f30 0x2bece5f38fc0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=826 childCount=0
