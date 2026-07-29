@@ -34,6 +34,10 @@ import (
 
 var DumpRTCallback func(rv *rendering.RenderView)
 
+// debugPaintLog enables verbose paint and event diagnostics printed to stderr.
+// Set to true to trace hover, click, and paint operations.
+const debugPaintLog = true
+
 // ClickHandler is invoked when the user clicks an element whose onclick
 // attribute does not use the "js:" prefix. el is the deepest hit-tested
 // element with an onclick attribute (may be nil if nothing was hit), and
@@ -617,19 +621,56 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 
 		case window.EventCursorMove:
 			h.cursorX, h.cursorY = ev.X, ev.Y
+			csX, csY := h.win.ContentScale()
+			if csX <= 0 {
+				csX = 1
+			}
+			if csY <= 0 {
+				csY = 1
+			}
+			cssX := ev.X / csX
+			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // page coords for scrollbar hover
+
 			// Update RenderView cursor for scrollbar hover highlight.
 			if rv != nil {
-				csX, csY := h.win.ContentScale()
-				if csX <= 0 {
-					csX = 1
-				}
-				if csY <= 0 {
-					csY = 1
-				}
-				cssX := ev.X / csX
-				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // page coords for scrollbar hover
 				rv.SetCursorPos(cssX, cssY)
 			}
+
+			// ── Hover tracking (normal cursor move, outside scrollbar drag) ──
+			if rv != nil && !h.scrollbarDragging {
+				newEl := rendering.HitTest(rv, cssX, cssY, "")
+				elName := "<nil>"
+				if newEl != nil {
+					elName = newEl.LocalName()
+					if cn := newEl.ClassName(); cn != "" {
+						elName += "." + cn
+					}
+				}
+				if debugPaintLog {
+					if newEl != h.hoveredEl {
+						oldName := "<nil>"
+						if h.hoveredEl != nil {
+							oldName = h.hoveredEl.LocalName()
+						}
+						log.Printf("[dbg/hover] css=(%.0f,%.0f) %s → %s", cssX, cssY, oldName, elName)
+					}
+				}
+				if newEl != h.hoveredEl {
+					if h.hoveredEl != nil {
+						h.hoveredEl.SetHovered(false)
+					}
+					if newEl != nil {
+						newEl.SetHovered(true)
+					}
+					h.hoveredEl = newEl
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
+			}
+
 			// Handle scrollbar thumb drag.
 			if h.scrollbarDragging && rv != nil && h.scrollbarDragBox != nil {
 				csX, csY := h.win.ContentScale()
@@ -719,12 +760,52 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
+				if debugPaintLog {
+					log.Printf("[dbg/click] press at css=(%.0f,%.0f)", cssX, cssY)
+				}
 				// ── Active state ──
 				if rv != nil {
 					activeEl := rendering.HitTest(rv, cssX, cssY, "")
 					if activeEl != nil {
+						if debugPaintLog {
+							log.Printf("[dbg/click] hit=%s class=%q type=%q", activeEl.LocalName(), activeEl.ClassName(), activeEl.GetAttribute("type"))
+						}
 						activeEl.SetActive(true)
 						h.activeEl = activeEl
+
+						// ── Toggle checkbox / radio on click ──
+						if activeEl.LocalName() == "input" {
+							inputType := activeEl.GetAttribute("type")
+							if inputType == "checkbox" || inputType == "radio" {
+								if in, ok := html5.ToInputElement(activeEl); ok {
+									if inputType == "checkbox" {
+										in.SetChecked(!in.Checked())
+									} else if inputType == "radio" {
+										// Uncheck all radio buttons with same name
+										name := activeEl.GetAttribute("name")
+										if name != "" && h.wv.MainFrame() != nil {
+											doc := h.wv.MainFrame().Document()
+											if doc != nil {
+												allInputs := doc.GetElementsByTagName("input")
+												for _, r := range allInputs {
+													if r.GetAttribute("type") == "radio" && r.GetAttribute("name") == name {
+														if r2, ok2 := html5.ToInputElement(r); ok2 {
+															r2.SetChecked(false)
+														}
+													}
+												}
+											}
+										}
+										in.SetChecked(true)
+									}
+									if debugPaintLog {
+										log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
+									}
+									h.wv.RebuildRenderTree()
+								}
+							}
+						}
+
 						if mf := h.wv.MainFrame(); mf != nil {
 							if fr := mf.Frame(); fr != nil {
 								fr.MarkRenderTreeDirty()

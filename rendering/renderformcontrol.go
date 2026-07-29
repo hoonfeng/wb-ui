@@ -25,6 +25,7 @@
 package rendering
 
 import (
+	"log"
 	"strconv"
 	"strings"
 
@@ -114,6 +115,10 @@ var FocusedFormControlSel *FormControlSelection
 // and delegates to the corresponding paint function. It is called from the foreground phase
 // for box-bearing replaced elements that are form controls. Returns true if the element
 // was handled (so the caller can skip the default text-paint path), false otherwise.
+//
+// debugPaintLog enables verbose paint diagnostics. Set to true to trace form-control paint calls.
+const debugPaintLog = false
+
 func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 	if box == nil || info == nil || info.canvas == nil {
 		return false
@@ -127,6 +132,17 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		return false
 	}
 	localName := el.LocalName()
+	// Get the type attribute for input elements
+	inputType := ""
+	if localName == "input" {
+		if in, ok2 := html5.ToInputElement(el); ok2 {
+			inputType = string(in.Type())
+		}
+	}
+	if debugPaintLog {
+		log.Printf("[dbg/paint] PaintFormControl: <%s> type=%q class=%q xy=(%.0f,%.0f) wh=(%.0f,%.0f)",
+			localName, inputType, el.ClassName(), box.X(), box.Y(), box.Width(), box.Height())
+	}
 	x, y, w, h := box.X(), box.Y(), box.Width(), box.Height()
 	op := CumulativeOpacity(box)
 	st := box.Style()
