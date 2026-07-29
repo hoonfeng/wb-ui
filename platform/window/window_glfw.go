@@ -27,6 +27,7 @@ type EventType int
 
 const (
 	EventMouseButton EventType = iota
+	EventChar
 	EventCursorMove
 	EventKey
 	EventResize
@@ -41,8 +42,9 @@ type Event struct {
 	X, Y    float64
 	Button  int // glfw.MouseButton*
 	Action  int // glfw.Press / glfw.Release
-	Key     int // glfw.Key*
-	Mods    int // glfw.ModifierKey (for key / mouse events)
+	Char    rune   // Unicode codepoint (for EventChar)
+	Key     int    // glfw.Key*
+	Mods    int    // glfw.ModifierKey (for key / mouse events)
 	Width   int // for EventResize
 	Height  int
 	ScrollY float64  // for EventScroll (vertical wheel offset)
@@ -206,6 +208,14 @@ func (w *Window) setupCallbacks() {
 			Type: EventCursorMove,
 			X:    x,
 			Y:    y,
+		})
+		w.eventsMu.Unlock()
+	})
+	w.win.SetCharCallback(func(_ *glfw.Window, char rune) {
+		w.eventsMu.Lock()
+		w.events = append(w.events, Event{
+			Type: EventChar,
+			Char: char,
 		})
 		w.eventsMu.Unlock()
 	})

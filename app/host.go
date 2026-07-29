@@ -974,6 +974,43 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
 							}
+						} else if hitEl != nil && (hitEl.LocalName() == "input") {
+							inputType := hitEl.GetAttribute("type")
+							if strings.ToLower(inputType) == "checkbox" {
+								checked := hitEl.GetAttribute("checked")
+								if checked == "" {
+									hitEl.SetAttribute("checked", "true")
+								} else {
+									hitEl.RemoveAttribute("checked")
+								}
+								if mf := h.wv.MainFrame(); mf != nil {
+									if fr := mf.Frame(); fr != nil {
+										fr.MarkRenderTreeDirty()
+									}
+								}
+								hitEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+							} else if strings.ToLower(inputType) == "radio" {
+								name := hitEl.GetAttribute("name")
+								if name != "" {
+									// Walk siblings to find same-name radio buttons
+									for parent := hitEl.ParentNode(); parent != nil; parent = parent.ParentNode() {
+										for c := parent.FirstChild(); c != nil; c = c.NextSibling() {
+											if child, ok := c.(*dom.Element); ok && child != hitEl {
+												if child.LocalName() == "input" && child.GetAttribute("type") == "radio" && child.GetAttribute("name") == name {
+													child.RemoveAttribute("checked")
+												}
+											}
+										}
+									}
+								}
+								hitEl.SetAttribute("checked", "true")
+								if mf := h.wv.MainFrame(); mf != nil {
+									if fr := mf.Frame(); fr != nil {
+										fr.MarkRenderTreeDirty()
+									}
+								}
+								hitEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+							}
 						} else if h.imeFocusedEl != nil {
 							h.Unfocus()
 						}
@@ -1045,6 +1082,51 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 			}
+		case window.EventChar:
+			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+				char := string(ev.Char)
+				// Get current value and insert character at cursor position
+				val := focusedElementValue(h.imeFocusedEl)
+				runes := []rune(val)
+				sel := rendering.FocusedFormControlSel
+				pos := 0
+				if sel != nil && sel.Active {
+					pos = sel.Start
+				}
+				if runes == nil {
+					runes = []rune{}
+				}
+				if pos < 0 {
+					pos = 0
+				}
+				if pos > len(runes) {
+					pos = len(runes)
+				}
+				newRunes := make([]rune, 0, len(runes)+1)
+				newRunes = append(newRunes, runes[:pos]...)
+				newRunes = append(newRunes, []rune(char)...)
+				newRunes = append(newRunes, runes[pos:]...)
+				newVal := string(newRunes)
+				setFocusedElementValue(h.imeFocusedEl, newVal)
+				// Update cursor position
+				newPos := pos + len([]rune(char))
+				if sel == nil {
+					rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+						Start: newPos, End: newPos, Active: true,
+					}
+				} else {
+				sel.Start = newPos
+				sel.End = newPos
+			}
+			if mf := h.wv.MainFrame(); mf != nil {
+				if fr := mf.Frame(); fr != nil {
+					fr.MarkRenderTreeDirty()
+				}
+			}
+			h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+			h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+			}
+
 		case window.EventKey:
 			// Keyboard scrolling for PageUp/PageDown/Arrow keys.
 			if ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat) {
