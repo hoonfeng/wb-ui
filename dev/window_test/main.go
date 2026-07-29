@@ -8,10 +8,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"wb-ui/app"
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
+	"wb-ui/platform/window"
 	"wb-ui/rendering"
 	"wb-ui/webkit"
 )
@@ -20,6 +24,7 @@ func main() {
 	htmlFile := flag.String("html", "", "HTML file path")
 	width := flag.Int("w", 800, "window width")
 	height := flag.Int("h", 1000, "window height")
+	autoClick := flag.String("autoclick", "", "auto-click coords after startup (e.g. '80,370,44,609')")
 	flag.Parse()
 
 	if *htmlFile == "" {
@@ -121,8 +126,61 @@ func main() {
 			f.Sync()
 		}
 	}
+	// Parse auto-click coordinates.
+	if coords := parseAutoClick(*autoClick); len(coords) > 0 {
+		go injectAutoClicks(host, coords)
+	}
 	host.Run()
 	fmt.Println("Done.")
+}
+
+// injectAutoClicks posts synthetic mouse click events to the host's window
+// at the given (x,y) coordinates after a short delay to allow the window and
+// render loop to start.
+func injectAutoClicks(h *app.Host, coords []struct{ x, y int }) {
+	if h == nil || len(coords) == 0 {
+		return
+	}
+	time.Sleep(500 * time.Millisecond)
+	win := h.Window()
+	if win == nil {
+		return
+	}
+	for _, c := range coords {
+		fmt.Printf("[autoclick] clicking at (%d,%d)\n", c.x, c.y)
+		win.PostEvent(window.Event{
+			Type:   window.EventMouseButton,
+			X:      float64(c.x),
+			Y:      float64(c.y),
+			Button: 0, // left button
+			Action: 1, // glfw.Press
+		})
+		time.Sleep(100 * time.Millisecond)
+		win.PostEvent(window.Event{
+			Type:   window.EventMouseButton,
+			X:      float64(c.x),
+			Y:      float64(c.y),
+			Button: 0,
+			Action: 0, // glfw.Release
+		})
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func parseAutoClick(s string) []struct{ x, y int } {
+	if s == "" {
+		return nil
+	}
+	var result []struct{ x, y int }
+	parts := strings.Split(s, ",")
+	for i := 0; i+1 < len(parts); i += 2 {
+		x, _ := strconv.Atoi(strings.TrimSpace(parts[i]))
+		y, _ := strconv.Atoi(strings.TrimSpace(parts[i+1]))
+		if x > 0 && y > 0 {
+			result = append(result, struct{ x, y int }{x, y})
+		}
+	}
+	return result
 }
 
 func dumpRO(ro rendering.RenderObject, depth int) {

@@ -1,0 +1,1 @@
+rendering\hittest.go:6:1: expected 'package', found 'const'

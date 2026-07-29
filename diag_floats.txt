@@ -1,733 +1,243 @@
 === float layout diagnostics ===
-> layoutBlockChildren: box=&{{0x555e6fc6370 1 0x555e6fc6210 0x555e6fc6210 0x555e6f3e090 <nil> 0x555e6f3e120 0x555e6fc6580 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x555e7b76008
-> layoutBlockChildren: box=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x555e7b76808
-> layoutBlockChildren: box=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9188008
-  [i=1] child=&{{0x555e6fc66e0 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e510 0x555e6f3efc0 0x555e6f3e5a0 0x555e6f3ef30 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e7b7e008
-> layoutBlockChildren: box=&{{0x555e6fc66e0 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e510 0x555e6f3efc0 0x555e6f3e5a0 0x555e6f3ef30 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc6790 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e5a0 0x555e6f3e6c0 0x555e6f3e630 0x555e6f3e630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e7b7e808
-> layoutBlockChildren: box=&{{0x555e6fc6790 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e5a0 0x555e6f3e6c0 0x555e6f3e630 0x555e6f3e630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9188808
-  [i=1] child=&{{0x555e6fc6840 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e6c0 0x555e6f3e990 0x555e6f3e750 0x555e6f3e900 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9078008
-> layoutBlockChildren: box=&{{0x555e6fc6840 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e6c0 0x555e6f3e990 0x555e6f3e750 0x555e6f3e900 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc68f0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e750 0x555e6f3e870 0x555e6f3e7e0 0x555e6f3e7e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e9078808
-> layoutBlockChildren: box=&{{0x555e6fc68f0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e750 0x555e6f3e870 0x555e6f3e7e0 0x555e6f3e7e0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9189008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e9189808
-> layoutBlockChildren: box=&{{0x555e6fc69a0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e870 0x555e6f3e900 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x555e6fc6a50 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e990 0x555e6f3ec60 0x555e6f3ea20 0x555e6f3ebd0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9081808
-> layoutBlockChildren: box=&{{0x555e6fc6a50 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e990 0x555e6f3ec60 0x555e6f3ea20 0x555e6f3ebd0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6b00 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3ea20 0x555e6f3eb40 0x555e6f3eab0 0x555e6f3eab0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e908a008
-> layoutBlockChildren: box=&{{0x555e6fc6b00 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3ea20 0x555e6f3eb40 0x555e6f3eab0 0x555e6f3eab0 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918a008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918a808
-> layoutBlockChildren: box=&{{0x555e6fc6bb0 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3eb40 0x555e6f3ebd0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x555e6fc6c60 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3ec60 0x555e6f3ef30 0x555e6f3ecf0 0x555e6f3eea0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9095008
-> layoutBlockChildren: box=&{{0x555e6fc6c60 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3ec60 0x555e6f3ef30 0x555e6f3ecf0 0x555e6f3eea0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6d10 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ecf0 0x555e6f3ee10 0x555e6f3ed80 0x555e6f3ed80 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e9095808
-> layoutBlockChildren: box=&{{0x555e6fc6d10 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ecf0 0x555e6f3ee10 0x555e6f3ed80 0x555e6f3ed80 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918b008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918b808
-> layoutBlockChildren: box=&{{0x555e6fc6dc0 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ee10 0x555e6f3eea0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x555e6fc6e70 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3efc0 0x555e6f3f320 0x555e6f3f050 0x555e6f3f290 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90a4808
-> layoutBlockChildren: box=&{{0x555e6fc6e70 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3efc0 0x555e6f3f320 0x555e6f3f050 0x555e6f3f290 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6f20 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f050 0x555e6f3f170 0x555e6f3f0e0 0x555e6f3f0e0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90a5008
-> layoutBlockChildren: box=&{{0x555e6fc6f20 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f050 0x555e6f3f170 0x555e6f3f0e0 0x555e6f3f0e0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918c008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918c808
-> layoutBlockChildren: box=&{{0x555e6fc6fd0 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f170 0x555e6f3f290 0x555e6f3f200 0x555e6f3f200 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x555e6fc7080 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f320 0x555e6f3f9e0 0x555e6f3f3b0 0x555e6f3f950 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90b2008
-> layoutBlockChildren: box=&{{0x555e6fc7080 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f320 0x555e6f3f9e0 0x555e6f3f3b0 0x555e6f3f950 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc7130 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f3b0 0x555e6f3f4d0 0x555e6f3f440 0x555e6f3f440 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90b2808
-> layoutBlockChildren: box=&{{0x555e6fc7130 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f3b0 0x555e6f3f4d0 0x555e6f3f440 0x555e6f3f440 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918d008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e9191008
-> layoutBlockChildren: box=&{{0x555e6fc71e0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f4d0 0x555e6f3f5f0 0x555e6f3f560 0x555e6f3f560 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e918d808
-> layoutBlockChildren: box=&{{0x555e6fc7290 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f5f0 0x555e6f3f710 0x555e6f3f680 0x555e6f3f680 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e9190008
-> layoutBlockChildren: box=&{{0x555e6fc7340 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f710 0x555e6f3f830 0x555e6f3f7a0 0x555e6f3f7a0 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e9190808
-> layoutBlockChildren: box=&{{0x555e6fc73f0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f830 0x555e6f3f8c0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc74a0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f8c0 0x555e6f3f950 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x555e6fc7550 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f9e0 0x555e7ada5a0 0x555e6f3fa70 0x555e7ada510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90e4808
-> layoutBlockChildren: box=&{{0x555e6fc7550 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f9e0 0x555e7ada5a0 0x555e6f3fa70 0x555e7ada510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc7600 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fa70 0x555e6f3fb90 0x555e6f3fb00 0x555e6f3fb00 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90e5008
-> layoutBlockChildren: box=&{{0x555e6fc7600 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fa70 0x555e6f3fb90 0x555e6f3fb00 0x555e6f3fb00 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9191808
-  [i=1] child=&{{0x555e6fc76b0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fb90 0x555e6f3fe60 0x555e6f3fc20 0x555e6f3fdd0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e90ec808
-> layoutBlockChildren: box=&{{0x555e6fc76b0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fb90 0x555e6f3fe60 0x555e6f3fc20 0x555e6f3fdd0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9192808
-> layoutBlockChildren: box=&{{0x555e6fc7760 1 0x555e6fc6210 0x555e6fc76b0 0x555e6f3fc20 0x555e6f3fcb0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7810 1 0x555e6fc6210 0x555e6fc76b0 0x555e6f3fcb0 0x555e6f3fdd0 0x555e6f3fd40 0x555e6f3fd40 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9192008
-  [i=2] child=&{{0x555e6fc78c0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fe60 0x555e7ada240 0x555e7ada000 0x555e7ada1b0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e90fc808
-> layoutBlockChildren: box=&{{0x555e6fc78c0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fe60 0x555e7ada240 0x555e7ada000 0x555e7ada1b0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9193808
-> layoutBlockChildren: box=&{{0x555e6fc7970 1 0x555e6fc6210 0x555e6fc78c0 0x555e7ada000 0x555e7ada090 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7a20 1 0x555e6fc6210 0x555e6fc78c0 0x555e7ada090 0x555e7ada1b0 0x555e7ada120 0x555e7ada120 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9193008
-  [i=3] child=&{{0x555e6fc7ad0 1 0x555e6fc6210 0x555e6fc7550 0x555e7ada240 0x555e7ada510 0x555e7ada2d0 0x555e7ada480 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9110808
-> layoutBlockChildren: box=&{{0x555e6fc7ad0 1 0x555e6fc6210 0x555e6fc7550 0x555e7ada240 0x555e7ada510 0x555e7ada2d0 0x555e7ada480 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9196808
-> layoutBlockChildren: box=&{{0x555e6fc7b80 1 0x555e6fc6210 0x555e6fc7ad0 0x555e7ada2d0 0x555e7ada360 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7c30 1 0x555e6fc6210 0x555e6fc7ad0 0x555e7ada360 0x555e7ada480 0x555e7ada3f0 0x555e7ada3f0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9196008
-  [i=5] child=&{{0x555e6fc7ce0 1 0x555e6fc6210 0x555e6fc6580 0x555e7ada5a0 0x555e7adb050 0x555e7ada630 0x555e7adafc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e9120808
-> layoutBlockChildren: box=&{{0x555e6fc7ce0 1 0x555e6fc6210 0x555e6fc6580 0x555e7ada5a0 0x555e7adb050 0x555e7ada630 0x555e7adafc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc7d90 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada630 0x555e7ada750 0x555e7ada6c0 0x555e7ada6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e9121008
-> layoutBlockChildren: box=&{{0x555e6fc7d90 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada630 0x555e7ada750 0x555e7ada6c0 0x555e7ada6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9197008
-  [i=1] child=&{{0x555e6fc7e40 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada750 0x555e7adaa20 0x555e7ada7e0 0x555e7ada990 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9126808
-> layoutBlockChildren: box=&{{0x555e6fc7e40 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada750 0x555e7adaa20 0x555e7ada7e0 0x555e7ada990 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9198008
-> layoutBlockChildren: box=&{{0x555e7ae0000 1 0x555e6fc6210 0x555e6fc7e40 0x555e7ada7e0 0x555e7ada870 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae00b0 1 0x555e6fc6210 0x555e6fc7e40 0x555e7ada870 0x555e7ada990 0x555e7ada900 0x555e7ada900 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9197808
-  [i=2] child=&{{0x555e7ae0160 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adaa20 0x555e7adacf0 0x555e7adaab0 0x555e7adac60 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9134808
-> layoutBlockChildren: box=&{{0x555e7ae0160 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adaa20 0x555e7adacf0 0x555e7adaab0 0x555e7adac60 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9199008
-> layoutBlockChildren: box=&{{0x555e7ae0210 1 0x555e6fc6210 0x555e7ae0160 0x555e7adaab0 0x555e7adab40 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae02c0 1 0x555e6fc6210 0x555e7ae0160 0x555e7adab40 0x555e7adac60 0x555e7adabd0 0x555e7adabd0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9198808
-  [i=3] child=&{{0x555e7ae0370 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adacf0 0x555e7adafc0 0x555e7adad80 0x555e7adaf30 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9146808
-> layoutBlockChildren: box=&{{0x555e7ae0370 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adacf0 0x555e7adafc0 0x555e7adad80 0x555e7adaf30 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919a008
-> layoutBlockChildren: box=&{{0x555e7ae0420 1 0x555e6fc6210 0x555e7ae0370 0x555e7adad80 0x555e7adae10 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae04d0 1 0x555e6fc6210 0x555e7ae0370 0x555e7adae10 0x555e7adaf30 0x555e7adaea0 0x555e7adaea0 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9199808
-  [i=6] child=&{{0x555e7ae0580 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb050 0x555e7adb830 0x555e7adb0e0 0x555e7adb7a0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e915a808
-> layoutBlockChildren: box=&{{0x555e7ae0580 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb050 0x555e7adb830 0x555e7adb0e0 0x555e7adb7a0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0630 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb0e0 0x555e7adb200 0x555e7adb170 0x555e7adb170 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e915b008
-> layoutBlockChildren: box=&{{0x555e7ae0630 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb0e0 0x555e7adb200 0x555e7adb170 0x555e7adb170 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919a808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919b008
-> layoutBlockChildren: box=&{{0x555e7ae06e0 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb200 0x555e7adb7a0 0x555e7adb290 0x555e7adb710 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x555e7ae0a50 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb830 0x555e7adbb90 0x555e7adb8c0 0x555e7adbb00 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e916c008
-> layoutBlockChildren: box=&{{0x555e7ae0a50 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb830 0x555e7adbb90 0x555e7adb8c0 0x555e7adbb00 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0b00 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb8c0 0x555e7adb9e0 0x555e7adb950 0x555e7adb950 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e916c808
-> layoutBlockChildren: box=&{{0x555e7ae0b00 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb8c0 0x555e7adb9e0 0x555e7adb950 0x555e7adb950 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919b808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919e808
-> layoutBlockChildren: box=&{{0x555e7ae0bb0 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb9e0 0x555e7adbb00 0x555e7adba70 0x555e7adba70 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x555e919e008
-  [i=8] child=&{{0x555e7ae0c60 1 0x555e6fc6210 0x555e6fc6580 0x555e7adbb90 0x555e7adbe60 0x555e7adbc20 0x555e7adbdd0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e917a808
-> layoutBlockChildren: box=&{{0x555e7ae0c60 1 0x555e6fc6210 0x555e6fc6580 0x555e7adbb90 0x555e7adbe60 0x555e7adbc20 0x555e7adbdd0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0d10 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbc20 0x555e7adbd40 0x555e7adbcb0 0x555e7adbcb0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e917b008
-> layoutBlockChildren: box=&{{0x555e7ae0d10 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbc20 0x555e7adbd40 0x555e7adbcb0 0x555e7adbcb0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919f008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919f808
-> layoutBlockChildren: box=&{{0x555e7ae0dc0 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbd40 0x555e7adbdd0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc6370 1 0x555e6fc6210 0x555e6fc6210 0x555e6f3e090 <nil> 0x555e6f3e120 0x555e6fc6580 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x555e7b76008
-> layoutBlockChildren: box=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x555e7b76808
-> layoutBlockChildren: box=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9188008
-  [i=1] child=&{{0x555e6fc66e0 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e510 0x555e6f3efc0 0x555e6f3e5a0 0x555e6f3ef30 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e7b7e008
-> layoutBlockChildren: box=&{{0x555e6fc66e0 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e510 0x555e6f3efc0 0x555e6f3e5a0 0x555e6f3ef30 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc6790 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e5a0 0x555e6f3e6c0 0x555e6f3e630 0x555e6f3e630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e7b7e808
-> layoutBlockChildren: box=&{{0x555e6fc6790 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e5a0 0x555e6f3e6c0 0x555e6f3e630 0x555e6f3e630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9188808
-  [i=1] child=&{{0x555e6fc6840 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e6c0 0x555e6f3e990 0x555e6f3e750 0x555e6f3e900 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9078008
-> layoutBlockChildren: box=&{{0x555e6fc6840 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e6c0 0x555e6f3e990 0x555e6f3e750 0x555e6f3e900 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc68f0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e750 0x555e6f3e870 0x555e6f3e7e0 0x555e6f3e7e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e9078808
-> layoutBlockChildren: box=&{{0x555e6fc68f0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e750 0x555e6f3e870 0x555e6f3e7e0 0x555e6f3e7e0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9189008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e9189808
-> layoutBlockChildren: box=&{{0x555e6fc69a0 1 0x555e6fc6210 0x555e6fc6840 0x555e6f3e870 0x555e6f3e900 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x555e6fc6a50 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e990 0x555e6f3ec60 0x555e6f3ea20 0x555e6f3ebd0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9081808
-> layoutBlockChildren: box=&{{0x555e6fc6a50 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3e990 0x555e6f3ec60 0x555e6f3ea20 0x555e6f3ebd0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6b00 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3ea20 0x555e6f3eb40 0x555e6f3eab0 0x555e6f3eab0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e908a008
-> layoutBlockChildren: box=&{{0x555e6fc6b00 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3ea20 0x555e6f3eb40 0x555e6f3eab0 0x555e6f3eab0 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918a008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918a808
-> layoutBlockChildren: box=&{{0x555e6fc6bb0 1 0x555e6fc6210 0x555e6fc6a50 0x555e6f3eb40 0x555e6f3ebd0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x555e6fc6c60 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3ec60 0x555e6f3ef30 0x555e6f3ecf0 0x555e6f3eea0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x555e9095008
-> layoutBlockChildren: box=&{{0x555e6fc6c60 1 0x555e6fc6210 0x555e6fc66e0 0x555e6f3ec60 0x555e6f3ef30 0x555e6f3ecf0 0x555e6f3eea0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6d10 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ecf0 0x555e6f3ee10 0x555e6f3ed80 0x555e6f3ed80 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x555e9095808
-> layoutBlockChildren: box=&{{0x555e6fc6d10 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ecf0 0x555e6f3ee10 0x555e6f3ed80 0x555e6f3ed80 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918b008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918b808
-> layoutBlockChildren: box=&{{0x555e6fc6dc0 1 0x555e6fc6210 0x555e6fc6c60 0x555e6f3ee10 0x555e6f3eea0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x555e6fc6e70 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3efc0 0x555e6f3f320 0x555e6f3f050 0x555e6f3f290 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90a4808
-> layoutBlockChildren: box=&{{0x555e6fc6e70 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3efc0 0x555e6f3f320 0x555e6f3f050 0x555e6f3f290 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc6f20 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f050 0x555e6f3f170 0x555e6f3f0e0 0x555e6f3f0e0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90a5008
-> layoutBlockChildren: box=&{{0x555e6fc6f20 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f050 0x555e6f3f170 0x555e6f3f0e0 0x555e6f3f0e0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918c008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e918c808
-> layoutBlockChildren: box=&{{0x555e6fc6fd0 1 0x555e6fc6210 0x555e6fc6e70 0x555e6f3f170 0x555e6f3f290 0x555e6f3f200 0x555e6f3f200 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x555e6fc7080 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f320 0x555e6f3f9e0 0x555e6f3f3b0 0x555e6f3f950 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90b2008
-> layoutBlockChildren: box=&{{0x555e6fc7080 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f320 0x555e6f3f9e0 0x555e6f3f3b0 0x555e6f3f950 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e6fc7130 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f3b0 0x555e6f3f4d0 0x555e6f3f440 0x555e6f3f440 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90b2808
-> layoutBlockChildren: box=&{{0x555e6fc7130 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f3b0 0x555e6f3f4d0 0x555e6f3f440 0x555e6f3f440 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e918d008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e9191008
-> layoutBlockChildren: box=&{{0x555e6fc71e0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f4d0 0x555e6f3f5f0 0x555e6f3f560 0x555e6f3f560 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e918d808
-> layoutBlockChildren: box=&{{0x555e6fc7290 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f5f0 0x555e6f3f710 0x555e6f3f680 0x555e6f3f680 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e9190008
-> layoutBlockChildren: box=&{{0x555e6fc7340 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f710 0x555e6f3f830 0x555e6f3f7a0 0x555e6f3f7a0 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x555e9190808
-> layoutBlockChildren: box=&{{0x555e6fc73f0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f830 0x555e6f3f8c0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc74a0 1 0x555e6fc6210 0x555e6fc7080 0x555e6f3f8c0 0x555e6f3f950 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x555e6fc7550 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f9e0 0x555e7ada5a0 0x555e6f3fa70 0x555e7ada510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e90e4808
-> layoutBlockChildren: box=&{{0x555e6fc7550 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3f9e0 0x555e7ada5a0 0x555e6f3fa70 0x555e7ada510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc7600 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fa70 0x555e6f3fb90 0x555e6f3fb00 0x555e6f3fb00 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e90e5008
-> layoutBlockChildren: box=&{{0x555e6fc7600 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fa70 0x555e6f3fb90 0x555e6f3fb00 0x555e6f3fb00 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9191808
-  [i=1] child=&{{0x555e6fc76b0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fb90 0x555e6f3fe60 0x555e6f3fc20 0x555e6f3fdd0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e90ec808
-> layoutBlockChildren: box=&{{0x555e6fc76b0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fb90 0x555e6f3fe60 0x555e6f3fc20 0x555e6f3fdd0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9192808
-> layoutBlockChildren: box=&{{0x555e6fc7760 1 0x555e6fc6210 0x555e6fc76b0 0x555e6f3fc20 0x555e6f3fcb0 <nil> <nil> map[]} input [type checked] map[type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7810 1 0x555e6fc6210 0x555e6fc76b0 0x555e6f3fcb0 0x555e6f3fdd0 0x555e6f3fd40 0x555e6f3fd40 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9192008
-  [i=2] child=&{{0x555e6fc78c0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fe60 0x555e7ada240 0x555e7ada000 0x555e7ada1b0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e90fc808
-> layoutBlockChildren: box=&{{0x555e6fc78c0 1 0x555e6fc6210 0x555e6fc7550 0x555e6f3fe60 0x555e7ada240 0x555e7ada000 0x555e7ada1b0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9193808
-> layoutBlockChildren: box=&{{0x555e6fc7970 1 0x555e6fc6210 0x555e6fc78c0 0x555e7ada000 0x555e7ada090 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7a20 1 0x555e6fc6210 0x555e6fc78c0 0x555e7ada090 0x555e7ada1b0 0x555e7ada120 0x555e7ada120 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9193008
-  [i=3] child=&{{0x555e6fc7ad0 1 0x555e6fc6210 0x555e6fc7550 0x555e7ada240 0x555e7ada510 0x555e7ada2d0 0x555e7ada480 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9110808
-> layoutBlockChildren: box=&{{0x555e6fc7ad0 1 0x555e6fc6210 0x555e6fc7550 0x555e7ada240 0x555e7ada510 0x555e7ada2d0 0x555e7ada480 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9196808
-> layoutBlockChildren: box=&{{0x555e6fc7b80 1 0x555e6fc6210 0x555e6fc7ad0 0x555e7ada2d0 0x555e7ada360 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc7c30 1 0x555e6fc6210 0x555e6fc7ad0 0x555e7ada360 0x555e7ada480 0x555e7ada3f0 0x555e7ada3f0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9196008
-  [i=5] child=&{{0x555e6fc7ce0 1 0x555e6fc6210 0x555e6fc6580 0x555e7ada5a0 0x555e7adb050 0x555e7ada630 0x555e7adafc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e9120808
-> layoutBlockChildren: box=&{{0x555e6fc7ce0 1 0x555e6fc6210 0x555e6fc6580 0x555e7ada5a0 0x555e7adb050 0x555e7ada630 0x555e7adafc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x555e6fc7d90 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada630 0x555e7ada750 0x555e7ada6c0 0x555e7ada6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e9121008
-> layoutBlockChildren: box=&{{0x555e6fc7d90 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada630 0x555e7ada750 0x555e7ada6c0 0x555e7ada6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9197008
-  [i=1] child=&{{0x555e6fc7e40 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada750 0x555e7adaa20 0x555e7ada7e0 0x555e7ada990 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9126808
-> layoutBlockChildren: box=&{{0x555e6fc7e40 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7ada750 0x555e7adaa20 0x555e7ada7e0 0x555e7ada990 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9198008
-> layoutBlockChildren: box=&{{0x555e7ae0000 1 0x555e6fc6210 0x555e6fc7e40 0x555e7ada7e0 0x555e7ada870 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae00b0 1 0x555e6fc6210 0x555e6fc7e40 0x555e7ada870 0x555e7ada990 0x555e7ada900 0x555e7ada900 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9197808
-  [i=2] child=&{{0x555e7ae0160 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adaa20 0x555e7adacf0 0x555e7adaab0 0x555e7adac60 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9134808
-> layoutBlockChildren: box=&{{0x555e7ae0160 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adaa20 0x555e7adacf0 0x555e7adaab0 0x555e7adac60 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9199008
-> layoutBlockChildren: box=&{{0x555e7ae0210 1 0x555e6fc6210 0x555e7ae0160 0x555e7adaab0 0x555e7adab40 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae02c0 1 0x555e6fc6210 0x555e7ae0160 0x555e7adab40 0x555e7adac60 0x555e7adabd0 0x555e7adabd0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9198808
-  [i=3] child=&{{0x555e7ae0370 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adacf0 0x555e7adafc0 0x555e7adad80 0x555e7adaf30 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x555e9146808
-> layoutBlockChildren: box=&{{0x555e7ae0370 1 0x555e6fc6210 0x555e6fc7ce0 0x555e7adacf0 0x555e7adafc0 0x555e7adad80 0x555e7adaf30 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919a008
-> layoutBlockChildren: box=&{{0x555e7ae0420 1 0x555e6fc6210 0x555e7ae0370 0x555e7adad80 0x555e7adae10 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x555e7ae04d0 1 0x555e6fc6210 0x555e7ae0370 0x555e7adae10 0x555e7adaf30 0x555e7adaea0 0x555e7adaea0 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x555e9199808
-  [i=6] child=&{{0x555e7ae0580 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb050 0x555e7adb830 0x555e7adb0e0 0x555e7adb7a0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e915a808
-> layoutBlockChildren: box=&{{0x555e7ae0580 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb050 0x555e7adb830 0x555e7adb0e0 0x555e7adb7a0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0630 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb0e0 0x555e7adb200 0x555e7adb170 0x555e7adb170 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e915b008
-> layoutBlockChildren: box=&{{0x555e7ae0630 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb0e0 0x555e7adb200 0x555e7adb170 0x555e7adb170 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919a808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919b008
-> layoutBlockChildren: box=&{{0x555e7ae06e0 1 0x555e6fc6210 0x555e7ae0580 0x555e7adb200 0x555e7adb7a0 0x555e7adb290 0x555e7adb710 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x555e7ae0a50 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb830 0x555e7adbb90 0x555e7adb8c0 0x555e7adbb00 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e916c008
-> layoutBlockChildren: box=&{{0x555e7ae0a50 1 0x555e6fc6210 0x555e6fc6580 0x555e7adb830 0x555e7adbb90 0x555e7adb8c0 0x555e7adbb00 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0b00 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb8c0 0x555e7adb9e0 0x555e7adb950 0x555e7adb950 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e916c808
-> layoutBlockChildren: box=&{{0x555e7ae0b00 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb8c0 0x555e7adb9e0 0x555e7adb950 0x555e7adb950 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919b808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919e808
-> layoutBlockChildren: box=&{{0x555e7ae0bb0 1 0x555e6fc6210 0x555e7ae0a50 0x555e7adb9e0 0x555e7adbb00 0x555e7adba70 0x555e7adba70 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x555e919e008
-  [i=8] child=&{{0x555e7ae0c60 1 0x555e6fc6210 0x555e6fc6580 0x555e7adbb90 0x555e7adbe60 0x555e7adbc20 0x555e7adbdd0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x555e917a808
-> layoutBlockChildren: box=&{{0x555e7ae0c60 1 0x555e6fc6210 0x555e6fc6580 0x555e7adbb90 0x555e7adbe60 0x555e7adbc20 0x555e7adbdd0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x555e7ae0d10 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbc20 0x555e7adbd40 0x555e7adbcb0 0x555e7adbcb0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x555e917b008
-> layoutBlockChildren: box=&{{0x555e7ae0d10 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbc20 0x555e7adbd40 0x555e7adbcb0 0x555e7adbcb0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e919f008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x555e919f808
-> layoutBlockChildren: box=&{{0x555e7ae0dc0 1 0x555e6fc6210 0x555e7ae0c60 0x555e7adbd40 0x555e7adbdd0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
-> layoutBlockChildren: box=&{{0x555e6fc6370 1 0x555e6fc6210 0x555e6fc6210 0x555e6f3e090 <nil> 0x555e6f3e120 0x555e6fc6580 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x555e7b76008
-> layoutBlockChildren: box=&{{0x555e6fc6580 1 0x555e6fc6210 0x555e6fc6370 0x555e6f3e360 <nil> 0x555e6f3e3f0 0x555e7adbe60 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x555e7b76808
-> layoutBlockChildren: box=&{{0x555e6fc6630 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e3f0 0x555e6f3e510 0x555e6f3e480 0x555e6f3e480 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x555e9188008
-  [i=1] child=&{{0x555e6fc66e0 1 0x555e6fc6210 0x555e6fc6580 0x555e6f3e510 0x555e6f3efc0 0x555e6f3e5a0 0x555e6f3ef30 map[]} div [class] map[class:sec> layoutBlockChildren: box=&{{0x2c2e5b544420 1 0x2c2e5b5442c0 0x2c2e5b5442c0 0x2c2e5b8cacf0 <nil> 0x2c2e5b8cad80 0x2c2e5b544630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2c2e5c32b008
-> layoutBlockChildren: box=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2c2e5c32b808
-> layoutBlockChildren: box=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b647808
-  [i=1] child=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b7be008
-> layoutBlockChildren: box=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b7be808
-> layoutBlockChildren: box=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b648008
-  [i=1] child=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b7d0008
-> layoutBlockChildren: box=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b7d0808
-> layoutBlockChildren: box=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b648808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b649008
-> layoutBlockChildren: box=&{{0x2c2e5b544a50 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb4d0 0x2c2e5b8cb560 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b901008
-> layoutBlockChildren: box=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b7d4808
-> layoutBlockChildren: box=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b649808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64a008
-> layoutBlockChildren: box=&{{0x2c2e5b544c60 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb7a0 0x2c2e5b8cb830 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b800808
-> layoutBlockChildren: box=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b801008
-> layoutBlockChildren: box=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64a808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64b008
-> layoutBlockChildren: box=&{{0x2c2e5b544e70 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cba70 0x2c2e5b8cbb00 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] true true true} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b818008
-> layoutBlockChildren: box=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b818808
-> layoutBlockChildren: box=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64b808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64c008
-> layoutBlockChildren: box=&{{0x2c2e5b545080 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbdd0 0x2c2e5c0ee000 0x2c2e5b8cbe60 0x2c2e5b8cbe60 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b825808
-> layoutBlockChildren: box=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b83c008
-> layoutBlockChildren: box=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b64c808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b650808
-> layoutBlockChildren: box=&{{0x2c2e5b545290 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee240 0x2c2e5c0ee360 0x2c2e5c0ee2d0 0x2c2e5c0ee2d0 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b64d008
-> layoutBlockChildren: box=&{{0x2c2e5b545340 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee360 0x2c2e5c0ee480 0x2c2e5c0ee3f0 0x2c2e5c0ee3f0 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b64d808
-> layoutBlockChildren: box=&{{0x2c2e5b5453f0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee480 0x2c2e5c0ee5a0 0x2c2e5c0ee510 0x2c2e5c0ee510 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b650008
-> layoutBlockChildren: box=&{{0x2c2e5b5454a0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee5a0 0x2c2e5c0ee630 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545550 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee630 0x2c2e5c0ee6c0 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b858008
-> layoutBlockChildren: box=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b858808
-> layoutBlockChildren: box=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b651008
-  [i=1] child=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b85a008
-> layoutBlockChildren: box=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b652008
-> layoutBlockChildren: box=&{{0x2c2e5b545810 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0ee990 0x2c2e5c0eea20 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b5458c0 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0eea20 0x2c2e5c0eeb40 0x2c2e5c0eeab0 0x2c2e5c0eeab0 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b651808
-  [i=2] child=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b472008
-> layoutBlockChildren: box=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b653008
-> layoutBlockChildren: box=&{{0x2c2e5b545a20 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eec60 0x2c2e5c0eecf0 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ad0 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eecf0 0x2c2e5c0eee10 0x2c2e5c0eed80 0x2c2e5c0eed80 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b652808
-  [i=3] child=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b5ec008
-> layoutBlockChildren: box=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b654008
-> layoutBlockChildren: box=&{{0x2c2e5b545c30 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eef30 0x2c2e5c0eefc0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ce0 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eefc0 0x2c2e5c0ef0e0 0x2c2e5c0ef050 0x2c2e5c0ef050 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b653808
-  [i=5] child=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b5f0008
-> layoutBlockChildren: box=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b5f0808
-> layoutBlockChildren: box=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b654808
-  [i=1] child=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b622008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b655808
-> layoutBlockChildren: box=&{{0x2c2e5c0f60b0 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef440 0x2c2e5c0ef4d0 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6160 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef4d0 0x2c2e5c0ef5f0 0x2c2e5c0ef560 0x2c2e5c0ef560 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b655008
-  [i=2] child=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b628008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b656808
-> layoutBlockChildren: box=&{{0x2c2e5c0f62c0 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef710 0x2c2e5c0ef7a0 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6370 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef7a0 0x2c2e5c0ef8c0 0x2c2e5c0ef830 0x2c2e5c0ef830 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b656008
-  [i=3] child=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b62c008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b657808
-> layoutBlockChildren: box=&{{0x2c2e5c0f64d0 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0ef9e0 0x2c2e5c0efa70 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6580 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0efa70 0x2c2e5c0efb90 0x2c2e5c0efb00 0x2c2e5c0efb00 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b657008
-  [i=6] child=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b630008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b630808
-> layoutBlockChildren: box=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b658008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b658808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6790 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efe60 0x2c2e5c0fa510 0x2c2e5c0fa000 0x2c2e5c0fa480 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b633808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b636008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b659008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b65a008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6c60 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa750 0x2c2e5c0fa870 0x2c2e5c0fa7e0 0x2c2e5c0fa7e0 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x2c2e5b659808
-  [i=8] child=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b63e008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b63e808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b65a808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b65b008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6e70 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0faab0 0x2c2e5c0fab40 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b544420 1 0x2c2e5b5442c0 0x2c2e5b5442c0 0x2c2e5b8cacf0 <nil> 0x2c2e5b8cad80 0x2c2e5b544630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b620808
-> layoutBlockChildren: box=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b621008
-> layoutBlockChildren: box=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9eb808
-  [i=1] child=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5c46f808
-> layoutBlockChildren: box=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5c2d4008
-> layoutBlockChildren: box=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f2008
-  [i=1] child=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5c32a808
-> layoutBlockChildren: box=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b98c008
-> layoutBlockChildren: box=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f2808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f3008
-> layoutBlockChildren: box=&{{0x2c2e5b544a50 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb4d0 0x2c2e5b8cb560 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b991008
-> layoutBlockChildren: box=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b991808
-> layoutBlockChildren: box=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f3808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f4008
-> layoutBlockChildren: box=&{{0x2c2e5b544c60 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb7a0 0x2c2e5b8cb830 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] true true true} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b994808
-> layoutBlockChildren: box=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b995008
-> layoutBlockChildren: box=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f4808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f5008
-> layoutBlockChildren: box=&{{0x2c2e5b544e70 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cba70 0x2c2e5b8cbb00 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b99c008
-> layoutBlockChildren: box=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b99c808
-> layoutBlockChildren: box=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f5808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f6008
-> layoutBlockChildren: box=&{{0x2c2e5b545080 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbdd0 0x2c2e5c0ee000 0x2c2e5b8cbe60 0x2c2e5b8cbe60 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b99f808
-> layoutBlockChildren: box=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9a0008
-> layoutBlockChildren: box=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f6808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f8808
-> layoutBlockChildren: box=&{{0x2c2e5b545290 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee240 0x2c2e5c0ee360 0x2c2e5c0ee2d0 0x2c2e5c0ee2d0 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b9f7008
-> layoutBlockChildren: box=&{{0x2c2e5b545340 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee360 0x2c2e5c0ee480 0x2c2e5c0ee3f0 0x2c2e5c0ee3f0 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b9f7808
-> layoutBlockChildren: box=&{{0x2c2e5b5453f0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee480 0x2c2e5c0ee5a0 0x2c2e5c0ee510 0x2c2e5c0ee510 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b9f8008
-> layoutBlockChildren: box=&{{0x2c2e5b5454a0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee5a0 0x2c2e5c0ee630 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545550 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee630 0x2c2e5c0ee6c0 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b9b2008
-> layoutBlockChildren: box=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9b2808
-> layoutBlockChildren: box=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9f9008
-  [i=1] child=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9b6008
-> layoutBlockChildren: box=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fa008
-> layoutBlockChildren: box=&{{0x2c2e5b545810 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0ee990 0x2c2e5c0eea20 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b5458c0 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0eea20 0x2c2e5c0eeb40 0x2c2e5c0eeab0 0x2c2e5c0eeab0 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9f9808
-  [i=2] child=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9ba008
-> layoutBlockChildren: box=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fb008
-> layoutBlockChildren: box=&{{0x2c2e5b545a20 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eec60 0x2c2e5c0eecf0 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ad0 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eecf0 0x2c2e5c0eee10 0x2c2e5c0eed80 0x2c2e5c0eed80 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9fa808
-  [i=3] child=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9be008
-> layoutBlockChildren: box=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fc008
-> layoutBlockChildren: box=&{{0x2c2e5b545c30 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eef30 0x2c2e5c0eefc0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ce0 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eefc0 0x2c2e5c0ef0e0 0x2c2e5c0ef050 0x2c2e5c0ef050 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9fb808
-  [i=5] child=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b9c2008
-> layoutBlockChildren: box=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9c2808
-> layoutBlockChildren: box=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fc808
-  [i=1] child=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9c4008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fd808
-> layoutBlockChildren: box=&{{0x2c2e5c0f60b0 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef440 0x2c2e5c0ef4d0 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6160 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef4d0 0x2c2e5c0ef5f0 0x2c2e5c0ef560 0x2c2e5c0ef560 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9fd008
-  [i=2] child=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9ca008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9fe808
-> layoutBlockChildren: box=&{{0x2c2e5c0f62c0 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef710 0x2c2e5c0ef7a0 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6370 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef7a0 0x2c2e5c0ef8c0 0x2c2e5c0ef830 0x2c2e5c0ef830 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9fe008
-  [i=3] child=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b9ce008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b9ff808
-> layoutBlockChildren: box=&{{0x2c2e5c0f64d0 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0ef9e0 0x2c2e5c0efa70 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6580 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0efa70 0x2c2e5c0efb90 0x2c2e5c0efb00 0x2c2e5c0efb00 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b9ff008
-  [i=6] child=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b9d6008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9d6808
-> layoutBlockChildren: box=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b468008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b468808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6790 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efe60 0x2c2e5c0fa510 0x2c2e5c0fa000 0x2c2e5c0fa480 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b9d9808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9dc008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b469008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b46e008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6c60 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa750 0x2c2e5c0fa870 0x2c2e5c0fa7e0 0x2c2e5c0fa7e0 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x2c2e5b469808
-  [i=8] child=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b9e6008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b9e6808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b46e808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b46f008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6e70 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0faab0 0x2c2e5c0fab40 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b544420 1 0x2c2e5b5442c0 0x2c2e5b5442c0 0x2c2e5b8cacf0 <nil> 0x2c2e5b8cad80 0x2c2e5b544630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2c2e5c46f008
-> layoutBlockChildren: box=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2c2e5c2d5808
-> layoutBlockChildren: box=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b4008
-  [i=1] child=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b65b008
-> layoutBlockChildren: box=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b621808
-> layoutBlockChildren: box=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b4808
-  [i=1] child=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b606008
-> layoutBlockChildren: box=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b606808
-> layoutBlockChildren: box=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b5008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b5808
-> layoutBlockChildren: box=&{{0x2c2e5b544a50 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb4d0 0x2c2e5b8cb560 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] true true true} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b611808
-> layoutBlockChildren: box=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b61e008
-> layoutBlockChildren: box=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b6008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b6808
-> layoutBlockChildren: box=&{{0x2c2e5b544c60 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb7a0 0x2c2e5b8cb830 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b62f008
-> layoutBlockChildren: box=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b62f808
-> layoutBlockChildren: box=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b7008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6b7808
-> layoutBlockChildren: box=&{{0x2c2e5b544e70 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cba70 0x2c2e5b8cbb00 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b636808
-> layoutBlockChildren: box=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b637008
-> layoutBlockChildren: box=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6ba008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6ba808
-> layoutBlockChildren: box=&{{0x2c2e5b545080 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbdd0 0x2c2e5c0ee000 0x2c2e5b8cbe60 0x2c2e5b8cbe60 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b646008
-> layoutBlockChildren: box=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b646808
-> layoutBlockChildren: box=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6bb008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6bd008
-> layoutBlockChildren: box=&{{0x2c2e5b545290 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee240 0x2c2e5c0ee360 0x2c2e5c0ee2d0 0x2c2e5c0ee2d0 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b6bb808
-> layoutBlockChildren: box=&{{0x2c2e5b545340 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee360 0x2c2e5c0ee480 0x2c2e5c0ee3f0 0x2c2e5c0ee3f0 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b6bc008
-> layoutBlockChildren: box=&{{0x2c2e5b5453f0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee480 0x2c2e5c0ee5a0 0x2c2e5c0ee510 0x2c2e5c0ee510 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b6bc808
-> layoutBlockChildren: box=&{{0x2c2e5b5454a0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee5a0 0x2c2e5c0ee630 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545550 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee630 0x2c2e5c0ee6c0 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b662808
-> layoutBlockChildren: box=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b663008
-> layoutBlockChildren: box=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6bd808
-  [i=1] child=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b66a808
-> layoutBlockChildren: box=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c0808
-> layoutBlockChildren: box=&{{0x2c2e5b545810 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0ee990 0x2c2e5c0eea20 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b5458c0 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0eea20 0x2c2e5c0eeb40 0x2c2e5c0eeab0 0x2c2e5c0eeab0 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c0008
-  [i=2] child=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b672808
-> layoutBlockChildren: box=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c1808
-> layoutBlockChildren: box=&{{0x2c2e5b545a20 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eec60 0x2c2e5c0eecf0 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ad0 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eecf0 0x2c2e5c0eee10 0x2c2e5c0eed80 0x2c2e5c0eed80 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c1008
-  [i=3] child=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b678808
-> layoutBlockChildren: box=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c2808
-> layoutBlockChildren: box=&{{0x2c2e5b545c30 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eef30 0x2c2e5c0eefc0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ce0 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eefc0 0x2c2e5c0ef0e0 0x2c2e5c0ef050 0x2c2e5c0ef050 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c2008
-  [i=5] child=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b67e808
-> layoutBlockChildren: box=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b67f008
-> layoutBlockChildren: box=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c3008
-  [i=1] child=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b682808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c4008
-> layoutBlockChildren: box=&{{0x2c2e5c0f60b0 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef440 0x2c2e5c0ef4d0 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6160 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef4d0 0x2c2e5c0ef5f0 0x2c2e5c0ef560 0x2c2e5c0ef560 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c3808
-  [i=2] child=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b68a808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c5008
-> layoutBlockChildren: box=&{{0x2c2e5c0f62c0 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef710 0x2c2e5c0ef7a0 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6370 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef7a0 0x2c2e5c0ef8c0 0x2c2e5c0ef830 0x2c2e5c0ef830 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c4808
-  [i=3] child=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b69c808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c8008
-> layoutBlockChildren: box=&{{0x2c2e5c0f64d0 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0ef9e0 0x2c2e5c0efa70 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6580 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0efa70 0x2c2e5c0efb90 0x2c2e5c0efb00 0x2c2e5c0efb00 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b6c5808
-  [i=6] child=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b6a2808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b6a3008
-> layoutBlockChildren: box=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c8808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c9008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6790 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efe60 0x2c2e5c0fa510 0x2c2e5c0fa000 0x2c2e5c0fa480 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b6aa008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b6aa808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6c9808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6ca808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6c60 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa750 0x2c2e5c0fa870 0x2c2e5c0fa7e0 0x2c2e5c0fa7e0 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x2c2e5b6ca008
-  [i=8] child=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b6b0808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b6b1008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6cb008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b6cb808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6e70 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0faab0 0x2c2e5c0fab40 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b544420 1 0x2c2e5b5442c0 0x2c2e5b5442c0 0x2c2e5b8cacf0 <nil> 0x2c2e5b8cad80 0x2c2e5b544630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
-  [i=0] child=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b46f008
-> layoutBlockChildren: box=&{{0x2c2e5b544630 1 0x2c2e5b5442c0 0x2c2e5b544420 0x2c2e5b8cafc0 <nil> 0x2c2e5b8cb050 0x2c2e5c0fabd0 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
-  [i=0] child=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2c2e5c46e808
-> layoutBlockChildren: box=&{{0x2c2e5b5446e0 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb050 0x2c2e5b8cb170 0x2c2e5b8cb0e0 0x2c2e5b8cb0e0 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b605808
-  [i=1] child=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5c2d4808
-> layoutBlockChildren: box=&{{0x2c2e5b544790 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cb170 0x2c2e5b8cbc20 0x2c2e5b8cb200 0x2c2e5b8cbb90 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5c2d5008
-> layoutBlockChildren: box=&{{0x2c2e5b544840 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb200 0x2c2e5b8cb320 0x2c2e5b8cb290 0x2c2e5b8cb290 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b608008
-  [i=1] child=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b620808
-> layoutBlockChildren: box=&{{0x2c2e5b5448f0 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb320 0x2c2e5b8cb5f0 0x2c2e5b8cb3b0 0x2c2e5b8cb560 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b621008
-> layoutBlockChildren: box=&{{0x2c2e5b5449a0 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb3b0 0x2c2e5b8cb4d0 0x2c2e5b8cb440 0x2c2e5b8cb440 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b608808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b609008
-> layoutBlockChildren: box=&{{0x2c2e5b544a50 1 0x2c2e5b5442c0 0x2c2e5b5448f0 0x2c2e5b8cb4d0 0x2c2e5b8cb560 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b813808
-> layoutBlockChildren: box=&{{0x2c2e5b544b00 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb5f0 0x2c2e5b8cb8c0 0x2c2e5b8cb680 0x2c2e5b8cb830 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b852008
-> layoutBlockChildren: box=&{{0x2c2e5b544bb0 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb680 0x2c2e5b8cb7a0 0x2c2e5b8cb710 0x2c2e5b8cb710 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b609808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60a008
-> layoutBlockChildren: box=&{{0x2c2e5b544c60 1 0x2c2e5b5442c0 0x2c2e5b544b00 0x2c2e5b8cb7a0 0x2c2e5b8cb830 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2c2e5b855008
-> layoutBlockChildren: box=&{{0x2c2e5b544d10 1 0x2c2e5b5442c0 0x2c2e5b544790 0x2c2e5b8cb8c0 0x2c2e5b8cbb90 0x2c2e5b8cb950 0x2c2e5b8cbb00 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2c2e5b855808
-> layoutBlockChildren: box=&{{0x2c2e5b544dc0 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cb950 0x2c2e5b8cba70 0x2c2e5b8cb9e0 0x2c2e5b8cb9e0 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60a808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60b008
-> layoutBlockChildren: box=&{{0x2c2e5b544e70 1 0x2c2e5b5442c0 0x2c2e5b544d10 0x2c2e5b8cba70 0x2c2e5b8cbb00 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
-  [i=2] child=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b8ac808
-> layoutBlockChildren: box=&{{0x2c2e5b544f20 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5b8cbc20 0x2c2e5c0ee090 0x2c2e5b8cbcb0 0x2c2e5c0ee000 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b8ad008
-> layoutBlockChildren: box=&{{0x2c2e5b544fd0 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbcb0 0x2c2e5b8cbdd0 0x2c2e5b8cbd40 0x2c2e5b8cbd40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60b808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60c008
-> layoutBlockChildren: box=&{{0x2c2e5b545080 1 0x2c2e5b5442c0 0x2c2e5b544f20 0x2c2e5b8cbdd0 0x2c2e5c0ee000 0x2c2e5b8cbe60 0x2c2e5b8cbe60 map[]} textarea [] map[] true true true} contentX=50 contentY=348 contentWidth=500 childCount=0
-  [i=3] child=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b8b2008
-> layoutBlockChildren: box=&{{0x2c2e5b545130 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee090 0x2c2e5c0ee750 0x2c2e5c0ee120 0x2c2e5c0ee6c0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b8b2808
-> layoutBlockChildren: box=&{{0x2c2e5b5451e0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee120 0x2c2e5c0ee240 0x2c2e5c0ee1b0 0x2c2e5c0ee1b0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60c808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60e808
-> layoutBlockChildren: box=&{{0x2c2e5b545290 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee240 0x2c2e5c0ee360 0x2c2e5c0ee2d0 0x2c2e5c0ee2d0 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b60d008
-> layoutBlockChildren: box=&{{0x2c2e5b545340 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee360 0x2c2e5c0ee480 0x2c2e5c0ee3f0 0x2c2e5c0ee3f0 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b60d808
-> layoutBlockChildren: box=&{{0x2c2e5b5453f0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee480 0x2c2e5c0ee5a0 0x2c2e5c0ee510 0x2c2e5c0ee510 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=2 style=0x2c2e5b60e008
-> layoutBlockChildren: box=&{{0x2c2e5b5454a0 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee5a0 0x2c2e5c0ee630 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545550 1 0x2c2e5b5442c0 0x2c2e5b545130 0x2c2e5c0ee630 0x2c2e5c0ee6c0 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
-  [i=4] child=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b8bc008
-> layoutBlockChildren: box=&{{0x2c2e5b545600 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ee750 0x2c2e5c0ef200 0x2c2e5c0ee7e0 0x2c2e5c0ef170 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b8bc808
-> layoutBlockChildren: box=&{{0x2c2e5b5456b0 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee7e0 0x2c2e5c0ee900 0x2c2e5c0ee870 0x2c2e5c0ee870 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b60f008
-  [i=1] child=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b8be008
-> layoutBlockChildren: box=&{{0x2c2e5b545760 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0ee900 0x2c2e5c0eebd0 0x2c2e5c0ee990 0x2c2e5c0eeb40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b61a008
-> layoutBlockChildren: box=&{{0x2c2e5b545810 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0ee990 0x2c2e5c0eea20 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b5458c0 1 0x2c2e5b5442c0 0x2c2e5b545760 0x2c2e5c0eea20 0x2c2e5c0eeb40 0x2c2e5c0eeab0 0x2c2e5c0eeab0 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b60f808
-  [i=2] child=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b8cc008
-> layoutBlockChildren: box=&{{0x2c2e5b545970 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eebd0 0x2c2e5c0eeea0 0x2c2e5c0eec60 0x2c2e5c0eee10 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b61b008
-> layoutBlockChildren: box=&{{0x2c2e5b545a20 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eec60 0x2c2e5c0eecf0 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ad0 1 0x2c2e5b5442c0 0x2c2e5b545970 0x2c2e5c0eecf0 0x2c2e5c0eee10 0x2c2e5c0eed80 0x2c2e5c0eed80 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b61a808
-  [i=3] child=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b8d8008
-> layoutBlockChildren: box=&{{0x2c2e5b545b80 1 0x2c2e5b5442c0 0x2c2e5b545600 0x2c2e5c0eeea0 0x2c2e5c0ef170 0x2c2e5c0eef30 0x2c2e5c0ef0e0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b622008
-> layoutBlockChildren: box=&{{0x2c2e5b545c30 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eef30 0x2c2e5c0eefc0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5b545ce0 1 0x2c2e5b5442c0 0x2c2e5b545b80 0x2c2e5c0eefc0 0x2c2e5c0ef0e0 0x2c2e5c0ef050 0x2c2e5c0ef050 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b61b808
-  [i=5] child=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b8e2008
-> layoutBlockChildren: box=&{{0x2c2e5b545d90 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0ef200 0x2c2e5c0efcb0 0x2c2e5c0ef290 0x2c2e5c0efc20 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
-  [i=0] child=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b8e2808
-> layoutBlockChildren: box=&{{0x2c2e5b545e40 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef290 0x2c2e5c0ef3b0 0x2c2e5c0ef320 0x2c2e5c0ef320 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b622808
-  [i=1] child=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b8ea008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6000 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef3b0 0x2c2e5c0ef680 0x2c2e5c0ef440 0x2c2e5c0ef5f0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b623808
-> layoutBlockChildren: box=&{{0x2c2e5c0f60b0 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef440 0x2c2e5c0ef4d0 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6160 1 0x2c2e5b5442c0 0x2c2e5c0f6000 0x2c2e5c0ef4d0 0x2c2e5c0ef5f0 0x2c2e5c0ef560 0x2c2e5c0ef560 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b623008
-  [i=2] child=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b468008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6210 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef680 0x2c2e5c0ef950 0x2c2e5c0ef710 0x2c2e5c0ef8c0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b624808
-> layoutBlockChildren: box=&{{0x2c2e5c0f62c0 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef710 0x2c2e5c0ef7a0 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6370 1 0x2c2e5b5442c0 0x2c2e5c0f6210 0x2c2e5c0ef7a0 0x2c2e5c0ef8c0 0x2c2e5c0ef830 0x2c2e5c0ef830 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b624008
-  [i=3] child=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2c2e5b5bc008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6420 1 0x2c2e5b5442c0 0x2c2e5b545d90 0x2c2e5c0ef950 0x2c2e5c0efc20 0x2c2e5c0ef9e0 0x2c2e5c0efb90 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b625808
-> layoutBlockChildren: box=&{{0x2c2e5c0f64d0 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0ef9e0 0x2c2e5c0efa70 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
-> layoutBlockChildren: box=&{{0x2c2e5c0f6580 1 0x2c2e5b5442c0 0x2c2e5c0f6420 0x2c2e5c0efa70 0x2c2e5c0efb90 0x2c2e5c0efb00 0x2c2e5c0efb00 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=0 style=0x2c2e5b625008
-  [i=6] child=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b5e8008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6630 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0efcb0 0x2c2e5c0fa5a0 0x2c2e5c0efd40 0x2c2e5c0fa510 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b5e8808
-> layoutBlockChildren: box=&{{0x2c2e5c0f66e0 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efd40 0x2c2e5c0efe60 0x2c2e5c0efdd0 0x2c2e5c0efdd0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b626008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b626808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6790 1 0x2c2e5b5442c0 0x2c2e5c0f6630 0x2c2e5c0efe60 0x2c2e5c0fa510 0x2c2e5c0fa000 0x2c2e5c0fa480 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
-  [i=7] child=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b5eb808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6b00 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa5a0 0x2c2e5c0fa900 0x2c2e5c0fa630 0x2c2e5c0fa870 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b5ec008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6bb0 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa630 0x2c2e5c0fa750 0x2c2e5c0fa6c0 0x2c2e5c0fa6c0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b627008
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b628008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6c60 1 0x2c2e5b5442c0 0x2c2e5c0f6b00 0x2c2e5c0fa750 0x2c2e5c0fa870 0x2c2e5c0fa7e0 0x2c2e5c0fa7e0 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=100% display=2 style=0x2c2e5b627808
-  [i=8] child=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2c2e5b5f0008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6d10 1 0x2c2e5b5442c0 0x2c2e5b544630 0x2c2e5c0fa900 0x2c2e5c0fabd0 0x2c2e5c0fa990 0x2c2e5c0fab40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
-  [i=0] child=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2c2e5b5f0808
-> layoutBlockChildren: box=&{{0x2c2e5c0f6dc0 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0fa990 0x2c2e5c0faab0 0x2c2e5c0faa20 0x2c2e5c0faa20 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
-  [i=0] child=anonymous float="none" width=0 display=1 style=0x2c2e5b628808
-  [i=1] child=anonymous float="none" width=0 display=1 style=0x2c2e5b629008
-> layoutBlockChildren: box=&{{0x2c2e5c0f6e70 1 0x2c2e5b5442c0 0x2c2e5c0f6d10 0x2c2e5c0faab0 0x2c2e5c0fab40 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137546420 1 0x2e71375462c0 0x2e71375462c0 0x2e71375bf170 <nil> 0x2e71375bf200 0x2e7137546630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
+  [i=0] child=&{{0x2e7137546630 1 0x2e71375462c0 0x2e7137546420 0x2e71375bf440 <nil> 0x2e71375bf4d0 0x2e7138077050 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2e71382aa008
+> layoutBlockChildren: box=&{{0x2e7137546630 1 0x2e71375462c0 0x2e7137546420 0x2e71375bf440 <nil> 0x2e71375bf4d0 0x2e7138077050 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
+  [i=0] child=&{{0x2e71375466e0 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf4d0 0x2e71375bf5f0 0x2e71375bf560 0x2e71375bf560 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2e71382aa808
+> layoutBlockChildren: box=&{{0x2e71375466e0 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf4d0 0x2e71375bf5f0 0x2e71375bf560 0x2e71375bf560 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383ca008
+  [i=1] child=&{{0x2e7137546790 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf5f0 0x2e713806c1b0 0x2e71375bf680 0x2e713806c120 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71382b0008
+> layoutBlockChildren: box=&{{0x2e7137546790 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf5f0 0x2e713806c1b0 0x2e71375bf680 0x2e713806c120 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e7137546840 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf680 0x2e71375bf7a0 0x2e71375bf710 0x2e71375bf710 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71382b0808
+> layoutBlockChildren: box=&{{0x2e7137546840 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf680 0x2e71375bf7a0 0x2e71375bf710 0x2e71375bf710 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383ca808
+  [i=1] child=&{{0x2e71375468f0 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf7a0 0x2e71375bfa70 0x2e71375bf830 0x2e71375bf9e0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e71382ba008
+> layoutBlockChildren: box=&{{0x2e71375468f0 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf7a0 0x2e71375bfa70 0x2e71375bf830 0x2e71375bf9e0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71375469a0 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf830 0x2e71375bf950 0x2e71375bf8c0 0x2e71375bf8c0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e71382ba808
+> layoutBlockChildren: box=&{{0x2e71375469a0 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf830 0x2e71375bf950 0x2e71375bf8c0 0x2e71375bf8c0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383cb008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383cb808
+> layoutBlockChildren: box=&{{0x2e7137546a50 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf950 0x2e71375bf9e0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
+  [i=2] child=&{{0x2e7137546b00 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfa70 0x2e71375bfd40 0x2e71375bfb00 0x2e71375bfcb0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e71382c1808
+> layoutBlockChildren: box=&{{0x2e7137546b00 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfa70 0x2e71375bfd40 0x2e71375bfb00 0x2e71375bfcb0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546bb0 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfb00 0x2e71375bfc20 0x2e71375bfb90 0x2e71375bfb90 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e71382cc008
+> layoutBlockChildren: box=&{{0x2e7137546bb0 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfb00 0x2e71375bfc20 0x2e71375bfb90 0x2e71375bfb90 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383cc008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383cc808
+> layoutBlockChildren: box=&{{0x2e7137546c60 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfc20 0x2e71375bfcb0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
+  [i=3] child=&{{0x2e7137546d10 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfd40 0x2e713806c120 0x2e71375bfdd0 0x2e713806c090 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e71382d5008
+> layoutBlockChildren: box=&{{0x2e7137546d10 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfd40 0x2e713806c120 0x2e71375bfdd0 0x2e713806c090 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546dc0 1 0x2e71375462c0 0x2e7137546d10 0x2e71375bfdd0 0x2e713806c000 0x2e71375bfe60 0x2e71375bfe60 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e71382d5808
+> layoutBlockChildren: box=&{{0x2e7137546dc0 1 0x2e71375462c0 0x2e7137546d10 0x2e71375bfdd0 0x2e713806c000 0x2e71375bfe60 0x2e71375bfe60 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383cd008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383cd808
+> layoutBlockChildren: box=&{{0x2e7137546e70 1 0x2e71375462c0 0x2e7137546d10 0x2e713806c000 0x2e713806c090 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
+  [i=2] child=&{{0x2e7137546f20 1 0x2e71375462c0 0x2e7137546630 0x2e713806c1b0 0x2e713806c510 0x2e713806c240 0x2e713806c480 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71382e4808
+> layoutBlockChildren: box=&{{0x2e7137546f20 1 0x2e71375462c0 0x2e7137546630 0x2e713806c1b0 0x2e713806c510 0x2e713806c240 0x2e713806c480 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546fd0 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c240 0x2e713806c360 0x2e713806c2d0 0x2e713806c2d0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71382e5008
+> layoutBlockChildren: box=&{{0x2e7137546fd0 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c240 0x2e713806c360 0x2e713806c2d0 0x2e713806c2d0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383ce008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383ce808
+> layoutBlockChildren: box=&{{0x2e7137547080 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c360 0x2e713806c480 0x2e713806c3f0 0x2e713806c3f0 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
+  [i=3] child=&{{0x2e7137547130 1 0x2e71375462c0 0x2e7137546630 0x2e713806c510 0x2e713806cbd0 0x2e713806c5a0 0x2e713806cb40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71382f6008
+> layoutBlockChildren: box=&{{0x2e7137547130 1 0x2e71375462c0 0x2e7137546630 0x2e713806c510 0x2e713806cbd0 0x2e713806c5a0 0x2e713806cb40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71375471e0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c5a0 0x2e713806c6c0 0x2e713806c630 0x2e713806c630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71382f6808
+> layoutBlockChildren: box=&{{0x2e71375471e0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c5a0 0x2e713806c6c0 0x2e713806c630 0x2e713806c630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383cf008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383d1008
+> layoutBlockChildren: box=&{{0x2e7137547290 1 0x2e71375462c0 0x2e7137547130 0x2e713806c6c0 0x2e713806c7e0 0x2e713806c750 0x2e713806c750 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e71383cf808
+> layoutBlockChildren: box=&{{0x2e7137547340 1 0x2e71375462c0 0x2e7137547130 0x2e713806c7e0 0x2e713806c900 0x2e713806c870 0x2e713806c870 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e71383d0008
+> layoutBlockChildren: box=&{{0x2e71375473f0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c900 0x2e713806ca20 0x2e713806c990 0x2e713806c990 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e71383d0808
+> layoutBlockChildren: box=&{{0x2e71375474a0 1 0x2e71375462c0 0x2e7137547130 0x2e713806ca20 0x2e713806cab0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547550 1 0x2e71375462c0 0x2e7137547130 0x2e713806cab0 0x2e713806cb40 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
+  [i=4] child=&{{0x2e7137547600 1 0x2e71375462c0 0x2e7137546630 0x2e713806cbd0 0x2e713806d680 0x2e713806cc60 0x2e713806d5f0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713832a808
+> layoutBlockChildren: box=&{{0x2e7137547600 1 0x2e71375462c0 0x2e7137546630 0x2e713806cbd0 0x2e713806d680 0x2e713806cc60 0x2e713806d5f0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e71375476b0 1 0x2e71375462c0 0x2e7137547600 0x2e713806cc60 0x2e713806cd80 0x2e713806ccf0 0x2e713806ccf0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e713832b008
+> layoutBlockChildren: box=&{{0x2e71375476b0 1 0x2e71375462c0 0x2e7137547600 0x2e713806cc60 0x2e713806cd80 0x2e713806ccf0 0x2e713806ccf0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383d1808
+  [i=1] child=&{{0x2e7137547760 1 0x2e71375462c0 0x2e7137547600 0x2e713806cd80 0x2e713806d050 0x2e713806ce10 0x2e713806cfc0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e7138334808
+> layoutBlockChildren: box=&{{0x2e7137547760 1 0x2e71375462c0 0x2e7137547600 0x2e713806cd80 0x2e713806d050 0x2e713806ce10 0x2e713806cfc0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383d6808
+> layoutBlockChildren: box=&{{0x2e7137547810 1 0x2e71375462c0 0x2e7137547760 0x2e713806ce10 0x2e713806cea0 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e71375478c0 1 0x2e71375462c0 0x2e7137547760 0x2e713806cea0 0x2e713806cfc0 0x2e713806cf30 0x2e713806cf30 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383d6008
+  [i=2] child=&{{0x2e7137547970 1 0x2e71375462c0 0x2e7137547600 0x2e713806d050 0x2e713806d320 0x2e713806d0e0 0x2e713806d290 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e7138346808
+> layoutBlockChildren: box=&{{0x2e7137547970 1 0x2e71375462c0 0x2e7137547600 0x2e713806d050 0x2e713806d320 0x2e713806d0e0 0x2e713806d290 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383d7808
+> layoutBlockChildren: box=&{{0x2e7137547a20 1 0x2e71375462c0 0x2e7137547970 0x2e713806d0e0 0x2e713806d170 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547ad0 1 0x2e71375462c0 0x2e7137547970 0x2e713806d170 0x2e713806d290 0x2e713806d200 0x2e713806d200 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383d7008
+  [i=3] child=&{{0x2e7137547b80 1 0x2e71375462c0 0x2e7137547600 0x2e713806d320 0x2e713806d5f0 0x2e713806d3b0 0x2e713806d560 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e7138356808
+> layoutBlockChildren: box=&{{0x2e7137547b80 1 0x2e71375462c0 0x2e7137547600 0x2e713806d320 0x2e713806d5f0 0x2e713806d3b0 0x2e713806d560 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383d8808
+> layoutBlockChildren: box=&{{0x2e7137547c30 1 0x2e71375462c0 0x2e7137547b80 0x2e713806d3b0 0x2e713806d440 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547ce0 1 0x2e71375462c0 0x2e7137547b80 0x2e713806d440 0x2e713806d560 0x2e713806d4d0 0x2e713806d4d0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383d8008
+  [i=5] child=&{{0x2e7137547d90 1 0x2e71375462c0 0x2e7137546630 0x2e713806d680 0x2e7138076240 0x2e713806d710 0x2e71380761b0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e7138366808
+> layoutBlockChildren: box=&{{0x2e7137547d90 1 0x2e71375462c0 0x2e7137546630 0x2e713806d680 0x2e7138076240 0x2e713806d710 0x2e71380761b0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e7137547e40 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d710 0x2e713806d830 0x2e713806d7a0 0x2e713806d7a0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e7138367008
+> layoutBlockChildren: box=&{{0x2e7137547e40 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d710 0x2e713806d830 0x2e713806d7a0 0x2e713806d7a0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383d9008
+  [i=1] child=&{{0x2e7138074000 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d830 0x2e713806db00 0x2e713806d8c0 0x2e713806da70 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e713836c808
+> layoutBlockChildren: box=&{{0x2e7138074000 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d830 0x2e713806db00 0x2e713806d8c0 0x2e713806da70 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383da008
+> layoutBlockChildren: box=&{{0x2e71380740b0 1 0x2e71375462c0 0x2e7138074000 0x2e713806d8c0 0x2e713806d950 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074160 1 0x2e71375462c0 0x2e7138074000 0x2e713806d950 0x2e713806da70 0x2e713806d9e0 0x2e713806d9e0 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383d9808
+  [i=2] child=&{{0x2e7138074210 1 0x2e71375462c0 0x2e7137547d90 0x2e713806db00 0x2e713806ddd0 0x2e713806db90 0x2e713806dd40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e713837c808
+> layoutBlockChildren: box=&{{0x2e7138074210 1 0x2e71375462c0 0x2e7137547d90 0x2e713806db00 0x2e713806ddd0 0x2e713806db90 0x2e713806dd40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383db008
+> layoutBlockChildren: box=&{{0x2e71380742c0 1 0x2e71375462c0 0x2e7138074210 0x2e713806db90 0x2e713806dc20 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074370 1 0x2e71375462c0 0x2e7138074210 0x2e713806dc20 0x2e713806dd40 0x2e713806dcb0 0x2e713806dcb0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383da808
+  [i=3] child=&{{0x2e7138074420 1 0x2e71375462c0 0x2e7137547d90 0x2e713806ddd0 0x2e71380761b0 0x2e713806de60 0x2e7138076120 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e713838e808
+> layoutBlockChildren: box=&{{0x2e7138074420 1 0x2e71375462c0 0x2e7137547d90 0x2e713806ddd0 0x2e71380761b0 0x2e713806de60 0x2e7138076120 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383dc008
+> layoutBlockChildren: box=&{{0x2e71380744d0 1 0x2e71375462c0 0x2e7138074420 0x2e713806de60 0x2e7138076000 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074580 1 0x2e71375462c0 0x2e7138074420 0x2e7138076000 0x2e7138076120 0x2e7138076090 0x2e7138076090 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e71383db808
+  [i=6] child=&{{0x2e7138074630 1 0x2e71375462c0 0x2e7137546630 0x2e7138076240 0x2e7138076a20 0x2e71380762d0 0x2e7138076990 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713839e808
+> layoutBlockChildren: box=&{{0x2e7138074630 1 0x2e71375462c0 0x2e7137546630 0x2e7138076240 0x2e7138076a20 0x2e71380762d0 0x2e7138076990 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71380746e0 1 0x2e71375462c0 0x2e7138074630 0x2e71380762d0 0x2e71380763f0 0x2e7138076360 0x2e7138076360 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e713839f008
+> layoutBlockChildren: box=&{{0x2e71380746e0 1 0x2e71375462c0 0x2e7138074630 0x2e71380762d0 0x2e71380763f0 0x2e7138076360 0x2e7138076360 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383dc808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383dd008
+> layoutBlockChildren: box=&{{0x2e7138074790 1 0x2e71375462c0 0x2e7138074630 0x2e71380763f0 0x2e7138076990 0x2e7138076480 0x2e7138076900 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
+  [i=7] child=&{{0x2e7138074b00 1 0x2e71375462c0 0x2e7137546630 0x2e7138076a20 0x2e7138076d80 0x2e7138076ab0 0x2e7138076cf0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71383ac008
+> layoutBlockChildren: box=&{{0x2e7138074b00 1 0x2e71375462c0 0x2e7137546630 0x2e7138076a20 0x2e7138076d80 0x2e7138076ab0 0x2e7138076cf0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7138074bb0 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076ab0 0x2e7138076bd0 0x2e7138076b40 0x2e7138076b40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71383ac808
+> layoutBlockChildren: box=&{{0x2e7138074bb0 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076ab0 0x2e7138076bd0 0x2e7138076b40 0x2e7138076b40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383dd808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383de808
+> layoutBlockChildren: box=&{{0x2e7138074c60 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076bd0 0x2e7138076cf0 0x2e7138076c60 0x2e7138076c60 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=100% display=2 style=0x2e71383de008
+  [i=8] child=&{{0x2e7138074d10 1 0x2e71375462c0 0x2e7137546630 0x2e7138076d80 0x2e7138077050 0x2e7138076e10 0x2e7138076fc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71383bc808
+> layoutBlockChildren: box=&{{0x2e7138074d10 1 0x2e71375462c0 0x2e7137546630 0x2e7138076d80 0x2e7138077050 0x2e7138076e10 0x2e7138076fc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7138074dc0 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076e10 0x2e7138076f30 0x2e7138076ea0 0x2e7138076ea0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71383bd008
+> layoutBlockChildren: box=&{{0x2e7138074dc0 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076e10 0x2e7138076f30 0x2e7138076ea0 0x2e7138076ea0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e71383df008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e71383df808
+> layoutBlockChildren: box=&{{0x2e7138074e70 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076f30 0x2e7138076fc0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137546420 1 0x2e71375462c0 0x2e71375462c0 0x2e71375bf170 <nil> 0x2e71375bf200 0x2e7137546630 map[]} html [] map[] false false false} contentX=0 contentY=0 contentWidth=600 childCount=1
+  [i=0] child=&{{0x2e7137546630 1 0x2e71375462c0 0x2e7137546420 0x2e71375bf440 <nil> 0x2e71375bf4d0 0x2e7138077050 map[]} body [] map[] false false false} float="" width=0 display=1 style=0x2e7138437008
+> layoutBlockChildren: box=&{{0x2e7137546630 1 0x2e71375462c0 0x2e7137546420 0x2e71375bf440 <nil> 0x2e71375bf4d0 0x2e7138077050 map[]} body [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=9
+  [i=0] child=&{{0x2e71375466e0 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf4d0 0x2e71375bf5f0 0x2e71375bf560 0x2e71375bf560 map[]} h2 [] map[] false false false} float="" width=0 display=1 style=0x2e7138437808
+> layoutBlockChildren: box=&{{0x2e71375466e0 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf4d0 0x2e71375bf5f0 0x2e71375bf560 0x2e71375bf560 map[]} h2 [] map[] false false false} contentX=20 contentY=20 contentWidth=560 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713855d008
+  [i=1] child=&{{0x2e7137546790 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf5f0 0x2e713806c1b0 0x2e71375bf680 0x2e713806c120 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713843f008
+> layoutBlockChildren: box=&{{0x2e7137546790 1 0x2e71375462c0 0x2e7137546630 0x2e71375bf5f0 0x2e713806c1b0 0x2e71375bf680 0x2e713806c120 map[]} div [class] map[class:section] false false false} contentX=37 contentY=68 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e7137546840 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf680 0x2e71375bf7a0 0x2e71375bf710 0x2e71375bf710 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e713843f808
+> layoutBlockChildren: box=&{{0x2e7137546840 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf680 0x2e71375bf7a0 0x2e71375bf710 0x2e71375bf710 map[]} div [class] map[class:label] false false false} contentX=37 contentY=68 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713855d808
+  [i=1] child=&{{0x2e71375468f0 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf7a0 0x2e71375bfa70 0x2e71375bf830 0x2e71375bf9e0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e7138449008
+> layoutBlockChildren: box=&{{0x2e71375468f0 1 0x2e71375462c0 0x2e7137546790 0x2e71375bf7a0 0x2e71375bfa70 0x2e71375bf830 0x2e71375bf9e0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=85 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71375469a0 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf830 0x2e71375bf950 0x2e71375bf8c0 0x2e71375bf8c0 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e7138449808
+> layoutBlockChildren: box=&{{0x2e71375469a0 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf830 0x2e71375bf950 0x2e71375bf8c0 0x2e71375bf8c0 map[]} label [] map[] false false false} contentX=37 contentY=85 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138562008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138562808
+> layoutBlockChildren: box=&{{0x2e7137546a50 1 0x2e71375462c0 0x2e71375468f0 0x2e71375bf950 0x2e71375bf9e0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter username type:text value:admin] false false false} contentX=50 contentY=111 contentWidth=500 childCount=0
+  [i=2] child=&{{0x2e7137546b00 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfa70 0x2e71375bfd40 0x2e71375bfb00 0x2e71375bfcb0 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e713845c808
+> layoutBlockChildren: box=&{{0x2e7137546b00 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfa70 0x2e71375bfd40 0x2e71375bfb00 0x2e71375bfcb0 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=143 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546bb0 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfb00 0x2e71375bfc20 0x2e71375bfb90 0x2e71375bfb90 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e713845d008
+> layoutBlockChildren: box=&{{0x2e7137546bb0 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfb00 0x2e71375bfc20 0x2e71375bfb90 0x2e71375bfb90 map[]} label [] map[] false false false} contentX=37 contentY=143 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138563008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138563808
+> layoutBlockChildren: box=&{{0x2e7137546c60 1 0x2e71375462c0 0x2e7137546b00 0x2e71375bfc20 0x2e71375bfcb0 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter password type:password value:password123] false false false} contentX=50 contentY=168 contentWidth=500 childCount=0
+  [i=3] child=&{{0x2e7137546d10 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfd40 0x2e713806c120 0x2e71375bfdd0 0x2e713806c090 map[]} div [class] map[class:input-group] false false false} float="" width=0 display=1 style=0x2e713846c008
+> layoutBlockChildren: box=&{{0x2e7137546d10 1 0x2e71375462c0 0x2e7137546790 0x2e71375bfd40 0x2e713806c120 0x2e71375bfdd0 0x2e713806c090 map[]} div [class] map[class:input-group] false false false} contentX=37 contentY=200 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546dc0 1 0x2e71375462c0 0x2e7137546d10 0x2e71375bfdd0 0x2e713806c000 0x2e71375bfe60 0x2e71375bfe60 map[]} label [] map[] false false false} float="" width=0 display=1 style=0x2e713846c808
+> layoutBlockChildren: box=&{{0x2e7137546dc0 1 0x2e71375462c0 0x2e7137546d10 0x2e71375bfdd0 0x2e713806c000 0x2e71375bfe60 0x2e71375bfe60 map[]} label [] map[] false false false} contentX=37 contentY=200 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138564008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138564808
+> layoutBlockChildren: box=&{{0x2e7137546e70 1 0x2e71375462c0 0x2e7137546d10 0x2e713806c000 0x2e713806c090 <nil> <nil> map[]} input [type value placeholder] map[placeholder:Enter email type:email value:user@example.com] false false false} contentX=50 contentY=226 contentWidth=500 childCount=0
+  [i=2] child=&{{0x2e7137546f20 1 0x2e71375462c0 0x2e7137546630 0x2e713806c1b0 0x2e713806c510 0x2e713806c240 0x2e713806c480 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e7138473808
+> layoutBlockChildren: box=&{{0x2e7137546f20 1 0x2e71375462c0 0x2e7137546630 0x2e713806c1b0 0x2e713806c510 0x2e713806c240 0x2e713806c480 map[]} div [class] map[class:section] false false false} contentX=37 contentY=322 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7137546fd0 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c240 0x2e713806c360 0x2e713806c2d0 0x2e713806c2d0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e713847c008
+> layoutBlockChildren: box=&{{0x2e7137546fd0 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c240 0x2e713806c360 0x2e713806c2d0 0x2e713806c2d0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=322 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138565008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138565808
+> layoutBlockChildren: box=&{{0x2e7137547080 1 0x2e71375462c0 0x2e7137546f20 0x2e713806c360 0x2e713806c480 0x2e713806c3f0 0x2e713806c3f0 map[]} textarea [] map[] false false false} contentX=50 contentY=348 contentWidth=500 childCount=0
+  [i=3] child=&{{0x2e7137547130 1 0x2e71375462c0 0x2e7137546630 0x2e713806c510 0x2e713806cbd0 0x2e713806c5a0 0x2e713806cb40 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e7138485008
+> layoutBlockChildren: box=&{{0x2e7137547130 1 0x2e71375462c0 0x2e7137546630 0x2e713806c510 0x2e713806cbd0 0x2e713806c5a0 0x2e713806cb40 map[]} div [class] map[class:section] false false false} contentX=37 contentY=463 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71375471e0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c5a0 0x2e713806c6c0 0x2e713806c630 0x2e713806c630 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e7138485808
+> layoutBlockChildren: box=&{{0x2e71375471e0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c5a0 0x2e713806c6c0 0x2e713806c630 0x2e713806c630 map[]} div [class] map[class:label] false false false} contentX=37 contentY=463 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138566008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e713856a008
+> layoutBlockChildren: box=&{{0x2e7137547290 1 0x2e71375462c0 0x2e7137547130 0x2e713806c6c0 0x2e713806c7e0 0x2e713806c750 0x2e713806c750 map[]} button [class] map[class:primary] false false false} contentX=54 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e7138566808
+> layoutBlockChildren: box=&{{0x2e7137547340 1 0x2e71375462c0 0x2e7137547130 0x2e713806c7e0 0x2e713806c900 0x2e713806c870 0x2e713806c870 map[]} button [] map[] false false false} contentX=146 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e7138567008
+> layoutBlockChildren: box=&{{0x2e71375473f0 1 0x2e71375462c0 0x2e7137547130 0x2e713806c900 0x2e713806ca20 0x2e713806c990 0x2e713806c990 map[]} button [] map[] false false false} contentX=237 contentY=489 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=2 style=0x2e7138567808
+> layoutBlockChildren: box=&{{0x2e71375474a0 1 0x2e71375462c0 0x2e7137547130 0x2e713806ca20 0x2e713806cab0 <nil> <nil> map[]} input [type value] map[type:submit value:Submit] false false false} contentX=322 contentY=489 contentWidth=0 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547550 1 0x2e71375462c0 0x2e7137547130 0x2e713806cab0 0x2e713806cb40 <nil> <nil> map[]} input [type value] map[type:reset value:Reset] false false false} contentX=407 contentY=489 contentWidth=0 childCount=0
+  [i=4] child=&{{0x2e7137547600 1 0x2e71375462c0 0x2e7137546630 0x2e713806cbd0 0x2e713806d680 0x2e713806cc60 0x2e713806d5f0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71384b9808
+> layoutBlockChildren: box=&{{0x2e7137547600 1 0x2e71375462c0 0x2e7137546630 0x2e713806cbd0 0x2e713806d680 0x2e713806cc60 0x2e713806d5f0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=577 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e71375476b0 1 0x2e71375462c0 0x2e7137547600 0x2e713806cc60 0x2e713806cd80 0x2e713806ccf0 0x2e713806ccf0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71384c4008
+> layoutBlockChildren: box=&{{0x2e71375476b0 1 0x2e71375462c0 0x2e7137547600 0x2e713806cc60 0x2e713806cd80 0x2e713806ccf0 0x2e713806ccf0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=577 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713856a808
+  [i=1] child=&{{0x2e7137547760 1 0x2e71375462c0 0x2e7137547600 0x2e713806cd80 0x2e713806d050 0x2e713806ce10 0x2e713806cfc0 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e71384c5808
+> layoutBlockChildren: box=&{{0x2e7137547760 1 0x2e71375462c0 0x2e7137547600 0x2e713806cd80 0x2e713806d050 0x2e713806ce10 0x2e713806cfc0 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=602 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713856b808
+> layoutBlockChildren: box=&{{0x2e7137547810 1 0x2e71375462c0 0x2e7137547760 0x2e713806ce10 0x2e713806cea0 <nil> <nil> map[]} input [type checked] map[type:checkbox] false false false} contentX=37 contentY=602 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e71375478c0 1 0x2e71375462c0 0x2e7137547760 0x2e713806cea0 0x2e713806cfc0 0x2e713806cf30 0x2e713806cf30 map[]} label [] map[] false false false} contentX=59 contentY=602 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e713856b008
+  [i=2] child=&{{0x2e7137547970 1 0x2e71375462c0 0x2e7137547600 0x2e713806d050 0x2e713806d320 0x2e713806d0e0 0x2e713806d290 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e71384d3808
+> layoutBlockChildren: box=&{{0x2e7137547970 1 0x2e71375462c0 0x2e7137547600 0x2e713806d050 0x2e713806d320 0x2e713806d0e0 0x2e713806d290 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=627 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713856c808
+> layoutBlockChildren: box=&{{0x2e7137547a20 1 0x2e71375462c0 0x2e7137547970 0x2e713806d0e0 0x2e713806d170 <nil> <nil> map[]} input [type] map[type:checkbox] false false false} contentX=37 contentY=627 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547ad0 1 0x2e71375462c0 0x2e7137547970 0x2e713806d170 0x2e713806d290 0x2e713806d200 0x2e713806d200 map[]} label [] map[] false false false} contentX=59 contentY=627 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e713856c008
+  [i=3] child=&{{0x2e7137547b80 1 0x2e71375462c0 0x2e7137547600 0x2e713806d320 0x2e713806d5f0 0x2e713806d3b0 0x2e713806d560 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e71384e1808
+> layoutBlockChildren: box=&{{0x2e7137547b80 1 0x2e71375462c0 0x2e7137547600 0x2e713806d320 0x2e713806d5f0 0x2e713806d3b0 0x2e713806d560 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=651 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e713856d808
+> layoutBlockChildren: box=&{{0x2e7137547c30 1 0x2e71375462c0 0x2e7137547b80 0x2e713806d3b0 0x2e713806d440 <nil> <nil> map[]} input [type checked] map[checked: type:checkbox] false false false} contentX=37 contentY=652 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7137547ce0 1 0x2e71375462c0 0x2e7137547b80 0x2e713806d440 0x2e713806d560 0x2e713806d4d0 0x2e713806d4d0 map[]} label [] map[] false false false} contentX=59 contentY=652 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e713856d008
+  [i=5] child=&{{0x2e7137547d90 1 0x2e71375462c0 0x2e7137546630 0x2e713806d680 0x2e7138076240 0x2e713806d710 0x2e71380761b0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e71384f3808
+> layoutBlockChildren: box=&{{0x2e7137547d90 1 0x2e71375462c0 0x2e7137546630 0x2e713806d680 0x2e7138076240 0x2e713806d710 0x2e71380761b0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=740 contentWidth=526 childCount=4
+  [i=0] child=&{{0x2e7137547e40 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d710 0x2e713806d830 0x2e713806d7a0 0x2e713806d7a0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e71384f8008
+> layoutBlockChildren: box=&{{0x2e7137547e40 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d710 0x2e713806d830 0x2e713806d7a0 0x2e713806d7a0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=740 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138570008
+  [i=1] child=&{{0x2e7138074000 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d830 0x2e713806db00 0x2e713806d8c0 0x2e713806da70 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e71384f9808
+> layoutBlockChildren: box=&{{0x2e7138074000 1 0x2e71375462c0 0x2e7137547d90 0x2e713806d830 0x2e713806db00 0x2e713806d8c0 0x2e713806da70 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=765 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138571008
+> layoutBlockChildren: box=&{{0x2e71380740b0 1 0x2e71375462c0 0x2e7138074000 0x2e713806d8c0 0x2e713806d950 <nil> <nil> map[]} input [type name checked] map[checked: name:radio-group type:radio] false false false} contentX=37 contentY=765 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074160 1 0x2e71375462c0 0x2e7138074000 0x2e713806d950 0x2e713806da70 0x2e713806d9e0 0x2e713806d9e0 map[]} label [] map[] false false false} contentX=59 contentY=765 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e7138570808
+  [i=2] child=&{{0x2e7138074210 1 0x2e71375462c0 0x2e7137547d90 0x2e713806db00 0x2e713806ddd0 0x2e713806db90 0x2e713806dd40 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e7138509808
+> layoutBlockChildren: box=&{{0x2e7138074210 1 0x2e71375462c0 0x2e7137547d90 0x2e713806db00 0x2e713806ddd0 0x2e713806db90 0x2e713806dd40 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=790 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138572008
+> layoutBlockChildren: box=&{{0x2e71380742c0 1 0x2e71375462c0 0x2e7138074210 0x2e713806db90 0x2e713806dc20 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=790 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074370 1 0x2e71375462c0 0x2e7138074210 0x2e713806dc20 0x2e713806dd40 0x2e713806dcb0 0x2e713806dcb0 map[]} label [] map[] false false false} contentX=59 contentY=790 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e7138571808
+  [i=3] child=&{{0x2e7138074420 1 0x2e71375462c0 0x2e7137547d90 0x2e713806ddd0 0x2e71380761b0 0x2e713806de60 0x2e7138076120 map[]} div [class] map[class:checkbox-group] false false false} float="" width=0 display=1 style=0x2e713851b808
+> layoutBlockChildren: box=&{{0x2e7138074420 1 0x2e71375462c0 0x2e7137547d90 0x2e713806ddd0 0x2e71380761b0 0x2e713806de60 0x2e7138076120 map[]} div [class] map[class:checkbox-group] false false false} contentX=37 contentY=815 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138573008
+> layoutBlockChildren: box=&{{0x2e71380744d0 1 0x2e71375462c0 0x2e7138074420 0x2e713806de60 0x2e7138076000 <nil> <nil> map[]} input [type name] map[name:radio-group type:radio] false false false} contentX=37 contentY=815 contentWidth=14 childCount=0
+> layoutBlockChildren: box=&{{0x2e7138074580 1 0x2e71375462c0 0x2e7138074420 0x2e7138076000 0x2e7138076120 0x2e7138076090 0x2e7138076090 map[]} label [] map[] false false false} contentX=59 contentY=815 contentWidth=0 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=0 style=0x2e7138572808
+  [i=6] child=&{{0x2e7138074630 1 0x2e71375462c0 0x2e7137546630 0x2e7138076240 0x2e7138076a20 0x2e71380762d0 0x2e7138076990 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713852f808
+> layoutBlockChildren: box=&{{0x2e7138074630 1 0x2e71375462c0 0x2e7137546630 0x2e7138076240 0x2e7138076a20 0x2e71380762d0 0x2e7138076990 map[]} div [class] map[class:section] false false false} contentX=37 contentY=903 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e71380746e0 1 0x2e71375462c0 0x2e7138074630 0x2e71380762d0 0x2e71380763f0 0x2e7138076360 0x2e7138076360 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e7138534008
+> layoutBlockChildren: box=&{{0x2e71380746e0 1 0x2e71375462c0 0x2e7138074630 0x2e71380762d0 0x2e71380763f0 0x2e7138076360 0x2e7138076360 map[]} div [class] map[class:label] false false false} contentX=37 contentY=903 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138573808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138574008
+> layoutBlockChildren: box=&{{0x2e7138074790 1 0x2e71375462c0 0x2e7138074630 0x2e71380763f0 0x2e7138076990 0x2e7138076480 0x2e7138076900 map[]} select [] map[] false false false} contentX=48 contentY=927 contentWidth=178 childCount=0
+  [i=7] child=&{{0x2e7138074b00 1 0x2e71375462c0 0x2e7137546630 0x2e7138076a20 0x2e7138076d80 0x2e7138076ab0 0x2e7138076cf0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713853f008
+> layoutBlockChildren: box=&{{0x2e7138074b00 1 0x2e71375462c0 0x2e7137546630 0x2e7138076a20 0x2e7138076d80 0x2e7138076ab0 0x2e7138076cf0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7138074bb0 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076ab0 0x2e7138076bd0 0x2e7138076b40 0x2e7138076b40 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e713853f808
+> layoutBlockChildren: box=&{{0x2e7138074bb0 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076ab0 0x2e7138076bd0 0x2e7138076b40 0x2e7138076b40 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1013 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138574808
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138575808
+> layoutBlockChildren: box=&{{0x2e7138074c60 1 0x2e71375462c0 0x2e7138074b00 0x2e7138076bd0 0x2e7138076cf0 0x2e7138076c60 0x2e7138076c60 map[]} progress [value max] map[max:100 value:60] false false false} contentX=37 contentY=1030 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=100% display=2 style=0x2e7138575008
+  [i=8] child=&{{0x2e7138074d10 1 0x2e71375462c0 0x2e7137546630 0x2e7138076d80 0x2e7138077050 0x2e7138076e10 0x2e7138076fc0 map[]} div [class] map[class:section] false false false} float="" width=0 display=1 style=0x2e713854d808
+> layoutBlockChildren: box=&{{0x2e7138074d10 1 0x2e71375462c0 0x2e7137546630 0x2e7138076d80 0x2e7138077050 0x2e7138076e10 0x2e7138076fc0 map[]} div [class] map[class:section] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=2
+  [i=0] child=&{{0x2e7138074dc0 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076e10 0x2e7138076f30 0x2e7138076ea0 0x2e7138076ea0 map[]} div [class] map[class:label] false false false} float="" width=0 display=1 style=0x2e7138554008
+> layoutBlockChildren: box=&{{0x2e7138074dc0 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076e10 0x2e7138076f30 0x2e7138076ea0 0x2e7138076ea0 map[]} div [class] map[class:label] false false false} contentX=37 contentY=1114 contentWidth=526 childCount=1
+  [i=0] child=anonymous float="none" width=0 display=1 style=0x2e7138576008
+  [i=1] child=anonymous float="none" width=0 display=1 style=0x2e7138576808
+> layoutBlockChildren: box=&{{0x2e7138074e70 1 0x2e71375462c0 0x2e7138074d10 0x2e7138076f30 0x2e7138076fc0 <nil> <nil> map[]} input [type min max value] map[max:100 min:0 type:range value:40] false false false} contentX=37 contentY=1131 contentWidth=526 childCount=0

@@ -340,6 +340,14 @@ func (w *Window) PollEvents() []Event {
 	return events
 }
 
+// PostEvent appends a synthetic event to the window's event queue so it will
+// be picked up by the next PollEvents call. Useful for automated testing.
+func (w *Window) PostEvent(ev Event) {
+	w.eventsMu.Lock()
+	w.events = append(w.events, ev)
+	w.eventsMu.Unlock()
+}
+
 // ShouldClose reports whether the window has been asked to close.
 func (w *Window) ShouldClose() bool { return w.win.ShouldClose() }
 
