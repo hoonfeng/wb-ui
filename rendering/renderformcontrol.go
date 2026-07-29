@@ -117,7 +117,7 @@ var FocusedFormControlSel *FormControlSelection
 // was handled (so the caller can skip the default text-paint path), false otherwise.
 //
 // debugPaintLog enables verbose paint diagnostics. Set to true to trace form-control paint calls.
-const debugPaintLog = false
+const debugPaintLog = true
 
 func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 	if box == nil || info == nil || info.canvas == nil {

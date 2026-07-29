@@ -966,6 +966,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// If it's a form control (input/textarea/select), set focus.
 					if rv != nil {
 						hitEl := rendering.HitTest(rv, cssX, cssY, "type")
+						log.Printf("[dbg/click] Press at css=(%.0f,%.0f) imeFocusedEl=%v hitEl=%v localName=%q type=%q",
+							cssX, cssY, h.imeFocusedEl != nil, hitEl != nil,
+							func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
+							func() string { if hitEl != nil { return hitEl.GetAttribute("type") }; return "" }())
 						if hitEl != nil && isTextFormControl(hitEl) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
@@ -976,6 +980,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							}
 						} else if hitEl != nil && (hitEl.LocalName() == "input") {
 							inputType := hitEl.GetAttribute("type")
+							log.Printf("[dbg/click] input localName=%s type=%q", hitEl.LocalName(), inputType)
 							if strings.ToLower(inputType) == "checkbox" {
 								checked := hitEl.GetAttribute("checked")
 								if checked == "" {
@@ -1083,6 +1088,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		case window.EventChar:
+			log.Printf("[dbg/char] EventChar char=%q imeFocused=%v isText=%v", string(ev.Char), h.imeFocusedEl != nil, h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl))
 			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
 				char := string(ev.Char)
 				// Get current value and insert character at cursor position
