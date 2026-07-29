@@ -36,7 +36,7 @@ var DumpRTCallback func(rv *rendering.RenderView)
 
 // debugPaintLog enables verbose paint and event diagnostics printed to stderr.
 // Set to true to trace hover, click, and paint operations.
-const debugPaintLog = true
+const debugPaintLog = false
 
 // ClickHandler is invoked when the user clicks an element whose onclick
 // attribute does not use the "js:" prefix. el is the deepest hit-tested

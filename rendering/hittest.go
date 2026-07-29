@@ -9,7 +9,13 @@
 
 package rendering
 
-import "wb-ui/dom"
+import (
+	"log"
+	"wb-ui/dom"
+)
+
+// debugHitTest enables verbose hit-test diagnostics.
+const debugHitTest = false
 
 // boxCoords extracts the bounding rectangle of a RenderObject if it is box-bearing.
 // Returns ok=false for non-box objects (RenderInline, RenderText without a box).
@@ -54,7 +60,16 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 	if !ok {
 		// Non-box objects (inline, text) still recurse into children.
 	} else {
-		if x < ox || y < oy || x >= ox+ow || y >= oy+oh {
+		inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
+		if debugHitTest && o.Node() != nil {
+			if el, isEl := o.Node().(*dom.Element); isEl {
+				tn := el.TagName()
+				cn := el.ClassName()
+				log.Printf("[dbg/ht] %s.%s box=(%.0f,%.0f %.0fx%.0f) pt=(%.0f,%.0f) inBounds=%v",
+					tn, cn, ox, oy, ow, oh, x, y, inBounds)
+			}
+		}
+		if !inBounds {
 			return // outside this box's bounds
 		}
 	}

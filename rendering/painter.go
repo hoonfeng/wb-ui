@@ -21,9 +21,11 @@
 package rendering
 
 import (
+	"log"
 	"strconv"
 	"strings"
 
+	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
@@ -174,11 +176,23 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if bg.A == 0 {
 		return
 	}
+// Debug: log non-trivial background paints
+	if false && (bg.R != 0 || bg.G != 0 || bg.B != 0) {
+		elName := ""
+		if box.Node() != nil {
+			if el, ok := box.Node().(*dom.Element); ok {
+				elName = el.LocalName() + "." + el.ClassName()
+			}
+		}
+		log.Printf("[dbg/paintbg] %s rect=(%.0f,%.0f %.0fx%.0f) col=#%02x%02x%02x alpha=%d",
+			elName, rect.X, rect.Y, rect.Width, rect.Height, bg.R, bg.G, bg.B, bg.A)
+	}
 	bg = ApplyOpacityToColor(bg, CumulativeOpacity(box))
 	if bg.A == 0 {
 		return
 	}
 	if r := lengthValue(st.BorderRadius); r > 0 {
+		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
 	} else {
 		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bg)
 	}
