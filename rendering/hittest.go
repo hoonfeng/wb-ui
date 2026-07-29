@@ -60,17 +60,24 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 	if !ok {
 		// Non-box objects (inline, text) still recurse into children.
 	} else {
-		inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
-		if debugHitTest && o.Node() != nil {
-			if el, isEl := o.Node().(*dom.Element); isEl {
-				tn := el.TagName()
-				cn := el.ClassName()
-				log.Printf("[dbg/ht] %s.%s box=(%.0f,%.0f %.0fx%.0f) pt=(%.0f,%.0f) inBounds=%v",
-					tn, cn, ox, oy, ow, oh, x, y, inBounds)
+		// Anonymous wrappers (RenderBlockFlow from buildChildren flush) with
+		// zero area have no visual content. Skip bounds check so children are
+		// still visited; they won't become hit candidates (area=0).
+		if ow == 0 && oh == 0 {
+			// pass through to children
+		} else {
+			inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
+			if debugHitTest && o.Node() != nil {
+				if el, isEl := o.Node().(*dom.Element); isEl {
+					tn := el.TagName()
+					cn := el.ClassName()
+					log.Printf("[dbg/ht] %s.%s box=(%.0f,%.0f %.0fx%.0f) pt=(%.0f,%.0f) inBounds=%v",
+						tn, cn, ox, oy, ow, oh, x, y, inBounds)
+				}
 			}
-		}
-		if !inBounds {
-			return // outside this box's bounds
+			if !inBounds {
+				return // outside this box's bounds
+			}
 		}
 	}
 	// Check if this object's DOM node is an element with the attribute.
