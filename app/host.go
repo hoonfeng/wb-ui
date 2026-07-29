@@ -580,7 +580,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssX := h.cursorX / csX
 			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
-				log.Printf("[scroll] per-box hit at (%.0f,%.0f) cssY=%d scrollY=%d\n",
+				log.Printf("[scroll] per-box hit at (%.0f,%.0f) scrollY=%d\n",
 					cssX, cssY, h.wv.Page().MainFrame().View().ScrollY())
 				sx, sy := rv.BoxScrollOffset(scrollBox)
 				deltaX := int(ev.ScrollX * 40)  // positive = right → sx increases
@@ -965,7 +965,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// HitTest the click position to find the element under cursor.
 					// If it's a form control (input/textarea/select), set focus.
 					if rv != nil {
-						hitEl := rendering.HitTest(rv, cssX, cssY, "type")
+						hitEl := rendering.HitTest(rv, cssX, cssY, "")
 						log.Printf("[dbg/click] Press at css=(%.0f,%.0f) imeFocusedEl=%v hitEl=%v localName=%q type=%q",
 							cssX, cssY, h.imeFocusedEl != nil, hitEl != nil,
 							func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
@@ -974,47 +974,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
 							}
-						} else if hitEl != nil && (hitEl.LocalName() == "select" || hitEl.LocalName() == "button") {
+						} else if hitEl != nil && hitEl.LocalName() == "select" {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
-							}
-						} else if hitEl != nil && (hitEl.LocalName() == "input") {
-							inputType := hitEl.GetAttribute("type")
-							log.Printf("[dbg/click] input localName=%s type=%q", hitEl.LocalName(), inputType)
-							if strings.ToLower(inputType) == "checkbox" {
-								checked := hitEl.GetAttribute("checked")
-								if checked == "" {
-									hitEl.SetAttribute("checked", "true")
-								} else {
-									hitEl.RemoveAttribute("checked")
-								}
-								if mf := h.wv.MainFrame(); mf != nil {
-									if fr := mf.Frame(); fr != nil {
-										fr.MarkRenderTreeDirty()
-									}
-								}
-								hitEl.DispatchEvent(dom.NewEvent("change", true, false, false))
-							} else if strings.ToLower(inputType) == "radio" {
-								name := hitEl.GetAttribute("name")
-								if name != "" {
-									// Walk siblings to find same-name radio buttons
-									for parent := hitEl.ParentNode(); parent != nil; parent = parent.ParentNode() {
-										for c := parent.FirstChild(); c != nil; c = c.NextSibling() {
-											if child, ok := c.(*dom.Element); ok && child != hitEl {
-												if child.LocalName() == "input" && child.GetAttribute("type") == "radio" && child.GetAttribute("name") == name {
-													child.RemoveAttribute("checked")
-												}
-											}
-										}
-									}
-								}
-								hitEl.SetAttribute("checked", "true")
-								if mf := h.wv.MainFrame(); mf != nil {
-									if fr := mf.Frame(); fr != nil {
-										fr.MarkRenderTreeDirty()
-									}
-								}
-								hitEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 							}
 						} else if h.imeFocusedEl != nil {
 							h.Unfocus()
