@@ -74,24 +74,28 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 		}
 	}
 	// Check if this object's DOM node is an element with the attribute.
-	if attrName != "" {
-		node := o.Node()
-		if el, isEl := node.(*dom.Element); isEl {
-			if val := el.GetAttribute(attrName); val != "" {
+	// Only box-bearing objects (ok=true) are considered as hit targets;
+	// non-box objects (RenderInline, RenderText) just pass through to their children.
+	if ok {
+		if attrName != "" {
+			node := o.Node()
+			if el, isEl := node.(*dom.Element); isEl {
+				if val := el.GetAttribute(attrName); val != "" {
+					area := ow * oh
+					if *best == nil || area < *bestArea {
+						*best = el
+						*bestArea = area
+					}
+				}
+			}
+		} else {
+			node := o.Node()
+			if el, isEl := node.(*dom.Element); isEl {
 				area := ow * oh
 				if *best == nil || area < *bestArea {
 					*best = el
 					*bestArea = area
 				}
-			}
-		}
-	} else {
-		node := o.Node()
-		if el, isEl := node.(*dom.Element); isEl {
-			area := ow * oh
-			if *best == nil || area < *bestArea {
-				*best = el
-				*bestArea = area
 			}
 		}
 	}
