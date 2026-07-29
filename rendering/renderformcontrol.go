@@ -143,14 +143,14 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		paintTextAreaText(info, el, st, x, y, w, h, op)
 		return true
 	case "progress":
-		paintProgressBar(info, x, y, w, h, el, op)
+		paintProgressBar(info, st, x, y, w, h, el, op)
 		return true
 	case "meter":
-		paintMeterBar(info, x, y, w, h, el, op)
+		paintMeterBar(info, st, x, y, w, h, el, op)
 		return true
 	case "select":
 		paintSelectText(info, el, st, x, y, w, h, op)
-		paintSelectArrow(info, x, y, w, h, op)
+		paintSelectArrow(info, st, x, y, w, h, op)
 		return true // select is a replaced element — no child text to paint
 	}
 	return false
@@ -164,13 +164,13 @@ func paintInput(el *dom.Element, info *PaintInfo, st *style.ComputedStyle, x, y,
 	}
 	switch in.Type() {
 	case html5.InputCheckbox:
-		paintCheckbox(info, x, y, w, h, in.Checked(), op)
+		paintCheckbox(info, st, x, y, w, h, in.Checked(), op)
 		return true
 	case html5.InputRadio:
-		paintRadio(info, x, y, w, h, in.Checked(), op)
+		paintRadio(info, st, x, y, w, h, in.Checked(), op)
 		return true
 	case html5.InputRange:
-		paintRangeSlider(info, x, y, w, h, in, op)
+		paintRangeSlider(info, st, x, y, w, h, in, op)
 		return true
 	case html5.InputColor:
 		paintColorSwatch(info, x, y, w, h, in.Value(), op)
@@ -350,8 +350,11 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 }
 
 // paintCheckbox draws a classic checkbox: a square border with a checkmark when checked.
-// Mirrors RenderTheme::paintCheckbox.
-func paintCheckbox(info *PaintInfo, x, y, w, h float64, checked bool, op float64) {
+// Mirrors RenderTheme::paintCheckbox. Uses default classic colors for the widget
+// background (light) independent of the element's background-color, matching
+// browser behavior where form controls use OS-native widget colors. The
+// checkmark color uses the element's text color (accent-color equivalent).
+func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, checked bool, op float64) {
 	c := info.canvas
 	size := w
 	if h < size {
@@ -360,17 +363,27 @@ func paintCheckbox(info *PaintInfo, x, y, w, h float64, checked bool, op float64
 	// Center the square in the box.
 	cx := x + (w-size)/2
 	cy := y + (h-size)/2
+	// Classic widget background: always light (white) by default, like browser's
+	// native form control rendering. The element's background-color is NOT used
+	// here because form controls are replaced elements whose appearance is
+	// independent of the page theme.
 	bg := FormControlColors.CheckboxBg
-	border := FormControlColors.CheckboxBorder
 	if checked {
+		// Checked state: slightly tinted background for visual feedback.
 		bg = FormControlColors.CheckboxBgHot
 	}
+	border := FormControlColors.CheckboxBorder
 	c.FillRect(cx, cy, size, size, applyOpacity(bg, op))
 	c.StrokeRect(cx, cy, size, size, 1, applyOpacity(border, op))
 	if checked {
-		check := applyOpacity(FormControlColors.CheckboxCheck, op)
+		// Use element's text color for checkmark (acts as accent-color),
+		// fall back to default dark checkmark.
+		check := toGraphicsColor(st.Color)
+		if check.A == 0 {
+			check = FormControlColors.CheckboxCheck
+		}
+		check = applyOpacity(check, op)
 		// Draw a simple checkmark: two line segments forming an "L" rotated.
-		// The check is drawn inside the square with a small inset.
 		inset := size * 0.22
 		p1x := cx + inset
 		p1y := cy + size*0.55
@@ -385,8 +398,9 @@ func paintCheckbox(info *PaintInfo, x, y, w, h float64, checked bool, op float64
 }
 
 // paintRadio draws a classic radio button: a circle with a filled dot when checked.
-// Mirrors RenderTheme::paintRadio.
-func paintRadio(info *PaintInfo, x, y, w, h float64, checked bool, op float64) {
+// Mirrors RenderTheme::paintRadio. Uses classic widget colors (light bg) matching
+// browser native rendering. The dot color uses the element's text color.
+func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, checked bool, op float64) {
 	c := info.canvas
 	size := w
 	if h < size {
@@ -395,18 +409,28 @@ func paintRadio(info *PaintInfo, x, y, w, h float64, checked bool, op float64) {
 	cx := x + w/2
 	cy := y + h/2
 	radius := size / 2
+	// Classic widget background: always light, like browser native rendering.
+	bg := FormControlColors.RadioBg
+	border := FormControlColors.RadioBorder
 	// Outer circle (background + border).
-	c.FillCircle(cx, cy, radius, applyOpacity(FormControlColors.RadioBg, op))
-	c.StrokeCircle(cx, cy, radius, 1, applyOpacity(FormControlColors.RadioBorder, op))
+	c.FillCircle(cx, cy, radius, applyOpacity(bg, op))
+	c.StrokeCircle(cx, cy, radius, 1, applyOpacity(border, op))
 	if checked {
+		// Use element's text color for the dot (accent-color equivalent),
+		// fall back to default dark.
+		dot := toGraphicsColor(st.Color)
+		if dot.A == 0 {
+			dot = FormControlColors.RadioDot
+		}
 		// Inner dot: ~45% of the outer radius.
-		c.FillCircle(cx, cy, radius*0.45, applyOpacity(FormControlColors.RadioDot, op))
+		c.FillCircle(cx, cy, radius*0.45, applyOpacity(dot, op))
 	}
 }
 
 // paintRangeSlider draws a horizontal slider: a track plus a thumb positioned at the
-// value's fraction along the range. Mirrors RenderTheme::paintSlider.
-func paintRangeSlider(info *PaintInfo, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
+// value's fraction along the range. Mirrors RenderTheme::paintSlider. Default theme
+// colors for track/thumb, matching browser native rendering.
+func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
 	c := info.canvas
 	// Track: a thin rounded bar centered vertically.
 	trackH := h * 0.3
@@ -432,23 +456,29 @@ func paintRangeSlider(info *PaintInfo, x, y, w, h float64, in html5.HTMLInputEle
 		thumbR = 5
 	}
 	thumbX := x + frac*w
-	c.FillCircle(thumbX, y+h/2, thumbR, applyOpacity(FormControlColors.SliderThumb, op))
-	c.StrokeCircle(thumbX, y+h/2, thumbR, 1, applyOpacity(FormControlColors.SliderThumbBorder, op))
+	// Use element's text color for thumb (accent-color equivalent), fallback default.
+	thumbCol := toGraphicsColor(st.Color)
+	if thumbCol.A == 0 {
+		thumbCol = FormControlColors.SliderThumb
+	}
+	thumbBorder := FormControlColors.SliderThumbBorder
+	c.FillCircle(thumbX, y+h/2, thumbR, applyOpacity(thumbCol, op))
+	c.StrokeCircle(thumbX, y+h/2, thumbR, 1, applyOpacity(thumbBorder, op))
 }
 
 // paintProgressBar draws a <progress> element: a rounded track with a filled portion
 // proportional to value/max. Indeterminate progress bars (no value attribute) show an
-// empty track. Mirrors RenderTheme::paintProgressBar.
-func paintProgressBar(info *PaintInfo, x, y, w, h float64, el *dom.Element, op float64) {
+// empty track. Mirrors RenderTheme::paintProgressBar. Default theme colors are used
+// for the widget, matching browser native rendering.
+func paintProgressBar(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, el *dom.Element, op float64) {
 	c := info.canvas
 	p, ok := html5.ToProgressElement(el)
 	if !ok {
 		return
 	}
-	// Track.
+	// Track: use default theme color (browsers paint the track independently of CSS).
 	c.FillRoundRect(x, y, w, h, h/2, applyOpacity(FormControlColors.ProgressTrack, op))
 	if p.Indeterminate() {
-		// No fill for indeterminate progress bars (the animated stripe is omitted).
 		return
 	}
 	max := p.Max()
@@ -464,21 +494,26 @@ func paintProgressBar(info *PaintInfo, x, y, w, h float64, el *dom.Element, op f
 	}
 	fillW := w * frac
 	if fillW < h {
-		fillW = h // ensure the rounded end is visible
+		fillW = h
 	}
-	c.FillRoundRect(x, y, fillW, h, h/2, applyOpacity(FormControlColors.ProgressFill, op))
+	// Use element's text color as accent fill, fall back to default blue.
+	fillCol := toGraphicsColor(st.Color)
+	if fillCol.A == 0 {
+		fillCol = FormControlColors.ProgressFill
+	}
+	c.FillRoundRect(x, y, fillW, h, h/2, applyOpacity(fillCol, op))
 }
 
 // paintMeterBar draws a <meter> element: a track with a colored fill whose color depends
 // on the value's position relative to low/high/optimum zones. Mirrors
-// RenderTheme::paintMeter.
-func paintMeterBar(info *PaintInfo, x, y, w, h float64, el *dom.Element, op float64) {
+// RenderTheme::paintMeter. Default theme colors for the track.
+func paintMeterBar(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, el *dom.Element, op float64) {
 	c := info.canvas
 	m, ok := html5.ToMeterElement(el)
 	if !ok {
 		return
 	}
-	// Track.
+	// Track: use default theme color.
 	c.FillRoundRect(x, y, w, h, h/2, applyOpacity(FormControlColors.ProgressTrack, op))
 	max := m.Max()
 	min := m.Min()
@@ -765,7 +800,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 }
 
 // paintSelectArrow draws the downward-pointing arrow indicator on the right
-func paintSelectArrow(info *PaintInfo, x, y, w, h float64, op float64) {
+func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, op float64) {
 	c := info.canvas
 	// Arrow area: a region on the right side.
 	arrowW := h * 0.6
@@ -775,7 +810,12 @@ func paintSelectArrow(info *PaintInfo, x, y, w, h float64, op float64) {
 	ax := x + w - arrowW - 4
 	ay := y + h/2
 	half := arrowW / 2
-	col := applyOpacity(FormControlColors.SelectArrow, op)
+	// Use element's text color for arrow, fallback to default.
+	col := toGraphicsColor(st.Color)
+	if col.A == 0 {
+		col = FormControlColors.SelectArrow
+	}
+	col = applyOpacity(col, op)
 	// Downward-pointing triangle (filled).
 	c.FillTriangle(ax, ay-half, ax+half, ay+half, ax-half, ay+half, col)
 }

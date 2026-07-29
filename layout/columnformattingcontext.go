@@ -23,8 +23,8 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 		ctx.InitBase(box, state)
 		ctx.Layout(box, state)
 		return
-		return
 	}
+
 
 	contentWidth := g.ContentWidth()
 	contentHeight := g.ContentHeight()
