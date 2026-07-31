@@ -29,8 +29,12 @@ func TestSVGText(t *testing.T) {
 	if len(sd.shapes) != 1 {
 		t.Fatalf("expected 1 shape, got %d", len(sd.shapes))
 	}
-	_, ok := sd.shapes[0].(*svgText)
-	if !ok {
+	shape := sd.shapes[0]
+	// Elements with a resolved fill are wrapped in svgFilledShape; unwrap.
+	if w, ok := shape.(*svgFilledShape); ok {
+		shape = w.shape
+	}
+	if _, ok := shape.(*svgText); !ok {
 		t.Fatalf("expected *svgText, got %T", sd.shapes[0])
 	}
 }

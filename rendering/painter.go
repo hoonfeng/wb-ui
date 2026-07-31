@@ -185,11 +185,19 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	}
 	// background-image: url(...) — decode and draw with size/position.
 	if url, ok := parseBackgroundURL(st.BackgroundImage); ok {
-		img := loadBackgroundImage(url, "")
-		if img != nil && img.Loaded() {
+		if img := loadBackgroundImage(url, ""); img != nil && img.Loaded() {
+			// Raster image: dest math uses the intrinsic size for cover/
+			// contain aspect ratio.
 			dx, dy, dw, dh := computeBackgroundDest(rect.X, rect.Y, rect.Width, rect.Height,
 				st.BackgroundSize, st.BackgroundPosition, img.Width(), img.Height())
-			img.Draw(info.canvas, dx, dy, dw, dh)
+			paintBackgroundImageTiled(info.canvas, img, rect.X, rect.Y, rect.Width, rect.Height,
+				dx, dy, dw, dh, st.BackgroundRepeat)
+		} else if svg := loadBackgroundSVG(url); svg != nil {
+			// Vector SVG: no intrinsic raster size — gradient-like dest
+			// (auto/cover/contain fill the box; explicit sizes confine it).
+			dx, dy, dw, dh := computeGradientDest(rect.X, rect.Y, rect.Width, rect.Height,
+				st.BackgroundSize, st.BackgroundPosition)
+			paintSVGScaled(info.canvas, svg, dx, dy, dw, dh)
 		}
 		return
 	}
@@ -571,8 +579,14 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	runes := []rune(content)
 	rv := info.rv
 	// Browsers default selected text to white so it is legible against the
-	// semi-transparent blue selection background.
+	// semi-transparent blue selection background. A ::selection rule's
+	// color overrides it.
 	selCol := graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+	if rv != nil && rv.Resolver() != nil {
+		if _, fg, ok := rv.Resolver().SelectionColors(); ok && fg.A != 0 {
+			selCol = toGraphicsColor(fg)
+		}
+	}
 
 	// Paint text-shadow: draw the text once per shadow in the shadow color.
 	textShadows := parseShadowList(st.TextShadow)

@@ -10,11 +10,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"wb-ui/dom"
+	"wb-ui/html"
+	"wb-ui/platform/graphics"
 )
 
 // parseBackgroundURL extracts the URL inside a url(...) token.
@@ -49,6 +54,136 @@ func httpGet(url string) ([]byte, error) {
 		return nil, fmt.Errorf("http %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 16<<20)) // 16 MiB cap
+}
+
+// svgBackgroundCache caches parsed SVG background documents by URL string.
+var svgBackgroundCache = struct {
+	mu   sync.Mutex
+	docs map[string]*svgDocument
+}{docs: map[string]*svgDocument{}}
+
+// loadBackgroundSVG resolves and parses a background-image SVG (data:
+// image/svg+xml URIs or file paths). Returns nil when the URL is not an SVG
+// or cannot be parsed. Results are cached by URL.
+func loadBackgroundSVG(url string) *svgDocument {
+	svgBackgroundCache.mu.Lock()
+	defer svgBackgroundCache.mu.Unlock()
+	if d, ok := svgBackgroundCache.docs[url]; ok {
+		return d
+	}
+	var text string
+	low := strings.ToLower(url)
+	if strings.HasPrefix(low, "data:image/svg+xml") {
+		if strings.Contains(low, ";base64,") {
+			if b, ok := decodeDataURI(url); ok {
+				text = string(b)
+			}
+		} else if i := strings.Index(url, ","); i >= 0 {
+			raw := url[i+1:]
+			if dec, err := neturl.QueryUnescape(raw); err == nil {
+				text = dec
+			} else {
+				text = raw
+			}
+		}
+	} else if !strings.Contains(url, ":") { // file path
+		if b, err := os.ReadFile(url); err == nil {
+			text = string(b)
+		}
+	}
+	if text == "" {
+		return nil
+	}
+	doc := parseSVGText(text)
+	if doc == nil {
+		return nil
+	}
+	svgBackgroundCache.docs[url] = doc
+	return doc
+}
+
+// parseSVGText parses an SVG document string and builds the svgDocument for
+// painting. Uses the HTML parser (which folds SVG foreign content).
+func parseSVGText(text string) *svgDocument {
+	d, err := html.Parse(text)
+	if err != nil {
+		return nil
+	}
+	var svgEl *dom.Element
+	var walk func(n dom.Node)
+	walk = func(n dom.Node) {
+		if svgEl != nil {
+			return
+		}
+		if el, ok := n.(*dom.Element); ok && el.LocalName() == "svg" {
+			svgEl = el
+			return
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	for c := d.FirstChild(); c != nil; c = c.NextSibling() {
+		walk(c)
+	}
+	if svgEl == nil {
+		return nil
+	}
+	return buildSVGDocument(svgEl)
+}
+
+// paintSVGScaled paints an svgDocument scaled into the destination rect.
+// The SVG's intrinsic width/height define the scale; missing intrinsic size
+// falls back to painting at (x, y) at natural shape coordinates.
+func paintSVGScaled(canvas *graphics.Canvas, svg *svgDocument, x, y, w, h float64) {
+	if svg == nil || canvas == nil {
+		return
+	}
+	if svg.width > 0 && svg.height > 0 && w > 0 && h > 0 {
+		canvas.Save()
+		canvas.Translate(x, y)
+		canvas.Scale(w/svg.width, h/svg.height)
+		paintSVG(canvas, svg, 0, 0, graphics.Color{})
+		canvas.Restore()
+	} else {
+		paintSVG(canvas, svg, x, y, graphics.Color{})
+	}
+}
+
+// paintBackgroundImageTiled draws a decoded background image into the box
+// honoring background-repeat. The image's destination (dx,dy,dw,dh) is the
+// first tile; repeat (default) tiles in both axes, repeat-x/repeat-y tile in
+// one axis, no-repeat draws a single tile. Tiles that start before the box
+// edge start at the tile's own offset so the pattern stays aligned with the
+// position origin (matching CSS: the position defines the first tile's
+// location).
+func paintBackgroundImageTiled(canvas *graphics.Canvas, img *DecodedImage,
+	x, y, w, h, dx, dy, dw, dh float64, repeat string) {
+	if canvas == nil || img == nil || !img.Loaded() || dw <= 0 || dh <= 0 {
+		return
+	}
+	rep := strings.ToLower(strings.TrimSpace(repeat))
+	repX := rep != "no-repeat" && rep != "repeat-y"
+	repY := rep != "no-repeat" && rep != "repeat-x"
+	startX := dx
+	startY := dy
+	for ty := startY; ty < y+h; ty += dh {
+		for tx := startX; tx < x+w; tx += dw {
+			if repX && tx+dw < x {
+				continue
+			}
+			if repY && ty+dh < y {
+				continue
+			}
+			img.Draw(canvas, tx, ty, dw, dh)
+			if !repX {
+				break
+			}
+		}
+		if !repY {
+			break
+		}
+	}
 }
 
 // decodeDataURI decodes a data: URI (data:image/png;base64,XXXX) to bytes.

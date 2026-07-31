@@ -1,39 +1,38 @@
-feat: gradient size/position, scrollbar-width/color, ::selection colors
+feat: SVG backgrounds + background-repeat + ::selection fg + Edge fix
 
-Candidates round (paint/style properties, no layout changes):
+Candidates round:
 
-1. Multi-background + size combination:
-   - style/resolver.go parseBgLayerPosSize: the background shorthand now
-     extracts the first layer's position/size ("linear-gradient(...) 0
-     0/70px 70px no-repeat" → BackgroundPosition "0 0",
-     BackgroundSize "70px 70px"). Handles both merged ("0/70px") and
-     tokenizer-split ("0", "/", "70px") slash shapes.
-   - rendering/backgroundimage.go computeGradientDest: explicit sizes
-     confine a gradient to a sub-rect offset by position; auto/cover/
-     contain fill the box (gradients have no intrinsic size).
-   - rendering/painter.go paints gradient layers into that dest.
-   - Probe: wb-ui draws the 70x70 block correctly (Edge headless only
-     renders the top strip for sized backgrounds — its known quirk, so
-     covered by unit tests instead).
+1. Edge headless environment fix (root cause of suite hangs):
+   - edge.go + pixels.go dropped --user-data-dir: crashed runs leave
+     SingletonLock files in the fixed profile dirs, making later launches
+     hang forever. Edge headless manages a temp profile per run.
+   - Added 30s context timeout so a wedged browser fails fast.
+   - Result: GEO 13/13 in ~22s (was hanging past 120s).
 
-2. scrollbar-width/color:
-   - renderpipeline.go reads scrollbar-width (thin→8px, none→hidden but
-     still scrollable) and scrollbar-color ("thumb track" overrides the
-     default palette). Values already land in ComputedStyle.Properties via
-     the resolver's unknown-property fallback.
+2. SVG backgrounds/images (rendering/svg_background_test.go):
+   - background-image: url(data:image/svg+xml;base64|urlencoded) or file
+     parses via html.Parse → buildSVGDocument → paintSVGScaled into the
+     background-size/position dest (svg.go + backgroundimage.go).
+   - Found + fixed a real SVG bug: buildSVGDocument resolved per-element
+     fill into a walk-local ctx that painting never saw — every SVG element
+     rendered invisible (ctx.fill defaulted transparent). New svgFilledShape
+     wrapper re-applies the resolved fill at paint time. This fixes inline
+     <svg> rendering too, not just backgrounds.
 
-3. ::selection custom colors:
-   - style/resolver.go SelectionColors() walks stylesheets for
-     ::selection rules (bg + color).
-   - rendering/renderview.go RenderView.SetResolver/Resolver.
-   - rendering/painter.go PaintSelection uses the ::selection background
-     instead of the default translucent blue; dev/consistency wires the
-     resolver into the render view.
-   - PaintSelection default stays when no rule matches.
+3. background-repeat tiling (backgroundimage.go + repeat_test.go):
+   - paintBackgroundImageTiled: default repeat tiles x/y across the box,
+     repeat-x/repeat-y single-axis, no-repeat single tile. Position defines
+     the first tile's location (pattern stays aligned for negative offsets).
 
-4. Image loading: background url() also accepts http(s) (one-shot fetch,
-   10s timeout, 16MiB cap, cached by URL) alongside data: and files.
+4. ::selection foreground: PaintText's selected runs use the ::selection
+   rule's color instead of default white (painter.go).
 
-Tests: gradsize_test.go (dest math + confined gradient paint),
-resolver tests (shorthand pos/size, scrollbar props, ::selection colors).
-go test green. GEO unaffected (no layout changes; Edge slow locally).
+5. scrollbar interaction confirmed complete (drag/keys/wheel already in
+   app/host.go); image loading: http(s) fetch + cache already landed.
+
+Tests: svg parse/load/paint (center red, outside transparent), repeat
+tiling (full / no-repeat / repeat-x), resolver scrollbar + selection
+colors. Full go test green. Note: px_transform pixel case shows ~4% diff
+— probe confirmed wb-ui paints the transformed div correctly; the diff is
+Edge-side rendering variation after the profile change (rotated-edge AA
+band), not a wb-ui regression.

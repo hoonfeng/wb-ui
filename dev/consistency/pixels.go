@@ -18,6 +18,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"context"
 
 	"wb-ui/html"
 	"wb-ui/html5"
@@ -37,10 +40,14 @@ func edgeShot(c TestCase) (string, int, int, error) {
 	out := filepath.Join(TempDir, c.Name+".edge.png")
 	os.Remove(out)
 	url := "file:///" + strings.ReplaceAll(fname, "\\", "/")
-	cmd := exec.Command(EdgePath,
+	// No --user-data-dir (crashed profiles leave SingletonLock that hang
+	// launches); Edge headless manages a temp profile per run. 30s timeout
+	// so a wedged browser fails fast instead of blocking the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, EdgePath,
 		"--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
 		"--window-size="+fmt.Sprintf("%d,%d", c.ViewportW, c.ViewportH),
-		"--user-data-dir="+filepath.Join(TempDir, "edge_shot_"+c.Name),
 		"--screenshot="+out, url)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

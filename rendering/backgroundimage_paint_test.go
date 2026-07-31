@@ -40,6 +40,7 @@ func TestPaintBackgroundURL(t *testing.T) {
 	st.BackgroundImage = "url(" + uri + ")"
 	st.BackgroundSize = "80px 40px"
 	st.BackgroundPosition = "center"
+	st.BackgroundRepeat = "no-repeat" // isolate the single-tile geometry test
 	box := NewRenderBox(el, st)
 	box.SetLocation(0, 0)
 	box.SetSize(160, 80)

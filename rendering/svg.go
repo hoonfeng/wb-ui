@@ -24,6 +24,23 @@ type svgShape interface {
 	paint(canvas *graphics.Canvas, ctx *svgPaintContext)
 }
 
+// svgFilledShape wraps a parsed shape with its resolved fill color. The
+// shapes parsed by parseSVGElement carry geometry only; the walk in
+// buildSVGDocument resolves per-element fill/stroke into an elCtx, but that
+// context is local to the walk. Without this wrapper the fill would be lost
+// when paintSVG runs with the default (transparent) fill — every SVG element
+// rendered invisible. The wrapper re-applies the resolved fill during paint.
+type svgFilledShape struct {
+	shape svgShape
+	fill  graphics.Color
+}
+
+func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	c2 := *ctx
+	c2.fill = s.fill
+	s.shape.paint(canvas, &c2)
+}
+
 // svgPaintContext bundles all paint-time state for a single SVG subtree.
 type svgPaintContext struct {
 	fill        graphics.Color
@@ -771,6 +788,11 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 		// Parse the shape
 		if shape := parseSVGElement(childEl); shape != nil {
+			// Attach the resolved fill so painting (which runs with a fresh
+			// default context) still sees it.
+			if elCtx.fill.A > 0 {
+				shape = &svgFilledShape{shape: shape, fill: elCtx.fill}
+			}
 			doc.shapes = append(doc.shapes, shape)
 		}
 

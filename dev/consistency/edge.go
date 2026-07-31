@@ -6,12 +6,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // edgeCollect runs the reference browser and returns per-element snapshots.
@@ -25,10 +27,15 @@ func edgeCollect(c TestCase) ([]ElementSnapshot, error) {
 	}
 
 	url := "file:///" + strings.ReplaceAll(fname, "\\", "/")
-	cmd := exec.Command(EdgePath,
+	// No --user-data-dir: Edge headless manages a temp profile itself. A
+	// shared fixed profile dir accumulates SingletonLock files across runs
+	// (crashed instances leave them), which makes subsequent launches hang.
+	// Each --dump-dom run is one-shot, so the default temp profile is fine.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, EdgePath,
 		"--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
 		"--window-size="+fmt.Sprintf("%d,%d", c.ViewportW, c.ViewportH),
-		"--user-data-dir="+filepath.Join(TempDir, "edge_profile_"+c.Name),
 		"--dump-dom", url)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
