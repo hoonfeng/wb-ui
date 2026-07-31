@@ -183,10 +183,20 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		op := CumulativeOpacity(box)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
 	}
-	// Paint gradient if background-image is a linear-gradient.
+	// Paint gradient if background-image is a linear-gradient. The
+	// background-color (if any) paints beneath the gradient (CSS: multiple
+	// background layers stack, color at the bottom).
 	bgGradient := parseGradient(st.BackgroundImage)
 	if bgGradient != nil {
 		r := lengthValue(st.BorderRadius)
+		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
+			bgc = ApplyOpacityToColor(bgc, CumulativeOpacity(box))
+			if r > 0 {
+				info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bgc)
+			} else {
+				info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bgc)
+			}
+		}
 		if r > 0 {
 			// Rounded corners: clip the gradient to the rounded rect so the
 			// corners follow the curve instead of painting a sharp square.
@@ -200,7 +210,16 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	if bgRadial := parseRadialGradient(st.BackgroundImage); bgRadial != nil {
-		if r := lengthValue(st.BorderRadius); r > 0 {
+		r := lengthValue(st.BorderRadius)
+		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
+			bgc = ApplyOpacityToColor(bgc, CumulativeOpacity(box))
+			if r > 0 {
+				info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bgc)
+			} else {
+				info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bgc)
+			}
+		}
+		if r > 0 {
 			info.canvas.Save()
 			info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
 			paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgRadial)

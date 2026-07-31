@@ -169,4 +169,21 @@ func TestPxRadialGradient(t *testing.T) {
 	`, 0.002)
 }
 
+// TestPxButton: button UA visual — Windows-style #efefef highlight band,
+// white body, #767676 border. Budget for the corner rounding Edge applies.
+func TestPxButton(t *testing.T) {
+	pixelCompare(t, "px_button", `
+		<button id="b1" style="width:120px;height:34px;margin:10px">OK</button>
+	`, 0.025)
+}
+
+// TestPxCheckboxRadio: checked checkbox/radio use the Windows accent blue
+// (matching Edge). Budget for vertical baseline alignment (~5px).
+func TestPxCheckboxRadio(t *testing.T) {
+	pixelCompare(t, "px_checkbox", `
+		<input id="c1" type="checkbox" checked style="margin:6px">
+		<input id="r1" type="radio" checked style="margin:6px">
+	`, 0.035)
+}
+
 func init() { _ = fmt.Sprintf }

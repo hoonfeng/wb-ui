@@ -113,13 +113,16 @@ input[type="image"] {
 	display: inline-block;
 }
 
-/* Submit/reset/button inputs and <button> share button styling. */
+/* Submit/reset/button inputs and <button> share button styling. The
+   background mirrors Edge's Windows-style button: white body with a
+   #efefef highlight band across the top ~25%, and a #767676 border. */
 input[type="submit"], input[type="reset"], input[type="button"],
 button {
 	display: inline-block;
 	padding: 4px 10px;
-	border: 1px solid #a0a0a0;
+	border: 1px solid #767676;
 	background-color: #f0f0f0;
+	background-image: linear-gradient(to bottom, #efefef 0%, #efefef 28%, #ffffff 28%);
 	color: #000000;
 	text-align: center;
 	cursor: default;

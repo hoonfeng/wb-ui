@@ -236,8 +236,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			// transform-origin (default 50% 50% = box center), but the
 			// canvas primitives operate around the origin. Compose:
 			// T(origin) · ops · T(-origin).
-			originX := box.X() + box.Width()/2
-			originY := box.Y() + box.Height()/2
+			originX, originY := box.X(), box.Y()
+			if ox := resolveTransformOrigin(st.TransformOriginX, box.Width()); ox >= 0 {
+				originX += ox
+			}
+			if oy := resolveTransformOrigin(st.TransformOriginY, box.Height()); oy >= 0 {
+				originY += oy
+			}
 			info.canvas.Translate(originX, originY)
 			if applyTransformOps(info.canvas, st.Transform) {
 				info.canvas.Translate(-originX, -originY)
@@ -463,6 +468,21 @@ restoreClip:
 	}
 	if needsTransformRestore {
 		info.canvas.Restore()
+	}
+}
+
+// resolveTransformOrigin converts a transform-origin Length into an offset
+// from the box's top-left corner. Returns -1 when the length is empty
+// (caller falls back to the box center).
+func resolveTransformOrigin(l style.Length, boxSize float64) float64 {
+	if l.Unit == "" {
+		return -1
+	}
+	switch l.Unit {
+	case "%":
+		return boxSize * l.Value / 100.0
+	default:
+		return l.Value
 	}
 }
 

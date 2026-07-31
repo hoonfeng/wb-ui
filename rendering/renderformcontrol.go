@@ -45,6 +45,7 @@ var FormControlColors = struct {
 	RadioBorder       graphics.Color
 	RadioDot          graphics.Color
 	RadioBg           graphics.Color
+	RadioBgHot        graphics.Color
 	SliderTrack       graphics.Color
 	SliderThumb       graphics.Color
 	SliderThumbBorder graphics.Color
@@ -59,12 +60,14 @@ var FormControlColors = struct {
 	ButtonShadow      graphics.Color
 }{
 	CheckboxBorder:    graphics.Color{R: 120, G: 120, B: 120, A: 255},
-	CheckboxCheck:     graphics.Color{R: 40, G: 40, B: 40, A: 255},
+	CheckboxCheck:     graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	CheckboxBg:        graphics.Color{R: 255, G: 255, B: 255, A: 255},
-	CheckboxBgHot:     graphics.Color{R: 230, G: 240, B: 255, A: 255},
+	// Windows accent blue for the checked state (matches Edge).
+	CheckboxBgHot:     graphics.Color{R: 26, G: 115, B: 232, A: 255},
 	RadioBorder:       graphics.Color{R: 120, G: 120, B: 120, A: 255},
-	RadioDot:          graphics.Color{R: 40, G: 40, B: 40, A: 255},
+	RadioDot:          graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	RadioBg:           graphics.Color{R: 255, G: 255, B: 255, A: 255},
+	RadioBgHot:        graphics.Color{R: 26, G: 115, B: 232, A: 255},
 	SliderTrack:       graphics.Color{R: 200, G: 200, B: 200, A: 255},
 	SliderThumb:       graphics.Color{R: 240, G: 240, B: 240, A: 255},
 	SliderThumbBorder: graphics.Color{R: 120, G: 120, B: 120, A: 255},
@@ -426,7 +429,11 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 	cy := y + h/2
 	radius := size / 2
 	// Classic widget background: always light, like browser native rendering.
+	// Checked state uses the Windows accent blue (matches Edge).
 	bg := FormControlColors.RadioBg
+	if checked {
+		bg = FormControlColors.RadioBgHot
+	}
 	border := FormControlColors.RadioBorder
 	// Outer circle (background + border).
 	c.FillCircle(cx, cy, radius, applyOpacity(bg, op))

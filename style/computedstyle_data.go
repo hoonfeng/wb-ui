@@ -175,6 +175,8 @@ type NonInheritedData struct {
 	BoxShadow     string
 	TextShadow    string
 	Transform     string
+	TransformOriginX Length
+	TransformOriginY Length
 	Filter        string
 	BackdropFilter string
 

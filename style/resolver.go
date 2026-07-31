@@ -396,9 +396,10 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background":
-		// Shorthand: extract background-color and background-image
-		// (linear-gradient). Splits on whitespace but keeps function values
-		// (rgb(...), linear-gradient(...)) intact.
+		// Shorthand: resets background-image (unless the value carries a
+		// gradient) and extracts background-color. Splits on whitespace but
+		// keeps function values (rgb(...), linear-gradient(...)) intact.
+		cs.BackgroundImage = ""
 		for _, p := range splitShorthandValue(valueString) {
 			if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
 				cs.BackgroundImage = p
@@ -790,6 +791,8 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.TextShadow = valueString
 	case "transform":
 		cs.Transform = valueString
+	case "transform-origin":
+		cs.TransformOriginX, cs.TransformOriginY = parseTransformOrigin(valueString)
 	case "transition":
 		cs.Transition = valueString
 		cs.TransitionProperty, cs.TransitionDuration, cs.TransitionTimingFunction, cs.TransitionDelay = parseTransitionShorthand(valueString)
@@ -1521,8 +1524,9 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			cs.Display = LookupDisplayType(resolvedStr)
 			cs.DisplaySet = true
 		case "background":
-			// Shorthand: extract background-color and background-image
-			// (linear-gradient).
+			// Shorthand: resets background-image (unless a gradient is
+			// present) and extracts background-color.
+			cs.BackgroundImage = ""
 			for _, p := range splitShorthandValue(resolvedStr) {
 				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
 					cs.BackgroundImage = p
@@ -1895,8 +1899,48 @@ func parseAnimationShorthand(s string) (name string, duration float64, iteration
 // parseTransitionShorthand parses the CSS transition shorthand:
 //   transition: <property> <duration> <timing-function> <delay>
 // Examples: "all 0.3s ease", "opacity 0.2s", "transform 0.5s ease-in-out"
-func parseTransitionShorthand(s string) (prop string, duration float64, timing string, delay float64) {
-	if s == "" || s == "none" {
+// parseTransformOrigin parses "transform-origin: <x> <y>" where each value is
+// a percentage, length, or keyword (left/center/right, top/middle/bottom).
+// Defaults to 50% 50% (CSS 2.1 §11.1.2).
+func parseTransformOrigin(s string) (x, y Length) {
+	x = Length{Value: 50, Unit: "%"}
+	y = Length{Value: 50, Unit: "%"}
+	parts := strings.Fields(s)
+	if len(parts) == 0 {
+		return
+	}
+	parseAxis := func(v string) Length {
+		switch v {
+		case "left", "top":
+			return Length{Value: 0, Unit: "%"}
+		case "center", "middle":
+			return Length{Value: 50, Unit: "%"}
+		case "right", "bottom":
+			return Length{Value: 100, Unit: "%"}
+		}
+		if strings.HasSuffix(v, "%") {
+			if n, err := strconv.ParseFloat(strings.TrimSuffix(v, "%"), 64); err == nil {
+				return Length{Value: n, Unit: "%"}
+			}
+			return Length{Value: 50, Unit: "%"}
+		}
+		if l, ok := parseLength(v); ok {
+			return l
+		}
+		return Length{Value: 50, Unit: "%"}
+	}
+	x = parseAxis(parts[0])
+	if len(parts) >= 2 {
+		y = parseAxis(parts[1])
+	} else if parts[0] == "left" || parts[0] == "right" {
+		y = Length{Value: 50, Unit: "%"}
+	} else if parts[0] == "top" || parts[0] == "bottom" {
+		x = Length{Value: 50, Unit: "%"}
+	}
+	return
+}
+
+func parseTransitionShorthand(s string) (prop string, duration float64, timing string, delay float64) {	if s == "" || s == "none" {
 		return "all", 0, "ease", 0
 	}
 	// Defaults

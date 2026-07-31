@@ -1,29 +1,31 @@
-feat: pixel cases + radial-gradient + static transform + shadow order fixes
+feat: form control visuals + inline-block layout + transform-origin
 
-Extends the pixel comparison suite from 9 to 16 cases and fixes the engine
-BUGs they exposed:
+Form controls (candidate: full UA visuals):
+- layout/inlineformattingcontext.go — inline-block layout was broken for
+  controls: horizontal/vertical margins ignored, definite width collapsed
+  to content width by the child's IFC Layout, definite height ignored, and
+  vertical-align:middle re-centered the box without its margins. Now:
+  margins applied (position + line width), explicit width re-applied after
+  child Layout, definite height on inline-block/replaced wins, and the
+  middle alignment accounts for margins. Button geometry went from
+  (8,8 81x26) to the exact Edge (18,18 120x34).
+- html5/defaultcss.go — button UA style mirrors Edge's Windows button:
+  #767676 border, #efefef top highlight band (gradient to 28%), white
+  body, #f0f0f0 background-color (keeps GEO parity).
+- style/resolver.go — `background` shorthand now resets background-image
+  (author background-color must clear the UA gradient, CSS shorthand
+  semantics).
+- rendering/renderformcontrol.go — checked checkbox/radio use the Windows
+  accent blue (RadioBgHot added; check/dot white), matching Edge.
+- Pixel cases: px_button (2.3%, corner rounding), px_checkbox (3.2%,
+  baseline alignment).
 
-1. rendering/shadow.go — multi-shadow z-order: the FIRST shadow must paint
-   on TOP of later ones (CSS). Painter iterated forward so later shadows
-   covered earlier ones; now reversed. px_multishadow: 2.6% → 0 px.
+Background stacking: painter.go paints background-color beneath linear/
+radial gradients (CSS multi-layer order).
 
-2. rendering/painter.go + platform/graphics/canvas.go — rounded-corner
-   gradients painted past the curve (the old comment promised clipping but
-   never did it). New Canvas.ClipRoundRect (skia rounded-rect path) clips
-   the gradient fill. px_roundgrad: 10.6% → 0.27% (AA band).
+transform-origin (candidate: more transform): TransformOriginX/Y style
+fields + parseTransformOrigin (px/%/keywords) + applied in walkSubtreeExcluded
+(T(origin)·ops·T(-origin)); unit test covers %/px resolution and corner
+scale pivot.
 
-3. rendering/gradient.go + style/resolver.go — radial-gradient support
-   (circle/ellipse, center, farthest-corner sizing), extracted by the
-   background shorthand like linear-gradient. px_radial: 0 px diff.
-
-4. rendering/renderpipeline.go — static CSS transform composition:
-   walkSubtreeExcluded now applies the transform around the element's
-   transform-origin (default 50% 50% = box center, matching CSS; the old
-   per-box tryApplyTransform rotated around the canvas origin and never
-   transformed children). paintObjectBackground no longer re-applies it.
-   px_transform: 9.6% → 0.52% (rotated-edge AA band).
-
-5. rendering/painter.go — 3px dashed borders now paint 6px dash / 6px gap
-   (Edge's pattern) instead of 9/3.
-
-Pixel suite 16/16 (5 at 0 px), GEO suite 13/13, go test ./... green.
+Verified: GEO 13/13, pixel suite 19/19, go test green.

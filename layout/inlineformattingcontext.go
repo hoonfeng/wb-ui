@@ -203,17 +203,21 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			case *ElementBox:
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
-			cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
 
-			// Compute border/padding BEFORE the child's Layout so the child's
-			// formatting context (e.g. BFC.Layout for inline-block) sees the
-			// correct ContentBoxLeft/ContentBoxTop. Without this, padding/border
-			// are treated as zero and text inside the child gets positioned at
-			// the child's border-box top-left instead of its content-box origin.
+			// Compute margin/padding/border BEFORE the child's Layout so the
+			// child's formatting context (e.g. BFC.Layout for inline-block) sees
+			// the correct ContentBoxLeft/ContentBoxTop. Without this,
+			// padding/border are treated as zero and text inside the child gets
+			// positioned at the child's border-box top-left instead of its
+			// content-box origin.
 			fs := fontSizeOf(cld)
-			_, padding, border := computeBoxModelForBox(cld, contentWidth, fs)
+			margin, padding, border := computeBoxModelForBox(cld, contentWidth, fs)
+			cldG.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
 			cldG.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 			cldG.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+			// Horizontal margins shift the child and consume line space;
+			// margin-top lowers the child inside the line box.
+			cldG.SetTopLeft(currentLine.y+centeringOffset+margin.Top, currentLine.contentX+currentLine.widthUsed+margin.Left)
 
 			// Set CSS width if definite BEFORE Layout so box-sizing:border-box
 			// correctly limits the content width used by the child's Layout.
@@ -234,6 +238,21 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
+
+			// Re-apply explicit width: the child's Layout (IFC for inline
+			// content) collapses the box to content width; a definite CSS
+			// width on an inline-block must win.
+			if cs := cld.Style(); cs != nil {
+				if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
+					if isBorderBoxForBox(cld) {
+						b := cldG.BorderLeft() + cldG.BorderRight()
+						p := cldG.PaddingLeft() + cldG.PaddingRight()
+						cldG.SetContentWidth(w - b - p)
+					} else {
+						cldG.SetContentWidth(w)
+					}
+				}
+			}
 
 			// Fallback: for replaced input/button elements without explicit CSS
 			// width, derive width from the HTML value attribute text. Text
@@ -305,6 +324,22 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					}
 				}
 			}
+			// A definite height on an inline-block/replaced child wins over
+			// the content-derived height (e.g. button height:34px). Plain
+			// inline (span) heights have no layout effect per CSS.
+			if cld.IsInline() && cld.Style().Display == style.DisplayInlineBlock {
+				if cs := cld.Style(); cs != nil {
+					if h, ok := definiteHeight(cs.Height, contentWidth, fs); ok && h > 0 {
+						if isBorderBoxForBox(cld) {
+							b := cldG.BorderTop() + cldG.BorderBottom()
+							p := cldG.PaddingTop() + cldG.PaddingBottom()
+							cldG.SetContentHeight(h - b - p)
+						} else {
+							cldG.SetContentHeight(h)
+						}
+					}
+				}
+			}
 
 			// If content height is still 0 (no CSS height), use line height.
 			if cldG.ContentHeight() <= 0 {
@@ -323,16 +358,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					va = cldCS.Properties["vertical-align"]
 				}
 				if va == "middle" {
-					childH := cldG.BorderBoxHeight()
+					// The child's vertical margin participates in the line
+					// box: line box height = child border-box + margins.
+					childBH := cldG.BorderBoxHeight()
+					childH := childBH + margin.Top + margin.Bottom
 					lineH := lineHeight
-					if cldBH2 := cldG.BorderBoxHeight(); cldBH2 > lineH {
-						lineH = cldBH2
+					if childH > lineH {
+						lineH = childH
 					}
 					if childH > 0 && lineH > 0 {
 						// Line box: from currentLine.y to currentLine.y+lineH.
-						// Place child's middle at line's middle.
+						// Place child's middle at line's middle, then shift
+						// by margin-top so the margin stays outside.
 						lineTop := currentLine.y
-						targetTop := lineTop + (lineH-childH)/2
+						targetTop := lineTop + (lineH-childH)/2 + margin.Top
 						cldG.SetTopLeft(targetTop, cldG.Left())
 					}
 				}
@@ -352,7 +391,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if cldBH := cldG.BorderBoxHeight(); cldBH > lineHeight {
 				lineHeight = cldBH
 			}
-			cldW := cldG.BorderBoxWidth()
+			cldW := cldG.BorderBoxWidth() + margin.Horizontal()
 			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 				lines = append(lines, currentLine)
 				newY := currentLine.y + lineHeight
