@@ -186,4 +186,12 @@ func TestPxCheckboxRadio(t *testing.T) {
 	`, 0.035)
 }
 
+// TestPxTextarea: textarea border (#767676, Edge parity), white body.
+// Budget for Edge's headless selection highlight over the value text.
+func TestPxTextarea(t *testing.T) {
+	pixelCompare(t, "px_textarea", `
+		<textarea id="t1" style="width:150px;height:50px;margin:8px">abc</textarea>
+	`, 0.03)
+}
+
 func init() { _ = fmt.Sprintf }

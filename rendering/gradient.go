@@ -140,6 +140,48 @@ func parseGradientDirection(s string) *GradientDirection {
 	return &GradientDirection{Angle: 180}
 }
 
+// splitBackgroundLayers splits a background-image value into its comma-
+// separated layers, tracking parenthesis depth so commas inside gradient
+// function arguments are preserved.
+func splitBackgroundLayers(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "none" {
+		return nil
+	}
+	var layers []string
+	depth := 0
+	cur := strings.Builder{}
+	for _, r := range s {
+		switch r {
+		case '(':
+			depth++
+			cur.WriteRune(r)
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteRune(r)
+		case ',':
+			if depth == 0 {
+				layers = append(layers, strings.TrimSpace(cur.String()))
+				cur.Reset()
+			} else {
+				cur.WriteRune(r)
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		layers = append(layers, strings.TrimSpace(cur.String()))
+	}
+	// drop empty trailing layers
+	for len(layers) > 0 && layers[len(layers)-1] == "" {
+		layers = layers[:len(layers)-1]
+	}
+	return layers
+}
+
 // paintRadialGradient fills the box with a radial gradient: each pixel's
 // color is interpolated by its distance from the center over the radius
 // (farthest-corner for circle, scaled axes for ellipse).

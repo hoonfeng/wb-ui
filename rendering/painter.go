@@ -183,12 +183,38 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		op := CumulativeOpacity(box)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
 	}
-	// Paint gradient if background-image is a linear-gradient. The
-	// background-color (if any) paints beneath the gradient (CSS: multiple
-	// background layers stack, color at the bottom).
-	bgGradient := parseGradient(st.BackgroundImage)
-	if bgGradient != nil {
+	// Paint gradient layers (background-image). Multiple comma-separated
+	// layers stack with the FIRST layer on TOP (CSS background layering);
+	// paint bottom-up so the first layer is drawn last. The
+	// background-color (if any) paints beneath all layers.
+	bgLayers := splitBackgroundLayers(st.BackgroundImage)
+	if len(bgLayers) > 0 {
 		r := lengthValue(st.BorderRadius)
+		drawGradientLayer := func(i int) {
+			layer := bgLayers[i]
+			if lg := parseGradient(layer); lg != nil {
+				if r > 0 {
+					info.canvas.Save()
+					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
+					paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, lg)
+					info.canvas.Restore()
+				} else {
+					paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, lg)
+				}
+				return
+			}
+			if rg := parseRadialGradient(layer); rg != nil {
+				if r > 0 {
+					info.canvas.Save()
+					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
+					paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, rg)
+					info.canvas.Restore()
+				} else {
+					paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, rg)
+				}
+			}
+		}
+		// Color beneath the layers.
 		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
 			bgc = ApplyOpacityToColor(bgc, CumulativeOpacity(box))
 			if r > 0 {
@@ -197,35 +223,9 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 				info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bgc)
 			}
 		}
-		if r > 0 {
-			// Rounded corners: clip the gradient to the rounded rect so the
-			// corners follow the curve instead of painting a sharp square.
-			info.canvas.Save()
-			info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
-			info.canvas.Restore()
-		} else {
-			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
-		}
-		return
-	}
-	if bgRadial := parseRadialGradient(st.BackgroundImage); bgRadial != nil {
-		r := lengthValue(st.BorderRadius)
-		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
-			bgc = ApplyOpacityToColor(bgc, CumulativeOpacity(box))
-			if r > 0 {
-				info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bgc)
-			} else {
-				info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bgc)
-			}
-		}
-		if r > 0 {
-			info.canvas.Save()
-			info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-			paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgRadial)
-			info.canvas.Restore()
-		} else {
-			paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgRadial)
+		// Layers bottom-up (last layer first, first layer painted last = on top).
+		for i := len(bgLayers) - 1; i >= 0; i-- {
+			drawGradientLayer(i)
 		}
 		return
 	}

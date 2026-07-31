@@ -22,6 +22,12 @@ form {
 	margin: 0 0 1em 0;
 }
 
+/* Default focus ring (Edge/Chrome: blue outline on :focus elements). */
+:focus {
+	outline: 1px solid #4d90fe;
+	outline-offset: 0px;
+}
+
 fieldset {
 	display: block;
 	margin: 0 2px 0.8em 0;
@@ -55,7 +61,7 @@ input[type="email"], input[type="url"], input[type="tel"],
 input[type="number"], input[type="date"], input[type="time"],
 input[type="month"], input[type="week"], input[type="datetime-local"] {
 	padding: 2px 4px;
-	border: 1px solid #c0c0c0;
+	border: 1px solid #767676;
 	background-color: #ffffff;
 	box-sizing: border-box;
 	min-height: 1.2em;
@@ -63,7 +69,7 @@ input[type="month"], input[type="week"], input[type="datetime-local"] {
 
 textarea {
 	padding: 2px 4px;
-	border: 1px solid #c0c0c0;
+	border: 1px solid #767676;
 	background-color: #ffffff;
 	box-sizing: border-box;
 	resize: both;

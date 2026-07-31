@@ -1,31 +1,25 @@
-feat: form control visuals + inline-block layout + transform-origin
+feat: multi-layer backgrounds + textarea/focus UA + text input borders
 
-Form controls (candidate: full UA visuals):
-- layout/inlineformattingcontext.go — inline-block layout was broken for
-  controls: horizontal/vertical margins ignored, definite width collapsed
-  to content width by the child's IFC Layout, definite height ignored, and
-  vertical-align:middle re-centered the box without its margins. Now:
-  margins applied (position + line width), explicit width re-applied after
-  child Layout, definite height on inline-block/replaced wins, and the
-  middle alignment accounts for margins. Button geometry went from
-  (8,8 81x26) to the exact Edge (18,18 120x34).
-- html5/defaultcss.go — button UA style mirrors Edge's Windows button:
-  #767676 border, #efefef top highlight band (gradient to 28%), white
-  body, #f0f0f0 background-color (keeps GEO parity).
-- style/resolver.go — `background` shorthand now resets background-image
-  (author background-color must clear the UA gradient, CSS shorthand
-  semantics).
-- rendering/renderformcontrol.go — checked checkbox/radio use the Windows
-  accent blue (RadioBgHot added; check/dot white), matching Edge.
-- Pixel cases: px_button (2.3%, corner rounding), px_checkbox (3.2%,
-  baseline alignment).
+Form-control & UA polish (candidates: select/textarea visuals, focus):
+- html5/defaultcss.go — text inputs and textarea now use Edge's #767676
+  border (was #c0c0c0); added the default :focus outline (1px #4d90fe,
+  Edge/Chrome focus ring). :hover/:focus selector matching and host-driven
+  hovered/focused state already existed; the UA outline was missing.
+- select stays as-is: Edge headless renders native widgets blank, so pixel
+  comparison is meaningless; GEO geometry already aligned.
 
-Background stacking: painter.go paints background-color beneath linear/
-radial gradients (CSS multi-layer order).
+Multi-layer backgrounds (candidate: multi-background stacking):
+- style/resolver.go — the background shorthand now joins multiple gradient
+  layers with commas (first layer = topmost) instead of keeping only the
+  first.
+- rendering/gradient.go — splitBackgroundLayers splits top-level commas
+  (parenthesis-aware so gradient args stay intact).
+- rendering/painter.go — paints all gradient layers bottom-up so the FIRST
+  layer ends up on top (CSS background layering), with background-color
+  beneath. Opaque top layer wins (px probe 1:1 with Edge); semi-transparent
+  top layer blends with the layer below (unit test: rgba(255,0,0,0.5) over
+  green → #807f00).
+- rendering/multibg_test.go — layer splitting + opaque/blend paint tests.
 
-transform-origin (candidate: more transform): TransformOriginX/Y style
-fields + parseTransformOrigin (px/%/keywords) + applied in walkSubtreeExcluded
-(T(origin)·ops·T(-origin)); unit test covers %/px resolution and corner
-scale pivot.
-
-Verified: GEO 13/13, pixel suite 19/19, go test green.
+Pixel cases: px_textarea (0.48%, border aligned; Edge headless selection
+highlight budget). Verified GEO 13/13, pixel suite 20/20, go test green.
