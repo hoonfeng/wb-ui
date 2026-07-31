@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
 	"wb-ui/style"
 )
@@ -62,8 +63,8 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	style := box.Style()
-	isVerticalWM := IsVerticalWritingMode(style)
+	cs := box.Style()
+	isVerticalWM := IsVerticalWritingMode(cs)
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
 	contentWidth := g.ContentWidth()
@@ -208,6 +209,17 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		childCtx := contextFor(childEb, state)
 		childCtx.Layout(childEb, state)
 
+		// Compute the list-item marker (bullet "•" / ordered "1." / "a.") for
+		// display:list-item children, mirroring the marker box generation in
+		// WebCore's layout (RenderListItem + CSS Lists spec §4.1).
+		// Only real DOM elements get a marker: anonymous wrappers (which clone
+		// the li's display style for their inline content) must not.
+		if childCs.Display == style.DisplayListItem && childEb.Element() != nil {
+			childEb.MarkerText = listMarkerFor(childEb, box)
+		} else {
+			childEb.MarkerText = ""
+		}
+
 		fs := fontSizeOf(childEb)
 		if isVerticalWM {
 			minW, maxW, minWAuto, maxWAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, 0, fs)
@@ -233,7 +245,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	// Resolve box block size (height for horizontal-tb, width for vertical WM).
-	cs := box.Style()
+	boxCS := box.Style()
 	if heightIsAutoForBox(box) {
 		blockSize := cursor - blockStart
 		if !establishesBFC && g.BorderBottom() == 0 && g.PaddingBottom() == 0 {
@@ -275,7 +287,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	} else if box.Parent() != nil {
 		fs := fontSizeOf(box)
 		cbHeight := state.GeometryForBox(box.Parent()).ContentHeight()
-		hv, ok := definiteHeight(cs.Height, cbHeight, fs)
+		hv, ok := definiteHeight(boxCS.Height, cbHeight, fs)
 		if ok {
 			if isBorderBoxForBox(box) {
 				g.SetContentHeight(hv - g.VerticalBorder() - g.VerticalPadding())
@@ -441,6 +453,128 @@ func stateRootForBox(box *ElementBox) *ElementBox {
 	cur := box
 	for cur.Parent() != nil { cur = cur.Parent() }
 	return cur
+}
+
+// listMarkerFor computes the marker text for a display:list-item child of
+// container. Unordered lists use disc/circle/square bullets (list-style-type);
+// ordered lists use the 1-based index of the item among its ordered siblings
+// formatted per the list-style-type (decimal/decimal-leading-zero/lower-alpha/
+// upper-alpha/lower-roman/upper-roman). Mirrors CSS Lists & Counters §4.1 and
+// WebCore's RenderListItem marker generation.
+func listMarkerFor(li *ElementBox, container *ElementBox) string {
+	if li == nil || container == nil {
+		return ""
+	}
+	containerStyle := container.Style()
+	if containerStyle == nil {
+		return ""
+	}
+	// Explicit list-style-type on the <li> overrides the container's.
+	lt := li.Style().ListStyleType
+	if lt == "" || lt == "inherit" {
+		lt = containerStyle.ListStyleType
+	}
+	if lt == "" {
+		// Infer from the container element: <ul> → disc, <ol> → decimal.
+		if el := container.Element(); el != nil {
+			switch el.LocalName() {
+			case "ol":
+				lt = "decimal"
+			default:
+				lt = "disc"
+			}
+		} else {
+			lt = "disc"
+		}
+	}
+
+	switch lt {
+	case "none":
+		return ""
+	case "disc":
+		return "•"
+	case "circle":
+		return "◦"
+	case "square":
+		return "▪"
+	case "decimal":
+		return fmt.Sprintf("%d.", listIndexAmongSiblings(li))
+	case "decimal-leading-zero":
+		return fmt.Sprintf("%02d.", listIndexAmongSiblings(li))
+	case "lower-alpha":
+		return fmt.Sprintf("%s.", listAlphaMarker(listIndexAmongSiblings(li), 'a'))
+	case "upper-alpha":
+		return fmt.Sprintf("%s.", listAlphaMarker(listIndexAmongSiblings(li), 'A'))
+	case "lower-roman":
+		return fmt.Sprintf("%s.", listRomanMarker(listIndexAmongSiblings(li), false))
+	case "upper-roman":
+		return fmt.Sprintf("%s.", listRomanMarker(listIndexAmongSiblings(li), true))
+	}
+	// Unknown list-style-type: fall back to disc for unordered, decimal for ordered.
+	if el := container.Element(); el != nil && el.LocalName() == "ol" {
+		return fmt.Sprintf("%d.", listIndexAmongSiblings(li))
+	}
+	return "•"
+}
+
+// listIndexAmongSiblings returns the 1-based index of li among its ordered-list
+// siblings (siblings that are themselves list items, within the same container).
+func listIndexAmongSiblings(li *ElementBox) int {
+	idx := 0
+	parent := li.Parent()
+	if parent == nil {
+		return 1
+	}
+	for _, s := range parent.Children() {
+		sib, ok := s.(*ElementBox)
+		if !ok {
+			continue
+		}
+		if sib.Style() != nil && sib.Style().Display == style.DisplayListItem {
+			idx++
+		}
+		if sib == li {
+			break
+		}
+	}
+	if idx < 1 {
+		idx = 1
+	}
+	return idx
+}
+
+// listAlphaMarker converts a 1-based index to an alphabetical marker
+// (1→a, 2→b, 27→aa), using the given base letter ('a' or 'A').
+func listAlphaMarker(n int, base rune) string {
+	var sb []rune
+	for n > 0 {
+		n--
+		sb = append([]rune{base + rune(n%26)}, sb...)
+		n /= 26
+	}
+	return string(sb)
+}
+
+// listRomanMarker converts a 1-based index to a Roman numeral string.
+func listRomanMarker(n int, upper bool) string {
+	if n <= 0 || n > 3999 {
+		return fmt.Sprintf("%d", n)
+	}
+	vals := []int{1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1}
+	syms := []string{"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"}
+	if !upper {
+		for i := range syms {
+			syms[i] = strings.ToLower(syms[i])
+		}
+	}
+	var sb strings.Builder
+	for i, v := range vals {
+		for n >= v {
+			sb.WriteString(syms[i])
+			n -= v
+		}
+	}
+	return sb.String()
 }
 
 func elementName(box *ElementBox) string {

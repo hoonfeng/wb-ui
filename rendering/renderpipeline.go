@@ -18,6 +18,8 @@
 package rendering
 
 import (
+	"sort"
+
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
@@ -66,6 +68,13 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 // RenderLayer::paintLayer(). The canvas state is saved, the layer's clip is applied, the
 // layer owner's bounded subtree is painted by phase, then each child layer is painted on
 // top (composited), and finally the canvas state is restored.
+//
+// Child layers are painted in CSS stacking order (CSS 2.1 §9.9 / Appendix E):
+//   1. child layers with negative z-index, most-negative first
+//   2. child layers with z-index:auto (or z-index:0 in a stacking context),
+//      in tree order — this pass paints the layer's own subtree as well
+//   3. child layers with positive z-index, smallest first
+// This mirrors RenderLayer::paintLayer / paintLayerContents ordering.
 func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	if layer == nil {
 		return
@@ -76,10 +85,72 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}
 	paintLayerContent(layer, info)
+
+	// Collect child layers and bucket them by stacking position.
+	var neg, auto, pos []*RenderLayer
 	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
+		z := layerZIndex(child)
+		switch {
+		case z < 0:
+			neg = append(neg, child)
+		case z > 0:
+			pos = append(pos, child)
+		default:
+			auto = append(auto, child)
+		}
+	}
+	// Negative z-index: most negative first (e.g. -2 before -1).
+	sortLayerByZ(neg, true)
+	// Positive z-index: smallest first (e.g. 1 before 2, so 2 paints on top).
+	sortLayerByZ(pos, true)
+	// Auto/zero layers stay in tree order (already collected in order).
+
+	for _, child := range neg {
+		paintLayerTree(child, info)
+	}
+	for _, child := range auto {
+		paintLayerTree(child, info)
+	}
+	for _, child := range pos {
 		paintLayerTree(child, info)
 	}
 	info.canvas.Restore()
+}
+
+// layerZIndex returns the owner's effective z-index for stacking. A z-index only
+// participates in stacking when the layer's owner is positioned (CSS 2.1 §10.6)
+// or the layer establishes a stacking context (opacity/transform/filter/overflow);
+// otherwise it behaves as auto (0).
+func layerZIndex(layer *RenderLayer) int {
+	if layer == nil || layer.owner == nil {
+		return 0
+	}
+	st := layer.owner.Style()
+	if st == nil {
+		return 0
+	}
+	// Non-positioned elements ignore z-index unless they create a stacking
+	// context via opacity/transform/filter/overflow.
+	positioned := st.Position != style.PositionStatic
+	stackingCtx := st.Opacity < 1.0 || st.Transform != "" || st.Filter != "" ||
+		st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible
+	if !positioned && !stackingCtx {
+		return 0
+	}
+	return st.ZIndex
+}
+
+// sortLayerByZ sorts layers by owner z-index ascending (desc=true for negative
+// buckets, which want most-negative first = ascending). Stable so tree order is
+// preserved for equal z-index values.
+func sortLayerByZ(layers []*RenderLayer, ascending bool) {
+	sort.SliceStable(layers, func(i, j int) bool {
+		zi, zj := layerZIndex(layers[i]), layerZIndex(layers[j])
+		if ascending {
+			return zi < zj
+		}
+		return zi > zj
+	})
 }
 
 // paintLayerContent paints the layer owner's subtree in phase order, excluding the

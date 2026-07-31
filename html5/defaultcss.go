@@ -243,6 +243,195 @@ dialog[open] {
 	transform: translate(-50%, -50%);
 	z-index: 1000;
 }
+
+/* ── General element defaults (mirrors WebCore/css/html.css headings/lists/
+       text sections; only properties the engine resolves are listed) ── */
+
+html {
+	display: block;
+}
+
+body {
+	display: block;
+	margin: 8px;
+}
+
+p {
+	display: block;
+	margin-top: 1em;
+	margin-bottom: 1em;
+}
+
+address, article, aside, div, footer, header, hgroup, main, nav, section {
+	display: block;
+}
+
+blockquote {
+	display: block;
+	margin-top: 1em;
+	margin-bottom: 1em;
+	margin-left: 40px;
+	margin-right: 40px;
+}
+
+figure {
+	display: block;
+	margin-top: 1em;
+	margin-bottom: 1em;
+	margin-left: 40px;
+	margin-right: 40px;
+}
+
+figcaption {
+	display: block;
+}
+
+/* Headings: h1-h6 are bold block boxes with relative font sizes. */
+h1, h2, h3, h4, h5, h6 {
+	display: block;
+	font-weight: bold;
+}
+
+h1 {
+	font-size: 2em;
+	margin-top: 0.67em;
+	margin-bottom: 0.67em;
+}
+
+h2 {
+	font-size: 1.5em;
+	margin-top: 0.83em;
+	margin-bottom: 0.83em;
+}
+
+h3 {
+	font-size: 1.17em;
+	margin-top: 1em;
+	margin-bottom: 1em;
+}
+
+h4 {
+	margin-top: 1.33em;
+	margin-bottom: 1.33em;
+}
+
+h5 {
+	font-size: 0.83em;
+	margin-top: 1.67em;
+	margin-bottom: 1.67em;
+}
+
+h6 {
+	font-size: 0.67em;
+	margin-top: 2.33em;
+	margin-bottom: 2.33em;
+}
+
+/* Lists. */
+ul, menu, dir {
+	display: block;
+	list-style-type: disc;
+	margin-top: 1em;
+	margin-bottom: 1em;
+	padding-left: 40px;
+}
+
+ol {
+	display: block;
+	list-style-type: decimal;
+	margin-top: 1em;
+	margin-bottom: 1em;
+	padding-left: 40px;
+}
+
+li {
+	display: list-item;
+}
+
+dl {
+	display: block;
+	margin-top: 1em;
+	margin-bottom: 1em;
+}
+
+dt {
+	display: block;
+}
+
+dd {
+	display: block;
+	margin-left: 40px;
+}
+
+/* Inline text defaults. */
+a {
+	color: -webkit-link;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+strong, b {
+	font-weight: bold;
+}
+
+em, i {
+	font-style: italic;
+}
+
+big {
+	font-size: 1.17em;
+}
+
+small {
+	font-size: 0.83em;
+}
+
+sub {
+	font-size: 0.83em;
+	vertical-align: sub;
+}
+
+sup {
+	font-size: 0.83em;
+	vertical-align: super;
+}
+
+s, strike, del {
+	text-decoration: line-through;
+}
+
+u, ins {
+	text-decoration: underline;
+}
+
+code, kbd, samp, tt {
+	font-family: monospace;
+}
+
+pre {
+	display: block;
+	font-family: monospace;
+	white-space: pre;
+	margin-top: 1em;
+	margin-bottom: 1em;
+}
+
+hr {
+	display: block;
+	margin-top: 0.5em;
+	margin-bottom: 0.5em;
+	border-style: inset;
+	border-width: 1px;
+}
+
+q {
+	display: inline;
+}
+
+center {
+	display: block;
+	text-align: center;
+}
 `
 
 // NewUAStyleSheet parses the UA default CSS and returns a CSSStyleSheet

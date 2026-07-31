@@ -85,6 +85,10 @@ type ElementBox struct {
 	TextSegments    []TextSegment
 	columnInfo      *columnLayoutInfo
 	layoutCache     layoutResult
+	// MarkerText holds the list-item marker ("•", "1.", "a.") when this box is
+	// a display:list-item and its formatting context computed a marker. Empty
+	// for non-list items.
+	MarkerText string
 }
 
 // ─── ElementBox implements Box ───────────────────────────────

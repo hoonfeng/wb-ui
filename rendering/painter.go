@@ -84,6 +84,31 @@ func findTextOverflowAncestor(ro RenderObject) *layout.LayoutRect {
 	return nil
 }
 
+// listMarkerForRenderText walks up the render tree from a RenderText to find a
+// display:list-item ancestor whose layout box carries a computed marker text.
+// It returns (marker, liBox) — empty marker when the text is not inside a list
+// item. The marker text is computed during layout (layout.BlockFormattingContext
+// sets ElementBox.MarkerText) and mirrored to the render object's layout box.
+func listMarkerForRenderText(rt *RenderText) (string, *layout.LayoutBox) {
+	if rt == nil {
+		return "", nil
+	}
+	for p := rt.Parent(); p != nil; p = p.Parent() {
+		if p.Style() == nil || p.Style().Display != style.DisplayListItem {
+			continue
+		}
+		lb := p.LayoutBox()
+		if lb == nil {
+			return "", nil
+		}
+		if lb.MarkerText != "" {
+			return lb.MarkerText, lb
+		}
+		return "", nil
+	}
+	return "", nil
+}
+
 // BoxGeometry returns the border-box position and size of a render object, or
 // (0,0,0,0,false) if the object is not box-bearing. Exposed for embedders/tests
 // that need to inspect the laid-out geometry (e.g. for hit-testing or debugging).
@@ -231,22 +256,23 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	// uniform-color case (e.g. `border: 2px solid #e5e7eb; border-radius: 4px`)
 	// is by far the most common, so it is handled directly; unequal sides
 	// fall back to the per-side FillRect path below.
+	btC, brC, bbC, blC := st.BorderColor("top"), st.BorderColor("right"), st.BorderColor("bottom"), st.BorderColor("left")
 	if r := lengthValue(st.BorderRadius); r > 0 &&
 		topW == rightW && rightW == bottomW && bottomW == leftW &&
 		st.BorderTopStyle != "none" && st.BorderRightStyle != "none" &&
 		st.BorderBottomStyle != "none" && st.BorderLeftStyle != "none" &&
-		colorsEqual(st.BorderTopColor, st.BorderRightColor) &&
-		colorsEqual(st.BorderRightColor, st.BorderBottomColor) &&
-		colorsEqual(st.BorderBottomColor, st.BorderLeftColor) {
-		info.canvas.StrokeRoundRect(x, y, w, h, r, topW, ApplyOpacityToColor(toGraphicsColor(st.BorderTopColor), op))
+		colorsEqual(btC, brC) &&
+		colorsEqual(brC, bbC) &&
+		colorsEqual(bbC, blC) {
+		info.canvas.StrokeRoundRect(x, y, w, h, r, topW, ApplyOpacityToColor(toGraphicsColor(btC), op))
 		return
 	}
 	// Top and bottom span the full width, including the corners.
 	if topW > 0 && st.BorderTopStyle != "none" {
-		paintBorderSide(info.canvas, x, y, w, topW, ApplyOpacityToColor(toGraphicsColor(st.BorderTopColor), op), st.BorderTopStyle)
+		paintBorderSide(info.canvas, x, y, w, topW, ApplyOpacityToColor(toGraphicsColor(btC), op), st.BorderTopStyle)
 	}
 	if bottomW > 0 && st.BorderBottomStyle != "none" {
-		paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, ApplyOpacityToColor(toGraphicsColor(st.BorderBottomColor), op), st.BorderBottomStyle)
+		paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, ApplyOpacityToColor(toGraphicsColor(bbC), op), st.BorderBottomStyle)
 	}
 	// Left and right exclude the top/bottom border regions so the corner color (top/bottom)
 	// is preserved.
@@ -256,10 +282,10 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	if leftW > 0 && st.BorderLeftStyle != "none" {
-		paintBorderSide(info.canvas, x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderLeftColor), op), st.BorderLeftStyle)
+		paintBorderSide(info.canvas, x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(blC), op), st.BorderLeftStyle)
 	}
 	if rightW > 0 && st.BorderRightStyle != "none" {
-		paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(st.BorderRightColor), op), st.BorderRightStyle)
+		paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(brC), op), st.BorderRightStyle)
 	}
 }
 
@@ -454,6 +480,19 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		}
 		ellipsisGap := ellipsisDotR * 3.2 // ~1.2px gap between dot edges for 14px
 		textEllipsisW = ellipsisGap*2 + ellipsisDotR*2
+	}
+
+	// List-item marker: draw the bullet/ordinal before the first text segment.
+	// The marker text is computed during layout (ElementBox.MarkerText) and
+	// exposed on the render object via ListMarkerText().
+	if marker, mbox := listMarkerForRenderText(text); marker != "" && mbox != nil && len(segments) > 0 {
+		first := segments[0]
+		baseline := first.Y + ascent
+		// The marker occupies the padding-left zone of the li (40px default);
+		// draw it right-aligned within that zone, 6px before the content start.
+		markerX := first.X - 6 - graphics.MeasureText(font, marker)
+		info.canvas.DrawText(markerX, baseline, marker, font, col)
+		_ = mbox
 	}
 
 	for _, seg := range segments {

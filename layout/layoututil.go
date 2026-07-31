@@ -214,12 +214,28 @@ func fontSizeOf(box *ElementBox) float64 {
 		}
 		return defaultFontSize
 	}
-	ref := 0.0
-	if cs.FontSize.Unit == "%" && box.Parent() != nil {
-		ref = fontSizeOf(box.Parent())
+	parentSize := 0.0
+	if box.Parent() != nil {
+		parentSize = fontSizeOf(box.Parent())
 	}
-	r := resolveLength(cs.FontSize, ref, 0)
-	if !r.Definite || r.Value <= 0 { return defaultFontSize }
+	// em/rem/% font-sizes resolve against the parent's font-size:
+	//   - em  → value × parent font-size
+	//   - %   → value% of parent font-size
+	//   - rem → value × root font-size (approximated by defaultFontSize)
+	var r lengthResult
+	switch cs.FontSize.Unit {
+	case "%":
+		r = resolveLength(cs.FontSize, parentSize, 0)
+	case "em":
+		r = resolveLength(cs.FontSize, 0, parentSize)
+	case "rem":
+		r = resolveLength(cs.FontSize, 0, defaultFontSize)
+	default:
+		r = resolveLength(cs.FontSize, 0, 0)
+	}
+	if !r.Definite || r.Value <= 0 {
+		return defaultFontSize
+	}
 	return r.Value
 }
 

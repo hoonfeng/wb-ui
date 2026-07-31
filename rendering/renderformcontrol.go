@@ -681,7 +681,7 @@ func paintButtonBox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64
 	radius := 3.0
 	c.FillRoundRect(x, y, w, h, radius, bg)
 	// Border: use style's border color if available, or a default gray.
-	borderCol := toGraphicsColor(st.BorderTopColor)
+	borderCol := toGraphicsColor(st.BorderColor("top"))
 	if borderCol.A == 0 {
 		borderCol = graphics.Color{R: 204, G: 204, B: 204, A: 255}
 	}

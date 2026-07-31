@@ -202,3 +202,91 @@ func TestZIndexHigherPaintsOnTop(t *testing.T) {
 		t.Fatalf("overlap pixel at (20,20) = %+v, want %+v (green, front on top)", got, green)
 	}
 }
+
+// --- Layer-tree stacking order tests ----------------------------------------
+
+// TestLayerTreeZIndexOrdering verifies that paintLayerTree paints child layers
+// in CSS stacking order: negative z-index first, then auto/zero in tree order,
+// then positive z-index. This exercises the real BuildLayerTree + paintLayerTree
+// path (not manual PaintBackground calls).
+func TestLayerTreeZIndexOrdering(t *testing.T) {
+	canvas := graphics.NewCanvas(80, 80)
+	doc := dom.NewDocument()
+	rv := NewRenderView(doc, style.NewComputedStyle())
+	rv.SetViewportSize(80, 80)
+
+	// Three overlapping positioned boxes at the same spot. Positioned boxes
+	// participate in stacking so z-index is honored by paintLayerTree.
+	mkBox := func(name string, z int, c style.Color) *RenderBox {
+		st := style.NewComputedStyle()
+		st.Position = style.PositionAbsolute
+		st.ZIndex = z
+		st.BackgroundColor = c
+		box := NewRenderBox(doc.CreateElement(name), st)
+		box.SetLocation(10, 10)
+		box.SetSize(40, 40)
+		return box
+	}
+	neg := mkBox("neg", -1, style.Color{R: 0xFF, G: 0, B: 0, A: 0xFF})     // red, z=-1
+	mid := mkBox("mid", 0, style.Color{R: 0, G: 0xFF, B: 0, A: 0xFF})      // green, z=0
+	top := mkBox("top", 2, style.Color{R: 0, G: 0, B: 0xFF, A: 0xFF})      // blue, z=2
+	top2 := mkBox("top2", 1, style.Color{R: 0xFF, G: 0xFF, B: 0, A: 0xFF}) // yellow, z=1
+
+	// Add in tree order: top (z=2) first, then neg (z=-1), then mid, then top2.
+	rv.AddChild(top, nil)
+	rv.AddChild(neg, nil)
+	rv.AddChild(mid, nil)
+	rv.AddChild(top2, nil)
+
+	// Build the layer tree and paint through the real pipeline.
+	comp := NewRenderLayerCompositor(rv)
+	rootLayer := comp.BuildLayerTree(RenderObject(rv))
+	if rootLayer == nil {
+		t.Fatal("BuildLayerTree returned nil")
+	}
+	rv.SetRootLayer(rootLayer)
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 80, Height: 80})
+
+	// Stacking order bottom→top: neg(z=-1) → mid(z=0) → top2(z=1) → top(z=2).
+	// Center pixel must be top's blue.
+	blue := graphics.Color{B: 0xFF, A: 0xFF}
+	if got := canvas.PixelAt(30, 30); got != blue {
+		t.Fatalf("center pixel = %+v, want %+v (blue z=2 on top despite being first in tree order)", got, blue)
+	}
+}
+
+// TestLayerTreeZIndexNegativeBehind verifies a negative z-index layer paints
+// behind auto layers even when the auto layer comes later in tree order.
+func TestLayerTreeZIndexNegativeBehind(t *testing.T) {
+	canvas := graphics.NewCanvas(80, 80)
+	doc := dom.NewDocument()
+	rv := NewRenderView(doc, style.NewComputedStyle())
+	rv.SetViewportSize(80, 80)
+
+	mkBox := func(name string, z int, c style.Color) *RenderBox {
+		st := style.NewComputedStyle()
+		st.Position = style.PositionAbsolute
+		st.ZIndex = z
+		st.BackgroundColor = c
+		box := NewRenderBox(doc.CreateElement(name), st)
+		box.SetLocation(10, 10)
+		box.SetSize(40, 40)
+		return box
+	}
+	autoBox := mkBox("auto", 0, style.Color{R: 0, G: 0xFF, B: 0, A: 0xFF}) // green
+	negBox := mkBox("neg", -5, style.Color{R: 0xFF, G: 0, B: 0, A: 0xFF})  // red
+
+	// Tree order: auto first, neg second — but neg must paint behind.
+	rv.AddChild(autoBox, nil)
+	rv.AddChild(negBox, nil)
+
+	comp := NewRenderLayerCompositor(rv)
+	rootLayer := comp.BuildLayerTree(RenderObject(rv))
+	rv.SetRootLayer(rootLayer)
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 80, Height: 80})
+
+	green := graphics.Color{G: 0xFF, A: 0xFF}
+	if got := canvas.PixelAt(30, 30); got != green {
+		t.Fatalf("center pixel = %+v, want %+v (green auto layer on top of z=-5)", got, green)
+	}
+}

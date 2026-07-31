@@ -977,6 +977,19 @@ func parseColor(s string) (Color, bool) {
 	if s == "transparent" {
 		return Color{A: 0}, true
 	}
+	// System colors (CSS Color 4 §6.1) used by UA stylesheets.
+	switch s {
+	case "-webkit-link", "linktext":
+		// Default hyperlink blue (UA stylesheet link color).
+		return Color{R: 0x00, G: 0x00, B: 0xEE, A: 0xFF}, true
+	case "-webkit-activelink":
+		// Default active-link red.
+		return Color{R: 0xEE, G: 0x00, B: 0x00, A: 0xFF}, true
+	case "canvas", "background":
+		return Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}, true
+	case "canvastext", "foreground":
+		return Color{R: 0x00, G: 0x00, B: 0x00, A: 0xFF}, true
+	}
 	if s == "inherit" || s == "currentcolor" || s == "initial" {
 		// The caller should handle inheritance; we treat these as "no value".
 		return Color{}, false
@@ -1157,6 +1170,12 @@ func parseBorderShorthand(s string) (width Length, style string, color Color, ok
 		// Try color (e.g. "#e5e7eb", "red", "rgb(...)").
 		if c, cOK := parseColor(p); cOK {
 			color = c
+			continue
+		}
+		// currentcolor resolves to the element's color property at paint time;
+		// leave the zero Color so the renderer falls back to st.Color.
+		if strings.EqualFold(p, "currentcolor") {
+			color = Color{}
 			continue
 		}
 		// Otherwise treat as style keyword (solid, dashed, dotted, none, double, ...).

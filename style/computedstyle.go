@@ -247,6 +247,30 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	c.syncRefs()
 }
 
+// BorderColor returns the effective border color for a side, implementing the
+// CSS `currentcolor` semantics: when no explicit border color was specified
+// (the initial value is currentcolor), the border uses the element's color.
+// A side whose Border*Color is fully transparent (zero alpha, the zero value)
+// and whose style is not "none" is treated as unset and falls back to Color.
+func (c *ComputedStyle) BorderColor(side string) Color {
+	col := Color{R: 0, G: 0, B: 0, A: 0}
+	switch side {
+	case "top":
+		col = c.BorderTopColor
+	case "right":
+		col = c.BorderRightColor
+	case "bottom":
+		col = c.BorderBottomColor
+	case "left":
+		col = c.BorderLeftColor
+	}
+	// Zero-value (transparent) border color → currentcolor fallback.
+	if col.A == 0 && col.R == 0 && col.G == 0 && col.B == 0 {
+		return c.Color
+	}
+	return col
+}
+
 // GetProperty returns the raw string value of the named property.
 func (c *ComputedStyle) GetProperty(name string) string {
 	name = strings.ToLower(name)

@@ -748,7 +748,8 @@ type Event struct {
 	Mods    int
 	Width   int // for EventResize
 	Height  int
-\tScrollY float64\n\tScrollX float64
+	ScrollY float64
+	ScrollX float64
 	DropFiles []string // for EventDrop
 	TouchX, TouchY float64
 	TouchID        int
