@@ -244,6 +244,16 @@ func (c *Canvas) SaveLayerWithFilter(imgFilter *skia.ImageFilter) {
 	}
 }
 
+// SaveLayerWithBlendMode pushes an offscreen layer that is composited with the
+// given blend mode when Restore is called (CSS mix-blend-mode).
+func (c *Canvas) SaveLayerWithBlendMode(mode skia.BlendMode) {
+	c.states = append(c.states, c.state)
+	paint := skia.NewPaint()
+	paint.SetAntialias(true)
+	paint.SetBlendMode(mode)
+	c.canvas.SaveLayer(nil, paint)
+}
+
 // Restore pops the most recently saved graphics state, mirroring GraphicsContext::
 // restore(). If the stack is empty it is a no-op (WebKit asserts / logs in that case).
 func (c *Canvas) Restore() {

@@ -1,42 +1,42 @@
-feat: SVG gradient coords + dasharray + pattern + CSS clip-path
+feat: SVG <symbol> + userSpaceOnUse + clip shadow + text rotate + blend
 
 Candidates round:
 
-1. SVG gradient coordinates (svg.go + svg_gradient_test.go):
-   - FIXED case bug: parseGradientElement compared tag == "radialGradient"
-     after lowercasing, so radial gradients never set isRadial and fell into
-     the linear path (black fill fallback).
-   - Linear gradients with non-default x1/y1/x2/y2 now sample per-pixel by
-     projecting each point onto the gradient axis (objectBoundingBox
-     percentages), instead of falling back to a vertical canvas gradient;
-     bounded to 40k px before falling back.
-   - Verified: diagonal red→blue axis; radial white→black falloff.
+1. SVG <symbol> via <use> (svg.go + svg_symbol_test.go):
+   - <symbol> templates were collected by id but parseSVGElement returned nil
+     for them, so use href="#sym" silently dropped the content. Now <use>
+     referencing a <symbol> renders each child shape with fill resolution and
+     the use x/y offset applied to the whole set; walk skips <symbol> subtrees
+     (template-only, never painted directly).
+   - Verified: red+blue rects inside a symbol render at use(10,10).
 
-2. SVG stroke-dasharray (svg.go + svg_dash_test.go):
-   - stroke-dasharray (line/path strokes) rendered via dashLine: dashes
-     alternate on/off along the segment with phase/offset support; odd counts
-     duplicate the last entry per SVG semantics.
-   - Verified: "10 6" dashes on a horizontal line (on/off pixel checks).
+2. SVG gradientUnits=userSpaceOnUse (svg.go + svg_style_test.go):
+   - New svgGradient.userSpaceOnUse flag; when set, x1/y1/x2/y2 (and radial
+     cx/cy/r) are absolute user-space coordinates instead of bbox percentages:
+     the bbox-center fallback and bbox-projection are skipped, projecting
+     directly onto the absolute axis.
+   - Verified: two rects share one absolute 0..100 axis (left red, right blue).
 
-3. SVG <pattern> fill (svg.go + svg_pattern_test.go):
-   - <pattern> defs collected (child shapes + width/height); fill="url(#id)"
-     resolves to a pattern when not a gradient. Shapes wrapped with
-     fill/stroke so tiles paint colored. Tiled across the shape bbox via
-     canvas.Save/Translate per tile.
-   - Fixed nil-map panic: per-element paint context now copies ctx.patterns;
-     svgDocument carries patterns to paint time.
-   - Verified: red dots tiled every 20px.
+3. CSS clip-path composes with box-shadow (clip_path_test.go):
+   - Confirmed box-shadow is drawn inside PaintBackground, so an inset clip
+     trims the shadow spill — added TestClipPathInsetShadow.
 
-4. CSS clip-path geometry (renderpipeline.go + css_clip.go + clip_path_test.go):
-   - New: clip-path: inset() / circle() / polygon() applied around
-     background+border painting (canvas.Save + Clip/ClipPath + Restore),
-     mirroring RenderBox::paint()'s clip. Percentages and px supported.
-   - polygon parsing splits on commas (not whitespace) so "x% y%" pairs
-     survive.
-   - Verified: inset(20px) shrinks; circle(50%) rounds; triangle polygon.
+4. SVG text rotate + letter-spacing (svg.go + svg_style_test.go):
+   - rotate="45" draws the whole text block rotated around the anchor point
+     (canvas Save/Translate/Rotate/Restore); letter-spacing draws character
+     by character with added advance.
+   - Verified: rotate=90 makes horizontal text vertical.
 
-5. Image decode-failure placeholder — already covered (img alt text in
-   PaintImage + background failure no-crash); no change needed.
+5. CSS mix-blend-mode (canvas.go + renderpipeline.go + blend_test.go):
+   - New Canvas.SaveLayerWithBlendMode (offscreen layer composited with the
+     skia blend mode on Restore); paintObjectBackground wraps boxes with
+     mix-blend-mode in such a layer; parseBlendMode maps all CSS values
+     (multiply/screen/overlay/darken/…/luminosity).
+   - Verified: blue box with multiply over gray yields blended #000080, while
+     non-overlapping top region stays opaque blue.
 
-Tests: gradient diagonal + radial, dash array, pattern tiling, clip-path
-inset/circle/polygon. Full go test green.
+6. Scrollbar drag interaction — already implemented in a previous round
+   (drag/hover/auto-hide/keyboard scroll); no change.
+
+Tests: symbol use, userSpace gradient, clip+shadow, text rotate, blend
+multiply. Full go test green.

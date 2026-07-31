@@ -25,6 +25,8 @@ import (
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 	"wb-ui/widgets"
+
+	"github.com/hoonfeng/goskia/skia"
 )
 
 // Paint is the top-level paint entry point, mirroring FrameView::paint() which calls
@@ -551,6 +553,15 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 			}
 		}
 	}
+	// Apply CSS mix-blend-mode: wrap in an offscreen layer composited with
+	// the blend mode (mirrors WebKit's blend mode layer).
+	var blendCleanup func()
+	if st := box.Style(); st != nil {
+		if bm := parseBlendMode(st.GetProperty("mix-blend-mode")); bm != nil {
+			info.canvas.SaveLayerWithBlendMode(*bm)
+			blendCleanup = info.canvas.Restore
+		}
+	}
 	// Apply CSS filter: wrap painting in a SaveLayer with ImageFilter.
 	var filterCleanup func()
 	if st := box.Style(); st != nil && st.Filter != "" && st.Filter != "none" {
@@ -568,9 +579,53 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	if filterCleanup != nil {
 		defer filterCleanup()
 	}
+	if blendCleanup != nil {
+		defer blendCleanup()
+	}
 	if clipCleanup != nil {
 		defer clipCleanup()
 	}
+}
+
+// parseBlendMode maps a CSS mix-blend-mode value to a skia blend mode.
+// Returns nil for "normal" or unknown values (no layer needed).
+func parseBlendMode(s string) *skia.BlendMode {
+	var m skia.BlendMode
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "multiply":
+		m = skia.BlendModeMultiply
+	case "screen":
+		m = skia.BlendModeScreen
+	case "overlay":
+		m = skia.BlendModeOverlay
+	case "darken":
+		m = skia.BlendModeDarken
+	case "lighten":
+		m = skia.BlendModeLighten
+	case "color-dodge":
+		m = skia.BlendModeColorDodge
+	case "color-burn":
+		m = skia.BlendModeColorBurn
+	case "hard-light":
+		m = skia.BlendModeHardLight
+	case "soft-light":
+		m = skia.BlendModeSoftLight
+	case "difference":
+		m = skia.BlendModeDifference
+	case "exclusion":
+		m = skia.BlendModeExclusion
+	case "hue":
+		m = skia.BlendModeHue
+	case "saturation":
+		m = skia.BlendModeSaturation
+	case "color":
+		m = skia.BlendModeColor
+	case "luminosity":
+		m = skia.BlendModeLuminosity
+	default:
+		return nil
+	}
+	return &m
 }
 // <wb-editor> custom elements by delegating to the editor package's painter, and
 // native form controls (checkbox/radio/range/progress/meter/select arrow) via

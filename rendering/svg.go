@@ -208,10 +208,11 @@ type svgStop struct {
 }
 
 type svgGradient struct {
-	id        string
+	id            string
 	x1, y1, x2, y2 float64 // linear
 	cx, cy, r       float64 // radial
 	isRadial        bool
+	userSpaceOnUse  bool // gradientUnits="userSpaceOnUse" (default: objectBoundingBox)
 	stops           []svgStop
 }
 
@@ -533,14 +534,16 @@ func arcToPolyline(x1, y1, rx, ry, phi float64, largeArc, sweep bool, x2, y2 flo
 // --- SVG Text ---
 
 type svgText struct {
-	x, y float64
-	fontFamily string
-	fontSize   float64
-	textAnchor string
-	content    string
-	fill       graphics.Color
-	stroke     graphics.Color
-	strokeWidth float64
+	x, y          float64
+	fontFamily    string
+	fontSize      float64
+	textAnchor    string
+	content       string
+	fill          graphics.Color
+	stroke        graphics.Color
+	strokeWidth   float64
+	rotate        float64       // rotate="45" degrees around the anchor point
+	letterSpacing float64       // letter-spacing in px
 }
 
 func (s *svgText) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
@@ -570,6 +573,16 @@ func (s *svgText) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	lines := strings.Split(s.content, "\n")
 	lineHeight := size * 1.2
+
+	// Rotate the whole text block around the anchor point (SVG rotate attr).
+	if s.rotate != 0 {
+		canvas.Save()
+		canvas.Translate(s.x, s.y)
+		canvas.Rotate(s.rotate)
+		canvas.Translate(-s.x, -s.y)
+		defer canvas.Restore()
+	}
+
 	for i, line := range lines {
 		if line == "" {
 			continue
@@ -583,6 +596,19 @@ func (s *svgText) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			textX -= w
 		}
 		baseline := s.y + float64(i)*lineHeight
+		if s.letterSpacing != 0 {
+			// Draw character by character with added spacing.
+			cx := textX
+			for _, ch := range line {
+				chStr := string(ch)
+				canvas.DrawText(cx, baseline, chStr, font, fill)
+				if s.stroke.A > 0 && s.strokeWidth > 0 {
+					canvas.DrawText(cx, baseline, chStr, font, s.stroke)
+				}
+				cx += graphics.MeasureText(font, chStr) + s.letterSpacing
+			}
+			continue
+		}
 		canvas.DrawText(textX, baseline, line, font, fill)
 		if s.stroke.A > 0 && s.strokeWidth > 0 {
 			canvas.DrawText(textX, baseline, line, font, s.stroke)
@@ -860,15 +886,17 @@ func parseSVGElement(el *dom.Element) svgShape {
 	case "text":
 		content := el.TextContent()
 		return &svgText{
-			x:           parseSVGCoord(el.GetAttribute("x")),
-			y:           parseSVGCoord(el.GetAttribute("y")),
-			fontFamily:  getAttr("font-family"),
-			fontSize:    parseSVGCoord(getAttr("font-size")),
-			textAnchor:  el.GetAttribute("text-anchor"),
-			content:     content,
-			fill:        parseColorAttribute(getAttr("fill")),
-			stroke:      parseColorAttribute(getAttr("stroke")),
-			strokeWidth: parseSVGCoord(getAttr("stroke-width")),
+			x:            parseSVGCoord(el.GetAttribute("x")),
+			y:            parseSVGCoord(el.GetAttribute("y")),
+			fontFamily:   getAttr("font-family"),
+			fontSize:     parseSVGCoord(getAttr("font-size")),
+			textAnchor:   el.GetAttribute("text-anchor"),
+			content:      content,
+			fill:         parseColorAttribute(getAttr("fill")),
+			stroke:       parseColorAttribute(getAttr("stroke")),
+			strokeWidth:  parseSVGCoord(getAttr("stroke-width")),
+			rotate:       parseSVGCoord(el.GetAttribute("rotate")),
+			letterSpacing: parseSVGCoord(getAttr("letter-spacing")),
 		}
 	case "image":
 		href := el.GetAttribute("href")
@@ -906,6 +934,9 @@ func parseGradientElement(el *dom.Element) *svgGradient {
 	}
 	g := &svgGradient{
 		id: el.GetAttribute("id"),
+	}
+	if strings.EqualFold(el.GetAttribute("gradientUnits"), "userSpaceOnUse") {
+		g.userSpaceOnUse = true
 	}
 	if tag == "radialgradient" {
 		g.isRadial = true
@@ -962,7 +993,7 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 		cx := g.cx
 		cy := g.cy
 		r := g.r
-		if cx == 0 && cy == 0 && r == 50 {
+		if !g.userSpaceOnUse && cx == 0 && cy == 0 && r == 50 {
 			// Default: center of bounding box
 			cx = x + w/2
 			cy = y + h/2
@@ -977,6 +1008,34 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 	// projecting each point onto the gradient axis (SVG objectBoundingBox:
 	// x1/y1/x2/y2 are percentages of the shape bbox).
 	x1, y1, x2, y2 := g.x1, g.y1, g.x2, g.y2
+	if g.userSpaceOnUse {
+		// Coordinates are absolute user-space units: project directly.
+		ax, ay := x1, y1
+		bx, by := x2, y2
+		vx, vy := bx-ax, by-ay
+		den := vx*vx + vy*vy
+		if den == 0 {
+			canvas.FillRect(x, y, w, h, g.stops[len(g.stops)-1].color)
+			return
+		}
+		stops := make([]ColorStop, len(g.stops))
+		for i, s := range g.stops {
+			stops[i] = ColorStop{Color: s.color, Position: s.offset}
+		}
+		if w*h > 40000 {
+			canvas.FillLinearGradient(x, y, w, h, g.stops[0].color, g.stops[len(g.stops)-1].color)
+			return
+		}
+		for py := int(y); py < int(y+h); py++ {
+			for px := int(x); px < int(x+w); px++ {
+				pxc := float64(px) + 0.5
+				pyc := float64(py) + 0.5
+				t := ((pxc-ax)*vx + (pyc-ay)*vy) / den
+				canvas.FillRect(float64(px), float64(py), 1, 1, interpolateColor(stops, t))
+			}
+		}
+		return
+	}
 	if x1 == 0 && y1 == 0 && x2 == 100 && y2 == 0 {
 		// Default: left to right across the bounding box.
 		stops := make([]ColorStop, len(g.stops))
@@ -1356,6 +1415,11 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			}
 		}
 
+		// <symbol> is a template: never rendered directly, only via <use>.
+		if tag == "symbol" {
+			return
+		}
+
 		// Handle <use> elements: look up referenced element and clone its shape
 		if tag == "use" {
 			href := childEl.GetAttribute("href")
@@ -1369,6 +1433,30 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 				refID = strings.TrimSpace(href)[1:]
 			}
 			if refEl, ok := doc.elementByID[refID]; ok {
+				// <symbol> is a template container: render each of its child
+				// shapes, applying the <use> x/y offset to the whole set.
+				if strings.ToLower(refEl.LocalName()) == "symbol" {
+					dx := parseSVGCoord(childEl.GetAttribute("x"))
+					dy := parseSVGCoord(childEl.GetAttribute("y"))
+					for c := refEl.FirstChild(); c != nil; c = c.NextSibling() {
+						if subEl, ok := c.(*dom.Element); ok {
+							shape := parseSVGElement(subEl)
+							if shape == nil {
+								continue
+							}
+							if f := subEl.GetAttribute("fill"); f != "" {
+								if col := parseColorAttribute(f); col.A > 0 {
+									shape = &svgFilledShape{shape: shape, fill: col}
+								}
+							}
+							if dx != 0 || dy != 0 {
+								shape = &svgTranslatedShape{shape: shape, dx: dx, dy: dy}
+							}
+							doc.shapes = append(doc.shapes, shape)
+						}
+					}
+					return
+				}
 				refShape := parseSVGElement(refEl)
 				if refShape != nil {
 					// The referenced shape is pure geometry; resolve its
