@@ -39,11 +39,12 @@ label {
 }
 
 /* Replaced elements: input, button, select, textarea are inline-block by
-   default so they sit on the text baseline. */
+   default so they sit on the text baseline. The 13.33px font matches
+   WebCore's -webkit-small-control default for form controls. */
 input, button, select, textarea {
 	display: inline-block;
 	font-family: inherit;
-	font-size: inherit;
+	font-size: 13.3333px;
 	color: inherit;
 	vertical-align: middle;
 }

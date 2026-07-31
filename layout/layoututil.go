@@ -120,7 +120,16 @@ func parseCSSLength(s string) style.Length {
 	if err != nil {
 		return style.Length{Unit: "auto"}
 	}
-	return style.Length{Value: num, Unit: s[i:]}
+	unit := s[i:]
+	// A bare number is only valid as a length when it is 0 (CSS Values §5.1:
+	// "the unit may be omitted when the value is zero"). Treat "0" as 0px.
+	if unit == "" && num != 0 {
+		return style.Length{Unit: "auto"}
+	}
+	if unit == "" {
+		unit = "px"
+	}
+	return style.Length{Value: num, Unit: unit}
 }
 
 

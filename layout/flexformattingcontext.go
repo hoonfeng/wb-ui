@@ -490,9 +490,16 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			case "space-between", "space-around":
 				itemCount := len(items)
 				if itemCount > 1 {
+					// freeGap is the leftover after items AND the explicit gap
+					// spacings; the justify gaps are distributed over the
+					// remaining free space only (CSS Flexbox §8.2).
+					gapSum := gap * float64(itemCount-1)
+					if justify == "space-around" { gapSum = gap * float64(itemCount) }
+					freeSpace := freeGap - gapSum
+					if freeSpace < 0 { freeSpace = 0 }
 					divisor := float64(itemCount - 1)
 					if justify == "space-around" { divisor = float64(itemCount) }
-					extraGap := freeGap / divisor
+					extraGap := freeSpace / divisor
 					gap += extraGap
 				}
 			}
@@ -508,9 +515,13 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			case "space-between", "space-around":
 				itemCount := len(items)
 				if itemCount > 1 {
+					gapSum := gap * float64(itemCount-1)
+					if justify == "space-around" { gapSum = gap * float64(itemCount) }
+					freeSpace := freeGap - gapSum
+					if freeSpace < 0 { freeSpace = 0 }
 					divisor := float64(itemCount - 1)
 					if justify == "space-around" { divisor = float64(itemCount) }
-					extraGap := freeGap / divisor
+					extraGap := freeSpace / divisor
 					gap += extraGap
 				}
 			}

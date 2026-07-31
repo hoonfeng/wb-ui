@@ -75,6 +75,15 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	establishesBFC := box.EstablishesBlockFormattingContext()
+
+	// Margin collapsing: if this box has no border/padding on top (so its top
+	// margin is "adjoining" with its first in-flow child), seed the bubbled
+	// margin with this box's own top margin. The child's collapsed offset then
+	// absorbs the max of both (CSS 2.1 §8.3.1).
+	if !establishesBFC && g.BorderTop() == 0 && g.PaddingTop() == 0 && box.Parent() != nil {
+		state.AdjoiningTopMargin = g.MarginBefore()
+	}
+
 	var fc *floatContext
 	if establishesBFC {
 		// Only BFC-establishing boxes create their own float context.
@@ -159,7 +168,24 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		topMargin := margin.Top
 		collapsedTop := 0.0
 		if firstInFlow && collapseTopWithParent {
+			// The child's top margin collapses with this box's own top margin
+			// (CSS 2.1 §8.3.1). The box's own margin has already been applied
+			// as its content offset, so the child only advances by the amount
+			// that exceeds the box's margin (the larger of the two wins).
 			collapsedTop = topMargin
+			if bubbled := state.AdjoiningTopMargin; bubbled > collapsedTop {
+				collapsedTop = bubbled
+			}
+			// Box's margin is already in the cursor position; only the excess
+			// over the box's margin moves the child further down.
+			if boxOwn := g.MarginBefore(); boxOwn > 0 {
+				if excess := collapsedTop - boxOwn; excess > 0 {
+					collapsedTop = excess
+				} else {
+					collapsedTop = 0
+				}
+			}
+			state.AdjoiningTopMargin = collapsedTop
 		} else {
 			collapsedTop = math.Max(pendingMargin, topMargin)
 		}

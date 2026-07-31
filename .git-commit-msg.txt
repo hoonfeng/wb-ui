@@ -1,14 +1,33 @@
-fix: cross-platform window backend alignment (IME/drop/focus/software render)
+feat: browser consistency verification suite + engine alignment fixes
 
-- app/host.go: fix software-rendered backends (X11/Cocoa) never rendering —
-  the main loop skipped the paint path when GPUSurface() returned nil; now
-  falls back to Window.Canvas() for CPU raster + Present
-- platform/window: add Canvas() to all three backends (glfw returns nil,
-  x11/macos return the raster canvas)
-- platform/window/window_x11.go: wire up XIM IME (Init + SetClientWindow +
-  FilterEvent on KeyPress), implement IME()/PollIMEEvents()/SetIMECompositionPos/
-  SetIMEEnabled, add PostEvent/Focus (XRaiseWindow), call dropCallback on drop
-- platform/window/window_macos.go: wire up NSTextInputClient IME (Init with
-  NSView), implement IME methods, add PostEvent/Focus (cocoa_focus helper),
-  remove unused extern goCocoaViewEvent declaration
-- platform/window/window_glfw.go: import graphics for Canvas()
+New dev/consistency suite verifies wb-ui rendering against a real browser
+(Edge/Chrome headless) across layout, styles, animations, form controls,
+and interaction. 11 cases, 9 pass.
+
+Verification architecture:
+- edge.go: launches Edge headless, injects a JS collector that serializes
+  per-element geometry/computed-style/state into document.title, reads it
+  back via --dump-dom
+- wbui.go: renders the same HTML through the wb-ui full pipeline and
+  extracts identical per-element snapshots
+- compare.go: aligns snapshots by tag#id and diffs geometry (tolerances)
+  + style + content, writing a structured report to dev/consistency/report/
+- cases.go: 11 cases covering block/flex/position/float layout, cascade/
+  box styles, opacity/transform animations, form controls, lists, click
+- usage: go run ./dev/consistency [-case name]
+
+Engine fixes discovered by the suite:
+- layout/layoututil.go: parseCSSLength treats bare "0" as 0px (was auto,
+  breaking absolute right:0/bottom:0 positioning)
+- layout/blockformattingcontext.go: margin collapse across body/html —
+  body margin participates in first-child collapse via AdjoiningTopMargin
+- layout/flexformattingcontext.go: space-between/space-around subtract
+  explicit gap before distributing free space (was over-spacing)
+- style/resolver.go: background/border shorthands keep function values
+  (rgb(...)) intact via splitShorthandValue (were split on whitespace)
+- layout/inlineformattingcontext.go: text inputs get ~20ch default width;
+  select/textarea get browser-default sizes
+- html5/defaultcss.go: form controls default font-size 13.3333px (WebKit
+  -webkit-small-control)
+- dev/consistency: Edge viewport detection (headless innerWidth !=
+  window-size), extractGeo stops at </title> not newline, option skip

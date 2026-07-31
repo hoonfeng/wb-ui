@@ -29,6 +29,12 @@ type LayoutState struct {
 	savedMainDefinite  bool
 	savedMainFallback  float64
 
+	// AdjoiningTopMargin is the margin-top that has bubbled up from an in-flow
+	// child whose parent has no border/padding (CSS margin collapsing across
+	// parent boundaries). A child's margin collapses with the largest adjoining
+	// margin instead of stacking.
+	AdjoiningTopMargin float64
+
 	// Per-box geometry cache (mirrors WebKit's BoxGeometry storage).
 	geometry map[Box]*BoxGeometry
 }

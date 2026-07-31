@@ -396,9 +396,9 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background":
-		// Shorthand: try to extract background-color.
-		parts := strings.Fields(valueString)
-		for _, p := range parts {
+		// Shorthand: extract the background-color. Splits on whitespace but
+		// keeps function values (rgb(...) etc.) intact.
+		for _, p := range splitShorthandValue(valueString) {
 			if c, ok := parseColor(p); ok {
 				cs.BackgroundColor = c
 				break
@@ -1152,11 +1152,45 @@ func parseEdgeShorthand(s string) (top, right, bottom, left Length) {
 	return
 }
 
+// splitShorthandValue splits a shorthand value on whitespace while keeping
+// parenthesized groups (rgb(...), calc(...), url(...)) together, so function
+// values are not torn apart into separate fields.
+func splitShorthandValue(s string) []string {
+	var parts []string
+	depth := 0
+	cur := strings.Builder{}
+	for _, r := range s {
+		switch r {
+		case '(':
+			depth++
+			cur.WriteRune(r)
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteRune(r)
+		case ' ', '\t', '\n', '\r':
+			if depth > 0 {
+				cur.WriteRune(r)
+			} else if cur.Len() > 0 {
+				parts = append(parts, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		parts = append(parts, cur.String())
+	}
+	return parts
+}
+
 // parseBorderShorthand parses a border shorthand value like "1px solid #e5e7eb" and
 // returns (width, style, color, ok). Components may appear in any order; missing
 // components are left as their zero value.
 func parseBorderShorthand(s string) (width Length, style string, color Color, ok bool) {
-	parts := strings.Fields(s)
+	parts := splitShorthandValue(s)
 	if len(parts) == 0 {
 		return
 	}

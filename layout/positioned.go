@@ -39,7 +39,6 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	}
 	g := state.GeometryForBox(box)
 	cbWidth, cbHeight := cbContentBoxSizeForBox(cb, root, state)
-
 	margin, padding, border := computeBoxModel(box, cbWidth, fontSizeOf(box))
 	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)

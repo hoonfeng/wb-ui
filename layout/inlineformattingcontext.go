@@ -236,30 +236,60 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			childCtx.Layout(cld, state)
 
 			// Fallback: for replaced input/button elements without explicit CSS
-			// width, derive width from the HTML value attribute text.
+			// width, derive width from the HTML value attribute text. Text
+			// inputs get the browser default ~20ch width (Edge reports ~177px
+			// at 13.33px font) regardless of the value attribute.
 			if cldG.ContentWidth() <= 0 && cld.IsReplaced() {
 				if el := cld.Element(); el != nil && el.NodeName() == "INPUT" {
+					typ := el.GetAttribute("type")
 					val := el.GetAttribute("value")
-					if val == "" {
-						switch el.GetAttribute("type") {
-						case "submit":
-							val = "Submit"
-						case "reset":
-							val = "Reset"
-						case "button":
-							val = "Button"
+					switch typ {
+					case "text", "password", "search", "email", "url", "tel",
+						"number", "date", "time", "month", "week", "datetime-local":
+						// ~20ch default width, matching Chromium's default text
+						// field size (Edge: 177px at 13.33px ≈ 8.3px/char).
+						chW := measureText(cld, "0")
+						if chW <= 0 {
+							chW = fs * 0.5
 						}
+						cldG.SetContentWidth(20*chW + 8)
+					case "submit":
+						val = "Submit"
+					case "reset":
+						val = "Reset"
+					case "button":
+						val = "Button"
 					}
-					if val != "" {
+					if val != "" && cldG.ContentWidth() <= 0 {
 						textW := measureText(cld, val)
 						if textW > 0 {
 							cldG.SetContentWidth(textW)
-							if cldG.ContentHeight() <= 0 {
-								lineH := fontLineGap(cld)
-								if lineH <= 0 { lineH = fs * 1.2 }
-								cldG.SetContentHeight(lineH)
-							}
 						}
+					}
+					if cldG.ContentWidth() > 0 && cldG.ContentHeight() <= 0 {
+						lineH := fontLineGap(cld)
+						if lineH <= 0 {
+							lineH = fs * 1.2
+						}
+						cldG.SetContentHeight(lineH)
+					}
+				} else if el := cld.Element(); el != nil {
+					// SELECT / TEXTAREA default sizes (browser defaults):
+					// select ≈ 45px wide, textarea ≈ 2 columns x 2 rows.
+					switch el.LocalName() {
+					case "select":
+						cldG.SetContentWidth(45)
+						if cldG.ContentHeight() <= 0 {
+							cldG.SetContentHeight(fs * 1.4)
+						}
+					case "textarea":
+						chW := measureText(cld, "0")
+						if chW <= 0 {
+							chW = fs * 0.5
+						}
+						// ~20 cols x 2 rows, plus padding.
+						cldG.SetContentWidth(20*chW + 4)
+						cldG.SetContentHeight(2*fontLineGap(cld) + 4)
 					}
 				}
 			}

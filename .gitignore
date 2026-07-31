@@ -32,6 +32,8 @@ translation-progress.txt
 *.ppm 
 dump.txt 
  
+# Consistency suite runtime reports
+dev/consistency/report/
 # Temp debug scripts 
 _debug_*.py 
 _fix_*.py 
