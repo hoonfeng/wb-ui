@@ -271,18 +271,45 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 
 	total := 0.0
 	maxH := 0.0
+	blockChildCount := 0
 	for _, child := range box.Children() {
 		if !child.IsInFlow() { continue }
 		switch c := child.(type) {
 		case *ElementBox:
-			h := fontLineGap(c)
-			if isColFlex { total += h }
+			// Use the child's real height: explicit height wins, otherwise
+			// recurse for intrinsic content height, falling back to the line
+			// gap only for text-only boxes. Using fontLineGap unconditionally
+			// collapsed flex column items with tall children (e.g. a 150px
+			// textarea → container height ~25px, child overflowed).
+			h := 0.0
+			if cs := c.Style(); cs != nil {
+				if hv, ok := definiteHeight(cs.Height, 0, fontSizeOf(c)); ok && hv > 0 {
+					h = hv
+				} else {
+					h = intrinsicContentHeight(c)
+				}
+			}
+			if h <= 0 { h = fontLineGap(c) }
+			if isColFlex {
+				total += h
+			} else if !c.IsFloated() {
+				// Block container: block-level children stack vertically, so
+				// their heights sum (a toolbar under a textarea must push the
+				// container taller, not be capped by max(child)).
+				blockChildCount++
+				total += h
+			}
 			if h > maxH { maxH = h }
 		case *InlineTextBox:
 			h := fontLineGap(box)
 			if isColFlex { total += h }
 			if h > maxH { maxH = h }
 		}
+	}
+	if !isColFlex && blockChildCount > 0 {
+		// Multiple block children stack: total height = sum. A single child
+		// may be inline (line box) — max is right for that case.
+		maxH = total
 	}
 	if isColFlex {
 		maxH = total

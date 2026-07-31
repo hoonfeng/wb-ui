@@ -15,6 +15,9 @@
 package rendering
 
 import (
+	"strconv"
+	"strings"
+
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
@@ -246,16 +249,66 @@ func (b *RenderTreeBuilder) isInlineLevel(cs *style.ComputedStyle) bool {
 // When the resolver is available but CSS did not explicitly set 'display', the
 // tag-based default is used as the UA stylesheet would.
 func (b *RenderTreeBuilder) resolveStyle(el *dom.Element) *style.ComputedStyle {
+	var cs *style.ComputedStyle
 	if b.resolver != nil {
-		cs := b.resolver.ResolveElement(el)
+		cs = b.resolver.ResolveElement(el)
 		// Apply tag-based default display when no CSS rule explicitly set it,
 		// mirroring the UA stylesheet defaults in a real browser.
 		if !cs.DisplaySet {
 			cs.Display = defaultDisplayForTag(el.LocalName())
 		}
-		return cs
+	} else {
+		cs = defaultStyleForTag(el.LocalName())
 	}
-	return defaultStyleForTag(el.LocalName())
+	// SVG / replaced-element presentation attributes: the width/height
+	// attributes map to CSS width/height when no stylesheet rule declared
+	// them (WebKit treats them as low-priority presentation attributes).
+	// Without this, <svg width="18" height="18"> sized to 0×18 and every
+	// icon in the Vue app rendered as a zero-width sliver.
+	if el.LocalName() == "svg" || el.LocalName() == "img" {
+		if _, declared := cs.Properties["width"]; !declared {
+			if aw := el.GetAttribute("width"); aw != "" {
+				if l, ok := parseAttrLength(aw); ok {
+					cs.Width = l
+				}
+			}
+		}
+		if _, declared := cs.Properties["height"]; !declared {
+			if ah := el.GetAttribute("height"); ah != "" {
+				if l, ok := parseAttrLength(ah); ok {
+					cs.Height = l
+				}
+			}
+		}
+	}
+	return cs
+}
+
+// parseAttrLength converts an HTML presentation-attribute length ("18" or
+// "18px", unitless = px) into a style.Length.
+func parseAttrLength(s string) (style.Length, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return style.Length{}, false
+	}
+	i := 0
+	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.' || s[i] == '-' || s[i] == '+') {
+		i++
+	}
+	num := s[:i]
+	if num == "" {
+		return style.Length{}, false
+	}
+	v, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return style.Length{}, false
+	}
+	unit := s[i:]
+	switch unit {
+	case "", "px":
+		return style.Length{Value: v, Unit: "px"}, true
+	}
+	return style.Length{}, false
 }
 
 // attachLayoutTree builds the layout tree via layout.BuildLayoutTree and links each
