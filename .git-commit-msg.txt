@@ -1,42 +1,37 @@
-feat: SVG <symbol> + userSpaceOnUse + clip shadow + text rotate + blend
+feat: fix CJK tofu + word-break/overflow-wrap character breaking
 
-Candidates round:
+Full-scan round:
 
-1. SVG <symbol> via <use> (svg.go + svg_symbol_test.go):
-   - <symbol> templates were collected by id but parseSVGElement returned nil
-     for them, so use href="#sym" silently dropped the content. Now <use>
-     referencing a <symbol> renders each child shape with fill resolution and
-     the use x/y offset applied to the whole set; walk skips <symbol> subtrees
-     (template-only, never painted directly).
-   - Verified: red+blue rects inside a symbol render at use(10,10).
+1. CJK tofu fix (fontmgr.go):
+   - selectDefaults previously preferred OS "Arial" as the default sans —
+     Arial has no CJK glyphs, so text without an explicit font-family relied
+     on Skia's unstable system fallback (part of the UI rendered tofu boxes
+     while components with font-family picked YaHei fine).
+   - Now: sans-serif/default prefers OS "Microsoft YaHei" (CJK coverage +
+     intact system fallback chain), then raw msyh data, then Segoe UI, then
+     Arial as LAST resort. serif prefers OS "SimSun" (Chinese serif) over
+     kochi mincho.
+   - resolveFamily maps additional CJK family names (PingFang SC, SimHei,
+     SimSun, NSimSun, Hiragino, WenQuanYi, Noto Sans CJK) to YaHei so
+     font-family lists like "PingFang SC, Microsoft YaHei" resolve correctly.
+   - Verified via dev/fontprobe: default path ink 292→483 (YaHei glyphs
+     instead of Arial fallback); all 10 resolution paths render CJK.
 
-2. SVG gradientUnits=userSpaceOnUse (svg.go + svg_style_test.go):
-   - New svgGradient.userSpaceOnUse flag; when set, x1/y1/x2/y2 (and radial
-     cx/cy/r) are absolute user-space coordinates instead of bbox percentages:
-     the bbox-center fallback and bbox-projection are skipped, projecting
-     directly onto the absolute axis.
-   - Verified: two rects share one absolute 0..100 axis (left red, right blue).
+2. word-break / overflow-wrap (inlineformattingcontext.go + resolver.go +
+   wordbreak_test.go):
+   - Previously a single word wider than the whole line could not break —
+     long URLs / CJK-free words overflowed the container.
+   - New: when wordWidth > line availWidth and word-break:break-all (or
+     overflow-wrap:break-word), the word is split per character with proper
+     line wrapping (no space prefix, mirrors WebCore break-word handling).
+   - Resolver now parses word-break and overflow-wrap (word-wrap alias).
+   - Verified: 20-char word in 60px box splits across >=2 lines with
+     break-all / break-word; without a rule it overflows on one line.
 
-3. CSS clip-path composes with box-shadow (clip_path_test.go):
-   - Confirmed box-shadow is drawn inside PaintBackground, so an inset clip
-     trims the shadow spill — added TestClipPathInsetShadow.
+Scan notes (gaps recorded, not implemented this round):
+   - position: sticky scroll-pinning (complex, needs scroll-container)
+   - backdrop-filter (GPU cost)
+   - SVG <marker>
+   - file input renders via generic text-input path
 
-4. SVG text rotate + letter-spacing (svg.go + svg_style_test.go):
-   - rotate="45" draws the whole text block rotated around the anchor point
-     (canvas Save/Translate/Rotate/Restore); letter-spacing draws character
-     by character with added advance.
-   - Verified: rotate=90 makes horizontal text vertical.
-
-5. CSS mix-blend-mode (canvas.go + renderpipeline.go + blend_test.go):
-   - New Canvas.SaveLayerWithBlendMode (offscreen layer composited with the
-     skia blend mode on Restore); paintObjectBackground wraps boxes with
-     mix-blend-mode in such a layer; parseBlendMode maps all CSS values
-     (multiply/screen/overlay/darken/…/luminosity).
-   - Verified: blue box with multiply over gray yields blended #000080, while
-     non-overlapping top region stays opaque blue.
-
-6. Scrollbar drag interaction — already implemented in a previous round
-   (drag/hover/auto-hide/keyboard scroll); no change.
-
-Tests: symbol use, userSpace gradient, clip+shadow, text rotate, blend
-multiply. Full go test green.
+Tests: word break-all / break-word / no-rule overflow. Full go test green.

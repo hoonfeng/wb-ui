@@ -388,18 +388,26 @@ func (m *FontManager) selectDefaults() {
 	if m.monoTF == nil {
 		m.monoTF = m.findBest("dejavu sans mono", 400, false)
 	}
-	// sans-serif: prefer Microsoft YaHei (proportional CJK, like GWui), then
-	// fall back to other sans-serif families. Use OS font name lookup first
-	// (skia.NewTypeface) because NewTypefaceFromData on TTC files may return
-	// a valid Typeface that fails to render glyphs.
-	if dt := skia.NewTypeface("Arial", skia.FontStyle{Weight: 400, Width: 5, Slant: 0}); dt != nil {
+	// sans-serif: prefer OS Microsoft YaHei (CJK coverage + intact system
+	// fallback chain) over raw-data faces. OS-name lookup (skia.NewTypeface)
+	// is used first because NewTypefaceFromData on TTC files may return a
+	// Typeface that fails to render glyphs, and OS faces keep Skia's system
+	// fallback for characters the face lacks. Arial is a LAST resort (no
+	// CJK coverage — would render tofu for Chinese without fallback).
+	if dt := skia.NewTypeface("Microsoft YaHei", skia.FontStyle{Weight: 400, Width: 5, Slant: 0}); dt != nil {
 		m.sansTF = dt
 	}
 	if m.sansTF == nil {
-		m.sansTF = skia.NewTypeface("Times New Roman", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+		m.sansTF = m.findBest("microsoft yahei", 400, false)
 	}
 	if m.sansTF == nil {
-		m.sansTF = m.findBest("microsoft yahei", 400, false)
+		m.sansTF = skia.NewTypeface("Segoe UI", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	}
+	if m.sansTF == nil {
+		m.sansTF = skia.NewTypeface("Arial", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	}
+	if m.sansTF == nil {
+		m.sansTF = skia.NewTypeface("Times New Roman", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 	}
 	if m.sansTF == nil {
 		m.sansTF = m.findBest("kochi gothic", 400, false)
@@ -413,8 +421,12 @@ func (m *FontManager) selectDefaults() {
 	if m.sansTF == nil && len(m.fonts) > 0 {
 		m.sansTF = m.fonts[0].tf
 	}
-	// serif: prefer CJK-capable serif (kochi mincho), fall back to DejaVuSerif
-	m.serifTF = m.findBest("kochi mincho", 400, false)
+	// serif: prefer OS SimSun (Chinese serif, matches browser default serif
+	// for CJK), then kochi mincho / DejaVuSerif / LiberationSerif.
+	m.serifTF = skia.NewTypeface("SimSun", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	if m.serifTF == nil {
+		m.serifTF = m.findBest("kochi mincho", 400, false)
+	}
 	if m.serifTF == nil {
 		m.serifTF = m.findBest("dejavu serif", 400, false)
 	}
@@ -552,7 +564,9 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "nsimsun", true // generic �?always available
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
-		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system":
+		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system",
+			"pingfang sc", "pingfang", "hiragino sans gb", "hiragino", "simhei",
+			"simsun", "nsimsun", "heiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
 			return "microsoft yahei", false
 		case "roboto":
 			return "roboto", false

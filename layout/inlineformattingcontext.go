@@ -187,6 +187,46 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					firstWord = true
 					nextX = 0
 				}
+				// A single word wider than the whole line: break it per
+				// character when word-break:break-all or
+				// overflow-wrap:break-word (mirrors WebCore break-word
+				// handling for long URLs / CJK-free text).
+				if wordWidth > currentLine.availWidth {
+					wordBreak := cs.GetProperty("word-break")
+					overflowWrap := cs.GetProperty("overflow-wrap")
+					if wordBreak == "break-all" || wordBreak == "break-word" || overflowWrap == "break-word" {
+						for i, ch := range []rune(word) {
+							chStr := string(ch)
+							chW := measureText(box, chStr)
+							if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth {
+								lines = append(lines, currentLine)
+								newY := currentLine.y + lineHeight
+								newCx, newCw := availableLineWidth(newY)
+								currentLine = lineInfo{
+									y: newY,
+									contentX: newCx,
+									segStart: len(pending),
+									widthUsed: 0,
+									availWidth: newCw,
+								}
+								firstWord = true
+							}
+							pending = append(pending, pendingSeg{
+								textBox: cld,
+								seg: TextSegment{
+									Start: wordStart + i, Len: 1,
+									X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
+									Width: chW, Height: textHeight,
+									LineY: currentLine.y, LineHeight: lineHeight,
+								},
+								lineIdx: len(lines),
+							})
+							currentLine.widthUsed += chW
+							firstWord = false
+						}
+						continue
+					}
+				}
 				pending = append(pending, pendingSeg{
 					textBox: cld,
 					seg: TextSegment{
