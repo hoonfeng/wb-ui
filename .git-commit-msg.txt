@@ -1,8 +1,23 @@
-chore: remove more debug leftover files from earlier sessions
+feat: table auto-layout (content-aware column widths) + font-family quote fix
 
-Accumulated throwaway scripts and outputs that were swept into
-auto-commits during earlier debugging: _build_test*.bat, _check.py,
-_count_lines.py, _replace*.py, build_check*.bat, build_err.txt,
-build_log.txt, click_dbg/out.txt, clicktest_output.txt,
-form_pixels*.txt, step10_*/step12_*/step17_* probe outputs,
-temp_*.txt, tmp_scan.txt, wbui_last_run.txt, wbui_test_out.txt.
+1. Table auto layout (CSS2.1 §17.5.2.2): column widths are now computed
+   from content instead of equal distribution. Each auto column's
+   preferred width is the widest cell content (text advance + horizontal
+   padding/border) in that column; remaining table width is split in
+   proportion to preferred widths. Matches Edge for both single-char
+   cells (equal split when glyphs are equal width) and content-heavy
+   cells (AAAA/DDDDDD columns scale by measured text). Verified by Edge
+   probes: wideleft 233.7/66.3 (Edge 234/66), mixed 115.6/184.4
+   (Edge 116/184).
+
+2. font-family parser bug: quoted families like 'Arial' were stored with
+   the quotes ("\"Arial\"") because css.Token serialization adds them,
+   so the family never matched any real font and always fell back to
+   the default. Trim quotes in both resolve paths.
+
+3. layout_table case extended to 16 elements (two tables: equal-width
+   cells + content-differentiated columns) and pinned to Arial so wb-ui
+   and Edge measure glyphs identically; the td/table width tolerance
+   hack is removed since column widths now match exactly (0 diffs).
+
+Consistency suite: 13/13 green, layout_table 16/16 with zero diffs.

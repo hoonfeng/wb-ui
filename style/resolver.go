@@ -405,7 +405,7 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			}
 		}
 	case "font-family":
-		cs.FontFamily = valueString
+		cs.FontFamily = strings.Trim(valueString, `"'`)
 	case "font-size":
 		if l, ok := parseLength(valueString); ok {
 			cs.FontSize = l
@@ -1497,7 +1497,7 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.Color = c
 			}
 		case "font-family":
-			cs.FontFamily = resolvedStr
+			cs.FontFamily = strings.Trim(resolvedStr, `"'`)
 		case "font-size":
 			if l, ok := parseLength(resolvedStr); ok {
 				cs.FontSize = l

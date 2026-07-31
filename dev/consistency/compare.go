@@ -211,15 +211,9 @@ func xToleranceFor(et, wt string) float64 {
 }
 
 // widthToleranceFor returns the width tolerance for a pair of tags. Form
-// control default widths depend on the browser's widget internals; table
-// cells use the auto table-layout algorithm (content-aware) which wb-ui
-// approximates with equal distribution.
+// control default widths depend on the browser's widget internals.
 func widthToleranceFor(et, wt string) float64 {
 	if isFormControl(et) || isFormControl(wt) {
-		return 10
-	}
-	switch et {
-	case "td", "th", "table", "tbody", "col":
 		return 10
 	}
 	return GeoTolerance

@@ -133,7 +133,12 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	// Distribute remaining space equally among non-explicit columns.
+	// Distribute the remaining width among non-explicit columns using the
+	// table auto-layout heuristic: each column's preferred width is the
+	// widest cell content (text advance + horizontal padding + border) in
+	// that column; remaining space is then split in proportion to those
+	// preferred widths (CSS2.1 §17.5.2.2). This matches Edge for both
+	// single-char and multi-char cells.
 	explicitTotal := 0.0
 	autoCount := maxCols
 	for ci := 0; ci < maxCols; ci++ {
@@ -146,14 +151,44 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if remaining < 0 {
 		remaining = 0
 	}
-	if autoCount < 1 {
-		autoCount = 1
-	}
-	autoWidth := remaining / float64(autoCount)
 
+	// Compute per-column preferred widths from content.
+	prefCols := make([]float64, maxCols)
+	for _, row := range rows {
+		for ci, cell := range row.cells {
+			if ci >= maxCols {
+				break
+			}
+			if explicitCols[ci] {
+				continue
+			}
+			fs := fontSizeOf(cell)
+			_, padding, border := computeBoxModelForBox(cell, remaining, fs)
+			hp := padding.Left + padding.Right + border.Left + border.Right
+			w := tableCellPreferredWidth(cell, fs) + hp
+			if w > prefCols[ci] {
+				prefCols[ci] = w
+			}
+		}
+	}
+	sumPref := 0.0
 	for ci := 0; ci < maxCols; ci++ {
 		if !explicitCols[ci] {
-			colWidths[ci] = autoWidth
+			sumPref += prefCols[ci]
+		}
+	}
+	if autoCount > 0 && sumPref > 0 {
+		for ci := 0; ci < maxCols; ci++ {
+			if !explicitCols[ci] {
+				colWidths[ci] = prefCols[ci] * remaining / sumPref
+			}
+		}
+	} else if autoCount > 0 {
+		autoWidth := remaining / float64(autoCount)
+		for ci := 0; ci < maxCols; ci++ {
+			if !explicitCols[ci] {
+				colWidths[ci] = autoWidth
+			}
 		}
 	}
 
@@ -277,6 +312,35 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		sg.SetContentWidth(cw)
 		sg.SetContentHeight(math.Max(1, bottom-top))
 	}
+}
+
+// tableCellPreferredWidth returns the preferred (max-content) width of a
+// table cell: the advance width of its text content, or the widest child
+// element for non-text content.
+func tableCellPreferredWidth(cell *ElementBox, fs float64) float64 {
+	total := 0.0
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, c := range b.Children() {
+			if itb, ok := c.(*InlineTextBox); ok {
+				total += measureText(b, itb.Text())
+			} else if eb, ok := c.(*ElementBox); ok {
+				// Inline-level children (span/em) contribute their width;
+				// block children reset the total (each starts a new line).
+				childW := tableCellPreferredWidth(eb, fontSizeOf(eb))
+				if eb.IsInlineLevel() {
+					total += childW
+				} else if childW > total {
+					total = childW
+				}
+			}
+		}
+	}
+	walk(cell)
+	if total <= 0 {
+		total = fs * 0.5
+	}
+	return total
 }
 
 // ── helper methods for ElementBox ──

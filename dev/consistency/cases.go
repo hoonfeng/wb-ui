@@ -112,14 +112,18 @@ func allCases() []TestCase {
 			`, ""),
 		},
 		{
-			Name: "layout_table", Desc: "table/tr/td geometry, border-collapse",
+			Name: "layout_table", Desc: "table/tr/td geometry, border-collapse, auto column widths",
 			ViewportW: 800, ViewportH: 600,
 			HTML: baseDoc(`
 				<table id="t1" style="border-collapse:collapse;width:300px;background:#eee">
 					<tr><td id="td1" style="border:1px solid #000">A</td><td id="td2" style="border:1px solid #000">B</td></tr>
 					<tr><td id="td3" style="border:1px solid #000">C</td><td id="td4" style="border:1px solid #000">D</td></tr>
 				</table>
-			`, ""),
+				<table id="t2" style="border-collapse:collapse;width:300px;background:#ddd">
+					<tr><td id="tw1" style="border:1px solid #000">AAAA</td><td id="tw2" style="border:1px solid #000">B</td></tr>
+					<tr><td id="tw3" style="border:1px solid #000">C</td><td id="tw4" style="border:1px solid #000">DDDDDD</td></tr>
+				</table>
+			`, `<style>body,td{font-family:'Arial'}</style>`),
 		},
 		// ── Styles ──────────────────────────────────────────────
 		{
