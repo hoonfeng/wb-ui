@@ -1,36 +1,37 @@
-feat: SVG <g>/nested svg + bezier paths + object-position + SVG <image>
+feat: SVG <style> rules + transform + arc paths + multiline text
 
 Candidates round:
 
-1. SVG <g> groups + nested <svg> (svg.go + svg_group_test.go):
-   - <g> fill/stroke inheritance already flowed through walk's elCtx; tests
-     confirm group fill applies to children.
-   - Nested <svg> x/y offsets were missing: children painted at absolute
-     coords, ignoring the inner svg's x/y. walk now accumulates an (offX,
-     offY) passed to descendants; shapes get wrapped in svgTranslatedShape.
-     Verified: inner <svg x=30 y=20> shifts its rect to (30,20)+.
+1. SVG <style> sheet rules (svg.go + svg_style_test.go):
+   - <style> content parsed via css.NewParser; fill/stroke/stroke-width
+     declarations collected per rule (class or tag selector).
+   - Precedence: inline attribute > style="" > stylesheet rule (SVG
+     presentation-attribute semantics). matchSVGStyleRule matches ".cls" in
+     the element's class or a bare tag name.
+   - Verified: .redBox/.blueBox classes fill two rects; inline fill wins.
 
-2. SVG path curves (svg.go + svg_path_test.go):
-   - parseSVGPathData parsed C/c (cubic) and Q/q (quadratic) commands but
-     svgPath.paint only handled M/L/Z — curves rendered as straight M/L
-     segments. Added cubic/quadratic bezier sampling (16/12 steps) with
-     relative-command support, plus current-point tracking.
-   - Verified: cubic "M 10 50 C ... Z" fills red center; quadratic
-     stroke="blue" paints along the curve apex.
+2. SVG transform attribute (svg.go + svg_style_test.go):
+   - transform="translate(...)/scale(...)/rotate(...)" applied on the shape
+     via canvas.Save + applyTransformOps + Restore (reuses the CSS transform
+     pipeline); also composes with gradient fills and clip paths.
+   - Verified: translate(30,20) shifts the rect; scale(2) doubles it.
 
-3. img object-position (painter.go + objectfit_test.go):
-   - cover/contain/none now respect object-position (default 50% 50%);
-     percent/keyword parser (left/top/center/right/bottom). none now
-     centers by default per CSS Images §3 (was top-left).
-   - TestObjectFitPosition: none + left top pins the image to the corner.
+3. SVG path arc commands A/a (svg.go + svg_style_test.go):
+   - Elliptical arcs were parsed but never drawn. Added arcToPolyline: the
+     SVG 1.1 F.6.5 endpoint→center conversion (radius correction, large-arc/
+     sweep flags, angle sweep) sampled at 24 points with relative-command
+     support.
+   - Verified: two half-ellipse arcs stroke top/bottom of an ellipse.
 
-4. background-position — already complete (percent/keyword/px in
-   parseBackgroundPosition); no change needed.
+4. SVG text multiline (svg.go + svg_style_test.go):
+   - <text> with \n paints each line at baseline + i*lineHeight (1.2em);
+     tspan content already flows through TextContent. text-anchor applies
+     per line.
 
-5. SVG <image> element (svg.go + svg_group_test.go):
-   - New svgImage shape: href (or xlink:href) resolves through the shared
-     image cache (data/file/http), drawn scaled to x/y/width/height.
-   - Verified: 10x20 red PNG data URI at (20,30) 40x40 paints red center.
+5. CSS mask — parse/storage only (mask_test.go):
+   - mask-image flows through the resolver's generic SetProperty storage and
+     painting with it set doesn't panic. Full image-as-alpha rasterization
+     is deferred (no skia API for it; pixel loop ROI low).
 
-Tests: group fill, nested svg offset, cubic fill, quadratic stroke,
-object-fit position, SVG image. Full go test green.
+Tests: style classes + inline precedence, transform translate/scale, arc
+stroke, multiline text, mask no-crash. Full go test green.

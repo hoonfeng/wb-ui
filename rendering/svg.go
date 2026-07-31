@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 
@@ -42,6 +43,7 @@ type svgFilledShape struct {
 	stroke      graphics.Color
 	strokeWidth float64
 	clipID      string
+	transform   string
 }
 
 func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
@@ -49,6 +51,11 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	// shader (the shape's own paint would only use flat colors).
 	if s.gradientID != "" {
 		if g, ok := ctx.gradients[s.gradientID]; ok {
+			if s.transform != "" {
+				canvas.Save()
+				defer canvas.Restore()
+				applyTransformOps(canvas, s.transform)
+			}
 			paintShapeGradient(canvas, s.shape, g)
 			return
 		}
@@ -64,11 +71,21 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			if clipPath := clipShapesToPath(clipShapes); clipPath != nil {
 				canvas.ClipPath(clipPath)
 				clipPath.Release()
+				if s.transform != "" {
+					applyTransformOps(canvas, s.transform)
+				}
 				s.shape.paint(canvas, &c2)
 			}
 			canvas.Restore()
 			return
 		}
+	}
+	if s.transform != "" {
+		canvas.Save()
+		applyTransformOps(canvas, s.transform)
+		s.shape.paint(canvas, &c2)
+		canvas.Restore()
+		return
 	}
 	s.shape.paint(canvas, &c2)
 }
@@ -329,6 +346,19 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
 				curX, curY = x, y
 			}
+		case 'A', 'a': // elliptical arc: rx ry x-axis-rot large-arc sweep x y
+			if len(args) >= 7 {
+				rx, ry := math.Abs(args[0]), math.Abs(args[1])
+				phi := args[2] * math.Pi / 180
+				laf, sf := args[3] != 0, args[4] != 0
+				x, y := args[5], args[6]
+				if cmd.kind == 'a' {
+					x += curX
+					y += curY
+				}
+				pts = append(pts, arcToPolyline(curX, curY, rx, ry, phi, laf, sf, x, y)...)
+				curX, curY = x, y
+			}
 		case 'Z', 'z':
 			if hasFirst {
 				pts = append(pts, firstPoint)
@@ -394,6 +424,73 @@ func sampleQuadraticBezier(x0, y0, x1, y1, x2, y2 float64) []graphics.Point {
 	}
 	return out
 }
+
+// arcToPolyline converts an SVG elliptical arc (endpoint parametrization,
+// SVG 1.1 F.6.5) into a polyline sampled along the arc. Returns empty when
+// the arc degenerates (zero radii or coincident endpoints).
+func arcToPolyline(x1, y1, rx, ry, phi float64, largeArc, sweep bool, x2, y2 float64) []graphics.Point {
+	if rx == 0 || ry == 0 {
+		// Degenerate: straight line.
+		return []graphics.Point{{X: x2, Y: y2}}
+	}
+	dx2 := (x1 - x2) / 2
+	dy2 := (y1 - y2) / 2
+	cosP, sinP := math.Cos(phi), math.Sin(phi)
+	x1p := cosP*dx2 + sinP*dy2
+	y1p := -sinP*dx2 + cosP*dy2
+	// Correct radii per F.6.6.
+	lambda := (x1p*x1p)/(rx*rx) + (y1p*y1p)/(ry*ry)
+	if lambda > 1 {
+		s := math.Sqrt(lambda)
+		rx *= s
+		ry *= s
+	}
+	// Center computation (F.6.5.1).
+	num := rx*rx*ry*ry - rx*rx*y1p*y1p - ry*ry*x1p*x1p
+	den := rx*rx*y1p*y1p + ry*ry*x1p*x1p
+	coef := 0.0
+	if den > 0 {
+		coef = math.Sqrt(math.Max(num/den, 0))
+	}
+	if largeArc == sweep {
+		coef = -coef
+	}
+	cxp := coef * (rx * y1p / ry)
+	cyp := coef * (-ry * x1p / rx)
+	cx := cosP*cxp - sinP*cyp + (x1+x2)/2
+	cy := sinP*cxp + cosP*cyp + (y1+y2)/2
+	// Angles (F.6.5.2).
+	angle := func(ux, uy, vx, vy float64) float64 {
+		dot := ux*vx + uy*vy
+		lens := math.Hypot(ux, uy) * math.Hypot(vx, vy)
+		if lens == 0 {
+			return 0
+		}
+		a := math.Acos(math.Max(-1, math.Min(1, dot/lens)))
+		if ux*vy-uy*vx < 0 {
+			a = -a
+		}
+		return a
+	}
+	theta1 := angle(1, 0, (x1p-cxp)/rx, (y1p-cyp)/ry)
+	dtheta := angle((x1p-cxp)/rx, (y1p-cyp)/ry, (-x1p-cxp)/rx, (-y1p-cyp)/ry)
+	if !sweep && dtheta > 0 {
+		dtheta -= 2 * math.Pi
+	} else if sweep && dtheta < 0 {
+		dtheta += 2 * math.Pi
+	}
+	const steps = 24
+	out := make([]graphics.Point, 0, steps)
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / steps
+		theta := theta1 + t*dtheta
+		cosT, sinT := math.Cos(theta), math.Sin(theta)
+		x := cx + rx*cosT*cosP - ry*sinT*sinP
+		y := cy + rx*cosT*sinP + ry*sinT*cosP
+		out = append(out, graphics.Point{X: x, Y: y})
+	}
+	return out
+}
 // --- SVG Text ---
 
 type svgText struct {
@@ -432,18 +529,25 @@ func (s *svgText) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	if anchor == "" {
 		anchor = "start"
 	}
-	textX := s.x
-	if anchor == "middle" {
-		w := graphics.MeasureText(font, s.content)
-		textX -= w / 2
-	} else if anchor == "end" {
-		w := graphics.MeasureText(font, s.content)
-		textX -= w
-	}
-
-	canvas.DrawText(textX, s.y, s.content, font, fill)
-	if s.stroke.A > 0 && s.strokeWidth > 0 {
-		canvas.DrawText(textX, s.y, s.content, font, s.stroke)
+	lines := strings.Split(s.content, "\n")
+	lineHeight := size * 1.2
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		textX := s.x
+		if anchor == "middle" {
+			w := graphics.MeasureText(font, line)
+			textX -= w / 2
+		} else if anchor == "end" {
+			w := graphics.MeasureText(font, line)
+			textX -= w
+		}
+		baseline := s.y + float64(i)*lineHeight
+		canvas.DrawText(textX, baseline, line, font, fill)
+		if s.stroke.A > 0 && s.strokeWidth > 0 {
+			canvas.DrawText(textX, baseline, line, font, s.stroke)
+		}
 	}
 }
 
@@ -461,6 +565,42 @@ type svgDocument struct {
 	// stored here for shape gradient/clip resolution).
 	gradients map[string]*svgGradient
 	clips     map[string][]svgShape
+	// styleRules carry <style> sheet rules (class/type selectors resolved to
+	// fill/stroke) so shapes without inline presentation attributes can pick
+	// up stylesheet styling, like real SVG.
+	styleRules []svgStyleRule
+}
+
+// svgStyleRule is one declaration subset (fill/stroke) extracted from a
+// <style> rule, matched against element class or tag name.
+type svgStyleRule struct {
+	selector    string // serialized selector text (".cls" or "rect")
+	fill        string
+	stroke      string
+	strokeWidth string
+}
+
+// matchSVGStyleRule finds the first stylesheet rule matching the element:
+// a selector containing ".cls" matches when the element's class attribute
+// lists cls; a bare tag-name selector matches by local name.
+func matchSVGStyleRule(rules []svgStyleRule, el *dom.Element) *svgStyleRule {
+	classes := strings.Fields(el.GetAttribute("class"))
+	tag := strings.ToLower(el.LocalName())
+	for i := range rules {
+		sel := rules[i].selector
+		if strings.Contains(sel, ".") {
+			for _, cls := range classes {
+				if strings.Contains(sel, "."+cls) {
+					return &rules[i]
+				}
+			}
+			continue
+		}
+		if sel == tag {
+			return &rules[i]
+		}
+	}
+	return nil
 }
 
 // --- Parsing helpers ---
@@ -905,6 +1045,33 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			return
 		}
 
+		// Handle <style> — collect fill/stroke rules from the embedded CSS
+		// sheet so shapes can be styled by class like real SVG.
+		if tag == "style" {
+			for _, rule := range css.NewParser(childEl.TextContent()).ParseStyleSheet() {
+				if sr, ok := rule.(*css.StyleRule); ok {
+					var r svgStyleRule
+					r.selector = strings.TrimSpace(sr.Selectors.String())
+					if r.selector == "" {
+						continue
+					}
+					for _, d := range sr.Declarations {
+						val := d.ValueString()
+						switch strings.ToLower(d.Name) {
+						case "fill":
+							r.fill = val
+						case "stroke":
+							r.stroke = val
+						case "stroke-width":
+							r.strokeWidth = val
+						}
+					}
+					doc.styleRules = append(doc.styleRules, r)
+				}
+			}
+			return
+		}
+
 		// Check display:none
 		styleMap := parseStyleAttribute(childEl.GetAttribute("style"))
 		if styleMap["display"] == "none" {
@@ -923,6 +1090,23 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 		swStr := childEl.GetAttribute("stroke-width")
 		if swStr == "" {
 			swStr = styleMap["stroke-width"]
+		}
+
+		// Third precedence level: stylesheet rules (<style> sheet) matched by
+		// class or tag name. Inline attributes and style="" win, exactly like
+		// CSS presentation-attribute precedence in SVG.
+		if fillStr == "" || strokeStr == "" || swStr == "" {
+			if sr := matchSVGStyleRule(doc.styleRules, childEl); sr != nil {
+				if fillStr == "" && sr.fill != "" {
+					fillStr = sr.fill
+				}
+				if strokeStr == "" && sr.stroke != "" {
+					strokeStr = sr.stroke
+				}
+				if swStr == "" && sr.strokeWidth != "" {
+					swStr = sr.strokeWidth
+				}
+			}
 		}
 
 		// Create a per-element paint context
@@ -1023,6 +1207,7 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			if clipID := parseURLReference(clipStr); clipID != "" {
 				wrapper.clipID = clipID
 			}
+			wrapper.transform = childEl.GetAttribute("transform")
 			doc.shapes = append(doc.shapes, wrapper)
 		}
 
