@@ -285,6 +285,9 @@ func hasInlineChildren(box *ElementBox) bool {
 		if _, ok := c.(*InlineTextBox); ok {
 			return true
 		}
+		if eb, ok := c.(*ElementBox); ok && eb.IsInlineLevel() {
+			return true
+		}
 	}
 	return false
 }

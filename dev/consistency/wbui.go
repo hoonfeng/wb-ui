@@ -132,8 +132,7 @@ func collectRenderTree(ro rendering.RenderObject, out *[]ElementSnapshot) {
 				s.Color = st.Color.String()
 				s.BG = st.BackgroundColor.String()
 				s.FontSz = st.FontSize.String()
-			}
-			// Input value / checked state.
+			}			// Input value / checked state.
 			switch e.LocalName() {
 			case "input":
 				s.Value = e.GetAttribute("value")
@@ -155,8 +154,19 @@ func collectRenderTree(ro rendering.RenderObject, out *[]ElementSnapshot) {
 	if e.LocalName() != "html" && e.LocalName() != "body" && e.LocalName() != "style" &&
 		e.LocalName() != "script" && e.LocalName() != "option" {
 			// Aggregate descendant text for content comparison (truncate to
-			// match Edge's collector which slices to 20 chars).
-			text := aggregateText(ro)
+			// match Edge's collector which trims then slices to 20 chars).
+			// Container elements (form/ul/ol/select) whose children are not
+			// all in the render tree (options, hidden inputs) use the DOM
+			// textContent, which matches the browser's textContent exactly.
+			text := ""
+			if e.LocalName() == "form" || e.LocalName() == "ul" || e.LocalName() == "ol" ||
+				e.LocalName() == "select" || e.LocalName() == "textarea" || e.LocalName() == "div" {
+				text = e.TextContent()
+			}
+			if text == "" {
+				text = aggregateText(ro)
+			}
+			text = strings.TrimSpace(text)
 			if len(text) > 20 {
 				text = text[:20]
 			}
@@ -190,7 +200,8 @@ func firstOptionText(sel *dom.Element) string {
 	return ""
 }
 
-// aggregateText concatenates the text of all RenderText descendants.
+// aggregateText concatenates the text of all RenderText descendants, matching
+// the DOM textContent semantics (raw concatenation, no injected separators).
 func aggregateText(ro rendering.RenderObject) string {
 	var sb strings.Builder
 	var walk func(o rendering.RenderObject)
@@ -200,13 +211,7 @@ func aggregateText(ro rendering.RenderObject) string {
 		}
 		if o.IsRenderText() {
 			if t, ok := o.(*rendering.RenderText); ok {
-				txt := t.Text()
-				if txt != "" {
-					if sb.Len() > 0 && !strings.HasSuffix(sb.String(), " ") {
-						sb.WriteString(" ")
-					}
-					sb.WriteString(strings.TrimSpace(txt))
-				}
+				sb.WriteString(t.Text())
 			}
 		}
 		for c := o.FirstChild(); c != nil; c = c.NextSibling() {

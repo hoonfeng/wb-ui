@@ -223,6 +223,14 @@ func fontSizeOf(box *ElementBox) float64 {
 		}
 		return defaultFontSize
 	}
+	// Anonymous boxes (no DOM element) inherit their parent's style object;
+	// their em/% font-size must resolve against the parent's *computed* px,
+	// not re-resolve the raw em against the parent (2em on an h1 → 2×32=64).
+	// The anonymous wrapper's style.FontSize is copied from the parent's raw
+	// declaration, so treat it as inherited-computed by walking to the parent.
+	if box.Element() == nil && box.Parent() != nil && cs.FontSize.Unit != "" && cs.FontSize.Unit != "px" {
+		return fontSizeOf(box.Parent())
+	}
 	parentSize := 0.0
 	if box.Parent() != nil {
 		parentSize = fontSizeOf(box.Parent())

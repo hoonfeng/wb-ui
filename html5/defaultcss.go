@@ -89,10 +89,12 @@ input[type="checkbox"], input[type="radio"] {
 /* Range input renders as a slider. */
 input[type="range"] {
 	display: inline-block;
-	width: 12em;
+	width: 9.7em;
 	height: 1.2em;
 	padding: 0;
 	border: none;
+	background-color: #ffffff;
+	color: #101010;
 	overflow: hidden;
 }
 

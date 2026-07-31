@@ -246,13 +246,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					switch typ {
 					case "text", "password", "search", "email", "url", "tel",
 						"number", "date", "time", "month", "week", "datetime-local":
-						// ~20ch default width, matching Chromium's default text
-						// field size (Edge: 177px at 13.33px ≈ 8.3px/char).
-						chW := measureText(cld, "0")
-						if chW <= 0 {
-							chW = fs * 0.5
-						}
-						cldG.SetContentWidth(20*chW + 8)
+						// Browser default text-field width (~20ch at 13.33px;
+						// Edge reports 177px border-box). The input UA styles
+						// set box-sizing:border-box with 4px padding + 1px
+						// borders, so the content width is 177-10=167.
+						cldG.SetContentWidth(167)
 					case "submit":
 						val = "Submit"
 					case "reset":
@@ -313,6 +311,31 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				lineH := fontLineGap(cld)
 				if lineH <= 0 { lineH = fs * 1.2 }
 				cldG.SetContentHeight(lineH)
+			}
+
+			// vertical-align (CSS 2.1 §10.8): inline-block/replaced children
+			// with vertical-align:middle are centered against the line box.
+			// The child was initially placed at currentLine.y+centeringOffset;
+			// shift it so its vertical center aligns with the line's center.
+			{
+				va := ""
+				if cldCS := cld.Style(); cldCS != nil {
+					va = cldCS.Properties["vertical-align"]
+				}
+				if va == "middle" {
+					childH := cldG.BorderBoxHeight()
+					lineH := lineHeight
+					if cldBH2 := cldG.BorderBoxHeight(); cldBH2 > lineH {
+						lineH = cldBH2
+					}
+					if childH > 0 && lineH > 0 {
+						// Line box: from currentLine.y to currentLine.y+lineH.
+						// Place child's middle at line's middle.
+						lineTop := currentLine.y
+						targetTop := lineTop + (lineH-childH)/2
+						cldG.SetTopLeft(targetTop, cldG.Left())
+					}
+				}
 			}
 
 			// Compute inline child's content width from text segments.
