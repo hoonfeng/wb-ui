@@ -1,28 +1,29 @@
-feat: border-collapse:collapse — shared borders, cell precedence, shrink-to-fit
+feat: pixel cases + radial-gradient + static transform + shadow order fixes
 
-Table border collapsing (CSS 2.1 §17.6) was entirely missing: wb-ui painted
-each cell's borders independently (adjacent cells showed doubled lines) and
-auto-width tables stretched to the available width instead of shrinking to
-content.
+Extends the pixel comparison suite from 9 to 16 cases and fixes the engine
+BUGs they exposed:
 
-New:
-- style: BorderCollapse property (computedstyle_data.go, computedstyle.go,
-  resolver.go) with collapse/separate parse.
-- layout/tableformattingcontext.go:
-  * collapse mode starts cells at the table border-box edge (cell borders
-    replace the table's outer border).
-  * applyCollapseBorders resolves conflicts per CSS: the first cell in DOM
-    order (top/left) wins the shared line's color, the wider border wins the
-    width, and the losing edge is zeroed so each line paints once. The
-    table's own outer border is maxed against the outermost cell (cell
-    painted later covers it).
-  * explicit cell width + padding + border feeds the column (matches Edge:
-    width:80 + 2px borders + 1px padding → 86px column).
-- layout/blockformattingcontext.go: auto-width tables now shrink-to-fit
-  (tablePreferredWidth = max-content column sum), never stretched to the
-  container width (Edge: 172px not 284px).
+1. rendering/shadow.go — multi-shadow z-order: the FIRST shadow must paint
+   on TOP of later ones (CSS). Painter iterated forward so later shadows
+   covered earlier ones; now reversed. px_multishadow: 2.6% → 0 px.
 
-Pixel cases added: single-row collapse table (0.4% diff — Edge's sub-pixel
-outer border placement at the far right) and 2x2 multi-row (1.07%).
+2. rendering/painter.go + platform/graphics/canvas.go — rounded-corner
+   gradients painted past the curve (the old comment promised clipping but
+   never did it). New Canvas.ClipRoundRect (skia rounded-rect path) clips
+   the gradient fill. px_roundgrad: 10.6% → 0.27% (AA band).
 
-Verified: pixel suite 9/9, GEO suite 13/13, go test ./... green.
+3. rendering/gradient.go + style/resolver.go — radial-gradient support
+   (circle/ellipse, center, farthest-corner sizing), extracted by the
+   background shorthand like linear-gradient. px_radial: 0 px diff.
+
+4. rendering/renderpipeline.go — static CSS transform composition:
+   walkSubtreeExcluded now applies the transform around the element's
+   transform-origin (default 50% 50% = box center, matching CSS; the old
+   per-box tryApplyTransform rotated around the canvas origin and never
+   transformed children). paintObjectBackground no longer re-applies it.
+   px_transform: 9.6% → 0.52% (rotated-edge AA band).
+
+5. rendering/painter.go — 3px dashed borders now paint 6px dash / 6px gap
+   (Edge's pattern) instead of 9/3.
+
+Pixel suite 16/16 (5 at 0 px), GEO suite 13/13, go test ./... green.

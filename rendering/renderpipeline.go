@@ -223,6 +223,31 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	if excluded[root] {
 		return
 	}
+
+	// CSS transform: applied OUTSIDE the overflow clip (transform acts on the
+	// whole box including its clip). The box's own background AND all
+	// descendants paint inside the transformed space, so visit() is called
+	// after applying it.
+	needsTransformRestore := false
+	if box := asRenderBox(root); box != nil && info != nil && info.canvas != nil {
+		if st := box.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
+			info.canvas.Save()
+			// CSS transforms rotate/scale around the element's
+			// transform-origin (default 50% 50% = box center), but the
+			// canvas primitives operate around the origin. Compose:
+			// T(origin) · ops · T(-origin).
+			originX := box.X() + box.Width()/2
+			originY := box.Y() + box.Height()/2
+			info.canvas.Translate(originX, originY)
+			if applyTransformOps(info.canvas, st.Transform) {
+				info.canvas.Translate(-originX, -originY)
+				needsTransformRestore = true
+			} else {
+				info.canvas.Restore()
+			}
+		}
+	}
+
 	visit(root, info)
 
 	// Determine overflow/clip and scroll offset for this box.
@@ -436,6 +461,9 @@ restoreClip:
 	if needsClipRestore {
 		info.canvas.Restore()
 	}
+	if needsTransformRestore {
+		info.canvas.Restore()
+	}
 }
 
 // paintObjectBackground paints the background-color and border for box-bearing objects
@@ -455,10 +483,9 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 			filterCleanup = info.canvas.Restore
 		}
 	}
-	// Apply CSS transform if present (inside filter layer).
-	if cleanup := tryApplyTransform(info.canvas, box); cleanup != nil {
-		defer cleanup()
-	}
+	// Apply CSS transform if present (inside filter layer). The transform is
+	// applied by walkSubtreeExcluded for the whole subtree; the per-box
+	// background/border painting here must NOT re-apply it.
 	PaintBackground(box, info)
 	PaintBorder(box, info)
 	if filterCleanup != nil {

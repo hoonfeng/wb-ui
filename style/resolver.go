@@ -400,7 +400,7 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		// (linear-gradient). Splits on whitespace but keeps function values
 		// (rgb(...), linear-gradient(...)) intact.
 		for _, p := range splitShorthandValue(valueString) {
-			if strings.HasPrefix(p, "linear-gradient(") {
+			if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
 				cs.BackgroundImage = p
 				continue
 			}
@@ -1524,7 +1524,7 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			// Shorthand: extract background-color and background-image
 			// (linear-gradient).
 			for _, p := range splitShorthandValue(resolvedStr) {
-				if strings.HasPrefix(p, "linear-gradient(") {
+				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
 					cs.BackgroundImage = p
 					continue
 				}

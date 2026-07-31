@@ -127,4 +127,46 @@ func TestPxMultiStopGradient(t *testing.T) {
 	`, 0.002)
 }
 
+// TestPxRoundedGradient: gradient clipped to border-radius (previously the
+// gradient painted past the rounded corners). Remaining diff is the 1px AA
+// transition band at the curve.
+func TestPxRoundedGradient(t *testing.T) {
+	pixelCompare(t, "px_roundgrad", `
+		<div style="width:140px;height:80px;margin:10px;border-radius:14px;background:linear-gradient(to bottom,#ffcc00,#ff6600)"></div>
+	`, 0.005)
+}
+
+// TestPxMultiShadow: multiple box-shadows — the FIRST shadow must paint on
+// TOP of later ones (CSS z-order of shadows).
+func TestPxMultiShadow(t *testing.T) {
+	pixelCompare(t, "px_multishadow", `
+		<div style="width:130px;height:60px;margin:10px;background:#eeeeee;box-shadow:3px 3px 0px 0px #aa0000, 7px 7px 0px 0px #00aa00, 11px 11px 0px 0px #0000aa"></div>
+	`, 0.001)
+}
+
+// TestPxDashedBorder: dashed borders — dash pattern is browser-specific
+// (Edge 3px → 6px dash / 6px gap with its own phase), allow a budget.
+func TestPxDashedBorder(t *testing.T) {
+	pixelCompare(t, "px_dashed", `
+		<div style="width:150px;height:70px;margin:10px;border:3px dashed #cc0000;background:#f8f8f8"></div>
+	`, 0.025)
+}
+
+// TestPxTransformCompose: static transform composition translate+rotate
+// (rotate around the element center, CSS transform-origin default). Remaining
+// diff is the AA transition band at the rotated edges.
+func TestPxTransformCompose(t *testing.T) {
+	pixelCompare(t, "px_transform", `
+		<div style="width:80px;height:60px;margin:0;background:#ff0000;transform:translate(40px,30px) rotate(30deg)"></div>
+	`, 0.01)
+}
+
+// TestPxRadialGradient: radial-gradient(circle) — center/radius/color
+// distribution, pixel-for-pixel.
+func TestPxRadialGradient(t *testing.T) {
+	pixelCompare(t, "px_radial", `
+		<div id="r" style="width:160px;height:100px;margin:10px;background:radial-gradient(circle,#ff0000,#0000ff)"></div>
+	`, 0.002)
+}
+
 func init() { _ = fmt.Sprintf }

@@ -23,6 +23,52 @@ type LinearGradient struct {
 	Stops     []ColorStop
 }
 
+// RadialGradient describes a radial-gradient background (circle shape,
+// centered in the box, radius = farthest-corner — the common case).
+type RadialGradient struct {
+	Stops  []ColorStop
+	CenterX, CenterY float64 // relative 0..1
+	// Shape "circle" (1) or "ellipse" (0 = default); radius is computed at
+	// paint time from the box dimensions.
+	Circle bool
+}
+
+// parseRadialGradient parses "radial-gradient(...)" (subset: circle/ellipse
+// shape keyword, default center and farthest-corner sizing).
+func parseRadialGradient(s string) *RadialGradient {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "none" || !strings.HasPrefix(s, "radial-gradient(") || !strings.HasSuffix(s, ")") {
+		return nil
+	}
+	inner := s[len("radial-gradient(") : len(s)-1]
+	parts := splitGradientArgs(inner)
+	if len(parts) < 2 {
+		return nil
+	}
+	rg := &RadialGradient{CenterX: 0.5, CenterY: 0.5}
+	pos := 0
+	first := strings.TrimSpace(parts[0])
+	if strings.HasPrefix(first, "circle") || strings.HasPrefix(first, "ellipse") ||
+		strings.HasPrefix(first, "closest") || strings.HasPrefix(first, "farthest") {
+		if strings.HasPrefix(first, "circle") {
+			rg.Circle = true
+		}
+		pos = 1
+	} else {
+		rg.Circle = true // default shape for the common case
+	}
+	for i := pos; i < len(parts); i++ {
+		if stop := parseColorStop(strings.TrimSpace(parts[i])); stop != nil {
+			rg.Stops = append(rg.Stops, *stop)
+		}
+	}
+	if len(rg.Stops) < 2 {
+		return nil
+	}
+	assignGradientPositions(rg.Stops)
+	return rg
+}
+
 func parseGradient(s string) *LinearGradient {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" || !strings.HasPrefix(s, "linear-gradient(") || !strings.HasSuffix(s, ")") {
@@ -92,6 +138,55 @@ func parseGradientDirection(s string) *GradientDirection {
 		return &GradientDirection{Angle: 225}
 	}
 	return &GradientDirection{Angle: 180}
+}
+
+// paintRadialGradient fills the box with a radial gradient: each pixel's
+// color is interpolated by its distance from the center over the radius
+// (farthest-corner for circle, scaled axes for ellipse).
+func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *RadialGradient) {
+	if rg == nil || len(rg.Stops) < 2 || w <= 0 || h <= 0 {
+		return
+	}
+	cx := x + w*rg.CenterX
+	cy := y + h*rg.CenterY
+	iw, ih := int(math.Round(w)), int(math.Round(h))
+	if rg.Circle {
+		dx := math.Max(cx-x, x+w-cx)
+		dy := math.Max(cy-y, y+h-cy)
+		radius := math.Sqrt(dx*dx + dy*dy)
+		if radius <= 0 {
+			return
+		}
+		for py := 0; py < ih; py++ {
+			for px := 0; px < iw; px++ {
+				dxp := (x + float64(px) + 0.5) - cx
+				dyp := (y + float64(py) + 0.5) - cy
+				t := math.Sqrt(dxp*dxp+dyp*dyp) / radius
+				if t > 1 {
+					t = 1
+				}
+				canvas.FillRect(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+			}
+		}
+		return
+	}
+	// Ellipse: normalize each axis independently (distance in ellipse space).
+	radiusX := math.Max(cx-x, x+w-cx)
+	radiusY := math.Max(cy-y, y+h-cy)
+	if radiusX <= 0 || radiusY <= 0 {
+		return
+	}
+	for py := 0; py < ih; py++ {
+		for px := 0; px < iw; px++ {
+			dxn := ((x + float64(px) + 0.5) - cx) / radiusX
+			dyn := ((y + float64(py) + 0.5) - cy) / radiusY
+			t := math.Sqrt(dxn*dxn + dyn*dyn)
+			if t > 1 {
+				t = 1
+			}
+			canvas.FillRect(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+		}
+	}
 }
 
 func parseColorStop(s string) *ColorStop {

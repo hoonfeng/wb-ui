@@ -188,13 +188,25 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if bgGradient != nil {
 		r := lengthValue(st.BorderRadius)
 		if r > 0 {
-			// For rounded corners with gradient, use a simple fallback:
-			// fill the gradient first, then clip with rounded rect.
-			// Since we can't clip to a rounded rect, we draw the gradient
-			// and then draw the border-radius background on top.
+			// Rounded corners: clip the gradient to the rounded rect so the
+			// corners follow the curve instead of painting a sharp square.
+			info.canvas.Save()
+			info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
 			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
+			info.canvas.Restore()
 		} else {
 			paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgGradient)
+		}
+		return
+	}
+	if bgRadial := parseRadialGradient(st.BackgroundImage); bgRadial != nil {
+		if r := lengthValue(st.BorderRadius); r > 0 {
+			info.canvas.Save()
+			info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
+			paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgRadial)
+			info.canvas.Restore()
+		} else {
+			paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, bgRadial)
 		}
 		return
 	}
@@ -381,8 +393,10 @@ func paintBorderSide(canvas *graphics.Canvas, x, y, w, h float64, col graphics.C
 		if thick <= 0 {
 			thick = 1
 		}
-		dashLen := thick * 3
-		gapLen := thick
+		// Edge paints 3px dashed borders as 6px dashes with 6px gaps
+		// (dash = gap = 2×width), unlike CSS's unspecified defaults.
+		dashLen := thick * 2
+		gapLen := thick * 2
 		if w >= h {
 			for dx := 0.0; dx < w; dx += dashLen + gapLen {
 				dw := dashLen

@@ -357,6 +357,33 @@ func (c *Canvas) ClipPath(path *skia.Path) {
 	c.invalidatePixels()
 }
 
+// ClipRoundRect intersects the current clip with a rounded rectangle
+// (radius clamped to fit). Used to clip gradient fills to border-radius.
+func (c *Canvas) ClipRoundRect(x, y, w, h, radius float64) {
+	r := float64(math.Min(radius, math.Min(w/2, h/2)))
+	if r <= 0 {
+		c.Clip(Rect{X: x, Y: y, Width: w, Height: h})
+		return
+	}
+	path := skia.NewPath()
+	defer path.Release()
+	// Rounded rect path: top edge, TR corner, right edge, BR corner,
+	// bottom edge, BL corner, left edge, TL corner.
+	path.MoveTo(float32(x+r), float32(y))
+	path.LineTo(float32(x+w-r), float32(y))
+	path.QuadTo(float32(x+w), float32(y), float32(x+w), float32(y+r))
+	path.LineTo(float32(x+w), float32(y+h-r))
+	path.QuadTo(float32(x+w), float32(y+h), float32(x+w-r), float32(y+h))
+	path.LineTo(float32(x+r), float32(y+h))
+	path.QuadTo(float32(x), float32(y+h), float32(x), float32(y+h-r))
+	path.LineTo(float32(x), float32(y+r))
+	path.QuadTo(float32(x), float32(y), float32(x+r), float32(y))
+	path.Close()
+	c.canvas.ClipPath(path, skia.ClipOpIntersect, true)
+	c.state.hasClip = true
+	c.invalidatePixels()
+}
+
 // FillRect fills the given world-space rectangle with the supplied color, mirroring
 // GraphicsContext::fillRect(FloatRect, Color). The rectangle is drawn through the
 // Skia canvas which applies the current transform, clip, and anti-aliasing.

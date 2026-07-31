@@ -183,7 +183,11 @@ func parseShadowLength(s string) float64 {
 // approximated by reducing opacity in proportion to blur radius. Inset shadows
 // are rendered by clipping to the box interior and filling an offset rect.
 func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Shadow, opacity float64, insetOnly bool) {
-	for _, sh := range shadows {
+	// Shadows paint in reverse order: the FIRST shadow in the list is the
+	// TOPMOST (CSS: later shadows are behind earlier ones). Painting the
+	// last shadow first means earlier shadows end up on top.
+	for i := len(shadows) - 1; i >= 0; i-- {
+		sh := shadows[i]
 		if sh.Inset != insetOnly {
 			continue
 		}
