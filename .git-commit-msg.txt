@@ -1,37 +1,42 @@
-feat: SVG <style> rules + transform + arc paths + multiline text
+feat: SVG gradient coords + dasharray + pattern + CSS clip-path
 
 Candidates round:
 
-1. SVG <style> sheet rules (svg.go + svg_style_test.go):
-   - <style> content parsed via css.NewParser; fill/stroke/stroke-width
-     declarations collected per rule (class or tag selector).
-   - Precedence: inline attribute > style="" > stylesheet rule (SVG
-     presentation-attribute semantics). matchSVGStyleRule matches ".cls" in
-     the element's class or a bare tag name.
-   - Verified: .redBox/.blueBox classes fill two rects; inline fill wins.
+1. SVG gradient coordinates (svg.go + svg_gradient_test.go):
+   - FIXED case bug: parseGradientElement compared tag == "radialGradient"
+     after lowercasing, so radial gradients never set isRadial and fell into
+     the linear path (black fill fallback).
+   - Linear gradients with non-default x1/y1/x2/y2 now sample per-pixel by
+     projecting each point onto the gradient axis (objectBoundingBox
+     percentages), instead of falling back to a vertical canvas gradient;
+     bounded to 40k px before falling back.
+   - Verified: diagonal red→blue axis; radial white→black falloff.
 
-2. SVG transform attribute (svg.go + svg_style_test.go):
-   - transform="translate(...)/scale(...)/rotate(...)" applied on the shape
-     via canvas.Save + applyTransformOps + Restore (reuses the CSS transform
-     pipeline); also composes with gradient fills and clip paths.
-   - Verified: translate(30,20) shifts the rect; scale(2) doubles it.
+2. SVG stroke-dasharray (svg.go + svg_dash_test.go):
+   - stroke-dasharray (line/path strokes) rendered via dashLine: dashes
+     alternate on/off along the segment with phase/offset support; odd counts
+     duplicate the last entry per SVG semantics.
+   - Verified: "10 6" dashes on a horizontal line (on/off pixel checks).
 
-3. SVG path arc commands A/a (svg.go + svg_style_test.go):
-   - Elliptical arcs were parsed but never drawn. Added arcToPolyline: the
-     SVG 1.1 F.6.5 endpoint→center conversion (radius correction, large-arc/
-     sweep flags, angle sweep) sampled at 24 points with relative-command
-     support.
-   - Verified: two half-ellipse arcs stroke top/bottom of an ellipse.
+3. SVG <pattern> fill (svg.go + svg_pattern_test.go):
+   - <pattern> defs collected (child shapes + width/height); fill="url(#id)"
+     resolves to a pattern when not a gradient. Shapes wrapped with
+     fill/stroke so tiles paint colored. Tiled across the shape bbox via
+     canvas.Save/Translate per tile.
+   - Fixed nil-map panic: per-element paint context now copies ctx.patterns;
+     svgDocument carries patterns to paint time.
+   - Verified: red dots tiled every 20px.
 
-4. SVG text multiline (svg.go + svg_style_test.go):
-   - <text> with \n paints each line at baseline + i*lineHeight (1.2em);
-     tspan content already flows through TextContent. text-anchor applies
-     per line.
+4. CSS clip-path geometry (renderpipeline.go + css_clip.go + clip_path_test.go):
+   - New: clip-path: inset() / circle() / polygon() applied around
+     background+border painting (canvas.Save + Clip/ClipPath + Restore),
+     mirroring RenderBox::paint()'s clip. Percentages and px supported.
+   - polygon parsing splits on commas (not whitespace) so "x% y%" pairs
+     survive.
+   - Verified: inset(20px) shrinks; circle(50%) rounds; triangle polygon.
 
-5. CSS mask — parse/storage only (mask_test.go):
-   - mask-image flows through the resolver's generic SetProperty storage and
-     painting with it set doesn't panic. Full image-as-alpha rasterization
-     is deferred (no skia API for it; pixel loop ROI low).
+5. Image decode-failure placeholder — already covered (img alt text in
+   PaintImage + background failure no-crash); no change needed.
 
-Tests: style classes + inline precedence, transform translate/scale, arc
-stroke, multiline text, mask no-crash. Full go test green.
+Tests: gradient diagonal + radial, dash array, pattern tiling, clip-path
+inset/circle/polygon. Full go test green.

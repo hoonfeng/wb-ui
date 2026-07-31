@@ -534,6 +534,23 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	if box == nil || !box.IsVisible() {
 		return
 	}
+	// Apply CSS clip-path (inset/circle/polygon) around the box's own
+	// background/border painting, mirroring RenderBox::paint()'s clip.
+	var clipCleanup func()
+	if st := box.Style(); st != nil {
+		if cp := st.GetProperty("clip-path"); cp != "" && cp != "none" && !strings.HasPrefix(cp, "url(") {
+			bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
+			if r, ok := parseCSSClipInset(cp, bx, by, bw, bh); ok {
+				info.canvas.Save()
+				info.canvas.Clip(r)
+				clipCleanup = info.canvas.Restore
+			} else if p := parseCSSClipShape(cp, bx, by, bw, bh); p != nil {
+				info.canvas.Save()
+				info.canvas.ClipPath(p)
+				clipCleanup = info.canvas.Restore
+			}
+		}
+	}
 	// Apply CSS filter: wrap painting in a SaveLayer with ImageFilter.
 	var filterCleanup func()
 	if st := box.Style(); st != nil && st.Filter != "" && st.Filter != "none" {
@@ -550,6 +567,9 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	PaintBorder(box, info)
 	if filterCleanup != nil {
 		defer filterCleanup()
+	}
+	if clipCleanup != nil {
+		defer clipCleanup()
 	}
 }
 // <wb-editor> custom elements by delegating to the editor package's painter, and

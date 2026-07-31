@@ -40,13 +40,39 @@ type svgFilledShape struct {
 	shape       svgShape
 	fill        graphics.Color
 	gradientID  string
+	patternID   string
 	stroke      graphics.Color
 	strokeWidth float64
 	clipID      string
 	transform   string
+	dashArray   []float64
 }
 
 func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	// Pattern fill: tile the pattern's shapes across the shape bbox.
+	if s.patternID != "" {
+		if pat, ok := ctx.patterns[s.patternID]; ok && len(pat.shapes) > 0 && pat.w > 0 && pat.h > 0 {
+			px, py, pw, ph := shapeBBox(s.shape)
+			if pw > 0 && ph > 0 {
+				canvas.Save()
+				defer canvas.Restore()
+				if s.transform != "" {
+					applyTransformOps(canvas, s.transform)
+				}
+				for ty := py; ty < py+ph; ty += pat.h {
+					for tx := px; tx < px+pw; tx += pat.w {
+						for _, ps := range pat.shapes {
+							canvas.Save()
+							canvas.Translate(tx, ty)
+							ps.paint(canvas, ctx)
+							canvas.Restore()
+						}
+					}
+				}
+				return
+			}
+		}
+	}
 	// Gradient fill: paint the shape geometry directly with the gradient
 	// shader (the shape's own paint would only use flat colors).
 	if s.gradientID != "" {
@@ -64,6 +90,9 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	c2.fill = s.fill
 	c2.stroke = s.stroke
 	c2.strokeWidth = s.strokeWidth
+	if len(s.dashArray) > 0 {
+		c2.dashArray = s.dashArray
+	}
 	if s.clipID != "" {
 		if clipShapes, ok := ctx.clips[s.clipID]; ok && len(clipShapes) > 0 {
 			// Apply the clip path, paint the shape, restore.
@@ -141,6 +170,13 @@ func paintShapeGradient(canvas *graphics.Canvas, shape svgShape, g *svgGradient)
 	}
 }
 
+// svgPattern is a <pattern> element: child shapes tiled across the fill
+// bounding box at (w,h) intervals.
+type svgPattern struct {
+	shapes []svgShape
+	w, h   float64
+}
+
 // svgPaintContext bundles all paint-time state for a single SVG subtree.
 type svgPaintContext struct {
 	fill        graphics.Color
@@ -149,6 +185,8 @@ type svgPaintContext struct {
 	opacity     float64
 	gradients   map[string]*svgGradient // gradients defined in <defs>
 	clips       map[string][]svgShape   // clip paths defined in <defs>
+	dashArray   []float64               // stroke-dasharray pattern
+	patterns    map[string]*svgPattern  // patterns defined in <defs>
 }
 
 func defaultSVGContext() *svgPaintContext {
@@ -158,6 +196,7 @@ func defaultSVGContext() *svgPaintContext {
 		opacity:     1.0,
 		gradients:   make(map[string]*svgGradient),
 		clips:       make(map[string][]svgShape),
+		patterns:    make(map[string]*svgPattern),
 	}
 }
 
@@ -236,7 +275,7 @@ type svgLine struct{ x1, y1, x2, y2 float64 }
 
 func (s *svgLine) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 {
-		canvas.StrokeLine(s.x1, s.y1, s.x2, s.y2, ctx.strokeWidth, ctx.stroke)
+		dashLine(canvas, s.x1, s.y1, s.x2, s.y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
 	}
 }
 
@@ -375,7 +414,7 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	// Stroke as line segments
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(pts) >= 2 {
 		for i := 0; i < len(pts)-1; i++ {
-			canvas.StrokeLine(pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke)
+			dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
 		}
 	}
 }
@@ -565,6 +604,7 @@ type svgDocument struct {
 	// stored here for shape gradient/clip resolution).
 	gradients map[string]*svgGradient
 	clips     map[string][]svgShape
+	patterns  map[string]*svgPattern
 	// styleRules carry <style> sheet rules (class/type selectors resolved to
 	// fill/stroke) so shapes without inline presentation attributes can pick
 	// up stylesheet styling, like real SVG.
@@ -867,7 +907,7 @@ func parseGradientElement(el *dom.Element) *svgGradient {
 	g := &svgGradient{
 		id: el.GetAttribute("id"),
 	}
-	if tag == "radialGradient" {
+	if tag == "radialgradient" {
 		g.isRadial = true
 		g.cx = parseSVGCoord(el.GetAttribute("cx"))
 		g.cy = parseSVGCoord(el.GetAttribute("cy"))
@@ -933,8 +973,9 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 	}
 	// Linear gradient. The canvas API only paints top-to-bottom, so paint
 	// pixel columns manually (mirroring the CSS gradient rasterizer) for the
-	// default horizontal direction; other directions fall back to the
-	// vertical canvas gradient.
+	// default horizontal direction; arbitrary axes are sampled per-pixel by
+	// projecting each point onto the gradient axis (SVG objectBoundingBox:
+	// x1/y1/x2/y2 are percentages of the shape bbox).
 	x1, y1, x2, y2 := g.x1, g.y1, g.x2, g.y2
 	if x1 == 0 && y1 == 0 && x2 == 100 && y2 == 0 {
 		// Default: left to right across the bounding box.
@@ -952,7 +993,131 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 		}
 		return
 	}
-	canvas.FillLinearGradient(x, y, w, h, g.stops[0].color, g.stops[len(g.stops)-1].color)
+	// Arbitrary axis: project each pixel onto the (x1,y1)→(x2,y2) axis.
+	ax := x + x1/100*w
+	ay := y + y1/100*h
+	bx := x + x2/100*w
+	by := y + y2/100*h
+	vx, vy := bx-ax, by-ay
+	den := vx*vx + vy*vy
+	if den == 0 {
+		// Degenerate axis: gradient collapses, fill with the last stop.
+		canvas.FillRect(x, y, w, h, g.stops[len(g.stops)-1].color)
+		return
+	}
+	stops := make([]ColorStop, len(g.stops))
+	for i, s := range g.stops {
+		stops[i] = ColorStop{Color: s.color, Position: s.offset}
+	}
+	// Keep per-pixel cost bounded: fall back to the canvas gradient for
+	// very large boxes.
+	if w*h > 40000 {
+		canvas.FillLinearGradient(x, y, w, h, g.stops[0].color, g.stops[len(g.stops)-1].color)
+		return
+	}
+	for py := int(y); py < int(y+h); py++ {
+		for px := int(x); px < int(x+w); px++ {
+			pxc := float64(px) + 0.5
+			pyc := float64(py) + 0.5
+			t := ((pxc-ax)*vx + (pyc-ay)*vy) / den
+			canvas.FillRect(float64(px), float64(py), 1, 1, interpolateColor(stops, t))
+		}
+	}
+}
+
+// shapeBBox returns the bounding box of a basic shape (used by pattern
+// tiling); zero w/h for shapes without a box.
+func shapeBBox(s svgShape) (x, y, w, h float64) {
+	switch sh := s.(type) {
+	case *svgRect:
+		return sh.x, sh.y, sh.w, sh.h
+	case *svgCircle:
+		return sh.cx - sh.r, sh.cy - sh.r, sh.r * 2, sh.r * 2
+	case *svgEllipse:
+		return sh.cx - sh.rx, sh.cy - sh.ry, sh.rx * 2, sh.ry * 2
+	}
+	return 0, 0, 0, 0
+}
+
+// dashLine strokes the segment (x1,y1)-(x2,y2) with a dash pattern.
+// dashes alternates on/off lengths; offset shifts the pattern (common
+// values like "5 3" or "4,4" are supported; offset usually absent).
+func dashLine(canvas *graphics.Canvas, x1, y1, x2, y2, width float64, col graphics.Color, dashes []float64, offset float64) {
+	if len(dashes) == 0 {
+		canvas.StrokeLine(x1, y1, x2, y2, width, col)
+		return
+	}
+	dx, dy := x2-x1, y2-y1
+	L := math.Hypot(dx, dy)
+	if L == 0 {
+		return
+	}
+	ux, uy := dx/L, dy/L
+	drawn := math.Mod(offset, totalDashes(dashes))
+	if drawn < 0 {
+		drawn += totalDashes(dashes)
+	}
+	on := true
+	i := 0
+	// Advance to the correct phase: find which pattern index `drawn` falls in.
+	var acc float64
+	for i < len(dashes) {
+		if acc+dashes[i] > drawn {
+			on = (i%2 == 0)
+			drawn -= acc
+			break
+		}
+		acc += dashes[i]
+		i++
+	}
+	for drawn < L {
+		seg := dashes[i%len(dashes)]
+		if seg <= 0 {
+			seg = 0.001
+		}
+		end := math.Min(drawn+seg, L)
+		if on {
+			canvas.StrokeLine(x1+ux*drawn, y1+uy*drawn, x1+ux*end, y1+uy*end, width, col)
+		}
+		drawn = end
+		on = !on
+		i++
+	}
+}
+
+func totalDashes(dashes []float64) float64 {
+	var t float64
+	for _, d := range dashes {
+		t += d
+	}
+	if t == 0 {
+		return 1
+	}
+	return t
+}
+
+// parseDashArray parses "5,3 2" / "5 3" / "4 4" into an alternating
+// on/off pattern.
+func parseDashArray(s string) []float64 {
+	s = strings.ReplaceAll(s, ",", " ")
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]float64, 0, len(fields))
+	for _, f := range fields {
+		if v, err := strconv.ParseFloat(f, 64); err == nil && v > 0 {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	// Odd count: the last entry is duplicated (SVG semantics).
+	if len(out)%2 == 1 {
+		out = append(out, out[len(out)-1])
+	}
+	return out
 }
 
 // --- ClipPath parsing ---
@@ -1039,6 +1204,44 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 						if clipID != "" {
 							ctx.clips[clipID] = parseClipPathElement(defEl)
 						}
+					case "pattern":
+						patID := defEl.GetAttribute("id")
+						if patID != "" {
+							pat := &svgPattern{
+								w: parseSVGCoord(defEl.GetAttribute("width")),
+								h: parseSVGCoord(defEl.GetAttribute("height")),
+							}
+							for pc := defEl.FirstChild(); pc != nil; pc = pc.NextSibling() {
+								if pEl, ok := pc.(*dom.Element); ok {
+									if shape := parseSVGElement(pEl); shape != nil {
+										// Wrap with fill/stroke from attributes so
+										// pattern shapes paint colored.
+										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}}
+										pm := parseStyleAttribute(pEl.GetAttribute("style"))
+										if f, ok2 := pm["fill"]; ok2 {
+											fs.fill = parseColorAttribute(f)
+										} else if f := pEl.GetAttribute("fill"); f != "" {
+											fs.fill = parseColorAttribute(f)
+										}
+										if sw := pm["stroke-width"]; sw != "" {
+											fs.strokeWidth = parseSVGCoord(sw)
+										} else {
+											fs.strokeWidth = parseSVGCoord(pEl.GetAttribute("stroke-width"))
+										}
+										if st := pm["stroke"]; st != "" {
+											fs.stroke = parseColorAttribute(st)
+										} else if st := pEl.GetAttribute("stroke"); st != "" {
+											fs.stroke = parseColorAttribute(st)
+										}
+										if d := pEl.GetAttribute("stroke-dasharray"); d != "" {
+											fs.dashArray = parseDashArray(d)
+										}
+										pat.shapes = append(pat.shapes, fs)
+									}
+								}
+							}
+							ctx.patterns[patID] = pat
+						}
 					}
 				}
 			}
@@ -1117,6 +1320,7 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			opacity:     ctx.opacity,
 			gradients:   ctx.gradients,
 			clips:       ctx.clips,
+			patterns:    ctx.patterns,
 		}
 
 		// Resolve url(#gradientId) references
@@ -1202,12 +1406,20 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 				strokeWidth: elCtx.strokeWidth,
 			}
 			if gradientID := parseURLReference(fillStr); gradientID != "" {
-				wrapper.gradientID = gradientID
+				// Same url() reference may resolve to a gradient OR a pattern.
+				if _, ok := ctx.gradients[gradientID]; ok {
+					wrapper.gradientID = gradientID
+				} else if _, ok := ctx.patterns[gradientID]; ok {
+					wrapper.patternID = gradientID
+				}
 			}
 			if clipID := parseURLReference(clipStr); clipID != "" {
 				wrapper.clipID = clipID
 			}
 			wrapper.transform = childEl.GetAttribute("transform")
+			if dashStr := childEl.GetAttribute("stroke-dasharray"); dashStr != "" {
+				wrapper.dashArray = parseDashArray(dashStr)
+			}
 			doc.shapes = append(doc.shapes, wrapper)
 		}
 
@@ -1221,6 +1433,7 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 	walk(el, ctx, 0, 0)
 	doc.gradients = ctx.gradients
 	doc.clips = ctx.clips
+	doc.patterns = ctx.patterns
 	return doc
 }
 
@@ -1267,6 +1480,7 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 	ctx.fill = defaultFill
 	ctx.gradients = doc.gradients
 	ctx.clips = doc.clips
+	ctx.patterns = doc.patterns
 	for _, s := range doc.shapes {
 		s.paint(canvas, ctx)
 	}
