@@ -245,6 +245,38 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		totalHeight = 0
 	}
 	g.SetContentHeight(math.Max(g.ContentHeight(), totalHeight))
+
+	// ── Step 4: Size table sections (tbody/thead/tfoot). These grouping
+	// elements wrap the rows and must cover their rows' extent; the flat
+	// row loop above skips them, leaving their geometry at zero.
+	for _, child := range box.Children() {
+		eb, ok := child.(*ElementBox)
+		if !ok || !eb.IsVisible() || !eb.IsTableSection() {
+			continue
+		}
+		sg := state.GeometryForBox(eb)
+		var top, bottom float64
+		first := true
+		for _, row := range rows {
+			if row.box.Parent() != eb {
+				continue
+			}
+			rg := state.GeometryForBox(row.box)
+			if first {
+				top = rg.Top()
+				first = false
+			}
+			if rb := rg.Top() + rg.BorderBoxHeight(); rb > bottom {
+				bottom = rb
+			}
+		}
+		if first {
+			continue
+		}
+		sg.SetTopLeft(top, contentLeft)
+		sg.SetContentWidth(cw)
+		sg.SetContentHeight(math.Max(1, bottom-top))
+	}
 }
 
 // ── helper methods for ElementBox ──

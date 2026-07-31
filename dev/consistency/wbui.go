@@ -160,7 +160,9 @@ func collectRenderTree(ro rendering.RenderObject, out *[]ElementSnapshot) {
 			// textContent, which matches the browser's textContent exactly.
 			text := ""
 			if e.LocalName() == "form" || e.LocalName() == "ul" || e.LocalName() == "ol" ||
-				e.LocalName() == "select" || e.LocalName() == "textarea" || e.LocalName() == "div" {
+				e.LocalName() == "select" || e.LocalName() == "textarea" || e.LocalName() == "div" ||
+				e.LocalName() == "table" || e.LocalName() == "tbody" || e.LocalName() == "thead" ||
+				e.LocalName() == "tfoot" || e.LocalName() == "tr" {
 				text = e.TextContent()
 			}
 			if text == "" {
@@ -265,18 +267,38 @@ func displayName(d style.DisplayType) string {
 		return "list-item"
 	case style.DisplayNone:
 		return "none"
+	case style.DisplayContents:
+		return "contents"
+	case style.DisplayFlowRoot:
+		return "flow-root"
 	case style.DisplayFlex:
 		return "flex"
 	case style.DisplayInlineFlex:
 		return "inline-flex"
 	case style.DisplayGrid:
 		return "grid"
+	case style.DisplayInlineGrid:
+		return "inline-grid"
 	case style.DisplayTable:
 		return "table"
-	case style.DisplayTableCell:
-		return "table-cell"
+	case style.DisplayInlineTable:
+		return "inline-table"
+	case style.DisplayTableCaption:
+		return "table-caption"
+	case style.DisplayTableRowGroup:
+		return "table-row-group"
+	case style.DisplayTableHeaderGroup:
+		return "table-header-group"
+	case style.DisplayTableFooterGroup:
+		return "table-footer-group"
 	case style.DisplayTableRow:
 		return "table-row"
+	case style.DisplayTableCell:
+		return "table-cell"
+	case style.DisplayTableColumn:
+		return "table-column"
+	case style.DisplayTableColumnGroup:
+		return "table-column-group"
 	}
 	return "inline"
 }

@@ -183,11 +183,23 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	colPos := gridTrackPos(colState, g.ContentBoxLeft(), colGap)
 	rowPos := gridTrackPos(rowState, g.ContentBoxTop(), rowGap)
 
-	gridPlaceItems(items, colPos, rowPos, state)
+	gridPlaceItems(items, colPos, rowPos, colState, rowState, colGap, rowGap, state)
 
 	lastRowEnd := rowPos[len(rowPos)-1]
-	g.SetContentHeight(math.Max(g.ContentHeight(), lastRowEnd-g.ContentBoxTop()))
+	contentH := math.Max(0, lastRowEnd-g.ContentBoxTop())
+	// The container's height:auto resolves to its content extent. Do NOT
+	// max() against the pre-layout ContentHeight: block ancestors pre-size
+	// grid boxes to the viewport height before their FC runs, so max() would
+	// leave the box stuck at viewport height. Only an explicit CSS height
+	// (which ancestors set before this FC) should be preserved.
+	if !heightIsAutoForBox(box) {
+		g.SetContentHeight(math.Max(g.ContentHeight(), contentH))
+	} else {
+		g.SetContentHeight(contentH)
+	}
 }
+
+
 
 // ── Track parsing ──
 
@@ -455,7 +467,10 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 	}
 	sort.SliceStable(spans, func(i, j int) bool { return spans[i].count < spans[j].count })
 
-	// Step 1: Content-based growth (simplified — items without explicit size contribute 0)
+	// Step 1: Content-based growth. For auto/min-content/max-content tracks,
+	// the track grows to fit the content of the items that span it. For row
+	// tracks (isCol=false) the content contribution is the item's intrinsic
+	// height; for column tracks it is the intrinsic width.
 	for _, sp := range spans {
 		cur := 0.0
 		for i := sp.start; i < sp.end; i++ {
@@ -465,7 +480,45 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 			cur += gap * float64(sp.count-1)
 		}
 
+		// Content contribution: for fixed-size items the declared size is
+		// used; otherwise measure intrinsic content (text line height for
+		// rows, measured text width for columns).
 		content := 0.0
+		if cb := sp.box; cb != nil {
+			cfs := fontSizeOf(cb)
+			_, p, b := computeBoxModel(cb, avail, cfs)
+			hp := p.Left + p.Right + b.Left + b.Right
+			csb := cb.Style()
+			if csb != nil {
+				var declared float64
+				if isCol {
+					if w, ok := definiteWidth(csb.Width, avail, cfs); ok && w > 0 {
+						declared = w
+					}
+				} else {
+					if h, ok := definiteHeight(csb.Height, 100, cfs); ok && h > 0 {
+						declared = h
+					}
+				}
+				if declared > 0 {
+					if isBorderBox(cb) {
+						declared = math.Max(0, declared-hp) // content-box
+					}
+					content = declared
+				} else {
+					// Intrinsic: text content height (row) or width (col).
+					if isCol {
+						content = gridIntrinsicTextWidth(cb, cfs)
+					} else {
+						lh := fontLineGap(cb)
+						if lh <= 0 {
+							lh = cfs * 1.2
+						}
+						content = lh
+					}
+				}
+			}
+		}
 		extra := content - cur
 		if extra <= 0 {
 			continue
@@ -531,6 +584,22 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 	}
 }
 
+func gridIntrinsicTextWidth(box *ElementBox, fs float64) float64 {
+	total := 0.0
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, c := range b.Children() {
+			if itb, ok := c.(*InlineTextBox); ok {
+				total += measureText(box, itb.Text())
+			} else if eb, ok := c.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(box)
+	return total
+}
+
 // ── Track positions ──
 
 func gridTrackPos(states []gridTrackState, start, gap float64) []float64 {
@@ -544,10 +613,7 @@ func gridTrackPos(states []gridTrackState, start, gap float64) []float64 {
 	}
 	return p
 }
-
-// ── Cell placement ──
-
-func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, state *LayoutState) {
+func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowState []gridTrackState, colGap, rowGap float64, state *LayoutState) {
 	nCols := len(colPos) - 1
 	nRows := len(rowPos) - 1
 
@@ -564,11 +630,24 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, state *LayoutSt
 		}
 
 		cl := colPos[cs]
-		cr := colPos[ce]
 		rt := rowPos[rs]
-		rb := rowPos[re]
-		cw := cr - cl
-		ch := rb - rt
+		// Cell size: sum of spanned track sizes + internal gaps only. Using
+		// colPos[ce]-colPos[cs] would include the trailing gap after every
+		// non-last track, over-sizing the cell by one gap.
+		cw := 0.0
+		for i := cs; i < ce; i++ {
+			cw += colState[i].size
+		}
+		if ce-cs > 1 {
+			cw += colGap * float64(ce-cs-1)
+		}
+		ch := 0.0
+		for i := rs; i < re; i++ {
+			ch += rowState[i].size
+		}
+		if re-rs > 1 {
+			ch += rowGap * float64(re-rs-1)
+		}
 
 		ig := state.GeometryForBox(it.box)
 		ml := ig.MarginStart()

@@ -93,6 +93,34 @@ func allCases() []TestCase {
 				<div id="txt" style="width:400px">Some text that should wrap around the floats on both sides.</div>
 			`, ""),
 		},
+		{
+			Name: "layout_grid", Desc: "grid columns, rows, gap, auto placement",
+			ViewportW: 800, ViewportH: 600,
+			HTML: baseDoc(`
+				<div style="display:grid;grid-template-columns:100px 100px 100px;gap:10px;width:330px;background:#eee">
+					<div id="g1" style="background:#f00">A</div>
+					<div id="g2" style="background:#0f0">B</div>
+					<div id="g3" style="background:#00f">C</div>
+					<div id="g4" style="background:#ff0">D</div>
+				</div>
+				<div style="display:grid;grid-template-columns:repeat(2,80px);grid-template-rows:50px 50px;gap:5px;width:180px;background:#ddd">
+					<div id="gr1" style="background:#f80">1</div>
+					<div id="gr2" style="background:#08f">2</div>
+					<div id="gr3" style="background:#8f0">3</div>
+					<div id="gr4" style="background:#f0f">4</div>
+				</div>
+			`, ""),
+		},
+		{
+			Name: "layout_table", Desc: "table/tr/td geometry, border-collapse",
+			ViewportW: 800, ViewportH: 600,
+			HTML: baseDoc(`
+				<table id="t1" style="border-collapse:collapse;width:300px;background:#eee">
+					<tr><td id="td1" style="border:1px solid #000">A</td><td id="td2" style="border:1px solid #000">B</td></tr>
+					<tr><td id="td3" style="border:1px solid #000">C</td><td id="td4" style="border:1px solid #000">D</td></tr>
+				</table>
+			`, ""),
+		},
 		// ── Styles ──────────────────────────────────────────────
 		{
 			Name: "style_cascade", Desc: "specificity, inheritance, important",

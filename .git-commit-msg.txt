@@ -1,15 +1,8 @@
-chore: remove debug leftover files, extract layout test helpers
+chore: remove more debug leftover files from earlier sessions
 
-Cleanup of accumulated debug/diagnostic artifacts:
-
-- delete _tmp_read.go (throwaway file reader)
-- delete rendering/full_pipeline_diag_test.go, layout_diag_test.go
-  (print-only diagnostic tests with zero assertions)
-- delete static_diag_full.log, dev/output/sync_diag.txt,
-  dev/static_test/{ide,ide_vue,wbui}_diag.txt (diagnostic output dumps)
-- delete built binaries (pipeline_diag.exe, window_test*.exe, etc.)
-
-The diagnostic tests' helper functions (layoutInfo, walkAllLayoutBoxes,
-findByClass, dumpLayoutTree) are depended on by the real regression test
-layout_fix_test.go; they are preserved in a new
-rendering/layout_helpers_test.go together with the indexHTMLCSS fixture.
+Accumulated throwaway scripts and outputs that were swept into
+auto-commits during earlier debugging: _build_test*.bat, _check.py,
+_count_lines.py, _replace*.py, build_check*.bat, build_err.txt,
+build_log.txt, click_dbg/out.txt, clicktest_output.txt,
+form_pixels*.txt, step10_*/step12_*/step17_* probe outputs,
+temp_*.txt, tmp_scan.txt, wbui_last_run.txt, wbui_test_out.txt.

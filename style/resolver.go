@@ -648,6 +648,10 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "gap":
 		if l, ok := parseLength(valueString); ok {
 			cs.Gap = l
+			// The `gap` shorthand sets both row-gap and column-gap (CSS
+			// Box Alignment §gap). Grid/Flex read the longhands directly.
+			cs.RowGap = l
+			cs.ColumnGap = l
 		}
 	case "row-gap":
 		if l, ok := parseLength(valueString); ok {
@@ -1582,6 +1586,9 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 		case "gap":
 			if l, ok := parseLength(resolvedStr); ok {
 				cs.Gap = l
+				// The `gap` shorthand sets both row-gap and column-gap.
+				cs.RowGap = l
+				cs.ColumnGap = l
 			}
 		case "transition":
 			cs.Transition = resolvedStr
