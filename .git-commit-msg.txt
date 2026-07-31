@@ -1,42 +1,37 @@
-feat: async image loading + SVG gradients/strokes + img SVG + overlay scrollbars
+feat: SVG clip-path + <use> + multi-stop gradients + img object-fit/alt
 
 Candidates round:
 
-1. Async http(s) background images (backgroundimage.go + async_image_test.go):
-   - loadBackgroundImage now returns nil for http(s) URLs on first call and
-     spawns a goroutine (fetchBackgroundImageAsync); the cache serves the
-     image on later paints, so network latency never blocks the render
-     thread. data: URIs and files stay synchronous.
-   - SetBackgroundImageLoadedCallback(url) fires after a fetch completes so
-     hosts can schedule a repaint.
+1. SVG clip-path application (svg.go + svg_test.go):
+   - clip-path="url(#id)" now actually clips: svgFilledShape carries clipID;
+     paint saves the canvas, builds a skia path from the clip shapes
+     (rect/circle approximated) and clips the shape's paint.
+   - Verified: rect fill=red clipped to left-half rect paints red left,
+     transparent right.
 
-2. SVG gradients, strokes + a real SVG parsing bug (svg.go + svg_gradient_test.go):
-   - Found: dom.Element.LocalName() lowercases ("linearGradient" →
-     "lineargradient"), but parseGradientElement and the <defs> walk compared
-     camelCase → gradient/clipPath defs were never collected (gradients
-     silently dropped). Fixed both to lowercase comparisons.
-   - svgFilledShape now carries gradientID + stroke + strokeWidth (was fill
-     only), so fill="url(#g)" gradients and stroke= actually paint.
-   - svgDocument stores defs gradients/clips; paintSVG injects them into the
-     fresh per-call context (previously the defs were lost between build and
-     paint).
-   - paintGradientOnShape: default linear gradient paints pixel columns
-     (canvas only supports vertical FillLinearGradient) → horizontal red→blue
-     verified.
+2. SVG <use> elements (svg.go + svg_use_test.go):
+   - Fixed href resolution: <use href="#id"> uses the #id fragment syntax,
+     but parseURLReference only handled url(#id). The use branch now accepts
+     both (reverting the earlier global #-prefix change that mis-parsed
+     fill="#ffffff" as a reference and broke SVG strokes).
+   - The referenced shape is pure geometry; its own fill is now resolved and
+     wrapped so the use target is visible (paint context default fill is
+     transparent). x/y offset via svgTranslatedShape verified at (30,40).
 
-3. <img> SVG sources (painter.go PaintImage): img without an attached
-   DecodedImage now lazily loads src via the shared image cache; SVG srcs
-   (data:image/svg+xml) parse and paint scaled into the content box.
-   TestPaintImageSVG verifies center red / corner transparent.
+3. Multi-stop gradients (svg_gradient_test.go):
+   - SVG linear gradients already rasterize pixel-columns via
+     interpolateColor (CSS gradient code) so 3+ stops work; TestSVGMultiStopGradient
+     verifies red → green → blue across the rect.
 
-4. Overlay scrollbars (renderpipeline.go + scrollbar_overlay_test.go):
-   - overflow:auto scrollbars render only while the cursor is over the box
-     (overlay behavior); overflow:scroll stays always visible.
-   - Overflow clip now triggers on EITHER axis (overflow-y:auto alone must
-     clip + paint its scrollbar); previously the AND condition meant a
-     single-axis scroll box never got scrollbars.
+4. img object-fit (painter.go + objectfit_test.go):
+   - cover/contain/none/fill implemented in PaintImage (10x20 image in
+     60x30 box: contain letterboxes left/right, cover fills+crops, none
+     draws natural size top-left).
 
-Tests: async http fetch+cache+callback, SVG gradient left-red/right-blue,
-SVG stroke border-green/center-white, img SVG paint, scrollbar overlay
-hidden/visible + scroll always-visible. Full go test green; GEO suite
-13/13 still green (single-axis clip did not regress layout geometry).
+5. Image fallback alt text (painter.go + objectfit_test.go):
+   - PaintImage paints the alt attribute when the image can't be decoded
+     (broken src / async http not yet arrived), using the element color.
+
+Tests: clip left-half red/right-transparent, use rect at offset in blue,
+3-stop gradient red/green/blue, object-fit contain/cover/none, alt fallback.
+Full go test green; GEO 13/13 (Edge) unchanged.

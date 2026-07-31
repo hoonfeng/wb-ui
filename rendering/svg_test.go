@@ -162,6 +162,52 @@ func TestSVGViewBoxPainting(t *testing.T) {
 	paintSVG(canvas, sd, 0, 0, graphics.Color{})
 }
 
+// TestSVGClipPathPaint: circle with clip-path="url(#myClip)" — a rect clip
+// that only covers the left half — paints only inside the clip region.
+func TestSVGClipPathPaint(t *testing.T) {
+	doc := dom.NewDocument()
+	svgEl := doc.CreateElement("svg")
+	svgEl.SetAttribute("width", "100")
+	svgEl.SetAttribute("height", "100")
+	defs := doc.CreateElement("defs")
+	cp := doc.CreateElement("clipPath")
+	cp.SetAttribute("id", "leftHalf")
+	clipRect := doc.CreateElement("rect")
+	clipRect.SetAttribute("width", "50")
+	clipRect.SetAttribute("height", "100")
+	cp.AppendChild(clipRect)
+	defs.AppendChild(cp)
+
+	rect := doc.CreateElement("rect")
+	rect.SetAttribute("width", "100")
+	rect.SetAttribute("height", "100")
+	rect.SetAttribute("fill", "red")
+	rect.SetAttribute("clip-path", "url(#leftHalf)")
+	svgEl.AppendChild(defs)
+	svgEl.AppendChild(rect)
+
+	sd := buildSVGDocument(svgEl)
+	if sd == nil || len(sd.shapes) != 1 {
+		t.Fatalf("shapes=%v, want 1", len(sd.shapes))
+	}
+	w, ok := sd.shapes[0].(*svgFilledShape)
+	if !ok || w.clipID != "leftHalf" {
+		t.Fatalf("shape clipID=%q, want leftHalf (type=%T)", w.clipID, sd.shapes[0])
+	}
+
+	canvas := graphics.NewCanvas(100, 100)
+	defer canvas.Release()
+	paintSVG(canvas, sd, 0, 0, graphics.Color{})
+	// Left half: red (inside clip).
+	if px := canvas.PixelAt(20, 50); px.R != 255 || px.G != 0 {
+		t.Fatalf("left (20,50) = %+v, want red", px)
+	}
+	// Right half: clipped (transparent).
+	if px := canvas.PixelAt(80, 50); px.A != 0 {
+		t.Fatalf("right (80,50) = %+v, want clipped", px)
+	}
+}
+
 // TestSVGClipPath tests clipPath parsing.
 func TestSVGClipPath(t *testing.T) {
 	doc := dom.NewDocument()

@@ -11,11 +11,14 @@
 package rendering
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
+
+	"github.com/hoonfeng/goskia/skia"
 )
 
 // --- SVG types ---
@@ -30,14 +33,15 @@ type svgShape interface {
 // context is local to the walk. Without this wrapper the fill would be lost
 // when paintSVG runs with the default (transparent) fill — every SVG element
 // rendered invisible. The wrapper re-applies the resolved fill during paint.
-// gradientID (fill="url(#id)") and stroke are carried too so gradient fills
-// and strokes survive to paint time.
+// gradientID (fill="url(#id)"), stroke and clipID (clip-path="url(#id)") are
+// carried too so gradients, strokes and clips survive to paint time.
 type svgFilledShape struct {
 	shape       svgShape
 	fill        graphics.Color
 	gradientID  string
 	stroke      graphics.Color
 	strokeWidth float64
+	clipID      string
 }
 
 func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
@@ -53,7 +57,54 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	c2.fill = s.fill
 	c2.stroke = s.stroke
 	c2.strokeWidth = s.strokeWidth
+	if s.clipID != "" {
+		if clipShapes, ok := ctx.clips[s.clipID]; ok && len(clipShapes) > 0 {
+			// Apply the clip path, paint the shape, restore.
+			canvas.Save()
+			if clipPath := clipShapesToPath(clipShapes); clipPath != nil {
+				canvas.ClipPath(clipPath)
+				clipPath.Release()
+				s.shape.paint(canvas, &c2)
+			}
+			canvas.Restore()
+			return
+		}
+	}
 	s.shape.paint(canvas, &c2)
+}
+
+// clipShapesToPath converts SVG clip shapes into a single skia path. Only
+// rect and circle are supported; unsupported shapes contribute nothing.
+func clipShapesToPath(shapes []svgShape) *skia.Path {
+	if len(shapes) == 0 {
+		return nil
+	}
+	path := skia.NewPath()
+	for _, sh := range shapes {
+		switch s := sh.(type) {
+		case *svgRect:
+			path.MoveTo(float32(s.x), float32(s.y))
+			path.LineTo(float32(s.x+s.w), float32(s.y))
+			path.LineTo(float32(s.x+s.w), float32(s.y+s.h))
+			path.LineTo(float32(s.x), float32(s.y+s.h))
+			path.Close()
+		case *svgCircle:
+			// Approximate the circle with an octagon (enough for clips).
+			const steps = 16
+			for i := 0; i < steps; i++ {
+				a := 2 * math.Pi * float64(i) / steps
+				x := s.cx + s.r*math.Cos(a)
+				y := s.cy + s.r*math.Sin(a)
+				if i == 0 {
+					path.MoveTo(float32(x), float32(y))
+				} else {
+					path.LineTo(float32(x), float32(y))
+				}
+			}
+			path.Close()
+		}
+	}
+	return path
 }
 
 // paintShapeGradient fills a basic shape with a defs gradient (delegates
@@ -817,18 +868,30 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			if href == "" {
 				href = childEl.GetAttribute("xlink:href")
 			}
-			if refID := parseURLReference(href); refID != "" {
-				if refEl, ok := doc.elementByID[refID]; ok {
-					refShape := parseSVGElement(refEl)
-					if refShape != nil {
-						// Apply <use> x/y offset
-						dx := parseSVGCoord(childEl.GetAttribute("x"))
-						dy := parseSVGCoord(childEl.GetAttribute("y"))
-						if dx != 0 || dy != 0 {
-							refShape = &svgTranslatedShape{shape: refShape, dx: dx, dy: dy}
+			// <use> uses #id fragment syntax (not url(#id)); parseURLReference
+			// only handles url() so accept both forms here.
+			refID := parseURLReference(href)
+			if refID == "" && strings.HasPrefix(strings.TrimSpace(href), "#") {
+				refID = strings.TrimSpace(href)[1:]
+			}
+			if refEl, ok := doc.elementByID[refID]; ok {
+				refShape := parseSVGElement(refEl)
+				if refShape != nil {
+					// The referenced shape is pure geometry; resolve its
+					// own fill so it is visible (the paint context's
+					// default fill is transparent).
+					if refFillStr := refEl.GetAttribute("fill"); refFillStr != "" {
+						if refFill := parseColorAttribute(refFillStr); refFill.A > 0 {
+							refShape = &svgFilledShape{shape: refShape, fill: refFill}
 						}
-						doc.shapes = append(doc.shapes, refShape)
 					}
+					// Apply <use> x/y offset
+					dx := parseSVGCoord(childEl.GetAttribute("x"))
+					dy := parseSVGCoord(childEl.GetAttribute("y"))
+					if dx != 0 || dy != 0 {
+						refShape = &svgTranslatedShape{shape: refShape, dx: dx, dy: dy}
+					}
+					doc.shapes = append(doc.shapes, refShape)
 				}
 			}
 			return // <use> resolved, skip children
@@ -846,6 +909,9 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			}
 			if gradientID := parseURLReference(fillStr); gradientID != "" {
 				wrapper.gradientID = gradientID
+			}
+			if clipID := parseURLReference(clipStr); clipID != "" {
+				wrapper.clipID = clipID
 			}
 			doc.shapes = append(doc.shapes, wrapper)
 		}

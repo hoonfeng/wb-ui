@@ -76,6 +76,61 @@ func TestSVGGradientFill(t *testing.T) {
 	}
 }
 
+// TestSVGMultiStopGradient: a 3-stop linear gradient paints red → green →
+// blue across the rect (middle column green, right column blue).
+func TestSVGMultiStopGradient(t *testing.T) {
+	doc := dom.NewDocument()
+	svgEl := doc.CreateElement("svg")
+	svgEl.SetAttribute("width", "30")
+	svgEl.SetAttribute("height", "10")
+	defs := doc.CreateElement("defs")
+	lg := doc.CreateElement("linearGradient")
+	lg.SetAttribute("id", "g")
+	for _, s := range [][2]string{{"0%", "#ff0000"}, {"50%", "#00ff00"}, {"100%", "#0000ff"}} {
+		st := doc.CreateElement("stop")
+		st.SetAttribute("offset", s[0])
+		st.SetAttribute("stop-color", s[1])
+		lg.AppendChild(st)
+	}
+	defs.AppendChild(lg)
+	rect := doc.CreateElement("rect")
+	rect.SetAttribute("width", "30")
+	rect.SetAttribute("height", "10")
+	rect.SetAttribute("fill", "url(#g)")
+	svgEl.AppendChild(defs)
+	svgEl.AppendChild(rect)
+
+	sd := buildSVGDocument(svgEl)
+	canvas := graphics.NewCanvas(30, 10)
+	defer canvas.Release()
+	paintSVG(canvas, sd, 0, 0, graphics.Color{})
+
+	// Left: red, middle: green, right: blue.
+	checks := []struct {
+		x    int
+		kind string // "r" red-dominant, "g" green, "b" blue
+	}{
+		{2, "r"}, {15, "g"}, {28, "b"},
+	}
+	for _, c := range checks {
+		px := canvas.PixelAt(c.x, 5)
+		switch c.kind {
+		case "r":
+			if px.R < 200 || px.G > 60 {
+				t.Fatalf("(%d,5) = %+v, want red", c.x, px)
+			}
+		case "g":
+			if px.G < 200 || px.R > 60 || px.B > 60 {
+				t.Fatalf("(%d,5) = %+v, want green", c.x, px)
+			}
+		case "b":
+			if px.B < 200 || px.R > 60 {
+				t.Fatalf("(%d,5) = %+v, want blue", c.x, px)
+			}
+		}
+	}
+}
+
 // TestSVGStroke: rect with stroke paints a colored outline plus fill.
 func TestSVGStroke(t *testing.T) {
 	doc := dom.NewDocument()

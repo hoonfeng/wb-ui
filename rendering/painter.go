@@ -1031,8 +1031,55 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		}
 	}
 	if img == nil || !img.Loaded() {
+		// Fallback: draw the alt text (if any) like a broken-image state.
+		if el, ok := box.Node().(*dom.Element); ok {
+			if alt := el.GetAttribute("alt"); alt != "" {
+				font := toGraphicsFont(st)
+				altCol := toGraphicsColor(st.Color)
+				if altCol.A == 0 {
+					altCol = graphics.Color{R: 96, G: 96, B: 96, A: 255}
+				}
+				ascent := info.canvas.FontAscent(font)
+				info.canvas.DrawText(x, y+ascent, alt, font, altCol)
+			}
+		}
 		return false
 	}
-	img.Draw(info.canvas, x, y, w, h)
+	// object-fit (default fill) controls how the image scales into the
+	// content box, mirroring CSS Images §3.
+	iw, ih := float64(img.Width()), float64(img.Height())
+	fit := strings.ToLower(st.GetProperty("object-fit"))
+	switch fit {
+	case "cover":
+		if iw > 0 && ih > 0 {
+			ratio := w / iw
+			if h/ih > ratio {
+				ratio = h / ih
+			}
+			dw, dh := iw*ratio, ih*ratio
+			img.Draw(info.canvas, x+(w-dw)/2, y+(h-dh)/2, dw, dh)
+		} else {
+			img.Draw(info.canvas, x, y, w, h)
+		}
+	case "contain":
+		if iw > 0 && ih > 0 {
+			ratio := w / iw
+			if h/ih < ratio {
+				ratio = h / ih
+			}
+			dw, dh := iw*ratio, ih*ratio
+			img.Draw(info.canvas, x+(w-dw)/2, y+(h-dh)/2, dw, dh)
+		} else {
+			img.Draw(info.canvas, x, y, w, h)
+		}
+	case "none":
+		if iw > 0 && ih > 0 {
+			img.Draw(info.canvas, x, y, iw, ih)
+		} else {
+			img.Draw(info.canvas, x, y, w, h)
+		}
+	default: // fill (stretch to the content box)
+		img.Draw(info.canvas, x, y, w, h)
+	}
 	return true
 }
