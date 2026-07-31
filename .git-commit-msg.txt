@@ -1,21 +1,14 @@
-fix: wb-ui browser alignment - UA stylesheet, list markers, z-index stacking, currentcolor
+fix: cross-platform window backend alignment (IME/drop/focus/software render)
 
-- html5/defaultcss.go: add general element UA defaults (headings h1-h6 sizes,
-  p/ul/ol/dl margins, a link color/underline, strong/em/small/code/hr, dialog)
-- layout/layoututil.go: fix fontSizeOf em/%/rem resolution (em needs parent
-  font-size as base; previously em font-size fell back to 16px)
-- layout/blockformattingcontext.go: generate list-item markers (disc/circle/
-  square, decimal/alpha/roman ordinals) per CSS Lists & Counters 4.1;
-  rename shadowed style var to cs; add listMarkerFor/alpha/roman helpers
-- layout/box.go: add ElementBox.MarkerText field
-- rendering/painter.go: draw list markers before first text segment;
-  border color uses currentcolor fallback (style.BorderColor)
-- rendering/renderpipeline.go: sort child layers by z-index in stacking order
-  (negative -> auto/tree -> positive), per CSS 2.1 9.9
-- style/resolver.go: support -webkit-link/linktext/canvas system colors;
-  parse currentcolor in border shorthand
-- style/computedstyle.go: add BorderColor() (currentcolor fallback) and
-  DisplayType/OverflowType String() methods
-- rendering/renderformcontrol.go: use BorderColor() for form border
-- platform/window/window_macos.go: fix escaped tab in Event struct
-- tests: uastyle_test.go (5), listmarker_test.go (1), integration z-index (2)
+- app/host.go: fix software-rendered backends (X11/Cocoa) never rendering —
+  the main loop skipped the paint path when GPUSurface() returned nil; now
+  falls back to Window.Canvas() for CPU raster + Present
+- platform/window: add Canvas() to all three backends (glfw returns nil,
+  x11/macos return the raster canvas)
+- platform/window/window_x11.go: wire up XIM IME (Init + SetClientWindow +
+  FilterEvent on KeyPress), implement IME()/PollIMEEvents()/SetIMECompositionPos/
+  SetIMEEnabled, add PostEvent/Focus (XRaiseWindow), call dropCallback on drop
+- platform/window/window_macos.go: wire up NSTextInputClient IME (Init with
+  NSView), implement IME methods, add PostEvent/Focus (cocoa_focus helper),
+  remove unused extern goCocoaViewEvent declaration
+- platform/window/window_glfw.go: import graphics for Canvas()

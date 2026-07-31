@@ -81,6 +81,8 @@ type Window struct {
 	closeCallback func()
 	shouldClose   bool
 
+	ime ime.Handler
+
 	atomDeleteWindow C.Atom
 
 	// Xdnd atoms for drag & drop
@@ -166,6 +168,16 @@ func NewWindow(width, height int, title string) (*Window, error) {
 		atomXdndActionCopy: atomXdndActionCopy,
 		atomXdndURIList:   atomXdndURIList,
 		dropVersion:       5,
+		ime:               ime.NewHandler(),
+	}
+	// Wire up the XIM IME handler. The Display pointer is passed as the
+	// Init handle; the client window is set explicitly since XIM needs
+	// the actual X11 Window for input context focus.
+	if w.ime != nil {
+		w.ime.Init(uintptr(unsafe.Pointer(dpy)))
+		if setter, ok := w.ime.(interface{ SetClientWindow(uintptr) }); ok {
+			setter.SetClientWindow(uintptr(xwin))
+		}
 	}
 	w.detectDPI()
 	return w, nil
@@ -246,6 +258,9 @@ func (w *Window) blitToWindow() {
 // GPUSurface returns nil on the X11 raster backend.
 func (w *Window) GPUSurface() *skia.Surface          { return nil }
 func (w *Window) GPUContext() *skia.DirectContext     { return nil }
+
+// Canvas returns the CPU raster canvas backing this software-rendered window.
+func (w *Window) Canvas() *graphics.Canvas { return w.canvas }
 
 // Present blits the raster canvas to the X11 window.
 func (w *Window) Present() {
@@ -372,6 +387,15 @@ func (w *Window) PollEvents() []Event {
 			w.events = append(w.events, Event{Type: EventCursorMove, X: float64(mot.x), Y: float64(mot.y)})
 			w.eventsMu.Unlock()
 		case C.KeyPress:
+			// Let the IME (XIM) filter the event first. If it consumes the
+			// key (composition input), it is not delivered as a normal key.
+			if w.ime != nil {
+				if f, ok := w.ime.(interface{ FilterEvent(unsafe.Pointer) bool }); ok {
+					if f.FilterEvent(unsafe.Pointer(&xev)) {
+						continue
+					}
+				}
+			}
 			key := (*C.XKeyEvent)(unsafe.Pointer(&xev))
 			ks := C.XLookupKeysym(key, 0)
 			w.eventsMu.Lock()
@@ -453,6 +477,14 @@ func (w *Window) PollEvents() []Event {
 							Type:      EventDrop,
 							DropFiles: files,
 						})
+						// Notify the drop callback, mirroring glfw's behavior.
+						if w.dropCallback != nil {
+							cb := w.dropCallback
+							cbFiles := files
+							w.eventsMu.Unlock()
+							cb(cbFiles)
+							w.eventsMu.Lock()
+						}
 					}
 					w.eventsMu.Unlock()
 				}
@@ -492,10 +524,51 @@ func (w *Window) FramebufferHeight() int                { return w.fbHeight }
 func (w *Window) ContentScale() (float64, float64)      { return w.contentScaleX, w.contentScaleY }
 func (w *Window) SetCloseCallback(fn func())            { w.closeCallback = fn }
 func (w *Window) SetDropCallback(fn func([]string))     { w.dropCallback = fn }
-func (w *Window) IME() ime.Handler                      { return nil }
-func (w *Window) PollIMEEvents() []ime.Event            { return nil }
-func (w *Window) SetIMECompositionPos(cssX, cssY float64) {}
-func (w *Window) SetIMEEnabled(enabled bool)            {}
+
+// PostEvent appends an event to the internal queue, mirroring the GLFW
+// backend's PostEvent. Used by tests and synthetic event injection.
+func (w *Window) PostEvent(ev Event) {
+	w.eventsMu.Lock()
+	w.events = append(w.events, ev)
+	w.eventsMu.Unlock()
+}
+
+// Focus raises and gives keyboard focus to the window.
+func (w *Window) Focus() {
+	if w.display == nil {
+		return
+	}
+	C.XRaiseWindow(w.display, w.xwin)
+	C.XSetInputFocus(w.display, w.xwin, C.RevertToParent, C.CurrentTime)
+	C.XFlush(w.display)
+}
+
+func (w *Window) IME() ime.Handler                      { return w.ime }
+func (w *Window) PollIMEEvents() []ime.Event {
+	if w.ime == nil {
+		return nil
+	}
+	return w.ime.PopEvents()
+}
+func (w *Window) SetIMECompositionPos(cssX, cssY float64) {
+	if w.ime == nil {
+		return
+	}
+	scaleX, scaleY := 1.0, 1.0
+	if w.width > 0 {
+		scaleX = float64(w.fbWidth) / float64(w.width)
+	}
+	if w.height > 0 {
+		scaleY = float64(w.fbHeight) / float64(w.height)
+	}
+	w.ime.SetCompositionPos(int32(cssX*scaleX), int32(cssY*scaleY))
+}
+func (w *Window) SetIMEEnabled(enabled bool) {
+	if w.ime == nil {
+		return
+	}
+	w.ime.SetEnabled(enabled)
+}
 func (w *Window) SetClipboardString(s string)           {}
 func (w *Window) GetClipboardString() string            { return "" }
 

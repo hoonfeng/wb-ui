@@ -92,7 +92,8 @@ typedef struct {
 } CocoaWindow;
 
 // Forward declarations for the Go-callable view event notifier
-extern void goCocoaViewEvent(void* ctx, int type, double x, double y, int button, int action, int key, double scrollY);
+// (unused in this port; events flow through the NativeEvent queue instead).
+// extern void goCocoaViewEvent(void* ctx, int type, double x, double y, int button, int action, int key, double scrollY);
 
 // --- View subclass (created at runtime via ObjC runtime) ---
 static Class viewClass = NULL;
@@ -711,6 +712,14 @@ static void cocoa_close(CocoaWindow* cw) {
     cw->shouldClose = 1;
     free(cw);
 }
+
+// --- Focus / raise window ---
+static void cocoa_focus(CocoaWindow* cw) {
+    if (!cw || !cw->win) return;
+    id win = (id)cw->win;
+    ((void(*)(id, SEL))objc_msgSend)(win, sel_registerName("makeKeyAndOrderFront:"));
+    ((void(*)(id, SEL))objc_msgSend)(win, sel_registerName("orderFront:"));
+}
 */
 import "C"
 
@@ -766,6 +775,8 @@ type Window struct {
 
 	canvas *graphics.Canvas
 
+	ime ime.Handler
+
 	events   []Event
 	eventsMu sync.Mutex
 
@@ -797,12 +808,22 @@ func NewWindow(width, height int, title string) (*Window, error) {
 		contentScaleX: scale, contentScaleY: scale,
 		canvas: canvas,
 	}
+	// Wire up the NSTextInputClient IME handler with the NSView pointer.
+	// The view's imeQueuePtr ivar is set by macosHandler.Init so the
+	// text-input methods can push composition events into the queue.
+	w.ime = ime.NewHandler()
+	if w.ime != nil && cw.view != nil {
+		w.ime.Init(uintptr(unsafe.Pointer(cw.view)))
+	}
 	return w, nil
 }
 
 // GPUSurface returns nil on the Cocoa raster backend.
 func (w *Window) GPUSurface() *skia.Surface      { return nil }
 func (w *Window) GPUContext() *skia.DirectContext { return nil }
+
+// Canvas returns the CPU raster canvas backing this software-rendered window.
+func (w *Window) Canvas() *graphics.Canvas { return w.canvas }
 
 // Present reads the raster canvas and blits it to the NSView layer.
 func (w *Window) Present() {
@@ -932,6 +953,22 @@ func (w *Window) ShouldClose() bool {
 	return w.handle.shouldClose != 0
 }
 
+// PostEvent appends an event to the internal queue, mirroring the GLFW
+// backend's PostEvent. Used by tests and synthetic event injection.
+func (w *Window) PostEvent(ev Event) {
+	w.eventsMu.Lock()
+	w.events = append(w.events, ev)
+	w.eventsMu.Unlock()
+}
+
+// Focus brings the window to the front (Cocoa makeKeyAndOrderFront).
+func (w *Window) Focus() {
+	if w.handle == nil {
+		return
+	}
+	C.cocoa_focus(w.handle)
+}
+
 // Width / Height return the window size in logical points (CSS pixels).
 func (w *Window) Width() int                        { return w.width }
 func (w *Window) Height() int                       { return w.height }
@@ -940,10 +977,32 @@ func (w *Window) FramebufferHeight() int            { return w.fbHeight }
 func (w *Window) ContentScale() (float64, float64)  { return w.contentScaleX, w.contentScaleY }
 func (w *Window) SetCloseCallback(fn func())        { w.closeCallback = fn }
 func (w *Window) SetDropCallback(fn func([]string)) { w.dropCallback = fn }
-func (w *Window) IME() ime.Handler                  { return nil }
-func (w *Window) PollIMEEvents() []ime.Event        { return nil }
-func (w *Window) SetIMECompositionPos(x, y float64) {}
-func (w *Window) SetIMEEnabled(enabled bool)        {}
+func (w *Window) IME() ime.Handler                  { return w.ime }
+func (w *Window) PollIMEEvents() []ime.Event {
+	if w.ime == nil {
+		return nil
+	}
+	return w.ime.PopEvents()
+}
+func (w *Window) SetIMECompositionPos(x, y float64) {
+	if w.ime == nil {
+		return
+	}
+	scaleX, scaleY := 1.0, 1.0
+	if w.width > 0 {
+		scaleX = float64(w.fbWidth) / float64(w.width)
+	}
+	if w.height > 0 {
+		scaleY = float64(w.fbHeight) / float64(w.height)
+	}
+	w.ime.SetCompositionPos(int32(x*scaleX), int32(y*scaleY))
+}
+func (w *Window) SetIMEEnabled(enabled bool) {
+	if w.ime == nil {
+		return
+	}
+	w.ime.SetEnabled(enabled)
+}
 func (w *Window) SetClipboardString(s string)       {}
 func (w *Window) GetClipboardString() string        { return "" }
 

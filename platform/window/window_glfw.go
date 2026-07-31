@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 	"github.com/hoonfeng/goskia/skia"
+	"wb-ui/platform/graphics"
 	"wb-ui/platform/ime"
 )
 
@@ -292,6 +293,13 @@ func (w *Window) setupCallbacks() {
 // Release the returned surface; it is owned by the Window.
 func (w *Window) GPUSurface() *skia.Surface {
 	return w.gpuSurface
+}
+
+// Canvas returns the CPU raster canvas for software-rendered backends
+// (X11/Cocoa). The GLFW GPU backend returns nil — callers should use
+// GPUSurface instead.
+func (w *Window) Canvas() *graphics.Canvas {
+	return nil
 }
 
 // GPUContext returns the Skia DirectContext for the GPU surface. Callers

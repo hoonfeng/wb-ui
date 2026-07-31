@@ -439,12 +439,24 @@ func (h *Host) Run() {
 		// but catches resize events that the FramebufferSizeCallback may have
 		// missed (e.g. maximize/un-maximize on some GLFW/platform combos).
 		h.wv.Resize(h.win.Width(), h.win.Height())
-		if gpuSurf == nil {
+
+		// Software-rendered backends (X11/Cocoa) expose a CPU canvas; the GLFW
+		// GPU backend wraps its framebuffer surface. Unify both into gpuCanvas
+		// so the paint + Present path below works on every platform.
+		var gpuCanvas *graphics.Canvas
+		var ownsCanvas bool
+		if gpuSurf != nil {
+			gpuCanvas = graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
+			ownsCanvas = true
+		} else if sw := h.win.Canvas(); sw != nil {
+			gpuCanvas = sw
+			ownsCanvas = false
+		}
+		if gpuCanvas == nil {
 			h.processEvents(nil)
 			h.processEventLoop()
 			continue
 		}
-		gpuCanvas := graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
 
 		h.wv.EnsureLayout()
 		rv := h.wv.RenderView()
@@ -514,7 +526,9 @@ func (h *Host) Run() {
 			gpuCanvas.Restore()
 		}
 
-		gpuCanvas.Release()
+		if ownsCanvas {
+			gpuCanvas.Release()
+		}
 		h.win.Present()
 
 		h.processEvents(rv)
