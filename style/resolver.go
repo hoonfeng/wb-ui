@@ -601,6 +601,8 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		if l, ok := parseLength(valueString); ok {
 			cs.BorderRadius = l
 		}
+	case "border-collapse":
+		cs.BorderCollapse = parseBorderCollapse(valueString)
 	case "box-sizing":
 		cs.BoxSizing = valueString
 	case "visibility":

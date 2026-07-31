@@ -111,6 +111,9 @@ type NonInheritedData struct {
 	BorderLeftStyle   string
 	BoxSizing         string
 
+	// Border collapse mode (table only): separate (default) or collapse.
+	BorderCollapse BorderCollapseType
+
 	// Border radius (single value for all corners).
 	BorderRadius Length
 

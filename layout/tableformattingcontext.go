@@ -74,13 +74,13 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cw <= 0 {
 		return
 	}
+	// border-collapse: collapse — cell boxes start at the table's border-box
+	// edge (cell borders replace the table border), borders merge into shared
+	// single lines, and explicit cell widths are content widths (border and
+	// padding add to the column).
+	collapse := cs.BorderCollapse == style.BorderCollapseCollapse
 
 	// ── Step 1: Collect all rows and cells ──
-	type tableRow struct {
-		box   *ElementBox
-		cells []*ElementBox
-	}
-
 	rowBoxes := collectRows(box)
 	if len(rowBoxes) == 0 {
 		return
@@ -114,7 +114,16 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			cs := cell.Style()
 			if cs != nil && cs.Width.Unit == "px" && cs.Width.Value > 0 {
-				colWidths[ci] = cs.Width.Value
+				w := cs.Width.Value
+				if collapse {
+					// Collapse mode: explicit cell width is a content width; the
+					// column additionally carries the cell's border and padding
+					// (verified against Edge: td width:80 + 2px borders + 1px
+					// padding → 86px column, with borders drawn inside the box).
+					_, pad, border := computeBoxModelForBox(cell, 0, fontSizeOf(cell))
+					w += pad.Horizontal() + border.Horizontal()
+				}
+				colWidths[ci] = w
 				explicitCols[ci] = true
 			} else if cs != nil && cs.Width.Unit == "%" && cs.Width.Value > 0 && cw > 0 {
 				colWidths[ci] = cw * cs.Width.Value / 100.0
@@ -195,6 +204,12 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// ── Step 3: Layout rows and cells ──
 	contentLeft := g.ContentBoxLeft()
 	y := g.ContentBoxTop()
+	if collapse {
+		// Cells sit at the table border-box edge: their borders replace the
+		// table's own outer border.
+		contentLeft = g.Left()
+		y = g.Top()
+	}
 
 	for _, row := range rows {
 		rg := state.GeometryForBox(row.box)
@@ -312,6 +327,167 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		sg.SetContentWidth(cw)
 		sg.SetContentHeight(math.Max(1, bottom-top))
 	}
+
+	// ── Step 5: Border collapsing ──
+	// border-collapse:collapse merges adjacent cell borders into a single
+	// shared line. Conflicts resolve CSS-style: the cell that appears first
+	// (top/left in DOM order) wins the color; the wider border wins the
+	// width. The losing cell's edge is zeroed so it isn't painted twice.
+	if collapse {
+		applyCollapseBorders(box, rows, state)
+	}
+}
+
+// tableRow groups a row box with its collected cells.
+type tableRow struct {
+	box   *ElementBox
+	cells []*ElementBox
+}
+
+// borderWidthOf returns the resolved pixel width of a border side.
+func borderWidthOf(cs *style.ComputedStyle, side string) float64 {
+	if cs == nil {
+		return 0
+	}
+	var l style.Length
+	switch side {
+	case "top":
+		l = cs.BorderTopWidth
+	case "right":
+		l = cs.BorderRightWidth
+	case "bottom":
+		l = cs.BorderBottomWidth
+	default:
+		l = cs.BorderLeftWidth
+	}
+	return resolveLength(l, 0, 0).Value
+}
+
+// setBorderWidth overwrites a border side width on the cell's computed style.
+// The painter reads border widths from the style, so this directly controls
+// what gets painted (geometry is already laid out).
+func setBorderWidth(box *ElementBox, side string, w float64) {
+	cs := box.Style()
+	if cs == nil {
+		return
+	}
+	l := style.Length{Value: w, Unit: "px"}
+	switch side {
+	case "top":
+		cs.BorderTopWidth = l
+	case "right":
+		cs.BorderRightWidth = l
+	case "bottom":
+		cs.BorderBottomWidth = l
+	default:
+		cs.BorderLeftWidth = l
+	}
+}
+
+// applyCollapseBorders resolves border conflicts for a border-collapse:collapse
+// table (CSS 2.1 §17.6.2.1, simplified to the dominant cases):
+//   - a cell's border always beats the table's own outer border (same position;
+//     the cell is painted later and covers it)
+//   - adjacent cells share the line between them: the first cell (top/left in
+//     DOM order) provides the color, the wider border provides the width
+//   - the losing edge is zeroed so it paints once
+func applyCollapseBorders(table *ElementBox, rows []tableRow, state *LayoutState) {
+	ts := table.Style()
+	if ts == nil {
+		return
+	}
+	tableW := map[string]float64{
+		"top":    borderWidthOf(ts, "top"),
+		"right":  borderWidthOf(ts, "right"),
+		"bottom": borderWidthOf(ts, "bottom"),
+		"left":   borderWidthOf(ts, "left"),
+	}
+	maxWidth := func(a, b float64) float64 {
+		if a > b {
+			return a
+		}
+		return b
+	}
+	for ri, row := range rows {
+		lastRow := ri == len(rows)-1
+		for ci, cell := range row.cells {
+			cs := cell.Style()
+			if cs == nil {
+				continue
+			}
+			// Top edge: first row conflicts with the table's top border
+			// (cell wins → keep width max); inner rows lose to the cell
+			// above (which paints the shared line).
+			if ri == 0 {
+				setBorderWidth(cell, "top", maxWidth(borderWidthOf(cs, "top"), tableW["top"]))
+			} else {
+				setBorderWidth(cell, "top", 0)
+			}
+			// Left edge: first column conflicts with the table's left border
+			// (cell wins); inner columns lose to the left neighbor.
+			if ci == 0 {
+				setBorderWidth(cell, "left", maxWidth(borderWidthOf(cs, "left"), tableW["left"]))
+			} else {
+				setBorderWidth(cell, "left", 0)
+			}
+			// Right edge: this cell paints the shared line with the right
+			// neighbor — width = max of both, color = ours (we come first).
+			if ci < len(row.cells)-1 {
+				next := row.cells[ci+1]
+				ns := next.Style()
+				w := maxWidth(borderWidthOf(cs, "right"), borderWidthOf(ns, "left"))
+				setBorderWidth(cell, "right", w)
+			} else {
+				setBorderWidth(cell, "right", maxWidth(borderWidthOf(cs, "right"), tableW["right"]))
+			}
+			// Bottom edge: this cell paints the shared line with the row
+			// below — width = max, color = ours. Last row conflicts with the
+			// table's bottom border (cell wins).
+			if !lastRow {
+				var below *style.ComputedStyle
+				if ri+1 < len(rows) && ci < len(rows[ri+1].cells) {
+					below = rows[ri+1].cells[ci].Style()
+				}
+				w := borderWidthOf(cs, "bottom")
+				if below != nil {
+					w = maxWidth(w, borderWidthOf(below, "top"))
+				}
+				setBorderWidth(cell, "bottom", w)
+			} else {
+				setBorderWidth(cell, "bottom", maxWidth(borderWidthOf(cs, "bottom"), tableW["bottom"]))
+			}
+		}
+	}
+}
+
+// tablePreferredWidth returns the max-content width of a table: the sum of
+// each column's widest cell (text advance + padding + border). Used for
+// shrink-to-fit auto width (CSS 2.1 §17.5.2.1).
+func tablePreferredWidth(table *ElementBox) float64 {
+	rowBoxes := collectRows(table)
+	var colPrefs []float64
+	for _, rb := range rowBoxes {
+		for ci, cell := range collectCells(rb) {
+			fs := fontSizeOf(cell)
+			_, padding, border := computeBoxModelForBox(cell, 0, fs)
+			w := tableCellPreferredWidth(cell, fs) + padding.Horizontal() + border.Horizontal()
+			// Explicit cell width wins over content-derived width.
+			if cs := cell.Style(); cs != nil && cs.Width.Unit == "px" && cs.Width.Value > 0 {
+				w = cs.Width.Value + padding.Horizontal() + border.Horizontal()
+			}
+			for len(colPrefs) <= ci {
+				colPrefs = append(colPrefs, 0)
+			}
+			if w > colPrefs[ci] {
+				colPrefs[ci] = w
+			}
+		}
+	}
+	total := 0.0
+	for _, w := range colPrefs {
+		total += w
+	}
+	return total
 }
 
 // tableCellPreferredWidth returns the preferred (max-content) width of a

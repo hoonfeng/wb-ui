@@ -64,6 +64,14 @@ const (
 	OverflowAuto
 )
 
+// BorderCollapseType mirrors WebCore::BorderCollapse.
+type BorderCollapseType int
+
+const (
+	BorderCollapseSeparate BorderCollapseType = iota
+	BorderCollapseCollapse
+)
+
 // WhiteSpaceType mirrors WebCore::WhiteSpaceType.
 type WhiteSpaceType int
 
@@ -680,6 +688,24 @@ func LookupOverflow(s string) OverflowType {
 	default:
 		return OverflowVisible
 	}
+}
+
+// parseBorderCollapse resolves the border-collapse CSS keyword.
+func parseBorderCollapse(s string) BorderCollapseType {
+	switch s {
+	case "collapse":
+		return BorderCollapseCollapse
+	default:
+		return BorderCollapseSeparate
+	}
+}
+
+// BorderCollapseName returns the CSS string for a BorderCollapseType.
+func BorderCollapseName(t BorderCollapseType) string {
+	if t == BorderCollapseCollapse {
+		return "collapse"
+	}
+	return "separate"
 }
 
 // TextOverflowTypeName returns the CSS string for a TextOverflowType.

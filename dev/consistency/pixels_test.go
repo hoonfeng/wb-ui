@@ -87,6 +87,39 @@ func TestPxInsetShadow(t *testing.T) {
 	`, 0.001)
 }
 
+// TestPxCollapseTable: border-collapse:collapse — adjacent cell borders merge
+// into a single shared line (first cell wins color), cell borders replace the
+// table's outer border, and auto table width shrinks to content. Budget for
+// Edge's sub-pixel outer border placement (2px at the far right edge).
+func TestPxCollapseTable(t *testing.T) {
+	pixelCompare(t, "px_collapse", `
+		<table style="border-collapse:collapse;border:2px solid #333333;margin:10px">
+			<tr>
+				<td id="c1" style="border:2px solid #ff0000;width:80px;height:30px">&nbsp;</td>
+				<td id="c2" style="border:2px solid #0000ff;width:80px;height:30px">&nbsp;</td>
+			</tr>
+		</table>
+	`, 0.006)
+}
+
+// TestPxCollapseTable2x2: multi-row collapse — horizontal shared border
+// (row 2 top is zeroed) plus the shrink-to-fit width. Allows a small budget
+// for Edge's sub-pixel outer border placement (2px off at the far right edge).
+func TestPxCollapseTable2x2(t *testing.T) {
+	pixelCompare(t, "px_collapse2", `
+		<table style="border-collapse:collapse;border:2px solid #333333;margin:10px">
+			<tr>
+				<td id="c1" style="border:2px solid #ff0000;width:80px;height:30px">&nbsp;</td>
+				<td id="c2" style="border:2px solid #0000ff;width:80px;height:30px">&nbsp;</td>
+			</tr>
+			<tr>
+				<td id="c3" style="border:2px solid #00ff00;width:80px;height:30px">&nbsp;</td>
+				<td id="c4" style="border:2px solid #ff00ff;width:80px;height:30px">&nbsp;</td>
+			</tr>
+		</table>
+	`, 0.03)
+}
+
 // TestPxMultiStopGradient: three stops with explicit positions.
 func TestPxMultiStopGradient(t *testing.T) {
 	pixelCompare(t, "px_grad3", `

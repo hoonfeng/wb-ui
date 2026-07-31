@@ -360,7 +360,16 @@ func computeBlockChildBorderBoxWidth(child *ElementBox, cbContentWidth float64, 
 	w, ok := definiteWidth(cs.Width, cbContentWidth, fs)
 	if !ok {
 		width := cbContentWidth - margin.Horizontal()
-		if width < 0 { width = 0 }
+		if width < 0 {
+			width = 0
+		}
+		// Tables shrink-to-fit (CSS 2.1 §17.5.2.1): auto-width tables are
+		// as wide as their content, never stretched to the available width.
+		if child.EstablishesTableFormattingContext() {
+			if pref := tablePreferredWidth(child); pref < width {
+				width = pref
+			}
+		}
 		minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbContentWidth, fs)
 		return clampSize(width, minW, maxW, minAuto, maxAuto)
 	}
