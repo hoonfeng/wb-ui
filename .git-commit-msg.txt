@@ -1,23 +1,24 @@
-feat: table auto-layout (content-aware column widths) + font-family quote fix
+feat: unified Arial base font + grid explicit placement fixes
 
-1. Table auto layout (CSS2.1 §17.5.2.2): column widths are now computed
-   from content instead of equal distribution. Each auto column's
-   preferred width is the widest cell content (text advance + horizontal
-   padding/border) in that column; remaining table width is split in
-   proportion to preferred widths. Matches Edge for both single-char
-   cells (equal split when glyphs are equal width) and content-heavy
-   cells (AAAA/DDDDDD columns scale by measured text). Verified by Edge
-   probes: wideleft 233.7/66.3 (Edge 234/66), mixed 115.6/184.4
-   (Edge 116/184).
+1. Consistency suite: every case now pins font-family:'Arial' via
+   baseDoc (case-specific extraHead styles still win). wb-ui and Edge
+   measure Arial identically (A=B=10.67 @16px), so glyph-metric drift is
+   gone from geometry comparisons — all 13 reports now show zero diffs.
 
-2. font-family parser bug: quoted families like 'Arial' were stored with
-   the quotes ("\"Arial\"") because css.Token serialization adds them,
-   so the family never matched any real font and always fell back to
-   the default. Trim quotes in both resolve paths.
+2. Grid auto-placement BUG: auto items used a naive cursor that ignored
+   occupied cells, overlapping explicitly placed or spanning items.
+   Rewrote placement with an occupancy matrix: explicit/spanning items
+   are marked first, auto items scan row-major for the first free cell
+   (matches Edge's sparse flow — probe: auto item falls to col1,row2
+   instead of colliding with the col1-2,row1 span).
 
-3. layout_table case extended to 16 elements (two tables: equal-width
-   cells + content-differentiated columns) and pinned to Arial so wb-ui
-   and Edge measure glyphs identically; the td/table width tolerance
-   hack is removed since column widths now match exactly (0 diffs).
+3. Grid implicit expansion BUG: colEnd/rowEnd are LINE numbers, so
+   `grid-column:3` (end line 4 on a 3-track grid) wrongly created an
+   extra implicit column, shifting subsequent auto items. Expansion now
+   uses end-1 (track count), so an end line of nTracks+1 (far edge of
+   the explicit grid) creates no implicit track.
 
-Consistency suite: 13/13 green, layout_table 16/16 with zero diffs.
+4. layout_grid case extended to 15 elements: explicit placement,
+   column/row spans, and span+auto mix verified against Edge (0 diffs).
+
+Consistency suite: 13/13 green, layout_grid 15/15 with zero diffs.

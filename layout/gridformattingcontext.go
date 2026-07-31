@@ -123,13 +123,16 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	// Expand implicit grid
+	// Expand implicit grid. colEnd/rowEnd are line numbers: an item spanning
+	// tracks i..j has end line j+1, so the implicit column/row count is
+	// end-1. An end line of nTracks+1 (the far edge of the explicit grid)
+	// must NOT create an extra implicit track.
 	for _, it := range items {
-		if it.colEnd > nCols {
-			nCols = it.colEnd
+		if it.colEnd-1 > nCols {
+			nCols = it.colEnd - 1
 		}
-		if it.rowEnd > nRows {
-			nRows = it.rowEnd
+		if it.rowEnd-1 > nRows {
+			nRows = it.rowEnd - 1
 		}
 	}
 	if nCols < 1 {
@@ -145,25 +148,53 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		rowTracks = append(rowTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
 	}
 
-	// Auto-placement: assign unique column positions to items that were not
-	// explicitly placed (colStart == 1 && rowStart == 1, the default).
-	// Use a simple cursor that advances column-by-column, wrapping to the next
-	// row when columns are exhausted.
-	autoCol := 1
-	autoRow := 1
+	// Auto-placement: assign unique grid positions to items that were not
+	// explicitly placed (colStart == 1 && rowStart == 1 && colEnd == 2 &&
+	// rowEnd == 2, the default). Scan row-major for the first free cell so
+	// auto items never overlap explicitly placed or spanning items (matches
+	// Edge's sparse auto-flow: ge4 in the probe falls to col1,row2 instead of
+	// colliding with the col1-2,row1 span).
+	occupied := make(map[int]map[int]bool)
+	mark := func(r, cc int) {
+		if occupied[r] == nil {
+			occupied[r] = map[int]bool{}
+		}
+		occupied[r][cc] = true
+	}
 	for _, it := range items {
 		if it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2 {
-			// This item has default placement; assign the next auto slot.
-			it.colStart = autoCol
-			it.colEnd = autoCol + 1
-			it.rowStart = autoRow
-			it.rowEnd = autoRow + 1
-			autoCol++
-			if autoCol > nCols && nCols > 0 {
-				// For explicit tracks, wrap to next row if col > nCols.
-				// For implicit-only grids (no explicit tracks), nCols may be 0.
-				autoCol = 1
-				autoRow++
+			continue // auto item, placed below
+		}
+		for r := it.rowStart; r < it.rowEnd; r++ {
+			for cc := it.colStart; cc < it.colEnd; cc++ {
+				mark(r, cc)
+			}
+		}
+	}
+	for _, it := range items {
+		if it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2 {
+			placed := false
+			for r := 1; r <= nRows && !placed; r++ {
+				for cc := 1; cc <= nCols && !placed; cc++ {
+					if !occupied[r][cc] {
+						it.colStart = cc
+						it.colEnd = cc + 1
+						it.rowStart = r
+						it.rowEnd = r + 1
+						mark(r, cc)
+						placed = true
+					}
+				}
+			}
+			if !placed {
+				// Grid is full: append an implicit row.
+				nRows++
+				rowTracks = append(rowTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
+				it.colStart = 1
+				it.colEnd = 2
+				it.rowStart = nRows
+				it.rowEnd = nRows + 1
+				mark(nRows, 1)
 			}
 		}
 	}

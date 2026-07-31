@@ -42,7 +42,13 @@ const collectorSnippet = `
 `
 
 func baseDoc(body, extraHead string) string {
-	return "<!DOCTYPE html><html><head><meta charset='utf-8'>" + extraHead + "</head><body>" + body + collectorSnippet + "</body></html>"
+	// Unified font: wb-ui and Edge both measure Arial identically (verified
+	// A=B=10.67 at 16px), so pinning every case to Arial removes glyph-metric
+	// drift from geometry comparisons. Case-specific styles in extraHead are
+	// injected after and can override.
+	return "<!DOCTYPE html><html><head><meta charset='utf-8'>" +
+		"<style>body,td,th,input,button,select,textarea,li,a,h1,h2,h3,h4,h5,h6,label,option{font-family:'Arial'}</style>" +
+		extraHead + "</head><body>" + body + collectorSnippet + "</body></html>"
 }
 
 func allCases() []TestCase {
@@ -108,6 +114,12 @@ func allCases() []TestCase {
 					<div id="gr2" style="background:#08f">2</div>
 					<div id="gr3" style="background:#8f0">3</div>
 					<div id="gr4" style="background:#f0f">4</div>
+				</div>
+				<div style="display:grid;grid-template-columns:100px 100px 100px;grid-template-rows:50px 50px 50px;gap:10px;width:330px;background:#ccc">
+					<div id="ge1" style="grid-column:1/3;background:#f00">span2col</div>
+					<div id="ge2" style="grid-column:3;grid-row:1/3;background:#0f0">span2row</div>
+					<div id="ge3" style="grid-column:2;grid-row:2;background:#00f">placed</div>
+					<div id="ge4" style="background:#ff0">auto</div>
 				</div>
 			`, ""),
 		},
