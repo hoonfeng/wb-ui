@@ -209,14 +209,30 @@ func decodeDataURI(uri string) ([]byte, bool) {
 //
 // ⚠️ Single-WebView global: see package doc.
 var backgroundImageCache = struct {
-	mu   sync.Mutex
-	imgs map[string]*DecodedImage
-}{imgs: map[string]*DecodedImage{}}
+	mu      sync.Mutex
+	imgs    map[string]*DecodedImage
+	loading map[string]bool // http(s) URLs currently being fetched
+}{imgs: map[string]*DecodedImage{}, loading: map[string]bool{}}
+
+// bgImageLoadedCallback, when set, is invoked after an async http(s)
+// background image finishes loading (success or failure). Hosts use it to
+// schedule a repaint so the image appears without waiting for the next
+// frame-driven paint.
+var bgImageLoadedCallback func(url string)
+
+// SetBackgroundImageLoadedCallback registers the callback fired after an
+// async background image load completes. Pass nil to clear.
+func SetBackgroundImageLoadedCallback(cb func(url string)) {
+	backgroundImageCache.mu.Lock()
+	bgImageLoadedCallback = cb
+	backgroundImageCache.mu.Unlock()
+}
 
 // loadBackgroundImage resolves and decodes a background-image URL.
-// data: URIs are decoded inline; file paths are read relative to baseDir
-// (empty = current working directory). Results are cached; Release is not
-// called on cached images (they live for the process).
+// data: URIs and file paths decode synchronously (local, fast). http(s)
+// URLs fetch asynchronously: the first call spawns a goroutine and returns
+// nil; subsequent paints pick the image from the cache once loaded. This
+// keeps the render thread unblocked by network latency.
 func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	backgroundImageCache.mu.Lock()
 	defer backgroundImageCache.mu.Unlock()
@@ -227,12 +243,13 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	if b, ok := decodeDataURI(url); ok {
 		data = b
 	} else if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		// Remote image: fetch once (synchronously) and cache by URL. The
-		// resource pipeline's async loading is not wired into background
-		// painting yet; dev/test pages use data URIs or local files.
-		if resp, err := httpGet(url); err == nil && len(resp) > 0 {
-			data = resp
+		// Remote image: async fetch once per URL. Return nil now; the
+		// goroutine fills the cache and fires the loaded callback.
+		if !backgroundImageCache.loading[url] {
+			backgroundImageCache.loading[url] = true
+			go fetchBackgroundImageAsync(url)
 		}
+		return nil
 	} else if !strings.Contains(url, ":") { // not a scheme, treat as file
 		p := url
 		if baseDir != "" && !strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "\\") {
@@ -252,6 +269,24 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	}
 	backgroundImageCache.imgs[url] = img
 	return img
+}
+
+// fetchBackgroundImageAsync downloads an http(s) image off-thread and stores
+// the decoded result in the cache, then fires the loaded callback.
+func fetchBackgroundImageAsync(url string) {
+	data, err := httpGet(url)
+	backgroundImageCache.mu.Lock()
+	delete(backgroundImageCache.loading, url)
+	if err == nil && len(data) > 0 {
+		if img := NewDecodedImage(data); img != nil {
+			backgroundImageCache.imgs[url] = img
+		}
+	}
+	cb := bgImageLoadedCallback
+	backgroundImageCache.mu.Unlock()
+	if cb != nil {
+		cb(url)
+	}
 }
 
 // bgSizeMode describes how background-size scales the image.

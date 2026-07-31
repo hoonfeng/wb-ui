@@ -24,21 +24,53 @@ type svgShape interface {
 	paint(canvas *graphics.Canvas, ctx *svgPaintContext)
 }
 
-// svgFilledShape wraps a parsed shape with its resolved fill color. The
-// shapes parsed by parseSVGElement carry geometry only; the walk in
+// svgFilledShape wraps a parsed shape with its resolved paint properties.
+// The shapes parsed by parseSVGElement carry geometry only; the walk in
 // buildSVGDocument resolves per-element fill/stroke into an elCtx, but that
 // context is local to the walk. Without this wrapper the fill would be lost
 // when paintSVG runs with the default (transparent) fill — every SVG element
 // rendered invisible. The wrapper re-applies the resolved fill during paint.
+// gradientID (fill="url(#id)") and stroke are carried too so gradient fills
+// and strokes survive to paint time.
 type svgFilledShape struct {
-	shape svgShape
-	fill  graphics.Color
+	shape       svgShape
+	fill        graphics.Color
+	gradientID  string
+	stroke      graphics.Color
+	strokeWidth float64
 }
 
 func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	// Gradient fill: paint the shape geometry directly with the gradient
+	// shader (the shape's own paint would only use flat colors).
+	if s.gradientID != "" {
+		if g, ok := ctx.gradients[s.gradientID]; ok {
+			paintShapeGradient(canvas, s.shape, g)
+			return
+		}
+	}
 	c2 := *ctx
 	c2.fill = s.fill
+	c2.stroke = s.stroke
+	c2.strokeWidth = s.strokeWidth
 	s.shape.paint(canvas, &c2)
+}
+
+// paintShapeGradient fills a basic shape with a defs gradient (delegates
+// direction/radius math to paintGradientOnShape). Unsupported shape types
+// fall back to the flat fill (drawn by the caller's non-gradient path).
+func paintShapeGradient(canvas *graphics.Canvas, shape svgShape, g *svgGradient) {
+	if canvas == nil || g == nil || len(g.stops) < 2 {
+		return
+	}
+	switch s := shape.(type) {
+	case *svgRect:
+		paintGradientOnShape(canvas, g, s.x, s.y, s.w, s.h)
+	case *svgCircle:
+		paintGradientOnShape(canvas, g, s.cx-s.r, s.cy-s.r, s.r*2, s.r*2)
+	case *svgEllipse:
+		paintGradientOnShape(canvas, g, s.cx-s.rx, s.cy-s.ry, s.rx*2, s.ry*2)
+	}
 }
 
 // svgPaintContext bundles all paint-time state for a single SVG subtree.
@@ -287,6 +319,11 @@ type svgDocument struct {
 	viewBox     [4]float64 // x, y, w, h (0 if not set)
 	hasVB       bool
 	elementByID map[string]*dom.Element // used by <use> references
+	// gradients/clips carry defs contents to paint time (the paint context
+	// is fresh per paintSVG call, so the defs parsed during build must be
+	// stored here for shape gradient/clip resolution).
+	gradients map[string]*svgGradient
+	clips     map[string][]svgShape
 }
 
 // --- Parsing helpers ---
@@ -534,8 +571,8 @@ func parseSVGElement(el *dom.Element) svgShape {
 // --- Gradient parsing ---
 
 func parseGradientElement(el *dom.Element) *svgGradient {
-	tag := el.LocalName()
-	if tag != "linearGradient" && tag != "radialGradient" {
+	tag := strings.ToLower(el.LocalName())
+	if tag != "lineargradient" && tag != "radialgradient" {
 		return nil
 	}
 	g := &svgGradient{
@@ -592,10 +629,6 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 	if len(g.stops) < 2 {
 		return
 	}
-	colors := make([]graphics.Color, len(g.stops))
-	for i, s := range g.stops {
-		colors[i] = s.color
-	}
 	if g.isRadial {
 		cx := g.cx
 		cy := g.cy
@@ -606,18 +639,31 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 			cy = y + h/2
 			r = (w + h) / 4
 		}
-		canvas.FillRadialGradient(cx, cy, r, colors[0], colors[len(colors)-1])
-	} else {
-		x1, y1, x2, y2 := g.x1, g.y1, g.x2, g.y2
-		if x1 == 0 && y1 == 0 && x2 == 100 && y2 == 0 {
-			// Default: left to right across bounding box
-			x1 = x
-			x2 = x + w
-			y1 = y
-			y2 = y
-		}
-		canvas.FillLinearGradient(x1, y1, x2-x1, y2-y1, colors[0], colors[len(colors)-1])
+		canvas.FillRadialGradient(cx, cy, r, g.stops[0].color, g.stops[len(g.stops)-1].color)
+		return
 	}
+	// Linear gradient. The canvas API only paints top-to-bottom, so paint
+	// pixel columns manually (mirroring the CSS gradient rasterizer) for the
+	// default horizontal direction; other directions fall back to the
+	// vertical canvas gradient.
+	x1, y1, x2, y2 := g.x1, g.y1, g.x2, g.y2
+	if x1 == 0 && y1 == 0 && x2 == 100 && y2 == 0 {
+		// Default: left to right across the bounding box.
+		stops := make([]ColorStop, len(g.stops))
+		for i, s := range g.stops {
+			stops[i] = ColorStop{Color: s.color, Position: s.offset}
+		}
+		iw := int(w)
+		if iw < 1 {
+			return
+		}
+		for px := 0; px < iw; px++ {
+			t := (float64(px) + 0.5) / w
+			canvas.FillRect(x+float64(px), y, 1, h, interpolateColor(stops, t))
+		}
+		return
+	}
+	canvas.FillLinearGradient(x, y, w, h, g.stops[0].color, g.stops[len(g.stops)-1].color)
 }
 
 // --- ClipPath parsing ---
@@ -680,16 +726,18 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 		}
 		tag := childEl.LocalName()
 
-		// Handle <defs> — collect gradients and clip paths
-		if tag == "defs" || tag == "svgDefs" {
+		// Handle <defs> — collect gradients and clip paths. LocalName() is
+		// lowercased, so compare lowercase (SVG tag names are case-sensitive
+		// but this port normalizes them for element lookup).
+		if tag == "defs" {
 			for c := childEl.FirstChild(); c != nil; c = c.NextSibling() {
 				if defEl, ok := c.(*dom.Element); ok {
-					switch defEl.LocalName() {
-					case "linearGradient", "radialGradient":
+					switch strings.ToLower(defEl.LocalName()) {
+					case "lineargradient", "radialgradient":
 						if g := parseGradientElement(defEl); g != nil && g.id != "" {
 							ctx.gradients[g.id] = g
 						}
-					case "clipPath":
+					case "clippath":
 						clipID := defEl.GetAttribute("id")
 						if clipID != "" {
 							ctx.clips[clipID] = parseClipPathElement(defEl)
@@ -788,12 +836,18 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 		// Parse the shape
 		if shape := parseSVGElement(childEl); shape != nil {
-			// Attach the resolved fill so painting (which runs with a fresh
-			// default context) still sees it.
-			if elCtx.fill.A > 0 {
-				shape = &svgFilledShape{shape: shape, fill: elCtx.fill}
+			// Attach the resolved paint properties so painting (which runs
+			// with a fresh default context) still sees them.
+			wrapper := &svgFilledShape{
+				shape:       shape,
+				fill:        elCtx.fill,
+				stroke:      elCtx.stroke,
+				strokeWidth: elCtx.strokeWidth,
 			}
-			doc.shapes = append(doc.shapes, shape)
+			if gradientID := parseURLReference(fillStr); gradientID != "" {
+				wrapper.gradientID = gradientID
+			}
+			doc.shapes = append(doc.shapes, wrapper)
 		}
 
 		// Recurse into children
@@ -804,6 +858,8 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 	ctx := defaultSVGContext()
 	walk(el, ctx)
+	doc.gradients = ctx.gradients
+	doc.clips = ctx.clips
 	return doc
 }
 
@@ -830,6 +886,8 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 
 			ctx := defaultSVGContext()
 			ctx.fill = defaultFill
+			ctx.gradients = doc.gradients
+			ctx.clips = doc.clips
 			for _, s := range doc.shapes {
 				s.paint(canvas, ctx)
 			}
@@ -846,6 +904,8 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 
 	ctx := defaultSVGContext()
 	ctx.fill = defaultFill
+	ctx.gradients = doc.gradients
+	ctx.clips = doc.clips
 	for _, s := range doc.shapes {
 		s.paint(canvas, ctx)
 	}

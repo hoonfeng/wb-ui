@@ -109,3 +109,36 @@ func TestPaintBackgroundSVG(t *testing.T) {
 		t.Fatalf("outside svg (4,4) = %+v, want transparent", px)
 	}
 }
+
+// TestPaintImageSVG: an <img src="data:image/svg+xml,..."> paints the SVG
+// scaled into the content box.
+func TestPaintImageSVG(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="red"/></svg>`
+	uri := "data:image/svg+xml," + url.QueryEscape(svg)
+
+	canvas := graphics.NewCanvas(60, 30)
+	defer canvas.Release()
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 60, Height: 30})
+
+	doc := dom.NewDocument()
+	imgEl := doc.CreateElement("img")
+	imgEl.SetAttribute("src", uri)
+	st := style.NewComputedStyle()
+	box := NewRenderBox(imgEl, st)
+	box.SetLocation(0, 0)
+	box.SetSize(60, 30)
+
+	if !PaintImage(box, info) {
+		t.Fatalf("PaintImage returned false")
+	}
+	// Center of the SVG circle scaled into the box → red.
+	if px := canvas.PixelAt(30, 15); px.R != 255 || px.G != 0 {
+		t.Fatalf("center (30,15) = %+v, want red", px)
+	}
+	// Corner outside the circle stays transparent.
+	if px := canvas.PixelAt(2, 2); px.A != 0 {
+		t.Fatalf("corner (2,2) = %+v, want transparent", px)
+	}
+}
+
+var _ = base64.StdEncoding

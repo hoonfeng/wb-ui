@@ -1,38 +1,42 @@
-feat: SVG backgrounds + background-repeat + ::selection fg + Edge fix
+feat: async image loading + SVG gradients/strokes + img SVG + overlay scrollbars
 
 Candidates round:
 
-1. Edge headless environment fix (root cause of suite hangs):
-   - edge.go + pixels.go dropped --user-data-dir: crashed runs leave
-     SingletonLock files in the fixed profile dirs, making later launches
-     hang forever. Edge headless manages a temp profile per run.
-   - Added 30s context timeout so a wedged browser fails fast.
-   - Result: GEO 13/13 in ~22s (was hanging past 120s).
+1. Async http(s) background images (backgroundimage.go + async_image_test.go):
+   - loadBackgroundImage now returns nil for http(s) URLs on first call and
+     spawns a goroutine (fetchBackgroundImageAsync); the cache serves the
+     image on later paints, so network latency never blocks the render
+     thread. data: URIs and files stay synchronous.
+   - SetBackgroundImageLoadedCallback(url) fires after a fetch completes so
+     hosts can schedule a repaint.
 
-2. SVG backgrounds/images (rendering/svg_background_test.go):
-   - background-image: url(data:image/svg+xml;base64|urlencoded) or file
-     parses via html.Parse → buildSVGDocument → paintSVGScaled into the
-     background-size/position dest (svg.go + backgroundimage.go).
-   - Found + fixed a real SVG bug: buildSVGDocument resolved per-element
-     fill into a walk-local ctx that painting never saw — every SVG element
-     rendered invisible (ctx.fill defaulted transparent). New svgFilledShape
-     wrapper re-applies the resolved fill at paint time. This fixes inline
-     <svg> rendering too, not just backgrounds.
+2. SVG gradients, strokes + a real SVG parsing bug (svg.go + svg_gradient_test.go):
+   - Found: dom.Element.LocalName() lowercases ("linearGradient" →
+     "lineargradient"), but parseGradientElement and the <defs> walk compared
+     camelCase → gradient/clipPath defs were never collected (gradients
+     silently dropped). Fixed both to lowercase comparisons.
+   - svgFilledShape now carries gradientID + stroke + strokeWidth (was fill
+     only), so fill="url(#g)" gradients and stroke= actually paint.
+   - svgDocument stores defs gradients/clips; paintSVG injects them into the
+     fresh per-call context (previously the defs were lost between build and
+     paint).
+   - paintGradientOnShape: default linear gradient paints pixel columns
+     (canvas only supports vertical FillLinearGradient) → horizontal red→blue
+     verified.
 
-3. background-repeat tiling (backgroundimage.go + repeat_test.go):
-   - paintBackgroundImageTiled: default repeat tiles x/y across the box,
-     repeat-x/repeat-y single-axis, no-repeat single tile. Position defines
-     the first tile's location (pattern stays aligned for negative offsets).
+3. <img> SVG sources (painter.go PaintImage): img without an attached
+   DecodedImage now lazily loads src via the shared image cache; SVG srcs
+   (data:image/svg+xml) parse and paint scaled into the content box.
+   TestPaintImageSVG verifies center red / corner transparent.
 
-4. ::selection foreground: PaintText's selected runs use the ::selection
-   rule's color instead of default white (painter.go).
+4. Overlay scrollbars (renderpipeline.go + scrollbar_overlay_test.go):
+   - overflow:auto scrollbars render only while the cursor is over the box
+     (overlay behavior); overflow:scroll stays always visible.
+   - Overflow clip now triggers on EITHER axis (overflow-y:auto alone must
+     clip + paint its scrollbar); previously the AND condition meant a
+     single-axis scroll box never got scrollbars.
 
-5. scrollbar interaction confirmed complete (drag/keys/wheel already in
-   app/host.go); image loading: http(s) fetch + cache already landed.
-
-Tests: svg parse/load/paint (center red, outside transparent), repeat
-tiling (full / no-repeat / repeat-x), resolver scrollbar + selection
-colors. Full go test green. Note: px_transform pixel case shows ~4% diff
-— probe confirmed wb-ui paints the transformed div correctly; the diff is
-Edge-side rendering variation after the profile change (rotated-edge AA
-band), not a wb-ui regression.
+Tests: async http fetch+cache+callback, SVG gradient left-red/right-blue,
+SVG stroke border-green/center-white, img SVG paint, scrollbar overlay
+hidden/visible + scroll always-visible. Full go test green; GEO suite
+13/13 still green (single-axis clip did not regress layout geometry).

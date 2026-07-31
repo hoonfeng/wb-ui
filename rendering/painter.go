@@ -998,9 +998,6 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		return false
 	}
 	img := box.DecodedImage()
-	if img == nil || !img.Loaded() {
-		return false
-	}
 	st := box.Style()
 	if st == nil {
 		return false
@@ -1015,6 +1012,25 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	w := box.Width() - pL - pR
 	h := box.Height() - pT - pB
 	if w <= 0 || h <= 0 {
+		return false
+	}
+	// Lazy-load from the src attribute: raster images decode synchronously
+	// (data/file) or asynchronously (http, via the shared background-image
+	// cache); SVG sources parse and paint as vectors.
+	var src string
+	if el, ok := box.Node().(*dom.Element); ok {
+		src = el.GetAttribute("src")
+	}
+	if (img == nil || !img.Loaded()) && src != "" {
+		img = loadBackgroundImage(src, "")
+		if img != nil && img.Loaded() {
+			box.SetDecodedImage(img)
+		} else if sd := loadBackgroundSVG(src); sd != nil {
+			paintSVGScaled(info.canvas, sd, x, y, w, h)
+			return true
+		}
+	}
+	if img == nil || !img.Loaded() {
 		return false
 	}
 	img.Draw(info.canvas, x, y, w, h)

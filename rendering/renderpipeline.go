@@ -260,11 +260,14 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	var clipBox *RenderBox
 	var scrollSX, scrollSY float64
 	if box := asRenderBox(root); box != nil {
+		// Clip when EITHER axis scrolls/clips (overflow-y:auto alone must
+		// still clip + paint scrollbars). A rectangular clip is harmless for
+		// the axis that does not overflow.
 		if st := box.Style(); st != nil &&
 			(st.OverflowX == style.OverflowHidden ||
 				st.OverflowX == style.OverflowAuto ||
-				st.OverflowX == style.OverflowScroll) &&
-			(st.OverflowY == style.OverflowHidden ||
+				st.OverflowX == style.OverflowScroll ||
+				st.OverflowY == style.OverflowHidden ||
 				st.OverflowY == style.OverflowAuto ||
 				st.OverflowY == style.OverflowScroll) {
 			clipBox = box
@@ -349,6 +352,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
+							// Overlay scrollbars (overflow:auto): visible only
+							// while the cursor is over the box, matching
+							// modern browsers. overflow:scroll stays always
+							// visible.
+							if (st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto) && info.rv != nil {
+								cx, cy := info.rv.CursorPos()
+								if cx < pb.X || cx > pb.X+pb.Width || cy < pb.Y || cy > pb.Y+pb.Height {
+									goto endScrollbars
+								}
+							}
 
 							// Darker scrollbar colors (better contrast vs white track).
 							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
@@ -482,6 +495,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)
 							}
 						}
+						endScrollbars:
 					}
 				}
 			}
