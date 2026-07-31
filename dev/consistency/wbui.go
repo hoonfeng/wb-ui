@@ -49,6 +49,7 @@ func wbuiCollect(c TestCase) ([]ElementSnapshot, error) {
 
 	builder := rendering.NewRenderTreeBuilder(resolver)
 	rv := builder.Build(doc)
+	rv.SetResolver(resolver)
 	if rv == nil {
 		return nil, fmt.Errorf("render tree build failed")
 	}

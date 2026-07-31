@@ -49,7 +49,17 @@ type RenderView struct {
 	// cursorX/cursorY track the last known cursor position in CSS pixels,
 	// used by paint code for scrollbar hover highlighting.
 	cursorX, cursorY float64
+
+	// resolver holds the style resolver used to build this tree; paint code
+	// (e.g. PaintSelection for ::selection colors) reads it lazily.
+	resolver *style.Resolver
 }
+
+// SetResolver attaches the style resolver used to build the render tree.
+func (v *RenderView) SetResolver(r *style.Resolver) { v.resolver = r }
+
+// Resolver returns the attached style resolver (may be nil).
+func (v *RenderView) Resolver() *style.Resolver { return v.resolver }
 
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
 	rv := &RenderView{

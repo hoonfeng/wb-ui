@@ -19,6 +19,7 @@ package rendering
 
 import (
 	"sort"
+	"strings"
 
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
@@ -324,11 +325,19 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			if needsScroll {
 				pb := box.PaddingBoxRect()
 				// Modern flat scrollbar: 12px wide, subtle arrow buttons, rounded rect thumb.
-const scrollW = 12.0    // total scrollbar width
-						const arrowSize = 12.0  // arrow button height/width
-						const arrowGap = 5.0   // gap between arrow buttons and thumb track
+				scrollW := 12.0 // total scrollbar width
+				const arrowSize = 12.0 // arrow button height/width
+				const arrowGap = 5.0   // gap between arrow buttons and thumb track
 
-				if pb.Width > scrollW*2 && pb.Height > scrollW*2 {
+				// CSS scrollbar-width: thin (8px) / none (hidden, still scrollable).
+				switch sw := st.GetProperty("scrollbar-width"); sw {
+				case "thin":
+					scrollW = 8
+				case "none":
+					scrollW = 0
+				}
+
+				if scrollW > 0 && pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
 						cw, ch := info.rv.BoxContentSize(box)
 						totalW := cw
@@ -347,6 +356,23 @@ const scrollW = 12.0    // total scrollbar width
 							thumbHoverCol := graphics.Color{R: 128, G: 128, B: 128, A: 255} // #808080 hover (was #A0A0A0)
 
 							arrowCol := graphics.Color{R: 96, G: 96, B: 96, A: 255}     // #606060 arrow (was #808080)
+
+							// CSS scrollbar-color: "thumb track" overrides the
+							// default palette (thumb hover uses the thumb color).
+							if sc := st.GetProperty("scrollbar-color"); sc != "" && sc != "auto" {
+								scParts := strings.Fields(sc)
+								if len(scParts) >= 1 {
+									if c, ok := parseColorSimple(scParts[0]); ok {
+										thumbCol = c
+										thumbHoverCol = c
+									}
+								}
+								if len(scParts) >= 2 {
+									if c, ok := parseColorSimple(scParts[1]); ok {
+										trackCol = c
+									}
+								}
+							}
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)

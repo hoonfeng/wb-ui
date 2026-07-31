@@ -569,6 +569,75 @@ func TestResolver_PseudoClassHover(t *testing.T) {
 	}
 }
 
+func TestResolver_BackgroundShorthandPosSize(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "div")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, `div { background: linear-gradient(to right,#ff0000,#ff0000) 0 0/70px 70px no-repeat; }`))
+	cs := r.ResolveElement(el)
+	if !strings.HasPrefix(cs.BackgroundImage, "linear-gradient(") {
+		t.Fatalf("BackgroundImage=%q", cs.BackgroundImage)
+	}
+	if cs.BackgroundSize != "70px 70px" {
+		t.Fatalf("BackgroundSize=%q, want 70px 70px", cs.BackgroundSize)
+	}
+	if cs.BackgroundPosition != "0 0" {
+		t.Fatalf("BackgroundPosition=%q, want 0 0", cs.BackgroundPosition)
+	}
+}
+
+func TestResolver_BackgroundShorthandNoSize(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "div")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, `div { background: linear-gradient(to right,#ff0000,#ff0000); }`))
+	cs := r.ResolveElement(el)
+	if cs.BackgroundSize != "" {
+		t.Fatalf("BackgroundSize=%q, want empty", cs.BackgroundSize)
+	}
+}
+
+func TestResolver_ScrollbarProps(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "div")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, `div { scrollbar-width: thin; scrollbar-color: #ff0000 #0000ff; }`))
+	cs := r.ResolveElement(el)
+	if cs.GetProperty("scrollbar-width") != "thin" {
+		t.Fatalf("scrollbar-width=%q, want thin", cs.GetProperty("scrollbar-width"))
+	}
+	// Token serialization joins with spaces; compare the two colors by
+	// splitting (the renderer uses strings.Fields anyway).
+	sc := strings.Fields(cs.GetProperty("scrollbar-color"))
+	if len(sc) != 2 || sc[0] != "#ff0000" || sc[1] != "#0000ff" {
+		t.Fatalf("scrollbar-color=%q, want [#ff0000 #0000ff]", cs.GetProperty("scrollbar-color"))
+	}
+}
+
+func TestResolver_SelectionColors(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "p")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, `::selection { background-color: #ffee00; color: #000000; }`))
+	bg, fg, ok := r.SelectionColors()
+	if !ok {
+		t.Fatalf("SelectionColors ok=false, want true")
+	}
+	if bg.R != 0xFF || bg.G != 0xEE || bg.B != 0 {
+		t.Fatalf("bg=%+v, want #ffee00", bg)
+	}
+	if fg.R != 0 || fg.G != 0 || fg.B != 0 {
+		t.Fatalf("fg=%+v, want black", fg)
+	}
+	// No ::selection rule → ok=false.
+	r2 := NewResolver()
+	r2.AddStyleSheet(newSheet(t, `p { color: red; }`))
+	if _, _, ok := r2.SelectionColors(); ok {
+		t.Fatalf("no ::selection rule should report ok=false")
+	}
+	_ = el
+}
+
 func TestResolver_NthChildSelector(t *testing.T) {
 	doc := dom.NewDocument()
 	container := dom.NewElement(doc, "div")

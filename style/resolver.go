@@ -54,6 +54,65 @@ type Resolver struct {
 	StyleSheetLoader func(href string) (string, error)
 }
 
+// SelectionColors returns the ::selection pseudo-element background and
+// foreground colors from the stylesheets, if any rule declares them. Mirrors
+// StyleResolver::pseudoStyleForElement for ::selection. The background is
+// used by PaintSelection; the foreground by text painting of selected runs.
+// Colors are style.Color (the resolver's own type); the renderer converts.
+func (r *Resolver) SelectionColors() (bg, fg Color, ok bool) {
+	var walk func(rules []css.Rule)
+	walk = func(rules []css.Rule) {
+		for _, rule := range rules {
+			switch r2 := rule.(type) {
+			case *css.StyleRule:
+				if hasSelectionSelector(r2.Selectors) {
+					for _, d := range r2.Declarations {
+						switch d.Name {
+						case "background-color":
+							if c, cok := parseColor(d.ValueString()); cok {
+								bg = c
+							}
+						case "color":
+							if c, cok := parseColor(d.ValueString()); cok {
+								fg = c
+							}
+						}
+					}
+				}
+				if len(r2.NestedRules) > 0 {
+					walk(r2.NestedRules)
+				}
+			case *css.MediaRule:
+				walk(r2.Rules)
+			}
+		}
+	}
+	for _, sheet := range r.sheets {
+		walk(sheet.Rules())
+	}
+	return bg, fg, bg.A != 0 || fg.A != 0
+}
+
+// hasSelectionSelector reports whether any complex selector in the list ends
+// with the ::selection pseudo-element (::selection matches any element).
+func hasSelectionSelector(list *css.SelectorList) bool {
+	if list == nil {
+		return false
+	}
+	for _, cs := range list.Selectors {
+		if len(cs.Compounds) == 0 {
+			continue
+		}
+		last := cs.Compounds[len(cs.Compounds)-1]
+		for _, s := range last.Selectors {
+			if s.Match == css.MatchPseudoElement && s.PseudoElem == css.PseudoElementSelection {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NewResolver constructs an empty Resolver.
 func NewResolver() *Resolver {
 	return &Resolver{
@@ -398,7 +457,9 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "background":
 		// Shorthand: resets background-image (unless the value carries
 		// gradient layers) and extracts background-color. Multiple gradient
-		// layers are joined with commas (first = topmost).
+		// layers are joined with commas (first = topmost). Position/size
+		// (e.g. "0 0/70px 70px no-repeat") of the FIRST layer are parsed
+		// into BackgroundPosition/BackgroundSize.
 		cs.BackgroundImage = ""
 		var grads []string
 		for _, p := range splitShorthandValue(valueString) {
@@ -413,6 +474,13 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		}
 		if len(grads) > 0 {
 			cs.BackgroundImage = strings.Join(grads, ", ")
+			pos, size := parseBgLayerPosSize(splitShorthandValue(valueString))
+			if pos != "" {
+				cs.BackgroundPosition = pos
+			}
+			if size != "" {
+				cs.BackgroundSize = size
+			}
 		}
 	case "font-family":
 		cs.FontFamily = strings.Trim(valueString, `"'`)
@@ -1202,6 +1270,77 @@ func splitShorthandValue(s string) []string {
 		parts = append(parts, cur.String())
 	}
 	return parts
+}
+
+// parseBgLayerPosSize extracts the first background layer's position and
+// size from a shorthand's whitespace-split parts, e.g.
+//
+//	["linear-gradient(...)", "0", "0/70px", "70px", "no-repeat"]
+//	  → pos "0 0", size "70px 70px"
+//
+// The CSS tokenizer serializes "/" as its own part, so the slash may also
+// appear standalone: ["0", "0", "/", "70px", "70px"]. Both shapes are
+// handled. Returns "" for missing components.
+func parseBgLayerPosSize(parts []string) (pos, size string) {
+	isImage := func(s string) bool {
+		return strings.HasPrefix(s, "linear-gradient(") || strings.HasPrefix(s, "radial-gradient(") || strings.HasPrefix(s, "url(")
+	}
+	isRepeat := func(s string) bool {
+		switch s {
+		case "repeat", "no-repeat", "repeat-x", "repeat-y", "space", "round":
+			return true
+		}
+		return false
+	}
+	isValue := func(s string) bool { return s != "" && s != "/" && !isImage(s) && !isRepeat(s) }
+	for i, p := range parts {
+		j := strings.IndexByte(p, '/')
+		if j < 0 {
+			continue
+		}
+		var posVals, sizeVals []string
+		if p == "/" {
+			// Standalone slash: position = parts[i-2], parts[i-1];
+			// size = parts[i+1], parts[i+2].
+			if i >= 2 && isValue(parts[i-2]) {
+				posVals = append(posVals, parts[i-2])
+			}
+			if i >= 1 && isValue(parts[i-1]) {
+				posVals = append(posVals, parts[i-1])
+			}
+			if i+1 < len(parts) && isValue(parts[i+1]) {
+				sizeVals = append(sizeVals, parts[i+1])
+			}
+			if i+2 < len(parts) && isValue(parts[i+2]) {
+				sizeVals = append(sizeVals, parts[i+2])
+			}
+		} else {
+			// Merged shape "0/70px": position = parts[i-1] + left,
+			// size = right + parts[i+1].
+			left := strings.TrimSpace(p[:j])
+			right := strings.TrimSpace(p[j+1:])
+			if i >= 1 && isValue(parts[i-1]) {
+				posVals = append(posVals, parts[i-1])
+			}
+			if left != "" {
+				posVals = append(posVals, left)
+			}
+			if right != "" {
+				sizeVals = append(sizeVals, right)
+			}
+			if i+1 < len(parts) && isValue(parts[i+1]) {
+				sizeVals = append(sizeVals, parts[i+1])
+			}
+		}
+		if len(posVals) > 0 {
+			pos = strings.Join(posVals, " ")
+		}
+		if len(sizeVals) > 0 {
+			size = strings.Join(sizeVals, " ")
+		}
+		return pos, size
+	}
+	return "", ""
 }
 
 // parseBorderShorthand parses a border shorthand value like "1px solid #e5e7eb" and

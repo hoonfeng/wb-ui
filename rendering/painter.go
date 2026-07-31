@@ -201,16 +201,20 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	bgLayers := splitBackgroundLayers(st.BackgroundImage)
 	if len(bgLayers) > 0 {
 		r := lengthValue(st.BorderRadius)
+		// Gradient destination honors background-size/position (a sub-rect
+		// confined by explicit sizes, offset by position; fill box default).
+		gdx, gdy, gdw, gdh := computeGradientDest(rect.X, rect.Y, rect.Width, rect.Height,
+			st.BackgroundSize, st.BackgroundPosition)
 		drawGradientLayer := func(i int) {
 			layer := bgLayers[i]
 			if lg := parseGradient(layer); lg != nil {
 				if r > 0 {
 					info.canvas.Save()
 					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-					paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, lg)
+					paintLinearGradient(info.canvas, gdx, gdy, gdw, gdh, lg)
 					info.canvas.Restore()
 				} else {
-					paintLinearGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, lg)
+					paintLinearGradient(info.canvas, gdx, gdy, gdw, gdh, lg)
 				}
 				return
 			}
@@ -218,10 +222,10 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 				if r > 0 {
 					info.canvas.Save()
 					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-					paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, rg)
+					paintRadialGradient(info.canvas, gdx, gdy, gdw, gdh, rg)
 					info.canvas.Restore()
 				} else {
-					paintRadialGradient(info.canvas, rect.X, rect.Y, rect.Width, rect.Height, rg)
+					paintRadialGradient(info.canvas, gdx, gdy, gdw, gdh, rg)
 				}
 			}
 		}
@@ -828,6 +832,18 @@ func PaintSelection(rv *RenderView, info *PaintInfo) {
 		return
 	}
 	selColor := graphics.Color{R: 0x33, G: 0x99, B: 0xFF, A: 0x66}
+	// ::selection background-color (if the stylesheets declare one) overrides
+	// the default highlight.
+	if res := rv.Resolver(); res != nil {
+		if bg, _, ok := res.SelectionColors(); ok {
+			selColor = toGraphicsColor(bg)
+			// A fully-opaque ::selection background is typical; keep opacity
+			// as authored (the default is translucent).
+			if selColor.A == 0 {
+				selColor.A = 0x66
+			}
+		}
+	}
 	for _, r := range rects {
 		if !info.intersects(r) {
 			continue

@@ -7,10 +7,14 @@ package rendering
 
 import (
 	"encoding/base64"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // parseBackgroundURL extracts the URL inside a url(...) token.
@@ -31,6 +35,20 @@ func parseBackgroundURL(s string) (string, bool) {
 		inner = inner[1 : len(inner)-1]
 	}
 	return inner, true
+}
+
+// httpGet fetches a URL's body with a short timeout. Returns nil on error.
+func httpGet(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("http %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20)) // 16 MiB cap
 }
 
 // decodeDataURI decodes a data: URI (data:image/png;base64,XXXX) to bytes.
@@ -73,6 +91,13 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	var data []byte
 	if b, ok := decodeDataURI(url); ok {
 		data = b
+	} else if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		// Remote image: fetch once (synchronously) and cache by URL. The
+		// resource pipeline's async loading is not wired into background
+		// painting yet; dev/test pages use data URIs or local files.
+		if resp, err := httpGet(url); err == nil && len(resp) > 0 {
+			data = resp
+		}
 	} else if !strings.Contains(url, ":") { // not a scheme, treat as file
 		p := url
 		if baseDir != "" && !strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "\\") {
@@ -191,6 +216,30 @@ func computeBackgroundDest(x, y, w, h float64, size, position string, imgW, imgH
 	// Position: default 0% 0% (top-left). Percentages offset by
 	// (box - image) so 50% centers, 100% aligns bottom-right.
 	px, py := parseBackgroundPosition(position, w-dw, h-dh)
+	dx, dy = x+px, y+py
+	return
+}
+
+// computeGradientDest computes the destination rect for a gradient layer
+// inside a box. Gradients have no intrinsic size, so background-size:
+// auto/cover/contain all mean "fill the box"; explicit lengths/percentages
+// confine the gradient to a sub-rect, offset by background-position.
+func computeGradientDest(x, y, w, h float64, size, pos string) (dx, dy, dw, dh float64) {
+	mode, wPct, wPx, hPct, hPx := parseBackgroundSize(size)
+	dw, dh = w, h
+	if mode == bgSizeExplicit {
+		if wPct > 0 {
+			dw = w * wPct / 100
+		} else if wPx > 0 {
+			dw = wPx
+		}
+		if hPct > 0 {
+			dh = h * hPct / 100
+		} else if hPx > 0 {
+			dh = hPx
+		}
+	}
+	px, py := parseBackgroundPosition(pos, w-dw, h-dh)
 	dx, dy = x+px, y+py
 	return
 }

@@ -82,6 +82,7 @@ func wbuiRenderPNG(c TestCase, w, h int) (*image.RGBA, error) {
 
 	builder := rendering.NewRenderTreeBuilder(resolver)
 	rv := builder.Build(doc)
+	rv.SetResolver(resolver)
 	if rv == nil {
 		return nil, fmt.Errorf("render tree build failed")
 	}
