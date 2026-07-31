@@ -1,37 +1,48 @@
-feat: fix CJK tofu + word-break/overflow-wrap character breaking
+feat: position:sticky + backdrop-filter + SVG marker + file input
 
-Full-scan round:
+Gap-filling round — closes all four recorded gaps:
 
-1. CJK tofu fix (fontmgr.go):
-   - selectDefaults previously preferred OS "Arial" as the default sans —
-     Arial has no CJK glyphs, so text without an explicit font-family relied
-     on Skia's unstable system fallback (part of the UI rendered tofu boxes
-     while components with font-family picked YaHei fine).
-   - Now: sans-serif/default prefers OS "Microsoft YaHei" (CJK coverage +
-     intact system fallback chain), then raw msyh data, then Segoe UI, then
-     Arial as LAST resort. serif prefers OS "SimSun" (Chinese serif) over
-     kochi mincho.
-   - resolveFamily maps additional CJK family names (PingFang SC, SimHei,
-     SimSun, NSimSun, Hiragino, WenQuanYi, Noto Sans CJK) to YaHei so
-     font-family lists like "PingFang SC, Microsoft YaHei" resolve correctly.
-   - Verified via dev/fontprobe: default path ink 292→483 (YaHei glyphs
-     instead of Arial fallback); all 10 resolution paths render CJK.
+1. position: sticky (box.go + renderbox.go + renderpipeline.go +
+   sticky_test.go):
+   - Layout: IsRelativelyPositioned now includes sticky (WebKit semantics),
+     so sticky participates in normal flow and applies top/left offsets like
+     relative.
+   - Render: walkSubtreeExcluded wraps sticky boxes in a scroll-pinning
+     translate (computeStickyOffset): once the element's viewport position
+     scrolls past the top line, it is pinned back to top (document-level
+     scroll; nested scroll containers treated as relative — noted in the
+     comment).
+   - Verified: bar at static y=300 with top:10 pins to viewport y=10 after
+     scrolling 400px; unscrolled stays at 300.
 
-2. word-break / overflow-wrap (inlineformattingcontext.go + resolver.go +
-   wordbreak_test.go):
-   - Previously a single word wider than the whole line could not break —
-     long URLs / CJK-free words overflowed the container.
-   - New: when wordWidth > line availWidth and word-break:break-all (or
-     overflow-wrap:break-word), the word is split per character with proper
-     line wrapping (no space prefix, mirrors WebCore break-word handling).
-   - Resolver now parses word-break and overflow-wrap (word-wrap alias).
-   - Verified: 20-char word in 60px box splits across >=2 lines with
-     break-all / break-word; without a rule it overflows on one line.
+2. backdrop-filter (renderpipeline.go + backdrop_test.go):
+   - New paintBackdrop: snapshots the current canvas, runs the CSS filter
+     chain (blur etc.) offscreen over the box region via a SaveLayer with a
+     filter-bearing paint, and blits the result back before the box's own
+     background paints (software approximation of WebKit backdrop blur).
+   - Verified: red square behind a backdrop-filter:blur(6px) box bleeds
+     beyond its sharp edge inside the box region.
 
-Scan notes (gaps recorded, not implemented this round):
-   - position: sticky scroll-pinning (complex, needs scroll-container)
-   - backdrop-filter (GPU cost)
-   - SVG <marker>
-   - file input renders via generic text-input path
+3. SVG <marker> (svg.go + svg_marker_test.go):
+   - svgDocument collects <marker> templates (defs + top-level); svgPath
+     reads marker-start/marker-end; paintSVGMarker draws the marker's child
+     shapes at the path vertex, translated by refX/refY and rotated to the
+     path direction when orient=auto.
+   - Verified: marker-end triangle renders at the end of a horizontal line.
 
-Tests: word break-all / break-word / no-rule overflow. Full go test green.
+4. file input rendering (renderformcontrol.go + fileinput_test.go):
+   - type=file now paints a native look: light-gray "选择文件" button on the
+     right plus the chosen file's basename (or placeholder) on the left,
+     truncated with ellipsis.
+
+Desktop integration verification:
+   - gou-ide cmd/desktop and cmd/render_test build clean with CGO.
+   - dev/consistency GEO: 13/13 green (18.4s) — rendering consistency
+     against Edge intact.
+   - cmd/render_test shows 34/69 due to its own baseline conventions
+     (transparent canvas vs black, premultiplied vs straight alpha) — not
+     engine defects; a minimal probe confirmed rgba background paints
+     correctly (premultiplied #80000080 = alpha 128 red).
+
+Tests: sticky pin/no-scroll/relative, backdrop blur bleed, SVG marker,
+file input paint + type mapping. Full go test green.

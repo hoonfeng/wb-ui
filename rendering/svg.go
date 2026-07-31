@@ -187,6 +187,7 @@ type svgPaintContext struct {
 	clips       map[string][]svgShape   // clip paths defined in <defs>
 	dashArray   []float64               // stroke-dasharray pattern
 	patterns    map[string]*svgPattern  // patterns defined in <defs>
+	markers     map[string]*svgMarker   // markers defined in <defs>
 }
 
 func defaultSVGContext() *svgPaintContext {
@@ -197,6 +198,7 @@ func defaultSVGContext() *svgPaintContext {
 		gradients:   make(map[string]*svgGradient),
 		clips:       make(map[string][]svgShape),
 		patterns:    make(map[string]*svgPattern),
+		markers:     make(map[string]*svgMarker),
 	}
 }
 
@@ -320,7 +322,11 @@ type pathCmd struct {
 	args []float64
 }
 
-type svgPath struct{ commands []pathCmd }
+type svgPath struct {
+	commands    []pathCmd
+	markerStart string // url(#id) — drawn at the path start
+	markerEnd   string // url(#id) — drawn at the path end
+}
 
 func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	if len(s.commands) == 0 {
@@ -418,6 +424,44 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
 		}
 	}
+	// Markers: paint the referenced <marker> templates at the path start and
+	// end, rotated to the local path direction (orient=auto).
+	if ctx.markers != nil {
+		if s.markerStart != "" {
+			if id := parseURLReference(s.markerStart); id != "" {
+				if m, ok := ctx.markers[id]; ok && len(pts) >= 1 {
+					dir := graphics.Point{X: pts[1].X - pts[0].X, Y: pts[1].Y - pts[0].Y}
+					paintSVGMarker(canvas, ctx, m, pts[0], dir)
+				}
+			}
+		}
+		if s.markerEnd != "" {
+			if id := parseURLReference(s.markerEnd); id != "" {
+				if m, ok := ctx.markers[id]; ok && len(pts) >= 2 {
+					last := pts[len(pts)-1]
+					dir := graphics.Point{X: last.X - pts[len(pts)-2].X, Y: last.Y - pts[len(pts)-2].Y}
+					paintSVGMarker(canvas, ctx, m, last, dir)
+				}
+			}
+		}
+	}
+}
+
+// paintSVGMarker paints a <marker> template at a path vertex: translate to
+// the vertex, rotate to the direction (orient=auto), then offset by refX/refY
+// and paint the child shapes.
+func paintSVGMarker(canvas *graphics.Canvas, ctx *svgPaintContext, m *svgMarker, at, dir graphics.Point) {
+	canvas.Save()
+	canvas.Translate(at.X, at.Y)
+	if m.orientAuto {
+		angle := math.Atan2(dir.Y, dir.X) * 180 / math.Pi
+		canvas.Rotate(angle)
+	}
+	canvas.Translate(-m.refX, -m.refY)
+	for _, sh := range m.shapes {
+		sh.paint(canvas, ctx)
+	}
+	canvas.Restore()
 }
 
 // svgImage embeds a raster image (data URI or file) into the SVG, mirroring
@@ -635,6 +679,16 @@ type svgDocument struct {
 	// fill/stroke) so shapes without inline presentation attributes can pick
 	// up stylesheet styling, like real SVG.
 	styleRules []svgStyleRule
+	// markers carry <marker> templates referenced by marker-start/end.
+	markers map[string]*svgMarker
+}
+
+// svgMarker is a <marker> template: child shapes painted at a path vertex,
+// translated by (refX,refY) and rotated to the path direction when orient=auto.
+type svgMarker struct {
+	shapes     []svgShape
+	refX, refY float64
+	orientAuto bool
 }
 
 // svgStyleRule is one declaration subset (fill/stroke) extracted from a
@@ -882,7 +936,11 @@ func parseSVGElement(el *dom.Element) svgShape {
 			closed: tag == "polygon",
 		}
 	case "path":
-		return &svgPath{commands: parseSVGPathData(el.GetAttribute("d"))}
+		return &svgPath{
+			commands:    parseSVGPathData(el.GetAttribute("d")),
+			markerStart: el.GetAttribute("marker-start"),
+			markerEnd:   el.GetAttribute("marker-end"),
+		}
 	case "text":
 		content := el.TextContent()
 		return &svgText{
@@ -1301,6 +1359,31 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 							}
 							ctx.patterns[patID] = pat
 						}
+					case "marker":
+						mid := defEl.GetAttribute("id")
+						if mid != "" {
+							m := &svgMarker{
+								refX: parseSVGCoord(defEl.GetAttribute("refX")),
+								refY: parseSVGCoord(defEl.GetAttribute("refY")),
+							}
+							if strings.EqualFold(defEl.GetAttribute("orient"), "auto") {
+								m.orientAuto = true
+							}
+							for mc := defEl.FirstChild(); mc != nil; mc = mc.NextSibling() {
+								if mEl, ok := mc.(*dom.Element); ok {
+									if shape := parseSVGElement(mEl); shape != nil {
+										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}}
+										if f := mEl.GetAttribute("fill"); f != "" {
+											fs.fill = parseColorAttribute(f)
+										} else if pm := parseStyleAttribute(mEl.GetAttribute("style")); pm["fill"] != "" {
+											fs.fill = parseColorAttribute(pm["fill"])
+										}
+										m.shapes = append(m.shapes, fs)
+									}
+								}
+							}
+							ctx.markers[mid] = m
+						}
 					}
 				}
 			}
@@ -1380,6 +1463,7 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			gradients:   ctx.gradients,
 			clips:       ctx.clips,
 			patterns:    ctx.patterns,
+			markers:     ctx.markers,
 		}
 
 		// Resolve url(#gradientId) references
@@ -1417,6 +1501,32 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 		// <symbol> is a template: never rendered directly, only via <use>.
 		if tag == "symbol" {
+			return
+		}
+
+		// <marker> is a template: never rendered directly; its child shapes
+		// are painted at path vertices referenced by marker-start/end.
+		if tag == "marker" {
+			m := &svgMarker{
+				refX: parseSVGCoord(childEl.GetAttribute("refX")),
+				refY: parseSVGCoord(childEl.GetAttribute("refY")),
+			}
+			if strings.EqualFold(childEl.GetAttribute("orient"), "auto") {
+				m.orientAuto = true
+			}
+			for c := childEl.FirstChild(); c != nil; c = c.NextSibling() {
+				if subEl, ok := c.(*dom.Element); ok {
+					if shape := parseSVGElement(subEl); shape != nil {
+						m.shapes = append(m.shapes, shape)
+					}
+				}
+			}
+			if id := childEl.GetAttribute("id"); id != "" {
+				if doc.markers == nil {
+					doc.markers = make(map[string]*svgMarker)
+				}
+				doc.markers[id] = m
+			}
 			return
 		}
 
@@ -1522,6 +1632,7 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 	doc.gradients = ctx.gradients
 	doc.clips = ctx.clips
 	doc.patterns = ctx.patterns
+	doc.markers = ctx.markers
 	return doc
 }
 
@@ -1550,6 +1661,7 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 			ctx.fill = defaultFill
 			ctx.gradients = doc.gradients
 			ctx.clips = doc.clips
+			ctx.markers = doc.markers
 			for _, s := range doc.shapes {
 				s.paint(canvas, ctx)
 			}
@@ -1569,6 +1681,7 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 	ctx.gradients = doc.gradients
 	ctx.clips = doc.clips
 	ctx.patterns = doc.patterns
+	ctx.markers = doc.markers
 	for _, s := range doc.shapes {
 		s.paint(canvas, ctx)
 	}

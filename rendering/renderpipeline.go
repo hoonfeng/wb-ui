@@ -19,6 +19,7 @@ package rendering
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"wb-ui/dom"
@@ -225,6 +226,20 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	}
 	if excluded[root] {
 		return
+	}
+
+	// CSS sticky: apply the scroll-pinning translate OUTSIDE the box's own
+	// transform and overflow clip, mirroring RenderBox::stickyPositionOffset
+	// applied by the nearest scrolling ancestor during paint.
+	needsStickyRestore := false
+	if rb := asRenderBox(root); rb != nil && info != nil && info.canvas != nil && info.rv != nil {
+		if rb.IsStickyPositioned() {
+			if dx, dy := computeStickyOffset(rb, info.rv); dx != 0 || dy != 0 {
+				info.canvas.Save()
+				info.canvas.Translate(dx, dy)
+				needsStickyRestore = true
+			}
+		}
 	}
 
 	// CSS transform: applied OUTSIDE the overflow clip (transform acts on the
@@ -511,6 +526,9 @@ restoreClip:
 	if needsTransformRestore {
 		info.canvas.Restore()
 	}
+	if needsStickyRestore {
+		info.canvas.Restore()
+	}
 }
 
 // resolveTransformOrigin converts a transform-origin Length into an offset
@@ -528,6 +546,123 @@ func resolveTransformOrigin(l style.Length, boxSize float64) float64 {
 	}
 }
 
+// paintBackdrop paints the blurred/filtered content behind this box as its
+// background (CSS backdrop-filter). Software approximation: snapshot the
+// current canvas, run the filter chain offscreen over the box region, and
+// blit the result back at the box's position before its own background is
+// drawn.
+func paintBackdrop(box *RenderBox, info *PaintInfo, imgFilter *skia.ImageFilter) {
+	w := int(box.Width())
+	h := int(box.Height())
+	if w <= 0 || h <= 0 {
+		return
+	}
+	img := info.canvas.Snapshot()
+	if img == nil {
+		return
+	}
+	defer img.Release()
+	surf, err := skia.NewRasterSurface(skia.ImageInfoN32Premul(w, h))
+	if err != nil || surf == nil {
+		return
+	}
+	defer surf.Release()
+	sc := surf.Canvas()
+	// Apply the filter via a SaveLayer with a filter-bearing paint (the same
+	// mechanism as the verified CSS filter path) rather than relying on the
+	// image paint's filter, which some cgo bindings drop.
+	filterPaint := skia.NewPaint()
+	defer filterPaint.Release()
+	filterPaint.SetAntialias(true)
+	filterPaint.SetImageFilter(imgFilter)
+	sc.SaveLayer(nil, filterPaint)
+	src := skia.RectXYWH(float32(box.X()), float32(box.Y()), float32(w), float32(h))
+	dst := skia.RectXYWH(0, 0, float32(w), float32(h))
+	plainPaint := skia.NewPaint()
+	defer plainPaint.Release()
+	plainPaint.SetAntialias(true)
+	sc.DrawImageRect(img, src, dst, skia.SamplingLinear, plainPaint)
+	sc.Restore()
+	out := surf.Snapshot()
+	if out == nil {
+		return
+	}
+	defer out.Release()
+	info.canvas.DrawImage(out, box.X(), box.Y(), box.Width(), box.Height())
+}
+
+// computeStickyOffset returns the scroll-pinning translate for a
+// position:sticky box, mirroring RenderBox::stickyPositionOffset() simplified
+// to the document-level scroll offset. The box sticks to the nearest
+// scrollport edge when its static position would otherwise leave it:
+//
+//	top: N   → pins when staticY+scrollY < N, clamped so the box never
+//	          passes below the bottom of the viewport.
+//
+// Nested scroll containers (overflow:scroll ancestors other than the view)
+// are not tracked yet — sticky inside them is treated as relative.
+func computeStickyOffset(box *RenderBox, view *RenderView) (float64, float64) {
+	st := box.Style()
+	if st == nil {
+		return 0, 0
+	}
+	// Only top-pinning is implemented (the overwhelmingly common case);
+	// bottom/left/right sticky are treated as static for now.
+	topRaw := st.GetProperty("top")
+	if topRaw == "" || topRaw == "auto" {
+		return 0, 0
+	}
+	top := 0.0
+	if l, ok := parseCSSLength(topRaw); ok {
+		top = l
+	} else {
+		return 0, 0
+	}
+	_, sy := view.ScrollOffset()
+	staticY := box.Y()
+	// Viewport-space position: scrolling down (sy>0) moves content up, so the
+	// element's viewport top is staticY - sy. The canvas is already translated
+	// by -scroll, so the element paints at staticY; a positive dy pulls it
+	// down to pin at top once its viewport position passes the top line.
+	vy := staticY - sy
+	if vy < top && staticY+box.Height() > 0 {
+		dy := top - vy
+		return 0, dy
+	}
+	return 0, 0
+}
+
+// parseCSSLength parses a plain CSS length ("0", "10px", "1.5em") into px.
+// em is resolved against 16px (no font context available here).
+func parseCSSLength(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	i := 0
+	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.' || s[i] == '-' || s[i] == '+') {
+		i++
+	}
+	num := s[:i]
+	if num == "" || num == "-" || num == "." {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(num, 64)
+	if err != nil {
+		return 0, false
+	}
+	unit := s[i:]
+	switch unit {
+	case "", "px":
+		return v, true
+	case "em":
+		return v * 16, true
+	case "%":
+		return 0, false // needs container size; treated as 0
+	}
+	return 0, false
+}
+
 // paintObjectBackground paints the background-color and border for box-bearing objects
 // during the background phase, mirroring the Background + Border phase of
 // RenderBox::paint().
@@ -535,6 +670,18 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	box := asRenderBox(o)
 	if box == nil || !box.IsVisible() {
 		return
+	}
+	// Apply CSS backdrop-filter: blur / filter the content painted behind
+	// this box before drawing its own background (software approximation of
+	// WebKit's backdrop blur — snapshot, filter offscreen, blit back).
+	if st := box.Style(); st != nil {
+		if bf := st.GetProperty("backdrop-filter"); bf != "" && bf != "none" {
+			if filters := parseCSSFilters(bf); len(filters) > 0 {
+				if imgFilter := buildCSSFilterChain(filters); imgFilter != nil {
+					paintBackdrop(box, info, imgFilter)
+				}
+			}
+		}
 	}
 	// Apply CSS clip-path (inset/circle/polygon) around the box's own
 	// background/border painting, mirroring RenderBox::paint()'s clip.

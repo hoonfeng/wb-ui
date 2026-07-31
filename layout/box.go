@@ -132,7 +132,7 @@ func (b *ElementBox) IsAbsolutelyPositioned() bool {
 }
 
 func (b *ElementBox) IsRelativelyPositioned() bool {
-	return b.style != nil && b.style.Position == style.PositionRelative
+	return b.style != nil && (b.style.Position == style.PositionRelative || b.style.Position == style.PositionSticky)
 }
 func (b *ElementBox) IsStickyPositioned() bool {
 	return b.style != nil && b.style.Position == style.PositionSticky

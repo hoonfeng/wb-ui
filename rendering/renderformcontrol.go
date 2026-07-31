@@ -26,6 +26,7 @@ package rendering
 
 import (
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -194,6 +195,9 @@ func paintInput(el *dom.Element, info *PaintInfo, st *style.ComputedStyle, x, y,
 	case html5.InputColor:
 		paintColorSwatch(info, x, y, w, h, in.Value(), op)
 		return true
+	case html5.InputFile:
+		paintFileInput(info, el, st, x, y, w, h, op)
+		return true
 	case html5.InputHidden:
 		return true // nothing to paint
 	}
@@ -202,6 +206,58 @@ func paintInput(el *dom.Element, info *PaintInfo, st *style.ComputedStyle, x, y,
 	// separately by PaintCaret.
 	paintTextInputValue(info, el, st, x, y, w, h, op)
 	return true
+}
+
+// paintFileInput paints a native file picker look: the chosen file name (or
+// placeholder) on the left and a "选择文件" button on the right, mirroring
+// RenderFileUploadControl::paint. The button is a small rounded rect with
+// centered label text; the filename is truncated to fit.
+func paintFileInput(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h float64, op float64) {
+	if info == nil || info.canvas == nil {
+		return
+	}
+	c := info.canvas
+	value := el.GetAttribute("value")
+	// Show the base file name when a path is present.
+	label := "未选择文件"
+	if value != "" {
+		label = filepath.Base(value)
+	}
+	fsV := st.FontSize.Value // px float (em resolved during style cascade)
+	if fsV <= 0 {
+		fsV = 16
+	}
+	textCol := toGraphicsColor(st.Color)
+	btnW := 96.0
+	btnH := h - 4
+	if btnH < 20 {
+		btnH = 20
+	}
+	btnX := x + w - btnW - 2
+	btnY := y + (h-btnH)/2
+	// Button background (light gray, pressed-look border).
+	btnCol := graphics.Color{R: 0xE8, G: 0xE8, B: 0xE8, A: 0xFF}
+	c.FillRoundRect(btnX, btnY, btnW, btnH, 3, btnCol)
+	c.StrokeRoundRect(btnX, btnY, btnW, btnH, 3, 1, graphics.Color{R: 0xB0, G: 0xB0, B: 0xB0, A: 0xFF})
+	// Button label.
+	font := graphics.Font{Family: st.FontFamily, Size: fsV - 2, Weight: 400, Style: st.FontStyle}
+	btnLabel := "选择文件"
+	lw := graphics.MeasureText(font, btnLabel)
+	c.DrawText(btnX+(btnW-lw)/2, btnY+btnH/2+fsV/2-1, btnLabel, font, graphics.Color{R: 0x33, G: 0x33, B: 0x33, A: 0xFF})
+	// Filename text (truncated to fit before the button).
+	maxW := w - btnW - 12
+	if maxW > 0 {
+		font2 := graphics.Font{Family: st.FontFamily, Size: fsV - 1, Weight: 400, Style: st.FontStyle}
+		if lw2 := graphics.MeasureText(font2, label); lw2 > maxW {
+			// Truncate with ellipsis.
+			runes := []rune(label)
+			for len(runes) > 0 && graphics.MeasureText(font2, string(runes)+"…") > maxW {
+				runes = runes[:len(runes)-1]
+			}
+			label = string(runes) + "…"
+		}
+		c.DrawText(x+6, y+h/2+fsV/2-1, label, font2, textCol)
+	}
 }
 
 // paintTextInputValue draws the value text (or placeholder) of a text-type <input>

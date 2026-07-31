@@ -263,9 +263,14 @@ func (b *RenderBox) IsAbsolutelyPositioned() bool {
 }
 
 // IsRelativelyPositioned reports whether this box is relatively positioned, mirroring
-// RenderBox::isRelativelyPositioned().
+// RenderBox::isRelativelyPositioned() (which also includes sticky).
 func (b *RenderBox) IsRelativelyPositioned() bool {
-	return b.style != nil && b.style.Position == style.PositionRelative
+	return b.style != nil && (b.style.Position == style.PositionRelative || b.style.Position == style.PositionSticky)
+}
+
+// IsStickyPositioned reports whether this box uses position: sticky.
+func (b *RenderBox) IsStickyPositioned() bool {
+	return b.style != nil && b.style.Position == style.PositionSticky
 }
 
 // IsFloated reports whether this box is floated, mirroring RenderBox::isFloating().
