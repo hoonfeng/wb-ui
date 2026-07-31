@@ -309,55 +309,93 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 
 
 func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, containerMainSize float64, isRow bool) {
-	totalFlexGrow := 0.0
-	totalBaseSize := 0.0
-	for _, it := range items {
-		totalFlexGrow += it.flexGrow
-		totalBaseSize += it.baseSize + it.marginMain
+	// Per CSS-FLEXBOX §9.7 (Resolving Flexible Lengths):
+	//   1. resolve flex base sizes (done in resolveBaseSize, already clamped)
+	//   2. freeze items with no flex factor
+	//   3. loop: distribute free space to unfrozen items, then re-clamp each
+	//      item's target size by min/max; freeze items that hit a boundary and
+	//      re-distribute the remaining space until no item changes.
+	clamp := func(it *flexItem, v float64) float64 {
+		if isRow {
+			return clampSize(v, it.minWidth, it.maxWidth, it.minWidth <= 0, it.maxWidth <= 0)
+		}
+		return clampSize(v, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
 	}
 
-	freeSpace := containerMainSize - totalBaseSize
+	for _, it := range items {
+		it.targetSize = it.baseSize
+		it.frozen = it.flexGrow <= 0 && it.flexShrink <= 0
+	}
 
-	if freeSpace > 0 && totalFlexGrow > 0 {
-		remaining := freeSpace
-		for _, it := range items { it.frozen = it.flexGrow <= 0 }
-		for remaining > 1e-3 {
-			activeGrow := 0.0
-			for _, it := range items {
-				if !it.frozen { activeGrow += it.flexGrow }
+	for {
+		anyUnfrozen := false
+		activeGrow, activeShrink := 0.0, 0.0
+		totalUsed := 0.0
+		for _, it := range items {
+			totalUsed += it.targetSize + it.marginMain
+			if it.frozen {
+				continue
 			}
-			if activeGrow <= 0 { break }
-			for _, it := range items {
-				if it.frozen { continue }
-				share := remaining * it.flexGrow / activeGrow
-				it.targetSize = it.baseSize + share
-			}
+			anyUnfrozen = true
+			activeGrow += it.flexGrow
+			activeShrink += it.flexShrink
+		}
+		if !anyUnfrozen {
 			break
 		}
-	} else if freeSpace < 0 {
-		totalFlexShrink := 0.0
-		scaledBaseSum := 0.0
-		for _, it := range items {
-			if it.flexShrink > 0 {
-				totalFlexShrink += it.flexShrink
+
+		freeSpace := containerMainSize - totalUsed
+		if freeSpace > 0 && activeGrow > 0 {
+			for _, it := range items {
+				if it.frozen || it.flexGrow <= 0 {
+					continue
+				}
+				it.targetSize += freeSpace * it.flexGrow / activeGrow
+			}
+		} else if freeSpace < 0 && activeShrink > 0 {
+			scaledBaseSum := 0.0
+			for _, it := range items {
+				if it.frozen || it.flexShrink <= 0 {
+					continue
+				}
 				scaledBaseSum += it.flexShrink * it.baseSize
 			}
-		}
-		shrinkSpace := -freeSpace
-		if totalFlexShrink > 0 && scaledBaseSum > 0 {
-			for _, it := range items {
-				if it.flexShrink <= 0 { it.targetSize = it.baseSize; continue }
-				shrink := shrinkSpace * (it.flexShrink * it.baseSize) / scaledBaseSum
-				it.targetSize = it.baseSize - shrink
-				if it.targetSize < 0 { it.targetSize = 0 }
+			if scaledBaseSum > 0 {
+				for _, it := range items {
+					if it.frozen || it.flexShrink <= 0 {
+						continue
+					}
+					shrink := -freeSpace * (it.flexShrink * it.baseSize) / scaledBaseSum
+					it.targetSize -= shrink
+					if it.targetSize < 0 {
+						it.targetSize = 0
+					}
+				}
 			}
-		} else {
-			for _, it := range items { it.targetSize = it.baseSize }
 		}
-	} else {
-		for _, it := range items { it.targetSize = it.baseSize }
+
+		// Re-clamp unfrozen items; freeze any that hit a min/max boundary.
+		frozeAny := false
+		for _, it := range items {
+			if it.frozen {
+				continue
+			}
+			clamped := clamp(it, it.targetSize)
+			if clamped != it.targetSize {
+				it.targetSize = clamped
+				it.frozen = true
+				frozeAny = true
+			}
+		}
+		// If nothing froze this pass, the space is fully consumed — stop.
+		if !frozeAny {
+			break
+		}
 	}
-	for _, it := range items { it.finalMainSize = it.targetSize }
+
+	for _, it := range items {
+		it.finalMainSize = it.targetSize
+	}
 }
 
 func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState) {

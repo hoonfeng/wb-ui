@@ -83,9 +83,12 @@ func mkAnon() *ElementBox {
 }
 
 // mkTextRun returns a text-run box holding the given text.
-func mkTextRun(text string) *ElementBox {
+// Text runs are represented by *InlineTextBox in the layout tree
+// (mirroring buildChildren in box.go); the legacy ElementBox{nodeType: NodeText}
+// form is not used by the engine.
+func mkTextRun(text string) *InlineTextBox {
 	cs := style.NewComputedStyle()
-	return &ElementBox{nodeType: NodeText, style: cs}
+	return &InlineTextBox{text: text, style: cs}
 }
 
 // setMargin sets the four margin sides of box to v px.

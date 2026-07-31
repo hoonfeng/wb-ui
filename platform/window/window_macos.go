@@ -729,6 +729,7 @@ type EventType int
 
 const (
 	EventMouseButton EventType = iota
+	EventChar
 	EventCursorMove
 	EventKey
 	EventResize

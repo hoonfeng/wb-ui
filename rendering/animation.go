@@ -660,19 +660,19 @@ func parseCSSAlpha(s string) uint8 {
 func namedColorSimple(name string) (graphics.Color, bool) {
 	switch strings.ToLower(name) {
 	case "black":
-		return graphics.Color{0, 0, 0, 255}, true
+		return graphics.Color{R: 0, G: 0, B: 0, A: 255}, true
 	case "white":
-		return graphics.Color{255, 255, 255, 255}, true
+		return graphics.Color{R: 255, G: 255, B: 255, A: 255}, true
 	case "red":
-		return graphics.Color{255, 0, 0, 255}, true
+		return graphics.Color{R: 255, G: 0, B: 0, A: 255}, true
 	case "green", "lime":
-		return graphics.Color{0, 255, 0, 255}, true
+		return graphics.Color{R: 0, G: 255, B: 0, A: 255}, true
 	case "blue":
-		return graphics.Color{0, 0, 255, 255}, true
+		return graphics.Color{R: 0, G: 0, B: 255, A: 255}, true
 	case "yellow":
-		return graphics.Color{255, 255, 0, 255}, true
+		return graphics.Color{R: 255, G: 255, B: 0, A: 255}, true
 	case "transparent":
-		return graphics.Color{0, 0, 0, 0}, true
+		return graphics.Color{R: 0, G: 0, B: 0, A: 0}, true
 	}
 	return graphics.Color{}, false
 }

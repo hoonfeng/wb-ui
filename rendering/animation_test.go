@@ -341,11 +341,11 @@ func TestParseColorSimple(t *testing.T) {
 		want  graphics.Color
 		ok    bool
 	}{
-		{"#ff0000", graphics.Color{255, 0, 0, 255}, true},
-		{"red", graphics.Color{255, 0, 0, 255}, true},
-		{"#f00", graphics.Color{255, 0, 0, 255}, true},
-		{"transparent", graphics.Color{0, 0, 0, 0}, true},
-		{"rgb(0, 255, 0)", graphics.Color{0, 255, 0, 255}, true},
+		{"#ff0000", graphics.Color{R: 255, G: 0, B: 0, A: 255}, true},
+		{"red", graphics.Color{R: 255, G: 0, B: 0, A: 255}, true},
+		{"#f00", graphics.Color{R: 255, G: 0, B: 0, A: 255}, true},
+		{"transparent", graphics.Color{R: 0, G: 0, B: 0, A: 0}, true},
+		{"rgb(0, 255, 0)", graphics.Color{R: 0, G: 255, B: 0, A: 255}, true},
 	}
 	for _, c := range cases {
 		got, ok := parseColorSimple(c.input)

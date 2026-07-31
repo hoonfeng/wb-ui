@@ -3,7 +3,6 @@
 //                  Source/WebCore/html/parser/InputStreamPreprocessor.h
 // Completeness: 75%
 // Simplifications:
-//   - plaintext mode unimplemented
 //   - RCData rules folded into RAWTEXT where the two differ only in entity handling
 //   - SegmentedString is replaced by a position index over a decoded []rune buffer
 //   - the InputStreamPreprocessor's CR/LF normalization and null replacement are

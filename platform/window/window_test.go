@@ -13,12 +13,13 @@ func TestEventTypeValues(t *testing.T) {
 		want int
 	}{
 		{EventMouseButton, 0},
-		{EventCursorMove, 1},
-		{EventKey, 2},
-		{EventResize, 3},
-\t{EventScroll, 4, ScrollX: 0},
-		{EventDrop, 5},
-		{EventTouch, 6},
+		{EventChar, 1},
+		{EventCursorMove, 2},
+		{EventKey, 3},
+		{EventResize, 4},
+		{EventScroll, 5},
+		{EventDrop, 6},
+		{EventTouch, 7},
 	}
 	for _, tt := range tests {
 		if int(tt.typ) != tt.want {

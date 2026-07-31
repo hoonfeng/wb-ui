@@ -83,6 +83,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cs != nil {
 		textAlign = cs.TextAlign
 	}
+	// Reference width for text-align: the container's content-box width
+	// (captured before we widen it to the text extent below). Centering/right
+	// alignment must be computed against the container, not the text width.
+	containerWidth := contentWidth
 
 	// Get float context for text wrapping around floats.
 	fc := state.currentFloatContext()
@@ -323,11 +327,6 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		lines = append(lines, currentLine)
 	}
 
-	// Flush pending segments to their InlineTextBoxes.
-	for _, ps := range pending {
-		ps.textBox.TextSegments = append(ps.textBox.TextSegments, ps.seg)
-	}
-
 	// Compute container height from line count.
 	totalHeight := 0.0
 	if len(lines) > 0 {
@@ -384,9 +383,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			var shift float64
 			switch textAlign {
 			case style.TextAlignCenter:
-				shift = (contentWidth - used) / 2
+				shift = (containerWidth - used) / 2
 			case style.TextAlignRight, style.TextAlignEnd:
-				shift = contentWidth - used
+				shift = containerWidth - used
 			}
 			if shift > 0 {
 				for i := ln.segStart; i < len(pending); i++ {
@@ -424,6 +423,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				}
 			}
 		}
+	}
+
+	// Flush pending segments to their InlineTextBoxes. Must run AFTER the
+	// text-align and vertical-centering adjustments above, otherwise the
+	// segments copied into TextSegments would keep their pre-adjustment X/Y.
+	for _, ps := range pending {
+		ps.textBox.TextSegments = append(ps.textBox.TextSegments, ps.seg)
 	}
 
 	g.SetContentHeight(math.Max(boxHeight, totalHeight))

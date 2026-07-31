@@ -488,6 +488,9 @@ func displayTypeName(d DisplayType) string {
 	return "inline"
 }
 
+// String returns the CSS display keyword for the DisplayType (e.g. "flex").
+func (d DisplayType) String() string { return displayTypeName(d) }
+
 func positionTypeName(p PositionType) string {
 	switch p {
 	case PositionStatic:
@@ -517,6 +520,9 @@ func overflowTypeName(o OverflowType) string {
 	}
 	return "visible"
 }
+
+// String returns the CSS keyword for the OverflowType (e.g. "auto").
+func (o OverflowType) String() string { return overflowTypeName(o) }
 
 func whiteSpaceTypeName(w WhiteSpaceType) string {
 	switch w {

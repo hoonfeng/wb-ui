@@ -50,13 +50,13 @@ func TestInline_TextAlignCenter(t *testing.T) {
 	anon.AddChild(mkTextRun("hi"))
 	root.AddChild(anon)
 
-	state := Layout(root, 800, 600)
+	Layout(root, 800, 600)
 
 	// The text item "hi" (2 chars) has advance 2*9.6 = 19.2. Centred in 800 means
 	// it starts at (800 - 19.2)/2 = 390.4.
 	for _, c := range anon.Children() {
-		if c.IsTextRun() {
-			cx, _, _, _ := rectOf(c.(*ElementBox), state)
+		if tb, ok := c.(*InlineTextBox); ok && len(tb.TextSegments) > 0 {
+			cx := tb.TextSegments[0].X
 			if cx < 300 {
 				t.Errorf("centred text X = %g, expected >= 300", cx)
 			}

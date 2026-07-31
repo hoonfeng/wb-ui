@@ -839,18 +839,9 @@ func (c *Canvas) getSymbolSkiaFont(font Font) *skia.Font {
 		return nil
 	}
 	return c.makeSkiaFont(mgr.SymbolTypeface(), font.Size)
-		return nil
-	return c.makeSkiaFont(mgr.SymbolTypeface(), font.Size)
 }
 
-// runeClass categorizes a Unicode rune for font fallback purposes.
-
-// runeClass categorizes a Unicode rune for font fallback purposes.
-
-
-// runeClass categorizes a Unicode rune for font fallback purposes.
-
-// runeClass categorizes a Unicode rune for font fallback purposes.
+// runeClass categorizes a Unicode rune for font fallback purposes.// runeClass categorizes a Unicode rune for font fallback purposes.
 type runeClass int
 
 const (

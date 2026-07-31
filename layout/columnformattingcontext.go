@@ -42,10 +42,15 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 	}
 
 	// Preliminary block layout in an infinite-height container.
+	// tempBox shares the children with the real box and is laid out at the
+	// column width so each child's intrinsic geometry (top/height) is known
+	// before distributing them across columns. Without this Layout call the
+	// child geometries are all zero and column assignment is meaningless.
 	tempBox := &ElementBox{
-		nodeType: NodeGenericElement,
-		style:    cs,
-		children: box.Children(),
+		nodeType:  NodeGenericElement,
+		style:     cs,
+		children:  box.Children(),
+		parentBox: box, // non-nil parent prevents BFC's viewport-root handling
 	}
 	tg := state.GeometryForBox(tempBox)
 	tg.SetContentWidth(colWidth)
@@ -53,6 +58,7 @@ func (mc *MultiColumnFormattingContext) Layout(box *ElementBox, state *LayoutSta
 	tg.SetPadding(g.PaddingTop(), g.PaddingRight(), g.PaddingBottom(), g.PaddingLeft())
 	blockCtx := &BlockFormattingContext{}
 	blockCtx.InitBase(tempBox, state)
+	blockCtx.Layout(tempBox, state)
 
 	totalChildHeight := 0.0
 	for _, c := range tempBox.Children() {

@@ -14,9 +14,32 @@ import (
 
 var diagFloats *os.File
 
-func init() {
-	diagFloats, _ = os.Create("diag_floats.txt")
-	diagFloats.WriteString("=== float layout diagnostics ===\n")
+// initDiagFloats lazily opens the float diagnostics file only when the
+// WBUI_FLOAT_DIAG environment variable is set, so normal runs/tests don't
+// litter the working directory with diag_floats.txt.
+func initDiagFloats() *os.File {
+	if diagFloats != nil {
+		return diagFloats
+	}
+	if os.Getenv("WBUI_FLOAT_DIAG") == "" {
+		return nil
+	}
+	f, err := os.Create("diag_floats.txt")
+	if err != nil {
+		return nil
+	}
+	f.WriteString("=== float layout diagnostics ===\n")
+	diagFloats = f
+	return diagFloats
+}
+
+// diagf writes a diagnostic line, no-op unless WBUI_FLOAT_DIAG is set.
+func diagf(format string, args ...interface{}) {
+	f := initDiagFloats()
+	if f == nil {
+		return
+	}
+	fmt.Fprintf(f, format, args...)
 }
 
 type BlockFormattingContext struct {
@@ -70,7 +93,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// DIAG: log container geometry for boxes with floats
 	for _, ch := range box.Children() {
 		if eb, ok := ch.(*ElementBox); ok && eb.IsFloated() {
-			fmt.Fprintf(diagFloats, "parent=%q contentX=%.0f contentY=%.0f contentWidth=%.0f bfc=%t\n",
+			diagf("parent=%q contentX=%.0f contentY=%.0f contentWidth=%.0f bfc=%t\n",
 				box.Style().Display, contentX, contentY, contentWidth, establishesBFC)
 			break
 		}
@@ -81,23 +104,23 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	collapseTopWithParent := !establishesBFC && g.BorderTop() == 0 && g.PaddingTop() == 0
 	firstInFlow := true
 
-		fmt.Fprintf(diagFloats, "> layoutBlockChildren: box=%s contentX=%.0f contentY=%.0f contentWidth=%.0f childCount=%d\n",
+		diagf("> layoutBlockChildren: box=%s contentX=%.0f contentY=%.0f contentWidth=%.0f childCount=%d\n",
 		elementName(box), contentX, contentY, contentWidth, len(box.Children()))
 
 	var deferredAbsolutes []*ElementBox
 
 	for i, child := range box.Children() {
 		if !child.IsVisible() {
-			fmt.Fprintf(diagFloats, "  [!INVIS i=%d child=%s type=%T]\n", i, elementNameOf(child), child)
+			diagf("  [!INVIS i=%d child=%s type=%T]\n", i, elementNameOf(child), child)
 			continue
 		}
 		childEb, childIsEb := child.(*ElementBox)
 		if !childIsEb {
-			fmt.Fprintf(diagFloats, "  [!NOTEB i=%d child=%T]\n", i, child)
+			diagf("  [!NOTEB i=%d child=%T]\n", i, child)
 			continue
 		}
 		childCs := childEb.Style()
-		fmt.Fprintf(diagFloats, "  [i=%d] child=%s float=%q width=%v display=%d style=%p\n",
+		diagf("  [i=%d] child=%s float=%q width=%v display=%d style=%p\n",
 			i, elementName(childEb), childCs.Float, childCs.Width, childCs.Display, childCs)
 		if child.IsFloated() {
 			layoutFloatedChild(childEb, contentX, contentY, contentWidth, fc, state)
@@ -336,7 +359,7 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 		w = contentWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
 		if w < 0 { w = 0 }
 	}
-	fmt.Fprintf(diagFloats, "  child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t el=%s\n",
+	diagf("  child=%q float=%s widthCSS=%v contentWidth=%.0f definiteW=%.0f ok=%t el=%s\n",
 		cs.Display, cs.Float, cs.Width, contentWidth, w, ok, elementName(child))
 	borderBox := w
 	if !isBorderBoxForBox(child) {

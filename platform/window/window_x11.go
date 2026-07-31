@@ -35,6 +35,7 @@ type EventType int
 
 const (
 	EventMouseButton EventType = iota
+	EventChar
 	EventCursorMove
 	EventKey
 	EventResize
@@ -53,7 +54,8 @@ type Event struct {
 	Mods    int
 	Width   int // for EventResize
 	Height  int
-\tScrollY float64  // for EventScroll (vertical wheel offset)\n\tScrollX float64  // for EventScroll (horizontal wheel offset)
+	ScrollY float64  // for EventScroll (vertical wheel offset)
+	ScrollX float64  // for EventScroll (horizontal wheel offset)
 	DropFiles []string // for EventDrop
 	// Touch
 	TouchX, TouchY float64
