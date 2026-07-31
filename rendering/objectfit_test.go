@@ -77,16 +77,42 @@ func TestObjectFitCover(t *testing.T) {
 	}
 }
 
-// TestObjectFitNone: 10x20 image drawn at natural size top-left (10x20
-// red block at origin; rest transparent).
+// TestObjectFitNone: 10x20 image drawn at natural size, centered by the
+// default object-position (50% 50%) → (25,5)-(35,25); corners transparent.
 func TestObjectFitNone(t *testing.T) {
 	canvas := paintFitBox(t, "none")
 	defer canvas.Release()
+	if px := canvas.PixelAt(30, 15); px.R != 255 || px.G != 0 {
+		t.Fatalf("natural center (30,15) = %+v, want red", px)
+	}
+	if px := canvas.PixelAt(5, 10); px.A != 0 {
+		t.Fatalf("outside natural size (5,10) = %+v, want transparent", px)
+	}
+}
+
+// TestObjectFitPosition: object-fit:none + object-position:left top moves
+// the natural-size image to the top-left corner.
+func TestObjectFitPosition(t *testing.T) {
+	canvas := graphics.NewCanvas(60, 30)
+	defer canvas.Release()
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 60, Height: 30})
+	doc := dom.NewDocument()
+	imgEl := doc.CreateElement("img")
+	imgEl.SetAttribute("src", fitPNG(t))
+	st := style.NewComputedStyle()
+	st.SetProperty("object-fit", "none")
+	st.SetProperty("object-position", "left top")
+	box := NewRenderBox(imgEl, st)
+	box.SetLocation(0, 0)
+	box.SetSize(60, 30)
+	if !PaintImage(box, info) {
+		t.Fatalf("PaintImage returned false")
+	}
 	if px := canvas.PixelAt(5, 10); px.R != 255 || px.G != 0 {
-		t.Fatalf("natural (5,10) = %+v, want red", px)
+		t.Fatalf("top-left natural (5,10) = %+v, want red", px)
 	}
 	if px := canvas.PixelAt(30, 15); px.A != 0 {
-		t.Fatalf("outside natural size (30,15) = %+v, want transparent", px)
+		t.Fatalf("away from corner (30,15) = %+v, want transparent", px)
 	}
 }
 

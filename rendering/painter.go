@@ -1046,9 +1046,11 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		return false
 	}
 	// object-fit (default fill) controls how the image scales into the
-	// content box, mirroring CSS Images §3.
+	// content box, mirroring CSS Images §3. object-position (default 50%
+	// 50%) controls alignment within the box.
 	iw, ih := float64(img.Width()), float64(img.Height())
 	fit := strings.ToLower(st.GetProperty("object-fit"))
+	opx, opy := parseObjectPosition(st.GetProperty("object-position"))
 	switch fit {
 	case "cover":
 		if iw > 0 && ih > 0 {
@@ -1057,7 +1059,7 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 				ratio = h / ih
 			}
 			dw, dh := iw*ratio, ih*ratio
-			img.Draw(info.canvas, x+(w-dw)/2, y+(h-dh)/2, dw, dh)
+			img.Draw(info.canvas, x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
 		} else {
 			img.Draw(info.canvas, x, y, w, h)
 		}
@@ -1068,13 +1070,13 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 				ratio = h / ih
 			}
 			dw, dh := iw*ratio, ih*ratio
-			img.Draw(info.canvas, x+(w-dw)/2, y+(h-dh)/2, dw, dh)
+			img.Draw(info.canvas, x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
 		} else {
 			img.Draw(info.canvas, x, y, w, h)
 		}
 	case "none":
 		if iw > 0 && ih > 0 {
-			img.Draw(info.canvas, x, y, iw, ih)
+			img.Draw(info.canvas, x+(w-iw)*opx, y+(h-ih)*opy, iw, ih)
 		} else {
 			img.Draw(info.canvas, x, y, w, h)
 		}
@@ -1082,4 +1084,42 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		img.Draw(info.canvas, x, y, w, h)
 	}
 	return true
+}
+
+// parseObjectPosition parses an object-position value ("left top",
+// "30% 60%", "10px 20px", …). Missing parts default to 50%. Returns the
+// horizontal and vertical ratios (0..1) usable as (space * ratio) offsets.
+func parseObjectPosition(s string) (float64, float64) {
+	ox, oy := 0.5, 0.5
+	parts := strings.Fields(strings.ToLower(s))
+	if len(parts) >= 1 {
+		ox = parsePosPart(parts[0])
+	}
+	if len(parts) >= 2 {
+		oy = parsePosPart(parts[1])
+	} else if len(parts) == 1 {
+		// One value: vertical = horizontal.
+		oy = ox
+	}
+	return ox, oy
+}
+
+// parsePosPart parses a single object-position component: a percentage
+// ("30%" → 0.3) or a keyword (left/top=0, center=0.5, right/bottom=1).
+func parsePosPart(s string) float64 {
+	if strings.HasSuffix(s, "%") {
+		if v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64); err == nil {
+			return v / 100
+		}
+		return 0.5
+	}
+	switch s {
+	case "left", "top":
+		return 0
+	case "right", "bottom":
+		return 1
+	case "center":
+		return 0.5
+	}
+	return 0.5
 }

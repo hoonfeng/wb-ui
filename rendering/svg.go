@@ -273,25 +273,66 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	var pts []graphics.Point
 	var firstPoint graphics.Point
 	hasFirst := false
+	curX, curY := 0.0, 0.0
 
 	for _, cmd := range s.commands {
+		args := cmd.args
 		switch cmd.kind {
 		case 'M', 'm':
-			if len(cmd.args) >= 2 {
-				p := graphics.Point{X: cmd.args[0], Y: cmd.args[1]}
+			if len(args) >= 2 {
+				x, y := args[0], args[1]
+				if cmd.kind == 'm' {
+					x += curX
+					y += curY
+				}
+				p := graphics.Point{X: x, Y: y}
 				pts = append(pts, p)
+				curX, curY = x, y
 				if !hasFirst {
 					firstPoint = p
 					hasFirst = true
 				}
 			}
 		case 'L', 'l':
-			if len(cmd.args) >= 2 {
-				pts = append(pts, graphics.Point{X: cmd.args[0], Y: cmd.args[1]})
+			if len(args) >= 2 {
+				x, y := args[0], args[1]
+				if cmd.kind == 'l' {
+					x += curX
+					y += curY
+				}
+				pts = append(pts, graphics.Point{X: x, Y: y})
+				curX, curY = x, y
+			}
+		case 'C', 'c': // cubic bezier: x1 y1 x2 y2 x y
+			if len(args) >= 6 {
+				x1, y1, x2, y2, x, y := args[0], args[1], args[2], args[3], args[4], args[5]
+				if cmd.kind == 'c' {
+					x1 += curX
+					y1 += curY
+					x2 += curX
+					y2 += curY
+					x += curX
+					y += curY
+				}
+				pts = append(pts, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
+				curX, curY = x, y
+			}
+		case 'Q', 'q': // quadratic bezier: x1 y1 x y
+			if len(args) >= 4 {
+				x1, y1, x, y := args[0], args[1], args[2], args[3]
+				if cmd.kind == 'q' {
+					x1 += curX
+					y1 += curY
+					x += curX
+					y += curY
+				}
+				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
+				curX, curY = x, y
 			}
 		case 'Z', 'z':
 			if hasFirst {
 				pts = append(pts, firstPoint)
+				curX, curY = firstPoint.X, firstPoint.Y
 			}
 		}
 	}
@@ -307,6 +348,51 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			canvas.StrokeLine(pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke)
 		}
 	}
+}
+
+// svgImage embeds a raster image (data URI or file) into the SVG, mirroring
+// the SVG <image> element. Paints the decoded bitmap scaled to (x,y,w,h).
+type svgImage struct {
+	x, y, w, h float64
+	href       string
+}
+
+func (s *svgImage) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	if canvas == nil || s.href == "" || s.w <= 0 || s.h <= 0 {
+		return
+	}
+	img := loadBackgroundImage(s.href, "")
+	if img != nil && img.Loaded() {
+		img.Draw(canvas, s.x, s.y, s.w, s.h)
+	}
+}
+
+// sampleCubicBezier returns points along a cubic bezier curve.
+func sampleCubicBezier(x0, y0, x1, y1, x2, y2, x3, y3 float64) []graphics.Point {
+	const steps = 16
+	out := make([]graphics.Point, 0, steps)
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / steps
+		mt := 1 - t
+		x := mt*mt*mt*x0 + 3*mt*mt*t*x1 + 3*mt*t*t*x2 + t*t*t*x3
+		y := mt*mt*mt*y0 + 3*mt*mt*t*y1 + 3*mt*t*t*y2 + t*t*t*y3
+		out = append(out, graphics.Point{X: x, Y: y})
+	}
+	return out
+}
+
+// sampleQuadraticBezier returns points along a quadratic bezier curve.
+func sampleQuadraticBezier(x0, y0, x1, y1, x2, y2 float64) []graphics.Point {
+	const steps = 12
+	out := make([]graphics.Point, 0, steps)
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / steps
+		mt := 1 - t
+		x := mt*mt*x0 + 2*mt*t*x1 + t*t*x2
+		y := mt*mt*y0 + 2*mt*t*y1 + t*t*y2
+		out = append(out, graphics.Point{X: x, Y: y})
+	}
+	return out
 }
 // --- SVG Text ---
 
@@ -604,6 +690,18 @@ func parseSVGElement(el *dom.Element) svgShape {
 			stroke:      parseColorAttribute(getAttr("stroke")),
 			strokeWidth: parseSVGCoord(getAttr("stroke-width")),
 		}
+	case "image":
+		href := el.GetAttribute("href")
+		if href == "" {
+			href = el.GetAttribute("xlink:href")
+		}
+		return &svgImage{
+			x:    parseSVGCoord(el.GetAttribute("x")),
+			y:    parseSVGCoord(el.GetAttribute("y")),
+			w:    parseSVGCoord(el.GetAttribute("width")),
+			h:    parseSVGCoord(el.GetAttribute("height")),
+			href: href,
+		}
 	case "use":
 		href := el.GetAttribute("href")
 		if href == "" {
@@ -766,8 +864,8 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 	}
 	collectIDs(el)
 
-	var walk func(dom.Node, *svgPaintContext)
-	walk = func(n dom.Node, ctx *svgPaintContext) {
+	var walk func(dom.Node, *svgPaintContext, float64, float64)
+	walk = func(n dom.Node, ctx *svgPaintContext, offX, offY float64) {
 		if n == nil {
 			return
 		}
@@ -776,6 +874,14 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 			return
 		}
 		tag := childEl.LocalName()
+
+		// Nested <svg> elements shift their children by their x/y attributes
+		// (the root svg usually has none). Accumulate into the offset passed
+		// down to descendants.
+		if tag == "svg" {
+			offX += parseSVGCoord(childEl.GetAttribute("x"))
+			offY += parseSVGCoord(childEl.GetAttribute("y"))
+		}
 
 		// Handle <defs> — collect gradients and clip paths. LocalName() is
 		// lowercased, so compare lowercase (SVG tag names are case-sensitive
@@ -899,6 +1005,10 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 		// Parse the shape
 		if shape := parseSVGElement(childEl); shape != nil {
+			// Nested <svg> / group offsets apply to the whole subtree.
+			if offX != 0 || offY != 0 {
+				shape = &svgTranslatedShape{shape: shape, dx: offX, dy: offY}
+			}
 			// Attach the resolved paint properties so painting (which runs
 			// with a fresh default context) still sees them.
 			wrapper := &svgFilledShape{
@@ -918,12 +1028,12 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 
 		// Recurse into children
 		for c := childEl.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c, elCtx)
+			walk(c, elCtx, offX, offY)
 		}
 	}
 
 	ctx := defaultSVGContext()
-	walk(el, ctx)
+	walk(el, ctx, 0, 0)
 	doc.gradients = ctx.gradients
 	doc.clips = ctx.clips
 	return doc
