@@ -109,6 +109,8 @@ func serializeToken(t Token) string {
 		return string(t.Delimiter)
 	case TokenComma:
 		return ","
+	case TokenURL:
+		return "url(" + t.Value + ")"
 	case TokenColon:
 		return ":"
 	case TokenSemicolon:

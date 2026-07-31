@@ -183,6 +183,17 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		op := CumulativeOpacity(box)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
 	}
+	// background-image: url(...) — decode and draw with size/position.
+	if url, ok := parseBackgroundURL(st.BackgroundImage); ok {
+		img := loadBackgroundImage(url, "")
+		if img != nil && img.Loaded() {
+			dx, dy, dw, dh := computeBackgroundDest(rect.X, rect.Y, rect.Width, rect.Height,
+				st.BackgroundSize, st.BackgroundPosition, img.Width(), img.Height())
+			img.Draw(info.canvas, dx, dy, dw, dh)
+		}
+		return
+	}
+
 	// Paint gradient layers (background-image). Multiple comma-separated
 	// layers stack with the FIRST layer on TOP (CSS background layering);
 	// paint bottom-up so the first layer is drawn last. The

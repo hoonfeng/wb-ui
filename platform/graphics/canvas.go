@@ -1012,7 +1012,7 @@ func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
 		return
 	}
 	src := skia.RectXYWH(0, 0, float32(img.Width()), float32(img.Height()))
-	dst := skia.RectXYWH(float32(x), float32(y), float32(x+w), float32(y+h))
+	dst := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
 	paint := skia.NewPaint()
 	paint.SetStyle(skia.PaintStyleFill)
 	paint.SetAntialias(true)

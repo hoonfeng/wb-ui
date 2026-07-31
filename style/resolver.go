@@ -402,7 +402,7 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.BackgroundImage = ""
 		var grads []string
 		for _, p := range splitShorthandValue(valueString) {
-			if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
+			if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") || strings.HasPrefix(p, "url(") {
 				grads = append(grads, p)
 				continue
 			}
@@ -1533,7 +1533,7 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			cs.BackgroundImage = ""
 			var grads []string
 			for _, p := range splitShorthandValue(resolvedStr) {
-				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") {
+				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") || strings.HasPrefix(p, "url(") {
 					grads = append(grads, p)
 					continue
 				}

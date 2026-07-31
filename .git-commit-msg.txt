@@ -1,25 +1,22 @@
-feat: multi-layer backgrounds + textarea/focus UA + text input borders
+feat: background-image url() support + two paint bugs
 
-Form-control & UA polish (candidates: select/textarea visuals, focus):
-- html5/defaultcss.go — text inputs and textarea now use Edge's #767676
-  border (was #c0c0c0); added the default :focus outline (1px #4d90fe,
-  Edge/Chrome focus ring). :hover/:focus selector matching and host-driven
-  hovered/focused state already existed; the UA outline was missing.
-- select stays as-is: Edge headless renders native widgets blank, so pixel
-  comparison is meaningless; GEO geometry already aligned.
+Candidate: image backgrounds with background-size/position.
 
-Multi-layer backgrounds (candidate: multi-background stacking):
-- style/resolver.go — the background shorthand now joins multiple gradient
-  layers with commas (first layer = topmost) instead of keeping only the
-  first.
-- rendering/gradient.go — splitBackgroundLayers splits top-level commas
-  (parenthesis-aware so gradient args stay intact).
-- rendering/painter.go — paints all gradient layers bottom-up so the FIRST
-  layer ends up on top (CSS background layering), with background-color
-  beneath. Opaque top layer wins (px probe 1:1 with Edge); semi-transparent
-  top layer blends with the layer below (unit test: rgba(255,0,0,0.5) over
-  green → #807f00).
-- rendering/multibg_test.go — layer splitting + opaque/blend paint tests.
+New rendering/backgroundimage.go — full url() background path:
+- parseBackgroundURL (quotes, data URIs), decodeDataURI (base64),
+  loadBackgroundImage (data: + file paths, cached), computeBackgroundDest
+  (background-size: auto/cover/contain/length/% and background-position:
+  keywords/%/px against the box−image delta), parseBackgroundSize/Position.
+- painter.go paints url() backgrounds before the gradient path.
+- style/resolver.go background shorthand recognizes url(...) layers.
 
-Pixel cases: px_textarea (0.48%, border aligned; Edge headless selection
-highlight budget). Verified GEO 13/13, pixel suite 20/20, go test green.
+Two real bugs found and fixed by the new path:
+1. css/rule.go serializeToken had no TokenURL case → url() values
+   serialized to "" → background-image silently lost. Now "url(...)".
+2. platform/graphics/canvas.go DrawImage passed (x, y, x+w, y+h) to
+   skia.RectXYWH — the destination rect was double-size, so images drew
+   into a 2x box. Fixed to (x, y, w, h); affects <img> painting too.
+
+Tests: unit tests for parsing (url/data-URI/size/position incl. px+%
++keywords), paint test asserts the centered image rect is red and the
+corner/outside stays transparent. GEO 13/13, go test green.
