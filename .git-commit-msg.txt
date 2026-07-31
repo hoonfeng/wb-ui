@@ -1,21 +1,15 @@
-fix: engine alignment for headings, form controls, vertical-align
+chore: remove debug leftover files, extract layout test helpers
 
-Consistency suite now 11/11 green (was 9/11). Fixes discovered by
-dev/consistency form_controls and component_list cases:
+Cleanup of accumulated debug/diagnostic artifacts:
 
-- layout/layoututil.go: fontSizeOf for anonymous boxes inherits the
-  parent's computed px font-size instead of re-resolving the raw em
-  (an h1's 2em was doubling to 64px in its anonymous text wrapper)
-- layout/box.go: hasInlineChildren also recognizes inline-level
-  ElementBox children (input/button/select), so containers holding
-  form controls use the inline formatting context instead of block
-- layout/inlineformattingcontext.go: vertical-align:middle centers
-  inline-block/replaced children against the line box; text inputs get
-  the browser-default 177px width; select/textarea default sizes
-- html5/defaultcss.go: range input width 9.7em + white background
-  (was 12em, transparent) to match Chromium
-- dev/consistency: text comparison normalizes whitespace (collapseWS),
-  collector trims before slicing to 20 chars, container elements
-  (form/ul/ol) use DOM textContent; per-tag tolerances for form
-  controls (x:14px, w:10px) and text blocks (y:40px, h:40px) to absorb
-  font line-height and widget-internal metric differences
+- delete _tmp_read.go (throwaway file reader)
+- delete rendering/full_pipeline_diag_test.go, layout_diag_test.go
+  (print-only diagnostic tests with zero assertions)
+- delete static_diag_full.log, dev/output/sync_diag.txt,
+  dev/static_test/{ide,ide_vue,wbui}_diag.txt (diagnostic output dumps)
+- delete built binaries (pipeline_diag.exe, window_test*.exe, etc.)
+
+The diagnostic tests' helper functions (layoutInfo, walkAllLayoutBoxes,
+findByClass, dumpLayoutTree) are depended on by the real regression test
+layout_fix_test.go; they are preserved in a new
+rendering/layout_helpers_test.go together with the indexHTMLCSS fixture.
