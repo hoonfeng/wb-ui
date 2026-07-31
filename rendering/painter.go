@@ -175,12 +175,13 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	// Paint box-shadow before the background (shadows sit behind the element).
-	// Paint shadows even when the background is transparent.
+	// Paint shadows even when the background is transparent. Inset shadows are
+	// excluded here — they paint ABOVE the background (see below).
 	if st.BoxShadow != "" && st.BoxShadow != "none" {
 		r := lengthValue(st.BorderRadius)
 		shadows := parseShadowList(st.BoxShadow)
 		op := CumulativeOpacity(box)
-		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op)
+		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
 	}
 	// Paint gradient if background-image is a linear-gradient.
 	bgGradient := parseGradient(st.BackgroundImage)
@@ -220,6 +221,13 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
 	} else {
 		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bg)
+	}
+	// Inset shadows paint ABOVE the background (below the border): inset 6px
+	// left shadow casts onto the element's own background.
+	if st.BoxShadow != "" && st.BoxShadow != "none" {
+		shadows := parseShadowList(st.BoxShadow)
+		op := CumulativeOpacity(box)
+		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), lengthValue(st.BorderRadius), shadows, op, true)
 	}
 }
 
@@ -286,6 +294,73 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	if rightW > 0 && st.BorderRightStyle != "none" {
 		paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(brC), op), st.BorderRightStyle)
+	}
+	// Corner bevels: when adjacent border colors differ, browsers split the
+	// corner along the diagonal from the outer corner to the inner corner
+	// (CSS border corner joining). The triangle on the horizontal-edge side
+	// keeps the top/bottom color; the other triangle gets the left/right
+	// color. Mirrors Edge pixel-for-pixel within anti-aliasing tolerance.
+	paintBorderCorners(info.canvas, x, y, w, h, topW, rightW, bottomW, leftW,
+		blC, brC, btC, bbC, op, st)
+}
+
+// paintBorderCorners fills the 45°-beveled corner triangles for corners where
+// the adjacent vertical and horizontal border colors differ.
+func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, bottomW, leftW float64,
+	blC, brC, btC, bbC style.Color, op float64, st *style.ComputedStyle) {
+	// fillBelow paints every pixel of the rect that lies strictly below the
+	// diagonal from (0,0) to (cw,ch) with col. The diagonal maps the outer
+	// border corner to the inner (padding-edge) corner.
+	fillBelow := func(cx, cy, cw, ch float64, col graphics.Color) {
+		if cw <= 0 || ch <= 0 || col.A == 0 {
+			return
+		}
+		col = ApplyOpacityToColor(col, op)
+		for dy := 0; dy < int(ch); dy++ {
+			for dx := 0; dx < int(cw); dx++ {
+				// below ⟺ dy > (dx/cw)*ch
+				if float64(dy) > float64(dx)*ch/cw {
+					canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+				}
+			}
+		}
+	}
+	// fillBelowRev paints pixels below the anti-diagonal from (0,ch) to (cw,0)
+	// (used when the outer corner maps to the top-right / bottom-left of the
+	// corner rect, i.e. the right and left corners).
+	fillBelowRev := func(cx, cy, cw, ch float64, col graphics.Color) {
+		if cw <= 0 || ch <= 0 || col.A == 0 {
+			return
+		}
+		col = ApplyOpacityToColor(col, op)
+		for dy := 0; dy < int(ch); dy++ {
+			for dx := 0; dx < int(cw); dx++ {
+				// below ⟺ dy > ch*(1-dx/cw)
+				if float64(dy) > ch*(1-float64(dx)/cw) {
+					canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+				}
+			}
+		}
+	}
+	topStyle, rightStyle := st.BorderTopStyle, st.BorderRightStyle
+	bottomStyle, leftStyle := st.BorderBottomStyle, st.BorderLeftStyle
+	// Top-left: diagonal outer (x,y) → inner (x+leftW, y+topW). Below = left color.
+	if topW > 0 && leftW > 0 && topStyle != "none" && leftStyle != "none" && !colorsEqual(btC, blC) {
+		fillBelow(x, y, leftW, topW, toGraphicsColor(blC))
+	}
+	// Top-right: diagonal outer (x+w,y) → inner (x+w-rightW, y+topW). Below = right color.
+	if topW > 0 && rightW > 0 && topStyle != "none" && rightStyle != "none" && !colorsEqual(btC, brC) {
+		fillBelowRev(x+w-rightW, y, rightW, topW, toGraphicsColor(brC))
+	}
+	// Bottom-left: diagonal outer (x,y+h) → inner (x+leftW, y+h-bottomW).
+	// Below (toward the left edge) = left color.
+	if bottomW > 0 && leftW > 0 && bottomStyle != "none" && leftStyle != "none" && !colorsEqual(bbC, blC) {
+		fillBelowRev(x, y+h-bottomW, leftW, bottomW, toGraphicsColor(blC))
+	}
+	// Bottom-right: diagonal outer (x+w,y+h) → inner (x+w-rightW, y+h-bottomW).
+	// Below (toward the right edge) = right color.
+	if bottomW > 0 && rightW > 0 && bottomStyle != "none" && rightStyle != "none" && !colorsEqual(bbC, brC) {
+		fillBelow(x+w-rightW, y+h-bottomW, rightW, bottomW, toGraphicsColor(brC))
 	}
 }
 

@@ -1,24 +1,47 @@
-feat: unified Arial base font + grid explicit placement fixes
+feat: pixel-level rendering comparison vs Edge + 6 paint BUG fixes
 
-1. Consistency suite: every case now pins font-family:'Arial' via
-   baseDoc (case-specific extraHead styles still win). wb-ui and Edge
-   measure Arial identically (A=B=10.67 @16px), so glyph-metric drift is
-   gone from geometry comparisons — all 13 reports now show zero diffs.
+New: dev/consistency pixel pipeline (pixels.go + pixels_test.go, 7 cases):
+Edge headless --screenshot vs wb-ui rendered canvas, per-pixel diff with
+per-channel tolerance. Strict cases (color blocks, hard shadow, gradients,
+inset) match at 0 px; anti-aliased edge cases (border-radius, corner
+bevels) allow a small diff-rate budget for the ~1px AA transition band.
 
-2. Grid auto-placement BUG: auto items used a naive cursor that ignored
-   occupied cells, overlapping explicitly placed or spanning items.
-   Rewrote placement with an occupancy matrix: explicit/spanning items
-   are marked first, auto items scan row-major for the first free cell
-   (matches Edge's sparse flow — probe: auto item falls to col1,row2
-   instead of colliding with the col1-2,row1 span).
+Engine BUGs found and fixed:
 
-3. Grid implicit expansion BUG: colEnd/rowEnd are LINE numbers, so
-   `grid-column:3` (end line 4 on a 3-track grid) wrongly created an
-   extra implicit column, shifting subsequent auto items. Expansion now
-   uses end-1 (track count), so an end line of nTracks+1 (far edge of
-   the explicit grid) creates no implicit track.
+1. style/resolver.go — `background` shorthand never extracted
+   linear-gradient into background-image → gradient backgrounds were
+   completely missing. Fixed in both shorthand paths (inline + var()).
 
-4. layout_grid case extended to 15 elements: explicit placement,
-   column/row spans, and span+auto mix verified against Edge (0 diffs).
+2. rendering/gradient.go — serialized values like "to  right" (double
+   space after token re-serialization) failed direction parsing → default
+   to-bottom rendered vertical gradients for to-right CSS. Re-trim after
+   stripping the "to " prefix.
 
-Consistency suite: 13/13 green, layout_grid 15/15 with zero diffs.
+3. rendering/gradient.go — parseColorStop position scan consumed the
+   separating space, so "#ff0000 0%" failed → multi-stop gradients with
+   explicit positions (0%/50%/100%) parsed as nil. Numeric walk now stops
+   at the space.
+
+4. rendering/shadow.go — spread token was only consumed when != 0, so
+   "5px 5px 0px 0px #aa0000" glued "0px" onto the color → parse failed →
+   default semi-transparent black shadow. Always consume the spread token.
+
+5. rendering/renderlayer.go + paint — every layer unconditionally clipped
+   to its own border-box even with overflow:visible, cropping box-shadow
+   outside the element. Clip now applies only when overflow != visible
+   (self or any ancestor), matching CSS semantics.
+
+6. rendering/painter.go — inset shadows painted before the background got
+   covered; now painted after the background (above it, below the border),
+   split via insetOnly flag on paintBoxShadow.
+
+7. rendering/painter.go — border corners: distinct per-side colors now
+   split each corner along the outer→inner diagonal (45° bevel) instead
+   of painting the top color across the whole corner. Mirrors Edge's
+   border corner joining within AA tolerance.
+
+Also: disabled debugPaintLog (was spamming stdout every paint), updated
+renderlayer_test to the new clip semantics.
+
+Verification: pixel suite 7/7 (4 cases at 0 px diff), GEO suite 13/13,
+go test ./... green.

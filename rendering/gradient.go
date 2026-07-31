@@ -70,7 +70,9 @@ func parseGradientDirection(s string) *GradientDirection {
 	if !strings.HasPrefix(s, "to ") {
 		return nil
 	}
-	s = strings.TrimPrefix(s, "to ")
+	// Serialized CSS values may contain extra whitespace (e.g. "to  right"
+	// after token re-serialization), so re-trim after removing the prefix.
+	s = strings.TrimSpace(strings.TrimPrefix(s, "to "))
 	switch s {
 	case "top":
 		return &GradientDirection{Angle: 0}
@@ -100,8 +102,12 @@ func parseColorStop(s string) *ColorStop {
 	pctPos := -1
 	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] == '%' {
+			// Walk back over the position's numeric part only (digits and
+			// decimal point). Must NOT consume the separating space, or
+			// "#ff0000 0%" would fail (the space would be skipped and j
+			// would land inside the color).
 			j := i - 1
-			for j >= 0 && (s[j] >= '0' && s[j] <= '9' || s[j] == '.' || s[j] == ' ') {
+			for j >= 0 && (s[j] >= '0' && s[j] <= '9' || s[j] == '.') {
 				j--
 			}
 			if j >= 0 && s[j] == ' ' {

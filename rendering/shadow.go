@@ -104,13 +104,10 @@ func parseSingleShadow(s string) *Shadow {
 		}
 	}
 
-	// Fourth token (if present) is spread-radius.
+	// Fourth token (if present) is spread-radius (may be 0 or negative).
 	if pos < len(tokens) {
-		if v := parseShadowLength(tokens[pos]); v != 0 {
-			// spread can be negative
-			sh.Spread = v
-			pos++
-		}
+		sh.Spread = parseShadowLength(tokens[pos])
+		pos++
 	}
 
 	// Remaining tokens are the color.
@@ -185,8 +182,11 @@ func parseShadowLength(s string) float64 {
 // shadow as a filled rounded-rect offset from the box, with the given blur
 // approximated by reducing opacity in proportion to blur radius. Inset shadows
 // are rendered by clipping to the box interior and filling an offset rect.
-func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Shadow, opacity float64) {
+func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Shadow, opacity float64, insetOnly bool) {
 	for _, sh := range shadows {
+		if sh.Inset != insetOnly {
+			continue
+		}
 		col := sh.Color
 		blurFactor := 1.0
 		if sh.Blur > 0 {

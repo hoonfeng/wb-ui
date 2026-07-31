@@ -396,9 +396,14 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background":
-		// Shorthand: extract the background-color. Splits on whitespace but
-		// keeps function values (rgb(...) etc.) intact.
+		// Shorthand: extract background-color and background-image
+		// (linear-gradient). Splits on whitespace but keeps function values
+		// (rgb(...), linear-gradient(...)) intact.
 		for _, p := range splitShorthandValue(valueString) {
+			if strings.HasPrefix(p, "linear-gradient(") {
+				cs.BackgroundImage = p
+				continue
+			}
 			if c, ok := parseColor(p); ok {
 				cs.BackgroundColor = c
 				break
@@ -1514,9 +1519,13 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			cs.Display = LookupDisplayType(resolvedStr)
 			cs.DisplaySet = true
 		case "background":
-			// Shorthand: try to extract background-color.
-			parts := strings.Fields(resolvedStr)
-			for _, p := range parts {
+			// Shorthand: extract background-color and background-image
+			// (linear-gradient).
+			for _, p := range splitShorthandValue(resolvedStr) {
+				if strings.HasPrefix(p, "linear-gradient(") {
+					cs.BackgroundImage = p
+					continue
+				}
 				if c, ok := parseColor(p); ok {
 					cs.BackgroundColor = c
 					break

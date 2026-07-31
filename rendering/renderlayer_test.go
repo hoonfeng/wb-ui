@@ -154,9 +154,23 @@ func TestCalculateRects(t *testing.T) {
 	if layerRect.X != 5 || layerRect.Y != 10 || layerRect.Width != 50 || layerRect.Height != 60 {
 		t.Fatalf("layerRect = %+v, want {5,10,50,60}", layerRect)
 	}
-	// With no overflow ancestor, clip rect equals layer rect.
-	if clipRect != layerRect {
-		t.Fatalf("clipRect = %+v, want equal to layerRect", clipRect)
+	// With no overflow ancestor, clip rect is empty: an overflow:visible
+	// layer must NOT clip its subtree (box-shadow, negative margins,
+	// absolutely positioned children can overflow the border box).
+	if clipRect.Width != 0 || clipRect.Height != 0 {
+		t.Fatalf("clipRect = %+v, want zero (overflow:visible → no clip)", clipRect)
+	}
+	// With overflow:hidden on the layer itself, clip equals the layer rect.
+	overflowStyle := style.NewComputedStyle()
+	overflowStyle.OverflowX = style.OverflowHidden
+	overflowStyle.OverflowY = style.OverflowHidden
+	box2 := NewRenderBox(doc.CreateElement("div"), overflowStyle)
+	box2.SetLocation(5, 10)
+	box2.SetSize(50, 60)
+	layer2 := NewRenderLayer(box2)
+	_, clipRect2 := layer2.CalculateRects()
+	if clipRect2 != layerRect {
+		t.Fatalf("clipRect(overflow:hidden) = %+v, want %+v", clipRect2, layerRect)
 	}
 }
 

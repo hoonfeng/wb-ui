@@ -156,7 +156,16 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 	} else {
 		layerRect = layout.LayoutRect{}
 	}
-	clipRect = layerRect
+	// A layer only clips its subtree when overflow is not visible. Start
+	// from zero (= no clip): with overflow:visible the layer's own
+	// border-box must NOT clip overflowing content (box-shadow, negative
+	// margins, absolutely positioned children...). Each ancestor that has
+	// overflow != visible narrows the clip to its padding-box.
+	clipRect = layout.LayoutRect{}
+	cs := l.owner.Style()
+	if cs != nil && (cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible) {
+		clipRect = layerRect
+	}
 	// Walk the ancestor layer chain intersecting with each ancestor's overflow clip.
 	for cur := l.parent; cur != nil; cur = cur.parent {
 		if cur.owner == nil {
@@ -174,7 +183,11 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 			continue
 		}
 		ancestorRect := cb.PaddingBoxRect()
-		clipRect = intersectRects(clipRect, ancestorRect)
+		if clipRect.Width == 0 && clipRect.Height == 0 {
+			clipRect = ancestorRect
+		} else {
+			clipRect = intersectRects(clipRect, ancestorRect)
+		}
 	}
 	return layerRect, clipRect
 }
