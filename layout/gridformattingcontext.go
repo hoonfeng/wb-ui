@@ -72,6 +72,33 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	nCols := len(colTracks)
 	nRows := len(rowTracks)
 
+	// Resolve grid-template-areas (named template): parse the area matrix and
+	// expand the implicit grid so every named cell fits.
+	var areas [][]string
+	if cs.GridTemplateAreas != "" {
+		areas = parseGridTemplateAreas(cs.GridTemplateAreas)
+		if len(areas) > 0 {
+			aRows, aCols := len(areas), 0
+			for _, row := range areas {
+				if len(row) > aCols {
+					aCols = len(row)
+				}
+			}
+			if aCols > nCols {
+				nCols = aCols
+			}
+			if aRows > nRows {
+				nRows = aRows
+			}
+			for len(colTracks) < nCols {
+				colTracks = append(colTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
+			}
+			for len(rowTracks) < nRows {
+				rowTracks = append(rowTracks, gridTrack{typ: gridTrackAuto, minVal: -1, maxVal: -1})
+			}
+		}
+	}
+
 	// Place items
 	var items []*gridItem
 	for _, child := range box.Children() {
@@ -79,13 +106,24 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if !ok || !child.IsInFlow() || !child.IsVisible() {
 			continue
 		}
-		items = append(items, &gridItem{
+		it := &gridItem{
 			box:      childEb,
 			colStart: gridParseLine(childEb.GridColumnStart()),
 			colEnd:   gridParseLine(childEb.GridColumnEnd()),
 			rowStart: gridParseLine(childEb.GridRowStart()),
 			rowEnd:   gridParseLine(childEb.GridRowEnd()),
-		})
+		}
+		// Named grid-area placement: grid-area: <name> → the cell span of the
+		// matching template area.
+		if name := childEb.GridArea(); name != "" && name != "auto" && len(areas) > 0 {
+			if cs2, rs2, ce2, re2 := gridAreaRect(areas, name); cs2 >= 0 {
+				it.colStart = cs2 + 1
+				it.rowStart = rs2 + 1
+				it.colEnd = ce2 + 1
+				it.rowEnd = re2 + 1
+			}
+		}
+		items = append(items, it)
 	}
 	if len(items) == 0 {
 		return
@@ -162,7 +200,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		occupied[r][cc] = true
 	}
 	for _, it := range items {
-		if it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2 {
+		if isAutoItem(it) {
 			continue // auto item, placed below
 		}
 		for r := it.rowStart; r < it.rowEnd; r++ {
@@ -172,7 +210,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 	for _, it := range items {
-		if it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2 {
+		if isAutoItem(it) {
 			placed := false
 			for r := 1; r <= nRows && !placed; r++ {
 				for cc := 1; cc <= nCols && !placed; cc++ {
@@ -557,14 +595,25 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 
 		var grow []int
 		for i := sp.start; i < sp.end; i++ {
-			if states[i].spec.typ != gridTrackFixed {
+			// fr tracks have a base size of 0 (CSS Grid §12.4): they are
+			// sized purely by flex distribution in step 3, never by content.
+			// Feeding content width into an fr track made the grid overflow
+			// its container (e.g. a 1fr main column stuck at its text width
+			// while the auto right panel already consumed the space).
+			if states[i].spec.typ != gridTrackFixed && states[i].spec.typ != gridTrackFlex {
 				grow = append(grow, i)
 			}
 		}
 		if len(grow) == 0 {
+			// Only auto tracks absorb intrinsic content growth; fr tracks
+			// remain at their flex base (0) even when no other track can
+			// grow, otherwise a 1fr column balloons to its text width and
+			// overflows the grid.
 			share := extra / float64(sp.count)
 			for i := sp.start; i < sp.end; i++ {
-				states[i].size += share
+				if states[i].spec.typ != gridTrackFlex {
+					states[i].size += share
+				}
 			}
 		} else {
 			share := extra / float64(len(grow))
@@ -737,6 +786,88 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// isAutoItem reports whether the item has no explicit/named placement.
+func isAutoItem(it *gridItem) bool {
+	return it.box.GridArea() == "" &&
+		it.colStart == 1 && it.rowStart == 1 && it.colEnd == 2 && it.rowEnd == 2
+}
+
+// parseGridTemplateAreas parses the grid-template-areas value into a matrix
+// of area names. Values look like: "title title" "actbar sidebar" — each
+// quoted string is one row; dots (.) mean empty cells.
+func parseGridTemplateAreas(s string) [][]string {
+	var rows [][]string
+	// Split by quoted strings first (each "..." is a row).
+	strs := extractQuotedStrings(s)
+	if len(strs) == 0 {
+		// Fallback: whitespace rows (unquoted form).
+		strs = strings.Fields(s)
+		if len(strs) == 0 {
+			return nil
+		}
+		rows = append(rows, strs)
+		return rows
+	}
+	for _, row := range strs {
+		fields := strings.Fields(row)
+		if len(fields) == 0 {
+			continue
+		}
+		rows = append(rows, fields)
+	}
+	return rows
+}
+
+// extractQuotedStrings pulls every "..." (or '...') chunk out of a CSS value.
+func extractQuotedStrings(s string) []string {
+	var out []string
+	for len(s) > 0 {
+		q := strings.IndexAny(s, "\"'")
+		if q < 0 {
+			break
+		}
+		quote := s[q]
+		rest := s[q+1:]
+		end := strings.IndexByte(rest, quote)
+		if end < 0 {
+			break
+		}
+		out = append(out, rest[:end])
+		s = rest[end+1:]
+	}
+	return out
+}
+
+// gridAreaRect finds the rectangular span of the named template area.
+// Returns (colStart, rowStart, colEnd, rowEnd) as 0-based cell indices
+// (end exclusive), or colStart=-1 when the name is not present.
+func gridAreaRect(areas [][]string, name string) (int, int, int, int) {
+	minR, minC := -1, -1
+	maxR, maxC := -1, -1
+	for r, row := range areas {
+		for c, cell := range row {
+			if cell == name {
+				if minR < 0 || r < minR {
+					minR = r
+				}
+				if minC < 0 || c < minC {
+					minC = c
+				}
+				if r > maxR {
+					maxR = r
+				}
+				if c > maxC {
+					maxC = c
+				}
+			}
+		}
+	}
+	if minR < 0 {
+		return -1, -1, -1, -1
+	}
+	return minC, minR, maxC + 1, maxR + 1
 }
 
 var _ = style.DisplayGrid

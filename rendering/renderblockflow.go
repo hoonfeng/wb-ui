@@ -65,18 +65,14 @@ func (b *RenderBlockFlow) Layout(state *layout.LayoutState) {
 		b.ClearNeedsLayout()
 		return
 	}
-	if b.layoutBox.Style() != nil && b.layoutBox.Style().Display == style.DisplayFlex {
-		ctx := &layout.FlexFormattingContext{}
-		ctx.InitBase(b.layoutBox, state)
-		ctx.Layout(b.layoutBox, state)
-		b.ClearNeedsLayout()
-		return
-	}
-	if b.childrenInline {
-		b.layoutInlineChildren(state)
-	} else {
-		b.layoutBlockChildren(state)
-	}
+	// Dispatch through the shared display-based formatter (grid / table /
+	// flex / block), mirroring RenderBox::layout(). The previous hand-rolled
+	// flex|inline|block branch silently treated grid and table containers as
+	// blocks — grid children stacked vertically at full width, producing
+	// completely broken real-page layouts (e.g. IDE app-root 3028px tall
+	// instead of 800px).
+	ctx := contextForBox(b.layoutBox)
+	ctx.Layout(b.layoutBox, state)
 	b.ClearNeedsLayout()
 }
 

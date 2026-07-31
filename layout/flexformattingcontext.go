@@ -132,7 +132,11 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		// If parent set a larger height (e.g. grid row), keep it.
 		// If parent set a SMALLER height, also keep it (don't overflow).
 		if box.Parent() != nil {
-			if blockSize > initialContentHeight {
+			// A parent-set height (grid row stretch / explicit height) pins
+			// the container; overflowing content must clip, not inflate it.
+			// Without this, a flex grid-item ballooned to its content height
+			// (e.g. right-panel 1068px) instead of staying in its 748px row.
+			if initialContentHeight <= 0 && blockSize > initialContentHeight {
 				g.SetContentHeight(blockSize)
 			}
 		} else {

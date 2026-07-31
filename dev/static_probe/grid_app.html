@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:1280px; height:800px; }
+body { background:#0d1117; color:#e6edf3; font-family:Arial, sans-serif; font-size:13px; }
+.app-root {
+  display: grid;
+  grid-template-columns: 48px 280px 1fr 200px;
+  grid-template-rows: 30px 1fr 22px;
+  grid-template-areas:
+    "title title title title"
+    "actbar sidebar main right"
+    "status status status status";
+  width:1280px; height:800px;
+}
+.titlebar { grid-area: title; background:#010409; display:flex; align-items:center; padding:0 8px; }
+.titlebar .logo { width:24px; height:24px; background:#f0883e; border-radius:4px; }
+.titlebar .tabs { display:flex; gap:8px; margin-left:12px; }
+.titlebar .tab { background:#1f6feb; color:#fff; padding:2px 8px; border-radius:3px; font-size:12px; }
+.activity-bar { grid-area: actbar; background:#161b22; display:flex; flex-direction:column; align-items:center; padding-top:8px; gap:6px; }
+.activity-bar .icon { width:28px; height:28px; background:#1f6feb; border-radius:6px; }
+.activity-bar .icon.gray { background:#6e7681; }
+.sidebar { grid-area: sidebar; background:#161b22; border-right:1px solid #21262d; display:flex; flex-direction:column; }
+.sidebar .s-header { height:32px; background:#161b22; display:flex; align-items:center; padding:0 12px; font-weight:bold; }
+.sidebar .s-item { padding:4px 12px; color:#9da5b1; }
+.sidebar .s-item.active { background:#1f6feb; color:#fff; }
+.main { grid-area: main; background:#0d1117; padding:16px; }
+.main .card { background:#161b22; border:1px solid #30363d; border-radius:6px; padding:16px; margin-bottom:12px; }
+.main .card h2 { font-size:16px; margin-bottom:8px; }
+.main .btn { display:inline-block; background:#238636; color:#fff; padding:6px 16px; border-radius:6px; }
+.right { grid-area: right; background:#161b22; border-left:1px solid #21262d; display:flex; flex-direction:column; }
+.right .r-header { height:40px; display:flex; align-items:center; padding:0 12px; border-bottom:1px solid #21262d; }
+.right .r-item { padding:6px 12px; color:#9da5b1; }
+.status-bar { grid-area: status; background:#010409; color:#8b949e; display:flex; align-items:center; padding:0 12px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="app-root">
+  <div class="titlebar">
+    <div class="logo"></div>
+    <div class="tabs"><span class="tab">main.go</span><span class="tab">config.json</span></div>
+  </div>
+  <div class="activity-bar">
+    <div class="icon"></div>
+    <div class="icon gray"></div>
+    <div class="icon"></div>
+  </div>
+  <div class="sidebar">
+    <div class="s-header">EXPLORER</div>
+    <div class="s-item active">Files</div>
+    <div class="s-item">Search</div>
+    <div class="s-item">Git</div>
+  </div>
+  <div class="main">
+    <div class="card"><h2>Welcome</h2>这是主编辑器区域</div>
+    <div class="card"><h2>Recent</h2><span class="btn">Open Folder</span></div>
+  </div>
+  <div class="right">
+    <div class="r-header">OUTLINE</div>
+    <div class="r-item">main()</div>
+    <div class="r-item">init()</div>
+  </div>
+  <div class="status-bar">Go 1.26  LF  UTF-8</div>
+</div>
+</body>
+</html>

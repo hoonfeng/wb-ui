@@ -1,48 +1,44 @@
-feat: position:sticky + backdrop-filter + SVG marker + file input
+fix: real-page rendering — grid-template-areas + fr/flex stretch + dispatch
 
-Gap-filling round — closes all four recorded gaps:
+User reported "rendering is very broken on real pages" despite GEO 13/13
+(geometry suite uses simple hand-tuned CSS; the real Vue IDE page exposed a
+chain of latent layout defects). Probe pipeline: dev/static_probe renders
+grid_app.html; gou-ide/dev/desktop_probe loads the actual desktop Vue SPA
+through WebView and dumps geometry/pixels.
 
-1. position: sticky (box.go + renderbox.go + renderpipeline.go +
-   sticky_test.go):
-   - Layout: IsRelativelyPositioned now includes sticky (WebKit semantics),
-     so sticky participates in normal flow and applies top/left offsets like
-     relative.
-   - Render: walkSubtreeExcluded wraps sticky boxes in a scroll-pinning
-     translate (computeStickyOffset): once the element's viewport position
-     scrolls past the top line, it is pinned back to top (document-level
-     scroll; nested scroll containers treated as relative — noted in the
-     comment).
-   - Verified: bar at static y=300 with top:10 pins to viewport y=10 after
-     scrolling 400px; unscrolled stays at 300.
+Four linked bugs fixed:
 
-2. backdrop-filter (renderpipeline.go + backdrop_test.go):
-   - New paintBackdrop: snapshots the current canvas, runs the CSS filter
-     chain (blur etc.) offscreen over the box region via a SaveLayer with a
-     filter-bearing paint, and blits the result back before the box's own
-     background paints (software approximation of WebKit backdrop blur).
-   - Verified: red square behind a backdrop-filter:blur(6px) box bleeds
-     beyond its sharp edge inside the box region.
+1. RenderBlockFlow.Layout dispatched only flex|inline|block by hand — grid
+   (and table) containers fell through to the block path, so every grid
+   child stacked vertically at full width. The IDE app-root rendered 3028px
+   tall (sum of children) instead of 800px; nothing but background painted.
+   Now dispatches through contextForBox (shared with RenderBox::layout).
 
-3. SVG <marker> (svg.go + svg_marker_test.go):
-   - svgDocument collects <marker> templates (defs + top-level); svgPath
-     reads marker-start/marker-end; paintSVGMarker draws the marker's child
-     shapes at the path vertex, translated by refX/refY and rotated to the
-     path direction when orient=auto.
-   - Verified: marker-end triangle renders at the end of a horizontal line.
+2. style/resolver.go case "grid-area" wrote the child's area name into the
+   CONTAINER's GridTemplateAreas (copy-paste bug), and GridFormattingContext
+   never consumed grid-template-areas at all. Fixed: grid-area stores into
+   Properties; GridFormattingContext parses the container's areas matrix
+   (parseGridTemplateAreas / gridAreaRect) and places named items into their
+   rectangular cell spans (gridItem.GridArea).
 
-4. file input rendering (renderformcontrol.go + fileinput_test.go):
-   - type=file now paints a native look: light-gray "选择文件" button on the
-     right plus the chosen file's basename (or placeholder) on the left,
-     truncated with ellipsis.
+3. fr track sizing: content-based track sizing fed intrinsic text width into
+   1fr tracks (base size 0 per CSS Grid §12.4) — a 1fr main column ballooned
+   to its text width while an auto right panel already consumed the space,
+   overflowing the container (titlebar/status-bar 1552px on a 1280 viewport).
+   fr tracks are now excluded from both grow branches; the grid stays within
+   its container (48+279+98+851+4 = 1280 exactly).
 
-Desktop integration verification:
-   - gou-ide cmd/desktop and cmd/render_test build clean with CGO.
-   - dev/consistency GEO: 13/13 green (18.4s) — rendering consistency
-     against Edge intact.
-   - cmd/render_test shows 34/69 due to its own baseline conventions
-     (transparent canvas vs black, premultiplied vs straight alpha) — not
-     engine defects; a minimal probe confirmed rgba background paints
-     correctly (premultiplied #80000080 = alpha 128 red).
+4. flex grid-item height: a flex container used as a grid item inflated to
+   its content height (right-panel 1068px) instead of staying pinned to the
+   grid row (748px). FlexFormattingContext now keeps a parent-set height
+   (grid stretch / explicit) and clips overflow instead of growing.
 
-Tests: sticky pin/no-scroll/relative, backdrop blur bleed, SVG marker,
-file input paint + type mapping. Full go test green.
+Verification:
+- grid_app.html renders pixel-correct: titlebar full-width, actbar 48px,
+  sidebar 280px, main 752px, right 200px, status full-width (image analysis).
+- desktop Vue SPA: titlebar/status-bar 1280px (was 1552), right-panel
+  748px tall at the right edge, chat/conv panels inside the viewport.
+- New regression tests: TestGridTemplateAreasPlacement (6-cell layout exact
+  match), TestGridFrShrink (1fr stays ≈532, no balloon), TestFlexGridItemStretchPinned
+  (stretch pins height), TestGridAutoFlowBasic.
+- Full go test green; GEO 13/13 (19s); cmd/desktop builds.

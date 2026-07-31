@@ -205,6 +205,10 @@ func (b *ElementBox) GridRowEnd() string {
 	if b.style == nil { return "" }
 	return b.style.GridRowEnd
 }
+func (b *ElementBox) GridArea() string {
+	if b.style == nil { return "" }
+	return b.style.GetProperty("grid-area")
+}
 
 func (b *ElementBox) AddChild(child Box) {
 	if child == nil { return }

@@ -807,7 +807,11 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "grid-area":
 		// Shorthand: grid-area: <name> | <row-start> / <col-start> / <row-end> / <col-end>
 		if parts := splitShorthand(valueString, "/"); len(parts) >= 1 {
-			cs.GridTemplateAreas = strings.TrimSpace(parts[0])
+			// A single bare word is a named grid area; store it in Properties
+			// so the grid formatter can place the element into the matching
+			// cell of the container's grid-template-areas. (Do NOT write it
+			// into GridTemplateAreas — that field belongs to the container.)
+			cs.SetProperty("grid-area", strings.TrimSpace(parts[0]))
 			if len(parts) >= 2 {
 				cs.GridRowStart = strings.TrimSpace(parts[1])
 			}
