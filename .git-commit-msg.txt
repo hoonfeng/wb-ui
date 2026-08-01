@@ -1,32 +1,24 @@
-fix: SVG polygon points/stroke/currentColor + circle dash
+fix: SVG currentColor timing — icons were completely invisible
 
-Continuing the desktop Vue-app probe (icon_cmp / svg_ring / send_svg /
-comp_check), five SVG drawing defects fixed:
+Regression introduced by the previous round: paintObjectForeground set
+doc.currentColor AFTER buildSVGDocument returned, but the walk inside
+build parses fill/stroke="currentColor" DURING the build — so every
+currentColor stroke resolved to the zero-value color (A=0 transparent)
+and ALL svg-icon paths were skipped (draw log: "path SKIPPED stroke:
+stroke.A=0"). The desktop app showed NO SVG icons at all.
 
-1. SVG path H/h and V/v commands were never parsed — paths with horizontal /
-   vertical lines (folder icon M22 19H4V5h5l2 3h9z) drew only stray arcs.
-   Added H/h/V/v cases (relative/absolute); the activity-bar folder icon now
-   draws its full outline (85 → 123 ink px, structure matches Edge).
+Fix: buildSVGDocument now takes the host element's CSS color as a
+variadic parameter and seeds doc.currentColor BEFORE the walk runs.
+paintObjectForeground passes box.Style().Color (default black when no
+style context, per the SVG spec).
 
-2. svgPolygon only filled triangles and never stroked — stroke-only icons
-   (send-btn paper plane: fill="none" stroke="currentColor") drew nothing.
-   Now strokes the outline (closed for polygon, open for polyline) with
-   dasharray support, and fills a full triangle fan for multi-point polygons.
+Verified with draw logs (WB_SVG_DEBUG=1): every icon now strokes with a
+valid currentColor (#e6edf3 / #6e7681 / #ffffff / #79c0ff …) and the
+activity-bar folder icon draws 219 ink px vs Edge's 218 (was 85 when
+broken, body missing). Send-btn paper plane strokes white, obtn icons
+colored per button. Activity-bar diff region 2093 -> 1560 px.
 
-3. parseSVGPoints split on whitespace then ParseFloat'd "0,0" whole — every
-   comma-separated polygon collapsed to a single (0,0) point. Now tokenizes
-   numeric literals (whitespace and/or commas).
+Also kept WB_SVG_DEBUG-gated draw logs in svgPath/svgPolygon/svgEllipse
+paint as a diagnostic tool for future rounds.
 
-4. fill/stroke="currentColor" resolved to the black fallback. svgDocument now
-   carries currentColor set from the host element's CSS color
-   (paintObjectForeground), so e.g. the white send icon renders white.
-
-5. circle/ellipse stroke-dasharray ignored — progress rings drew a full
-   circle. svgEllipse.paint samples the outline (96 segs) and draws dashes
-   with cumulative arc-length offset.
-
-Regression tests: TestSVGPathHVCmds (M/H/V/h/l/z), TestSVGPolygonStroke
-(3-point triangle stroke ink), plus existing suite.
-
-Full go test green; Edge pixel diff 2.9% -> 2.8% (send-btn region
-1302 -> 1223).
+Full go test green; GEO 13/13.

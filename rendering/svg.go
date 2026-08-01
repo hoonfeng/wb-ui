@@ -11,7 +11,9 @@
 package rendering
 
 import (
+	"log"
 	"math"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -266,6 +268,11 @@ func (s *svgCircle) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 type svgEllipse struct{ cx, cy, rx, ry float64 }
 func (s *svgEllipse) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	r := (s.rx + s.ry) / 2
+	if os.Getenv("WB_SVG_DEBUG") != "" {
+		log.Printf("[svg] ellipse/circle: c=(%.1f,%.1f) r=%.1f fill=#%02x%02x%02x stroke=#%02x%02x%02x w=%.1f dash=%d",
+			s.cx, s.cy, r, ctx.fill.R, ctx.fill.G, ctx.fill.B,
+			ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth, len(ctx.dashArray))
+	}
 	fill := ctx.fill
 	if fill.A > 0 {
 		canvas.FillCircle(s.cx, s.cy, r, fill)
@@ -308,6 +315,11 @@ type svgPolygon struct {
 }
 
 func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
+	if os.Getenv("WB_SVG_DEBUG") != "" {
+		log.Printf("[svg] polygon: pts=%d closed=%v fill=#%02x%02x%02x stroke=#%02x%02x%02x w=%.1f",
+			len(s.points), s.closed, ctx.fill.R, ctx.fill.G, ctx.fill.B,
+			ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth)
+	}
 	fill := ctx.fill
 	if fill.A > 0 && len(s.points) >= 3 {
 		// Triangle fan from points[0].
@@ -468,15 +480,23 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	// Triangle fan fill
 	if fill.A > 0 && len(pts) >= 3 {
+		if os.Getenv("WB_SVG_DEBUG") != "" {
+			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x", len(pts), fill.R, fill.G, fill.B)
+		}
 		for i := 1; i < len(pts)-1; i++ {
 			canvas.FillTriangle(pts[0].X, pts[0].Y, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, fill)
 		}
 	}
 	// Stroke as line segments
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(pts) >= 2 {
+		if os.Getenv("WB_SVG_DEBUG") != "" {
+			log.Printf("[svg] path stroke: pts=%d stroke=#%02x%02x%02x w=%.1f", len(pts), ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth)
+		}
 		for i := 0; i < len(pts)-1; i++ {
 			dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
 		}
+	} else if os.Getenv("WB_SVG_DEBUG") != "" && len(pts) >= 2 {
+		log.Printf("[svg] path SKIPPED stroke: stroke.A=%d strokeWidth=%.1f pts=%d", ctx.stroke.A, ctx.strokeWidth, len(pts))
 	}
 	// Markers: paint the referenced <marker> templates at the path start and
 	// end, rotated to the local path direction (orient=auto).
@@ -1318,11 +1338,19 @@ func parseClipPathElement(el *dom.Element) []svgShape {
 
 // --- Document builder ---
 
-func buildSVGDocument(el *dom.Element) *svgDocument {
+func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocument {
 	doc := &svgDocument{
 		width:       parseSVGCoord(el.GetAttribute("width")),
 		height:      parseSVGCoord(el.GetAttribute("height")),
 		elementByID: make(map[string]*dom.Element),
+		// currentColor default: black (SVG spec). The host element's CSS
+		// color is passed in when the caller has style context — it MUST be
+		// available BEFORE walk parses fill/stroke="currentColor", otherwise
+		// every currentColor stroke resolves to transparent (A=0).
+		currentColor: graphics.Color{R: 0, G: 0, B: 0, A: 0xFF},
+	}
+	if len(currentColors) > 0 {
+		doc.currentColor = currentColors[0]
 	}
 	if vb := el.GetAttribute("viewBox"); vb != "" {
 		doc.viewBox = parseViewBox(vb)

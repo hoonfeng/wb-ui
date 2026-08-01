@@ -18,6 +18,8 @@
 package rendering
 
 import (
+	"log"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -798,14 +800,23 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	}
 	// SVG elements: parse and paint shapes.
 	if el.LocalName() == "svg" {
-		doc := buildSVGDocument(el)
+		// fill/stroke="currentColor" resolves to the element's CSS color
+		// (e.g. white send-btn icon, muted icon color). Must be passed into
+		// buildSVGDocument BEFORE walk parses currentColor references.
+		var cc graphics.Color
+		if st := box.Style(); st != nil {
+			cc = toGraphicsColor(st.Color)
+		}
+		doc := buildSVGDocument(el, cc)
+		if os.Getenv("WB_SVG_DEBUG") != "" {
+			log.Printf("[svg] paintObjectForeground svg class=%q xy=(%.0f,%.0f) wh=(%.0f,%.0f) viewBox=%v shapes=%d currentColor=#%02x%02x%02x",
+				el.GetAttribute("class"), box.X(), box.Y(), box.Width(), box.Height(),
+				doc.viewBox, len(doc.shapes), cc.R, cc.G, cc.B)
+		}
 		if doc != nil && len(doc.shapes) > 0 {
-			// fill/stroke="currentColor" resolves to the element's CSS color
-			// (e.g. white send-btn icon, muted icon color).
-			if st := box.Style(); st != nil {
-				doc.currentColor = toGraphicsColor(st.Color)
-			}
 			paintSVG(info.canvas, doc, box.X(), box.Y(), graphics.Color{})
+		} else if os.Getenv("WB_SVG_DEBUG") != "" {
+			log.Printf("[svg] WARNING: no shapes parsed for svg class=%q", el.GetAttribute("class"))
 		}
 		return
 	}
