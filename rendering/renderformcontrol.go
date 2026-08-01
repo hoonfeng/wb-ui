@@ -287,7 +287,7 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			return
 		}
 		displayText = placeholder
-		textColor = applyOpacity(graphics.Color{R: 0xA0, G: 0xA0, B: 0xA0, A: 0xFF}, op)
+		textColor = applyOpacity(graphics.Color{R: 0x80, G: 0x80, B: 0x80, A: 0xFF}, op)
 		showPlaceholder = true
 	}
 
@@ -804,7 +804,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 			return
 		}
 		displayText = placeholder
-		textColor = applyOpacity(graphics.Color{R: 0xA0, G: 0xA0, B: 0xA0, A: 0xFF}, op)
+		textColor = applyOpacity(graphics.Color{R: 0x80, G: 0x80, B: 0x80, A: 0xFF}, op)
 	}
 
 	font := toGraphicsFont(st)

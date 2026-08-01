@@ -5,11 +5,14 @@ package layout
 
 import (
 	"math"
+	"os"
 	"sort"
 	"strconv"
 
 	"wb-ui/style"
 )
+
+var wbFlexDebug = os.Getenv("WB_FLEX_DEBUG") != ""
 
 type FlexFormattingContext struct {
 	FormattingContextBase
@@ -332,6 +335,19 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 					h = hv
 				} else {
 					h = intrinsicContentHeight(c)
+				}
+			}
+			// Replaced / SVG elements (svg height="N" attribute, img, canvas)
+			// size from their attribute dimensions, NOT their (empty) children
+			// — otherwise a 14px svg icon falls back to fontLineGap (~16px) and
+			// inflates column-flex items and blocks containing icons.
+			if el := c.Element(); el != nil {
+				if h <= 0 || el.LocalName() == "svg" || el.LocalName() == "img" {
+					if ht := el.GetAttribute("height"); ht != "" {
+						if f, err := strconv.ParseFloat(ht, 64); err == nil && f > 0 {
+							h = f
+						}
+					}
 				}
 			}
 			if h <= 0 { h = fontLineGap(c) }
