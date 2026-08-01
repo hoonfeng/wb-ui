@@ -1,29 +1,13 @@
-fix: SVG smooth bezier (S/s T/t) + flex absolute children
+fix: flex intrinsic width for svg/img replaced elements
 
-Desktop probe (token_geo / absflex_dump) located three real defects from
-the user report (审核开关 icon + token 统计 + component positioning):
+Flex items containing a 12px svg icon (width attribute, no CSS width)
+measured 0 from their empty children — .obtn buttons sized ~3px under
+content (38px vs Edge 53px), content overflowed into neighbors, and the
+space-between send-btn was shoved 16px right past the input border.
 
-1. SVG path S/s (smooth cubic) and T/t (smooth quadratic) commands were
-   never parsed — the shield icon (approval/review toggle) is
-   "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z": with 's' skipped the
-   path collapsed to a broken outline. Added S/s and T/t with control-
-   point reflection of the previous bezier (per SVG spec). Draw log now
-   shows the shield with 37 sampled points (green #5bbc7a).
+intrinsicContentWidth now reads the width attribute for svg/img elements.
+Verified vs Edge on the real companion frontend: obtn gap 2px restored,
+send-btn at x=965 (was 981, overflowing by 3px), shield green-ink 6 vs
+Edge 7, diff send-btn region 1291->348.
 
-2. FlexFormattingContext silently dropped absolutely-positioned children
-   (resolveItem only kept in-flow boxes) — .cache-ring-label (absolute,
-   inside the flex .cache-ring-wrap) stayed 0x0 at (0,0). Flex now
-   collects deferredAbsolutes and lays them out after items, mirroring
-   BlockFormattingContext.
-
-3. Static position of an absolute child of a flex container followed the
-   containing-block top-left (CSS-FLEXBOX §5.1 says it follows flex
-   alignment). layoutAbsolute now applies align-items (cross axis) and
-   justify-content (main axis) when the containing block is flex and no
-   offset is specified — the token ring label centers in the ring.
-
-Token stats panel (Token 统计) now renders: 0% cache label centered in
-the ring (96x36 at ring center), cs-rows with 输入/缓存/输出/总 Token
-values. GEO 13/13 green; full go test green.
-
-Regression tests: TestSVGPathSmoothBezier, TestFlexAbsoluteChild.
+Tests: TestFlexGapBetweenItems, TestFlexObtnEstimates. GEO 13/13.

@@ -6,6 +6,7 @@ package layout
 import (
 	"math"
 	"sort"
+	"strconv"
 
 	"wb-ui/style"
 )
@@ -257,6 +258,19 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
+			// Replaced / SVG elements (svg with width="N" attribute, img,
+			// canvas, iframe) size from their attribute/intrinsic dimensions,
+			// NOT their (usually empty) children — otherwise a 12px svg icon
+			// contributes 0 and flex items with icons shrink below content.
+			if el := c.Element(); el != nil {
+				if cw <= 0 || el.LocalName() == "svg" || el.LocalName() == "img" {
+					if w := el.GetAttribute("width"); w != "" {
+						if f, err := strconv.ParseFloat(w, 64); err == nil && f > 0 {
+							cw = f
+						}
+					}
+				}
+			}
 			if isFlexRow { total += cw }
 			if cw > maxW { maxW = cw }
 		}
@@ -671,7 +685,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				}
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
-		bw := g.BorderBoxWidth()
+			bw := g.BorderBoxWidth()
 			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
 
 			ctx := contextFor(it.box, state)
