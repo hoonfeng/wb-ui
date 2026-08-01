@@ -34,6 +34,7 @@ type flexItem struct {
 	finalMainSize   float64
 	marginMain      float64
 	marginCross     float64
+	paddingMain     float64 // main-axis padding+border (border-box items)
 	order           int
 	baselineOffset  float64
 }
@@ -81,7 +82,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	mainSize := cw
-	if !isRow { mainSize = ch }
+	if !isRow {
+		mainSize = ch
+	}
 
 	for _, it := range items {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
@@ -205,11 +208,26 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
 	minH, maxH, _, _ := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fs)
 
+	// Main-axis padding+border for border-box items. When flex-basis is 0%
+	// (flex:1), the resolved content size grown by free space must leave room
+	// for this padding — otherwise a border-box item ends up
+	// content+padding larger than the slot (project-section 605px in a 601px
+	// slot, overflowing the sidebar and triggering a wrong scrollbar).
+	paddingMain := 0.0
+	if isBorderBox(box) {
+		_, pb, bd := computeBoxModel(box, cbWidth, fs)
+		if isRow {
+			paddingMain = pb.Left + pb.Right + bd.Left + bd.Right
+		} else {
+			paddingMain = pb.Top + pb.Bottom + bd.Top + bd.Bottom
+		}
+	}
+
 	return &flexItem{
 		box: box, flexGrow: flexGrow, flexShrink: flexShrink,
 		flexBasis: flexBasis, minWidth: minW, maxWidth: maxW,
 		minHeight: minH, maxHeight: maxH,
-		marginMain: mm, marginCross: mc, order: cs.Order,
+		marginMain: mm, marginCross: mc, paddingMain: paddingMain, order: cs.Order,
 	}
 }
 
@@ -447,14 +465,14 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 		it.frozen = it.flexGrow <= 0 && it.flexShrink <= 0
 	}
 
-	for {
-		anyUnfrozen := false
-		activeGrow, activeShrink := 0.0, 0.0
-		totalUsed := 0.0
-		for _, it := range items {
-			totalUsed += it.targetSize + it.marginMain
-			if it.frozen {
-				continue
+		for {
+			anyUnfrozen := false
+			activeGrow, activeShrink := 0.0, 0.0
+			totalUsed := 0.0
+			for _, it := range items {
+				totalUsed += it.targetSize + it.marginMain
+				if it.frozen {
+					continue
 			}
 			anyUnfrozen = true
 			activeGrow += it.flexGrow
@@ -466,11 +484,25 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 
 		freeSpace := containerMainSize - totalUsed - gapTotal
 		if freeSpace > 0 && activeGrow > 0 {
+			// Free space distributes to content, but a border-box item's slot
+			// also contains its main-axis padding — deduct that so the grown
+			// border-box exactly fills the slot instead of overflowing it.
+			padSum := 0.0
 			for _, it := range items {
 				if it.frozen || it.flexGrow <= 0 {
 					continue
 				}
-				it.targetSize += freeSpace * it.flexGrow / activeGrow
+				padSum += it.paddingMain
+			}
+			usable := freeSpace - padSum
+			if usable < 0 {
+				usable = 0
+			}
+			for _, it := range items {
+				if it.frozen || it.flexGrow <= 0 {
+					continue
+				}
+				it.targetSize += usable * it.flexGrow / activeGrow
 			}
 		} else if freeSpace < 0 && activeShrink > 0 && containerMainSize > 0 {
 			// Auto-sized containers (mainSize 0, e.g. an absolutely-positioned
@@ -606,18 +638,28 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 	if isRow {
 		if totalMain < cw && justify != "flex-start" {
-			freeGap := cw - totalMain
 			switch justify {
-			case "center":
-				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
-			case "flex-end":
-				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+			case "center", "flex-end":
+				// Deduct the explicit inter-item gaps so center/flex-end align
+				// the group (items + gaps) as one block — otherwise center
+				// shifts by half the gap sum too far (welcome content sat 8px
+				// low in a 3-item column with 2×8px gaps).
+				freeGap := cw - totalMain - gap*float64(len(items)-1)
+				if freeGap < 0 {
+					freeGap = 0
+				}
+				if justify == "center" {
+					if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
+				} else {
+					if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+				}
 			case "space-between", "space-around":
 				itemCount := len(items)
 				if itemCount > 1 {
 					// freeGap is the leftover after items AND the explicit gap
 					// spacings; the justify gaps are distributed over the
 					// remaining free space only (CSS Flexbox §8.2).
+					freeGap := cw - totalMain
 					gapSum := gap * float64(itemCount-1)
 					if justify == "space-around" { gapSum = gap * float64(itemCount) }
 					freeSpace := freeGap - gapSum
@@ -631,15 +673,21 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		}
 	} else {
 		if totalMain < ch && justify != "flex-start" {
-			freeGap := ch - totalMain
 			switch justify {
-			case "center":
-				if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
-			case "flex-end":
-				if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+			case "center", "flex-end":
+				freeGap := ch - totalMain - gap*float64(len(items)-1)
+				if freeGap < 0 {
+					freeGap = 0
+				}
+				if justify == "center" {
+					if isReverse { mainPos -= freeGap / 2 } else { mainPos += freeGap / 2 }
+				} else {
+					if isReverse { mainPos -= freeGap } else { mainPos += freeGap }
+				}
 			case "space-between", "space-around":
 				itemCount := len(items)
 				if itemCount > 1 {
+					freeGap := ch - totalMain
 					gapSum := gap * float64(itemCount-1)
 					if justify == "space-around" { gapSum = gap * float64(itemCount) }
 					freeSpace := freeGap - gapSum

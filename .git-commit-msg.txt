@@ -1,28 +1,22 @@
-fix: hit-test zero-area swallow + text-align center reference
+fix: flex gap in justify space + border-box grow padding
 
-Fixes the blue "创建 / 新建终端" buttons: clicks did nothing, the
-labels were tiny and off-center.
+Two flex layout bugs found with desktop_probe on the real Vue IDE:
 
-1. Hit-test swallowed ALL clicks (ws-create-btn / term-create-btn /
-   term-tab new-tab all resolved to the empty position:fixed
-   .toast-container). A 0x0 box was accepted as the first candidate
-   (best==nil, area 0), and since every later element's area > 0 could
-   never beat 0, the empty container permanently won and blocked the
-   whole viewport. Zero-area boxes are now skipped as hit candidates;
-   buttons hit-test correctly.
+1. The file-explorer column overflowed its sidebar by 4px, so
+   sidebar-content (overflow:auto) grew a scrollbar that covered the whole
+   sidebar height instead of the file tree. flex:1 items with
+   box-sizing:border-box had their padding excluded from the flex base
+   size, so the grown content size + padding overshot the slot by exactly
+   the padding (project-section 605px in a 601px slot → sidebar content
+   720 > 716). distributeFreeSpace now deducts the grow items' main-axis
+   padding from the distributable free space, so border-box items exactly
+   fill their slot; sidebar no longer scrolls and the spurious scrollbar
+   is gone.
 
-2. text-align:center used containerWidth captured AFTER the auto-width
-   expansion (+20px) as its centering reference, so centered text inside
-   a flex-item span/button sat ~10px right of the box center ("创建" was
-   off-center inside the blue button). containerWidth is now captured
-   before the expansion; span "暂无工作区" X 159.9→149.9, button "创建"
-   X 214.6→204.6 (exact padding-10 offset), both centered.
+2. justify-content:center/flex-end on a flex column shifted items too far
+   by half the inter-item gap sum: freeGap = mainSize − Σitems ignored the
+   explicit gap, so welcome (3 items, 2×8px gaps) sat 8px low in the
+   editor. center/flex-end now compute freeGap minus gap×(n−1), aligning
+   items+gaps as one group (welcome-logo y 261.9 → 253.9, exact center).
 
-3. desktop_probe never initialized the FontManager, so CJK measured via
-   a bare Arial fallback (创建=15.5px → 35.5px button) while painting
-   used Skia's system fallback — inconsistent widths made the button
-   small and text cramped. main.go now mirrors host.go: InitFontManager
-   + LoadSystemFonts + MeasureTextFunc/FontMetricsFunc; the button grows
-   to 44px matching Edge.
-
-GEO 13/13, layout/rendering/page/graphics/style/webkit tests green.
+GEO 13/13, layout/rendering/page/webkit/graphics/style tests green.
