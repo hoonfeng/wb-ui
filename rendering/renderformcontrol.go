@@ -415,13 +415,96 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	if padX <= 0 {
 		padX = 4
 	}
+	padY := lengthValue(st.PaddingTop)
+	if padY <= 0 {
+		padY = 4
+	}
+	// Line height honoring CSS line-height so multi-line carets land on the
+	// painted row (a textarea with line-height:1.5 draws 19.5px rows).
+	lineH := cssControlLineHeight(st, font.Size)
+	if lineH <= 0 {
+		lineH = textHeight
+	}
+	if lineH <= 0 {
+		lineH = font.Size * 1.2
+	}
+
 	caretX := x + padX + textWidth
 	caretY := y + (h-textHeight)/2
+
+	// Multi-line (textarea): position the caret at the row/column of the
+	// current selection Start instead of the box's vertical center.
+	if el.LocalName() == "textarea" {
+		value := el.TextContent()
+		runes := []rune(value)
+		pos := 0
+		if FocusedFormControlSel != nil {
+			pos = FocusedFormControlSel.Start
+			if FocusedFormControlSel.End > pos {
+				pos = FocusedFormControlSel.End
+			}
+		}
+		if pos < 0 {
+			pos = 0
+		}
+		if pos > len(runes) {
+			pos = len(runes)
+		}
+		lineIdx := 0
+		col := 0
+		for i := 0; i < pos && i < len(runes); i++ {
+			if runes[i] == '\n' {
+				lineIdx++
+				col = 0
+			} else {
+				col++
+			}
+		}
+		// Column offset in the clicked line.
+		lineStart := pos - col
+		lineEnd := lineStart
+		for lineEnd < len(runes) && runes[lineEnd] != '\n' {
+			lineEnd++
+		}
+		lineText := string(runes[lineStart:lineEnd])
+		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
+		_ = lineText
+		caretX = x + padX + colW
+		caretY = y + padY + float64(lineIdx)*lineH
+		if caretY < y {
+			caretY = y
+		}
+	}
+
 	caretCol := applyOpacity(toGraphicsColor(st.Color), op)
 	if caretCol.A == 0 {
 		caretCol = graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}
 	}
-	c.FillRect(caretX, caretY, 1, textHeight, caretCol)
+	c.FillRect(caretX, caretY, 1, lineH, caretCol)
+}
+
+// cssControlLineHeight resolves the CSS line-height (multiplier, px, %) into
+// pixels for a given font size, returning 0 when not set.
+func cssControlLineHeight(st *style.ComputedStyle, fontSize float64) float64 {
+	if st == nil {
+		return 0
+	}
+	lh := st.LineHeight
+	switch lh.Unit {
+	case "px":
+		if lh.Value > 0 {
+			return lh.Value
+		}
+	case "%":
+		if lh.Value > 0 {
+			return lh.Value / 100 * fontSize
+		}
+	case "":
+		if lh.Value > 0 {
+			return lh.Value * fontSize
+		}
+	}
+	return 0
 }
 
 // paintCheckbox draws a classic checkbox: a square border with a checkmark when checked.
@@ -812,7 +895,12 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	if ascent <= 0 {
 		ascent = font.Size * 0.8
 	}
-	lineH := ascent + graphics.GlobalFontDescent(font)
+	// Line height honoring CSS line-height so painted rows and caret rows
+	// match (a textarea with line-height:1.5 at 13px draws 19.5px rows).
+	lineH := cssControlLineHeight(st, font.Size)
+	if lineH <= 0 {
+		lineH = ascent + graphics.GlobalFontDescent(font)
+	}
 	if lineH <= 0 {
 		lineH = font.Size * 1.2
 	}
@@ -829,6 +917,21 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	textX := x + padX
 	textY := y + padY + ascent
 
+	// Selection range (in runes) when this textarea is the focused control.
+	selStart, selEnd := -1, -1
+	hasSel := false
+	if FocusedFormControlSel != nil && el == FocusedFormControl {
+		s0, s1 := FocusedFormControlSel.Start, FocusedFormControlSel.End
+		if s0 > s1 {
+			s0, s1 = s1, s0
+		}
+		if s0 != s1 {
+			selStart, selEnd = s0, s1
+			hasSel = true
+		}
+	}
+	selColor := graphics.Color{R: 50, G: 100, B: 200, A: 150}
+
 	// Clip to content area
 	info.canvas.Save()
 	info.canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
@@ -836,12 +939,31 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	// Draw line by line
 	lines := strings.Split(displayText, "\n")
 	contentW := w - padX*2
+	globalOff := 0 // rune offset of the current line's first char in displayText
 	for i, line := range lines {
 		lineY := textY + float64(i)*lineH
 		if lineY > y+h {
 			break
 		}
-		if line != "" {
+		lineRunes := []rune(line)
+		lineLen := len(lineRunes)
+		// Compute the selection intersection for this line (globalOff..globalOff+lineLen).
+		selLineStart := -1
+		selLineEnd := -1
+		if hasSel {
+			ls := selStart - globalOff
+			le := selEnd - globalOff
+			if ls < 0 {
+				ls = 0
+			}
+			if le > lineLen {
+				le = lineLen
+			}
+			if ls < lineLen && le > 0 && ls < le {
+				selLineStart, selLineEnd = ls, le
+			}
+		}
+		if line != "" || selLineStart >= 0 {
 			// Truncate if too wide
 			lineW := graphics.MeasureText(font, line)
 			if lineW > contentW {
@@ -857,12 +979,39 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 				if len(runes) == 0 {
 					line = "…"
 				}
+				lineRunes = []rune(line)
+				lineLen = len(lineRunes)
 			}
-			c.DrawText(textX, lineY, line, font, textColor)
+
+			if selLineStart >= 0 && selLineEnd <= lineLen {
+				// Split the line into pre/selected/post and draw the
+				// selection highlight like the single-line input.
+				pre := string(lineRunes[:selLineStart])
+				selText := string(lineRunes[selLineStart:selLineEnd])
+				post := string(lineRunes[selLineEnd:])
+				preW := graphics.MeasureText(font, pre)
+				selW := graphics.MeasureText(font, selText)
+				if preW+selW <= contentW {
+					c.FillRect(textX+preW, lineY-ascent, selW, lineH, selColor)
+				}
+				if pre != "" {
+					c.DrawText(textX, lineY, pre, font, textColor)
+				}
+				if selText != "" {
+					c.DrawText(textX+preW, lineY, selText, font,
+						graphics.Color{R: 255, G: 255, B: 255, A: 255})
+				}
+				if post != "" {
+					c.DrawText(textX+preW+selW, lineY, post, font, textColor)
+				}
+			} else if line != "" {
+				c.DrawText(textX, lineY, line, font, textColor)
+			}
 		}
+		globalOff += lineLen + 1 // +1 for the '\n' separator
 	}
 
-	// Draw caret at end of text in textarea
+	// Draw caret at end of text in textarea (multi-line aware positioning).
 	if value == "" {
 		paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
 	} else {

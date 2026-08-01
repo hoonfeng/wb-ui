@@ -358,7 +358,30 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 	if descent < 0 {
 		descent = 0
 	}
-	lineH := ascent + descent
+	// Line height: honor the CSS line-height (multiplier, px, or %) so the
+	// caret line index matches the painted text. A textarea with
+	// line-height:1.5 at 13px draws 19.5px rows; using font metrics alone
+	// (~16px) put clicks on line 2+ at the wrong row.
+	lineH := 0.0
+	if st != nil {
+		switch st.LineHeight.Unit {
+		case "px":
+			if st.LineHeight.Value > 0 {
+				lineH = st.LineHeight.Value
+			}
+		case "%":
+			if st.LineHeight.Value > 0 {
+				lineH = st.LineHeight.Value / 100 * fontSize
+			}
+		case "":
+			if st.LineHeight.Value > 0 {
+				lineH = st.LineHeight.Value * fontSize
+			}
+		}
+	}
+	if lineH <= 0 {
+		lineH = ascent + descent
+	}
 	if lineH <= 0 {
 		lineH = fontSize * 1.2
 	}
@@ -692,6 +715,31 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// Update RenderView cursor for scrollbar hover highlight.
 			if rv != nil {
 				rv.SetCursorPos(cssX, cssY)
+			}
+
+			// ── Drag-to-select inside a focused text form control ──
+			// While the mouse button is held (selecting) and the drag
+			// threshold is met, extend the selection End to the cursor.
+			if h.selecting && !h.scrollbarDragging && h.imeFocusedEl != nil &&
+				isTextFormControl(h.imeFocusedEl) && rendering.FocusedFormControlSel != nil {
+				if !h.hysteresisMet {
+					dx := cssX - h.mouseDownX
+					dy := cssY - h.mouseDownY
+					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+						// Not yet dragging.
+					} else {
+						h.hysteresisMet = true
+					}
+				}
+				if h.hysteresisMet {
+					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+					rendering.FocusedFormControlSel.End = offset
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
 			}
 
 			// ── Hover tracking (normal cursor move, outside scrollbar drag) ──
@@ -1045,8 +1093,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// character offset and set the form-control selection.
 					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
 						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
+						// Start a mouse-drag selection from this press: the
+						// anchor stays at the press point; subsequent mouse
+						// moves extend the End. Previously selecting was never
+						// set true, so drag-to-select did nothing.
+						h.selecting = true
+						h.shiftSelecting = false
+						h.mouseDownX = cssX
+						h.mouseDownY = cssY
+						h.hysteresisMet = false
 						if (ev.Mods&int(glfw.ModShift)) != 0 && rendering.FocusedFormControlSel != nil {
 							// Shift+Click extends form-control selection.
+							h.selecting = false
 							rendering.FocusedFormControlSel.End = offset
 							rendering.FocusedFormControlSel.Active = true
 						} else {
@@ -1058,7 +1116,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 					} else if h.imeFocusedEl != nil {
 						// Click outside a text control clears the form-control selection.
+						h.selecting = false
 						rendering.FocusedFormControlSel = nil
+					} else {
+						h.selecting = false
 					}
 				}
 			} else if ev.Action == int(glfw.Release) {
@@ -1095,13 +1156,20 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 					// Hysteresis: only start dragging after moving > 3px from
-					// mouseDown.
+					// mouseDown. A plain click (no movement) ends the drag
+					// selection immediately — it becomes a caret placement.
 					if !h.hysteresisMet {
 						dx := cssX - h.mouseDownX
 						dy := cssY - h.mouseDownY
 						if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
-							continue // not yet dragging
+							h.selecting = false
+							h.hysteresisMet = false
+							if rendering.FocusedFormControlSel != nil {
+								rendering.FocusedFormControlSel.Active = false
+							}
+							continue // not yet dragging; treat as a click
 						}
+						h.hysteresisMet = true
 					}
 					// Update the cursor-move selection end point.
 					// The anchor (sel start) stays at the mouse-down point.
@@ -1111,52 +1179,71 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
 						rendering.FocusedFormControlSel.End = offset
 					}
+					// End the drag selection.
+					h.selecting = false
+					h.hysteresisMet = false
+					rendering.FocusedFormControlSel.Active = false
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
 				}
 			}
 		case window.EventChar:
 			log.Printf("[dbg/char] EventChar char=%q imeFocused=%v isText=%v", string(ev.Char), h.imeFocusedEl != nil, h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl))
 			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
 				char := string(ev.Char)
-				// Get current value and insert character at cursor position
+				// Get current value and insert character at cursor position,
+				// replacing any active selection (like a browser).
 				val := focusedElementValue(h.imeFocusedEl)
 				runes := []rune(val)
 				sel := rendering.FocusedFormControlSel
-				pos := 0
+				start, end := 0, 0
 				if sel != nil && sel.Active {
-					pos = sel.Start
+					start, end = sel.Start, sel.End
+				}
+				if start > end {
+					start, end = end, start
 				}
 				if runes == nil {
 					runes = []rune{}
 				}
-				if pos < 0 {
-					pos = 0
+				if start < 0 {
+					start = 0
 				}
-				if pos > len(runes) {
-					pos = len(runes)
+				if end < 0 {
+					end = 0
+				}
+				if start > len(runes) {
+					start = len(runes)
+				}
+				if end > len(runes) {
+					end = len(runes)
 				}
 				newRunes := make([]rune, 0, len(runes)+1)
-				newRunes = append(newRunes, runes[:pos]...)
+				newRunes = append(newRunes, runes[:start]...)
 				newRunes = append(newRunes, []rune(char)...)
-				newRunes = append(newRunes, runes[pos:]...)
+				newRunes = append(newRunes, runes[end:]...)
 				newVal := string(newRunes)
 				setFocusedElementValue(h.imeFocusedEl, newVal)
-				// Update cursor position
-				newPos := pos + len([]rune(char))
+				// Cursor lands right after the inserted character.
+				newPos := start + len([]rune(char))
 				if sel == nil {
 					rendering.FocusedFormControlSel = &rendering.FormControlSelection{
 						Start: newPos, End: newPos, Active: true,
 					}
 				} else {
-				sel.Start = newPos
-				sel.End = newPos
-			}
-			if mf := h.wv.MainFrame(); mf != nil {
-				if fr := mf.Frame(); fr != nil {
-					fr.MarkRenderTreeDirty()
+					sel.Start = newPos
+					sel.End = newPos
 				}
-			}
-			h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-			h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+				if mf := h.wv.MainFrame(); mf != nil {
+					if fr := mf.Frame(); fr != nil {
+						fr.MarkRenderTreeDirty()
+					}
+				}
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 			}
 
 		case window.EventKey:
