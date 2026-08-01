@@ -83,7 +83,11 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 	// Check if this object's DOM node is an element with the attribute.
 	// Only box-bearing objects (ok=true) are considered as hit targets;
 	// non-box objects (RenderInline, RenderText) just pass through to their children.
-	if ok {
+	// Zero-area boxes (0x0, e.g. an empty position:fixed toast-container) must
+	// NOT become hit candidates: once one is picked (best==nil, area 0) every
+	// later element loses because its area > 0 can never beat 0, so the empty
+	// container swallows ALL clicks across the viewport.
+	if ok && ow > 0 && oh > 0 {
 		if attrName != "" {
 			node := o.Node()
 			if el, isEl := node.(*dom.Element); isEl {

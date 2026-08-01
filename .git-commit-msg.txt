@@ -1,26 +1,28 @@
-fix: activity bar width, ring label height, flex gap in free space
+fix: hit-test zero-area swallow + text-align center reference
 
-Three flex layout fixes found with the desktop_probe geometry probes:
+Fixes the blue "创建 / 新建终端" buttons: clicks did nothing, the
+labels were tiny and off-center.
 
-1. Activity bar buttons were 40px wide but the intrinsic-content width of
-   the .activity-top flex column measured only the icon (18px) + padding,
-   ignoring the button's explicit width:40. The 40px button then overflowed
-   the 20px column and shifted every icon 12px right (svg x=27 instead of
-   15). intrinsicContentWidth now honors an explicit CSS width before
-   measuring content.
+1. Hit-test swallowed ALL clicks (ws-create-btn / term-create-btn /
+   term-tab new-tab all resolved to the empty position:fixed
+   .toast-container). A 0x0 box was accepted as the first candidate
+   (best==nil, area 0), and since every later element's area > 0 could
+   never beat 0, the empty container permanently won and blocked the
+   whole viewport. Zero-area boxes are now skipped as hit candidates;
+   buttons hit-test correctly.
 
-2. cache-ring-label (absolutely-positioned flex column, the "0% / 缓存命中"
-   ring center) had height 0 — its two spans stacked on top of each other.
-   distributeFreeSpace shrank every item because freeSpace = 0 − Σbase is
-   always negative for an auto-sized container (mainSize 0). Shrink is now
-   skipped when containerMainSize <= 0, so the label grows to its content
-   (37.2px) and the percentage sits above the caption.
+2. text-align:center used containerWidth captured AFTER the auto-width
+   expansion (+20px) as its centering reference, so centered text inside
+   a flex-item span/button sat ~10px right of the box center ("创建" was
+   off-center inside the blue button). containerWidth is now captured
+   before the expansion; span "暂无工作区" X 159.9→149.9, button "创建"
+   X 214.6→204.6 (exact padding-10 offset), both centered.
 
-3. Right-panel text was flush against the panel edge: conv-stats-detail
-   (flex:1) grew to 137px in a 129px slot because the flex free space never
-   subtracted the inter-item gap (CSS-FLEXBOX §9.7: free space = container
-   − Σbases − gaps). distributeFreeSpace now subtracts gap×(n−1); detail
-   right edge moves 1280 → 1272, restoring the 8px right padding and the
-   cs-val "总 Token" text margin.
+3. desktop_probe never initialized the FontManager, so CJK measured via
+   a bare Arial fallback (创建=15.5px → 35.5px button) while painting
+   used Skia's system fallback — inconsistent widths made the button
+   small and text cramped. main.go now mirrors host.go: InitFontManager
+   + LoadSystemFonts + MeasureTextFunc/FontMetricsFunc; the button grows
+   to 44px matching Edge.
 
-GEO 13/13, layout/rendering/page/graphics/style tests green.
+GEO 13/13, layout/rendering/page/graphics/style/webkit tests green.

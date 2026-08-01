@@ -27,6 +27,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentY := g.ContentBoxTop()
 	boxHeight := g.ContentHeight()
 	contentWidth := g.ContentWidth()
+	// Reference width for text-align: the container's REAL content-box width,
+	// captured BEFORE the auto-width expansion below. Using the widened
+	// (totalW+20) width as the centering reference shifts centered text
+	// right by half the expansion (span "暂无工作区" sat 10px right of its
+	// flex-item box, and "创建" inside the button was off-center by the same).
+	containerWidth := contentWidth
 	fs := fontSizeOf(box)
 	lineHeight := fontLineGap(box)
 	if lineHeight <= 0 { lineHeight = fs * 1.2 }
@@ -83,10 +89,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cs != nil {
 		textAlign = cs.TextAlign
 	}
-	// Reference width for text-align: the container's content-box width
-	// (captured before we widen it to the text extent below). Centering/right
-	// alignment must be computed against the container, not the text width.
-	containerWidth := contentWidth
+	// (containerWidth was captured before the auto-width expansion above.)
 
 	// Get float context for text wrapping around floats.
 	fc := state.currentFloatContext()
