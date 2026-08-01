@@ -446,6 +446,13 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.DisplaySet = true
 	case "position":
 		cs.Position = LookupPositionType(valueString)
+	case "inset":
+		// Shorthand for top/right/bottom/left (CSS Positioned Layout).
+		top, right, bottom, left := parseEdgeShorthand(valueString)
+		cs.SetProperty("top", top.String())
+		cs.SetProperty("right", right.String())
+		cs.SetProperty("bottom", bottom.String())
+		cs.SetProperty("left", left.String())
 	case "color":
 		if c, ok := parseColor(valueString); ok {
 			cs.Color = c

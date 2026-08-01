@@ -376,9 +376,14 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 // YaHei (a proportional CJK font) as the default sans-serif so UI text looks
 // natural. NSimSun is reserved for the monospace generic family only.
 func (m *FontManager) selectDefaults() {
-	// monospace: prefer NSimSun (CJK + ASCII monospace), then Consolas, then
-	// LiberationMono/DejaVuSansMono.
-	m.monoTF = m.findBest("nsimsun", 400, false)
+	// monospace: prefer OS NSimSun (CJK + ASCII monospace), then Consolas, then
+	// LiberationMono/DejaVuSansMono. OS-name lookup is used first because
+	// NewTypefaceFromData on TTC files (simsun.ttc index 1) may return a
+	// Typeface that fails to render CJK glyphs (tofu).
+	m.monoTF = skia.NewTypeface("NSimSun", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	if m.monoTF == nil {
+		m.monoTF = m.findBest("nsimsun", 400, false)
+	}
 	if m.monoTF == nil {
 		m.monoTF = m.findBest("consolas", 400, false)
 	}
@@ -576,6 +581,15 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 
 	for _, fam := range families {
 		targetFamily, isGeneric := resolveFamily(fam)
+		// CJK families: prefer OS-name lookup (skia.NewTypeface) because
+		// TTC faces loaded via NewTypefaceFromData may fail to render CJK
+		// glyphs (tofu). OS faces keep Skia's system fallback chain, so
+		// Chinese text renders instead of showing boxes.
+		if targetFamily == "microsoft yahei" || targetFamily == "nsimsun" || targetFamily == "simsun" {
+			if tf := m.osLookup(targetFamily, weight, italic); tf != nil {
+				return tf
+			}
+		}
 		// Try exact family + weight/italic match first.
 		if tf := m.findBest(targetFamily, weight, italic); tf != nil {
 			return tf
@@ -600,6 +614,30 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 	}
 	// Last resort: default sans-serif (CJK-capable) so text is never blank.
 	return m.defaultTF
+}
+
+// osLookup resolves a family via the platform font name (skia.NewTypeface),
+// which keeps Skia's system fallback chain — unlike NewTypefaceFromData TTC
+// faces that may fail to render CJK glyphs.
+func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *skia.Typeface {
+	var osName string
+	switch targetFamily {
+	case "microsoft yahei":
+		osName = "Microsoft YaHei"
+	case "nsimsun":
+		osName = "NSimSun"
+	case "simsun":
+		osName = "SimSun"
+	case "consolas":
+		osName = "Consolas"
+	default:
+		return nil
+	}
+	slant := skia.FontSlantUpright
+	if italic {
+		slant = skia.FontSlantItalic
+	}
+	return skia.NewTypeface(osName, skia.FontStyle{Weight: weight, Width: 5, Slant: slant})
 }
 
 // splitFontFamily splits a CSS font-family value into individual family names,
@@ -645,6 +683,19 @@ func (m *FontManager) SymbolTypeface() *skia.Typeface {
 		return nil
 	}
 	return m.symbolTF
+}
+
+// CJKTypeface returns the OS CJK Typeface (Microsoft YaHei on Windows,
+// fallback to the default sans-serif). Used to render Chinese/Japanese/
+// Korean characters that the primary font lacks (e.g. Consolas).
+func (m *FontManager) CJKTypeface() *skia.Typeface {
+	if m == nil {
+		return nil
+	}
+	if m.sansTF != nil {
+		return m.sansTF
+	}
+	return m.defaultTF
 }
 
 // TypefaceWeight returns the CSS weight of the loaded Typeface (400 for regular,

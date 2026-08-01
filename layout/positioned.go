@@ -76,6 +76,17 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	cbg := state.GeometryForBox(cb)
 	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
 	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
+	// CSS: when left AND right are both specified and width is auto, the
+	// box stretches to fill the space (inset:0 → full-width overlay).
+	if !leftAuto && !rightAuto && wAuto {
+		stretchW := cbWidth - left - right - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
+		if stretchW < 0 {
+			stretchW = 0
+		}
+		width = stretchW
+		g.SetContentWidth(width)
+		wAuto = false
+	}
 	x := cbg.ContentBoxLeft()
 	cbIsFlex := cb.Style() != nil && (cb.Style().Display == style.DisplayFlex || cb.Style().Display == style.DisplayInlineFlex)
 	cbRow := cbIsFlex && cb.Style().FlexDirection != "column" && cb.Style().FlexDirection != "column-reverse"
@@ -110,6 +121,19 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	// Calculate y from top/bottom, using the known border-box height.
 	top, topAuto := resolveOffset(asLength(cs.Properties["top"]), cbHeight)
 	bottom, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), cbHeight)
+	// CSS: when top AND bottom are both specified and height is auto, the
+	// box stretches to fill the space (e.g. position:fixed; inset:0 →
+	// full-viewport overlay). Without this the overlay collapses to its
+	// content height and ends up pinned to the top.
+	if !topAuto && !bottomAuto && hAuto {
+		stretchH := cbHeight - top - bottom - margin.Vertical() - border.Vertical() - padding.Vertical()
+		if stretchH < 0 {
+			stretchH = 0
+		}
+		height = stretchH
+		g.SetContentHeight(height)
+		hAuto = false
+	}
 	y := cbg.ContentBoxTop()
 	switch {
 	case !topAuto && !bottomAuto:

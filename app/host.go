@@ -1423,6 +1423,10 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 				h.handleAnchorClick(deepest)
 			}
 		}
+		// ★ Always rebuild: JS listeners may have mutated the DOM (tabs,
+		// list selection, dialog visibility). Without this the tree is
+		// stale until some other action (e.g. focusing an input) rebuilds.
+		h.wv.RebuildRenderTree()
 		if rendering.FocusedFormControl != prevFocus {
 			h.wv.RebuildRenderTree()
 		}
@@ -1438,6 +1442,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		if el.LocalName() == "a" {
 			h.handleAnchorClick(el)
 		}
+		h.wv.RebuildRenderTree()
 		return
 	}
 	if strings.HasPrefix(onclickVal, "js:") {
@@ -1448,8 +1453,8 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	el.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
 	if h.clickHandler != nil {
 		h.clickHandler(el, onclickVal, clickCSSX, clickCSSY)
-		h.wv.RebuildRenderTree()
 	}
+	h.wv.RebuildRenderTree()
 }
 func handleFormSubmitClick(el *dom.Element) {
 	if el == nil {

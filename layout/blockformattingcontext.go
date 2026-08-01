@@ -68,6 +68,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
 	contentWidth := g.ContentWidth()
+	if os.Getenv("WB_LAYOUT_DEBUG") != "" && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
+		fmt.Printf("[bfc] dialog-box: contentWidth=%.1f parent=%v children=%d\n", contentWidth, box.Parent(), len(box.Children()))
+	}
 
 	blockStart := g.ContentBoxTop()
 	if isVerticalWM {
@@ -142,6 +145,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 
 		ch := state.GeometryForBox(childEb)
+		if os.Getenv("WB_LAYOUT_DEBUG") != "" && childEb.Element() == nil && box.Element() != nil && box.Element().GetAttribute("class") == "dialog-box" {
+			fmt.Printf("[bfc] dialog-box child (anon) content=%.1f border=%.1f display=%d\n", ch.ContentWidth(), ch.BorderBoxWidth(), childCs.Display)
+		}
 		margin, padding, border := computeBoxModelForBox(childEb, contentWidth, fontSizeOf(childEb))
 		ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
 		ch.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)

@@ -55,6 +55,13 @@ input, button, select, textarea {
 	vertical-align: middle;
 }
 
+/* All input elements use border-box sizing regardless of type (matches
+   browsers: an <input> without an explicit type is type=text). Without
+   this, width:100% on an input overflows its container by padding+border. */
+input {
+	box-sizing: border-box;
+}
+
 /* Text inputs share a common border/padding. */
 input[type="text"], input[type="password"], input[type="search"],
 input[type="email"], input[type="url"], input[type="tel"],
@@ -63,7 +70,6 @@ input[type="month"], input[type="week"], input[type="datetime-local"] {
 	padding: 2px 4px;
 	border: 1px solid #767676;
 	background-color: #ffffff;
-	box-sizing: border-box;
 	min-height: 1.2em;
 }
 

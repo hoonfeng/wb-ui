@@ -767,6 +767,7 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
 	emojiSkFont := c.getEmojiSkiaFont(font)
 	symbolSkFont := c.getSymbolSkiaFont(font)
+	cjkSkFont := c.getCJKSkiaFont(font)
 	runes := []rune(text)
 	cx := float32(x)
 	i := 0
@@ -794,12 +795,30 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 					segFont = emojiSkFont
 				}
 			}
+		case runeCJK:
+			// CJK: the primary font (e.g. Consolas) usually lacks Chinese
+			// glyphs — use the OS CJK font (Microsoft YaHei) which keeps
+			// Skia's system fallback. This is what was missing before, so
+			// Chinese rendered as tofu boxes.
+			if primarySkFont.UnicharToGlyph(runes[start]) == 0 && cjkSkFont != nil {
+				segFont = cjkSkFont
+			}
 		}
 		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
 		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
 			cx += w
 		}
 	}
+}
+
+// getCJKSkiaFont returns a *skia.Font using the OS CJK Typeface (Microsoft
+// YaHei) at the same size as font, or nil if none available.
+func (c *Canvas) getCJKSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil {
+		return nil
+	}
+	return c.makeSkiaFont(mgr.CJKTypeface(), font.Size)
 }
 
 // FontAscent returns the ascent (distance from baseline up to the top of the
@@ -941,6 +960,7 @@ type runeClass int
 
 const (
 	runeASCII  runeClass = iota // ASCII printable (0x20-0x7E)
+	runeCJK                     // CJK ideographs (Chinese/Japanese/Korean)
 	runeEmoji                   // Emoji / SMP symbols
 	runeSymbol                  // Other non-ASCII symbols (geometric shapes, arrows, etc.)
 )
@@ -949,6 +969,16 @@ const (
 func classifyRune(r rune) runeClass {
 	if r >= 0x20 && r <= 0x7E {
 		return runeASCII
+	}
+	// CJK ideographs: Unified (0x4E00-0x9FFF), Ext A (0x3400-0x4DBF),
+	// Compatibility (0xF900-0xFAFF), plus the CJK punctuation/radicals.
+	switch {
+	case r >= 0x3400 && r <= 0x4DBF, // CJK Ext A
+		r >= 0x4E00 && r <= 0x9FFF, // CJK Unified
+		r >= 0xF900 && r <= 0xFAFF, // CJK Compatibility
+		r >= 0x3000 && r <= 0x303F, // CJK Symbols and Punctuation
+		r >= 0xFF00 && r <= 0xFFEF: // Fullwidth forms
+		return runeCJK
 	}
 	if r > 0xFFFF {
 		// Supplementary Multilingual Plane: emoji and SMP symbols
@@ -1213,6 +1243,7 @@ func MeasureText(font Font, text string) float64 {
 	// Non-ASCII present: measure segment by segment with the correct font.
 	emojiSkFont := globalEmojiSkiaFont(font)
 	symbolSkFont := globalSymbolSkiaFont(font)
+	cjkSkFont := globalCJKSkiaFont(font)
 	total := float64(0)
 	runes := []rune(text)
 	i := 0
@@ -1238,6 +1269,13 @@ func MeasureText(font Font, text string) float64 {
 				} else if emojiSkFont != nil {
 					f = emojiSkFont
 				}
+			}
+		case runeCJK:
+			// If primary font (e.g. Consolas) lacks the CJK glyph, measure
+			// with the OS CJK font (Microsoft YaHei) so layout matches the
+			// painted glyph width.
+			if skFont.UnicharToGlyph(runes[start]) == 0 && cjkSkFont != nil {
+				f = cjkSkFont
 			}
 		}
 		if w, _ := f.MeasureText(seg, paint); w > 0 {
@@ -1292,6 +1330,33 @@ func globalSymbolSkiaFont(font Font) *skia.Font {
 		return f
 	}
 	f := skia.NewFont(mgr.SymbolTypeface(), float32(size))
+	if f == nil {
+		return nil
+	}
+	f.SetEdging(skia.FontEdgingAntialias)
+	f.SetSubpixel(true)
+	globalFontCache[key] = f
+	return f
+}
+
+// globalCJKSkiaFont returns a cached *skia.Font using the OS CJK Typeface
+// (Microsoft YaHei) at the given font size, or nil if not available.
+func globalCJKSkiaFont(font Font) *skia.Font {
+	mgr := GetFontManager()
+	if mgr == nil || mgr.CJKTypeface() == nil {
+		return nil
+	}
+	size := font.Size
+	if size <= 0 {
+		size = 16
+	}
+	key := fontKey{family: "_cjk", size: float32(size), weight: 400}
+	globalFontCacheMu.Lock()
+	defer globalFontCacheMu.Unlock()
+	if f, ok := globalFontCache[key]; ok {
+		return f
+	}
+	f := skia.NewFont(mgr.CJKTypeface(), float32(size))
 	if f == nil {
 		return nil
 	}

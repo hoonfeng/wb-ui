@@ -2,7 +2,9 @@
 package layout
 
 import (
+	"fmt"
 	"math"
+	"os"
 
 	"wb-ui/style"
 )
@@ -27,6 +29,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentY := g.ContentBoxTop()
 	boxHeight := g.ContentHeight()
 	contentWidth := g.ContentWidth()
+	if os.Getenv("WB_LAYOUT_DEBUG") != "" && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
+		fmt.Printf("[ifc] dialog-box: contentWidth=%.1f padL=%.1f parent=%v\n", contentWidth, g.PaddingLeft(), box.Parent())
+	}
 	// Reference width for text-align: the container's REAL content-box width,
 	// captured BEFORE the auto-width expansion below. Using the widened
 	// (totalW+20) width as the centering reference shifts centered text
@@ -268,6 +273,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				cs := cld.Style()
 				if cs != nil {
 					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
+					if os.Getenv("WB_LAYOUT_DEBUG") != "" && cld.Element() != nil && cld.Element().NodeName() == "INPUT" {
+						fmt.Printf("[in] INPUT width: %% of contentWidth=%.1f → %v (container=%v class=%q)\n", contentWidth, w, box.Element(), func() string {
+							if box.Element() != nil {
+								return box.Element().GetAttribute("class")
+							}
+							return ""
+						}())
+					}
 						if isBorderBoxForBox(cld) {
 							b := cldG.BorderLeft() + cldG.BorderRight()
 							p := cldG.PaddingLeft() + cldG.PaddingRight()

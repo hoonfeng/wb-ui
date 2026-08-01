@@ -383,6 +383,14 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		anonStyle.MarginLeft = style.Length{}
 		anonStyle.Position = style.PositionStatic
 		anonStyle.Float = "none"
+		// Anonymous inline wrappers must NOT inherit min/max width either —
+		// a parent with min-width:320px (e.g. a dialog box) would otherwise
+		// stretch the wrapper to 320px, making a child input width:100%
+		// overflow the parent's real content width.
+		anonStyle.MinWidth = style.Length{}
+		anonStyle.MaxWidth = style.Length{}
+		anonStyle.MinHeight = style.Length{}
+		anonStyle.MaxHeight = style.Length{}
 		wrap.style = &anonStyle
 		for _, k := range kids {
 			switch c := k.(type) {

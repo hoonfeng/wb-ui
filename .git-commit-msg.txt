@@ -1,28 +1,38 @@
-fix: dispatch DOM click on release + multi-line caret placement
+fix: dialog overlay inset stretch + CJK glyph fallback + live click updates
 
-Comprehensive interaction test (rendering/interaction_test.go) covering
-clicks / checkbox toggling / single + multi-line caret placement exposed
-two engine bugs that made the desktop IDE feel dead:
+The standalone interaction test page (interact_test.html) exposed four
+engine bugs; all fixed and verified through the full WebView pipeline:
 
-1. Clicks never reached JS listeners. host.go's handleClick was never
-   called (dead code) and the release path only cleared active state, so
-   Vue @click handlers (registered via addEventListener('click')) never
-   ran — every button/icon/switch did nothing. handleClick is now invoked
-   on mouse-button release and dispatches a bubbling DOM click to the
-   hit-tested element, so addEventListener listeners fire (verified on the
-   real companion frontend: clicking ws-create-btn now opens the
-   workspace dialog).
+1. Dialog overlay pinned to the top. `position:fixed; inset:0` — the
+   `inset` shorthand was never parsed, so top/right/bottom/left were all
+   auto and the overlay collapsed to content height. Added `inset`
+   expansion in the style resolver, plus layoutAbsolute stretch logic:
+   when top+bottom (or left+right) are both specified and the size is
+   auto, the box fills the space. The overlay now covers the viewport
+   (1280x860) and the dialog-box is centered (640/640).
 
-2. Multi-line textarea caret landed wrong. calcTextControlOffset used a
-   hardcoded Consolas 14 and ignored the Y axis entirely — clicking line
-   2+ always returned an offset on line 1. The logic is extracted to
-   rendering.CalcFormControlCaretOffset (pure function) which resolves
-   the clicked line from Y, then the column from X with cumulative widths
-   (the column loop was also missing the running-total accumulator, so it
-   always returned end-of-line). The caret now uses the element's
-   computed font/padding, matching the painted text.
+2. Dialog input overflowed the dialog-box by 40px. A width:100% input
+   inside a min-width:320px dialog box was laid out at 320px (the
+   border-box width) instead of 280px (the content width). Root cause:
+   the anonymous inline wrapper cloned the parent's min-width:320, so its
+   auto width was clamped to 320. Anonymous wrappers now clear
+   min/max-width (and min/max-height) like they already clear
+   padding/border/margin. Verified: input width 278 <= 280.
 
-New tests: TestClickDispatchFiresJSListener, TestCheckboxToggleOnClickClick,
-TestCaretSingleLineInput, TestCaretTextareaMultiLine,
-TestClickBubblesToAncestor. rendering/layout/app/bindings/dom/page/
-webkit/html5 all green.
+3. Chinese text rendered as tofu boxes (no built-in font). CJK runes were
+   classified as symbols and drawn with Segoe UI Symbol (no CJK glyphs);
+   LookupTypeface also returned TTC faces loaded via NewTypefaceFromData
+   that fail to render CJK. Added a runeCJK class that routes Chinese/
+   Japanese/Korean runs to the OS CJK font (Microsoft YaHei via
+   skia.NewTypeface) in both DrawText and MeasureText, and CJK families
+   (microsoft yahei/nsimsun/simsun) now prefer OS-name lookup. Pixel
+   probe: "你好" now paints 414 lit pixels (real glyphs).
+
+4. Tab/list clicks didn't update until focusing an input. handleClick
+   dispatched the DOM click but only rebuilt the render tree when focus
+   changed, so JS-mutated DOM (tab content, list selection, dialog
+   visibility) stayed stale. It now always rebuilds after dispatch.
+
+Also: UA stylesheet applies box-sizing:border-box to ALL inputs (an
+<input> without type= is type=text), and the dialog opens/centers with
+live tab switching verified via interact_check.
