@@ -727,10 +727,18 @@ func arcToPolyline(x1, y1, rx, ry, phi float64, largeArc, sweep bool, x2, y2 flo
 	} else if sweep && dtheta < 0 {
 		dtheta += 2 * math.Pi
 	}
-	const steps = 24
+	// Sample density adapts to the arc sweep: ~4° per segment (a full circle
+	// gets ~90 points) so small gear arcs stay round when scaled down to
+	// 14-18px icon sizes. 8° segments made short arcs visibly faceted and
+	// the settings gear teeth look broken at 18px.
+	segs := math.Ceil(math.Abs(dtheta) / (math.Pi / 45)) // 4° per segment
+	if segs < 4 {
+		segs = 4
+	}
+	steps := int(segs)
 	out := make([]graphics.Point, 0, steps)
 	for i := 1; i <= steps; i++ {
-		t := float64(i) / steps
+		t := float64(i) / float64(steps)
 		theta := theta1 + t*dtheta
 		cosT, sinT := math.Cos(theta), math.Sin(theta)
 		x := cx + rx*cosT*cosP - ry*sinT*sinP
@@ -967,11 +975,33 @@ func tokenizeSVGPath(s string) []string {
 	return tokens
 }
 
+// parseSVGPathData parses an SVG path "d" attribute into path commands. Per
+// the SVG spec, consecutive parameter groups after a command are IMPLICIT
+// repetitions of the same command — e.g. "l-8-3-8 3" is "l -8 -3 l -8 3".
+// Many feather icons rely on this (settings gear arcs, shield outline).
+// Each parameter group becomes its own pathCmd so painters can process one
+// group per command.
 func parseSVGPathData(s string) []pathCmd {
 	var cmds []pathCmd
 	tokens := tokenizeSVGPath(s)
 	i := 0
 	lastCmd := byte('M')
+	// argsPerCmd maps a command letter to its parameter-group size.
+	argsPerCmd := func(c byte) int {
+		switch c {
+		case 'M', 'm', 'L', 'l', 'T', 't':
+			return 2
+		case 'H', 'h', 'V', 'v':
+			return 1
+		case 'C', 'c':
+			return 6
+		case 'S', 's', 'Q', 'q':
+			return 4
+		case 'A', 'a':
+			return 7
+		}
+		return 0
+	}
 	for i < len(tokens) {
 		cmd := lastCmd
 		tok := tokens[i]
@@ -990,7 +1020,25 @@ func parseSVGPathData(s string) []pathCmd {
 			}
 			i++
 		}
-		cmds = append(cmds, pathCmd{kind: cmd, args: args})
+		// Split the argument list into per-command groups. A trailing
+		// incomplete group is dropped (lenient, matches browsers).
+		per := argsPerCmd(cmd)
+		if per > 0 {
+			for start := 0; start+per <= len(args); start += per {
+				kind := cmd
+				// After an initial M/m, subsequent groups act as L/l.
+				if start > 0 && (cmd == 'M' || cmd == 'm') {
+					if cmd == 'M' {
+						kind = 'L'
+					} else {
+						kind = 'l'
+					}
+				}
+				cmds = append(cmds, pathCmd{kind: kind, args: args[start : start+per]})
+			}
+		} else if cmd == 'Z' || cmd == 'z' {
+			cmds = append(cmds, pathCmd{kind: cmd})
+		}
 		lastCmd = cmd
 	}
 	return cmds

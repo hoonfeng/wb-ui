@@ -1,18 +1,24 @@
-test: evenodd fill-rule tests use in-hole sample points
+feat: SVG path implicit command repeats + arc sampling density
 
-The goskia SetFillType(evenodd) binding was suspected broken after the
-bowtie/star tests "failed". Root cause: both test points (20,20) sat ON
-path boundaries — the bowtie crossing vertex and the star's vertical
-edge outer[0]→inner[2] (20,6)→(20,26) which passes through the center.
+Fixes the settings gear and shield icons rendering broken:
 
-Fix the sample points to genuinely in-hole coordinates and restore the
-strict assertions:
+1. parseSVGPathData now splits consecutive parameter groups after a
+   command into SEPARATE commands per the SVG spec ("l-8-3-8 3" is
+   "l -8 -3 l -8 3"). Previously all groups were packed into one
+   pathCmd but painters only read the first group:
+   - shield "l-8-3-8 3": second l(-8,3) dropped → left half missing
+   - settings gear "a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0": second arc
+     dropped → gear teeth incomplete
+   Multi-point M/m now also degrades to L/l per spec.
 
-- graphics evenodd_test.go: bowtie hole (20,18) stays unpainted; new
-  TestSkiaEvenOddStar proves the SVG star's center pentagon hole (20,23)
-  is empty while the arm (20,9) fills solid 255.
-- svg_enhance_test.go: TestSVGFillRuleEvenOdd now asserts the star hole
-  via (20,23) and removes the debug logs.
+2. arcToPolyline sampling 8°→4° per segment: at 18px icon sizes the
+   straight-line arc approximation made gear teeth visibly faceted;
+   4° keeps short arcs round when scaled down (activity-bar 3.1%→3.0%).
 
-Conclusion: evenodd works end-to-end (goskia SetFillType → graphics.
-Canvas.FillPath → svg fill-rule). No engine code changed.
+Pixel verification vs Edge: shield band diff 0/1600, 18px gear nearly
+identical (only the lower-left tooth 1px off); 24x24 unscaled render
+is symmetric and structurally correct. GEO 13/13 green.
+
+Tests: svg_implicit_test.go (shield l-repeat, gear arc-repeat,
+multi-M→L), svg_gear_test.go (settings path arc sweep tally),
+graphics strokewidth_test.go (Skia stroke scales with CTM).
