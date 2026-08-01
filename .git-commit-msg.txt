@@ -1,30 +1,32 @@
-fix: flex column justify re-center + SVG path H/V + circle dash
+fix: SVG polygon points/stroke/currentColor + circle dash
 
-desktop_probe (welcome_geo / icon_cmp / svg_ring / chat_region) located
-three real rendering defects reported by the user:
+Continuing the desktop Vue-app probe (icon_cmp / svg_ring / send_svg /
+comp_check), five SVG drawing defects fixed:
 
-1. Editor-area text overlap (welcome page): flex-column with
-   justify-content:center re-centered EVERY auto-height item to
-   cy+(ch-bh)/2 after child layout — collapsing all children onto the
-   single container-center position (logo/text/sub all at y≈200; in the
-   desktop app welcome-logo 261 / welcome-text 333 / welcome-sub 365 all
-   overlapped in a 64px band). Fixed: remove per-item main-axis
-   re-centering; for auto-height containers re-center / flex-end the whole
-   group ONCE after the loop (single shift keeps stacked positions).
-   welcome children now stack correctly (261 → 333 → 365 with 8px gap).
+1. SVG path H/h and V/v commands were never parsed — paths with horizontal /
+   vertical lines (folder icon M22 19H4V5h5l2 3h9z) drew only stray arcs.
+   Added H/h/V/v cases (relative/absolute); the activity-bar folder icon now
+   draws its full outline (85 → 123 ink px, structure matches Edge).
 
-2. SVG path H/h (horizontal) and V/v (vertical) line commands were not
-   parsed — paths using them (e.g. the lucide folder icon M22 19H4V5h5l2
-   3h9z) drew only stray arcs: the activity-bar icon body was missing
-   (85 ink px vs Edge's 218). Added H/h/V/v cases; first icon now draws
-   the full folder outline (123 ink px, structure matches Edge).
+2. svgPolygon only filled triangles and never stroked — stroke-only icons
+   (send-btn paper plane: fill="none" stroke="currentColor") drew nothing.
+   Now strokes the outline (closed for polygon, open for polyline) with
+   dasharray support, and fills a full triangle fan for multi-point polygons.
 
-3. SVG circle/ellipse stroke-dasharray was ignored — progress rings drew
-   a full circle instead of the dash pattern. svgEllipse.paint now samples
-   the outline (96 segments) and draws dashes with cumulative arc-length
-   offset, matching path/line dash behavior.
+3. parseSVGPoints split on whitespace then ParseFloat'd "0,0" whole — every
+   comma-separated polygon collapsed to a single (0,0) point. Now tokenizes
+   numeric literals (whitespace and/or commas).
 
-Regression tests: TestFlexColumnCenterGap (3 stacked children, 8px gaps),
-TestSVGPathHVCmds (M/H/V/h/l/z all parsed).
+4. fill/stroke="currentColor" resolved to the black fallback. svgDocument now
+   carries currentColor set from the host element's CSS color
+   (paintObjectForeground), so e.g. the white send icon renders white.
 
-Full go test green; GEO 13/13 (17s).
+5. circle/ellipse stroke-dasharray ignored — progress rings drew a full
+   circle. svgEllipse.paint samples the outline (96 segs) and draws dashes
+   with cumulative arc-length offset.
+
+Regression tests: TestSVGPathHVCmds (M/H/V/h/l/z), TestSVGPolygonStroke
+(3-point triangle stroke ink), plus existing suite.
+
+Full go test green; Edge pixel diff 2.9% -> 2.8% (send-btn region
+1302 -> 1223).

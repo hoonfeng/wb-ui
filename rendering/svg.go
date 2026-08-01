@@ -12,6 +12,7 @@ package rendering
 
 import (
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -309,9 +310,25 @@ type svgPolygon struct {
 func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	fill := ctx.fill
 	if fill.A > 0 && len(s.points) >= 3 {
-		canvas.FillTriangle(s.points[0].X, s.points[0].Y,
-			s.points[1].X, s.points[1].Y,
-			s.points[2].X, s.points[2].Y, fill)
+		// Triangle fan from points[0].
+		for i := 1; i < len(s.points)-1; i++ {
+			canvas.FillTriangle(s.points[0].X, s.points[0].Y,
+				s.points[i].X, s.points[i].Y,
+				s.points[i+1].X, s.points[i+1].Y, fill)
+		}
+	}
+	// Stroke the outline (closed for polygon, open for polyline).
+	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(s.points) >= 2 {
+		segs := len(s.points) - 1
+		closeRing := s.closed
+		if closeRing && len(s.points) >= 3 {
+			segs = len(s.points)
+		}
+		for i := 0; i < segs; i++ {
+			p1 := s.points[i]
+			p2 := s.points[(i+1)%len(s.points)]
+			dashLine(canvas, p1.X, p1.Y, p2.X, p2.Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
+		}
 	}
 }
 
@@ -718,6 +735,9 @@ type svgDocument struct {
 	styleRules []svgStyleRule
 	// markers carry <marker> templates referenced by marker-start/end.
 	markers map[string]*svgMarker
+	// currentColor is the resolved CSS color of the host element; SVG
+	// fill/stroke="currentColor" resolves to it (set by the caller).
+	currentColor graphics.Color
 }
 
 // svgMarker is a <marker> template: child shapes painted at a path vertex,
@@ -786,12 +806,20 @@ func parseSVGCoordList(s string) []float64 {
 }
 
 func parseSVGPoints(s string) []graphics.Point {
-	parts := strings.Fields(s)
+	// Points may be separated by whitespace AND/OR commas ("0,0 24,0 12,24"
+	// or "0,0,24,0,12,24"). Tokenize every numeric literal instead of
+	// splitting on whitespace only — ParseFloat("0,0") fails and collapses
+	// the whole polygon to a single (0,0) point.
+	var nums []float64
+	re := regexp.MustCompile(`-?\d*\.?\d+(?:[eE][-+]?\d+)?`)
+	for _, m := range re.FindAllString(s, -1) {
+		if v, err := strconv.ParseFloat(m, 64); err == nil {
+			nums = append(nums, v)
+		}
+	}
 	var pts []graphics.Point
-	for i := 0; i+1 < len(parts); i += 2 {
-		x, _ := strconv.ParseFloat(parts[i], 64)
-		y, _ := strconv.ParseFloat(parts[i+1], 64)
-		pts = append(pts, graphics.Point{X: x, Y: y})
+	for i := 0; i+1 < len(nums); i += 2 {
+		pts = append(pts, graphics.Point{X: nums[i], Y: nums[i+1]})
 	}
 	return pts
 }
@@ -1510,11 +1538,15 @@ func buildSVGDocument(el *dom.Element) *svgDocument {
 				elCtx.fill = graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}
 				_ = g // gradient applied in shape-specific code
 			}
+		} else if fillStr == "currentColor" {
+			elCtx.fill = doc.currentColor
 		} else if fillStr != "" {
 			elCtx.fill = parseColorAttribute(fillStr)
 		}
 
-		if strokeStr != "" {
+		if strokeStr == "currentColor" {
+			elCtx.stroke = doc.currentColor
+		} else if strokeStr != "" {
 			elCtx.stroke = parseColorAttribute(strokeStr)
 		}
 		if swStr != "" {

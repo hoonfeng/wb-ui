@@ -800,6 +800,11 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	if el.LocalName() == "svg" {
 		doc := buildSVGDocument(el)
 		if doc != nil && len(doc.shapes) > 0 {
+			// fill/stroke="currentColor" resolves to the element's CSS color
+			// (e.g. white send-btn icon, muted icon color).
+			if st := box.Style(); st != nil {
+				doc.currentColor = toGraphicsColor(st.Color)
+			}
 			paintSVG(info.canvas, doc, box.X(), box.Y(), graphics.Color{})
 		}
 		return
