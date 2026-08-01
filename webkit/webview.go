@@ -73,6 +73,13 @@ func (wv *WebView) Settings() *page.Settings    { return wv.settings }
 func (wv *WebView) Width() int                 { return wv.width }
 func (wv *WebView) Height() int                { return wv.height }
 
+// BeforePageScripts is an optional hook invoked after DOM bindings are
+// registered but before any page <script> executes. The `window` global
+// object exists at this point (it is created by RegisterDOMBindings), so
+// embedders can inject page-environment JS (e.g. fetch interception for
+// desktop mode) that must be visible to the application code.
+var BeforePageScripts func(rt *jsc.Interpreter)
+
 func (wv *WebView) LoadHTML(src string) error {
 	if wv.mainFrame != nil {
 		fn := func(code string) error {
@@ -141,6 +148,12 @@ func (wv *WebView) LoadHTML(src string) error {
 	// Execute page scripts AFTER DOM bindings are registered.
 	// Scripts (Vue/React) may mutate the DOM — rebuild the render tree
 	// so that newly created elements are included in layout/paint.
+	//
+	// ★ BeforePageScripts hook: window exists, page scripts not yet run —
+	// desktop embedders inject fetch interception / desktopBridge here.
+	if BeforePageScripts != nil && wv.jsInterpreter != nil {
+		BeforePageScripts(wv.jsInterpreter)
+	}
 	if fr := wv.mainFrame.Frame(); fr != nil {
 		fr.ExecuteScripts()
 		fr.RebuildRenderTree()

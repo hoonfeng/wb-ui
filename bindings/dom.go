@@ -4,7 +4,9 @@ package bindings
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -503,17 +505,34 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
 			obj := jsc.NewObject(in.ObjectPrototype())
 			href := ""
-			if len(args) >= 1 { href = args[0].ToString() }
+			if len(args) >= 1 {
+				href = args[0].ToString()
+				// 第二参数 base：相对 URL 拼接（如 new URL('/api/fs/list', location.origin)）
+				if len(args) >= 2 && args[1].IsString() && args[1].ToString() != "" && !strings.Contains(href, "://") {
+					base := args[1].ToString()
+					if strings.HasSuffix(base, "/") {
+						base = strings.TrimSuffix(base, "/")
+					}
+					href = base + href
+				}
+			}
 			obj.Set("href", jsc.StringValue(href))
 			obj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 					return jsc.StringValue(href)
 				}, 0)))
 			// 简单 URL 解析
+			queryPart := ""
 			if href != "" {
 				if colonIdx := strings.Index(href, "://"); colonIdx > 0 {
 					obj.Set("protocol", jsc.StringValue(href[:colonIdx+1]))
 					rest := href[colonIdx+3:]
+					// 分离 path 与 query
+					qIdx := strings.IndexByte(rest, '?')
+					if qIdx >= 0 {
+						queryPart = rest[qIdx+1:]
+						rest = rest[:qIdx]
+					}
 					if pathIdx := strings.IndexByte(rest, '/'); pathIdx > 0 {
 						obj.Set("hostname", jsc.StringValue(rest[:pathIdx]))
 						obj.Set("pathname", jsc.StringValue(rest[pathIdx:]))
@@ -522,8 +541,34 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 						obj.Set("pathname", jsc.StringValue("/"))
 					}
 				}
+				// pathname 也支持纯相对 URL（如 /api/fs/list）
+				if colonIdx := strings.Index(href, "://"); colonIdx < 0 {
+					qIdx := strings.IndexByte(href, '?')
+					if qIdx >= 0 {
+						queryPart = href[qIdx+1:]
+						obj.Set("pathname", jsc.StringValue(href[:qIdx]))
+					} else {
+						obj.Set("pathname", jsc.StringValue(href))
+					}
+				}
+				obj.Set("search", jsc.StringValue(("?" + queryPart)))
+				obj.Set("origin", jsc.StringValue(obj.GetStr("protocol").ToString() + "//" + obj.GetStr("hostname").ToString()))
 			}
+			// searchParams：URLSearchParams 实例
+			sp := makeURLSearchParams(in, queryPart)
+			obj.Set("searchParams", jsc.ObjectValue(sp))
+			obj.Set("host", jsc.StringValue(obj.GetStr("hostname").ToString()))
 			return obj
+		})))
+
+	// URLSearchParams 全局构造器
+	g.Set("URLSearchParams", jsc.FunctionValue(rt.NewConstructor("URLSearchParams",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			init := ""
+			if len(args) >= 1 {
+				init = args[0].ToString()
+			}
+			return makeURLSearchParams(in, init)
 		})))
 
 	// requestIdleCallback / cancelIdleCallback（GUI 模式下立即执行）
@@ -1215,6 +1260,129 @@ obj.SetInternal(doc)
 // so JS-side properties (__vue_app__, _vnode) set on one wrapper are
 // visible through all DOM access methods (querySelector, getElementById, etc.)
 var elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+
+// makeURLSearchParams 构造一个 URLSearchParams 对象，从 query 字符串（不带 ?）解析。
+// 支持 set/get/append/delete/has/toString/forEach/entries——companion 前端
+// api.js 的 apiURL() 依赖 u.searchParams.set(k, v)。
+func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
+	params := make(map[string][]string)
+	if query != "" {
+		for _, pair := range strings.Split(query, "&") {
+			if pair == "" {
+				continue
+			}
+			kv := strings.SplitN(pair, "=", 2)
+			k := kv[0]
+			v := ""
+			if len(kv) > 1 {
+				v = kv[1]
+			}
+			if decoded, err := url.QueryUnescape(k); err == nil {
+				k = decoded
+			}
+			if decoded, err := url.QueryUnescape(v); err == nil {
+				v = decoded
+			}
+			params[k] = append(params[k], v)
+		}
+	}
+	sp := jsc.NewObject(in.ObjectPrototype())
+	sp.SetClassName("URLSearchParams")
+	getAll := func(key string) []string {
+		if vs, ok := params[key]; ok {
+			return vs
+		}
+		return nil
+	}
+	sp.Set("get", jsc.FunctionValue(jsc.NewNativeFunction("get", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Null()
+		}
+		vs := getAll(args[0].ToString())
+		if len(vs) == 0 {
+			return jsc.Null()
+		}
+		return jsc.StringValue(vs[0])
+	}, 1)))
+	sp.Set("getAll", jsc.FunctionValue(jsc.NewNativeFunction("getAll", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		vs := getAll(args[0].ToString())
+		arr := jsc.NewObject(in.ObjectPrototype())
+		arr.SetClassName("Array")
+		if vs != nil {
+			for i, v := range vs {
+				arr.Set(strconv.Itoa(i), jsc.StringValue(v))
+			}
+		}
+		arr.Set("length", jsc.NumberValue(float64(len(vs))))
+		return jsc.ObjectValue(arr)
+	}, 1)))
+	sp.Set("has", jsc.FunctionValue(jsc.NewNativeFunction("has", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.BooleanValue(false)
+		}
+		_, ok := params[args[0].ToString()]
+		return jsc.BooleanValue(ok)
+	}, 1)))
+	sp.Set("set", jsc.FunctionValue(jsc.NewNativeFunction("set", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) < 2 {
+			return jsc.Undefined()
+		}
+		params[args[0].ToString()] = []string{args[1].ToString()}
+		return jsc.Undefined()
+	}, 2)))
+	sp.Set("append", jsc.FunctionValue(jsc.NewNativeFunction("append", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) < 2 {
+			return jsc.Undefined()
+		}
+		params[args[0].ToString()] = append(params[args[0].ToString()], args[1].ToString())
+		return jsc.Undefined()
+	}, 2)))
+	sp.Set("delete", jsc.FunctionValue(jsc.NewNativeFunction("delete", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) > 0 {
+			delete(params, args[0].ToString())
+		}
+		return jsc.Undefined()
+	}, 1)))
+	sp.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		var parts []string
+		for k, vs := range params {
+			for _, v := range vs {
+				parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+			}
+		}
+		return jsc.StringValue(strings.Join(parts, "&"))
+	}, 0)))
+	// entries/keys/values 返回简化数组
+	sp.Set("entries", jsc.FunctionValue(jsc.NewNativeFunction("entries", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		arr := jsc.NewObject(in.ObjectPrototype())
+		arr.SetClassName("Array")
+		idx := 0
+		for k, vs := range params {
+			for _, v := range vs {
+				entry := jsc.NewObject(in.ObjectPrototype())
+				entry.Set("0", jsc.StringValue(k))
+				entry.Set("1", jsc.StringValue(v))
+				entry.Set("length", jsc.NumberValue(2))
+				arr.Set(strconv.Itoa(idx), jsc.ObjectValue(entry))
+				idx++
+			}
+		}
+		arr.Set("length", jsc.NumberValue(float64(idx)))
+		return jsc.ObjectValue(arr)
+	}, 0)))
+			sp.Set("forEach", jsc.FunctionValue(jsc.NewNativeFunction("forEach", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 || !args[0].IsCallable() {
+			return jsc.Undefined()
+		}
+		for k, vs := range params {
+			for _, v := range vs {
+				in.Call(args[0], jsc.StringValue(v), []jsc.JSValue{jsc.StringValue(k), jsc.ObjectValue(sp)})
+			}
+		}
+		return jsc.Undefined()
+	}, 1)))
+	return sp
+}
 
 func clearElementCache() {
 	elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
