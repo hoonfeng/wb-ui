@@ -385,6 +385,10 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	var firstPoint graphics.Point
 	hasFirst := false
 	curX, curY := 0.0, 0.0
+	// lastCtrl / lastCtrlKind track the previous bezier control point so the
+	// smooth variants S/s (cubic) and T/t (quadratic) can reflect it.
+	var lastCtrl graphics.Point
+	lastCtrlKind := byte(0)
 
 	for _, cmd := range s.commands {
 		args := cmd.args
@@ -445,6 +449,27 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				}
 				pts = append(pts, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
 				curX, curY = x, y
+				lastCtrl = graphics.Point{X: x2, Y: y2}
+				lastCtrlKind = 'c'
+			}
+		case 'S', 's': // smooth cubic: x2 y2 x y (ctrl1 = reflection of prev ctrl2)
+			if len(args) >= 4 {
+				x1, y1 := curX, curY
+				if lastCtrlKind == 'c' || lastCtrlKind == 's' {
+					x1 = 2*curX - lastCtrl.X
+					y1 = 2*curY - lastCtrl.Y
+				}
+				x2, y2, x, y := args[0], args[1], args[2], args[3]
+				if cmd.kind == 's' {
+					x2 += curX
+					y2 += curY
+					x += curX
+					y += curY
+				}
+				pts = append(pts, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
+				curX, curY = x, y
+				lastCtrl = graphics.Point{X: x2, Y: y2}
+				lastCtrlKind = 's'
 			}
 		case 'Q', 'q': // quadratic bezier: x1 y1 x y
 			if len(args) >= 4 {
@@ -457,6 +482,25 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				}
 				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
 				curX, curY = x, y
+				lastCtrl = graphics.Point{X: x1, Y: y1}
+				lastCtrlKind = 'q'
+			}
+		case 'T', 't': // smooth quadratic: x y (ctrl = reflection of prev q ctrl)
+			if len(args) >= 2 {
+				x1, y1 := curX, curY
+				if lastCtrlKind == 'q' || lastCtrlKind == 't' {
+					x1 = 2*curX - lastCtrl.X
+					y1 = 2*curY - lastCtrl.Y
+				}
+				x, y := args[0], args[1]
+				if cmd.kind == 't' {
+					x += curX
+					y += curY
+				}
+				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
+				curX, curY = x, y
+				lastCtrl = graphics.Point{X: x1, Y: y1}
+				lastCtrlKind = 't'
 			}
 		case 'A', 'a': // elliptical arc: rx ry x-axis-rot large-arc sweep x y
 			if len(args) >= 7 {

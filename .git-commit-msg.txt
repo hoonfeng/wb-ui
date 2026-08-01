@@ -1,24 +1,29 @@
-fix: SVG currentColor timing — icons were completely invisible
+fix: SVG smooth bezier (S/s T/t) + flex absolute children
 
-Regression introduced by the previous round: paintObjectForeground set
-doc.currentColor AFTER buildSVGDocument returned, but the walk inside
-build parses fill/stroke="currentColor" DURING the build — so every
-currentColor stroke resolved to the zero-value color (A=0 transparent)
-and ALL svg-icon paths were skipped (draw log: "path SKIPPED stroke:
-stroke.A=0"). The desktop app showed NO SVG icons at all.
+Desktop probe (token_geo / absflex_dump) located three real defects from
+the user report (审核开关 icon + token 统计 + component positioning):
 
-Fix: buildSVGDocument now takes the host element's CSS color as a
-variadic parameter and seeds doc.currentColor BEFORE the walk runs.
-paintObjectForeground passes box.Style().Color (default black when no
-style context, per the SVG spec).
+1. SVG path S/s (smooth cubic) and T/t (smooth quadratic) commands were
+   never parsed — the shield icon (approval/review toggle) is
+   "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z": with 's' skipped the
+   path collapsed to a broken outline. Added S/s and T/t with control-
+   point reflection of the previous bezier (per SVG spec). Draw log now
+   shows the shield with 37 sampled points (green #5bbc7a).
 
-Verified with draw logs (WB_SVG_DEBUG=1): every icon now strokes with a
-valid currentColor (#e6edf3 / #6e7681 / #ffffff / #79c0ff …) and the
-activity-bar folder icon draws 219 ink px vs Edge's 218 (was 85 when
-broken, body missing). Send-btn paper plane strokes white, obtn icons
-colored per button. Activity-bar diff region 2093 -> 1560 px.
+2. FlexFormattingContext silently dropped absolutely-positioned children
+   (resolveItem only kept in-flow boxes) — .cache-ring-label (absolute,
+   inside the flex .cache-ring-wrap) stayed 0x0 at (0,0). Flex now
+   collects deferredAbsolutes and lays them out after items, mirroring
+   BlockFormattingContext.
 
-Also kept WB_SVG_DEBUG-gated draw logs in svgPath/svgPolygon/svgEllipse
-paint as a diagnostic tool for future rounds.
+3. Static position of an absolute child of a flex container followed the
+   containing-block top-left (CSS-FLEXBOX §5.1 says it follows flex
+   alignment). layoutAbsolute now applies align-items (cross axis) and
+   justify-content (main axis) when the containing block is flex and no
+   offset is specified — the token ring label centers in the ring.
 
-Full go test green; GEO 13/13.
+Token stats panel (Token 统计) now renders: 0% cache label centered in
+the ring (96x36 at ring center), cs-rows with 输入/缓存/输出/总 Token
+values. GEO 13/13 green; full go test green.
+
+Regression tests: TestSVGPathSmoothBezier, TestFlexAbsoluteChild.

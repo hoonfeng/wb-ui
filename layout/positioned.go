@@ -77,6 +77,8 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	left, leftAuto := resolveOffset(asLength(cs.Properties["left"]), cbWidth)
 	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
 	x := cbg.ContentBoxLeft()
+	cbIsFlex := cb.Style() != nil && (cb.Style().Display == style.DisplayFlex || cb.Style().Display == style.DisplayInlineFlex)
+	cbRow := cbIsFlex && cb.Style().FlexDirection != "column" && cb.Style().FlexDirection != "column-reverse"
 	switch {
 	case !leftAuto && !rightAuto:
 		x = cbg.ContentBoxLeft() + left + margin.Left
@@ -86,6 +88,22 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		x = cbg.ContentBoxLeft() + cbWidth - right - margin.Right - g.BorderBoxWidth()
 	default:
 		x = cbg.ContentBoxLeft() + margin.Left
+		// Static position of an absolutely-positioned child of a flex
+		// container follows the flex alignment (CSS-FLEXBOX §5.1): the
+		// cross axis uses align-items, the main axis uses justify-content.
+		if cbIsFlex {
+			align := cb.Style().AlignItems
+			if !cbRow {
+				align = cb.Style().JustifyContent
+			}
+			bw := g.BorderBoxWidth()
+			switch align {
+			case "center":
+				x += (cbWidth - bw - margin.Horizontal()) / 2
+			case "flex-end", "end", "right":
+				x += cbWidth - bw - margin.Left - margin.Right
+			}
+		}
 	}
 	g.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
 
@@ -102,6 +120,19 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		y = cbg.ContentBoxTop() + cbHeight - bottom - margin.Bottom - g.BorderBoxHeight()
 	default:
 		y = cbg.ContentBoxTop() + margin.Top
+		if cbIsFlex {
+			justify := cb.Style().JustifyContent
+			if !cbRow {
+				justify = cb.Style().AlignItems
+			}
+			bh := g.BorderBoxHeight()
+			switch justify {
+			case "center":
+				y += (cbHeight - bh - margin.Vertical()) / 2
+			case "flex-end", "end", "bottom":
+				y += cbHeight - bh - margin.Top - margin.Bottom
+			}
+		}
 	}
 	g.SetTopLeft(y, x)
 

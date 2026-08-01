@@ -52,15 +52,29 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	initialContentHeight := ch
 
 	var items []*flexItem
+	var deferredAbsolutes []*ElementBox
 	for _, child := range box.Children() {
-		if childEb, ok := child.(*ElementBox); ok && child.IsInFlow() && child.IsVisible() {
-			item := c.resolveItem(childEb, isRow, cw, ch, state)
-			items = append(items, item)
+		if childEb, ok := child.(*ElementBox); ok && child.IsVisible() {
+			if child.IsAbsolutelyPositioned() {
+				// Out-of-flow children of a flex container are NOT flex items;
+				// they are positioned against the flex container as containing
+				// block (CSS-FLEXBOX §5.1). Must be laid out like block-level
+				// absolutes — previously they were silently dropped, leaving
+				// e.g. .cache-ring-label (absolute, inside a flex wrap) at 0x0.
+				deferredAbsolutes = append(deferredAbsolutes, childEb)
+				continue
+			}
+			if child.IsInFlow() {
+				item := c.resolveItem(childEb, isRow, cw, ch, state)
+				items = append(items, item)
+			}
 		}
 	}
 
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
-	if len(items) == 0 { return }
+	if len(items) == 0 && len(deferredAbsolutes) == 0 {
+		return
+	}
 
 	mainSize := cw
 	if !isRow { mainSize = ch }
@@ -115,6 +129,17 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state)
 	c.applyPositions(items, box, isRow, isReverse, false, state)
+
+	// Lay out absolute-positioned children against this flex container as
+	// their containing block (CSS-FLEXBOX §5.1). Deferred to after items so
+	// the container's content box is final.
+	if len(deferredAbsolutes) > 0 {
+		root := stateRootForBox(box)
+		for _, ab := range deferredAbsolutes {
+			cb := containingBlockForAbsolute(ab, root)
+			layoutAbsolute(ab, cb, root, state)
+		}
+	}
 
 	// Compute auto container height from children.
 	// Preserve any height already set by parent formatting context (e.g. grid row height).
