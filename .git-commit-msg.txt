@@ -1,13 +1,27 @@
-fix: flex intrinsic width for svg/img replaced elements
+fix: transparent borders must not paint
 
-Flex items containing a 12px svg icon (width attribute, no CSS width)
-measured 0 from their empty children — .obtn buttons sized ~3px under
-content (38px vs Edge 53px), content overflowed into neighbors, and the
-space-between send-btn was shoved 16px right past the input border.
+User report: elements with no visible border were drawing one — every
+toolbar icon button (.tb-btn, .rp-btn) uses `border: 1px solid
+transparent` and got a solid black outline.
 
-intrinsicContentWidth now reads the width attribute for svg/img elements.
-Verified vs Edge on the real companion frontend: obtn gap 2px restored,
-send-btn at x=965 (was 981, overflowing by 3px), shield green-ink 6 vs
-Edge 7, diff send-btn region 1291->348.
+Root cause: BorderColor(side) treated a zero-value color (transparent)
+as "unset" and fell back to currentColor (black), so explicitly
+transparent borders painted as black. CSS distinguishes the two:
+`border: 1px solid transparent` stays invisible (occupies layout space
+only), while a border with NO color keyword falls back to currentColor.
 
-Tests: TestFlexGapBetweenItems, TestFlexObtnEstimates. GEO 13/13.
+Fix:
+- parseBorderShorthand now returns colorSet (whether a color keyword was
+  present, including transparent).
+- NonInheritedData gains Border{Top,Right,Bottom,Left}ColorSet; the
+  border/border-side shorthands record it.
+- BorderColor(side) falls back to currentColor ONLY when the color was
+  not set; an explicit transparent stays A=0 so painters skip it.
+- painter.go rounded-rect fast path additionally guards A>0.
+
+Verified vs Edge on the real companion frontend: pixel diff
+28823->27992 (-831), titlebar band 1246->946, toolbar band 1904->1608,
+rp-header buttons 3813->3513. GEO 13/13, full go test green.
+
+Test: TestTransparentBorderColor (transparent keeps A=0, unset falls
+back to currentColor).

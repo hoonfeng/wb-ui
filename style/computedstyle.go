@@ -272,9 +272,24 @@ func (c *ComputedStyle) BorderColor(side string) Color {
 	case "left":
 		col = c.BorderLeftColor
 	}
-	// Zero-value (transparent) border color → currentcolor fallback.
+	// Zero-value (transparent) border color → currentcolor fallback, UNLESS
+	// the color was explicitly set (e.g. `border: 1px solid transparent`),
+	// in which case the transparent alpha is preserved so painters skip it.
 	if col.A == 0 && col.R == 0 && col.G == 0 && col.B == 0 {
-		return c.Color
+		var set bool
+		switch side {
+		case "top":
+			set = c.BorderTopColorSet
+		case "right":
+			set = c.BorderRightColorSet
+		case "bottom":
+			set = c.BorderBottomColorSet
+		case "left":
+			set = c.BorderLeftColorSet
+		}
+		if !set {
+			return c.Color
+		}
 	}
 	return col
 }

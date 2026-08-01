@@ -599,7 +599,7 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.PaddingLeft = l
 		}
 	case "border":
-		w, s, c, ok := parseBorderShorthand(valueString)
+		w, s, c, cset, ok := parseBorderShorthand(valueString)
 		if ok {
 			cs.BorderTopWidth = w
 			cs.BorderRightWidth = w
@@ -613,30 +613,38 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BorderRightColor = c
 			cs.BorderBottomColor = c
 			cs.BorderLeftColor = c
+			cs.BorderTopColorSet = cset
+			cs.BorderRightColorSet = cset
+			cs.BorderBottomColorSet = cset
+			cs.BorderLeftColorSet = cset
 		}
 	case "border-top":
-		if w, s, c, ok := parseBorderShorthand(valueString); ok {
+		if w, s, c, cset, ok := parseBorderShorthand(valueString); ok {
 			cs.BorderTopWidth = w
 			cs.BorderTopStyle = s
 			cs.BorderTopColor = c
+			cs.BorderTopColorSet = cset
 		}
 	case "border-right":
-		if w, s, c, ok := parseBorderShorthand(valueString); ok {
+		if w, s, c, cset, ok := parseBorderShorthand(valueString); ok {
 			cs.BorderRightWidth = w
 			cs.BorderRightStyle = s
 			cs.BorderRightColor = c
+			cs.BorderRightColorSet = cset
 		}
 	case "border-bottom":
-		if w, s, c, ok := parseBorderShorthand(valueString); ok {
+		if w, s, c, cset, ok := parseBorderShorthand(valueString); ok {
 			cs.BorderBottomWidth = w
 			cs.BorderBottomStyle = s
 			cs.BorderBottomColor = c
+			cs.BorderBottomColorSet = cset
 		}
 	case "border-left":
-		if w, s, c, ok := parseBorderShorthand(valueString); ok {
+		if w, s, c, cset, ok := parseBorderShorthand(valueString); ok {
 			cs.BorderLeftWidth = w
 			cs.BorderLeftStyle = s
 			cs.BorderLeftColor = c
+			cs.BorderLeftColorSet = cset
 		}
 	case "border-top-width":
 		if l, ok := parseLength(valueString); ok {
@@ -1358,7 +1366,7 @@ func parseBgLayerPosSize(parts []string) (pos, size string) {
 // parseBorderShorthand parses a border shorthand value like "1px solid #e5e7eb" and
 // returns (width, style, color, ok). Components may appear in any order; missing
 // components are left as their zero value.
-func parseBorderShorthand(s string) (width Length, style string, color Color, ok bool) {
+func parseBorderShorthand(s string) (width Length, style string, color Color, colorSet bool, ok bool) {
 	parts := splitShorthandValue(s)
 	if len(parts) == 0 {
 		return
@@ -1370,9 +1378,10 @@ func parseBorderShorthand(s string) (width Length, style string, color Color, ok
 			width = l
 			continue
 		}
-		// Try color (e.g. "#e5e7eb", "red", "rgb(...)").
+		// Try color (e.g. "#e5e7eb", "red", "rgb(...)", "transparent").
 		if c, cOK := parseColor(p); cOK {
 			color = c
+			colorSet = true
 			continue
 		}
 		// currentcolor resolves to the element's color property at paint time;
@@ -1764,35 +1773,40 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.RowGap = l
 				cs.ColumnGap = l
 			}
-		case "transition":
-			cs.Transition = resolvedStr
 		case "border":
-			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {
 				cs.BorderTopWidth, cs.BorderRightWidth = w, w
 				cs.BorderBottomWidth, cs.BorderLeftWidth = w, w
 				cs.BorderTopStyle, cs.BorderRightStyle = s, s
 				cs.BorderBottomStyle, cs.BorderLeftStyle = s, s
 				cs.BorderTopColor, cs.BorderRightColor = c, c
 				cs.BorderBottomColor, cs.BorderLeftColor = c, c
+				cs.BorderTopColorSet, cs.BorderRightColorSet = cset, cset
+				cs.BorderBottomColorSet, cs.BorderLeftColorSet = cset, cset
 			}
 		case "border-top":
-			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {
 				cs.BorderTopWidth, cs.BorderTopStyle, cs.BorderTopColor = w, s, c
+				cs.BorderTopColorSet = cset
 			}
 		case "border-right":
-			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {
 				cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+				cs.BorderRightColorSet = cset
 			}
 		case "border-bottom":
-			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {
 				cs.BorderBottomWidth, cs.BorderBottomStyle, cs.BorderBottomColor = w, s, c
+				cs.BorderBottomColorSet = cset
 			}
 		case "border-left":
-			if w, s, c, ok := parseBorderShorthand(resolvedStr); ok {
+			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {
 				cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+				cs.BorderLeftColorSet = cset
 			}
 		case "border-top-color":
 			if c, ok := parseColor(resolvedStr); ok {
+
 				cs.BorderTopColor = c
 			}
 		case "border-right-color":

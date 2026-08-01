@@ -109,7 +109,15 @@ type NonInheritedData struct {
 	BorderRightStyle  string
 	BorderBottomStyle string
 	BorderLeftStyle   string
-	BoxSizing         string
+	// Border*ColorSet records whether the side color was EXPLICITLY set
+	// (including `transparent`). CSS semantics: an unset border color falls
+	// back to currentColor, but an explicitly transparent one must stay
+	// invisible — painters check alpha before drawing.
+	BorderTopColorSet    bool
+	BorderRightColorSet  bool
+	BorderBottomColorSet bool
+	BorderLeftColorSet   bool
+	BoxSizing            string
 
 	// Border collapse mode (table only): separate (default) or collapse.
 	BorderCollapse BorderCollapseType

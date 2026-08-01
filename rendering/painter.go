@@ -330,10 +330,15 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	// is by far the most common, so it is handled directly; unequal sides
 	// fall back to the per-side FillRect path below.
 	btC, brC, bbC, blC := st.BorderColor("top"), st.BorderColor("right"), st.BorderColor("bottom"), st.BorderColor("left")
+	// Transparent borders (e.g. `border: 1px solid transparent` on toolbars
+	// and icon buttons) must not be painted — they occupy layout space but
+	// stay invisible. The rounded-rect fast path must skip them too, just
+	// like paintBorderSide's A==0 guard.
 	if r := lengthValue(st.BorderRadius); r > 0 &&
 		topW == rightW && rightW == bottomW && bottomW == leftW &&
 		st.BorderTopStyle != "none" && st.BorderRightStyle != "none" &&
 		st.BorderBottomStyle != "none" && st.BorderLeftStyle != "none" &&
+		btC.A > 0 && brC.A > 0 && bbC.A > 0 && blC.A > 0 &&
 		colorsEqual(btC, brC) &&
 		colorsEqual(brC, bbC) &&
 		colorsEqual(bbC, blC) {
