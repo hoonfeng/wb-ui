@@ -270,7 +270,26 @@ func (s *svgEllipse) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		canvas.FillCircle(s.cx, s.cy, r, fill)
 	}
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 {
-		canvas.StrokeCircle(s.cx, s.cy, r, ctx.strokeWidth, ctx.stroke)
+		if len(ctx.dashArray) > 0 {
+			// stroke-dasharray on a circle (e.g. a progress ring): sample the
+			// outline and draw dashes with a cumulative arc-length offset so
+			// the dash pattern is continuous around the whole circle.
+			const segs = 96
+			per := 2 * math.Pi * r / segs
+			off := 0.0
+			for i := 0; i < segs; i++ {
+				a1 := 2 * math.Pi * float64(i) / segs
+				a2 := 2 * math.Pi * float64(i+1) / segs
+				x1 := s.cx + r*math.Cos(a1)
+				y1 := s.cy + r*math.Sin(a1)
+				x2 := s.cx + r*math.Cos(a2)
+				y2 := s.cy + r*math.Sin(a2)
+				dashLine(canvas, x1, y1, x2, y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, off)
+				off += per
+			}
+		} else {
+			canvas.StrokeCircle(s.cx, s.cy, r, ctx.strokeWidth, ctx.stroke)
+		}
 	}
 }
 
@@ -365,6 +384,24 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				}
 				pts = append(pts, graphics.Point{X: x, Y: y})
 				curX, curY = x, y
+			}
+		case 'H', 'h': // horizontal line (absolute / relative)
+			if len(args) >= 1 {
+				x := args[0]
+				if cmd.kind == 'h' {
+					x += curX
+				}
+				pts = append(pts, graphics.Point{X: x, Y: curY})
+				curX = x
+			}
+		case 'V', 'v': // vertical line (absolute / relative)
+			if len(args) >= 1 {
+				y := args[0]
+				if cmd.kind == 'v' {
+					y += curY
+				}
+				pts = append(pts, graphics.Point{X: curX, Y: y})
+				curY = y
 			}
 		case 'C', 'c': // cubic bezier: x1 y1 x2 y2 x y
 			if len(args) >= 6 {

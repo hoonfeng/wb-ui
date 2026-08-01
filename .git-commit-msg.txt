@@ -1,35 +1,30 @@
-fix: background shorthand reset + flex-row intrinsic + Edge pixel probe
+fix: flex column justify re-center + SVG path H/V + circle dash
 
-Continuing the desktop Vue-app probe (gou-ide/dev/desktop_probe), built a
-full-pixel Edge headless comparison: serve dist over local HTTP (ES modules
-are blocked on file://), screenshot via Edge headless with --virtual-time-budget,
-render the same page through wb-ui's jsc path, and diff the two 1280x800
-images. Initial diff was 98.8% (Edge blank due to CORS), then 4.0%, now 2.8%.
+desktop_probe (welcome_geo / icon_cmp / svg_ring / chat_region) located
+three real rendering defects reported by the user:
 
-Root causes found and fixed:
+1. Editor-area text overlap (welcome page): flex-column with
+   justify-content:center re-centered EVERY auto-height item to
+   cy+(ch-bh)/2 after child layout — collapsing all children onto the
+   single container-center position (logo/text/sub all at y≈200; in the
+   desktop app welcome-logo 261 / welcome-text 333 / welcome-sub 365 all
+   overlapped in a 64px band). Fixed: remove per-item main-axis
+   re-centering; for auto-height containers re-center / flex-end the whole
+   group ONCE after the loop (single shift keeps stacked positions).
+   welcome children now stack correctly (261 → 333 → 365 with 8px gap).
 
-1. background shorthand did not reset all sub-properties: `background: none`
-   cleared background-image but LEFT background-color at the UA button face
-   (#f0f0f0), so Vue buttons styled with `background: none` painted the light
-   UA face instead of the transparent activity bar. CSS Backgrounds-3 resets
-   every sub-property to its initial value; a value without a color resets
-   background-color to transparent. (desktop buttons now match Edge; pixel
-   diff 4.0% -> 2.8%.)
+2. SVG path H/h (horizontal) and V/v (vertical) line commands were not
+   parsed — paths using them (e.g. the lucide folder icon M22 19H4V5h5l2
+   3h9z) drew only stray arcs: the activity-bar icon body was missing
+   (85 ink px vs Edge's 218). Added H/h/V/v cases; first icon now draws
+   the full folder outline (123 ink px, structure matches Edge).
 
-2. intrinsicContentHeight regression from the previous round: the block-sum
-   heuristic also summed children of FLEX ROW containers (which size by
-   max-child on the cross axis), inflating the chat-input-area to 396px and
-   shifting rp-body down 69px. Summing is now restricted to true block
-   (non-flex/grid) containers; flex/grid containers keep max-child height.
-   (chat-input-area back to 196px, rp-body at y=67.)
+3. SVG circle/ellipse stroke-dasharray was ignored — progress rings drew
+   a full circle instead of the dash pattern. svgEllipse.paint now samples
+   the outline (96 segments) and draws dashes with cumulative arc-length
+   offset, matching path/line dash behavior.
 
-Probe infrastructure added: dev/static_probe/desc_test.html + desc_debug.go
-(render-pipeline background debug via WB_PAINT_DEBUG), gou-ide
-dev/desktop_probe/{edge_compare,region_diff,pxdump,pxread,btnbg,styles_dump,
-jsstyle,probe_vue_style,overflow,svg,icons}.go — reusable for future rounds.
+Regression tests: TestFlexColumnCenterGap (3 stacked children, 8px gaps),
+TestSVGPathHVCmds (M/H/V/h/l/z all parsed).
 
-Regression tests: TestBackgroundShorthandResetsColor / KeepsColor / Gradient
-(style), TestFlexColumnIntrinsicChildHeight / TestBlockIntrinsicSum /
-TestFlexRowChildHeightPinned (layout).
-
-Full go test green; GEO 13/13.
+Full go test green; GEO 13/13 (17s).

@@ -712,8 +712,6 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
-
-
 			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 
 			// Propagate auto cross-size (width) from children.
@@ -733,24 +731,38 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				shiftBoxAndDescendants(it.box, 0, delta, state)
 			}
 
-			// Propagate auto main-size (height) from children.
-			// For column flex, main axis = Y. justify-content:center/flex-end
-			// may need re-centering after child layout determines actual height.
-			if heightIsAutoForBox(it.box) {
-				oldTop := g.Top()
-				bh2 := g.BorderBoxHeight()
-				newMain := cy
-				switch justify {
-				case "center":
-					newMain = cy + (ch-bh2)/2
-				case "flex-end":
-					newMain = cy + ch - bh2
-				default:
-					newMain = oldTop
-				}
-				delta2 := newMain - oldTop
-				if delta2 != 0 {
-					shiftBoxAndDescendants(it.box, delta2, 0, state)
+			// NOTE: no per-item re-centering on the main axis here. The old
+			// code re-centered EVERY auto-height item to cy+(ch-bh)/2 when
+			// justify-content:center — collapsing all children to the single
+			// container-center position (the welcome-page text overlap bug).
+			// Group re-centering for auto-height containers happens once
+			// after the loop below.
+		}
+	}
+
+	// Column flex + auto container height: justify-content was applied against
+	// the ESTIMATED container height at the top of applyPositions. After child
+	// layout determines real heights, re-center / flex-end the whole group
+	// (single shift, not per-item) so items keep their stacked positions.
+	if !isRow && heightIsAutoForBox(container) && justify != "flex-start" && len(items) > 0 {
+		g0 := state.GeometryForBox(items[0].box)
+		gLast := state.GeometryForBox(items[len(items)-1].box)
+		groupTop := g0.Top()
+		groupBottom := gLast.Top() + gLast.BorderBoxHeight()
+		groupH := groupBottom - groupTop
+		if groupH > 0 {
+			var shift float64
+			switch justify {
+			case "center":
+				shift = cy + (ch-groupH)/2 - groupTop
+			case "flex-end":
+				shift = cy + ch - groupH - groupTop
+			default:
+				shift = 0
+			}
+			if shift != 0 {
+				for _, it := range items {
+					shiftBoxAndDescendants(it.box, shift, 0, state)
 				}
 			}
 		}
