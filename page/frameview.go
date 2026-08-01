@@ -250,6 +250,16 @@ func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 			return
 		}
 		if box := asRenderBox(o); box != nil {
+			// Ignore zero-size (ghost) boxes: an empty title-right or a
+			// collapsed margin-only box has no paintable area and must not
+			// inflate the frame content size (title-right right=1286 while
+			// being 0px tall was forcing a horizontal scrollbar).
+			if box.Height() <= 0 || box.Width() <= 0 {
+				for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+					walk(c)
+				}
+				return
+			}
 			right := int(box.AbsoluteX() + box.Width())
 			bottom := int(box.AbsoluteY() + box.Height())
 			if right > maxX {

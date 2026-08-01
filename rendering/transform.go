@@ -134,10 +134,23 @@ func applyTransformOps(canvas *graphics.Canvas, transform string) bool {
 				applied = true
 			}
 		case "rotate":
-			deg := parseAngle(args)
-			if deg != 0 {
-				canvas.Rotate(deg)
-				applied = true
+			vals := splitSpaceComma(args)
+			if len(vals) >= 1 {
+				deg := parseAngle(vals[0])
+				if deg != 0 {
+					if len(vals) >= 3 {
+						// rotate(deg cx cy): rotation about point (cx,cy),
+						// i.e. translate(cx,cy) rotate(deg) translate(-cx,-cy).
+						cx := parseLength(vals[1])
+						cy := parseLength(vals[2])
+						canvas.Translate(cx, cy)
+						canvas.Rotate(deg)
+						canvas.Translate(-cx, -cy)
+					} else {
+						canvas.Rotate(deg)
+					}
+					applied = true
+				}
 			}
 		case "rotatex":
 			// rotateX is a 3D transform; in our 2D canvas we

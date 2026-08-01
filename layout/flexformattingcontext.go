@@ -707,6 +707,20 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
+			// The flex-resolved main size is authoritative: a child's own
+			// layout must not override it with its content size (e.g. a
+			// flex:1 project-section whose tall child balloons it past the
+			// flex container — this used to overflow the sidebar bottom by
+			// ~52px and inflate the frame content size to 829px).
+			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
+				ms := it.finalMainSize
+				if isBorderBox(it.box) {
+					hp := g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+					ms = math.Max(0, ms-hp)
+				}
+				g.SetContentWidth(ms)
+			}
+
 			// Post-layout: inline content (IFC) may have expanded the content
 			// width. Adjust mainPos for the next sibling accordingly.
 			if isRow {
@@ -766,6 +780,18 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
+
+			// Restore the flex-resolved main size (height for column flex)
+			// after child layout so a tall child cannot balloon the item
+			// past the flex container (see row branch above).
+			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
+				ms := it.finalMainSize
+				if isBorderBox(it.box) {
+					vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
+					ms = math.Max(0, ms-vp)
+				}
+				g.SetContentHeight(ms)
+			}
 
 			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
 

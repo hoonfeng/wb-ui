@@ -228,7 +228,14 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		} else if cbHeight > 0 && childNeedsHeightConstraintForBox(childEb) {
 			remaining := cbHeight - (cursor - g.ContentBoxTop())
 			if remaining > 0 {
-				ch.SetContentHeight(remaining)
+				// The child's border-box fills the remaining parent content
+				// height. `remaining` is a border-box target, so the content
+				// height must subtract the child's own padding+border —
+				// regardless of box-sizing. Previously the border-box branch
+				// set the content height to `remaining` directly, making the
+				// border-box = remaining + padding and overflowing the parent
+				// (proj-empty ballooned 600.7 → 648.7, sidebar bottom 829px).
+				ch.SetContentHeight(math.Max(0, remaining-border.Vertical()-padding.Vertical()))
 			}
 		}
 

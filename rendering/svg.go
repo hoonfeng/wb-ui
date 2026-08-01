@@ -304,7 +304,26 @@ func (s *svgCircle) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		canvas.FillCircle(s.cx, s.cy, s.r, fill)
 	}
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 {
-		canvas.StrokeCircle(s.cx, s.cy, s.r, ctx.strokeWidth, ctx.stroke)
+		if len(ctx.dashArray) > 0 {
+			// stroke-dasharray on a circle (e.g. a progress ring): sample the
+			// outline and draw dashes with a cumulative arc-length offset so
+			// the dash pattern is continuous around the whole circle.
+			const segs = 96
+			per := 2 * math.Pi * s.r / segs
+			off := 0.0
+			for i := 0; i < segs; i++ {
+				a1 := 2 * math.Pi * float64(i) / segs
+				a2 := 2 * math.Pi * float64(i+1) / segs
+				x1 := s.cx + s.r*math.Cos(a1)
+				y1 := s.cy + s.r*math.Sin(a1)
+				x2 := s.cx + s.r*math.Cos(a2)
+				y2 := s.cy + s.r*math.Sin(a2)
+				dashLine(canvas, x1, y1, x2, y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, off, ctx.lineCap)
+				off += per
+			}
+		} else {
+			canvas.StrokeCircle(s.cx, s.cy, s.r, ctx.strokeWidth, ctx.stroke)
+		}
 	}
 }
 
@@ -1404,39 +1423,64 @@ func dashLine(canvas *graphics.Canvas, x1, y1, x2, y2, width float64, col graphi
 		return
 	}
 	ux, uy := dx/L, dy/L
-	drawn := math.Mod(offset, totalDashes(dashes))
-	if drawn < 0 {
-		drawn += totalDashes(dashes)
+	total := totalDashes(dashes)
+	// phase is the offset within the current on/off pattern element at the
+	// start of THIS line segment (a short arc sample). We walk the line
+	// position pos∈[0,L] in lockstep with the dash pattern, painting the
+	// on-intervals. This correctly handles segments whose start phase lies
+	// beyond the segment length (previously such segments were skipped even
+	// when the phase was inside an on-interval, breaking progress rings).
+	phase := math.Mod(offset, total)
+	if phase < 0 {
+		phase += total
 	}
-	on := true
 	i := 0
-	// Advance to the correct phase: find which pattern index `drawn` falls in.
+	// Advance to the pattern element containing `phase`.
 	var acc float64
 	for i < len(dashes) {
-		if acc+dashes[i] > drawn {
-			on = (i%2 == 0)
-			drawn -= acc
+		if acc+dashes[i] > phase {
+			phase -= acc
 			break
 		}
 		acc += dashes[i]
 		i++
 	}
-	for drawn < L {
+	if i >= len(dashes) {
+		i = len(dashes) - 1
+		phase = 0
+	}
+	pos := 0.0
+	for pos < L {
 		seg := dashes[i%len(dashes)]
 		if seg <= 0 {
 			seg = 0.001
 		}
-		end := math.Min(drawn+seg, L)
-		if on {
-			canvas.StrokeLine(x1+ux*drawn, y1+uy*drawn, x1+ux*end, y1+uy*end, width, col)
+		remain := seg - phase
+		if remain <= 0 {
+			// Phase sits exactly at the pattern boundary: move to the next
+			// element (toggling on/off).
+			phase = 0
+			i++
+			continue
+		}
+		lineRemain := L - pos
+		end := remain
+		if end > lineRemain {
+			end = lineRemain
+		}
+		if i%2 == 0 { // on-interval
+			canvas.StrokeLine(x1+ux*pos, y1+uy*pos, x1+ux*(pos+end), y1+uy*(pos+end), width, col)
 			if cap == "round" {
-				roundCap(x1+ux*drawn, y1+uy*drawn)
-				roundCap(x1+ux*end, y1+uy*end)
+				roundCap(x1+ux*pos, y1+uy*pos)
+				roundCap(x1+ux*(pos+end), y1+uy*(pos+end))
 			}
 		}
-		drawn = end
-		on = !on
-		i++
+		pos += end
+		phase += end
+		if phase >= seg {
+			phase = 0
+			i++
+		}
 	}
 }
 

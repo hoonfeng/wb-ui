@@ -33,8 +33,9 @@ type gridTrack struct {
 }
 
 type gridTrackState struct {
-	spec gridTrack
-	size float64
+	spec       gridTrack
+	size       float64
+	maxContent float64 // intrinsic max-content contribution (column tracks)
 }
 
 type GridFormattingContext struct {
@@ -577,7 +578,22 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 				} else {
 					// Intrinsic: text content height (row) or width (col).
 					if isCol {
-						content = gridIntrinsicTextWidth(cb, cfs)
+						// Auto tracks use MIN-content as their base (CSS Grid
+						// §12.4: fr maximizes first, auto grows to max-content
+						// only with remaining space). Using max-content here
+						// let the auto right-panel consume 855px and crushed
+						// the 1fr main column to 98px.
+						content = gridIntrinsicMinTextWidth(cb, cfs)
+						// Remember the max-content width so Step 4 can grow
+						// this track toward it without overshooting.
+						mc := gridIntrinsicTextWidth(cb, cfs) + hp
+						if mc > 0 {
+							for i := sp.start; i < sp.end; i++ {
+								if mc/float64(sp.count) > states[i].maxContent {
+									states[i].maxContent = mc / float64(sp.count)
+								}
+							}
+						}
 					} else {
 						lh := fontLineGap(cb)
 						if lh <= 0 {
@@ -662,6 +678,47 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 			}
 		}
 	}
+
+	// Step 4: grow auto/min/max COLUMN tracks toward max-content with any
+	// space that remains after fr distribution (CSS Grid §12.4). Without this
+	// the auto right-panel would be stuck at its min-content (a few words)
+	// while the 1fr main column absorbed all remaining width. Row tracks are
+	// excluded: their height is content/stretch driven and sharing leftover
+	// space equally would inflate every implicit row. Growth is capped at the
+	// recorded max-content so empty auto tracks stay 0.
+	if rem > 0 && isCol {
+		var grow []int
+		for i := range states {
+			if states[i].spec.typ != gridTrackFixed && states[i].spec.typ != gridTrackFlex {
+				grow = append(grow, i)
+			}
+		}
+		if len(grow) > 0 {
+			// Distribute greedily: grow each track up to its max-content,
+			// then hand the leftover to the next track.
+			leftover := rem
+			for len(grow) > 0 && leftover > 0 {
+				share := leftover / float64(len(grow))
+				next := grow[:0]
+				for _, idx := range grow {
+					cap := states[idx].maxContent - states[idx].size
+					if cap <= 0 {
+						continue
+					}
+					add := share
+					if add > cap {
+						add = cap
+					}
+					states[idx].size += add
+					leftover -= add
+					if states[idx].size < states[idx].maxContent {
+						next = append(next, idx)
+					}
+				}
+				grow = next
+			}
+		}
+	}
 }
 
 func gridIntrinsicTextWidth(box *ElementBox, fs float64) float64 {
@@ -678,6 +735,31 @@ func gridIntrinsicTextWidth(box *ElementBox, fs float64) float64 {
 	}
 	walk(box)
 	return total
+}
+
+// gridIntrinsicMinTextWidth returns the min-content contribution: the widest
+// single word / unbreakable token. CSS Grid sizes auto tracks from min-content
+// first, then grows them toward max-content with leftover space. Summing all
+// text (max-content) as the base made an auto grid column balloon to its full
+// unwrapped width and crush sibling fr columns.
+func gridIntrinsicMinTextWidth(box *ElementBox, fs float64) float64 {
+	maxW := 0.0
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, c := range b.Children() {
+			if itb, ok := c.(*InlineTextBox); ok {
+				for _, w := range strings.Fields(itb.Text()) {
+					if mw := measureText(box, w); mw > maxW {
+						maxW = mw
+					}
+				}
+			} else if eb, ok := c.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(box)
+	return maxW
 }
 
 // ── Track positions ──
