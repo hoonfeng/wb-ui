@@ -644,10 +644,19 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 		}
 		// Auto main-axis margin: absorb remaining free space (CSS-FLEXBOX §9.5).
+		// The remaining space is the container main size minus what earlier
+		// siblings already occupied (mainPos-cx, which includes gaps) minus
+		// this item's own main size — using `cw-totalMain` double-counted the
+		// gaps and pushed margin-left:auto items past the content edge
+		// (conv-stats-total right=1284 > sidebar edge 1280, clipping text).
 		if cs != nil && isRow && cs.MarginLeft.Unit == "auto" {
-			if rem := cw - totalMain; rem > 0 { mainPos += rem }
+			if rem := cw - (mainPos - cx) - it.finalMainSize; rem > 0 {
+				mainPos += rem
+			}
 		} else if cs != nil && !isRow && cs.MarginTop.Unit == "auto" {
-			if rem := ch - totalMain; rem > 0 { mainPos += rem }
+			if rem := ch - (mainPos - cy) - it.finalMainSize; rem > 0 {
+				mainPos += rem
+			}
 		}
 
 
@@ -691,13 +700,22 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// When container auto-height (ch=0), defer centering/flex-end
 			// until after child layout so we can use the actual child height.
 			if ch > 0 {
+				// Center/flex-end must not push a child above the container's
+				// content top when the child is TALLER than the container
+				// (auto-height row with a 96px ring in a still-unmeasured
+				// body): a negative (ch-bh)/2 offset lifted the cache-ring
+				// above its title. Clamp the reference to the child size.
+				refH := ch
+				if refH < bh {
+					refH = bh
+				}
 				switch align {
 				case "center":
-					crossAdjusted = crossPos + (ch-bh)/2
+					crossAdjusted = crossPos + (refH-bh)/2
 				case "baseline":
 					crossAdjusted = crossPos + (maxBO - it.baselineOffset)
 				case "flex-end":
-					crossAdjusted = crossPos + ch - bh
+					crossAdjusted = crossPos + refH - bh
 				}
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
@@ -736,13 +754,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				bh2 := g.BorderBoxHeight()
 				newCross := crossPos
 				if ch > 0 {
+					refH := ch
+					if refH < bh2 {
+						refH = bh2
+					}
 					switch align {
 					case "center":
-						newCross = crossPos + (ch-bh2)/2
+						newCross = crossPos + (refH-bh2)/2
 					case "baseline":
 						newCross = crossPos + (maxBO - it.baselineOffset)
 					case "flex-end":
-						newCross = crossPos + ch - bh2
+						newCross = crossPos + refH - bh2
 					}
 				} else {
 					// Container auto-height: center within actual child height.
@@ -799,13 +821,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			oldLeft := g.Left()
 			bw2 := g.BorderBoxWidth()
 			newCross := crossPos
+			refW := cw
+			if refW < bw2 {
+				refW = bw2
+			}
 			switch align {
 			case "center":
-				newCross = crossPos + (cw-bw2)/2
+				newCross = crossPos + (refW-bw2)/2
 			case "baseline":
 				newCross = crossPos + (maxBO - it.baselineOffset)
 			case "flex-end":
-				newCross = crossPos + cw - bw2
+				newCross = crossPos + refW - bw2
 			}
 			delta := newCross - oldLeft
 			if delta != 0 {
