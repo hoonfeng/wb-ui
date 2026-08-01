@@ -1171,14 +1171,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 						h.hysteresisMet = true
 					}
-					// Update the cursor-move selection end point.
-					// The anchor (sel start) stays at the mouse-down point.
-					if rendering.FocusedFormControlSel != nil &&
-						rendering.FocusedFormControlSel.Active &&
-						h.imeFocusedEl != nil {
-						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
-						rendering.FocusedFormControlSel.End = offset
-					}
+					// ★ Do NOT recompute End here from the release point:
+					// the selection range is finalized by the last
+					// mousemove while dragging. Recomputing with the release
+					// coordinates makes the selection jump when the mouse is
+					// released outside the control or after a fast drag
+					// (browsers keep the last drag position on mouseup).
 					// End the drag selection.
 					h.selecting = false
 					h.hysteresisMet = false

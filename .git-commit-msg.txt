@@ -1,34 +1,14 @@
-fix: multi-line textarea caret rows + drag-to-select + selection paint
+fix: keep drag selection End on release (don't recompute from release point)
 
-User reported the textarea caret still lands on the wrong row and text
-selection is missing entirely. Root causes found and fixed:
+User reported: after drag-selecting text, releasing the mouse changed the
+selection. Root cause: the Release branch recomputed FocusedFormControlSel.End
+from the release coordinates. When the mouse is released outside the control
+(or after a fast drag where the last mousemove and the release point differ),
+End jumped to a clamped position instead of staying at the last drag position.
 
-1. Multi-line caret row index ignored CSS line-height. Both
-   calcTextControlOffset (host.go) and paintTextAreaText used font
-   metrics (ascent+descent ≈16px at 13px) as the row height, while the
-   textarea CSS declares line-height:1.5 (19.5px). Clicking row 2+ then
-   computed the wrong row. Both now resolve the CSS line-height
-   (multiplier/px/%) and fall back to font metrics when unset.
+Browsers keep the selection established by the final mousemove on mouseup.
+The Release handler now only finalizes the drag state (selecting=false,
+Active=false) and no longer rewrites End.
 
-2. paintFormControlCaret drew the textarea caret at the box's vertical
-   center with the last-line width. It now computes the row/column of the
-   selection Start (End wins when a selection exists) and draws the caret
-   at that row's baseline, using the same CSS line-height as the text.
-
-3. Drag-to-select never worked: the Press handler never set h.selecting,
-   and EventCursorMove never extended the selection End. Press now arms
-   the drag (anchor = press point, 3px hysteresis), MouseMove extends
-   End while the button is held, and Release finalizes (Active=false) —
-   a plain click (no movement) becomes a caret placement instead of
-   leaking the selecting flag.
-
-4. Multi-line selection was not painted: paintTextAreaText now splits
-   each line into pre/selected/post and draws the highlight rect + white
-   selected text, mirroring the single-line input.
-
-5. Typing over a selection now replaces the selected range instead of
-   inserting after its start.
-
-Verified via caret_probe: clicking rows 1/2/3 of a 3-line textarea
-lands on offsets inside the correct rows (row2 → 24 ∈ [17..35), row3 →
-40 ∈ [35..45)), previously row 2/3 clicks both hit row 1.
+Verified with sim_drag_select: drag to End=22, release 200px below the
+control → fixed keeps 22, old code recomputed to 45 (end of text).
