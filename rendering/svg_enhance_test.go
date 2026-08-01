@@ -140,9 +140,15 @@ func TestSVGFillRuleEvenOdd(t *testing.T) {
 		return pix[off], pix[off+1], pix[off+2]
 	}
 	// An outer arm point must be painted under any fill rule.
-	r, _, _ := at(20, 6)
+	r, _, _ := at(20, 9)
 	if r == 0 {
-		t.Errorf("star outer arm (20,6) not painted")
+		t.Errorf("star arm (20,9) not painted")
+	}
+	// The center pentagon is an evenodd hole. (20,20) sits ON the vertical
+	// edge outer[0]→inner[2], so use (20,23) which is inside the hole.
+	r, _, _ = at(20, 23)
+	if r > 20 {
+		t.Errorf("evenodd star hole (20,23) painted (r=%d), want empty", r)
 	}
 }
 

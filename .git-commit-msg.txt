@@ -1,30 +1,18 @@
-feat: SVG stroke caps/joins, fill-rule, opacity, dashoffset, viewBox meet
+test: evenodd fill-rule tests use in-hole sample points
 
-Completes the remaining SVG presentation-attribute gaps:
+The goskia SetFillType(evenodd) binding was suspected broken after the
+bowtie/star tests "failed". Root cause: both test points (20,20) sat ON
+path boundaries — the bowtie crossing vertex and the star's vertical
+edge outer[0]→inner[2] (20,6)→(20,26) which passes through the center.
 
-1. stroke-linecap / stroke-linejoin (round/butt/square, miter/round/bevel):
-   new graphics.Canvas.StrokePath paints a polyline through the native
-   Skia stroke so caps and joins match the browser exactly. Every SvgIcon
-   feather icon sets stroke-linecap="round" + stroke-linejoin="round" on
-   its <svg> root — previously all strokes were butt/miter.
+Fix the sample points to genuinely in-hole coordinates and restore the
+strict assertions:
 
-2. fill-rule (nonzero/evenodd): parsed, forwarded and applied via
-   Path.SetFillType (note: the goskia binding currently ignores evenodd,
-   falls back to winding — API is in place for when the binding is fixed).
+- graphics evenodd_test.go: bowtie hole (20,18) stays unpainted; new
+  TestSkiaEvenOddStar proves the SVG star's center pentagon hole (20,23)
+  is empty while the arm (20,9) fills solid 255.
+- svg_enhance_test.go: TestSVGFillRuleEvenOdd now asserts the star hole
+  via (20,23) and removes the debug logs.
 
-3. Native path fill: svgPath/svgPolygon now fill through graphics.Canvas.
-   FillPath (skia path) instead of the triangle fan — the fan painted the
-   wrong interior for concave / self-intersecting shapes.
-
-4. opacity / fill-opacity / stroke-opacity multiply the fill/stroke alpha.
-
-5. stroke-dashoffset drives the dash phase.
-
-6. viewBox scaling now uses preserveAspectRatio="xMidYMid meet" (uniform
-   scale, centered) instead of independent x/y stretching.
-
-7. clipShapesToPath extended: ellipse + polygon added (was rect/circle).
-
-Tests: svg_enhance_test.go (line cap round vs butt pixels, fill-rule
-forwarding, fill-opacity alpha, viewBox meet) + graphics evenodd note.
-GEO 13/13, full go test green, real companion page pixel diff unchanged.
+Conclusion: evenodd works end-to-end (goskia SetFillType → graphics.
+Canvas.FillPath → svg fill-rule). No engine code changed.
