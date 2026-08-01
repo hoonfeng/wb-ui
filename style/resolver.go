@@ -455,12 +455,16 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BackgroundColor = c
 		}
 	case "background":
-		// Shorthand: resets background-image (unless the value carries
-		// gradient layers) and extracts background-color. Multiple gradient
-		// layers are joined with commas (first = topmost). Position/size
-		// (e.g. "0 0/70px 70px no-repeat") of the FIRST layer are parsed
-		// into BackgroundPosition/BackgroundSize.
+		// Shorthand: per CSS Backgrounds-3, resets ALL sub-properties to
+		// their initial values, then applies the specified ones. In
+		// particular a value carrying no color (e.g. "background: none")
+		// resets background-color to transparent — otherwise the UA button
+		// face (#f0f0f0 gradient/color) leaks through styled buttons.
+		cs.BackgroundColor = Color{}
 		cs.BackgroundImage = ""
+		cs.BackgroundPosition = ""
+		cs.BackgroundSize = ""
+		cs.BackgroundRepeat = ""
 		var grads []string
 		for _, p := range splitShorthandValue(valueString) {
 			if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") || strings.HasPrefix(p, "url(") {

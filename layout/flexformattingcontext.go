@@ -268,6 +268,12 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 	cs := box.Style()
 	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&
 		(cs.FlexDirection == "column" || cs.FlexDirection == "column-reverse")
+	// Any flex/grid container sizes itself by max-child on the cross axis —
+	// summing their children's heights balloons a flex-row wrapper (e.g. the
+	// chat input bar ballooned to 396px from a 150px textarea). Only true
+	// block containers (non-flex/grid) sum stacked block children.
+	isFlexOrGrid := cs != nil && box.EstablishesFlexFormattingContext() ||
+		(cs != nil && (cs.Display == style.DisplayGrid || cs.Display == style.DisplayInlineGrid))
 
 	total := 0.0
 	maxH := 0.0
@@ -292,7 +298,7 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			if h <= 0 { h = fontLineGap(c) }
 			if isColFlex {
 				total += h
-			} else if !c.IsFloated() {
+			} else if !isFlexOrGrid && !c.IsFloated() {
 				// Block container: block-level children stack vertically, so
 				// their heights sum (a toolbar under a textarea must push the
 				// container taller, not be capped by max(child)).

@@ -131,4 +131,10 @@ func main() {
 	} else {
 		fmt.Println("grid_app OK")
 	}
+	// 3. desc_test.html (descendant selector + background:none)
+	if err := renderPage("dev/static_probe/desc_test.html", 1280, 800, filepath.Join(wd, "desc_test.png")); err != nil {
+		fmt.Fprintln(os.Stderr, "desc_test:", err)
+	} else {
+		fmt.Println("desc_test OK")
+	}
 }

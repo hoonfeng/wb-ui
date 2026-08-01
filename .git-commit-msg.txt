@@ -1,32 +1,35 @@
-fix: flex intrinsic heights + SVG presentation attribute sizing
+fix: background shorthand reset + flex-row intrinsic + Edge pixel probe
 
-Desktop probe (gou-ide/dev/desktop_probe) continued to reveal real-page
-rendering defects in the Vue IDE app:
+Continuing the desktop Vue-app probe (gou-ide/dev/desktop_probe), built a
+full-pixel Edge headless comparison: serve dist over local HTTP (ES modules
+are blocked on file://), screenshot via Edge headless with --virtual-time-budget,
+render the same page through wb-ui's jsc path, and diff the two 1280x800
+images. Initial diff was 98.8% (Edge blank due to CORS), then 4.0%, now 2.8%.
 
-1. flex column intrinsic height: intrinsicContentHeight measured ElementBox
-   children with fontLineGap (line height ≈25px) instead of the child's real
-   height, so the chat-input-area (a flex row containing a 150px textarea)
-   collapsed to 25px and the textarea overflowed. Now explicit child heights
-   win, otherwise the child's own intrinsic height recurses; line gap is a
-   last resort for text-only boxes. (chat-input-area 25 → 160px; viewport
-   overflow 1094 → ~988.)
+Root causes found and fixed:
 
-2. block container intrinsic height: a block with multiple stacked block
-   children reported max(child) instead of the SUM, so a toolbar under a
-   textarea (input-bottom-bar) overflowed the 160px wrapper. Block-level
-   children now sum their heights. (The overflow:hidden conv-sidebar clips
-   its expanded content — matching browsers.)
+1. background shorthand did not reset all sub-properties: `background: none`
+   cleared background-image but LEFT background-color at the UA button face
+   (#f0f0f0), so Vue buttons styled with `background: none` painted the light
+   UA face instead of the transparent activity bar. CSS Backgrounds-3 resets
+   every sub-property to its initial value; a value without a color resets
+   background-color to transparent. (desktop buttons now match Edge; pixel
+   diff 4.0% -> 2.8%.)
 
-3. SVG / replaced-element presentation attributes: <svg width="18"
-   height="18"> never mapped to CSS width/height, so every icon in the Vue
-   app rendered as a 0px-wide sliver (18px tall). resolveStyle now applies
-   the width/height attributes to the computed style when no stylesheet rule
-   declared them (WebKit presentation-attribute semantics), covering both
-   <svg> and <img>. (Icons now render at 12–32px as authored.)
+2. intrinsicContentHeight regression from the previous round: the block-sum
+   heuristic also summed children of FLEX ROW containers (which size by
+   max-child on the cross axis), inflating the chat-input-area to 396px and
+   shifting rp-body down 69px. Summing is now restricted to true block
+   (non-flex/grid) containers; flex/grid containers keep max-child height.
+   (chat-input-area back to 196px, rp-body at y=67.)
 
-Regression tests: TestFlexColumnIntrinsicChildHeight (150px child),
-TestBlockIntrinsicSum (150+35 stacked), TestFlexRowChildHeightPinned
-(tallest-child height), TestSVGPresentationAttributeSize (svg 18×18),
-TestImgPresentationAttributeSize (img 30×20).
+Probe infrastructure added: dev/static_probe/desc_test.html + desc_debug.go
+(render-pipeline background debug via WB_PAINT_DEBUG), gou-ide
+dev/desktop_probe/{edge_compare,region_diff,pxdump,pxread,btnbg,styles_dump,
+jsstyle,probe_vue_style,overflow,svg,icons}.go — reusable for future rounds.
 
-Full go test green; GEO 13/13 (34s).
+Regression tests: TestBackgroundShorthandResetsColor / KeepsColor / Gradient
+(style), TestFlexColumnIntrinsicChildHeight / TestBlockIntrinsicSum /
+TestFlexRowChildHeightPinned (layout).
+
+Full go test green; GEO 13/13.
