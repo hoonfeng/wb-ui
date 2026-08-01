@@ -16,6 +16,9 @@
 package bindings
 
 import (
+	"fmt"
+	"os"
+
 	"wb-ui/dom"
 	"wb-ui/jsc"
 )
@@ -48,10 +51,16 @@ func (l *jsListener) HandleEvent(e dom.Event) {
 	if l.interp == nil || !l.fn.IsFunction() {
 		return
 	}
+	if os.Getenv("WB_EVT_DEBUG") != "" {
+		fmt.Printf("[evt] jsListener.HandleEvent type=%q\n", e.Type())
+	}
 	ev := eventToJS(l.interp, e)
 	// 'this' for a bare function callback is undefined (matching addEventListener
 	// semantics where the callback is invoked as a plain call, not a method).
-	_, _ = l.interp.Call(l.fn, jsc.Undefined(), []jsc.JSValue{ev})
+	_, err := l.interp.Call(l.fn, jsc.Undefined(), []jsc.JSValue{ev})
+	if os.Getenv("WB_EVT_DEBUG") != "" && err != nil {
+		fmt.Printf("[evt] jsListener call error: %v\n", err)
+	}
 }
 
 // makeAddEventListener returns a native JS function that registers a JS callback as a

@@ -1,22 +1,28 @@
-fix: flex gap in justify space + border-box grow padding
+fix: dispatch DOM click on release + multi-line caret placement
 
-Two flex layout bugs found with desktop_probe on the real Vue IDE:
+Comprehensive interaction test (rendering/interaction_test.go) covering
+clicks / checkbox toggling / single + multi-line caret placement exposed
+two engine bugs that made the desktop IDE feel dead:
 
-1. The file-explorer column overflowed its sidebar by 4px, so
-   sidebar-content (overflow:auto) grew a scrollbar that covered the whole
-   sidebar height instead of the file tree. flex:1 items with
-   box-sizing:border-box had their padding excluded from the flex base
-   size, so the grown content size + padding overshot the slot by exactly
-   the padding (project-section 605px in a 601px slot → sidebar content
-   720 > 716). distributeFreeSpace now deducts the grow items' main-axis
-   padding from the distributable free space, so border-box items exactly
-   fill their slot; sidebar no longer scrolls and the spurious scrollbar
-   is gone.
+1. Clicks never reached JS listeners. host.go's handleClick was never
+   called (dead code) and the release path only cleared active state, so
+   Vue @click handlers (registered via addEventListener('click')) never
+   ran — every button/icon/switch did nothing. handleClick is now invoked
+   on mouse-button release and dispatches a bubbling DOM click to the
+   hit-tested element, so addEventListener listeners fire (verified on the
+   real companion frontend: clicking ws-create-btn now opens the
+   workspace dialog).
 
-2. justify-content:center/flex-end on a flex column shifted items too far
-   by half the inter-item gap sum: freeGap = mainSize − Σitems ignored the
-   explicit gap, so welcome (3 items, 2×8px gaps) sat 8px low in the
-   editor. center/flex-end now compute freeGap minus gap×(n−1), aligning
-   items+gaps as one group (welcome-logo y 261.9 → 253.9, exact center).
+2. Multi-line textarea caret landed wrong. calcTextControlOffset used a
+   hardcoded Consolas 14 and ignored the Y axis entirely — clicking line
+   2+ always returned an offset on line 1. The logic is extracted to
+   rendering.CalcFormControlCaretOffset (pure function) which resolves
+   the clicked line from Y, then the column from X with cumulative widths
+   (the column loop was also missing the running-total accumulator, so it
+   always returned end-of-line). The caret now uses the element's
+   computed font/padding, matching the painted text.
 
-GEO 13/13, layout/rendering/page/webkit/graphics/style tests green.
+New tests: TestClickDispatchFiresJSListener, TestCheckboxToggleOnClickClick,
+TestCaretSingleLineInput, TestCaretTextareaMultiLine,
+TestClickBubblesToAncestor. rendering/layout/app/bindings/dom/page/
+webkit/html5 all green.

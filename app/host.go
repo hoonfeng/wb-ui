@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"wb-ui/platform/ime"
 	"wb-ui/platform/window"
 	"wb-ui/rendering"
+	"wb-ui/style"
 	"wb-ui/webkit"
 )
 
@@ -318,57 +320,99 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		return 0
 	}
 	text := focusedElementValue(el)
-	runes := []rune(text)
-	if len(runes) == 0 {
+	if len(text) == 0 {
 		return 0
 	}
 
-	// Find the render box for this element to get its absolute position.
-	elX := h.findFormControlBoxX(el)
-	if elX == 0 {
+	bx, by, bw, _, st := h.findFormControlBox(el)
+	if bx == 0 && bw == 0 {
 		return 0
 	}
-	relX := cssX - elX - 4 // 4px for left padding
 
-	// Use a default font for measurement (same as the rendering package uses).
-	font := graphics.Font{Family: "Consolas", Size: 14, Weight: 400}
-	totalW := 0.0
-	for i, r := range runes {
-		charW := graphics.MeasureText(font, string(r))
-		if relX < totalW+charW/2 {
-			return i
+	// Use the element's computed style font/padding so caret placement
+	// matches the painted text (previously a hardcoded Consolas 14 made
+	// multi-line caret land at the wrong column, and the Y axis was
+	// ignored entirely so clicking line 2+ always hit line 1).
+	fontSize := 14.0
+	family := "Consolas"
+	weight := 400
+	if st != nil {
+		if st.FontSize.Value > 0 && !st.FontSize.IsAuto() {
+			fontSize = st.FontSize.Value
 		}
-		totalW += charW
+		if st.FontFamily != "" {
+			family = st.FontFamily
+		}
+		if w, err := strconv.Atoi(st.FontWeight); err == nil && w >= 600 {
+			weight = 700
+		} else if strings.EqualFold(st.FontWeight, "bold") {
+			weight = 700
+		}
 	}
-	return len(runes)
+	font := graphics.Font{Family: family, Size: fontSize, Weight: weight}
+	ascent := graphics.GlobalFontAscent(font)
+	if ascent <= 0 {
+		ascent = fontSize * 0.8
+	}
+	descent := graphics.GlobalFontDescent(font)
+	if descent < 0 {
+		descent = 0
+	}
+	lineH := ascent + descent
+	if lineH <= 0 {
+		lineH = fontSize * 1.2
+	}
+	padX := 4.0
+	padY := 4.0
+	if st != nil {
+		if v := st.PaddingLeft.Value; v > 0 && !st.PaddingLeft.IsAuto() {
+			padX = v
+		}
+		if v := st.PaddingTop.Value; v > 0 && !st.PaddingTop.IsAuto() {
+			padY = v
+		}
+	}
+
+	return rendering.CalcFormControlCaretOffset(text, el.LocalName() == "textarea",
+		cssX, cssY, bx, by, font, padX, padY, lineH)
 }
 
-// findFormControlBoxX walks the render tree to find the absolute X position
-func (h *Host) findFormControlBoxX(el *dom.Element) float64 {
+// findFormControlBox walks the render tree to find the absolute border-box
+// position/size and computed style of a form-control element.
+func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh float64, st *style.ComputedStyle) {
 	if el == nil || h.wv == nil {
-		return 0
+		return 0, 0, 0, 0, nil
 	}
 	rv := h.wv.RenderView()
-	var foundX float64
-	var walk func(rendering.RenderObject)
-	walk = func(o rendering.RenderObject) {
+	if rv == nil {
+		return 0, 0, 0, 0, nil
+	}
+	var walk func(rendering.RenderObject) bool
+	walk = func(o rendering.RenderObject) bool {
 		if o == nil {
-			return
+			return false
 		}
 		if n := o.Node(); n != nil {
 			if e, ok := n.(*dom.Element); ok && e == el {
 				if box, ok := o.(*rendering.RenderBox); ok {
-					foundX = box.AbsoluteX()
+					bx = box.AbsoluteX()
+					by = box.AbsoluteY()
+					bw = box.Width()
+					bh = box.Height()
+					st = box.Style()
+					return true
 				}
-				return
 			}
 		}
 		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c)
+			if walk(c) {
+				return true
+			}
 		}
+		return false
 	}
 	walk(rendering.RenderObject(rv))
-	return foundX
+	return bx, by, bw, bh, st
 }
 
 // Unfocus clears the IME focus and disables text input on the platform
@@ -1028,6 +1072,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 					}
 				}
+				// ── Dispatch DOM click on release ──
+				// Vue binds @click via addEventListener('click'); the click
+				// must be dispatched here so those handlers actually run.
+				if rv != nil {
+					h.handleClick(rv, ev)
+				}
 				// End scrollbar drag if active.
 				if h.scrollbarDragging {
 					h.scrollbarDragging = false
@@ -1336,8 +1386,9 @@ func (h *Host) updateCaret(rv *rendering.RenderView) {
 
 // handleClick converts the physical-pixel click coordinates to CSS pixels
 // (the render tree's coordinate space), hit-tests the render tree, and
-// dispatches the onclick value: "js:" prefix → EvalJS, otherwise → click
-// handler.
+// dispatches a DOM click event (so JS addEventListener('click') listeners,
+// e.g. Vue @click, run) plus the onclick value: "js:" prefix → EvalJS,
+// otherwise → click handler.
 func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	if rv == nil {
 		return
@@ -1357,6 +1408,12 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	if el == nil {
 		deepest := rendering.HitTest(rv, clickCSSX, clickY, "")
 		prevFocus := rendering.FocusedFormControl
+		// Dispatch a bubbling DOM click so JS listeners (Vue @click,
+		// addEventListener) fire — previously they never ran, so every
+		// button/icon/switch click did nothing.
+		if deepest != nil {
+			deepest.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
+		}
 		if h.clickHandler != nil {
 			h.clickHandler(deepest, "", clickCSSX, clickCSSY)
 		}
@@ -1373,6 +1430,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	}
 	onclickVal := el.GetAttribute("onclick")
 	if onclickVal == "" {
+		el.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
 		if h.clickHandler != nil {
 			h.clickHandler(el, "", clickCSSX, clickCSSY)
 		}
@@ -1387,6 +1445,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		h.wv.RebuildRenderTree()
 		return
 	}
+	el.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
 	if h.clickHandler != nil {
 		h.clickHandler(el, onclickVal, clickCSSX, clickCSSY)
 		h.wv.RebuildRenderTree()
