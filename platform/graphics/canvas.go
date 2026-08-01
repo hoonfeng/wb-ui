@@ -562,6 +562,64 @@ func (c *Canvas) StrokeLine(x0, y0, x1, y1, strokeWidth float64, col Color) {
 	c.invalidatePixels()
 }
 
+// FillPath fills a closed polygon/polyline point list. evenOdd selects the
+// SVG fill-rule: evenodd vs nonzero (winding). Uses the native Skia path
+// fill so concave and self-intersecting paths rasterize correctly (the
+// triangle-fan fallback paints the wrong interior for concave shapes).
+func (c *Canvas) FillPath(pts []Point, col Color, evenOdd bool) {
+	if col.A == 0 || len(pts) < 3 {
+		return
+	}
+	path := skia.NewPath()
+	defer path.Release()
+	path.MoveTo(float32(pts[0].X), float32(pts[0].Y))
+	for i := 1; i < len(pts); i++ {
+		path.LineTo(float32(pts[i].X), float32(pts[i].Y))
+	}
+	path.Close()
+	if evenOdd {
+		path.SetFillType(skia.FillTypeEvenOdd)
+	}
+	c.fillPaint.SetColor(colorToSkia(col))
+	c.canvas.DrawPath(path, c.fillPaint)
+	c.invalidatePixels()
+}
+
+// StrokePath strokes a polyline with the given width, color and SVG
+// stroke-linecap / stroke-linejoin values (butt|round|square, miter|round|
+// bevel). Uses the native Skia stroke so caps and joins match the browser.
+func (c *Canvas) StrokePath(pts []Point, strokeWidth float64, col Color, cap, join string) {
+	if col.A == 0 || strokeWidth <= 0 || len(pts) < 2 {
+		return
+	}
+	path := skia.NewPath()
+	defer path.Release()
+	path.MoveTo(float32(pts[0].X), float32(pts[0].Y))
+	for i := 1; i < len(pts); i++ {
+		path.LineTo(float32(pts[i].X), float32(pts[i].Y))
+	}
+	c.strokePaint.SetColor(colorToSkia(col))
+	c.strokePaint.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		c.strokePaint.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		c.strokePaint.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		c.strokePaint.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		c.strokePaint.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		c.strokePaint.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		c.strokePaint.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+	c.canvas.DrawPath(path, c.strokePaint)
+	c.invalidatePixels()
+}
+
 // FillTriangle fills the triangle defined by three points with the supplied color.
 // Used by the select dropdown arrow painter. The triangle is built as a Skia path
 // (MoveTo + 2x LineTo + Close) and filled.

@@ -1,23 +1,30 @@
-fix: svg intrinsic height + placeholder color match Edge
+feat: SVG stroke caps/joins, fill-rule, opacity, dashoffset, viewBox meet
 
-Continuing the component-positioning sweep on the real companion
-frontend (edge_compare band analysis):
+Completes the remaining SVG presentation-attribute gaps:
 
-1. intrinsicContentHeight now reads the height attribute for svg/img
-   elements (like the width fix for intrinsicContentWidth). A 14px svg
-   icon without CSS height fell back to fontLineGap (~16px), inflating
-   column-flex items and blocks that contain icons.
+1. stroke-linecap / stroke-linejoin (round/butt/square, miter/round/bevel):
+   new graphics.Canvas.StrokePath paints a polyline through the native
+   Skia stroke so caps and joins match the browser exactly. Every SvgIcon
+   feather icon sets stroke-linecap="round" + stroke-linejoin="round" on
+   its <svg> root — previously all strokes were butt/miter.
 
-2. Placeholder text color 0xA0A0A0 → 0x808080 to match Edge's default
-   (#7F7F7F) for <input> and <textarea> placeholder painting.
+2. fill-rule (nonzero/evenodd): parsed, forwarded and applied via
+   Path.SetFillType (note: the goskia binding currently ignores evenodd,
+   falls back to winding — API is in place for when the binding is fixed).
 
-Scan conclusions (no engine bugs — data/state differences):
-- chat-input band: phase-bar (v-if element renders 40px without JS),
-  obtn label width (font metrics), 1-2px divider lines
-- conv-sidebar: cache-ring dasharray + Vue interpolation without JS
-- sidebar toolbar height: fontLineGap estimate (33 vs Edge 28) — the
-  alternative (intrinsicContentHeight) regresses chat-input 9.6→14.2%,
-  so it stays
-- activity-bar: 1px indicator offset + hover state color
+3. Native path fill: svgPath/svgPolygon now fill through graphics.Canvas.
+   FillPath (skia path) instead of the triangle fan — the fan painted the
+   wrong interior for concave / self-intersecting shapes.
 
-GEO 13/13, full go test green.
+4. opacity / fill-opacity / stroke-opacity multiply the fill/stroke alpha.
+
+5. stroke-dashoffset drives the dash phase.
+
+6. viewBox scaling now uses preserveAspectRatio="xMidYMid meet" (uniform
+   scale, centered) instead of independent x/y stretching.
+
+7. clipShapesToPath extended: ellipse + polygon added (was rect/circle).
+
+Tests: svg_enhance_test.go (line cap round vs butt pixels, fill-rule
+forwarding, fill-opacity alpha, viewBox meet) + graphics evenodd note.
+GEO 13/13, full go test green, real companion page pixel diff unchanged.

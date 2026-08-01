@@ -49,6 +49,11 @@ type svgFilledShape struct {
 	clipID      string
 	transform   string
 	dashArray   []float64
+	lineCap     string
+	lineJoin    string
+	opacity     float64 // element opacity multiplier; 0 = unset (1.0)
+	fillRule    string  // nonzero|evenodd
+	dashOffset  float64 // stroke-dashoffset (dash phase)
 }
 
 func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
@@ -93,8 +98,20 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	c2.fill = s.fill
 	c2.stroke = s.stroke
 	c2.strokeWidth = s.strokeWidth
+	c2.lineCap = s.lineCap
+	c2.lineJoin = s.lineJoin
+	c2.fillRule = s.fillRule
+	if s.opacity > 0 {
+		c2.opacity = s.opacity
+	}
+	// Element opacity multiplies both fill and stroke alpha.
+	if c2.opacity > 0 && c2.opacity < 1 {
+		c2.fill.A = uint8(float64(c2.fill.A) * c2.opacity)
+		c2.stroke.A = uint8(float64(c2.stroke.A) * c2.opacity)
+	}
 	if len(s.dashArray) > 0 {
 		c2.dashArray = s.dashArray
+		c2.dashOffset = s.dashOffset
 	}
 	if s.clipID != "" {
 		if clipShapes, ok := ctx.clips[s.clipID]; ok && len(clipShapes) > 0 {
@@ -122,8 +139,8 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	s.shape.paint(canvas, &c2)
 }
 
-// clipShapesToPath converts SVG clip shapes into a single skia path. Only
-// rect and circle are supported; unsupported shapes contribute nothing.
+// clipShapesToPath converts SVG clip shapes into a single skia path. Supports
+// rect, circle, ellipse and polygon; unsupported shapes contribute nothing.
 func clipShapesToPath(shapes []svgShape) *skia.Path {
 	if len(shapes) == 0 {
 		return nil
@@ -138,7 +155,7 @@ func clipShapesToPath(shapes []svgShape) *skia.Path {
 			path.LineTo(float32(s.x), float32(s.y+s.h))
 			path.Close()
 		case *svgCircle:
-			// Approximate the circle with an octagon (enough for clips).
+			// Approximate the circle with a polygon (enough for clips).
 			const steps = 16
 			for i := 0; i < steps; i++ {
 				a := 2 * math.Pi * float64(i) / steps
@@ -149,6 +166,28 @@ func clipShapesToPath(shapes []svgShape) *skia.Path {
 				} else {
 					path.LineTo(float32(x), float32(y))
 				}
+			}
+			path.Close()
+		case *svgEllipse:
+			const esteps = 24
+			for i := 0; i < esteps; i++ {
+				a := 2 * math.Pi * float64(i) / esteps
+				x := s.cx + s.rx*math.Cos(a)
+				y := s.cy + s.ry*math.Sin(a)
+				if i == 0 {
+					path.MoveTo(float32(x), float32(y))
+				} else {
+					path.LineTo(float32(x), float32(y))
+				}
+			}
+			path.Close()
+		case *svgPolygon:
+			if len(s.points) < 3 {
+				continue
+			}
+			path.MoveTo(float32(s.points[0].X), float32(s.points[0].Y))
+			for i := 1; i < len(s.points); i++ {
+				path.LineTo(float32(s.points[i].X), float32(s.points[i].Y))
 			}
 			path.Close()
 		}
@@ -191,6 +230,10 @@ type svgPaintContext struct {
 	dashArray   []float64               // stroke-dasharray pattern
 	patterns    map[string]*svgPattern  // patterns defined in <defs>
 	markers     map[string]*svgMarker   // markers defined in <defs>
+	lineCap     string                  // butt|round|square (stroke-linecap)
+	lineJoin    string                  // miter|round|bevel (stroke-linejoin)
+	fillRule    string                  // nonzero|evenodd (fill-rule)
+	dashOffset  float64                 // stroke-dashoffset (dash phase)
 }
 
 func defaultSVGContext() *svgPaintContext {
@@ -292,7 +335,7 @@ func (s *svgEllipse) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				y1 := s.cy + r*math.Sin(a1)
 				x2 := s.cx + r*math.Cos(a2)
 				y2 := s.cy + r*math.Sin(a2)
-				dashLine(canvas, x1, y1, x2, y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, off)
+				dashLine(canvas, x1, y1, x2, y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, off, ctx.lineCap)
 				off += per
 			}
 		} else {
@@ -305,7 +348,7 @@ type svgLine struct{ x1, y1, x2, y2 float64 }
 
 func (s *svgLine) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 {
-		dashLine(canvas, s.x1, s.y1, s.x2, s.y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
+		dashLine(canvas, s.x1, s.y1, s.x2, s.y2, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
 	}
 }
 
@@ -322,24 +365,24 @@ func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	fill := ctx.fill
 	if fill.A > 0 && len(s.points) >= 3 {
-		// Triangle fan from points[0].
-		for i := 1; i < len(s.points)-1; i++ {
-			canvas.FillTriangle(s.points[0].X, s.points[0].Y,
-				s.points[i].X, s.points[i].Y,
-				s.points[i+1].X, s.points[i+1].Y, fill)
-		}
+		// Native path fill (handles concave shapes + fill-rule).
+		canvas.FillPath(s.points, fill, ctx.fillRule == "evenodd")
 	}
 	// Stroke the outline (closed for polygon, open for polyline).
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(s.points) >= 2 {
-		segs := len(s.points) - 1
-		closeRing := s.closed
-		if closeRing && len(s.points) >= 3 {
-			segs = len(s.points)
-		}
-		for i := 0; i < segs; i++ {
-			p1 := s.points[i]
-			p2 := s.points[(i+1)%len(s.points)]
-			dashLine(canvas, p1.X, p1.Y, p2.X, p2.Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
+		if len(ctx.dashArray) == 0 {
+			canvas.StrokePath(s.points, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
+		} else {
+			segs := len(s.points) - 1
+			closeRing := s.closed
+			if closeRing && len(s.points) >= 3 {
+				segs = len(s.points)
+			}
+			for i := 0; i < segs; i++ {
+				p1 := s.points[i]
+				p2 := s.points[(i+1)%len(s.points)]
+				dashLine(canvas, p1.X, p1.Y, p2.X, p2.Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
+			}
 		}
 	}
 }
@@ -522,22 +565,25 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			}
 		}
 	}
-	// Triangle fan fill
+	// Fill via a native Skia path so concave / self-intersecting paths (and
+	// fill-rule="evenodd" stars etc.) rasterize like the browser — the old
+	// triangle fan painted the wrong interior for concave shapes.
 	if fill.A > 0 && len(pts) >= 3 {
 		if os.Getenv("WB_SVG_DEBUG") != "" {
-			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x", len(pts), fill.R, fill.G, fill.B)
+			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x rule=%s", len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
 		}
-		for i := 1; i < len(pts)-1; i++ {
-			canvas.FillTriangle(pts[0].X, pts[0].Y, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, fill)
-		}
+		canvas.FillPath(pts, fill, ctx.fillRule == "evenodd")
 	}
-	// Stroke as line segments
+	// Stroke. With a dash pattern we still walk segments (dashLine handles
+	// the on/off phases); solid strokes use the native path stroke so
+	// stroke-linecap / stroke-linejoin match the browser exactly.
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(pts) >= 2 {
-		if os.Getenv("WB_SVG_DEBUG") != "" {
-			log.Printf("[svg] path stroke: pts=%d stroke=#%02x%02x%02x w=%.1f", len(pts), ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth)
-		}
-		for i := 0; i < len(pts)-1; i++ {
-			dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, 0)
+		if len(ctx.dashArray) == 0 {
+			canvas.StrokePath(pts, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
+		} else {
+			for i := 0; i < len(pts)-1; i++ {
+				dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
+			}
 		}
 	} else if os.Getenv("WB_SVG_DEBUG") != "" && len(pts) >= 2 {
 		log.Printf("[svg] path SKIPPED stroke: stroke.A=%d strokeWidth=%.1f pts=%d", ctx.stroke.A, ctx.strokeWidth, len(pts))
@@ -1288,9 +1334,20 @@ func shapeBBox(s svgShape) (x, y, w, h float64) {
 // dashLine strokes the segment (x1,y1)-(x2,y2) with a dash pattern.
 // dashes alternates on/off lengths; offset shifts the pattern (common
 // values like "5 3" or "4,4" are supported; offset usually absent).
-func dashLine(canvas *graphics.Canvas, x1, y1, x2, y2, width float64, col graphics.Color, dashes []float64, offset float64) {
+func dashLine(canvas *graphics.Canvas, x1, y1, x2, y2, width float64, col graphics.Color, dashes []float64, offset float64, cap string) {
+	// roundCap paints a filled circle (diameter = stroke width) at a point so
+	// the line end is rounded — mirrors SVG stroke-linecap:round.
+	roundCap := func(px, py float64) {
+		if cap == "round" {
+			canvas.FillCircle(px, py, width/2, col)
+		}
+	}
 	if len(dashes) == 0 {
 		canvas.StrokeLine(x1, y1, x2, y2, width, col)
+		if cap == "round" {
+			roundCap(x1, y1)
+			roundCap(x2, y2)
+		}
 		return
 	}
 	dx, dy := x2-x1, y2-y1
@@ -1324,6 +1381,10 @@ func dashLine(canvas *graphics.Canvas, x1, y1, x2, y2, width float64, col graphi
 		end := math.Min(drawn+seg, L)
 		if on {
 			canvas.StrokeLine(x1+ux*drawn, y1+uy*drawn, x1+ux*end, y1+uy*end, width, col)
+			if cap == "round" {
+				roundCap(x1+ux*drawn, y1+uy*drawn)
+				roundCap(x1+ux*end, y1+uy*end)
+			}
 		}
 		drawn = end
 		on = !on
@@ -1625,6 +1686,38 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			elCtx.strokeWidth = parseSVGCoord(swStr)
 		}
 
+		// stroke-linecap / stroke-linejoin (attribute or style="").
+		attrOrStyle := func(name string) string {
+			if v, ok := styleMap[name]; ok {
+				return v
+			}
+			return childEl.GetAttribute(name)
+		}
+		elCtx.lineCap = attrOrStyle("stroke-linecap")
+		elCtx.lineJoin = attrOrStyle("stroke-linejoin")
+		elCtx.fillRule = attrOrStyle("fill-rule")
+		// opacity / fill-opacity / stroke-opacity multiply the alpha.
+		if opStr := attrOrStyle("opacity"); opStr != "" {
+			if op, err := strconv.ParseFloat(opStr, 64); err == nil {
+				elCtx.opacity = math.Max(0, math.Min(1, op))
+			}
+		}
+		if fo := attrOrStyle("fill-opacity"); fo != "" {
+			if op, err := strconv.ParseFloat(fo, 64); err == nil {
+				elCtx.fill.A = uint8(float64(elCtx.fill.A) * math.Max(0, math.Min(1, op)))
+			}
+		}
+		if so := attrOrStyle("stroke-opacity"); so != "" {
+			if op, err := strconv.ParseFloat(so, 64); err == nil {
+				elCtx.stroke.A = uint8(float64(elCtx.stroke.A) * math.Max(0, math.Min(1, op)))
+			}
+		}
+		if dos := attrOrStyle("stroke-dashoffset"); dos != "" {
+			if v, err := strconv.ParseFloat(dos, 64); err == nil {
+				elCtx.dashOffset = v
+			}
+		}
+
 		// Handle clip-path="url(#id)"
 		clipStr := childEl.GetAttribute("clip-path")
 		if clipStr == "" {
@@ -1743,6 +1836,11 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 				fill:        elCtx.fill,
 				stroke:      elCtx.stroke,
 				strokeWidth: elCtx.strokeWidth,
+				lineCap:     elCtx.lineCap,
+				lineJoin:    elCtx.lineJoin,
+				opacity:     elCtx.opacity,
+				fillRule:    elCtx.fillRule,
+				dashOffset:  elCtx.dashOffset,
 			}
 			if gradientID := parseURLReference(fillStr); gradientID != "" {
 				// Same url() reference may resolve to a gradient OR a pattern.
@@ -1784,17 +1882,21 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 		return
 	}
 
-	// Apply viewBox transform if present
+	// Apply viewBox transform if present. Uses preserveAspectRatio
+	// "xMidYMid meet" (SVG default): uniform scale that fits inside the
+	// viewport, centered — NOT independent x/y stretching.
 	if doc.hasVB && doc.width > 0 && doc.height > 0 {
 		vb := doc.viewBox
 		vbW := vb[2]
 		vbH := vb[3]
 		if vbW > 0 && vbH > 0 {
-			scaleX := doc.width / vbW
-			scaleY := doc.height / vbH
+			scale := math.Min(doc.width/vbW, doc.height/vbH)
+			dx := (doc.width - vbW*scale) / 2
+			dy := (doc.height - vbH*scale) / 2
 			canvas.Save()
 			canvas.Translate(x, y)
-			canvas.Scale(scaleX, scaleY)
+			canvas.Translate(dx, dy)
+			canvas.Scale(scale, scale)
 			canvas.Translate(-vb[0], -vb[1])
 			defer canvas.Restore()
 
