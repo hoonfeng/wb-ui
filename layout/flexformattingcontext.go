@@ -238,6 +238,19 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 // exceeds whole" discrepancy that causes unwanted line wraps.
 func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	cs := box.Style()
+	// An explicit CSS width is authoritative for the box's own contribution —
+	// otherwise flex items with a fixed width (e.g. a 40px-wide activity-bar
+	// button whose only child is an 18px icon) would shrink to their content
+	// width, overflow the flex container, and misposition the icon.
+	if cs != nil && !cs.Width.IsAuto() {
+		if w, ok := definiteWidth(cs.Width, 0, fontSizeOf(box)); ok && w > 0 {
+			if isBorderBox(box) {
+				return w
+			}
+			_, p, b := computeBoxModel(box, w, fontSizeOf(box))
+			return w + p.Left + p.Right + b.Left + b.Right
+		}
+	}
 	// For row-direction flex containers, the max-content inline size is the SUM
 	// of children (plus gap), matching CSS-FLEXBOX §9.9.2. For block/non-flex
 	// containers it's the max of children.
@@ -414,6 +427,21 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 		return clampSize(v, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
 	}
 
+	// The flex free space subtracts the inter-item gaps (CSS-FLEXBOX §9.7):
+	// free space = container size − Σ flex base sizes − gaps. Missing this
+	// made grow distribute too much (e.g. conv-stats-detail got 137px in a
+	// 129px slot), overflowing the container's right padding and clipping
+	// the cs-val text against the panel edge.
+	gap := 0.0
+	if len(items) > 1 {
+		if p := items[0].box.Parent(); p != nil {
+			if pcs := p.Style(); pcs != nil {
+				gap = flexGap(pcs, isRow, fontSizeOf(items[0].box))
+			}
+		}
+	}
+	gapTotal := gap * float64(len(items)-1)
+
 	for _, it := range items {
 		it.targetSize = it.baseSize
 		it.frozen = it.flexGrow <= 0 && it.flexShrink <= 0
@@ -436,7 +464,7 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 			break
 		}
 
-		freeSpace := containerMainSize - totalUsed
+		freeSpace := containerMainSize - totalUsed - gapTotal
 		if freeSpace > 0 && activeGrow > 0 {
 			for _, it := range items {
 				if it.frozen || it.flexGrow <= 0 {
@@ -444,7 +472,12 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 				}
 				it.targetSize += freeSpace * it.flexGrow / activeGrow
 			}
-		} else if freeSpace < 0 && activeShrink > 0 {
+		} else if freeSpace < 0 && activeShrink > 0 && containerMainSize > 0 {
+			// Auto-sized containers (mainSize 0, e.g. an absolutely-positioned
+			// flex column like cache-ring-label) must NOT shrink their items:
+			// freeSpace = 0 - sum(base) is always negative, so every item was
+			// collapsed to 0 and the container stayed 0-height, stacking the
+			// "0%" and "缓存命中" spans on top of each other.
 			scaledBaseSum := 0.0
 			for _, it := range items {
 				if it.frozen || it.flexShrink <= 0 {

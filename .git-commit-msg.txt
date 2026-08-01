@@ -1,23 +1,26 @@
-fix: flex auto-height center alignment + margin-left:auto overflow
+fix: activity bar width, ring label height, flex gap in free space
 
-Fixes the token panel cache-ring position and right-panel text clipping:
+Three flex layout fixes found with the desktop_probe geometry probes:
 
-1. align-items:center/flex-end on a flex ROW with auto height used the
-   container's still-unmeasured content height (ch) as the centering
-   reference. When a child was TALLER than that (96px cache-ring in a
-   body measured at ~16px), (ch-bh)/2 went negative and lifted the ring
-   ABOVE the panel title (ring top 377.7 < header top 383.9, overlapping
-   the "Token 统计" header). Clamp the reference to the child size so
-   oversized children align to the content top instead of overflowing.
-   Ring now sits at body top + padding (417), body grows to 123.4px.
+1. Activity bar buttons were 40px wide but the intrinsic-content width of
+   the .activity-top flex column measured only the icon (18px) + padding,
+   ignoring the button's explicit width:40. The 40px button then overflowed
+   the 20px column and shifted every icon 12px right (svg x=27 instead of
+   15). intrinsicContentWidth now honors an explicit CSS width before
+   measuring content.
 
-2. margin-left:auto in flex rows computed its free space as
-   `cw - totalMain`, which double-counted the inter-item gaps already
-   accumulated in mainPos, pushing auto-margin items past the content
-   edge: conv-stats-total right=1284 > conv-sidebar right=1280, clipping
-   its text (the "no window margin / text truncated" report). Now the
-   free space is `cw - (mainPos-cx) - finalMainSize`, so auto-margin
-   items end flush at the content edge (right=1272). Frame content width
-   drops to 1280 — no horizontal scrollbar.
+2. cache-ring-label (absolutely-positioned flex column, the "0% / 缓存命中"
+   ring center) had height 0 — its two spans stacked on top of each other.
+   distributeFreeSpace shrank every item because freeSpace = 0 − Σbase is
+   always negative for an auto-sized container (mainSize 0). Shrink is now
+   skipped when containerMainSize <= 0, so the label grows to its content
+   (37.2px) and the percentage sits above the caption.
 
-GEO 13/13, layout/rendering/page/graphics/style/webkit tests green.
+3. Right-panel text was flush against the panel edge: conv-stats-detail
+   (flex:1) grew to 137px in a 129px slot because the flex free space never
+   subtracted the inter-item gap (CSS-FLEXBOX §9.7: free space = container
+   − Σbases − gaps). distributeFreeSpace now subtracts gap×(n−1); detail
+   right edge moves 1280 → 1272, restoring the 8px right padding and the
+   cs-val "总 Token" text margin.
+
+GEO 13/13, layout/rendering/page/graphics/style tests green.
