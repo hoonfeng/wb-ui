@@ -311,9 +311,15 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 // window.console 由 SetupGlobal 设置
 
 	// localStorage / sessionStorage（内存存储，对标浏览器）
+	// 可通过 SetLocalStoragePersist 开启文件持久化（desktop 端重启不丢状态）。
 	store := make(map[string]string)
-	g.Set("localStorage", jsc.ObjectValue(makeStorage(rt, store)))
-	g.Set("sessionStorage", jsc.ObjectValue(makeStorage(rt, store)))
+	if localPersist != nil {
+		for k, v := range localPersist.Load() {
+			store[k] = v
+		}
+	}
+	g.Set("localStorage", jsc.ObjectValue(makeStorage(rt, store, false)))
+	g.Set("sessionStorage", jsc.ObjectValue(makeStorage(rt, store, true)))
 
 	// performance.now — 返回毫秒级高精度时间戳
 	g.Set("performance", jsc.ObjectValue(makePerformance(rt)))
@@ -1653,12 +1659,42 @@ func makeDOMRect(in *jsc.Interpreter, x, y, w, h float64) *jsc.JSObject {
 	return r
 }
 
+// ─── localStorage 文件持久化（可选） ─────────────────────────
+
+// LocalStoragePersist 接口抽象 localStorage 的持久化后端。
+// 设置后，localStorage.setItem/removeItem/clear 会同步落盘；
+// sessionStorage 保持纯内存（对标浏览器会话语义）。
+type LocalStoragePersist interface {
+	// Load 返回启动时已有的全部键值。
+	Load() map[string]string
+	// Save 持久化单个键值（value=空串表示删除）。
+	Save(key, value string)
+}
+
+// localPersist 是当前生效的持久化后端；nil 表示纯内存模式。
+var localPersist LocalStoragePersist
+
+// SetLocalStoragePersist 启用/关闭 localStorage 文件持久化。
+// 应在 RegisterDOMBindings 之前调用（desktop 入口在 LoadHTML 前设置）。
+func SetLocalStoragePersist(p LocalStoragePersist) {
+	localPersist = p
+}
+
 // makeStorage 创建一个 localStorage/sessionStorage 对象。
-func makeStorage(rt *jsc.Interpreter, store map[string]string) *jsc.JSObject {
+func makeStorage(rt *jsc.Interpreter, store map[string]string, session bool) *jsc.JSObject {
 	s := jsc.NewObject(rt.ObjectPrototype())
+	persist := func(key, value string) {
+		if session || localPersist == nil {
+			return
+		}
+		localPersist.Save(key, value)
+	}
 	s.Set("setItem", jsc.FunctionValue(jsc.NewNativeFunction("setItem",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) >= 2 { store[args[0].ToString()] = args[1].ToString() }
+			if len(args) >= 2 {
+				store[args[0].ToString()] = args[1].ToString()
+				persist(args[0].ToString(), args[1].ToString())
+			}
 			return jsc.Undefined()
 		}, 2)))
 	s.Set("getItem", jsc.FunctionValue(jsc.NewNativeFunction("getItem",
@@ -1672,12 +1708,18 @@ func makeStorage(rt *jsc.Interpreter, store map[string]string) *jsc.JSObject {
 		}, 1)))
 	s.Set("removeItem", jsc.FunctionValue(jsc.NewNativeFunction("removeItem",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) >= 1 { delete(store, args[0].ToString()) }
+			if len(args) >= 1 {
+				delete(store, args[0].ToString())
+				persist(args[0].ToString(), "")
+			}
 			return jsc.Undefined()
 		}, 1)))
 	s.Set("clear", jsc.FunctionValue(jsc.NewNativeFunction("clear",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			for k := range store { delete(store, k) }
+			for k := range store {
+				delete(store, k)
+				persist(k, "")
+			}
 			return jsc.Undefined()
 		}, 0)))
 	s.Set("key", jsc.FunctionValue(jsc.NewNativeFunction("key",
@@ -1686,7 +1728,9 @@ func makeStorage(rt *jsc.Interpreter, store map[string]string) *jsc.JSObject {
 				idx := int(args[0].ToNumber())
 				i := 0
 				for k := range store {
-					if i == idx { return jsc.StringValue(k) }
+					if i == idx {
+						return jsc.StringValue(k)
+					}
 					i++
 				}
 			}
