@@ -223,6 +223,25 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 			if st := box.Style(); st != nil {
 				font := toGraphicsFont(st)
 				lineH := 0.0
+				// Content-box viewport padding (scrollWidth/scrollHeight
+				// include the padding — a scrolled control must show the
+				// padding at the far edge like a browser).
+				padL := lengthValue(st.PaddingLeft)
+				padR := lengthValue(st.PaddingRight)
+				padT := lengthValue(st.PaddingTop)
+				padB := lengthValue(st.PaddingBottom)
+				if padL < 0 {
+					padL = 0
+				}
+				if padR < 0 {
+					padR = 0
+				}
+				if padT < 0 {
+					padT = 0
+				}
+				if padB < 0 {
+					padB = 0
+				}
 				if text != "" {
 					lines := strings.Split(text, "\n")
 					maxW := 0.0
@@ -235,8 +254,9 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 							lineH = cssControlLineHeight(st, font.Size)
 						}
 					}
-					if maxW > maxRight-pb.X {
-						maxRight = pb.X + maxW
+					// Horizontal extent = left padding + text + right padding.
+					if padL+maxW+padR > maxRight-pb.X {
+						maxRight = pb.X + padL + maxW + padR
 					}
 					if local == "textarea" && lineH > 0 {
 						// Vertical extent must count SOFT-WRAPPED rows (a
@@ -244,14 +264,6 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 						// visual rows), not just hard '\n' breaks — otherwise
 						// the scrollbar's total height / thumb ratio is too
 						// small and long text can't scroll far enough.
-						padL := lengthValue(st.PaddingLeft)
-						padR := lengthValue(st.PaddingRight)
-						if padL < 0 {
-							padL = 0
-						}
-						if padR < 0 {
-							padR = 0
-						}
 						contentW := pb.Width - padL - padR
 						if contentW < 1 {
 							contentW = 1
@@ -259,8 +271,8 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 						mode := textareaWrapMode(st, el)
 						wrapped := wrapTextAreaLines(text, font, contentW, mode)
 						rows := float64(len(wrapped))
-						if rows*lineH > maxBottom-pb.Y {
-							maxBottom = pb.Y + rows*lineH
+						if padT+rows*lineH+padB > maxBottom-pb.Y {
+							maxBottom = pb.Y + padT + rows*lineH + padB
 						}
 					}
 				}
@@ -334,6 +346,7 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	pb := scrollBox.PaddingBoxRect()
 	scrollW := 12.0
 	arrowSize := 12.0
+	arrowGap := 5.0
 	if pb.Width <= scrollW*2 || pb.Height <= scrollW*2 {
 		return nil
 	}
@@ -428,21 +441,20 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 			return h
 		}
 
-		// Track (non-thumb area) or thumb.
+		// Track (non-thumb area) or thumb — same geometry as the painter
+		// (shared ScrollbarMetrics) so a press lands on the drawn thumb.
 		h.IsVTrack = true
-		if totalH > contentH {
-			trackH := vh - arrowSize*2
-			thumbLen := trackH * contentH / totalH
-			if thumbLen < arrowSize { thumbLen = arrowSize }
-			if thumbLen > trackH-4 { thumbLen = trackH - 4 }
-			maxSy := totalH - contentH
-			if maxSy <= 0 { maxSy = 1 }
-			syRatio := sy / maxSy
-			if syRatio < 0 { syRatio = 0 }
-			if syRatio > 1 { syRatio = 1 }
-			thumbTrackSpace := trackH - thumbLen
-			thumbY := vy + arrowSize + syRatio*thumbTrackSpace
-			if y >= thumbY && y <= thumbY+thumbLen {
+		if m := VerticalScrollbarMetrics(rv, scrollBox); m.OK {
+			syRatio := sy / m.MaxScroll
+			if syRatio < 0 {
+				syRatio = 0
+			}
+			if syRatio > 1 {
+				syRatio = 1
+			}
+			thumbTrackSpace := m.TrackLen - m.ThumbLen
+			thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
+			if y >= thumbY && y <= thumbY+m.ThumbLen {
 				h.IsVThumb = true
 			}
 		}
@@ -468,21 +480,19 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 			return h
 		}
 
-		// Track or thumb.
+		// Track or thumb — same geometry as the painter (shared metrics).
 		h.IsHTrack = true
-		if totalW > contentW {
-			trackW := hw - arrowSize*2
-			thumbLen := trackW * contentW / totalW
-			if thumbLen < arrowSize { thumbLen = arrowSize }
-			if thumbLen > trackW-4 { thumbLen = trackW - 4 }
-			maxSx := totalW - contentW
-			if maxSx <= 0 { maxSx = 1 }
-			sxRatio := sx / maxSx
-			if sxRatio < 0 { sxRatio = 0 }
-			if sxRatio > 1 { sxRatio = 1 }
-			thumbTrackSpace := trackW - thumbLen
-			thumbX := hx + arrowSize + sxRatio*thumbTrackSpace
-			if x >= thumbX && x <= thumbX+thumbLen {
+		if m := HorizontalScrollbarMetrics(rv, scrollBox); m.OK {
+			sxRatio := sx / m.MaxScroll
+			if sxRatio < 0 {
+				sxRatio = 0
+			}
+			if sxRatio > 1 {
+				sxRatio = 1
+			}
+			thumbTrackSpace := m.TrackLen - m.ThumbLen
+			thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
+			if x >= thumbX && x <= thumbX+m.ThumbLen {
 				h.IsHThumb = true
 			}
 		}

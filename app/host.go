@@ -682,9 +682,11 @@ func (h *Host) ensureFocusedCaretVisible() {
 	if newSy < 0 {
 		newSy = 0
 	}
-	if _, ch := rv.BoxContentSize(box); ch > 0 {
-		if maxSy := ch - viewH; newSy > maxSy {
-			newSy = maxSy
+	// Clamp to the same max as the painter / scrollbar drag (shared
+	// geometry) so auto-scroll never overshoots the thumb's range.
+	if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK {
+		if newSy > m.MaxScroll {
+			newSy = m.MaxScroll
 		}
 	}
 	if newSy != sy {
@@ -1011,21 +1013,25 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if newSx < 0 {
 					newSx = 0
 				}
-				cw, ch := rv.BoxContentSize(scrollBox)
-				pb := scrollBox.PaddingBoxRect()
-				maxX := int(cw - pb.Width)
-				if maxX < 0 {
-					maxX = 0
+				// Clamp to the shared scrollbar geometry (content-box
+				// viewport, not the padding box) so wheel scrolling reaches
+				// the same max as the thumb — the painter's max is
+				// totalH - viewH with viewH = padding-box minus padding.
+				if vm := rendering.VerticalScrollbarMetrics(rv, scrollBox); vm.OK {
+					maxY := int(vm.MaxScroll)
+					if newSy > maxY {
+						newSy = maxY
+					}
+				} else if newSy > 0 {
+					newSy = 0
 				}
-				if newSx > maxX {
-					newSx = maxX
-				}
-				maxY := int(ch - pb.Height)
-				if maxY < 0 {
-					maxY = 0
-				}
-				if newSy > maxY {
-					newSy = maxY
+				if hm := rendering.HorizontalScrollbarMetrics(rv, scrollBox); hm.OK {
+					maxX := int(hm.MaxScroll)
+					if newSx > maxX {
+						newSx = maxX
+					}
+				} else if newSx > 0 {
+					newSx = 0
 				}
 				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
 			} else {
@@ -1130,67 +1136,46 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				cssX := ev.X / csX
 				cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // match EventMouseButton coordinate space
 				if h.scrollbarDragAxis {
-					// Vertical drag: cursor delta → scroll offset delta
+					// Vertical drag: cursor delta → scroll offset delta,
+					// using the same geometry as the painter (shared
+					// ScrollbarMetrics) so the thumb tracks the cursor
+					// 1:1 and the content follows the thumb.
 					dy := cssY - h.scrollbarDragStart
-					pb := h.scrollbarDragBox.PaddingBoxRect()
-					vh := pb.Height
-					_, ch := rv.BoxContentSize(h.scrollbarDragBox)
-					if ch > pb.Height {
-						const arrowSize = 12.0
-						trackH := vh - arrowSize*2
-						thumbH := trackH * pb.Height / ch
-						if thumbH < arrowSize {
-							thumbH = arrowSize
+					m := rendering.VerticalScrollbarMetrics(rv, h.scrollbarDragBox)
+					if m.OK {
+						travel := m.TrackLen - m.ThumbLen
+						if travel < 1 {
+							travel = 1
 						}
-						scale := (ch - pb.Height) / (trackH - thumbH)
-						newSy := h.scrollbarDragScroll + dy*scale
+						newSy := h.scrollbarDragScroll + dy*(m.MaxScroll/travel)
 						if newSy < 0 {
 							newSy = 0
 						}
-						maxY := ch - pb.Height
-						if newSy > maxY {
-							newSy = maxY
+						if newSy > m.MaxScroll {
+							newSy = m.MaxScroll
 						}
-						rv.SetBoxScrollOffset(h.scrollbarDragBox, 0, newSy)
+						// Preserve the horizontal offset (a vertical drag
+						// must never reset a box's sx).
+						sx, _ := rv.BoxScrollOffset(h.scrollbarDragBox)
+						rv.SetBoxScrollOffset(h.scrollbarDragBox, sx, newSy)
 					}
 				} else {
-					// Horizontal drag: cursor delta → scroll offset delta
+					// Horizontal drag: cursor delta → scroll offset delta,
+					// using the shared ScrollbarMetrics (same geometry as
+					// the painter) so the thumb tracks the cursor 1:1.
 					dx := cssX - h.scrollbarDragStart
-					pb := h.scrollbarDragBox.PaddingBoxRect()
-					hw := pb.Width
-					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
-					st2 := h.scrollbarDragBox.Style()
-					padL := float64(0)
-					padR := float64(0)
-					if st2 != nil {
-						padL = st2.PaddingLeft.Value
-						padR = st2.PaddingRight.Value
-					}
-					if padL < 0 {
-						padL = 0
-					}
-					if padR < 0 {
-						padR = 0
-					}
-					viewW := pb.Width - padL - padR
-					if viewW < 1 {
-						viewW = 1
-					}
-					if cw > viewW {
-						const arrowSize = 12.0
-						trackW := hw - arrowSize*2
-						thumbW := trackW * viewW / cw
-						if thumbW < arrowSize {
-							thumbW = arrowSize
+					m := rendering.HorizontalScrollbarMetrics(rv, h.scrollbarDragBox)
+					if m.OK {
+						travel := m.TrackLen - m.ThumbLen
+						if travel < 1 {
+							travel = 1
 						}
-						scale := (cw - viewW) / (trackW - thumbW)
-						newSx := h.scrollbarDragScroll + dx*scale
+						newSx := h.scrollbarDragScroll + dx*(m.MaxScroll/travel)
 						if newSx < 0 {
 							newSx = 0
 						}
-						maxX := cw - viewW
-						if newSx > maxX {
-							newSx = maxX
+						if newSx > m.MaxScroll {
+							newSx = m.MaxScroll
 						}
 						if setScrollXFor(rv, h.scrollbarDragBox, newSx) {
 							h.markScrollDirty()
@@ -1303,17 +1288,34 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						h.scrollbarDragScroll = scrollXFor(rv, box)
 						break
 					}
-					// ── Arrow buttons → line scroll ──
+					// ── Arrow buttons → line scroll (clamped to the same
+					// range as the thumb, shared geometry) ──
 					const lineStep = 16.0
 					if scrollHit.IsVUpArrow {
 						sx, sy := rv.BoxScrollOffset(box)
-						rv.SetBoxScrollOffset(box, sx, sy-lineStep)
+						sy -= lineStep
+						if sy < 0 {
+							sy = 0
+						}
+						if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK && sy > m.MaxScroll {
+							sy = m.MaxScroll
+						}
+						rv.SetBoxScrollOffset(box, sx, sy)
 						h.markScrollDirty()
 						break
 					}
 					if scrollHit.IsVDownArrow {
 						sx, sy := rv.BoxScrollOffset(box)
-						rv.SetBoxScrollOffset(box, sx, sy+lineStep)
+						sy += lineStep
+						if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK {
+							if sy < 0 {
+								sy = 0
+							}
+							if sy > m.MaxScroll {
+								sy = m.MaxScroll
+							}
+						}
+						rv.SetBoxScrollOffset(box, sx, sy)
 						h.markScrollDirty()
 						break
 					}
@@ -1333,80 +1335,62 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if scrollHit.IsVTrack {
 						sx, sy := rv.BoxScrollOffset(box)
 						pb := box.PaddingBoxRect()
-						pageH := pb.Height
-						// Determine click position relative to thumb center.
-						_, ch := rv.BoxContentSize(box)
-						totalH := ch
-						contentH := pb.Height
-						trackH := pb.Height - 12.0*2 // arrowSize
-						thumbLen := trackH * contentH / totalH
-						if thumbLen < 12.0 {
-							thumbLen = 12.0
-						}
-						if thumbLen > trackH-4 {
-							thumbLen = trackH - 4
-						}
-						maxSy := totalH - contentH
-						if maxSy <= 0 {
-							maxSy = 1
-						}
-						syRatio := sy / maxSy
-						thumbTrackSpace := trackH - thumbLen
-						thumbCenterY := pb.Y + 12.0 + syRatio*thumbTrackSpace + thumbLen/2
-						if cssY < thumbCenterY {
-							rv.SetBoxScrollOffset(box, sx, sy-pageH)
-						} else {
-							rv.SetBoxScrollOffset(box, sx, sy+pageH)
+						// Determine click position relative to the thumb
+						// center using the SAME geometry as the painter.
+						m := rendering.VerticalScrollbarMetrics(rv, box)
+						if m.OK {
+							syRatio := sy / m.MaxScroll
+							if syRatio < 0 {
+								syRatio = 0
+							}
+							if syRatio > 1 {
+								syRatio = 1
+							}
+							thumbTrackSpace := m.TrackLen - m.ThumbLen
+							thumbCenterY := pb.Y + 12.0 + 5.0 + syRatio*thumbTrackSpace + m.ThumbLen/2
+							pageH := m.ViewLen // one page = the visible content height
+							if cssY < thumbCenterY {
+								sy -= pageH
+							} else {
+								sy += pageH
+							}
+							if sy < 0 {
+								sy = 0
+							}
+							if sy > m.MaxScroll {
+								sy = m.MaxScroll
+							}
+							rv.SetBoxScrollOffset(box, sx, sy)
 						}
 						break
 					}
 					if scrollHit.IsHTrack {
 						pb := box.PaddingBoxRect()
-						st2 := box.Style()
-						pageW := pb.Width
-						cw, _ := rv.BoxContentSize(box)
-						totalW := cw
-						// Content-box viewport (minus padding), matching paint.
-						padL := st2.PaddingLeft.Value
-						padR := st2.PaddingRight.Value
-						if padL < 0 {
-							padL = 0
-						}
-						if padR < 0 {
-							padR = 0
-						}
-						contentW := pb.Width - padL - padR
-						if contentW < 1 {
-							contentW = 1
-						}
-						trackW := pb.Width - 12.0*2
-						thumbLen := trackW * contentW / totalW
-						if thumbLen < 12.0 {
-							thumbLen = 12.0
-						}
-						if thumbLen > trackW-4 {
-							thumbLen = trackW - 4
-						}
-						maxSx := totalW - contentW
-						if maxSx <= 0 {
-							maxSx = 1
-						}
-						hSx := scrollXFor(rv, box)
-						sxRatio := hSx / maxSx
-						if sxRatio < 0 {
-							sxRatio = 0
-						}
-						if sxRatio > 1 {
-							sxRatio = 1
-						}
-						thumbTrackSpace := trackW - thumbLen
-						thumbCenterX := pb.X + 12.0 + sxRatio*thumbTrackSpace + thumbLen/2
-						if cssX < thumbCenterX {
-							if setScrollXFor(rv, box, hSx-pageW) {
-								h.markScrollDirty()
+						// Same geometry as the painter (shared metrics).
+						m := rendering.HorizontalScrollbarMetrics(rv, box)
+						if m.OK {
+							hSx := scrollXFor(rv, box)
+							sxRatio := hSx / m.MaxScroll
+							if sxRatio < 0 {
+								sxRatio = 0
 							}
-						} else {
-							if setScrollXFor(rv, box, hSx+pageW) {
+							if sxRatio > 1 {
+								sxRatio = 1
+							}
+							thumbTrackSpace := m.TrackLen - m.ThumbLen
+							thumbCenterX := pb.X + 12.0 + 5.0 + sxRatio*thumbTrackSpace + m.ThumbLen/2
+							pageW := m.ViewLen // one page = visible content width
+							newSx := hSx - pageW
+							if cssX >= thumbCenterX {
+								newSx = hSx + pageW
+							}
+							if newSx < 0 {
+								newSx = 0
+							}
+							if newSx > m.MaxScroll {
+								newSx = m.MaxScroll
+							}
+							if setScrollXFor(rv, box, newSx) {
 								h.markScrollDirty()
 							}
 						}

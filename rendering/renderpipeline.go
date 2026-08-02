@@ -473,26 +473,21 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						dcy := dnBtnY + arrowSize/2
 						info.canvas.FillRoundedTriangle(acx, dcy+2, acx-4, dcy-3, acx+4, dcy-3, 0.8, arrowCol)
 
-							// Thumb (rounded rect, pill shape).
-							if totalH > viewH {
-								trackH := vh - arrowSize*2 - arrowGap*2
-								thumbLen := trackH * viewH / totalH
-								if thumbLen < 18 { thumbLen = 18 }
-								if thumbLen > trackH-4 { thumbLen = trackH - 4 }
-								maxSy := totalH - viewH
-								if maxSy <= 0 { maxSy = 1 }
-								syRatio := sy / maxSy
+							// Thumb (rounded rect, pill shape) — geometry from the shared
+							// ScrollbarMetrics so host drag/wheel map identically to paint.
+							if vm := VerticalScrollbarMetrics(info.rv, box); vm.OK {
+								syRatio := sy / vm.MaxScroll
 								if syRatio < 0 { syRatio = 0 }
 								if syRatio > 1 { syRatio = 1 }
-								thumbTrackSpace := trackH - thumbLen
+								thumbTrackSpace := vm.TrackLen - vm.ThumbLen
 								thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
 
 								isHover := cursorX >= vx && cursorX <= vx+scrollW &&
-									cursorY >= thumbY && cursorY <= thumbY+thumbLen
+									cursorY >= thumbY && cursorY <= thumbY+vm.ThumbLen
 								tCol := thumbCol
 								if isHover { tCol = thumbHoverCol }
 
-								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, thumbLen, 5, tCol)
+								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, 5, tCol)
 							}
 						}
 						endV:
@@ -521,26 +516,21 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						rtBtnX := hx + hw - arrowSize
 						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
 
-								// Thumb.
-								if totalW > viewW {
-									trackW := hw - arrowSize*2 - arrowGap*2
-									thumbLen := trackW * viewW / totalW
-									if thumbLen < 18 { thumbLen = 18 }
-									if thumbLen > trackW-4 { thumbLen = trackW - 4 }
-									maxSx := totalW - viewW
-									if maxSx <= 0 { maxSx = 1 }
-									sxRatio := sx / maxSx
+								// Thumb — geometry from the shared ScrollbarMetrics so
+								// host drag/wheel map identically to paint.
+								if hm := HorizontalScrollbarMetrics(info.rv, box); hm.OK {
+									sxRatio := sx / hm.MaxScroll
 									if sxRatio < 0 { sxRatio = 0 }
 									if sxRatio > 1 { sxRatio = 1 }
-									thumbTrackSpace := trackW - thumbLen
+									thumbTrackSpace := hm.TrackLen - hm.ThumbLen
 									thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
 
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
-										cursorX >= thumbX && cursorX <= thumbX+thumbLen
+										cursorX >= thumbX && cursorX <= thumbX+hm.ThumbLen
 									tCol := thumbCol
 									if isHover { tCol = thumbHoverCol }
 
-									info.canvas.FillRoundRect(thumbX, hy+2, thumbLen, scrollW-4, 5, tCol)
+									info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, 5, tCol)
 								}
 							}
 							endH:
