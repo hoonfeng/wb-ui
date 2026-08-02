@@ -386,6 +386,78 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	return maxW
 }
 
+// minContentWidth returns the min-content inline size: the width of the
+// longest unbreakable segment (longest whitespace-delimited word for text;
+// CJK characters are individually breakable so a CJK run contributes only
+// one character's width). Used for fit-content sizing of flex cross axis.
+func minContentWidth(box *ElementBox) float64 {
+	if box == nil {
+		return 0
+	}
+	if el := box.Element(); el != nil {
+		ln := el.LocalName()
+		if ln == "svg" || ln == "img" || ln == "canvas" {
+			if w := el.GetAttribute("width"); w != "" {
+				if f, err := strconv.ParseFloat(w, 64); err == nil && f > 0 {
+					return f
+				}
+			}
+		}
+	}
+	mw := 0.0
+	wordW := func(text string) float64 {
+		longest := 0.0
+		for _, word := range strings.Fields(text) {
+			// A CJK run is breakable per character: longest segment is the
+			// widest CJK char (or ASCII word).
+			runes := []rune(word)
+			w := 0.0
+			cjk := false
+			for _, r := range runes {
+				if r > 0x2E80 {
+					cjk = true
+					break
+				}
+			}
+			if cjk {
+				for _, r := range runes {
+					cw := measureText(box, string(r))
+					if cw > w {
+						w = cw
+					}
+				}
+			} else {
+				w = measureText(box, word)
+			}
+			if w > longest {
+				longest = w
+			}
+		}
+		return longest
+	}
+	for _, child := range box.Children() {
+		if !child.IsInFlow() {
+			continue
+		}
+		switch c := child.(type) {
+		case *InlineTextBox:
+			if w := wordW(c.text); w > mw {
+				mw = w
+			}
+		case *ElementBox:
+			if w := minContentWidth(c); w > mw {
+				mw = w
+			}
+		}
+	}
+	if mw <= 0 {
+		// No text: an empty box contributes nothing, but a replaced element
+		// with no attribute size still has a usable min-content of 0.
+		mw = 0
+	}
+	return mw
+}
+
 func intrinsicContentHeight(box *ElementBox) float64 {
 	cs := box.Style()
 	// A replaced element (svg/img/canvas) sizes from its attribute height,
@@ -676,16 +748,22 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				if stretchW < 0 { stretchW = 0 }
 				g.SetContentWidth(stretchW)
 			} else {
-				// Non-stretch: use intrinsic content width (shrink-to-fit) so that
-				// cross-axis centering formula (cw-bw)/2 in applyPositions works
-				// correctly. Do NOT clamp to the container width — a flex item
-				// with align-self:center/end sizes to its max-content and may
-				// overflow the container (Edge: .welcome-logo "PairCode" 48px
-				// font = 216px wide inside a 97px main-area, centered with
-				// x=268.4; clamping it to 97px left it unstretched left-aligned).
+				// Non-stretch: cross-axis size = fit-content =
+				//   min(max-content, max(min-content, available))
+				// max-content: .welcome-logo "PairCode" 48px font = 217px —
+				//   an unbreakable word must NOT shrink (Edge x=268 center).
+				// available: .welcome-sub is normal-wrapping text, so its
+				//   min-content is tiny and it wraps to the 97px container
+				//   (Edge h=64 multi-line, NOT a 317px single line).
 				iw := intrinsicContentWidth(it.box, false)
-				if iw < 0 { iw = 0 }
-				g.SetContentWidth(iw)
+				minC := minContentWidth(it.box)
+				avail := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
+				if avail < 0 { avail = 0 }
+				fit := minC
+				if fit < avail { fit = avail }
+				if iw < fit { fit = iw }
+				if fit < 0 { fit = 0 }
+				g.SetContentWidth(fit)
 			}
 		}
 	}
@@ -1001,12 +1079,21 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 			// Restore the flex-resolved main size (height for column flex)
 			// after child layout so a tall child cannot balloon the item
-			// past the flex container (see row branch above).
+			// past the flex container (see row branch above). Honor the flex
+			// item's automatic minimum (min-height:auto): the item must never
+			// shrink below its content's intrinsic height — .welcome-sub's
+			// text wraps to 4 lines (62px) but intrinsicContentHeight
+			// pre-layout estimated 1 line (17px); pinning to the estimate
+			// clipped the multi-line content.
 			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
 				ms := it.finalMainSize
 				if isBorderBox(it.box) {
 					vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
 					ms = math.Max(0, ms-vp)
+				}
+				if after := g.ContentHeight(); after > ms {
+					// min-height:auto — content wrapped taller than the slot.
+					ms = after
 				}
 				g.SetContentHeight(ms)
 			}
@@ -1050,11 +1137,13 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		}
 	}
 
-	// Column flex + auto container height: justify-content was applied against
-	// the ESTIMATED container height at the top of applyPositions. After child
-	// layout determines real heights, re-center / flex-end the whole group
-	// (single shift, not per-item) so items keep their stacked positions.
-	if !isRow && heightIsAutoForBox(container) && justify != "flex-start" && len(items) > 0 {
+	// Column flex: justify-content was applied against the ESTIMATED container
+	// height at the top of applyPositions. After child layout determines real
+	// heights (min-height:auto may have grown an item — .welcome-sub wrapped
+	// to 62px vs a 17px pre-layout estimate), re-center / flex-end the whole
+	// group (single shift, not per-item) so items keep their stacked positions.
+	// Applies to definite-height containers too (welcome has height:100%).
+	if !isRow && justify != "flex-start" && len(items) > 0 {
 		g0 := state.GeometryForBox(items[0].box)
 		gLast := state.GeometryForBox(items[len(items)-1].box)
 		groupTop := g0.Top()
