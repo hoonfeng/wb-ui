@@ -684,10 +684,16 @@ func (h *Host) ensureFocusedCaretVisible() {
 	}
 	// Clamp to the same max as the painter / scrollbar drag (shared
 	// geometry) so auto-scroll never overshoots the thumb's range.
+	maxScroll := 0.0
 	if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK {
+		maxScroll = m.MaxScroll
 		if newSy > m.MaxScroll {
 			newSy = m.MaxScroll
 		}
+	}
+	if os.Getenv("WB_SCROLL_DEBUG") != "" {
+		log.Printf("[scroll/ensure] bh=%.1f sy=%.1f viewH=%.1f lineH=%.1f contentW=%.1f mode=%v pos=%d row=%d rowTop=%.1f rowBottom=%.1f maxScroll=%.1f -> newSy=%.1f (changed=%v)",
+			bh, sy, viewH, lineH, contentW, mode, pos, row, rowTop, rowBottom, maxScroll, newSy, newSy != sy)
 	}
 	if newSy != sy {
 		rv.SetBoxScrollOffset(box, 0, newSy)
@@ -2396,6 +2402,10 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 			}
 			h.imeInputText = newText
 			if h.imeFocusedEl != nil {
+				if os.Getenv("WB_SCROLL_DEBUG") != "" {
+					log.Printf("[scroll/input] IME char=%q value → %q len=%d sel=%s", char, newText, len([]rune(newText)),
+						fmt.Sprintf("Start=%d End=%d", rendering.FocusedFormControlSel.Start, rendering.FocusedFormControlSel.End))
+				}
 				setFocusedElementValue(h.imeFocusedEl, newText)
 				needsRebuild = true
 

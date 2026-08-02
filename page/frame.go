@@ -214,7 +214,14 @@ func (f *Frame) RebuildRenderTree() {
 		// node so a keystroke (which rebuilds the tree) does not reset
 		// vertical scroll — otherwise auto-scroll yanks the content to
 		// the caret row on every character ("content jumps out of view").
+		before := 0
+		if oldRV != nil {
+			before = oldRV.ScrollOffsetCount()
+		}
 		f.renderView.RestoreScrollOffsetsFrom(oldRV)
+		if os.Getenv("WB_SCROLL_DEBUG") != "" {
+			Logf("RebuildRenderTree", "migrated scroll offsets old=%d new=%d", before, f.renderView.ScrollOffsetCount())
+		}
 		objCount = countRenderObjects(rendering.RenderObject(f.renderView))
 	}
 	Logf("RebuildRenderTree", "renderObjectCount=%d", objCount)

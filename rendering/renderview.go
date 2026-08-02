@@ -2,6 +2,8 @@
 package rendering
 
 import (
+	"log"
+	"os"
 	"strings"
 
 	"wb-ui/dom"
@@ -116,6 +118,11 @@ func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
 	if v.boxScrollOffsets == nil {
 		v.boxScrollOffsets = make(map[*RenderBox]graphics.Point)
 	}
+	if os.Getenv("WB_SCROLL_DEBUG") != "" && box != nil {
+		if el, ok := box.Node().(*dom.Element); ok {
+			log.Printf("[scroll/set] BoxScrollOffset %s → (%.1f, %.1f)", el.LocalName(), x, y)
+		}
+	}
 	v.boxScrollOffsets[box] = graphics.Point{X: x, Y: y}
 }
 
@@ -163,6 +170,15 @@ func (v *RenderView) RestoreScrollOffsetsFrom(old *RenderView) {
 			v.boxScrollOffsets[nb] = p
 		}
 	}
+}
+
+// ScrollOffsetCount returns the number of boxes with a stored scroll
+// offset (diagnostics).
+func (v *RenderView) ScrollOffsetCount() int {
+	if v == nil || v.boxScrollOffsets == nil {
+		return 0
+	}
+	return len(v.boxScrollOffsets)
 }
 
 // FindRenderBoxForNode returns the RenderBox for a given DOM node, or nil
