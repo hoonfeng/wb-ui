@@ -15,6 +15,7 @@
 package rendering
 
 import (
+	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
 )
@@ -134,6 +135,17 @@ func RequiresLayer(owner RenderObject) bool {
 		return true
 	}
 	if st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible {
+		// Form controls (input/textarea/select/button) scroll their content
+		// internally (UA overflow:hidden/auto). Giving them a composited
+		// layer would clip the :focus outline, which browsers paint OUTSIDE
+		// the border box (outline is not subject to the element's own
+		// overflow clip). Without this a focused textarea showed NO outline
+		// at all — the outline stroke fell outside the layer's clip rect.
+		if n := owner.Node(); n != nil {
+			if el, ok := n.(*dom.Element); ok && isReplacedElement(el.LocalName()) {
+				return false
+			}
+		}
 		return true
 	}
 	if st.Filter != "" {

@@ -86,6 +86,8 @@ type Host struct {
 	needsResizeDump bool
 	// lastLoggedScrollY dedupes per-frame [scroll] logs (only logs on change).
 	lastLoggedScrollY int
+	// lastIMEX/lastIMEY dedupe IME composition-position updates.
+	lastIMEX, lastIMEY int32
 
 	// Selection state. Text selection is tracked as CSS-pixel coordinates
 	// (not RenderText pointers) so it survives render tree rebuilds. Each
@@ -580,6 +582,24 @@ func (h *Host) Run() {
 				rendering.CaretVisible = !rendering.CaretVisible
 				rendering.CaretVisibleControl = rendering.CaretVisible
 				h.caretBlinkTime = time.Now()
+			}
+
+			// ★ Keep the IME composition/candidate window positioned at the
+			// text caret. Previously SetIMECompositionPos was never called,
+			// so Windows IME always showed its candidate list at the top-left
+			// corner of the screen.
+			if rendering.FocusedFormControl != nil {
+				if cx, cy, ok := rendering.FormControlCaretPosition(rv); ok {
+					// Caret Y is in page coordinates; account for scroll.
+					cy -= float64(frameView.ScrollY())
+					if cy < 0 {
+						cy = 0
+					}
+					if h.lastIMEX != int32(cx) || h.lastIMEY != int32(cy) {
+						h.lastIMEX, h.lastIMEY = int32(cx), int32(cy)
+						h.win.SetIMECompositionPos(cx, cy)
+					}
+				}
 			}
 
 			bgColor := findBodyBgColor(rendering.RenderObject(rv))

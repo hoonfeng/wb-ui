@@ -821,6 +821,33 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		if c, ok := parseColor(valueString); ok {
 			cs.BorderLeftColor = c
 		}
+	case "border-color":
+		// Shorthand: 1-4 colors → top/right/bottom/left (CSS box model §8.5).
+		if colors, ok := parseBorderColorShorthand(valueString); ok {
+			switch len(colors) {
+			case 1:
+				cs.BorderTopColor, cs.BorderRightColor = colors[0], colors[0]
+				cs.BorderBottomColor, cs.BorderLeftColor = colors[0], colors[0]
+				cs.BorderTopColorSet, cs.BorderRightColorSet = true, true
+				cs.BorderBottomColorSet, cs.BorderLeftColorSet = true, true
+			case 2:
+				cs.BorderTopColor, cs.BorderBottomColor = colors[0], colors[1]
+				cs.BorderRightColor, cs.BorderLeftColor = colors[0], colors[1]
+				cs.BorderTopColorSet, cs.BorderBottomColorSet = true, true
+				cs.BorderRightColorSet, cs.BorderLeftColorSet = true, true
+			case 3:
+				cs.BorderTopColor = colors[0]
+				cs.BorderRightColor, cs.BorderLeftColor = colors[1], colors[1]
+				cs.BorderBottomColor = colors[2]
+				cs.BorderTopColorSet, cs.BorderBottomColorSet = true, true
+				cs.BorderRightColorSet, cs.BorderLeftColorSet = true, true
+			case 4:
+				cs.BorderTopColor, cs.BorderRightColor = colors[0], colors[1]
+				cs.BorderBottomColor, cs.BorderLeftColor = colors[2], colors[3]
+				cs.BorderTopColorSet, cs.BorderRightColorSet = true, true
+				cs.BorderBottomColorSet, cs.BorderLeftColorSet = true, true
+			}
+		}
 	case "border-top-style":
 		cs.BorderTopStyle = valueString
 	case "border-right-style":
@@ -1098,6 +1125,23 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	if d.Important {
 		cs.ImportantProperties[name] = true
 	}
+}
+
+// parseBorderColorShorthand parses the border-color shorthand (1-4 colors).
+func parseBorderColorShorthand(s string) ([]Color, bool) {
+	parts := strings.Fields(strings.TrimSpace(s))
+	if len(parts) == 0 || len(parts) > 4 {
+		return nil, false
+	}
+	colors := make([]Color, 0, len(parts))
+	for _, p := range parts {
+		c, ok := parseColor(p)
+		if !ok {
+			return nil, false
+		}
+		colors = append(colors, c)
+	}
+	return colors, true
 }
 
 // parseTextAlign maps a CSS keyword to TextAlignType.
@@ -1856,8 +1900,7 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			for _, p := range splitShorthandValue(resolvedStr) {
 				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") || strings.HasPrefix(p, "url(") {
 					grads = append(grads, p)
-					continue
-				}
+					continue				}
 				if c, ok := parseColor(p); ok {
 					cs.BackgroundColor = c
 					break
@@ -1868,6 +1911,32 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			}
 		case "box-shadow":
 			cs.BoxShadow = resolvedStr
+		case "border-color":
+			if colors, ok := parseBorderColorShorthand(resolvedStr); ok {
+				switch len(colors) {
+				case 1:
+					cs.BorderTopColor, cs.BorderRightColor = colors[0], colors[0]
+					cs.BorderBottomColor, cs.BorderLeftColor = colors[0], colors[0]
+					cs.BorderTopColorSet, cs.BorderRightColorSet = true, true
+					cs.BorderBottomColorSet, cs.BorderLeftColorSet = true, true
+				case 2:
+					cs.BorderTopColor, cs.BorderBottomColor = colors[0], colors[1]
+					cs.BorderRightColor, cs.BorderLeftColor = colors[0], colors[1]
+					cs.BorderTopColorSet, cs.BorderBottomColorSet = true, true
+					cs.BorderRightColorSet, cs.BorderLeftColorSet = true, true
+				case 3:
+					cs.BorderTopColor = colors[0]
+					cs.BorderRightColor, cs.BorderLeftColor = colors[1], colors[1]
+					cs.BorderBottomColor = colors[2]
+					cs.BorderTopColorSet, cs.BorderBottomColorSet = true, true
+					cs.BorderRightColorSet, cs.BorderLeftColorSet = true, true
+				case 4:
+					cs.BorderTopColor, cs.BorderRightColor = colors[0], colors[1]
+					cs.BorderBottomColor, cs.BorderLeftColor = colors[2], colors[3]
+					cs.BorderTopColorSet, cs.BorderRightColorSet = true, true
+					cs.BorderBottomColorSet, cs.BorderLeftColorSet = true, true
+				}
+			}
 		case "margin":
 			// Shorthand — store as string for now
 			cs.SetProperty("margin", resolvedStr)
@@ -1940,10 +2009,22 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.BorderBottomWidth, cs.BorderLeftWidth = w, w
 				cs.BorderTopStyle, cs.BorderRightStyle = s, s
 				cs.BorderBottomStyle, cs.BorderLeftStyle = s, s
-				cs.BorderTopColor, cs.BorderRightColor = c, c
-				cs.BorderBottomColor, cs.BorderLeftColor = c, c
-				cs.BorderTopColorSet, cs.BorderRightColorSet = cset, cset
-				cs.BorderBottomColorSet, cs.BorderLeftColorSet = cset, cset
+				// 颜色：仅当没有更具体的 border-color / border-*-color
+				// 声明时由简写设置。Properties 遍历是 map 顺序（随机），
+				// 若简写后处理会把已解析的 accent 色覆盖回默认灰。
+				// 注意：必须查 Properties map 本身（GetProperty 对
+				// border-*-color 有 typed fallback，恒非空）。
+				_, hasBColor := cs.Properties["border-color"]
+				_, hasBTop := cs.Properties["border-top-color"]
+				_, hasBRight := cs.Properties["border-right-color"]
+				_, hasBBottom := cs.Properties["border-bottom-color"]
+				_, hasBLeft := cs.Properties["border-left-color"]
+				if !hasBColor && !hasBTop && !hasBRight && !hasBBottom && !hasBLeft {
+					cs.BorderTopColor, cs.BorderRightColor = c, c
+					cs.BorderBottomColor, cs.BorderLeftColor = c, c
+					cs.BorderTopColorSet, cs.BorderRightColorSet = cset, cset
+					cs.BorderBottomColorSet, cs.BorderLeftColorSet = cset, cset
+				}
 			}
 		case "border-top":
 			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {

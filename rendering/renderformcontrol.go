@@ -483,6 +483,122 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	c.FillRect(caretX, caretY, 1, lineH, caretCol)
 }
 
+// FormControlCaretPosition returns the CSS-pixel position of the text caret
+// for the currently focused form control (input/textarea), or false when no
+// caret is active. The host calls this each frame to position the IME
+// composition/candidate window next to the caret (previously the IME window
+// stayed at the top-left corner because the position was never updated).
+func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
+	el := FocusedFormControl
+	if el == nil || rv == nil {
+		return 0, 0, false
+	}
+	// Find the render box for the focused element.
+	var box *RenderBox
+	var walk func(o RenderObject) bool
+	walk = func(o RenderObject) bool {
+		if o == nil {
+			return false
+		}
+		if o.Node() == el {
+			if rb := asRenderBox(o); rb != nil {
+				box = rb
+				return true
+			}
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			if walk(c) {
+				return true
+			}
+		}
+		return false
+	}
+	walk(RenderObject(rv))
+	if box == nil {
+		return 0, 0, false
+	}
+	st := box.Style()
+	if st == nil {
+		return 0, 0, false
+	}
+	font := toGraphicsFont(st)
+	ascent := graphics.GlobalFontAscent(font)
+	if ascent <= 0 {
+		ascent = font.Size * 0.8
+	}
+	descent := graphics.GlobalFontDescent(font)
+	if descent < 0 {
+		descent = 0
+	}
+	textHeight := ascent + descent
+	padX := lengthValue(st.PaddingLeft)
+	if padX <= 0 {
+		padX = 4
+	}
+	padY := lengthValue(st.PaddingTop)
+	if padY <= 0 {
+		padY = 4
+	}
+	lineH := cssControlLineHeight(st, font.Size)
+	if lineH <= 0 {
+		lineH = textHeight
+	}
+	if lineH <= 0 {
+		lineH = font.Size * 1.2
+	}
+	boxX, boxY := box.X(), box.Y()
+	boxH := box.Height()
+	caretX := boxX + padX
+	caretY := boxY + (boxH-textHeight)/2
+	value := focusedControlText(el)
+	runes := []rune(value)
+	pos := 0
+	if FocusedFormControlSel != nil {
+		pos = FocusedFormControlSel.Start
+		if FocusedFormControlSel.End > pos {
+			pos = FocusedFormControlSel.End
+		}
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	if el.LocalName() == "textarea" {
+		lineIdx := 0
+		col := 0
+		for i := 0; i < pos && i < len(runes); i++ {
+			if runes[i] == '\n' {
+				lineIdx++
+				col = 0
+			} else {
+				col++
+			}
+		}
+		colW := graphics.MeasureText(font, string(runes[pos-col:pos]))
+		caretX = boxX + padX + colW
+		caretY = boxY + padY + float64(lineIdx)*lineH
+		if caretY < boxY {
+			caretY = boxY
+		}
+	} else {
+		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos]))
+	}
+	return caretX, caretY, true
+}
+
+// focusedControlText returns the displayed text of the focused control.
+func focusedControlText(el *dom.Element) string {
+	if el == nil {
+		return ""
+	}
+	if el.LocalName() == "textarea" {
+		return el.TextContent()
+	}
+	return el.GetAttribute("value")
+}
+
 // cssControlLineHeight resolves the CSS line-height (multiplier, px, %) into
 // pixels for a given font size, returning 0 when not set.
 func cssControlLineHeight(st *style.ComputedStyle, fontSize float64) float64 {

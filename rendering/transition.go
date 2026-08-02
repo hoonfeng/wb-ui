@@ -155,9 +155,17 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 				reg[p] = newTransitionAnim(p, anim, target, time, dur, st)
 				writeTransitionValue(st, p, cur.color, cur.num)
 				inFlight = true
-			} else {
-				// Rebuilt but the target is unchanged: stay settled.
+			} else if anim.settled() {
+				// Rebuilt but the target is unchanged and we were idle: stay
+				// settled.
 				reg[p] = settledAnim(p, target, time, st)
+			} else {
+				// ★ In-flight transition + rebuild (e.g. a hover rebuild
+				// happened mid-transition): the target is unchanged so the
+				// animation must CONTINUE, not settle. Only update the
+				// stylePtr so future frames keep advancing.
+				anim.stylePtr = st
+				inFlight = true
 			}
 			continue
 		}

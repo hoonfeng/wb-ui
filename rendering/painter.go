@@ -529,9 +529,9 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
+	olStyle := st.OutlineStyle
 	// 优先使用 typed 字段（outline 简写经 resolver 解析后设置 OutlineSet 等）；
 	// 兼容旧的 Properties map 路径（outline-style/width/color 单独属性）。
-	var olStyle string
 	var width float64
 	var color graphics.Color
 	if st.OutlineSet {
@@ -561,6 +561,7 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 	if !info.intersects(rectFromLayout(x, y, w, h)) {
 		return
 	}
+	info.canvas.StrokeRect(x, y, w, h, width, color)
 	// Outline 跟随元素的 border-radius（浏览器行为：圆角 input 的 focus
 	// outline 是圆角矩形，不是直角）。
 	r := lengthValue(st.BorderRadius)
