@@ -1508,6 +1508,14 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					case int(glfw.KeyEnd):
 						h.setFocusedCaret(-1) // clamps to end
 						edited = true
+					case int(glfw.KeyEnter), int(glfw.KeyKPEnter):
+						// Enter inserts a newline only in multi-line
+						// controls (textarea); single-line inputs submit
+						// (not implemented here, so the key is a no-op).
+						if h.imeFocusedEl.LocalName() == "textarea" {
+							h.pasteIntoFocused("\n")
+							edited = true
+						}
 					}
 				}
 			}
@@ -1592,6 +1600,17 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 			if ev.Action == int(glfw.Press) && (ev.Mods&int(glfw.ModControl)) != 0 {
 				switch ev.Key {
+				case int(glfw.KeyA):
+					// Ctrl+A: select all text in the focused form control.
+					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+						val := focusedElementValue(h.imeFocusedEl)
+						runes := []rune(val)
+						rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+							Start: 0,
+							End:   len(runes),
+						}
+						h.wv.RebuildRenderTree()
+					}
 				case int(glfw.KeyV):
 					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
 						clipText := h.win.GetClipboardString()
@@ -2160,6 +2179,15 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 		case ime.EventCharInput:
 			wasComposing := h.imeComposing
 			char := string(ev.Char)
+			// Normalize Enter's CR (if a platform delivers it as a char)
+			// to a newline in multi-line controls; single-line inputs drop it.
+			if ev.Char == '\r' {
+				if h.imeFocusedEl != nil && h.imeFocusedEl.LocalName() == "textarea" {
+					char = "\n"
+				} else {
+					break
+				}
+			}
 			var newText string
 			if wasComposing {
 				// Composition confirmed: replace the composition preview with
