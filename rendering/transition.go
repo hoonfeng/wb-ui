@@ -23,6 +23,8 @@ package rendering
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"strconv"
 	"strings"
 
@@ -128,6 +130,7 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 	if dur <= 0 {
 		return false
 	}
+	transDebug := os.Getenv("WB_TRANS_DEBUG") != ""
 	key := transitionKey{el: el, pseudo: isPseudo}
 	reg := transitionRegistry[key]
 	if reg == nil {
@@ -148,6 +151,9 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 			if anim == nil {
 				// First sighting: record the target as the settled value.
 				reg[p] = settledAnim(p, target, time, st)
+				if transDebug {
+					log.Printf("[trans] %s pseudo=%v prop=%s FIRST target=%.3f color=%v", el.LocalName(), isPseudo, p, target.num, target.color)
+				}
 			} else if !sameTransitionValue(anim, target, p) {
 				// Style was rebuilt with a different value: start/restart a
 				// transition from the last rendered value to the new target.
@@ -155,6 +161,9 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 				reg[p] = newTransitionAnim(p, anim, target, time, dur, st)
 				writeTransitionValue(st, p, cur.color, cur.num)
 				inFlight = true
+				if transDebug {
+					log.Printf("[trans] %s pseudo=%v prop=%s START from=%.3f to=%.3f color=%v→%v", el.LocalName(), isPseudo, p, cur.num, target.num, cur.color, target.color)
+				}
 			} else if anim.settled() {
 				// Rebuilt but the target is unchanged and we were idle: stay
 				// settled.
@@ -189,6 +198,9 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 			cur := interpolate(anim, time)
 			writeTransitionValue(st, p, cur.color, cur.num)
 			inFlight = true
+			if transDebug {
+				log.Printf("[trans] %s pseudo=%v prop=%s RUN prog=%.2f val=%.3f", el.LocalName(), isPseudo, p, prog, cur.num)
+			}
 		}
 	}
 	return inFlight
