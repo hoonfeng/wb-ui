@@ -51,6 +51,7 @@ var (
 	procCallWindowProcW  = user32.NewProc("CallWindowProcW")
 	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
 	procSendMessageW     = user32.NewProc("SendMessageW")
+	procClientToScreen   = user32.NewProc("ClientToScreen")
 )
 
 // ============================================================================
@@ -94,6 +95,11 @@ type candidateForm struct {
 	X, Y                           int32
 	RectLeft, RectTop              int32
 	RectRight, RectBottom          int32
+}
+
+// winPoint mirrors the Win32 POINT structure (two LONGs).
+type winPoint struct {
+	X, Y int32
 }
 
 // ============================================================================
@@ -355,14 +361,22 @@ func (h *WindowsHandler) getCursorPos(hwnd uintptr) int {
 // ============================================================================
 
 // setCompositionPos sets the IME composition and candidate window position
-// to the given physical pixel coordinates via ImmSetCompositionWindow /
-// ImmSetCandidateWindow.
+// to the given coordinates. The incoming x/y are relative to the window's
+// client area (page caret position); ImmSetCompositionWindow /
+// ImmSetCandidateWindow require SCREEN coordinates, so ClientToScreen
+// converts them first. Without this the candidate window showed at the
+// screen top-left corner (offset missing = client-origin treated as
+// screen-origin).
 func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 	himc, _, _ := procImmGetContext.Call(hwnd)
 	if himc == 0 {
 		return
 	}
 	defer procImmReleaseContext.Call(hwnd, himc)
+
+	pt := winPoint{X: x, Y: y}
+	procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+	x, y = pt.X, pt.Y
 
 	cf := compositionForm{
 		Style: cfsPoint,

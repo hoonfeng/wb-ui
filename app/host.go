@@ -1824,16 +1824,19 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 				// EXCEPT the in-progress composition) and the insertion point.
 				h.imeComposing = true
 				h.imeComposeBase = focusedElementValue(h.imeFocusedEl)
-				sel := rendering.FocusedFormControlSel
-				start := 0
-				if sel != nil {
+				// Default caret = END of text when no click positioned it
+				// (browsers put the caret at the end on focus; inserting at
+				// 0 put new text at the HEAD).
+				baseRunes := []rune(h.imeComposeBase)
+				start := len(baseRunes)
+				if sel := rendering.FocusedFormControlSel; sel != nil {
 					start = sel.Start
 					if start < 0 {
 						start = 0
 					}
 				}
-				if start > len([]rune(h.imeComposeBase)) {
-					start = len([]rune(h.imeComposeBase))
+				if start > len(baseRunes) {
+					start = len(baseRunes)
 				}
 				h.imeComposeStart = start
 			}
@@ -1873,11 +1876,13 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 				h.imeComposeBase = ""
 			} else {
 				// Plain character input: insert at the caret, replacing any
-				// selection (browser behavior). Previously this appended to
-				// the end of the whole value, ignoring the caret position.
+				// selection (browser behavior). Without a click-positioned
+				// caret the default is the END of the text (browsers focus
+				// with the caret at the end) — inserting at 0 put every
+				// character at the HEAD of the value.
 				val := focusedElementValue(h.imeFocusedEl)
 				runes := []rune(val)
-				start, end := 0, len(runes)
+				start, end := len(runes), len(runes)
 				if sel := rendering.FocusedFormControlSel; sel != nil {
 					start, end = sel.Start, sel.End
 					if start > end {

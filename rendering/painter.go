@@ -561,9 +561,9 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 	if !info.intersects(rectFromLayout(x, y, w, h)) {
 		return
 	}
-	info.canvas.StrokeRect(x, y, w, h, width, color)
 	// Outline 跟随元素的 border-radius（浏览器行为：圆角 input 的 focus
-	// outline 是圆角矩形，不是直角）。
+	// outline 是圆角矩形，不是直角）。必须二选一：先画直角 StrokeRect
+	// 再叠圆角会在圆角弧外残留直角的角部像素（用户看到的"多余直角边框"）。
 	r := lengthValue(st.BorderRadius)
 	if r > 0 {
 		// outline 在 border-box 外，半径相应外扩（近似：+ width/2 + offset）。
