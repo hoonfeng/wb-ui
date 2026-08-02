@@ -478,6 +478,201 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return ev
 		})))
 
+	// EventTarget 基类（可实例化的非 DOM 事件目标）。
+	// 浏览器标准 API：addEventListener / removeEventListener / dispatchEvent。
+	// 组件库或自定义事件源（如 WebSocket stub、状态总线）可能直接使用它。
+	g.Set("EventTarget", jsc.FunctionValue(rt.NewConstructor("EventTarget",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			obj := jsc.NewObject(in.ObjectPrototype())
+			listeners := map[string][]jsc.JSValue{} // type → JS callbacks
+			obj.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 || !a[1].IsCallable() {
+						return jsc.Undefined()
+					}
+					t := a[0].ToString()
+					for _, fn := range listeners[t] {
+						if fn.SameAs(a[1]) {
+							return jsc.Undefined() // duplicate
+						}
+					}
+					listeners[t] = append(listeners[t], a[1])
+					return jsc.Undefined()
+				}, 2)))
+			obj.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 {
+						return jsc.Undefined()
+					}
+					t := a[0].ToString()
+					cur := listeners[t]
+					out := cur[:0]
+					for _, fn := range cur {
+						if len(a) >= 2 && a[1].IsCallable() && fn.SameAs(a[1]) {
+							continue
+						}
+						out = append(out, fn)
+					}
+					listeners[t] = out
+					return jsc.Undefined()
+				}, 2)))
+			obj.Set("dispatchEvent", jsc.FunctionValue(jsc.NewNativeFunction("dispatchEvent",
+				func(interp *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 1 || !a[0].IsObject() {
+						return jsc.BooleanValue(false)
+					}
+					ev := a[0]
+					evObj := ev.AsObject()
+					if evObj == nil {
+						return jsc.BooleanValue(false)
+					}
+					// 设置 target/currentTarget（若未定义）
+					if v, ok := evObj.GetByKey("target"); !ok || v.IsUndefined() || v.IsNull() {
+						evObj.Set("target", this)
+					}
+					evObj.Set("currentTarget", this)
+					t := ""
+					if v, ok := evObj.GetByKey("type"); ok && v.IsString() {
+						t = v.ToString()
+					}
+					// 复制一份，避免回调中增删影响遍历
+					var cbs []jsc.JSValue
+					cbs = append(cbs, listeners[t]...)
+					for _, fn := range cbs {
+						interp.Call(fn, this, []jsc.JSValue{ev})
+					}
+					return jsc.BooleanValue(true)
+				}, 1)))
+			return obj
+		})))
+
+	// WebSocket 构造器（通用 stub）。
+	// wb-ui 引擎不内置真实 WebSocket 传输；此 stub 提供完整的浏览器语法
+	// （readyState 常量 / onopen / onmessage / onerror / onclose / send / close /
+	// addEventListener），供无真实网络环境的应用（桌面端）安全使用：
+	// 不建立连接、不崩溃、事件由宿主通过 dispatchMessage/dispatchStatus 注入。
+	// 有真实传输需求的宿主可在注入层覆盖 window.WebSocket。
+	wsCtor := rt.NewConstructor("WebSocket",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			obj := jsc.NewObject(in.ObjectPrototype())
+			url := ""
+			if len(args) >= 1 {
+				url = args[0].ToString()
+			}
+			obj.Set("url", jsc.StringValue(url))
+			obj.Set("readyState", jsc.NumberValue(0))
+			obj.Set("bufferedAmount", jsc.NumberValue(0))
+			obj.Set("extensions", jsc.StringValue(""))
+			obj.Set("protocol", jsc.StringValue(""))
+			obj.Set("binaryType", jsc.StringValue("blob"))
+			// 暴露最新实例：宿主可通过 globalThis.__desktopWS.dispatchMessage 推事件
+			g.Set("__desktopWS", jsc.ObjectValue(obj))
+
+			listeners := map[string][]jsc.JSValue{}
+			handle := func(evType string, ev jsc.JSValue) {
+				// on<type> 属性回调
+				onProp := "on" + evType
+				if v, ok := obj.GetByKey(onProp); ok && v.IsCallable() {
+					in.Call(v, jsc.ObjectValue(obj), []jsc.JSValue{ev})
+				}
+				// addEventListener 注册的回调
+				for _, fn := range listeners[evType] {
+					in.Call(fn, jsc.ObjectValue(obj), []jsc.JSValue{ev})
+				}
+			}
+
+			obj.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 || !a[1].IsCallable() {
+						return jsc.Undefined()
+					}
+					listeners[a[0].ToString()] = append(listeners[a[0].ToString()], a[1])
+					return jsc.Undefined()
+				}, 2)))
+			obj.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 {
+						return jsc.Undefined()
+					}
+					cur := listeners[a[0].ToString()]
+					out := cur[:0]
+					for _, fn := range cur {
+						if fn.SameAs(a[1]) {
+							continue
+						}
+						out = append(out, fn)
+					}
+					listeners[a[0].ToString()] = out
+					return jsc.Undefined()
+				}, 2)))
+			obj.Set("send", jsc.FunctionValue(jsc.NewNativeFunction("send",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined() // 桌面模式忽略 send（心跳等）
+				}, 1)))
+			obj.Set("close", jsc.FunctionValue(jsc.NewNativeFunction("close",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					if obj.GetStr("readyState").ToNumber() == 3 {
+						return jsc.Undefined()
+					}
+					obj.Set("readyState", jsc.NumberValue(3))
+					ev := jsc.NewObject(in.ObjectPrototype())
+					ev.Set("type", jsc.StringValue("close"))
+					ev.Set("code", jsc.NumberValue(1000))
+					ev.Set("reason", jsc.StringValue(""))
+					handle("close", jsc.ObjectValue(ev))
+					return jsc.Undefined()
+				}, 0)))
+			// 宿主扩展：dispatchMessage / dispatchStatus 推送事件
+			obj.Set("dispatchMessage", jsc.FunctionValue(jsc.NewNativeFunction("dispatchMessage",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					data := ""
+					if len(a) >= 1 {
+						data = a[0].ToString()
+					}
+					ev := jsc.NewObject(in.ObjectPrototype())
+					ev.Set("type", jsc.StringValue("message"))
+					ev.Set("data", jsc.StringValue(data))
+					handle("message", jsc.ObjectValue(ev))
+					return jsc.Undefined()
+				}, 1)))
+			obj.Set("dispatchStatus", jsc.FunctionValue(jsc.NewNativeFunction("dispatchStatus",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					data := ""
+					if len(a) >= 1 {
+						data = a[0].ToString()
+					}
+					ev := jsc.NewObject(in.ObjectPrototype())
+					ev.Set("type", jsc.StringValue("message"))
+					ev.Set("data", jsc.StringValue(data))
+					handle("message", jsc.ObjectValue(ev))
+					return jsc.Undefined()
+				}, 1)))
+			// 异步触发 onopen（模拟连接建立；等前端设置 onopen 后再回调）
+			if el := in.EnsureEventLoop(); el != nil {
+				openCb := in.NewNativeFunction("wsOpen", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					obj.Set("readyState", jsc.NumberValue(1))
+					ev := jsc.NewObject(in.ObjectPrototype())
+					ev.Set("type", jsc.StringValue("open"))
+					handle("open", jsc.ObjectValue(ev))
+					return jsc.Undefined()
+				}, 0)
+				_ = el.SetTimeout(jsc.FunctionValue(openCb), 0)
+			} else {
+				obj.Set("readyState", jsc.NumberValue(1))
+				ev := jsc.NewObject(in.ObjectPrototype())
+				ev.Set("type", jsc.StringValue("open"))
+				handle("open", jsc.ObjectValue(ev))
+			}
+			return obj
+		})
+	// 静态常量挂在构造器上
+	wsCtorObj := jsc.FunctionValue(wsCtor).AsObject()
+	wsCtorObj.Set("CONNECTING", jsc.NumberValue(0))
+	wsCtorObj.Set("OPEN", jsc.NumberValue(1))
+	wsCtorObj.Set("CLOSING", jsc.NumberValue(2))
+	wsCtorObj.Set("CLOSED", jsc.NumberValue(3))
+	g.Set("WebSocket", jsc.FunctionValue(wsCtor))
+
 	// DOMParser
 	domParserDoc := document // capture for closures
 	g.Set("DOMParser", jsc.FunctionValue(rt.NewConstructor("DOMParser",

@@ -2,6 +2,7 @@
 package jsc
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -51,7 +52,7 @@ func (r *Interpreter) SetupGlobal(logger *BufferLogger) {
 	logFunc := func(call goja.FunctionCall) goja.Value {
 		parts := make([]string, len(call.Arguments))
 		for i, arg := range call.Arguments {
-			parts[i] = fmt.Sprintf("%v", arg.Export())
+			parts[i] = formatConsoleArg(arg)
 		}
 		line := strings.Join(parts, " ")
 		if logger != nil {
@@ -67,6 +68,21 @@ func (r *Interpreter) SetupGlobal(logger *BufferLogger) {
 	consoleObj.Set("info", logFunc)
 	consoleObj.Set("debug", logFunc)
 	r.vm.Set("console", consoleObj)
+}
+
+// formatConsoleArg 将 console.log 参数格式化为可读文本。
+// 对象/数组尝试 JSON 序列化（避免 Go map 的 %v 打印出 map[]），
+// 失败时回退到 Go %v。
+func formatConsoleArg(v goja.Value) string {
+	if v == nil {
+		return "<nil>"
+	}
+	if obj, ok := v.(*goja.Object); ok {
+		if b, err := json.Marshal(obj.Export()); err == nil {
+			return string(b)
+		}
+	}
+	return fmt.Sprintf("%v", v.Export())
 }
 
 func (r *Interpreter) GlobalObject() *JSObject {
