@@ -593,12 +593,23 @@ func (h *Host) ensureFocusedCaretVisible() {
 	if h.wv == nil {
 		return
 	}
+	// The input path runs RebuildRenderTree() (brand-new RenderBox with
+	// zeroed geometry) immediately before this. Without an up-to-date
+	// layout, findFormControlBox returns bh=0 → viewH clamps to 1 →
+	// rowBottom>sy+1 computes a huge newSy and the content jumps out of
+	// view on every keystroke (WB_SCROLL_DEBUG proved bh=0.0 and sy
+	// oscillating 47↔65.5 per input). Layout first so geometry is valid.
+	h.wv.EnsureLayout()
 	rv := h.wv.RenderView()
 	if rv == nil {
 		return
 	}
 	box, _, _, _, bh, sy, st := h.findFormControlBox(el)
 	if box == nil || st == nil {
+		return
+	}
+	if bh <= 0 {
+		// Geometry still invalid — never write a scroll derived from it.
 		return
 	}
 	val := focusedElementValue(el)
