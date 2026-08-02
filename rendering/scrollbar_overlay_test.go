@@ -66,23 +66,11 @@ func helperRenderScrollBox(t *testing.T, overflow string, cx, cy float64) *graph
 	return canvas
 }
 
-// TestScrollbarOverlayHidden: overflow:auto with the cursor outside the box
-// paints no scrollbar (right edge stays background).
-func TestScrollbarOverlayHidden(t *testing.T) {
-	canvas := helperRenderScrollBox(t, "auto", -50, -50)
-	defer canvas.Release()
-	// Right edge (scrollbar zone) must be background (#eee child fills width).
-	for y := 10; y < 70; y += 10 {
-		px := canvas.PixelAt(114, y)
-		if px.A != 0 && !(px.R > 230 && px.G > 230 && px.B > 230) {
-			t.Fatalf("scrollbar pixel (114,%d) = %+v, want hidden", y, px)
-		}
-	}
-}
-
-// TestScrollbarOverlayVisible: overflow:auto with the cursor over the box
-// shows the scrollbar track at the right edge.
-func TestScrollbarOverlayVisible(t *testing.T) {
+// TestScrollbarAutoAlwaysVisible: overflow:auto shows the scrollbar whenever
+// content overflows — Windows-style resident scrollbars (Chrome/Edge on
+// Windows keep overflow:auto scrollbars visible; overlay auto-hiding is a
+// macOS/touch feature). Cursor position is irrelevant.
+func TestScrollbarAutoAlwaysVisible(t *testing.T) {
 	canvas := helperRenderScrollBox(t, "auto", 60, 40)
 	defer canvas.Release()
 	found := false
@@ -94,7 +82,22 @@ func TestScrollbarOverlayVisible(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("scrollbar not painted with cursor over box")
+		t.Fatalf("auto scrollbar not painted with cursor over box")
+	}
+
+	// Same box, cursor far away — still painted.
+	canvas2 := helperRenderScrollBox(t, "auto", -50, -50)
+	defer canvas2.Release()
+	found = false
+	for y := 14; y < 70; y++ {
+		px := canvas2.PixelAt(110, y)
+		if px.A != 0 && !(px.R > 230 && px.G > 230 && px.B > 230) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("auto scrollbar not painted with cursor far away")
 	}
 }
 

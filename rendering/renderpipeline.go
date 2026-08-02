@@ -371,16 +371,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
-							// Overlay scrollbars (overflow:auto): visible only
-							// while the cursor is over the box, matching
-							// modern browsers. overflow:scroll stays always
-							// visible.
-							if (st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto) && info.rv != nil {
-								cx, cy := info.rv.CursorPos()
-								if cx < pb.X || cx > pb.X+pb.Width || cy < pb.Y || cy > pb.Y+pb.Height {
-									goto endScrollbars
-								}
-							}
+							// Windows-style scrollbars are ALWAYS visible when content
+							// overflows (Chrome/Edge on Windows keep overflow:auto
+							// scrollbars resident; overlay auto-hiding is a macOS /
+							// touch feature). No cursor-over-box gating here.
 
 							// Darker scrollbar colors (better contrast vs white track).
 							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
@@ -422,7 +416,37 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 
-// ── Vertical scrollbar ──
+							// Scroll viewport is the CONTENT box (padding-box minus
+							// padding), matching the text area the painter clips to.
+							// Using the raw padding-box width made the thumb range
+							// LARGER than the actual scroll extent, so at max scroll
+							// sxRatio>1 pushed the thumb over the right arrow.
+							padL := lengthValue(st.PaddingLeft)
+							padR := lengthValue(st.PaddingRight)
+							padT := lengthValue(st.PaddingTop)
+							padB := lengthValue(st.PaddingBottom)
+							if padL < 0 {
+								padL = 0
+							}
+							if padR < 0 {
+								padR = 0
+							}
+							if padT < 0 {
+								padT = 0
+							}
+							if padB < 0 {
+								padB = 0
+							}
+							viewW := pb.Width - padL - padR
+							if viewW < 1 {
+								viewW = 1
+							}
+							viewH := pb.Height - padT - padB
+							if viewH < 1 {
+								viewH = 1
+							}
+
+							// ── Vertical scrollbar ──
 						if needsV {
 							vx := pb.X + pb.Width - scrollW
 							vy := pb.Y
@@ -449,14 +473,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						info.canvas.FillRoundedTriangle(acx, dcy+2, acx-4, dcy-3, acx+4, dcy-3, 0.8, arrowCol)
 
 							// Thumb (rounded rect, pill shape).
-							if totalH > contentH {
+							if totalH > viewH {
 								trackH := vh - arrowSize*2 - arrowGap*2
-								thumbLen := trackH * contentH / totalH
+								thumbLen := trackH * viewH / totalH
 								if thumbLen < 18 { thumbLen = 18 }
 								if thumbLen > trackH-4 { thumbLen = trackH - 4 }
-								maxSy := totalH - contentH
+								maxSy := totalH - viewH
 								if maxSy <= 0 { maxSy = 1 }
 								syRatio := sy / maxSy
+								if syRatio < 0 { syRatio = 0 }
+								if syRatio > 1 { syRatio = 1 }
 								thumbTrackSpace := trackH - thumbLen
 								thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
 
@@ -495,14 +521,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
 
 								// Thumb.
-								if totalW > contentW {
+								if totalW > viewW {
 									trackW := hw - arrowSize*2 - arrowGap*2
-									thumbLen := trackW * contentW / totalW
+									thumbLen := trackW * viewW / totalW
 									if thumbLen < 18 { thumbLen = 18 }
 									if thumbLen > trackW-4 { thumbLen = trackW - 4 }
-									maxSx := totalW - contentW
+									maxSx := totalW - viewW
 									if maxSx <= 0 { maxSx = 1 }
 									sxRatio := sx / maxSx
+									if sxRatio < 0 { sxRatio = 0 }
+									if sxRatio > 1 { sxRatio = 1 }
 									thumbTrackSpace := trackW - thumbLen
 									thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
 
@@ -523,7 +551,6 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)
 							}
 						}
-						endScrollbars:
 					}
 				}
 			}
