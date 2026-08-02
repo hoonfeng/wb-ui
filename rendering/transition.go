@@ -162,8 +162,14 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 			} else {
 				// ★ In-flight transition + rebuild (e.g. a hover rebuild
 				// happened mid-transition): the target is unchanged so the
-				// animation must CONTINUE, not settle. Only update the
-				// stylePtr so future frames keep advancing.
+				// animation must CONTINUE, not settle. The rebuild discarded
+				// the interpolated value (a fresh ComputedStyle was created
+				// from the raw CSS), so re-apply the current interpolation to
+				// the new style — without this the element jumps straight to
+				// the target whenever any hover/dirty rebuild fires between
+				// frames (the switch thumb never animates).
+				cur := interpolate(anim, time)
+				writeTransitionValue(st, p, cur.color, cur.num)
 				anim.stylePtr = st
 				inFlight = true
 			}

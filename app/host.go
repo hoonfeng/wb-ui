@@ -13,6 +13,7 @@ package app
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -140,6 +141,18 @@ type Host struct {
 	scrollbarDragStart float64
 	// scrollbarDragOffsetY is the scroll offset at drag start.
 	scrollbarDragScroll float64
+
+	// Smooth (wheel) scrolling state: wheel events set a TARGET offset and
+	// the main loop interpolates toward it with an exponential approach,
+	// mirroring browser wheel behavior. Scrollbar thumb drags stay 1:1 and
+	// bypass this entirely (they write BoxScrollOffset directly).
+	smoothBox    *rendering.RenderBox
+	smoothCurX   float64
+	smoothCurY   float64
+	smoothTarX   float64
+	smoothTarY   float64
+	smoothActive bool
+	smoothLast   time.Time
 
 	// caretBlinkTime tracks the last caret visibility toggle for blinking.
 	caretBlinkTime time.Time
@@ -841,6 +854,26 @@ func (h *Host) Run() {
 
 		h.wv.EnsureLayout()
 		rv := h.wv.RenderView()
+
+		// Smooth wheel scrolling: interpolate the per-box scroll offset
+		// toward the wheel-event target with an exponential approach
+		// (browser-like). Scrollbar thumb drags bypass this (1:1 direct
+		// writes), so the thumb never lags the cursor.
+		if h.smoothActive && rv != nil && h.smoothBox != nil {
+			now := time.Now()
+			dt := now.Sub(h.smoothLast).Seconds()
+			h.smoothLast = now
+			if dt > 0 && dt < 0.1 {
+				f := 1 - math.Exp(-dt*12)
+				h.smoothCurX += (h.smoothTarX - h.smoothCurX) * f
+				h.smoothCurY += (h.smoothTarY - h.smoothCurY) * f
+				if math.Abs(h.smoothTarX-h.smoothCurX) < 0.5 && math.Abs(h.smoothTarY-h.smoothCurY) < 0.5 {
+					h.smoothCurX, h.smoothCurY = h.smoothTarX, h.smoothTarY
+					h.smoothActive = false
+				}
+				rv.SetBoxScrollOffset(h.smoothBox, h.smoothCurX, h.smoothCurY)
+			}
+		}
 		if DumpRTCallback != nil && rv != nil && h.needsResizeDump {
 			DumpRTCallback(rv)
 			h.needsResizeDump = false
@@ -1050,7 +1083,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				} else if newSx > 0 {
 					newSx = 0
 				}
-				rv.SetBoxScrollOffset(scrollBox, float64(newSx), float64(newSy))
+				// Wheel scroll is SMOOTHED (browser-like): record the target
+				// and let the main loop interpolate toward it every frame.
+				// A new wheel event while animating simply re-targets from
+				// the current interpolated position.
+				if !h.smoothActive || h.smoothBox != scrollBox {
+					h.smoothBox = scrollBox
+					h.smoothCurX, h.smoothCurY = sx, sy
+				}
+				h.smoothTarX = float64(newSx)
+				h.smoothTarY = float64(newSy)
+				h.smoothActive = true
+				h.smoothLast = time.Now()
 			} else {
 				log.Printf("[scroll] FrameView.ScrollBy(dx=%d, dy=%d) scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
 					-int(ev.ScrollX*40), -int(ev.ScrollY*40),
@@ -1289,6 +1333,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					box := scrollHit.Box
 					// ── Thumb drag ──
 					if scrollHit.IsVThumb {
+						h.smoothActive = false // thumb drag is 1:1, not smoothed
 						h.scrollbarDragging = true
 						h.scrollbarDragBox = box
 						h.scrollbarDragAxis = true // vertical
@@ -1298,6 +1343,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						break
 					}
 					if scrollHit.IsHThumb {
+						h.smoothActive = false // thumb drag is 1:1, not smoothed
 						h.scrollbarDragging = true
 						h.scrollbarDragBox = box
 						h.scrollbarDragAxis = false // horizontal

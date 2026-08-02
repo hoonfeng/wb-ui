@@ -398,8 +398,25 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			selW := graphics.MeasureText(font, selText)
 
 			// Draw selection highlight rectangle behind the selected text.
+			// Browsers highlight the FULL content-area height of a
+			// single-line input (vertically centered), not just the glyph
+			// height — a glyph-only rect looks like a small uncentered
+			// patch inside a tall input.
 			selColor := graphics.Color{R: 50, G: 100, B: 200, A: 150}
-			c.FillRect(textX+preW, baselineY-ascent, selW, textHeight, selColor)
+			padY := lengthValue(st.PaddingTop)
+			padB := lengthValue(st.PaddingBottom)
+			if padY < 0 {
+				padY = 0
+			}
+			if padB < 0 {
+				padB = 0
+			}
+			selTop := y + padY
+			selH := h - padY - padB
+			if selH < textHeight {
+				selH = textHeight
+			}
+			c.FillRect(textX+preW, selTop, selW, selH, selColor)
 
 			// Draw pre-selection text in normal color.
 			if preText != "" {
