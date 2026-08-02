@@ -90,6 +90,11 @@ func applyTransitions(rv *RenderView, time float64) bool {
 			// 向上找最近的 DOM 宿主（如 .track 的 ::after 滑块）。
 			if el, isPseudo := transitionOwnerElement(o); el != nil {
 				if applyElementTransitions(el, isPseudo, st, time) {
+					// ★ 把渲染树 style 中的插值同步到布局树对应 box 的
+					// style：布局引擎用「布局树」的 style 计算几何（absolute
+					// 伪元素圆点的 left/top），渲染树的插值不同步过去则
+					// 圆点位置永远不动（"开关只有背景过渡"的根因）。
+					syncTransitionStyleToLayout(o, st)
 					anyActive = true
 				}
 			}
@@ -100,6 +105,32 @@ func applyTransitions(rv *RenderView, time float64) bool {
 	}
 	walk(RenderObject(rv))
 	return anyActive
+}
+
+// syncTransitionStyleToLayout copies the transition-interpolated values from a
+// render object's ComputedStyle into the corresponding layout-tree box's
+// ComputedStyle. The render tree and layout tree hold *separate* ComputedStyle
+// objects (the layout tree is built from raw CSS via the resolver); the
+// transition engine writes interpolated values into the render style, so
+// without this copy the layout pass re-reads the stale (un-interpolated) value
+// and the animated geometry never moves.
+func syncTransitionStyleToLayout(o RenderObject, st *style.ComputedStyle) {
+	lb := o.LayoutBox()
+	if lb == nil {
+		return
+	}
+	lst := lb.Style()
+	if lst == nil {
+		return
+	}
+	if s := st.Properties["left"]; s != "" {
+		lst.Properties["left"] = s
+	}
+	if s := st.Properties["top"]; s != "" {
+		lst.Properties["top"] = s
+	}
+	lst.BackgroundColor = st.BackgroundColor
+	lst.Opacity = st.Opacity
 }
 
 // transitionOwnerElement returns the DOM element driving transitions for o:
