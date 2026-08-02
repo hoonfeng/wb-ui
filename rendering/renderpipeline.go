@@ -725,25 +725,6 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 	// background/border painting here must NOT re-apply it.
 	PaintBackground(box, info)
 	PaintBorder(box, info)
-	// CSS outline：绘制在 border-box 外缘（不占布局空间），:focus 指示器等。
-	if st := box.Style(); st != nil && st.OutlineSet && st.OutlineStyle != "" && st.OutlineStyle != "none" {
-		ow := lengthValue(st.OutlineWidth)
-		if ow > 0 {
-			col := st.OutlineColor
-			if col.A == 0 {
-				col = st.Color // currentColor 回退
-			}
-			if col.A > 0 {
-				o := ApplyOpacityToColor(toGraphicsColor(col), CumulativeOpacity(box))
-				x, y, w, h := box.X(), box.Y(), box.Width(), box.Height()
-				// 四边（outline 在 border box 外侧，outline-offset 默认 0）
-				paintBorderSide(info.canvas, x-ow, y-ow, w+2*ow, ow, o, "solid")
-				paintBorderSide(info.canvas, x-ow, y+h, w+2*ow, ow, o, "solid")
-				paintBorderSide(info.canvas, x-ow, y, ow, h, o, "solid")
-				paintBorderSide(info.canvas, x+w, y, ow, h, o, "solid")
-			}
-		}
-	}
 	if filterCleanup != nil {
 		defer filterCleanup()
 	}

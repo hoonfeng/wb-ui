@@ -141,6 +141,23 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	currentLine := lineInfo{y: contentY, contentX: lineCx, segStart: 0, widthUsed: 0, availWidth: lineCw}
 
+	// Out-of-flow (absolute/fixed) children of an inline container must be
+	// laid out against their containing block, not as inline content.
+	// Without this, an absolute pseudo-element thumb (e.g. a switch track's
+	// ::after circle) would be treated as inline text and pinned to the
+	// container's content-box origin, ignoring left/top.
+	var deferredAbsolutes []*ElementBox
+	defer func() {
+		if len(deferredAbsolutes) == 0 {
+			return
+		}
+		root := stateRootForBox(box)
+		for _, ab := range deferredAbsolutes {
+			cb := containingBlockForAbsolute(ab, root)
+			layoutAbsolute(ab, cb, root, state)
+		}
+	}()
+
 	for _, child := range box.Children() {
 		switch cld := child.(type) {
 		case *InlineTextBox:
@@ -249,6 +266,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				firstWord = false
 			}
 			case *ElementBox:
+			// Absolute/fixed children are out-of-flow: collect for deferred
+			// layout against their containing block (handled above).
+			if cld.IsAbsolutelyPositioned() {
+				deferredAbsolutes = append(deferredAbsolutes, cld)
+				continue
+			}
 			if !cld.IsInlineLevel() { continue }
 			cldG := state.GeometryForBox(cld)
 

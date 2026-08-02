@@ -529,15 +529,26 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
-	olStyle := st.GetProperty("outline-style")
+	// 优先使用 typed 字段（outline 简写经 resolver 解析后设置 OutlineSet 等）；
+	// 兼容旧的 Properties map 路径（outline-style/width/color 单独属性）。
+	var olStyle string
+	var width float64
+	var color graphics.Color
+	if st.OutlineSet {
+		olStyle = st.OutlineStyle
+		width = lengthValue(st.OutlineWidth)
+		color = toGraphicsColor(st.OutlineColor)
+	} else {
+		olStyle = st.GetProperty("outline-style")
+		width = lengthValue(parseLengthProperty(st.GetProperty("outline-width")))
+		color = parseColorProperty(st.GetProperty("outline-color"))
+	}
 	if olStyle == "" || olStyle == "none" {
 		return
 	}
-	width := lengthValue(parseLengthProperty(st.GetProperty("outline-width")))
 	if width <= 0 {
 		width = 1
 	}
-	color := parseColorProperty(st.GetProperty("outline-color"))
 	if color.A == 0 {
 		// Default outline color is the element's current text color.
 		color = toGraphicsColor(st.Color)

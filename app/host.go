@@ -38,7 +38,7 @@ var DumpRTCallback func(rv *rendering.RenderView)
 
 // debugPaintLog enables verbose paint and event diagnostics printed to stderr.
 // Set to true to trace hover, click, and paint operations.
-const debugPaintLog = false
+var debugPaintLog = os.Getenv("WB_HOVER_DEBUG") != ""
 
 // ClickHandler is invoked when the user clicks an element whose onclick
 // attribute does not use the "js:" prefix. el is the deepest hit-tested
@@ -313,6 +313,25 @@ func isTextFormControl(el *dom.Element) bool {
 	default:
 		return false
 	}
+}
+
+// isFocusableElement 报告元素是否可聚焦（浏览器语义）。
+// 点击可聚焦元素应触发 :focus 伪类（outline 指示器等），而不只是文本控件。
+func isFocusableElement(el *dom.Element) bool {
+	if el == nil {
+		return false
+	}
+	switch el.LocalName() {
+	case "input", "textarea", "select", "button", "summary", "label", "a", "area":
+		return true
+	}
+	if strings.EqualFold(el.GetAttribute("contenteditable"), "true") {
+		return true
+	}
+	if el.HasAttribute("tabindex") {
+		return true
+	}
+	return false
 }
 
 func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
@@ -1076,11 +1095,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							cssX, cssY, h.imeFocusedEl != nil, hitEl != nil,
 							func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
 							func() string { if hitEl != nil { return hitEl.GetAttribute("type") }; return "" }())
-						if hitEl != nil && isTextFormControl(hitEl) {
-							if hitEl != h.imeFocusedEl {
-								h.FocusElement(hitEl)
-							}
-						} else if hitEl != nil && hitEl.LocalName() == "select" {
+						if hitEl != nil && isFocusableElement(hitEl) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
 							}
@@ -1504,6 +1519,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		}
 		if deepest != nil {
 			handleFormSubmitClick(deepest)
+			handleLabelToggle(deepest)
 			if deepest.LocalName() == "a" {
 				h.handleAnchorClick(deepest)
 			}
@@ -1524,6 +1540,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 			h.clickHandler(el, "", clickCSSX, clickCSSY)
 		}
 		handleFormSubmitClick(el)
+		handleLabelToggle(el)
 		if el.LocalName() == "a" {
 			h.handleAnchorClick(el)
 		}
@@ -1579,6 +1596,45 @@ func handleFormSubmitClick(el *dom.Element) {
 		if ok {
 			f.RequestSubmit(el)
 		}
+	}
+}
+
+// handleLabelToggle 实现 <label> 的点击转发：点击 label 或其任意后代，
+// 切换内部包裹的 checkbox/radio 的选中状态（浏览器 label 语义）。
+// 开关（switch）的 track span 点击因此能 toggle 内嵌 checkbox，
+// 且 `input:checked + .track::after` 滑块随之移动。
+func handleLabelToggle(el *dom.Element) {
+	if el == nil {
+		return
+	}
+	// 向上找 label 祖先。
+	lab := el
+	for lab != nil && lab.LocalName() != "label" {
+		lab = lab.ParentElement()
+	}
+	if lab == nil {
+		return
+	}
+	// 找 label 内第一个 checkbox/radio。
+	for c := lab.FirstChild(); c != nil; c = c.NextSibling() {
+		e, ok := c.(*dom.Element)
+		if !ok || e.LocalName() != "input" {
+			continue
+		}
+		typ := e.GetAttribute("type")
+		if typ != "checkbox" && typ != "radio" {
+			continue
+		}
+		in, ok := html5.ToInputElement(e)
+		if !ok {
+			continue
+		}
+		if typ == "checkbox" {
+			in.SetChecked(!in.Checked())
+		} else {
+			in.SetChecked(true)
+		}
+		return
 	}
 }
 
