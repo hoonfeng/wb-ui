@@ -1,0 +1,12 @@
+fix: flex cross-axis fit-content + min-height:auto + justify re-center
+
+Three more Edge-alignment fixes from the element-tree pipeline:
+1. non-stretch flex item width = fit-content = min(max-content,
+   max(min-content, available)) — .welcome-sub normal text wraps to the
+   97px main-area (Edge h=64 multi-line) while .welcome-logo "PairCode"
+   (unbreakable word) stays 217px centered; added minContentWidth
+2. flex item min-height:auto — .welcome-sub 4-line content (62px) must
+   not be pinned to the 17px pre-layout intrinsic estimate
+3. column-flex justify-content:center re-centers the group after child
+   layout even for definite-height containers (welcome height:100%):
+   content group now sits at Edge's y=232/301/332
