@@ -112,6 +112,13 @@ type winRect struct {
 	Left, Top, Right, Bottom int32
 }
 
+// candidateWindowHeight estimates the height of the IME candidate window
+// (one row of candidates + padding). TSF Microsoft Pinyin treats the point
+// returned by IMR_QUERYCHARPOSITION as the candidate list's BOTTOM edge
+// and expands the list upward, so the reported caret Y must be pushed down
+// by this height for the list to render below the caret.
+const candidateWindowHeight = 36
+
 // imeCharPosition mirrors the Win32 IMECHARPOSITION structure, used by
 // WM_IME_REQUEST / IMR_QUERYCHARPOSITION to ask the application for the
 // on-screen position of a character in the composition string.
@@ -340,25 +347,30 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 			log.Printf("[ime] wmIMERequest wParam=%#x lParam=%#x pos=(%d,%d)", wParam, lParam, x, y)
 		}
 		switch wParam {
-		case imrQueryCharPosition:
-			// TSF-compatible IMEs (Microsoft Pinyin) ask for the character's
-			// SCREEN position via IMR_QUERYCHARPOSITION; the candidate list
-			// is positioned from this. This is the primary mechanism that
-			// makes the candidate window follow the caret — ImmSetCandidateWindow
-			// alone is ignored by TSF IMEs.
-			if lParam != 0 {
-				cp := (*imeCharPosition)(unsafe.Pointer(lParam))
-				var pt struct{ X, Y int32 }
-				procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
-				cp.PtX = pt.X + x
-				cp.PtY = pt.Y + y
-				cp.Hwnd = hwnd
-				if os.Getenv("WB_IME_DEBUG") != "" {
-					log.Printf("[ime] IMR_QUERYCHARPOSITION charPos=%d screen=(%d,%d) hwnd=%#x", cp.CharPos, cp.PtX, cp.PtY, hwnd)
-				}
-				return uintptr(unsafe.Sizeof(imeCharPosition{}))
+	case imrQueryCharPosition:
+		// TSF-compatible IMEs (Microsoft Pinyin) ask for the character's
+		// SCREEN position via IMR_QUERYCHARPOSITION; the candidate list
+		// is positioned from this. This is the primary mechanism that
+		// makes the candidate window follow the caret — ImmSetCandidateWindow
+		// alone is ignored by TSF IMEs.
+		if lParam != 0 {
+			cp := (*imeCharPosition)(unsafe.Pointer(lParam))
+			var pt struct{ X, Y int32 }
+			procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+			cp.PtX = pt.X + x
+			// The reported point is the anchor for the candidate window's
+			// BOTTOM edge (TSF Microsoft Pinyin expands the list upward from
+			// it). To place the list BELOW the caret we must push Y down by
+			// the candidate window's own height — the caret-bottom anchor
+			// alone left the list flush with (covering) the caret line.
+			cp.PtY = pt.Y + y + candidateWindowHeight
+			cp.Hwnd = hwnd
+			if os.Getenv("WB_IME_DEBUG") != "" {
+				log.Printf("[ime] IMR_QUERYCHARPOSITION charPos=%d screen=(%d,%d) hwnd=%#x", cp.CharPos, cp.PtX, cp.PtY, hwnd)
 			}
-			return 0
+			return uintptr(unsafe.Sizeof(imeCharPosition{}))
+		}
+		return 0
 		case imrCompositionWindow:
 			if lParam != 0 {
 				f := (*compositionForm)(unsafe.Pointer(lParam))
@@ -371,7 +383,7 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 				f := (*candidateForm)(unsafe.Pointer(lParam))
 				f.Index = 0
 				f.Style = cfsCandidatePos
-				f.X, f.Y = x, y
+				f.X, f.Y = x, y + candidateWindowHeight
 				return uintptr(unsafe.Sizeof(candidateForm{}))
 			}
 		}

@@ -410,6 +410,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							cursorX, cursorY := float64(0), float64(0)
 							if info.rv != nil {
 								sx, sy = info.rv.BoxScrollOffset(box)
+								// Form-control text scrolls through
+								// FocusedFormControlTextScroll (input caret /
+								// pre-mode textarea), not BoxScrollOffset —
+								// mirror it so the horizontal thumb follows.
+								if el, ok := box.Node().(*dom.Element); ok {
+									if el.LocalName() == "textarea" || el.LocalName() == "input" {
+										sx = FocusedFormControlTextScroll
+									}
+								}
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 

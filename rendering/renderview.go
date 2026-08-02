@@ -2,6 +2,8 @@
 package rendering
 
 import (
+	"strings"
+
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -204,6 +206,47 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 			}
 		}
 	})
+
+	// Form controls (input/textarea) carry their text in value/textContent,
+	// not as render-tree children — measure it so scrollbars appear when the
+	// text overflows (a pre-mode textarea scrolls horizontally, a long input
+	// scrolls too). The scroll extent must at least cover the control.
+	if el, ok := box.Node().(*dom.Element); ok {
+		local := el.LocalName()
+		if local == "textarea" || local == "input" {
+			var text string
+			if local == "textarea" {
+				text = el.TextContent()
+			} else {
+				text = el.GetAttribute("value")
+			}
+			if st := box.Style(); st != nil && text != "" {
+				font := toGraphicsFont(st)
+				maxW := 0.0
+				lineH := 0.0
+				for i, line := range strings.Split(text, "\n") {
+					w := graphics.MeasureText(font, line)
+					if w > maxW {
+						maxW = w
+					}
+					if i == 0 {
+						lineH = cssControlLineHeight(st, font.Size)
+					}
+				}
+				if maxW > maxRight-pb.X {
+					maxRight = pb.X + maxW
+				}
+				if local == "textarea" && lineH > 0 {
+					rows := float64(len(strings.Split(text, "\n")))
+					if rows*lineH > maxBottom-pb.Y {
+						maxBottom = pb.Y + rows*lineH
+					}
+				}
+				found = true
+			}
+		}
+	}
+
 	if !found {
 		return pb.Width, pb.Height
 	}
