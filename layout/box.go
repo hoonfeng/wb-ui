@@ -12,6 +12,7 @@ package layout
 import (
 	"strings"
 
+	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/style"
 )
@@ -36,6 +37,7 @@ const (
 	NodeWordBreakOpportunity
 	NodeListMarker
 	NodeImplicitFlexBox
+	NodePseudoElement
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -349,9 +351,14 @@ func isReplacedElement(localName string) bool {
 }
 func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 	if isReplacedElement(el.LocalName()) { return }
+	// ::before 伪元素（镜像 WebKit：伪元素作为宿主的子 box，before 在最前）。
+	// 无 DOM 节点（Element()==nil），通过 NodePseudoElement 标记；linkLayoutBoxes
+	// 按匿名位置配对 render/layout 两侧的伪元素 box。
+	appendPseudoBefore(box, el, resolver)
 	if box.style != nil && (isFlexContainerDisplay(box.style.Display) ||
 		box.style.Display == style.DisplayGrid || box.style.Display == style.DisplayInlineGrid) {
 		buildFlexChildren(box, el, resolver)
+		appendPseudoAfter(box, el, resolver)
 		return
 	}
 	var inlineRun []Box
@@ -422,6 +429,28 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		}
 	}
 	flush()
+	// ::after 伪元素（最后）。
+	appendPseudoAfter(box, el, resolver)
+}
+
+// appendPseudoBefore/appendPseudoAfter 为宿主元素插入 ::before/::after 伪元素 box
+//（无 DOM 节点）。样式经 resolver.ResolvePseudoElement 解析；display:none 时跳过。
+func appendPseudoBefore(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
+	if resolver == nil {
+		return
+	}
+	if cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementBefore); ok && cs.Display != style.DisplayNone {
+		box.AddChild(&ElementBox{nodeType: NodePseudoElement, style: cs})
+	}
+}
+
+func appendPseudoAfter(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
+	if resolver == nil {
+		return
+	}
+	if cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementAfter); ok && cs.Display != style.DisplayNone {
+		box.AddChild(&ElementBox{nodeType: NodePseudoElement, style: cs})
+	}
 }
 
 func isFlexContainerDisplay(d style.DisplayType) bool {

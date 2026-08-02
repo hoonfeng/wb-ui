@@ -305,6 +305,115 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	return cs
 }
 
+// ResolvePseudoElement computes the ComputedStyle for a ::before/::after
+// pseudo-element of el, mirroring WebKit's pseudo-element style resolution
+// (ElementRuleCollector + StyleResolver for pseudo-elements).
+//
+// Returns (style, content, ok): ok=false when no rule targets the
+// pseudo-element (no box should be generated). The style inherits from the
+// host element's computed style first, then applies matching declarations
+// (e.g. `.switch .track::after { width:12px; ... }`).
+func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (*ComputedStyle, string, bool) {
+	var collected []collectedDecl
+	found := false
+	for _, sheet := range r.sheets {
+		order := 0
+		order = r.collectPseudoDeclarations(sheet.Rules(), sheet.Origin(), el, pe, &collected, order)
+		if !found && len(collected) > 0 {
+			found = true
+		}
+	}
+	if !found {
+		return nil, "", false
+	}
+
+	cs := NewComputedStyle()
+	// 伪元素从宿主元素继承（WebKit：伪元素继承宿主 computed style）。
+	hostCS := r.ResolveElement(el)
+	cs.InheritFrom(hostCS)
+
+	// 排序并应用声明（与 ResolveElement 相同的级联逻辑）。
+	sort.SliceStable(collected, func(i, j int) bool {
+		a, b := collected[i], collected[j]
+		ai := importanceRank(a.origin, a.important)
+		bj := importanceRank(b.origin, b.important)
+		if ai != bj {
+			return ai < bj
+		}
+		if c := a.specificity.Compare(b.specificity); c != 0 {
+			return c < 0
+		}
+		return a.sourceOrder < b.sourceOrder
+	})
+	for _, cd := range collected {
+		applyDeclaration(cs, cd.decl)
+	}
+
+	r.resolveCustomProperties(cs)
+	r.resolveVarInProperties(cs)
+
+	content := cs.GetProperty("content")
+	return cs, content, true
+}
+
+// collectPseudoDeclarations 收集匹配「el + 伪元素 pe」的规则声明。
+// 与 collectDeclarations 的区别：不跳过含伪元素的选择器，而是要求选择器的
+// 伪元素恰好等于 pe（`X::after` 在解析 X 的 ::after 时收集）。
+func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, baseOrder int) int {
+	order := baseOrder
+	for _, rule := range rules {
+		switch v := rule.(type) {
+		case *css.StyleRule:
+			if v.Selectors != nil {
+				for _, sel := range v.Selectors.Selectors {
+					if pseudoElementOf(&sel) != pe {
+						continue
+					}
+					if !r.checker.Match(sel, el) {
+						continue
+					}
+					spec := css.SpecificityOfComplex(sel)
+					for _, d := range v.Declarations {
+						*collected = append(*collected, collectedDecl{
+							decl:        d,
+							origin:      origin,
+							important:   d.Important,
+							specificity: spec,
+							sourceOrder: order,
+						})
+						order++
+					}
+				}
+			}
+			if len(v.NestedRules) > 0 {
+				order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order)
+			}
+		case *css.MediaRule:
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order)
+		case *css.SupportsRule:
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order)
+		}
+	}
+	return order
+}
+
+// pseudoElementOf 返回复杂选择器末尾的伪元素（若无则 PseudoElementUnknown）。
+// 浏览器语义：伪元素必须位于选择器最后。
+func pseudoElementOf(sel *css.ComplexSelector) css.PseudoElement {
+	if sel == nil || len(sel.Compounds) == 0 {
+		return css.PseudoElementUnknown
+	}
+	last := sel.Compounds[len(sel.Compounds)-1]
+	if len(last.Selectors) == 0 {
+		return css.PseudoElementUnknown
+	}
+	s := last.Selectors[len(last.Selectors)-1]
+	if s.Match == css.MatchPseudoElement {
+		return s.PseudoElem
+	}
+	return css.PseudoElementUnknown
+}
+
 // collectDeclarations walks a rule list, recursing into @media / @supports rules,
 // and appends matching declarations to collected with their cascade metadata.
 func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
@@ -624,6 +733,33 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.BorderRightColorSet = cset
 			cs.BorderBottomColorSet = cset
 			cs.BorderLeftColorSet = cset
+		}
+	case "outline":
+		if w, s, c, ok := parseOutlineShorthand(valueString); ok {
+			cs.OutlineWidth = w
+			cs.OutlineStyle = s
+			cs.OutlineColor = c
+			cs.OutlineSet = true
+		} else if strings.TrimSpace(valueString) == "none" {
+			cs.OutlineWidth = Length{Value: 0, Unit: "px"}
+			cs.OutlineStyle = "none"
+			cs.OutlineSet = true
+		}
+	case "outline-width":
+		if l, ok := parseLength(valueString); ok {
+			cs.OutlineWidth = l
+			cs.OutlineSet = true
+		}
+	case "outline-style":
+		s := strings.TrimSpace(valueString)
+		if s != "" {
+			cs.OutlineStyle = s
+			cs.OutlineSet = true
+		}
+	case "outline-color":
+		if c, ok := parseColor(valueString); ok {
+			cs.OutlineColor = c
+			cs.OutlineSet = true
 		}
 	case "border-top":
 		if w, s, c, cset, ok := parseBorderShorthand(valueString); ok {
@@ -1407,6 +1543,19 @@ func parseBorderShorthand(s string) (width Length, style string, color Color, co
 	return
 }
 
+// parseOutlineShorthand 解析 outline 简写（与 border 简写语法相同：
+// width style color 任意顺序）。outline 默认样式为 none。
+func parseOutlineShorthand(s string) (width Length, style string, color Color, ok bool) {
+	w, st, c, _, bok := parseBorderShorthand(s)
+	if !bok {
+		return
+	}
+	if st == "" {
+		st = "solid" // 浏览器默认 outline-style: none；显式 width 时常用 solid
+	}
+	return w, st, c, true
+}
+
 // parseRGB parses the comma- or space-separated arguments of rgb()/rgba().
 func parseRGB(args string, _ bool) (Color, bool) {
 	parts := strings.FieldsFunc(args, func(r rune) bool { return r == ',' || r == ' ' })
@@ -1827,6 +1976,31 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 		case "border-left-color":
 			if c, ok := parseColor(resolvedStr); ok {
 				cs.BorderLeftColor = c
+			}
+		case "outline":
+			if w, s, c, ok := parseOutlineShorthand(resolvedStr); ok {
+				cs.OutlineWidth, cs.OutlineStyle, cs.OutlineColor = w, s, c
+				cs.OutlineSet = true
+			} else if strings.TrimSpace(resolvedStr) == "none" {
+				cs.OutlineWidth = Length{Value: 0, Unit: "px"}
+				cs.OutlineStyle = "none"
+				cs.OutlineSet = true
+			}
+		case "outline-color":
+			if c, ok := parseColor(resolvedStr); ok {
+				cs.OutlineColor = c
+				cs.OutlineSet = true
+			}
+		case "outline-width":
+			if l, ok := parseLength(resolvedStr); ok {
+				cs.OutlineWidth = l
+				cs.OutlineSet = true
+			}
+		case "outline-style":
+			s := strings.TrimSpace(resolvedStr)
+			if s != "" {
+				cs.OutlineStyle = s
+				cs.OutlineSet = true
 			}
 		}
 	}

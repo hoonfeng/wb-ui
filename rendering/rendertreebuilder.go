@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
@@ -85,6 +86,12 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 	if isReplacedElement(el.LocalName()) {
 		return
 	}
+	// ::before 伪元素（第一个子节点）。
+	if b.resolver != nil {
+		if cs, content, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementBefore); ok && cs.Display != style.DisplayNone {
+			parent.AddChild(b.createPseudoObject(cs, content), nil)
+		}
+	}
 	// Flex / grid containers: per CSS (flexbox §4) every element child of a flex
 	// container becomes a flex item directly — no anonymous block wrappers are
 	// generated around inline-level children. Inline-level children are
@@ -96,6 +103,7 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		parent.Style().Display == style.DisplayGrid ||
 		parent.Style().Display == style.DisplayInlineGrid) {
 		b.buildFlexChildren(parent, el)
+		b.appendPseudoAfter(parent, el)
 		return
 	}
 	var inlineRun []RenderObject
@@ -150,7 +158,31 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		}
 	}
 	flush()
+	// ::after 伪元素（最后插入）。
+	b.appendPseudoAfter(parent, el)
 }
+
+// appendPseudoAfter 为宿主插入 ::after 伪元素渲染对象。
+func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Element) {
+	if b.resolver == nil {
+		return
+	}
+	if cs, content, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementAfter); ok && cs.Display != style.DisplayNone {
+		parent.AddChild(b.createPseudoObject(cs, content), nil)
+	}
+}
+
+	// createPseudoObject 为 ::before/::after 创建渲染对象。
+	// content 非空时附加一个 RenderText（镜像 WebKit 伪元素文本内容）。
+	func (b *RenderTreeBuilder) createPseudoObject(cs *style.ComputedStyle, content string) RenderObject {
+		block := NewRenderBlockFlow(nil, cs)
+		text := strings.TrimSpace(content)
+		if text != "" && text != "none" {
+			rt := NewRenderTextWith(nil, cs, text)
+			block.AddChild(rt, nil)
+		}
+		return block
+	}
 
 // buildFlexChildren populates a flex/grid container's children directly as flex
 // items, without anonymous-block wrappers. Inline-level children are blockified
@@ -235,6 +267,11 @@ func (b *RenderTreeBuilder) createRenderObject(el *dom.Element, cs *style.Comput
 
 // isInlineLevel reports whether the display value produces an inline-level box.
 func (b *RenderTreeBuilder) isInlineLevel(cs *style.ComputedStyle) bool {
+	// Out-of-flow (absolute/fixed) elements are blockified per CSS — they never
+	// join an inline run / anonymous block wrapper.
+	if cs.Position == style.PositionAbsolute || cs.Position == style.PositionFixed {
+		return false
+	}
 	switch cs.Display {
 	case style.DisplayInline, style.DisplayInlineBlock, style.DisplayInlineFlex,
 		style.DisplayInlineGrid, style.DisplayInlineTable:

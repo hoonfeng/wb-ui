@@ -125,6 +125,12 @@ type NonInheritedData struct {
 	// Border radius (single value for all corners).
 	BorderRadius Length
 
+	// ── Outline（focus 指示器等）──
+	OutlineWidth Length
+	OutlineStyle string
+	OutlineColor Color
+	OutlineSet   bool // 是否显式设置了 outline（含 outline:none）
+
 	// ── Background ──
 	BackgroundColor      Color
 	BackgroundImage      string
