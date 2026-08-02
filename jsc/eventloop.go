@@ -206,12 +206,18 @@ func (el *EventLoop) QueueMicrotask(callback JSValue) {
 // elapsedMs 是自事件循环启动以来经过的毫秒数。
 // 处理顺序：宏任务 → 微任务（清空） → 重复直到无宏任务 → 动画帧回调。
 // 宿主应在渲染循环中定期调用此方法。
-func (el *EventLoop) ProcessTasks(elapsedMs int64) {
+func (el *EventLoop) ProcessTasks(_ int64) {
 	el.running = true
+
+	// ★ 统一时间基准：宏任务的 DueTime 由 SetTimeout 用 el.nowMs()（EventLoop
+	//   自身 startTime 相对时间）计算；ProcessTasks 必须用同一时钟判断到期。
+	//   宿主传入的 elapsedMs（host.animStart 基准）与 EventLoop.startTime 不同
+	//   步，会导致所有 setTimeout/setInterval 永不触发（到期时间永远达不到）。
+	now := el.nowMs()
 
 	// 处理宏任务 + 微任务，直到宏任务队列为空。
 	for {
-		task := el.popNextMacrotask(elapsedMs)
+		task := el.popNextMacrotask(now)
 		if task == nil {
 			break
 		}
@@ -224,7 +230,7 @@ func (el *EventLoop) ProcessTasks(elapsedMs int64) {
 			newTask := &scheduledTask{
 				ID:       task.ID,
 				Callback: task.Callback,
-				DueTime:  elapsedMs + task.Delay,
+				DueTime:  el.nowMs() + task.Delay,
 				Delay:    task.Delay,
 				Repeat:   true,
 			}
@@ -234,6 +240,9 @@ func (el *EventLoop) ProcessTasks(elapsedMs int64) {
 
 		// 每个宏任务执行完后，清空所有微任务。
 		el.flushMicrotasks()
+
+		// 宏任务可能调度新的宏任务（setTimeout 内再 setTimeout）——刷新 now。
+		now = el.nowMs()
 	}
 
 	// 即使没有宏任务，也清空微任务（处理 Promise 回调）。

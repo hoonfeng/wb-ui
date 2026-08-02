@@ -347,6 +347,15 @@ func (o *JSObject) Set(key string, val JSValue) {
 		return
 	}
 	targetRt := o.obj.Runtime()
+	// ★ 关键：未绑定的 nativeFn（包级 NewNativeFunction + FunctionValue）没有
+	//   interp。必须用 o.interp（宿主创建的真实 Interpreter）包装，否则
+	//   val() 会临时 new 一个 &Interpreter{vm: rt}——它的 eventLoop 是独立的
+	//   新实例！bindings 里 setTimeout/setInterval 等经 g.Set 注册的全局函数
+	//   会把任务挂到那个孤儿 EventLoop，而 host.ProcessTasks 驱动的是真实
+	//   interpreter 的 EventLoop → 所有前端定时器永不触发。
+	if val.nativeFn != nil && val.interp == nil && o.interp != nil {
+		val.interp = o.interp
+	}
 	o.obj.Set(key, val.val(targetRt))
 }
 
