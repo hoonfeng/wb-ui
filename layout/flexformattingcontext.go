@@ -68,6 +68,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
+	if wbFlexDebug && flexName(box) == "div.chat-area" {
+		fmt.Fprintf(os.Stderr, "[flex/layout] chat-area: isRow=%v cw=%.1f ch=%.1f\n", isRow, cw, ch)
+	}
 	initialContentHeight := ch
 
 	var items []*flexItem
@@ -104,9 +107,9 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
 		it.hypothetical = it.baseSize
 		it.targetSize = it.baseSize
-		if wbFlexDebug && flexName(box) == "div.titlebar" {
-			fmt.Fprintf(os.Stderr, "[flex/item] titlebar child %s: grow=%.1f shrink=%.1f basis=%.1f base=%.1f padMain=%.1f\n",
-				flexName(it.box), it.flexGrow, it.flexShrink, it.flexBasis, it.baseSize, it.paddingMain)
+		if wbFlexDebug && (flexName(box) == "div.titlebar" || flexName(box) == "div.chat-area") {
+			fmt.Fprintf(os.Stderr, "[flex/item] titlebar child %s: grow=%.1f shrink=%.1f basis=%.1f base=%.1f padMain=%.1f marginMain=%.1f\n",
+				flexName(it.box), it.flexGrow, it.flexShrink, it.flexBasis, it.baseSize, it.paddingMain, it.marginMain)
 		}
 	}
 
@@ -233,6 +236,10 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 	mm, mc := margin.Left+margin.Right, margin.Top+margin.Bottom
 	if !isRow { mm, mc = margin.Top+margin.Bottom, margin.Left+margin.Right }
+	if wbFlexDebug && strings.HasPrefix(flexName(box), "div.plan-container") {
+		fmt.Fprintf(os.Stderr, "[flex/margin] plan-container: mT=%.1f mR=%.1f mB=%.1f mL=%.1f mm=%.1f\n",
+			margin.Top, margin.Right, margin.Bottom, margin.Left, mm)
+	}
 
 	fs := fontSizeOf(box)
 	flexGrow := cs.FlexGrow
@@ -615,6 +622,11 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 				gap = flexGap(pcs, isRow, fontSizeOf(items[0].box))
 			}
 		}
+	}
+	if wbFlexDebug && len(items) > 0 && items[0].box.Parent() != nil && flexName(items[0].box.Parent()) == "div.chat-area" {
+		pcs := items[0].box.Parent().Style()
+		fmt.Fprintf(os.Stderr, "[flex/gap] chat-area: gap=%.1f rowGap=%.1f colGap=%.1f isRow=%v\n",
+			gap, pcs.RowGap.Value, pcs.ColumnGap.Value, isRow)
 	}
 	gapTotal := gap * float64(len(items)-1)
 
@@ -1099,6 +1111,10 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 
 			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
+			if wbFlexDebug && flexName(it.box) == "div.chat-messages" {
+				fmt.Fprintf(os.Stderr, "[flex/pos] chat-messages final: ms=%.1f top=%.1f h=%.1f bh=%.1f\n",
+					it.finalMainSize, g.Top(), g.ContentHeight(), g.BorderBoxHeight())
+			}
 
 			// Propagate auto cross-size (width) from children.
 			oldLeft := g.Left()
