@@ -454,7 +454,7 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		return 0
 	}
 
-	bx, by, bw, _, st := h.findFormControlBox(el)
+	bx, by, bw, _, sy, st := h.findFormControlBox(el)
 	if bx == 0 && bw == 0 {
 		return 0
 	}
@@ -531,18 +531,18 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		wrapMode = rendering.TextareaWrapMode(st, el)
 	}
 	return rendering.CalcFormControlCaretOffset(text, el.LocalName() == "textarea",
-		cssX, cssY, bx, by, bw, font, padX, padY, lineH, wrapMode)
+		cssX, cssY, bx, by, bw, font, padX, padY, lineH, wrapMode, sy)
 }
 
 // findFormControlBox walks the render tree to find the absolute border-box
 // position/size and computed style of a form-control element.
-func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh float64, st *style.ComputedStyle) {
+func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh, sy float64, st *style.ComputedStyle) {
 	if el == nil || h.wv == nil {
-		return 0, 0, 0, 0, nil
+		return 0, 0, 0, 0, 0, nil
 	}
 	rv := h.wv.RenderView()
 	if rv == nil {
-		return 0, 0, 0, 0, nil
+		return 0, 0, 0, 0, 0, nil
 	}
 	var walk func(rendering.RenderObject) bool
 	walk = func(o rendering.RenderObject) bool {
@@ -557,6 +557,7 @@ func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh float64, st *
 					bw = box.Width()
 					bh = box.Height()
 					st = box.Style()
+					_, sy = rv.BoxScrollOffset(box)
 					return true
 				}
 			}
@@ -569,7 +570,7 @@ func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh float64, st *
 		return false
 	}
 	walk(rendering.RenderObject(rv))
-	return bx, by, bw, bh, st
+	return bx, by, bw, bh, sy, st
 }
 
 // Unfocus clears the IME focus and disables text input on the platform

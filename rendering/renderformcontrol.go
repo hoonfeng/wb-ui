@@ -26,6 +26,7 @@ package rendering
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -160,7 +161,11 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		// the resolved CSS style. Skip PaintFormControl handling.
 		return false
 	case "textarea":
-		paintTextAreaText(info, el, st, x, y, w, h, op)
+		_, sy := float64(0), float64(0)
+		if info.rv != nil {
+			_, sy = info.rv.BoxScrollOffset(box)
+		}
+		paintTextAreaText(info, el, st, x, y, w, h, op, sy)
 		return true
 	case "progress":
 		paintProgressBar(info, st, x, y, w, h, el, op)
@@ -282,8 +287,7 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	if displayText == "" {
 		placeholder := el.GetAttribute("placeholder")
 		if placeholder == "" {
-			// Even with no text, a focused control shows a caret.
-			paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, 0, op, 0)
 			return
 		}
 		displayText = placeholder
@@ -409,12 +413,12 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			}
 
 			// Draw the caret at the selection end (right edge of selected text).
-			paintFormControlCaret(info, el, st, x, y, w, h, preW+selW-textScrollX, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, preW+selW-textScrollX, op, 0)
 		} else {
 			// Caret only (Start == End): draw text normally, caret at offset.
 			c.DrawText(textX, baselineY, displayText, font, textColor)
 			caretOffset := graphics.MeasureText(font, string(runes[:selStart]))
-			paintFormControlCaret(info, el, st, x, y, w, h, caretOffset-textScrollX, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, caretOffset-textScrollX, op, 0)
 		}
 	} else {
 		// No selection: draw the full text normally.
@@ -427,13 +431,14 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 		if !showPlaceholder {
 			caretW = graphics.MeasureText(font, displayText)
 		}
-		paintFormControlCaret(info, el, st, x, y, w, h, caretW-textScrollX, op)
+		paintFormControlCaret(info, el, st, x, y, w, h, caretW-textScrollX, op, 0)
 	}
 	info.canvas.Restore()
 }
 // for form controls that have no RenderText (so the regular PaintCaret path
-// cannot find them).
-func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h, textWidth, op float64) {
+// cannot find them). sy is the textarea's vertical scroll offset (0 for
+// single-line inputs) so the caret tracks the scrolled text rows.
+func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h, textWidth, op, sy float64) {
 	if el != FocusedFormControl || !CaretVisibleControl {
 		return
 	}
@@ -498,10 +503,7 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 		lineStart := pos - col
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
 		caretX = x + padX + colW - FormControlTextScroll(el)
-		caretY = y + padY + float64(row)*lineH
-		if caretY < y {
-			caretY = y
-		}
+		caretY = y + padY + float64(row)*lineH - sy
 	}
 
 	caretCol := applyOpacity(toGraphicsColor(st.Color), op)
@@ -606,10 +608,10 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		// Horizontal scroll compensation: the caret may be scrolled out of
 		// view in pre/nowrap mode; the IME anchor follows the VISIBLE caret.
 		caretX = boxX + padX + colW - FormControlTextScroll(el)
-		caretY = boxY + padY + float64(row)*lineH
-		if caretY < boxY {
-			caretY = boxY
-		}
+		// Vertical scroll compensation: the IME anchor follows the VISIBLE
+		// caret row (scrolled up by BoxScrollOffset.sy).
+		_, sy := rv.BoxScrollOffset(box)
+		caretY = boxY + padY + float64(row)*lineH - sy
 		// Anchor IME candidate window BELOW the caret line (bottom + gap) so
 		// the candidate list renders under the text, not flush with the
 		// caret bottom. The returned point is only consumed by the host for
@@ -1203,7 +1205,7 @@ func paintButtonText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 // The text is left-aligned, top-aligned within the content area, with
 // word wrapping at the content width. A blinking caret is drawn at the
 // end of the text when this element is focused.
-func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h float64, op float64) {
+func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h float64, op float64, sy float64) {
 	if info == nil || info.canvas == nil {
 		return
 	}
@@ -1216,8 +1218,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	if displayText == "" {
 		placeholder := el.GetAttribute("placeholder")
 		if placeholder == "" {
-			// Still draw caret if focused
-			paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, 0, op, sy)
 			return
 		}
 		displayText = placeholder
@@ -1249,7 +1250,14 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	}
 
 	textX := x + padX
-	textY := y + padY + ascent
+	// Vertical scroll (BoxScrollOffset.sy, set by scrollbar drag / wheel):
+	// the text starts above the box by sy so scrolled-down content becomes
+	// visible — the scrollbar thumb follows BoxScrollOffset while the text
+	// used to stay put (user: "scrollbar moves but content doesn't").
+	textY := y + padY + ascent - sy
+	if os.Getenv("WB_TA_DEBUG") != "" {
+		log.Printf("[ta] paint sy=%.1f boxY=%.1f textY=%.1f", sy, y, textY)
+	}
 
 	// Selection range (in runes) when this textarea is the focused control.
 	selStart, selEnd := -1, -1
@@ -1363,7 +1371,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 
 	// Draw the caret at the selection/caret position (paintFormControlCaret
 	// re-derives the row/col from FocusedFormControlSel with soft-wrapping).
-	paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
+	paintFormControlCaret(info, el, st, x, y, w, h, 0, op, sy)
 
 	info.canvas.Restore()
 }

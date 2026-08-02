@@ -22,8 +22,10 @@ func TextareaWrapMode(st *style.ComputedStyle, el *dom.Element) int {
 // lineH must match the painted text so the caret lands where the glyphs
 // are. wrapMode comes from TextareaWrapMode (ignored for single-line).
 // The click X is compensated by the published horizontal scroll offset so
-// a scrolled (pre/nowrap) control maps clicks correctly.
-func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX, boxY, boxW float64, font graphics.Font, padX, padY, lineH float64, wrapMode int) int {
+// a scrolled (pre/nowrap) control maps clicks correctly; sy is the
+// control's vertical scroll offset (BoxScrollOffset.sy) so a scrolled-down
+// textarea maps the click Y to the right visual row.
+func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX, boxY, boxW float64, font graphics.Font, padX, padY, lineH float64, wrapMode int, sy float64) int {
 	runes := []rune(text)
 	if len(runes) == 0 {
 		return 0
@@ -35,7 +37,11 @@ func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX,
 	relX := cssX - boxX - padX + FormControlTextScroll(FocusedFormControl)
 
 	if isMultiLine {
-		relY := cssY - boxY - padY
+		// Click Y maps back to the text row by the vertical scroll offset
+		// (positive when the text has scrolled up), scoped per control via
+		// BoxScrollOffset.sy — a scrolled-down textarea must hit the visual
+		// row, not the row the text was laid out at.
+		relY := cssY - boxY - padY + sy
 		line := int(relY / lineH)
 		if line < 0 {
 			line = 0
