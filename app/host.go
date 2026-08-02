@@ -705,6 +705,14 @@ func (h *Host) processEventLoop() {
 // are hit-tested against the render tree and forwarded to the click handler.
 // Mouse drag/move drive text selection; Ctrl+C copies selected text.
 func (h *Host) processEvents(rv *rendering.RenderView) {
+	// Consume buffered IME events (composition updates, committed chars,
+	// composition end) and apply them to the focused form control. The
+	// Win32 IME handler buffers these in its subclassed WndProc; without
+	// this per-frame poll, composition text / confirmed characters never
+	// reach the element value ("can't type anything").
+	if imeEvs := h.win.PollIMEEvents(); len(imeEvs) > 0 {
+		h.applyIMEEvents(imeEvs)
+	}
 	for _, ev := range h.win.PollEvents() {
 		switch ev.Type {
 		case window.EventResize:

@@ -75,7 +75,8 @@ const (
 	iscShowUICompositionWindow uint32 = 0x80000000
 	iscShowUICandidateWindow   uint32 = 0x00000001
 
-	cfsPoint = 0x0002
+	cfsPoint         = 0x0002
+	cfsCandidatePos  = 0x0004
 
 	gwlWndProc = ^uintptr(3) // -4 as uintptr
 )
@@ -420,9 +421,15 @@ func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 	}
 	r1, _, _ := procImmSetCompositionWindow.Call(himc, uintptr(unsafe.Pointer(&cf)))
 
+	// CFS_CANDIDATEPOS (not CFS_POINT) for the candidate window: CFS_POINT
+	// ties the candidate list to the composition window position, and
+	// Microsoft Pinyin renders its (tall) composition box above the caret,
+	// pushing the candidate list down-right of the caret. CFS_CANDIDATEPOS
+	// anchors the candidate list directly at the caret (Chromium's approach),
+	// so it hugs the caret instead of drifting right/down.
 	cand := candidateForm{
 		Index: 0,
-		Style: cfsPoint,
+		Style: cfsCandidatePos,
 		X:     x,
 		Y:     y,
 	}
