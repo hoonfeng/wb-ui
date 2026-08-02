@@ -319,6 +319,10 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	if padX <= 0 {
 		padX = 4
 	}
+	padR := lengthValue(st.PaddingRight)
+	if padR <= 0 {
+		padR = 4
+	}
 
 	// Vertically center the text within the border box:
 	// baseline = top + (boxHeight - textHeight)/2 + ascent.
@@ -331,7 +335,7 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	// the current caret position; non-focused controls just clip. The offset
 	// is published globally so caret drawing / hit-testing / IME positioning
 	// stay consistent across single-line and pre-mode textarea.
-	contentW := w - padX*2
+	contentW := w - padX - padR
 	// Horizontal scroll: keep the caret inside the visible content area by
 	// shifting the text left/right (browsers scroll single-line inputs
 	// horizontally instead of ellipsizing overflow). Computed per-frame from
@@ -457,6 +461,10 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	if padX <= 0 {
 		padX = 4
 	}
+	padR := lengthValue(st.PaddingRight)
+	if padR <= 0 {
+		padR = 4
+	}
 	padY := lengthValue(st.PaddingTop)
 	if padY <= 0 {
 		padY = 4
@@ -494,7 +502,7 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 		if pos > len(runes) {
 			pos = len(runes)
 		}
-		contentW := w - padX*2
+		contentW := w - padX - padR
 		if contentW < 1 {
 			contentW = 1
 		}
@@ -565,6 +573,10 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 	if padX <= 0 {
 		padX = 4
 	}
+	padR := lengthValue(st.PaddingRight)
+	if padR <= 0 {
+		padR = 4
+	}
 	padY := lengthValue(st.PaddingTop)
 	if padY <= 0 {
 		padY = 4
@@ -597,7 +609,7 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		pos = len(runes)
 	}
 	if el.LocalName() == "textarea" {
-		contentW := boxW - padX*2
+		contentW := boxW - padX - padR
 		if contentW < 1 {
 			contentW = 1
 		}

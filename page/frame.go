@@ -205,9 +205,16 @@ func (f *Frame) RebuildRenderTree() {
 		f.resolver.ClearCache()
 	}
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
+	oldRV := f.renderView
 	f.renderView = builder.Build(f.document)
 	objCount := 0
 	if f.renderView != nil {
+		// The rebuilt tree has brand-new RenderBox objects and an empty
+		// scroll-offset map. Carry per-box scroll offsets across by DOM
+		// node so a keystroke (which rebuilds the tree) does not reset
+		// vertical scroll — otherwise auto-scroll yanks the content to
+		// the caret row on every character ("content jumps out of view").
+		f.renderView.RestoreScrollOffsetsFrom(oldRV)
 		objCount = countRenderObjects(rendering.RenderObject(f.renderView))
 	}
 	Logf("RebuildRenderTree", "renderObjectCount=%d", objCount)

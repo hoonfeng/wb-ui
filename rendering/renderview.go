@@ -119,6 +119,54 @@ func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
 	v.boxScrollOffsets[box] = graphics.Point{X: x, Y: y}
 }
 
+// RestoreScrollOffsetsFrom carries per-box scroll offsets from a previous
+// incarnation of the render tree into this one, mapping boxes through their
+// DOM nodes. RebuildRenderTree() builds a brand-new tree (new RenderBox
+// objects, empty boxScrollOffsets), so without this every rebuild — e.g.
+// each keystroke in a textarea — silently reset all vertical scroll to 0,
+// then auto-scroll yanked the content to the caret row ("content jumps out
+// of view as soon as I type"). Horizontal form-control text scroll lives in
+// a per-ELEMENT map and survives rebuilds; this covers the vertical /
+// overflow-container path.
+func (v *RenderView) RestoreScrollOffsetsFrom(old *RenderView) {
+	if old == nil || len(old.boxScrollOffsets) == 0 {
+		return
+	}
+	if v.boxScrollOffsets == nil {
+		v.boxScrollOffsets = make(map[*RenderBox]graphics.Point)
+	}
+	for ob, p := range old.boxScrollOffsets {
+		if ob == nil {
+			continue
+		}
+		// Match by DOM node via tree walk: nodeRenderMap is only
+		// populated during syncGeometry, which runs later at layout
+		// time — the rebuild itself cannot rely on it.
+		var nb *RenderBox
+		var walk func(RenderObject)
+		walk = func(o RenderObject) {
+			if nb != nil {
+				return
+			}
+			if o != nil && o.Node() == ob.Node() {
+				if b := asRenderBox(o); b != nil {
+					nb = b
+					return
+				}
+			}
+			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+				walk(c)
+			}
+		}
+		walk(RenderObject(v))
+		if nb != nil {
+			v.boxScrollOffsets[nb] = p
+		}
+	}
+}
+
+// FindRenderBoxForNode returns the RenderBox for a given DOM node, or nil
+
 // BoxScrollOffset returns the stored scroll offset for an overflow:scroll box.
 func (v *RenderView) BoxScrollOffset(box *RenderBox) (float64, float64) {
 	if v.boxScrollOffsets == nil {
