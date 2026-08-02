@@ -239,7 +239,26 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 						maxRight = pb.X + maxW
 					}
 					if local == "textarea" && lineH > 0 {
-						rows := float64(len(lines))
+						// Vertical extent must count SOFT-WRAPPED rows (a
+						// pre-wrap textarea wraps long lines into several
+						// visual rows), not just hard '\n' breaks — otherwise
+						// the scrollbar's total height / thumb ratio is too
+						// small and long text can't scroll far enough.
+						padL := lengthValue(st.PaddingLeft)
+						padR := lengthValue(st.PaddingRight)
+						if padL < 0 {
+							padL = 0
+						}
+						if padR < 0 {
+							padR = 0
+						}
+						contentW := pb.Width - padL - padR
+						if contentW < 1 {
+							contentW = 1
+						}
+						mode := textareaWrapMode(st, el)
+						wrapped := wrapTextAreaLines(text, font, contentW, mode)
+						rows := float64(len(wrapped))
 						if rows*lineH > maxBottom-pb.Y {
 							maxBottom = pb.Y + rows*lineH
 						}

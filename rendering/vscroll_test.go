@@ -113,3 +113,81 @@ func TestTextareaVScrollPaintKeepsOffset(t *testing.T) {
 		t.Fatalf("after paint: scroll=(%v,%v), want (0,%v) — paint must not clobber the scroll offset", sx, sy, lineH*3)
 	}
 }
+
+// TestTextareaContentSizeSoftWrap: BoxContentSize's vertical extent must
+// count SOFT-WRAPPED rows (a long line in a pre-wrap textarea wraps into
+// several visual rows), so the vertical scrollbar's total height / thumb
+// ratio matches the painted text. Previously only hard '\n' breaks were
+// counted, so long unbroken text reported ~1 row and the scrollbar could
+// not scroll far enough.
+func TestTextareaContentSizeSoftWrap(t *testing.T) {
+	layout.MeasureTextFunc = func(family string, size float64, weight int, style2, text string) float64 {
+		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}, text)
+	}
+	layout.FontMetricsFunc = func(family string, size float64, weight int, style2 string) (float64, float64, float64) {
+		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}
+		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
+	}
+	// A textarea 120px tall (content ~112px, line-height 20px → ~5 visible
+	// rows) holding ONE very long line that soft-wraps into 10 rows.
+	long := ""
+	for i := 0; i < 60; i++ {
+		long += "abcdefghij" // 600 chars ≈ 10 rows of 60px content width
+	}
+	htmlStr := `<!DOCTYPE html><html><head><style>html,body{margin:0;padding:0}</style></head><body>
+		<textarea id="ta" style="position:absolute;left:10px;top:10px;width:80px;height:120px;line-height:20px;font-family:Consolas;font-size:13px;padding:4px">` + long + `</textarea>
+	</body></html>`
+	doc, err := html.Parse(htmlStr)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	rv := NewRenderTreeBuilder(style.NewResolver()).Build(doc)
+	rv.SetViewportSize(400, 300)
+	rv.Layout(layout.NewLayoutState(400, 300))
+
+	var taBox *RenderBox
+	var find func(o RenderObject)
+	find = func(o RenderObject) {
+		if el, ok := o.Node().(*dom.Element); ok && el.GetAttribute("id") == "ta" {
+			taBox = asRenderBox(o)
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			find(c)
+		}
+	}
+	find(RenderObject(rv))
+	if taBox == nil {
+		t.Fatalf("textarea not found")
+	}
+	_, ch := rv.BoxContentSize(taBox)
+	// 10 soft-wrapped rows × 20px = 200; the old hard-'\n'-only code returned
+	// 20 (one row). Require at least 6 rows worth of extent so the vertical
+	// scrollbar has real travel (content 200 > viewport 112).
+	if ch < 120 {
+		t.Fatalf("BoxContentSize vertical extent = %v, want ≥ 120 (soft-wrapped rows); hard-break-only bug", ch)
+	}
+	t.Logf("BoxContentSize soft-wrap vertical extent = %v", ch)
+}
+
+// TestTextareaCaretVisualRow: the visual row of the caret must count
+// soft-wrapped rows — row 5 in a single hard line that wraps at row 4 must
+// return 4, not 0 (which would break vertical auto-scroll).
+func TestTextareaCaretVisualRow(t *testing.T) {
+	// 100-char line at 40px content width → ~25 chars per row → 4 rows.
+	line := ""
+	for i := 0; i < 100; i++ {
+		line += "x"
+	}
+	font := graphics.Font{Family: "Consolas", Size: 13, Weight: 400}
+	// Wrap mode anywhere (pre-wrap): the row containing rune 60.
+	row := TextareaCaretVisualRow(line, font, 40, wrapModeAnywhere, 60)
+	if row < 1 {
+		t.Fatalf("caret at rune 60 in a 4-row wrapped line → visual row %d, want ≥ 1", row)
+	}
+	t.Logf("caret visual row = %d", row)
+	// Hard newline boundaries.
+	row0 := TextareaCaretVisualRow("ab\ncd\nef", font, 200, wrapModeAnywhere, 6)
+	if row0 != 2 {
+		t.Fatalf("caret at end of 3 hard lines → row %d, want 2", row0)
+	}
+}

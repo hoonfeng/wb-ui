@@ -14,6 +14,22 @@ func TextareaWrapMode(st *style.ComputedStyle, el *dom.Element) int {
 	return textareaWrapMode(st, el)
 }
 
+// TextareaCaretVisualRow returns the visual (soft-wrapped) row index of the
+// caret at rune offset pos in a textarea, using the same line-breaking as
+// painting (wrapTextAreaLines). The host uses it to auto-scroll the caret
+// into view on keyboard navigation / typing / paste.
+func TextareaCaretVisualRow(text string, font graphics.Font, contentW float64, mode int, pos int) int {
+	if pos < 0 {
+		pos = 0
+	}
+	if runes := []rune(text); pos > len(runes) {
+		pos = len(runes)
+	}
+	wrapped := wrapTextAreaLines(text, font, contentW, mode)
+	row, _, _ := locateWrappedCaret(wrapped, pos)
+	return row
+}
+
 // CalcFormControlCaretOffset computes the character offset (into text, as
 // runes) for a click at CSS (cssX, cssY) on a form control whose border-box
 // starts at (boxX, boxY). isMultiLine selects <textarea> semantics (click

@@ -454,7 +454,7 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		return 0
 	}
 
-	bx, by, bw, _, sy, st := h.findFormControlBox(el)
+	_, bx, by, bw, _, sy, st := h.findFormControlBox(el)
 	if bx == 0 && bw == 0 {
 		return 0
 	}
@@ -536,14 +536,15 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 
 // findFormControlBox walks the render tree to find the absolute border-box
 // position/size and computed style of a form-control element.
-func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh, sy float64, st *style.ComputedStyle) {
+func (h *Host) findFormControlBox(el *dom.Element) (box *rendering.RenderBox, bx, by, bw, bh, sy float64, st *style.ComputedStyle) {
 	if el == nil || h.wv == nil {
-		return 0, 0, 0, 0, 0, nil
+		return nil, 0, 0, 0, 0, 0, nil
 	}
 	rv := h.wv.RenderView()
 	if rv == nil {
-		return 0, 0, 0, 0, 0, nil
+		return nil, 0, 0, 0, 0, 0, nil
 	}
+	var found *rendering.RenderBox
 	var walk func(rendering.RenderObject) bool
 	walk = func(o rendering.RenderObject) bool {
 		if o == nil {
@@ -551,13 +552,8 @@ func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh, sy float64, 
 		}
 		if n := o.Node(); n != nil {
 			if e, ok := n.(*dom.Element); ok && e == el {
-				if box, ok := o.(*rendering.RenderBox); ok {
-					bx = box.AbsoluteX()
-					by = box.AbsoluteY()
-					bw = box.Width()
-					bh = box.Height()
-					st = box.Style()
-					_, sy = rv.BoxScrollOffset(box)
+				if b, ok := o.(*rendering.RenderBox); ok {
+					found = b
 					return true
 				}
 			}
@@ -570,7 +566,169 @@ func (h *Host) findFormControlBox(el *dom.Element) (bx, by, bw, bh, sy float64, 
 		return false
 	}
 	walk(rendering.RenderObject(rv))
-	return bx, by, bw, bh, sy, st
+	if found == nil {
+		return nil, 0, 0, 0, 0, 0, nil
+	}
+	bx = found.AbsoluteX()
+	by = found.AbsoluteY()
+	bw = found.Width()
+	bh = found.Height()
+	st = found.Style()
+	_, sy = rv.BoxScrollOffset(found)
+	return found, bx, by, bw, bh, sy, st
+}
+
+// ensureFocusedCaretVisible auto-scrolls the focused form control so the
+// caret stays inside the visible content area after keyboard navigation,
+// typing or paste (browser behavior). Horizontal auto-scroll already happens
+// at paint time (computeTextScrollX keeps the caret visible in pre/nowrap
+// rows); this handles the VERTICAL axis for textareas — moving the caret to
+// a row above/below the viewport scrolls BoxScrollOffset.sy so the row is
+// revealed, matching how clicking/dragging in a scrolled textarea works.
+func (h *Host) ensureFocusedCaretVisible() {
+	el := h.imeFocusedEl
+	if el == nil || el.LocalName() != "textarea" {
+		return
+	}
+	if h.wv == nil {
+		return
+	}
+	rv := h.wv.RenderView()
+	if rv == nil {
+		return
+	}
+	box, _, _, _, bh, sy, st := h.findFormControlBox(el)
+	if box == nil || st == nil {
+		return
+	}
+	val := focusedElementValue(el)
+	runes := []rune(val)
+	pos := len(runes)
+	if sel := rendering.FocusedFormControlSel; sel != nil {
+		pos = sel.Start
+		if sel.End > pos {
+			pos = sel.End
+		}
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	if len(runes) == 0 {
+		return
+	}
+
+	fontSize := 14.0
+	family := "Consolas"
+	weight := 400
+	if st.FontSize.Value > 0 && !st.FontSize.IsAuto() {
+		fontSize = st.FontSize.Value
+	}
+	if st.FontFamily != "" {
+		family = st.FontFamily
+	}
+	if w, err := strconv.Atoi(st.FontWeight); err == nil && w >= 600 {
+		weight = 700
+	} else if strings.EqualFold(st.FontWeight, "bold") {
+		weight = 700
+	}
+	font := graphics.Font{Family: family, Size: fontSize, Weight: weight}
+
+	ascent := graphics.GlobalFontAscent(font)
+	if ascent <= 0 {
+		ascent = fontSize * 0.8
+	}
+	descent := graphics.GlobalFontDescent(font)
+	if descent < 0 {
+		descent = 0
+	}
+	lineH := cssControlLineHeightForHost(st, fontSize)
+	if lineH <= 0 {
+		lineH = ascent + descent
+	}
+	if lineH <= 0 {
+		lineH = fontSize * 1.2
+	}
+	padY := 4.0
+	padB := 4.0
+	if st.PaddingTop.Value > 0 && !st.PaddingTop.IsAuto() {
+		padY = st.PaddingTop.Value
+	}
+	if st.PaddingBottom.Value > 0 && !st.PaddingBottom.IsAuto() {
+		padB = st.PaddingBottom.Value
+	}
+
+	// Content box height (the viewport the painter clips to).
+	viewH := bh - padY - padB
+	if viewH < 1 {
+		viewH = 1
+	}
+
+	// Caret's visual row (soft-wrapped) and its top/bottom in content space.
+	mode := rendering.TextareaWrapMode(st, el)
+	contentW := st2ContentWidth(st, box) // same as painter's contentW
+	row := rendering.TextareaCaretVisualRow(val, font, contentW, mode, pos)
+	rowTop := padY + float64(row)*lineH
+	rowBottom := rowTop + lineH
+
+	newSy := sy
+	if rowTop < sy {
+		newSy = rowTop
+	} else if rowBottom > sy+viewH {
+		newSy = rowBottom - viewH
+	}
+	if newSy < 0 {
+		newSy = 0
+	}
+	if _, ch := rv.BoxContentSize(box); ch > 0 {
+		if maxSy := ch - viewH; newSy > maxSy {
+			newSy = maxSy
+		}
+	}
+	if newSy != sy {
+		rv.SetBoxScrollOffset(box, 0, newSy)
+	}
+}
+
+// cssControlLineHeightForHost mirrors rendering.cssControlLineHeight for the
+// host's hit-test / caret math (px, multiplier, or %).
+func cssControlLineHeightForHost(st *style.ComputedStyle, fontSize float64) float64 {
+	switch st.LineHeight.Unit {
+	case "px":
+		if st.LineHeight.Value > 0 {
+			return st.LineHeight.Value
+		}
+	case "%":
+		if st.LineHeight.Value > 0 {
+			return st.LineHeight.Value / 100 * fontSize
+		}
+	case "":
+		if st.LineHeight.Value > 0 {
+			return st.LineHeight.Value * fontSize
+		}
+	}
+	return 0
+}
+
+// st2ContentWidth returns the textarea's content width (padding-box minus
+// horizontal padding), matching the painter's contentW.
+func st2ContentWidth(st *style.ComputedStyle, box *rendering.RenderBox) float64 {
+	pb := box.PaddingBoxRect()
+	padL := 4.0
+	padR := 4.0
+	if st.PaddingLeft.Value > 0 && !st.PaddingLeft.IsAuto() {
+		padL = st.PaddingLeft.Value
+	}
+	if st.PaddingRight.Value > 0 && !st.PaddingRight.IsAuto() {
+		padR = st.PaddingRight.Value
+	}
+	cw := pb.Width - padL - padR
+	if cw < 1 {
+		cw = 1
+	}
+	return cw
 }
 
 // Unfocus clears the IME focus and disables text input on the platform
@@ -2029,6 +2187,7 @@ func (h *Host) pasteIntoFocused(text string) {
 	h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 
 	h.wv.RebuildRenderTree()
+	h.ensureFocusedCaretVisible()
 }
 
 // deleteFocusedChar deletes one character (or the active selection) in the
@@ -2123,6 +2282,7 @@ func (h *Host) setFocusedCaret(pos int) {
 			fr.MarkRenderTreeDirty()
 		}
 	}
+	h.ensureFocusedCaretVisible()
 }
 
 // applyIMEEvents updates the focused element's text from IME
@@ -2291,6 +2451,7 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 	}
 	if needsRebuild {
 		h.wv.RebuildRenderTree()
+		h.ensureFocusedCaretVisible()
 	}
 
 }
