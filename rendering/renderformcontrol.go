@@ -338,7 +338,7 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	// The previous frame's offset is preserved (so the scrollbar thumb can
 	// drag the text freely); auto-scroll only kicks back in when the caret
 	// leaves the visible content area.
-	textScrollX := FocusedFormControlTextScroll
+	textScrollX := FormControlTextScroll(el)
 	if !showPlaceholder && FocusedFormControlSel != nil && el == FocusedFormControl {
 		caretPos := FocusedFormControlSel.End
 		if FocusedFormControlSel.Start > caretPos {
@@ -351,12 +351,12 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			caretPos = 0
 		}
 		caretPx := graphics.MeasureText(font, string(runes[:caretPos]))
-		autoX := computeTextScrollX(caretPx, contentW)
+		autoX := computeTextScrollX(caretPx, contentW, textScrollX)
 		if caretPx < textScrollX || caretPx > textScrollX+contentW {
 			textScrollX = autoX
 		}
 	}
-	FocusedFormControlTextScroll = textScrollX
+	SetFormControlTextScroll(el, textScrollX)
 	textX := x + padX - textScrollX
 
 	// Clip to the input's content area so long text doesn't overflow.
@@ -497,7 +497,7 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 		row, col, _ := locateWrappedCaret(wrapped, pos)
 		lineStart := pos - col
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
-		caretX = x + padX + colW - FocusedFormControlTextScroll
+		caretX = x + padX + colW - FormControlTextScroll(el)
 		caretY = y + padY + float64(row)*lineH
 		if caretY < y {
 			caretY = y
@@ -605,7 +605,7 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
 		// Horizontal scroll compensation: the caret may be scrolled out of
 		// view in pre/nowrap mode; the IME anchor follows the VISIBLE caret.
-		caretX = boxX + padX + colW - FocusedFormControlTextScroll
+		caretX = boxX + padX + colW - FormControlTextScroll(el)
 		caretY = boxY + padY + float64(row)*lineH
 		if caretY < boxY {
 			caretY = boxY
@@ -616,7 +616,7 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		// IME positioning.
 		caretY += lineH + imeCandidateGap(lineH)
 	} else {
-		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos])) - FocusedFormControlTextScroll
+		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos])) - FormControlTextScroll(el)
 		// Single-line input: anchor IME candidate window below the text too.
 		caretY += lineH + imeCandidateGap(lineH)
 	}
@@ -689,12 +689,35 @@ func textareaWrapMode(st *style.ComputedStyle, el *dom.Element) int {
 	return wrapModeAnywhere
 }
 
-// FocusedFormControlTextScroll is the current horizontal scroll offset (in
-// CSS px) of the focused single-line input or pre-mode textarea, recomputed
-// every paint so the caret stays visible. Hit-testing and IME positioning
-// read it back to map coordinates correctly (a scrolled caret is drawn at
-// x - scroll; clicks at x map back to x + scroll).
-var FocusedFormControlTextScroll float64
+// formControlScroll stores the horizontal text-scroll offset (CSS px) of
+// each form control (input / textarea), scoped PER ELEMENT — a pre-mode
+// textarea's horizontal scroll must never leak into a sibling single-line
+// input. Painted controls recompute their own offset each frame so the
+// caret stays visible; scrollbar drag/arrow/track operations write it;
+// hit-testing and IME positioning read it back to map coordinates
+// correctly (a scrolled caret is drawn at x - scroll; clicks at x map back
+// to x + scroll). The map is only touched from the render/event loop
+// (single-threaded), mirroring FocusedFormControlSel.
+var formControlScroll = make(map[*dom.Element]float64)
+
+// FormControlTextScroll returns the last painted horizontal scroll offset
+// of a form control element (0 when it was never painted).
+func FormControlTextScroll(el *dom.Element) float64 {
+	if el == nil {
+		return 0
+	}
+	return formControlScroll[el]
+}
+
+// SetFormControlTextScroll records the horizontal scroll offset of a form
+// control element (used by scrollbar drag/arrow/track operations and the
+// painter's per-frame recompute).
+func SetFormControlTextScroll(el *dom.Element, v float64) {
+	if el == nil {
+		return
+	}
+	formControlScroll[el] = v
+}
 
 // wrapTextAreaLines breaks text into visual lines honoring hard '\n' breaks
 // and soft-wrapping per mode (see wrapMode*). Rows are never ellipsized —
@@ -762,11 +785,11 @@ func wrapTextAreaLines(text string, font graphics.Font, contentW float64, mode i
 // caret (at caretPx, measured from the text origin) visible inside a
 // content area of contentW CSS px. Stable: the caret only scrolls when it
 // leaves [0, contentW]; returning to the left edge resets it.
-func computeTextScrollX(caretPx, contentW float64) float64 {
+func computeTextScrollX(caretPx, contentW, curSx float64) float64 {
 	if contentW <= 0 {
 		return 0
 	}
-	sx := FocusedFormControlTextScroll
+	sx := curSx
 	if caretPx-sx < 0 {
 		sx = caretPx
 	}
@@ -1264,7 +1287,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	// The previous frame's offset is preserved (scrollbar thumb drags the
 	// text freely); auto-scroll resumes only when the caret leaves the
 	// visible content area.
-	textScrollX := FocusedFormControlTextScroll
+	textScrollX := FormControlTextScroll(el)
 	if mode == wrapModeNone && FocusedFormControlSel != nil && el == FocusedFormControl {
 		caretPos := FocusedFormControlSel.End
 		if FocusedFormControlSel.Start > caretPos {
@@ -1273,12 +1296,12 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 		_, col, wl := locateWrappedCaret(wrapped, caretPos)
 		runes := []rune(displayText)
 		caretPx := graphics.MeasureText(font, string(runes[wl.start:wl.start+col]))
-		autoX := computeTextScrollX(caretPx, contentW)
+		autoX := computeTextScrollX(caretPx, contentW, textScrollX)
 		if caretPx < textScrollX || caretPx > textScrollX+contentW {
 			textScrollX = autoX
 		}
 	}
-	FocusedFormControlTextScroll = textScrollX
+	SetFormControlTextScroll(el, textScrollX)
 	textX -= textScrollX
 
 	for i, wl := range wrapped {

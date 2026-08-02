@@ -372,12 +372,12 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	}
 
 	// Get scroll offsets for thumb position calculations. Form controls
-	// scroll their text through FocusedFormControlTextScroll, not
+	// scroll their text through per-element FormControlTextScroll, not
 	// BoxScrollOffset — mirror that so the thumb position matches paint.
 	sx, sy := rv.BoxScrollOffset(scrollBox)
 	if el2, ok := scrollBox.Node().(*dom.Element); ok {
 		if el2.LocalName() == "textarea" || el2.LocalName() == "input" {
-			sx = FocusedFormControlTextScroll
+			sx = FormControlTextScroll(el2)
 		}
 	}
 

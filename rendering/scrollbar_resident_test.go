@@ -101,7 +101,11 @@ func TestScrollbarThumbNotCoverRightArrow(t *testing.T) {
 	cw, _ := sbox.View().BoxContentSize(sbox)
 	pb := sbox.PaddingBoxRect()
 	viewW := pb.Width - 6 - 6 // padding 6px each side
-	FocusedFormControlTextScroll = cw - viewW // max scroll
+	if el, ok := sbox.Node().(*dom.Element); ok {
+		SetFormControlTextScroll(el, cw-viewW) // max scroll
+	} else {
+		t.Fatalf("scroll box has no element")
+	}
 
 	canvas2 := graphics.NewCanvas(260, 160)
 	Paint(sbox.View(), canvas2, Rect{X: 0, Y: 0, Width: 260, Height: 160})

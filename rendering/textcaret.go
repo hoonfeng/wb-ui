@@ -29,8 +29,10 @@ func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX,
 		return 0
 	}
 	// The visible click X maps back to text coordinates by the scroll offset
-	// (positive when the text has been scrolled left).
-	relX := cssX - boxX - padX + FocusedFormControlTextScroll
+	// (positive when the text has been scrolled left), scoped to the focused
+	// control so a sibling textarea's horizontal scroll never bleeds into a
+	// single-line input's hit-testing.
+	relX := cssX - boxX - padX + FormControlTextScroll(FocusedFormControl)
 
 	if isMultiLine {
 		relY := cssY - boxY - padY

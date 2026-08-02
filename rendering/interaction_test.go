@@ -189,7 +189,6 @@ func TestCheckboxToggleOnClickClick(t *testing.T) {
 
 // TestCaretSingleLineInput verifies single-line input caret offset from X.
 func TestCaretSingleLineInput(t *testing.T) {
-	rendering.FocusedFormControlTextScroll = 0 // reset global scroll state
 	font := graphics.Font{Family: "Consolas", Size: 14, Weight: 400}
 	text := "hello"
 	boxX, boxY, padX, padY, lineH := 10.0, 20.0, 4.0, 4.0, 17.0
@@ -222,7 +221,6 @@ func TestCaretSingleLineInput(t *testing.T) {
 // TestCaretTextareaMultiLine verifies multi-line textarea caret: clicking a
 // later line resolves that line, not line 0 (the previous bug).
 func TestCaretTextareaMultiLine(t *testing.T) {
-	rendering.FocusedFormControlTextScroll = 0 // reset global scroll state
 	font := graphics.Font{Family: "Consolas", Size: 14, Weight: 400}
 	text := "alpha\nbeta\ngamma"
 	boxX, boxY, padX, padY := 10.0, 30.0, 4.0, 4.0

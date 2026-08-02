@@ -241,14 +241,14 @@ func (h *Host) FocusElement(el *dom.Element) {
 }
 
 // scrollXFor returns the horizontal scroll offset of a scroll container.
-// Form controls (input/textarea) scroll their text through the
-// FocusedFormControlTextScroll global (set by the painter each frame), not
+// Form controls (input/textarea) scroll their text through the per-element
+// FormControlTextScroll (set by the painter each frame), not
 // BoxScrollOffset — mirror that so drag/arrow/track operations hit the
-// right value.
+// right value, scoped to the control being dragged.
 func scrollXFor(rv *rendering.RenderView, box *rendering.RenderBox) float64 {
 	if el, ok := box.Node().(*dom.Element); ok {
 		if el.LocalName() == "textarea" || el.LocalName() == "input" {
-			return rendering.FocusedFormControlTextScroll
+			return rendering.FormControlTextScroll(el)
 		}
 	}
 	if rv == nil {
@@ -259,18 +259,18 @@ func scrollXFor(rv *rendering.RenderView, box *rendering.RenderBox) float64 {
 }
 
 // setScrollXFor sets the horizontal scroll offset of a scroll container,
-// routing form controls to FocusedFormControlTextScroll and others to
-// BoxScrollOffset. Returns true when a change was applied.
+// routing form controls to their per-element FormControlTextScroll and
+// others to BoxScrollOffset. Returns true when a change was applied.
 func setScrollXFor(rv *rendering.RenderView, box *rendering.RenderBox, x float64) bool {
 	if x < 0 {
 		x = 0
 	}
 	if el, ok := box.Node().(*dom.Element); ok {
 		if el.LocalName() == "textarea" || el.LocalName() == "input" {
-			if rendering.FocusedFormControlTextScroll == x {
+			if rendering.FormControlTextScroll(el) == x {
 				return false
 			}
-			rendering.FocusedFormControlTextScroll = x
+			rendering.SetFormControlTextScroll(el, x)
 			return true
 		}
 	}
