@@ -27,6 +27,8 @@
 package ime
 
 import (
+	"log"
+	"os"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -47,11 +49,11 @@ var (
 	procImmGetCompositionStringW = imm32.NewProc("ImmGetCompositionStringW")
 	procImmAssociateContext      = imm32.NewProc("ImmAssociateContext")
 
-	procSetWindowLongW  = user32.NewProc("SetWindowLongW")
-	procCallWindowProcW  = user32.NewProc("CallWindowProcW")
-	procDefWindowProcW   = user32.NewProc("DefWindowProcW")
-	procSendMessageW     = user32.NewProc("SendMessageW")
-	procClientToScreen   = user32.NewProc("ClientToScreen")
+	procSetWindowLongPtrW = user32.NewProc("SetWindowLongPtrW")
+	procCallWindowProcW    = user32.NewProc("CallWindowProcW")
+	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
+	procSendMessageW       = user32.NewProc("SendMessageW")
+	procClientToScreen     = user32.NewProc("ClientToScreen")
 )
 
 // ============================================================================
@@ -155,8 +157,11 @@ func (h *WindowsHandler) Init(hwnd uintptr) {
 	h.hwnd = hwnd
 
 	h.subclassCallback = syscall.NewCallback(h.imeWndProc)
-	ret, _, _ := procSetWindowLongW.Call(hwnd, uintptr(gwlWndProc), h.subclassCallback)
+	ret, _, _ := procSetWindowLongPtrW.Call(hwnd, uintptr(gwlWndProc), h.subclassCallback)
 	h.origWndProc = ret
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		log.Printf("[ime] Init hwnd=%#x SetWindowLongPtrW ret=%#x", hwnd, ret)
+	}
 
 	// Re-associate the IME context to force a WM_IME_SETCONTEXT so our
 	// subclassed proc can clear ISC_SHOWUICOMPOSITIONWINDOW. The initial
@@ -238,6 +243,12 @@ func (h *WindowsHandler) pushEvent(ev Event) {
 // imeWndProc is the subclassed window procedure that intercepts IME messages.
 // It is called by Win32 on the same thread that runs the GLFW event loop.
 func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		switch msg {
+		case wmIMESetContext, wmIMEStartComposition, wmIMEComposition, wmIMEEndComposition, wmIMENotify, wmChar:
+			log.Printf("[ime] wndproc msg=0x%x wParam=%#x lParam=%#x", msg, wParam, lParam)
+		}
+	}
 	switch msg {
 	case wmIMESetContext:
 		// Clear ISC_SHOWUICOMPOSITIONWINDOW to suppress the IME's own
@@ -387,12 +398,19 @@ func (h *WindowsHandler) getCursorPos(hwnd uintptr) int {
 func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 	himc, _, _ := procImmGetContext.Call(hwnd)
 	if himc == 0 {
+		if os.Getenv("WB_IME_DEBUG") != "" {
+			log.Printf("[ime] setCompositionPos: ImmGetContext failed hwnd=%#x", hwnd)
+		}
 		return
 	}
 	defer procImmReleaseContext.Call(hwnd, himc)
 
 	pt := winPoint{X: x, Y: y}
+	before := pt
 	procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		log.Printf("[ime] setCompositionPos client=(%d,%d) → screen=(%d,%d)", before.X, before.Y, pt.X, pt.Y)
+	}
 	x, y = pt.X, pt.Y
 
 	cf := compositionForm{
@@ -400,7 +418,7 @@ func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 		X:     x,
 		Y:     y,
 	}
-	procImmSetCompositionWindow.Call(himc, uintptr(unsafe.Pointer(&cf)))
+	r1, _, _ := procImmSetCompositionWindow.Call(himc, uintptr(unsafe.Pointer(&cf)))
 
 	cand := candidateForm{
 		Index: 0,
@@ -408,5 +426,9 @@ func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 		X:     x,
 		Y:     y,
 	}
-	procImmSetCandidateWindow.Call(himc, uintptr(unsafe.Pointer(&cand)))
+	r2, _, _ := procImmSetCandidateWindow.Call(himc, uintptr(unsafe.Pointer(&cand)))
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		log.Printf("[ime] setCompositionPos screen=(%d,%d) hwnd=%#x ImmSetComposition=%d ImmSetCandidate=%d",
+			x, y, hwnd, r1, r2)
+	}
 }

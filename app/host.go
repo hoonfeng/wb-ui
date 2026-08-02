@@ -620,8 +620,13 @@ func (h *Host) Run() {
 					}
 					if h.lastIMEX != int32(cx) || h.lastIMEY != int32(cy) {
 						h.lastIMEX, h.lastIMEY = int32(cx), int32(cy)
+						if os.Getenv("WB_IME_DEBUG") != "" {
+							log.Printf("[ime] host SetIMECompositionPos css=(%.0f,%.0f) scrollY=%d", cx, cy, frameView.ScrollY())
+						}
 						h.win.SetIMECompositionPos(cx, cy)
 					}
+				} else if os.Getenv("WB_IME_DEBUG") != "" {
+					log.Printf("[ime] FormControlCaretPosition not ok (FocusedFormControl set)")
 				}
 			}
 
