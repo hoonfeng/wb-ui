@@ -43,29 +43,18 @@ func scrollbarWidthFor(st *style.ComputedStyle) float64 {
 	return 12
 }
 
-// boxViewAndContent returns the content-box viewport (padding-box minus
-// padding) and the content extent (BoxContentSize) for a box.
+// boxViewAndContent returns the client viewport (padding-box, per CSSOM —
+// clientWidth/clientHeight include padding) and the content extent
+// (BoxContentSize). Gating an overflow:auto box against the content-box
+// height makes every vertically-padded container look "overflowed" (the
+// content extent counts content + top padding), so ws-section /
+// project-section / sidebar-content all showed spurious scrollbars even
+// when content fit exactly. The painter, hit-test and drag geometry all
+// share this single source.
 func boxViewAndContent(rv *RenderView, box *RenderBox) (viewW, viewH, totalW, totalH float64) {
 	pb := box.PaddingBoxRect()
-	st := box.Style()
-	padL := lengthValue(st.PaddingLeft)
-	padR := lengthValue(st.PaddingRight)
-	padT := lengthValue(st.PaddingTop)
-	padB := lengthValue(st.PaddingBottom)
-	if padL < 0 {
-		padL = 0
-	}
-	if padR < 0 {
-		padR = 0
-	}
-	if padT < 0 {
-		padT = 0
-	}
-	if padB < 0 {
-		padB = 0
-	}
-	viewW = pb.Width - padL - padR
-	viewH = pb.Height - padT - padB
+	viewW = pb.Width
+	viewH = pb.Height
 	if viewW < 1 {
 		viewW = 1
 	}

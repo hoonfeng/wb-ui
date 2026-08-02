@@ -386,11 +386,18 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						if padB < 0 {
 							padB = 0
 						}
-						viewW := pb.Width - padL - padR
+						// clientWidth/clientHeight include padding (CSSOM: client
+						// height = padding-box height minus scrollbar). Gating an
+						// overflow:auto box against the content-box height makes
+						// every vertically-padded container look "overflowed"
+						// (BoxContentSize counts content + top padding), so
+						// ws-section/project-section/sidebar-content all showed
+						// spurious scrollbars even when content fit exactly.
+						viewW := pb.Width
 						if viewW < 1 {
 							viewW = 1
 						}
-						viewH := pb.Height - padT - padB
+						viewH := pb.Height
 						if viewH < 1 {
 							viewH = 1
 						}

@@ -440,11 +440,14 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	if padB < 0 {
 		padB = 0
 	}
-	contentW := pb.Width - padL - padR
+	// clientWidth/clientHeight include padding (CSSOM) — see paint gating in
+	// renderpipeline.go. Comparing against the content-box height makes every
+	// padded overflow:auto container spuriously scrollable.
+	contentW := pb.Width
 	if contentW < 1 {
 		contentW = 1
 	}
-	contentH := pb.Height - padT - padB
+	contentH := pb.Height
 	if contentH < 1 {
 		contentH = 1
 	}
