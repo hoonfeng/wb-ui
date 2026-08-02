@@ -316,6 +316,38 @@ func setFocusedElementValue(el *dom.Element, text string) {
 	el.SetTextContent(text)
 }
 
+// formControlEditLimits returns 0 when the focused control rejects edits
+// (readonly/disabled attributes), otherwise its maxlength in runes, or -1
+// when unlimited. Readonly/disabled controls still receive focus but must
+// not mutate their value (browser semantics).
+func formControlEditLimits(el *dom.Element) int {
+	if el == nil {
+		return -1
+	}
+	if el.GetAttribute("readonly") != "" || el.GetAttribute("disabled") != "" {
+		return 0
+	}
+	if in, ok := html5.ToInputElement(el); ok {
+		return in.MaxLength()
+	}
+	if ta, ok := html5.ToTextAreaElement(el); ok {
+		return ta.MaxLength()
+	}
+	return -1
+}
+
+// truncateToMaxLen clips s to at most maxLen runes (maxLen < 0 = unlimited).
+func truncateToMaxLen(s string, maxLen int) string {
+	if maxLen < 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= maxLen {
+		return s
+	}
+	return string(r[:maxLen])
+}
+
 // isTextFormControl reports whether el is an <input> (non-checkbox/radio/
 // hidden/range/color/file/submit/reset/button/image) or <textarea>, i.e. a
 // form control whose text is carried by the value attribute and which
@@ -440,8 +472,12 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		}
 	}
 
+	wrapMode := 0
+	if st != nil && el.LocalName() == "textarea" {
+		wrapMode = rendering.TextareaWrapMode(st, el)
+	}
 	return rendering.CalcFormControlCaretOffset(text, el.LocalName() == "textarea",
-		cssX, cssY, bx, by, bw, font, padX, padY, lineH)
+		cssX, cssY, bx, by, bw, font, padX, padY, lineH, wrapMode)
 }
 
 // findFormControlBox walks the render tree to find the absolute border-box
@@ -1818,6 +1854,9 @@ func (h *Host) pasteIntoFocused(text string) {
 	if h.imeFocusedEl == nil {
 		return
 	}
+	if formControlEditLimits(h.imeFocusedEl) == 0 {
+		return // readonly/disabled: no paste
+	}
 
 	sel := rendering.FocusedFormControlSel
 	val := focusedElementValue(h.imeFocusedEl)
@@ -1847,6 +1886,13 @@ func (h *Host) pasteIntoFocused(text string) {
 		// Append to end.
 		newVal = val + text
 		newOffset = len([]rune(newVal))
+	}
+
+	if maxLen := formControlEditLimits(h.imeFocusedEl); maxLen > 0 {
+		newVal = truncateToMaxLen(newVal, maxLen)
+		if newOffset > len([]rune(newVal)) {
+			newOffset = len([]rune(newVal))
+		}
 	}
 
 	setFocusedElementValue(h.imeFocusedEl, newVal)
@@ -1973,6 +2019,9 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 			if !h.imeComposing {
 				// Composition starts: snapshot the base text (everything
 				// EXCEPT the in-progress composition) and the insertion point.
+				if formControlEditLimits(h.imeFocusedEl) == 0 {
+					continue // readonly/disabled: never start a composition
+				}
 				h.imeComposing = true
 				h.imeComposeBase = focusedElementValue(h.imeFocusedEl)
 				// Default caret = END of text when no click positioned it
@@ -2024,6 +2073,9 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 					pos = len(runes)
 				}
 				newText = string(runes[:pos]) + char + string(runes[pos:])
+				if maxLen := formControlEditLimits(h.imeFocusedEl); maxLen > 0 {
+					newText = truncateToMaxLen(newText, maxLen)
+				}
 				h.imeComposeBase = ""
 				if os.Getenv("WB_IME_DEBUG") != "" {
 					log.Printf("[ime] compose-commit char=%q pos=%d base=%q → %q", char, pos, string(runes), newText)
@@ -2034,6 +2086,9 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 				// caret the default is the END of the text (browsers focus
 				// with the caret at the end) — inserting at 0 put every
 				// character at the HEAD of the value.
+				if formControlEditLimits(h.imeFocusedEl) == 0 {
+					break // readonly/disabled: ignore the keystroke
+				}
 				val := focusedElementValue(h.imeFocusedEl)
 				runes := []rune(val)
 				start, end := len(runes), len(runes)
@@ -2050,8 +2105,15 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 					}
 				}
 				newText = string(runes[:start]) + char + string(runes[end:])
-				// Move caret after the inserted char.
-				rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: start + 1, End: start + 1}
+				if maxLen := formControlEditLimits(h.imeFocusedEl); maxLen > 0 {
+					newText = truncateToMaxLen(newText, maxLen)
+				}
+				// Move caret after the inserted char (clamped by maxlength).
+				caretPos := start + 1
+				if n := len([]rune(newText)); caretPos > n {
+					caretPos = n
+				}
+				rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: caretPos, End: caretPos}
 				if os.Getenv("WB_IME_DEBUG") != "" {
 					selInfo := "nil"
 					if s := rendering.FocusedFormControlSel; s != nil {

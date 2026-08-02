@@ -324,7 +324,9 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	// Horizontal scroll: keep the caret inside the visible content area by
 	// shifting the text left/right (browsers scroll single-line inputs
 	// horizontally instead of ellipsizing overflow). Computed per-frame from
-	// the current caret position; non-focused controls just clip.
+	// the current caret position; non-focused controls just clip. The offset
+	// is published globally so caret drawing / hit-testing / IME positioning
+	// stay consistent across single-line and pre-mode textarea.
 	contentW := w - padX*2
 	textScrollX := 0.0
 	if !showPlaceholder && FocusedFormControlSel != nil && el == FocusedFormControl {
@@ -339,13 +341,9 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			caretPos = 0
 		}
 		caretPx := graphics.MeasureText(font, string(runes[:caretPos]))
-		if caretPx-textScrollX < 0 {
-			textScrollX = caretPx
-		}
-		if caretPx-textScrollX > contentW {
-			textScrollX = caretPx - contentW
-		}
+		textScrollX = computeTextScrollX(caretPx, contentW)
 	}
+	FocusedFormControlTextScroll = textScrollX
 	textX := x + padX - textScrollX
 
 	// Clip to the input's content area so long text doesn't overflow.
@@ -459,8 +457,9 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	caretY := y + (h-textHeight)/2
 
 	// Multi-line (textarea): position the caret at the row/column of the
-	// current selection Start instead of the box's vertical center. Soft
-	// wrapping (browser textarea wrap) determines the visual row/col.
+	// current selection Start instead of the box's vertical center. Wrap
+	// mode comes from white-space; the X is scrolled back by the published
+	// horizontal offset so the caret stays visible in pre/nowrap mode.
 	if el.LocalName() == "textarea" {
 		value := el.TextContent()
 		runes := []rune(value)
@@ -481,11 +480,11 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 		if contentW < 1 {
 			contentW = 1
 		}
-		wrapped := wrapTextAreaLines(value, font, contentW)
+		wrapped := wrapTextAreaLines(value, font, contentW, textareaWrapMode(st, el))
 		row, col, _ := locateWrappedCaret(wrapped, pos)
 		lineStart := pos - col
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
-		caretX = x + padX + colW
+		caretX = x + padX + colW - FocusedFormControlTextScroll
 		caretY = y + padY + float64(row)*lineH
 		if caretY < y {
 			caretY = y
@@ -587,26 +586,44 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		if contentW < 1 {
 			contentW = 1
 		}
-		wrapped := wrapTextAreaLines(value, font, contentW)
+		wrapped := wrapTextAreaLines(value, font, contentW, textareaWrapMode(st, el))
 		row, col, _ := locateWrappedCaret(wrapped, pos)
 		lineStart := pos - col
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
-		caretX = boxX + padX + colW
+		// Horizontal scroll compensation: the caret may be scrolled out of
+		// view in pre/nowrap mode; the IME anchor follows the VISIBLE caret.
+		caretX = boxX + padX + colW - FocusedFormControlTextScroll
 		caretY = boxY + padY + float64(row)*lineH
 		if caretY < boxY {
 			caretY = boxY
 		}
-		// Anchor IME candidate window at the BOTTOM of the caret line so the
-		// candidate list renders BELOW the text (browsers show candidates
-		// under the caret, not over it). The returned point is only consumed
-		// by the host for IME positioning.
-		caretY += lineH
+		// Anchor IME candidate window BELOW the caret line (bottom + gap) so
+		// the candidate list renders under the text, not flush with the
+		// caret bottom. The returned point is only consumed by the host for
+		// IME positioning.
+		caretY += lineH + imeCandidateGap(lineH)
 	} else {
-		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos]))
+		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos])) - FocusedFormControlTextScroll
 		// Single-line input: anchor IME candidate window below the text too.
-		caretY += lineH
+		caretY += lineH + imeCandidateGap(lineH)
 	}
 	return caretX, caretY, true
+}
+
+// imeCandidateGap returns the vertical gap (CSS px) between the caret
+// bottom and the IME candidate window anchor. Browsers render candidates a
+// few px below the caret; a pure bottom-anchor made the candidate list
+// flush with the caret line (reported as "candidate aligned with caret
+// bottom instead of below it").
+func imeCandidateGap(lineH float64) float64 {
+	gap := lineH * 0.3
+	if gap < 4 {
+		gap = 4
+	}
+	if gap > 10 {
+		gap = 10
+	}
+	return gap
 }
 
 // focusedControlText returns the displayed text of the focused control.
@@ -628,12 +645,49 @@ type wrappedLine struct {
 	end   int // exclusive
 }
 
+// Wrap strategies for textarea rows, derived from the CSS white-space
+// property (browsers honor it: pre/nowrap → no soft wrap + horizontal
+// scroll; pre-wrap → wrap at any character; normal/pre-line → wrap at
+// spaces). Textarea UA default is pre-wrap.
+const (
+	wrapModeNone     = iota // pre / nowrap: hard '\n' breaks only, rows may exceed width
+	wrapModeAnywhere         // pre-wrap / break-spaces: wrap at any character
+	wrapModeSpaces           // normal / pre-line: wrap at word boundaries
+)
+
+// textareaWrapMode derives the wrap strategy from the CSS white-space
+// property and the HTML wrap attribute (<textarea wrap="off"> disables soft
+// wrapping like white-space: pre). Textarea UA default is pre-wrap.
+func textareaWrapMode(st *style.ComputedStyle, el *dom.Element) int {
+	if el != nil && el.LocalName() == "textarea" {
+		if in, ok := html5.ToTextAreaElement(el); ok && in.Wrap() == "off" {
+			return wrapModeNone
+		}
+	}
+	if st == nil {
+		return wrapModeAnywhere // UA default: pre-wrap
+	}
+	switch st.WhiteSpace {
+	case style.WhiteSpacePre, style.WhiteSpaceNoWrap:
+		return wrapModeNone
+	case style.WhiteSpaceNormal, style.WhiteSpacePreLine, style.WhiteSpaceBreakSpaces:
+		return wrapModeSpaces
+	}
+	return wrapModeAnywhere
+}
+
+// FocusedFormControlTextScroll is the current horizontal scroll offset (in
+// CSS px) of the focused single-line input or pre-mode textarea, recomputed
+// every paint so the caret stays visible. Hit-testing and IME positioning
+// read it back to map coordinates correctly (a scrolled caret is drawn at
+// x - scroll; clicks at x map back to x + scroll).
+var FocusedFormControlTextScroll float64
+
 // wrapTextAreaLines breaks text into visual lines honoring hard '\n' breaks
-// AND soft-wrapping at the content width. Textareas wrap at ANY character
-// (browser default white-space: pre-wrap; overflow-wrap: break-word) — a
-// textarea row is NEVER ellipsized. Returns at least one line so an empty
-// value still maps to row 0.
-func wrapTextAreaLines(text string, font graphics.Font, contentW float64) []wrappedLine {
+// and soft-wrapping per mode (see wrapMode*). Rows are never ellipsized —
+// wrapModeNone rows may exceed the content width and scroll horizontally.
+// Returns at least one line so an empty value still maps to row 0.
+func wrapTextAreaLines(text string, font graphics.Font, contentW float64, mode int) []wrappedLine {
 	var out []wrappedLine
 	off := 0 // rune offset into text (includes '\n' chars)
 	for _, hard := range strings.Split(text, "\n") {
@@ -646,12 +700,12 @@ func wrapTextAreaLines(text string, font graphics.Font, contentW float64) []wrap
 		rest := runes
 		restStart := off
 		for len(rest) > 0 {
-			if graphics.MeasureText(font, string(rest)) <= contentW {
+			if graphics.MeasureText(font, string(rest)) <= contentW || mode == wrapModeNone {
 				out = append(out, wrappedLine{text: string(rest), start: restStart, end: restStart + len(rest)})
 				rest = nil
 				break
 			}
-			// Binary search the longest prefix that fits.
+			// Longest prefix that fits (binary search).
 			lo, hi := 1, len(rest)
 			for lo < hi {
 				mid := (lo + hi + 1) / 2
@@ -660,6 +714,24 @@ func wrapTextAreaLines(text string, font graphics.Font, contentW float64) []wrap
 				} else {
 					hi = mid - 1
 				}
+			}
+			if mode == wrapModeSpaces {
+				// Word-boundary wrap: prefer the last space inside the
+				// fitting prefix; the trailing space is dropped (browser
+				// collapses it at the break).
+				lastSpace := -1
+				for i := 0; i < lo; i++ {
+					if rest[i] == ' ' || rest[i] == '\t' {
+						lastSpace = i
+					}
+				}
+				if lastSpace > 0 {
+					out = append(out, wrappedLine{text: string(rest[:lastSpace]), start: restStart, end: restStart + lastSpace})
+					restStart += lastSpace + 1 // skip the space
+					rest = rest[lastSpace+1:]
+					continue
+				}
+				// No space in the fitting prefix → break the long word.
 			}
 			out = append(out, wrappedLine{text: string(rest[:lo]), start: restStart, end: restStart + lo})
 			restStart += lo
@@ -671,6 +743,24 @@ func wrapTextAreaLines(text string, font graphics.Font, contentW float64) []wrap
 		out = append(out, wrappedLine{})
 	}
 	return out
+}
+
+// computeTextScrollX returns the horizontal scroll offset that keeps the
+// caret (at caretPx, measured from the text origin) visible inside a
+// content area of contentW CSS px. Stable: the caret only scrolls when it
+// leaves [0, contentW]; returning to the left edge resets it.
+func computeTextScrollX(caretPx, contentW float64) float64 {
+	if contentW <= 0 {
+		return 0
+	}
+	sx := FocusedFormControlTextScroll
+	if caretPx-sx < 0 {
+		sx = caretPx
+	}
+	if caretPx-sx > contentW {
+		sx = caretPx - contentW
+	}
+	return sx
 }
 
 // locateWrappedCaret finds the visual row/col of a rune offset within
@@ -1144,12 +1234,33 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	info.canvas.Save()
 	info.canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
 
-	// Draw line by line with soft-wrapping (no ellipsis — textarea rows wrap).
+	// Draw line by line honoring the white-space wrap mode (pre-wrap wraps,
+	// pre/nowrap scrolls horizontally — never ellipsized).
 	contentW := w - padX*2
 	if contentW < 1 {
 		contentW = 1
 	}
-	wrapped := wrapTextAreaLines(displayText, font, contentW)
+	mode := textareaWrapMode(st, el)
+	wrapped := wrapTextAreaLines(displayText, font, contentW, mode)
+
+	// Horizontal scroll (white-space: pre / nowrap): rows may exceed the
+	// content width — keep the caret row's caret visible by shifting all
+	// rows, and publish the offset so caret drawing / hit-testing / IME
+	// positioning stay consistent.
+	textScrollX := 0.0
+	if mode == wrapModeNone && FocusedFormControlSel != nil && el == FocusedFormControl {
+		caretPos := FocusedFormControlSel.End
+		if FocusedFormControlSel.Start > caretPos {
+			caretPos = FocusedFormControlSel.Start
+		}
+		_, col, wl := locateWrappedCaret(wrapped, caretPos)
+		runes := []rune(displayText)
+		caretPx := graphics.MeasureText(font, string(runes[wl.start:wl.start+col]))
+		textScrollX = computeTextScrollX(caretPx, contentW)
+	}
+	FocusedFormControlTextScroll = textScrollX
+	textX -= textScrollX
+
 	for i, wl := range wrapped {
 		line := wl.text
 		lineStart := wl.start

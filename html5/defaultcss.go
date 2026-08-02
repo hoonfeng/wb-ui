@@ -82,6 +82,9 @@ textarea {
 	box-sizing: border-box;
 	resize: both;
 	overflow: auto;
+	/* Browser UA default: soft-wrap at any character. An explicit
+	   white-space: pre / nowrap overrides this and scrolls horizontally. */
+	white-space: pre-wrap;
 }
 
 input[type="color"] {

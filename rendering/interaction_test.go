@@ -193,7 +193,7 @@ func TestCaretSingleLineInput(t *testing.T) {
 	text := "hello"
 	boxX, boxY, padX, padY, lineH := 10.0, 20.0, 4.0, 4.0, 17.0
 	// Click at the start of the first character → offset 0
-	off := rendering.CalcFormControlCaretOffset(text, false, boxX+padX, boxY, boxX, boxY, 200, font, padX, padY, lineH)
+	off := rendering.CalcFormControlCaretOffset(text, false, boxX+padX, boxY, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off != 0 {
 		t.Errorf("click at char0 start → offset %d, want 0", off)
 	}
@@ -203,7 +203,7 @@ func TestCaretSingleLineInput(t *testing.T) {
 	for _, r := range chars {
 		totalW += graphics.MeasureText(font, string(r))
 	}
-	off = rendering.CalcFormControlCaretOffset(text, false, boxX+padX+totalW, boxY, boxX, boxY, 200, font, padX, padY, lineH)
+	off = rendering.CalcFormControlCaretOffset(text, false, boxX+padX+totalW, boxY, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off != len(chars) {
 		t.Errorf("click at end → offset %d, want %d", off, len(chars))
 	}
@@ -212,7 +212,7 @@ func TestCaretSingleLineInput(t *testing.T) {
 	for _, r := range chars[:2] {
 		mid += graphics.MeasureText(font, string(r))
 	}
-	off = rendering.CalcFormControlCaretOffset(text, false, boxX+padX+mid, boxY, boxX, boxY, 200, font, padX, padY, lineH)
+	off = rendering.CalcFormControlCaretOffset(text, false, boxX+padX+mid, boxY, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off != 2 {
 		t.Errorf("click at mid-char2 → offset %d, want 2", off)
 	}
@@ -233,13 +233,13 @@ func TestCaretTextareaMultiLine(t *testing.T) {
 	// Click near the start of line 1 (index 6 = 'b' of "beta")
 	cx := boxX + padX + 1
 	cy := boxY + padY + ascent + lineH*1
-	off := rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH)
+	off := rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off < 6 || off > 9 {
 		t.Errorf("click line1 start → offset %d, want 6..9 (beta)", off)
 	}
 	// Click near the start of line 2 (index 11 = 'g' of "gamma")
 	cy = boxY + padY + ascent + lineH*2
-	off = rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH)
+	off = rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off < 11 || off > 15 {
 		t.Errorf("click line2 start → offset %d, want 11..15 (gamma)", off)
 	}
@@ -247,7 +247,7 @@ func TestCaretTextareaMultiLine(t *testing.T) {
 	alW := graphics.MeasureText(font, "al")
 	cx = boxX + padX + alW
 	cy = boxY + padY + ascent
-	off = rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH)
+	off = rendering.CalcFormControlCaretOffset(text, true, cx, cy, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	t.Logf("alW=%.2f aW=%.2f lW=%.2f alphaW=%.2f ascent=%.2f lineH=%.2f", alW,
 		graphics.MeasureText(font, "a"), graphics.MeasureText(font, "l"),
 		graphics.MeasureText(font, "alpha"), ascent, lineH)
@@ -256,7 +256,7 @@ func TestCaretTextareaMultiLine(t *testing.T) {
 	}
 	// Click far past the last line → end of text
 	cy = boxY + padY + ascent + lineH*10
-	off = rendering.CalcFormControlCaretOffset(text, true, boxX+padX+500, cy, boxX, boxY, 200, font, padX, padY, lineH)
+	off = rendering.CalcFormControlCaretOffset(text, true, boxX+padX+500, cy, boxX, boxY, 200, font, padX, padY, lineH, 0)
 	if off != len([]rune(text)) {
 		t.Errorf("click below last line → offset %d, want %d", off, len([]rune(text)))
 	}
