@@ -1348,6 +1348,37 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 
 		case window.EventKey:
+			// ★ Text editing keys (backspace/delete/arrows/home/end) take
+			// priority over scrolling when a form control is focused. Without
+			// this, Backspace/Delete did nothing and arrows scrolled the page.
+			edited := false
+			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) && !h.imeComposing {
+				if ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat) {
+					switch ev.Key {
+					case int(glfw.KeyBackspace):
+						h.deleteFocusedChar(false)
+						edited = true
+					case int(glfw.KeyDelete):
+						h.deleteFocusedChar(true)
+						edited = true
+					case int(glfw.KeyLeft):
+						h.moveFocusedCaret(-1)
+						edited = true
+					case int(glfw.KeyRight):
+						h.moveFocusedCaret(1)
+						edited = true
+					case int(glfw.KeyHome):
+						h.setFocusedCaret(0)
+						edited = true
+					case int(glfw.KeyEnd):
+						h.setFocusedCaret(-1) // clamps to end
+						edited = true
+					}
+				}
+			}
+			if edited {
+				break
+			}
 			// Keyboard scrolling for PageUp/PageDown/Arrow keys.
 			if ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat) {
 				if rv != nil {
@@ -1833,6 +1864,100 @@ func (h *Host) pasteIntoFocused(text string) {
 	h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 
 	h.wv.RebuildRenderTree()
+}
+
+// deleteFocusedChar deletes one character (or the active selection) in the
+// focused form control. forward=true deletes after the caret (Delete key),
+// forward=false deletes before it (Backspace), matching browser behavior.
+func (h *Host) deleteFocusedChar(forward bool) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	val := focusedElementValue(el)
+	runes := []rune(val)
+	start, end := len(runes), len(runes)
+	if sel := rendering.FocusedFormControlSel; sel != nil {
+		start, end = sel.Start, sel.End
+		if start > end {
+			start, end = end, start
+		}
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end > len(runes) {
+		end = len(runes)
+	}
+	if start == end {
+		if forward {
+			if end >= len(runes) {
+				return // nothing after the caret
+			}
+			end++
+		} else {
+			if start <= 0 {
+				return // nothing before the caret
+			}
+			start--
+		}
+	}
+	newVal := string(runes[:start]) + string(runes[end:])
+	setFocusedElementValue(el, newVal)
+	h.imeInputText = newVal
+	rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: start, End: start}
+
+	inputType := "deleteContentForward"
+	if !forward {
+		inputType = "deleteContentBackward"
+	}
+	el.DispatchEvent(dom.NewInputEvent(inputType, "", false))
+	el.DispatchEvent(dom.NewEvent("change", true, false, false))
+	h.wv.RebuildRenderTree()
+}
+
+// moveFocusedCaret moves the caret of the focused form control by delta
+// runes (negative = left). Home/End are handled via moveFocusedCaretTo.
+func (h *Host) moveFocusedCaret(delta int) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	runes := []rune(focusedElementValue(el))
+	pos := len(runes)
+	if sel := rendering.FocusedFormControlSel; sel != nil {
+		pos = sel.Start
+	}
+	pos += delta
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	h.setFocusedCaret(pos)
+}
+
+// moveFocusedCaretTo sets the caret of the focused form control to an
+// absolute rune index.
+func (h *Host) setFocusedCaret(pos int) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	runes := []rune(focusedElementValue(el))
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: pos, End: pos}
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.MarkRenderTreeDirty()
+		}
+	}
 }
 
 // applyIMEEvents updates the focused element's text from IME

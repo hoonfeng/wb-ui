@@ -319,7 +319,34 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	// Vertically center the text within the border box:
 	// baseline = top + (boxHeight - textHeight)/2 + ascent.
 	baselineY := y + (h-textHeight)/2 + ascent
-	textX := x + padX
+	runes := []rune(displayText)
+
+	// Horizontal scroll: keep the caret inside the visible content area by
+	// shifting the text left/right (browsers scroll single-line inputs
+	// horizontally instead of ellipsizing overflow). Computed per-frame from
+	// the current caret position; non-focused controls just clip.
+	contentW := w - padX*2
+	textScrollX := 0.0
+	if !showPlaceholder && FocusedFormControlSel != nil && el == FocusedFormControl {
+		caretPos := FocusedFormControlSel.End
+		if FocusedFormControlSel.Start > caretPos {
+			caretPos = FocusedFormControlSel.Start
+		}
+		if caretPos > len(runes) {
+			caretPos = len(runes)
+		}
+		if caretPos < 0 {
+			caretPos = 0
+		}
+		caretPx := graphics.MeasureText(font, string(runes[:caretPos]))
+		if caretPx-textScrollX < 0 {
+			textScrollX = caretPx
+		}
+		if caretPx-textScrollX > contentW {
+			textScrollX = caretPx - contentW
+		}
+	}
+	textX := x + padX - textScrollX
 
 	// Clip to the input's content area so long text doesn't overflow.
 	// Clip to the input's content area so long text doesn't overflow.
@@ -328,7 +355,6 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 
 	// Draw the display text, splitting into pre/selected/post segments when
 	// there is an active selection in this element.
-	runes := []rune(displayText)
 	if FocusedFormControlSel != nil && el == FocusedFormControl && !showPlaceholder {
 		sel := FocusedFormControlSel
 		selStart := sel.Start
@@ -372,12 +398,12 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			}
 
 			// Draw the caret at the selection end (right edge of selected text).
-			paintFormControlCaret(info, el, st, x, y, w, h, preW+selW, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, preW+selW-textScrollX, op)
 		} else {
 			// Caret only (Start == End): draw text normally, caret at offset.
 			c.DrawText(textX, baselineY, displayText, font, textColor)
 			caretOffset := graphics.MeasureText(font, string(runes[:selStart]))
-			paintFormControlCaret(info, el, st, x, y, w, h, caretOffset, op)
+			paintFormControlCaret(info, el, st, x, y, w, h, caretOffset-textScrollX, op)
 		}
 	} else {
 		// No selection: draw the full text normally.
@@ -390,7 +416,7 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 		if !showPlaceholder {
 			caretW = graphics.MeasureText(font, displayText)
 		}
-		paintFormControlCaret(info, el, st, x, y, w, h, caretW, op)
+		paintFormControlCaret(info, el, st, x, y, w, h, caretW-textScrollX, op)
 	}
 	info.canvas.Restore()
 }
@@ -582,8 +608,15 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		if caretY < boxY {
 			caretY = boxY
 		}
+		// Anchor IME candidate window at the BOTTOM of the caret line so the
+		// candidate list renders BELOW the text (browsers show candidates
+		// under the caret, not over it). The returned point is only consumed
+		// by the host for IME positioning.
+		caretY += lineH
 	} else {
 		caretX = boxX + padX + graphics.MeasureText(font, string(runes[:pos]))
+		// Single-line input: anchor IME candidate window below the text too.
+		caretY += lineH
 	}
 	return caretX, caretY, true
 }
