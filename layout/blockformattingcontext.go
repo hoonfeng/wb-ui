@@ -260,11 +260,11 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 		fs := fontSizeOf(childEb)
 		if isVerticalWM {
-			minW, maxW, minWAuto, maxWAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, 0, fs)
+			minW, maxW, minWAuto, maxWAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, g.ContentWidth(), fs)
 			bw := ch.BorderBoxWidth()
 			ch.SetContentWidth(clampSize(bw, minW, maxW, minWAuto, maxWAuto) - border.Horizontal() - padding.Horizontal())
 		} else {
-			minH, maxH, minHAuto, maxHAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, 0, fs)
+			minH, maxH, minHAuto, maxHAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, g.ContentHeight(), fs)
 			bh := ch.BorderBoxHeight()
 			ch.SetContentHeight(clampSize(bh, minH, maxH, minHAuto, maxHAuto) - border.Vertical() - padding.Vertical())
 		}

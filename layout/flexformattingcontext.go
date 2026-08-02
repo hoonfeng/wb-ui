@@ -68,9 +68,6 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
-	if wbFlexDebug && flexName(box) == "div.chat-area" {
-		fmt.Fprintf(os.Stderr, "[flex/layout] chat-area: isRow=%v cw=%.1f ch=%.1f\n", isRow, cw, ch)
-	}
 	initialContentHeight := ch
 
 	var items []*flexItem
@@ -754,7 +751,18 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 		} else {
 			r := resolveLengthAuto(cs.Width, cbWidth, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
-				g.SetContentWidth(r.Value)
+				w := r.Value
+				// border-box: explicit width includes border+padding, so the
+				// content width must shrink (e.g. activity-bar button 40px with
+				// 2px border-left → content 38; without this the button renders
+				// 42px and overflows its 40px column).
+				if isBorderBox(it.box) {
+					w -= g.BorderLeft() + g.BorderRight() + g.PaddingLeft() + g.PaddingRight()
+				}
+				if w < 0 {
+					w = 0
+				}
+				g.SetContentWidth(w)
 			} else if align == "stretch" {
 				stretchW := cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
 				if stretchW < 0 { stretchW = 0 }
@@ -931,7 +939,16 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 			if cs != nil {
 				r := resolveLengthAuto(cs.Height, ch, fontSizeOf(it.box))
-				if r.Definite && !r.Auto { g.SetContentHeight(r.Value) }
+				if r.Definite && !r.Auto {
+					h := r.Value
+					if isBorderBox(it.box) {
+						h -= g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
+					}
+					if h < 0 {
+						h = 0
+					}
+					g.SetContentHeight(h)
+				}
 			}
 		} else {
 			ms := it.finalMainSize
@@ -943,7 +960,16 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 			if cs != nil {
 				r := resolveLengthAuto(cs.Width, cw, fontSizeOf(it.box))
-				if r.Definite && !r.Auto { g.SetContentWidth(r.Value) }
+				if r.Definite && !r.Auto {
+					w := r.Value
+					if isBorderBox(it.box) {
+						w -= g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+					}
+					if w < 0 {
+						w = 0
+					}
+					g.SetContentWidth(w)
+				}
 			}
 		}
 
