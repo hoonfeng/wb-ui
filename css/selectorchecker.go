@@ -200,9 +200,10 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 	case PseudoClassFocus:
 		return el.IsFocused()
 	case PseudoClassFocusVisible:
-		// Simplified: same as :focus. In the full spec :focus-visible additionally
-		// requires a focus indicator heuristic (keyboard vs mouse focus).
-		return el.IsFocused()
+		// :focus-visible matches keyboard (Tab) focus, not mouse clicks —
+		// Chrome/Edge UA default outline is `:focus-visible { outline: auto }`,
+		// so clicking a button does NOT draw a focus ring but Tab does.
+		return el.IsFocused() && el.FocusByKeyboard()
 	case PseudoClassFocusWithin:
 		// :focus-within matches if the element itself or any descendant has focus.
 		if el.IsFocused() {

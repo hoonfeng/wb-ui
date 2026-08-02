@@ -76,6 +76,13 @@ type Host struct {
 	imeInputText   string
 	imeComposing   bool
 	imeComposeText string
+	// Composition insertion state: base is the element text WITHOUT the
+	// in-progress composition, start is the caret offset where the composition
+	// (and subsequent char input) is inserted. Without this, IME text was
+	// always appended to the END of the value, ignoring the caret position —
+	// clicking mid-text then typing put the new text at the tail.
+	imeComposeBase  string
+	imeComposeStart int
 
 	// animStart is the wall-clock time when Run() started, used to compute
 	// the animation clock (AnimationTime) each frame.
@@ -230,13 +237,27 @@ func (h *Host) WebView() *webkit.WebView { return h.wv }
 // for other elements, text content is used (the legacy div-based editable
 // element behavior).
 func (h *Host) FocusElement(el *dom.Element) {
+	h.FocusElementByKeyboard(el, false)
+}
+
+// FocusElementByKeyboard is FocusElement with a focus-source hint. byKeyboard
+// should be true when focus moved via Tab (keyboard); false for mouse clicks.
+// It drives the :focus-visible pseudo-class: the UA default outline only
+// matches keyboard focus, so clicking a button/tab no longer draws the
+// (browser-mismatched) focus ring.
+func (h *Host) FocusElementByKeyboard(el *dom.Element, byKeyboard bool) {
 	if h.imeFocusedEl != nil && h.imeFocusedEl != el {
 		h.imeFocusedEl.SetFocused(false)
 	}
 	if el != nil {
 		el.SetFocused(true)
+		el.SetFocusByKeyboard(byKeyboard)
 	}
 	h.imeFocusedEl = el
+	h.imeComposing = false
+	h.imeComposeText = ""
+	h.imeComposeBase = ""
+	h.imeComposeStart = 0
 	// Mark frame dirty so :focus style updates.
 	if mf := h.wv.MainFrame(); mf != nil {
 		if fr := mf.Frame(); fr != nil {
@@ -471,6 +492,8 @@ func (h *Host) Unfocus() {
 		h.imeInputText = ""
 		h.imeComposing = false
 		h.imeComposeText = ""
+		h.imeComposeBase = ""
+		h.imeComposeStart = 0
 		rendering.FocusedFormControl = nil
 		rendering.FocusedFormControlSel = nil
 		rendering.CaretVisible = false
@@ -1788,16 +1811,40 @@ func (h *Host) pasteIntoFocused(text string) {
 
 // applyIMEEvents updates the focused element's text from IME
 // composition/handwriting events, dispatching DOM input/composition/change
-// events and rebuilding the render tree as needed.
+// events and rebuilding the render tree as needed. Text is inserted at the
+// caret (FocusedFormControlSel.Start), replacing any selection — not appended
+// to the end of the value (browser behavior).
 func (h *Host) applyIMEEvents(events []ime.Event) {
 	needsRebuild := false
 	for _, ev := range events {
 		switch ev.Kind {
 		case ime.EventCompositionUpdate:
-			h.imeComposing = true
+			if !h.imeComposing {
+				// Composition starts: snapshot the base text (everything
+				// EXCEPT the in-progress composition) and the insertion point.
+				h.imeComposing = true
+				h.imeComposeBase = focusedElementValue(h.imeFocusedEl)
+				sel := rendering.FocusedFormControlSel
+				start := 0
+				if sel != nil {
+					start = sel.Start
+					if start < 0 {
+						start = 0
+					}
+				}
+				if start > len([]rune(h.imeComposeBase)) {
+					start = len([]rune(h.imeComposeBase))
+				}
+				h.imeComposeStart = start
+			}
 			h.imeComposeText = ev.Composition
 			if h.imeFocusedEl != nil {
-				newText := h.imeInputText + h.imeComposeText
+				runes := []rune(h.imeComposeBase)
+				pos := h.imeComposeStart
+				if pos > len(runes) {
+					pos = len(runes)
+				}
+				newText := string(runes[:pos]) + h.imeComposeText + string(runes[pos:])
 				setFocusedElementValue(h.imeFocusedEl, newText)
 				needsRebuild = true
 
@@ -1810,19 +1857,51 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 
 		case ime.EventCharInput:
 			wasComposing := h.imeComposing
-			if h.imeComposing {
+			char := string(ev.Char)
+			var newText string
+			if wasComposing {
+				// Composition confirmed: replace the composition preview with
+				// the committed char, keeping the base text around it.
 				h.imeComposing = false
 				h.imeComposeText = ""
+				runes := []rune(h.imeComposeBase)
+				pos := h.imeComposeStart
+				if pos > len(runes) {
+					pos = len(runes)
+				}
+				newText = string(runes[:pos]) + char + string(runes[pos:])
+				h.imeComposeBase = ""
+			} else {
+				// Plain character input: insert at the caret, replacing any
+				// selection (browser behavior). Previously this appended to
+				// the end of the whole value, ignoring the caret position.
+				val := focusedElementValue(h.imeFocusedEl)
+				runes := []rune(val)
+				start, end := 0, len(runes)
+				if sel := rendering.FocusedFormControlSel; sel != nil {
+					start, end = sel.Start, sel.End
+					if start > end {
+						start, end = end, start
+					}
+					if start < 0 {
+						start = 0
+					}
+					if end > len(runes) {
+						end = len(runes)
+					}
+				}
+				newText = string(runes[:start]) + char + string(runes[end:])
+				// Move caret after the inserted char.
+				rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: start + 1, End: start + 1}
 			}
-			char := string(ev.Char)
-			h.imeInputText += char
+			h.imeInputText = newText
 			if h.imeFocusedEl != nil {
-				setFocusedElementValue(h.imeFocusedEl, h.imeInputText)
+				setFocusedElementValue(h.imeFocusedEl, newText)
 				needsRebuild = true
 
 				if wasComposing {
 					// End composition
-					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", h.imeInputText))
+					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", newText))
 				}
 
 				// Dispatch input event with insertText

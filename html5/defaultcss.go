@@ -22,8 +22,10 @@ form {
 	margin: 0 0 1em 0;
 }
 
-/* Default focus ring (Edge/Chrome: blue outline on :focus elements). */
-:focus {
+/* Default focus ring. Chrome/Edge UA uses :focus-visible, so mouse clicks do
+ * NOT draw the ring (only keyboard Tab focus does). User styles targeting
+ * :focus (e.g. .textarea:focus) still match on any focus. */
+:focus-visible {
 	outline: 1px solid #4d90fe;
 	outline-offset: 0px;
 }

@@ -29,9 +29,10 @@ type Element struct {
 	// Dynamic pseudo-class state, set by the embedding application (e.g. from
 	// mouse/keyboard event handlers). These mirror the interactive pseudo-classes
 	// :hover / :focus / :active in the CSS selector model.
-	hovered bool
-	focused bool
-	active  bool
+	hovered         bool
+	focused         bool
+	focusByKeyboard bool // true when focus came from keyboard (Tab) — drives :focus-visible
+	active          bool
 }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
@@ -149,6 +150,15 @@ func (e *Element) IsFocused() bool { return e.focused }
 // SetFocused sets the focus state. The embedder calls this from focus/blur
 // event handlers.
 func (e *Element) SetFocused(f bool) { e.focused = f }
+
+// FocusByKeyboard reports whether the current focus was established by the
+// keyboard (e.g. Tab), driving the :focus-visible pseudo-class.
+func (e *Element) FocusByKeyboard() bool { return e.focusByKeyboard }
+
+// SetFocusByKeyboard records how focus was established. Call SetFocused(true)
+// and SetFocusByKeyboard(true) together when Tab moves focus; mouse clicks set
+// it false so :focus-visible (UA default outline) does not match.
+func (e *Element) SetFocusByKeyboard(b bool) { e.focusByKeyboard = b }
 
 // IsActive reports whether the element is currently active (being activated
 // by the user, e.g. while a mouse button is pressed), mirroring the :active
