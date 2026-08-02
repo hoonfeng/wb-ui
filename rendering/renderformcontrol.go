@@ -1259,6 +1259,10 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	if ascent <= 0 {
 		ascent = font.Size * 0.8
 	}
+	descent := graphics.GlobalFontDescent(font)
+	if descent < 0 {
+		descent = 0
+	}
 	// Line height honoring CSS line-height so painted rows and caret rows
 	// match (a textarea with line-height:1.5 at 13px draws 19.5px rows).
 	lineH := cssControlLineHeight(st, font.Size)
@@ -1376,12 +1380,18 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 				post := string(lineRunes[selLineEnd:])
 				preW := graphics.MeasureText(font, pre)
 				selW := graphics.MeasureText(font, selText)
-				// Always paint the highlight rect — the content clip already
-				// cuts it to the visible area, so a selection that extends
-				// past the right edge (horizontally scrolled pre-mode rows)
-				// still shows a background for its visible portion instead of
-				// vanishing entirely.
-				c.FillRect(textX+preW, lineY-ascent, selW, lineH, selColor)
+				// Vertically center the highlight within the LINE BOX, not the
+				// glyph box: browsers split the line-height leading evenly
+				// above/below the glyphs, so the selection background covers
+				// the whole row while the text sits centered in it. Anchoring
+				// at (lineY - ascent) put the rect's bottom below the glyphs
+				// by the full leading ("text not centered in its highlight").
+				leading := lineH - (ascent + descent)
+				if leading < 0 {
+					leading = 0
+				}
+				selTop := lineY - ascent - leading/2
+				c.FillRect(textX+preW, selTop, selW, lineH, selColor)
 				if pre != "" {
 					c.DrawText(textX, lineY, pre, font, textColor)
 				}
