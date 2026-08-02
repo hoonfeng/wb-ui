@@ -180,13 +180,22 @@ func (h *WindowsHandler) PopEvents() []Event {
 
 // SetCompositionPos updates the cached IME composition position (physical
 // pixels). The position is used when WM_IME_STARTCOMPOSITION fires to place
-// the composition and candidate windows near the text caret.
+// the composition and candidate windows near the text caret. While a
+// composition is in progress the candidate window is also refreshed right
+// away, so it follows the caret as it moves / the candidate list updates
+// (previously the position was only applied once at composition start and
+// the candidate list stayed at the old spot).
 func (h *WindowsHandler) SetCompositionPos(x, y int32) {
 	h.mu.Lock()
 	h.compX = x
 	h.compY = y
 	h.compPosSet = true
+	composing := h.composing
+	hwnd := h.hwnd
 	h.mu.Unlock()
+	if composing && hwnd != 0 {
+		h.setCompositionPos(hwnd, x, y)
+	}
 }
 
 // SetEnabled enables or disables IME for the focused element.
@@ -250,6 +259,14 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 
 	case wmIMEComposition:
 		h.handleIMEComposition(hwnd, lParam)
+		// Refresh the candidate window position as the composition text
+		// changes (candidate list cycling), keeping it at the caret.
+		if h.composing {
+			h.mu.Lock()
+			x, y := h.compX, h.compY
+			h.mu.Unlock()
+			h.setCompositionPos(hwnd, x, y)
+		}
 		// Re-hide the composition window after each composition update,
 		// since some IMEs re-show it when the text changes.
 		procDefWindowProcW.Call(hwnd, uintptr(wmIMESetContext), 1, uintptr(iscShowUICandidateWindow))

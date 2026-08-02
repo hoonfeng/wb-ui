@@ -1190,6 +1190,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								End:    offset,
 								Active: true,
 							}
+							if os.Getenv("WB_IME_DEBUG") != "" {
+								log.Printf("[ime] click-pos css=(%.0f,%.0f) box=(%.0f,%.0f) offset=%d sel={%d,%d}",
+									cssX, cssY, h.mouseDownX, h.mouseDownY, offset, offset, offset)
+							}
 						}
 					} else if h.imeFocusedEl != nil {
 						// Click outside a text control clears the form-control selection.
@@ -1274,8 +1278,14 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				val := focusedElementValue(h.imeFocusedEl)
 				runes := []rune(val)
 				sel := rendering.FocusedFormControlSel
-				start, end := 0, 0
-				if sel != nil && sel.Active {
+				// Caret default = END of text when no click positioned it
+				// (browsers focus with the caret at the end; inserting at 0
+				// put every char at the HEAD). A click-positioned caret is
+				// honored regardless of Active — Release sets Active=false
+				// when the drag ends, but the caret must stay where the
+				// click placed it.
+				start, end := len(runes), len(runes)
+				if sel != nil {
 					start, end = sel.Start, sel.End
 				}
 				if start > end {
@@ -1302,6 +1312,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				newRunes = append(newRunes, runes[end:]...)
 				newVal := string(newRunes)
 				setFocusedElementValue(h.imeFocusedEl, newVal)
+				if os.Getenv("WB_IME_DEBUG") != "" {
+					log.Printf("[ime] evchar char=%q start=%d end=%d → %q", char, start, end, newVal)
+				}
 				// Cursor lands right after the inserted character.
 				newPos := start + len([]rune(char))
 				if sel == nil {
@@ -1874,6 +1887,9 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 				}
 				newText = string(runes[:pos]) + char + string(runes[pos:])
 				h.imeComposeBase = ""
+				if os.Getenv("WB_IME_DEBUG") != "" {
+					log.Printf("[ime] compose-commit char=%q pos=%d base=%q → %q", char, pos, string(runes), newText)
+				}
 			} else {
 				// Plain character input: insert at the caret, replacing any
 				// selection (browser behavior). Without a click-positioned
@@ -1898,6 +1914,13 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 				newText = string(runes[:start]) + char + string(runes[end:])
 				// Move caret after the inserted char.
 				rendering.FocusedFormControlSel = &rendering.FormControlSelection{Start: start + 1, End: start + 1}
+				if os.Getenv("WB_IME_DEBUG") != "" {
+					selInfo := "nil"
+					if s := rendering.FocusedFormControlSel; s != nil {
+						selInfo = fmt.Sprintf("Start=%d End=%d", s.Start, s.End)
+					}
+					log.Printf("[ime] char char=%q start=%d end=%d sel=%s → %q", char, start, end, selInfo, newText)
+				}
 			}
 			h.imeInputText = newText
 			if h.imeFocusedEl != nil {
