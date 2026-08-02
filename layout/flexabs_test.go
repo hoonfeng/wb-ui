@@ -25,9 +25,13 @@ func TestFlexAbsoluteChild(t *testing.T) {
 	label.style.FlexDirection = "column"
 	label.style.AlignItems = "center"
 
-	// Text child so the label has intrinsic height.
+	// Text child so the label has intrinsic size (CSS shrink-to-fit of an
+	// empty box is legitimately 0 — the real .cache-ring-label has "0%"
+	// text, which is what this test must model).
 	pct := mkBlock()
 	pct.style.FontSize = style.Length{Value: 18, Unit: "px"}
+	tb := &InlineTextBox{text: "0%", style: pct.style, parentBox: pct}
+	pct.AddChild(tb)
 	label.AddChild(pct)
 
 	// In-flow child so the flex container isn't empty.

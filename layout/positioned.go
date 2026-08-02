@@ -38,7 +38,11 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		return
 	}
 	g := state.GeometryForBox(box)
-	cbWidth, cbHeight := cbContentBoxSizeForBox(cb, root, state)
+	// Absolute containing block = the cb's PADDING box: inset:0/left:0 must
+	// align to the padding-box edge and 100% resolves against the padding-box
+	// size (chat-empty stretches to fill chat-messages' padded area, not its
+	// content area — Edge x=429 w=601 vs content 441 w=577).
+	cbWidth, cbHeight := cbPaddingBoxSizeForBox(cb, root, state)
 	margin, padding, border := computeBoxModel(box, cbWidth, fontSizeOf(box))
 	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
@@ -50,7 +54,17 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	minH, maxH, minHAuto, maxHAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fs)
 
 	if wAuto {
-		width = shrinkToFitWidthForBox(box, cbWidth, margin, border, padding)
+		// CSS: an absolutely-positioned box with width:auto and no left/right
+		// is shrink-to-fit = min(max-content, available) — .cache-ring-label
+		// ("0%"+"缓存命中", ~40px) must NOT fill the 96px ring-wrap.
+		// (left+right both set with width:auto is the stretch case, handled
+		// below before this width is used.)
+		content := intrinsicContentWidth(box, false)
+		avail := cbWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
+		if avail < 0 { avail = 0 }
+		width = content
+		if width > avail { width = avail }
+		if width < 0 { width = 0 }
 	}
 	if isBorderBoxForBox(box) {
 		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
@@ -87,18 +101,23 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		g.SetContentWidth(width)
 		wAuto = false
 	}
-	x := cbg.ContentBoxLeft()
+	// CSS absolute positioning resolves against the containing block's
+	// PADDING box (not the content box). left:0/inset:0 on an absolutely-
+	// positioned child must align to the padding-box edge — Edge places
+	// .chat-empty (absolute, inset:0) at x=429 (chat-messages padding-box
+	// left), wb-ui put it at x=441 (content-box left + 12px padding).
+	x := cbg.PaddingBoxLeft()
 	cbIsFlex := cb.Style() != nil && (cb.Style().Display == style.DisplayFlex || cb.Style().Display == style.DisplayInlineFlex)
 	cbRow := cbIsFlex && cb.Style().FlexDirection != "column" && cb.Style().FlexDirection != "column-reverse"
 	switch {
 	case !leftAuto && !rightAuto:
-		x = cbg.ContentBoxLeft() + left + margin.Left
+		x = cbg.PaddingBoxLeft() + left + margin.Left
 	case !leftAuto:
-		x = cbg.ContentBoxLeft() + left + margin.Left
+		x = cbg.PaddingBoxLeft() + left + margin.Left
 	case !rightAuto:
-		x = cbg.ContentBoxLeft() + cbWidth - right - margin.Right - g.BorderBoxWidth()
+		x = cbg.PaddingBoxLeft() + cbWidth - right - margin.Right - g.BorderBoxWidth()
 	default:
-		x = cbg.ContentBoxLeft() + margin.Left
+		x = cbg.PaddingBoxLeft() + margin.Left
 		// Static position of an absolutely-positioned child of a flex
 		// container follows the flex alignment (CSS-FLEXBOX §5.1): the
 		// cross axis uses align-items, the main axis uses justify-content.
@@ -134,16 +153,16 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		g.SetContentHeight(height)
 		hAuto = false
 	}
-	y := cbg.ContentBoxTop()
+	y := cbg.PaddingBoxTop()
 	switch {
 	case !topAuto && !bottomAuto:
-		y = cbg.ContentBoxTop() + top + margin.Top
+		y = cbg.PaddingBoxTop() + top + margin.Top
 	case !topAuto:
-		y = cbg.ContentBoxTop() + top + margin.Top
+		y = cbg.PaddingBoxTop() + top + margin.Top
 	case !bottomAuto:
-		y = cbg.ContentBoxTop() + cbHeight - bottom - margin.Bottom - g.BorderBoxHeight()
+		y = cbg.PaddingBoxTop() + cbHeight - bottom - margin.Bottom - g.BorderBoxHeight()
 	default:
-		y = cbg.ContentBoxTop() + margin.Top
+		y = cbg.PaddingBoxTop() + margin.Top
 		if cbIsFlex {
 			justify := cb.Style().JustifyContent
 			if !cbRow {
@@ -162,6 +181,14 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 
 	// Layout content now that position and size are fully known.
 	layoutBoxContentForBox(box, state)
+}
+
+func cbPaddingBoxSizeForBox(cb *ElementBox, root *ElementBox, state *LayoutState) (float64, float64) {
+	if cb == root {
+		return state.ViewportWidth, state.ViewportHeight
+	}
+	g := state.GeometryForBox(cb)
+	return g.PaddingBoxWidth(), g.PaddingBoxHeight()
 }
 
 func cbContentBoxSizeForBox(cb *ElementBox, root *ElementBox, state *LayoutState) (float64, float64) {

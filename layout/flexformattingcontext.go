@@ -4,15 +4,28 @@
 package layout
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
 	"wb-ui/style"
 )
 
 var wbFlexDebug = os.Getenv("WB_FLEX_DEBUG") != ""
+
+func flexName(box *ElementBox) string {
+	if box == nil { return "<nil>" }
+	if el := box.Element(); el != nil {
+		if cls := el.GetAttribute("class"); cls != "" {
+			return el.LocalName() + "." + cls
+		}
+		return el.LocalName()
+	}
+	return "<anon>"
+}
 
 type FlexFormattingContext struct {
 	FormattingContextBase
@@ -23,6 +36,7 @@ type flexItem struct {
 	flexGrow        float64
 	flexShrink      float64
 	flexBasis       float64
+	basisExplicit   bool // flex-basis explicitly set (e.g. 0% from flex:1) — must NOT fall back to content size
 	minWidth        float64
 	maxWidth        float64
 	minHeight       float64
@@ -90,6 +104,10 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
 		it.hypothetical = it.baseSize
 		it.targetSize = it.baseSize
+		if wbFlexDebug && flexName(box) == "div.titlebar" {
+			fmt.Fprintf(os.Stderr, "[flex/item] titlebar child %s: grow=%.1f shrink=%.1f basis=%.1f base=%.1f padMain=%.1f\n",
+				flexName(it.box), it.flexGrow, it.flexShrink, it.flexBasis, it.baseSize, it.paddingMain)
+		}
 	}
 
 	c.distributeFreeSpace(items, mainSize, isRow)
@@ -102,14 +120,43 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if isRow {
 			// Row flex: estimate auto height from the tallest child,
 			// including each child's actual vertical padding and border.
+			// Use the child's intrinsic content height (an svg/icon child is
+			// 14px, a text child is its line box) instead of fontLineGap —
+			// fontLineGap(13px font)≈15.6 inflates a 20px toolbar button to
+			// 21.8px and balloons .explorer-toolbar 29→32.6 (Edge reference).
 			estH := 0.0
 			for _, it := range items {
-				childH := fontLineGap(it.box)
+				childH := 0.0
+				// Explicit height on the child wins (a 1px ::before divider
+				// line must contribute 1px, not fontLineGap 17.2).
+				if csc := it.box.Style(); csc != nil {
+					if hv, ok := definiteHeight(csc.Height, 0, fontSizeOf(it.box)); ok && hv > 0 {
+						childH = hv
+					}
+				}
+				if childH <= 0 {
+					childH = intrinsicContentHeight(it.box)
+				}
 				cg := state.GeometryForBox(it.box)
-				childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
+				if childH <= 0 {
+					// No intrinsic content: fall back to the line box plus the
+					// child's own padding+border (intrinsicContentHeight already
+					// includes padding+border when it has content, so we must
+					// NOT add them again here — that double-counted .tb-btn
+					// 14px+6 → 20 then +6 → 26px).
+					childH = fontLineGap(it.box)
+					childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
+				}
+				if wbFlexDebug {
+					fmt.Fprintf(os.Stderr, "[flex/est] %s childH=%.1f (intr=%.1f)\n",
+						flexName(it.box), childH, intrinsicContentHeight(it.box))
+				}
 				if childH > estH {
 					estH = childH
 				}
+			}
+			if wbFlexDebug {
+				fmt.Fprintf(os.Stderr, "[flex/est] %s estH=%.1f ch=%.1f\n", flexName(box), estH, ch)
 			}
 			if estH > ch {
 				g.SetContentHeight(estH)
@@ -192,6 +239,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 	flexShrink := cs.FlexShrink
 
 	var flexBasis float64
+	basisExplicit := false
 	fb := cs.FlexBasis
 	if fb.Unit == "auto" || fb.Unit == "" {
 		if isRow {
@@ -203,6 +251,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 		}
 	} else {
 		flexBasis = resolveOrZero(fb, cbWidth, fs)
+		basisExplicit = true
 	}
 
 	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
@@ -225,7 +274,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 	return &flexItem{
 		box: box, flexGrow: flexGrow, flexShrink: flexShrink,
-		flexBasis: flexBasis, minWidth: minW, maxWidth: maxW,
+		flexBasis: flexBasis, basisExplicit: basisExplicit, minWidth: minW, maxWidth: maxW,
 		minHeight: minH, maxHeight: maxH,
 		marginMain: mm, marginCross: mc, paddingMain: paddingMain, order: cs.Order,
 	}
@@ -233,7 +282,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float64 {
 	base := it.flexBasis
-	if base <= 0 {
+	if base <= 0 && !it.basisExplicit {
 		if isRow {
 			// Row flex: main axis = width → use intrinsic content width.
 			base = intrinsicContentWidth(it.box, isRow)
@@ -339,6 +388,20 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 
 func intrinsicContentHeight(box *ElementBox) float64 {
 	cs := box.Style()
+	// A replaced element (svg/img/canvas) sizes from its attribute height,
+	// not its (empty) children — otherwise a 14px svg icon falls back to
+	// fontLineGap (~17px) and inflates every button containing one
+	// (.tb-btn 21.8px vs Edge 20px = 14 icon + 2×2 padding + 2×1 border).
+	if el := box.Element(); el != nil {
+		ln := el.LocalName()
+		if ln == "svg" || ln == "img" || ln == "canvas" {
+			if ht := el.GetAttribute("height"); ht != "" {
+				if f, err := strconv.ParseFloat(ht, 64); err == nil && f > 0 {
+					return f
+				}
+			}
+		}
+	}
 	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&
 		(cs.FlexDirection == "column" || cs.FlexDirection == "column-reverse")
 	// Any flex/grid container sizes itself by max-child on the cross axis —
@@ -361,6 +424,10 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			// collapsed flex column items with tall children (e.g. a 150px
 			// textarea → container height ~25px, child overflowed).
 			h := 0.0
+			if wbFlexDebug && flexName(box) == "div.ws-divider" {
+				fmt.Fprintf(os.Stderr, "[flex/intr] ws-divider child %s: el=%v cssH=%v display=%v\n",
+					flexName(c), c.Element() != nil, c.Style().Height, c.Style().Display)
+			}
 			if cs := c.Style(); cs != nil {
 				if hv, ok := definiteHeight(cs.Height, 0, fontSizeOf(c)); ok && hv > 0 {
 					h = hv
@@ -380,6 +447,10 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 						}
 					}
 				}
+				if wbFlexDebug && flexName(box) == "button.tb-btn" && el.LocalName() == "svg" {
+					fmt.Fprintf(os.Stderr, "[flex/intr] tb-btn child svg: cssH=%v attrH=%q → h=%.1f\n",
+						c.Style().Height, el.GetAttribute("height"), h)
+				}
 			}
 			if h <= 0 { h = fontLineGap(c) }
 			if isColFlex {
@@ -393,14 +464,29 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			}
 			if h > maxH { maxH = h }
 		case *InlineTextBox:
+			// Whitespace-only text (e.g. the newline between <button> and
+			// <svg> in Vue templates) contributes NO height — a button whose
+			// only child is an svg icon must size to the icon + padding, not
+			// to fontLineGap (13.3px×1.5=20px). Edge: .tb-btn = 14px icon +
+			// 2×2 padding + 2×1 border = 20px, not 26px.
+			raw := strings.TrimSpace(c.text)
+			if raw == "" {
+				continue
+			}
 			h := fontLineGap(box)
 			if isColFlex { total += h }
 			if h > maxH { maxH = h }
 		}
 	}
-	if !isColFlex && blockChildCount > 0 {
-		// Multiple block children stack: total height = sum. A single child
-		// may be inline (line box) — max is right for that case.
+		if wbFlexDebug && (flexName(box) == "button.tb-btn" || flexName(box) == "div.explorer-toolbar") {
+			fmt.Fprintf(os.Stderr, "[flex/intr] %s: children=%d\n", flexName(box), len(box.Children()))
+		}
+		if !isColFlex && blockChildCount > 0 && !isFlexOrGrid {
+		// True block container: multiple block children stack vertically, so
+		// their heights sum. Flex/grid containers do NOT sum — their children
+		// share one line/row and the cross-axis size is the MAX child height
+		// (a row-flex toolbar with tb-title(13px)+tb-spacer(15px)+tb-btn(20px)
+		// must be 20px tall, not 48px summed — Edge reference).
 		maxH = total
 	}
 	if isColFlex {
@@ -484,25 +570,17 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 
 		freeSpace := containerMainSize - totalUsed - gapTotal
 		if freeSpace > 0 && activeGrow > 0 {
-			// Free space distributes to content, but a border-box item's slot
-			// also contains its main-axis padding — deduct that so the grown
-			// border-box exactly fills the slot instead of overflowing it.
-			padSum := 0.0
+			// Free space distributes to the items' main size. targetSize is
+			// the border-box main size for border-box items; baseSize already
+			// excludes (basisExplicit 0%) or includes (intrinsic auto) the
+			// item's own padding, so NO separate padSum deduction is needed —
+			// subtracting padding here shrunk .title-center 1178→1168 (Edge:
+			// 1280 − 48 logo − 46 menubar − 8 title-right = 1178 exactly).
 			for _, it := range items {
 				if it.frozen || it.flexGrow <= 0 {
 					continue
 				}
-				padSum += it.paddingMain
-			}
-			usable := freeSpace - padSum
-			if usable < 0 {
-				usable = 0
-			}
-			for _, it := range items {
-				if it.frozen || it.flexGrow <= 0 {
-					continue
-				}
-				it.targetSize += usable * it.flexGrow / activeGrow
+				it.targetSize += freeSpace * it.flexGrow / activeGrow
 			}
 		} else if freeSpace < 0 && activeShrink > 0 && containerMainSize > 0 {
 			// Auto-sized containers (mainSize 0, e.g. an absolutely-positioned
@@ -599,11 +677,13 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				g.SetContentWidth(stretchW)
 			} else {
 				// Non-stretch: use intrinsic content width (shrink-to-fit) so that
-				// cross-axis centering formula (cw-bw)/2 in applyPositions works correctly.
+				// cross-axis centering formula (cw-bw)/2 in applyPositions works
+				// correctly. Do NOT clamp to the container width — a flex item
+				// with align-self:center/end sizes to its max-content and may
+				// overflow the container (Edge: .welcome-logo "PairCode" 48px
+				// font = 216px wide inside a 97px main-area, centered with
+				// x=268.4; clamping it to 97px left it unstretched left-aligned).
 				iw := intrinsicContentWidth(it.box, false)
-				if iw > cbWidth-it.marginCross-g.HorizontalBorderAndPadding() {
-					iw = cbWidth - it.marginCross - g.HorizontalBorderAndPadding()
-				}
 				if iw < 0 { iw = 0 }
 				g.SetContentWidth(iw)
 			}
@@ -786,6 +866,9 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				// positioning before child layout (post-layout corrects it).
 				bh = fontLineGap(it.box)
 			}
+			if wbFlexDebug {
+				fmt.Fprintf(os.Stderr, "[flex/pos] %s row: bh=%.1f ch=%.1f cs.H=%v\n", flexName(it.box), bh, ch, cs.Height)
+			}
 			align := alignOf(it.box, containerCS)
 			crossAdjusted := crossPos
 			// When container auto-height (ch=0), defer centering/flex-end
@@ -907,6 +990,10 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			case "flex-end":
 				crossAdjusted = crossPos + cw - bw
 			}
+			if wbFlexDebug && (flexName(it.box) == "div.welcome-logo" || flexName(it.box) == "div.welcome-text" || flexName(it.box) == "div.welcome-sub") {
+				fmt.Fprintf(os.Stderr, "[flex/pos] %s col: bw=%.1f cw=%.1f align=%q crossPos=%.1f → crossAdjusted=%.1f\n",
+					flexName(it.box), bw, cw, align, crossPos, crossAdjusted)
+			}
 			g.SetTopLeft(mainPos, crossAdjusted)
 			
 			ctx := contextFor(it.box, state)
@@ -930,21 +1017,28 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			oldLeft := g.Left()
 			bw2 := g.BorderBoxWidth()
 			newCross := crossPos
-			refW := cw
-			if refW < bw2 {
-				refW = bw2
-			}
+			// Width centering uses the CONTAINER width cw — do NOT clamp the
+			// reference to the item width (that collapses (cw-bw2)/2 to 0 when
+			// the item is wider than the container, undoing the centering:
+			// .welcome-logo 217px in a 97px main-area must overflow-center at
+			// x=268 like Edge, not snap back to x=327). The row branch clamps
+			// refH for height centering to avoid pushing items above the
+			// container top; width has no such constraint.
 			switch align {
 			case "center":
-				newCross = crossPos + (refW-bw2)/2
+				newCross = crossPos + (cw-bw2)/2
 			case "baseline":
 				newCross = crossPos + (maxBO - it.baselineOffset)
 			case "flex-end":
-				newCross = crossPos + refW - bw2
+				newCross = crossPos + cw - bw2
 			}
 			delta := newCross - oldLeft
 			if delta != 0 {
 				shiftBoxAndDescendants(it.box, 0, delta, state)
+			}
+			if wbFlexDebug && flexName(it.box) == "div.welcome-logo" {
+				fmt.Fprintf(os.Stderr, "[flex/pos] welcome-logo final: x=%.1f y=%.1f w=%.1f (oldLeft=%.1f bw2=%.1f delta=%.1f)\n",
+					g.Left(), g.Top(), g.BorderBoxWidth(), oldLeft, bw2, delta)
 			}
 
 			// NOTE: no per-item re-centering on the main axis here. The old

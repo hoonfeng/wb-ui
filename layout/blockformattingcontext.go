@@ -234,13 +234,12 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		} else if cbHeight > 0 && childNeedsHeightConstraintForBox(childEb) {
 			remaining := cbHeight - (cursor - g.ContentBoxTop())
 			if remaining > 0 {
-				// The child's border-box fills the remaining parent content
-				// height. `remaining` is a border-box target, so the content
-				// height must subtract the child's own padding+border —
-				// regardless of box-sizing. Previously the border-box branch
-				// set the content height to `remaining` directly, making the
-				// border-box = remaining + padding and overflowing the parent
-				// (proj-empty ballooned 600.7 → 648.7, sidebar bottom 829px).
+				// Grid container child: give it the parent's remaining height
+				// so 1fr rows can resolve (height:auto grid has no definite
+				// height to distribute fr against). Column-flex children are
+				// NOT stretched (childNeedsHeightConstraintForBox only admits
+				// grids) — a block-level auto-height column-flex child sizes
+				// to its content like Edge's .proj-empty (63px, not 597px).
 				ch.SetContentHeight(math.Max(0, remaining-border.Vertical()-padding.Vertical()))
 			}
 		}
@@ -486,13 +485,16 @@ func heightIsAutoForBox(box *ElementBox) bool {
 	return r.Auto
 }
 
+// childNeedsHeightConstraintForBox reports whether a block-level child that is
+// itself a grid container must be given the parent's remaining height so its
+// fr rows can resolve (a grid with height:auto has no definite height to
+// distribute 1fr against). Column-flex children are intentionally NOT
+// stretched: CSS sizes a block-level in-flow child with height:auto to its
+// content (Edge: .proj-empty 63px content-height inside .project-section,
+// not the full 597px sidebar) — the stretch hack only ballooned those.
 func childNeedsHeightConstraintForBox(box *ElementBox) bool {
 	if box == nil || box.Style() == nil { return false }
 	cs := box.Style()
-	if cs.Display == style.DisplayFlex || cs.Display == style.DisplayInlineFlex {
-		fd := cs.FlexDirection
-		if fd == "column" || fd == "column-reverse" { return true }
-	}
 	if cs.Display == style.DisplayGrid || cs.Display == style.DisplayInlineGrid { return true }
 	return false
 }
