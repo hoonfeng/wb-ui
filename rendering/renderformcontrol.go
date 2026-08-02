@@ -459,7 +459,8 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	caretY := y + (h-textHeight)/2
 
 	// Multi-line (textarea): position the caret at the row/column of the
-	// current selection Start instead of the box's vertical center.
+	// current selection Start instead of the box's vertical center. Soft
+	// wrapping (browser textarea wrap) determines the visual row/col.
 	if el.LocalName() == "textarea" {
 		value := el.TextContent()
 		runes := []rune(value)
@@ -476,27 +477,16 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 		if pos > len(runes) {
 			pos = len(runes)
 		}
-		lineIdx := 0
-		col := 0
-		for i := 0; i < pos && i < len(runes); i++ {
-			if runes[i] == '\n' {
-				lineIdx++
-				col = 0
-			} else {
-				col++
-			}
+		contentW := w - padX*2
+		if contentW < 1 {
+			contentW = 1
 		}
-		// Column offset in the clicked line.
+		wrapped := wrapTextAreaLines(value, font, contentW)
+		row, col, _ := locateWrappedCaret(wrapped, pos)
 		lineStart := pos - col
-		lineEnd := lineStart
-		for lineEnd < len(runes) && runes[lineEnd] != '\n' {
-			lineEnd++
-		}
-		lineText := string(runes[lineStart:lineEnd])
 		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
-		_ = lineText
 		caretX = x + padX + colW
-		caretY = y + padY + float64(lineIdx)*lineH
+		caretY = y + padY + float64(row)*lineH
 		if caretY < y {
 			caretY = y
 		}
@@ -573,6 +563,7 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		lineH = font.Size * 1.2
 	}
 	boxX, boxY := box.X(), box.Y()
+	boxW := box.Width()
 	boxH := box.Height()
 	caretX := boxX + padX
 	caretY := boxY + (boxH-textHeight)/2
@@ -592,19 +583,16 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		pos = len(runes)
 	}
 	if el.LocalName() == "textarea" {
-		lineIdx := 0
-		col := 0
-		for i := 0; i < pos && i < len(runes); i++ {
-			if runes[i] == '\n' {
-				lineIdx++
-				col = 0
-			} else {
-				col++
-			}
+		contentW := boxW - padX*2
+		if contentW < 1 {
+			contentW = 1
 		}
-		colW := graphics.MeasureText(font, string(runes[pos-col:pos]))
+		wrapped := wrapTextAreaLines(value, font, contentW)
+		row, col, _ := locateWrappedCaret(wrapped, pos)
+		lineStart := pos - col
+		colW := graphics.MeasureText(font, string(runes[lineStart:pos]))
 		caretX = boxX + padX + colW
-		caretY = boxY + padY + float64(lineIdx)*lineH
+		caretY = boxY + padY + float64(row)*lineH
 		if caretY < boxY {
 			caretY = boxY
 		}
@@ -630,6 +618,77 @@ func focusedControlText(el *dom.Element) string {
 		return el.TextContent()
 	}
 	return el.GetAttribute("value")
+}
+
+// wrappedLine is one visual line of a wrapped textarea, carrying the rune
+// offset range of its text within the original value (selection mapping).
+type wrappedLine struct {
+	text  string
+	start int // rune offset into original text
+	end   int // exclusive
+}
+
+// wrapTextAreaLines breaks text into visual lines honoring hard '\n' breaks
+// AND soft-wrapping at the content width. Textareas wrap at ANY character
+// (browser default white-space: pre-wrap; overflow-wrap: break-word) — a
+// textarea row is NEVER ellipsized. Returns at least one line so an empty
+// value still maps to row 0.
+func wrapTextAreaLines(text string, font graphics.Font, contentW float64) []wrappedLine {
+	var out []wrappedLine
+	off := 0 // rune offset into text (includes '\n' chars)
+	for _, hard := range strings.Split(text, "\n") {
+		runes := []rune(hard)
+		if len(runes) == 0 {
+			out = append(out, wrappedLine{text: "", start: off, end: off})
+			off++ // skip the '\n'
+			continue
+		}
+		rest := runes
+		restStart := off
+		for len(rest) > 0 {
+			if graphics.MeasureText(font, string(rest)) <= contentW {
+				out = append(out, wrappedLine{text: string(rest), start: restStart, end: restStart + len(rest)})
+				rest = nil
+				break
+			}
+			// Binary search the longest prefix that fits.
+			lo, hi := 1, len(rest)
+			for lo < hi {
+				mid := (lo + hi + 1) / 2
+				if graphics.MeasureText(font, string(rest[:mid])) <= contentW {
+					lo = mid
+				} else {
+					hi = mid - 1
+				}
+			}
+			out = append(out, wrappedLine{text: string(rest[:lo]), start: restStart, end: restStart + lo})
+			restStart += lo
+			rest = rest[lo:]
+		}
+		off += len(runes) + 1 // '\n'
+	}
+	if len(out) == 0 {
+		out = append(out, wrappedLine{})
+	}
+	return out
+}
+
+// locateWrappedCaret finds the visual row/col of a rune offset within
+// soft-wrapped textarea lines, plus the wrapped line itself. The caret sits
+// at the end of the line whose range contains pos (pos == end is the line's
+// trailing edge — never pushed to the next line).
+func locateWrappedCaret(lines []wrappedLine, pos int) (row, col int, wl wrappedLine) {
+	for i := range lines {
+		wl = lines[i]
+		if pos >= wl.start && pos <= wl.end {
+			return i, pos - wl.start, wl
+		}
+	}
+	if len(lines) > 0 {
+		wl = lines[len(lines)-1]
+		return len(lines) - 1, len([]rune(wl.text)), wl
+	}
+	return 0, 0, wrappedLine{}
 }
 
 // cssControlLineHeight resolves the CSS line-height (multiplier, px, %) into
@@ -1085,23 +1144,28 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	info.canvas.Save()
 	info.canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
 
-	// Draw line by line
-	lines := strings.Split(displayText, "\n")
+	// Draw line by line with soft-wrapping (no ellipsis — textarea rows wrap).
 	contentW := w - padX*2
-	globalOff := 0 // rune offset of the current line's first char in displayText
-	for i, line := range lines {
+	if contentW < 1 {
+		contentW = 1
+	}
+	wrapped := wrapTextAreaLines(displayText, font, contentW)
+	for i, wl := range wrapped {
+		line := wl.text
+		lineStart := wl.start
 		lineY := textY + float64(i)*lineH
 		if lineY > y+h {
 			break
 		}
 		lineRunes := []rune(line)
 		lineLen := len(lineRunes)
-		// Compute the selection intersection for this line (globalOff..globalOff+lineLen).
+		// Compute the selection intersection for this line
+		// (lineStart..lineStart+lineLen in original text).
 		selLineStart := -1
 		selLineEnd := -1
 		if hasSel {
-			ls := selStart - globalOff
-			le := selEnd - globalOff
+			ls := selStart - lineStart
+			le := selEnd - lineStart
 			if ls < 0 {
 				ls = 0
 			}
@@ -1113,25 +1177,6 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 			}
 		}
 		if line != "" || selLineStart >= 0 {
-			// Truncate if too wide
-			lineW := graphics.MeasureText(font, line)
-			if lineW > contentW {
-				runes := []rune(line)
-				for len(runes) > 0 {
-					candidate := string(runes) + "…"
-					if graphics.MeasureText(font, candidate) <= contentW {
-						line = candidate
-						break
-					}
-					runes = runes[:len(runes)-1]
-				}
-				if len(runes) == 0 {
-					line = "…"
-				}
-				lineRunes = []rune(line)
-				lineLen = len(lineRunes)
-			}
-
 			if selLineStart >= 0 && selLineEnd <= lineLen {
 				// Split the line into pre/selected/post and draw the
 				// selection highlight like the single-line input.
@@ -1157,21 +1202,11 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 				c.DrawText(textX, lineY, line, font, textColor)
 			}
 		}
-		globalOff += lineLen + 1 // +1 for the '\n' separator
 	}
 
-	// Draw caret at end of text in textarea (multi-line aware positioning).
-	if value == "" {
-		paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
-	} else {
-		lastLine := ""
-		lines2 := strings.Split(value, "\n")
-		if len(lines2) > 0 {
-			lastLine = lines2[len(lines2)-1]
-		}
-		lastLineW := graphics.MeasureText(font, lastLine)
-		paintFormControlCaret(info, el, st, x, y, w, h, lastLineW, op)
-	}
+	// Draw the caret at the selection/caret position (paintFormControlCaret
+	// re-derives the row/col from FocusedFormControlSel with soft-wrapping).
+	paintFormControlCaret(info, el, st, x, y, w, h, 0, op)
 
 	info.canvas.Restore()
 }

@@ -441,7 +441,7 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 	}
 
 	return rendering.CalcFormControlCaretOffset(text, el.LocalName() == "textarea",
-		cssX, cssY, bx, by, font, padX, padY, lineH)
+		cssX, cssY, bx, by, bw, font, padX, padY, lineH)
 }
 
 // findFormControlBox walks the render tree to find the absolute border-box

@@ -2,18 +2,16 @@
 package rendering
 
 import (
-	"strings"
-
 	"wb-ui/platform/graphics"
 )
 
 // CalcFormControlCaretOffset computes the character offset (into text, as
 // runes) for a click at CSS (cssX, cssY) on a form control whose border-box
 // starts at (boxX, boxY). isMultiLine selects <textarea> semantics (click
-// Y picks the line, then X picks the column); single-line inputs use X only.
-// font/padX/padY/lineH must match the painted text so the caret lands where
-// the glyphs are.
-func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX, boxY float64, font graphics.Font, padX, padY, lineH float64) int {
+// Y picks the visual line — soft-wrapped like the browser — then X picks
+// the column); single-line inputs use X only. font/padX/padY/lineH must
+// match the painted text so the caret lands where the glyphs are.
+func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX, boxY, boxW float64, font graphics.Font, padX, padY, lineH float64) int {
 	runes := []rune(text)
 	if len(runes) == 0 {
 		return 0
@@ -25,33 +23,26 @@ func CalcFormControlCaretOffset(text string, isMultiLine bool, cssX, cssY, boxX,
 		if line < 0 {
 			line = 0
 		}
-		// Rune offset where the clicked line begins.
-		lineStart := 0
-		cur := 0
-		for lineStart < len(runes) {
-			if cur == line {
-				break
-			}
-			if runes[lineStart] == '\n' {
-				cur++
-			}
-			lineStart++
+		contentW := boxW - padX*2
+		if contentW < 1 {
+			contentW = 1
 		}
+		wrapped := wrapTextAreaLines(text, font, contentW)
+		if line >= len(wrapped) {
+			line = len(wrapped) - 1
+		}
+		wl := wrapped[line]
 		relX := cssX - boxX - padX
-		lineEnd := lineStart
+		lineRunes := []rune(wl.text)
 		totalW := 0.0
-		for i := lineStart; i < len(runes); i++ {
-			if runes[i] == '\n' {
-				break
-			}
-			charW := graphics.MeasureText(font, string(runes[i]))
+		for i, r := range lineRunes {
+			charW := graphics.MeasureText(font, string(r))
 			if relX < totalW+charW/2 {
-				return i
+				return wl.start + i
 			}
 			totalW += charW
-			lineEnd = i + 1
 		}
-		return lineEnd
+		return wl.end
 	}
 
 	// Single-line input: offset from X only. Tabs advance to the next tab
@@ -81,6 +72,5 @@ func tabStopWidth(font graphics.Font, currentW float64) float64 {
 		col = 1
 	}
 	next := float64(col+1) * font.Size * 0.6
-	_ = strings.TrimSpace
 	return next - currentW
 }
