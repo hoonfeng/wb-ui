@@ -220,43 +220,52 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 			} else {
 				text = el.GetAttribute("value")
 			}
-			if st := box.Style(); st != nil && text != "" {
+			if st := box.Style(); st != nil {
 				font := toGraphicsFont(st)
-				maxW := 0.0
 				lineH := 0.0
-				for i, line := range strings.Split(text, "\n") {
-					w := graphics.MeasureText(font, line)
-					if w > maxW {
-						maxW = w
+				if text != "" {
+					lines := strings.Split(text, "\n")
+					maxW := 0.0
+					for i, line := range lines {
+						w := graphics.MeasureText(font, line)
+						if w > maxW {
+							maxW = w
+						}
+						if i == 0 {
+							lineH = cssControlLineHeight(st, font.Size)
+						}
 					}
-					if i == 0 {
-						lineH = cssControlLineHeight(st, font.Size)
+					if maxW > maxRight-pb.X {
+						maxRight = pb.X + maxW
+					}
+					if local == "textarea" && lineH > 0 {
+						rows := float64(len(lines))
+						if rows*lineH > maxBottom-pb.Y {
+							maxBottom = pb.Y + rows*lineH
+						}
 					}
 				}
-				if maxW > maxRight-pb.X {
-					maxRight = pb.X + maxW
-				}
-				if local == "textarea" && lineH > 0 {
-					rows := float64(len(strings.Split(text, "\n")))
-					if rows*lineH > maxBottom-pb.Y {
-						maxBottom = pb.Y + rows*lineH
-					}
-				}
+				// Form controls always contribute their (possibly empty)
+				// content so needsX tests compare against the content-box
+				// viewport, never fall into the no-children fallback below.
 				found = true
 			}
 		}
 	}
 
+	// No content at all: report zero extent. Callers compare against the
+	// content-box viewport, so an empty box must NOT claim the padding-box
+	// size (that would spuriously enable scrollbars on padding alone).
 	if !found {
-		return pb.Width, pb.Height
+		return 0, 0
 	}
 	cw := maxRight - pb.X
 	ch := maxBottom - pb.Y
-	if cw < pb.Width {
-		cw = pb.Width
+	if cw < 0 {
+		cw = 0
 	}
-	if ch < pb.Height {
-		ch = pb.Height
+	if ch < 0 {
+		ch = 0
 	}
 	return cw, ch
 }
@@ -310,32 +319,39 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 
-	// Compute scrollbar track rectangles (same logic as paint code).
-	contentW := pb.Width
-	contentH := pb.Height
+	// Content size via BoxContentSize — this handles form controls
+	// (input/textarea) whose text lives in value/textContent instead of
+	// render-tree children, so their scrollbars are hit-testable too.
+	cw, ch := rv.BoxContentSize(scrollBox)
+	totalW := cw
+	totalH := ch
 
-	// Compute content bounding box from children.
-	var minX, minY, maxX, maxY float64
-	hasChild := false
-	for c := scrollBox.FirstChild(); c != nil; c = c.NextSibling() {
-		if cb := asRenderBox(c); cb != nil {
-			cg := cb.FrameRect()
-			if !hasChild {
-				minX, minY, maxX, maxY = cg.X, cg.Y, cg.X+cg.Width, cg.Y+cg.Height
-				hasChild = true
-			} else {
-				if cg.X < minX { minX = cg.X }
-				if cg.Y < minY { minY = cg.Y }
-				if cg.X+cg.Width > maxX { maxX = cg.X + cg.Width }
-				if cg.Y+cg.Height > maxY { maxY = cg.Y + cg.Height }
-			}
-		}
+	// Scroll viewport is the CONTENT box (padding-box minus padding), the
+	// same viewport the paint code uses for thumb geometry.
+	padL := lengthValue(st.PaddingLeft)
+	padR := lengthValue(st.PaddingRight)
+	padT := lengthValue(st.PaddingTop)
+	padB := lengthValue(st.PaddingBottom)
+	if padL < 0 {
+		padL = 0
 	}
-	if !hasChild {
-		return nil
+	if padR < 0 {
+		padR = 0
 	}
-	totalW := maxX - minX
-	totalH := maxY - minY
+	if padT < 0 {
+		padT = 0
+	}
+	if padB < 0 {
+		padB = 0
+	}
+	contentW := pb.Width - padL - padR
+	if contentW < 1 {
+		contentW = 1
+	}
+	contentH := pb.Height - padT - padB
+	if contentH < 1 {
+		contentH = 1
+	}
 	needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
 	needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
 
@@ -343,16 +359,27 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	vx := pb.X + pb.Width - scrollW
 	vy := pb.Y
 	vh := pb.Height
-	if needsH { vh -= scrollW }
+	if needsH {
+		vh -= scrollW
+	}
 
 	// Horizontal scrollbar rect
 	hx := pb.X
 	hy := pb.Y + pb.Height - scrollW
 	hw := pb.Width
-	if needsV { hw -= scrollW }
+	if needsV {
+		hw -= scrollW
+	}
 
-	// Get scroll offsets for thumb position calculations.
+	// Get scroll offsets for thumb position calculations. Form controls
+	// scroll their text through FocusedFormControlTextScroll, not
+	// BoxScrollOffset — mirror that so the thumb position matches paint.
 	sx, sy := rv.BoxScrollOffset(scrollBox)
+	if el2, ok := scrollBox.Node().(*dom.Element); ok {
+		if el2.LocalName() == "textarea" || el2.LocalName() == "input" {
+			sx = FocusedFormControlTextScroll
+		}
+	}
 
 	// Corner: check first so it takes priority over individual bar hits.
 	if needsV && needsH {
@@ -392,6 +419,8 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 			maxSy := totalH - contentH
 			if maxSy <= 0 { maxSy = 1 }
 			syRatio := sy / maxSy
+			if syRatio < 0 { syRatio = 0 }
+			if syRatio > 1 { syRatio = 1 }
 			thumbTrackSpace := trackH - thumbLen
 			thumbY := vy + arrowSize + syRatio*thumbTrackSpace
 			if y >= thumbY && y <= thumbY+thumbLen {
@@ -430,6 +459,8 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 			maxSx := totalW - contentW
 			if maxSx <= 0 { maxSx = 1 }
 			sxRatio := sx / maxSx
+			if sxRatio < 0 { sxRatio = 0 }
+			if sxRatio > 1 { sxRatio = 1 }
 			thumbTrackSpace := trackW - thumbLen
 			thumbX := hx + arrowSize + sxRatio*thumbTrackSpace
 			if x >= thumbX && x <= thumbX+thumbLen {

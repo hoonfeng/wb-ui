@@ -364,11 +364,39 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						cw, ch := info.rv.BoxContentSize(box)
 						totalW := cw
 						totalH := ch
-						contentW := pb.Width
-						contentH := pb.Height
 
-						needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > contentH)) && st.OverflowY != style.OverflowHidden
-						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > contentW)) && st.OverflowX != style.OverflowHidden
+						// Scroll viewport is the CONTENT box (padding-box
+						// minus padding) — the text area the painter clips to.
+						// needsV/needsH and thumb geometry share this viewport
+						// so empty content (totalH ≤ viewH) never enables a
+						// scrollbar just because padding fills the box.
+						padL := lengthValue(st.PaddingLeft)
+						padR := lengthValue(st.PaddingRight)
+						padT := lengthValue(st.PaddingTop)
+						padB := lengthValue(st.PaddingBottom)
+						if padL < 0 {
+							padL = 0
+						}
+						if padR < 0 {
+							padR = 0
+						}
+						if padT < 0 {
+							padT = 0
+						}
+						if padB < 0 {
+							padB = 0
+						}
+						viewW := pb.Width - padL - padR
+						if viewW < 1 {
+							viewW = 1
+						}
+						viewH := pb.Height - padT - padB
+						if viewH < 1 {
+							viewH = 1
+						}
+
+						needsV := (st.OverflowY == style.OverflowScroll || (st.OverflowY == style.OverflowAuto && totalH > viewH)) && st.OverflowY != style.OverflowHidden
+						needsH := (st.OverflowX == style.OverflowScroll || (st.OverflowX == style.OverflowAuto && totalW > viewW)) && st.OverflowX != style.OverflowHidden
 
 						if needsV || needsH {
 							// Windows-style scrollbars are ALWAYS visible when content
@@ -416,35 +444,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								cursorX, cursorY = info.rv.CursorPos()
 							}
 
-							// Scroll viewport is the CONTENT box (padding-box minus
-							// padding), matching the text area the painter clips to.
-							// Using the raw padding-box width made the thumb range
-							// LARGER than the actual scroll extent, so at max scroll
-							// sxRatio>1 pushed the thumb over the right arrow.
-							padL := lengthValue(st.PaddingLeft)
-							padR := lengthValue(st.PaddingRight)
-							padT := lengthValue(st.PaddingTop)
-							padB := lengthValue(st.PaddingBottom)
-							if padL < 0 {
-								padL = 0
-							}
-							if padR < 0 {
-								padR = 0
-							}
-							if padT < 0 {
-								padT = 0
-							}
-							if padB < 0 {
-								padB = 0
-							}
-							viewW := pb.Width - padL - padR
-							if viewW < 1 {
-								viewW = 1
-							}
-							viewH := pb.Height - padT - padB
-							if viewH < 1 {
-								viewH = 1
-							}
+							// (viewW/viewH already computed above for needsX; the
+							// thumb geometry below reuses them.)
 
 							// ── Vertical scrollbar ──
 						if needsV {

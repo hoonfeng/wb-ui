@@ -240,6 +240,60 @@ func (h *Host) FocusElement(el *dom.Element) {
 	h.FocusElementByKeyboard(el, false)
 }
 
+// scrollXFor returns the horizontal scroll offset of a scroll container.
+// Form controls (input/textarea) scroll their text through the
+// FocusedFormControlTextScroll global (set by the painter each frame), not
+// BoxScrollOffset — mirror that so drag/arrow/track operations hit the
+// right value.
+func scrollXFor(rv *rendering.RenderView, box *rendering.RenderBox) float64 {
+	if el, ok := box.Node().(*dom.Element); ok {
+		if el.LocalName() == "textarea" || el.LocalName() == "input" {
+			return rendering.FocusedFormControlTextScroll
+		}
+	}
+	if rv == nil {
+		return 0
+	}
+	sx, _ := rv.BoxScrollOffset(box)
+	return sx
+}
+
+// setScrollXFor sets the horizontal scroll offset of a scroll container,
+// routing form controls to FocusedFormControlTextScroll and others to
+// BoxScrollOffset. Returns true when a change was applied.
+func setScrollXFor(rv *rendering.RenderView, box *rendering.RenderBox, x float64) bool {
+	if x < 0 {
+		x = 0
+	}
+	if el, ok := box.Node().(*dom.Element); ok {
+		if el.LocalName() == "textarea" || el.LocalName() == "input" {
+			if rendering.FocusedFormControlTextScroll == x {
+				return false
+			}
+			rendering.FocusedFormControlTextScroll = x
+			return true
+		}
+	}
+	if rv == nil {
+		return false
+	}
+	sx, sy := rv.BoxScrollOffset(box)
+	if sx == x {
+		return false
+	}
+	rv.SetBoxScrollOffset(box, x, sy)
+	return true
+}
+
+// markScrollDirty forces a repaint after a programmatic scroll change.
+func (h *Host) markScrollDirty() {
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.MarkRenderTreeDirty()
+		}
+	}
+}
+
 // FocusElementByKeyboard is FocusElement with a focus-source hint. byKeyboard
 // should be true when focus moved via Tab (keyboard); false for mouse clicks.
 // It drives the :focus-visible pseudo-class: the UA default outline only
@@ -946,23 +1000,42 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					pb := h.scrollbarDragBox.PaddingBoxRect()
 					hw := pb.Width
 					cw, _ := rv.BoxContentSize(h.scrollbarDragBox)
-					if cw > pb.Width {
+					st2 := h.scrollbarDragBox.Style()
+					padL := float64(0)
+					padR := float64(0)
+					if st2 != nil {
+						padL = st2.PaddingLeft.Value
+						padR = st2.PaddingRight.Value
+					}
+					if padL < 0 {
+						padL = 0
+					}
+					if padR < 0 {
+						padR = 0
+					}
+					viewW := pb.Width - padL - padR
+					if viewW < 1 {
+						viewW = 1
+					}
+					if cw > viewW {
 						const arrowSize = 12.0
 						trackW := hw - arrowSize*2
-						thumbW := trackW * pb.Width / cw
+						thumbW := trackW * viewW / cw
 						if thumbW < arrowSize {
 							thumbW = arrowSize
 						}
-						scale := (cw - pb.Width) / (trackW - thumbW)
+						scale := (cw - viewW) / (trackW - thumbW)
 						newSx := h.scrollbarDragScroll + dx*scale
 						if newSx < 0 {
 							newSx = 0
 						}
-						maxX := cw - pb.Width
+						maxX := cw - viewW
 						if newSx > maxX {
 							newSx = maxX
 						}
-						rv.SetBoxScrollOffset(h.scrollbarDragBox, newSx, 0)
+						if setScrollXFor(rv, h.scrollbarDragBox, newSx) {
+							h.markScrollDirty()
+						}
 					}
 				}
 				// ── Hover tracking ──
@@ -1067,9 +1140,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						h.scrollbarDragging = true
 						h.scrollbarDragBox = box
 						h.scrollbarDragAxis = false // horizontal
-						sx, _ := rv.BoxScrollOffset(box)
 						h.scrollbarDragStart = cssX
-						h.scrollbarDragScroll = sx
+						h.scrollbarDragScroll = scrollXFor(rv, box)
 						break
 					}
 					// ── Arrow buttons → line scroll ──
@@ -1077,21 +1149,25 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if scrollHit.IsVUpArrow {
 						sx, sy := rv.BoxScrollOffset(box)
 						rv.SetBoxScrollOffset(box, sx, sy-lineStep)
+						h.markScrollDirty()
 						break
 					}
 					if scrollHit.IsVDownArrow {
 						sx, sy := rv.BoxScrollOffset(box)
 						rv.SetBoxScrollOffset(box, sx, sy+lineStep)
+						h.markScrollDirty()
 						break
 					}
 					if scrollHit.IsHLeftArrow {
-						sx, sy := rv.BoxScrollOffset(box)
-						rv.SetBoxScrollOffset(box, sx-lineStep, sy)
+						if setScrollXFor(rv, box, scrollXFor(rv, box)-lineStep) {
+							h.markScrollDirty()
+						}
 						break
 					}
 					if scrollHit.IsHRightArrow {
-						sx, sy := rv.BoxScrollOffset(box)
-						rv.SetBoxScrollOffset(box, sx+lineStep, sy)
+						if setScrollXFor(rv, box, scrollXFor(rv, box)+lineStep) {
+							h.markScrollDirty()
+						}
 						break
 					}
 					// ── Track click (non-thumb) → page scroll ──
@@ -1126,12 +1202,24 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						break
 					}
 					if scrollHit.IsHTrack {
-						sx, sy := rv.BoxScrollOffset(box)
 						pb := box.PaddingBoxRect()
+						st2 := box.Style()
 						pageW := pb.Width
 						cw, _ := rv.BoxContentSize(box)
 						totalW := cw
-						contentW := pb.Width
+						// Content-box viewport (minus padding), matching paint.
+						padL := st2.PaddingLeft.Value
+						padR := st2.PaddingRight.Value
+						if padL < 0 {
+							padL = 0
+						}
+						if padR < 0 {
+							padR = 0
+						}
+						contentW := pb.Width - padL - padR
+						if contentW < 1 {
+							contentW = 1
+						}
 						trackW := pb.Width - 12.0*2
 						thumbLen := trackW * contentW / totalW
 						if thumbLen < 12.0 {
@@ -1144,13 +1232,24 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						if maxSx <= 0 {
 							maxSx = 1
 						}
-						sxRatio := sx / maxSx
+						hSx := scrollXFor(rv, box)
+						sxRatio := hSx / maxSx
+						if sxRatio < 0 {
+							sxRatio = 0
+						}
+						if sxRatio > 1 {
+							sxRatio = 1
+						}
 						thumbTrackSpace := trackW - thumbLen
 						thumbCenterX := pb.X + 12.0 + sxRatio*thumbTrackSpace + thumbLen/2
 						if cssX < thumbCenterX {
-							rv.SetBoxScrollOffset(box, sx-pageW, sy)
+							if setScrollXFor(rv, box, hSx-pageW) {
+								h.markScrollDirty()
+							}
 						} else {
-							rv.SetBoxScrollOffset(box, sx+pageW, sy)
+							if setScrollXFor(rv, box, hSx+pageW) {
+								h.markScrollDirty()
+							}
 						}
 						break
 					}

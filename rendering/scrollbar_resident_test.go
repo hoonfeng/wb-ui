@@ -118,3 +118,48 @@ func TestScrollbarThumbNotCoverRightArrow(t *testing.T) {
 		}
 	}
 }
+
+// TestHitTestScrollbarTextarea: the horizontal scrollbar of a textarea
+// (pre-mode, long value) must be hit-testable — previously HitTestScrollbar
+// only measured render-tree children, so a textarea (text lives in
+// textContent, no children) always returned nil and scrollbar clicks fell
+// through to the input control.
+func TestHitTestScrollbarTextarea(t *testing.T) {
+	canvas, sbox, _ := helperRenderHSTextarea(t, "auto", strings.Repeat("ab", 60), 60, 60)
+	defer canvas.Release()
+	if sbox == nil {
+		t.Fatalf("scroll box not found")
+	}
+	rv := sbox.View()
+	pb := sbox.PaddingBoxRect()
+	st := sbox.Style()
+	cw2, ch2 := rv.BoxContentSize(sbox)
+	t.Logf("overflowY=%v overflowX=%v content=(%.1f,%.1f) view=(%.1f,%.1f)", st.OverflowY, st.OverflowX, cw2, ch2, pb.Width-6-6, pb.Height-4-4)
+	trackY := pb.Y + pb.Height - 12 + 3 // inside the 12px horizontal track
+	if trackY < pb.Y {
+		trackY = pb.Y
+	}
+	// Left arrow zone: x in [pb.X, pb.X+12).
+	hit := HitTestScrollbar(rv, pb.X+4, trackY)
+	if hit == nil {
+		t.Fatalf("left arrow not hit — scrollbar clicks fall through (trackY=%.0f)", trackY)
+	}
+	if !hit.IsHLeftArrow {
+		t.Fatalf("left arrow zone → %+v, want IsHLeftArrow", hit)
+	}
+	// Right arrow zone: last 12px.
+	hit = HitTestScrollbar(rv, pb.X+pb.Width-4, trackY)
+	if hit == nil || !hit.IsHRightArrow {
+		t.Fatalf("right arrow zone → %+v, want IsHRightArrow", hit)
+	}
+	// Track zone (middle, away from arrows and thumb at scroll=0): thumb
+	// starts at hx+arrowSize with scroll=0, so the middle is track.
+	hit = HitTestScrollbar(rv, pb.X+pb.Width/2, trackY)
+	if hit == nil {
+		t.Fatalf("track middle not hit")
+	}
+	if !hit.IsHTrack && !hit.IsHThumb {
+		t.Fatalf("track middle → %+v, want IsHTrack/IsHThumb", hit)
+	}
+}
+

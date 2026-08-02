@@ -328,7 +328,17 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 	// is published globally so caret drawing / hit-testing / IME positioning
 	// stay consistent across single-line and pre-mode textarea.
 	contentW := w - padX*2
-	textScrollX := 0.0
+	// Horizontal scroll: keep the caret inside the visible content area by
+	// shifting the text left/right (browsers scroll single-line inputs
+	// horizontally instead of ellipsizing overflow). Computed per-frame from
+	// the current caret position; non-focused controls just clip. The offset
+	// is published globally so caret drawing / hit-testing / IME positioning
+	// stay consistent across single-line and pre-mode textarea.
+	//
+	// The previous frame's offset is preserved (so the scrollbar thumb can
+	// drag the text freely); auto-scroll only kicks back in when the caret
+	// leaves the visible content area.
+	textScrollX := FocusedFormControlTextScroll
 	if !showPlaceholder && FocusedFormControlSel != nil && el == FocusedFormControl {
 		caretPos := FocusedFormControlSel.End
 		if FocusedFormControlSel.Start > caretPos {
@@ -341,7 +351,10 @@ func paintTextInputValue(info *PaintInfo, el *dom.Element, st *style.ComputedSty
 			caretPos = 0
 		}
 		caretPx := graphics.MeasureText(font, string(runes[:caretPos]))
-		textScrollX = computeTextScrollX(caretPx, contentW)
+		autoX := computeTextScrollX(caretPx, contentW)
+		if caretPx < textScrollX || caretPx > textScrollX+contentW {
+			textScrollX = autoX
+		}
 	}
 	FocusedFormControlTextScroll = textScrollX
 	textX := x + padX - textScrollX
@@ -1247,7 +1260,11 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	// content width — keep the caret row's caret visible by shifting all
 	// rows, and publish the offset so caret drawing / hit-testing / IME
 	// positioning stay consistent.
-	textScrollX := 0.0
+	//
+	// The previous frame's offset is preserved (scrollbar thumb drags the
+	// text freely); auto-scroll resumes only when the caret leaves the
+	// visible content area.
+	textScrollX := FocusedFormControlTextScroll
 	if mode == wrapModeNone && FocusedFormControlSel != nil && el == FocusedFormControl {
 		caretPos := FocusedFormControlSel.End
 		if FocusedFormControlSel.Start > caretPos {
@@ -1256,7 +1273,10 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 		_, col, wl := locateWrappedCaret(wrapped, caretPos)
 		runes := []rune(displayText)
 		caretPx := graphics.MeasureText(font, string(runes[wl.start:wl.start+col]))
-		textScrollX = computeTextScrollX(caretPx, contentW)
+		autoX := computeTextScrollX(caretPx, contentW)
+		if caretPx < textScrollX || caretPx > textScrollX+contentW {
+			textScrollX = autoX
+		}
 	}
 	FocusedFormControlTextScroll = textScrollX
 	textX -= textScrollX
@@ -1296,9 +1316,12 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 				post := string(lineRunes[selLineEnd:])
 				preW := graphics.MeasureText(font, pre)
 				selW := graphics.MeasureText(font, selText)
-				if preW+selW <= contentW {
-					c.FillRect(textX+preW, lineY-ascent, selW, lineH, selColor)
-				}
+				// Always paint the highlight rect — the content clip already
+				// cuts it to the visible area, so a selection that extends
+				// past the right edge (horizontally scrolled pre-mode rows)
+				// still shows a background for its visible portion instead of
+				// vanishing entirely.
+				c.FillRect(textX+preW, lineY-ascent, selW, lineH, selColor)
 				if pre != "" {
 					c.DrawText(textX, lineY, pre, font, textColor)
 				}
