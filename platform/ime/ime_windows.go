@@ -53,6 +53,7 @@ var (
 	procCallWindowProcW    = user32.NewProc("CallWindowProcW")
 	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
 	procSendMessageW       = user32.NewProc("SendMessageW")
+	procGetWindowRect      = user32.NewProc("GetWindowRect")
 	procClientToScreen     = user32.NewProc("ClientToScreen")
 )
 
@@ -66,7 +67,13 @@ const (
 	wmIMEComposition      = 0x010F
 	wmIMESetContext       = 0x0281
 	wmIMENotify           = 0x0282
+	wmIMERequest          = 0x0288
 	wmChar                = 0x0102
+
+	// WM_IME_REQUEST (0x0288) wParam request types.
+	imrCompositionWindow   = 0x0001
+	imrCandidateWindow     = 0x0002
+	imrQueryCharPosition   = 0x0006
 
 	gcsCompStr   = 0x0008
 	gcsResultStr = 0x0800
@@ -100,9 +107,19 @@ type candidateForm struct {
 	RectRight, RectBottom          int32
 }
 
-// winPoint mirrors the Win32 POINT structure (two LONGs).
-type winPoint struct {
-	X, Y int32
+// winRect mirrors the Win32 RECT structure (four LONGs).
+type winRect struct {
+	Left, Top, Right, Bottom int32
+}
+
+// imeCharPosition mirrors the Win32 IMECHARPOSITION structure, used by
+// WM_IME_REQUEST / IMR_QUERYCHARPOSITION to ask the application for the
+// on-screen position of a character in the composition string.
+type imeCharPosition struct {
+	Size     uint32 // dwSize — size of the structure
+	CharPos  uint32 // dwCharPos — character index in the string
+	PtX, PtY int32  // pt — SCREEN coordinates of the character (top-left)
+	Hwnd     uintptr
 }
 
 // ============================================================================
@@ -307,6 +324,58 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 
 	case wmIMENotify:
 		return 0
+
+	case wmIMERequest:
+		// The IME asks the application for the composition/candidate window
+		// position (WebKit's WebView.cpp onIMERequest handles
+		// IMR_COMPOSITIONWINDOW / IMR_CANDIDATEWINDOW the same way). TSF
+		// compatible IMEs (Microsoft Pinyin) query via this message, so the
+		// candidate list follows the caret even when ImmSetCandidateWindow
+		// alone is ignored. lParam points to the structure to fill; the
+		// return value is the structure size in bytes.
+		h.mu.Lock()
+		x, y := h.compX, h.compY
+		h.mu.Unlock()
+		if os.Getenv("WB_IME_DEBUG") != "" {
+			log.Printf("[ime] wmIMERequest wParam=%#x lParam=%#x pos=(%d,%d)", wParam, lParam, x, y)
+		}
+		switch wParam {
+		case imrQueryCharPosition:
+			// TSF-compatible IMEs (Microsoft Pinyin) ask for the character's
+			// SCREEN position via IMR_QUERYCHARPOSITION; the candidate list
+			// is positioned from this. This is the primary mechanism that
+			// makes the candidate window follow the caret — ImmSetCandidateWindow
+			// alone is ignored by TSF IMEs.
+			if lParam != 0 {
+				cp := (*imeCharPosition)(unsafe.Pointer(lParam))
+				var pt struct{ X, Y int32 }
+				procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+				cp.PtX = pt.X + x
+				cp.PtY = pt.Y + y
+				cp.Hwnd = hwnd
+				if os.Getenv("WB_IME_DEBUG") != "" {
+					log.Printf("[ime] IMR_QUERYCHARPOSITION charPos=%d screen=(%d,%d) hwnd=%#x", cp.CharPos, cp.PtX, cp.PtY, hwnd)
+				}
+				return uintptr(unsafe.Sizeof(imeCharPosition{}))
+			}
+			return 0
+		case imrCompositionWindow:
+			if lParam != 0 {
+				f := (*compositionForm)(unsafe.Pointer(lParam))
+				f.Style = cfsPoint
+				f.X, f.Y = x, y
+				return uintptr(unsafe.Sizeof(compositionForm{}))
+			}
+		case imrCandidateWindow:
+			if lParam != 0 {
+				f := (*candidateForm)(unsafe.Pointer(lParam))
+				f.Index = 0
+				f.Style = cfsCandidatePos
+				f.X, f.Y = x, y
+				return uintptr(unsafe.Sizeof(candidateForm{}))
+			}
+		}
+		return 0
 	}
 
 	return h.callOldWndProc(hwnd, msg, wParam, lParam)
@@ -406,13 +475,24 @@ func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 	}
 	defer procImmReleaseContext.Call(hwnd, himc)
 
-	pt := winPoint{X: x, Y: y}
-	before := pt
-	procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
+	// The incoming x/y are CLIENT-AREA coordinates (physical pixels relative
+	// to the window's client origin), matching the caret position computed by
+	// FormControlCaretPosition and scaled by Window.SetIMECompositionPos.
+	// ImmSetCompositionWindow / ImmSetCandidateWindow expect coordinates
+	// relative to the window client area — NOT screen coordinates. Converting
+	// with ClientToScreen pushed the candidate list down-right by the window's
+	// client-area offset on screen ("candidate drifts right/down of caret").
+	// WebKit (WebView.cpp IME handling) passes the caret rect as-is.
 	if os.Getenv("WB_IME_DEBUG") != "" {
-		log.Printf("[ime] setCompositionPos client=(%d,%d) → screen=(%d,%d)", before.X, before.Y, pt.X, pt.Y)
+		// For screen-coordinate verification: window rect (screen) + client
+		// origin => caret's actual screen position, to compare against the
+		// candidate window's observed position on screen.
+		var wr winRect
+		procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&wr)))
+		log.Printf("[ime] setCompositionPos client=(%d,%d) winRect=(%d,%d,%d,%d) caretScreen≈(%d,%d)",
+			x, y, wr.Left, wr.Top, wr.Right, wr.Bottom,
+			wr.Left+int32(x), wr.Top+int32(y))
 	}
-	x, y = pt.X, pt.Y
 
 	cf := compositionForm{
 		Style: cfsPoint,
@@ -435,7 +515,7 @@ func (h *WindowsHandler) setCompositionPos(hwnd uintptr, x, y int32) {
 	}
 	r2, _, _ := procImmSetCandidateWindow.Call(himc, uintptr(unsafe.Pointer(&cand)))
 	if os.Getenv("WB_IME_DEBUG") != "" {
-		log.Printf("[ime] setCompositionPos screen=(%d,%d) hwnd=%#x ImmSetComposition=%d ImmSetCandidate=%d",
+		log.Printf("[ime] setCompositionPos client=(%d,%d) hwnd=%#x ImmSetComposition=%d ImmSetCandidate=%d",
 			x, y, hwnd, r1, r2)
 	}
 }
