@@ -84,6 +84,8 @@ type Host struct {
 	// needsResizeDump is set true on EventResize, cleared after DumpRTCallback fires
 	// once on the re-laid-out tree. Prevents dumping every frame.
 	needsResizeDump bool
+	// lastLoggedScrollY dedupes per-frame [scroll] logs (only logs on change).
+	lastLoggedScrollY int
 
 	// Selection state. Text selection is tracked as CSS-pixel coordinates
 	// (not RenderText pointers) so it survives render tree rebuilds. Each
@@ -553,8 +555,17 @@ func (h *Host) Run() {
 		if rv != nil {
 			// Drive CSS animations: update the global animation clock and
 			// apply animated opacity to elements' ComputedStyle before paint.
+			// CSS transitions interpolate style changes (:hover / :checked);
+			// while one is in flight the frame needs a re-layout every frame
+			// so interpolated left/top geometry updates (switch thumb slide).
 			rendering.AnimationTime = time.Since(h.animStart).Seconds()
-			rendering.ApplyAnimations(rv)
+			if rendering.ApplyAnimations(rv) {
+				if mf := h.wv.MainFrame(); mf != nil {
+					if fr := mf.Frame(); fr != nil {
+						fr.SetNeedsLayout(true)
+					}
+				}
+			}
 
 			// Update text selection from stored coordinates against the
 			// current render tree (robust to rebuilds).
@@ -597,9 +608,10 @@ func (h *Host) Run() {
 				}
 				scrollY = maxY
 			}
-			if scrollY != 0 {
+			if scrollY != 0 && scrollY != h.lastLoggedScrollY {
 				log.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
 					scrollY, frameView.MaxScrollY(), frameView.ContentHeight(), frameView.Height())
+				h.lastLoggedScrollY = scrollY
 			}
 			frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
 
@@ -791,6 +803,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							fr.MarkRenderTreeDirty()
+							// ★ hover 状态变化必须触发重建：只 MarkRenderTreeDirty
+							// 不会驱动 EnsureLayout → Layout（NeedsLayout 仍为 false），
+							// RebuildRenderTreeIfNeeded 永远不会执行 → :hover 样式
+							// 从不反映到画面上。SetNeedsLayout 让下帧 Layout 重建。
+							fr.SetNeedsLayout(true)
 						}
 					}
 				}
@@ -869,6 +886,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							fr.MarkRenderTreeDirty()
+							// hover 需 SetNeedsLayout 才能触发下帧重建（同第一处）。
+							fr.SetNeedsLayout(true)
 						}
 					}
 				}

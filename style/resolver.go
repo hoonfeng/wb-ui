@@ -1591,10 +1591,15 @@ func parseComponent(s string) uint8 {
 
 // parseAlpha parses an alpha component (0.0-1.0).
 func parseAlpha(s string) uint8 {
+	isPct := strings.HasSuffix(s, "%")
 	s = strings.TrimSuffix(s, "%")
 	v, _ := strconv.ParseFloat(s, 64)
-	if strings.HasSuffix(s, "%") {
+	if isPct {
+		// "50%" → 127
 		v = v * 255 / 100
+	} else if v <= 1 {
+		// 0-1 float (rgba(…, 0.15)) → 0-255
+		v = v * 255
 	}
 	if v > 255 {
 		v = 255

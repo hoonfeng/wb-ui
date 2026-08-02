@@ -573,7 +573,17 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 		if isRow {
 			r := resolveLengthAuto(cs.Height, cbHeight, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
-				g.SetContentHeight(r.Value)
+				h := r.Value
+				// border-box: explicit height includes border+padding, so the
+				// content height must shrink (e.g. switch track 34x18 with 1px
+				// border → content 16). Without this the box renders 2px taller.
+				if isBorderBox(it.box) {
+					h -= g.BorderTop() + g.BorderBottom() + g.PaddingTop() + g.PaddingBottom()
+				}
+				if h < 0 {
+					h = 0
+				}
+				g.SetContentHeight(h)
 			} else if align == "stretch" {
 				stretchH := cbHeight - it.marginCross - g.VerticalBorderAndPadding()
 				if stretchH < 0 { stretchH = 0 }
@@ -805,6 +815,24 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
+
+			// Re-apply the explicit cross size (height for row flex): the
+			// child's own layout (e.g. a blockified span's BFC) collapses the
+			// content height back to the CSS height without subtracting
+			// border-box border/padding — a switch track 34x18 with 1px border
+			// would render 20px tall (18 content + 2 border). The flex-resolved
+			// cross size must win.
+			if isRow && cs != nil {
+				if h, ok := definiteHeight(cs.Height, g.ContentHeight(), fs); ok && h > 0 {
+					if isBorderBox(it.box) {
+						h -= g.BorderTop() + g.BorderBottom() + g.PaddingTop() + g.PaddingBottom()
+					}
+					if h < 0 {
+						h = 0
+					}
+					g.SetContentHeight(h)
+				}
+			}
 
 			// The flex-resolved main size is authoritative: a child's own
 			// layout must not override it with its content size (e.g. a

@@ -36,25 +36,32 @@ var KeyframesLookup func(name string) *css.KeyframesRule
 // ApplyAnimations walks the render tree and updates each element's animated
 // properties (opacity, transform translate/scale, color, background-color)
 // based on the current AnimationTime and the element's animation properties.
-// This must be called before Paint each frame.
-func ApplyAnimations(rv *RenderView) {
-	if rv == nil || KeyframesLookup == nil {
-		return
+// It also drives CSS transitions (:hover / :checked style changes).
+// This must be called before Paint each frame. It returns true when a
+// transition is in flight (the host should re-layout to update geometry).
+func ApplyAnimations(rv *RenderView) bool {
+	if rv == nil {
+		return false
 	}
-	var walk func(o RenderObject)
-	walk = func(o RenderObject) {
-		if o == nil {
-			return
+	anyTrans := false
+	if KeyframesLookup != nil {
+		var walk func(o RenderObject)
+		walk = func(o RenderObject) {
+			if o == nil {
+				return
+			}
+			st := o.Style()
+			if st != nil && st.AnimationName != "" {
+				applyAnimationToStyle(st, AnimationTime)
+			}
+			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+				walk(c)
+			}
 		}
-		st := o.Style()
-		if st != nil && st.AnimationName != "" {
-			applyAnimationToStyle(st, AnimationTime)
-		}
-		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c)
-		}
+		walk(RenderObject(rv))
 	}
-	walk(RenderObject(rv))
+	anyTrans = applyTransitions(rv, AnimationTime)
+	return anyTrans
 }
 
 // applyAnimationToStyle computes all animated properties for a single element

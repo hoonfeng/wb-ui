@@ -314,6 +314,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					}
 				}
 			}
+			// Set CSS height if definite BEFORE Layout (inline-block/span with
+			// explicit height, e.g. a switch track 34x18). Without this the
+			// height collapses to the line-height, inflating the box.
+			if cs := cld.Style(); cs != nil {
+				if h, ok := definiteHeight(cs.Height, g.ContentHeight(), fs); ok && h > 0 {
+					if isBorderBoxForBox(cld) {
+						b := cldG.BorderTop() + cldG.BorderBottom()
+						p := cldG.PaddingTop() + cldG.PaddingBottom()
+						cldG.SetContentHeight(h - b - p)
+					} else {
+						cldG.SetContentHeight(h)
+					}
+				}
+			}
 
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
