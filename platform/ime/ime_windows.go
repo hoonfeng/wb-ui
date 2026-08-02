@@ -153,9 +153,12 @@ type WindowsHandler struct {
 	// (WM_IME_STARTCOMPOSITION received, no END yet).
 	composing bool
 
-	// skipChars records how many WM_CHAR messages to skip after an IME
-	// confirmation (GCS_RESULTSTR), to avoid double-input of committed text.
-	skipChars int
+	// pendingChars holds the characters whose WM_CHAR duplicates may follow
+	// an IME confirmation (GCS_RESULTSTR). WM_CHAR is dropped only when it
+	// MATCHES the pending character — a stale count would swallow the next
+	// real keystroke (typically Space) when the IME delivers fewer WM_CHARs
+	// than expected (TSF often consumes them itself).
+	pendingChars []rune
 
 	// cached composition position (physical pixels) for WM_IME_STARTCOMPOSITION.
 	compX, compY int32
@@ -311,19 +314,29 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 	case wmIMEEndComposition:
 		h.mu.Lock()
 		h.composing = false
+		h.pendingChars = nil
 		h.mu.Unlock()
 		h.pushEvent(Event{Kind: EventCompositionEnd})
 		return 0
 
 	case wmChar:
-		// Skip WM_CHAR messages that duplicate GCS_RESULTSTR confirmation.
-		if h.skipChars > 0 {
-			h.mu.Lock()
-			h.skipChars--
-			h.mu.Unlock()
-			return 0
-		}
 		ch := rune(wParam)
+		// Drop only the WM_CHAR that duplicates a GCS_RESULTSTR-confirmed
+		// character (character-matched, not counted). If the expected
+		// duplicate never arrives (TSF consumes it), the pending slot stays
+		// for one message and any OTHER real keystroke (e.g. Space) clears
+		// it and is processed normally — a stale counter used to swallow
+		// the next input entirely ("space does nothing").
+		h.mu.Lock()
+		if len(h.pendingChars) > 0 {
+			if h.pendingChars[0] == ch {
+				h.pendingChars = h.pendingChars[1:]
+				h.mu.Unlock()
+				return 0
+			}
+			h.pendingChars = nil
+		}
+		h.mu.Unlock()
 		if ch >= 32 && ch != 127 {
 			h.pushEvent(Event{Kind: EventCharInput, Char: ch})
 		}
@@ -416,10 +429,12 @@ func (h *WindowsHandler) handleIMEComposition(hwnd uintptr, lParam uintptr) {
 			for _, ch := range result {
 				h.pushEvent(Event{Kind: EventCharInput, Char: ch})
 			}
-			// Count UTF-16 code units to skip the duplicate WM_CHAR
-			// messages that follow GCS_RESULTSTR confirmation.
+			// Track the exact confirmed characters whose duplicate WM_CHAR
+			// messages may follow (see wmChar). Matched against the actual
+			// WM_CHAR so a missing duplicate never swallows the next real
+			// keystroke.
 			h.mu.Lock()
-			h.skipChars += len(syscall.StringToUTF16(result)) - 1
+			h.pendingChars = append(h.pendingChars, []rune(result)...)
 			h.mu.Unlock()
 		}
 	}
