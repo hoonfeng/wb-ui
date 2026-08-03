@@ -14,6 +14,14 @@ import (
 // containingBlockForAbsolute walks from box's parent to find the nearest positioned
 // ancestor (or root). Returns root if none found.
 func containingBlockForAbsolute(box *ElementBox, root *ElementBox) *ElementBox {
+	// position:fixed is always positioned against the VIEWPORT (CSS 2.1
+	// §10.1) — never against a positioned ancestor. Without this,
+	// .toast-container (position:fixed; right:16px) inside a positioned
+	// app-root was placed at x=0 (the ancestor's padding box) instead of
+	// 1280−16−width (the viewport).
+	if box.IsFixedPositioned() {
+		return root
+	}
 	for cur := box.Parent(); cur != nil; cur = cur.Parent() {
 		if cur == root {
 			return root

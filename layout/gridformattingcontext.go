@@ -255,6 +255,19 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	gridPlaceItems(items, colPos, rowPos, colState, rowState, colGap, rowGap, state)
 
+	// Lay out absolutely/fixed-positioned children against this grid
+	// container as their containing block (CSS-GRID-1 §9.2). Previously they
+	// were silently dropped — .toast-container (position:fixed; top:40px;
+	// right:16px) inside app-root stayed at 0x0 instead of the viewport
+	// corner. position:fixed resolves against the viewport (root).
+	root := stateRootForBox(box)
+	for _, child := range box.Children() {
+		if childEb, ok := child.(*ElementBox); ok && childEb.IsAbsolutelyPositioned() {
+			cb := containingBlockForAbsolute(childEb, root)
+			layoutAbsolute(childEb, cb, root, state)
+		}
+	}
+
 	lastRowEnd := rowPos[len(rowPos)-1]
 	contentH := math.Max(0, lastRowEnd-g.ContentBoxTop())
 	// The container's height:auto resolves to its content extent. Do NOT

@@ -171,6 +171,13 @@ func (b *ElementBox) EstablishesTableFormattingContext() bool {
 
 func (b *ElementBox) IsInlineLevel() bool {
 	if b.style == nil { return false }
+	// Flex items are blockified (CSS-DISPLAY-3 §2.7): a span inside a flex
+	// container behaves as a block-level flex item even though its computed
+	// display stays inline. Without this, getComputedStyle-equivalent
+	// reporting (and IFC auto-width expansion) treat flex items as inline.
+	if isFlexItem(b) {
+		return false
+	}
 	switch b.style.Display {
 	case style.DisplayInline, style.DisplayInlineBlock, style.DisplayInlineFlex,
 		style.DisplayInlineGrid, style.DisplayInlineTable:

@@ -1123,15 +1123,25 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// text wraps to 4 lines (62px) but intrinsicContentHeight
 			// pre-layout estimated 1 line (17px); pinning to the estimate
 			// clipped the multi-line content.
+			//
+			// EXCEPTION (CSS-FLEXBOX §4.5): when the item's overflow is NOT
+			// visible (auto/hidden/scroll), its automatic minimum size is
+			// ZERO — the flex-resolved height wins and overflowing content is
+			// clipped/scrolled, not inflated. Without this, .project-section
+			// (flex:1; overflow-y:auto) ballooned to its full 2776px content
+			// height instead of the flex slot (~605px), overflowing the
+			// sidebar and spawning the wrong scrollbars.
 			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
 				ms := it.finalMainSize
 				if isBorderBox(it.box) {
 					vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
 					ms = math.Max(0, ms-vp)
 				}
-				if after := g.ContentHeight(); after > ms {
-					// min-height:auto — content wrapped taller than the slot.
-					ms = after
+				if itc := it.box.Style(); itc != nil && flexOverflowVisible(itc) {
+					if after := g.ContentHeight(); after > ms {
+						// min-height:auto — content wrapped taller than the slot.
+						ms = after
+					}
 				}
 				g.SetContentHeight(ms)
 			}

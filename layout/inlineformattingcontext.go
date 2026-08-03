@@ -26,6 +26,18 @@ func isFlexItem(box *ElementBox) bool {
 	return box.IsInFlow() && !box.IsAbsolutelyPositioned()
 }
 
+// flexOverflowVisible reports whether both overflow axes are visible. Flex
+// items with non-visible overflow have an automatic minimum size of 0
+// (CSS-FLEXBOX §4.5) — the flex-resolved main size must not be inflated by
+// content height.
+func flexOverflowVisible(cs *style.ComputedStyle) bool {
+	if cs == nil {
+		return true
+	}
+	ox, oy := cs.OverflowX, cs.OverflowY
+	return (ox == style.OverflowVisible || ox == 0) && (oy == style.OverflowVisible || oy == 0)
+}
+
 type InlineFormattingContext struct {
 	FormattingContextBase
 }
