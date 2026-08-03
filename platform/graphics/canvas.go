@@ -447,6 +447,20 @@ func (c *Canvas) FillRect(x, y, w, h float64, col Color) {
 	c.invalidatePixels()
 }
 
+// FillRectNoAA fills a rectangle with anti-aliasing disabled. Used for
+// pixel-exact bands (e.g. the rounded border taper bands): each 1×1 pixel is
+// filled with an explicit alpha so the taper gradient itself is the only
+// smoothing — the AA edge spread of DrawRect would otherwise bleed into
+// neighbouring pixels and widen the band.
+func (c *Canvas) FillRectNoAA(x, y, w, h float64, col Color) {
+	c.fillPaint.SetColor(colorToSkia(col))
+	c.fillPaint.SetAntialias(false)
+	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
+	c.canvas.DrawRect(r, c.fillPaint)
+	c.fillPaint.SetAntialias(true)
+	c.invalidatePixels()
+}
+
 // FillRoundRect fills a rounded rectangle with the supplied color, mirroring
 // GraphicsContext::fillRoundedRect(). The corner radius is applied uniformly to
 // all four corners. Used by PaintBackground when border-radius > 0.

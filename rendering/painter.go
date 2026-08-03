@@ -446,26 +446,88 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 }
 
 // paintRoundedBorderSide 用"沿圆角矩形外边界（外弧 r）的 width 宽描边带"绘制
-// 单边边框，clip 到 border-box。Edge 对单边边框 + border-radius 的渲染正是
-// 这样：竖线中段为直边，顶端沿外弧弯曲（贴合圆角矩形），圆角处描边带沿弧
-// 切线方向偏移（保持 width 宽，不塌缩）。
+// 单边边框，clip 到 border-box。浏览器对单边边框 + border-radius 的渲染：
+// 竖线中段为直边（贴背景左缘），顶端沿外弧弯曲（渐细弧带），弧带像素从左到右
+// （竖线主体→背景内部）alpha 渐隐，边缘平滑无锯齿。
 func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, width, r float64, col graphics.Color) {
 	if width <= 0 || col.A == 0 || r <= 0 {
 		return
 	}
 	// ★ 竖线 = 圆角矩形的一条边（如 conv-item.active 的 border-left: 2px +
-	//   border-radius: 6px）。用户反馈链：
-	//   "竖线相当于矩形的一条边，就是个蓝色阴影"
-	//   "渐细效果为啥没有呢？" / "圆角看着小很多，根本不是 CSS 里设置的圆角大小"
-	//   "会深入到内部的话，那就是层次问题，绘制在圆角矩形的低一层就不会被侵入"
-	// Edge 实测（border_px_ref.html）：竖线弧带沿 CSS 圆角（r=6px）渐细——
-	//   中段贴背景左缘（x..x+width），端部沿外弧向右渐细凸出 3px 高、3px→2px
-	//   渐细，弧带窄（不是外弧到内弧的宽月牙）。
-	// 实现：中段直边（贴左缘 width 宽）+ 端部逐行渐细带——中心线沿外弧 r
-	//   （圆心 x+r,y+r）左移 width，前 2 行宽 width+1（3px）、之后 width（2px），
-	//   FillRect 逐行填充（无 StrokePath，无锯齿）。
+	//   border-radius: 6px）。浏览器实测（web_debug 截图，Chromium/Edge 同内核）：
+	//   y=100: x+3..x+5（3px 凸出弧带） y=101: x+1..x+3（3px）
+	//   y=102: x+1..x+2（2px 渐细） y=103+: x..x+1（中段 2px 贴背景左缘）
+	//   弧带像素从左到右 alpha 渐隐（x+3 亮 ~0.85 → x+5 暗 ~0.3），中段右缘
+	//   ~0.6——平滑过渡，无阶梯锯齿。
+	// 实现：中段直边（左缘满、右缘 ~60%）+ 端部逐行渐细带（中心线沿外弧 r 左移
+	//   width-0.5-i，每行亚像素 alpha 渐隐填充——FillRect 1px 带 alpha，覆盖比例
+	//   × 从左到右渐隐因子）。
 	canvas.Save()
 	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+	// 亚像素抗锯齿填充水平带 [lo,hi)：像素 alpha = 覆盖比例 × 渐隐因子
+	// （左缘 alphaHi → 右缘 alphaLo，模拟浏览器弧带从竖线主体向背景内部渐隐）。
+	fillBandH := func(lo, hi, yy, alphaHi, alphaLo float64) {
+		span := hi - lo
+		for px := int(math.Floor(lo)); px < int(math.Ceil(hi)); px++ {
+			cov := math.Min(hi, float64(px)+1) - math.Max(lo, float64(px))
+			if cov <= 0 {
+				continue
+			}
+			t := (float64(px) + 0.5 - lo) / span
+			if t < 0 {
+				t = 0
+			}
+			if t > 1 {
+				t = 1
+			}
+			// smoothstep：边缘（t→0/1）变化缓、中间线性——比线性渐隐更柔和，
+			// 弧带边缘融入背景/竖线主体，消除阶梯锯齿
+			ts := t * t * (3 - 2*t)
+			a := (alphaHi*(1-ts) + alphaLo*ts) * cov
+			if a <= 0 {
+				continue
+			}
+			c := col
+			c.A = uint8(float64(col.A) * a)
+			canvas.FillRectNoAA(float64(px), yy, 1, 1, c)
+		}
+	}
+	// 垂直带（转置）
+	fillBandV := func(lo, hi, xx, alphaHi, alphaLo float64) {
+		span := hi - lo
+		for py := int(math.Floor(lo)); py < int(math.Ceil(hi)); py++ {
+			cov := math.Min(hi, float64(py)+1) - math.Max(lo, float64(py))
+			if cov <= 0 {
+				continue
+			}
+			t := (float64(py) + 0.5 - lo) / span
+			if t < 0 {
+				t = 0
+			}
+			if t > 1 {
+				t = 1
+			}
+			ts := t * t * (3 - 2*t)
+			a := (alphaHi*(1-ts) + alphaLo*ts) * cov
+			if a <= 0 {
+				continue
+			}
+			c := col
+			c.A = uint8(float64(col.A) * a)
+			canvas.FillRectNoAA(xx, float64(py), 1, 1, c)
+		}
+	}
+	// 中段直边：左缘满 alpha，右缘 ~60%（匹配浏览器中段 x=100 满、x=101 60%）
+	// 中段直边：整宽纯色（几何精确 x..x+width）。注意：半透明右缘在
+	// PaintBackground（FillRoundRect）之后会被 fillPaint 的 AA 状态影响而
+	// 异常扩散（中段多出 2px），故中段保持纯色——弧带的平滑抗锯齿由
+	// fillBandH/V 的亚像素 alpha 渐隐负责。
+	midRect := func(mx, my, mw, mh float64) {
+		if mw <= 0 || mh <= 0 {
+			return
+		}
+		canvas.FillRectNoAA(mx, my, mw, mh, col)
+	}
 	// left/right：水平带（沿外弧，y 从端点向内 3 行，带宽 3px→2px 渐细）
 	taperH := func(top bool) {
 		cy := y + r
@@ -475,24 +537,21 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 		for i := 0; i <= 2; i++ {
 			var yy float64
 			if top {
-				yy = y + float64(i)
+				yy = y + float64(i) // 顶部：圆顶行起（dy=-r+i）
 			} else {
-				yy = y + h - 1 - float64(i)
+				yy = y + h - float64(i) // 底部：圆底行起（dy=+r-i，i=0 在 clip 外被裁，
+				// 保证弧带与顶部镜像对称——之前用 y+h-1-i 缺圆底行导致弧带偏左）
 			}
-			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧）。浏览器实测弧带中心线
-			// 左移量随行数递减：i=0 左移 width-0.5，i=1 左移 width-1，i=2 右移 0.5，
-			// 逐像素匹配浏览器（Chromium/Edge 同内核）web_debug 截图：
-			//   y=100: x+3..x+5（3px） y=101: x..x+2（3px） y=102: x+1..x+2（2px）
-			// 左移量随行数递减 1px/步，反推自浏览器像素：i=0 移 width-0.5
-			// （弧带 x+3..x+5），i=1 移 width-1.5（弧带 x+1..x+3），i=2 移
-			// width-2.5（弧带 x+1..x+2）
+			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧），中心线左移
+			// width-0.5-i（每行递减 1px，反推自浏览器像素）。弧带从左到右
+			// alpha 渐隐：左缘 ~1.0 → 右缘 ~0.22。
 			left := width - 0.5 - 1.0*float64(i)
 			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - left
 			bw := width + 1
 			if i >= 2 {
 				bw = width
 			}
-			canvas.FillRect(xc-bw/2, yy, bw, 1, col)
+			fillBandH(xc-bw/2, xc+bw/2, yy, 1.0, 0.22)
 		}
 	}
 	// top/bottom：垂直带（转置）
@@ -506,7 +565,7 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			if left {
 				xx = x + float64(i)
 			} else {
-				xx = x + w - 1 - float64(i)
+				xx = x + w - float64(i) // right 端：圆角行起（i=0 在 clip 外被裁，对称）
 			}
 			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx))
 			yc -= width - 0.5 - 1.0*float64(i)
@@ -514,31 +573,31 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			if i >= 2 {
 				bw = width
 			}
-			canvas.FillRect(xx, yc-bw/2, 1, bw, col)
+			fillBandV(yc-bw/2, yc+bw/2, xx, 1.0, 0.22)
 		}
 	}
 	switch side {
 	case "left":
 		if h > 7 {
-			canvas.FillRect(x, y+3, width, h-7, col) // 中段直边（贴左缘 width 宽）
+			midRect(x, y+3, width, h-7) // 中段直边（贴左缘 width 宽）
 		}
 		taperH(true)  // 左上渐细带（沿外弧 r6）
 		taperH(false) // 左下渐细带
 	case "right":
 		if h > 7 {
-			canvas.FillRect(x+w-width, y+3, width, h-7, col)
+			midRect(x+w-width, y+3, width, h-7)
 		}
 		taperH(true)
 		taperH(false)
 	case "top":
 		if w > 7 {
-			canvas.FillRect(x+3, y, w-7, width, col)
+			midRect(x+3, y, w-7, width)
 		}
 		taperV(true)
 		taperV(false)
 	case "bottom":
 		if w > 7 {
-			canvas.FillRect(x+3, y+h-width, w-7, width, col)
+			midRect(x+3, y+h-width, w-7, width)
 		}
 		taperV(true)
 		taperV(false)
