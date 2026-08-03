@@ -2327,6 +2327,9 @@ func applyScrollbarDeclarations(cs *ComputedStyle, decls []collectedDecl) {
 	for _, cd := range decls {
 		pn := strings.ToLower(cd.decl.Name)
 		val := cd.decl.ValueString()
+		if DiagEnabled("scrollbar") {
+			Diagf("scrollbar", "  DECL sel=%q kind=%d prop=%s val=%q", cd.selector, cd.sbKind, pn, val)
+		}
 		switch pn {
 		case "width":
 			cs.SetProperty("-webkit-scrollbar-width", val)
