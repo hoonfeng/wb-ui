@@ -22,6 +22,7 @@ package rendering
 
 import (
 	"log"
+	"math"
 	"strconv"
 	"strings"
 
@@ -452,24 +453,58 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	if width <= 0 || col.A == 0 || r <= 0 {
 		return
 	}
-	// ★ 普通圆角竖线：全高 width 矩形 + 两端小圆角（Skia 原生 FillRoundRect，
-	//   边缘光滑无锯齿）。用户反馈："就是普通圆角竖线更高一点点就能满足"。
-	//   圆角半径取 min(border-radius, width)——竖线两端圆角贴合 box 边缘，
-	//   长度接近 box 高（比"中段矩形 + 内弧描边带"方案更高、更简单）。
-	roundR := r
-	if roundR > width {
-		roundR = width
+	// ★ 竖线 = 圆角矩形的一条边（如 conv-item.active 的 border-left: 2px +
+	//   border-radius: 6px）。用户反馈："竖线相当于矩形的一条边，就是个蓝色
+	//   阴影"——即竖线贴着矩形左边界，圆角处沿外弧 r 弯曲（包着圆角矩形），
+	//   不是独立竖线两端自己的圆角。
+	// 实现：中段直边（width 宽矩形）+ 端部沿外弧 r 的描边带（采样 24 段，
+	// 消除 StrokePath 折线锯齿）。
+	arcPts := func(cx, cy, rad, a0, a1 float64) []graphics.Point {
+		n := 24
+		var pts []graphics.Point
+		for i := 0; i <= n; i++ {
+			a := a0 + (a1-a0)*float64(i)/float64(n)
+			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
+		}
+		return pts
 	}
+	strokeArc := func(cx, cy, rad, a0, a1 float64) {
+		if pts := arcPts(cx, cy, rad, a0, a1); len(pts) >= 2 {
+			canvas.StrokePath(pts, width, col, "butt", "miter")
+		}
+	}
+	canvas.Save()
+	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+	// 中段直边：从 y+3 到 y+h-3（Edge 圆角过渡约 3px，y+3 起全宽；矩形与
+	// 端部外弧描边带衔接，竖线全程不窄于 width）。
+	mid := 3.0
 	switch side {
 	case "left":
-		canvas.FillRoundRect(x, y, width, h, roundR, col)
+		if h > 2*mid {
+			canvas.FillRect(x, y+mid, width, h-2*mid, col) // 中段直边（贴左缘 width 宽）
+		}
+		strokeArc(x+r, y+r, r, 3*math.Pi/2, math.Pi)    // 左上外弧（顶→左）——标准：沿圆角矩形外边界
+		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
 	case "right":
-		canvas.FillRoundRect(x+w-width, y, width, h, roundR, col)
+		if h > 2*mid {
+			canvas.FillRect(x+w-width, y+mid, width, h-2*mid, col)
+		}
+		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
+		strokeArc(x+w-r, y+h-r, r, 0, math.Pi/2)         // 右下外弧（右→下）
 	case "top":
-		canvas.FillRoundRect(x, y, w, width, roundR, col)
+		if w > 2*mid {
+			canvas.FillRect(x+mid, y, w-2*mid, width, col)
+		}
+		strokeArc(x+r, y+r, r, math.Pi, 3*math.Pi/2)     // 左上外弧（左→顶）
+		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
 	case "bottom":
-		canvas.FillRoundRect(x, y+h-width, w, width, roundR, col)
+		if w > 2*mid {
+			canvas.FillRect(x+mid, y+h-width, w-2*mid, width, col)
+		}
+		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
+		strokeArc(x+w-r, y+h-r, r, math.Pi/2, 0)         // 右下外弧（下→右）
 	}
+	canvas.Restore()
 }
 
 func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, bottomW, leftW float64,
