@@ -372,6 +372,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				// 12px style keeps arrows + inset thumb).
 				webkitSB := webkitCustomScrollbar(st)
 
+				if style.DiagEnabled("scrollbar") {
+					cn := ""
+					if el, ok := box.Node().(*dom.Element); ok {
+						cn = el.GetAttribute("class")
+					}
+					style.Diagf("scrollbar", "ENTER %q: ovfX=%d ovfY=%d scrollW=%.0f webkitSB=%v sw=%q sbc=%q",
+						cn, st.OverflowX, st.OverflowY, scrollW, webkitSB,
+						st.GetProperty("scrollbar-width"), st.GetProperty("scrollbar-color"))
+				}
+
 				if scrollW > 0 && pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
 						cw, ch := info.rv.BoxContentSize(box)
@@ -527,7 +537,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if syRatio < 0 { syRatio = 0 }
 								if syRatio > 1 { syRatio = 1 }
 								thumbTrackSpace := vm.TrackLen - vm.ThumbLen
-								thumbY := syRatio * thumbTrackSpace
+								thumbY := vy + syRatio*thumbTrackSpace
 								if !webkitSB {
 									thumbY += arrowSize + arrowGap
 								}
@@ -541,10 +551,23 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									rad = thumbRadius
 								}
+								if style.DiagEnabled("scrollbar") {
+									cn := ""
+									if el, ok := box.Node().(*dom.Element); ok {
+										cn = el.GetAttribute("class")
+									}
+									style.Diagf("scrollbar", "VSB %q: scrollW=%.0f webkitSB=%v thumbCol=#%02x%02x%02x%02x trackCol=#%02x%02x%02x%02x vx=%.0f thumbY=%.0f thumbLen=%.0f trackLen=%.0f sy=%.0f maxScroll=%.0f rad=%.0f",
+										cn, scrollW, webkitSB,
+										thumbCol.R, thumbCol.G, thumbCol.B, thumbCol.A,
+										trackCol.R, trackCol.G, trackCol.B, trackCol.A,
+										vx, thumbY, vm.ThumbLen, vm.TrackLen, sy, vm.MaxScroll, rad)
+								}
 								if webkitSB {
-									// Custom webkit scrollbar: thumb fills the full width
-									// (1px breathing room each side), no arrow offset.
-									info.canvas.FillRoundRect(vx+1, thumbY, scrollW-2, vm.ThumbLen, rad, tCol)
+									// Custom webkit scrollbar: thumb fills the FULL
+									// scrollbar width like the browser (Edge headless
+									// measures 8px for ::-webkit-scrollbar { width:8px }),
+									// no breathing room, no arrow offset.
+									info.canvas.FillRoundRect(vx, thumbY, scrollW, vm.ThumbLen, rad, tCol)
 								} else {
 									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, rad, tCol)
 								}
@@ -587,7 +610,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									if sxRatio < 0 { sxRatio = 0 }
 									if sxRatio > 1 { sxRatio = 1 }
 									thumbTrackSpace := hm.TrackLen - hm.ThumbLen
-									thumbX := sxRatio * thumbTrackSpace
+									thumbX := hx + sxRatio*thumbTrackSpace
 									if !webkitSB {
 										thumbX += arrowSize + arrowGap
 									}
@@ -602,7 +625,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									radH = thumbRadius
 								}
 								if webkitSB {
-									info.canvas.FillRoundRect(thumbX, hy+1, hm.ThumbLen, scrollW-2, radH, tCol)
+									info.canvas.FillRoundRect(thumbX, hy, hm.ThumbLen, scrollW, radH, tCol)
 								} else {
 									info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, radH, tCol)
 								}
