@@ -257,6 +257,15 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 			return
 		}
 		if cb := asRenderBox(o); cb != nil {
+			// Fixed-position boxes are viewport-anchored and NEVER contribute
+			// to an ancestor's scroll size (CSS 2.1 §10.1). Without this a
+			// dialog overlay (position:fixed; inset:0; 1280px wide) inside
+			// file-explorer inflates sidebar-content's content width to
+			// 1280-48=1232px → spurious horizontal scrollbar over the whole
+			// sidebar after clicking "新建工作区".
+			if st := cb.Style(); st != nil && st.Position == style.PositionFixed {
+				return
+			}
 			if r := cb.frame.X + cb.frame.Width; r > maxRight {
 				maxRight = r
 			}
