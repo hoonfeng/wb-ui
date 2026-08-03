@@ -67,6 +67,17 @@ type PaintInfo struct {
 	// which Skia's GPU backend turns into an empty clip).
 	initialSaveCount int
 
+	// opacityLayerDepth counts how many enclosing opacity transparency layers
+	// (SaveLayerWithOpacity) are currently active. When > 0, painters must
+	// NOT multiply colors by CumulativeOpacity — the enclosing layer already
+	// applies that opacity when it composites, mirroring the browser where
+	// background + border + text of an opacity<1 element are flattened and
+	// then faded as a whole. Without this, text painted at 50% alpha onto a
+	// 50% background looks translucent/grey instead of the browser's solid
+	// dark text (and a 50% border over a 50% background leaves a visible
+	// bright edge instead of blending in).
+	opacityLayerDepth int
+
 // textOverflowEllipsisPainted is set by PaintText when it draws the
 	// ellipsis during text-overflow:ellipsis truncation, so that
 	// walkSubtreeExcluded skips its own ellipsis paint for this container.

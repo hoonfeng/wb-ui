@@ -149,7 +149,7 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 			localName, inputType, el.ClassName(), box.X(), box.Y(), box.Width(), box.Height())
 	}
 	x, y, w, h := box.X(), box.Y(), box.Width(), box.Height()
-	op := CumulativeOpacity(box)
+	op := paintOpacity(box, info)
 	st := box.Style()
 	switch localName {
 	case "input":

@@ -158,6 +158,52 @@ func TestClickDispatchFiresJSListener(t *testing.T) {
 	}
 }
 
+// TestHitTestInsideFixedDialog verifies that static elements INSIDE a
+// position:fixed subtree (dialog-box buttons) are hit-testable — not just the
+// fixed ancestors themselves. Regression test for the desktop dialog where the
+// "browse" button click and :hover on "cancel" did nothing because hitTestFixed
+// only considered position:fixed boxes, so every click inside the dialog
+// resolved to the dialog-box div and never reached the button.
+func TestHitTestInsideFixedDialog(t *testing.T) {
+	doc, rv, _, _ := mkRuntime(t, `<div class="overlay" style="position:fixed;left:0;top:0;width:800px;height:600px;background:rgba(0,0,0,0.5)">
+  <div class="box" style="position:absolute;left:100px;top:100px;width:300px;height:150px;background:#fff">
+    <button class="dlg-cancel" style="width:80px;height:30px">取消</button>
+    <button class="dlg-create" style="width:80px;height:30px;opacity:0.5">创建</button>
+  </div>
+</div>`)
+	cancelBtn := findEl(t, doc, "dlg-cancel")
+	createBtn := findEl(t, doc, "dlg-create")
+
+	// Click on the "create" button (opacity<1 → own layer) must hit the button.
+	cx, cy := hitCenter(t, rv, "dlg-create")
+	deepest := rendering.HitTest(rv, cx, cy, "")
+	if deepest == nil {
+		t.Fatal("HitTest on create button = nil")
+	}
+	if deepest != createBtn {
+		t.Fatalf("HitTest on create button = %v, want button", deepest)
+	}
+	// Hover on the "cancel" button must hit the button too.
+	cx2, cy2 := hitCenter(t, rv, "dlg-cancel")
+	h := rendering.HitTest(rv, cx2, cy2, "")
+	if h != cancelBtn {
+		t.Fatalf("HitTest on cancel button = %v, want button", h)
+	}
+	// Clicking inside the box but outside any button hits the box.
+	bx, by := hitCenter(t, rv, "box")
+	boxHit := rendering.HitTest(rv, bx, by, "")
+	if boxHit == nil || !strings.Contains(boxHit.GetAttribute("class"), "box") {
+		t.Fatalf("HitTest on box = %v, want the box div", boxHit)
+	}
+	// Clicking outside the box (but inside the overlay) hits the overlay.
+	ov := findEl(t, doc, "overlay")
+	ovHit := rendering.HitTest(rv, 10, 10, "")
+	if ovHit == nil || !strings.Contains(ovHit.GetAttribute("class"), "overlay") {
+		t.Fatalf("HitTest on overlay background = %v, want the overlay", ovHit)
+	}
+	_ = ov
+}
+
 // TestCheckboxToggleOnClickClick verifies checkbox toggling on a real click
 // (press path + dispatch, mirroring host.go).
 func TestCheckboxToggleOnClickClick(t *testing.T) {

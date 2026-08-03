@@ -70,6 +70,22 @@ func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
 // the overlay (large) resolves to the box, and clicking the overlay itself
 // (outside the box) resolves to the overlay.
 func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView) {
+	hitTestFixedInner(o, x, y, attrName, best, bestArea, rv, false)
+}
+
+// hitTestFixedInner is the recursive body of hitTestFixedFirst. Once the walk
+// enters a fixed-position subtree (insideFixed=true), EVERY box participates in
+// hit-testing — the dialog-box's buttons / inputs / labels are position:static
+// but paint on top of the normal flow, so they must be hittable (a click on the
+// "browse" button must reach the button, not fall through to the dialog-box).
+// Rules:
+//   - a fixed box whose bounds do NOT contain the point excludes its whole
+//     subtree (fixed siblings never overlap — clicking outside the dialog-box
+//     must not hit a control inside it)
+//   - a plain box inside a fixed subtree that misses the point just skips
+//     itself; a smaller descendant may still contain the point
+//   - smallest area wins, so buttons < dialog-box < overlay resolve correctly
+func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView, insideFixed bool) {
 	if o == nil {
 		return
 	}
@@ -81,28 +97,34 @@ func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom
 				isFixed = st.Position == style.PositionFixed
 			}
 		}
-		if isFixed {
-			// Only descend if the point is inside this fixed box (or it has
-			// zero area and children still matter).
-			if ow > 0 && oh > 0 {
-				if x < ox || y < oy || x >= ox+ow || y >= oy+oh {
+	}
+	if ok && (isFixed || insideFixed) {
+		if ow > 0 && oh > 0 {
+			inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
+			if isFixed {
+				// Fixed box outside the point: its whole subtree is
+				// excluded (fixed siblings don't overlap).
+				if !inBounds {
 					return
 				}
+			} else if !inBounds {
+				// Plain box inside a fixed subtree that misses: skip
+				// itself, children could still contain the point.
+				goto descend
 			}
-			// Fixed box hit: consider it and its descendants (smallest area wins).
-			if ow > 0 && oh > 0 {
-				if el, isEl := o.Node().(*dom.Element); isEl {
-					if attrName == "" || el.GetAttribute(attrName) != "" {
-						area := ow * oh
-						if *best == nil || area < *bestArea {
-							*best = el
-							*bestArea = area
-						}
+			// Hit candidate: consider it (smallest area wins).
+			if el, isEl := o.Node().(*dom.Element); isEl {
+				if attrName == "" || el.GetAttribute(attrName) != "" {
+					area := ow * oh
+					if *best == nil || area < *bestArea {
+						*best = el
+						*bestArea = area
 					}
 				}
 			}
 		}
 	}
+descend:
 	// Descend into children (scroll-offset aware like the normal walk).
 	childX, childY := x, y
 	if rv != nil {
@@ -114,8 +136,9 @@ func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom
 			}
 		}
 	}
+	childInside := insideFixed || isFixed
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-		hitTestFixedFirst(c, childX, childY, attrName, best, bestArea, rv)
+		hitTestFixedInner(c, childX, childY, attrName, best, bestArea, rv, childInside)
 	}
 }
 

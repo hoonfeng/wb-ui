@@ -184,6 +184,21 @@ func parseFontWeight(w string) int {
 	return 400
 }
 
+// paintOpacity returns the effective opacity to apply when drawing o. When
+// the paint is already inside an opacity transparency layer
+// (PaintInfo.opacityLayerDepth > 0), the enclosing SaveLayer composites the
+// whole subtree at that opacity — mirroring the browser's flatten-then-fade
+// semantics — so painters must NOT multiply colors again (otherwise text
+// drawn at 50% alpha onto a 50% background looks translucent grey instead
+// of the browser's solid dark text, and a 50% border over a 50% background
+// leaves a visible bright edge).
+func paintOpacity(o RenderObject, info *PaintInfo) float64 {
+	if info != nil && info.opacityLayerDepth > 0 {
+		return 1.0
+	}
+	return CumulativeOpacity(o)
+}
+
 // PaintBackground paints the background color of a RenderBox, mirroring
 // BackgroundPainter::paintBackground. The background fills the border-box rectangle
 // (background clips to the border-box by default). Background images are not supported in
@@ -207,7 +222,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st.BoxShadow != "" && st.BoxShadow != "none" {
 		r := lengthValue(st.BorderRadius)
 		shadows := parseShadowList(st.BoxShadow)
-		op := CumulativeOpacity(box)
+		op := paintOpacity(box, info)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
 	}
 	// background-image: url(...) — decode and draw with size/position.
@@ -266,7 +281,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		}
 		// Color beneath the layers.
 		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
-			bgc = ApplyOpacityToColor(bgc, CumulativeOpacity(box))
+			bgc = ApplyOpacityToColor(bgc, paintOpacity(box, info))
 			if r > 0 {
 				info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bgc)
 			} else {
@@ -305,7 +320,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		log.Printf("[dbg/paintbg] %s rect=(%.0f,%.0f %.0fx%.0f) col=#%02x%02x%02x alpha=%d",
 			elName, rect.X, rect.Y, rect.Width, rect.Height, bg.R, bg.G, bg.B, bg.A)
 	}
-	bg = ApplyOpacityToColor(bg, CumulativeOpacity(box))
+	bg = ApplyOpacityToColor(bg, paintOpacity(box, info))
 	if bg.A == 0 {
 		return
 	}
@@ -318,7 +333,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	// left shadow casts onto the element's own background.
 	if st.BoxShadow != "" && st.BoxShadow != "none" {
 		shadows := parseShadowList(st.BoxShadow)
-		op := CumulativeOpacity(box)
+		op := paintOpacity(box, info)
 		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), lengthValue(st.BorderRadius), shadows, op, true)
 	}
 }
@@ -348,7 +363,7 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	if !info.intersects(rectFromLayout(x, y, w, h)) {
 		return
 	}
-	op := CumulativeOpacity(box)
+	op := paintOpacity(box, info)
 	// When border-radius is set, draw the border as a single stroked rounded
 	// rectangle so the corners follow the curve. Using FillRect sides here
 	// would paint sharp rectangular corners that cover the rounded background
@@ -621,7 +636,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	if col.A == 0 {
 		return
 	}
-	col = ApplyOpacityToColor(col, CumulativeOpacity(text))
+	col = ApplyOpacityToColor(col, paintOpacity(text, info))
 	if col.A == 0 {
 		return
 	}
@@ -654,7 +669,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// Paint text-shadow: draw the text once per shadow in the shadow color.
 	textShadows := parseShadowList(st.TextShadow)
 	if len(textShadows) > 0 {
-		opacity := CumulativeOpacity(text)
+		opacity := paintOpacity(text, info)
 		for _, seg := range segments {
 			end := seg.Start + seg.Len
 			if seg.Start < 0 || end > len(runes) {

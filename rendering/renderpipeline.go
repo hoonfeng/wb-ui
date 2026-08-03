@@ -120,7 +120,15 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
 			}
 		}
-		paintLayerContents(layer, info)
+		if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 {
+			info.canvas.SaveLayerWithOpacity(st.Opacity)
+			info.opacityLayerDepth++
+			paintLayerContents(layer, info)
+			info.opacityLayerDepth--
+			info.canvas.Restore()
+		} else {
+			paintLayerContents(layer, info)
+		}
 		info.canvas.Restore()
 		// Rebalance the save stack for the outer recursion: ancestors'
 		// saves were popped by RestoreToCount; push a fresh save so the
@@ -133,7 +141,21 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		_ = layerRect
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}
-	paintLayerContents(layer, info)
+	// CSS opacity<1: the whole subtree paints into an offscreen transparency
+	// layer that composites at `opacity` on restore — the browser's
+	// flatten-then-fade semantics. Painters skip their own CumulativeOpacity
+	// multiplication while inside (opacityLayerDepth > 0) so text/border are
+	// composited inside the layer and the single fade produces the same
+	// solid dark text and invisible border as the browser.
+	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 {
+		info.canvas.SaveLayerWithOpacity(st.Opacity)
+		info.opacityLayerDepth++
+		paintLayerContents(layer, info)
+		info.opacityLayerDepth--
+		info.canvas.Restore()
+	} else {
+		paintLayerContents(layer, info)
+	}
 	info.canvas.Restore()
 }
 
