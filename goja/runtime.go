@@ -2889,6 +2889,27 @@ func (r *Runtime) leave() {
 	r.vm.stack = nil
 }
 
+// RunJobs runs all queued Promise microtasks (jobs). goja runs them implicitly
+// when a top-level RunProgram returns (leave), but Runtime.Call does NOT
+// trigger leave — so embedders that drive JS via Call (e.g. DOM event
+// dispatch → Vue @click handler) must call RunJobs explicitly, otherwise
+// Promise.then callbacks (Vue's reactive scheduler) never run and the DOM
+// stays stale.
+//
+// Unlike leave() this does NOT reset vm.stack — RunJobs may be called from
+// inside a running script (e.g. a native DOM dispatchEvent handler calling
+// back into JS), where clearing the stack would corrupt the VM.
+func (r *Runtime) RunJobs() {
+	var jobs []func()
+	for len(r.jobQueue) > 0 {
+		jobs, r.jobQueue = r.jobQueue, jobs[:0]
+		for _, job := range jobs {
+			job()
+		}
+	}
+	r.jobQueue = nil
+}
+
 // called when the top level function returns (i.e. control is passed outside the Runtime) but it was due to an interrupt
 func (r *Runtime) leaveAbrupt() {
 	r.jobQueue = nil

@@ -58,6 +58,11 @@ func (l *jsListener) HandleEvent(e dom.Event) {
 	// 'this' for a bare function callback is undefined (matching addEventListener
 	// semantics where the callback is invoked as a plain call, not a method).
 	_, err := l.interp.Call(l.fn, jsc.Undefined(), []jsc.JSValue{ev})
+	// ★ Flush goja's Promise microtasks: Vue's @click handler mutates reactive
+	// state and schedules the DOM update via Promise.resolve().then. Runtime.Call
+	// does NOT run those jobs (only RunProgram does), so without this the DOM
+	// stays stale and every click looks like it "does nothing".
+	l.interp.RunJobs()
 	if os.Getenv("WB_EVT_DEBUG") != "" && err != nil {
 		fmt.Printf("[evt] jsListener call error: %v\n", err)
 	}

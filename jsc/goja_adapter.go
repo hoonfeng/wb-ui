@@ -126,6 +126,15 @@ func (r *Interpreter) Call(fn JSValue, this JSValue, args []JSValue) (JSValue, e
 	return JSValue{v: result, interp: r}, nil
 }
 
+// RunJobs flushes goja's native Promise microtask queue. goja runs these
+// implicitly when RunProgram returns, but Runtime.Call does NOT — so after
+// invoking a JS callback via Call (DOM event dispatch → Vue @click handler),
+// embedders must call RunJobs or Vue's reactive scheduler (Promise.then
+// based) never runs and the DOM never updates.
+func (r *Interpreter) RunJobs() {
+	r.vm.RunJobs()
+}
+
 // NewNativeFunction 在正确运行时创建原生函数（推荐用法）。
 func (r *Interpreter) NewNativeFunction(name string, fn NativeFunc, _ int) *JSFunction {
 	fv := r.wrapNativeFunc(fn, r)

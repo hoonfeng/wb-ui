@@ -318,6 +318,9 @@ func (el *EventLoop) flushMicrotasks() {
 		el.mu.Lock()
 		if len(el.microtasks) == 0 {
 			el.mu.Unlock()
+			// goja 的原生 Promise 微任务（Vue scheduler）也可能已排队
+			//（宏任务回调里 Promise.then）——一并 flush。
+			el.interp.RunJobs()
 			return
 		}
 		// 取出当前所有微任务（快照），清空队列。
@@ -351,6 +354,9 @@ func (el *EventLoop) executeCallback(cb JSValue) {
 	}
 	// 使用 Interpreter.Call 执行回调。
 	_, _ = el.interp.Call(cb, Undefined(), nil)
+	// ★ Flush goja 原生 Promise 微任务（Vue 响应式 scheduler 走
+	// Promise.resolve().then）——Runtime.Call 不会自动跑 jobQueue。
+	el.interp.RunJobs()
 }
 
 // ─── Runtime 池化（内存优化）─────────────────────────
