@@ -682,7 +682,7 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				if box := asRenderBox(ro); box != nil && len(segs) > 0 {
 					textRight := segs[0].X + segs[0].Width
 					frameRight := box.frame.X + box.frame.Width
-					if textRight > frameRight {
+					if textRight > frameRight && !renderIsFlexItem(ro) {
 						box.frame.Width = textRight - box.frame.X
 					}
 					textBottom := segs[0].Y + segs[0].Height
@@ -728,12 +728,32 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 			}
 		}
 		if maxRight > frameRight {
-			box.frame.Width = maxRight - box.frame.X
+			if !renderIsFlexItem(ro) {
+				box.frame.Width = maxRight - box.frame.X
+			}
 		}
 		if maxBottom > frameBottom {
 			box.frame.Height = maxBottom - box.frame.Y
 		}
 	}
+}
+
+// renderIsFlexItem reports whether ro is an in-flow child of a flex container.
+// Flex items' frame width must stay at the flex-resolved size (the text may
+// overflow and be ellipsized/clipped) — syncOne must NOT widen them back to
+// the raw text extent (that made a 238px flex-shrunk .item-name render 260px
+// and overflow its item-row).
+func renderIsFlexItem(ro RenderObject) bool {
+	lb := ro.LayoutBox()
+	if lb == nil || lb.Parent() == nil {
+		return false
+	}
+	pcs := lb.Parent().Style()
+	if pcs == nil {
+		return false
+	}
+	d := pcs.Display
+	return (d == style.DisplayFlex || d == style.DisplayInlineFlex) && !lb.IsAbsolutelyPositioned()
 }
 
 func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *layout.LayoutState) {

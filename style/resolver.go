@@ -222,11 +222,33 @@ func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
 // collectedDecl is an intermediate structure used during cascade sorting.
 // collectedDecl is an intermediate structure used during cascade sorting.
 type collectedDecl struct {
-	decl       css.Declaration
-	origin     css.Origin
-	important  bool
+	decl        css.Declaration
+	origin      css.Origin
+	important   bool
 	specificity css.Specificity
 	sourceOrder int
+	selector    string // matched rule selector text (diag only)
+}
+
+// keyStyleProp lists the layout-critical properties whose cascade history the
+// WB_DIAG=style probe logs (to surface wrong-override bugs).
+var keyStyleProp = map[string]bool{
+	"display": true, "position": true, "width": true, "height": true,
+	"min-width": true, "max-width": true, "min-height": true, "max-height": true,
+	"flex": true, "flex-grow": true, "flex-shrink": true, "flex-basis": true,
+	"flex-direction": true, "flex-wrap": true, "justify-content": true,
+	"align-items": true, "align-self": true, "gap": true,
+	"margin": true, "margin-top": true, "margin-right": true, "margin-bottom": true, "margin-left": true,
+	"padding": true, "padding-top": true, "padding-right": true, "padding-bottom": true, "padding-left": true,
+	"border": true, "border-width": true, "border-top-width": true, "border-right-width": true,
+	"border-bottom-width": true, "border-left-width": true,
+	"overflow": true, "overflow-x": true, "overflow-y": true,
+	"box-sizing": true, "grid-template-columns": true, "grid-template-rows": true,
+	"grid-template-areas": true, "grid-column": true, "grid-row": true,
+	"top": true, "right": true, "bottom": true, "left": true,
+	"background": true, "background-color": true, "color": true,
+	"font-size": true, "line-height": true, "white-space": true,
+	"text-overflow": true, "z-index": true, "opacity": true, "float": true,
 }
 
 // ResolveElement computes the ComputedStyle for the given element by walking the
@@ -288,6 +310,31 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	})
 
 	// Apply declarations in sorted order; later ones overwrite earlier ones.
+	diag := DiagEnabled("style")
+	if diag {
+		// Track how many distinct rules touched each key layout property so
+		// probes can spot cascade overrides (the "wrong value wins" class of
+		// bugs) — a single element where width/height/flex/overflow is set by
+		// several rules with different values is a prime suspect.
+		elTag := el.LocalName()
+		elCls := el.GetAttribute("class")
+		elID := el.GetAttribute("id")
+		elName := elTag
+		if elID != "" {
+			elName += "#" + elID
+		}
+		if elCls != "" {
+			elName += "." + strings.Fields(elCls)[0]
+		}
+		for _, cd := range collected {
+			pn := strings.ToLower(cd.decl.Name)
+			if keyStyleProp[pn] {
+				Diagf("style", "%s: %s = %q  via %s (origin=%d imp=%v spec=%d.%d.%d)",
+					elName, pn, cd.decl.ValueString(), cd.selector, cd.origin, cd.important,
+					cd.specificity.A, cd.specificity.B, cd.specificity.C)
+			}
+		}
+	}
 	for _, cd := range collected {
 		applyDeclaration(cs, cd.decl)
 	}
@@ -445,6 +492,7 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 								important:   d.Important,
 								specificity: spec,
 								sourceOrder: order,
+								selector:    sel.String(),
 							})
 							order++
 						}

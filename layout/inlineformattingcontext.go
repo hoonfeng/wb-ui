@@ -9,6 +9,23 @@ import (
 	"wb-ui/style"
 )
 
+// isFlexItem reports whether box is an in-flow child of a flex container
+// (its main size is decided by the flex algorithm, not by its own content).
+func isFlexItem(box *ElementBox) bool {
+	if box == nil || box.Parent() == nil {
+		return false
+	}
+	p := box.Parent()
+	if p.Style() == nil {
+		return false
+	}
+	disp := p.Style().Display
+	if disp != style.DisplayFlex && disp != style.DisplayInlineFlex {
+		return false
+	}
+	return box.IsInFlow() && !box.IsAbsolutelyPositioned()
+}
+
 type InlineFormattingContext struct {
 	FormattingContextBase
 }
@@ -99,7 +116,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// Get float context for text wrapping around floats.
 	fc := state.currentFloatContext()
 
-	// availableLineWidth returns the usable width for a line at the given page Y.
+// availableLineWidth returns the usable width for a line at the given page Y.
 	// When floats intrude at this Y, the line is narrowed accordingly.
 	availableLineWidth := func(lineY float64) (lineContentX, lineWidth float64) {
 		if fc != nil {
@@ -524,26 +541,35 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// syncOne sets the correct frame width. Without this, flex items with
 	// overflow:hidden would clip the text because their frame is narrower
 	// than the actual text content.
+	//
+	// EXCEPTION: flex items — their width is decided by the flex algorithm
+	// (base size ± grow/shrink) and MUST NOT be widened back to the raw text
+	// extent. A long file name in .item-name (overflow:hidden + ellipsis)
+	// previously got its 238px flex-shrunk width overwritten to 260px here,
+	// overflowing the item-row instead of ellipsizing — the "file names only
+	// show a few characters / overflow the row" report.
 	var totalWidth float64
-	for _, ps := range pending {
-		right := ps.seg.X + ps.seg.Width - contentX
-		if right > totalWidth {
-			totalWidth = right
-		}
-	}
-	// Also include inline ElementBox children's widths (e.g. span > anonymous
-	// wrapper > text). These children may have their own content width updated
-	// by their IFC, but the parent box's width needs to encompass them.
-	for _, child := range box.Children() {
-		if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
-			cg := state.GeometryForBox(eb)
-			if right := cg.Left() + cg.BorderBoxWidth() - contentX; right > totalWidth {
+	if !isFlexItem(box) {
+		for _, ps := range pending {
+			right := ps.seg.X + ps.seg.Width - contentX
+			if right > totalWidth {
 				totalWidth = right
 			}
 		}
-	}
-	if totalWidth > 0 {
-		g.SetContentWidth(totalWidth)
+		// Also include inline ElementBox children's widths (e.g. span > anonymous
+		// wrapper > text). These children may have their own content width updated
+		// by their IFC, but the parent box's width needs to encompass them.
+		for _, child := range box.Children() {
+			if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
+				cg := state.GeometryForBox(eb)
+				if right := cg.Left() + cg.BorderBoxWidth() - contentX; right > totalWidth {
+					totalWidth = right
+				}
+			}
+		}
+		if totalWidth > 0 {
+			g.SetContentWidth(totalWidth)
+		}
 	}
 
 	// Apply text-align adjustment AFTER setting content width so the shift
@@ -551,7 +577,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// the expanded auto-width estimate. Without this, text-align:center inside
 	// buttons lands the text at the wrong X because contentWidth was widened
 	// by +20 during auto-width expansion but then corrected to totalWidth.
-	contentWidth = totalWidth
+	if totalWidth > 0 {
+		contentWidth = totalWidth
+	}
 	if textAlign != style.TextAlignLeft && len(lines) > 0 {
 		for li, ln := range lines {
 			var used float64

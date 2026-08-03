@@ -57,6 +57,33 @@ func toGraphicsColor(c style.Color) graphics.Color {
 	return graphics.Color{R: c.R, G: c.G, B: c.B, A: c.A}
 }
 
+// textName returns a short identity (tag.class) for a RenderText's element.
+func textName(text *RenderText) string {
+	if text == nil || text.Node() == nil {
+		return "?"
+	}
+	if el, ok := text.Node().(*dom.Element); ok {
+		n := el.LocalName()
+		if cls := el.GetAttribute("class"); cls != "" {
+			n += "." + strings.Fields(cls)[0]
+		}
+		return n
+	}
+	return text.Node().NodeName()
+}
+
+// elText returns the trimmed text content of a RenderText.
+func elText(text *RenderText) string {
+	if text == nil {
+		return ""
+	}
+	t := text.Text()
+	if len(t) > 30 {
+		t = t[:30] + "…"
+	}
+	return t
+}
+
 // findTextOverflowAncestor walks up the render tree from the given RenderObject
 // to find the nearest ancestor with text-overflow:ellipsis. Returns its content
 // box rect, or nil if none found.
@@ -680,16 +707,26 @@ func PaintText(text *RenderText, info *PaintInfo) {
 
 	// ── text-overflow:ellipsis ──
 		// Walk segments sequentially from the left. Track cumulative width from the
-		// content box start. Once a segment's right edge exceeds the available width
-		// (content-box-width minus ellipsis-width), truncate it character-by-character,
-		// append "..." using the same font, and skip all remaining segments.
+		// content box start. The ellipsis only kicks in when text genuinely
+		// OVERFLOWS the content box (segRight > content width) — text that
+		// exactly fills the box (or fits) must be drawn verbatim. Previously
+		// maxTextRight = width − ellipsisWidth reserved the ellipsis even when
+		// nothing overflowed, so every item whose name exactly filled its
+		// container (e.g. "gou-ide" 49.4px in a 49.4px box) was truncated and
+		// gained a spurious "…" — the "file names only show a few characters"
+		// report.
 		if toCB != nil {
 			segRelX := seg.X - toCB.X // segment X relative to content box origin
 			segRight := segRelX + seg.Width
-			maxTextRight := toCB.Width - textEllipsisW // max allowed from content box origin
 
-			if segRight > maxTextRight {
-				// This segment overflows into the "..." zone.
+			if segRight > toCB.Width {
+				// Genuine overflow: now reserve room for the ellipsis.
+				maxTextRight := toCB.Width - textEllipsisW
+				if style.DiagEnabled("paint") {
+					elName := textName(text)
+					style.Diagf("paint", "ellipsis %s: segRight=%.1f toCB.w=%.1f maxTextRight=%.1f segX=%.1f text=%q",
+						elName, segRight, toCB.Width, maxTextRight, segRelX, elText(text))
+				}
 				if segRelX >= toCB.Width {
 					break
 				}
