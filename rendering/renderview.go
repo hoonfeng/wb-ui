@@ -246,8 +246,17 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 	pb := box.PaddingBoxRect()
 	var maxRight, maxBottom float64
 	found := false
-	walkRenderChildren(box, func(child RenderObject) {
-		if cb := asRenderBox(child); cb != nil {
+	// ★ Custom recursion that SKIPS subtrees of overflow-clipping containers
+	// (auto/scroll/hidden): their clipped content (e.g. .project-section's
+	// file tree reaching y=2080) must not inflate an ANCESTOR's content size,
+	// or sidebar-content grows a spurious scrollbar on top of the container's
+	// own one ("three scrollbars" / hover-background-covers-scrollbar).
+	var walk func(o RenderObject)
+	walk = func(o RenderObject) {
+		if o == nil {
+			return
+		}
+		if cb := asRenderBox(o); cb != nil {
 			if r := cb.frame.X + cb.frame.Width; r > maxRight {
 				maxRight = r
 			}
@@ -255,23 +264,37 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 				maxBottom = b
 			}
 			found = true
-		}
-		if _, ok := child.(*RenderText); ok {
-			if rt, ok2 := child.(*RenderText); ok2 {
-				for _, seg := range rt.Segments() {
-					if r := seg.X + seg.Width; r > maxRight {
-						maxRight = r
-					}
-					if b := seg.Y + seg.Height; b > maxBottom {
-						maxBottom = b
-					}
-					found = true
-				}
+			if st := cb.Style(); st != nil && overflowClipsContentStyle(st) {
+				return // content clipped: do not recurse into this subtree
 			}
 		}
-	})
+		if rt, ok := o.(*RenderText); ok {
+			for _, seg := range rt.Segments() {
+				if r := seg.X + seg.Width; r > maxRight {
+					maxRight = r
+				}
+				if b := seg.Y + seg.Height; b > maxBottom {
+					maxBottom = b
+				}
+				found = true
+			}
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	for c := box.FirstChild(); c != nil; c = c.NextSibling() {
+		walk(c)
+	}
+	_ = pb
 
-	// Form controls (input/textarea) carry their text in value/textContent,
+	// overflowClipsContentStyle reports whether either overflow axis clips content
+	// (auto/scroll/hidden). BoxContentSize skips clipped subtrees so an ancestor's
+	// content size never includes a scroll container's overflowing children.
+	// (Defined below; see also page/frameview.go updateContentSize for the same
+	// rule at frame level.)
+
+// Form controls (input/textarea) carry their text in value/textContent,
 	// not as render-tree children — measure it so scrollbars appear when the
 	// text overflows (a pre-mode textarea scrolls horizontally, a long input
 	// scrolls too). The scroll extent must at least cover the control.
@@ -363,6 +386,22 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 		ch = 0
 	}
 	return cw, ch
+}
+
+// overflowClipsContentStyle reports whether either overflow axis clips content
+// (auto/scroll/hidden). BoxContentSize skips clipped subtrees so an ancestor's
+// content size never includes a scroll container's overflowing children
+// (same rule as page/frameview.go updateContentSize).
+func overflowClipsContentStyle(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	return st.OverflowX == style.OverflowHidden ||
+		st.OverflowX == style.OverflowAuto ||
+		st.OverflowX == style.OverflowScroll ||
+		st.OverflowY == style.OverflowHidden ||
+		st.OverflowY == style.OverflowAuto ||
+		st.OverflowY == style.OverflowScroll
 }
 
 // walkRenderChildren recursively visits all descendants of root.
