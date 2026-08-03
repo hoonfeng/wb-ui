@@ -455,54 +455,60 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	}
 	// ★ 竖线 = 圆角矩形的一条边（如 conv-item.active 的 border-left: 2px +
 	//   border-radius: 6px）。用户反馈："竖线相当于矩形的一条边，就是个蓝色
-	//   阴影"——即竖线贴着矩形左边界，圆角处沿外弧 r 弯曲（包着圆角矩形），
-	//   不是独立竖线两端自己的圆角。
-	// 实现：中段直边（width 宽矩形）+ 端部沿外弧 r 的描边带（采样 24 段，
-	// 消除 StrokePath 折线锯齿）。
-	arcPts := func(cx, cy, rad, a0, a1 float64) []graphics.Point {
+	//   阴影"、"按样式的标准实现"、"标准实现不应该使用 StrokePath"。
+	// 标准 CSS border 渲染 = 填充几何：
+	//   ① 中段直边：FillRect（贴左缘 width 宽）
+	//   ② 圆角区域：外弧 r 与内弧 r-width 之间的月牙（FillPath 填充）
+	// 不用 StrokePath 描边——描边带沿切线投影会在弧陡峭处变窄（1px），
+	// 且折线有锯齿；月牙是"外弧到内弧的填充区域"，标准且平滑。
+	innerR := r - width
+	if innerR < 0 {
+		innerR = 0
+	}
+	// 月牙：圆心 (cx,cy)，外弧 r（a 从 a0 到 a1）+ 内弧 innerR 反向，
+	// FillPath 闭合填充（外弧与内弧之间的环带）。
+	lune := func(cx, cy, a0, a1 float64) {
 		n := 24
 		var pts []graphics.Point
 		for i := 0; i <= n; i++ {
 			a := a0 + (a1-a0)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
+			pts = append(pts, graphics.Point{X: cx + r*math.Cos(a), Y: cy + r*math.Sin(a)})
 		}
-		return pts
-	}
-	strokeArc := func(cx, cy, rad, a0, a1 float64) {
-		if pts := arcPts(cx, cy, rad, a0, a1); len(pts) >= 2 {
-			canvas.StrokePath(pts, width, col, "butt", "miter")
+		for i := 0; i <= n; i++ {
+			a := a1 + (a0-a1)*float64(i)/float64(n)
+			pts = append(pts, graphics.Point{X: cx + innerR*math.Cos(a), Y: cy + innerR*math.Sin(a)})
+		}
+		if len(pts) >= 3 {
+			canvas.FillPath(pts, col, false)
 		}
 	}
 	canvas.Save()
 	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
-	// 中段直边：从 y+3 到 y+h-3（Edge 圆角过渡约 3px，y+3 起全宽；矩形与
-	// 端部外弧描边带衔接，竖线全程不窄于 width）。
-	mid := 3.0
 	switch side {
 	case "left":
-		if h > 2*mid {
-			canvas.FillRect(x, y+mid, width, h-2*mid, col) // 中段直边（贴左缘 width 宽）
+		if h > 2*innerR {
+			canvas.FillRect(x, y+innerR, width, h-2*innerR, col) // 中段直边（贴左缘 width 宽）
 		}
-		strokeArc(x+r, y+r, r, 3*math.Pi/2, math.Pi)    // 左上外弧（顶→左）——标准：沿圆角矩形外边界
-		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
+		lune(x+r, y+r, 3*math.Pi/2, math.Pi)         // 左上月牙（外弧顶→左）
+		lune(x+r, y+h-r, math.Pi, math.Pi/2)          // 左下月牙（外弧左→下）
 	case "right":
-		if h > 2*mid {
-			canvas.FillRect(x+w-width, y+mid, width, h-2*mid, col)
+		if h > 2*innerR {
+			canvas.FillRect(x+w-width, y+innerR, width, h-2*innerR, col)
 		}
-		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
-		strokeArc(x+w-r, y+h-r, r, 0, math.Pi/2)         // 右下外弧（右→下）
+		lune(x+w-r, y+r, 3*math.Pi/2, 2*math.Pi)      // 右上月牙（外弧顶→右）
+		lune(x+w-r, y+h-r, 0, math.Pi/2)              // 右下月牙（外弧右→下）
 	case "top":
-		if w > 2*mid {
-			canvas.FillRect(x+mid, y, w-2*mid, width, col)
+		if w > 2*innerR {
+			canvas.FillRect(x+innerR, y, w-2*innerR, width, col)
 		}
-		strokeArc(x+r, y+r, r, math.Pi, 3*math.Pi/2)     // 左上外弧（左→顶）
-		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
+		lune(x+r, y+r, math.Pi, 3*math.Pi/2)          // 左上月牙（外弧左→顶）
+		lune(x+w-r, y+r, 3*math.Pi/2, 2*math.Pi)      // 右上月牙（外弧顶→右）
 	case "bottom":
-		if w > 2*mid {
-			canvas.FillRect(x+mid, y+h-width, w-2*mid, width, col)
+		if w > 2*innerR {
+			canvas.FillRect(x+innerR, y+h-width, w-2*innerR, width, col)
 		}
-		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
-		strokeArc(x+w-r, y+h-r, r, math.Pi/2, 0)         // 右下外弧（下→右）
+		lune(x+r, y+h-r, math.Pi, math.Pi/2)          // 左下月牙（外弧左→下）
+		lune(x+w-r, y+h-r, math.Pi/2, 0)              // 右下月牙（外弧下→右）
 	}
 	canvas.Restore()
 }
