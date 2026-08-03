@@ -138,6 +138,7 @@ const (
 	PseudoElementViewTransitionNew
 	PseudoElementWebkitScrollbar
 	PseudoElementWebkitScrollbarThumb
+	PseudoElementWebkitScrollbarTrack
 )
 
 // SimpleSelector is one component of a compound selector: a tag, an id, a class, an
@@ -624,6 +625,8 @@ func LookupPseudoElement(name string) PseudoElement {
 		return PseudoElementWebkitScrollbar
 	case "-webkit-scrollbar-thumb":
 		return PseudoElementWebkitScrollbarThumb
+	case "-webkit-scrollbar-track":
+		return PseudoElementWebkitScrollbarTrack
 	}
 	return PseudoElementUnknown
 }

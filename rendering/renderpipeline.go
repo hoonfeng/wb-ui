@@ -497,8 +497,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								goto endV
 							}
 
-							// Track background.
-							info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+							// Track background (transparent track from ::-webkit-scrollbar-track
+							// { background: transparent } is skipped — browser shows only the thumb).
+							if trackCol.A > 0 {
+								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+							}
 
 // Up arrow: rounded triangle matching horizontal arrow proportions.
 						upBtnY := vy
@@ -546,8 +549,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									goto endH
 								}
 
-								// Track background.
+							// Track background (transparent → skip, browser-style).
+							if trackCol.A > 0 {
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
+							}
 
 												// Left arrow.
 						ltBtnX := hx
@@ -581,8 +586,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							}
 							endH:
 
-							// Corner fill.
-							if needsV && needsH {
+							// Corner fill (transparent track → skip).
+							if needsV && needsH && trackCol.A > 0 {
 								cx := pb.X + pb.Width - scrollW
 								cy := pb.Y + pb.Height - scrollW
 								info.canvas.FillRect(cx, cy, scrollW, scrollW, trackCol)

@@ -2234,8 +2234,8 @@ func applyDefaultDisplay(cs *ComputedStyle, el *dom.Element) {
 
 // parentElement returns the parent element of el, or nil if the parent is not an
 // webkitScrollbarPseudo returns which ::-webkit-scrollbar pseudo-element the
-// complex selector's LAST compound targets: 1=scrollbar-thumb, 0=scrollbar,
-// -1=none (not a webkit scrollbar selector).
+// complex selector's LAST compound targets: 1=scrollbar-thumb, 2=scrollbar-track,
+// 0=scrollbar, -1=none (not a webkit scrollbar selector).
 func webkitScrollbarPseudo(sel *css.ComplexSelector) int {
 	if sel == nil || len(sel.Compounds) == 0 {
 		return -1
@@ -2250,6 +2250,8 @@ func webkitScrollbarPseudo(sel *css.ComplexSelector) int {
 			return 0
 		case css.PseudoElementWebkitScrollbarThumb:
 			return 1
+		case css.PseudoElementWebkitScrollbarTrack:
+			return 2
 		}
 	}
 	return -1
@@ -2331,9 +2333,12 @@ func applyScrollbarDeclarations(cs *ComputedStyle, decls []collectedDecl) {
 		case "height":
 			cs.SetProperty("-webkit-scrollbar-height", val)
 		case "background", "background-color":
-			if cd.sbKind == 1 {
+			switch cd.sbKind {
+			case 1:
 				cs.SetProperty("-webkit-scrollbar-thumb-color", val)
-			} else {
+			case 2:
+				cs.SetProperty("-webkit-scrollbar-track-color", val)
+			default:
 				cs.SetProperty("-webkit-scrollbar-track-color", val)
 			}
 		case "border-radius":
