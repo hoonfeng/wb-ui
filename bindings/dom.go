@@ -759,6 +759,26 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			sp := makeURLSearchParams(in, queryPart)
 			obj.Set("searchParams", jsc.ObjectValue(sp))
 			obj.Set("host", jsc.StringValue(obj.GetStr("hostname").ToString()))
+			// ★ URL.toString 必须包含 searchParams 的当前序列化。api.js 用
+			// new URL('/api/x', origin).searchParams.set(k,v) 再 toString()
+			// 构造带 query 的请求 URL——若不拼回，/api/fs/list?path=... 的
+			// path 参数丢失，fs/list 回退到默认工作区，所有根目录列出同一目录。
+			obj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					qs := ""
+					if fn := sp.GetStr("toString"); fn.IsCallable() {
+						if r, err := in.Call(fn, jsc.ObjectValue(sp), nil); err == nil {
+							qs = r.ToString()
+						}
+					}
+					if qs != "" {
+						if strings.Contains(href, "?") {
+							return jsc.StringValue(href + "&" + qs)
+						}
+						return jsc.StringValue(href + "?" + qs)
+					}
+					return jsc.StringValue(href)
+				}, 0)))
 			return obj
 		})))
 

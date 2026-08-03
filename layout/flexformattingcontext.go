@@ -549,7 +549,15 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			if raw == "" {
 				continue
 			}
-			h := fontLineGap(box)
+			// ★ Text line height honors the element's CSS line-height first
+			// (ws-name line-height:1.2 → 15.6), falling back to font metrics
+			// (Arial 13px ≈ 17.2) only when line-height is unset/normal.
+			// Using font metrics unconditionally inflated .ws-item 28→28.8px
+			// (Edge 28px) and shifted project-section 6px down.
+			h := cssLineHeight(box)
+			if h <= 0 {
+				h = fontLineGap(box)
+			}
 			if isColFlex { total += h }
 			if h > maxH { maxH = h }
 		}
