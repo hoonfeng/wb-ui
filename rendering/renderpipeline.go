@@ -99,6 +99,11 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	}
 	if isFixedLayer {
 		info.canvas.ResetClip()
+		// Fixed layers paint against the viewport: discard inherited
+		// scroll translates (page-level and per-box) while keeping the
+		// device content scale. Without this a dialog inside a scrolled
+		// sidebar-content renders at the sidebar's scrolled position.
+		info.canvas.ResetFixedTransform()
 		// The fixed element's OWN overflow still clips its subtree.
 		if st := layer.Owner().Style(); st != nil &&
 			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {

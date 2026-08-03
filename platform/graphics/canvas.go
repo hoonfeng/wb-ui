@@ -284,6 +284,22 @@ func (c *Canvas) Scale(sx, sy float64) {
 	c.invalidatePixels()
 }
 
+// ResetFixedTransform keeps the current scale (device content scale) but
+// drops every accumulated translate, so a fixed-position layer paints
+// against the viewport instead of inheriting ancestor scroll offsets.
+// The browser never scrolls a fixed element with its containing block, so
+// both the page-level scroll translate and per-box overflow translates must
+// be discarded here (clip is handled separately by ResetClip).
+func (c *Canvas) ResetFixedTransform() {
+	sx, sy := c.state.scaleX, c.state.scaleY
+	c.state.translateX, c.state.translateY = 0, 0
+	c.canvas.ResetMatrix()
+	if sx != 1 || sy != 1 {
+		c.canvas.Scale(float32(sx), float32(sy))
+	}
+	c.invalidatePixels()
+}
+
 // Rotate composes a rotation (clockwise degrees) into the current transform,
 // mirroring GraphicsContext::rotate(). The rotation is about the current origin.
 func (c *Canvas) Rotate(degrees float64) {
