@@ -49,6 +49,9 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	info := NewPaintInfo(canvas, paintRect)
 	info.rv = view
 	info.SetDirtyCheckEnabled(view.IsDirty())
+	// Record the save depth at entry so fixed layers can restore to a
+	// clip-free state via RestoreToCount (see paintLayerTree).
+	info.initialSaveCount = canvas.SaveCount()
 
 	// Apply scroll offset as a canvas translate.
 	scrollX, scrollY := view.ScrollOffset()
@@ -98,13 +101,18 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		}
 	}
 	if isFixedLayer {
-		info.canvas.ResetClip()
-		// Fixed layers paint against the viewport: discard inherited
-		// scroll translates (page-level and per-box) while keeping the
-		// device content scale. Without this a dialog inside a scrolled
-		// sidebar-content renders at the sidebar's scrolled position.
+		// ★ Fixed-position layers paint against the viewport. The previous
+		// approach — ResetClip via SkClipOp::kReplace — is BROKEN on Skia's
+		// GPU backend: it turns the clip into an EMPTY clip, so every
+		// subsequent draw (overlay background, dialog box) is culled and
+		// the dialog never appears (raster is fine, GPU is not).
+		// Reliable alternative: RestoreToCount to the Paint-entry depth
+		// (clip-free), then Save + ResetFixedTransform (keep device scale,
+		// drop inherited scroll translates). The fixed element's own
+		// overflow still clips its subtree.
+		info.canvas.RestoreToCount(info.initialSaveCount)
+		info.canvas.Save()
 		info.canvas.ResetFixedTransform()
-		// The fixed element's OWN overflow still clips its subtree.
 		if st := layer.Owner().Style(); st != nil &&
 			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
 			if rb := asRenderBox(layer.Owner()); rb != nil {
@@ -112,10 +120,27 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
 			}
 		}
+		paintLayerContents(layer, info)
+		info.canvas.Restore()
+		// Rebalance the save stack for the outer recursion: ancestors'
+		// saves were popped by RestoreToCount; push a fresh save so the
+		// outer Restore() has a matching entry. Later siblings paint in the
+		// clip-free viewport state, which is correct for fixed layers.
+		info.canvas.RestoreToCount(info.initialSaveCount)
+		info.canvas.Save()
+		return
 	} else if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
 		_ = layerRect
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}
+	paintLayerContents(layer, info)
+	info.canvas.Restore()
+}
+
+// paintLayerContents paints the layer owner's subtree (excluding child layer
+// owners) then recurses into child layers in CSS stacking order. Shared by the
+// fixed-layer branch (clip-free viewport state) and the normal branch.
+func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	paintLayerContent(layer, info)
 
 	// Collect child layers and bucket them by stacking position.
@@ -146,7 +171,6 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	for _, child := range pos {
 		paintLayerTree(child, info)
 	}
-	info.canvas.Restore()
 }
 
 // layerZIndex returns the owner's effective z-index for stacking. A z-index only

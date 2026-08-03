@@ -213,6 +213,21 @@ func (c *Canvas) Save() {
 	c.canvas.Save()
 }
 
+// SaveCount returns the current save-stack depth (delegates to Skia).
+func (c *Canvas) SaveCount() int {
+	return c.canvas.SaveCount()
+}
+
+// RestoreToCount pops the save stack down to the given depth. Used by the
+// renderer to discard every ancestor clip for fixed-position layers.
+func (c *Canvas) RestoreToCount(count int) {
+	for len(c.states) > count {
+		c.states = c.states[:len(c.states)-1]
+	}
+	c.canvas.RestoreToCount(count)
+	c.invalidatePixels()
+}
+
 // SaveLayerWithOpacity pushes an offscreen layer that is composited with the
 // given opacity (0.0�?.0) when Restore is called. This mirrors
 // GraphicsContext::beginTransparencyLayer() and is used for CSS opacity.
@@ -372,10 +387,10 @@ func (c *Canvas) Clip(r Rect) {
 func (c *Canvas) HasClip() bool { return c.state.hasClip }
 
 // ResetClip replaces the current clip with the full canvas surface, discarding
-// any ancestor clip. This lets fixed-position layers (dialog overlays, menus)
-// paint over the whole viewport even when their DOM ancestor has overflow:
-// auto — the browser never clips a fixed element by ancestor overflow unless
-// that ancestor establishes a containing block (transform/filter/perspective).
+// any ancestor clip. ⚠️ NOTE: this uses SkClipOp::kReplace (=5, non-standard)
+// which works on raster but Skia's GPU backend turns into an EMPTY clip —
+// fixed-position layers (dialogs/overlays) must NOT use this; paintLayerTree
+// handles them via RestoreToCount(initialSaveCount) instead.
 func (c *Canvas) ResetClip() {
 	c.canvas.ClipRect(skia.RectXYWH(0, 0, float32(c.width), float32(c.height)), skia.ClipOpReplace, false)
 	c.state.hasClip = false

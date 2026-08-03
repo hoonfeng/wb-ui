@@ -61,6 +61,12 @@ type PaintInfo struct {
 	// true (full repaint). Enabled by default.
 	dirtyCheckEnabled bool
 
+	// initialSaveCount is the canvas save-stack depth at Paint entry.
+	// Fixed-position layers use RestoreToCount(initialSaveCount) to discard
+	// every ancestor clip (a GPU-reliable alternative to ClipOpReplace,
+	// which Skia's GPU backend turns into an empty clip).
+	initialSaveCount int
+
 // textOverflowEllipsisPainted is set by PaintText when it draws the
 	// ellipsis during text-overflow:ellipsis truncation, so that
 	// walkSubtreeExcluded skips its own ellipsis paint for this container.
