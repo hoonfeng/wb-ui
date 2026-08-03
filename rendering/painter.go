@@ -479,8 +479,11 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			} else {
 				yy = y + h - 1 - float64(i)
 			}
-			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧），竖线带中心=外弧再左移 width
-			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - width - 0.5
+			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧）。Edge 实测弧带中心线
+			// 左移量随行数递减：i=0 左移 width+0.5，i=1 左移 width-1，i=2 右移 0.5，
+			// 逐像素匹配 Edge（Chromium）：
+			//   y=100: x+2..x+4（3px） y=101: x..x+2（3px） y=102: x+1..x+2（2px）
+			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - width - 0.5 + 1.5*float64(i)
 			bw := width + 1
 			if i >= 2 {
 				bw = width
@@ -501,7 +504,7 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			} else {
 				xx = x + w - 1 - float64(i)
 			}
-			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx)) - width - 0.5
+			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx)) - width - 0.5 + 1.5*float64(i)
 			bw := width + 1
 			if i >= 2 {
 				bw = width
