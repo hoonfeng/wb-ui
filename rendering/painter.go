@@ -454,71 +454,86 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 		return
 	}
 	// ★ 竖线 = 圆角矩形的一条边（如 conv-item.active 的 border-left: 2px +
-	//   border-radius: 6px）。用户反馈："竖线相当于矩形的一条边，就是个蓝色
-	//   阴影"、"按样式的标准实现（不用 StrokePath）"、"应该是圆角矩形外部
-	//   实现的而不是内部"。
-	// Edge 实测（border_px_ref.html，背景=padding-box 左缘 x+width）：
-	//   竖线中段 x..x+width（背景外部）；弧带 y=box顶 处 x+width..x+width+2
-	//   （贴着背景左缘，在背景外部），不深入背景圆角内部。
-	// 实现：中段直边（贴左缘 width 宽）+ 端部月牙——圆心用内缩弧
-	//   (x+innerR, y+innerR)（innerR = r-width），外弧 innerR、内弧
-	//   innerR-width，FillPath 填充（无 StrokePath）。弧带贴在背景左缘
-	//   （x+width）外部，不伸进背景圆角。
-	innerR := r - width
-	if innerR < 0 {
-		innerR = 0
-	}
-	inner2 := innerR - width
-	if inner2 < 0 {
-		inner2 = 0
-	}
-	// 月牙：圆心 (cx,cy)，外弧 rad（a 从 a0 到 a1）+ 内弧 rad-width 反向。
-	lune := func(cx, cy, rad, a0, a1 float64) {
-		n := 24
-		var pts []graphics.Point
-		for i := 0; i <= n; i++ {
-			a := a0 + (a1-a0)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
-		}
-		ir := rad - width
-		if ir < 0 {
-			ir = 0
-		}
-		for i := 0; i <= n; i++ {
-			a := a1 + (a0-a1)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + ir*math.Cos(a), Y: cy + ir*math.Sin(a)})
-		}
-		if len(pts) >= 3 {
-			canvas.FillPath(pts, col, false)
-		}
-	}
+	//   border-radius: 6px）。用户反馈链：
+	//   "竖线相当于矩形的一条边，就是个蓝色阴影"
+	//   "渐细效果为啥没有呢？" / "圆角看着小很多，根本不是 CSS 里设置的圆角大小"
+	//   "会深入到内部的话，那就是层次问题，绘制在圆角矩形的低一层就不会被侵入"
+	// Edge 实测（border_px_ref.html）：竖线弧带沿 CSS 圆角（r=6px）渐细——
+	//   中段贴背景左缘（x..x+width），端部沿外弧向右渐细凸出 3px 高、3px→2px
+	//   渐细，弧带窄（不是外弧到内弧的宽月牙）。
+	// 实现：中段直边（贴左缘 width 宽）+ 端部逐行渐细带——中心线沿外弧 r
+	//   （圆心 x+r,y+r）左移 width，前 2 行宽 width+1（3px）、之后 width（2px），
+	//   FillRect 逐行填充（无 StrokePath，无锯齿）。
 	canvas.Save()
 	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+	// left/right：水平带（沿外弧，y 从端点向内 3 行，带宽 3px→2px 渐细）
+	taperH := func(top bool) {
+		cy := y + r
+		if !top {
+			cy = y + h - r
+		}
+		for i := 0; i <= 2; i++ {
+			var yy float64
+			if top {
+				yy = y + float64(i)
+			} else {
+				yy = y + h - 1 - float64(i)
+			}
+			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧），竖线带中心=外弧再左移 width
+			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - width - 0.5
+			bw := width + 1
+			if i >= 2 {
+				bw = width
+			}
+			canvas.FillRect(xc-bw/2, yy, bw, 1, col)
+		}
+	}
+	// top/bottom：垂直带（转置）
+	taperV := func(left bool) {
+		cx := x + r
+		if !left {
+			cx = x + w - r
+		}
+		for i := 0; i <= 2; i++ {
+			var xx float64
+			if left {
+				xx = x + float64(i)
+			} else {
+				xx = x + w - 1 - float64(i)
+			}
+			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx)) - width - 0.5
+			bw := width + 1
+			if i >= 2 {
+				bw = width
+			}
+			canvas.FillRect(xx, yc-bw/2, 1, bw, col)
+		}
+	}
 	switch side {
 	case "left":
-		if h > 2*innerR {
-			canvas.FillRect(x, y+innerR, width, h-2*innerR, col) // 中段直边（贴左缘 width 宽）
+		if h > 7 {
+			canvas.FillRect(x, y+3, width, h-7, col) // 中段直边（贴左缘 width 宽）
 		}
-		lune(x+innerR, y+innerR, innerR, 3*math.Pi/2, math.Pi)         // 左上（内缩弧贴背景左缘）
-		lune(x+innerR, y+h-innerR, innerR, math.Pi, math.Pi/2)         // 左下
+		taperH(true)  // 左上渐细带（沿外弧 r6）
+		taperH(false) // 左下渐细带
 	case "right":
-		if h > 2*innerR {
-			canvas.FillRect(x+w-width, y+innerR, width, h-2*innerR, col)
+		if h > 7 {
+			canvas.FillRect(x+w-width, y+3, width, h-7, col)
 		}
-		lune(x+w-innerR, y+innerR, innerR, 3*math.Pi/2, 2*math.Pi)      // 右上
-		lune(x+w-innerR, y+h-innerR, innerR, 0, math.Pi/2)              // 右下
+		taperH(true)
+		taperH(false)
 	case "top":
-		if w > 2*innerR {
-			canvas.FillRect(x+innerR, y, w-2*innerR, width, col)
+		if w > 7 {
+			canvas.FillRect(x+3, y, w-7, width, col)
 		}
-		lune(x+innerR, y+innerR, innerR, math.Pi, 3*math.Pi/2)          // 左上
-		lune(x+w-innerR, y+innerR, innerR, 3*math.Pi/2, 2*math.Pi)      // 右上
+		taperV(true)
+		taperV(false)
 	case "bottom":
-		if w > 2*innerR {
-			canvas.FillRect(x+innerR, y+h-width, w-2*innerR, width, col)
+		if w > 7 {
+			canvas.FillRect(x+3, y+h-width, w-7, width, col)
 		}
-		lune(x+innerR, y+h-innerR, innerR, math.Pi, math.Pi/2)          // 左下
-		lune(x+w-innerR, y+h-innerR, innerR, math.Pi/2, 0)              // 右下
+		taperV(true)
+		taperV(false)
 	}
 	canvas.Restore()
 }

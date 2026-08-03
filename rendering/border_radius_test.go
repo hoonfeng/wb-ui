@@ -61,11 +61,10 @@ func TestPaintBorderRadiusLeftSideRounded(t *testing.T) {
 	if px := canvas.PixelAt(11, 20); px.B < 200 {
 		t.Fatalf("left border mid (11,20) = %+v, want blue", px)
 	}
-	// 顶部弧带：y=10（box 顶）处竖线沿内缩弧（圆心 x+innerR）月牙填充——
-	// 弧带贴着背景左缘（x+width）外部，不深入背景圆角。box(10,10) innerR=4
-	// 弧带 x=11-13，(12,10) 应有蓝色。
-	if pxTop := canvas.PixelAt(12, 10); pxTop.A == 0 || pxTop.B < 150 {
-		t.Fatalf("left border top lune (12,10) = %+v, want blue (lune hugs bg left edge)", pxTop)
+	// 顶部渐细带：y=10（box 顶）处竖线沿外弧 r（6px 圆角）渐细凸出——
+	// box(10,10) 弧带 x=12-14，(13,10) 应有蓝色（沿 CSS 圆角渐细，与 Edge 一致）。
+	if pxTop := canvas.PixelAt(13, 10); pxTop.A == 0 || pxTop.B < 150 {
+		t.Fatalf("left border top taper (13,10) = %+v, want blue (arc band along r=6px)", pxTop)
 	}
 	// box 左上角外侧 (x=9, y=30) 应透明（clip 到 border-box，x>=10）。
 	if px := canvas.PixelAt(9, 30); px.A != 0 {
