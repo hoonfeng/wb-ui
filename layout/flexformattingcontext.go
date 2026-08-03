@@ -158,7 +158,15 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if wbFlexDebug {
 				fmt.Fprintf(os.Stderr, "[flex/est] %s estH=%.1f ch=%.1f\n", flexName(box), estH, ch)
 			}
-			if estH > ch {
+			if box.Parent() != nil && initialContentHeight > 0 {
+				// Parent set height (grid row stretch / explicit height /
+				// nested flex sizing) pins the container — do NOT inflate it
+				// to the tallest child. Without this, a row-flex grid item
+				// (e.g. .right-container holding the chat panel) ballooned to
+				// its 2397px content height instead of staying in its 748px
+				// grid row, pushing the conversation list and chat input off
+				// the viewport. Mirrors the column-flex branch below.
+			} else if estH > ch {
 				g.SetContentHeight(estH)
 				ch = estH
 			}

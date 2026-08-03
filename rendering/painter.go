@@ -401,6 +401,16 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	if midH <= 0 {
 		return
 	}
+	// ★ 圆角 per-side 边框：border-radius>0 但 fast path 不满足（典型：仅单边
+	//   有色边框，如 .conv-item.active 的 border-left: 2px solid var(--accent)）。
+	//   浏览器按 border-radius 圆角裁剪整条边框；这里用圆角 clip 包裹 per-side
+	//   矩形绘制，使可见边框两端沿圆角收尾（Edge 对 conv-item 选中蓝线即如此）。
+	radiusClip := false
+	if r := lengthValue(st.BorderRadius); r > 0 {
+		info.canvas.Save()
+		info.canvas.ClipRoundRect(x, y, w, h, r)
+		radiusClip = true
+	}
 	if leftW > 0 && st.BorderLeftStyle != "none" {
 		paintBorderSide(info.canvas, x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(blC), op), st.BorderLeftStyle)
 	}
@@ -414,6 +424,9 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	// color. Mirrors Edge pixel-for-pixel within anti-aliasing tolerance.
 	paintBorderCorners(info.canvas, x, y, w, h, topW, rightW, bottomW, leftW,
 		blC, brC, btC, bbC, op, st)
+	if radiusClip {
+		info.canvas.Restore()
+	}
 }
 
 // paintBorderCorners fills the 45°-beveled corner triangles for corners where
