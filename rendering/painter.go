@@ -22,7 +22,6 @@ package rendering
 
 import (
 	"log"
-	"math"
 	"strconv"
 	"strings"
 
@@ -453,91 +452,24 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	if width <= 0 || col.A == 0 || r <= 0 {
 		return
 	}
-	// Edge 实测（border_px_ref 逐像素对比）：单边边框 + border-radius =
-	//   ① 中段：box 内该边的 width 矩形，从内弧(r-width) 到达该边的 y 开始
-	//   ② 端部：内弧(r-width) 的描边带（弧带，从 box 角沿内弧弯曲）
-	// 中段矩形不覆盖端部（无 ClipRoundRect 的边界残留），端部由弧带负责。
-	innerR := r - width
-	if innerR < 0 {
-		innerR = 0
+	// ★ 普通圆角竖线：全高 width 矩形 + 两端小圆角（Skia 原生 FillRoundRect，
+	//   边缘光滑无锯齿）。用户反馈："就是普通圆角竖线更高一点点就能满足"。
+	//   圆角半径取 min(border-radius, width)——竖线两端圆角贴合 box 边缘，
+	//   长度接近 box 高（比"中段矩形 + 内弧描边带"方案更高、更简单）。
+	roundR := r
+	if roundR > width {
+		roundR = width
 	}
-	canvas.Save()
-	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
-	// ① 中段矩形
 	switch side {
 	case "left":
-		rectY := y + innerR
-		rectH := h - 2*innerR
-		if rectH > 0 {
-			canvas.FillRect(x, rectY, width, rectH, col)
-		}
+		canvas.FillRoundRect(x, y, width, h, roundR, col)
 	case "right":
-		rectY := y + innerR
-		rectH := h - 2*innerR
-		if rectH > 0 {
-			canvas.FillRect(x+w-width, rectY, width, rectH, col)
-		}
+		canvas.FillRoundRect(x+w-width, y, width, h, roundR, col)
 	case "top":
-		rectX := x + innerR
-		rectW := w - 2*innerR
-		if rectW > 0 {
-			canvas.FillRect(rectX, y, rectW, width, col)
-		}
+		canvas.FillRoundRect(x, y, w, width, roundR, col)
 	case "bottom":
-		rectX := x + innerR
-		rectW := w - 2*innerR
-		if rectW > 0 {
-			canvas.FillRect(rectX, y+h-width, rectW, width, col)
-		}
+		canvas.FillRoundRect(x, y+h-width, w, width, roundR, col)
 	}
-	// ② 端部弧带：内弧(r-width) 描边，clip 到端部区域（消除 StrokePath 在
-	// 内弧端点外的描边带残留——完整渲染 y=内弧端点处会多出 1px）
-	if innerR > 0 {
-		arcPts := func(cx, cy, rad, a0, a1 float64) []graphics.Point {
-			n := int(math.Abs(a1-a0) / (math.Pi / 12))
-			if n < 6 {
-				n = 6
-			}
-			var pts []graphics.Point
-			for i := 0; i <= n; i++ {
-				a := a0 + (a1-a0)*float64(i)/float64(n)
-				pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
-			}
-			return pts
-		}
-		strokeArc := func(cx, cy, rad, a0, a1 float64) {
-			if pts := arcPts(cx, cy, rad, a0, a1); len(pts) >= 2 {
-				canvas.StrokePath(pts, width, col, "butt", "miter")
-			}
-		}
-		switch side {
-		case "left":
-			canvas.Save()
-			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: innerR})
-			strokeArc(x+r, y+r, innerR, 3*math.Pi/2, math.Pi)
-			canvas.Restore()
-			canvas.Save()
-			canvas.Clip(graphics.Rect{X: x, Y: y + h - innerR, Width: w, Height: innerR})
-			strokeArc(x+r, y+h-r, innerR, math.Pi, math.Pi/2)
-			canvas.Restore()
-		case "right":
-			canvas.Save()
-			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: innerR})
-			strokeArc(x+w-r, y+r, innerR, 3*math.Pi/2, 2*math.Pi)
-			canvas.Restore()
-			canvas.Save()
-			canvas.Clip(graphics.Rect{X: x, Y: y + h - innerR, Width: w, Height: innerR})
-			strokeArc(x+w-r, y+h-r, innerR, 0, math.Pi/2)
-			canvas.Restore()
-		case "top":
-			strokeArc(x+r, y+r, innerR, math.Pi, 3*math.Pi/2)
-			strokeArc(x+w-r, y+r, innerR, 3*math.Pi/2, 2*math.Pi)
-		case "bottom":
-			strokeArc(x+r, y+h-r, innerR, math.Pi, math.Pi/2)
-			strokeArc(x+w-r, y+h-r, innerR, math.Pi/2, 0)
-		}
-	}
-	canvas.Restore()
 }
 
 func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, bottomW, leftW float64,
