@@ -141,6 +141,11 @@ func (m *FontManager) loadDir(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[fontmgr] read dir %s failed: %v\n", dir, err)
+		// 目录不可用（如 InitFontManager("")）时仍执行 selectDefaults：
+		// 默认字体通过 skia.NewTypeface 按 OS 字体名查找（Microsoft YaHei
+		// / Consolas / SimSun 等），不依赖本目录已加载的文件，保证文本
+		// 始终可渲染。
+		m.selectDefaults()
 		return
 	}
 	for _, e := range entries {

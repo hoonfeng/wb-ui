@@ -110,7 +110,12 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	c.distributeFreeSpace(items, mainSize, isRow)
+	wrapMode := cs.FlexWrap == "wrap" || cs.FlexWrap == "wrap-reverse"
+	if wrapMode && len(items) > 0 {
+		// flex-wrap: wrap / wrap-reverse：按行分组布局（CSS-FLEXBOX §8）。
+		c.layoutWrapped(items, box, isRow, isReverse, cw, ch, state)
+	} else {
+		c.distributeFreeSpace(items, mainSize, isRow)
 
 	// Before resolving cross sizes and positions, compute a preliminary
 	// container content height from children so that cross-axis centering
@@ -189,8 +194,13 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state)
-	c.applyPositions(items, box, isRow, isReverse, false, state)
+		crossStart := g.ContentBoxTop()
+		if !isRow {
+			crossStart = g.ContentBoxLeft()
+		}
+		c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state, ch)
+		c.applyPositions(items, box, isRow, isReverse, false, state, crossStart)
+	}
 
 	// Lay out absolute-positioned children against this flex container as
 	// their containing block (CSS-FLEXBOX §5.1). Deferred to after items so
@@ -230,6 +240,116 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			g.SetContentHeight(blockSize)
 		}
 	}
+}
+
+// layoutWrapped 处理 flex-wrap:wrap / wrap-reverse：将 items 按主轴空间
+// 分组为多行（CSS-FLEXBOX §9.1：行基于 flex base size 确定，超宽换行），
+// 每行独立分配主轴空间（distributeFreeSpace）并定位；跨轴方向行间递增。
+// 行内 justify-content / align-items 与单行共用 applyPositions（传行起点）。
+func (c *FlexFormattingContext) layoutWrapped(items []*flexItem, container *ElementBox, isRow, isReverse bool, cw, ch float64, state *LayoutState) {
+	cs := container.Style()
+	g := state.GeometryForBox(container)
+	mainSize := cw
+	if !isRow {
+		mainSize = ch
+	}
+	gapMain := flexGap(cs, isRow, fontSizeOf(container))
+	gapCross := flexGap(cs, !isRow, fontSizeOf(container))
+	wrapReverse := cs.FlexWrap == "wrap-reverse"
+
+	// 1. 行分组：累计 base+margin+gap，超 mainSize 开新行。
+	//    mainSize<=0（auto 容器）时无法判断换行，全部放一行。
+	var lines [][]*flexItem
+	var cur []*flexItem
+	used := 0.0
+	first := true
+	for _, it := range items {
+		it.targetSize = it.baseSize
+		it.hypothetical = it.baseSize
+		need := it.baseSize + it.marginMain
+		if !first {
+			need += gapMain
+		}
+		if !first && mainSize > 0 && used+need > mainSize {
+			lines = append(lines, cur)
+			cur = nil
+			used = 0
+			first = true
+			need = it.baseSize + it.marginMain
+		}
+		cur = append(cur, it)
+		used += need
+		first = false
+	}
+	if len(cur) > 0 {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		return
+	}
+	if wrapReverse {
+		// wrap-reverse：第一行在跨轴末端，行序反转。
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+	}
+
+	// 2. 每行：分配主轴空间 + 计算行跨轴尺寸（stretch 用行高）。
+	lineHeights := make([]float64, len(lines))
+	for li, line := range lines {
+		c.distributeFreeSpace(line, mainSize, isRow)
+		maxH := 0.0
+		for _, it := range line {
+			if h := itemCrossSize(it, isRow, state); h > maxH {
+				maxH = h
+			}
+		}
+		if maxH <= 0 {
+			maxH = fontLineGap(container)
+		}
+		lineHeights[li] = maxH
+		c.resolveCrossSizes(line, isRow, isReverse, false, cw, ch, state, maxH)
+	}
+
+	// 3. 定位：跨轴起点从容器内容起点开始，行间 += 行高 + gap。
+	crossStart := g.ContentBoxTop()
+	if !isRow {
+		crossStart = g.ContentBoxLeft()
+	}
+	for li, line := range lines {
+		if li > 0 {
+			crossStart += lineHeights[li-1] + gapCross
+		}
+		c.applyPositions(line, container, isRow, isReverse, false, state, crossStart)
+	}
+}
+
+// itemCrossSize 返回 flex item 的跨轴尺寸（row 为高度、column 为宽度），
+// 用于 wrap 时确定行高。显式尺寸优先，其次布局几何，最后字体行高兜底。
+func itemCrossSize(it *flexItem, isRow bool, state *LayoutState) float64 {
+	g := state.GeometryForBox(it.box)
+	cs := it.box.Style()
+	fs := fontSizeOf(it.box)
+	if isRow {
+		if cs != nil {
+			if hv, ok := definiteHeight(cs.Height, 0, fs); ok && hv > 0 {
+				return hv
+			}
+		}
+		if h := g.BorderBoxHeight(); h > 0 {
+			return h
+		}
+		return fontLineGap(it.box) + g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
+	}
+	if cs != nil && !cs.Width.IsAuto() {
+		if wv, ok := definiteWidth(cs.Width, 0, fs); ok && wv > 0 {
+			return wv
+		}
+	}
+	if w := g.BorderBoxWidth(); w > 0 {
+		return w
+	}
+	return 0
 }
 
 func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth, cbHeight float64, state *LayoutState) *flexItem {
@@ -730,7 +850,7 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 	}
 }
 
-func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState) {
+func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState, lineCross float64) {
 	containerCS := c.Root().Style()
 	alignItems := "stretch"
 	if containerCS != nil && containerCS.AlignItems != "" {
@@ -760,7 +880,7 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				}
 				g.SetContentHeight(h)
 			} else if align == "stretch" {
-				stretchH := cbHeight - it.marginCross - g.VerticalBorderAndPadding()
+				stretchH := lineCross - it.marginCross - g.VerticalBorderAndPadding()
 				if stretchH < 0 { stretchH = 0 }
 				g.SetContentHeight(stretchH)
 			}
@@ -805,7 +925,7 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 	}
 }
 
-func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *ElementBox, isRow, isReverse, _ bool, state *LayoutState) {
+func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *ElementBox, isRow, isReverse, _ bool, state *LayoutState, crossStart float64) {
 	cg := state.GeometryForBox(container)
 	cx := cg.ContentBoxLeft()
 	cy := cg.ContentBoxTop()
@@ -814,11 +934,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	containerCS := container.Style()
 
 	mainPos := cx
-	crossPos := cy
+	crossPos := crossStart
 	if !isRow {
 		// Column flex: main axis is Y (vertical), cross axis is X (horizontal)
 		mainPos = cy
-		crossPos = cx
+		crossPos = crossStart
 	}
 	if isReverse {
 		if isRow { mainPos = cx + cw } else { mainPos = cy + ch }

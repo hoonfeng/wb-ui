@@ -284,10 +284,13 @@ func (b *RenderBox) IsInFlow() bool {
 	return !b.IsFloated() && !b.IsAbsolutelyPositioned()
 }
 
-// IsVisible reports whether this box should be rendered (display: none suppresses it),
-// mirroring RenderBox::isVisible().
+// IsVisible reports whether this box should be rendered, mirroring
+// RenderBox::isVisible(). display:none suppresses layout/paint entirely;
+// visibility:hidden keeps the box in layout (occupies space) but skips paint.
+// Both must be honoured here — the painter calls IsVisible before drawing
+// background/border/text.
 func (b *RenderBox) IsVisible() bool {
-	return b.style == nil || b.style.Display != style.DisplayNone
+	return b.style == nil || (b.style.Display != style.DisplayNone && b.style.Visibility == "visible")
 }
 
 // RenderName returns a debug name for the box.

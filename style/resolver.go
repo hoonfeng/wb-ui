@@ -1906,8 +1906,18 @@ func identValue(tokens []css.Token) string {
 // resolved by resolveCustomProperties. After substitution, known properties
 // are re-applied to typed fields so the layout/paint engine can read them.
 func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
-	if len(cs.CustomProperties) == 0 {
-		return // nothing to substitute
+	// 即使没有任何自定义属性也要解析 var()——未定义变量的 fallback 值
+	// （如 var(--undefined, blue)）仍应替换。只有属性值里完全没有 var(
+	// 才跳过。
+	hasVar := false
+	for _, raw := range cs.Properties {
+		if strings.Contains(raw, "var(") {
+			hasVar = true
+			break
+		}
+	}
+	if !hasVar {
+		return
 	}
 	for name, raw := range cs.Properties {
 		if !strings.Contains(raw, "var(") {

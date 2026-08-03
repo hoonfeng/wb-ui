@@ -15,6 +15,7 @@ import (
 	"wb-ui/bridge"
 	"wb-ui/dom"
 	"wb-ui/jsc"
+	"wb-ui/layout"
 	"wb-ui/page"
 	"wb-ui/platform/graphics"
 	"wb-ui/rendering"
@@ -34,7 +35,34 @@ type WebView struct {
 	width, height int
 }
 
+// ensureFonts initializes the global FontManager (if not already done) and
+// wires layout text measurement to real glyph metrics. Text rendering requires
+// a non-nil FontManager — without it inline text silently disappears (the
+// render_test / companion paths never called InitFontManager). Desktop hosts
+// (app.NewHost) may have already initialized with a bundled font directory;
+// GetFontManager() guards against re-initialization (InitFontManager is a
+// sync.Once).
+func ensureFonts() {
+	if graphics.GetFontManager() == nil {
+		// 空目录：selectDefaults 通过 skia.NewTypeface 按 OS 字体名查找
+		// （Microsoft YaHei / Consolas / SimSun），无需预加载字体文件。
+		_ = graphics.InitFontManager("")
+	}
+	if layout.MeasureTextFunc == nil {
+		layout.MeasureTextFunc = func(family string, size float64, weight int, style, text string) float64 {
+			return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style}, text)
+		}
+	}
+	if layout.FontMetricsFunc == nil {
+		layout.FontMetricsFunc = func(family string, size float64, weight int, style string) (float64, float64, float64) {
+			f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style}
+			return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
+		}
+	}
+}
+
 func NewWebView() *WebView {
+	ensureFonts()
 	settings := page.NewSettings()
 	p := page.NewPage(settings)
 	wv := &WebView{
