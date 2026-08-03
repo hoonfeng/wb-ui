@@ -41,7 +41,7 @@ func TestPaintBorderRadiusLeftSideRounded(t *testing.T) {
 	box.SetLocation(10, 10)
 	box.SetSize(40, 40)
 
-	// 先画背景（圆角），再画边框（走 per-side 路径 + 圆角 clip）。
+	// 先画背景（圆角），再画边框（per-side 路径 + 圆角外弧描边）。
 	paintObjectBackground(box, info)
 	PaintBorder(box, info)
 
@@ -49,19 +49,23 @@ func TestPaintBorderRadiusLeftSideRounded(t *testing.T) {
 	if px := canvas.PixelAt(11, 30); px.A == 0 || px.B < 200 {
 		t.Fatalf("left border mid (11,30) = %+v, want blue", px)
 	}
-	// 左上圆角外 (x=11, y=11)：radius 6 的圆弧在 y=11 处 x≈12，
-	// x=11 位于圆角外侧。修复前 per-side 矩形画到 (11,11)（全蓝 A=255）；
-	// 修复后圆角 clip 使该处仅剩抗锯齿渐变（A 明显 < 200）。
-	if px := canvas.PixelAt(11, 11); px.A >= 200 {
-		t.Fatalf("left border top corner (11,11) = %+v, want faded (rounded clip)", px)
+	// 竖线宽 2px：x=10 与 x=11 都蓝（clip 到 box 从 x=10 起）；x=12 应透明。
+	if px := canvas.PixelAt(10, 30); px.B < 200 {
+		t.Fatalf("left border outer col (10,30) = %+v, want blue", px)
 	}
-	// 左下圆角外 (x=11, y=49)（box 底 50，radius 6 → y=44 起圆角）。
-	if px := canvas.PixelAt(11, 49); px.A >= 200 {
-		t.Fatalf("left border bottom corner (11,49) = %+v, want faded (rounded clip)", px)
+	if px := canvas.PixelAt(12, 30); px.A != 0 {
+		t.Fatalf("left border right of width (12,30) = %+v, want transparent", px)
 	}
-	// 圆弧内侧点 (x=11, y=13)：radius 6 的左上角圆弧在 y=13 处 x≈10.8，
-	// x=11 位于圆弧内侧 → 左边框（x=10-12）在该处应已绘制。
+	// ★ 竖线沿圆角矩形外弧弯曲（"包着圆角矩形"）：左上外弧 r6 从 (16,10) 到
+	//   (10,16)，描边带在 y=10-11 处位于 x≈11-15（弧带，贴合圆角）。
+	if px := canvas.PixelAt(13, 10); px.B < 150 {
+		t.Fatalf("left border arc band top (13,10) = %+v, want blue (arc follows rounded rect)", px)
+	}
 	if px := canvas.PixelAt(11, 13); px.A == 0 || px.B < 150 {
 		t.Fatalf("left border inside corner (11,13) = %+v, want blue (inside radius)", px)
+	}
+	// box 左上角外侧 (x=9, y=30) 应透明（clip 到 border-box，x>=10）。
+	if px := canvas.PixelAt(9, 30); px.A != 0 {
+		t.Fatalf("left of box (9,30) = %+v, want transparent", px)
 	}
 }
