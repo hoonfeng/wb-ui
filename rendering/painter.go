@@ -455,28 +455,38 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	}
 	// ★ 竖线 = 圆角矩形的一条边（如 conv-item.active 的 border-left: 2px +
 	//   border-radius: 6px）。用户反馈："竖线相当于矩形的一条边，就是个蓝色
-	//   阴影"、"按样式的标准实现"、"标准实现不应该使用 StrokePath"。
-	// 标准 CSS border 渲染 = 填充几何：
-	//   ① 中段直边：FillRect（贴左缘 width 宽）
-	//   ② 圆角区域：外弧 r 与内弧 r-width 之间的月牙（FillPath 填充）
-	// 不用 StrokePath 描边——描边带沿切线投影会在弧陡峭处变窄（1px），
-	// 且折线有锯齿；月牙是"外弧到内弧的填充区域"，标准且平滑。
+	//   阴影"、"按样式的标准实现（不用 StrokePath）"、"应该是圆角矩形外部
+	//   实现的而不是内部"。
+	// Edge 实测（border_px_ref.html，背景=padding-box 左缘 x+width）：
+	//   竖线中段 x..x+width（背景外部）；弧带 y=box顶 处 x+width..x+width+2
+	//   （贴着背景左缘，在背景外部），不深入背景圆角内部。
+	// 实现：中段直边（贴左缘 width 宽）+ 端部月牙——圆心用内缩弧
+	//   (x+innerR, y+innerR)（innerR = r-width），外弧 innerR、内弧
+	//   innerR-width，FillPath 填充（无 StrokePath）。弧带贴在背景左缘
+	//   （x+width）外部，不伸进背景圆角。
 	innerR := r - width
 	if innerR < 0 {
 		innerR = 0
 	}
-	// 月牙：圆心 (cx,cy)，外弧 r（a 从 a0 到 a1）+ 内弧 innerR 反向，
-	// FillPath 闭合填充（外弧与内弧之间的环带）。
-	lune := func(cx, cy, a0, a1 float64) {
+	inner2 := innerR - width
+	if inner2 < 0 {
+		inner2 = 0
+	}
+	// 月牙：圆心 (cx,cy)，外弧 rad（a 从 a0 到 a1）+ 内弧 rad-width 反向。
+	lune := func(cx, cy, rad, a0, a1 float64) {
 		n := 24
 		var pts []graphics.Point
 		for i := 0; i <= n; i++ {
 			a := a0 + (a1-a0)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + r*math.Cos(a), Y: cy + r*math.Sin(a)})
+			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
+		}
+		ir := rad - width
+		if ir < 0 {
+			ir = 0
 		}
 		for i := 0; i <= n; i++ {
 			a := a1 + (a0-a1)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + innerR*math.Cos(a), Y: cy + innerR*math.Sin(a)})
+			pts = append(pts, graphics.Point{X: cx + ir*math.Cos(a), Y: cy + ir*math.Sin(a)})
 		}
 		if len(pts) >= 3 {
 			canvas.FillPath(pts, col, false)
@@ -489,26 +499,26 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 		if h > 2*innerR {
 			canvas.FillRect(x, y+innerR, width, h-2*innerR, col) // 中段直边（贴左缘 width 宽）
 		}
-		lune(x+r, y+r, 3*math.Pi/2, math.Pi)         // 左上月牙（外弧顶→左）
-		lune(x+r, y+h-r, math.Pi, math.Pi/2)          // 左下月牙（外弧左→下）
+		lune(x+innerR, y+innerR, innerR, 3*math.Pi/2, math.Pi)         // 左上（内缩弧贴背景左缘）
+		lune(x+innerR, y+h-innerR, innerR, math.Pi, math.Pi/2)         // 左下
 	case "right":
 		if h > 2*innerR {
 			canvas.FillRect(x+w-width, y+innerR, width, h-2*innerR, col)
 		}
-		lune(x+w-r, y+r, 3*math.Pi/2, 2*math.Pi)      // 右上月牙（外弧顶→右）
-		lune(x+w-r, y+h-r, 0, math.Pi/2)              // 右下月牙（外弧右→下）
+		lune(x+w-innerR, y+innerR, innerR, 3*math.Pi/2, 2*math.Pi)      // 右上
+		lune(x+w-innerR, y+h-innerR, innerR, 0, math.Pi/2)              // 右下
 	case "top":
 		if w > 2*innerR {
 			canvas.FillRect(x+innerR, y, w-2*innerR, width, col)
 		}
-		lune(x+r, y+r, math.Pi, 3*math.Pi/2)          // 左上月牙（外弧左→顶）
-		lune(x+w-r, y+r, 3*math.Pi/2, 2*math.Pi)      // 右上月牙（外弧顶→右）
+		lune(x+innerR, y+innerR, innerR, math.Pi, 3*math.Pi/2)          // 左上
+		lune(x+w-innerR, y+innerR, innerR, 3*math.Pi/2, 2*math.Pi)      // 右上
 	case "bottom":
 		if w > 2*innerR {
 			canvas.FillRect(x+innerR, y+h-width, w-2*innerR, width, col)
 		}
-		lune(x+r, y+h-r, math.Pi, math.Pi/2)          // 左下月牙（外弧左→下）
-		lune(x+w-r, y+h-r, math.Pi/2, 0)              // 右下月牙（外弧下→右）
+		lune(x+innerR, y+h-innerR, innerR, math.Pi, math.Pi/2)          // 左下
+		lune(x+w-innerR, y+h-innerR, innerR, math.Pi/2, 0)              // 右下
 	}
 	canvas.Restore()
 }
