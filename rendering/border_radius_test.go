@@ -56,13 +56,14 @@ func TestPaintBorderRadiusLeftSideRounded(t *testing.T) {
 	if px := canvas.PixelAt(12, 30); px.A != 0 {
 		t.Fatalf("left border right of width (12,30) = %+v, want transparent", px)
 	}
-	// ★ 竖线沿圆角矩形外弧弯曲（"包着圆角矩形"）：左上外弧 r6 从 (16,10) 到
-	//   (10,16)，描边带在 y=10-11 处位于 x≈11-15（弧带，贴合圆角）。
-	if px := canvas.PixelAt(13, 10); px.B < 150 {
-		t.Fatalf("left border arc band top (13,10) = %+v, want blue (arc follows rounded rect)", px)
+	// ★ 端部弧带：内弧(r-width=4，圆心 (16,16)) 描边带，从 (16,12) 到 (12,16)，
+	//   clip 到端部区域 [y, y+innerR]；弧带在 y=13 处位于 x≈12-14。
+	if px := canvas.PixelAt(14, 13); px.B < 150 {
+		t.Fatalf("left border arc band (14,13) = %+v, want blue (inner arc band)", px)
 	}
-	if px := canvas.PixelAt(11, 13); px.A == 0 || px.B < 150 {
-		t.Fatalf("left border inside corner (11,13) = %+v, want blue (inside radius)", px)
+	// 中段矩形从 y+innerR 开始：y=14 处竖线应为矩形 2px（x=10-11）。
+	if px := canvas.PixelAt(11, 20); px.B < 200 {
+		t.Fatalf("left border mid rect (11,20) = %+v, want blue", px)
 	}
 	// box 左上角外侧 (x=9, y=30) 应透明（clip 到 border-box，x>=10）。
 	if px := canvas.PixelAt(9, 30); px.A != 0 {

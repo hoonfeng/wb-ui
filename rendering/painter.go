@@ -453,44 +453,89 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	if width <= 0 || col.A == 0 || r <= 0 {
 		return
 	}
-	// arcPts 生成外弧（圆角矩形外边界）的采样折线。
-	arcPts := func(cx, cy, rad, a0, a1 float64) []graphics.Point {
-		n := int(math.Abs(a1-a0) / (math.Pi / 12))
-		if n < 8 {
-			n = 8
-		}
-		var pts []graphics.Point
-		for i := 0; i <= n; i++ {
-			a := a0 + (a1-a0)*float64(i)/float64(n)
-			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
-		}
-		return pts
-	}
-	strokeArc := func(cx, cy, rad, a0, a1 float64) {
-		if pts := arcPts(cx, cy, rad, a0, a1); len(pts) >= 2 {
-			canvas.StrokePath(pts, width, col, "butt", "miter")
-		}
+	// Edge 实测（border_px_ref 逐像素对比）：单边边框 + border-radius =
+	//   ① 中段：box 内该边的 width 矩形，从内弧(r-width) 到达该边的 y 开始
+	//   ② 端部：内弧(r-width) 的描边带（弧带，从 box 角沿内弧弯曲）
+	// 中段矩形不覆盖端部（无 ClipRoundRect 的边界残留），端部由弧带负责。
+	innerR := r - width
+	if innerR < 0 {
+		innerR = 0
 	}
 	canvas.Save()
 	canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+	// ① 中段矩形
 	switch side {
 	case "left":
-		// 直边带：从 box 左缘起 width 宽（[x, x+width)），clip 后保留完整 width
-		canvas.FillRect(x, y+r, width, h-2*r, col)
-		strokeArc(x+r, y+r, r, 3*math.Pi/2, math.Pi)     // 左上外弧（顶→左）
-		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
+		rectY := y + innerR
+		rectH := h - 2*innerR
+		if rectH > 0 {
+			canvas.FillRect(x, rectY, width, rectH, col)
+		}
 	case "right":
-		canvas.FillRect(x+w-width, y+r, width, h-2*r, col)
-		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
-		strokeArc(x+w-r, y+h-r, r, 0, math.Pi/2)         // 右下外弧（右→下）
+		rectY := y + innerR
+		rectH := h - 2*innerR
+		if rectH > 0 {
+			canvas.FillRect(x+w-width, rectY, width, rectH, col)
+		}
 	case "top":
-		canvas.FillRect(x+r, y, w-2*r, width, col)
-		strokeArc(x+r, y+r, r, math.Pi, 3*math.Pi/2)     // 左上外弧（左→顶）
-		strokeArc(x+w-r, y+r, r, 3*math.Pi/2, 2*math.Pi) // 右上外弧（顶→右）
+		rectX := x + innerR
+		rectW := w - 2*innerR
+		if rectW > 0 {
+			canvas.FillRect(rectX, y, rectW, width, col)
+		}
 	case "bottom":
-		canvas.FillRect(x+r, y+h-width, w-2*r, width, col)
-		strokeArc(x+r, y+h-r, r, math.Pi, math.Pi/2)     // 左下外弧（左→下）
-		strokeArc(x+w-r, y+h-r, r, math.Pi/2, 0)         // 右下外弧（下→右）
+		rectX := x + innerR
+		rectW := w - 2*innerR
+		if rectW > 0 {
+			canvas.FillRect(rectX, y+h-width, rectW, width, col)
+		}
+	}
+	// ② 端部弧带：内弧(r-width) 描边，clip 到端部区域（消除 StrokePath 在
+	// 内弧端点外的描边带残留——完整渲染 y=内弧端点处会多出 1px）
+	if innerR > 0 {
+		arcPts := func(cx, cy, rad, a0, a1 float64) []graphics.Point {
+			n := int(math.Abs(a1-a0) / (math.Pi / 12))
+			if n < 6 {
+				n = 6
+			}
+			var pts []graphics.Point
+			for i := 0; i <= n; i++ {
+				a := a0 + (a1-a0)*float64(i)/float64(n)
+				pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
+			}
+			return pts
+		}
+		strokeArc := func(cx, cy, rad, a0, a1 float64) {
+			if pts := arcPts(cx, cy, rad, a0, a1); len(pts) >= 2 {
+				canvas.StrokePath(pts, width, col, "butt", "miter")
+			}
+		}
+		switch side {
+		case "left":
+			canvas.Save()
+			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: innerR})
+			strokeArc(x+r, y+r, innerR, 3*math.Pi/2, math.Pi)
+			canvas.Restore()
+			canvas.Save()
+			canvas.Clip(graphics.Rect{X: x, Y: y + h - innerR, Width: w, Height: innerR})
+			strokeArc(x+r, y+h-r, innerR, math.Pi, math.Pi/2)
+			canvas.Restore()
+		case "right":
+			canvas.Save()
+			canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: innerR})
+			strokeArc(x+w-r, y+r, innerR, 3*math.Pi/2, 2*math.Pi)
+			canvas.Restore()
+			canvas.Save()
+			canvas.Clip(graphics.Rect{X: x, Y: y + h - innerR, Width: w, Height: innerR})
+			strokeArc(x+w-r, y+h-r, innerR, 0, math.Pi/2)
+			canvas.Restore()
+		case "top":
+			strokeArc(x+r, y+r, innerR, math.Pi, 3*math.Pi/2)
+			strokeArc(x+w-r, y+r, innerR, 3*math.Pi/2, 2*math.Pi)
+		case "bottom":
+			strokeArc(x+r, y+h-r, innerR, math.Pi, math.Pi/2)
+			strokeArc(x+w-r, y+h-r, innerR, math.Pi/2, 0)
+		}
 	}
 	canvas.Restore()
 }
