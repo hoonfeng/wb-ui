@@ -17,6 +17,7 @@ import (
 	"log"
 
 	"wb-ui/rendering"
+	"wb-ui/style"
 )
 
 // LayoutPhase tracks the current state of the layout scheduler.
@@ -268,6 +269,14 @@ func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 			if bottom > maxY {
 				maxY = bottom
 			}
+			// Overflow clipping containers (auto/scroll/hidden) clip their
+			// content — overflowing descendants (e.g. .project-section's
+			// file-tree rows reaching y=2900) must NOT inflate the frame
+			// content size, or the page grows a bogus global scrollbar on
+			// top of the container's own one (the "three scrollbars" bug).
+			if st := box.Style(); st != nil && overflowClipsContent(st) {
+				return
+			}
 		}
 		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
 			walk(c)
@@ -278,6 +287,21 @@ func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 	v.contentHeight = maxY
 	log.Printf("[scroll] updateContentSize: maxX=%d maxY=%d rvType=%T", maxX, maxY, rv)
 	v.SetScrollOffset(v.scrollX, v.scrollY)
+}
+
+// overflowClipsContent reports whether either overflow axis clips its content
+// (auto/scroll/hidden). Used by updateContentSize to exclude clipped
+// descendants from the frame content size.
+func overflowClipsContent(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	return st.OverflowX == style.OverflowHidden ||
+		st.OverflowX == style.OverflowAuto ||
+		st.OverflowX == style.OverflowScroll ||
+		st.OverflowY == style.OverflowHidden ||
+		st.OverflowY == style.OverflowAuto ||
+		st.OverflowY == style.OverflowScroll
 }
 
 // asRenderBox attempts to cast a RenderObject to *rendering.RenderBox.
