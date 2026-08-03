@@ -70,7 +70,9 @@ func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
 // the overlay (large) resolves to the box, and clicking the overlay itself
 // (outside the box) resolves to the overlay.
 func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView) {
-	hitTestFixedInner(o, x, y, attrName, best, bestArea, rv, false)
+	bestOrder := -1
+	nextOrder := 0
+	hitTestFixedInner(o, x, y, attrName, best, bestArea, rv, false, 0, &bestOrder, &nextOrder)
 }
 
 // hitTestFixedInner is the recursive body of hitTestFixedFirst. Once the walk
@@ -84,8 +86,13 @@ func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom
 //     must not hit a control inside it)
 //   - a plain box inside a fixed subtree that misses the point just skips
 //     itself; a smaller descendant may still contain the point
-//   - smallest area wins, so buttons < dialog-box < overlay resolve correctly
-func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView, insideFixed bool) {
+//   - stacking order wins ACROSS fixed layers: each fixed layer gets an
+//     incrementing order in traversal (= paint order, later = on top), so a
+//     click on a top dialog-overlay's backdrop hits that overlay, not the
+//     same-size overlay underneath (two stacked dialogs — workspace create +
+//     dir browser). Within one layer, smallest area wins, so buttons <
+//     dialog-box < overlay resolve correctly.
+func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView, insideFixed bool, order int, bestOrder *int, nextOrder *int) {
 	if o == nil {
 		return
 	}
@@ -96,6 +103,12 @@ func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom
 			if st := box.Style(); st != nil {
 				isFixed = st.Position == style.PositionFixed
 			}
+		}
+		if isFixed {
+			// Fixed layers are numbered in traversal order (= paint order,
+			// same z-index siblings paint in tree order, later on top).
+			order = *nextOrder
+			*nextOrder++
 		}
 	}
 	if ok && (isFixed || insideFixed) {
@@ -112,13 +125,15 @@ func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom
 				// itself, children could still contain the point.
 				goto descend
 			}
-			// Hit candidate: consider it (smallest area wins).
+			// Hit candidate. Higher layer order (painted on top) wins;
+			// within the same layer the smallest area wins.
 			if el, isEl := o.Node().(*dom.Element); isEl {
 				if attrName == "" || el.GetAttribute(attrName) != "" {
 					area := ow * oh
-					if *best == nil || area < *bestArea {
+					if *best == nil || order > *bestOrder || (order == *bestOrder && area < *bestArea) {
 						*best = el
 						*bestArea = area
+						*bestOrder = order
 					}
 				}
 			}
@@ -138,7 +153,7 @@ descend:
 	}
 	childInside := insideFixed || isFixed
 	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-		hitTestFixedInner(c, childX, childY, attrName, best, bestArea, rv, childInside)
+		hitTestFixedInner(c, childX, childY, attrName, best, bestArea, rv, childInside, order, bestOrder, nextOrder)
 	}
 }
 

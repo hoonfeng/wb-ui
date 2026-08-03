@@ -158,6 +158,49 @@ func TestClickDispatchFiresJSListener(t *testing.T) {
 	}
 }
 
+// TestHitTestStackedOverlays verifies that with two overlapping position:fixed
+// overlays (workspace-create dialog + dir-browser dialog, same z-index), the
+// TOP overlay (later in paint order) wins the hit test. Regression test for
+// the desktop dialog where clicking the dir-browser backdrop closed the
+// underlying create dialog instead (both overlays are full-screen fixed, so
+// equal-area candidates resolved to the FIRST traversed = bottom layer), and
+// the dir-browser "cancel" button (same position as the create dialog's
+// cancel) was unreachable.
+func TestHitTestStackedOverlays(t *testing.T) {
+	doc, rv, _, _ := mkRuntime(t, `<div class="overlay-a" style="position:fixed;left:0;top:0;width:800px;height:600px">
+  <div class="box-a" style="position:absolute;left:100px;top:100px;width:300px;height:150px">
+    <button class="btn-a" style="width:60px;height:20px">A</button>
+  </div>
+</div>
+<div class="overlay-b" style="position:fixed;left:0;top:0;width:800px;height:600px">
+  <div class="box-b" style="position:absolute;left:100px;top:100px;width:300px;height:150px">
+    <button class="btn-b" style="width:60px;height:20px">B</button>
+  </div>
+</div>`)
+
+	// Backdrop click (inside both full-screen overlays, outside both boxes)
+	// must hit the TOP overlay (overlay-b), never the bottom one.
+	backdrop := rendering.HitTest(rv, 10, 10, "")
+	if backdrop == nil || !strings.Contains(backdrop.GetAttribute("class"), "overlay-b") {
+		t.Fatalf("backdrop hit = %v, want overlay-b (top layer)", backdrop)
+	}
+
+	// Button click: the two buttons occupy the same spot; the top layer's
+	// button must win.
+	btnB := findEl(t, doc, "btn-b")
+	bx, by := hitCenter(t, rv, "btn-b")
+	hb := rendering.HitTest(rv, bx, by, "")
+	if hb != btnB {
+		t.Fatalf("button hit = %v, want btn-b (top layer)", hb)
+	}
+
+	// Box click (inside both boxes, outside the buttons) hits the top box.
+	boxHit := rendering.HitTest(rv, 120, 140, "")
+	if boxHit == nil || !strings.Contains(boxHit.GetAttribute("class"), "box-b") {
+		t.Fatalf("box hit = %v, want box-b (top layer)", boxHit)
+	}
+}
+
 // TestHitTestInsideFixedDialog verifies that static elements INSIDE a
 // position:fixed subtree (dialog-box buttons) are hit-testable — not just the
 // fixed ancestors themselves. Regression test for the desktop dialog where the
