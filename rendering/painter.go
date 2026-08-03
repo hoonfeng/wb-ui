@@ -22,6 +22,7 @@ package rendering
 
 import (
 	"log"
+	"math"
 	"strconv"
 	"strings"
 
@@ -388,11 +389,22 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	// Top and bottom span the full width, including the corners.
+	radius := lengthValue(st.BorderRadius)
 	if topW > 0 && st.BorderTopStyle != "none" {
-		paintBorderSide(info.canvas, x, y, w, topW, ApplyOpacityToColor(toGraphicsColor(btC), op), st.BorderTopStyle)
+		c := ApplyOpacityToColor(toGraphicsColor(btC), op)
+		if radius > 0 {
+			paintRoundedBorderSide(info.canvas, "top", x, y, w, h, topW, radius, c)
+		} else {
+			paintBorderSide(info.canvas, x, y, w, topW, c, st.BorderTopStyle)
+		}
 	}
 	if bottomW > 0 && st.BorderBottomStyle != "none" {
-		paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, ApplyOpacityToColor(toGraphicsColor(bbC), op), st.BorderBottomStyle)
+		c := ApplyOpacityToColor(toGraphicsColor(bbC), op)
+		if radius > 0 {
+			paintRoundedBorderSide(info.canvas, "bottom", x, y, w, h, bottomW, radius, c)
+		} else {
+			paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, c, st.BorderBottomStyle)
+		}
 	}
 	// Left and right exclude the top/bottom border regions so the corner color (top/bottom)
 	// is preserved.
@@ -403,29 +415,127 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	// ★ 圆角 per-side 边框：border-radius>0 但 fast path 不满足（典型：仅单边
 	//   有色边框，如 .conv-item.active 的 border-left: 2px solid var(--accent)）。
-	//   浏览器按 border-radius 圆角裁剪整条边框；这里用圆角 clip 包裹 per-side
-	//   矩形绘制，使可见边框两端沿圆角收尾（Edge 对 conv-item 选中蓝线即如此）。
-	radiusClip := false
-	if r := lengthValue(st.BorderRadius); r > 0 {
-		info.canvas.Save()
-		info.canvas.ClipRoundRect(x, y, w, h, r)
-		radiusClip = true
-	}
+	//   浏览器（Edge）对单边边框 + border-radius 的几何：边框区域 = 外弧(半径 r)
+	//   与内弧(半径 r-width) 之间的月牙环带，圆角处水平截线可比边框宽。
+	//   之前用 ClipRoundRect 裁剪矩形会把内缘附近"多裁"（竖线圆角不贴合圆角
+	//   矩形边界）。改用 FillPath 直接构造该边的圆角月牙形状，与浏览器一致。
 	if leftW > 0 && st.BorderLeftStyle != "none" {
-		paintBorderSide(info.canvas, x, midY, leftW, midH, ApplyOpacityToColor(toGraphicsColor(blC), op), st.BorderLeftStyle)
+		c := ApplyOpacityToColor(toGraphicsColor(blC), op)
+		if radius > 0 {
+			paintRoundedBorderSide(info.canvas, "left", x, y, w, h, leftW, radius, c)
+		} else {
+			paintBorderSide(info.canvas, x, midY, leftW, midH, c, st.BorderLeftStyle)
+		}
 	}
 	if rightW > 0 && st.BorderRightStyle != "none" {
-		paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, ApplyOpacityToColor(toGraphicsColor(brC), op), st.BorderRightStyle)
+		c := ApplyOpacityToColor(toGraphicsColor(brC), op)
+		if radius > 0 {
+			paintRoundedBorderSide(info.canvas, "right", x, y, w, h, rightW, radius, c)
+		} else {
+			paintBorderSide(info.canvas, x+w-rightW, midY, rightW, midH, c, st.BorderRightStyle)
+		}
 	}
-	// Corner bevels: when adjacent border colors differ, browsers split the
-	// corner along the diagonal from the outer corner to the inner corner
-	// (CSS border corner joining). The triangle on the horizontal-edge side
-	// keeps the top/bottom color; the other triangle gets the left/right
-	// color. Mirrors Edge pixel-for-pixel within anti-aliasing tolerance.
-	paintBorderCorners(info.canvas, x, y, w, h, topW, rightW, bottomW, leftW,
-		blC, brC, btC, bbC, op, st)
-	if radiusClip {
-		info.canvas.Restore()
+	if radius <= 0 {
+		// Corner bevels: when adjacent border colors differ, browsers split the
+		// corner along the diagonal from the outer corner to the inner corner
+		// (CSS border corner joining). The triangle on the horizontal-edge side
+		// keeps the top/bottom color; the other triangle gets the left/right
+		// color. Mirrors Edge pixel-for-pixel within anti-aliasing tolerance.
+		paintBorderCorners(info.canvas, x, y, w, h, topW, rightW, bottomW, leftW,
+			blC, brC, btC, bbC, op, st)
+	}
+}
+
+// paintRoundedBorderSide 用 FillPath 绘制单边的圆角月牙形状（浏览器 border-left
+// + border-radius 的精确几何）：外弧半径 r、内弧半径 r-width（同心），两端沿
+// 圆弧收尾。多边形用采样点逼近圆弧（每 ~15° 一个点，足够平滑）。
+func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, width, r float64, col graphics.Color) {
+	if width <= 0 || col.A == 0 || r <= 0 {
+		return
+	}
+	var pts []graphics.Point
+	// sample 线性插值角度 a0→a1（屏幕坐标 y 向下，角度顺时针增加：右0/下π/2/左π/上3π/2）
+	sample := func(cx, cy, rad, a0, a1 float64) {
+		n := int(math.Abs(a1-a0) / (math.Pi / 12))
+		if n < 6 {
+			n = 6
+		}
+		for i := 0; i <= n; i++ {
+			a := a0 + (a1-a0)*float64(i)/float64(n)
+			pts = append(pts, graphics.Point{X: cx + rad*math.Cos(a), Y: cy + rad*math.Sin(a)})
+		}
+	}
+	norm := func(a float64) float64 {
+		for a < 0 {
+			a += 2 * math.Pi
+		}
+		for a >= 2*math.Pi {
+			a -= 2 * math.Pi
+		}
+		return a
+	}
+	switch side {
+	case "left":
+		tlCX, tlCY := x+r, y+r     // 左上角圆心
+		blCX, blCY := x+r, y+h-r   // 左下角圆心
+		// 1. 外弧左上：左(π) → 上(3π/2)
+		sample(tlCX, tlCY, r, math.Pi, 3*math.Pi/2)
+		// 2. 内弧左上反向：上(3π/2) → 左下方（角度 atan2(-width, width-r)）
+		aEnd := norm(math.Atan2(-width, width-r))
+		sample(tlCX, tlCY, r-width, 3*math.Pi/2, aEnd)
+		// 3. 内缘直边
+		pts = append(pts, graphics.Point{X: x + width, Y: y + h - r + width})
+		// 4. 内弧左下反向：左下方 → 正下(π/2)
+		aStart := norm(math.Atan2(width, width-r))
+		sample(blCX, blCY, r-width, aStart, math.Pi/2)
+		// 5. 内缘→外缘垂直边（左下角收口）
+		pts = append(pts, graphics.Point{X: x + r, Y: y + h})
+		// 6. 外弧左下反向：下(π/2) → 左(π)
+		sample(blCX, blCY, r, math.Pi/2, math.Pi)
+		// 7. 外缘直边闭合
+		pts = append(pts, graphics.Point{X: x, Y: y + r})
+	case "right":
+		trCX, trCY := x+w-r, y+r
+		brCX, brCY := x+w-r, y+h-r
+		// 右上外弧：右(0) → 上(3π/2)
+		sample(trCX, trCY, r, 0, 3*math.Pi/2)
+		aEnd := norm(math.Atan2(-width, -(width - r)))
+		sample(trCX, trCY, r-width, 3*math.Pi/2, aEnd)
+		pts = append(pts, graphics.Point{X: x + w - width, Y: y + h - r + width})
+		aStart := norm(math.Atan2(width, -(width - r)))
+		sample(brCX, brCY, r-width, aStart, math.Pi/2)
+		pts = append(pts, graphics.Point{X: x + w - r, Y: y + h})
+		sample(brCX, brCY, r, math.Pi/2, math.Pi)
+		pts = append(pts, graphics.Point{X: x + w, Y: y + r})
+	case "top":
+		tlCX, tlCY := x+r, y+r
+		trCX, trCY := x+w-r, y+r
+		// 上外弧：左上(π) → 右上(0)，经过上(3π/2)
+		sample(tlCX, tlCY, r, math.Pi, 3*math.Pi/2)
+		sample(trCX, trCY, r, 3*math.Pi/2, 0)
+		// 内弧右上反向
+		aEnd := norm(math.Atan2(-width, w - width - r))
+		sample(trCX, trCY, r-width, 0, aEnd)
+		pts = append(pts, graphics.Point{X: x + w - r, Y: y + width})
+		// 内弧左上反向
+		aStart := norm(math.Atan2(-width, -(w - width - r)))
+		sample(tlCX, tlCY, r-width, aStart, math.Pi)
+		pts = append(pts, graphics.Point{X: x, Y: y + r})
+	case "bottom":
+		blCX, blCY := x+r, y+h-r
+		brCX, brCY := x+w-r, y+h-r
+		// 下外弧：左下(π) → 右下(0)，经过下(π/2)
+		sample(blCX, blCY, r, math.Pi, math.Pi/2)
+		sample(brCX, brCY, r, math.Pi/2, 0)
+		aEnd := norm(math.Atan2(width, w - width - r))
+		sample(brCX, brCY, r-width, 0, aEnd)
+		pts = append(pts, graphics.Point{X: x + w - r, Y: y + h - width})
+		aStart := norm(math.Atan2(width, -(w - width - r)))
+		sample(blCX, blCY, r-width, aStart, math.Pi)
+		pts = append(pts, graphics.Point{X: x, Y: y + h - r})
+	}
+	if len(pts) >= 3 {
+		canvas.FillPath(pts, col, false)
 	}
 }
 
