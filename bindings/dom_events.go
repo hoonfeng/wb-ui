@@ -156,6 +156,21 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 	obj.Set("defaultPrevented", jsc.BooleanValue(e.DefaultPrevented()))
 	obj.Set("eventPhase", jsc.NumberValue(float64(e.EventPhase())))
 	obj.Set("timeStamp", jsc.NumberValue(float64(e.TimeStamp().UnixNano())/1e6))
+	// ★ target/currentTarget: Vue's .self modifier compiles to
+	// `$event.target === $event.currentTarget` — without these the
+	// comparison is `undefined === undefined` (always true) AND @click.self
+	// on the dialog overlay can't distinguish clicks on the overlay vs its
+	// children. Expose both as JS wrappers of the DOM nodes.
+	if t := e.Target(); t != nil {
+		if el, ok := t.(*dom.Element); ok {
+			obj.Set("target", jsc.ObjectValue(wrapElement(in, el)))
+		}
+	}
+	if ct := e.CurrentTarget(); ct != nil {
+		if el, ok := ct.(*dom.Element); ok {
+			obj.Set("currentTarget", jsc.ObjectValue(wrapElement(in, el)))
+		}
+	}
 	obj.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
 		func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			e.PreventDefault()

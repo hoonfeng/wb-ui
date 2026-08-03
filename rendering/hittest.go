@@ -12,6 +12,7 @@ package rendering
 import (
 	"log"
 	"wb-ui/dom"
+	"wb-ui/style"
 )
 
 // debugHitTest enables verbose hit-test diagnostics.
@@ -41,12 +42,83 @@ func boxCoords(o RenderObject) (x, y, w, h float64, ok bool) {
 // bounding box contains (x, y) and that has the given attribute set (e.g. "onclick").
 // When attrName is empty, returns the deepest box-bearing element at the point.
 // Returns nil when no element matches.
+//
+// Fixed-position elements paint on top of everything (viewport-anchored) but
+// occupy a LARGE bounding box, so a plain "smallest area" walk would pick the
+// underlying page element instead — clicking a dialog overlay would fall
+// through to the file tree / activity bar below. We first hit-test fixed
+// subtrees (topmost in paint order); only if none matches do we walk the
+// normal tree.
 func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
+	// Pass 1: fixed-position subtrees win (dialog overlay / context menus).
 	var best *dom.Element
 	var bestArea float64 = -1
+	hitTestFixedFirst(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
+	if best != nil {
+		return best
+	}
+	// Pass 2: normal tree.
+	best = nil
+	bestArea = -1
 	hitTestWalk(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
 	return best
 }
+
+// hitTestFixedFirst walks the render tree but only considers subtrees whose
+// ancestor is position:fixed (they paint above everything). The smallest-area
+// element inside such a subtree wins — clicking the dialog-box (small) inside
+// the overlay (large) resolves to the box, and clicking the overlay itself
+// (outside the box) resolves to the overlay.
+func hitTestFixedFirst(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView) {
+	if o == nil {
+		return
+	}
+	ox, oy, ow, oh, ok := boxCoords(o)
+	isFixed := false
+	if ok {
+		if box := asRenderBox(o); box != nil {
+			if st := box.Style(); st != nil {
+				isFixed = st.Position == style.PositionFixed
+			}
+		}
+		if isFixed {
+			// Only descend if the point is inside this fixed box (or it has
+			// zero area and children still matter).
+			if ow > 0 && oh > 0 {
+				if x < ox || y < oy || x >= ox+ow || y >= oy+oh {
+					return
+				}
+			}
+			// Fixed box hit: consider it and its descendants (smallest area wins).
+			if ow > 0 && oh > 0 {
+				if el, isEl := o.Node().(*dom.Element); isEl {
+					if attrName == "" || el.GetAttribute(attrName) != "" {
+						area := ow * oh
+						if *best == nil || area < *bestArea {
+							*best = el
+							*bestArea = area
+						}
+					}
+				}
+			}
+		}
+	}
+	// Descend into children (scroll-offset aware like the normal walk).
+	childX, childY := x, y
+	if rv != nil {
+		if box := asRenderBox(o); box != nil {
+			sx, sy := rv.BoxScrollOffset(box)
+			if sx != 0 || sy != 0 {
+				childX = x + sx
+				childY = y + sy
+			}
+		}
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		hitTestFixedFirst(c, childX, childY, attrName, best, bestArea, rv)
+	}
+}
+
 
 // hitTestWalk recursively visits render objects, tracking the smallest (deepest)
 // matching element. When descending into children of a scroll container with a
