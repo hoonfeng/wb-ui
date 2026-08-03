@@ -86,7 +86,28 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		return
 	}
 	info.canvas.Save()
-	if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
+	// Fixed-position layers paint against the viewport: reset the inherited
+	// ancestor clip so a dialog-overlay / menu inside an overflow:auto
+	// container (e.g. sidebar-content) still covers the whole window.
+	// The browser never clips fixed elements by ancestor overflow unless
+	// that ancestor establishes a containing block (transform/filter).
+	isFixedLayer := false
+	if layer.Owner() != nil {
+		if st := layer.Owner().Style(); st != nil {
+			isFixedLayer = st.Position == style.PositionFixed
+		}
+	}
+	if isFixedLayer {
+		info.canvas.ResetClip()
+		// The fixed element's OWN overflow still clips its subtree.
+		if st := layer.Owner().Style(); st != nil &&
+			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
+			if rb := asRenderBox(layer.Owner()); rb != nil {
+				pb := rb.PaddingBoxRect()
+				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
+			}
+		}
+	} else if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
 		_ = layerRect
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}

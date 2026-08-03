@@ -196,7 +196,15 @@ func matchAttribute(s SimpleSelector, el *dom.Element) bool {
 func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bool {
 	switch s.PseudoClass {
 	case PseudoClassHover:
-		return el.IsHovered()
+		// CSS :hover matches the element itself OR any descendant currently
+		// under the cursor — hovering an <svg> icon inside a <button> must
+		// light up the whole button (the hover state "bubbles" up the
+		// ancestor chain in the browser). Without this, moving onto the icon
+		// kills the button's hover background.
+		if el.IsHovered() {
+			return true
+		}
+		return c.hasHoveredDescendant(el)
 	case PseudoClassFocus:
 		return el.IsFocused()
 	case PseudoClassFocusVisible:
@@ -331,8 +339,23 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 
 // hasFocusedDescendant returns true when any descendant element (child, grandchild,
 // etc.) of el has the focused flag set. It is used by :focus-within matching.
-func (c *SelectorChecker) hasFocusedDescendant(el *dom.Element) bool {
+// hasHoveredDescendant reports whether any descendant element is currently
+// hovered — the counterpart to hasFocusedDescendant for :hover bubbling.
+func (c *SelectorChecker) hasHoveredDescendant(el *dom.Element) bool {
 	for child := el.FirstChild(); child != nil; child = child.NextSibling() {
+		if childEl, ok := child.(*dom.Element); ok {
+			if childEl.IsHovered() {
+				return true
+			}
+			if c.hasHoveredDescendant(childEl) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *SelectorChecker) hasFocusedDescendant(el *dom.Element) bool {	for child := el.FirstChild(); child != nil; child = child.NextSibling() {
 		if childEl, ok := child.(*dom.Element); ok {
 			if childEl.IsFocused() {
 				return true

@@ -355,6 +355,18 @@ func (c *Canvas) Clip(r Rect) {
 // HasClip reports whether a clip is active.
 func (c *Canvas) HasClip() bool { return c.state.hasClip }
 
+// ResetClip replaces the current clip with the full canvas surface, discarding
+// any ancestor clip. This lets fixed-position layers (dialog overlays, menus)
+// paint over the whole viewport even when their DOM ancestor has overflow:
+// auto — the browser never clips a fixed element by ancestor overflow unless
+// that ancestor establishes a containing block (transform/filter/perspective).
+func (c *Canvas) ResetClip() {
+	c.canvas.ClipRect(skia.RectXYWH(0, 0, float32(c.width), float32(c.height)), skia.ClipOpReplace, false)
+	c.state.hasClip = false
+	c.state.clip = Rect{}
+	c.invalidatePixels()
+}
+
 // ClipRect returns the current device-space clip rectangle and whether one is set.
 func (c *Canvas) ClipRect() (Rect, bool) { return c.state.clip, c.state.hasClip }
 
