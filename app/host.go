@@ -96,6 +96,9 @@ type Host struct {
 	lastLoggedScrollY int
 	// lastIMEX/lastIMEY dedupe IME composition-position updates.
 	lastIMEX, lastIMEY int32
+	// dialogPixLogged: one-shot [skia] pixel probe for the workspace dialog
+	// (answers "did the dialog actually paint onto the GPU surface").
+	dialogPixLogged bool
 
 	// Selection state. Text selection is tracked as CSS-pixel coordinates
 	// (not RenderText pointers) so it survives render tree rebuilds. Each
@@ -971,6 +974,23 @@ func (h *Host) Run() {
 			dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
 			rendering.Paint(rv, gpuCanvas, dirtyRect)
 			gpuCanvas.Restore()
+
+			// ── [skia] one-shot pixel probe: does the workspace dialog
+			// actually paint onto the GPU surface? Samples the overlay
+			// (should be dimmed bg) and the dialog-box (panel color) after
+			// Paint, before Present. Logs once when the overlay appears. ──
+			if !h.dialogPixLogged && os.Getenv("WB_DIAG") != "" {
+				if doc := h.wv.MainFrame().Document(); doc != nil {
+					if ovs := doc.GetElementsByClassName("dialog-overlay"); len(ovs) > 0 {
+						h.dialogPixLogged = true
+						p1 := gpuCanvas.PixelAt(200, 400)
+						p2 := gpuCanvas.PixelAt(640, 400)
+						p3 := gpuCanvas.PixelAt(640, 430)
+						log.Printf("[skia] dialog-overlay in DOM; overlay(200,400)=#%02x%02x%02x box(640,400)=#%02x%02x%02x boxInner(640,430)=#%02x%02x%02x scrollY=%d",
+							p1.R, p1.G, p1.B, p2.R, p2.G, p2.B, p3.R, p3.G, p3.B, scrollY)
+					}
+				}
+			}
 		}
 
 		if ownsCanvas {
