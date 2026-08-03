@@ -203,6 +203,84 @@ func TestLayerWithOverflowClip(t *testing.T) {
 	}
 }
 
+// TestFixedAncestorStopsClipChain verifies that an overflow clip of an ancestor
+// OUTSIDE a fixed-position layer does not reach a descendant layer. A fixed
+// element establishes a viewport containing block (it left the normal flow), so
+// the browser never clips it by the overflow of a scroll container it happens to
+// be nested in. Regression test for the dialog "create" button that became its
+// own layer (opacity<1 => RequiresLayer) and painted via the normal layer
+// branch, where CalculateRects wrongly re-applied the sidebar-content overflow
+// clip, culling the whole button.
+func TestFixedAncestorStopsClipChain(t *testing.T) {
+	doc := dom.NewDocument()
+
+	// Scroll container (sidebar-content): overflow auto, small panel.
+	scrollStyle := style.NewComputedStyle()
+	scrollStyle.OverflowX = style.OverflowAuto
+	scrollStyle.OverflowY = style.OverflowAuto
+	scrollBox := NewRenderBox(doc.CreateElement("div"), scrollStyle)
+	scrollBox.SetLocation(0, 0)
+	scrollBox.SetSize(40, 40)
+
+	// Fixed overlay nested inside the scroll container.
+	fixedStyle := style.NewComputedStyle()
+	fixedStyle.Position = style.PositionFixed
+	fixedBox := NewRenderBox(doc.CreateElement("div"), fixedStyle)
+	fixedBox.SetLocation(0, 0)
+	fixedBox.SetSize(300, 200)
+
+	// Opacity<1 child inside the fixed overlay (its own layer).
+	btnStyle := style.NewComputedStyle()
+	btnStyle.Opacity = 0.5
+	btnBox := NewRenderBox(doc.CreateElement("button"), btnStyle)
+	btnBox.SetLocation(100, 80)
+	btnBox.SetSize(60, 20)
+
+	scrollLayer := NewRenderLayer(scrollBox)
+	fixedLayer := NewRenderLayer(fixedBox)
+	btnLayer := NewRenderLayer(btnBox)
+	scrollLayer.AddChild(fixedLayer)
+	fixedLayer.AddChild(btnLayer)
+
+	_, clipRect := btnLayer.CalculateRects()
+	// The fixed ancestor stops the chain: the scroll container's 40x40
+	// overflow clip must NOT be applied to the fixed overlay's child.
+	if clipRect.Width != 0 || clipRect.Height != 0 {
+		t.Fatalf("clipRect = %+v, want zero (fixed ancestor stops outer overflow clip)", clipRect)
+	}
+}
+
+// TestFixedAncestorOwnClipStillApplies verifies that a fixed ancestor's OWN
+// overflow still clips its subtree (the chain only drops clips OUTSIDE it).
+func TestFixedAncestorOwnClipStillApplies(t *testing.T) {
+	doc := dom.NewDocument()
+
+	// Fixed dialog with overflow:hidden (rounded-corner clipping etc).
+	fixedStyle := style.NewComputedStyle()
+	fixedStyle.Position = style.PositionFixed
+	fixedStyle.OverflowX = style.OverflowHidden
+	fixedStyle.OverflowY = style.OverflowHidden
+	fixedBox := NewRenderBox(doc.CreateElement("div"), fixedStyle)
+	fixedBox.SetLocation(0, 0)
+	fixedBox.SetSize(300, 200)
+
+	// Opacity<1 child.
+	btnStyle := style.NewComputedStyle()
+	btnStyle.Opacity = 0.5
+	btnBox := NewRenderBox(doc.CreateElement("button"), btnStyle)
+	btnBox.SetLocation(10, 10)
+	btnBox.SetSize(60, 20)
+
+	fixedLayer := NewRenderLayer(fixedBox)
+	btnLayer := NewRenderLayer(btnBox)
+	fixedLayer.AddChild(btnLayer)
+
+	_, clipRect := btnLayer.CalculateRects()
+	if clipRect.Width != 300 || clipRect.Height != 200 {
+		t.Fatalf("clipRect = %+v, want the fixed ancestor's own padding box (300x200)", clipRect)
+	}
+}
+
 // TestGraphicsLayerProperties verifies the placeholder GraphicsLayer property setters.
 func TestGraphicsLayerProperties(t *testing.T) {
 	gl := NewGraphicsLayer("test")

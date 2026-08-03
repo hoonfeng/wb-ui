@@ -191,14 +191,27 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 		if cs == nil {
 			continue
 		}
-		if cs.OverflowX == style.OverflowVisible && cs.OverflowY == style.OverflowVisible {
-			continue
+		if cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible {
+			ancestorRect := cb.PaddingBoxRect()
+			if clipRect.Width == 0 && clipRect.Height == 0 {
+				clipRect = ancestorRect
+			} else {
+				clipRect = intersectRects(clipRect, ancestorRect)
+			}
 		}
-		ancestorRect := cb.PaddingBoxRect()
-		if clipRect.Width == 0 && clipRect.Height == 0 {
-			clipRect = ancestorRect
-		} else {
-			clipRect = intersectRects(clipRect, ancestorRect)
+		// A fixed-position ancestor establishes a viewport containing
+		// block: it (and its descendants) left the normal flow, so
+		// overflow clips of ancestors OUTSIDE it must not apply — the
+		// browser never clips a fixed dialog by the overflow of a scroll
+		// container it happens to be nested in. The fixed ancestor's own
+		// overflow (applied above) still clips its subtree. Mirrors
+		// RenderLayer::calculateClipRects treating fixed layers as clip
+		// roots. Without this, an opacity<1 element inside a fixed dialog
+		// gets its own layer (RequiresLayer) and paints via the normal
+		// layer branch, where this chain wrongly re-applied e.g. the
+		// sidebar-content overflow clip, culling the paint.
+		if cs.Position == style.PositionFixed {
+			break
 		}
 	}
 	return layerRect, clipRect
