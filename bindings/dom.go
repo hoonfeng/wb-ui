@@ -324,17 +324,41 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// performance.now — 返回毫秒级高精度时间戳
 	g.Set("performance", jsc.ObjectValue(makePerformance(rt)))
 
-	// getComputedStyle — 返回元素的 inline style（简化实现）
+	// getComputedStyle — 返回可用的 computed style 对象（简化实现）。
+	// 浏览器返回元素的最终计算样式；此处返回带常用属性 + getPropertyValue /
+	// getPropertyPriority 方法的对象（属性尽量从 inline style 提取，CSS 变量
+	// 返回空串由前端默认值兜底）。★ 此前返回 Null 会导致依赖
+	// getComputedStyle(el).getPropertyValue('--x') 的代码（如 TerminalPanel 的
+	// xterm 主题）抛 "Value is not an object"，组件挂载中断 → Vue subTree.el
+	// 未设置 → 后续 patch 级联失败 → v-if 关闭不移除 DOM。
 	g.Set("getComputedStyle", jsc.FunctionValue(jsc.NewNativeFunction("getComputedStyle",
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) < 1 { return jsc.Null() }
-			// 返回元素的 style 对象作为 computed style 的近似
-			if obj := args[0].AsObject(); obj != nil {
-				if style := obj.GetStr("style"); !style.IsUndefined() {
-					return style
+			cs := jsc.NewObject(in.ObjectPrototype())
+			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					// CSS 变量（--xxx）查询返回空串，调用方用 || 默认值兜底
+					return jsc.StringValue("")
+				}, 1)))
+			cs.Set("getPropertyPriority", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyPriority",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.StringValue("")
+				}, 1)))
+			cs.Set("cssText", jsc.StringValue(""))
+			if len(args) >= 1 {
+				if obj := args[0].AsObject(); obj != nil {
+					// 复制 inline style 的常用属性（color/background/font 等）
+					if style := obj.GetStr("style"); style.IsObject() {
+						if so := style.AsObject(); so != nil {
+							for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "borderColor", "width", "height"} {
+								if v, ok := so.GetByKey(prop); ok {
+									cs.Set(prop, v)
+								}
+							}
+						}
+					}
 				}
 			}
-			return jsc.Null()
+			return jsc.ObjectValue(cs)
 		}, 1)))
 
 	// Event 基类构造函数
@@ -1831,18 +1855,34 @@ obj.SetInternal(el)
 		return a
 	})))
 	obj.Set("insertBefore", funcVal(fn2Node(func(in *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
-		if nc == nil { return jsc.Null() }
+		if nc == nil {
+			return jsc.Null()
+		}
 		// DocumentFragment: insert all children individually.
 		if frag, ok := nc.(*dom.DocumentFragment); ok {
 			for c := frag.FirstChild(); c != nil; c = frag.FirstChild() {
 				frag.RemoveChild(c)
-				el.InsertBefore(c, rc)
-				if OnNodeInserted != nil { OnNodeInserted(c) }
+				if err := el.InsertBefore(c, rc); err != nil {
+					// 容错：refChild 不在本节点下时回退为追加，避免 Vue vnode/DOM 不一致
+					_ = el.AppendChild(c)
+				}
+				if OnNodeInserted != nil {
+					OnNodeInserted(c)
+				}
 			}
 			return a0
 		}
-		el.InsertBefore(nc, rc)
-		if OnNodeInserted != nil { OnNodeInserted(nc) }
+		if err := el.InsertBefore(nc, rc); err != nil {
+			// 浏览器对 anchor 不在父下的情况抛 NotFoundError；goja 环境 Vue 的
+			// vnode/DOM 可能短暂不一致（anchor detached），静默失败会让元素
+			// 永远不进 DOM 但 OnNodeInserted 照常触发 → vnode 认为已插入 →
+			// 后续 v-if 关闭/卸载时 unmount 找不到正确 parent，DOM 不移除。
+			// 回退追加保证元素真实进入 DOM，Vue 状态一致。
+			_ = el.AppendChild(nc)
+		}
+		if OnNodeInserted != nil {
+			OnNodeInserted(nc)
+		}
 		return a0
 	})))
 	obj.Set("replaceChild", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, oc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
@@ -2538,6 +2578,7 @@ obj.SetInternal(t)
 	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(t.NodeType()))
 	}), nil)
+	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return t.ParentNode() }), nil)
 	return obj
 }
 
