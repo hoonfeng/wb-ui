@@ -29,7 +29,9 @@ type ScrollbarMetrics struct {
 }
 
 // scrollbarWidthFor mirrors the CSS scrollbar-width property used by the
-// painter: 12px default, 8px thin, 0 none (still scrollable).
+// painter: 12px default, 8px thin, 0 none (still scrollable). It also honors
+// ::-webkit-scrollbar { width: Npx } (Blink/WebKit custom width — wins over
+// the standard property, matching Chrome).
 func scrollbarWidthFor(st *style.ComputedStyle) float64 {
 	if st == nil {
 		return 12
@@ -40,7 +42,28 @@ func scrollbarWidthFor(st *style.ComputedStyle) float64 {
 	case "none":
 		return 0
 	}
+	if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
+		if l, ok := parseLengthAny(wv); ok && l > 0 {
+			return l
+		}
+	}
 	return 12
+}
+
+// webkitCustomScrollbar reports whether the element has Blink/WebKit custom
+// scrollbar styling (::-webkit-scrollbar { width/background } or
+// ::-webkit-scrollbar-thumb). Custom webkit scrollbars render WITHOUT the
+// classic arrow buttons and their thumb fills the full scrollbar width —
+// unlike the default flat style (12px + arrow buttons).
+func webkitCustomScrollbar(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	return st.GetProperty("-webkit-scrollbar-width") != "" ||
+		st.GetProperty("-webkit-scrollbar-height") != "" ||
+		st.GetProperty("-webkit-scrollbar-thumb-color") != "" ||
+		st.GetProperty("-webkit-scrollbar-track-color") != "" ||
+		st.GetProperty("-webkit-scrollbar-thumb-radius") != ""
 }
 
 // boxViewAndContent returns the client viewport (padding-box, per CSSOM —
@@ -98,10 +121,14 @@ func VerticalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics {
 	if needH {
 		vh -= scrollbarWidthFor(box.Style())
 	}
-	if vh <= sbArrowSize*2+sbArrowGap*2 {
+	webkit := webkitCustomScrollbar(box.Style())
+	if !webkit && vh <= sbArrowSize*2+sbArrowGap*2 {
 		return ScrollbarMetrics{}
 	}
-	trackLen := vh - sbArrowSize*2 - sbArrowGap*2
+	trackLen := vh
+	if !webkit {
+		trackLen = vh - sbArrowSize*2 - sbArrowGap*2
+	}
 	thumbLen := trackLen * viewH / totalH
 	if thumbLen < 18 {
 		thumbLen = 18
@@ -132,10 +159,14 @@ func HorizontalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics
 	if needV {
 		hw -= scrollbarWidthFor(box.Style())
 	}
-	if hw <= sbArrowSize*2+sbArrowGap*2 {
+	webkit := webkitCustomScrollbar(box.Style())
+	if !webkit && hw <= sbArrowSize*2+sbArrowGap*2 {
 		return ScrollbarMetrics{}
 	}
-	trackLen := hw - sbArrowSize*2 - sbArrowGap*2
+	trackLen := hw
+	if !webkit {
+		trackLen = hw - sbArrowSize*2 - sbArrowGap*2
+	}
 	thumbLen := trackLen * viewW / totalW
 	if thumbLen < 18 {
 		thumbLen = 18

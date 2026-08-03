@@ -447,12 +447,13 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 		return nil
 	}
 	pb := scrollBox.PaddingBoxRect()
-	scrollW := 12.0
+	scrollW := scrollbarWidthFor(st)
 	arrowSize := 12.0
 	arrowGap := 5.0
-	if pb.Width <= scrollW*2 || pb.Height <= scrollW*2 {
+	if scrollW <= 0 || pb.Width <= scrollW*2 || pb.Height <= scrollW*2 {
 		return nil
 	}
+	webkit := webkitCustomScrollbar(st)
 
 	// Content size via BoxContentSize — this handles form controls
 	// (input/textarea) whose text lives in value/textContent instead of
@@ -531,20 +532,22 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	// ── Vertical scrollbar hit test ──
 	if needsV && x >= vx && x <= vx+scrollW && y >= vy && y <= vy+vh {
 		h := &ScrollbarHit{Box: scrollBox}
-		if vh <= arrowSize*2 {
+		if !webkit && vh <= arrowSize*2 {
 			return nil
 		}
-		upBtnY := vy
-		dnBtnY := vy + vh - arrowSize
+		if !webkit {
+			upBtnY := vy
+			dnBtnY := vy + vh - arrowSize
 
-		// Check arrow buttons first.
-		if y >= upBtnY && y < upBtnY+arrowSize {
-			h.IsVUpArrow = true
-			return h
-		}
-		if y >= dnBtnY && y < dnBtnY+arrowSize {
-			h.IsVDownArrow = true
-			return h
+			// Check arrow buttons first.
+			if y >= upBtnY && y < upBtnY+arrowSize {
+				h.IsVUpArrow = true
+				return h
+			}
+			if y >= dnBtnY && y < dnBtnY+arrowSize {
+				h.IsVDownArrow = true
+				return h
+			}
 		}
 
 		// Track (non-thumb area) or thumb — same geometry as the painter
@@ -559,7 +562,10 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 				syRatio = 1
 			}
 			thumbTrackSpace := m.TrackLen - m.ThumbLen
-			thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
+			thumbY := vy + syRatio*thumbTrackSpace
+			if !webkit {
+				thumbY += arrowSize + arrowGap
+			}
 			if y >= thumbY && y <= thumbY+m.ThumbLen {
 				h.IsVThumb = true
 			}
@@ -570,20 +576,22 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	// ── Horizontal scrollbar hit test ──
 	if needsH && y >= hy && y <= hy+scrollW && x >= hx && x <= hx+hw {
 		h := &ScrollbarHit{Box: scrollBox}
-		if hw <= arrowSize*2 {
+		if !webkit && hw <= arrowSize*2 {
 			return nil
 		}
-		ltBtnX := hx
-		rtBtnX := hx + hw - arrowSize
+		if !webkit {
+			ltBtnX := hx
+			rtBtnX := hx + hw - arrowSize
 
-		// Check arrow buttons first.
-		if x >= ltBtnX && x < ltBtnX+arrowSize {
-			h.IsHLeftArrow = true
-			return h
-		}
-		if x >= rtBtnX && x < rtBtnX+arrowSize {
-			h.IsHRightArrow = true
-			return h
+			// Check arrow buttons first.
+			if x >= ltBtnX && x < ltBtnX+arrowSize {
+				h.IsHLeftArrow = true
+				return h
+			}
+			if x >= rtBtnX && x < rtBtnX+arrowSize {
+				h.IsHRightArrow = true
+				return h
+			}
 		}
 
 		// Track or thumb — same geometry as the painter (shared metrics).
@@ -597,7 +605,10 @@ func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 				sxRatio = 1
 			}
 			thumbTrackSpace := m.TrackLen - m.ThumbLen
-			thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
+			thumbX := hx + sxRatio*thumbTrackSpace
+			if !webkit {
+				thumbX += arrowSize + arrowGap
+			}
 			if x >= thumbX && x <= thumbX+m.ThumbLen {
 				h.IsHThumb = true
 			}

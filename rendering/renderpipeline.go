@@ -367,6 +367,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 						scrollW = l
 					}
 				}
+				// WebKit/Blink custom scrollbars have NO arrow buttons and the
+				// thumb fills the full scrollbar width (only the default flat
+				// 12px style keeps arrows + inset thumb).
+				webkitSB := webkitCustomScrollbar(st)
 
 				if scrollW > 0 && pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
@@ -503,16 +507,18 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
 							}
 
-// Up arrow: rounded triangle matching horizontal arrow proportions.
-						upBtnY := vy
-						acx := vx + scrollW/2
-						acy := upBtnY + arrowSize/2
-						info.canvas.FillRoundedTriangle(acx, acy-2, acx-4, acy+3, acx+4, acy+3, 0.8, arrowCol)
+							if !webkitSB {
+								// Up arrow: rounded triangle matching horizontal arrow proportions.
+								upBtnY := vy
+								acx := vx + scrollW/2
+								acy := upBtnY + arrowSize/2
+								info.canvas.FillRoundedTriangle(acx, acy-2, acx-4, acy+3, acx+4, acy+3, 0.8, arrowCol)
 
-						// Down arrow.
-						dnBtnY := vy + vh - arrowSize
-						dcy := dnBtnY + arrowSize/2
-						info.canvas.FillRoundedTriangle(acx, dcy+2, acx-4, dcy-3, acx+4, dcy-3, 0.8, arrowCol)
+								// Down arrow.
+								dnBtnY := vy + vh - arrowSize
+								dcy := dnBtnY + arrowSize/2
+								info.canvas.FillRoundedTriangle(acx, dcy+2, acx-4, dcy-3, acx+4, dcy-3, 0.8, arrowCol)
+							}
 
 							// Thumb (rounded rect, pill shape) — geometry from the shared
 							// ScrollbarMetrics so host drag/wheel map identically to paint.
@@ -521,7 +527,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if syRatio < 0 { syRatio = 0 }
 								if syRatio > 1 { syRatio = 1 }
 								thumbTrackSpace := vm.TrackLen - vm.ThumbLen
-								thumbY := vy + arrowSize + arrowGap + syRatio*thumbTrackSpace
+								thumbY := syRatio * thumbTrackSpace
+								if !webkitSB {
+									thumbY += arrowSize + arrowGap
+								}
 
 								isHover := cursorX >= vx && cursorX <= vx+scrollW &&
 									cursorY >= thumbY && cursorY <= thumbY+vm.ThumbLen
@@ -532,7 +541,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									rad = thumbRadius
 								}
-								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, rad, tCol)
+								if webkitSB {
+									// Custom webkit scrollbar: thumb fills the full width
+									// (1px breathing room each side), no arrow offset.
+									info.canvas.FillRoundRect(vx+1, thumbY, scrollW-2, vm.ThumbLen, rad, tCol)
+								} else {
+									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, rad, tCol)
+								}
 							}
 						}
 						endV:
@@ -554,14 +569,16 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
 							}
 
-												// Left arrow.
-						ltBtnX := hx
-						aCy := hy + scrollW/2
-						info.canvas.FillRoundedTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-3, aCy-4, ltBtnX+arrowSize-3, aCy+4, 0.8, arrowCol)
+							if !webkitSB {
+								// Left arrow.
+								ltBtnX := hx
+								aCy := hy + scrollW/2
+								info.canvas.FillRoundedTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-3, aCy-4, ltBtnX+arrowSize-3, aCy+4, 0.8, arrowCol)
 
-						// Right arrow.
-						rtBtnX := hx + hw - arrowSize
-						info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
+								// Right arrow.
+								rtBtnX := hx + hw - arrowSize
+								info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
+							}
 
 								// Thumb — geometry from the shared ScrollbarMetrics so
 								// host drag/wheel map identically to paint.
@@ -570,7 +587,10 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									if sxRatio < 0 { sxRatio = 0 }
 									if sxRatio > 1 { sxRatio = 1 }
 									thumbTrackSpace := hm.TrackLen - hm.ThumbLen
-									thumbX := hx + arrowSize + arrowGap + sxRatio*thumbTrackSpace
+									thumbX := sxRatio * thumbTrackSpace
+									if !webkitSB {
+										thumbX += arrowSize + arrowGap
+									}
 
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+hm.ThumbLen
@@ -581,7 +601,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									radH = thumbRadius
 								}
-								info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, radH, tCol)
+								if webkitSB {
+									info.canvas.FillRoundRect(thumbX, hy+1, hm.ThumbLen, scrollW-2, radH, tCol)
+								} else {
+									info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, radH, tCol)
+								}
 								}
 							}
 							endH:
