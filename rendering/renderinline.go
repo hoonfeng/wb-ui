@@ -14,6 +14,9 @@
 package rendering
 
 import (
+	"strconv"
+	"strings"
+
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
@@ -90,4 +93,20 @@ func lengthValue(l style.Length) float64 {
 		return 0
 	}
 	return l.Value
+}
+
+// parseLengthAny parses a CSS length string ("4px", "2.5px") into a pixel value.
+// Used for ::-webkit-scrollbar width/radius overrides where only px makes sense.
+func parseLengthAny(s string) (float64, bool) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if strings.HasSuffix(s, "px") {
+		s = strings.TrimSpace(strings.TrimSuffix(s, "px"))
+	}
+	if s == "" {
+		return 0, false
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f, true
+	}
+	return 0, false
 }

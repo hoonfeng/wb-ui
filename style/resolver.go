@@ -228,6 +228,7 @@ type collectedDecl struct {
 	specificity css.Specificity
 	sourceOrder int
 	selector    string // matched rule selector text (diag only)
+	sbKind      int    // scrollbar pseudo kind: 0=::-webkit-scrollbar, 1=::-webkit-scrollbar-thumb, -1=none
 }
 
 // keyStyleProp lists the layout-critical properties whose cascade history the
@@ -277,6 +278,16 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	for _, sheet := range r.sheets {
 		r.collectDeclarations(sheet.Rules(), sheet.Origin(), el, &collected, 0)
 	}
+
+	// ::-webkit-scrollbar / ::-webkit-scrollbar-thumb rules (WebKit/Blink
+	// scrollbar styling) apply to the element's scrollbar palette, not the
+	// element itself — collect them separately and map onto raw properties
+	// the painter reads (width/height/track/thumb color + radius).
+	var sbDecls []collectedDecl
+	for _, sheet := range r.sheets {
+		r.collectScrollbarDeclarations(sheet.Rules(), sheet.Origin(), el, &sbDecls, 0)
+	}
+	applyScrollbarDeclarations(cs, sbDecls)
 
 	// Inline style attribute (high specificity, last source order in author origin).
 	if style := el.GetAttribute("style"); style != "" {
@@ -2222,8 +2233,125 @@ func applyDefaultDisplay(cs *ComputedStyle, el *dom.Element) {
 }
 
 // parentElement returns the parent element of el, or nil if the parent is not an
-// element (e.g. the document).
-// isPseudoElementOnly reports whether the complex selector consists of nothing
+// webkitScrollbarPseudo returns which ::-webkit-scrollbar pseudo-element the
+// complex selector's LAST compound targets: 1=scrollbar-thumb, 0=scrollbar,
+// -1=none (not a webkit scrollbar selector).
+func webkitScrollbarPseudo(sel *css.ComplexSelector) int {
+	if sel == nil || len(sel.Compounds) == 0 {
+		return -1
+	}
+	last := sel.Compounds[len(sel.Compounds)-1]
+	for _, s := range last.Selectors {
+		if s.Match != css.MatchPseudoElement {
+			continue
+		}
+		switch s.PseudoElem {
+		case css.PseudoElementWebkitScrollbar:
+			return 0
+		case css.PseudoElementWebkitScrollbarThumb:
+			return 1
+		}
+	}
+	return -1
+}
+
+// collectScrollbarDeclarations gathers declarations from rules whose selector
+// targets ::-webkit-scrollbar / ::-webkit-scrollbar-thumb on el. These are
+// stored separately (applied to the scrollbar palette, never to the element's
+// own computed style — width:4px on a scrollbar must not shrink the element).
+func (r *Resolver) collectScrollbarDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
+	order := baseOrder
+	for _, rule := range rules {
+		switch v := rule.(type) {
+		case *css.StyleRule:
+			if v.Selectors != nil {
+				for _, sel := range v.Selectors.Selectors {
+					if k := webkitScrollbarPseudo(&sel); k >= 0 && r.checker.Match(sel, el) {
+						spec := css.SpecificityOfComplex(sel)
+						for _, d := range v.Declarations {
+							*collected = append(*collected, collectedDecl{
+								decl:        d,
+								origin:      origin,
+								important:   d.Important,
+								specificity: spec,
+								sourceOrder: order,
+								selector:    sel.String(),
+								sbKind:      k,
+							})
+							order++
+						}
+					}
+				}
+			}
+			if len(v.NestedRules) > 0 {
+				order = r.collectScrollbarDeclarations(v.NestedRules, origin, el, collected, order)
+			}
+		case *css.MediaRule:
+			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+				continue
+			}
+			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order)
+		case *css.SupportsRule:
+			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order)
+		}
+	}
+	return order
+}
+
+// applyScrollbarDeclarations maps ::-webkit-scrollbar declarations onto the
+// element's scrollbar palette (raw properties read by the painter):
+//
+//	::-webkit-scrollbar { width → -webkit-scrollbar-width, background → track color }
+//	::-webkit-scrollbar-thumb { background → -webkit-scrollbar-thumb-color,
+//	                            border-radius → -webkit-scrollbar-thumb-radius }
+func applyScrollbarDeclarations(cs *ComputedStyle, decls []collectedDecl) {
+	if len(decls) == 0 {
+		return
+	}
+	// Sort by cascade (origin/importance/specificity/sourceOrder) so later
+	// declarations overwrite earlier ones like the normal cascade.
+	sort.SliceStable(decls, func(i, j int) bool {
+		a, b := decls[i], decls[j]
+		ai := importanceRank(a.origin, a.important)
+		bj := importanceRank(b.origin, b.important)
+		if ai != bj {
+			return ai < bj
+		}
+		if c := a.specificity.Compare(b.specificity); c != 0 {
+			return c < 0
+		}
+		return a.sourceOrder < b.sourceOrder
+	})
+	for _, cd := range decls {
+		pn := strings.ToLower(cd.decl.Name)
+		val := cd.decl.ValueString()
+		switch pn {
+		case "width":
+			cs.SetProperty("-webkit-scrollbar-width", val)
+		case "height":
+			cs.SetProperty("-webkit-scrollbar-height", val)
+		case "background", "background-color":
+			if cd.sbKind == 1 {
+				cs.SetProperty("-webkit-scrollbar-thumb-color", val)
+			} else {
+				cs.SetProperty("-webkit-scrollbar-track-color", val)
+			}
+		case "border-radius":
+			if cd.sbKind == 1 {
+				cs.SetProperty("-webkit-scrollbar-thumb-radius", val)
+			}
+		case "scrollbar-width":
+			cs.SetProperty("scrollbar-width", val)
+		case "scrollbar-color":
+			cs.SetProperty("scrollbar-color", val)
+		}
+	}
+}
+
+// webkitScrollbarPseudoFromSelector is retained for compatibility (not used by
+// the cascade path, which records sbKind at collection time).
+
+
 // but pseudo-element simple selectors (e.g. ::selection, ::-webkit-scrollbar-thumb).
 // Such selectors should NOT apply their declarations to the base element — they
 // only apply when the resolver resolves the element FOR the pseudo-element.

@@ -358,6 +358,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				case "none":
 					scrollW = 0
 				}
+				// ::-webkit-scrollbar { width: Npx } — Blink/WebKit custom width
+				// (GitPanel uses 4px). Overrides the default (and scrollbar-width
+				// thin above when both present, mirroring Chrome where
+				// ::-webkit-scrollbar wins over the standard property).
+				if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
+					if l, ok := parseLengthAny(wv); ok && l > 0 {
+						scrollW = l
+					}
+				}
 
 				if scrollW > 0 && pb.Width > scrollW*2 && pb.Height > scrollW*2 {
 					if info.rv != nil {
@@ -434,6 +443,28 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									}
 								}
 							}
+							// ::-webkit-scrollbar-thumb / ::-webkit-scrollbar
+							// background overrides (Blink/WebKit custom styling,
+							// e.g. GitPanel's var(--scrollbar-thumb)).
+							if tc := st.GetProperty("-webkit-scrollbar-thumb-color"); tc != "" {
+								if c, ok := parseColorSimple(tc); ok {
+									thumbCol = c
+									thumbHoverCol = c
+								}
+							}
+							if tc2 := st.GetProperty("-webkit-scrollbar-track-color"); tc2 != "" {
+								if c, ok := parseColorSimple(tc2); ok {
+									trackCol = c
+								}
+							}
+							// ::-webkit-scrollbar-thumb { border-radius } —
+							// used to round the thumb ends.
+							thumbRadius := 0.0
+							if tr := st.GetProperty("-webkit-scrollbar-thumb-radius"); tr != "" {
+								if l, ok := parseLengthAny(tr); ok && l > 0 {
+									thumbRadius = l
+								}
+							}
 
 							sx, sy := float64(0), float64(0)
 							cursorX, cursorY := float64(0), float64(0)
@@ -494,7 +525,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								tCol := thumbCol
 								if isHover { tCol = thumbHoverCol }
 
-								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, 5, tCol)
+								rad := 5.0
+								if thumbRadius > 0 {
+									rad = thumbRadius
+								}
+								info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, rad, tCol)
 							}
 						}
 						endV:
@@ -537,7 +572,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									tCol := thumbCol
 									if isHover { tCol = thumbHoverCol }
 
-									info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, 5, tCol)
+									radH := 5.0
+								if thumbRadius > 0 {
+									radH = thumbRadius
+								}
+								info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, radH, tCol)
 								}
 							}
 							endH:
