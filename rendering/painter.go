@@ -479,11 +479,15 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			} else {
 				yy = y + h - 1 - float64(i)
 			}
-			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧）。Edge 实测弧带中心线
-			// 左移量随行数递减：i=0 左移 width+0.5，i=1 左移 width-1，i=2 右移 0.5，
-			// 逐像素匹配 Edge（Chromium）：
-			//   y=100: x+2..x+4（3px） y=101: x..x+2（3px） y=102: x+1..x+2（2px）
-			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - width - 0.5 + 1.5*float64(i)
+			// 外弧点（圆心 x+r, cy）在 yy 处的左侧（x 小侧）。浏览器实测弧带中心线
+			// 左移量随行数递减：i=0 左移 width-0.5，i=1 左移 width-1，i=2 右移 0.5，
+			// 逐像素匹配浏览器（Chromium/Edge 同内核）web_debug 截图：
+			//   y=100: x+3..x+5（3px） y=101: x..x+2（3px） y=102: x+1..x+2（2px）
+			// 左移量随行数递减 1px/步，反推自浏览器像素：i=0 移 width-0.5
+			// （弧带 x+3..x+5），i=1 移 width-1.5（弧带 x+1..x+3），i=2 移
+			// width-2.5（弧带 x+1..x+2）
+			left := width - 0.5 - 1.0*float64(i)
+			xc := (x + r) - math.Sqrt(r*r-(yy-cy)*(yy-cy)) - left
 			bw := width + 1
 			if i >= 2 {
 				bw = width
@@ -504,7 +508,8 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 			} else {
 				xx = x + w - 1 - float64(i)
 			}
-			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx)) - width - 0.5 + 1.5*float64(i)
+			yc := (y + r) - math.Sqrt(r*r-(xx-cx)*(xx-cx))
+			yc -= width - 0.5 - 1.0*float64(i)
 			bw := width + 1
 			if i >= 2 {
 				bw = width
