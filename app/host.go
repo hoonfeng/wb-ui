@@ -2051,7 +2051,20 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// 是两套：dispatch 时 jsListener 里已 RunJobs 一次，但 Vue 的
 		// flushJobs 可能在 await 恢复链更后面，这里再补一次确保触发。
 		if h.wv.JSInterpreter() != nil {
-			h.wv.JSInterpreter().RunJobs()
+			// 多轮交替 flush：Vue 的组件更新是嵌套的（父→子），一次
+			// RunJobs 只跑一层，需要反复直到无新任务。
+			for i := 0; i < 10; i++ {
+				h.wv.JSInterpreter().RunJobs()
+				h.processEventLoop()
+			}
+			// 真实等待：Vue 的 scheduler 可能用 rAF/宏任务（ProcessTasks
+			// 每帧才跑一次），handleClick 在主循环外同步执行，必须让出
+			// 时间让调度器完成。多次短 sleep 驱动动画帧。
+			for i := 0; i < 8; i++ {
+				time.Sleep(15 * time.Millisecond)
+				h.processEventLoop()
+				h.wv.JSInterpreter().RunJobs()
+			}
 		}
 		h.wv.RebuildRenderTree()
 		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
