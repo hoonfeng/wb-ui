@@ -102,6 +102,21 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	for _, it := range items {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
+		// ★ Column flex 冻结项（flex-grow:0 + flex-shrink:0，basis:auto）：
+		//   baseSize 用真实布局高度替代 intrinsic 估算。估算会低估嵌套
+		//   flex/grid 内容（conv-stats 面板实测 271px vs 估算 228px），
+		//   冻结项按低估高度参与分配后实际更高，总高溢出容器，把底部
+		//   内容（conv-footer-actions 市场/设置按钮）挤出视口不可见。
+		//   Chrome 对 basis:auto 的 flex base size 同样取 max-content 实测值。
+		//   预布局仅影响冻结项自身的几何，后续 applyPositions 会再次
+		//   ctx.Layout（LayoutState 无 visited 标记，重复布局幂等）。
+		if !isRow && it.flexGrow <= 0 && it.flexShrink <= 0 && !it.basisExplicit {
+			ctx := contextFor(it.box, state)
+			ctx.Layout(it.box, state)
+			if bh := state.GeometryForBox(it.box).BorderBoxHeight(); bh > 0 {
+				it.baseSize = bh
+			}
+		}
 		it.hypothetical = it.baseSize
 		it.targetSize = it.baseSize
 		if wbFlexDebug && (flexName(box) == "div.titlebar" || flexName(box) == "div.chat-area") {
