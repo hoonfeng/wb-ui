@@ -48,8 +48,17 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 	info := NewPaintInfo(canvas, paintRect)
 	info.rv = view
-	info.SetDirtyCheckEnabled(view.IsDirty())
-	// Record the save depth at entry so fixed layers can restore to a
+	// ★ 存在任何容器级 scroll offset 时禁用 dirty check：painter 的
+	// intersects() 用未 translate 的绝对坐标判断对象是否在脏区内。
+	// 滚动后内容 translate 进入视口，但绝对坐标仍在旧视口外 →
+	// intersects=false → 新进入视口的内容被跳过 → "滚动正常但内容
+	// 滚上来后空白/丢失"。有滚动偏移即全量重绘（滚动时内容必须
+	// 全部绘制，这是浏览器滚动后的正常重绘范围）。
+	anyBoxScroll := view.HasBoxScrollOffset()
+	info.SetDirtyCheckEnabled(view.IsDirty() && !anyBoxScroll)
+	if os.Getenv("WB_PAINT_DEBUG") != "" {
+		log.Printf("[paint] dirty=%v anyScroll=%v offsets=%d", view.IsDirty(), anyBoxScroll, view.ScrollOffsetCount())
+	}	// Record the save depth at entry so fixed layers can restore to a
 	// clip-free state via RestoreToCount (see paintLayerTree).
 	info.initialSaveCount = canvas.SaveCount()
 
@@ -165,6 +174,36 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	paintLayerContent(layer, info)
 
+	// ★ Scrolled content inside child layers: when THIS layer's owner is a
+	// scroll container (overflow:auto/scroll), its child layers' content
+	// must move with the scroll offset. The child layer path bypasses
+	// walkSubtreeExcluded (whose scroll translate only covers non-layer
+	// children), so without this translate a scrollbar thumb moves while
+	// layer content (e.g. position:relative conv-item inside conv-list)
+	// stays put. The scrollbar itself is drawn in the parent's
+	// walkSubtreeExcluded (clip-only, no translate), so it stays fixed.
+	var scrollRestore bool
+	var scrollCheckWasEnabled bool
+	if info != nil && info.rv != nil {
+		if rb := asRenderBox(layer.Owner()); rb != nil {
+			if st := rb.Style(); st != nil &&
+				(st.OverflowX == style.OverflowAuto || st.OverflowX == style.OverflowScroll ||
+					st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
+				if sx, sy := info.rv.BoxScrollOffset(rb); sx != 0 || sy != 0 {
+					info.canvas.Save()
+					info.canvas.Translate(-sx, -sy)
+					scrollRestore = true
+					// ★ child layers 的内容用绝对坐标绘制，滚动后新进入
+					// 视口的内容（未 translate 坐标仍在 dirtyRect 外）会被
+					// painter 的 intersects 误判跳过 → "滚动后下方内容不显示"。
+					// translate 期间禁用 dirty check，保证全部绘制。
+					scrollCheckWasEnabled = info.DirtyCheckEnabled()
+					info.SetDirtyCheckEnabled(false)
+				}
+			}
+		}
+	}
+
 	// Collect child layers and bucket them by stacking position.
 	var neg, auto, pos []*RenderLayer
 	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
@@ -192,6 +231,10 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	}
 	for _, child := range pos {
 		paintLayerTree(child, info)
+	}
+	if scrollRestore {
+		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)
+		info.canvas.Restore()
 	}
 }
 
@@ -395,8 +438,21 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	}
 
 	// Paint children (inside clip + translate).
+	// ★ Scroll translate 期间必须禁用 dirty-rect 检查：dirty 判定基于
+	// 未 translate 的坐标，滚动后内容实际画在 (原位置 - scrollSY)，
+	// 原坐标在视口外的项会被 intersects() 误判为"不在脏区"而跳过绘制，
+	// 结果就是滚动条 thumb 跟着动、内容却完全没重绘。滚动容器的
+	// 内容要么全部绘制，要么按 translate 后的坐标重算脏区——前者简单可靠。
+	scrollCheckWasEnabled := false
+	if needsScrollRestore && info != nil {
+		scrollCheckWasEnabled = info.DirtyCheckEnabled()
+		info.SetDirtyCheckEnabled(false)
+	}
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 		walkSubtreeExcluded(c, excluded, info, visit)
+	}
+	if needsScrollRestore && info != nil {
+		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)
 	}
 
 	// Restore Level 2 (scroll translate) — now we're back in clip-only state.

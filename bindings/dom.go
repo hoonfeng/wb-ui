@@ -2387,7 +2387,9 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 	switch key {
 	case "cssText":
 		s.el.SetAttribute("style", val.String())
-		fmt.Fprintf(os.Stderr, "[styleProxy] cssText=%q\n", val.String())
+		if os.Getenv("WB_STYLE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[styleProxy] cssText=%q\n", val.String())
+		}
 		if OnInlineStyleChanged != nil {
 			OnInlineStyleChanged(s.el)
 		}
@@ -2405,8 +2407,10 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 			props[ckey] = strVal
 		}
 		s.el.SetAttribute("style", joinStyle(props))
-		fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
-			key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
+		if os.Getenv("WB_STYLE_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
+				key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
+		}
 		if OnInlineStyleChanged != nil {
 			OnInlineStyleChanged(s.el)
 		}

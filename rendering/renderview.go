@@ -41,9 +41,13 @@ type RenderView struct {
 	dirtyRect   Rect
 	scrollOffsetX, scrollOffsetY float64
 	// scrollOffsets stores per-box scroll offsets for overflow:scroll/auto.
-	// Keyed by the RenderBox pointer; only boxes that have been scrolled
-	// appear in this map.
-	boxScrollOffsets map[*RenderBox]graphics.Point
+	// Keyed by the DOM node (NOT the RenderBox pointer): the render tree is
+	// rebuilt frequently (hover :style changes, DOM mutations → brand-new
+	// RenderBox instances), so pointer keys go stale and a wheel/thumb
+	// offset written against the old box would never be seen by paint of
+	// the new box — "scrollbar thumb moves but content does not". DOM nodes
+	// survive rebuilds; paint/hit-test/scrollbar code reads by box.Node().
+	boxScrollOffsets map[dom.Node]graphics.Point
 
 	// nodeRenderMap maps DOM nodes to their corresponding RenderObject.
 	// Populated during syncGeometry() so hit-test and scroll container lookup
@@ -68,7 +72,7 @@ func (v *RenderView) Resolver() *style.Resolver { return v.resolver }
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
 	rv := &RenderView{
 		document:         doc,
-		boxScrollOffsets: make(map[*RenderBox]graphics.Point),
+		boxScrollOffsets: make(map[dom.Node]graphics.Point),
 		nodeRenderMap:    make(map[dom.Node]RenderObject),
 	}
 	rv.initBase(rv, doc, st)
@@ -114,16 +118,30 @@ func (v *RenderView) SetScrollOffset(x, y float64) {
 func (v *RenderView) ScrollOffset() (float64, float64) { return v.scrollOffsetX, v.scrollOffsetY }
 
 // SetBoxScrollOffset stores a scroll offset for an overflow:scroll box.
+// Keyed by DOM node so the offset survives render-tree rebuilds (see the
+// boxScrollOffsets field comment).
 func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
-	if v.boxScrollOffsets == nil {
-		v.boxScrollOffsets = make(map[*RenderBox]graphics.Point)
+	if box == nil {
+		return
 	}
-	if os.Getenv("WB_SCROLL_DEBUG") != "" && box != nil {
+	if v.boxScrollOffsets == nil {
+		v.boxScrollOffsets = make(map[dom.Node]graphics.Point)
+	}
+	if os.Getenv("WB_SCROLL_DEBUG") != "" {
 		if el, ok := box.Node().(*dom.Element); ok {
 			log.Printf("[scroll/set] BoxScrollOffset %s → (%.1f, %.1f)", el.LocalName(), x, y)
 		}
 	}
-	v.boxScrollOffsets[box] = graphics.Point{X: x, Y: y}
+	v.boxScrollOffsets[box.Node()] = graphics.Point{X: x, Y: y}
+	// ★ 滚动偏移变化必须标记全脏：paint 的 dirty-rect 检查（intersects）
+	// 用未 translate 的绝对坐标判断对象是否在脏区内。滚动后新进入
+	// 视口的内容（绝对坐标仍在旧视口下方）会被误判为"不在脏区"而
+	// 跳过绘制 → "滚动条 thumb 动了、内容却空白"或"滚上来后内容
+	// 不显示"。与 SetScrollOffset（页面级）一致，每次 box 滚动都
+	// MarkAllDirty，下一帧全量重绘。
+	if v.viewWidth > 0 && v.viewHeight > 0 {
+		v.MarkAllDirty()
+	}
 }
 
 // RestoreScrollOffsetsFrom carries per-box scroll offsets from a previous
@@ -140,35 +158,14 @@ func (v *RenderView) RestoreScrollOffsetsFrom(old *RenderView) {
 		return
 	}
 	if v.boxScrollOffsets == nil {
-		v.boxScrollOffsets = make(map[*RenderBox]graphics.Point)
+		v.boxScrollOffsets = make(map[dom.Node]graphics.Point)
 	}
-	for ob, p := range old.boxScrollOffsets {
-		if ob == nil {
+	// Keyed by DOM node, which survives the rebuild — copy directly.
+	for node, p := range old.boxScrollOffsets {
+		if node == nil {
 			continue
 		}
-		// Match by DOM node via tree walk: nodeRenderMap is only
-		// populated during syncGeometry, which runs later at layout
-		// time — the rebuild itself cannot rely on it.
-		var nb *RenderBox
-		var walk func(RenderObject)
-		walk = func(o RenderObject) {
-			if nb != nil {
-				return
-			}
-			if o != nil && o.Node() == ob.Node() {
-				if b := asRenderBox(o); b != nil {
-					nb = b
-					return
-				}
-			}
-			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-				walk(c)
-			}
-		}
-		walk(RenderObject(v))
-		if nb != nil {
-			v.boxScrollOffsets[nb] = p
-		}
+		v.boxScrollOffsets[node] = p
 	}
 }
 
@@ -185,14 +182,33 @@ func (v *RenderView) ScrollOffsetCount() int {
 
 // BoxScrollOffset returns the stored scroll offset for an overflow:scroll box.
 func (v *RenderView) BoxScrollOffset(box *RenderBox) (float64, float64) {
-	if v.boxScrollOffsets == nil {
+	if v.boxScrollOffsets == nil || box == nil || box.Node() == nil {
 		return 0, 0
 	}
-	p, ok := v.boxScrollOffsets[box]
+	p, ok := v.boxScrollOffsets[box.Node()]
 	if !ok {
 		return 0, 0
 	}
 	return float64(p.X), float64(p.Y)
+}
+
+// HasBoxScrollOffset reports whether ANY overflow:scroll/auto box currently
+// carries a non-zero scroll offset. Paint uses this to force a full repaint:
+// per-box scroll translate moves content into the viewport whose ABSOLUTE
+// (un-translated) coordinates still lie outside the dirty rect, so the
+// painter's intersects() check would skip it ("scrollbar moves, scrolled-in
+// content is blank"). When any box is scrolled, dirty-checking is disabled
+// for the frame.
+func (v *RenderView) HasBoxScrollOffset() bool {
+	if v == nil || len(v.boxScrollOffsets) == 0 {
+		return false
+	}
+	for _, p := range v.boxScrollOffsets {
+		if p.X != 0 || p.Y != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // FindRenderBoxForNode returns the RenderBox for a given DOM node, or nil
@@ -209,6 +225,13 @@ func (v *RenderView) FindRenderBoxForNode(n dom.Node) *RenderBox {
 
 // FindScrollContainerForNode walks up from node (through DOM ancestors)
 // looking for the first element whose RenderBox has overflow:scroll or
+// overflow:auto on EITHER axis. The painter's scrollbar gating
+// (needsScrollbars) is per-axis (overflow-y:auto with content overflow
+// draws a vertical scrollbar even when overflow-x stays visible), so a
+// container with only overflow-y:auto must be hit-testable as a scroll
+// container too — otherwise wheel events over such boxes fall through to
+// the FrameView (page maxY=0) and every single-axis scroll container
+// becomes unscrollable.
 func (v *RenderView) FindScrollContainerForNode(n dom.Node) *RenderBox {
 	for cur := n; cur != nil; cur = cur.ParentNode() {
 		box := v.FindRenderBoxForNode(cur)
@@ -219,8 +242,10 @@ func (v *RenderView) FindScrollContainerForNode(n dom.Node) *RenderBox {
 		if st == nil {
 			continue
 		}
-		isScroll := (st.OverflowX == style.OverflowScroll || st.OverflowX == style.OverflowAuto) &&
-			(st.OverflowY == style.OverflowScroll || st.OverflowY == style.OverflowAuto)
+		isScroll := st.OverflowX == style.OverflowScroll ||
+			st.OverflowX == style.OverflowAuto ||
+			st.OverflowY == style.OverflowScroll ||
+			st.OverflowY == style.OverflowAuto
 		if isScroll {
 			return box
 		}

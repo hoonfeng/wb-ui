@@ -860,18 +860,32 @@ func (h *Host) Run() {
 		// (browser-like). Scrollbar thumb drags bypass this (1:1 direct
 		// writes), so the thumb never lags the cursor.
 		if h.smoothActive && rv != nil && h.smoothBox != nil {
-			now := time.Now()
-			dt := now.Sub(h.smoothLast).Seconds()
-			h.smoothLast = now
-			if dt > 0 && dt < 0.1 {
-				f := 1 - math.Exp(-dt*12)
-				h.smoothCurX += (h.smoothTarX - h.smoothCurX) * f
-				h.smoothCurY += (h.smoothTarY - h.smoothCurY) * f
-				if math.Abs(h.smoothTarX-h.smoothCurX) < 0.5 && math.Abs(h.smoothTarY-h.smoothCurY) < 0.5 {
-					h.smoothCurX, h.smoothCurY = h.smoothTarX, h.smoothTarY
-					h.smoothActive = false
+			// ★ 渲染树可能已被重建（hover 变化触发 MarkRenderTreeDirty +
+			// SetNeedsLayout → 下帧 RebuildRenderTreeIfNeeded 重建整棵树，
+			// 新 RenderBox 实例）。h.smoothBox 是旧树指针，直接
+			// SetBoxScrollOffset(旧box) 写入的偏移在新树上读不到 →
+			// 滚动条 thumb 跟着动但内容不滚。必须每帧按 DOM 节点
+			// 重新解析当前树中的 box 再写入。
+			smoothBox := rv.FindRenderBoxForNode(h.smoothBox.Node())
+			if smoothBox == nil {
+				// 容器被移除/不可达：放弃平滑滚动。
+				h.smoothActive = false
+			} else {
+				now := time.Now()
+				dt := now.Sub(h.smoothLast).Seconds()
+				h.smoothLast = now
+				if dt > 0 && dt < 0.1 {
+					f := 1 - math.Exp(-dt*12)
+					h.smoothCurX += (h.smoothTarX - h.smoothCurX) * f
+					h.smoothCurY += (h.smoothTarY - h.smoothCurY) * f
+					if math.Abs(h.smoothTarX-h.smoothCurX) < 0.5 && math.Abs(h.smoothTarY-h.smoothCurY) < 0.5 {
+						h.smoothCurX, h.smoothCurY = h.smoothTarX, h.smoothTarY
+						h.smoothActive = false
+					}
+					rv.SetBoxScrollOffset(smoothBox, h.smoothCurX, h.smoothCurY)
+					// 更新持有的 box 引用，避免每帧重复查找。
+					h.smoothBox = smoothBox
 				}
-				rv.SetBoxScrollOffset(h.smoothBox, h.smoothCurX, h.smoothCurY)
 			}
 		}
 		if DumpRTCallback != nil && rv != nil && h.needsResizeDump {
@@ -936,14 +950,6 @@ func (h *Host) Run() {
 				bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
 			}
 			gpuCanvas.Clear(bgColor)
-
-			// Diagnostic: log body frame rect on first frame
-			if bodyRO := findRenderObjectForNode(rendering.RenderObject(rv), h.wv.MainFrame().Document().Body()); bodyRO != nil {
-				if box, ok := bodyRO.(*rendering.RenderBox); ok {
-					fr := box.FrameRect()
-					log.Printf("[paint] body frame=(%.0f,%.0f %.0fx%.0f)", fr.X, fr.Y, fr.Width, fr.Height)
-				}
-			}
 
 			// Clamp scroll offset to valid range after layout.
 			scrollY := frameView.ScrollY()
@@ -1049,8 +1055,28 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssX := h.cursorX / csX
 			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
+				if os.Getenv("WB_SCROLL_DEBUG") != "" {
+					boxName := "?"
+					if n := scrollBox.Node(); n != nil {
+						if el, ok := n.(*dom.Element); ok {
+							boxName = el.LocalName() + "." + el.GetAttribute("class")
+						}
+					}
+					log.Printf("[scroll] hit-box=%s at (%.0f,%.0f)\n", boxName, cssX, cssY)
+				}
 				log.Printf("[scroll] per-box hit at (%.0f,%.0f) scrollY=%d\n",
 					cssX, cssY, h.wv.Page().MainFrame().View().ScrollY())
+				if os.Getenv("WB_SCROLL_DEBUG") != "" && h.wv.JSInterpreter() != nil {
+					if v, err := h.wv.JSInterpreter().RunJS(`(function(){
+						try {
+							var msgs = document.querySelectorAll('.msg-item, .message, .chat-msg, .msg-row, .tl-row');
+							var convs = document.querySelectorAll('.conv-item');
+							return 'domMsgs=' + msgs.length + ' domConvs=' + convs.length;
+						} catch(e){ return 'err:'+e.message; }
+					})()`); err == nil {
+						fmt.Fprintf(os.Stderr, "[scroll] %s\n", v.ToString())
+					}
+				}
 				sx, sy := rv.BoxScrollOffset(scrollBox)
 				deltaX := int(ev.ScrollX * 40)  // positive = right → sx increases
 				deltaY := -int(ev.ScrollY * 40) // positive = up → sy decreases
@@ -1507,10 +1533,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// If it's a form control (input/textarea/select), set focus.
 					if rv != nil {
 						hitEl := rendering.HitTest(rv, cssX, cssY, "")
-						log.Printf("[dbg/click] Press at css=(%.0f,%.0f) imeFocusedEl=%v hitEl=%v localName=%q type=%q",
-							cssX, cssY, h.imeFocusedEl != nil, hitEl != nil,
-							func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
-							func() string { if hitEl != nil { return hitEl.GetAttribute("type") }; return "" }())
+						if debugPaintLog {
+							log.Printf("[dbg/click] Press at css=(%.0f,%.0f) imeFocusedEl=%v hitEl=%v localName=%q type=%q",
+								cssX, cssY, h.imeFocusedEl != nil, hitEl != nil,
+								func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
+								func() string { if hitEl != nil { return hitEl.GetAttribute("type") }; return "" }())
+						}
 						if hitEl != nil && isFocusableElement(hitEl) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
@@ -1984,6 +2012,13 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	clickY := clickCSSY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 	el := rendering.HitTest(rv, clickCSSX, clickY, "onclick")
+	if os.Getenv("WB_EVT_DEBUG") != "" {
+		en := "<nil>"
+		if el != nil {
+			en = el.LocalName() + "." + el.GetAttribute("class")
+		}
+		fmt.Fprintf(os.Stderr, "[click] hit-onclick=%s at (%.0f,%.0f)\n", en, clickCSSX, clickY)
+	}
 	if el == nil {
 		deepest := rendering.HitTest(rv, clickCSSX, clickY, "")
 		prevFocus := rendering.FocusedFormControl
@@ -2011,7 +2046,36 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// microtasks, so without this the DOM still shows the OLD state
 		// and every click looks like it "does nothing".
 		h.processEventLoop()
+		// ★ Vue 的 scheduler（nextTick/component update）用 Promise 微任务
+		// （goja 队列），与 processEventLoop 驱动的 queueMicrotask（jsc 队列）
+		// 是两套：dispatch 时 jsListener 里已 RunJobs 一次，但 Vue 的
+		// flushJobs 可能在 await 恢复链更后面，这里再补一次确保触发。
+		if h.wv.JSInterpreter() != nil {
+			h.wv.JSInterpreter().RunJobs()
+		}
 		h.wv.RebuildRenderTree()
+		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
+			if v, err := h.wv.JSInterpreter().RunJS(`(function(){
+				try {
+					var out = [];
+					var items = document.querySelectorAll('.conv-item');
+					var titles = [];
+					for (var i=0;i<items.length && i<20;i++) {
+						var t = items[i].textContent.replace(/\s+/g,' ').slice(0,20);
+						var a = items[i].className.indexOf('active')>=0 ? 'A' : ' ';
+						titles.push(i + a + ':' + t);
+					}
+					out.push('items=' + items.length + ' [' + titles.join(' | ') + ']');
+					// 找当前 active 的 title
+					var actTitle = '';
+					for (var i=0;i<items.length;i++) if (items[i].className.indexOf('active')>=0) { actTitle = items[i].textContent.slice(0,25); break; }
+					out.push('activeTitle=' + actTitle);
+					return out.join(' | ');
+				} catch(e){ return 'err:'+e.message; }
+			})()`); err == nil {
+				fmt.Fprintf(os.Stderr, "[click] post-dispatch %s\n", v.ToString())
+			}
+		}
 		if rendering.FocusedFormControl != prevFocus {
 			h.processEventLoop()
 			h.wv.RebuildRenderTree()
@@ -2030,7 +2094,60 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 			h.handleAnchorClick(el)
 		}
 		h.processEventLoop()
+		// ★ Vue 的 scheduler（nextTick/组件更新）用 Promise 微任务
+		// （goja 队列），与 processEventLoop 驱动的 queueMicrotask（jsc 队列）
+		// 是两套：dispatch 后必须补一次 goja RunJobs，否则 Vue 的
+		// flushJobs 不跑，DOM 永远停留在旧状态（点击"看起来没反应"）。
+		if h.wv.JSInterpreter() != nil {
+			h.wv.JSInterpreter().RunJobs()
+		}
 		h.wv.RebuildRenderTree()
+		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
+			if v, err := h.wv.JSInterpreter().RunJS(`(function(){
+				try {
+					var out = [];
+					// 1. Vue devtools hook
+					var vhook = window.__VUE__;
+					out.push('VUE=' + typeof vhook);
+					// 2. app 实例
+					var appEl = document.querySelector('#app');
+					var app = appEl && appEl.__vue_app__;
+					out.push('app=' + (app ? 'yes' : 'no'));
+					// 3. 遍历组件树找 RightPanel 实例读 setupState.state.currentConvId
+					if (app) {
+						var found = [];
+						var walk = function(inst, depth) {
+							if (!inst || depth > 6) return;
+							if (inst.setupState && inst.setupState.state && inst.setupState.state.currentConvId !== undefined) {
+								found.push('cur=' + inst.setupState.state.currentConvId + ' msgs=' + (inst.setupState.state.messages||[]).length);
+							}
+							if (inst.setupState && Object.keys(inst.setupState).length) {
+								var ks = Object.keys(inst.setupState);
+								if (ks.indexOf('switchConv') >= 0) {
+									found.push('hasSwitchConv cur=' + (inst.setupState.state ? inst.setupState.state.currentConvId : '?'));
+								}
+							}
+							if (inst.subTree && inst.subTree.component) walk(inst.subTree.component, depth+1);
+							if (inst.subTree && inst.subTree.children) {
+								for (var i=0;i<inst.subTree.children.length;i++) {
+									if (inst.subTree.children[i] && inst.subTree.children[i].component) walk(inst.subTree.children[i].component, depth+1);
+								}
+							}
+						};
+						walk(app._instance, 0);
+						out.push('FOUND=' + (found.length ? found.join(';') : 'none'));
+					}
+					// 4. DOM active 索引
+					var items = document.querySelectorAll('.conv-item');
+					var active = [];
+					for (var i=0;i<items.length;i++) if (items[i].className.indexOf('active')>=0) active.push(i);
+					out.push('items=' + items.length + ' active=' + JSON.stringify(active));
+					return out.join(' | ');
+				} catch(e){ return 'err:'+e.message; }
+			})()`); err == nil {
+				fmt.Fprintf(os.Stderr, "[click] post-dispatch %s\n", v.ToString())
+			}
+		}
 		return
 	}
 	if strings.HasPrefix(onclickVal, "js:") {

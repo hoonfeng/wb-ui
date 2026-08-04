@@ -15,6 +15,7 @@ package page
 
 import (
 	"log"
+	"os"
 
 	"wb-ui/rendering"
 	"wb-ui/style"
@@ -285,7 +286,9 @@ func (v *FrameView) updateContentSize(rv *rendering.RenderView) {
 	walk(rendering.RenderObject(rv))
 	v.contentWidth = maxX
 	v.contentHeight = maxY
-	log.Printf("[scroll] updateContentSize: maxX=%d maxY=%d rvType=%T", maxX, maxY, rv)
+	if os.Getenv("WB_SCROLL_DEBUG") != "" {
+		log.Printf("[scroll] updateContentSize: maxX=%d maxY=%d rvType=%T", maxX, maxY, rv)
+	}
 	v.SetScrollOffset(v.scrollX, v.scrollY)
 }
 
