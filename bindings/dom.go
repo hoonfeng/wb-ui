@@ -36,6 +36,26 @@ var OnNodeInserted func(node dom.Node)
 // rebuild the render tree.
 var OnNodeRemoved func(node dom.Node)
 
+// ── 渲染树桥（由 webkit.WebView 注入）──
+// Element 的滚动/尺寸 CSSOM 属性（scrollTop/scrollHeight/clientHeight/
+// offsetHeight 等）需要真实布局几何。bindings 不直接依赖 rendering 包
+// （避免耦合），改为回调注入：webkit.WebView 在注册 DOM bindings 时设置
+// 这些函数，wrapElement 的 accessor 通过它们读取/写入渲染树。
+var (
+	// GetElementScrollOffset 返回元素当前滚动偏移 (x, y)；无渲染盒返回 0,0。
+	GetElementScrollOffset func(el *dom.Element) (x, y float64)
+	// SetElementScrollOffset 写入元素滚动偏移。非滚动容器或越界由实现方
+	// 忽略/钳制（浏览器语义：非 overflow 容器 scrollTop 赋值无效）。
+	SetElementScrollOffset func(el *dom.Element, x, y float64)
+	// GetElementScrollMetrics 返回 (viewW, viewH, totalW, totalH, scrollable)：
+	// view* 为 padding-box 尺寸（clientWidth/clientHeight），
+	// total* 为内容包围盒尺寸（scrollWidth/scrollHeight）。
+	GetElementScrollMetrics func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool)
+	// GetElementBoxRect 返回元素布局盒 (left, top, width, height)
+	// （offsetLeft/offsetTop/offsetWidth/offsetHeight 用）。
+	GetElementBoxRect func(el *dom.Element) (left, top, width, height float64)
+)
+
 // DOM prototype objects — set by RegisterDOMBindings, used by wrappers.
 var (
 	domElementProto *jsc.JSObject // Element.prototype
@@ -1997,18 +2017,118 @@ obj.SetInternal(el)
 		return in.GlobalObject().GetOrZero("document")
 	}), nil)
 
-	// Position / dimension stubs (Vue needs these)
+	// ── 滚动 / 尺寸 CSSOM 属性（真实几何，经渲染树桥）──
+	// 前端（Vue scrollToBottom 等）依赖 el.scrollTop = el.scrollHeight /
+	// el.clientHeight / offsetHeight 等；桥未注入（非 webkit 宿主）时安全回退 0。
+	obj.SetAccessor("scrollTop",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			if GetElementScrollOffset == nil {
+				return jsc.NumberValue(0)
+			}
+			_, y := GetElementScrollOffset(el)
+			return jsc.NumberValue(y)
+		}),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+			if SetElementScrollOffset == nil {
+				return
+			}
+			x := 0.0
+			if GetElementScrollOffset != nil {
+				x, _ = GetElementScrollOffset(el)
+			}
+			SetElementScrollOffset(el, x, v.ToNumber())
+		})
+	obj.SetAccessor("scrollLeft",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			if GetElementScrollOffset == nil {
+				return jsc.NumberValue(0)
+			}
+			x, _ := GetElementScrollOffset(el)
+			return jsc.NumberValue(x)
+		}),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+			if SetElementScrollOffset == nil {
+				return
+			}
+			y := 0.0
+			if GetElementScrollOffset != nil {
+				_, y = GetElementScrollOffset(el)
+			}
+			SetElementScrollOffset(el, v.ToNumber(), y)
+		})
+	obj.SetAccessor("scrollHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementScrollMetrics == nil {
+			return jsc.NumberValue(0)
+		}
+		_, _, _, th, _ := GetElementScrollMetrics(el)
+		return jsc.NumberValue(th)
+	}), nil)
+	obj.SetAccessor("scrollWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementScrollMetrics == nil {
+			return jsc.NumberValue(0)
+		}
+		_, _, tw, _, _ := GetElementScrollMetrics(el)
+		return jsc.NumberValue(tw)
+	}), nil)
+	obj.SetAccessor("clientHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementScrollMetrics == nil {
+			return jsc.NumberValue(0)
+		}
+		_, vh, _, _, _ := GetElementScrollMetrics(el)
+		return jsc.NumberValue(vh)
+	}), nil)
+	obj.SetAccessor("clientWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementScrollMetrics == nil {
+			return jsc.NumberValue(0)
+		}
+		vw, _, _, _, _ := GetElementScrollMetrics(el)
+		return jsc.NumberValue(vw)
+	}), nil)
+	obj.SetAccessor("offsetHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementBoxRect == nil {
+			return jsc.NumberValue(0)
+		}
+		_, _, _, h := GetElementBoxRect(el)
+		return jsc.NumberValue(h)
+	}), nil)
+	obj.SetAccessor("offsetWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementBoxRect == nil {
+			return jsc.NumberValue(0)
+		}
+		_, _, w, _ := GetElementBoxRect(el)
+		return jsc.NumberValue(w)
+	}), nil)
+	obj.SetAccessor("offsetTop", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementBoxRect == nil {
+			return jsc.NumberValue(0)
+		}
+		_, top, _, _ := GetElementBoxRect(el)
+		return jsc.NumberValue(top)
+	}), nil)
+	obj.SetAccessor("offsetLeft", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if GetElementBoxRect == nil {
+			return jsc.NumberValue(0)
+		}
+		left, _, _, _ := GetElementBoxRect(el)
+		return jsc.NumberValue(left)
+	}), nil)
+
+	// Position / dimension (Vue needs these)
 	obj.Set("getBoundingClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			r := jsc.NewObject(in.ObjectPrototype())
-			r.Set("x", jsc.NumberValue(0))
-			r.Set("y", jsc.NumberValue(0))
-			r.Set("width", jsc.NumberValue(0))
-			r.Set("height", jsc.NumberValue(0))
-			r.Set("top", jsc.NumberValue(0))
-			r.Set("right", jsc.NumberValue(0))
-			r.Set("bottom", jsc.NumberValue(0))
-			r.Set("left", jsc.NumberValue(0))
+			left, top, w, h := 0.0, 0.0, 0.0, 0.0
+			if GetElementBoxRect != nil {
+				left, top, w, h = GetElementBoxRect(el)
+			}
+			r.Set("x", jsc.NumberValue(left))
+			r.Set("y", jsc.NumberValue(top))
+			r.Set("width", jsc.NumberValue(w))
+			r.Set("height", jsc.NumberValue(h))
+			r.Set("top", jsc.NumberValue(top))
+			r.Set("right", jsc.NumberValue(left+w))
+			r.Set("bottom", jsc.NumberValue(top+h))
+			r.Set("left", jsc.NumberValue(left))
 			return jsc.ObjectValue(r)
 		}, 0)))
 	obj.Set("scrollIntoView", jsc.FunctionValue(jsc.NewNativeFunction("scrollIntoView",

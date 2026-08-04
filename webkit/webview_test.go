@@ -8,6 +8,7 @@
 package webkit
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -319,4 +320,83 @@ func TestWebViewResizeBeforeLoad(t *testing.T) {
 	if wv.Width() != 640 || wv.Height() != 480 {
 		t.Errorf("resize before load = %dx%d, want 640x480", wv.Width(), wv.Height())
 	}
+}
+
+// TestWebViewScrollBridgeElement verifies the render-tree bridge end to end:
+// Element.scrollHeight/clientHeight/scrollTop/offsetWidth read real layout
+// geometry, el.scrollTop = el.scrollHeight (the Vue scrollToBottom pattern)
+// actually scrolls the overflow box, negative values clamp to 0, and
+// getBoundingClientRect returns the box rect instead of zeros.
+func TestWebViewScrollBridgeElement(t *testing.T) {
+	wv := NewWebView()
+	wv.Resize(300, 200)
+	src := `<html><body style="margin:0"><div id="c" style="overflow:scroll;width:200px;height:100px;box-sizing:border-box"><div id="inner" style="height:600px"></div></div></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML failed: %v", err)
+	}
+	if _, err := wv.Render(); err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	v, err := wv.EvalJS(`(() => {
+		const c = document.getElementById("c");
+		const before = {
+			scrollHeight: c.scrollHeight,
+			clientHeight: c.clientHeight,
+			scrollTop: c.scrollTop,
+			offsetHeight: c.offsetHeight,
+			offsetWidth: c.offsetWidth,
+		};
+		c.scrollTop = c.scrollHeight;   // Vue scrollToBottom pattern
+		const afterScrollTop = c.scrollTop;
+		c.scrollTop = -50;              // must clamp to 0
+		const afterNegative = c.scrollTop;
+		const br = c.getBoundingClientRect();
+		return JSON.stringify({before, afterScrollTop, afterNegative, br});
+	})()`)
+	if err != nil {
+		t.Fatalf("EvalJS failed: %v", err)
+	}
+	var out struct {
+		Before struct {
+			ScrollHeight float64 `json:"scrollHeight"`
+			ClientHeight float64 `json:"clientHeight"`
+			ScrollTop    float64 `json:"scrollTop"`
+			OffsetHeight float64 `json:"offsetHeight"`
+			OffsetWidth  float64 `json:"offsetWidth"`
+		} `json:"before"`
+		AfterScrollTop float64 `json:"afterScrollTop"`
+		AfterNegative  float64 `json:"afterNegative"`
+		BR             struct {
+			Width  float64 `json:"width"`
+			Height float64 `json:"height"`
+		} `json:"br"`
+	}
+	raw := strings.TrimSpace(v.ToString())
+	raw = strings.Trim(raw, `"`)
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("unmarshal %q: %v", raw, err)
+	}
+	if out.Before.ClientHeight != 100 {
+		t.Errorf("clientHeight = %v, want 100", out.Before.ClientHeight)
+	}
+	if out.Before.ScrollHeight <= out.Before.ClientHeight {
+		t.Errorf("scrollHeight = %v should exceed clientHeight = %v (content 600 vs view 100)",
+			out.Before.ScrollHeight, out.Before.ClientHeight)
+	}
+	if out.Before.ScrollTop != 0 {
+		t.Errorf("initial scrollTop = %v, want 0", out.Before.ScrollTop)
+	}
+	maxScroll := out.Before.ScrollHeight - out.Before.ClientHeight
+	if out.AfterScrollTop <= 0 || out.AfterScrollTop > maxScroll+1 {
+		t.Errorf("after scrollTop=scrollHeight got %v, want in (0, %v]", out.AfterScrollTop, maxScroll)
+	}
+	if out.AfterNegative != 0 {
+		t.Errorf("scrollTop=-50 should clamp to 0, got %v", out.AfterNegative)
+	}
+	if out.BR.Width != 200 || out.BR.Height != 100 {
+		t.Errorf("getBoundingClientRect = %vx%v, want 200x100", out.BR.Width, out.BR.Height)
+	}
+	t.Logf("bridge OK: scrollHeight=%v clientHeight=%v scrollTop %v→%v rect=%vx%v",
+		out.Before.ScrollHeight, out.Before.ClientHeight,
+		out.Before.ScrollTop, out.AfterScrollTop, out.BR.Width, out.BR.Height)
 }

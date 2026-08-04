@@ -222,6 +222,12 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 	wv.ensureJSRuntime()
 	if doc := wv.mainFrame.Document(); doc != nil {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, doc)
+		// ★ 渲染树桥：Element.scrollTop/scrollLeft/scrollHeight/scrollWidth/
+		//   clientHeight/clientWidth/offsetHeight/offsetWidth 等 CSSOM 属性需要
+		//   真实布局几何。前端（Vue 聊天列表 scrollToBottom 等）依赖
+		//   el.scrollTop = el.scrollHeight，此前未实现 → 滚动 API 静默失效。
+		//   每次注册 DOM bindings 时重新注入（渲染树可能已重建）。
+		wv.injectRenderTreeBridge()
 		// Ensure callback for dynamic <style> injection.
 		bindings.OnStyleNodeAdded = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
@@ -275,6 +281,91 @@ func (wv *WebView) JSInterpreter() *jsc.Interpreter {
 
 func (wv *WebView) Document() *dom.Document {
 	return wv.mainFrame.Document()
+}
+
+// injectRenderTreeBridge wires the bindings package's render-tree callbacks
+// (Element.scrollTop/scrollHeight/clientHeight/offsetHeight/... accessors) to
+// this WebView's RenderView. Without it those CSSOM properties return 0 and
+// frontend scroll APIs (el.scrollTop = el.scrollHeight) silently no-op.
+func (wv *WebView) injectRenderTreeBridge() {
+	rv := wv.RenderView()
+	wrapBox := func(el *dom.Element, fn func(box *rendering.RenderBox) (float64, float64)) (float64, float64) {
+		if rv == nil || el == nil {
+			return 0, 0
+		}
+		box := rv.FindRenderBoxForNode(el)
+		if box == nil {
+			return 0, 0
+		}
+		return fn(box)
+	}
+	bindings.GetElementScrollOffset = func(el *dom.Element) (float64, float64) {
+		return wrapBox(el, func(box *rendering.RenderBox) (float64, float64) {
+			return rv.BoxScrollOffset(box)
+		})
+	}
+	bindings.SetElementScrollOffset = func(el *dom.Element, x, y float64) {
+		box := func() *rendering.RenderBox {
+			if rv == nil || el == nil {
+				return nil
+			}
+			return rv.FindRenderBoxForNode(el)
+		}()
+		if box == nil {
+			return
+		}
+		// 浏览器语义：非滚动容器上 scrollTop/scrollLeft 赋值无效（忽略）。
+		vm := rendering.VerticalScrollbarMetrics(rv, box)
+		hm := rendering.HorizontalScrollbarMetrics(rv, box)
+		if !vm.OK && !hm.OK {
+			return
+		}
+		if vm.OK {
+			if y < 0 {
+				y = 0
+			}
+			if y > vm.MaxScroll {
+				y = vm.MaxScroll
+			}
+		} else {
+			y = 0
+		}
+		if hm.OK {
+			if x < 0 {
+				x = 0
+			}
+			if x > hm.MaxScroll {
+				x = hm.MaxScroll
+			}
+		} else {
+			x = 0
+		}
+		rv.SetBoxScrollOffset(box, x, y)
+	}
+	bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
+		if rv == nil || el == nil {
+			return 0, 0, 0, 0, false
+		}
+		box := rv.FindRenderBoxForNode(el)
+		if box == nil {
+			return 0, 0, 0, 0, false
+		}
+		pb := box.PaddingBoxRect()
+		tw, th := rv.BoxContentSize(box)
+		vm := rendering.VerticalScrollbarMetrics(rv, box)
+		hm := rendering.HorizontalScrollbarMetrics(rv, box)
+		return pb.Width, pb.Height, tw, th, (vm.OK || hm.OK)
+	}
+	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
+		if rv == nil || el == nil {
+			return 0, 0, 0, 0
+		}
+		box := rv.FindRenderBoxForNode(el)
+		if box == nil {
+			return 0, 0, 0, 0
+		}
+		return box.X(), box.Y(), box.Width(), box.Height()
+	}
 }
 
 func (wv *WebView) RenderView() *rendering.RenderView {
