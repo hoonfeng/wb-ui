@@ -207,7 +207,7 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 				if t > 1 {
 					t = 1
 				}
-				canvas.FillRect(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+				canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
 			}
 		}
 		return
@@ -226,7 +226,7 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 			if t > 1 {
 				t = 1
 			}
-			canvas.FillRect(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+			canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
 		}
 	}
 }
@@ -391,7 +391,7 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 			if t < 0 {
 				t = 0
 			}
-			canvas.FillRect(x, y+float64(py), w, 1, interpolateColor(lg.Stops, t))
+			canvas.FillRectNoAA(x, y+float64(py), w, 1, interpolateColor(lg.Stops, t))
 		}
 		return
 	}
@@ -405,7 +405,7 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 			if t < 0 {
 				t = 0
 			}
-			canvas.FillRect(x+float64(px), y, 1, h, interpolateColor(lg.Stops, t))
+			canvas.FillRectNoAA(x+float64(px), y, 1, h, interpolateColor(lg.Stops, t))
 		}
 		return
 	}
@@ -413,7 +413,7 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 	ec := lg.Stops[len(lg.Stops)-1].Color
 	for py := 0; py < ih; py++ {
 		t := float64(py) / float64(ih)
-		canvas.FillRect(x, y+float64(py), w, 1, lerpColor(sc, ec, t))
+		canvas.FillRectNoAA(x, y+float64(py), w, 1, lerpColor(sc, ec, t))
 	}
 }
 

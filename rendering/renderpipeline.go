@@ -182,7 +182,56 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 				layerName(layer), clip.X, clip.Y, clip.Width, clip.Height,
 				info.scrollTranslateX, info.scrollTranslateY, m.TransY)
 		}
-		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
+		// ★ border-radius + overflow:hidden → rounded clip, mirroring
+		// RenderLayer::paintLayer clipping children to the owner's rounded
+		// border box. A rect clip would let children's square corners
+		// bleed past the rounded corners (e.g. a .comp-bar pill whose
+		// segment children poke out of the radius). Only the layer's OWN
+		// overflow establishes the rounded clip — an ancestor's clip was
+		// already rounded at that ancestor's layer entry.
+		radius := 0.0
+		if st := layer.Owner().Style(); st != nil &&
+			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
+			radius = lengthValue(st.BorderRadius)
+			if radius > 0 {
+				// Overflow rounded clip applies to the PADDING box (WebKit
+				// RenderLayer::paintLayer clips children to the owner's
+				// rounded padding box): inset the rect by the border widths
+				// and shrink the radius by the border, otherwise the arc is
+				// 1px larger and centered on the border edge — the child
+				// segments start at the padding edge so their corners stay
+				// inside the arc and the pill's ends look square instead of
+				// rounded (the arc must cut INTO the padding area).
+				bw := lengthValue(st.BorderLeftWidth)
+				bh := lengthValue(st.BorderTopWidth)
+				insetX, insetY := bw, bh
+				// If a side has no border, the border edge == padding edge
+				// for that side; use per-side insets.
+				if bw <= 0 {
+					bw = lengthValue(st.BorderRightWidth)
+					insetX = bw
+				}
+				if bh <= 0 {
+					bh = lengthValue(st.BorderBottomWidth)
+					insetY = bh
+				}
+				cw, ch := clip.Width-2*insetX, clip.Height-2*insetY
+				if cw > 0 && ch > 0 {
+					clip.X += insetX
+					clip.Y += insetY
+					clip.Width, clip.Height = cw, ch
+					radius -= (insetX + insetY) / 2
+					if radius < 0 {
+						radius = 0
+					}
+				}
+			}
+		}
+		if radius > 0 {
+			info.canvas.ClipRoundRect(clip.X, clip.Y, clip.Width, clip.Height, radius)
+		} else {
+			info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
+		}
 	}
 	// CSS opacity<1: the whole subtree paints into an offscreen transparency
 	// layer that composites at `opacity` on restore — the browser's
