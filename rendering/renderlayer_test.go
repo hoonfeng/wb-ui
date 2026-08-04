@@ -306,6 +306,166 @@ func TestGraphicsLayerProperties(t *testing.T) {
 	}
 }
 
+// TestCalculateRectsScrollDeviceCoords verifies that CalculateRects returns
+// the clip in DEVICE coordinates once a scroll container has scrolled.
+// Scrolling is implemented as a canvas translate (paintLayerContents) applied
+// AFTER CalculateRects — paintLayerTree re-adds the accumulated
+// scrollTranslate and Clip() maps back to the screen-fixed viewport — so:
+//
+//   - the layer's own border box must be shifted by the sum of ALL scroll
+//     ancestors' offsets (its content moved up inside the fixed viewport);
+//   - each scroll ancestor's padding box (its viewport) stays FIXED in device
+//     space: it must be shifted only by the scroll of ancestors OUTSIDE it.
+//
+// Without this correction a layer initially BELOW a scroll container's
+// viewport (content coords) intersects the un-shifted padding box to zero and
+// is never painted after being scrolled into view — the conv-title rows that
+// start below the conv-list fold never appear when the user scrolls up, and
+// rows that started inside the viewport keep a clip pinned to the OLD
+// viewport bottom and get wrongly culled once scrolled away.
+func TestCalculateRectsScrollDeviceCoords(t *testing.T) {
+	doc := dom.NewDocument()
+	view := NewRenderView(doc, style.NewComputedStyle())
+
+	// conv-list: overflow auto, viewport (1031,98) 249x304, scrolled 300 down.
+	scrollStyle := style.NewComputedStyle()
+	scrollStyle.OverflowX = style.OverflowAuto
+	scrollStyle.OverflowY = style.OverflowAuto
+	scrollBox := NewRenderBox(doc.CreateElement("div"), scrollStyle)
+	scrollBox.SetLocation(1031, 98)
+	scrollBox.SetSize(249, 304)
+	view.AddChild(scrollBox, nil)
+	view.SetBoxScrollOffset(scrollBox, 0, 300)
+
+	// conv-item #10: overflow:visible plain box at y=278 (content coords).
+	item := NewRenderBox(doc.CreateElement("div"), style.NewComputedStyle())
+	item.SetLocation(1031, 278)
+	item.SetSize(249, 34)
+	scrollBox.AddChild(item, nil)
+
+	// conv-title #10: its own layer (position:relative) at content y=556 —
+	// initially BELOW the 98..402 viewport, so it is only visible after
+	// scrolling 300 (device y = 556-300 = 256, inside the viewport). Like
+	// the real conv-title it has overflow:hidden (single-line ellipsis),
+	// so its own device border box is the clip start and the intersection
+	// with the ancestor viewport yields the visible device rect.
+	titleStyle := style.NewComputedStyle()
+	titleStyle.Position = style.PositionRelative
+	titleStyle.OverflowX = style.OverflowHidden
+	titleStyle.OverflowY = style.OverflowHidden
+	title := NewRenderBox(doc.CreateElement("div"), titleStyle)
+	title.SetLocation(1047, 556)
+	title.SetSize(135, 17)
+	item.AddChild(title, nil)
+
+	scrollLayer := NewRenderLayer(scrollBox)
+	itemLayer := NewRenderLayer(item)
+	titleLayer := NewRenderLayer(title)
+	scrollLayer.AddChild(itemLayer)
+	itemLayer.AddChild(titleLayer)
+
+	_, clip := titleLayer.CalculateRects()
+	// Device y = 556 - 300 = 256: the title is inside the 98..402 viewport
+	// and must paint. Old behavior: content-coords rect (y=556..573) vs
+	// un-shifted padding box (98..402) → zero → culled → never drawn after
+	// scrolling it into view.
+	if clip.Width == 0 || clip.Height == 0 {
+		t.Fatalf("scrolled-into-view title clip = %+v, want non-zero (device y 256..273 inside viewport 98..402)", clip)
+	}
+	if clip.Y != 256 {
+		t.Fatalf("clip.Y = %v, want 256 (device coords = content 556 - scroll 300)", clip.Y)
+	}
+	if clip.Width != 135 {
+		t.Fatalf("clip.Width = %v, want 135 (fully inside viewport horizontally)", clip.Width)
+	}
+
+	// A title even further down (content y=746 → device y=446, BELOW the
+	// 402 viewport bottom) must stay culled.
+	title2 := NewRenderBox(doc.CreateElement("div"), titleStyle)
+	title2.SetLocation(1047, 746)
+	title2.SetSize(135, 17)
+	item.AddChild(title2, nil)
+	titleLayer2 := NewRenderLayer(title2)
+	itemLayer.AddChild(titleLayer2)
+	_, clip2 := titleLayer2.CalculateRects()
+	if clip2.Width != 0 || clip2.Height != 0 {
+		t.Fatalf("still-below-viewport title clip = %+v, want zero (device y 446..463 > 402)", clip2)
+	}
+
+	// A title ABOVE the viewport after scroll (content y=110 → device
+	// y=-190) must also be culled.
+	title3 := NewRenderBox(doc.CreateElement("div"), titleStyle)
+	title3.SetLocation(1047, 110)
+	title3.SetSize(135, 17)
+	item.AddChild(title3, nil)
+	titleLayer3 := NewRenderLayer(title3)
+	itemLayer.AddChild(titleLayer3)
+	_, clip3 := titleLayer3.CalculateRects()
+	if clip3.Width != 0 || clip3.Height != 0 {
+		t.Fatalf("scrolled-above-viewport title clip = %+v, want zero (device y -190..-173)", clip3)
+	}
+}
+
+// TestCalculateRectsNestedScroll verifies that a scroll container nested
+// inside another scroll container clips with its viewport in the correct
+// device position: the inner viewport is fixed in device space, shifted only
+// by the scroll of the OUTER container (not by its own scroll).
+func TestCalculateRectsNestedScroll(t *testing.T) {
+	doc := dom.NewDocument()
+	view := NewRenderView(doc, style.NewComputedStyle())
+
+	// Outer scroll container A: overflow auto, viewport (10,10) 200x300,
+	// scrolled 100 down.
+	aStyle := style.NewComputedStyle()
+	aStyle.OverflowX = style.OverflowAuto
+	aStyle.OverflowY = style.OverflowAuto
+	aBox := NewRenderBox(doc.CreateElement("div"), aStyle)
+	aBox.SetLocation(10, 10)
+	aBox.SetSize(200, 300)
+	view.AddChild(aBox, nil)
+	view.SetBoxScrollOffset(aBox, 0, 100)
+
+	// Inner scroll container B: overflow auto, viewport (50,50) 100x200,
+	// scrolled 50 down. Device viewport y = 50 - 100 (outer scroll) = -50.
+	bStyle := style.NewComputedStyle()
+	bStyle.OverflowX = style.OverflowAuto
+	bStyle.OverflowY = style.OverflowAuto
+	bBox := NewRenderBox(doc.CreateElement("div"), bStyle)
+	bBox.SetLocation(50, 50)
+	bBox.SetSize(100, 200)
+	aBox.AddChild(bBox, nil)
+	view.SetBoxScrollOffset(bBox, 0, 50)
+
+	// Layer C at content (60,150): device y = 150 - 100 - 50 = 0. It is
+	// inside B's device viewport (-50..150) and A's device viewport
+	// (10..310) only for y >= 10, so the clip is (60,10) 20x10.
+	cStyle := style.NewComputedStyle()
+	cStyle.Position = style.PositionRelative
+	cStyle.OverflowX = style.OverflowHidden
+	cStyle.OverflowY = style.OverflowHidden
+	cBox := NewRenderBox(doc.CreateElement("div"), cStyle)
+	cBox.SetLocation(60, 150)
+	cBox.SetSize(20, 20)
+	bBox.AddChild(cBox, nil)
+
+	aLayer := NewRenderLayer(aBox)
+	bLayer := NewRenderLayer(bBox)
+	cLayer := NewRenderLayer(cBox)
+	aLayer.AddChild(bLayer)
+	bLayer.AddChild(cLayer)
+
+	_, clip := cLayer.CalculateRects()
+	if clip.Width == 0 || clip.Height == 0 {
+		t.Fatalf("nested-scroll layer clip = %+v, want non-zero", clip)
+	}
+	if clip.Y != 10 {
+		t.Fatalf("clip.Y = %v, want 10 (outer A viewport top in device coords)", clip.Y)
+	}
+	if clip.Height != 10 {
+		t.Fatalf("clip.Height = %v, want 10 (device y 0..20 ∩ A viewport 10..310)", clip.Height)
+	}
+}
+
 // TestLayoutRectIntersection verifies the rect intersection helper used by CalculateRects.
 func TestLayoutRectIntersection(t *testing.T) {
 	a := layout.LayoutRect{X: 0, Y: 0, Width: 100, Height: 100}

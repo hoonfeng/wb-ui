@@ -173,12 +173,73 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 	// border-box must NOT clip overflowing content (box-shadow, negative
 	// margins, absolutely positioned children...). Each ancestor that has
 	// overflow != visible narrows the clip to its padding-box.
+	//
+	// ★ hasClip flag, NOT a zero-rect test: intersectRects() also returns a
+	// zero rect when a layer is fully outside an ancestor's overflow clip
+	// (e.g. a conv-title scrolled out of its conv-list viewport). Treating
+	// that zero as "no clip yet" made the loop REPLACE the (empty)
+	// intersection with the next ancestor's padding box — the scrolled-out
+	// title ended up clipped by an unrelated ancestor (conv-sidebar) rect
+	// (1031,67,249x711) instead of being fully culled.
+	//
+	// ★ Device-coordinate correction for scroll containers: this port keeps
+	// layout geometry ABSOLUTE and implements scrolling with a canvas
+	// translate (paintLayerContents). CalculateRects must therefore return
+	// the clip in DEVICE coordinates — paintLayerTree adds the accumulated
+	// scrollTranslate back and Clip() maps it to the screen-fixed viewport:
+	//   - the layer's own border box (content coords) minus the sum of all
+	//     scroll offsets of scroll ancestors = its device position
+	//   - each scroll ancestor's padding box minus the scroll offsets of
+	//     ancestors OUTSIDE it (a nested scroll container's viewport is
+	//     fixed in device space — it does not move with its own content)
+	// Without this, a layer initially OUTSIDE the viewport (conv-title
+	// below conv-list's bottom) intersects the un-shifted padding box to
+	// zero and is never painted after being scrolled into view, while a
+	// layer initially inside keeps a clip pinned to the OLD viewport bottom
+	// and gets culled once scrolled away — "内容初始被裁切的部分滚动后
+	// 永远不显示 / 显示错位".
+	isFixed := false
+	if cs := l.owner.Style(); cs != nil {
+		isFixed = cs.Position == style.PositionFixed
+	}
+	view := l.owner.View()
+	totalSX, totalSY := 0.0, 0.0
+	if view != nil && !isFixed {
+		for cur := l.parent; cur != nil; cur = cur.parent {
+			if cur.owner == nil {
+				continue
+			}
+			cb := asRenderBox(cur.owner)
+			if cb == nil {
+				continue
+			}
+			cs := cur.owner.Style()
+			if cs == nil {
+				continue
+			}
+			if cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible {
+				sx, sy := view.BoxScrollOffset(cb)
+				totalSX += sx
+				totalSY += sy
+			}
+			if cs.Position == style.PositionFixed {
+				break
+			}
+		}
+	}
+	ownRect := layerRect
+	ownRect.X -= totalSX
+	ownRect.Y -= totalSY
+
 	clipRect = layout.LayoutRect{}
+	hasClip := false
 	cs := l.owner.Style()
 	if cs != nil && (cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible) {
-		clipRect = layerRect
+		clipRect = ownRect
+		hasClip = true
 	}
 	// Walk the ancestor layer chain intersecting with each ancestor's overflow clip.
+	innerSX, innerSY := 0.0, 0.0
 	for cur := l.parent; cur != nil; cur = cur.parent {
 		if cur.owner == nil {
 			continue
@@ -193,8 +254,19 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 		}
 		if cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible {
 			ancestorRect := cb.PaddingBoxRect()
-			if clipRect.Width == 0 && clipRect.Height == 0 {
+			sx, sy := 0.0, 0.0
+			if view != nil {
+				sx, sy = view.BoxScrollOffset(cb)
+			}
+			// This ancestor's viewport in device space: its content-coord
+			// padding box shifted by the scroll of ancestors OUTSIDE it.
+			ancestorRect.X -= totalSX - innerSX - sx
+			ancestorRect.Y -= totalSY - innerSY - sy
+			innerSX += sx
+			innerSY += sy
+			if !hasClip {
 				clipRect = ancestorRect
+				hasClip = true
 			} else {
 				clipRect = intersectRects(clipRect, ancestorRect)
 			}
