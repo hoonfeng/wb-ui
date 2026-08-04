@@ -1274,7 +1274,32 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 					ms = math.Max(0, ms-vp)
 				}
 				if itc := it.box.Style(); itc != nil && flexOverflowVisible(itc) {
-					if after := g.ContentHeight(); after > ms {
+					// min-height:auto — the item must never shrink below its
+					// content's REAL height. g.ContentHeight() alone is
+					// unreliable when the item's own layout locked its auto
+					// height to the parent flex estimate (e.g. a flex-row
+					// msg-item pinned to intrinsicContentHeight(msg-list-wrap)
+					// while its block bubble lays out 2× taller): the frame
+					// stays at the underestimated value, overflowing children
+					// are cut off and scroll containers under-report their
+					// content size — the tail of a long chat message can
+					// never be scrolled into view. Measure the true content
+					// extent from in-flow children (geometry is final after
+					// ctx.Layout above).
+					after := g.ContentHeight()
+					bottom := g.ContentBoxTop() + g.ContentHeight()
+					for _, child := range it.box.Children() {
+						if !child.IsInFlow() { continue }
+						cg := state.GeometryForBox(child)
+						if cg == nil { continue }
+						if b := cg.Top() + cg.BorderBoxHeight(); b > bottom {
+							bottom = b
+						}
+					}
+					if rb := bottom - g.ContentBoxTop(); rb > after {
+						after = rb
+					}
+					if after > ms {
 						// min-height:auto — content wrapped taller than the slot.
 						ms = after
 					}
