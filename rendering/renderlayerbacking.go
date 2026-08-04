@@ -11,7 +11,10 @@
 
 package rendering
 
-import "wb-ui/layout"
+import (
+	"wb-ui/dom"
+	"wb-ui/layout"
+)
 
 // GraphicsLayer is a placeholder for the composited output target. In the full WebKit
 // port this wraps a platform GraphicsLayer that holds a GPU texture or display list.
@@ -118,7 +121,24 @@ func layerName(l *RenderLayer) string {
 	if l == nil || l.owner == nil {
 		return "?"
 	}
-	return l.owner.RenderName()
+	return objName(l.owner)
+}
+
+// objName returns a debug name (tag + class) for a render object.
+func objName(o RenderObject) string {
+	if o == nil {
+		return "?"
+	}
+	if n := o.Node(); n != nil {
+		if el, ok := n.(*dom.Element); ok {
+			cls := el.GetClassName()
+			if cls != "" {
+				return el.TagName() + "." + cls
+			}
+			return el.TagName()
+		}
+	}
+	return o.RenderName()
 }
 
 // UpdateAfterLayout refreshes the backing's geometry after a layout pass, mirroring

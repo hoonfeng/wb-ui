@@ -97,6 +97,13 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	if layer == nil {
 		return
 	}
+	if os.Getenv("WB_PAINT_DEBUG") != "" {
+		n := 0
+		for c := layer.FirstChild(); c != nil; c = c.NextSibling() {
+			n++
+		}
+		log.Printf("[layer] %s children=%d", layerName(layer), n)
+	}
 	info.canvas.Save()
 	// Fixed-position layers paint against the viewport: reset the inherited
 	// ancestor clip so a dialog-overlay / menu inside an overflow:auto
@@ -156,16 +163,25 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		return
 	} else if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
 		_ = layerRect
-		// ★ Layer clips are ABSOLUTE coordinates from CalculateRects, but
-		// Clip() applies the current transform first. Under an active
-		// ancestor scroll translate (scrollTranslate != 0) the un-shifted
-		// rect lands -scrollY too high in device space and intersects the
-		// ancestor clip to nothing — scrolled-in layer content
-		// (position:relative items, dropdowns) is culled and "content below
-		// the fold never appears". Shift the rect back by the accumulated
-		// scroll offset so it lands on the correct device-space region.
+		// ★ Layer clips from CalculateRects are ABSOLUTE coordinates, but
+		// Clip() applies the current transform first. Child layers paint
+		// under an ancestor scroll translate (scrollTranslate != 0), so an
+		// un-shifted clip would land -scroll HIGHER in device space than its
+		// content — the scrolled-in layer content (position:relative items)
+		// is culled. Shift the rect back by the accumulated scroll offset:
+		// after Clip() applies the transform the clip lands at the
+		// screen-fixed viewport position, matching WebKit where the ancestor
+		// overflow clip stays in layer coords while content scrolls inside
+		// it. The scroll container itself is clipped BEFORE the translate
+		// (scrollTranslate == 0 here), so its clip is not shifted.
 		clip.X += info.scrollTranslateX
 		clip.Y += info.scrollTranslateY
+		if os.Getenv("WB_PAINT_DEBUG") != "" {
+			m := info.canvas.GetMatrix()
+			log.Printf("[paint/layer] %s clip=%.0f,%.0f %.0fx%.0f scrollT=(%.0f,%.0f) ctmY=%.1f",
+				layerName(layer), clip.X, clip.Y, clip.Width, clip.Height,
+				info.scrollTranslateX, info.scrollTranslateY, m.TransY)
+		}
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}
 	// CSS opacity<1: the whole subtree paints into an offscreen transparency
@@ -190,16 +206,20 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 // owners) then recurses into child layers in CSS stacking order. Shared by the
 // fixed-layer branch (clip-free viewport state) and the normal branch.
 func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
-	paintLayerContent(layer, info)
-
-	// ★ Scrolled content inside child layers: when THIS layer's owner is a
-	// scroll container (overflow:auto/scroll), its child layers' content
-	// must move with the scroll offset. The child layer path bypasses
-	// walkSubtreeExcluded (whose scroll translate only covers non-layer
-	// children), so without this translate a scrollbar thumb moves while
-	// layer content (e.g. position:relative conv-item inside conv-list)
-	// stays put. The scrollbar itself is drawn in the parent's
-	// walkSubtreeExcluded (clip-only, no translate), so it stays fixed.
+	// ★ Scrolled content — unified scroll translate. A scroll container's
+	// ENTIRE content must move by -scroll as one unit: the non-layer
+	// children painted via paintLayerContent AND the child layers painted by
+	// the paintLayerTree recursion below. WebKit gets this implicitly
+	// because layer geometry is computed against the scrolled content origin
+	// (RenderLayer::updateLayerPositions subtracts the parent's scroll
+	// position), so paints and clips share one coordinate system and no
+	// per-content translate exists. This port keeps layout coordinates
+	// absolute and applies the scroll as a canvas translate instead, so the
+	// translate must wrap BOTH content paths — exactly like
+	// RenderLayer::paintLayer applying the scroll offset before
+	// paintLayerContents. The layer's own clip was already applied by
+	// paintLayerTree (CalculateRects, before this translate), so the
+	// viewport stays fixed while content moves inside it.
 	var scrollRestore bool
 	var scrollCheckWasEnabled bool
 	var scrollSX, scrollSY float64
@@ -213,22 +233,25 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 					info.canvas.Translate(-sx, -sy)
 					scrollRestore = true
 					scrollSX, scrollSY = sx, sy
-					// ★ child layers 的内容用绝对坐标绘制，滚动后新进入
-					// 视口的内容（未 translate 坐标仍在 dirtyRect 外）会被
-					// painter 的 intersects 误判跳过 → "滚动后下方内容不显示"。
-					// translate 期间禁用 dirty check，保证全部绘制。
+					// ★ 内容用绝对坐标绘制，滚动后新进入视口的内容（未
+					// translate 坐标仍在 dirtyRect 外）会被 painter 的
+					// intersects 误判跳过 → "滚动后下方内容不显示"。translate
+					// 期间禁用 dirty check，保证全部绘制。
 					scrollCheckWasEnabled = info.DirtyCheckEnabled()
 					info.SetDirtyCheckEnabled(false)
-					// ★ 同步累计滚动偏移：child layer 的 clip 来自
-					// CalculateRects（绝对坐标），而 Clip() 会先应用当前
-					// transform，不反推偏移就会与祖先 clip 求交为空 →
-					// 滚入视口的 layer 内容被裁掉。
+					// ★ 累计滚动偏移：walkSubtreeExcluded 的滚动条绘制在
+					// translate 下运行，而滚动条几何是绝对坐标（paddingBox），
+					// 不补偿就会随内容一起滚走。用累计偏移把滚动条拉回
+					// 固定视口位置（这与 WebKit 中 RenderScrollbar 独立于
+					// 滚动内容、按层坐标绘制的行为一致）。
 					info.scrollTranslateX += sx
 					info.scrollTranslateY += sy
 				}
 			}
 		}
 	}
+
+	paintLayerContent(layer, info)
 
 	// Collect child layers and bucket them by stacking position.
 	var neg, auto, pos []*RenderLayer
@@ -373,6 +396,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		return
 	}
 
+	if os.Getenv("WB_PAINT_DEBUG") != "" && info != nil && info.rv != nil {
+		if rb := asRenderBox(root); rb != nil {
+			if st := rb.Style(); st != nil {
+				sx, sy := info.rv.BoxScrollOffset(rb)
+				log.Printf("[walk] %s ovfY=%d off=(%.0f,%.0f)", objName(root), st.OverflowY, sx, sy)
+			}
+		}
+	}
+
 	// CSS sticky: apply the scroll-pinning translate OUTSIDE the box's own
 	// transform and overflow clip, mirroring RenderBox::stickyPositionOffset
 	// applied by the nearest scrolling ancestor during paint.
@@ -444,52 +476,41 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 
 	// Level 1: apply overflow clip (outer save).
 	needsClipRestore := false
+	scrollbarPaint := false
 	if clipBox != nil && info != nil && info.canvas != nil {
-		info.canvas.Save()
-		pb := clipBox.PaddingBoxRect()
-		info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
-		needsClipRestore = true
-	}
-
-	// Level 2: apply scroll translate (inner save — nested inside clip save).
-	needsScrollRestore := false
-	if (scrollSX != 0 || scrollSY != 0) && info != nil && info.canvas != nil {
-		if needsClipRestore {
-			info.canvas.Save() // nested inside clip Save
-			info.canvas.Translate(-scrollSX, -scrollSY)
-			needsScrollRestore = true
-		} else {
+		// ★ Scrolled containers (scroll≠0) skip the clip here. The viewport
+		// clip is applied by paintLayerTree via CalculateRects BEFORE the
+		// scroll translate, so it stays fixed in screen space while the
+		// content moves inside it. Clipping here would run under the
+		// translate (content coordinates), shifting the viewport by -scroll
+		// and culling the scrolled-in content. scrollbarPaint stays true so
+		// the scrollbars below still paint (they are screen-anchored via the
+		// scrollTranslate compensation further down).
+		if scrollSX == 0 && scrollSY == 0 {
 			info.canvas.Save()
-			info.canvas.Translate(-scrollSX, -scrollSY)
-			needsScrollRestore = true
+			pb := clipBox.PaddingBoxRect()
+			if os.Getenv("WB_PAINT_DEBUG") != "" {
+				log.Printf("[paint/walk] %s clip=%.0f,%.0f %.0fx%.0f scroll=(%.0f,%.0f)",
+					objName(root), pb.X, pb.Y, pb.Width, pb.Height, scrollSX, scrollSY)
+			}
+			info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
+			needsClipRestore = true
 		}
+		scrollbarPaint = true
 	}
 
-	// Paint children (inside clip + translate).
-	// ★ Scroll translate 期间必须禁用 dirty-rect 检查：dirty 判定基于
-	// 未 translate 的坐标，滚动后内容实际画在 (原位置 - scrollSY)，
-	// 原坐标在视口外的项会被 intersects() 误判为"不在脏区"而跳过绘制，
-	// 结果就是滚动条 thumb 跟着动、内容却完全没重绘。滚动容器的
-	// 内容要么全部绘制，要么按 translate 后的坐标重算脏区——前者简单可靠。
-	scrollCheckWasEnabled := false
-	if needsScrollRestore && info != nil {
-		scrollCheckWasEnabled = info.DirtyCheckEnabled()
-		info.SetDirtyCheckEnabled(false)
-	}
+	// Paint children. The scroll translate is NOT applied here: scroll
+	// containers are always layers (RequiresLayer) and paintLayerContents
+	// applies one unified translate around both the non-layer content
+	// (this walk) and the child layers, exactly like WebKit applying the
+	// scroll offset before RenderLayer::paintLayerContents. Applying it in
+	// both places would double-scroll the content.
 	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
 		walkSubtreeExcluded(c, excluded, info, visit)
 	}
-	if needsScrollRestore && info != nil {
-		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)
-	}
-
-	// Restore Level 2 (scroll translate) — now we're back in clip-only state.
-	if needsScrollRestore {
-		info.canvas.Restore()
-	}
 
 	// ── Overflow controls (painted in clip-only state, no translate) ──
-	if needsClipRestore && info.Phase() == PhaseForeground {
+	if scrollbarPaint && info.Phase() == PhaseForeground {
 		info.textOverflowEllipsisPainted = false
 		if box := asRenderBox(root); box != nil {
 			st := box.Style()
@@ -502,6 +523,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				st.OverflowX == style.OverflowAuto || st.OverflowY == style.OverflowAuto)
 			if needsScroll {
 				pb := box.PaddingBoxRect()
+				// ★ Scrollbar geometry is absolute (padding-box) but this
+				// walk runs under paintLayerContents' scroll translate, so
+				// compensate by the accumulated scroll offset to keep the
+				// scrollbar screen-anchored (WebKit paints RenderScrollbar in
+				// layer coords, outside the scrolled content).
+				pb.X += info.scrollTranslateX
+				pb.Y += info.scrollTranslateY
 				// Modern flat scrollbar: 12px wide, subtle arrow buttons, rounded rect thumb.
 				scrollW := 12.0 // total scrollbar width
 				const arrowSize = 12.0 // arrow button height/width
