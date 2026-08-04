@@ -28,6 +28,8 @@ type InheritedData struct {
 	TextTransform   string
 	WhiteSpace      WhiteSpaceType
 	TextOverflow    TextOverflowType
+	WordBreak       string // "normal" / "break-all" / "break-word" (inherited)
+	OverflowWrap    string // "normal" / "break-word" (inherited; word-wrap alias)
 	Direction       string
 	UnicodeBidi     string
 

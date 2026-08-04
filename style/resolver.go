@@ -696,8 +696,10 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "white-space":
 		cs.WhiteSpace = LookupWhiteSpace(valueString)
 	case "word-break":
+		cs.WordBreak = valueString
 		cs.SetProperty("word-break", valueString)
 	case "overflow-wrap", "word-wrap":
+		cs.OverflowWrap = valueString
 		cs.SetProperty("overflow-wrap", valueString)
 	case "text-overflow":
 		cs.TextOverflow = LookupTextOverflow(valueString)

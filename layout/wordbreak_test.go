@@ -101,3 +101,69 @@ func TestWordBreakNoneOverflow(t *testing.T) {
 		t.Fatalf("no break rule: %d line(s), want 1 (overflow)", len(lines))
 	}
 }
+
+// TestWordBreakInheritedCJK: a space-less CJK paragraph (no whitespace
+// between characters, so the whole text is one "word") must wrap per
+// character when word-break:break-word is INHERITED from an ancestor.
+// Regression: word-break is a CSS inherited property but was only stored in
+// the raw Properties map (not InheritedData), so descendants lost it and the
+// CJK text overflowed the container.
+func TestWordBreakInheritedCJK(t *testing.T) {
+	parent := mkBlock()
+	parent.style.WordBreak = "break-word" // as the resolver would set it
+	child := mkBlock()
+	child.style.InheritFrom(parent.style)
+	child.style.FontSize = style.Length{Value: 10, Unit: "px"}
+	child.style.Width = style.Length{Value: 60, Unit: "px"}
+	// 20 CJK chars, no spaces: a single "word" wider than the container.
+	word := "这是一段没有空格的长中文文本用来验证逐字断行"
+	tb := &InlineTextBox{text: word, style: child.style}
+	child.AddChild(tb)
+
+	root := mkBlock()
+	root.AddChild(child)
+	Layout(root, 120, 200)
+
+	var segs []TextSegment
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, ch := range b.Children() {
+			if childTB, ok := ch.(*InlineTextBox); ok {
+				segs = append(segs, childTB.TextSegments...)
+				continue
+			}
+			if eb, ok := ch.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(child)
+	if len(segs) == 0 {
+		t.Fatal("no segments produced")
+	}
+	lines := map[int]string{}
+	for _, s := range segs {
+		lines[int(s.Y/4)] += string([]rune(word)[s.Start : s.Start+s.Len])
+	}
+	if len(lines) < 2 {
+		t.Fatalf("inherited word-break:break-word produced %d line(s), want >=2 (CJK text must wrap)", len(lines))
+	}
+	var keys []int
+	for k := range lines {
+		keys = append(keys, k)
+	}
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[j] < keys[i] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	var joined string
+	for _, k := range keys {
+		joined += lines[k]
+	}
+	if joined != word {
+		t.Fatalf("joined=%q want %q", joined, word)
+	}
+}

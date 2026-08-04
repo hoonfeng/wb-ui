@@ -376,6 +376,22 @@ func (c *ComputedStyle) GetProperty(name string) string {
 		return textAlignTypeName(c.TextAlign)
 	case "white-space":
 		return whiteSpaceTypeName(c.WhiteSpace)
+	case "word-break":
+		if c.WordBreak != "" {
+			return c.WordBreak
+		}
+		if c.Properties != nil {
+			return c.Properties["word-break"]
+		}
+		return ""
+	case "overflow-wrap":
+		if c.OverflowWrap != "" {
+			return c.OverflowWrap
+		}
+		if c.Properties != nil {
+			return c.Properties["overflow-wrap"]
+		}
+		return ""
 	case "direction":
 		return c.Direction
 	case "writing-mode":
