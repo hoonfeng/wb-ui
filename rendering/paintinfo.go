@@ -67,6 +67,18 @@ type PaintInfo struct {
 	// which Skia's GPU backend turns into an empty clip).
 	initialSaveCount int
 
+	// scrollTranslateX / scrollTranslateY accumulate the scroll offsets
+	// currently applied as canvas translates for overflow:auto/scroll boxes
+	// (paintLayerContents child-layer path). Layer clips come from
+	// CalculateRects in ABSOLUTE (un-translated) coordinates, but Skia's
+	// Clip() applies the current transform first, so under an active scroll
+	// translate the clip lands offset by -scrollY in device space and
+	// intersects the ancestor clip to nothing — scrolled-in layer content
+	// (position:relative items etc.) is culled and "content below the fold
+	// never appears". Painters shift the clip rect back by this amount.
+	scrollTranslateX float64
+	scrollTranslateY float64
+
 	// opacityLayerDepth counts how many enclosing opacity transparency layers
 	// (SaveLayerWithOpacity) are currently active. When > 0, painters must
 	// NOT multiply colors by CumulativeOpacity — the enclosing layer already

@@ -119,6 +119,13 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		// (clip-free), then Save + ResetFixedTransform (keep device scale,
 		// drop inherited scroll translates). The fixed element's own
 		// overflow still clips its subtree.
+		// The scroll-translate bookkeeping resets here too: RestoreToCount
+		// discarded every ancestor scroll translate, so the accumulated
+		// counter (used to shift layer clips back into device space) no
+		// longer matches the canvas state. Save it, zero it for the
+		// viewport-aligned subtree, and restore it for later siblings.
+		savedScrollTX, savedScrollTY := info.scrollTranslateX, info.scrollTranslateY
+		info.scrollTranslateX, info.scrollTranslateY = 0, 0
 		info.canvas.RestoreToCount(info.initialSaveCount)
 		info.canvas.Save()
 		info.canvas.ResetFixedTransform()
@@ -143,11 +150,22 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		// saves were popped by RestoreToCount; push a fresh save so the
 		// outer Restore() has a matching entry. Later siblings paint in the
 		// clip-free viewport state, which is correct for fixed layers.
+		info.scrollTranslateX, info.scrollTranslateY = savedScrollTX, savedScrollTY
 		info.canvas.RestoreToCount(info.initialSaveCount)
 		info.canvas.Save()
 		return
 	} else if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
 		_ = layerRect
+		// ★ Layer clips are ABSOLUTE coordinates from CalculateRects, but
+		// Clip() applies the current transform first. Under an active
+		// ancestor scroll translate (scrollTranslate != 0) the un-shifted
+		// rect lands -scrollY too high in device space and intersects the
+		// ancestor clip to nothing — scrolled-in layer content
+		// (position:relative items, dropdowns) is culled and "content below
+		// the fold never appears". Shift the rect back by the accumulated
+		// scroll offset so it lands on the correct device-space region.
+		clip.X += info.scrollTranslateX
+		clip.Y += info.scrollTranslateY
 		info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 	}
 	// CSS opacity<1: the whole subtree paints into an offscreen transparency
@@ -184,6 +202,7 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	// walkSubtreeExcluded (clip-only, no translate), so it stays fixed.
 	var scrollRestore bool
 	var scrollCheckWasEnabled bool
+	var scrollSX, scrollSY float64
 	if info != nil && info.rv != nil {
 		if rb := asRenderBox(layer.Owner()); rb != nil {
 			if st := rb.Style(); st != nil &&
@@ -193,12 +212,19 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 					info.canvas.Save()
 					info.canvas.Translate(-sx, -sy)
 					scrollRestore = true
+					scrollSX, scrollSY = sx, sy
 					// ★ child layers 的内容用绝对坐标绘制，滚动后新进入
 					// 视口的内容（未 translate 坐标仍在 dirtyRect 外）会被
 					// painter 的 intersects 误判跳过 → "滚动后下方内容不显示"。
 					// translate 期间禁用 dirty check，保证全部绘制。
 					scrollCheckWasEnabled = info.DirtyCheckEnabled()
 					info.SetDirtyCheckEnabled(false)
+					// ★ 同步累计滚动偏移：child layer 的 clip 来自
+					// CalculateRects（绝对坐标），而 Clip() 会先应用当前
+					// transform，不反推偏移就会与祖先 clip 求交为空 →
+					// 滚入视口的 layer 内容被裁掉。
+					info.scrollTranslateX += sx
+					info.scrollTranslateY += sy
 				}
 			}
 		}
@@ -234,6 +260,8 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	}
 	if scrollRestore {
 		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)
+		info.scrollTranslateX -= scrollSX
+		info.scrollTranslateY -= scrollSY
 		info.canvas.Restore()
 	}
 }
