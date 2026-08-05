@@ -58,6 +58,15 @@ func ensureFonts() {
 		// （Microsoft YaHei / Consolas / SimSun），无需预加载字体文件。
 		_ = graphics.InitFontManager("")
 	}
+	// ★ 自动加载系统字体（C:\Windows\Fonts 等）：symbol（Segoe UI Symbol）
+	//   / emoji / CJK 等 fallback 字体依赖字体文件预加载后才能解析；
+	//   LoadSystemFonts 有幂等保护，重复调用无副作用。这是 wb-ui 自动
+	//   完成的初始化，调用方（desktop 主程序、render_test、probe）无需
+	//   再手动 LoadSystemFonts——否则折叠三角 ▸ 等几何符号会因 symbolTF
+	//   为 nil 渲染成 .notdef 方块。
+	if mgr := graphics.GetFontManager(); mgr != nil {
+		mgr.LoadSystemFonts()
+	}
 	if layout.MeasureTextFunc == nil {
 		layout.MeasureTextFunc = func(family string, size float64, weight int, style, text string) float64 {
 			return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style}, text)

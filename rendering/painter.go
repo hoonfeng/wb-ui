@@ -508,12 +508,16 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 		arc(x+w-r, y+h-r, inner, r, angRight, angDown)
 		arc(x+w-r, y+h-r, r, r, angDown, angRight)
 		pts = append(pts, graphics.Point{X: x + w, Y: y + r})
-		arc(x+w-r, y+r, r, r, angRight, angUp)
-		arc(x+w-r, y+r, inner, r, angUp, angRight)
+		// ★ 右上角：angRight(0)↔angUp(3π/2) 数值差 270°，线性插值会扫过
+		//   右→下→左→上大弧（FillPath 形状错乱、右上角凹陷）。必须把终点
+		//   折算到 0 附近的 90° 区间：右→上 = 0→-π/2，上→右 = 3π/2→2π。
+		arc(x+w-r, y+r, r, r, angRight, angUp-2*math.Pi)
+		arc(x+w-r, y+r, inner, r, angUp, angRight+2*math.Pi)
 	case "top":
 		pts = append(pts, graphics.Point{X: x + w - r, Y: y + width})
-		arc(x+w-r, y+r, r, inner, angUp, angRight)
-		arc(x+w-r, y+r, r, r, angRight, angUp)
+		// ★ 右上角同 right 分支：90° 区间折算（上→右 = 3π/2→2π，右→上 = 0→-π/2）
+		arc(x+w-r, y+r, r, inner, angUp, angRight+2*math.Pi)
+		arc(x+w-r, y+r, r, r, angRight, angUp-2*math.Pi)
 		pts = append(pts, graphics.Point{X: x + r, Y: y})
 		arc(x+r, y+r, r, r, angUp, angLeft)
 		arc(x+r, y+r, r, inner, angLeft, angUp)

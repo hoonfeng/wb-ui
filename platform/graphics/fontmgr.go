@@ -79,6 +79,10 @@ type FontManager struct {
 	serifTF   *skia.Typeface  // generic serif
 	emojiTF   *skia.Typeface  // emoji font (Segoe UI Emoji / Noto Color Emoji)
 	symbolTF  *skia.Typeface // symbol font (Segoe UI Symbol) for geometric shapes/arrows
+
+	// systemFontsLoaded guards LoadSystemFonts against duplicate scans
+	// (ensureFonts / NewHost may both call it; fonts must load only once).
+	systemFontsLoaded bool
 }
 
 var (
@@ -183,6 +187,13 @@ func (m *FontManager) loadDir(dir string) {
 // On macOS it scans /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.
 // On Linux it scans /usr/share/fonts and /usr/local/share/fonts.
 func (m *FontManager) LoadSystemFonts() {
+	m.mu.Lock()
+	if m.systemFontsLoaded {
+		m.mu.Unlock()
+		return
+	}
+	m.systemFontsLoaded = true
+	m.mu.Unlock()
 	loaded := 0
 	// Windows
 	_ = m.loadSystemFontDir(`C:\Windows\Fonts`, &loaded)
@@ -468,9 +479,14 @@ func (m *FontManager) selectDefaults() {
 		}
 	}
 	// Fallback: try to find by family name if no font was flagged as emoji.
+	// Use OS-name lookup (skia.NewTypeface) rather than findBest so emoji /
+	// symbol faces are found even when no font files were pre-loaded
+	// (m.fonts empty — e.g. the webkit.ensureFonts path calls
+	// InitFontManager("") without LoadSystemFonts; findBest would always
+	// miss and symbols/emoji would render as .notdef tofu boxes).
 	if m.emojiTF == nil {
-		for _, name := range []string{"segoe ui emoji", "noto color emoji", "apple color emoji"} {
-			m.emojiTF = m.findBest(name, 400, false)
+		for _, name := range []string{"Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji"} {
+			m.emojiTF = skia.NewTypeface(name, skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 			if m.emojiTF != nil {
 				break
 			}
@@ -484,10 +500,11 @@ func (m *FontManager) selectDefaults() {
 			break
 		}
 	}
-	// Fallback: try common symbol font family names.
+	// Fallback: try common symbol font family names. OS-name lookup (see
+	// comment above) so symbol faces resolve even with an empty m.fonts.
 	if m.symbolTF == nil {
-		for _, name := range []string{"segoe ui symbol", "segoe ui", "arial"} {
-			m.symbolTF = m.findBest(name, 400, false)
+		for _, name := range []string{"Segoe UI Symbol", "Segoe UI", "Arial"} {
+			m.symbolTF = skia.NewTypeface(name, skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 			if m.symbolTF != nil {
 				break
 			}
