@@ -51,7 +51,9 @@ type pendingSeg struct {
 
 func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	cs := box.Style()
-	if cs == nil { return }
+	if cs == nil {
+		return
+	}
 	g := state.GeometryForBox(box)
 
 	contentX := g.ContentBoxLeft()
@@ -69,7 +71,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	containerWidth := contentWidth
 	fs := fontSizeOf(box)
 	lineHeight := fontLineGap(box)
-	if lineHeight <= 0 { lineHeight = fs * 1.2 }
+	if lineHeight <= 0 {
+		lineHeight = fs * 1.2
+	}
 	// Use CSS line-height if explicitly set (overrides font metrics).
 	cssLH := cssLineHeight(box)
 	if cssLH > 0 {
@@ -78,7 +82,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// Text segment height should be the actual font metrics height, not CSS
 	// line-height. The line-height determines line spacing and centering.
 	textHeight := fontLineGap(box)
-	if textHeight <= 0 { textHeight = fs * 1.2 }
+	if textHeight <= 0 {
+		textHeight = fs * 1.2
+	}
 	// Compute the vertical centering offset: when line-height > font metrics,
 	// shift text down so it appears vertically centered within the line.
 	centeringOffset := 0.0
@@ -135,7 +141,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// Get float context for text wrapping around floats.
 	fc := state.currentFloatContext()
 
-// availableLineWidth returns the usable width for a line at the given page Y.
+	// availableLineWidth returns the usable width for a line at the given page Y.
 	// When floats intrude at this Y, the line is narrowed accordingly.
 	availableLineWidth := func(lineY float64) (lineContentX, lineWidth float64) {
 		if fc != nil {
@@ -164,10 +170,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	type lineInfo struct {
-		y, contentX float64    // line Y position and content start X
-		segStart    int        // index into pending (first seg on this line)
-		widthUsed   float64    // actual used width (contentX .. last-right-edge)
-		availWidth  float64    // available width for this line (adjusted for floats)
+		y, contentX float64 // line Y position and content start X
+		segStart    int     // index into pending (first seg on this line)
+		widthUsed   float64 // actual used width (contentX .. last-right-edge)
+		availWidth  float64 // available width for this line (adjusted for floats)
 	}
 
 	// Initialize first line with float-aware available width.
@@ -198,13 +204,17 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		switch cld := child.(type) {
 		case *InlineTextBox:
 			text := cld.Text()
-			if text == "" { continue }
+			if text == "" {
+				continue
+			}
 			// Clear segments from any previous layout pass (e.g. auto-height
 			// re-layout in flex formatting context).
 			cld.TextSegments = cld.TextSegments[:0]
 			runes := []rune(text)
 			spaceWidth := measureText(box, " ")
-			if spaceWidth <= 0 { spaceWidth = measureText(box, " ") }
+			if spaceWidth <= 0 {
+				spaceWidth = measureText(box, " ")
+			}
 			cursor := 0
 			firstWord := true
 			// If this text node starts with whitespace and there's already
@@ -219,96 +229,114 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				for cursor < len(runes) && isInlineWhitespace(runes[cursor]) {
 					cursor++
 				}
-				if cursor >= len(runes) { break }
+				if cursor >= len(runes) {
+					break
+				}
 				wordStart := cursor
 				for cursor < len(runes) && !isInlineWhitespace(runes[cursor]) {
 					cursor++
 				}
 				wordEnd := cursor
-				word := string(runes[wordStart:wordEnd])
-				wordWidth := measureText(box, word)
 
-				// Compute the x where this word would be placed.
-				nextX := currentLine.widthUsed
-				if !firstWord {
-					nextX += spaceWidth
-				}
-				if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
-					// Line wrap: record line, start new line with float-aware width.
-					lines = append(lines, currentLine)
-					newY := currentLine.y + lineHeight
-					newCx, newCw := availableLineWidth(newY)
-					currentLine = lineInfo{
-						y: newY,
-						contentX: newCx,
-						segStart: len(pending),
-						widthUsed: 0,
-						availWidth: newCw,
+				// Split the word into breakable sub-units: in browsers every
+				// CJK ideograph is a soft-wrap opportunity by default (even
+				// without word-break:break-word), while a non-CJK run keeps
+				// its unbreakable-word semantics. Treating a space-less CJK
+				// run as one unbreakable word made e.g. "完成摘要" in a
+				// cramped flex header stay on one line and overlap its
+				// siblings, where the browser wraps it per character.
+				subWords := splitCJKWord(runes, wordStart, wordEnd)
+				for wi, sub := range subWords {
+					word := sub.text
+					wordWidth := measureText(box, word)
+
+					// Compute the x where this word would be placed.
+					// A space separator applies only between whitespace-
+					// delimited words (wi==0); CJK sub-units split from the
+					// same original word have no space between them.
+					nextX := currentLine.widthUsed
+					if !firstWord && wi == 0 {
+						nextX += spaceWidth
 					}
-					firstWord = true
-					nextX = 0
-				}
-				// A single word wider than the whole line: break it per
-				// character when word-break:break-all or
-				// overflow-wrap:break-word (mirrors WebCore break-word
-				// handling for long URLs / CJK-free text).
-				if wordWidth > currentLine.availWidth {
-					wordBreak := cs.GetProperty("word-break")
-					overflowWrap := cs.GetProperty("overflow-wrap")
-					if wordBreak == "break-all" || wordBreak == "break-word" || overflowWrap == "break-word" {
-						for i, ch := range []rune(word) {
-							chStr := string(ch)
-							chW := measureText(box, chStr)
-							if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth {
-								lines = append(lines, currentLine)
-								newY := currentLine.y + lineHeight
-								newCx, newCw := availableLineWidth(newY)
-								currentLine = lineInfo{
-									y: newY,
-									contentX: newCx,
-									segStart: len(pending),
-									widthUsed: 0,
-									availWidth: newCw,
-								}
-								firstWord = true
-							}
-							pending = append(pending, pendingSeg{
-								textBox: cld,
-								seg: TextSegment{
-									Start: wordStart + i, Len: 1,
-									X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
-									Width: chW, Height: textHeight,
-									LineY: currentLine.y, LineHeight: lineHeight,
-								},
-								lineIdx: len(lines),
-							})
-							currentLine.widthUsed += chW
-							firstWord = false
+					if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+						// Line wrap: record line, start new line with float-aware width.
+						lines = append(lines, currentLine)
+						newY := currentLine.y + lineHeight
+						newCx, newCw := availableLineWidth(newY)
+						currentLine = lineInfo{
+							y:          newY,
+							contentX:   newCx,
+							segStart:   len(pending),
+							widthUsed:  0,
+							availWidth: newCw,
 						}
-						continue
+						firstWord = true
+						nextX = 0
 					}
+					// A single word wider than the whole line: break it per
+					// character when word-break:break-all or
+					// overflow-wrap:break-word (mirrors WebCore break-word
+					// handling for long URLs / CJK-free text).
+					if wordWidth > currentLine.availWidth {
+						wordBreak := cs.GetProperty("word-break")
+						overflowWrap := cs.GetProperty("overflow-wrap")
+						if wordBreak == "break-all" || wordBreak == "break-word" || overflowWrap == "break-word" {
+							for i, ch := range []rune(word) {
+								chStr := string(ch)
+								chW := measureText(box, chStr)
+								if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth {
+									lines = append(lines, currentLine)
+									newY := currentLine.y + lineHeight
+									newCx, newCw := availableLineWidth(newY)
+									currentLine = lineInfo{
+										y:          newY,
+										contentX:   newCx,
+										segStart:   len(pending),
+										widthUsed:  0,
+										availWidth: newCw,
+									}
+									firstWord = true
+								}
+								pending = append(pending, pendingSeg{
+									textBox: cld,
+									seg: TextSegment{
+										Start: sub.start + i, Len: 1,
+										X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
+										Width: chW, Height: textHeight,
+										LineY: currentLine.y, LineHeight: lineHeight,
+									},
+									lineIdx: len(lines),
+								})
+								currentLine.widthUsed += chW
+								firstWord = false
+							}
+							continue
+						}
+					}
+					pending = append(pending, pendingSeg{
+						textBox: cld,
+						seg: TextSegment{
+							Start: sub.start, Len: len([]rune(word)),
+							X: currentLine.contentX + nextX, Y: currentLine.y + centeringOffset,
+							Width: wordWidth, Height: textHeight,
+							LineY: currentLine.y, LineHeight: lineHeight,
+						},
+						lineIdx: len(lines), // current (in-progress) line
+					})
+					currentLine.widthUsed = nextX + wordWidth
+					firstWord = false
 				}
-				pending = append(pending, pendingSeg{
-					textBox: cld,
-					seg: TextSegment{
-						Start: wordStart, Len: wordEnd - wordStart,
-						X: currentLine.contentX + nextX, Y: currentLine.y + centeringOffset,
-						Width: wordWidth, Height: textHeight,
-						LineY: currentLine.y, LineHeight: lineHeight,
-					},
-					lineIdx: len(lines), // current (in-progress) line
-				})
-				currentLine.widthUsed = nextX + wordWidth
-				firstWord = false
 			}
-			case *ElementBox:
+		case *ElementBox:
 			// Absolute/fixed children are out-of-flow: collect for deferred
 			// layout against their containing block (handled above).
 			if cld.IsAbsolutelyPositioned() {
 				deferredAbsolutes = append(deferredAbsolutes, cld)
 				continue
 			}
-			if !cld.IsInlineLevel() { continue }
+			if !cld.IsInlineLevel() {
+				continue
+			}
 			cldG := state.GeometryForBox(cld)
 
 			// Compute margin/padding/border BEFORE the child's Layout so the
@@ -332,14 +360,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				cs := cld.Style()
 				if cs != nil {
 					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
-					if os.Getenv("WB_LAYOUT_DEBUG") != "" && cld.Element() != nil && cld.Element().NodeName() == "INPUT" {
-						fmt.Printf("[in] INPUT width: %% of contentWidth=%.1f → %v (container=%v class=%q)\n", contentWidth, w, box.Element(), func() string {
-							if box.Element() != nil {
-								return box.Element().GetAttribute("class")
-							}
-							return ""
-						}())
-					}
+						if os.Getenv("WB_LAYOUT_DEBUG") != "" && cld.Element() != nil && cld.Element().NodeName() == "INPUT" {
+							fmt.Printf("[in] INPUT width: %% of contentWidth=%.1f → %v (container=%v class=%q)\n", contentWidth, w, box.Element(), func() string {
+								if box.Element() != nil {
+									return box.Element().GetAttribute("class")
+								}
+								return ""
+							}())
+						}
 						if isBorderBoxForBox(cld) {
 							b := cldG.BorderLeft() + cldG.BorderRight()
 							p := cldG.PaddingLeft() + cldG.PaddingRight()
@@ -473,7 +501,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// If content height is still 0 (no CSS height), use line height.
 			if cldG.ContentHeight() <= 0 {
 				lineH := fontLineGap(cld)
-				if lineH <= 0 { lineH = fs * 1.2 }
+				if lineH <= 0 {
+					lineH = fs * 1.2
+				}
 				cldG.SetContentHeight(lineH)
 			}
 
@@ -526,10 +556,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				newY := currentLine.y + lineHeight
 				newCx, newCw := availableLineWidth(newY)
 				currentLine = lineInfo{
-					y: newY,
-					contentX: newCx,
-					segStart: len(pending),
-					widthUsed: 0,
+					y:          newY,
+					contentX:   newCx,
+					segStart:   len(pending),
+					widthUsed:  0,
 					availWidth: newCw,
 				}
 				cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
@@ -606,7 +636,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				for i := ln.segStart; i < lines[li+1].segStart && i < len(pending); i++ {
 					s := pending[i].seg
 					r := s.X + s.Width - contentX
-					if r > used { used = r }
+					if r > used {
+						used = r
+					}
 				}
 			} else {
 				used = ln.widthUsed
@@ -621,7 +653,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			if shift > 0 {
 				for i := ln.segStart; i < len(pending); i++ {
-					if pending[i].lineIdx != li && i >= (func() int { if li+1 < len(lines) { return lines[li+1].segStart }; return len(pending) })() {
+					if pending[i].lineIdx != li && i >= (func() int {
+						if li+1 < len(lines) {
+							return lines[li+1].segStart
+						}
+						return len(pending)
+					})() {
 						break
 					}
 					pending[i].seg.X += shift
@@ -671,6 +708,61 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 // separates words in inline layout.
 func isInlineWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+}
+
+// inlineWordSub is one breakable sub-unit split from a whitespace-delimited
+// word: either a single CJK ideograph or a contiguous non-CJK run. start is
+// the rune offset of the sub-unit within the original text runes.
+type inlineWordSub struct {
+	start int
+	text  string
+}
+
+// splitCJKWord splits runes[ws:we] (a whitespace-delimited word, no spaces
+// inside) into breakable sub-units: every CJK ideograph becomes its own
+// sub-unit (browsers allow line breaks between CJK characters by default),
+// while contiguous non-CJK characters stay together as one sub-unit
+// (unbreakable-word semantics preserved for Latin runs).
+func splitCJKWord(runes []rune, ws, we int) []inlineWordSub {
+	var out []inlineWordSub
+	var cur []rune
+	curStart := -1
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, inlineWordSub{start: curStart, text: string(cur)})
+			cur = nil
+			curStart = -1
+		}
+	}
+	for i := ws; i < we; i++ {
+		r := runes[i]
+		if isCJKChar(r) {
+			flush()
+			out = append(out, inlineWordSub{start: i, text: string(r)})
+		} else {
+			if curStart < 0 {
+				curStart = i
+			}
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return out
+}
+
+// isCJKChar reports whether r is a CJK ideograph / fullwidth form that
+// browsers treat as a default soft-wrap opportunity. Ranges mirror
+// platform/graphics canvas.go runeCJK classification.
+func isCJKChar(r rune) bool {
+	switch {
+	case r >= 0x3400 && r <= 0x4DBF, // CJK Ext A
+		r >= 0x4E00 && r <= 0x9FFF, // CJK Unified
+		r >= 0xF900 && r <= 0xFAFF, // CJK Compatibility
+		r >= 0x3000 && r <= 0x303F, // CJK Symbols and Punctuation
+		r >= 0xFF00 && r <= 0xFFEF: // Fullwidth forms
+		return true
+	}
+	return false
 }
 
 // computeInlineContentWidth computes the inline content width of an ElementBox

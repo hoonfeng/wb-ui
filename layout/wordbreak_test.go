@@ -92,6 +92,111 @@ func TestOverflowWrapBreakWord(t *testing.T) {
 	}
 }
 
+// TestCJKDefaultLineBreak: a space-less CJK phrase ("完成摘要") in a narrow
+// container must wrap per character BY DEFAULT — in browsers every CJK
+// ideograph is a soft-wrap opportunity even without word-break:break-word.
+// Regression: wb-ui treated the whole space-less CJK run as one unbreakable
+// word, so a 4-char title in a cramped flex header stayed on one line (and
+// overlapped its siblings) while the browser split it across two lines.
+func TestCJKDefaultLineBreak(t *testing.T) {
+	box := mkBlock()
+	box.style.Width = style.Length{Value: 20, Unit: "px"}
+	box.style.FontSize = style.Length{Value: 12, Unit: "px"}
+	word := "完成摘要"
+	tb := &InlineTextBox{text: word, style: box.style}
+	box.AddChild(tb)
+
+	root := mkBlock()
+	root.AddChild(box)
+	Layout(root, 120, 200)
+
+	var segs []TextSegment
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, ch := range b.Children() {
+			if childTB, ok := ch.(*InlineTextBox); ok {
+				segs = append(segs, childTB.TextSegments...)
+				continue
+			}
+			if eb, ok := ch.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(box)
+
+	lines := map[int]string{}
+	wordRunes := []rune(word)
+	for _, s := range segs {
+		key := int(s.Y / 4)
+		lines[key] += string(wordRunes[s.Start : s.Start+s.Len])
+	}
+	if len(lines) < 2 {
+		t.Fatalf("CJK text in 40px container produced %d line(s), want >=2 (default per-char wrapping)", len(lines))
+	}
+}
+
+// TestCJKBreakInFlexItem: the real "folded-summary" structure — a flex row
+// holding a chevron span, a CJK title span ("完成摘要") and a long summary
+// span, laid out in a narrow container — must wrap the CJK title per
+// character (browser default), not keep it as one unbreakable word that
+// overflows the flex row and overlaps its siblings.
+func TestCJKBreakInFlexItem(t *testing.T) {
+	inlineSpan := func(text string) *ElementBox {
+		cs := style.NewComputedStyle()
+		cs.Display = style.DisplayInline
+		cs.FontSize = style.Length{Value: 12, Unit: "px"}
+		b := &ElementBox{nodeType: NodeGenericElement, style: cs}
+		tb := &InlineTextBox{text: text, style: cs}
+		b.AddChild(tb)
+		return b
+	}
+
+	container := mkFlex()
+	container.style.Width = style.Length{Value: 130, Unit: "px"}
+	container.style.FontSize = style.Length{Value: 12, Unit: "px"}
+
+	container.AddChild(inlineSpan("▸"))
+	title := inlineSpan("完成摘要")
+	container.AddChild(title)
+	container.AddChild(inlineSpan("已为你完成全部请求并生成了完整摘要，共修改 12 个文件。"))
+
+	root := mkBlock()
+	root.AddChild(container)
+	Layout(root, 200, 200)
+
+	// Collect segments belonging to the CJK title span.
+	var segs []TextSegment
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, ch := range b.Children() {
+			if itb, ok := ch.(*InlineTextBox); ok {
+				if itb.Text() == "完成摘要" {
+					segs = append(segs, itb.TextSegments...)
+				}
+				continue
+			}
+			if eb, ok := ch.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(container)
+	if len(segs) == 0 {
+		t.Fatal("no segments produced for the CJK title")
+	}
+	// Group segments by line Y: two or more distinct Y buckets mean the
+	// title wrapped onto multiple lines (per-char CJK breaking).
+	lines := map[int]int{}
+	wordRunes := []rune("完成摘要")
+	for _, s := range segs {
+		lines[int(s.Y/4)] += len(wordRunes[s.Start : s.Start+s.Len])
+	}
+	if len(lines) < 2 {
+		t.Fatalf("CJK title in narrow flex row produced %d line(s), want >=2 (per-char wrap)", len(lines))
+	}
+}
+
 // TestWordBreakNoneOverflow: without break rules the word stays on one line
 // (overflowing the 60px box) — preserves existing behavior.
 func TestWordBreakNoneOverflow(t *testing.T) {
