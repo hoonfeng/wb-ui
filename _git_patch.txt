@@ -1,0 +1,67 @@
+commit 949fb86acf647746f2912204ad96689dace4d4e2
+Author: hfen <739731746@qq.com>
+Date:   Mon Aug 3 19:34:05 2026 +0800
+
+    fix: 事件派发后 Vue 响应式更新从不执行——Call 未跑 goja Promise 微任务
+    
+    用户报告：点击无遮罩/无浮窗、活动栏切换无效、事件响应有延迟。
+    
+    探针实证（模拟 host.handleClick 完整路径）：
+    - dispatch click 到 svg → jsListener.HandleEvent 触发（Vue @click 回调执行了）
+    - 但 dialog 不出现——只有额外跑宏任务（RunJS setTimeout）后才 shown
+    
+    根因（goja 引擎缺口）：goja 的 Promise 微任务（jobQueue）只在顶层
+    RunProgram 返回时隐式执行（leave()），而 Runtime.Call 不触发 leave。
+    Vue 3 的响应式 scheduler 用 Promise.resolve().then(flushJobs) 排队——
+    jsListener 用 interp.Call 执行 Vue @click handler 后，flushJobs 永远不跑
+    → DOM 从不更新 → 所有 @click 驱动的 UI 变化（浮窗/遮罩/活动栏切换）
+    都"没反应"。之前加的 processEventLoop/handleClick flush 只清自定义
+    queueMicrotask 队列，够不到 goja 的 Promise jobQueue。
+    
+    修复：
+    1. goja/runtime.go：新增公开 RunJobs()——只跑 jobQueue 不动 vm.stack
+       （leave 的 stack=nil 在脚本执行中途调用会破坏 VM，实测 bindings
+       测试 panic）
+    2. jsc/goja_adapter.go：Interpreter.RunJobs() 透传
+    3. bindings/dom_events.go：jsListener.HandleEvent 在 Call 后 RunJobs
+    4. jsc/eventloop.go：executeCallback（宏任务回调）与 flushMicrotasks
+       也 RunJobs——覆盖 setTimeout 宏任务里触发 Vue 更新的场景
+    
+    验证：
+    - clickhost_probe（Go 层 DispatchEvent 到 plus svg，零额外 flush）：
+      dialog hidden → shown（立即生效）
+    - bindings/dom/app/css 测试全绿
+    - desktop 窗口 id=30 运行中
+
+diff --git a/goja/runtime.go b/goja/runtime.go
+index 9ff09d3..47dc127 100644
+--- a/goja/runtime.go
++++ b/goja/runtime.go
+@@ -2889,6 +2889,27 @@ func (r *Runtime) leave() {
+ 	r.vm.stack = nil
+ }
+ 
++// RunJobs runs all queued Promise microtasks (jobs). goja runs them implicitly
++// when a top-level RunProgram returns (leave), but Runtime.Call does NOT
++// trigger leave — so embedders that drive JS via Call (e.g. DOM event
++// dispatch → Vue @click handler) must call RunJobs explicitly, otherwise
++// Promise.then callbacks (Vue's reactive scheduler) never run and the DOM
++// stays stale.
++//
++// Unlike leave() this does NOT reset vm.stack — RunJobs may be called from
++// inside a running script (e.g. a native DOM dispatchEvent handler calling
++// back into JS), where clearing the stack would corrupt the VM.
++func (r *Runtime) RunJobs() {
++	var jobs []func()
++	for len(r.jobQueue) > 0 {
++		jobs, r.jobQueue = r.jobQueue, jobs[:0]
++		for _, job := range jobs {
++			job()
++		}
++	}
++	r.jobQueue = nil
++}
++
+ // called when the top level function returns (i.e. control is passed outside the Runtime) but it was due to an interrupt
+ func (r *Runtime) leaveAbrupt() {
+ 	r.jobQueue = nil

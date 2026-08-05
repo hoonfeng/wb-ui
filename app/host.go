@@ -1289,6 +1289,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		case window.EventMouseButton:
+			if os.Getenv("WB_EVT_DEBUG") != "" {
+				log.Printf("[evt] MouseButton action=%d at=(%.0f,%.0f) cur=(%.0f,%.0f) win=%dx%d",
+					ev.Action, ev.X, ev.Y, h.cursorX, h.cursorY, h.win.Width(), h.win.Height())
+			}
 			csX, csY := h.win.ContentScale()
 			if csX <= 0 {
 				csX = 1
@@ -1997,6 +2001,10 @@ func (h *Host) updateCaret(rv *rendering.RenderView) {
 // e.g. Vue @click, run) plus the onclick value: "js:" prefix → EvalJS,
 // otherwise → click handler.
 func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
+	if os.Getenv("WB_EVT_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[click] handleClick entered rv=%v at=(%.0f,%.0f) action=%d\n",
+			rv != nil, ev.X, ev.Y, ev.Action)
+	}
 	if rv == nil {
 		return
 	}
