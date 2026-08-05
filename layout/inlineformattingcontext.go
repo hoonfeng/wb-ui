@@ -95,11 +95,18 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// clipping (overflow:hidden, text-overflow:ellipsis) works correctly.
 	{
 		hasExplicitWidth := cs != nil && cs.Width.Unit != "" && cs.Width.Unit != "auto"
-		if !hasExplicitWidth {
+		if !hasExplicitWidth && !isFlexItem(box) {
 			// Auto-width expansion: only expand for auto-width inline-level
 			// boxes (e.g. span, inline-block). Block-level children get their
 			// width from the parent BFC and must not be expanded, otherwise
 			// text would not wrap (causing overflow beyond the container).
+			// Flex items are excluded too: their main size is decided by the
+			// flex algorithm (base ± grow/shrink, e.g. .tl-tc-param flex:1
+			// gets half the header width). Widening a flex item back to its
+			// raw text extent here makes a long tool-call param/summary
+			// overflow its shrunk box — the "text runs past the shrunken
+			// rectangle" report. The final width re-clamp below already
+			// skips flex items (isFlexItem check at L~560).
 			if box.IsInlineLevel() {
 				allText := ""
 				for _, child := range box.Children() {
