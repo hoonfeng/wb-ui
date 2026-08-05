@@ -1520,11 +1520,18 @@ obj.SetInternal(doc)
 	return obj
 }
 
-// ─── Element wrapper cache ─────────────────────────────
-// Ensures the same Go *dom.Element always maps to the same JS wrapper,
-// so JS-side properties (__vue_app__, _vnode) set on one wrapper are
-// visible through all DOM access methods (querySelector, getElementById, etc.)
-var elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+// ─── Node wrapper cache ────────────────────────────────
+// Ensures the same Go dom.Node always maps to the same JS wrapper, so
+// JS-side properties (__vue_app__, _vnode) set on one wrapper are visible
+// through all DOM access methods (querySelector, getElementById, etc.),
+// and reference-equality checks (===) work as in the browser.
+//
+// Reference equality is REQUIRED by Vue 3's renderer: removeFragment()
+// terminates its traversal with `cur !== anchor` — if each nextSibling
+// call returned a fresh wrapper, cur would never equal anchor and the
+// loop would walk past the end of the fragment until cur is undefined,
+// crashing with "Cannot read property 'nextSibling' of undefined".
+var nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
 
 // makeURLSearchParams 构造一个 URLSearchParams 对象，从 query 字符串（不带 ?）解析。
 // 支持 set/get/append/delete/has/toString/forEach/entries——companion 前端
@@ -1649,8 +1656,8 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 	return sp
 }
 
-func clearElementCache() {
-	elementWrapperCache = make(map[*dom.Element]*jsc.JSObject)
+func clearNodeCache() {
+	nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
 }
 
 // isStyleElement reports whether n is an HTML <style> element.
@@ -1826,7 +1833,7 @@ func makePerformance(rt *jsc.Interpreter) *jsc.JSObject {
 
 func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	// Return cached wrapper if available
-	if cached, ok := elementWrapperCache[el]; ok {
+	if cached, ok := nodeWrapperCache[el]; ok {
 		return cached
 	}
 	proto := rt.ObjectPrototype()
@@ -1837,7 +1844,7 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	obj.SetClassName("Element")
 obj.SetInternal(el)
 	// Cache before returning
-	elementWrapperCache[el] = obj
+	nodeWrapperCache[el] = obj
 
 	// Attributes
 	obj.Set("getAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {
@@ -2674,13 +2681,19 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 // ─── Text / Comment ────────────────────────────────────
 
 func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
+	// Return cached wrapper if available (Vue removeFragment relies on
+	// reference equality of Text/Comment wrappers to terminate traversal).
+	if cached, ok := nodeWrapperCache[t]; ok {
+		return cached
+	}
 	proto := rt.ObjectPrototype()
 	if domTextProto != nil {
 		proto = domTextProto
 	}
 	obj := jsc.NewObject(proto)
 	obj.SetClassName("Text")
-obj.SetInternal(t)
+	obj.SetInternal(t)
+	nodeWrapperCache[t] = obj
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			if p := t.ParentNode(); p != nil { p.RemoveChild(t) }
@@ -2703,10 +2716,23 @@ obj.SetInternal(t)
 		return jsc.NumberValue(float64(t.NodeType()))
 	}), nil)
 	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return t.ParentNode() }), nil)
+	// 树遍历属性（Vue 3 渲染器需要：removeFragment/patch 依赖 nextSibling/previousSibling）
+	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return t.NextSibling() }), nil)
+	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return t.PreviousSibling() }), nil)
+	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return t.FirstChild() }), nil)
+	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return t.LastChild() }), nil)
+	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrNode(in, t.ChildNodes())
+	}), nil)
 	return obj
 }
 
 func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
+	// Return cached wrapper if available (Vue removeFragment relies on
+	// reference equality of Text/Comment wrappers to terminate traversal).
+	if cached, ok := nodeWrapperCache[c]; ok {
+		return cached
+	}
 	proto := rt.ObjectPrototype()
 	if domCommentProto != nil {
 		proto = domCommentProto
@@ -2714,6 +2740,7 @@ func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 	obj := jsc.NewObject(proto)
 	obj.SetClassName("Comment")
 	obj.SetInternal(c)
+	nodeWrapperCache[c] = obj
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			if p := c.ParentNode(); p != nil { p.RemoveChild(c) }
