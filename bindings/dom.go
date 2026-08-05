@@ -3235,11 +3235,60 @@ func cssEscapeIdent(s string) string {
 // 遍历 document 内的 <style> 样式表做级联计算。
 var registeredDocument *dom.Document
 
+// styleSheetCache 缓存样式表解析结果：key 为 document + 全部 <style> 文本
+// 的 FNV 指纹。style 文本不变（含运行时动态注入）即复用解析结果，避免每次
+// getComputedStyle 全量重解析（Vue 应用多个 style 标签时解析开销可观）。
+// class/inline style 变化不失效：选择器匹配与内联叠加在每次计算时实时进行。
+var styleSheetCache struct {
+	doc    *dom.Document
+	finger uint64
+	rules  []css.Rule
+}
+
+// collectStyleTexts 遍历 document 收集所有 <style> 元素的文本，并返回
+// 基于 FNV-1a 的指纹（含文本顺序信息）。
+func collectStyleTexts(doc dom.Node) ([]string, uint64) {
+	var texts []string
+	finger := uint64(14695981039346656037) // FNV offset basis
+	mix := func(b []byte) {
+		for _, c := range b {
+			finger ^= uint64(c)
+			finger *= 1099511628211
+		}
+	}
+	var visit func(n dom.Node)
+	visit = func(n dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.NodeType() == dom.NodeElement {
+			if e, ok := n.(*dom.Element); ok && strings.EqualFold(e.TagName(), "style") {
+				var sb strings.Builder
+				for _, c := range e.ChildNodes() {
+					if c.NodeType() == dom.NodeText {
+						sb.WriteString(c.NodeValue())
+					}
+				}
+				if sb.Len() > 0 {
+					t := sb.String()
+					texts = append(texts, t)
+					mix([]byte(t))
+				}
+			}
+		}
+		for _, c := range n.ChildNodes() {
+			visit(c)
+		}
+	}
+	visit(doc)
+	return texts, finger
+}
+
 // computedStyleFor 计算元素的级联样式（bindings 层近似实现）：
-// 遍历 document 中 <style> 元素文本 → css 包解析 → SelectorChecker 匹配
-// 元素 → 按 specificity + 源顺序级联 → 再按标准优先级叠加 inline style 与
-// !important。返回 kebab-case 属性名 → 原始值字符串 的映射
-// （CSS 变量 --x 同样参与级联）。
+// 遍历 document 中 <style> 元素文本 → css 包解析（指纹缓存复用）→
+// SelectorChecker 匹配元素 → 按 specificity + 源顺序级联 → 再按标准优先级
+// 叠加 inline style 与 !important。返回 kebab-case 属性名 → 原始值字符串 的
+// 映射（CSS 变量 --x 同样参与级联）。
 func computedStyleFor(el dom.Node) map[string]string {
 	out := map[string]string{}
 	doc := el.OwnerDocument()
@@ -3283,30 +3332,20 @@ func computedStyleFor(el dom.Node) map[string]string {
 			}
 		}
 	}
-	// 收集 document 中所有 <style> 元素的文本并解析
-	var visit func(n dom.Node)
-	visit = func(n dom.Node) {
-		if n == nil {
-			return
+	// 收集 document 中所有 <style> 元素文本并解析（指纹缓存复用）
+	texts, finger := collectStyleTexts(doc)
+	var rules []css.Rule
+	if styleSheetCache.doc == doc && styleSheetCache.finger == finger {
+		rules = styleSheetCache.rules
+	} else {
+		for _, t := range texts {
+			rules = append(rules, css.NewParser(t).ParseStyleSheet()...)
 		}
-		if n.NodeType() == dom.NodeElement {
-			if e, ok := n.(*dom.Element); ok && strings.EqualFold(e.TagName(), "style") {
-				var sb strings.Builder
-				for _, c := range e.ChildNodes() {
-					if c.NodeType() == dom.NodeText {
-						sb.WriteString(c.NodeValue())
-					}
-				}
-				if sb.Len() > 0 {
-					applyRules(css.NewParser(sb.String()).ParseStyleSheet())
-				}
-			}
-		}
-		for _, c := range n.ChildNodes() {
-			visit(c)
-		}
+		styleSheetCache.doc = doc
+		styleSheetCache.finger = finger
+		styleSheetCache.rules = rules
 	}
-	visit(doc)
+	applyRules(rules)
 	// 按 specificity 升序 + 源顺序升序排序：后应用者优先
 	sort.Slice(decls, func(i, j int) bool {
 		if c := decls[i].spec.Compare(decls[j].spec); c != 0 {

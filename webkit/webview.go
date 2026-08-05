@@ -38,6 +38,11 @@ type WebView struct {
 	// 宿主经 SetPrefersColorScheme 设置后，matchMedia 与媒体查询上下文
 	// 会动态反映；空串按 light 处理。
 	colorScheme string
+	// hoverCapability/pointerCapability 是 (hover)/(pointer) 媒体特性能力，
+	// 默认 "hover"/"fine"（desktop 鼠标场景）；宿主可经
+	// SetPointerCapabilities 调整为触屏（coarse/none）等场景。
+	hoverCapability  string
+	pointerCapability string
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -125,6 +130,40 @@ func (wv *WebView) PrefersColorScheme() string {
 	return wv.colorScheme
 }
 
+// SetPointerCapabilities 设置媒体查询 (hover)/(pointer) 能力值。
+// hover 接受 "hover"/"none"，pointer 接受 "fine"/"coarse"/"none"，
+// 非法值回退默认（"hover"/"fine"）。
+func (wv *WebView) SetPointerCapabilities(hover, pointer string) {
+	switch strings.ToLower(strings.TrimSpace(hover)) {
+	case "hover", "none":
+		wv.hoverCapability = strings.ToLower(strings.TrimSpace(hover))
+	default:
+		wv.hoverCapability = "hover"
+	}
+	switch strings.ToLower(strings.TrimSpace(pointer)) {
+	case "fine", "coarse", "none":
+		wv.pointerCapability = strings.ToLower(strings.TrimSpace(pointer))
+	default:
+		wv.pointerCapability = "fine"
+	}
+}
+
+// HoverCapability 返回 (hover) 能力值（默认 "hover"）。
+func (wv *WebView) HoverCapability() string {
+	if wv.hoverCapability == "" {
+		return "hover"
+	}
+	return wv.hoverCapability
+}
+
+// PointerCapability 返回 (pointer) 能力值（默认 "fine"）。
+func (wv *WebView) PointerCapability() string {
+	if wv.pointerCapability == "" {
+		return "fine"
+	}
+	return wv.pointerCapability
+}
+
 // BeforePageScripts is an optional hook invoked after DOM bindings are
 // registered but before any page <script> executes. The `window` global
 // object exists at this point (it is created by RegisterDOMBindings), so
@@ -183,8 +222,9 @@ func (wv *WebView) LoadHTML(src string) error {
 			return &css.MediaQueryContext{
 				Width: w, Height: h, DeviceWidth: w, DeviceHeight: h,
 				DevicePixelRatio: 1, Orientation: orientation,
-				PrefersColorScheme: wv.PrefersColorScheme(), Hover: "hover", AnyHover: "hover",
-				Pointer: "fine", AnyPointer: "fine",
+				PrefersColorScheme: wv.PrefersColorScheme(),
+				Hover:              wv.HoverCapability(), AnyHover: wv.HoverCapability(),
+				Pointer: wv.PointerCapability(), AnyPointer: wv.PointerCapability(),
 			}
 		}
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
