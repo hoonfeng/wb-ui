@@ -293,9 +293,11 @@ func (t *Tokenizer) handleEOF() {
 }
 
 // processEntity consumes a character reference starting after the '&' and emits
-// its replacement as character data into the current token. The inAttribute flag
-// selects the attribute-value entity rules (which allow a few unterminated names).
-// Returns the number of source characters consumed beyond the '&'.
+// its replacement into the current token. When inAttribute is true the decoded
+// text is appended to the current attribute's value (mirroring the HTML spec's
+// "character reference in attribute value" state); otherwise it is appended to
+// the character data. The inAttribute flag also selects the attribute-value
+// entity rules (which allow a few unterminated names).
 func (t *Tokenizer) processEntity(inAttribute bool) {
 	// t.src[t.pos] is the char after '&'.
 	if t.pos < len(t.src) && t.src[t.pos] == '#' {
@@ -323,7 +325,7 @@ func (t *Tokenizer) processEntity(inAttribute bool) {
 			}
 		}
 		rep, _ := decodeNumericEntity(string(body), isHex)
-		t.token.appendToCharacterString(rep)
+		t.appendEntityResult(rep, inAttribute)
 		return
 	}
 	// Named entity: try terminated form first.
@@ -335,12 +337,12 @@ func (t *Tokenizer) processEntity(inAttribute bool) {
 		name := string(t.src[start:t.pos])
 		t.pos++
 		if rep, ok := namedEntities[name]; ok {
-			t.token.appendToCharacterString(rep)
+			t.appendEntityResult(rep, inAttribute)
 			return
 		}
 		// Unknown terminated entity: emit '&' literally and reconsume the rest.
 		t.pos = start
-		t.token.appendToCharacter('&')
+		t.appendEntityAmp(inAttribute)
 		return
 	}
 	// Unterminated: only a few names are matched in attribute context; otherwise
@@ -351,12 +353,32 @@ func (t *Tokenizer) processEntity(inAttribute bool) {
 	}
 	if inAttribute {
 		if rep, ok := unterminatedAttrEntity(candidate); ok {
-			t.token.appendToCharacterString(rep)
+			t.appendEntityResult(rep, inAttribute)
 			return
 		}
 	}
 	t.pos = start
-	t.token.appendToCharacter('&')
+	t.appendEntityAmp(inAttribute)
+}
+
+// appendEntityResult appends decoded entity text either to the current
+// attribute value (inAttribute) or to the character data.
+func (t *Tokenizer) appendEntityResult(rep string, inAttribute bool) {
+	if inAttribute {
+		t.token.appendToAttributeValueString(rep)
+	} else {
+		t.token.appendToCharacterString(rep)
+	}
+}
+
+// appendEntityAmp appends a literal '&' either to the current attribute value
+// (inAttribute) or to the character data.
+func (t *Tokenizer) appendEntityAmp(inAttribute bool) {
+	if inAttribute {
+		t.token.appendToAttributeValue('&')
+	} else {
+		t.token.appendToCharacter('&')
+	}
 }
 
 // unterminatedAttrEntity returns the replacement for a named entity that the
