@@ -64,12 +64,29 @@ var (
 	domDocFragProto *jsc.JSObject // DocumentFragment.prototype
 )
 
+// domBindingsMarker 是挂在 interpreter 全局对象上的隐藏标记，用于幂等判断：
+// 同一 interpreter 的 RegisterDOMBindings 只完整注册一次（构造函数与
+// prototype 链），后续调用仅刷新 document 引用。以 interpreter 为粒度，
+// 避免多实例测试（rt1/rt2 各自完整注册）互相影响。
+const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
+
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
+	// ★ 幂等注册（按 interpreter）：构造函数与 prototype 链只在首次
+	// 调用时构建。后续调用（如 EvalJS 每次执行前）仅刷新 document 引用——
+	// 若每次都重建 Element.prototype，JS 侧对 prototype 的 hook/修改
+	// （Vue scoped data-v 探针、monkey-patch 等）会被新 prototype 静默
+	// 覆盖，导致探针失效（与标准浏览器行为相悖）。
+	g := rt.GlobalObject()
+	if _, ok := g.GetByKey(domBindingsMarker); ok {
+		docObj := wrapDocument(rt, document)
+		g.Set("document", jsc.ObjectValue(docObj))
+		return
+	}
+
 	docObj := wrapDocument(rt, document)
 	rt.GlobalObject().Set("document", jsc.ObjectValue(docObj))
 
 	// window / self / globalThis → 全局对象
-	g := rt.GlobalObject()
 	g.Set("window", jsc.ObjectValue(g))
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
@@ -136,6 +153,65 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	domCommentProto = commentProto
 	domDocFragProto = docFragProto
 
+	// ── Element.prototype: attribute 方法（标准 DOM 设计）──
+	// 属性方法定义在 prototype 上而非每个包装实例上：
+	//   1. 符合 DOM 规范（Element.prototype.setAttribute 等，HTML/SVG/Element
+	//      所有元素经原型链共享，且 Element.prototype.setAttribute 可访问）
+	//   2. 实例包装更轻（每个元素少 5 个自有属性）
+	//   3. 可被框架/探针在 Element.prototype 上 hook（如 Vue scoped 样式
+	//      data-v 属性写入追踪、测试工具 monkey-patch）
+	// native 函数经 this 取回包装对象的内部 *dom.Element。
+	protoAttr := func(name string, argc int, fn func(el *dom.Element, args []jsc.JSValue) jsc.JSValue) {
+		elementProto.Set(name, jsc.FunctionValue(jsc.NewNativeFunction(name,
+			func(_ *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if !this.IsObject() {
+					return jsc.Undefined()
+				}
+				el, ok := this.AsObject().Internal().(*dom.Element)
+				if !ok || el == nil {
+					return jsc.Undefined()
+				}
+				return fn(el, args)
+			}, argc)))
+	}
+	protoAttr("getAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Null()
+		}
+		return jsc.StringValue(el.GetAttribute(args[0].ToString()))
+	})
+	protoAttr("setAttribute", 2, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) < 2 {
+			return jsc.Undefined()
+		}
+		el.SetAttribute(args[0].ToString(), args[1].ToString())
+		return jsc.Undefined()
+	})
+	protoAttr("hasAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.BooleanValue(false)
+		}
+		return jsc.BooleanValue(el.HasAttribute(args[0].ToString()))
+	})
+	protoAttr("removeAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Undefined()
+		}
+		el.RemoveAttribute(args[0].ToString())
+		return jsc.Undefined()
+	})
+	protoAttr("toggleAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Undefined()
+		}
+		name := args[0].ToString()
+		if el.HasAttribute(name) {
+			el.RemoveAttribute(name)
+			return jsc.BooleanValue(false)
+		}
+		el.SetAttribute(name, "")
+		return jsc.BooleanValue(true)
+	})
 
 	// location 桩
 	loc := jsc.NewObject(rt.ObjectPrototype())
@@ -1432,6 +1508,9 @@ if len(a) >= 2 { offset = int64(a[1].ToNumber()) }
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.ObjectValue(selObj)
 		}, 0)))
+
+	// 完整注册完成——打上幂等标记（后续调用仅刷新 document）。
+	rt.GlobalObject().Set(domBindingsMarker, jsc.BooleanValue(true))
 }
 
 type ElementWrapper struct {
@@ -1846,26 +1925,8 @@ obj.SetInternal(el)
 	// Cache before returning
 	nodeWrapperCache[el] = obj
 
-	// Attributes
-	obj.Set("getAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {
-		return jsc.StringValue(el.GetAttribute(arg))
-	})))
-	obj.Set("setAttribute", funcVal(fn2(func(_ *jsc.Interpreter, a, b string) jsc.JSValue {
-		el.SetAttribute(a, b)
-		return jsc.Undefined()
-	})))
-	obj.Set("hasAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {
-		return jsc.BooleanValue(el.HasAttribute(arg))
-	})))
-	obj.Set("removeAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {
-		el.RemoveAttribute(arg)
-		return jsc.Undefined()
-	})))
-	obj.Set("toggleAttribute", funcVal(fn1(func(_ *jsc.Interpreter, arg string) jsc.JSValue {
-		if el.HasAttribute(arg) { el.RemoveAttribute(arg); return jsc.BooleanValue(false) }
-		el.SetAttribute(arg, "")
-		return jsc.BooleanValue(true)
-	})))
+	// Attributes — 定义在 Element.prototype（见 RegisterDOMBindings），
+	// 实例不再重复绑定，避免遮蔽 prototype 上的标准方法。
 
 	// Node tree
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {

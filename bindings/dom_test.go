@@ -146,6 +146,77 @@ func TestDOMSetAttributeAndReadBack(t *testing.T) {
 	}
 }
 
+// TestElementPrototypeStandardLayout 验证 attribute 方法定义在 Element.prototype
+// 上（标准 DOM 设计）而非每个实例的自有属性，且实例经原型链继承、instanceof 正常：
+//   - Element.prototype.setAttribute 等为函数
+//   - el.hasOwnProperty("setAttribute") === false（实例无自有遮蔽）
+//   - el.setAttribute 可调用（原型链继承）
+//   - el instanceof Element 成立（原型链完整）
+// 注：instanceof HTMLElement/SVGElement 因 dom.Element 未区分 HTML/SVG 命名空间
+// （tag 名扁平存储），所有元素共用 Element.prototype——属已知架构简化，不在此验证。
+func TestElementPrototypeStandardLayout(t *testing.T) {
+	rt, doc, log := newRuntimeWithDoc(t)
+	el := doc.CreateElement("div")
+	el.SetId("x")
+	doc.AppendChild(el)
+	mustRun(t, rt, `
+		var el = document.getElementById("x");
+		console.log(typeof Element.prototype.setAttribute);
+		console.log(typeof Element.prototype.getAttribute);
+		console.log(typeof Element.prototype.removeAttribute);
+		console.log(el.hasOwnProperty("setAttribute"));
+		console.log(el instanceof Element);
+		el.setAttribute("data-v-test", "1");
+		console.log(el.getAttribute("data-v-test"));
+	`)
+	lines := strings.Split(strings.TrimSpace(log.String()), "\n")
+	want := []string{"function", "function", "function", "false", "true", "1"}
+	if len(lines) < len(want) {
+		t.Fatalf("output lines = %d, want >= %d: %q", len(lines), len(want), log.String())
+	}
+	for i, w := range want {
+		if got := strings.TrimSpace(lines[i]); got != w {
+			t.Fatalf("line %d = %q, want %q", i+1, got, w)
+		}
+	}
+	if got := el.GetAttribute("data-v-test"); got != "1" {
+		t.Fatalf("Go DOM data-v-test = %q, want 1", got)
+	}
+}
+
+// TestElementPrototypeHookCapture 模拟探针/框架在 Element.prototype 上
+// monkey-patch setAttribute（如 data-v 属性追踪、测试工具 hook），验证：
+//   - patch 后实例调用 el.setAttribute 走的是被替换的方法（可捕获）
+//   - 原始方法经 orig.apply(this, ...) 仍能正常工作（不破坏 DOM 写入）
+func TestElementPrototypeHookCapture(t *testing.T) {
+	rt, doc, log := newRuntimeWithDoc(t)
+	el := doc.CreateElement("div")
+	el.SetId("x")
+	doc.AppendChild(el)
+	mustRun(t, rt, `
+		var origSA = Element.prototype.setAttribute;
+		window.__slog = [];
+		Element.prototype.setAttribute = function(n, v) {
+			window.__slog.push(String(n));
+			return origSA.apply(this, arguments);
+		};
+		var el = document.getElementById("x");
+		el.setAttribute("data-v-hooktest", "");
+		el.setAttribute("class", "item");
+		console.log(JSON.stringify(window.__slog));
+	`)
+	got := strings.TrimSpace(log.String())
+	if want := `["data-v-hooktest","class"]`; got != want {
+		t.Fatalf("hook capture = %s, want %s", got, want)
+	}
+	if g := el.GetAttribute("data-v-hooktest"); g != "" {
+		t.Fatalf("Go DOM data-v-hooktest = %q, want empty", g)
+	}
+	if g := el.GetAttribute("class"); g != "item" {
+		t.Fatalf("Go DOM class = %q, want item", g)
+	}
+}
+
 func TestDOMCreateElementAppendChild(t *testing.T) {
 	rt, doc, log := newRuntimeWithDoc(t)
 	root := doc.CreateElement("section")

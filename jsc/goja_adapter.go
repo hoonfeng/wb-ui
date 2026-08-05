@@ -488,11 +488,21 @@ func FunctionValue(f *JSFunction) JSValue {
 }
 
 func NewObject(proto *JSObject) *JSObject {
+	var interp *Interpreter
 	if proto != nil && proto.interp != nil {
-		return &JSObject{obj: proto.interp.vm.NewObject(), interp: proto.interp}
+		interp = proto.interp
+	} else {
+		interp = &Interpreter{vm: goja.New()}
 	}
-	vm := goja.New()
-	return &JSObject{obj: vm.NewObject(), interp: &Interpreter{vm: vm}}
+	obj := &JSObject{obj: interp.vm.NewObject(), interp: interp}
+	// proto 参数必须真正生效：设置原型链（vendored goja 无 SetPrototype API，
+	// 用标准 __proto__ 赋值触发 setter，与 Object.setPrototypeOf 等价）。
+	// 此前忽略 proto 导致 wrapElement 创建的实例原型为 Object.prototype，
+	// Element.prototype 上的方法（setAttribute 等）无法被实例继承。
+	if proto != nil && proto.obj != nil {
+		obj.obj.Set("__proto__", proto.obj)
+	}
+	return obj
 }
 
 // WrapObject wraps an existing goja.Object (e.g. from NewDynamicObject) as a JSObject.
