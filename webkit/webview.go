@@ -34,6 +34,10 @@ type WebView struct {
 	jsInterpreter *jsc.Interpreter
 	jsLogger      *jsc.BufferLogger
 	width, height int
+	// colorScheme 是 (prefers-color-scheme) 的值（"light"/"dark"），
+	// 宿主经 SetPrefersColorScheme 设置后，matchMedia 与媒体查询上下文
+	// 会动态反映；空串按 light 处理。
+	colorScheme string
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -102,6 +106,25 @@ func (wv *WebView) Settings() *page.Settings    { return wv.settings }
 func (wv *WebView) Width() int                 { return wv.width }
 func (wv *WebView) Height() int                { return wv.height }
 
+// SetPrefersColorScheme 设置 (prefers-color-scheme) 的值（"light"/"dark"），
+// 供 matchMedia 与 CSS 媒体查询使用。
+func (wv *WebView) SetPrefersColorScheme(scheme string) {
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case "dark", "light":
+		wv.colorScheme = strings.ToLower(strings.TrimSpace(scheme))
+	default:
+		wv.colorScheme = "light"
+	}
+}
+
+// PrefersColorScheme 返回当前颜色方案（默认 "light"）。
+func (wv *WebView) PrefersColorScheme() string {
+	if wv.colorScheme == "" {
+		return "light"
+	}
+	return wv.colorScheme
+}
+
 // BeforePageScripts is an optional hook invoked after DOM bindings are
 // registered but before any page <script> executes. The `window` global
 // object exists at this point (it is created by RegisterDOMBindings), so
@@ -143,8 +166,8 @@ func (wv *WebView) LoadHTML(src string) error {
 	// JS frameworks (Vue/React) have access to document.getElementById,
 	// querySelector, Element.appendChild, etc. at boot time.
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
-		// matchMedia 需要真实视口上下文（随 wv 尺寸变化；主题/指针能力暂用
-		// 默认值，宿主可在后续扩展 WebView 字段时调整）。
+		// matchMedia 需要真实视口上下文（尺寸随 wv 变化、颜色方案随
+		// SetPrefersColorScheme 设置；指针能力暂用默认值）。
 		bindings.MediaQueryContextProvider = func() *css.MediaQueryContext {
 			w, h := wv.width, wv.height
 			if w <= 0 {
@@ -160,7 +183,7 @@ func (wv *WebView) LoadHTML(src string) error {
 			return &css.MediaQueryContext{
 				Width: w, Height: h, DeviceWidth: w, DeviceHeight: h,
 				DevicePixelRatio: 1, Orientation: orientation,
-				PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
+				PrefersColorScheme: wv.PrefersColorScheme(), Hover: "hover", AnyHover: "hover",
 				Pointer: "fine", AnyPointer: "fine",
 			}
 		}

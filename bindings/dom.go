@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// （Vue scoped data-v 探针、monkey-patch 等）会被新 prototype 静默
 	// 覆盖，导致探针失效（与标准浏览器行为相悖）。
 	g := rt.GlobalObject()
+	registeredDocument = document
 	if _, ok := g.GetByKey(domBindingsMarker); ok {
 		docObj := wrapDocument(rt, document)
 		g.Set("document", jsc.ObjectValue(docObj))
@@ -431,30 +433,35 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// performance.now — 返回毫秒级高精度时间戳
 	g.Set("performance", jsc.ObjectValue(makePerformance(rt)))
 
-	// getComputedStyle — 返回可用的 computed style 对象。
-	// 浏览器返回元素的最终计算样式；此处返回带常用属性 + getPropertyValue /
-	// getPropertyPriority 方法的对象：属性从 inline style 提取，getPropertyValue
-	// 真正读取 inline style 的对应值（CSS 变量 --x 返回空串由前端默认值兜底，
-	// 因为引擎暂不解析 var() 级联）。★ 此前返回 Null 会导致依赖
-	// getComputedStyle(el).getPropertyValue('--x') 的代码（如 TerminalPanel 的
-	// xterm 主题）抛 "Value is not an object"，组件挂载中断 → Vue subTree.el
-	// 未设置 → 后续 patch 级联失败 → v-if 关闭不移除 DOM。
+	// getComputedStyle — 返回元素的级联计算样式对象。
+	// 实现：遍历 document 内 <style> 样式表，用 css 包 SelectorChecker 匹配
+	// 元素，按 specificity + 源顺序级联，再按标准优先级叠加 inline style 与
+	// !important，最后把命中声明回写到对象（常用属性直接复制 + 统一
+	// getPropertyValue 查询，kebab-case 键）。CSS 变量 --x 也参与级联，
+	// TerminalPanel 等依赖 getPropertyValue('--x') 的 xterm 主题可拿到真实值。
+	// ★ 绝不能返回 Null：依赖 getComputedStyle(el).getPropertyValue('--x')
+	// 的代码会抛 "Value is not an object"，组件挂载中断 → Vue subTree.el 未设置
+	// → 后续 patch 级联失败 → v-if 关闭不移除 DOM。
 	g.Set("getComputedStyle", jsc.FunctionValue(jsc.NewNativeFunction("getComputedStyle",
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			cs := jsc.NewObject(in.ObjectPrototype())
-			// 捕获目标元素的 inline style 对象（可能为 nil）
-			var styleObj *jsc.JSObject
+			var computed map[string]string
 			if len(args) >= 1 {
-				if obj := args[0].AsObject(); obj != nil {
-					if style := obj.GetStr("style"); style.IsObject() {
-						styleObj = style.AsObject()
-						// 复制 inline style 的常用属性（color/background/font 等）
-						for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "borderColor", "width", "height"} {
-							if v, ok := styleObj.GetByKey(prop); ok {
-								cs.Set(prop, v)
-							}
-						}
-					}
+				if n := unwrapNode(args[0]); n != nil {
+					computed = computedStyleFor(n)
+				}
+			}
+			if computed == nil {
+				computed = map[string]string{}
+			}
+			// 常用属性直接回写到对象属性（camelCase，与浏览器一致）
+			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginBottom", "paddingTop", "paddingBottom", "textAlign", "whiteSpace"} {
+				key := prop
+				if k := camelToKebab(prop); k != prop {
+					key = k
+				}
+				if v, ok := computed[key]; ok {
+					cs.Set(prop, jsc.StringValue(v))
 				}
 			}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
@@ -462,20 +469,13 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					if len(a) == 0 {
 						return jsc.StringValue("")
 					}
-					prop := a[0].ToString()
-					// CSS 变量（--xxx）查询返回空串，调用方用 || 默认值兜底
-					if strings.HasPrefix(prop, "--") {
-						return jsc.StringValue("")
+					prop := strings.ToLower(strings.TrimSpace(a[0].ToString()))
+					if v, ok := computed[prop]; ok {
+						return jsc.StringValue(v)
 					}
-					if styleObj != nil {
-						if v, ok := styleObj.GetByKey(prop); ok {
-							return v
-						}
-						// kebab-case → camelCase 再试（font-size → fontSize）
-						if camel := kebabToCamel(prop); camel != prop {
-							if v, ok := styleObj.GetByKey(camel); ok {
-								return v
-							}
+					if camel := kebabToCamel(prop); camel != prop {
+						if v, ok := computed[camel]; ok {
+							return jsc.StringValue(v)
 						}
 					}
 					return jsc.StringValue("")
@@ -1034,11 +1034,17 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				// 未知属性按现代浏览器行为返回 false
 				return jsc.BooleanValue(false)
 			}
-			// selector 形式：无法可靠解析 → 保守返回 true（避免误伤框架探测）
-			if strings.ContainsAny(s, "#.>+~[]:") {
-				return jsc.BooleanValue(true)
+			// selector 形式：CSS.supports('selector') 返回选择器是否被引擎支持。
+			// 用 css 包真实解析，并检测未知伪类/伪元素（浏览器对未知伪类返回
+			// false；对不支持的选择器语法同样 false），替代此前的保守 true。
+			sel := css.NewParser(s).ParseSelectorList()
+			if sel == nil || len(sel.Selectors) == 0 {
+				return jsc.BooleanValue(false)
 			}
-			return jsc.BooleanValue(false)
+			if selectorHasUnknownPseudo(sel) {
+				return jsc.BooleanValue(false)
+			}
+			return jsc.BooleanValue(true)
 		}, 1)))
 	g.Set("CSS", jsc.ObjectValue(cssObj))
 
@@ -3223,6 +3229,161 @@ func cssEscapeIdent(s string) string {
 		escapeByte(c)
 	}
 	return b.String()
+}
+
+// registeredDocument 由 RegisterDOMBindings 维护，getComputedStyle 通过它
+// 遍历 document 内的 <style> 样式表做级联计算。
+var registeredDocument *dom.Document
+
+// computedStyleFor 计算元素的级联样式（bindings 层近似实现）：
+// 遍历 document 中 <style> 元素文本 → css 包解析 → SelectorChecker 匹配
+// 元素 → 按 specificity + 源顺序级联 → 再按标准优先级叠加 inline style 与
+// !important。返回 kebab-case 属性名 → 原始值字符串 的映射
+// （CSS 变量 --x 同样参与级联）。
+func computedStyleFor(el dom.Node) map[string]string {
+	out := map[string]string{}
+	doc := el.OwnerDocument()
+	if doc == nil {
+		doc = registeredDocument
+	}
+	if doc == nil {
+		return out
+	}
+	type matchedDecl struct {
+		spec  css.Specificity
+		order int
+		decl  css.Declaration
+	}
+	var decls []matchedDecl
+	checker := css.NewSelectorChecker()
+	orderCounter := 0
+	var applyRules func(rules []css.Rule)
+	applyRules = func(rules []css.Rule) {
+		for _, r := range rules {
+			switch rl := r.(type) {
+			case *css.StyleRule:
+				if rl.Selectors == nil || len(rl.Selectors.Selectors) == 0 {
+					continue
+				}
+				if !checker.MatchList(rl.Selectors, el) {
+					continue
+				}
+				spec := css.SpecificityOfList(rl.Selectors)
+				for _, d := range rl.Declarations {
+					if d.Name == "" {
+						continue
+					}
+					orderCounter++
+					decls = append(decls, matchedDecl{spec: spec, order: orderCounter, decl: d})
+				}
+			case *css.MediaRule:
+				if mediaMatches(rl) {
+					applyRules(rl.Rules)
+				}
+			}
+		}
+	}
+	// 收集 document 中所有 <style> 元素的文本并解析
+	var visit func(n dom.Node)
+	visit = func(n dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.NodeType() == dom.NodeElement {
+			if e, ok := n.(*dom.Element); ok && strings.EqualFold(e.TagName(), "style") {
+				var sb strings.Builder
+				for _, c := range e.ChildNodes() {
+					if c.NodeType() == dom.NodeText {
+						sb.WriteString(c.NodeValue())
+					}
+				}
+				if sb.Len() > 0 {
+					applyRules(css.NewParser(sb.String()).ParseStyleSheet())
+				}
+			}
+		}
+		for _, c := range n.ChildNodes() {
+			visit(c)
+		}
+	}
+	visit(doc)
+	// 按 specificity 升序 + 源顺序升序排序：后应用者优先
+	sort.Slice(decls, func(i, j int) bool {
+		if c := decls[i].spec.Compare(decls[j].spec); c != 0 {
+			return c < 0
+		}
+		return decls[i].order < decls[j].order
+	})
+	// 第一遍：普通声明（!important 稍后覆盖）
+	for _, md := range decls {
+		if md.decl.Important {
+			continue
+		}
+		out[strings.ToLower(md.decl.Name)] = strings.TrimSpace(md.decl.ValueString())
+	}
+	// inline style：特异性高于 author 普通声明，但低于 author !important
+	if e, ok := el.(*dom.Element); ok {
+		for k, v := range parseStyle(e.GetAttribute("style")) {
+			out[k] = v
+		}
+	}
+	// 第二遍：!important 声明
+	for _, md := range decls {
+		if md.decl.Important {
+			out[strings.ToLower(md.decl.Name)] = strings.TrimSpace(md.decl.ValueString())
+		}
+	}
+	return out
+}
+
+// mediaMatches 判断 MediaRule 条件是否匹配当前媒体上下文
+// （视口尺寸/颜色方案来自 MediaQueryContextProvider，与 matchMedia 一致）。
+func mediaMatches(rule *css.MediaRule) bool {
+	if rule == nil {
+		return false
+	}
+	if len(rule.Parsed) == 0 {
+		return strings.TrimSpace(rule.Condition) == ""
+	}
+	ctx := css.MediaQueryContext{
+		Width: 1280, Height: 800, DeviceWidth: 1280, DeviceHeight: 800,
+		DevicePixelRatio: 1, Orientation: "landscape",
+		PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
+		Pointer: "fine", AnyPointer: "fine",
+	}
+	if MediaQueryContextProvider != nil {
+		if c := MediaQueryContextProvider(); c != nil {
+			ctx = *c
+		}
+	}
+	return css.MatchesAny(rule.Parsed, ctx)
+}
+
+// selectorHasUnknownPseudo 检测选择器列表是否含有引擎未知的伪类/伪元素
+// （CSS.supports 对未知伪类返回 false）。注意 PseudoClassUnknown/PseudoElementUnknown
+// 与“无伪类”共用 0 值，必须结合 Match 类型判断：只有 MatchPseudoClass /
+// MatchPseudoElement 时才检查对应枚举。
+func selectorHasUnknownPseudo(sel *css.SelectorList) bool {
+	if sel == nil {
+		return false
+	}
+	for _, cs := range sel.Selectors {
+		for _, comp := range cs.Compounds {
+			for _, s := range comp.Selectors {
+				switch s.Match {
+				case css.MatchPseudoClass:
+					if s.PseudoClass == css.PseudoClassUnknown {
+						return true
+					}
+				case css.MatchPseudoElement:
+					if s.PseudoElem == css.PseudoElementUnknown {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // knownCSSProps 是 CSS.supports('(prop: value)') 判断用的已知属性表
