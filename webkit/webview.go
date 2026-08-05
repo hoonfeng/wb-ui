@@ -13,6 +13,7 @@ import (
 
 	"wb-ui/bindings"
 	"wb-ui/bridge"
+	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/jsc"
 	"wb-ui/layout"
@@ -142,6 +143,27 @@ func (wv *WebView) LoadHTML(src string) error {
 	// JS frameworks (Vue/React) have access to document.getElementById,
 	// querySelector, Element.appendChild, etc. at boot time.
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
+		// matchMedia 需要真实视口上下文（随 wv 尺寸变化；主题/指针能力暂用
+		// 默认值，宿主可在后续扩展 WebView 字段时调整）。
+		bindings.MediaQueryContextProvider = func() *css.MediaQueryContext {
+			w, h := wv.width, wv.height
+			if w <= 0 {
+				w = DefaultWebViewWidth
+			}
+			if h <= 0 {
+				h = DefaultWebViewHeight
+			}
+			orientation := "landscape"
+			if h > w {
+				orientation = "portrait"
+			}
+			return &css.MediaQueryContext{
+				Width: w, Height: h, DeviceWidth: w, DeviceHeight: h,
+				DevicePixelRatio: 1, Orientation: orientation,
+				PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
+				Pointer: "fine", AnyPointer: "fine",
+			}
+		}
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
 		// Set up callback for dynamic <style> injection (Vue scoped CSS).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.

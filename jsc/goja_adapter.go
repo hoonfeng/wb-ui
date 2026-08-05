@@ -4,6 +4,7 @@ package jsc
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -271,7 +272,17 @@ func (v JSValue) IsFunction() bool {
 	return v.nativeFn != nil || (v.v != nil && v.v.ToBoolean() && v.AsFunction() != nil)
 }
 
-func (v JSValue) SameAs(other JSValue) bool { return false }
+func (v JSValue) SameAs(other JSValue) bool {
+	if v.nativeFn != nil || other.nativeFn != nil {
+		if v.nativeFn == nil || other.nativeFn == nil {
+			return false
+		}
+		return reflect.ValueOf(v.nativeFn).Pointer() == reflect.ValueOf(other.nativeFn).Pointer()
+	}
+	// goja.Value 接口比较：对象/函数为指针比较（同一 JS 对象 → true），
+	// 原始值（string/number/bool）按值比较。
+	return v.v == other.v
+}
 
 func (v JSValue) ToString() string {
 	if v.v == nil || goja.IsUndefined(v.v) || goja.IsNull(v.v) {
@@ -366,6 +377,15 @@ func (o *JSObject) Set(key string, val JSValue) {
 		val.interp = o.interp
 	}
 	o.obj.Set(key, val.val(targetRt))
+}
+
+// SetIterator 把对象的 Symbol.iterator 设为 fn（每次迭代调用 fn 返回
+// 迭代器对象，支持 Array.from / for...of / 展开运算符）。
+func (o *JSObject) SetIterator(fn NativeFunc) {
+	if o == nil || o.obj == nil || o.interp == nil {
+		return
+	}
+	_ = o.obj.SetSymbol(goja.SymIterator, o.interp.wrapNativeFunc(fn, o.interp))
 }
 
 func (o *JSObject) GetStr(key string) JSValue {

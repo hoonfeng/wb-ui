@@ -3,6 +3,7 @@
 package bindings
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"wb-ui.com/goja"
+	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/jsc"
 )
@@ -55,6 +57,15 @@ var (
 	// （offsetLeft/offsetTop/offsetWidth/offsetHeight 用）。
 	GetElementBoxRect func(el *dom.Element) (left, top, width, height float64)
 )
+
+// MediaQueryContextProvider 提供 matchMedia 评估所需的设备/视口上下文
+// （视口尺寸、devicePixelRatio、颜色方案等）；由宿主（webkit.WebView）
+// 在注册时注入真实值；nil 时 matchMedia 用默认值（1280×800、light）。
+var MediaQueryContextProvider func() *css.MediaQueryContext
+
+// windowEventListeners 存储 window 上的事件监听器（window.dispatchEvent
+// 真分发用）。key 为事件类型字符串（如 "resize"、"message"、自定义事件）。
+var windowEventListeners = map[string][]jsc.JSValue{}
 
 // DOM prototype objects — set by RegisterDOMBindings, used by wrappers.
 var (
@@ -420,19 +431,53 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// performance.now — 返回毫秒级高精度时间戳
 	g.Set("performance", jsc.ObjectValue(makePerformance(rt)))
 
-	// getComputedStyle — 返回可用的 computed style 对象（简化实现）。
+	// getComputedStyle — 返回可用的 computed style 对象。
 	// 浏览器返回元素的最终计算样式；此处返回带常用属性 + getPropertyValue /
-	// getPropertyPriority 方法的对象（属性尽量从 inline style 提取，CSS 变量
-	// 返回空串由前端默认值兜底）。★ 此前返回 Null 会导致依赖
+	// getPropertyPriority 方法的对象：属性从 inline style 提取，getPropertyValue
+	// 真正读取 inline style 的对应值（CSS 变量 --x 返回空串由前端默认值兜底，
+	// 因为引擎暂不解析 var() 级联）。★ 此前返回 Null 会导致依赖
 	// getComputedStyle(el).getPropertyValue('--x') 的代码（如 TerminalPanel 的
 	// xterm 主题）抛 "Value is not an object"，组件挂载中断 → Vue subTree.el
 	// 未设置 → 后续 patch 级联失败 → v-if 关闭不移除 DOM。
 	g.Set("getComputedStyle", jsc.FunctionValue(jsc.NewNativeFunction("getComputedStyle",
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			cs := jsc.NewObject(in.ObjectPrototype())
+			// 捕获目标元素的 inline style 对象（可能为 nil）
+			var styleObj *jsc.JSObject
+			if len(args) >= 1 {
+				if obj := args[0].AsObject(); obj != nil {
+					if style := obj.GetStr("style"); style.IsObject() {
+						styleObj = style.AsObject()
+						// 复制 inline style 的常用属性（color/background/font 等）
+						for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "borderColor", "width", "height"} {
+							if v, ok := styleObj.GetByKey(prop); ok {
+								cs.Set(prop, v)
+							}
+						}
+					}
+				}
+			}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) == 0 {
+						return jsc.StringValue("")
+					}
+					prop := a[0].ToString()
 					// CSS 变量（--xxx）查询返回空串，调用方用 || 默认值兜底
+					if strings.HasPrefix(prop, "--") {
+						return jsc.StringValue("")
+					}
+					if styleObj != nil {
+						if v, ok := styleObj.GetByKey(prop); ok {
+							return v
+						}
+						// kebab-case → camelCase 再试（font-size → fontSize）
+						if camel := kebabToCamel(prop); camel != prop {
+							if v, ok := styleObj.GetByKey(camel); ok {
+								return v
+							}
+						}
+					}
 					return jsc.StringValue("")
 				}, 1)))
 			cs.Set("getPropertyPriority", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyPriority",
@@ -440,20 +485,6 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					return jsc.StringValue("")
 				}, 1)))
 			cs.Set("cssText", jsc.StringValue(""))
-			if len(args) >= 1 {
-				if obj := args[0].AsObject(); obj != nil {
-					// 复制 inline style 的常用属性（color/background/font 等）
-					if style := obj.GetStr("style"); style.IsObject() {
-						if so := style.AsObject(); so != nil {
-							for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "borderColor", "width", "height"} {
-								if v, ok := so.GetByKey(prop); ok {
-									cs.Set(prop, v)
-								}
-							}
-						}
-					}
-				}
-			}
 			return jsc.ObjectValue(cs)
 		}, 1)))
 
@@ -930,62 +961,157 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.Undefined()
 		}, 1)))
 
-	// crypto.randomUUID / crypto.getRandomValues（简化）
+	// crypto.randomUUID / crypto.getRandomValues（crypto/rand 真随机）
 	cryptoObj := jsc.NewObject(rt.ObjectPrototype())
 	cryptoObj.Set("randomUUID", jsc.FunctionValue(jsc.NewNativeFunction("randomUUID",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			// 生成 version 4 UUID
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			// 用 crypto/rand 生成 version 4 UUID（不可预测，无碰撞）
 			b := make([]byte, 16)
-			for i := range b { b[i] = byte(time.Now().UnixNano()>>(i*4)) & 0xFF }
-			// 设置 version 4 和 variant
-			b[6] = (b[6] & 0x0f) | 0x40
-			b[8] = (b[8] & 0x3f) | 0x80
-			uuid := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-				b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-			return jsc.StringValue(uuid)
+			if _, err := rand.Read(b); err != nil {
+				// 理论不可达（crypto/rand 只返回 nil err）；回退时间戳保底
+				for i := range b {
+					b[i] = byte(time.Now().UnixNano() >> (i * 4))
+				}
+			}
+			b[6] = (b[6] & 0x0f) | 0x40 // version 4
+			b[8] = (b[8] & 0x3f) | 0x80 // variant 10xx
+			return jsc.StringValue(fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]))
 		}, 0)))
+	cryptoObj.Set("getRandomValues", jsc.FunctionValue(jsc.NewNativeFunction("getRandomValues",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			// 用 crypto/rand 填充传入的 TypedArray（Vite/加密库依赖）
+			if len(args) == 0 {
+				return jsc.Undefined()
+			}
+			obj := args[0].AsObject()
+			if obj == nil {
+				return jsc.Undefined()
+			}
+			length := 0
+			if lv, ok := obj.GetByKey("length"); ok {
+				length = int(lv.ToNumber())
+			}
+			if length <= 0 || length > 65536 {
+				return jsc.Undefined()
+			}
+			buf := make([]byte, length)
+			if _, err := rand.Read(buf); err != nil {
+				return jsc.Undefined()
+			}
+			for i, v := range buf {
+				obj.Set(strconv.Itoa(i), jsc.NumberValue(float64(v)))
+			}
+			return args[0]
+		}, 1)))
 	g.Set("crypto", jsc.ObjectValue(cryptoObj))
 
-	// CSS.escape / CSS.supports（简化桩）
+	// CSS.escape / CSS.supports
 	cssObj := jsc.NewObject(rt.ObjectPrototype())
 	cssObj.Set("escape", jsc.FunctionValue(jsc.NewNativeFunction("escape",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.StringValue("") }
-			// 简单转义：替换特殊字符
-			s := strings.ReplaceAll(args[0].ToString(), "\\", "\\\\")
-			return jsc.StringValue(s)
+			if len(args) == 0 {
+				return jsc.StringValue("")
+			}
+			return jsc.StringValue(cssEscapeIdent(args[0].ToString()))
 		}, 1)))
 	cssObj.Set("supports", jsc.FunctionValue(jsc.NewNativeFunction("supports",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.BooleanValue(false) }
-			// 简单检测：已知支持 flex, grid, css grid 等
-			s := strings.ToLower(args[0].ToString())
-			supported := strings.Contains(s, "display:") &&
-				(strings.Contains(s, "flex") || strings.Contains(s, "grid") || strings.Contains(s, "block") || strings.Contains(s, "none"))
-			return jsc.BooleanValue(supported)
+			if len(args) == 0 {
+				return jsc.BooleanValue(false)
+			}
+			s := strings.TrimSpace(args[0].ToString())
+			if s == "" {
+				return jsc.BooleanValue(false)
+			}
+			// (property: value) 声明形式：校验 property 为已知 CSS 属性
+			if strings.HasPrefix(s, "(") && strings.Contains(s, ":") {
+				inner := strings.TrimSuffix(strings.TrimPrefix(s, "("), ")")
+				parts := strings.SplitN(inner, ":", 2)
+				prop := strings.ToLower(strings.TrimSpace(parts[0]))
+				if isKnownCSSProperty(prop) {
+					return jsc.BooleanValue(true)
+				}
+				// 未知属性按现代浏览器行为返回 false
+				return jsc.BooleanValue(false)
+			}
+			// selector 形式：无法可靠解析 → 保守返回 true（避免误伤框架探测）
+			if strings.ContainsAny(s, "#.>+~[]:") {
+				return jsc.BooleanValue(true)
+			}
+			return jsc.BooleanValue(false)
 		}, 1)))
 	g.Set("CSS", jsc.ObjectValue(cssObj))
 
-	// window.matchMedia 桩
+	// window.matchMedia — 基于 css 包真实解析与匹配
 	g.Set("matchMedia", jsc.FunctionValue(jsc.NewNativeFunction("matchMedia",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			query := ""
+			if len(args) > 0 {
+				query = args[0].ToString()
+			}
 			mq := jsc.NewObject(in.ObjectPrototype())
-			mq.Set("matches", jsc.BooleanValue(false))
-			mq.Set("media", jsc.StringValue(""))
+			mq.Set("media", jsc.StringValue(query))
+			ctx := css.MediaQueryContext{
+				Width: 1280, Height: 800, DeviceWidth: 1280, DeviceHeight: 800,
+				DevicePixelRatio: 1, Orientation: "landscape",
+				PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
+				Pointer: "fine", AnyPointer: "fine",
+			}
+			if MediaQueryContextProvider != nil {
+				if c := MediaQueryContextProvider(); c != nil {
+					ctx = *c
+				}
+			}
+			matched := false
+			trimmed := strings.TrimSpace(query)
+			if trimmed == "" || trimmed == "all" {
+				matched = true
+			} else if qs, err := css.ParseMediaQueryList(query); err == nil && len(qs) > 0 {
+				matched = css.MatchesAny(qs, ctx)
+			}
+			mq.Set("matches", jsc.BooleanValue(matched))
+			// 存储监听器，支持 change 事件（简化：不主动重估，宿主可重建）
+			mql := struct{ listeners []jsc.JSValue }{}
 			mq.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 2 && a[1].IsCallable() {
+						mql.listeners = append(mql.listeners, a[1])
+					}
 					return jsc.Undefined()
 				}, 2)))
 			mq.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 2 {
+						return jsc.Undefined()
+					}
+					out := mql.listeners[:0]
+					for _, fn := range mql.listeners {
+						if !fn.SameAs(a[1]) {
+							out = append(out, fn)
+						}
+					}
+					mql.listeners = out
 					return jsc.Undefined()
 				}, 2)))
 			mq.Set("addListener", jsc.FunctionValue(jsc.NewNativeFunction("addListener",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) >= 1 && a[0].IsCallable() {
+						mql.listeners = append(mql.listeners, a[0])
+					}
 					return jsc.Undefined()
 				}, 1)))
 			mq.Set("removeListener", jsc.FunctionValue(jsc.NewNativeFunction("removeListener",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
+					out := mql.listeners[:0]
+					for _, fn := range mql.listeners {
+						if !fn.SameAs(a[0]) {
+							out = append(out, fn)
+						}
+					}
+					mql.listeners = out
 					return jsc.Undefined()
 				}, 1)))
 			return jsc.ObjectValue(mq)
@@ -1065,19 +1191,21 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.Undefined()
 		}, 1)))
 
-	// window.addEventListener / removeEventListener (real, for popstate/hashchange)
+	// window.addEventListener / removeEventListener — 通用存储（dispatchEvent 真分发）
 	g.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			if len(args) < 2 || !args[1].IsCallable() {
 				return jsc.Undefined()
 			}
 			eventType := args[0].ToString()
-			capture := len(args) >= 3 && args[2].ToBoolean()
+			// 记录事件类型（含 capture 标志，真分发按序调用；popstate/hashchange
+			// 仍由 navState 在 URL 变化时触发）
+			windowEventListeners[eventType] = append(windowEventListeners[eventType], args[1])
 			if eventType == "popstate" || eventType == "hashchange" {
 				navState.popListeners = append(navState.popListeners, struct {
 					fn      jsc.JSValue
 					capture bool
-				}{fn: args[1], capture: capture})
+				}{fn: args[1], capture: len(args) >= 3 && args[2].ToBoolean()})
 			}
 			return jsc.Undefined()
 		}, 2)))
@@ -1087,6 +1215,17 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				return jsc.Undefined()
 			}
 			eventType := args[0].ToString()
+			// 从通用表移除
+			if cur, ok := windowEventListeners[eventType]; ok {
+				out := cur[:0]
+				for _, fn := range cur {
+					if !fn.SameAs(args[1]) {
+						out = append(out, fn)
+					}
+				}
+				windowEventListeners[eventType] = out
+			}
+			// 从 navState 移除（兼容 popstate/hashchange 触发）
 			if eventType == "popstate" || eventType == "hashchange" {
 				targetID := args[1].AsFunction().String()
 				for i := len(navState.popListeners) - 1; i >= 0; i-- {
@@ -1097,9 +1236,28 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 			return jsc.Undefined()
 		}, 2)))
-	// window.dispatchEvent — basic stub that always returns true
+	// window.dispatchEvent — 真实分发到 window 上的监听器（target/currentTarget=window）
 	g.Set("dispatchEvent", jsc.FunctionValue(jsc.NewNativeFunction("dispatchEvent",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) == 0 || !args[0].IsObject() {
+				return jsc.BooleanValue(false)
+			}
+			ev := args[0].AsObject()
+			evType := ""
+			if v, ok := ev.GetByKey("type"); ok {
+				evType = v.ToString()
+			}
+			if evType == "" {
+				return jsc.BooleanValue(false)
+			}
+			evv := args[0]
+			if listeners, ok := windowEventListeners[evType]; ok {
+				for _, fn := range listeners {
+					if fn.IsCallable() {
+						in.Call(fn, jsc.ObjectValue(g), []jsc.JSValue{evv})
+					}
+				}
+			}
 			return jsc.BooleanValue(true)
 		}, 1)))
 
@@ -1617,6 +1775,13 @@ var nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
 // api.js 的 apiURL() 依赖 u.searchParams.set(k, v)。
 func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 	params := make(map[string][]string)
+	order := []string{} // 保序：记录 key 首次出现顺序（URLSearchParams 迭代顺序）
+	addParam := func(k, v string) {
+		if _, ok := params[k]; !ok {
+			order = append(order, k)
+		}
+		params[k] = append(params[k], v)
+	}
 	if query != "" {
 		for _, pair := range strings.Split(query, "&") {
 			if pair == "" {
@@ -1634,7 +1799,16 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 			if decoded, err := url.QueryUnescape(v); err == nil {
 				v = decoded
 			}
-			params[k] = append(params[k], v)
+			addParam(k, v)
+		}
+	}
+	removeKey := func(k string) {
+		delete(params, k)
+		for i, ok := range order {
+			if ok == k {
+				order = append(order[:i], order[i+1:]...)
+				break
+			}
 		}
 	}
 	sp := jsc.NewObject(in.ObjectPrototype())
@@ -1678,49 +1852,93 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 		if len(args) < 2 {
 			return jsc.Undefined()
 		}
-		params[args[0].ToString()] = []string{args[1].ToString()}
+		k := args[0].ToString()
+		if _, ok := params[k]; ok {
+			removeKey(k)
+		}
+		addParam(k, args[1].ToString())
 		return jsc.Undefined()
 	}, 2)))
 	sp.Set("append", jsc.FunctionValue(jsc.NewNativeFunction("append", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) < 2 {
 			return jsc.Undefined()
 		}
-		params[args[0].ToString()] = append(params[args[0].ToString()], args[1].ToString())
+		addParam(args[0].ToString(), args[1].ToString())
 		return jsc.Undefined()
 	}, 2)))
 	sp.Set("delete", jsc.FunctionValue(jsc.NewNativeFunction("delete", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) > 0 {
-			delete(params, args[0].ToString())
+			removeKey(args[0].ToString())
 		}
 		return jsc.Undefined()
 	}, 1)))
 	sp.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 		var parts []string
-		for k, vs := range params {
-			for _, v := range vs {
+		for _, k := range order {
+			for _, v := range params[k] {
 				parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
 			}
 		}
 		return jsc.StringValue(strings.Join(parts, "&"))
 	}, 0)))
-	// entries/keys/values 返回简化数组
-	sp.Set("entries", jsc.FunctionValue(jsc.NewNativeFunction("entries", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-		arr := jsc.NewObject(in.ObjectPrototype())
-		arr.SetClassName("Array")
+	// entries/keys/values 返回真迭代器（含 next()），并实现 Symbol.iterator
+	// 支持 Array.from / for...of / 展开。
+	makeIter := func(items []jsc.JSValue) *jsc.JSObject {
+		it := jsc.NewObject(in.ObjectPrototype())
 		idx := 0
-		for k, vs := range params {
-			for _, v := range vs {
-				entry := jsc.NewObject(in.ObjectPrototype())
-				entry.Set("0", jsc.StringValue(k))
-				entry.Set("1", jsc.StringValue(v))
-				entry.Set("length", jsc.NumberValue(2))
-				arr.Set(strconv.Itoa(idx), jsc.ObjectValue(entry))
+		it.Set("next", jsc.FunctionValue(jsc.NewNativeFunction("next",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				res := jsc.NewObject(in.ObjectPrototype())
+				if idx >= len(items) {
+					res.Set("value", jsc.Undefined())
+					res.Set("done", jsc.BooleanValue(true))
+					return jsc.ObjectValue(res)
+				}
+				res.Set("value", items[idx])
+				res.Set("done", jsc.BooleanValue(false))
 				idx++
+				return jsc.ObjectValue(res)
+			}, 0)))
+		// 迭代器自身实现 Symbol.iterator（返回自身），支持 Array.from/for...of
+		it.SetIterator(func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(it)
+		})
+		return it
+	}
+	allEntries := func() []jsc.JSValue {
+		var items []jsc.JSValue
+		for _, k := range order {
+			for _, v := range params[k] {
+				items = append(items, jsc.ObjectValue(jsc.NewArrayForInterp(in, []jsc.JSValue{jsc.StringValue(k), jsc.StringValue(v)})))
 			}
 		}
-		arr.Set("length", jsc.NumberValue(float64(idx)))
-		return jsc.ObjectValue(arr)
+		return items
+	}
+	sp.Set("entries", jsc.FunctionValue(jsc.NewNativeFunction("entries", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.ObjectValue(makeIter(allEntries()))
 	}, 0)))
+	sp.Set("keys", jsc.FunctionValue(jsc.NewNativeFunction("keys", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		var items []jsc.JSValue
+		for _, k := range order {
+			for range params[k] {
+				items = append(items, jsc.StringValue(k))
+			}
+		}
+		return jsc.ObjectValue(makeIter(items))
+	}, 0)))
+	sp.Set("values", jsc.FunctionValue(jsc.NewNativeFunction("values", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		var items []jsc.JSValue
+		for _, k := range order {
+			for _, v := range params[k] {
+				items = append(items, jsc.StringValue(v))
+			}
+		}
+		return jsc.ObjectValue(makeIter(items))
+	}, 0)))
+	// Symbol.iterator：直接复用 entries 迭代器
+	sp.SetIterator(func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.ObjectValue(makeIter(allEntries()))
+	})
 			sp.Set("forEach", jsc.FunctionValue(jsc.NewNativeFunction("forEach", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) == 0 || !args[0].IsCallable() {
 			return jsc.Undefined()
@@ -1892,19 +2110,16 @@ func makeStorage(rt *jsc.Interpreter, store map[string]string, session bool) *js
 	return s
 }
 
-// makePerformance 创建一个 performance 对象（简化版）。
+// makePerformance 创建一个 performance 对象（now 以解释器创建时刻为时间原点）。
 func makePerformance(rt *jsc.Interpreter) *jsc.JSObject {
 	p := jsc.NewObject(rt.ObjectPrototype())
-	start := rt.GetEventLoop()
-	var origin int64
-	if start != nil {
-		origin = time.Now().UnixMilli()
-	}
+	origin := time.Now().UnixMilli()
 	p.Set("now", jsc.FunctionValue(jsc.NewNativeFunction("now",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			elapsed := float64(time.Now().UnixMilli()-origin) / 1000.0 * 1000.0
-			return jsc.NumberValue(elapsed)
+			return jsc.NumberValue(float64(time.Now().UnixMilli() - origin))
 		}, 0)))
+	// timeOrigin 与浏览器一致（页面加载时刻）
+	p.Set("timeOrigin", jsc.NumberValue(float64(origin)))
 	return p
 }
 
@@ -2959,6 +3174,103 @@ func arrJS(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	return arrayValue(in, len(els), func(i int) jsc.JSValue {
 		return jsc.ObjectValue(wrapElement(in, els[i]))
 	})
+}
+
+// cssEscapeIdent 按 CSSOM 规范的 CSS.escape 转义 CSS 标识符。
+func cssEscapeIdent(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	escapeByte := func(c byte) {
+		b.WriteByte('\\')
+		switch {
+		case c < 0x20 || c == 0x7F:
+			// 控制字符 → 十六进制转义 + 空格
+			b.WriteString(strconv.FormatInt(int64(c), 16))
+			b.WriteByte(' ')
+		case c >= 0x30 && c <= 0x39 || c >= 0x41 && c <= 0x5A || c >= 0x61 && c <= 0x7A || c == '_' || c == '-' || c >= 0x80:
+			// 标识符字符 → 反斜杠前缀原样（规范行为）
+			b.WriteByte(c)
+		default:
+			// 其余可打印 ASCII（空格等）→ 反斜杠 + 原字符（如 'a b' → 'a\ b'）
+			b.WriteByte(c)
+		}
+	}
+	first := s[0]
+	switch {
+	case first >= '0' && first <= '9':
+		// 首字符数字 → 十六进制转义（CSS 标识符不能以数字开头）
+		b.WriteByte('\\')
+		b.WriteString(strconv.FormatInt(int64(first), 16))
+		b.WriteByte(' ')
+	case first >= 'A' && first <= 'Z' || first >= 'a' && first <= 'z' || first == '_' || first == '-' || first >= 0x80:
+		b.WriteByte(first)
+	default:
+		escapeByte(first)
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c == '-' && i == len(s)-1 {
+			// 尾随连字符必须转义
+			b.WriteString("\\-")
+			continue
+		}
+		if c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || c == '-' || c >= 0x80 {
+			b.WriteByte(c)
+			continue
+		}
+		escapeByte(c)
+	}
+	return b.String()
+}
+
+// knownCSSProps 是 CSS.supports('(prop: value)') 判断用的已知属性表
+// （覆盖 Vue/常见库会探测的属性；非穷尽，未列出时 supports 返回 false
+// 与浏览器行为一致——浏览器对未知属性也返回 false）。
+var knownCSSProps = map[string]bool{
+	"align-content": true, "align-items": true, "align-self": true,
+	"animation": true, "appearance": true, "aspect-ratio": true,
+	"backdrop-filter": true, "background": true, "background-clip": true,
+	"background-color": true, "background-image": true, "background-size": true,
+	"border": true, "border-bottom": true, "border-color": true,
+	"border-radius": true, "border-top": true, "border-width": true,
+	"bottom": true, "box-shadow": true, "box-sizing": true,
+	"caption-side": true, "caret-color": true, "clip-path": true,
+	"color": true, "column-gap": true, "columns": true,
+	"content": true, "cursor": true, "display": true,
+	"filter": true, "flex": true, "flex-basis": true, "flex-direction": true,
+	"flex-flow": true, "flex-grow": true, "flex-shrink": true, "flex-wrap": true,
+	"float": true, "font": true, "font-family": true, "font-size": true,
+	"font-style": true, "font-weight": true, "gap": true,
+	"grid": true, "grid-area": true, "grid-auto-columns": true,
+	"grid-auto-rows": true, "grid-column": true, "grid-row": true,
+	"grid-template": true, "grid-template-areas": true, "grid-template-columns": true,
+	"grid-template-rows": true, "height": true, "inset": true,
+	"inset-block": true, "inset-inline": true, "justify-content": true,
+	"justify-items": true, "justify-self": true, "left": true,
+	"letter-spacing": true, "line-height": true, "list-style": true,
+	"margin": true, "margin-bottom": true, "margin-left": true,
+	"margin-right": true, "margin-top": true, "max-height": true,
+	"max-width": true, "min-height": true, "min-width": true,
+	"object-fit": true, "object-position": true, "opacity": true,
+	"order": true, "outline": true, "overflow": true, "overflow-x": true,
+	"overflow-y": true, "padding": true, "padding-bottom": true,
+	"padding-left": true, "padding-right": true, "padding-top": true,
+	"place-content": true, "place-items": true, "place-self": true,
+	"pointer-events": true, "position": true, "resize": true,
+	"right": true, "row-gap": true, "scroll-behavior": true,
+	"text-align": true, "text-decoration": true, "text-overflow": true,
+	"text-shadow": true, "text-transform": true, "top": true,
+	"transform": true, "transform-origin": true, "transition": true,
+	"user-select": true, "vertical-align": true, "visibility": true,
+	"white-space": true, "width": true, "word-break": true,
+	"word-wrap": true, "z-index": true,
+}
+
+// isKnownCSSProperty 判断属性名是否在已知 CSS 属性表中。
+func isKnownCSSProperty(prop string) bool {
+	return knownCSSProps[strings.ToLower(prop)]
 }
 
 // Silence unused import warning
