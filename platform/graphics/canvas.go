@@ -1207,6 +1207,26 @@ var (
 	globalMeasureOnce        sync.Once
 )
 
+// globalWidthCache caches MeasureText results by (font, text). Layout calls
+// MeasureTextFunc for every inline text segment every layout pass; chat /
+// IDE UIs are full of repeated strings (buttons, labels, identical message
+// fragments), so caching the Skia advance-width avoids re-running the
+// rasterizer's text measurement for the same string thousands of times per
+// frame. The cache is bounded: past the cap it is rebuilt from scratch
+// (cheaper than unbounded memory growth; a rebuild costs one layout pass of
+// misses, which is still far cheaper than measuring every frame).
+type widthCacheKey struct {
+	font fontKey
+	text string
+}
+
+var (
+	globalWidthCache     = make(map[widthCacheKey]float64)
+	globalWidthCacheMu   sync.Mutex
+	globalWidthCacheMax  = 8192
+	globalWidthCacheHits, globalWidthCacheMisses int64
+)
+
 // globalMeasurePaintInstance lazily creates a shared Paint for text measurement.
 func globalMeasurePaintInstance() *skia.Paint {
 	globalMeasureOnce.Do(func() {
@@ -1284,8 +1304,44 @@ func globalSkiaFont(font Font) *skia.Font {
 // text width before painting (via layout.MeasureTextFunc). Returns 0 when the
 // font cannot be loaded. Non-ASCII characters (emoji, symbols, geometric
 // shapes) are measured using the emoji fallback font when the primary font
-// lacks the glyph.
+// lacks the glyph. Results are memoized in globalWidthCache (bounded) so
+// repeated strings across layout passes cost one map lookup instead of a
+// Skia rasterizer measurement.
 func MeasureText(font Font, text string) float64 {
+	if text == "" {
+		return 0
+	}
+	sz := font.Size
+	if sz <= 0 {
+		sz = 16
+	}
+	key := widthCacheKey{font: fontKey{family: font.Family, size: float32(sz), weight: font.Weight, style: font.Style}, text: text}
+	globalWidthCacheMu.Lock()
+	if w, ok := globalWidthCache[key]; ok {
+		globalWidthCacheHits++
+		globalWidthCacheMu.Unlock()
+		return w
+	}
+	globalWidthCacheMisses++
+	globalWidthCacheMu.Unlock()
+
+	w := measureTextUncached(font, text)
+
+	globalWidthCacheMu.Lock()
+	if len(globalWidthCache) >= globalWidthCacheMax {
+		// Rebuild from scratch at the cap: bounded memory, and a one-pass
+		// rebuild (misses) is far cheaper than measuring every segment every
+		// frame. Rebuilding on overflow amortizes well for long-running
+		// sessions with unbounded user text.
+		globalWidthCache = make(map[widthCacheKey]float64, 512)
+		globalWidthCacheHits, globalWidthCacheMisses = 0, 0
+	}
+	globalWidthCache[key] = w
+	globalWidthCacheMu.Unlock()
+	return w
+}
+
+func measureTextUncached(font Font, text string) float64 {
 	skFont := globalSkiaFont(font)
 	if skFont == nil {
 		return 0
