@@ -292,7 +292,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// character when word-break:break-all or
 					// overflow-wrap:break-word (mirrors WebCore break-word
 					// handling for long URLs / CJK-free text).
-					if wordWidth > currentLine.availWidth {
+					// ★ nowrap 优先：white-space:nowrap 时浏览器完全禁止软换行，
+					//   word-break/overflow-wrap 均不生效（长词溢出由 overflow
+					//   裁剪/省略号处理）——漏掉此检查会让 .msg-bubble 继承的
+					//   word-break:break-word 把 nowrap 的 tl-tc-param 长词拆行。
+					if wordWidth > currentLine.availWidth && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 						wordBreak := cs.GetProperty("word-break")
 						overflowWrap := cs.GetProperty("overflow-wrap")
 						if wordBreak == "break-all" || wordBreak == "break-word" || overflowWrap == "break-word" {

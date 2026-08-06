@@ -237,6 +237,13 @@ func (wv *WebView) LoadHTML(src string) error {
 			}
 		}
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
+		// ★ 渲染树几何桥：Element.scrollTop/scrollHeight/clientHeight/offsetHeight/
+		//   getBoundingClientRect 等 CSSOM 属性需要真实布局几何。此前只在 EvalJS
+		//   中注入——cmd/desktop 与页面脚本（Vue）均走 JSInterpreter().RunJS 执行，
+		//   从不经过 EvalJS → hook 保持 nil → 前端读到 0：聊天列表无法按空间
+		//   加载（clientHeight/scrollHeight 恒 0）、scrollTop 赋值静默失效。
+		//   在 LoadHTML 注册 DOM bindings 后、页面脚本执行前注入（渲染树可用）。
+		wv.injectRenderTreeBridge()
 		// Set up callback for dynamic <style> injection (Vue scoped CSS).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
 		bindings.OnStyleNodeAdded = func(n dom.Node) {
@@ -382,8 +389,10 @@ func (wv *WebView) Document() *dom.Document {
 // this WebView's RenderView. Without it those CSSOM properties return 0 and
 // frontend scroll APIs (el.scrollTop = el.scrollHeight) silently no-op.
 func (wv *WebView) injectRenderTreeBridge() {
-	rv := wv.RenderView()
+	// ★ rv 延迟获取：LoadHTML 注入时渲染树可能尚未重建（rv==nil），
+	//   闭包内每次调用时再取 RenderView，保证前端 JS 读取几何时拿到最新实例。
 	wrapBox := func(el *dom.Element, fn func(box *rendering.RenderBox) (float64, float64)) (float64, float64) {
+		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0
 		}
@@ -395,10 +404,14 @@ func (wv *WebView) injectRenderTreeBridge() {
 	}
 	bindings.GetElementScrollOffset = func(el *dom.Element) (float64, float64) {
 		return wrapBox(el, func(box *rendering.RenderBox) (float64, float64) {
-			return rv.BoxScrollOffset(box)
+			if rv := wv.RenderView(); rv != nil {
+				return rv.BoxScrollOffset(box)
+			}
+			return 0, 0
 		})
 	}
 	bindings.SetElementScrollOffset = func(el *dom.Element, x, y float64) {
+		rv := wv.RenderView()
 		box := func() *rendering.RenderBox {
 			if rv == nil || el == nil {
 				return nil
@@ -437,6 +450,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		rv.SetBoxScrollOffset(box, x, y)
 	}
 	bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
+		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0, 0, 0, false
 		}
@@ -451,6 +465,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		return pb.Width, pb.Height, tw, th, (vm.OK || hm.OK)
 	}
 	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
+		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0, 0, 0
 		}
