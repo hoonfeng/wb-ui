@@ -11,13 +11,17 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/png"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
@@ -35,6 +39,15 @@ import (
 	"wb-ui/style"
 	"wb-ui/webkit"
 )
+
+// encodePNG converts RGBA pixels to PNG bytes (for WB_PAINT_DUMP diagnostics).
+func encodePNG(w, h int, rgba []byte) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	copy(img.Pix, rgba)
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	return buf.Bytes()
+}
 
 var DumpRTCallback func(rv *rendering.RenderView)
 
@@ -97,6 +110,16 @@ type Host struct {
 	// needsResizeDump is set true on EventResize, cleared after DumpRTCallback fires
 	// once on the re-laid-out tree. Prevents dumping every frame.
 	needsResizeDump bool
+	// lastDbgCW/CH track last logged paint canvas size (WB_RESIZE_DEBUG)
+	lastDbgCW, lastDbgCH int
+	// paintDumped marks the one-shot WB_PAINT_DUMP canvas pixel dump
+	paintDumped bool
+	// snapEnabled/snapLast drive the periodic WB_SNAP layout snapshot
+	snapEnabled bool
+	snapLast    time.Time
+	// snapFile/snapMu guard the _layout_snap.log writer (WB_SNAP)
+	snapFile *os.File
+	snapMu   sync.Mutex
 	// lastLoggedScrollY dedupes per-frame [scroll] logs (only logs on change).
 	lastLoggedScrollY int
 	// lastIMEX/lastIMEY dedupe IME composition-position updates.
@@ -849,6 +872,8 @@ func (h *Host) Run() {
 
 	h.animStart = time.Now()
 	h.firstFrame = true
+	h.snapEnabled = os.Getenv("WB_SNAP") != ""
+	h.snapLast = time.Now()
 
 	// Get the FrameView for scroll management.
 	frameView := h.wv.Page().MainFrame().View()
@@ -929,6 +954,43 @@ func (h *Host) Run() {
 			DumpRTCallback(rv)
 			h.needsResizeDump = false
 		}
+		// ★ WB_RESIZE_DEBUG=1：resize 后 dump 布局根 + 关键节点几何 + 滚动 + canvas，
+		//   验证最大化/拖拽后布局是否跟随 viewport 更新（"内容绘制区域变小/编辑区偏移"）。
+		if os.Getenv("WB_RESIZE_DEBUG") != "" && rv != nil && h.needsResizeDump && h.wv.MainFrame() != nil {
+			if fr2 := h.wv.MainFrame().Frame(); fr2 != nil {
+				if lb := rv.LayoutBox(); lb != nil {
+					st := rv.LayoutState()
+					g := st.GeometryForBox(lb)
+					fv := fr2.View()
+					log.Printf("[resize-aft] layoutRoot=(%.0f,%.0f %.0fx%.0f) viewport=%dx%d scrollY=%d contentSize=%dx%d",
+						g.ContentBoxLeft(), g.ContentBoxTop(), g.ContentWidth(), g.ContentHeight(),
+						fv.Width(), fv.Height(), fv.ScrollY(), fv.ContentWidth(), fv.ContentHeight())
+					// 关键节点 dump（main-area / right-container / editor-area）
+					var walkD func(ro rendering.RenderObject, depth int)
+					walkD = func(ro rendering.RenderObject, depth int) {
+						if ro == nil || depth > 14 {
+							return
+						}
+						if n := ro.Node(); n != nil {
+							if el, ok := n.(*dom.Element); ok {
+								cls := el.GetAttribute("class")
+								if cls == "main-area" || cls == "right-container" || cls == "editor-area" || cls == "right-panel" || cls == "sidebar" || cls == "activity-bar" {
+									if rb := ro.LayoutBox(); rb != nil {
+										gg := st.GeometryForBox(rb)
+										log.Printf("[resize-aft] %s=(%.0f,%.0f %.0fx%.0f)", cls, gg.Left(), gg.Top(), gg.BorderBoxWidth(), gg.BorderBoxHeight())
+									}
+								}
+							}
+						}
+						for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+							walkD(c, depth+1)
+						}
+					}
+					walkD(rendering.RenderObject(rv), 0)
+				}
+				h.needsResizeDump = false
+			}
+		}
 		animActive := false
 		if rv != nil {
 			// Drive CSS animations: update the global animation clock and
@@ -978,6 +1040,15 @@ func (h *Host) Run() {
 		h.firstFrame = false
 		if needPaint {
 			perfRenders++
+		}
+
+		// ★ WB_SNAP=1：周期性布局快照（打开文件前后对比用）。
+		//   每 600ms dump 关键布局/几何/CM6 状态到 _layout_snap.log（主循环线程内
+		//   执行，避免与 RunJS 并发竞态）。用户操作 desktop（打开文件/滚动）后，
+		//   对比快照时间线即可定位"布局异常"发生的时刻与变化。
+		if h.snapEnabled && time.Since(h.snapLast) > 600*time.Millisecond {
+			h.snapLast = time.Now()
+			h.dumpLayoutSnap()
 		}
 
 		if needPaint && rv != nil {
@@ -1051,9 +1122,43 @@ func (h *Host) Run() {
 				gpuCanvas.Scale(csX, csY)
 				gpuCanvas.Translate(0, -float64(frameView.ScrollY()))
 				dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
+				if os.Getenv("WB_RESIZE_DEBUG") != "" && (gpuCanvas.Width() != h.lastDbgCW || gpuCanvas.Height() != h.lastDbgCH) {
+					h.lastDbgCW, h.lastDbgCH = gpuCanvas.Width(), gpuCanvas.Height()
+					log.Printf("[paint] canvas=%dx%d fb=%dx%d css=%dx%d dirty=(%.0f,%.0f %.0fx%.0f) scale=%.2f",
+						gpuCanvas.Width(), gpuCanvas.Height(),
+						h.win.FramebufferWidth(), h.win.FramebufferHeight(),
+						h.win.Width(), h.win.Height(),
+						dirtyRect.X, dirtyRect.Y, dirtyRect.Width, dirtyRect.Height,
+						csX)
+				}
 				rendering.Paint(rv, gpuCanvas, dirtyRect)
 				gpuCanvas.Restore()
 
+				// ★ WB_PAINT_DUMP=1：Paint 后采样 canvas 像素，判断内容是否真的画出来
+				//   （"布局正常但画面空"排查：dirtyRect / canvas transform / GPU 回读）。
+				if os.Getenv("WB_PAINT_DUMP") != "" && !h.paintDumped {
+					h.paintDumped = true
+					if px := gpuCanvas.Pixels(); len(px) >= 4 {
+						nonBg := 0
+						sampled := 0
+						for i := 0; i+3 < len(px); i += 1024 {
+							sampled++
+							// 背景是 Clear(bgColor) 后的统一色；alpha>0 且非纯黑/纯白背景视为内容
+							if px[i+3] > 0 {
+								nonBg++
+							}
+						}
+						log.Printf("[paint-dump] canvas=%dx%d px=%d nonZeroAlpha=%d/%d (%.1f%%)",
+							gpuCanvas.Width(), gpuCanvas.Height(), len(px)/4, nonBg, sampled, 100*float64(nonBg)/float64(sampled))
+						// 保存 PNG 供人工检查
+						if len(px) == gpuCanvas.Width()*gpuCanvas.Height()*4 {
+							pngBytes := encodePNG(gpuCanvas.Width(), gpuCanvas.Height(), px)
+							if err := os.WriteFile("_desktop_paint.png", pngBytes, 0o644); err == nil {
+								log.Printf("[paint-dump] saved _desktop_paint.png")
+							}
+						}
+					}
+				}
 				if ownsCanvas {
 					gpuCanvas.Release()
 				}
@@ -1076,6 +1181,87 @@ func (h *Host) Run() {
 			float64(perfRenders)/max(elapsed, 0.001))
 	}
 }
+
+// snapLayoutJS collects key layout geometry + CM6 state from the page (WB_SNAP).
+const snapLayoutJS = `(function(){
+  var o = {};
+  o.vw = {w: window.innerWidth, h: window.innerHeight};
+  o.bodyScrollH = document.body ? document.body.scrollHeight : -1;
+  o.deScrollTop = document.documentElement ? document.documentElement.scrollTop : -1;
+  function rect(sel, key){
+    var el = document.querySelector(sel);
+    if (!el) { o[key] = sel + '=NULL'; return; }
+    var r = el.getBoundingClientRect();
+    var cs = getComputedStyle(el);
+    o[key] = sel + '=(' + Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) + ') disp=' + cs.display + ' w=' + cs.width + ' pos=' + cs.position + ' ovf=' + cs.overflow;
+  }
+  rect('.app-root', 'app');
+  rect('.main-area', 'main');
+  rect('.right-container', 'right');
+  rect('.editor-area', 'ea');
+  rect('.editor-body', 'eb');
+  rect('.editor-wrapper', 'ew');
+  rect('.code-editor-wrapper', 'cw');
+  rect('.cm-editor', 'cm');
+  rect('.cm-scroller', 'sc');
+  rect('.cm-content', 'co');
+  var co = document.querySelector('.cm-content');
+  if (co) { o.coChildren = co.children.length; o.coTextLen = (co.textContent || '').length; o.coScrollW = co.scrollWidth; }
+  o.lineCount = document.querySelectorAll('.cm-line').length;
+  o.cmExists = !!document.querySelector('.cm-editor');
+  var sc = document.querySelector('.cm-scroller');
+  if (sc) { o.scScrollTop = sc.scrollTop; o.scScrollH = sc.scrollHeight; o.scClientH = sc.clientHeight; }
+  o.active = (document.querySelector('.file-tree-item.active .item-name') || {}).textContent || '';
+  o.ftItems = document.querySelectorAll('.file-tree-item .item-row').length;
+  o.errs = (window.__errs || []).join(' ;; ');
+  return JSON.stringify(o);
+})()`
+
+// dumpLayoutSnap writes a periodic layout snapshot to _layout_snap.log (WB_SNAP).
+// Appends with a timestamp so the user's interactions (open file / scroll) can be
+// compared along the time axis: find the moment the layout broke and what changed.
+func (h *Host) dumpLayoutSnap() {
+	if h.wv.JSInterpreter() == nil {
+		return
+	}
+	geo := ""
+	v, err := h.wv.JSInterpreter().RunJS(snapLayoutJS)
+	if err != nil {
+		geo = "[err] " + err.Error()
+	} else {
+		geo = v.ToString()
+	}
+	// Go 侧补充：布局根 + 关键渲染节点几何（与 JS getBoundingClientRect 对比）
+	extra := ""
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			if rv := fr.RenderView(); rv != nil {
+				if lb := rv.LayoutBox(); lb != nil {
+					if st := rv.LayoutState(); st != nil {
+						g := st.GeometryForBox(lb)
+						extra = fmt.Sprintf(" layoutRoot=(%.0f,%.0f %.0fx%.0f)", g.ContentBoxLeft(), g.ContentBoxTop(), g.ContentWidth(), g.ContentHeight())
+						if fv := fr.View(); fv != nil {
+							extra += fmt.Sprintf(" viewport=%dx%d scrollY=%d", fv.Width(), fv.Height(), fv.ScrollY())
+						}
+					}
+				}
+			}
+		}
+	}
+	line := fmt.Sprintf("[%s] %s%s", time.Now().Format("15:04:05.000"), geo, extra)
+	h.snapMu.Lock()
+	defer h.snapMu.Unlock()
+	if h.snapFile == nil {
+		f, err := os.OpenFile("_layout_snap.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return
+		}
+		h.snapFile = f
+	}
+	fmt.Fprintln(h.snapFile, line)
+	_ = h.snapFile.Sync()
+}
+
 
 // processEventLoop 驱动 JS 事件循环（对标浏览器事件循环模型）。
 // 在渲染循环中每帧调用，处理到期的宏任务、微任务和动画帧回调。
