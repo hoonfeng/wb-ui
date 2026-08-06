@@ -23,14 +23,43 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"wb-ui/dom"
+	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 	"wb-ui/widgets"
 
 	"github.com/hoonfeng/goskia/skia"
 )
+
+// paintStats* accumulate per-Paint layer-tree statistics when
+// WB_PAINT_STATS=1, printed at the end of Paint().
+var paintStatsLayers, paintStatsClipLayers, paintStatsNoClipLayers, paintStatsFixed, paintStatsVisits int
+
+// paintDebugEnabled / paintStatsEnabled cache the WB_PAINT_DEBUG /
+// WB_PAINT_STATS environment flags: os.Getenv on Windows is a syscall
+// (~10µs), and the paint path queries it per layer (3000+ layers × 3 checks
+// ≈ 90ms of pure syscall overhead in the old code).
+var (
+	paintDebugOnce  sync.Once
+	paintDebugFlag  bool
+	paintStatsOnce  sync.Once
+	paintStatsFlag  bool
+	paintStatsCount int
+)
+
+func paintDebugEnabled() bool {
+	paintDebugOnce.Do(func() { paintDebugFlag = os.Getenv("WB_PAINT_DEBUG") != "" })
+	return paintDebugFlag
+}
+
+func paintStatsEnabled() bool {
+	paintStatsOnce.Do(func() { paintStatsFlag = os.Getenv("WB_PAINT_STATS") != "" })
+	return paintStatsFlag
+}
 
 // Paint is the top-level paint entry point, mirroring FrameView::paint() which calls
 // RenderView::paint(). It walks the render tree (or, when layers are present, the layer
@@ -40,6 +69,16 @@ import (
 func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if view == nil || canvas == nil {
 		return
+	}
+	if paintStatsEnabled() {
+		paintStatsLayers, paintStatsClipLayers, paintStatsNoClipLayers, paintStatsFixed, paintStatsVisits = 0, 0, 0, 0, 0
+		restoreCountAtEntry := graphics.CanvasRestoreCount
+		defer func() {
+			log.Printf("[paint-stats] layers=%d clip=%d noclip=%d fixed=%d saveCount=%d restores=%d visits=%d cgo{%s}",
+				paintStatsLayers, paintStatsClipLayers, paintStatsNoClipLayers, paintStatsFixed,
+				canvas.SaveCount(), graphics.CanvasRestoreCount-restoreCountAtEntry, paintStatsVisits,
+				graphics.CanvasTimingSummary())
+		}()
 	}
 	// Use the view's dirty rect if set; otherwise fall back to the caller's rect.
 	paintRect := rect
@@ -60,7 +99,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	sx0, sy0 := view.ScrollOffset()
 	anyBoxScroll := view.HasBoxScrollOffset() || sx0 != 0 || sy0 != 0
 	info.SetDirtyCheckEnabled(view.IsDirty() && !anyBoxScroll)
-	if os.Getenv("WB_PAINT_DEBUG") != "" {
+	if paintDebugEnabled() {
 		log.Printf("[paint] dirty=%v anyScroll=%v offsets=%d", view.IsDirty(), anyBoxScroll, view.ScrollOffsetCount())
 	}	// Record the save depth at entry so fixed layers can restore to a
 	// clip-free state via RestoreToCount (see paintLayerTree).
@@ -75,7 +114,11 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 
 	if view.RootLayer() != nil {
+		tTree := time.Now()
 		paintLayerTree(view.RootLayer(), info)
+		if paintStatsEnabled() {
+			log.Printf("[paint-timing] tree=%v", time.Since(tTree).Round(time.Microsecond))
+		}
 	} else {
 		paintSubtreeByPhase(RenderObject(view), info, nil)
 	}
@@ -84,6 +127,23 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if view.IsDirty() {
 		view.ClearDirty()
 	}
+}
+
+// opacityLayerBounds computes the device-space SaveLayer bounds for an opacity
+// layer: the owner's border box (world/absolute coords, with 16px slack for
+// shadows/overflow) mapped through the current canvas transform. Limiting the
+// layer bounds makes the Restore composite cheap on raster (element region
+// instead of the whole 1280×800 surface).
+func opacityLayerBounds(info *PaintInfo, layerRect layout.LayoutRect) graphics.Rect {
+	w := layerRect.Width
+	h := layerRect.Height
+	if w <= 0 {
+		w = 4
+	}
+	if h <= 0 {
+		h = 4
+	}
+	return info.canvas.DeviceRect(graphics.Rect{X: layerRect.X - 16, Y: layerRect.Y - 16, Width: w + 32, Height: h + 32})
 }
 
 // paintLayerTree paints a single render layer and its descendants, mirroring
@@ -101,14 +161,13 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	if layer == nil {
 		return
 	}
-	if os.Getenv("WB_PAINT_DEBUG") != "" {
+	if paintDebugEnabled() {
 		n := 0
 		for c := layer.FirstChild(); c != nil; c = c.NextSibling() {
 			n++
 		}
 		log.Printf("[layer] %s children=%d", layerName(layer), n)
 	}
-	info.canvas.Save()
 	// Fixed-position layers paint against the viewport: reset the inherited
 	// ancestor clip so a dialog-overlay / menu inside an overflow:auto
 	// container (e.g. sidebar-content) still covers the whole window.
@@ -119,6 +178,47 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		if st := layer.Owner().Style(); st != nil {
 			isFixedLayer = st.Position == style.PositionFixed
 		}
+	}
+	layerRect, clip := layer.CalculateRects()
+	hasClip := clip.Width > 0 && clip.Height > 0
+	_ = layerRect
+	if paintStatsEnabled() {
+		paintStatsLayers++
+		if isFixedLayer {
+			paintStatsFixed++
+		}
+		if hasClip {
+			paintStatsClipLayers++
+		}
+	}
+	// ★ 层早退提前到 Save 之前（局部重绘核心优化）：当前实现先 Save+Clip
+	// 再判断与 dirty rect 无交 → 白白付出 Save+Clip+Restore 三次 cgo。
+	// 局部重绘时（hover/局部变化）1944 个 clip 层中绝大多数与脏区无交
+	// （脏区 581×66 只覆盖少数层）——提前 return 省掉每层的全部 cgo。
+	// 全量重绘（DirtyCheckEnabled=false）不早退；fixed 层不早退（其
+	// 内容可能在视口任意处）。
+	if !isFixedLayer && hasClip && info.DirtyCheckEnabled() {
+		dr := info.dirtyRect
+		if dr.Width > 0 && dr.Height > 0 {
+			cl := clip
+			cl.X += info.scrollTranslateX
+			cl.Y += info.scrollTranslateY
+			if cl.Width <= 0 || cl.Height <= 0 ||
+				cl.X >= dr.X+dr.Width || cl.X+cl.Width <= dr.X ||
+				cl.Y >= dr.Y+dr.Height || cl.Y+cl.Height <= dr.Y {
+				return
+			}
+		}
+	}
+	// ★ 仅在 hasClip 或 fixed 时 Save（对齐 WebKit RenderLayer::paintLayer
+	// 只在需要时才 saveGraphicsState）：普通 positioned 层（overflow:
+	// visible 且祖先无 overflow，无 clip）不保护 canvas 状态——层内
+	// 的容器 clip（walkSubtreeExcluded 自配对）、scroll translate
+	// （paintLayerContents 自配对）、opacity SaveLayer（自配对）都不会
+	// 泄漏到层外。省掉 2978 层中 1034 个无 clip 层的全部 Save/Restore
+	// cgo 调用（Windows cgo ~20µs/次，这是 paint 80%+ 的时间）。
+	if hasClip || isFixedLayer {
+		info.canvas.Save()
 	}
 	if isFixedLayer {
 		// ★ Fixed-position layers paint against the viewport. The previous
@@ -147,8 +247,14 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
 			}
 		}
-		if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 {
-			info.canvas.SaveLayerWithOpacity(st.Opacity)
+		// ★ opacity 阈值：opacity∈[0.98,1) 不建 SaveLayer（offscreen 合成在
+		// raster 上 ~0.7ms/次，是 paint 的主成本——200 combos 时 405 次
+		// opacity 层 ≈ 283ms/70%）。直接按 alpha 绘制（painter 的
+		// CumulativeOpacity 乘法），0.98+ 的视觉差不可见。
+		// ★ bounds 限制：SaveLayer 只分配元素区域（非全 surface）——
+		// raster 合成从 ~0.7ms 降到 ~µs。
+		if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 {
+			info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
 			info.opacityLayerDepth++
 			paintLayerContents(layer, info)
 			info.opacityLayerDepth--
@@ -165,8 +271,8 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		info.canvas.RestoreToCount(info.initialSaveCount)
 		info.canvas.Save()
 		return
-	} else if layerRect, clip := layer.CalculateRects(); clip.Width > 0 && clip.Height > 0 {
-		_ = layerRect
+	}
+	if hasClip {
 		// ★ Layer clips from CalculateRects are ABSOLUTE coordinates, but
 		// Clip() applies the current transform first. Child layers paint
 		// under an ancestor scroll translate (scrollTranslate != 0), so an
@@ -180,7 +286,7 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		// (scrollTranslate == 0 here), so its clip is not shifted.
 		clip.X += info.scrollTranslateX
 		clip.Y += info.scrollTranslateY
-		if os.Getenv("WB_PAINT_DEBUG") != "" {
+		if paintDebugEnabled() {
 			m := info.canvas.GetMatrix()
 			log.Printf("[paint/layer] %s clip=%.0f,%.0f %.0fx%.0f scrollT=(%.0f,%.0f) ctmY=%.1f",
 				layerName(layer), clip.X, clip.Y, clip.Width, clip.Height,
@@ -251,14 +357,10 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 			}
 		}
 	}
-	// CSS opacity<1: the whole subtree paints into an offscreen transparency
-	// layer that composites at `opacity` on restore — the browser's
-	// flatten-then-fade semantics. Painters skip their own CumulativeOpacity
-	// multiplication while inside (opacityLayerDepth > 0) so text/border are
-	// composited inside the layer and the single fade produces the same
-	// solid dark text and invisible border as the browser.
-	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 {
-		info.canvas.SaveLayerWithOpacity(st.Opacity)
+	// ★ opacity∈[0.98,1) 直接 alpha 绘制（省 offscreen 合成，见 fixed 分支）。
+	// ★ bounds 限制：SaveLayer 只分配元素区域，raster 合成 ~0.7ms→µs。
+	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 {
+		info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
 		info.opacityLayerDepth++
 		paintLayerContents(layer, info)
 		info.opacityLayerDepth--
@@ -266,7 +368,9 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	} else {
 		paintLayerContents(layer, info)
 	}
-	info.canvas.Restore()
+	if hasClip || isFixedLayer {
+		info.canvas.Restore()
+	}
 }
 
 // paintLayerContents paints the layer owner's subtree (excluding child layer
@@ -473,6 +577,17 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	if root == nil {
 		return
 	}
+	// ★ phase 感知的文本跳过：RenderText 只在 Foreground phase 绘制
+	// （background/outline 均无操作，selection 由 PaintSelection 单独处理）。
+	// 文本是树叶子（无子节点），直接返回省掉 bg/outline 两个 phase 的
+	// 全部文本节点遍历——消息列表类页面文本占对象数 60%+。
+	if info != nil {
+		if _, isText := root.(*RenderText); isText {
+			if info.Phase() == PhaseBackground || info.Phase() == PhaseOutline {
+				return
+			}
+		}
+	}
 	if excluded[root] {
 		return
 	}
@@ -502,7 +617,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		}
 	}
 
-	if os.Getenv("WB_PAINT_DEBUG") != "" && info != nil && info.rv != nil {
+	if paintDebugEnabled() && info != nil && info.rv != nil {
 		if rb := asRenderBox(root); rb != nil {
 			if st := rb.Style(); st != nil {
 				sx, sy := info.rv.BoxScrollOffset(rb)
@@ -564,16 +679,25 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	// 的普通 box 直接跳过 visit（子对象仍遍历，各自再判——overflow
 	// visible 的子内容可能越界）。sticky/transform/filter/opacity<1 对象
 	// 的绘制位置与布局 box 不一致，保守不跳过。
+	// ★ 对象级快速剔除（局部重绘）：paintObjectBackground/Foreground/
+	// Outline 对每个对象先做 backdrop-filter/clip-path/blend/filter 的
+	// GetProperty 解析再绘制——即使对象最终被 intersects 跳过，这些
+	// 检查本身在 12K 对象 × 3 phase 下就是主要成本。与 dirty rect 无交
+	// 的普通 box 直接跳过 visit（子对象仍遍历，各自再判——overflow
+	// visible 的子内容可能越界）。sticky/transform/filter/opacity<1 对象
+	// 的绘制位置与布局 box 不一致，保守不跳过。
+	// ★ 几何先行：先取 box 几何判断无交（便宜），命中后才取 Style 做
+	// 保守条件检查——无交对象（绝大多数）省掉 Style() 调用。
 	doVisit := true
 	if info != nil && info.DirtyCheckEnabled() {
 		dr := info.dirtyRect
 		if dr.Width > 0 && dr.Height > 0 {
 			if box := asRenderBox(root); box != nil && !box.IsStickyPositioned() {
-				if st := box.Style(); st == nil || (st.Transform == "" && st.Filter == "" && st.Opacity >= 1) {
-					bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
-					if bw > 0 && bh > 0 &&
-						(bx+bw <= dr.X || bx >= dr.X+dr.Width ||
-							by+bh <= dr.Y || by >= dr.Y+dr.Height) {
+				bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
+				if bw > 0 && bh > 0 &&
+					(bx+bw <= dr.X || bx >= dr.X+dr.Width ||
+						by+bh <= dr.Y || by >= dr.Y+dr.Height) {
+					if st := box.Style(); st == nil || (st.Transform == "" && st.Filter == "" && st.Opacity >= 1) {
 						doVisit = false
 					}
 				}
@@ -623,7 +747,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		if scrollSX == 0 && scrollSY == 0 {
 			info.canvas.Save()
 			pb := clipBox.PaddingBoxRect()
-			if os.Getenv("WB_PAINT_DEBUG") != "" {
+			if paintDebugEnabled() {
 				log.Printf("[paint/walk] %s clip=%.0f,%.0f %.0fx%.0f scroll=(%.0f,%.0f)",
 					objName(root), pb.X, pb.Y, pb.Width, pb.Height, scrollSX, scrollSY)
 			}
@@ -1184,6 +1308,9 @@ func parseCSSLength(s string) (float64, bool) {
 // during the background phase, mirroring the Background + Border phase of
 // RenderBox::paint().
 func paintObjectBackground(o RenderObject, info *PaintInfo) {
+	if paintStatsEnabled() {
+		paintStatsVisits++
+	}
 	box := asRenderBox(o)
 	if box == nil || !box.IsVisible() {
 		return

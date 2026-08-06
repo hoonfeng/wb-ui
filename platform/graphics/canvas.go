@@ -12,8 +12,10 @@
 package graphics
 
 import (
+	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/hoonfeng/goskia/skia"
 	"wb-ui/wtf"
@@ -210,7 +212,9 @@ func (c *Canvas) StrokeThickness() float64     { return c.state.strokeThickness 
 // and clips are restored together.
 func (c *Canvas) Save() {
 	c.states = append(c.states, c.state)
+	t0 := time.Now()
 	c.canvas.Save()
+	CgoTimingSave += time.Since(t0)
 }
 
 // SaveCount returns the current save-stack depth (delegates to Skia).
@@ -228,10 +232,13 @@ func (c *Canvas) RestoreToCount(count int) {
 	c.invalidatePixels()
 }
 
-// SaveLayerWithOpacity pushes an offscreen layer that is composited with the
-// given opacity (0.0�?.0) when Restore is called. This mirrors
-// GraphicsContext::beginTransparencyLayer() and is used for CSS opacity.
-func (c *Canvas) SaveLayerWithOpacity(opacity float64) {
+// SaveLayerWithOpacityBounds pushes an offscreen layer limited to the given
+// device-space rect, composited with the given opacity on Restore. Limiting
+// the layer bounds is critical on raster: SaveLayer(nil) allocates the WHOLE
+// surface (1280×800) and the Restore composite costs ~0.7ms; a bounds-limited
+// layer only composites the element's region (~µs).
+func (c *Canvas) SaveLayerWithOpacityBounds(opacity float64, r Rect) {
+	CanvasSaveLayerCount++
 	c.states = append(c.states, c.state)
 	paint := skia.NewPaint()
 	paint.SetAntialias(true)
@@ -240,8 +247,32 @@ func (c *Canvas) SaveLayerWithOpacity(opacity float64) {
 		alpha = 255
 	}
 	paint.SetColor(skia.RGBA(0xFF, 0xFF, 0xFF, alpha))
-	c.canvas.SaveLayer(nil, paint)
+	sr := skia.RectXYWH(float32(r.X), float32(r.Y), float32(r.Width), float32(r.Height))
+	t0 := time.Now()
+	c.canvas.SaveLayer(&sr, paint)
+	CgoTimingSaveLayer += time.Since(t0)
 }
+
+// SaveLayerWithOpacity pushes an offscreen layer that is composited with the
+// given opacity (0.0�?.0) when Restore is called. This mirrors
+// GraphicsContext::beginTransparencyLayer() and is used for CSS opacity.
+func (c *Canvas) SaveLayerWithOpacity(opacity float64) {
+	CanvasSaveLayerCount++
+	c.states = append(c.states, c.state)
+	paint := skia.NewPaint()
+	paint.SetAntialias(true)
+	alpha := uint8(opacity * 255)
+	if alpha > 255 {
+		alpha = 255
+	}
+	paint.SetColor(skia.RGBA(0xFF, 0xFF, 0xFF, alpha))
+	t0 := time.Now()
+	c.canvas.SaveLayer(nil, paint)
+	CgoTimingSaveLayer += time.Since(t0)
+}
+
+// CanvasSaveLayerCount counts SaveLayerWithOpacity calls (debug: WB_PAINT_STATS).
+var CanvasSaveLayerCount int
 
 // SaveLayerWithFilter pushes an offscreen layer with a Skia ImageFilter.
 // The filter is applied when Restore is called. This is the primary mechanism
@@ -275,10 +306,37 @@ func (c *Canvas) Restore() {
 	if len(c.states) == 0 {
 		return
 	}
+	CanvasRestoreCount++
 	c.state = c.states[len(c.states)-1]
 	c.states = c.states[:len(c.states)-1]
+	t0 := time.Now()
 	c.canvas.Restore()
+	CgoTimingRestore += time.Since(t0)
 	c.invalidatePixels()
+}
+
+// CanvasRestoreCount counts Restore calls (debug: WB_PAINT_STATS prints it).
+var CanvasRestoreCount int
+
+// CgoTiming accumulates wall time inside the cgo canvas state-mutation calls
+// (Save/Restore/Clip/Translate), sampled with time.Now per call. Debug-only:
+// read via CanvasTimingSummary().
+var (
+	CgoTimingRestore time.Duration
+	CgoTimingSave    time.Duration
+	CgoTimingClip    time.Duration
+	CgoTimingTrans   time.Duration
+	CgoTimingDraw    time.Duration
+	CgoTimingSaveLayer time.Duration
+)
+
+// CanvasTimingSummary returns the accumulated cgo timing as a string.
+func CanvasTimingSummary() string {
+	return fmt.Sprintf("restore=%v save=%v clip=%v trans=%v draw=%v clipRR=%d saveLayer=%d/%v",
+		CgoTimingRestore.Round(time.Microsecond), CgoTimingSave.Round(time.Microsecond),
+		CgoTimingClip.Round(time.Microsecond), CgoTimingTrans.Round(time.Microsecond),
+		CgoTimingDraw.Round(time.Microsecond), CanvasClipRRCount, CanvasSaveLayerCount,
+		CgoTimingSaveLayer.Round(time.Microsecond))
 }
 
 // Translate composes a translation into the current transform, mirroring
@@ -286,7 +344,9 @@ func (c *Canvas) Restore() {
 func (c *Canvas) Translate(dx, dy float64) {
 	c.state.translateX += dx * c.state.scaleX
 	c.state.translateY += dy * c.state.scaleY
+	t0 := time.Now()
 	c.canvas.Translate(float32(dx), float32(dy))
+	CgoTimingTrans += time.Since(t0)
 	c.invalidatePixels()
 }
 
@@ -363,6 +423,14 @@ func (c *Canvas) transform(wx, wy float64) (x, y float64) {
 		wy*c.state.scaleY + c.state.translateY
 }
 
+// DeviceRect maps a world-space rect to device space (current transform).
+func (c *Canvas) DeviceRect(r Rect) Rect {
+	x0, y0 := c.transform(r.X, r.Y)
+	x1, y1 := c.transform(r.X+r.Width, r.Y+r.Height)
+	return normalizeRect(Rect{X: math.Min(x0, x1), Y: math.Min(y0, y1),
+		Width: math.Abs(x1 - x0), Height: math.Abs(y1 - y0)})
+}
+
 // Clip intersects the current clip with the given world-space rectangle, mirroring
 // GraphicsContext::clip() for the rectangular case. The rectangle is transformed to
 // device space and then intersected with any existing clip.
@@ -420,6 +488,7 @@ func (c *Canvas) ClipPath(path *skia.Path) {
 // raster and GPU paths — the corner geometry and anti-aliasing match Skia's
 // own DrawRoundRect/FillRoundRect exactly.
 func (c *Canvas) ClipRoundRect(x, y, w, h, radius float64) {
+	CanvasClipRRCount++
 	r := float64(math.Min(radius, math.Min(w/2, h/2)))
 	if r <= 0 {
 		c.Clip(Rect{X: x, Y: y, Width: w, Height: h})
@@ -429,10 +498,15 @@ func (c *Canvas) ClipRoundRect(x, y, w, h, radius float64) {
 	defer rr.Release()
 	rr.SetRectXY(skia.RectXYWH(float32(x), float32(y), float32(w), float32(h)),
 		float32(r), float32(r))
+	t0 := time.Now()
 	c.canvas.ClipRRect(rr, skia.ClipOpIntersect, true)
+	CgoTimingClip += time.Since(t0)
 	c.state.hasClip = true
 	c.invalidatePixels()
 }
+
+// CanvasClipRRCount counts ClipRoundRect calls (debug: WB_PAINT_STATS).
+var CanvasClipRRCount int
 
 // FillRect fills the given world-space rectangle with the supplied color, mirroring
 // GraphicsContext::fillRect(FloatRect, Color). The rectangle is drawn through the
@@ -804,12 +878,16 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	// Always use fallback path when text contains non-ASCII characters,
 	// since CJK fallback fonts often lack geometric/dingbat symbols.
 	if containsNonASCII(text) {
+		t0 := time.Now()
 		c.drawTextWithFallback(x, y, text, font, skFont, col)
+		CgoTimingDraw += time.Since(t0)
 		c.invalidatePixels()
 		return
 	}
 
+	t0 := time.Now()
 	c.canvas.DrawText(text, float32(x), float32(y), skFont, c.fillPaint)
+	CgoTimingDraw += time.Since(t0)
 	c.invalidatePixels()
 }
 
