@@ -13,7 +13,9 @@ package graphics
 
 import (
 	"fmt"
+	"log"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -369,8 +371,16 @@ func (c *Canvas) ResetFixedTransform() {
 	sx, sy := c.state.scaleX, c.state.scaleY
 	c.state.translateX, c.state.translateY = 0, 0
 	c.canvas.ResetMatrix()
+	if os.Getenv("WB_CTM_DEBUG") != "" {
+		m := c.canvas.GetMatrix()
+		log.Printf("[ctm] ResetFixedTransform state=(%.3f,%.3f) afterReset sx=%.3f", sx, sy, m.ScaleX)
+	}
 	if sx != 1 || sy != 1 {
 		c.canvas.Scale(float32(sx), float32(sy))
+	}
+	if os.Getenv("WB_CTM_DEBUG") != "" {
+		m := c.canvas.GetMatrix()
+		log.Printf("[ctm] ResetFixedTransform done sx=%.3f", m.ScaleX)
 	}
 	c.invalidatePixels()
 }
@@ -413,6 +423,8 @@ func (c *Canvas) GetMatrix() skia.Matrix {
 // ResetMatrix sets the current transform to the identity matrix,
 // mirroring GraphicsContext::resetTransform().
 func (c *Canvas) ResetMatrix() {
+	c.state.scaleX, c.state.scaleY = 1, 1
+	c.state.translateX, c.state.translateY = 0, 0
 	c.canvas.ResetMatrix()
 	c.invalidatePixels()
 }

@@ -80,6 +80,8 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 				graphics.CanvasTimingSummary())
 		}()
 	}
+	// Reset the per-frame component paint trace (WB_COMP_LOG drains it via host).
+	ResetComponentPaints()
 	// Use the view's dirty rect if set; otherwise fall back to the caller's rect.
 	paintRect := rect
 	if view.IsDirty() {
@@ -114,10 +116,18 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 
 	if view.RootLayer() != nil {
+		if os.Getenv("WB_CTM_DEBUG") != "" {
+			m0 := canvas.GetMatrix()
+			log.Printf("[ctm] Paint entry scaleX=%.3f tx=%.1f ty=%.1f", m0.ScaleX, m0.TransX, m0.TransY)
+		}
 		tTree := time.Now()
 		paintLayerTree(view.RootLayer(), info)
 		if paintStatsEnabled() {
 			log.Printf("[paint-timing] tree=%v", time.Since(tTree).Round(time.Microsecond))
+		}
+		if os.Getenv("WB_CTM_DEBUG") != "" {
+			m1 := canvas.GetMatrix()
+			log.Printf("[ctm] after-layerTree scaleX=%.3f tx=%.1f ty=%.1f depth=%d", m1.ScaleX, m1.TransX, m1.TransY, canvas.SaveCount())
 		}
 	} else {
 		paintSubtreeByPhase(RenderObject(view), info, nil)
@@ -736,24 +746,27 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	needsClipRestore := false
 	scrollbarPaint := false
 	if clipBox != nil && info != nil && info.canvas != nil {
-		// ★ Scrolled containers (scroll≠0) skip the clip here. The viewport
-		// clip is applied by paintLayerTree via CalculateRects BEFORE the
-		// scroll translate, so it stays fixed in screen space while the
-		// content moves inside it. Clipping here would run under the
-		// translate (content coordinates), shifting the viewport by -scroll
-		// and culling the scrolled-in content. scrollbarPaint stays true so
-		// the scrollbars below still paint (they are screen-anchored via the
-		// scrollTranslate compensation further down).
-		if scrollSX == 0 && scrollSY == 0 {
-			info.canvas.Save()
-			pb := clipBox.PaddingBoxRect()
-			if paintDebugEnabled() {
-				log.Printf("[paint/walk] %s clip=%.0f,%.0f %.0fx%.0f scroll=(%.0f,%.0f)",
-					objName(root), pb.X, pb.Y, pb.Width, pb.Height, scrollSX, scrollSY)
-			}
-			info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
-			needsClipRestore = true
+		// ★ Scrolled containers (scroll≠0) previously skipped the clip here,
+		// relying solely on paintLayerTree's layer clip (CalculateRects).
+		// That single point of failure let overflow content (e.g. a CM6
+		// .cm-content 508px wide inside a 98px .cm-scroller) paint past the
+		// container when anything diverged (dirty-rect early-out, layer
+		// chain gap) — matching the browser where an overflow container
+		// ALWAYS clips its subtree. Now clip unconditionally: when scroll≠0
+		// this walk runs under paintLayerContents' scroll translate (content
+		// coordinates) while PaddingBoxRect() is absolute, so shift the clip
+		// rect back by this box's own scroll — after the transform it lands
+		// on the screen-fixed viewport, same as the layer clip. scrollbarPaint
+		// stays true so the scrollbars below still paint (they are
+		// screen-anchored via the scrollTranslate compensation further down).
+		info.canvas.Save()
+		pb := clipBox.PaddingBoxRect()
+		if paintDebugEnabled() {
+			log.Printf("[paint/walk] %s clip=%.0f,%.0f %.0fx%.0f scroll=(%.0f,%.0f)",
+				objName(root), pb.X, pb.Y, pb.Width, pb.Height, scrollSX, scrollSY)
 		}
+		info.canvas.Clip(graphics.Rect{X: pb.X + scrollSX, Y: pb.Y + scrollSY, Width: pb.Width, Height: pb.Height})
+		needsClipRestore = true
 		scrollbarPaint = true
 	}
 

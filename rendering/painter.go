@@ -304,6 +304,9 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 			} else {
 				info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bgc)
 			}
+			if el, ok := box.Node().(*dom.Element); ok {
+				RecordComponentPaint(el, rect.X, rect.Y, rect.Width, rect.Height, bgc, graphics.Color{}, false)
+			}
 		}
 		// Layers bottom-up (last layer first, first layer painted last = on top).
 		for i := len(bgLayers) - 1; i >= 0; i-- {
@@ -334,6 +337,9 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
 	} else {
 		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bg)
+	}
+	if el, ok := box.Node().(*dom.Element); ok {
+		RecordComponentPaint(el, rect.X, rect.Y, rect.Width, rect.Height, bg, graphics.Color{}, false)
 	}
 	// Inset shadows paint ABOVE the background (below the border): inset 6px
 	// left shadow casts onto the element's own background.

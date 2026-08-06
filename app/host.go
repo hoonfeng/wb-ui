@@ -120,6 +120,10 @@ type Host struct {
 	// snapFile/snapMu guard the _layout_snap.log writer (WB_SNAP)
 	snapFile *os.File
 	snapMu   sync.Mutex
+	// paintLogFile is the WB_PAINT_LOG=1 paint trace writer (_paint_trace.log).
+	// Records dirty rect / view dirty state / canvas pixel coverage per frame
+	// so "打开文件前 vs 打开文件后" paint behavior can be compared exactly.
+	paintLogFile *os.File
 	// lastLoggedScrollY dedupes per-frame [scroll] logs (only logs on change).
 	lastLoggedScrollY int
 	// lastIMEX/lastIMEY dedupe IME composition-position updates.
@@ -1117,9 +1121,23 @@ func (h *Host) Run() {
 				}
 				frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
 
-				gpuCanvas.Save()
+				// ★ 每帧重置 transform：surface.Canvas() 返回持久 skia canvas
+				// （surface 跨帧持有），上一帧的 Scale/Translate/scroll 会
+				// 残留累积（指数放大/错位）。ResetMatrix 清为单位矩阵并
+				// 同步 c.state。★ Save 必须在 Scale 之后：fixed 层
+				// （paintLayerTree 的 fixed 分支）用
+				// RestoreToCount(initialSaveCount) 丢弃祖先 clip，
+				// initialSaveCount = Paint 入口 SaveCount()。若 Save 在
+				// Scale 之前，Saved 状态是单位矩阵（scale=1.0）——
+				// RestoreToCount 弹回后 scale 变 1.0，fixed 层之后的全部
+				// 内容按 1:1 画到物理 canvas → 界面等比缩小 80% + 右下空白
+				// （"打开文件后绘制区域变小"：编辑器引入 fixed/层路径
+				// 触发该分支）。Save 在 Scale 之后 → Saved 状态含 scale
+				// 1.25，RestoreToCount 恢复正确缩放。
+				gpuCanvas.ResetMatrix()
 				csX, csY := h.win.ContentScale()
 				gpuCanvas.Scale(csX, csY)
+				gpuCanvas.Save()
 				gpuCanvas.Translate(0, -float64(frameView.ScrollY()))
 				dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
 				if os.Getenv("WB_RESIZE_DEBUG") != "" && (gpuCanvas.Width() != h.lastDbgCW || gpuCanvas.Height() != h.lastDbgCH) {
@@ -1131,33 +1149,131 @@ func (h *Host) Run() {
 						dirtyRect.X, dirtyRect.Y, dirtyRect.Width, dirtyRect.Height,
 						csX)
 				}
+				// ★ WB_PAINT_LOG=1：Paint 前记录 view 的 dirty 状态——
+				//   Paint 内部若 view.IsDirty() 会用 GetDirtyRect() 覆盖
+				//   paintRect（只画局部），而 Clear 是全屏 → 局部之外空白
+				//   = "内容绘制区域变小"。必须在 Paint 前抓（Paint 后
+				//   ClearDirty 就丢了）。
+				preDirtyStr := ""
+				if os.Getenv("WB_PAINT_LOG") != "" && h.paintLogFile == nil {
+					f, err := os.OpenFile("_paint_trace.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+					if err == nil {
+						h.paintLogFile = f
+					}
+				}
+				csXv, _ := h.win.ContentScale()
+				if h.paintLogFile != nil {
+					if rv != nil {
+						preDirtyStr = fmt.Sprintf("preDirty=%v", rv.IsDirty())
+						if r := rv.GetDirtyRect(); r.Width > 0 || r.Height > 0 {
+							preDirtyStr += fmt.Sprintf(" preDR=(%.0f,%.0f %.0fx%.0f)", r.X, r.Y, r.Width, r.Height)
+						} else {
+							preDirtyStr += " preDR=none"
+						}
+					} else {
+						preDirtyStr = "rv=nil"
+					}
+				}
+				if os.Getenv("WB_CTM_DEBUG") != "" {
+					mPre := gpuCanvas.GetMatrix()
+					log.Printf("[ctm] PRE-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f", mPre.ScaleX, mPre.ScaleY, mPre.TransX, mPre.TransY)
+				}
 				rendering.Paint(rv, gpuCanvas, dirtyRect)
 				gpuCanvas.Restore()
+				if os.Getenv("WB_CTM_DEBUG") != "" {
+					mPost := gpuCanvas.GetMatrix()
+					log.Printf("[ctm] POST-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f", mPost.ScaleX, mPost.ScaleY, mPost.TransX, mPost.TransY)
+				}
 
-				// ★ WB_PAINT_DUMP=1：Paint 后采样 canvas 像素，判断内容是否真的画出来
-				//   （"布局正常但画面空"排查：dirtyRect / canvas transform / GPU 回读）。
-				if os.Getenv("WB_PAINT_DUMP") != "" && !h.paintDumped {
-					h.paintDumped = true
-					if px := gpuCanvas.Pixels(); len(px) >= 4 {
-						nonBg := 0
-						sampled := 0
-						for i := 0; i+3 < len(px); i += 1024 {
-							sampled++
-							// 背景是 Clear(bgColor) 后的统一色；alpha>0 且非纯黑/纯白背景视为内容
-							if px[i+3] > 0 {
-								nonBg++
+				if h.paintLogFile != nil {
+					// 降采样统计非背景像素覆盖率 + 包围盒 + 亮色(编辑器)包围盒（每 8px 步长）
+					cov, bb, lbb := "", "", ""
+					rootInfo := ""
+					if rv != nil {
+						if lb := rv.LayoutBox(); lb != nil {
+							if st := rv.LayoutState(); st != nil {
+								g := st.GeometryForBox(lb)
+								rootInfo = fmt.Sprintf(" root=(%.0f,%.0f %.0fx%.0f)", g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight())
 							}
 						}
-						log.Printf("[paint-dump] canvas=%dx%d px=%d nonZeroAlpha=%d/%d (%.1f%%)",
-							gpuCanvas.Width(), gpuCanvas.Height(), len(px)/4, nonBg, sampled, 100*float64(nonBg)/float64(sampled))
-						// 保存 PNG 供人工检查
-						if len(px) == gpuCanvas.Width()*gpuCanvas.Height()*4 {
-							pngBytes := encodePNG(gpuCanvas.Width(), gpuCanvas.Height(), px)
-							if err := os.WriteFile("_desktop_paint.png", pngBytes, 0o644); err == nil {
-								log.Printf("[paint-dump] saved _desktop_paint.png")
+						sx, sy := rv.ScrollOffset()
+						rootInfo += fmt.Sprintf(" vScroll=(%.0f,%.0f) boxScroll=%v", sx, sy, rv.HasBoxScrollOffset())
+					}
+					if px := gpuCanvas.Pixels(); len(px) >= 4 {
+						cw, ch := gpuCanvas.Width(), gpuCanvas.Height()
+						if cw > 0 && ch > 0 {
+							nonBg, tot := 0, 0
+							minX, minY, maxX, maxY := cw, ch, -1, -1
+							lminX, lminY, lmaxX, lmaxY := cw, ch, -1, -1
+							lNonBg := 0
+							// 背景是 Clear(bgColor) 后的统一色，取左上角像素为参考
+							refR, refG, refB, refA := px[0], px[1], px[2], px[3]
+							for y := 0; y < ch; y += 8 {
+								for x := 0; x < cw; x += 8 {
+									idx := (y*cw + x) * 4
+									tot++
+									if idx+3 < len(px) {
+										if px[idx+3] != refA || px[idx] != refR || px[idx+1] != refG || px[idx+2] != refB {
+											nonBg++
+											if x < minX {
+												minX = x
+											}
+											if x > maxX {
+												maxX = x
+											}
+											if y < minY {
+												minY = y
+											}
+											if y > maxY {
+												maxY = y
+											}
+										}
+										// 亮色像素（编辑器浅色背景/文字）：R+G+B 高 → 编辑器实际绘制区
+										rp, gp, bp := int(px[idx]), int(px[idx+1]), int(px[idx+2])
+										if rp > 180 && gp > 180 && bp > 180 {
+											lNonBg++
+											if x < lminX {
+												lminX = x
+											}
+											if x > lmaxX {
+												lmaxX = x
+											}
+											if y < lminY {
+												lminY = y
+											}
+											if y > lmaxY {
+												lmaxY = y
+											}
+										}
+									}
+								}
+							}
+							cov = fmt.Sprintf("cov=%d%%", 100*nonBg/tot)
+							if maxX >= 0 {
+								bb = fmt.Sprintf("bb=(%d,%d %dx%d)", minX, minY, maxX-minX+1, maxY-minY+1)
+							} else {
+								bb = "bb=none"
+							}
+							if lmaxX >= 0 {
+								lbb = fmt.Sprintf("lightBB=(%d,%d %dx%d) lcov=%d%%", lminX, lminY, lmaxX-lminX+1, lmaxY-lminY+1, 100*lNonBg/tot)
+							} else {
+								lbb = "lightBB=none"
 							}
 						}
 					}
+					line := fmt.Sprintf("[%s] css=%dx%d fb=%dx%d canvas=%dx%d scale=%.2f dirty=(%.0f,%.0f %.0fx%.0f) %s %s %s %s %s%s px{side=%s rp=%s st=%s}\n",
+						time.Now().Format("15:04:05.000"), h.win.Width(), h.win.Height(),
+						h.win.FramebufferWidth(), h.win.FramebufferHeight(),
+						gpuCanvas.Width(), gpuCanvas.Height(),
+						csXv,
+						dirtyRect.X, dirtyRect.Y, dirtyRect.Width, dirtyRect.Height,
+						preDirtyStr, cov, bb, lbb, rootInfo, "",
+						sampleCanvasPx2(gpuCanvas, 60, 100),   // sidebar (48,30) 物理
+						sampleCanvasPx2(gpuCanvas, 536, 100),  // right-panel (429,30) 物理
+						sampleCanvasPx2(gpuCanvas, 750, 987)) // status-bar 物理					h.snapMu.Lock()
+					_, _ = h.paintLogFile.WriteString(line)
+					_ = h.paintLogFile.Sync()
+					h.snapMu.Unlock()
 				}
 				if ownsCanvas {
 					gpuCanvas.Release()
@@ -1182,9 +1298,42 @@ func (h *Host) Run() {
 	}
 }
 
+// sampleCanvasPx2 returns the hex color of the canvas pixel at physical (x,y).
+// Used by the WB_PAINT_LOG trace to verify whether key regions were painted.
+func sampleCanvasPx2(c *graphics.Canvas, x, y int) string {
+	if c == nil {
+		return "?"
+	}
+	px := c.Pixels()
+	if len(px) < 4 {
+		return "?"
+	}
+	cw, ch := c.Width(), c.Height()
+	if cw <= 0 || ch <= 0 {
+		return "?"
+	}
+	ix, iy := x, y
+	if ix < 0 {
+		ix = 0
+	}
+	if iy < 0 {
+		iy = 0
+	}
+	if ix >= cw {
+		ix = cw - 1
+	}
+	if iy >= ch {
+		iy = ch - 1
+	}
+	idx := (iy*cw + ix) * 4
+	if idx+3 >= len(px) {
+		return "?"
+	}
+	return fmt.Sprintf("#%02x%02x%02x", px[idx], px[idx+1], px[idx+2])
+}
+
 // snapLayoutJS collects key layout geometry + CM6 state from the page (WB_SNAP).
-const snapLayoutJS = `(function(){
-  var o = {};
+const snapLayoutJS = `(function(){  var o = {};
   o.vw = {w: window.innerWidth, h: window.innerHeight};
   o.bodyScrollH = document.body ? document.body.scrollHeight : -1;
   o.deScrollTop = document.documentElement ? document.documentElement.scrollTop : -1;
@@ -1245,10 +1394,48 @@ func (h *Host) dumpLayoutSnap() {
 						}
 					}
 				}
+				// ★ overflow 诊断：找 cm-scroller / cm-content 的引擎级
+				//   ComputedStyle.OverflowX/Y + 几何——验证 overflow:auto
+				//   是否被解析（裁剪缺失 → 内容溢出画到聊天区）。
+				var walkOv func(ro rendering.RenderObject, depth int)
+				walkOv = func(ro rendering.RenderObject, depth int) {
+					if ro == nil || depth > 30 {
+						return
+					}
+					if n := ro.Node(); n != nil {
+						if el, ok := n.(*dom.Element); ok {
+							cls := el.GetAttribute("class")
+							if cls == "cm-scroller" || cls == "cm-content" || cls == "cm-line" || cls == "cm-editor" {
+								cs := ro.Style()
+								ovX, ovY := -1, -1
+								flexG, flexS := -1.0, -1.0
+								wd := -1.0
+								if cs != nil {
+									ovX = int(cs.OverflowX)
+									ovY = int(cs.OverflowY)
+									flexG, flexS = cs.FlexGrow, cs.FlexShrink
+									wd = cs.Width.Value
+								}
+								var gx, gy, gw, gh float64
+								if rb := ro.LayoutBox(); rb != nil && rv.LayoutState() != nil {
+									gg := rv.LayoutState().GeometryForBox(rb)
+									gx, gy, gw, gh = gg.Left(), gg.Top(), gg.BorderBoxWidth(), gg.BorderBoxHeight()
+								}
+								extra += fmt.Sprintf(" ov[%s]=(%.0f,%.0f %.0fx%.0f) ovX=%d ovY=%d flexG=%.1f flexS=%.1f w=%.1f |",
+									cls, gx, gy, gw, gh, ovX, ovY, flexG, flexS, wd)
+							}
+						}
+					}
+					for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+						walkOv(c, depth+1)
+					}
+				}
+				walkOv(rendering.RenderObject(rv), 0)
 			}
 		}
 	}
-	line := fmt.Sprintf("[%s] %s%s", time.Now().Format("15:04:05.000"), geo, extra)
+	line := fmt.Sprintf("[%s] %s%s\n  [paint] %s", time.Now().Format("15:04:05.000"), geo, extra,
+		rendering.SnapshotComponentPaints())
 	h.snapMu.Lock()
 	defer h.snapMu.Unlock()
 	if h.snapFile == nil {
@@ -1400,6 +1587,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())
 			h.needsResizeDump = true
+			log.Printf("[resize-ev] fb=%dx%d css=%dx%d scale=(%.2f,%.2f) viewport=%dx%d",
+				h.win.FramebufferWidth(), h.win.FramebufferHeight(),
+				h.win.Width(), h.win.Height(),
+				func() float64 { a, _ := h.win.ContentScale(); return a }(), 0.0,
+				func() int {
+					if fv := h.wv.Page().MainFrame().View(); fv != nil {
+						return fv.Width()
+					}
+					return -1
+				}(), 0)
 			// Also dump on the first frame after resize: compare scroll and content sizes
 			if rv != nil && rv.LayoutState() != nil {
 				lb := rv.LayoutBox()

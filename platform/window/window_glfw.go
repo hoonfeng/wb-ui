@@ -134,6 +134,14 @@ func NewWindow(width, height int, title string) (*Window, error) {
 	w.fbWidth, w.fbHeight = win.GetFramebufferSize()
 	w.contentScaleX = float64(csX)
 	w.contentScaleY = float64(csY)
+	// ★ DPI 诊断：glfw 创建的窗口物理尺寸 vs framebuffer vs CSS。
+	//   若窗口物理 ≈ CSS（1294x838）而 framebuffer=1600x1000，说明
+	//   CreateWindow 的 DPI 处理异常 → canvas 内容画到过大的 framebuffer
+	//   → 窗口只显示左上 80% → "内容绘制区域变小 + 右下空白"。
+	if winW, winH := win.GetSize(); winW > 0 && winH > 0 {
+		fmt.Printf("[window-dpi] css=%dx%d glfwSize=%dx%d fb=%dx%d scale=(%.2f,%.2f)\n",
+			width, height, winW, winH, w.fbWidth, w.fbHeight, w.contentScaleX, w.contentScaleY)
+	}
 
 	// Assemble Skia GL interface from the current GL context.
 	glIface, err := skia.NewGLInterface(func(name string) unsafe.Pointer {
