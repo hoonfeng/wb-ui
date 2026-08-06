@@ -1401,6 +1401,9 @@ const snapLayoutJS = `(function(){  var o = {};
   rect('.status-bar', 'sb');
   rect('.cm-scroller', 'sc');
   rect('.cm-content', 'co');
+  // ★ 聊天区滚动诊断：chat-messages 的 scrollTop/scrollHeight/clientHeight
+  var cm2 = document.querySelector('.chat-messages');
+  if (cm2) { o.cmScrollTop = cm2.scrollTop; o.cmScrollH = cm2.scrollHeight; o.cmClientH = cm2.clientHeight; o.cmChildCount = cm2.children.length; }
   var co = document.querySelector('.cm-content');
   if (co) { o.coChildren = co.children.length; o.coTextLen = (co.textContent || '').length; o.coScrollW = co.scrollWidth; }
   o.lineCount = document.querySelectorAll('.cm-line').length;
