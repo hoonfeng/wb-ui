@@ -49,6 +49,21 @@ type pendingSeg struct {
 	lineIdx int
 }
 
+// insideFlexItem reports whether box is a flex item or a descendant of one.
+// The flex algorithm decides the main size of the whole flex item subtree;
+// auto-width expansion must not widen inner inline boxes (e.g. the anonymous
+// wrapper holding a blockified span's text) back to their raw text extent —
+// otherwise a shrunken flex item's text never line-breaks (CJK "完成摘要"
+// stays one 41px line in a 27px title instead of wrapping 2+2 like Edge).
+func insideFlexItem(box *ElementBox) bool {
+	for b := box; b != nil; b = b.Parent() {
+		if isFlexItem(b) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	cs := box.Style()
 	if cs == nil {
@@ -101,7 +116,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// clipping (overflow:hidden, text-overflow:ellipsis) works correctly.
 	{
 		hasExplicitWidth := cs != nil && cs.Width.Unit != "" && cs.Width.Unit != "auto"
-		if !hasExplicitWidth && !isFlexItem(box) {
+		if !hasExplicitWidth && !insideFlexItem(box) {
 			// Auto-width expansion: only expand for auto-width inline-level
 			// boxes (e.g. span, inline-block). Block-level children get their
 			// width from the parent BFC and must not be expanded, otherwise
@@ -354,6 +369,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// margin-top lowers the child inside the line box.
 			cldG.SetTopLeft(currentLine.y+centeringOffset+margin.Top, currentLine.contentX+currentLine.widthUsed+margin.Left)
 
+			// ★ 换行约束：无显式宽度的 inline 子元素（含 flex item 文本的
+			//    匿名 inline 包装盒）必须以「父级行宽」而非自身 max-content
+			//    作为换行 availWidth——否则 flex 压缩的 span 内 CJK 文本不折行
+			//    （"完成摘要"在 27px 容器内保持 41px 单行溢出，Edge 中 2+2
+			//    折行）。child 的真实 box 宽度在其 Layout 之后由
+			//    computeInlineContentWidth 恢复为内容宽度。
+			if cldG.ContentWidth() <= 0 && !cld.IsReplaced() {
+				csc := cld.Style()
+				hasExplicit := csc != nil && csc.Width.Unit != "" && csc.Width.Unit != "auto"
+				if !hasExplicit {
+					cldG.SetContentWidth(contentWidth)
+				}
+			}
+
 			// Set CSS width if definite BEFORE Layout so box-sizing:border-box
 			// correctly limits the content width used by the child's Layout.
 			if cldG.ContentWidth() <= 0 {
@@ -538,7 +567,19 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 			// Compute inline child's content width from text segments.
 			// Without this, cldW=0 and subsequent text on same line overlaps.
-			if cldG.ContentWidth() <= 0 {
+			// For non-explicit-width inline children this re-computation is
+			// unconditional: the wrap-constraint above may have set a
+			// full-width constraint value, which must shrink back to the
+			// real text extent for line advancement and hit-testing.
+			hasExplicitChildWidth := false
+			if csc := cld.Style(); csc != nil && csc.Width.Unit != "" && csc.Width.Unit != "auto" {
+				hasExplicitChildWidth = true
+			}
+			if !hasExplicitChildWidth {
+				if cw := computeInlineContentWidth(cld, state); cw > 0 {
+					cldG.SetContentWidth(cw)
+				}
+			} else if cldG.ContentWidth() <= 0 {
 				if cw := computeInlineContentWidth(cld, state); cw > 0 {
 					cldG.SetContentWidth(cw)
 				}

@@ -346,21 +346,53 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 			}
 		}
 	}
+	// ★ 两阶段应用（cascade 顺序）：
+	//   阶段 1：先按级联顺序应用自定义属性（--xxx），再 resolveCustomProperties
+	//           展开嵌套 var()，使 resolveVarInTokens 引用到最终级联值。
+	//   阶段 2：普通属性按级联顺序逐个应用；应用前先把值里的 var() 展开。
+	//           这保证了声明顺序被保留（如 `border` 后跟 `border-left`）。
+	//           旧的 resolveVarInProperties 遍历 Go map（迭代顺序随机）逐个
+	//           re-apply 含 var() 的属性：`border` 可能在 `border-left`
+	//           之后处理，把 `border-left: 3px solid var(--accent)` 静默
+	//           覆盖回 `border` 的 1px 灰色——折叠摘要条左侧蓝色竖条
+	//           （border-left: 3px var(--accent)）随机消失的根因。
 	for _, cd := range collected {
-		applyDeclaration(cs, cd.decl)
+		if strings.HasPrefix(cd.decl.Name, "--") {
+			applyDeclaration(cs, cd.decl)
+		}
 	}
-
-	// Resolve custom properties (var()) now that the cascade is complete.
 	r.resolveCustomProperties(cs)
 
-	// Resolve var() references in all regular properties (Properties map).
-	// Custom properties have already been resolved above; now we substitute
-	// var(--xxx) in property values like "background: var(--bg-primary)"
-	// and re-apply them to typed fields where applicable.
+	for _, cd := range collected {
+		if strings.HasPrefix(cd.decl.Name, "--") {
+			continue
+		}
+		d := cd.decl
+		if declContainsVar(d.Value) {
+			d.Value = r.resolveVarInTokens(cs, d.Value, map[string]bool{})
+		}
+		applyDeclaration(cs, d)
+	}
+
+	// 兜底：展开剩余未展开的 var()（例如 applyScrollbarDeclarations 写入
+	// Properties 的 -webkit-scrollbar-* 属性）。此时普通属性（border 系列
+	// 等）已在阶段 2 按级联顺序展开为无 var() 的最终值，不再进入该循环，
+	// 因此不会重演「map 顺序随机重放 border/border-left」的顺序 bug。
 	r.resolveVarInProperties(cs)
 
 	r.cache[el] = cs
 	return cs
+}
+
+// declContainsVar reports whether the declaration value references a var()
+// function at any token position (case-insensitive).
+func declContainsVar(value []css.Token) bool {
+	for _, t := range value {
+		if t.Type == css.TokenFunction && strings.EqualFold(t.Value, "var") {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolvePseudoElement computes the ComputedStyle for a ::before/::after
@@ -404,10 +436,24 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 		return a.sourceOrder < b.sourceOrder
 	})
 	for _, cd := range collected {
-		applyDeclaration(cs, cd.decl)
+		if strings.HasPrefix(cd.decl.Name, "--") {
+			applyDeclaration(cs, cd.decl)
+		}
+	}
+	r.resolveCustomProperties(cs)
+
+	for _, cd := range collected {
+		if strings.HasPrefix(cd.decl.Name, "--") {
+			continue
+		}
+		d := cd.decl
+		if declContainsVar(d.Value) {
+			d.Value = r.resolveVarInTokens(cs, d.Value, map[string]bool{})
+		}
+		applyDeclaration(cs, d)
 	}
 
-	r.resolveCustomProperties(cs)
+	// 兜底：展开剩余未展开的 var()（如 scrollbar 属性），见 ResolveElement 注释。
 	r.resolveVarInProperties(cs)
 
 	content := cs.GetProperty("content")
