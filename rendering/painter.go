@@ -23,6 +23,7 @@ package rendering
 import (
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -316,18 +317,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	// Debug: log non-trivial background paints
-	if false && (bg.R != 0 || bg.G != 0 || bg.B != 0) {
-		elName := ""
-		if box.Node() != nil {
-			if el, ok := box.Node().(*dom.Element); ok {
-				elName = el.LocalName() + "." + el.ClassName()
-			}
-		}
-		log.Printf("[dbg/paintbg] %s rect=(%.0f,%.0f %.0fx%.0f) col=#%02x%02x%02x alpha=%d",
-			elName, rect.X, rect.Y, rect.Width, rect.Height, bg.R, bg.G, bg.B, bg.A)
-	}
-// Debug: log non-trivial background paints
-	if false && (bg.R != 0 || bg.G != 0 || bg.B != 0) {
+	if os.Getenv("WB_PAINT_DEBUG") != "" && (bg.R != 0 || bg.G != 0 || bg.B != 0) {
 		elName := ""
 		if box.Node() != nil {
 			if el, ok := box.Node().(*dom.Element); ok {
