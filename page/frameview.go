@@ -142,8 +142,18 @@ func (v *FrameView) ScrollY() int { return v.scrollY }
 
 // SetScrollOffset sets both scroll offsets, clamping to valid range.
 func (v *FrameView) SetScrollOffset(x, y int) {
-	v.scrollX = clamp(x, 0, v.MaxScrollX())
-	v.scrollY = clamp(y, 0, v.MaxScrollY())
+	nx := clamp(x, 0, v.MaxScrollX())
+	ny := clamp(y, 0, v.MaxScrollY())
+	if nx == v.scrollX && ny == v.scrollY {
+		return
+	}
+	v.scrollX, v.scrollY = nx, ny
+	// ★ 页面级滚动偏移变化必须标记渲染脏：按需渲染（空闲帧跳过
+	// Paint）下，若滚动不标记 dirty，内容平移后下一帧仍被判定为
+	// "无变化"而跳过重绘 → 页面滚动后画面不更新。
+	if v.frame != nil && v.frame.renderView != nil {
+		v.frame.renderView.MarkAllDirty()
+	}
 }
 
 // ScrollBy adds (dx, dy) to the current scroll offset.
@@ -235,6 +245,11 @@ func (v *FrameView) Layout() {
 	rv.Layout(nil)
 	v.updateContentSize(rv)
 	v.layoutPhase = LayoutPhaseNone
+	// ★ 布局（含 render-tree 重建）意味着树/几何变化，必须标记全量重绘。
+	// 按需渲染（空闲帧跳过 Paint）下，若布局后不 MarkAllDirty，hover /
+	// DOM 变更 / resize 引发的重建在下一帧被误判为"无变化"而跳过 →
+	// 画面永远停留在旧状态。
+	rv.MarkAllDirty()
 	Logf("Layout", "done contentSize=%dx%d", v.contentWidth, v.contentHeight)
 }
 

@@ -38,12 +38,14 @@ var KeyframesLookup func(name string) *css.KeyframesRule
 // based on the current AnimationTime and the element's animation properties.
 // It also drives CSS transitions (:hover / :checked style changes).
 // This must be called before Paint each frame. It returns true when a
-// transition is in flight (the host should re-layout to update geometry).
+// keyframe animation is still in its active phase or a transition is in
+// flight (the host should re-layout AND re-paint this frame; when false the
+// host may skip painting entirely — no animation state changed).
 func ApplyAnimations(rv *RenderView) bool {
 	if rv == nil {
 		return false
 	}
-	anyTrans := false
+	active := false
 	if KeyframesLookup != nil {
 		var walk func(o RenderObject)
 		walk = func(o RenderObject) {
@@ -52,7 +54,9 @@ func ApplyAnimations(rv *RenderView) bool {
 			}
 			st := o.Style()
 			if st != nil && st.AnimationName != "" {
-				applyAnimationToStyle(st, AnimationTime)
+				if applyAnimationToStyle(st, AnimationTime) {
+					active = true
+				}
 			}
 			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
 				walk(c)
@@ -60,16 +64,22 @@ func ApplyAnimations(rv *RenderView) bool {
 		}
 		walk(RenderObject(rv))
 	}
-	anyTrans = applyTransitions(rv, AnimationTime)
-	return anyTrans
+	if applyTransitions(rv, AnimationTime) {
+		active = true
+	}
+	return active
 }
 
 // applyAnimationToStyle computes all animated properties for a single element
-// and writes them directly into its ComputedStyle.
-func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
+// and writes them directly into its ComputedStyle. It returns true while the
+// animation is in its active phase (delay included): the caller uses this to
+// decide whether the frame needs a re-paint. Once the animation has ended the
+// final keyframe value (progress=1.0) was already applied in the last active
+// frame, so returning false lets the host stop re-painting.
+func applyAnimationToStyle(st *style.ComputedStyle, time float64) bool {
 	kf := KeyframesLookup(st.AnimationName)
 	if kf == nil || len(kf.Keyframes) == 0 {
-		return
+		return false
 	}
 	duration := st.AnimationDuration
 	if duration <= 0 {
@@ -87,7 +97,9 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
 			progress := 0.0
 			applyProgressToStyle(st, kf, progress)
 		}
-		return
+		// Delay phase counts as active: the animation is pending and must
+		// keep re-painting so its start is not missed.
+		return true
 	}
 
 	// Determine iteration count and total duration.
@@ -107,7 +119,9 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
 			progress := 1.0
 			applyProgressToStyle(st, kf, progress)
 		}
-		return
+		// Ended: the final keyframe value was already rendered in the last
+		// active frame (progress reached 1.0 there), so no re-paint needed.
+		return false
 	}
 
 	// Compute which iteration and local progress.
@@ -154,6 +168,8 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) {
 
 	// --- 2. Interpolate keyframe values -------------------------------------
 	applyProgressToStyle(st, kf, progress)
+	// Active phase: animation state changed this frame → needs re-paint.
+	return true
 }
 
 // applyProgressToStyle applies the interpolated keyframe values at the given

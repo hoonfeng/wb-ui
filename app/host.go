@@ -89,6 +89,10 @@ type Host struct {
 	// the animation clock (AnimationTime) each frame.
 	animStart time.Time
 
+	// firstFrame forces a render on the first loop iteration so the window
+	// never stays black before any dirty rect is established.
+	firstFrame bool
+
 	// needsResizeDump is set true on EventResize, cleared after DumpRTCallback fires
 	// once on the re-laid-out tree. Prevents dumping every frame.
 	needsResizeDump bool
@@ -835,6 +839,7 @@ func (h *Host) Run() {
 	}
 
 	h.animStart = time.Now()
+	h.firstFrame = true
 
 	// Get the FrameView for scroll management.
 	frameView := h.wv.Page().MainFrame().View()
@@ -844,7 +849,17 @@ func (h *Host) Run() {
 
 	h.frameView = frameView
 
+	// 性能统计（WB_PERF_DEBUG=1）：统计帧总数 / 渲染帧 / 空闲帧，窗口
+	// 关闭时输出，用于验证按需渲染（空闲帧跳过 Paint/Present）。
+	perfDebug := os.Getenv("WB_PERF_DEBUG") != ""
+	perfFrames, perfRenders := 0, 0
+	var perfStart time.Time
+	if perfDebug {
+		perfStart = time.Now()
+	}
+
 	for !h.win.ShouldClose() {
+		perfFrames++
 		// Fetch the GPU surface fresh each frame: resize callbacks release
 		// and recreate the surface, so the cached pointer would be dangling.
 		gpuSurf := h.win.GPUSurface()
@@ -853,24 +868,6 @@ func (h *Host) Run() {
 		// but catches resize events that the FramebufferSizeCallback may have
 		// missed (e.g. maximize/un-maximize on some GLFW/platform combos).
 		h.wv.Resize(h.win.Width(), h.win.Height())
-
-		// Software-rendered backends (X11/Cocoa) expose a CPU canvas; the GLFW
-		// GPU backend wraps its framebuffer surface. Unify both into gpuCanvas
-		// so the paint + Present path below works on every platform.
-		var gpuCanvas *graphics.Canvas
-		var ownsCanvas bool
-		if gpuSurf != nil {
-			gpuCanvas = graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
-			ownsCanvas = true
-		} else if sw := h.win.Canvas(); sw != nil {
-			gpuCanvas = sw
-			ownsCanvas = false
-		}
-		if gpuCanvas == nil {
-			h.processEvents(nil)
-			h.processEventLoop()
-			continue
-		}
 
 		h.wv.EnsureLayout()
 		rv := h.wv.RenderView()
@@ -923,6 +920,7 @@ func (h *Host) Run() {
 			DumpRTCallback(rv)
 			h.needsResizeDump = false
 		}
+		animActive := false
 		if rv != nil {
 			// Drive CSS animations: update the global animation clock and
 			// apply animated opacity to elements' ComputedStyle before paint.
@@ -930,96 +928,143 @@ func (h *Host) Run() {
 			// while one is in flight the frame needs a re-layout every frame
 			// so interpolated left/top geometry updates (switch thumb slide).
 			rendering.AnimationTime = time.Since(h.animStart).Seconds()
-			if rendering.ApplyAnimations(rv) {
+			animActive = rendering.ApplyAnimations(rv)
+			if animActive {
 				if mf := h.wv.MainFrame(); mf != nil {
 					if fr := mf.Frame(); fr != nil {
 						fr.SetNeedsLayout(true)
 					}
 				}
 			}
+		}
 
-			// Update text selection from stored coordinates against the
-			// current render tree (robust to rebuilds).
-			h.updateSelection(rv)
+		// Blink the caret at ~500ms intervals, mirroring WebKit's
+		// caret blink cycle. The caret is only visible when an IME
+		// focus target is set or a non-selection click positioned it.
+		// CaretVisibleControl follows the same cycle for form-control
+		// carets (which are drawn by paintFormControlCaret, not PaintCaret).
+		// A tick flags the frame that must re-render (blink state flipped).
+		caretTick := false
+		if rv != nil && time.Since(h.caretBlinkTime) > 500*time.Millisecond {
+			rendering.CaretVisible = !rendering.CaretVisible
+			rendering.CaretVisibleControl = rendering.CaretVisible
+			h.caretBlinkTime = time.Now()
+			caretTick = true
+		}
 
-			// Blink the caret at ~500ms intervals, mirroring WebKit's
-			// caret blink cycle. The caret is only visible when an IME
-			// focus target is set or a non-selection click positioned it.
-			// CaretVisibleControl follows the same cycle for form-control
-			// carets (which are drawn by paintFormControlCaret, not PaintCaret).
-			if time.Since(h.caretBlinkTime) > 500*time.Millisecond {
-				rendering.CaretVisible = !rendering.CaretVisible
-				rendering.CaretVisibleControl = rendering.CaretVisible
-				h.caretBlinkTime = time.Now()
+		// ★ 按需渲染（性能核心）：仅当本帧存在任何视觉变化时才执行
+		// Clear + Paint + Present；空闲帧（无 dirty、无滚动插值、无动画、
+		// 无 caret 翻转、非首帧）完全跳过渲染，CPU/GPU 占用趋近于零。
+		// 所有变化来源都会标记 dirty 或置位本判定：
+		//   - 布局/渲染树重建（hover、DOM 变更、resize、IME 输入）→
+		//     FrameView.Layout → MarkAllDirty（frameview.go）
+		//   - box 滚动 / 页面滚动 → SetBoxScrollOffset / SetScrollOffset
+		//     → MarkAllDirty（renderview.go / frameview.go）
+		//   - 平滑滚动插值进行中 → h.smoothActive
+		//   - CSS 动画/过渡活跃 → animActive（ApplyAnimations 返回值）
+		//   - 光标闪烁翻转 → caretTick
+		//   - 鼠标移动 → EventCursorMove 无条件 MarkAllDirty（滚动条
+		//     hover 高亮依赖 cursor 位置，见 processEvents）
+		needPaint := h.firstFrame || (rv != nil && (rv.IsDirty() || h.smoothActive || animActive || caretTick))
+		h.firstFrame = false
+		if needPaint {
+			perfRenders++
+		}
+
+		if needPaint && rv != nil {
+			// Software-rendered backends (X11/Cocoa) expose a CPU canvas; the
+			// GLFW GPU backend wraps its framebuffer surface. Unify both into
+			// gpuCanvas so the paint + Present path below works on every platform.
+			var gpuCanvas *graphics.Canvas
+			var ownsCanvas bool
+			if gpuSurf != nil {
+				gpuCanvas = graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
+				ownsCanvas = true
+			} else if sw := h.win.Canvas(); sw != nil {
+				gpuCanvas = sw
+				ownsCanvas = false
 			}
+			if gpuCanvas != nil {
+				// Update text selection from stored coordinates against the
+				// current render tree (robust to rebuilds).
+				h.updateSelection(rv)
 
-			// ★ Keep the IME composition/candidate window positioned at the
-			// text caret. Previously SetIMECompositionPos was never called,
-			// so Windows IME always showed its candidate list at the top-left
-			// corner of the screen.
-			if rendering.FocusedFormControl != nil {
-				if cx, cy, ok := rendering.FormControlCaretPosition(rv); ok {
-					// Caret Y is in page coordinates; account for scroll.
-					cy -= float64(frameView.ScrollY())
-					if cy < 0 {
-						cy = 0
-					}
-					if h.lastIMEX != int32(cx) || h.lastIMEY != int32(cy) {
-						h.lastIMEX, h.lastIMEY = int32(cx), int32(cy)
-						if os.Getenv("WB_IME_DEBUG") != "" {
-							log.Printf("[ime] host SetIMECompositionPos css=(%.0f,%.0f) scrollY=%d", cx, cy, frameView.ScrollY())
+				// ★ Keep the IME composition/candidate window positioned at the
+				// text caret. Previously SetIMECompositionPos was never called,
+				// so Windows IME always showed its candidate list at the top-left
+				// corner of the screen.
+				if rendering.FocusedFormControl != nil {
+					if cx, cy, ok := rendering.FormControlCaretPosition(rv); ok {
+						// Caret Y is in page coordinates; account for scroll.
+						cy -= float64(frameView.ScrollY())
+						if cy < 0 {
+							cy = 0
 						}
-						h.win.SetIMECompositionPos(cx, cy)
+						if h.lastIMEX != int32(cx) || h.lastIMEY != int32(cy) {
+							h.lastIMEX, h.lastIMEY = int32(cx), int32(cy)
+							if os.Getenv("WB_IME_DEBUG") != "" {
+								log.Printf("[ime] host SetIMECompositionPos css=(%.0f,%.0f) scrollY=%d", cx, cy, frameView.ScrollY())
+							}
+							h.win.SetIMECompositionPos(cx, cy)
+						}
+					} else if os.Getenv("WB_IME_DEBUG") != "" {
+						log.Printf("[ime] FormControlCaretPosition not ok (FocusedFormControl set)")
 					}
-				} else if os.Getenv("WB_IME_DEBUG") != "" {
-					log.Printf("[ime] FormControlCaretPosition not ok (FocusedFormControl set)")
 				}
-			}
 
-			bgColor := findBodyBgColor(rendering.RenderObject(rv))
-			if bgColor.A == 0 {
-				bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
-			}
-			gpuCanvas.Clear(bgColor)
-
-			// Clamp scroll offset to valid range after layout.
-			scrollY := frameView.ScrollY()
-			if scrollY < 0 {
-				scrollY = 0
-			}
-			if maxY := frameView.MaxScrollY(); scrollY > maxY {
-				if maxY > 0 {
-					log.Printf("[scroll] clamp scrollY from %d to %d (maxY=%d contentH=%d viewportH=%d)\n",
-						scrollY, maxY, maxY, frameView.ContentHeight(), frameView.Height())
+				bgColor := findBodyBgColor(rendering.RenderObject(rv))
+				if bgColor.A == 0 {
+					bgColor = graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
 				}
-				scrollY = maxY
-			}
-			if scrollY != 0 && scrollY != h.lastLoggedScrollY {
-				log.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
-					scrollY, frameView.MaxScrollY(), frameView.ContentHeight(), frameView.Height())
-				h.lastLoggedScrollY = scrollY
-			}
-			frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
+				gpuCanvas.Clear(bgColor)
 
-			gpuCanvas.Save()
-			csX, csY := h.win.ContentScale()
-			gpuCanvas.Scale(csX, csY)
-			gpuCanvas.Translate(0, -float64(frameView.ScrollY()))
-			dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
-			rendering.Paint(rv, gpuCanvas, dirtyRect)
-			gpuCanvas.Restore()
-		}
+				// Clamp scroll offset to valid range after layout.
+				scrollY := frameView.ScrollY()
+				if scrollY < 0 {
+					scrollY = 0
+				}
+				if maxY := frameView.MaxScrollY(); scrollY > maxY {
+					if maxY > 0 {
+						log.Printf("[scroll] clamp scrollY from %d to %d (maxY=%d contentH=%d viewportH=%d)\n",
+							scrollY, maxY, maxY, frameView.ContentHeight(), frameView.Height())
+					}
+					scrollY = maxY
+				}
+				if scrollY != 0 && scrollY != h.lastLoggedScrollY {
+					log.Printf("[scroll] scrollY=%d maxY=%d contentH=%d viewportH=%d\n",
+						scrollY, frameView.MaxScrollY(), frameView.ContentHeight(), frameView.Height())
+					h.lastLoggedScrollY = scrollY
+				}
+				frameView.SetScrollOffset(frameView.ScrollX(), scrollY)
 
-		if ownsCanvas {
-			gpuCanvas.Release()
+				gpuCanvas.Save()
+				csX, csY := h.win.ContentScale()
+				gpuCanvas.Scale(csX, csY)
+				gpuCanvas.Translate(0, -float64(frameView.ScrollY()))
+				dirtyRect := graphics.Rect{X: 0, Y: float64(frameView.ScrollY()), Width: float64(h.win.Width()), Height: float64(h.win.Height())}
+				rendering.Paint(rv, gpuCanvas, dirtyRect)
+				gpuCanvas.Restore()
+
+				if ownsCanvas {
+					gpuCanvas.Release()
+				}
+				h.win.Present()
+			}
 		}
-		h.win.Present()
 
 		h.processEvents(rv)
 
 		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
 		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
 		h.processEventLoop()
+	}
+	if perfDebug {
+		elapsed := time.Since(perfStart).Seconds()
+		log.Printf("[perf] frames=%d renders=%d idle=%d (%.1f%% idle) elapsed=%.2fs avgFrame=%.2fms renderRate=%.1ffps",
+			perfFrames, perfRenders, perfFrames-perfRenders,
+			100*float64(perfFrames-perfRenders)/float64(max(perfFrames, 1)),
+			elapsed, 1000*elapsed/float64(max(perfFrames, 1)),
+			float64(perfRenders)/max(elapsed, 0.001))
 	}
 }
 
@@ -1175,6 +1220,13 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// Update RenderView cursor for scrollbar hover highlight.
 			if rv != nil {
 				rv.SetCursorPos(cssX, cssY)
+				// ★ 鼠标移动必须标记重绘：滚动条 thumb 的 hover 高亮由
+				// cursor 位置决定（renderpipeline.go isHover 判定），而 hover
+				// 元素可能未变（移入/移出滚动条轨道不改 DOM hover）。按需
+				// 渲染下若不标记 dirty，鼠标在滚动条上滑动时画面不更新。
+				// 开销：鼠标移动期间全量重绘（与按需渲染前的行为一致），
+				// 鼠标静止时零重绘。
+				rv.MarkAllDirty()
 			}
 
 			// ── Drag-to-select inside a focused text form control ──
