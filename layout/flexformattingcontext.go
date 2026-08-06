@@ -111,6 +111,16 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		//   预布局仅影响冻结项自身的几何，后续 applyPositions 会再次
 		//   ctx.Layout（LayoutState 无 visited 标记，重复布局幂等）。
 		if !isRow && it.flexGrow <= 0 && it.flexShrink <= 0 && !it.basisExplicit {
+			// ★ 预布局前先设置 cross（宽度）尺寸：column flex 的 cross =
+			// 容器内容宽。否则 0 宽下内部文本（尤其 CJK）按 0 宽换行→每字
+			// 一行（.resume-text 437px 撑爆 chat-input-area 的根因），预布局
+			// 高度错误后正式布局因 IFC 的 Max(boxHeight,totalHeight) 保留
+			// 旧高度。浏览器对 stretch 默认 cross 即容器宽，这里直接给
+			// 容器宽（align-items 非 stretch 时后续 resolveCrossSizes 修正）。
+			ig := state.GeometryForBox(it.box)
+			if ig.ContentWidth() <= 0 {
+				ig.SetContentWidth(cw)
+			}
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 			if bh := state.GeometryForBox(it.box).BorderBoxHeight(); bh > 0 {

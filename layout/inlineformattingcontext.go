@@ -379,7 +379,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			//    （"完成摘要"在 27px 容器内保持 41px 单行溢出，Edge 中 2+2
 			//    折行）。child 的真实 box 宽度在其 Layout 之后由
 			//    computeInlineContentWidth 恢复为内容宽度。
-			if cldG.ContentWidth() <= 0 && !cld.IsReplaced() {
+			//    ★ 不能用 ContentWidth()<=0 判断：上一轮布局（如 column flex
+			//    冻结项预布局 0 宽）后 computeInlineContentWidth 把匿名包装
+			//    宽度恢复成内容宽（单字 12px），本轮若跳过约束，包装内 CJK
+			//    文本会按 12px 换行→每字一行（.resume-text 437px 撑爆输入区、
+			//    .chat-messages 被挤到 110px 的根因）。无显式宽度的 inline
+			//    子一律以父行宽约束换行，布局后仍由 computeInlineContentWidth
+			//    恢复真实内容宽度用于行推进。
+			if !cld.IsReplaced() {
 				csc := cld.Style()
 				hasExplicit := csc != nil && csc.Width.Unit != "" && csc.Width.Unit != "auto"
 				if !hasExplicit {
