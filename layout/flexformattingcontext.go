@@ -1365,6 +1365,50 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		}
 	}
 
+	// Row flex: align-items center/flex-end must reference the REAL flex line
+	// height (max item cross size after child layout), not the container's
+	// initial single-line estimate. When a later sibling grows the line
+	// (folded-title wraps to 4 lines = 76.8px), a short icon (9px svg) that
+	// was centered against the initial 19.2px estimate stays 28px high —
+	// the "inline-centered, not line-centered" symptom. Re-center every
+	// non-stretch item against the final line height in one pass (all items
+	// are already laid out, so the max is known). stretch fills the line;
+	// baseline was handled per-item above; flex-start keeps crossPos.
+	if isRow && len(items) > 0 {
+		lineCross := ch
+		if lineCross < 0 {
+			lineCross = 0
+		}
+		for _, it := range items {
+			if h := state.GeometryForBox(it.box).BorderBoxHeight(); h > lineCross {
+				lineCross = h
+			}
+		}
+		if lineCross > 0 {
+			for _, it := range items {
+				align := alignOf(it.box, containerCS)
+				if align != "center" && align != "flex-end" {
+					continue
+				}
+				g := state.GeometryForBox(it.box)
+				bh := g.BorderBoxHeight()
+				if bh <= 0 {
+					continue
+				}
+				target := crossPos
+				if align == "center" {
+					target = crossPos + (lineCross-bh)/2
+				} else {
+					target = crossPos + lineCross - bh
+				}
+				delta := target - g.Top()
+				if delta != 0 {
+					shiftBoxAndDescendants(it.box, delta, 0, state)
+				}
+			}
+		}
+	}
+
 	// Column flex: justify-content was applied against the ESTIMATED container
 	// height at the top of applyPositions. After child layout determines real
 	// heights (min-height:auto may have grown an item — .welcome-sub wrapped
