@@ -14,6 +14,7 @@ package page
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"strings"
 
@@ -84,6 +85,14 @@ type Frame struct {
 	// at the start of the next layout pass, batching multiple mutations into
 	// a single full render-tree rebuild.
 	needsRenderTreeRebuild bool
+
+	// styleFP caches the fingerprint of all <style> textContent + <link> href
+	// seen at the last style extraction. RebuildRenderTree skips the expensive
+	// full style re-extraction (re-parsing the whole Vue bundle CSS) when the
+	// fingerprint is unchanged — pure DOM mutations (workspace switch, list
+	// updates) never touch <style>, so re-parsing thousands of rules on every
+	// rebuild is pure waste (measured: tens of ms on each rebuild).
+	styleFP string
 }
 
 // NewFrame constructs a Frame attached to the given Page. The frame is given a
@@ -199,9 +208,19 @@ func (f *Frame) RebuildRenderTree() {
 		Logf("RebuildRenderTree", "skip: no document")
 		return
 	}
+	// ★ style 指纹缓存：<style>/<link> 内容未变时跳过 extractAndAddStyles +
+	//   resolver.ClearCache（全量重扫+重解析整个 Vue bundle CSS）。
+	//   切换工作区等纯 DOM 变化场景 style 未变，跳过可省几十 ms/次重建。
+	//   styleFP 为空表示从未提取过（首次必须提取）。
 	if f.resolver != nil {
-		f.extractAndAddStyles()
-		f.resolver.ClearCache()
+		fp := f.styleFingerprint()
+		if fp != f.styleFP {
+			f.extractAndAddStyles()
+			f.resolver.ClearCache()
+			f.styleFP = fp
+		} else {
+			Logf("RebuildRenderTree", "style fingerprint unchanged, skip re-extract (len=%d)", len(fp))
+		}
 	}
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	oldRV := f.renderView
@@ -265,6 +284,30 @@ func (f *Frame) SetNeedsLayout(needs bool) {
 	if f.view != nil {
 		f.view.SetNeedsLayout(needs)
 	}
+}
+
+// styleFingerprint 计算当前文档所有 <style> textContent 与 <link> href 的
+// 组合指纹（FNV 哈希）。<style> 内容或外部样式表引用未变 → 指纹相同 →
+// RebuildRenderTree 跳过全量重扫。Vue 打包的 scoped CSS 在构建时已固定，
+// 运行时纯 DOM 变化（切换工作区/列表更新）不会改变 <style>。
+func (f *Frame) styleFingerprint() string {
+	if f.document == nil {
+		return ""
+	}
+	h := fnv.New64a()
+	styleEls := f.document.GetElementsByTagName("style")
+	for _, el := range styleEls {
+		h.Write([]byte(el.TextContent()))
+		h.Write([]byte{0})
+	}
+	linkEls := f.document.GetElementsByTagName("link")
+	for _, el := range linkEls {
+		if l, ok := html5.ToLinkElement(el); ok && l.IsStyleSheet() {
+			h.Write([]byte(l.Href()))
+			h.Write([]byte{0})
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // extractAndAddStyles finds all <style> elements in the current document,

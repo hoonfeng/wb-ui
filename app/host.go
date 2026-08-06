@@ -2250,19 +2250,28 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// 是两套：dispatch 时 jsListener 里已 RunJobs 一次，但 Vue 的
 		// flushJobs 可能在 await 恢复链更后面，这里再补一次确保触发。
 		if h.wv.JSInterpreter() != nil {
-			// 多轮交替 flush：Vue 的组件更新是嵌套的（父→子），一次
-			// RunJobs 只跑一层，需要反复直到无新任务。
-			for i := 0; i < 10; i++ {
-				h.wv.JSInterpreter().RunJobs()
+			interp := h.wv.JSInterpreter()
+			// ★ 智能等待（替代原固定 8×15ms=120ms sleep）：
+			//   事件派发后 Vue 的 async 链（@click → await apiPost →
+			//   await loadXXX …）由 RunJobs（goja microtask）+ ProcessTasks
+			//   （宏任务/rAF）交替驱动。普通点击无异步链，PendingTasks
+			//   立即排空 → 提前退出（省 120ms 固定延迟，点击响应更快）；
+			//   切换工作区等长链持续驱动直到排空或超时（上限保护）。
+			//   Vue 的 nextTick 是 Promise.microtask，RunJobs 一次会清空
+			//   队列；仅当链中调度了宏任务（setTimeout/rAF）才需要
+			//   ProcessTasks 补一轮，因此无需人为固定 sleep。
+			el := interp.GetEventLoop()
+			deadline := time.Now().Add(180 * time.Millisecond)
+			for {
+				interp.RunJobs()
 				h.processEventLoop()
-			}
-			// 真实等待：Vue 的 scheduler 可能用 rAF/宏任务（ProcessTasks
-			// 每帧才跑一次），handleClick 在主循环外同步执行，必须让出
-			// 时间让调度器完成。多次短 sleep 驱动动画帧。
-			for i := 0; i < 8; i++ {
-				time.Sleep(15 * time.Millisecond)
-				h.processEventLoop()
-				h.wv.JSInterpreter().RunJobs()
+				if el == nil || el.PendingTasks() == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		}
 		h.wv.RebuildRenderTree()
@@ -2308,10 +2317,24 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		h.processEventLoop()
 		// ★ Vue 的 scheduler（nextTick/组件更新）用 Promise 微任务
 		// （goja 队列），与 processEventLoop 驱动的 queueMicrotask（jsc 队列）
-		// 是两套：dispatch 后必须补一次 goja RunJobs，否则 Vue 的
+		// 是两套：dispatch 后必须补 goja RunJobs，否则 Vue 的
 		// flushJobs 不跑，DOM 永远停留在旧状态（点击"看起来没反应"）。
 		if h.wv.JSInterpreter() != nil {
-			h.wv.JSInterpreter().RunJobs()
+			interp := h.wv.JSInterpreter()
+			interp.RunJobs()
+			// 智能等待：点击 handler 里的 async 链（@click → await fetch →
+			// Vue 更新）立即推进到排空，避免依赖下一帧渲染循环才推进。
+			if el0 := interp.GetEventLoop(); el0 != nil {
+				deadline := time.Now().Add(120 * time.Millisecond)
+				for {
+					interp.RunJobs()
+					h.processEventLoop()
+					if el0.PendingTasks() == 0 || time.Now().After(deadline) {
+						break
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
 		}
 		h.wv.RebuildRenderTree()
 		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
