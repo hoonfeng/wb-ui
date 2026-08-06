@@ -33,6 +33,25 @@ import (
 	"wb-ui/dom"
 )
 
+// indexedRule pairs a StyleRule with its declaration-stream position inside the
+// sheet (count of declarations in ALL rules — including @media bodies — that
+// precede it). Source order for the cascade must follow the CSS source, not the
+// bucket traversal order, or same-specificity rules would resolve in the wrong
+// direction.
+type indexedRule struct {
+	rule  *css.StyleRule
+	order int
+}
+
+// ruleBucket is a per-stylesheet rule index built by class/id/tag of the
+// rightmost compound selector. Candidate lookup for an element only touches
+// the buckets its own tag/id/classes hit, plus the universal bucket — instead
+// of scanning every rule of every sheet (O(element × rules) → O(candidates)).
+type ruleBucket struct {
+	universal []indexedRule // rules with no indexable key (must always match)
+	byKey     map[string][]indexedRule
+}
+
 // Resolver is the Go translation of WebCore::Style::Resolver. It holds the set of
 // author stylesheets (plus UA / user sheets if added) and exposes ResolveElement to
 // compute a ComputedStyle for a given Element.
@@ -42,6 +61,8 @@ type Resolver struct {
 	// cache memoizes per-element ComputedStyle to make inheritance cheap. The cache
 	// is keyed by element identity (pointer).
 	cache map[*dom.Element]*ComputedStyle
+	// sheetIndex holds the per-sheet rule index (nil until first use / rebuild).
+	sheetIndex map[*css.CSSStyleSheet]*ruleBucket
 	// keyframes stores @keyframes rules by name, for animation resolution.
 	keyframes map[string]*css.KeyframesRule
 	// mediaQueryCtx holds the current viewport/device context for media query
@@ -116,9 +137,10 @@ func hasSelectionSelector(list *css.SelectorList) bool {
 // NewResolver constructs an empty Resolver.
 func NewResolver() *Resolver {
 	return &Resolver{
-		checker:   css.NewSelectorChecker(),
-		cache:     map[*dom.Element]*ComputedStyle{},
-		keyframes: map[string]*css.KeyframesRule{},
+		checker:    css.NewSelectorChecker(),
+		cache:      map[*dom.Element]*ComputedStyle{},
+		keyframes:  map[string]*css.KeyframesRule{},
+		sheetIndex: map[*css.CSSStyleSheet]*ruleBucket{},
 	}
 }
 
@@ -166,6 +188,7 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 		if s == sheet {
 			r.sheets = append(r.sheets[:i], r.sheets[i+1:]...)
 			r.ClearCache()
+			delete(r.sheetIndex, sheet)
 			return
 		}
 	}
@@ -175,6 +198,15 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 // the stylesheets or DOM so subsequent calls compute fresh values.
 func (r *Resolver) ClearCache() {
 	r.cache = map[*dom.Element]*ComputedStyle{}
+}
+
+// Invalidate drops the cached ComputedStyle for a single element so the next
+// ResolveElement recomputes it (e.g. after a dynamic pseudo-class change like
+// :hover). Used by the host's hover fast-path to avoid a full rebuild.
+func (r *Resolver) Invalidate(el *dom.Element) {
+	if r.cache != nil {
+		delete(r.cache, el)
+	}
 }
 
 // resolveImports walks all rules in the sheet, and for each @import rule
@@ -273,19 +305,41 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// in <style> or the style attribute) override this default via the cascade.
 	applyDefaultDisplay(cs, el)
 
-	// Collect declarations in cascade order.
+	// Collect declarations in cascade order (indexed: only candidate rules
+	// whose rightmost compound mentions the element's tag/id/class are matched,
+	// instead of scanning every rule of every sheet).
 	var collected []collectedDecl
 	for _, sheet := range r.sheets {
-		r.collectDeclarations(sheet.Rules(), sheet.Origin(), el, &collected, 0)
+		r.collectSheetDeclarations(sheet, el, &collected)
 	}
 
 	// ::-webkit-scrollbar / ::-webkit-scrollbar-thumb rules (WebKit/Blink
 	// scrollbar styling) apply to the element's scrollbar palette, not the
 	// element itself — collect them separately and map onto raw properties
-	// the painter reads (width/height/track/thumb color + radius).
+	// the painter reads (width/height/track/thumb color + radius). Uses the
+	// rule index (candidate buckets) like the main cascade.
 	var sbDecls []collectedDecl
 	for _, sheet := range r.sheets {
-		r.collectScrollbarDeclarations(sheet.Rules(), sheet.Origin(), el, &sbDecls, 0)
+		bkt := r.sheetIndex[sheet]
+		if bkt == nil {
+			bkt = buildRuleBucket(sheet)
+			r.sheetIndex[sheet] = bkt
+		}
+		order := 0
+		for _, ir := range bkt.candidates(el) {
+			order = r.collectScrollbarFromRule(ir.rule, sheet.Origin(), el, &sbDecls, order)
+		}
+		for _, rule := range sheet.Rules() {
+			switch v := rule.(type) {
+			case *css.MediaRule:
+				if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+					continue
+				}
+				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order)
+			case *css.SupportsRule:
+				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order)
+			}
+		}
 	}
 	applyScrollbarDeclarations(cs, sbDecls)
 
@@ -407,8 +461,27 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 	var collected []collectedDecl
 	found := false
 	for _, sheet := range r.sheets {
+		bkt := r.sheetIndex[sheet]
+		if bkt == nil {
+			bkt = buildRuleBucket(sheet)
+			r.sheetIndex[sheet] = bkt
+		}
 		order := 0
-		order = r.collectPseudoDeclarations(sheet.Rules(), sheet.Origin(), el, pe, &collected, order)
+		for _, ir := range bkt.candidates(el) {
+			order = r.collectPseudoDeclarationsFromRule(ir.rule, sheet.Origin(), el, pe, &collected, order)
+		}
+		// @media / @supports bodies are scanned fully (rare).
+		for _, rule := range sheet.Rules() {
+			switch v := rule.(type) {
+			case *css.MediaRule:
+				if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+					continue
+				}
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order)
+			case *css.SupportsRule:
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order)
+			}
+		}
 		if !found && len(collected) > 0 {
 			found = true
 		}
@@ -460,6 +533,37 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 	return cs, content, true
 }
 
+// collectPseudoDeclarationsFromRule matches one StyleRule's selectors whose
+// pseudo-element equals pe, appending matched declarations. Shared by the
+// indexed and full-scan paths.
+func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, order int) int {
+	if v.Selectors != nil {
+		for _, sel := range v.Selectors.Selectors {
+			if pseudoElementOf(&sel) != pe {
+				continue
+			}
+			if !r.checker.Match(sel, el) {
+				continue
+			}
+			spec := css.SpecificityOfComplex(sel)
+			for _, d := range v.Declarations {
+				*collected = append(*collected, collectedDecl{
+					decl:        d,
+					origin:      origin,
+					important:   d.Important,
+					specificity: spec,
+					sourceOrder: order,
+				})
+				order++
+			}
+		}
+	}
+	if len(v.NestedRules) > 0 {
+		order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order)
+	}
+	return order
+}
+
 // collectPseudoDeclarations 收集匹配「el + 伪元素 pe」的规则声明。
 // 与 collectDeclarations 的区别：不跳过含伪元素的选择器，而是要求选择器的
 // 伪元素恰好等于 pe（`X::after` 在解析 X 的 ::after 时收集）。
@@ -468,30 +572,7 @@ func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			if v.Selectors != nil {
-				for _, sel := range v.Selectors.Selectors {
-					if pseudoElementOf(&sel) != pe {
-						continue
-					}
-					if !r.checker.Match(sel, el) {
-						continue
-					}
-					spec := css.SpecificityOfComplex(sel)
-					for _, d := range v.Declarations {
-						*collected = append(*collected, collectedDecl{
-							decl:        d,
-							origin:      origin,
-							important:   d.Important,
-							specificity: spec,
-							sourceOrder: order,
-						})
-						order++
-					}
-				}
-			}
-			if len(v.NestedRules) > 0 {
-				order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order)
-			}
+			order = r.collectPseudoDeclarationsFromRule(v, origin, el, pe, collected, order)
 		case *css.MediaRule:
 			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order)
 		case *css.SupportsRule:
@@ -518,51 +599,222 @@ func pseudoElementOf(sel *css.ComplexSelector) css.PseudoElement {
 	return css.PseudoElementUnknown
 }
 
+// ─── rule index (fast candidate lookup) ───────────────────
+
+// complexSelectorKeys returns the index keys for one complex selector: the
+// tag/id/class of its RIGHTMOST compound. A selector whose rightmost compound
+// has none of those (pure :hover, attribute selector, :not(...), pseudo-element,
+// universal) returns nil — such selectors match elements regardless of their
+// tag/class, so their rule must live in the universal bucket.
+func complexSelectorKeys(cs css.ComplexSelector) map[string]bool {
+	if len(cs.Compounds) == 0 {
+		return nil
+	}
+	last := cs.Compounds[len(cs.Compounds)-1]
+	keys := map[string]bool{}
+	for _, s := range last.Selectors {
+		switch s.Match {
+		case css.MatchTag:
+			if s.Value == "*" {
+				return nil // universal selector matches any element
+			}
+			keys[s.Value] = true
+		case css.MatchID:
+			keys["#"+s.Value] = true
+		case css.MatchClass:
+			keys["."+s.Value] = true
+		case css.MatchPseudoClass:
+			if s.SelectorList != nil {
+				return nil // :not(...) / :is(...) / :has(...) — be conservative
+			}
+			// :hover / :first-child etc. carry no key by themselves; if the
+			// same compound also has a class (e.g. .a:hover) that key applies.
+		case css.MatchSet, css.MatchExact, css.MatchList, css.MatchHyphen,
+			css.MatchBegin, css.MatchEnd, css.MatchContain:
+			// Attribute selectors (very common in Vue scoped CSS:
+			// `.msg-item[data-v-xxxx]`) match by element attribute, which the
+			// checker evaluates — they don't contribute an index key but must
+			// NOT disable the class/id/tag key of the same compound.
+		default:
+			// pseudo-element selectors — no safe key
+			return nil
+		}
+	}
+	return keys
+}
+
+// selectorListKeys returns the union of keys across a selector list, or nil
+// when ANY selector is keyless — a single keyless selector (e.g. `a:hover`'s
+// sibling `*`) makes the whole rule match every element, so the rule must be
+// matched unconditionally (universal bucket) for correctness.
+func selectorListKeys(list *css.SelectorList) []string {
+	if list == nil {
+		return nil
+	}
+	all := map[string]bool{}
+	for _, cs := range list.Selectors {
+		keys := complexSelectorKeys(cs)
+		if len(keys) == 0 {
+			return nil
+		}
+		for k := range keys {
+			all[k] = true
+		}
+	}
+	out := make([]string, 0, len(all))
+	for k := range all {
+		out = append(out, k)
+	}
+	return out
+}
+
+// buildRuleBucket indexes the top-level StyleRules of a sheet, recording each
+// rule's declaration-stream position so cascade source order stays correct.
+// Rules inside @media/@supports stay out of the index (handled by full
+// recursion) but still consume stream positions. Rules whose selector list
+// contains any keyless selector go to the universal bucket.
+func buildRuleBucket(sheet *css.CSSStyleSheet) *ruleBucket {
+	b := &ruleBucket{byKey: map[string][]indexedRule{}}
+	declCount := 0
+	var countDecls func(rules []css.Rule)
+	countDecls = func(rules []css.Rule) {
+		for _, rule := range rules {
+			if sr, ok := rule.(*css.StyleRule); ok {
+				declCount += len(sr.Declarations)
+			}
+		}
+	}
+	for _, rule := range sheet.Rules() {
+		sr, ok := rule.(*css.StyleRule)
+		if !ok {
+			countDecls([]css.Rule{rule})
+			continue
+		}
+		ir := indexedRule{rule: sr, order: declCount}
+		declCount += len(sr.Declarations)
+		keys := selectorListKeys(sr.Selectors)
+		if len(keys) == 0 {
+			b.universal = append(b.universal, ir)
+			continue
+		}
+		for _, k := range keys {
+			b.byKey[k] = append(b.byKey[k], ir)
+		}
+	}
+	return b
+}
+
+// candidates returns the candidate rules for an element: union of the buckets
+// for its tag / id / each class, plus the universal bucket, deduped. Keeps the
+// order of first encounter (universal first, then tag/id/class buckets).
+func (b *ruleBucket) candidates(el *dom.Element) []indexedRule {
+	seen := make(map[*css.StyleRule]bool)
+	out := make([]indexedRule, 0, 16)
+	add := func(rs []indexedRule) {
+		for _, ir := range rs {
+			if !seen[ir.rule] {
+				seen[ir.rule] = true
+				out = append(out, ir)
+			}
+		}
+	}
+	add(b.universal)
+	if el != nil {
+		if t := el.LocalName(); t != "" {
+			add(b.byKey[t])
+		}
+		if id := el.GetAttribute("id"); id != "" {
+			add(b.byKey["#"+id])
+		}
+		if cn := el.ClassName(); cn != "" {
+			for _, c := range strings.Fields(cn) {
+				add(b.byKey["."+c])
+			}
+		}
+	}
+	return out
+}
+
+// collectSheetDeclarations collects cascade declarations for el from one sheet
+// using the rule index. Non-indexed containers (@media / @supports) fall back
+// to the original full scan; the stream order continues from the indexed rules
+// so the cascade's source-order comparison stays faithful to the CSS source.
+func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.Element, collected *[]collectedDecl) {
+	bkt := r.sheetIndex[sheet]
+	if bkt == nil {
+		bkt = buildRuleBucket(sheet)
+		r.sheetIndex[sheet] = bkt
+	}
+	origin := sheet.Origin()
+	cands := bkt.candidates(el)
+	// Collect in CSS source order (not bucket order) so the cascade's
+	// source-order comparison matches the full scan exactly; sourceOrder is
+	// the matched-declaration counter (same as the original implementation).
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].order < cands[j].order })
+	order := 0
+	for _, ir := range cands {
+		order = r.collectFromStyleRule(ir.rule, origin, el, collected, order)
+	}
+	// @media / @supports rule bodies are scanned fully (their inner StyleRules
+	// are not in the index — they are few); their stream positions continue
+	// after the top-level matched rules.
+	for _, rule := range sheet.Rules() {
+		switch v := rule.(type) {
+		case *css.MediaRule:
+			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+				continue
+			}
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+		case *css.SupportsRule:
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+		}
+	}
+}
+
+// collectFromStyleRule matches one StyleRule's selectors against el and appends
+// matched declarations; recurses into nested rules (CSS nesting) afterwards.
+// This is the per-rule body shared by the indexed and full-scan paths.
+func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order int) int {
+	if v.Selectors != nil {
+		for _, sel := range v.Selectors.Selectors {
+			if r.checker.Match(sel, el) {
+				// Skip selectors that consist ONLY of pseudo-elements
+				// (e.g. ::selection, ::-webkit-scrollbar-thumb),
+				// OR selectors that CONTAIN pseudo-elements
+				// (e.g. .clearfix::after).
+				if isPseudoElementOnly(&sel) || hasPseudoElement(&sel) {
+					continue
+				}
+				spec := css.SpecificityOfComplex(sel)
+				for _, d := range v.Declarations {
+					*collected = append(*collected, collectedDecl{
+						decl:        d,
+						origin:      origin,
+						important:   d.Important,
+						specificity: spec,
+						sourceOrder: order,
+						selector:    sel.String(),
+					})
+					order++
+				}
+			}
+		}
+	}
+	if len(v.NestedRules) > 0 {
+		order = r.collectDeclarations(v.NestedRules, origin, el, collected, order)
+	}
+	return order
+}
+
 // collectDeclarations walks a rule list, recursing into @media / @supports rules,
 // and appends matching declarations to collected with their cascade metadata.
+// Used for non-indexed containers (media/supports bodies) and nested rules.
 func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			if v.Selectors != nil {
-				for _, sel := range v.Selectors.Selectors {
-					if r.checker.Match(sel, el) {
-						// Skip selectors that consist ONLY of pseudo-elements
-						// (e.g. ::selection, ::-webkit-scrollbar-thumb),
-						// OR selectors that CONTAIN pseudo-elements
-						// (e.g. .clearfix::after).
-						// These should not apply declarations to the element itself
-						// — they only apply when the resolver resolves the element
-						// FOR the pseudo-element. Without this check, rules like
-						// ::selection { color: #fff; } or
-						// .clearfix::after { display: table; } would leak into
-						// the base element's computed style.
-						if isPseudoElementOnly(&sel) || hasPseudoElement(&sel) {
-							continue
-						}
-						spec := css.SpecificityOfComplex(sel)
-						for _, d := range v.Declarations {
-							*collected = append(*collected, collectedDecl{
-								decl:        d,
-								origin:      origin,
-								important:   d.Important,
-								specificity: spec,
-								sourceOrder: order,
-								selector:    sel.String(),
-							})
-							order++
-						}
-					}
-				}
-			}
-			// Nested rules (CSS Nesting) are matched relative to the matched
-			// element, mirroring WebKit's style resolution for nested rules. For
-			// simplicity we also test them against the same element; the cascade
-			// order continues from the outer rule.
-			if len(v.NestedRules) > 0 {
-				order = r.collectDeclarations(v.NestedRules, origin, el, collected, order)
-			}
+			order = r.collectFromStyleRule(v, origin, el, collected, order)
 		case *css.MediaRule:
 			// Evaluate media queries against the current device/viewport context.
 			// If the parsed query list is empty (parse error or unsupported syntax),
@@ -2319,33 +2571,40 @@ func webkitScrollbarPseudo(sel *css.ComplexSelector) int {
 // targets ::-webkit-scrollbar / ::-webkit-scrollbar-thumb on el. These are
 // stored separately (applied to the scrollbar palette, never to the element's
 // own computed style — width:4px on a scrollbar must not shrink the element).
+// collectScrollbarFromRule matches one StyleRule whose selector is a
+// ::-webkit-scrollbar pseudo, appending matched declarations.
+func (r *Resolver) collectScrollbarFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order int) int {
+	if v.Selectors != nil {
+		for _, sel := range v.Selectors.Selectors {
+			if k := webkitScrollbarPseudo(&sel); k >= 0 && r.checker.Match(sel, el) {
+				spec := css.SpecificityOfComplex(sel)
+				for _, d := range v.Declarations {
+					*collected = append(*collected, collectedDecl{
+						decl:        d,
+						origin:      origin,
+						important:   d.Important,
+						specificity: spec,
+						sourceOrder: order,
+						selector:    sel.String(),
+						sbKind:      k,
+					})
+					order++
+				}
+			}
+		}
+	}
+	if len(v.NestedRules) > 0 {
+		order = r.collectScrollbarDeclarations(v.NestedRules, origin, el, collected, order)
+	}
+	return order
+}
+
 func (r *Resolver) collectScrollbarDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			if v.Selectors != nil {
-				for _, sel := range v.Selectors.Selectors {
-					if k := webkitScrollbarPseudo(&sel); k >= 0 && r.checker.Match(sel, el) {
-						spec := css.SpecificityOfComplex(sel)
-						for _, d := range v.Declarations {
-							*collected = append(*collected, collectedDecl{
-								decl:        d,
-								origin:      origin,
-								important:   d.Important,
-								specificity: spec,
-								sourceOrder: order,
-								selector:    sel.String(),
-								sbKind:      k,
-							})
-							order++
-						}
-					}
-				}
-			}
-			if len(v.NestedRules) > 0 {
-				order = r.collectScrollbarDeclarations(v.NestedRules, origin, el, collected, order)
-			}
+			order = r.collectScrollbarFromRule(v, origin, el, collected, order)
 		case *css.MediaRule:
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue

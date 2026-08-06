@@ -1087,6 +1087,110 @@ func (h *Host) processEventLoop() {
 // Resize updates the WebView viewport; scroll adjusts scrollY; mouse clicks
 // are hit-tested against the render tree and forwarded to the click handler.
 // Mouse drag/move drive text selection; Ctrl+C copies selected text.
+// ─── hover style fast-path ────────────────────────────────
+//
+// A :hover switch normally triggers a FULL render-tree rebuild + layout +
+// repaint (each O(content)). For a mouse move that only changes which element
+// is hovered this is the dominant cost — with 10k+ render objects a single
+// hover change took multiple seconds ("UI responds slowly as content grows").
+//
+// The fast path re-resolves the :hover-affected styles of ONLY the old/new
+// hovered elements, swaps them onto the existing render objects, and marks
+// just their regions dirty. Layout is only re-run when the computed style
+// change actually affects box geometry (fonts / box model / display / flex);
+// pure visual changes (color / background / shadow / opacity) repaint the
+// element's rect in place.
+
+// hoverStyleFastPath applies the :hover style change for oldEl → newEl without
+// rebuilding the render tree. Falls back to a full rebuild+layout when the
+// style change affects layout (geometry).
+func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldEl, newEl *dom.Element) {
+	if fr == nil || rv == nil {
+		return
+	}
+	resolver := fr.Resolver()
+	if resolver == nil {
+		return
+	}
+	layoutDirty := false
+	for _, el := range []*dom.Element{oldEl, newEl} {
+		if el == nil {
+			continue
+		}
+		resolver.Invalidate(el)
+		newCS := resolver.ResolveElement(el)
+		if newCS == nil {
+			continue
+		}
+		ro := findRenderObjectForNode(rendering.RenderObject(rv), el)
+		if ro == nil {
+			continue
+		}
+		oldCS := ro.Style()
+		if !layoutDirty && layoutAffectingChanged(oldCS, newCS) {
+			layoutDirty = true
+		}
+		ro.SetStyle(newCS)
+		// Mark the element's region dirty for a local repaint (pad for
+		// hover shadows/borders). Scroll containers disable the dirty check
+		// at paint time, so correctness is preserved there.
+		if lb := ro.LayoutBox(); lb != nil && rv.LayoutState() != nil {
+			g := rv.LayoutState().GeometryForBox(lb)
+			r := rendering.Rect{X: g.Left() - 2, Y: g.Top() - 2, Width: g.BorderBoxWidth() + 4, Height: g.BorderBoxHeight() + 4}
+			if r.Width > 0 && r.Height > 0 {
+				rv.MarkDirty(r)
+			}
+		} else {
+			rv.MarkAllDirty()
+		}
+	}
+	if layoutDirty {
+		fr.SetNeedsLayout(true)
+	}
+}
+
+// layoutAffectingChanged reports whether a computed-style change from a to b
+// would alter box geometry (requiring a layout pass). Pure visual properties
+// (color, background, shadow, opacity, transform…) return false — they only
+// need a repaint. Positioned offsets (top/left/…) are not tracked here; hover
+// rules never change them in practice.
+func layoutAffectingChanged(a, b *style.ComputedStyle) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	// Inline formatting / font / wrapping (inherit into text layout).
+	if a.FontSize != b.FontSize || a.FontFamily != b.FontFamily || a.FontWeight != b.FontWeight ||
+		a.FontStyle != b.FontStyle || a.LineHeight != b.LineHeight || a.LetterSpacing != b.LetterSpacing ||
+		a.WordSpacing != b.WordSpacing || a.TextIndent != b.TextIndent || a.TextAlign != b.TextAlign ||
+		a.WhiteSpace != b.WhiteSpace || a.WordBreak != b.WordBreak || a.OverflowWrap != b.OverflowWrap ||
+		a.WritingMode != b.WritingMode || a.Direction != b.Direction || a.Visibility != b.Visibility {
+		return true
+	}
+	// Box model / positioning / display / flex / grid / multi-column.
+	if a.Display != b.Display || a.Position != b.Position || a.Float != b.Float || a.Clear != b.Clear ||
+		a.OverflowX != b.OverflowX || a.OverflowY != b.OverflowY ||
+		a.Width != b.Width || a.Height != b.Height || a.MinWidth != b.MinWidth || a.MinHeight != b.MinHeight ||
+		a.MaxWidth != b.MaxWidth || a.MaxHeight != b.MaxHeight ||
+		a.MarginTop != b.MarginTop || a.MarginRight != b.MarginRight || a.MarginBottom != b.MarginBottom || a.MarginLeft != b.MarginLeft ||
+		a.PaddingTop != b.PaddingTop || a.PaddingRight != b.PaddingRight || a.PaddingBottom != b.PaddingBottom || a.PaddingLeft != b.PaddingLeft ||
+		a.BorderTopWidth != b.BorderTopWidth || a.BorderRightWidth != b.BorderRightWidth ||
+		a.BorderBottomWidth != b.BorderBottomWidth || a.BorderLeftWidth != b.BorderLeftWidth ||
+		a.BorderTopStyle != b.BorderTopStyle || a.BorderRightStyle != b.BorderRightStyle ||
+		a.BorderBottomStyle != b.BorderBottomStyle || a.BorderLeftStyle != b.BorderLeftStyle ||
+		a.BoxSizing != b.BoxSizing || a.BorderRadius != b.BorderRadius ||
+		a.FlexDirection != b.FlexDirection || a.FlexWrap != b.FlexWrap ||
+		a.JustifyContent != b.JustifyContent || a.AlignItems != b.AlignItems || a.AlignContent != b.AlignContent ||
+		a.Gap != b.Gap || a.RowGap != b.RowGap || a.ColumnGap != b.ColumnGap ||
+		a.FlexBasis != b.FlexBasis || a.FlexGrow != b.FlexGrow || a.FlexShrink != b.FlexShrink || a.Order != b.Order ||
+		a.AlignSelf != b.AlignSelf || a.JustifySelf != b.JustifySelf ||
+		a.VerticalAlign != b.VerticalAlign || a.ZIndex != b.ZIndex ||
+		a.ColumnCount != b.ColumnCount || a.ColumnWidth != b.ColumnWidth ||
+		a.GridTemplateColumns != b.GridTemplateColumns || a.GridTemplateRows != b.GridTemplateRows {
+		return true
+	}
+	return false
+}
+
 func (h *Host) processEvents(rv *rendering.RenderView) {
 	// Consume buffered IME events (composition updates, committed chars,
 	// composition end) and apply them to the focused form control. The
@@ -1274,21 +1378,20 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 				if newEl != h.hoveredEl {
-					if h.hoveredEl != nil {
-						h.hoveredEl.SetHovered(false)
+					oldHover := h.hoveredEl
+					if oldHover != nil {
+						oldHover.SetHovered(false)
 					}
 					if newEl != nil {
 						newEl.SetHovered(true)
 					}
 					h.hoveredEl = newEl
+					// ★ hover 快速路径：只重算新旧 hover 元素的样式，不重建
+					// 整个渲染树（内容多时全树 rebuild+layout 需数秒）。
+					// 仅当样式变化影响几何时才回退全树布局。
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
-							fr.MarkRenderTreeDirty()
-							// ★ hover 状态变化必须触发重建：只 MarkRenderTreeDirty
-							// 不会驱动 EnsureLayout → Layout（NeedsLayout 仍为 false），
-							// RebuildRenderTreeIfNeeded 永远不会执行 → :hover 样式
-							// 从不反映到画面上。SetNeedsLayout 让下帧 Layout 重建。
-							fr.SetNeedsLayout(true)
+							h.hoverStyleFastPath(rv, fr, oldHover, newEl)
 						}
 					}
 				}
@@ -1356,8 +1459,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// ── Hover tracking ──
 				newEl := rendering.HitTest(rv, cssX, cssY, "")
 				if newEl != h.hoveredEl {
-					if h.hoveredEl != nil {
-						h.hoveredEl.SetHovered(false)
+					oldHover := h.hoveredEl
+					if oldHover != nil {
+						oldHover.SetHovered(false)
 					}
 					if newEl != nil {
 						newEl.SetHovered(true)
@@ -1365,9 +1469,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					h.hoveredEl = newEl
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
-							fr.MarkRenderTreeDirty()
-							// hover 需 SetNeedsLayout 才能触发下帧重建（同第一处）。
-							fr.SetNeedsLayout(true)
+							h.hoverStyleFastPath(rv, fr, oldHover, newEl)
 						}
 					}
 				}
