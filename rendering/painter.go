@@ -213,10 +213,26 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
-	rect := rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())
-	if !info.intersects(rect) {
+	// ★ 滚动容器自身背景固定于视口：paintLayerContents 对容器内容整体
+	// translate(-scroll) 后，背景若用绝对坐标绘制会随内容一起滚动——
+	// 背景滚出容器视口，文字继续滚动到背景区域外显示（"文字在背景外"）。
+	// CSS background-attachment:scroll（默认）背景相对元素固定、不随内容
+	// 滚动。这里补偿 box 自身的 scroll offset：祖先滚动（box 整体随祖先
+	// 内容移动）保留，只有该 box 自身的内容滚动被抵消，背景钉回视口。
+	ox, oy := 0.0, 0.0
+	if info.rv != nil {
+		ox, oy = info.rv.BoxScrollOffset(box)
+	}
+	// ★ intersects 检查用 sticky 偏移后的位置：sticky 元素绘制坐标 = 布局
+	// 坐标 + 页面滚动 translate + sticky pin translate（canvas 已应用），
+	// 但 dirty-rect 检查用的是未 translate 的布局坐标。pin 后元素被拉进
+	// 视口，静态 rect 却在视口外 → 误 cull。这里仅修正检查矩形，绘制
+	// 仍用 box.X()/box.Y()（canvas translate 已在绘制路径中）。
+	checkRect := rectFromLayout(box.X()+ox+info.stickyDx, box.Y()+oy+info.stickyDy, box.Width(), box.Height())
+	if !info.intersects(checkRect) {
 		return
 	}
+	rect := rectFromLayout(box.X()+ox, box.Y()+oy, box.Width(), box.Height())
 	// Paint box-shadow before the background (shadows sit behind the element).
 	// Paint shadows even when the background is transparent. Inset shadows are
 	// excluded here — they paint ABOVE the background (see below).
@@ -224,7 +240,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		r := lengthValue(st.BorderRadius)
 		shadows := parseShadowList(st.BoxShadow)
 		op := paintOpacity(box, info)
-		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), r, shadows, op, false)
+		paintBoxShadow(info.canvas, box.X()+ox, box.Y()+oy, box.Width(), box.Height(), r, shadows, op, false)
 	}
 	// background-image: url(...) — decode and draw with size/position.
 	if url, ok := parseBackgroundURL(st.BackgroundImage); ok {
@@ -335,7 +351,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st.BoxShadow != "" && st.BoxShadow != "none" {
 		shadows := parseShadowList(st.BoxShadow)
 		op := paintOpacity(box, info)
-		paintBoxShadow(info.canvas, box.X(), box.Y(), box.Width(), box.Height(), lengthValue(st.BorderRadius), shadows, op, true)
+		paintBoxShadow(info.canvas, box.X()+ox, box.Y()+oy, box.Width(), box.Height(), lengthValue(st.BorderRadius), shadows, op, true)
 	}
 }
 
@@ -352,7 +368,13 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
-	x, y := box.X(), box.Y()
+	// ★ 滚动容器自身边框同样固定于视口（与 PaintBackground 同理）：
+	// 补偿 box 自身 scroll offset，抵消 paintLayerContents 的内容 translate。
+	ox, oy := 0.0, 0.0
+	if info.rv != nil {
+		ox, oy = info.rv.BoxScrollOffset(box)
+	}
+	x, y := box.X()+ox, box.Y()+oy
 	w, h := box.Width(), box.Height()
 	topW := lengthValue(st.BorderTopWidth)
 	rightW := lengthValue(st.BorderRightWidth)
@@ -361,7 +383,7 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	if topW <= 0 && rightW <= 0 && bottomW <= 0 && leftW <= 0 {
 		return
 	}
-	if !info.intersects(rectFromLayout(x, y, w, h)) {
+	if !info.intersects(rectFromLayout(x+info.stickyDx, y+info.stickyDy, w, h)) {
 		return
 	}
 	op := paintOpacity(box, info)

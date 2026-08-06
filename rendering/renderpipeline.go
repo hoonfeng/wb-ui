@@ -53,8 +53,12 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// 滚动后内容 translate 进入视口，但绝对坐标仍在旧视口外 →
 	// intersects=false → 新进入视口的内容被跳过 → "滚动正常但内容
 	// 滚上来后空白/丢失"。有滚动偏移即全量重绘（滚动时内容必须
-	// 全部绘制，这是浏览器滚动后的正常重绘范围）。
-	anyBoxScroll := view.HasBoxScrollOffset()
+	// 全部绘制，这是浏览器滚动后的正常重绘范围）。页面级
+	// SetScrollOffset（FrameView 滚动）同样平移内容，必须一并考虑 —
+	// 否则 sticky 底栏/滚动后的普通元素用布局坐标 intersects 会被
+	// 误判为"不在脏区"而消失。
+	sx0, sy0 := view.ScrollOffset()
+	anyBoxScroll := view.HasBoxScrollOffset() || sx0 != 0 || sy0 != 0
 	info.SetDirtyCheckEnabled(view.IsDirty() && !anyBoxScroll)
 	if os.Getenv("WB_PAINT_DEBUG") != "" {
 		log.Printf("[paint] dirty=%v anyScroll=%v offsets=%d", view.IsDirty(), anyBoxScroll, view.ScrollOffsetCount())
@@ -458,12 +462,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	// transform and overflow clip, mirroring RenderBox::stickyPositionOffset
 	// applied by the nearest scrolling ancestor during paint.
 	needsStickyRestore := false
+	savedStickyDx, savedStickyDy := 0.0, 0.0
 	if rb := asRenderBox(root); rb != nil && info != nil && info.canvas != nil && info.rv != nil {
 		if rb.IsStickyPositioned() {
 			if dx, dy := computeStickyOffset(rb, info.rv); dx != 0 || dy != 0 {
 				info.canvas.Save()
 				info.canvas.Translate(dx, dy)
 				needsStickyRestore = true
+				savedStickyDx, savedStickyDy = info.stickyDx, info.stickyDy
+				info.stickyDx, info.stickyDy = dx, dy
 			}
 		}
 	}
@@ -574,11 +581,21 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				pb := box.PaddingBoxRect()
 				// ★ Scrollbar geometry is absolute (padding-box) but this
 				// walk runs under paintLayerContents' scroll translate, so
-				// compensate by the accumulated scroll offset to keep the
-				// scrollbar screen-anchored (WebKit paints RenderScrollbar in
-				// layer coords, outside the scrolled content).
-				pb.X += info.scrollTranslateX
-				pb.Y += info.scrollTranslateY
+				// compensate by the box's OWN scroll offset to keep the
+				// scrollbar anchored to the container viewport (WebKit paints
+				// RenderScrollbar in layer coords, outside the scrolled
+				// content). NESTED scroll containers must NOT use the
+				// accumulated info.scrollTranslateX/Y here: that includes
+				// ANCESTOR scrolls (e.g. chat-messages scrolled 300px + this
+				// box 100px = 400), but the ancestor translate already moved
+				// the whole box (scrollbar included) in the canvas — adding
+				// it again pins the scrollbar at the wrong absolute position
+				// (container at device -165, scrollbar drawn at +135, a 300px
+				// offset — "滚动条离开容器/滚到底后 thumb 与内容错位").
+				if sx0, sy0 := info.rv.BoxScrollOffset(box); sx0 != 0 || sy0 != 0 {
+					pb.X += sx0
+					pb.Y += sy0
+				}
 				// Modern flat scrollbar: 12px wide, subtle arrow buttons, rounded rect thumb.
 				scrollW := 12.0 // total scrollbar width
 				const arrowSize = 12.0 // arrow button height/width
@@ -713,21 +730,28 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								}
 							}
 
-							sx, sy := float64(0), float64(0)
-							cursorX, cursorY := float64(0), float64(0)
-							if info.rv != nil {
-								sx, sy = info.rv.BoxScrollOffset(box)
-								// Form-control text scrolls through per-element
-								// FormControlTextScroll (input caret / pre-mode textarea),
-								// not BoxScrollOffset — mirror it so the horizontal thumb
-								// follows the control's own scroll, not a sibling's.
-								if el, ok := box.Node().(*dom.Element); ok {
-									if el.LocalName() == "textarea" || el.LocalName() == "input" {
-										sx = FormControlTextScroll(el)
-									}
+						sx, sy := float64(0), float64(0)
+						cursorX, cursorY := float64(0), float64(0)
+						if info.rv != nil {
+							sx, sy = info.rv.BoxScrollOffset(box)
+							// Form-control text scrolls through per-element
+							// FormControlTextScroll (input caret / pre-mode textarea),
+							// not BoxScrollOffset — mirror it so the horizontal thumb
+							// follows the control's own scroll, not a sibling's.
+							if el, ok := box.Node().(*dom.Element); ok {
+								if el.LocalName() == "textarea" || el.LocalName() == "input" {
+									sx = FormControlTextScroll(el)
 								}
-								cursorX, cursorY = info.rv.CursorPos()
 							}
+							cursorX, cursorY = info.rv.CursorPos()
+						}
+						if style.DiagEnabled("scrollbar") && os.Getenv("WB_SB_DEBUG") != "" {
+							if el, ok := box.Node().(*dom.Element); ok {
+								style.Diagf("scrollbar", "VSB-GEO %q pb=(%.0f,%.0f %.0fx%.0f) scrollT=(%.0f,%.0f) self=(%.0f,%.0f) sy=%.0f",
+									el.GetAttribute("class"), pb.X, pb.Y, pb.Width, pb.Height,
+									info.scrollTranslateX, info.scrollTranslateY, sx, sy, sy)
+							}
+						}
 
 							// (viewW/viewH already computed above for needsX; the
 							// thumb geometry below reuses them.)
@@ -784,17 +808,17 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									rad = thumbRadius
 								}
-								if style.DiagEnabled("scrollbar") {
-									cn := ""
-									if el, ok := box.Node().(*dom.Element); ok {
-										cn = el.GetAttribute("class")
-									}
-									style.Diagf("scrollbar", "VSB %q: scrollW=%.0f webkitSB=%v thumbCol=#%02x%02x%02x%02x trackCol=#%02x%02x%02x%02x vx=%.0f thumbY=%.0f thumbLen=%.0f trackLen=%.0f sy=%.0f maxScroll=%.0f rad=%.0f",
-										cn, scrollW, webkitSB,
-										thumbCol.R, thumbCol.G, thumbCol.B, thumbCol.A,
-										trackCol.R, trackCol.G, trackCol.B, trackCol.A,
-										vx, thumbY, vm.ThumbLen, vm.TrackLen, sy, vm.MaxScroll, rad)
+							if style.DiagEnabled("scrollbar") {
+								cn := ""
+								if el, ok := box.Node().(*dom.Element); ok {
+									cn = el.GetAttribute("class")
 								}
+								style.Diagf("scrollbar", "VSB %q: scrollW=%.0f webkitSB=%v thumbCol=#%02x%02x%02x%02x trackCol=#%02x%02x%02x%02x vx=%.0f thumbY=%.0f thumbLen=%.0f trackLen=%.0f sy=%.0f maxScroll=%.0f rad=%.0f pbY=%.0f vy=%.0f",
+									cn, scrollW, webkitSB,
+									thumbCol.R, thumbCol.G, thumbCol.B, thumbCol.A,
+									trackCol.R, trackCol.G, trackCol.B, trackCol.A,
+									vx, thumbY, vm.ThumbLen, vm.TrackLen, sy, vm.MaxScroll, rad, box.PaddingBoxRect().Y, vy)
+							}
 								if webkitSB {
 									// Custom webkit scrollbar: thumb fills the FULL
 									// scrollbar width like the browser (Edge headless
@@ -888,6 +912,7 @@ restoreClip:
 	}
 	if needsStickyRestore {
 		info.canvas.Restore()
+		info.stickyDx, info.stickyDy = savedStickyDx, savedStickyDy
 	}
 }
 
@@ -951,6 +976,12 @@ func paintBackdrop(box *RenderBox, info *PaintInfo, imgFilter *skia.ImageFilter)
 	info.canvas.DrawImage(out, box.X(), box.Y(), box.Width(), box.Height())
 }
 
+// ComputeStickyOffsetForTest exposes computeStickyOffset for integration
+// probes (desktop_probe) that verify sticky pinning in real layouts.
+func ComputeStickyOffsetForTest(box *RenderBox, view *RenderView) (float64, float64) {
+	return computeStickyOffset(box, view)
+}
+
 // computeStickyOffset returns the scroll-pinning translate for a
 // position:sticky box, mirroring RenderBox::stickyPositionOffset() simplified
 // to the document-level scroll offset. The box sticks to the nearest
@@ -958,36 +989,84 @@ func paintBackdrop(box *RenderBox, info *PaintInfo, imgFilter *skia.ImageFilter)
 //
 //	top: N   → pins when staticY+scrollY < N, clamped so the box never
 //	          passes below the bottom of the viewport.
+//	bottom: N → pins when staticBottom+scrollY > viewportBottom - N, clamped
+//	          so the box never passes above the top of the viewport.
 //
-// Nested scroll containers (overflow:scroll ancestors other than the view)
-// are not tracked yet — sticky inside them is treated as relative.
+// The scroll offset comes from the nearest scrollable ancestor (overflow
+// auto/scroll box) when one exists — sticky inside a nested scroll container
+// (e.g. the "▲ 收起" button inside .chat-messages) must track THAT container's
+// scroll, not the page-level FrameView offset which never changes while the
+// container scrolls.
 func computeStickyOffset(box *RenderBox, view *RenderView) (float64, float64) {
 	st := box.Style()
 	if st == nil {
 		return 0, 0
 	}
-	// Only top-pinning is implemented (the overwhelmingly common case);
-	// bottom/left/right sticky are treated as static for now.
-	topRaw := st.GetProperty("top")
-	if topRaw == "" || topRaw == "auto" {
-		return 0, 0
+	// Find the nearest scrollable ancestor — the sticky scrollport. For a
+	// box directly under the view the scroll offset is the page's; nested
+	// scroll containers contribute their own BoxScrollOffset.
+	scrollBox := (*RenderBox)(nil)
+	for cur := box.Parent(); cur != nil; cur = cur.Parent() {
+		if rb := asRenderBox(cur); rb != nil {
+			if cs := rb.Style(); cs != nil {
+				if cs.OverflowX == style.OverflowAuto || cs.OverflowX == style.OverflowScroll ||
+					cs.OverflowY == style.OverflowAuto || cs.OverflowY == style.OverflowScroll {
+					scrollBox = rb
+					break
+				}
+			}
+		}
 	}
-	top := 0.0
-	if l, ok := parseCSSLength(topRaw); ok {
-		top = l
+	var sy float64
+	if scrollBox != nil {
+		_, sy = view.BoxScrollOffset(scrollBox)
 	} else {
-		return 0, 0
+		_, sy = view.ScrollOffset()
 	}
-	_, sy := view.ScrollOffset()
 	staticY := box.Y()
+	staticBottom := staticY + box.Height()
+
 	// Viewport-space position: scrolling down (sy>0) moves content up, so the
 	// element's viewport top is staticY - sy. The canvas is already translated
 	// by -scroll, so the element paints at staticY; a positive dy pulls it
 	// down to pin at top once its viewport position passes the top line.
-	vy := staticY - sy
-	if vy < top && staticY+box.Height() > 0 {
-		dy := top - vy
-		return 0, dy
+	if topRaw := st.GetProperty("top"); topRaw != "" && topRaw != "auto" {
+		top := 0.0
+		if l, ok := parseCSSLength(topRaw); ok {
+			top = l
+		} else {
+			top = 0
+		}
+		vy := staticY - sy
+		if vy < top && staticBottom > 0 {
+			dy := top - vy
+			return 0, dy
+		}
+	}
+	// bottom: N — pins the box's bottom edge N px above the scrollport
+	// bottom once its static bottom would scroll below it (like the "▲ 收起"
+	// button staying visible at the bottom of the chat viewport while the
+	// thinking text scrolls). Viewport bottom in this coordinate space is the
+	// scroll container's padding-box bottom (or the view height for page
+	// scroll) minus N; the box sticks with dy pushing it back UP into view.
+	if bottomRaw := st.GetProperty("bottom"); bottomRaw != "" && bottomRaw != "auto" {
+		bottom := 0.0
+		if l, ok := parseCSSLength(bottomRaw); ok {
+			bottom = l
+		}
+		var viewportBottom float64
+		if scrollBox != nil {
+			pb := scrollBox.PaddingBoxRect()
+			viewportBottom = pb.Y + pb.Height
+		} else {
+			viewportBottom = view.ViewHeight()
+		}
+		// Element's viewport-space bottom after scroll.
+		vb := staticBottom - sy
+		if vb > viewportBottom-bottom {
+			dy := (viewportBottom - bottom) - vb
+			return 0, dy
+		}
 	}
 	return 0, 0
 }

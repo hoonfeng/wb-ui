@@ -79,6 +79,19 @@ type PaintInfo struct {
 	scrollTranslateX float64
 	scrollTranslateY float64
 
+	// stickyDx / stickyDy hold the scroll-pinning translate applied to the
+	// box currently being walked (set in walkSubtreeExcluded when a sticky
+	// box pins). Painters use them to translate the dirty-rect intersection
+	// test: a sticky box's PAINTED position differs from its static layout
+	// position by the pin offset, so an intersects() test against the static
+	// rect wrongly culls a box pinned INTO the viewport from below
+	// (e.g. bottom-sticky at y=700 pinned to 390 — the static rect 700..740
+	// is outside the 0..400 dirty rect and the box vanishes). WebKit has no
+	// such problem because sticky positioning happens in layout; this port
+	// applies it in paint, so the paint-side visibility test must follow.
+	stickyDx float64
+	stickyDy float64
+
 	// opacityLayerDepth counts how many enclosing opacity transparency layers
 	// (SaveLayerWithOpacity) are currently active. When > 0, painters must
 	// NOT multiply colors by CumulativeOpacity — the enclosing layer already
