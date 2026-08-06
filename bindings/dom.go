@@ -97,12 +97,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 注册时挂到 docObj，刷新后的 document 将丢失该方法，CM6 初始化
 	// 直接抛 "Object has no member 'getSelection'"。因此 Selection
 	// 单例必须在幂等分支之前创建，且两处 docObj 都需挂 getSelection。
-	type selState struct {
-		ranges []*jsc.JSObject
-	}
-	var sstate = &selState{}
+	// sstate 为包级（见文件尾部附近定义），供 InsertTextAtSelection 使用。
 	selObj := jsc.NewObject(rt.ObjectPrototype())
-	selObj.Set("rangeCount", jsc.NumberValue(0))
 	selObj.Set("anchorNode", jsc.Null())
 	selObj.Set("anchorOffset", jsc.NumberValue(0))
 	selObj.Set("focusNode", jsc.Null())
@@ -1999,7 +1995,11 @@ func isStyleElement(n dom.Node) bool {
 func mutationRecordToJS(in *jsc.Interpreter, r *dom.MutationRecord) *jsc.JSObject {
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.Set("type", jsc.StringValue(string(r.Type)))
-	obj.Set("target", jsc.ObjectValue(wrapElement(in, r.Target.(*dom.Element))))
+	if tgt, ok := r.Target.(*dom.Element); ok && tgt != nil {
+		obj.Set("target", jsc.ObjectValue(wrapElement(in, tgt)))
+	} else {
+		obj.Set("target", jsc.Null())
+	}
 	if r.AddedNodes != nil {
 		jsAdded := make([]jsc.JSValue, len(r.AddedNodes))
 		for i, n := range r.AddedNodes {
@@ -2030,8 +2030,94 @@ func mutationRecordToJS(in *jsc.Interpreter, r *dom.MutationRecord) *jsc.JSObjec
 	return obj
 }
 
+// ── Selection 单例（包级）──────────────────────────────────
+// sstate 在 RegisterDOMBindings 中填充（range 数据），供包内
+// InsertTextAtSelection（contenteditable 光标插入）等使用。包级而非
+// 函数内局部：contenteditable 输入发生在 host 事件循环（非注册期）。
+type selState struct {
+	ranges []*jsc.JSObject
+}
+
+var sstate = &selState{}
+
+// InsertTextAtSelection 在 DOM Selection 的当前 range 处插入文本（光标处插入）。
+// contenteditable（CodeMirror 6 输入区）依赖此路径：wb-ui 宿主层对
+// input/textarea 走 value/textContent 直接替换，但对 contenteditable 用
+// SetTextContent(全文) 会抹掉 CM6 的结构化 DOM（.cm-line + 语法高亮 span），
+// 且 CM6 的 input 处理发现文本未变（全文替换文本相同）不会重建结构 → 布局
+// 永久破坏。浏览器语义：在光标处插入文本节点 → 派发 input 事件 → CM6 的
+// readDOMChange 对比 DOM/state 差异后重建正确结构。返回 false 表示无有效
+// selection（调用方应回退：跳过 DOM 修改，仅派发 input 事件）。
+func InsertTextAtSelection(text string) bool {
+	if len(sstate.ranges) == 0 {
+		return false
+	}
+	r := sstate.ranges[0]
+	if r == nil {
+		return false
+	}
+	sc := r.GetStr("startContainer")
+	if sc.IsNull() || sc.IsUndefined() {
+		return false
+	}
+	node := unwrapNode(sc)
+	if node == nil {
+		return false
+	}
+	off := int(r.GetStr("startOffset").ToNumber())
+	if off < 0 {
+		off = 0
+	}
+	if t, ok := node.(*dom.Text); ok {
+		rs := []rune(t.NodeValue())
+		if off > len(rs) {
+			off = len(rs)
+		}
+		tail, err := t.SplitText(off)
+		if err != nil {
+			return false
+		}
+		doc := t.OwnerDocument()
+		if doc == nil {
+			return false
+		}
+		ins := dom.NewText(doc, text)
+		if p := t.ParentNode(); p != nil {
+			if err := p.InsertBefore(ins, tail); err != nil {
+				return false
+			}
+			return true
+		}
+		return false
+	}
+	if el, ok := node.(*dom.Element); ok {
+		doc := el.OwnerDocument()
+		if doc == nil {
+			return false
+		}
+		ins := dom.NewText(doc, text)
+		var ref dom.Node
+		i := 0
+		for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+			if i == off {
+				ref = c
+				break
+			}
+			i++
+		}
+		if err := el.InsertBefore(ins, ref); err != nil {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 // nodeToJS 将 dom.Node 转换为对应的 JS 对象。
 func nodeToJS(in *jsc.Interpreter, n dom.Node) jsc.JSValue {
+	if isNilNode(n) {
+		return jsc.Null()
+	}
 	switch v := n.(type) {
 	case *dom.Element:
 		return jsc.ObjectValue(wrapElement(in, v))
@@ -3132,7 +3218,7 @@ func nodeAcc(rt *jsc.Interpreter, n dom.Node) getterFn {
 func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
 	return func(in *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue {
 		n := fn()
-		if n == nil {
+		if isNilNode(n) {
 			return jsc.Null()
 		}
 		switch v := n.(type) {
@@ -3148,6 +3234,29 @@ func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
 		return jsc.Null()
 	}
 }
+
+// isNilNode reports whether a dom.Node interface value is nil, including
+// typed-nil cases (a *dom.Element nil pointer stored in the interface, which
+// fails the plain `n == nil` check).
+func isNilNode(n dom.Node) bool {
+	if n == nil {
+		return true
+	}
+	switch v := n.(type) {
+	case *dom.Element:
+		return v == nil
+	case *dom.Text:
+		return v == nil
+	case *dom.Comment:
+		return v == nil
+	case *dom.DocumentFragment:
+		return v == nil
+	}
+	return false
+}
+
+// isNilEl reports whether a *dom.Element pointer is nil.
+func isNilEl(el *dom.Element) bool { return el == nil }
 
 func funcVal(fn *jsc.JSFunction) jsc.JSValue { return jsc.FunctionValue(fn) }
 
@@ -3186,15 +3295,21 @@ func fn2Node(fn func(in *jsc.Interpreter, n1, n2 dom.Node, a0, a1 jsc.JSValue) j
 	}, 2)
 }
 
-// arr helpers
+	// arr helpers
 func arrElem(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	return arrayValue(in, len(els), func(i int) jsc.JSValue {
+		if isNilEl(els[i]) {
+			return jsc.Null()
+		}
 		return jsc.ObjectValue(wrapElement(in, els[i]))
 	})
 }
 
 func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 	return arrayValue(in, len(nodes), func(i int) jsc.JSValue {
+		if isNilNode(nodes[i]) {
+			return jsc.Null()
+		}
 		switch v := nodes[i].(type) {
 		case *dom.Element:
 			return jsc.ObjectValue(wrapElement(in, v))

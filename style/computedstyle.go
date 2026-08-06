@@ -627,6 +627,7 @@ func textAlignTypeName(t TextAlignType) string {
 
 // LookupDisplayType returns the DisplayType for a CSS display string.
 func LookupDisplayType(s string) DisplayType {
+	s = strings.TrimSpace(s)
 	switch s {
 	case "block":
 		return DisplayBlock
@@ -675,6 +676,7 @@ func LookupDisplayType(s string) DisplayType {
 
 // LookupPositionType returns the PositionType for a CSS position string.
 func LookupPositionType(s string) PositionType {
+	s = strings.TrimSpace(s)
 	switch s {
 	case "relative":
 		return PositionRelative
@@ -691,6 +693,7 @@ func LookupPositionType(s string) PositionType {
 
 // LookupWhiteSpace returns the WhiteSpaceType for a CSS white-space string.
 func LookupWhiteSpace(s string) WhiteSpaceType {
+	s = strings.TrimSpace(s)
 	switch s {
 	case "pre":
 		return WhiteSpacePre
@@ -709,6 +712,7 @@ func LookupWhiteSpace(s string) WhiteSpaceType {
 
 // LookupOverflow returns the OverflowType for a CSS overflow string.
 func LookupOverflow(s string) OverflowType {
+	s = strings.TrimSpace(s)
 	switch s {
 	case "hidden":
 		return OverflowHidden
@@ -753,6 +757,7 @@ func TextOverflowTypeName(t TextOverflowType) string {
 
 // LookupTextOverflow returns the TextOverflowType for a CSS text-overflow string.
 func LookupTextOverflow(s string) TextOverflowType {
+	s = strings.TrimSpace(s)
 	switch s {
 	case "ellipsis":
 		return TextOverflowEllipsis

@@ -23,6 +23,7 @@ import (
 	"github.com/go-gl/glfw/v3.3/glfw"
 
 	"wb-ui/css"
+	"wb-ui/bindings"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/layout"
@@ -394,6 +395,14 @@ func focusedElementValue(el *dom.Element) string {
 // for other elements it sets textContent.
 func setFocusedElementValue(el *dom.Element, text string) {
 	if el == nil {
+		return
+	}
+	// ★ contenteditable（CodeMirror 6 输入区）：绝不 SetTextContent 全文替换
+	//   ——会抹掉 CM6 的结构化 DOM（.cm-line + 高亮 span），且 CM6 的 input
+	//   处理发现文本未变不会重建结构，布局永久破坏。字符插入走
+	//   bindings.InsertTextAtSelection（光标处插文本节点），由 CM6 的
+	//   readDOMChange 同步 state 并重建正确 DOM。
+	if strings.EqualFold(el.GetAttribute("contenteditable"), "true") {
 		return
 	}
 	if el.LocalName() == "textarea" {
@@ -2824,16 +2833,25 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 					log.Printf("[scroll/input] IME char=%q value → %q len=%d sel=%s", char, newText, len([]rune(newText)),
 						fmt.Sprintf("Start=%d End=%d", rendering.FocusedFormControlSel.Start, rendering.FocusedFormControlSel.End))
 				}
-				setFocusedElementValue(h.imeFocusedEl, newText)
-				needsRebuild = true
+				if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
+					// ★ contenteditable（CodeMirror 6 输入区）：光标处插入单个字符，
+					//   不全文替换（全文替换会抹掉 CM6 的 .cm-line/高亮 span 结构，
+					//   且 CM6 发现文本未变不重建 → 布局永久破坏）。插入后派发
+					//   insertText → CM6 readDOMChange 同步 state 并重建结构。
+					if !bindings.InsertTextAtSelection(char) {
+						break // 无有效 selection：跳过 DOM 修改（保住现有结构）
+					}
+					h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+				} else {
+					setFocusedElementValue(h.imeFocusedEl, newText)
+					needsRebuild = true
+					h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+				}
 
 				if wasComposing {
 					// End composition
 					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", newText))
 				}
-
-				// Dispatch input event with insertText
-				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 
 				// Dispatch change event (bubbles, not cancelable)
 				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
