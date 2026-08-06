@@ -295,6 +295,10 @@ func setScrollXFor(rv *rendering.RenderView, box *rendering.RenderBox, x float64
 		return false
 	}
 	rv.SetBoxScrollOffset(box, x, sy)
+	// 水平滚动同样派发 scroll DOM 事件（前端 @scroll 懒加载依赖）。
+	if el, ok := box.Node().(*dom.Element); ok {
+		el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
+	}
 	return true
 }
 
@@ -303,6 +307,22 @@ func (h *Host) markScrollDirty() {
 	if mf := h.wv.MainFrame(); mf != nil {
 		if fr := mf.Frame(); fr != nil {
 			fr.MarkRenderTreeDirty()
+		}
+	}
+}
+
+// dispatchScrollEvent 向滚动容器派发 scroll DOM 事件（不冒泡，浏览器语义），
+// 让前端 @scroll 监听器（Vue onScroll → loadMoreMessages 向上翻页等）感知
+// 滚动偏移变化。此前滚轮/滚动条交互只更新引擎内偏移从不派发事件——JS 的
+// el.addEventListener('scroll') 永远收不到回调，历史对话打开后向上翻页永不
+// 触发，只显示初始 limit=50 条原始行（tool 消息占配额，≈最后一个 run）。
+func (h *Host) dispatchScrollEvent(box *rendering.RenderBox) {
+	if box == nil {
+		return
+	}
+	if n := box.Node(); n != nil {
+		if el, ok := n.(*dom.Element); ok {
+			el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
 		}
 	}
 }
@@ -885,6 +905,17 @@ func (h *Host) Run() {
 					rv.SetBoxScrollOffset(smoothBox, h.smoothCurX, h.smoothCurY)
 					// 更新持有的 box 引用，避免每帧重复查找。
 					h.smoothBox = smoothBox
+					// ★ 派发 scroll DOM 事件，让前端 @scroll 监听器（Vue
+					// 懒加载向上翻页 loadMoreMessages 等）感知滚动偏移变化。
+					// 此前滚轮只更新引擎内偏移从不派发事件——JS 的
+					// el.addEventListener('scroll') 永远收不到回调，历史对话
+					// 向上翻页永不触发，打开会话只显示初始 limit=50 条
+					// 原始行（≈最后一个 run）。
+					if n := smoothBox.Node(); n != nil {
+						if el, ok := n.(*dom.Element); ok {
+							el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
+						}
+					}
 				}
 			}
 		}
@@ -1245,6 +1276,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						// must never reset a box's sx).
 						sx, _ := rv.BoxScrollOffset(h.scrollbarDragBox)
 						rv.SetBoxScrollOffset(h.scrollbarDragBox, sx, newSy)
+						h.dispatchScrollEvent(h.scrollbarDragBox)
 					}
 				} else {
 					// Horizontal drag: cursor delta → scroll offset delta,
@@ -1394,6 +1426,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							sy = m.MaxScroll
 						}
 						rv.SetBoxScrollOffset(box, sx, sy)
+						h.dispatchScrollEvent(box)
 						h.markScrollDirty()
 						break
 					}
@@ -1409,6 +1442,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							}
 						}
 						rv.SetBoxScrollOffset(box, sx, sy)
+						h.dispatchScrollEvent(box)
 						h.markScrollDirty()
 						break
 					}
@@ -1454,6 +1488,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								sy = m.MaxScroll
 							}
 							rv.SetBoxScrollOffset(box, sx, sy)
+							h.dispatchScrollEvent(box)
 						}
 						break
 					}
@@ -1803,6 +1838,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 									newSx = maxSx
 								}
 								rv.SetBoxScrollOffset(scrollBox, newSx, sy)
+								h.dispatchScrollEvent(scrollBox)
 							} else {
 								newSy := sy + delta
 								_, ch := rv.BoxContentSize(scrollBox)
@@ -1813,6 +1849,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 									newSy = maxSy
 								}
 								rv.SetBoxScrollOffset(scrollBox, sx, newSy)
+								h.dispatchScrollEvent(scrollBox)
 							}
 							break
 						}
