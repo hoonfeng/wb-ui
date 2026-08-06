@@ -90,8 +90,32 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 覆盖，导致探针失效（与标准浏览器行为相悖）。
 	g := rt.GlobalObject()
 	registeredDocument = document
+
+	// ── Selection 单例（提前创建）──────────────────────────────
+	// ★ CodeMirror 6 等库依赖 document.getSelection()。幂等分支每次
+	// EvalJS/RunJS 前都会新建 document 对象；若 getSelection 只在首次
+	// 注册时挂到 docObj，刷新后的 document 将丢失该方法，CM6 初始化
+	// 直接抛 "Object has no member 'getSelection'"。因此 Selection
+	// 单例必须在幂等分支之前创建，且两处 docObj 都需挂 getSelection。
+	type selState struct {
+		ranges []*jsc.JSObject
+	}
+	var sstate = &selState{}
+	selObj := jsc.NewObject(rt.ObjectPrototype())
+	selObj.Set("rangeCount", jsc.NumberValue(0))
+	selObj.Set("anchorNode", jsc.Null())
+	selObj.Set("anchorOffset", jsc.NumberValue(0))
+	selObj.Set("focusNode", jsc.Null())
+	selObj.Set("focusOffset", jsc.NumberValue(0))
+	selObj.Set("isCollapsed", jsc.BooleanValue(true))
+	selObj.Set("type", jsc.StringValue("None"))
+
 	if _, ok := g.GetByKey(domBindingsMarker); ok {
 		docObj := wrapDocument(rt, document)
+		docObj.Set("getSelection", jsc.FunctionValue(jsc.NewNativeFunction("getSelection",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				return jsc.ObjectValue(selObj)
+			}, 0)))
 		g.Set("document", jsc.ObjectValue(docObj))
 		return
 	}
@@ -1460,11 +1484,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	//   range.setStart(node, offset) / range.setEnd(node, offset)
 	//   selection.addRange(range) / getRangeAt / removeAllRanges
 	// Mirrors WHATWG Selection API.
-
-	type selState struct {
-		ranges []*jsc.JSObject
-	}
-	var sstate = &selState{}
+	// （sstate/selObj 在函数开头创建，见幂等分支注释）
 
 	// Range constructor
 	g.Set("Range", jsc.FunctionValue(rt.NewConstructor("Range",
@@ -1577,15 +1597,7 @@ ec = int64(cn.AsObject().GetStr("length").ToNumber())
 			return r
 		})))
 
-	// Selection singleton
-	selObj := jsc.NewObject(rt.ObjectPrototype())
-	selObj.Set("rangeCount", jsc.NumberValue(0))
-	selObj.Set("anchorNode", jsc.Null())
-	selObj.Set("anchorOffset", jsc.NumberValue(0))
-	selObj.Set("focusNode", jsc.Null())
-	selObj.Set("focusOffset", jsc.NumberValue(0))
-	selObj.Set("isCollapsed", jsc.BooleanValue(true))
-	selObj.Set("type", jsc.StringValue("None"))
+	// Selection singleton 方法（selObj 在函数开头创建）
 
 	selObj.Set("getRangeAt", jsc.FunctionValue(jsc.NewNativeFunction("getRangeAt",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
@@ -1759,6 +1771,19 @@ obj.SetInternal(doc)
 		}
 		return jsc.StringValue("CSS1Compat")
 	}), nil)
+
+	// document.hasFocus() — CodeMirror 6 等库用它判断编辑器是否获得焦点
+	// （决定光标/选区渲染）。wb-ui 由 Element.SetFocused 记录焦点状态。
+	obj.Set("hasFocus", jsc.FunctionValue(jsc.NewNativeFunction("hasFocus",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			els := DocumentQuerySelectorAll(doc, "*")
+			for _, el := range els {
+				if el.IsFocused() {
+					return jsc.BooleanValue(true)
+				}
+			}
+			return jsc.BooleanValue(false)
+		}, 0)))
 
 	return obj
 }
@@ -2565,6 +2590,18 @@ obj.SetInternal(el)
 	obj.SetAccessor("className",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetClassName()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetClassName(v.ToString()) })
+	// attributes — NamedNodeMap 风格数组：length + 索引（{name,value}）。
+	// CodeMirror 6 的 setAttrs 依赖 dom.attributes.length / attributes[i].name
+	// 做属性同步，缺失会导致 "Cannot read property 'length' of undefined"。
+	obj.SetAccessor("attributes", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		names := el.AttributeNames()
+		return arrayValue(in, len(names), func(i int) jsc.JSValue {
+			attr := jsc.NewObject(in.ObjectPrototype())
+			attr.Set("name", jsc.StringValue(names[i]))
+			attr.Set("value", jsc.StringValue(el.GetAttribute(names[i])))
+			return jsc.ObjectValue(attr)
+		})
+	}), nil)
 	obj.SetAccessor("innerHTML",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetInnerHTML()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetInnerHTML(v.ToString()) })
@@ -3289,7 +3326,16 @@ func collectStyleTexts(doc dom.Node) ([]string, uint64) {
 // SelectorChecker 匹配元素 → 按 specificity + 源顺序级联 → 再按标准优先级
 // 叠加 inline style 与 !important。返回 kebab-case 属性名 → 原始值字符串 的
 // 映射（CSS 变量 --x 同样参与级联）。
+// computedStyleDepth 防止 resolveVarInComputed 收集祖先自定义属性时
+// computedStyleFor 无限递归（祖先的 out 也含 var() → 再解析 → 再收集…）。
+var computedStyleDepth int
+
 func computedStyleFor(el dom.Node) map[string]string {
+	if computedStyleDepth > 8 {
+		return map[string]string{}
+	}
+	computedStyleDepth++
+	defer func() { computedStyleDepth-- }()
 	out := map[string]string{}
 	doc := el.OwnerDocument()
 	if doc == nil {
@@ -3372,7 +3418,107 @@ func computedStyleFor(el dom.Node) map[string]string {
 			out[strings.ToLower(md.decl.Name)] = strings.TrimSpace(md.decl.ValueString())
 		}
 	}
+	// 解析 var(--xxx) 引用（自定义属性继承链：:root → body → ... → el）。
+	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
+	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
+	resolveVarInComputed(out, el)
 	return out
+}
+
+// resolveVarInComputed 解析 computedStyle map 中所有 var(--name[,fallback])
+// 引用。自定义属性来源：documentElement(:root) 声明（本项目的 CSS 变量均
+// 定义于 :root；跳过祖先链全遍历——每层全量级联计算成本极高，且实际变量
+// 都集中在 :root。若未来出现 body 级覆盖变量，再引入按元素缓存）。
+// 仅当 out 存在 var( 时才执行，避免每次 getComputedStyle 全量开销。
+func resolveVarInComputed(out map[string]string, el dom.Node) {
+	hasVar := false
+	for _, v := range out {
+		if strings.Contains(v, "var(") {
+			hasVar = true
+			break
+		}
+	}
+	if !hasVar {
+		return
+	}
+	doc := el.OwnerDocument()
+	if doc == nil {
+		doc = registeredDocument
+	}
+	if doc == nil {
+		return
+	}
+	vars := map[string]string{}
+	if de := doc.DocumentElement(); de != nil {
+		st := computedStyleFor(de)
+		for k, v := range st {
+			if strings.HasPrefix(k, "--") {
+				vars[k] = v
+			}
+		}
+	}
+	if len(vars) == 0 {
+		return
+	}
+	for k, v := range out {
+		if strings.Contains(v, "var(") {
+			out[k] = substituteVars(v, vars, 0)
+		}
+	}
+}
+
+// substituteVars 把字符串中 var(--name[, fallback]) 替换为 vars[name]。
+// fallback 缺失且变量未定义时保留原 var() 文本（与浏览器行为一致）。
+// depth 限制嵌套（变量值本身含 var() 时的递归深度）。
+func substituteVars(s string, vars map[string]string, depth int) string {
+	if depth > 4 || !strings.Contains(s, "var(") {
+		return s
+	}
+	var buf strings.Builder
+	i := 0
+	for i < len(s) {
+		vi := strings.Index(s[i:], "var(")
+		if vi < 0 {
+			buf.WriteString(s[i:])
+			break
+		}
+		vi += i
+		buf.WriteString(s[i:vi])
+		// 找匹配的右括号（支持嵌套 var( 的 fallback）
+		depthParen := 0
+		j := vi + 4
+		for j < len(s) {
+			if s[j] == '(' {
+				depthParen++
+			} else if s[j] == ')' {
+				if depthParen == 0 {
+					break
+				}
+				depthParen--
+			}
+			j++
+		}
+		if j >= len(s) {
+			buf.WriteString(s[vi:])
+			break
+		}
+		inner := s[vi+4 : j]
+		name := strings.TrimSpace(inner)
+		fallback := ""
+		if comma := strings.Index(inner, ","); comma >= 0 {
+			name = strings.TrimSpace(inner[:comma])
+			fallback = strings.TrimSpace(inner[comma+1:])
+		}
+		if v, ok := vars[name]; ok {
+			buf.WriteString(substituteVars(v, vars, depth+1))
+		} else if fallback != "" {
+			buf.WriteString(substituteVars(fallback, vars, depth+1))
+		} else {
+			buf.WriteString(s[vi : j+1])
+		}
+		i = j + 1
+	}
+	return buf.String()
 }
 
 // mediaMatches 判断 MediaRule 条件是否匹配当前媒体上下文
