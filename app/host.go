@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"log"
 	"math"
@@ -1176,13 +1177,15 @@ func (h *Host) Run() {
 				}
 				if os.Getenv("WB_CTM_DEBUG") != "" {
 					mPre := gpuCanvas.GetMatrix()
-					log.Printf("[ctm] PRE-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f", mPre.ScaleX, mPre.ScaleY, mPre.TransX, mPre.TransY)
+					log.Printf("[ctm] PRE-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f saveCount=%d",
+						mPre.ScaleX, mPre.ScaleY, mPre.TransX, mPre.TransY, gpuCanvas.SaveCount())
 				}
 				rendering.Paint(rv, gpuCanvas, dirtyRect)
 				gpuCanvas.Restore()
 				if os.Getenv("WB_CTM_DEBUG") != "" {
 					mPost := gpuCanvas.GetMatrix()
-					log.Printf("[ctm] POST-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f", mPost.ScaleX, mPost.ScaleY, mPost.TransX, mPost.TransY)
+					log.Printf("[ctm] POST-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f saveCount=%d",
+						mPost.ScaleX, mPost.ScaleY, mPost.TransX, mPost.TransY, gpuCanvas.SaveCount())
 				}
 
 				if h.paintLogFile != nil {
@@ -1270,10 +1273,17 @@ func (h *Host) Run() {
 						preDirtyStr, cov, bb, lbb, rootInfo, "",
 						sampleCanvasPx2(gpuCanvas, 60, 100),   // sidebar (48,30) 物理
 						sampleCanvasPx2(gpuCanvas, 536, 100),  // right-panel (429,30) 物理
-						sampleCanvasPx2(gpuCanvas, 750, 987)) // status-bar 物理					h.snapMu.Lock()
+						sampleCanvasPx2(gpuCanvas, 750, 987)) // status-bar 物理
+					h.snapMu.Lock()
 					_, _ = h.paintLogFile.WriteString(line)
 					_ = h.paintLogFile.Sync()
 					h.snapMu.Unlock()
+					// ★ WB_DUMP_PNG=1：Paint 后把 canvas（pixelCache 读回）
+					//   内容存 PNG，与 BitBlt 屏幕截图对比——区分"绘制没
+					//   上 canvas"与"canvas 有但屏幕没显示"。
+					if os.Getenv("WB_DUMP_PNG") != "" {
+						dumpCanvasPNG(gpuCanvas, "_canvas_dump.png")
+					}
 				}
 				if ownsCanvas {
 					gpuCanvas.Release()
@@ -1283,7 +1293,6 @@ func (h *Host) Run() {
 		}
 
 		h.processEvents(rv)
-
 		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
 		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
 		h.processEventLoop()
@@ -1296,6 +1305,43 @@ func (h *Host) Run() {
 			elapsed, 1000*elapsed/float64(max(perfFrames, 1)),
 			float64(perfRenders)/max(elapsed, 0.001))
 	}
+}
+
+// renderChildCount counts direct render children of a render object.
+func renderChildCount(ro rendering.RenderObject) int {
+	n := 0
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		n++
+	}
+	return n
+}
+
+// dumpCanvasPNG writes the canvas contents to a PNG file (debug aid).
+func dumpCanvasPNG(c *graphics.Canvas, path string) {
+	px := c.Pixels()
+	if len(px) < 4 {
+		return
+	}
+	cw, ch := c.Width(), c.Height()
+	if cw <= 0 || ch <= 0 {
+		return
+	}
+	img := image.NewRGBA(image.Rect(0, 0, cw, ch))
+	for y := 0; y < ch; y++ {
+		for x := 0; x < cw; x++ {
+			idx := (y*cw + x) * 4
+			if idx+3 >= len(px) {
+				continue
+			}
+			img.SetRGBA(x, y, color.RGBA{R: px[idx], G: px[idx+1], B: px[idx+2], A: px[idx+3]})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = png.Encode(f, img)
 }
 
 // sampleCanvasPx2 returns the hex color of the canvas pixel at physical (x,y).
@@ -1352,12 +1398,29 @@ const snapLayoutJS = `(function(){  var o = {};
   rect('.editor-wrapper', 'ew');
   rect('.code-editor-wrapper', 'cw');
   rect('.cm-editor', 'cm');
+  rect('.status-bar', 'sb');
   rect('.cm-scroller', 'sc');
   rect('.cm-content', 'co');
   var co = document.querySelector('.cm-content');
   if (co) { o.coChildren = co.children.length; o.coTextLen = (co.textContent || '').length; o.coScrollW = co.scrollWidth; }
   o.lineCount = document.querySelectorAll('.cm-line').length;
   o.cmExists = !!document.querySelector('.cm-editor');
+  var sb = document.querySelector('.status-bar');
+  if (sb) {
+    o.sbText = (sb.textContent || '').replace(/\s+/g, ' ').slice(0, 60);
+    o.sbChildren = sb.children.length;
+    o.sbHtmlLen = (sb.innerHTML || '').length;
+    var csb = getComputedStyle(sb);
+    o.sbColor = csb.color;
+    o.sbBg = csb.backgroundColor;
+    o.sbFontSize = csb.fontSize;
+    o.sbFontWeight = csb.fontWeight;
+    o.sbFontFamily = csb.fontFamily;
+    var sl = document.querySelector('.status-left');
+    if (sl) { o.sbLeftChild = sl.children.length; o.sbLeftText = (sl.textContent || '').slice(0, 40); }
+    var sr = document.querySelector('.status-right');
+    if (sr) { o.sbRightChild = sr.children.length; o.sbRightText = (sr.textContent || '').slice(0, 40); }
+  }
   var sc = document.querySelector('.cm-scroller');
   if (sc) { o.scScrollTop = sc.scrollTop; o.scScrollH = sc.scrollHeight; o.scClientH = sc.clientHeight; }
   o.active = (document.querySelector('.file-tree-item.active .item-name') || {}).textContent || '';
@@ -1423,6 +1486,35 @@ func (h *Host) dumpLayoutSnap() {
 								}
 								extra += fmt.Sprintf(" ov[%s]=(%.0f,%.0f %.0fx%.0f) ovX=%d ovY=%d flexG=%.1f flexS=%.1f w=%.1f |",
 									cls, gx, gy, gw, gh, ovX, ovY, flexG, flexS, wd)
+							}
+							// ★ 状态栏诊断：找 .status-bar / .status-left /
+							//   .status-right / .status-item 的 RenderObject
+							//   及其子对象（文本节点是否有 RenderText）。
+							if cls == "status-bar" || cls == "status-left" || cls == "status-right" || strings.HasPrefix(cls, "status-item") {
+								var gx, gy, gw, gh float64
+								if rb := ro.LayoutBox(); rb != nil && rv.LayoutState() != nil {
+									gg := rv.LayoutState().GeometryForBox(rb)
+									gx, gy, gw, gh = gg.Left(), gg.Top(), gg.BorderBoxWidth(), gg.BorderBoxHeight()
+								}
+								extra += fmt.Sprintf(" sb[%s]=(%.0f,%.0f %.0fx%.0f) kids=%d |",
+									cls, gx, gy, gw, gh, renderChildCount(ro))
+							}
+							// ★ 状态栏文本诊断：status-item 子树内所有后代
+							//   RenderObject 的 renderName（验证 RenderText）。
+							if cls == "status-left" || cls == "status-right" {
+								var sbTree func(ro2 rendering.RenderObject, d int)
+								sbTree = func(ro2 rendering.RenderObject, d int) {
+									if ro2 == nil || d > 8 {
+										return
+									}
+									extra += fmt.Sprintf(" sbTree>%s/%s |", ro2.RenderName(), renderChildCount(ro2))
+									for c := ro2.FirstChild(); c != nil; c = c.NextSibling() {
+										sbTree(c, d+1)
+									}
+								}
+								for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+									sbTree(c, 0)
+								}
 							}
 						}
 					}

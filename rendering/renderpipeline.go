@@ -139,12 +139,22 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 }
 
-// opacityLayerBounds computes the device-space SaveLayer bounds for an opacity
-// layer: the owner's border box (world/absolute coords, with 16px slack for
-// shadows/overflow) mapped through the current canvas transform. Limiting the
-// layer bounds makes the Restore composite cheap on raster (element region
-// instead of the whole 1280×800 surface).
+// opacityLayerBounds computes the SaveLayer bounds for an opacity layer:
+// the owner's border box in LOCAL (pre-CTM) coordinates, with 16px slack for
+// shadows/overflow.
+//
+// ★ CRITICAL: Skia SkCanvas::saveLayer(bounds) treats bounds as LOCAL
+// coordinates — it is transformed by the CURRENT matrix when allocating the
+// offscreen layer. The canvas CTM is scale(1.25)+translate(0,-scrollY), so
+// world (CSS) coordinates ARE local coordinates. Passing DeviceRect()-mapped
+// (already device-space) coordinates made Skia apply the CTM a SECOND time:
+// a status-item layer at CSS (1187,782) got bounds ≈ (1483,1222) — 220px
+// BELOW the 1000px-tall surface — so the offscreen layer was allocated
+// outside the canvas and the composited content (status bar text, icons,
+// status dot) was silently culled. This was the "状态栏没有内容显示" root
+// cause: every opacity<0.98 layer's content vanished on the GPU backend.
 func opacityLayerBounds(info *PaintInfo, layerRect layout.LayoutRect) graphics.Rect {
+	_ = info
 	w := layerRect.Width
 	h := layerRect.Height
 	if w <= 0 {
@@ -153,7 +163,7 @@ func opacityLayerBounds(info *PaintInfo, layerRect layout.LayoutRect) graphics.R
 	if h <= 0 {
 		h = 4
 	}
-	return info.canvas.DeviceRect(graphics.Rect{X: layerRect.X - 16, Y: layerRect.Y - 16, Width: w + 32, Height: h + 32})
+	return graphics.Rect{X: layerRect.X - 16, Y: layerRect.Y - 16, Width: w + 32, Height: h + 32}
 }
 
 // paintLayerTree paints a single render layer and its descendants, mirroring
@@ -369,7 +379,12 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	}
 	// ★ opacity∈[0.98,1) 直接 alpha 绘制（省 offscreen 合成，见 fixed 分支）。
 	// ★ bounds 限制：SaveLayer 只分配元素区域，raster 合成 ~0.7ms→µs。
-	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 {
+	// ★ WB_NO_SAVELAYER=1：跳过 SaveLayer 离屏合成（opacity 直接用 alpha
+	//   绘制）——GPU 后端 SaveLayer 合成丢失时（内容画进离屏层但 Restore
+	//   合成不上主画布 → 元素整体消失，如状态栏 status-item 文本/圆点），
+	//   用此开关验证"离屏合成是元凶"。
+	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 &&
+		os.Getenv("WB_NO_SAVELAYER") == "" {
 		info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
 		info.opacityLayerDepth++
 		paintLayerContents(layer, info)

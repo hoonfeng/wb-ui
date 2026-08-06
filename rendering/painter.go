@@ -328,6 +328,18 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		}
 		log.Printf("[dbg/paintbg] %s rect=(%.0f,%.0f %.0fx%.0f) col=#%02x%02x%02x alpha=%d",
 			elName, rect.X, rect.Y, rect.Width, rect.Height, bg.R, bg.G, bg.B, bg.A)
+		// ★ Skia 真实 clip 诊断：对比 Go 侧 c.state.clip 与 Skia 侧
+		//   device clip（RestoreToCount/ResetMatrix 只操作 Go state 的
+		//   地方会漂移）。状态栏（y=778+）若被 Skia clip 裁掉即可见。
+		if sdc, ok := info.canvas.DeviceClipBounds(); ok {
+			log.Printf("[dbg/clip] %s deviceClip=(%.0f,%.0f %.0fx%.0f) goClip=(%.0f,%.0f %.0fx%.0f) has=%v",
+				elName, sdc.X, sdc.Y, sdc.Width, sdc.Height,
+				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.X }; return -1 }(),
+				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Y }; return -1 }(),
+				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Width }; return -1 }(),
+				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Height }; return -1 }(),
+				func() bool { _, h := info.canvas.ClipRect(); return h }())
+		}
 	}
 	bg = ApplyOpacityToColor(bg, paintOpacity(box, info))
 	if bg.A == 0 {

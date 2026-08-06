@@ -224,6 +224,18 @@ func (c *Canvas) SaveCount() int {
 	return c.canvas.SaveCount()
 }
 
+// DeviceClipBounds returns the Skia canvas's CURRENT device-space clip
+// (physical pixels, after CTM). ok=false when clip is empty. Used to verify
+// that the Go-side c.state.clip matches the real Skia clip (RestoreToCount /
+// ResetMatrix only manipulate the Go state in places, so they can drift).
+func (c *Canvas) DeviceClipBounds() (Rect, bool) {
+	l, t, r, b, ok := c.canvas.GetDeviceClipBounds()
+	if !ok {
+		return Rect{}, false
+	}
+	return Rect{X: float64(l), Y: float64(t), Width: float64(r - l), Height: float64(b - t)}, true
+}
+
 // RestoreToCount pops the save stack down to the given depth. Used by the
 // renderer to discard every ancestor clip for fixed-position layers.
 func (c *Canvas) RestoreToCount(count int) {

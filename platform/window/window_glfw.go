@@ -320,9 +320,17 @@ func (w *Window) GPUContext() *skia.DirectContext {
 // Call this after painting directly on the GPU surface obtained from
 // GPUSurface(). Mirrors the flush + SwapBuffers sequence that Display
 // used to perform internally.
+//
+// ★ CRITICAL: FlushAndSubmit must be SYNCHRONOUS (sync=true). With async
+// (false), SwapBuffers swaps immediately while the tail of the draw queue
+// (status bar, bottom of sidebar/main) is still in flight — the front
+// buffer gets a partially-completed back buffer and the queued tail draws
+// (status bar background/text) never appear. Symptom: "状态栏没有内容
+// 显示" + sidebar/main bottom content missing while everything above
+// renders fine (queue head completed before the swap).
 func (w *Window) Present() {
 	if w.gpuCtx != nil {
-		w.gpuCtx.FlushAndSubmit(false)
+		w.gpuCtx.FlushAndSubmit(true)
 	}
 	w.win.SwapBuffers()
 }
