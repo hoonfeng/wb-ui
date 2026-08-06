@@ -236,6 +236,20 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		} else {
 			info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
 		}
+		// ★ dirty-rect 层级别早退（局部重绘核心）：启用局部重绘时，层
+		// clip（视口坐标，含 scroll 偏移补偿）与 dirty rect 无交 → 整层
+		// 子树都可跳过（其内容全被此 clip 限制，绝不可能落在脏区内）。
+		// 全量重绘（dirty check 关闭）不受影响。这让 hover/局部变化时
+		// paint 只遍历脏区附近的对象，而非整棵 12K 对象层树。
+		if info.DirtyCheckEnabled() && clip.Width > 0 && clip.Height > 0 {
+			dr := info.dirtyRect
+			if dr.Width <= 0 || dr.Height <= 0 ||
+				clip.X >= dr.X+dr.Width || clip.X+clip.Width <= dr.X ||
+				clip.Y >= dr.Y+dr.Height || clip.Y+clip.Height <= dr.Y {
+				info.canvas.Restore() // 抵消 paintLayerTree 开头的 Save
+				return
+			}
+		}
 	}
 	// CSS opacity<1: the whole subtree paints into an offscreen transparency
 	// layer that composites at `opacity` on restore — the browser's
@@ -275,6 +289,7 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	// viewport stays fixed while content moves inside it.
 	var scrollRestore bool
 	var scrollCheckWasEnabled bool
+	var scrollDirtyShifted bool
 	var scrollSX, scrollSY float64
 	if info != nil && info.rv != nil {
 		if rb := asRenderBox(layer.Owner()); rb != nil {
@@ -286,12 +301,21 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 					info.canvas.Translate(-sx, -sy)
 					scrollRestore = true
 					scrollSX, scrollSY = sx, sy
-					// ★ 内容用绝对坐标绘制，滚动后新进入视口的内容（未
-					// translate 坐标仍在 dirtyRect 外）会被 painter 的
-					// intersects 误判跳过 → "滚动后下方内容不显示"。translate
-					// 期间禁用 dirty check，保证全部绘制。
+					// ★ 滚动感知的 dirty check：translate 后内容用内容坐标
+					// 绘制，而 dirty rect 是视口坐标——把 dirty rect 平移
+					// +scroll 到内容坐标即可在滚动容器内做局部重绘（跳过
+					// 视口外内容），而非全量禁用。若本轮没有局部 dirty rect
+					// （全量重绘，如滚动本身 MarkAllDirty），保持全量。
+					// 滚动变化路径（SetBoxScrollOffset）已 MarkAllDirty →
+					// dirty rect 全屏 → intersects 全部通过，不受影响。
 					scrollCheckWasEnabled = info.DirtyCheckEnabled()
-					info.SetDirtyCheckEnabled(false)
+					if scrollCheckWasEnabled && info.dirtyRect.Width > 0 && info.dirtyRect.Height > 0 {
+						info.dirtyRect.X += sx
+						info.dirtyRect.Y += sy
+						scrollDirtyShifted = true
+					} else {
+						info.SetDirtyCheckEnabled(false)
+					}
 					// ★ 累计滚动偏移：walkSubtreeExcluded 的滚动条绘制在
 					// translate 下运行，而滚动条几何是绝对坐标（paddingBox），
 					// 不补偿就会随内容一起滚走。用累计偏移把滚动条拉回
@@ -336,6 +360,10 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	}
 	if scrollRestore {
 		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)
+		if scrollDirtyShifted {
+			info.dirtyRect.X -= scrollSX
+			info.dirtyRect.Y -= scrollSY
+		}
 		info.scrollTranslateX -= scrollSX
 		info.scrollTranslateY -= scrollSY
 		info.canvas.Restore()
@@ -449,6 +477,31 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		return
 	}
 
+	// ★ 父级子树早退（局部重绘）：overflow 裁剪容器的内容被 clip 在
+	// padding box 内——若该区域与 dirty rect 无交，整棵子树（含其所有
+	// 后代对象）都无需绘制，直接跳过。这是聊天列表等长内容场景的关键
+	// 优化：hover 局部重绘时只遍历脏区附近的子树，而非整棵 12K 对象树
+	// （每对象 × 3 phase 的 visit 调用）。sticky（滚动 pin 后可能移入
+	// 视口）/ transform（改变绘制空间）/ filter / opacity<1 元素保守
+	// 不跳过——它们的实际绘制范围可能与布局 box 不一致。
+	if info != nil && info.DirtyCheckEnabled() {
+		dr := info.dirtyRect
+		if dr.Width > 0 && dr.Height > 0 {
+			if box := asRenderBox(root); box != nil {
+				st := box.Style()
+				if st != nil && !box.IsStickyPositioned() && st.Transform == "" && st.Filter == "" && st.Opacity >= 1 &&
+					(st.OverflowX == style.OverflowHidden || st.OverflowX == style.OverflowAuto || st.OverflowX == style.OverflowScroll ||
+						st.OverflowY == style.OverflowHidden || st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
+					pb := box.PaddingBoxRect()
+					if pb.X+pb.Width <= dr.X || pb.X >= dr.X+dr.Width ||
+						pb.Y+pb.Height <= dr.Y || pb.Y >= dr.Y+dr.Height {
+						return
+					}
+				}
+			}
+		}
+	}
+
 	if os.Getenv("WB_PAINT_DEBUG") != "" && info != nil && info.rv != nil {
 		if rb := asRenderBox(root); rb != nil {
 			if st := rb.Style(); st != nil {
@@ -504,7 +557,32 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 		}
 	}
 
-	visit(root, info)
+	// ★ 对象级快速剔除（局部重绘）：paintObjectBackground/Foreground/
+	// Outline 对每个对象先做 backdrop-filter/clip-path/blend/filter 的
+	// GetProperty 解析再绘制——即使对象最终被 intersects 跳过，这些
+	// 检查本身在 12K 对象 × 3 phase 下就是主要成本。与 dirty rect 无交
+	// 的普通 box 直接跳过 visit（子对象仍遍历，各自再判——overflow
+	// visible 的子内容可能越界）。sticky/transform/filter/opacity<1 对象
+	// 的绘制位置与布局 box 不一致，保守不跳过。
+	doVisit := true
+	if info != nil && info.DirtyCheckEnabled() {
+		dr := info.dirtyRect
+		if dr.Width > 0 && dr.Height > 0 {
+			if box := asRenderBox(root); box != nil && !box.IsStickyPositioned() {
+				if st := box.Style(); st == nil || (st.Transform == "" && st.Filter == "" && st.Opacity >= 1) {
+					bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
+					if bw > 0 && bh > 0 &&
+						(bx+bw <= dr.X || bx >= dr.X+dr.Width ||
+							by+bh <= dr.Y || by >= dr.Y+dr.Height) {
+						doVisit = false
+					}
+				}
+			}
+		}
+	}
+	if doVisit {
+		visit(root, info)
+	}
 
 	// Determine overflow/clip and scroll offset for this box.
 	var clipBox *RenderBox
