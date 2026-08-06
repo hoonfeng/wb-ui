@@ -391,7 +391,21 @@ func (wv *WebView) Document() *dom.Document {
 func (wv *WebView) injectRenderTreeBridge() {
 	// ★ rv 延迟获取：LoadHTML 注入时渲染树可能尚未重建（rv==nil），
 	//   闭包内每次调用时再取 RenderView，保证前端 JS 读取几何时拿到最新实例。
+	// ★ 强制同步布局（浏览器 forced reflow 语义）：DOM 变更（Vue patch 插入
+	//   新消息）只 MarkRenderTreeDirty + SetNeedsLayout（延迟到下一帧渲染
+	//   循环）。前端 scrollToBottom 在 nextTick（微任务）里读 scrollHeight /
+	//   写 scrollTop——此时布局未跑，scrollHeight 还是旧值（新消息未计入
+	//   内容高度）→ 跳底到旧位置/滚动条长度不对。浏览器读取几何属性会
+	//   强制同步布局（forced reflow）拿到最新值；这里在几何桥入口先
+	//   EnsureLayout（含脏渲染树重建）对齐浏览器语义。
+	forceLayout := func() {
+		if fr := wv.mainFrame.Frame(); fr != nil {
+			fr.RebuildRenderTreeIfNeeded()
+		}
+		wv.EnsureLayout()
+	}
 	wrapBox := func(el *dom.Element, fn func(box *rendering.RenderBox) (float64, float64)) (float64, float64) {
+		forceLayout()
 		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0
@@ -411,6 +425,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		})
 	}
 	bindings.SetElementScrollOffset = func(el *dom.Element, x, y float64) {
+		forceLayout()
 		rv := wv.RenderView()
 		box := func() *rendering.RenderBox {
 			if rv == nil || el == nil {
@@ -450,6 +465,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		rv.SetBoxScrollOffset(box, x, y)
 	}
 	bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
+		forceLayout()
 		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0, 0, 0, false
@@ -465,6 +481,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		return pb.Width, pb.Height, tw, th, (vm.OK || hm.OK)
 	}
 	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
+		forceLayout()
 		rv := wv.RenderView()
 		if rv == nil || el == nil {
 			return 0, 0, 0, 0
