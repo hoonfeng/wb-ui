@@ -111,7 +111,11 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		//   Chrome 对 basis:auto 的 flex base size 同样取 max-content 实测值。
 		//   预布局仅影响冻结项自身的几何，后续 applyPositions 会再次
 		//   ctx.Layout（LayoutState 无 visited 标记，重复布局幂等）。
-		if !isRow && it.flexGrow <= 0 && it.flexShrink <= 0 && !it.basisExplicit {
+		//   ★ flexBasis <= 0 限定：有明确 height/flex-basis 的冻结项
+		//   （如 .sidebar-header{height:32px}）必须保留指定主尺寸——否则
+		//   预布局用内容高度（13px 文字+border=14）覆盖 32px，标题栏塌缩、
+		//   文字贴顶。只有 basis:auto（无显式尺寸）的冻结项才需要实测值。
+		if !isRow && it.flexGrow <= 0 && it.flexShrink <= 0 && !it.basisExplicit && it.flexBasis <= 0 {
 			// ★ 预布局前先设置 cross（宽度）尺寸：column flex 的 cross =
 			// 容器内容宽。否则 0 宽下内部文本（尤其 CJK）按 0 宽换行→每字
 			// 一行（.resume-text 437px 撑爆 chat-input-area 的根因），预布局
