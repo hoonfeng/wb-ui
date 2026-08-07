@@ -37,6 +37,7 @@ type flexItem struct {
 	flexShrink      float64
 	flexBasis       float64
 	basisExplicit   bool // flex-basis explicitly set (e.g. 0% from flex:1) — must NOT fall back to content size
+	basisPercent    bool // flex-basis 是百分比：容器 main size 未确定（auto）时按 auto → 内容尺寸（浏览器语义）
 	minWidth        float64
 	maxWidth        float64
 	minHeight       float64
@@ -397,6 +398,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 	var flexBasis float64
 	basisExplicit := false
+	basisPercent := false
 	fb := cs.FlexBasis
 	if fb.Unit == "auto" || fb.Unit == "" {
 		if isRow {
@@ -409,6 +411,9 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 	} else {
 		flexBasis = resolveOrZero(fb, cbWidth, fs)
 		basisExplicit = true
+		if fb.Unit == "%" {
+			basisPercent = true
+		}
 	}
 
 	minW, maxW, _, _ := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fs)
@@ -431,7 +436,7 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 	return &flexItem{
 		box: box, flexGrow: flexGrow, flexShrink: flexShrink,
-		flexBasis: flexBasis, basisExplicit: basisExplicit, minWidth: minW, maxWidth: maxW,
+		flexBasis: flexBasis, basisExplicit: basisExplicit, basisPercent: basisPercent, minWidth: minW, maxWidth: maxW,
 		minHeight: minH, maxHeight: maxH,
 		marginMain: mm, marginCross: mc, paddingMain: paddingMain, order: cs.Order,
 	}
@@ -439,7 +444,11 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 
 func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float64 {
 	base := it.flexBasis
-	if base <= 0 && !it.basisExplicit {
+	// ★ flex-basis 百分比（如 flex:1 → 0%）在容器 main size 未确定（≤0，
+	// auto 高度）时按浏览器语义视为 auto → 用内容尺寸。否则 modal-body
+	// 等 flex:1 的子项在 auto 高度容器里被压成 0（设置面板 modal 高 102
+	// vs 浏览器 514，工具配置弹窗内容区高 4px 的根因）。
+	if base <= 0 && (!it.basisExplicit || (it.basisPercent && containerMainSize <= 0)) {
 		if isRow {
 			// Row flex: main axis = width → use intrinsic content width.
 			base = intrinsicContentWidth(it.box, isRow)

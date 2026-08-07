@@ -1460,72 +1460,7 @@ func (h *Host) dumpLayoutSnap() {
 						}
 					}
 				}
-				// ★ overflow 诊断：找 cm-scroller / cm-content 的引擎级
-				//   ComputedStyle.OverflowX/Y + 几何——验证 overflow:auto
-				//   是否被解析（裁剪缺失 → 内容溢出画到聊天区）。
-				var walkOv func(ro rendering.RenderObject, depth int)
-				walkOv = func(ro rendering.RenderObject, depth int) {
-					if ro == nil || depth > 30 {
-						return
-					}
-					if n := ro.Node(); n != nil {
-						if el, ok := n.(*dom.Element); ok {
-							cls := el.GetAttribute("class")
-							if cls == "cm-scroller" || cls == "cm-content" || cls == "cm-line" || cls == "cm-editor" {
-								cs := ro.Style()
-								ovX, ovY := -1, -1
-								flexG, flexS := -1.0, -1.0
-								wd := -1.0
-								if cs != nil {
-									ovX = int(cs.OverflowX)
-									ovY = int(cs.OverflowY)
-									flexG, flexS = cs.FlexGrow, cs.FlexShrink
-									wd = cs.Width.Value
-								}
-								var gx, gy, gw, gh float64
-								if rb := ro.LayoutBox(); rb != nil && rv.LayoutState() != nil {
-									gg := rv.LayoutState().GeometryForBox(rb)
-									gx, gy, gw, gh = gg.Left(), gg.Top(), gg.BorderBoxWidth(), gg.BorderBoxHeight()
-								}
-								extra += fmt.Sprintf(" ov[%s]=(%.0f,%.0f %.0fx%.0f) ovX=%d ovY=%d flexG=%.1f flexS=%.1f w=%.1f |",
-									cls, gx, gy, gw, gh, ovX, ovY, flexG, flexS, wd)
-							}
-							// ★ 状态栏诊断：找 .status-bar / .status-left /
-							//   .status-right / .status-item 的 RenderObject
-							//   及其子对象（文本节点是否有 RenderText）。
-							if cls == "status-bar" || cls == "status-left" || cls == "status-right" || strings.HasPrefix(cls, "status-item") {
-								var gx, gy, gw, gh float64
-								if rb := ro.LayoutBox(); rb != nil && rv.LayoutState() != nil {
-									gg := rv.LayoutState().GeometryForBox(rb)
-									gx, gy, gw, gh = gg.Left(), gg.Top(), gg.BorderBoxWidth(), gg.BorderBoxHeight()
-								}
-								extra += fmt.Sprintf(" sb[%s]=(%.0f,%.0f %.0fx%.0f) kids=%d |",
-									cls, gx, gy, gw, gh, renderChildCount(ro))
-							}
-							// ★ 状态栏文本诊断：status-item 子树内所有后代
-							//   RenderObject 的 renderName（验证 RenderText）。
-							if cls == "status-left" || cls == "status-right" {
-								var sbTree func(ro2 rendering.RenderObject, d int)
-								sbTree = func(ro2 rendering.RenderObject, d int) {
-									if ro2 == nil || d > 8 {
-										return
-									}
-									extra += fmt.Sprintf(" sbTree>%s/%s |", ro2.RenderName(), renderChildCount(ro2))
-									for c := ro2.FirstChild(); c != nil; c = c.NextSibling() {
-										sbTree(c, d+1)
-									}
-								}
-								for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
-									sbTree(c, 0)
-								}
-							}
-						}
-					}
-					for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
-						walkOv(c, depth+1)
-					}
-				}
-				walkOv(rendering.RenderObject(rv), 0)
+
 			}
 		}
 	}
@@ -1589,11 +1524,23 @@ func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldE
 	if resolver == nil {
 		return
 	}
-	layoutDirty := false
+	// ★ :hover 冒泡匹配：el 自身 hovered 时其全部祖先经 hasHoveredDescendant
+	// 也匹配 :hover。因此 hover 切换必须重算 old/new 两元素的完整祖先链
+	// （去重），否则旧祖先的 :hover 样式残留缓存（视觉上多个高亮并存）、
+	// 新祖先的 :hover 也不生效。之前只重算 oldEl/newEl 两个叶子节点，
+	// 悬停从一处移到另一处时旧容器高亮残留。
+	seen := map[*dom.Element]bool{}
+	var els []*dom.Element
 	for _, el := range []*dom.Element{oldEl, newEl} {
-		if el == nil {
-			continue
+		for e := el; e != nil; e = e.ParentElement() {
+			if !seen[e] {
+				seen[e] = true
+				els = append(els, e)
+			}
 		}
+	}
+	layoutDirty := false
+	for _, el := range els {
 		resolver.Invalidate(el)
 		newCS := resolver.ResolveElement(el)
 		if newCS == nil {

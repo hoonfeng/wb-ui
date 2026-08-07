@@ -58,9 +58,12 @@ type ruleBucket struct {
 type Resolver struct {
 	sheets  []*css.CSSStyleSheet
 	checker *css.SelectorChecker
-	// cache memoizes per-element ComputedStyle to make inheritance cheap. The cache
-	// is keyed by element identity (pointer).
-	cache map[*dom.Element]*ComputedStyle
+	// cache memoizes per-element ComputedStyle to make inheritance cheap.
+	// Keyed by element identity + 属性版本号：class/type/checked 等属性变化
+	// 后 AttrVersion 递增，旧缓存自动失效（浏览器 attribute 变化触发 style
+	// recalc 的等价物）。此前只按元素指针缓存，class 切换（Vue :class）在
+	// style 指纹不变时不清缓存 → 选中/悬停样式残留、多个高亮并存。
+	cache map[*dom.Element]cachedStyle
 	// sheetIndex holds the per-sheet rule index (nil until first use / rebuild).
 	sheetIndex map[*css.CSSStyleSheet]*ruleBucket
 	// keyframes stores @keyframes rules by name, for animation resolution.
@@ -73,6 +76,13 @@ type Resolver struct {
 	// via this callback, the response is parsed as CSS and the resulting rules
 	// are merged into the cascade. When nil, @import rules are silently skipped.
 	StyleSheetLoader func(href string) (string, error)
+}
+
+// cachedStyle 是带版本号的 per-element 计算样式缓存项。
+// ver 记录解析时的 AttrVersion，属性变化后自动失效。
+type cachedStyle struct {
+	cs  *ComputedStyle
+	ver uint64
 }
 
 // SelectionColors returns the ::selection pseudo-element background and
@@ -138,7 +148,7 @@ func hasSelectionSelector(list *css.SelectorList) bool {
 func NewResolver() *Resolver {
 	return &Resolver{
 		checker:    css.NewSelectorChecker(),
-		cache:      map[*dom.Element]*ComputedStyle{},
+		cache:      map[*dom.Element]cachedStyle{},
 		keyframes:  map[string]*css.KeyframesRule{},
 		sheetIndex: map[*css.CSSStyleSheet]*ruleBucket{},
 	}
@@ -197,7 +207,7 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 // ClearCache drops the per-element ComputedStyle cache. Call this after mutating
 // the stylesheets or DOM so subsequent calls compute fresh values.
 func (r *Resolver) ClearCache() {
-	r.cache = map[*dom.Element]*ComputedStyle{}
+	r.cache = map[*dom.Element]cachedStyle{}
 }
 
 // Invalidate drops the cached ComputedStyle for a single element so the next
@@ -288,8 +298,8 @@ var keyStyleProp = map[string]bool{
 // cascade, applying matched declarations in order, and resolving inheritance /
 // custom properties. The result is cached.
 func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
-	if cs, ok := r.cache[el]; ok {
-		return cs
+	if c, ok := r.cache[el]; ok && c.ver == el.AttrVersion() {
+		return c.cs
 	}
 	cs := NewComputedStyle()
 	// Inherit from the parent first so that non-matched properties keep their
@@ -434,7 +444,7 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// 因此不会重演「map 顺序随机重放 border/border-left」的顺序 bug。
 	r.resolveVarInProperties(cs)
 
-	r.cache[el] = cs
+	r.cache[el] = cachedStyle{cs: cs, ver: el.AttrVersion()}
 	return cs
 }
 

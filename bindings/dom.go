@@ -2574,11 +2574,22 @@ obj.SetInternal(el)
 						el.RemoveAttribute("checked")
 					}
 				})
+			// ★ type property 反射 attribute：Vue 3 对 input 的 type 走
+			// mustUseProp → el.type = 'text'（property 赋值）。此前 setter
+			// 为 nil → 赋值静默失败 → type attribute 永远缺失 → CSS
+			// `input[type="text"]` 不匹配 → flex:1 等样式全部失效（设置面板
+			// 输入框宽度 0）。浏览器 HTMLInputElement.type 会反射回 attribute。
 			obj.SetAccessor("type",
 				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					return jsc.StringValue(el.GetAttribute("type"))
+					if t := el.GetAttribute("type"); t != "" {
+						return jsc.StringValue(t)
+					}
+					// 浏览器默认 input.type = "text"
+					return jsc.StringValue("text")
 				}),
-				nil)
+				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+					el.SetAttribute("type", v.ToString())
+				})
 		}
 		if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" {
 			obj.SetAccessor("disabled",

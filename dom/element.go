@@ -33,6 +33,12 @@ type Element struct {
 	focused         bool
 	focusByKeyboard bool // true when focus came from keyboard (Tab) — drives :focus-visible
 	active          bool
+
+	// attrVersion 随属性变更递增，样式解析器据此失效 per-element 缓存：
+	// class/type/checked 等影响 CSS 选择器匹配的属性变化后必须重算样式
+	// （浏览器 attribute 变化触发 style recalc）。此前 RebuildRenderTree 的
+	// style 指纹缓存跳过 ClearCache → class 切换样式残留（选中高亮多个并存）。
+	attrVersion uint64
 }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
@@ -99,6 +105,7 @@ func (e *Element) SetAttribute(name, value string) {
 	e.attrs[key] = value
 	// MutationObserver: notify attributes
 	if !existed || oldValue != value {
+		e.attrVersion++
 		NotifyAttributes(e, key, oldValue)
 	}
 }
@@ -113,9 +120,15 @@ func (e *Element) RemoveAttribute(name string) bool {
 	}
 	delete(e.attrs, key)
 	// MutationObserver: notify attributes removed
+	e.attrVersion++
 	NotifyAttributes(e, key, oldValue)
 	return true
 }
+
+// AttrVersion 返回属性版本号（每次属性增/改/删递增）。
+// 样式解析器用它判断 per-element 计算样式缓存是否过期：版本变化意味着
+// 可能影响 CSS 选择器匹配（class/id/type/checked/…），必须重算。
+func (e *Element) AttrVersion() uint64 { return e.attrVersion }
 
 // AttributeNames returns the attribute names in insertion order, mirroring
 // Element::getAttributeNames().
