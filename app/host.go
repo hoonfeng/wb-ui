@@ -168,6 +168,9 @@ type Host struct {
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
 	scrollbarDragBox *rendering.RenderBox
+	// scrollbarDragRV is the RenderView owning the dragged scroll container —
+	// iframe 子文档的滚动条属于子 Frame 的 RenderView（偏移表存子 rv）。
+	scrollbarDragRV *rendering.RenderView
 	// scrollbarDragAxis: true = vertical, false = horizontal.
 	scrollbarDragAxis bool
 	// scrollbarDragStartY is the cursor Y at drag start (CSS pixels).
@@ -1849,6 +1852,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 
 			// Handle scrollbar thumb drag.
 			if h.scrollbarDragging && rv != nil && h.scrollbarDragBox != nil {
+				// ★ 拖拽的滚动容器可能属于 iframe 子 Frame——偏移表在子
+				// RenderView，全部读写用 dragRV（按下时记录）。
+				drv := h.scrollbarDragRV
+				if drv == nil {
+					drv = rv // 兼容旧路径：未记录 RV 时回退主视图
+				}
 				csX, csY := h.win.ContentScale()
 				if csX <= 0 {
 					csX = 1
@@ -1864,7 +1873,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// ScrollbarMetrics) so the thumb tracks the cursor
 					// 1:1 and the content follows the thumb.
 					dy := cssY - h.scrollbarDragStart
-					m := rendering.VerticalScrollbarMetrics(rv, h.scrollbarDragBox)
+					m := rendering.VerticalScrollbarMetrics(drv, h.scrollbarDragBox)
 					if m.OK {
 						travel := m.TrackLen - m.ThumbLen
 						if travel < 1 {
@@ -1879,8 +1888,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 						// Preserve the horizontal offset (a vertical drag
 						// must never reset a box's sx).
-						sx, _ := rv.BoxScrollOffset(h.scrollbarDragBox)
-						rv.SetBoxScrollOffset(h.scrollbarDragBox, sx, newSy)
+						sx, _ := drv.BoxScrollOffset(h.scrollbarDragBox)
+						drv.SetBoxScrollOffset(h.scrollbarDragBox, sx, newSy)
 						h.dispatchScrollEvent(h.scrollbarDragBox)
 					}
 				} else {
@@ -1888,7 +1897,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// using the shared ScrollbarMetrics (same geometry as
 					// the painter) so the thumb tracks the cursor 1:1.
 					dx := cssX - h.scrollbarDragStart
-					m := rendering.HorizontalScrollbarMetrics(rv, h.scrollbarDragBox)
+					m := rendering.HorizontalScrollbarMetrics(drv, h.scrollbarDragBox)
 					if m.OK {
 						travel := m.TrackLen - m.ThumbLen
 						if travel < 1 {
@@ -1901,7 +1910,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						if newSx > m.MaxScroll {
 							newSx = m.MaxScroll
 						}
-						if setScrollXFor(rv, h.scrollbarDragBox, newSx) {
+						if setScrollXFor(drv, h.scrollbarDragBox, newSx) {
 							h.markScrollDirty()
 						}
 					}
@@ -1997,13 +2006,20 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				scrollHit := rendering.HitTestScrollbar(rv, cssX, cssY)
 				if scrollHit != nil && !scrollHit.IsCorner {
 					box := scrollHit.Box
+					// ★ 滚动条所属的 RenderView：iframe 子文档滚动条属于
+					// 子 Frame 的 rv（偏移表/几何在子 rv），全部读写用 srv。
+					srv := scrollHit.RV
+					if srv == nil {
+						srv = rv // 兼容：未记录 RV 时回退主视图
+					}
 					// ── Thumb drag ──
 					if scrollHit.IsVThumb {
 						h.smoothActive = false // thumb drag is 1:1, not smoothed
 						h.scrollbarDragging = true
 						h.scrollbarDragBox = box
+						h.scrollbarDragRV = srv
 						h.scrollbarDragAxis = true // vertical
-						_, sy := rv.BoxScrollOffset(box)
+						_, sy := srv.BoxScrollOffset(box)
 						h.scrollbarDragStart = cssY
 						h.scrollbarDragScroll = sy
 						break
@@ -2012,32 +2028,33 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						h.smoothActive = false // thumb drag is 1:1, not smoothed
 						h.scrollbarDragging = true
 						h.scrollbarDragBox = box
+						h.scrollbarDragRV = srv
 						h.scrollbarDragAxis = false // horizontal
 						h.scrollbarDragStart = cssX
-						h.scrollbarDragScroll = scrollXFor(rv, box)
+						h.scrollbarDragScroll = scrollXFor(srv, box)
 						break
 					}
 					// ── Arrow buttons → line scroll (clamped to the same
 					// range as the thumb, shared geometry) ──
 					const lineStep = 16.0
 					if scrollHit.IsVUpArrow {
-						sx, sy := rv.BoxScrollOffset(box)
+						sx, sy := srv.BoxScrollOffset(box)
 						sy -= lineStep
 						if sy < 0 {
 							sy = 0
 						}
-						if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK && sy > m.MaxScroll {
+						if m := rendering.VerticalScrollbarMetrics(srv, box); m.OK && sy > m.MaxScroll {
 							sy = m.MaxScroll
 						}
-						rv.SetBoxScrollOffset(box, sx, sy)
+						srv.SetBoxScrollOffset(box, sx, sy)
 						h.dispatchScrollEvent(box)
 						h.markScrollDirty()
 						break
 					}
 					if scrollHit.IsVDownArrow {
-						sx, sy := rv.BoxScrollOffset(box)
+						sx, sy := srv.BoxScrollOffset(box)
 						sy += lineStep
-						if m := rendering.VerticalScrollbarMetrics(rv, box); m.OK {
+						if m := rendering.VerticalScrollbarMetrics(srv, box); m.OK {
 							if sy < 0 {
 								sy = 0
 							}
@@ -2045,30 +2062,30 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								sy = m.MaxScroll
 							}
 						}
-						rv.SetBoxScrollOffset(box, sx, sy)
+						srv.SetBoxScrollOffset(box, sx, sy)
 						h.dispatchScrollEvent(box)
 						h.markScrollDirty()
 						break
 					}
 					if scrollHit.IsHLeftArrow {
-						if setScrollXFor(rv, box, scrollXFor(rv, box)-lineStep) {
+						if setScrollXFor(srv, box, scrollXFor(srv, box)-lineStep) {
 							h.markScrollDirty()
 						}
 						break
 					}
 					if scrollHit.IsHRightArrow {
-						if setScrollXFor(rv, box, scrollXFor(rv, box)+lineStep) {
+						if setScrollXFor(srv, box, scrollXFor(srv, box)+lineStep) {
 							h.markScrollDirty()
 						}
 						break
 					}
 					// ── Track click (non-thumb) → page scroll ──
 					if scrollHit.IsVTrack {
-						sx, sy := rv.BoxScrollOffset(box)
+						sx, sy := srv.BoxScrollOffset(box)
 						pb := box.PaddingBoxRect()
 						// Determine click position relative to the thumb
 						// center using the SAME geometry as the painter.
-						m := rendering.VerticalScrollbarMetrics(rv, box)
+						m := rendering.VerticalScrollbarMetrics(srv, box)
 						if m.OK {
 							syRatio := sy / m.MaxScroll
 							if syRatio < 0 {
@@ -2091,7 +2108,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if sy > m.MaxScroll {
 								sy = m.MaxScroll
 							}
-							rv.SetBoxScrollOffset(box, sx, sy)
+							srv.SetBoxScrollOffset(box, sx, sy)
 							h.dispatchScrollEvent(box)
 						}
 						break
@@ -2099,9 +2116,9 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if scrollHit.IsHTrack {
 						pb := box.PaddingBoxRect()
 						// Same geometry as the painter (shared metrics).
-						m := rendering.HorizontalScrollbarMetrics(rv, box)
+						m := rendering.HorizontalScrollbarMetrics(srv, box)
 						if m.OK {
-							hSx := scrollXFor(rv, box)
+							hSx := scrollXFor(srv, box)
 							sxRatio := hSx / m.MaxScroll
 							if sxRatio < 0 {
 								sxRatio = 0
@@ -2122,7 +2139,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if newSx > m.MaxScroll {
 								newSx = m.MaxScroll
 							}
-							if setScrollXFor(rv, box, newSx) {
+							if setScrollXFor(srv, box, newSx) {
 								h.markScrollDirty()
 							}
 						}
@@ -2249,6 +2266,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if h.scrollbarDragging {
 					h.scrollbarDragging = false
 					h.scrollbarDragBox = nil
+					h.scrollbarDragRV = nil
 				}
 				if h.selecting {
 					csX, csY := h.win.ContentScale()

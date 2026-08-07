@@ -82,6 +82,14 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 	// Reset the per-frame component paint trace (WB_COMP_LOG drains it via host).
 	ResetComponentPaints()
+	// ★ 跨 Frame 选区：绘制帧开始时由主 Frame 构建一次全局文本列表
+	// （主 Frame + 所有 iframe 子 Frame，树序）。子 Frame 的 Paint 由
+	// PaintIFrame 在主绘制中途调用——直接复用该列表（不重复构建），
+	// 因此每个 Frame 绘制时都能用全局文档顺序判定选区。
+	if IFrameContainingFor(view.Document()) == nil {
+		globalSelTexts = nil
+		collectRenderTextsAll(RenderObject(view), &globalSelTexts)
+	}
 	// Use the view's dirty rect if set; otherwise fall back to the caller's rect.
 	paintRect := rect
 	if view.IsDirty() {

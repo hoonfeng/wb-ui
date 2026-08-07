@@ -494,7 +494,11 @@ func walkRenderChildren(root RenderObject, fn func(RenderObject)) {
 
 // ScrollbarHit describes which scrollbar element was hit at a given point.
 type ScrollbarHit struct {
-	Box         *RenderBox
+	Box *RenderBox
+	// RV 是滚动条所属的 RenderView。iframe 子文档的滚动条属于子 Frame 的
+	// RenderView（偏移表/几何存在子 rv）——宿主读写偏移、计算 thumb 几何
+	// 必须用 RV 而非主视图（与 ScrollTarget.RV 同一语义）。
+	RV *RenderView
 	IsVThumb    bool // vertical thumb hit
 	IsVTrack    bool // vertical track (non-thumb, non-arrow area)
 	IsVUpArrow  bool // vertical up arrow button
@@ -508,10 +512,40 @@ type ScrollbarHit struct {
 
 // HitTestScrollbar checks whether (x,y) hits a scrollbar thumb or track
 // of any scrollable box in the render tree. Returns nil if nothing hit.
+// 命中 iframe 内容时递归进子 Frame（子文档滚动条由子 RenderView 判定），
+// 返回的 ScrollbarHit.RV 是滚动条所属的 RenderView。
 func HitTestScrollbar(rv *RenderView, x, y float64) *ScrollbarHit {
 	if rv == nil {
 		return nil
 	}
+	el := HitTest(rv, x, y, "")
+	if el == nil {
+		return nil
+	}
+	// ★ iframe 子文档元素：点击点在子 Frame 内，滚动条判定用子坐标在子
+	// Frame 的 RenderView 里递归（子文档滚动容器不在主渲染树）。坐标系
+	// 已由 hit-test 下钻记录（lastDive：子 Frame 视图 + 子坐标）。
+	if od := el.OwnerDocument(); od != nil && od != rv.Document() {
+		if lastDive.ok && lastDive.sub != nil && lastDive.sub.Document() == od &&
+			lastDive.sub.RenderView() != nil {
+			sub := lastDive.sub
+			lastDive.ok = false // 一次性消费
+			if sub.NeedsLayout() {
+				sub.LayoutNow()
+			}
+			return HitTestScrollbar(sub.RenderView(), lastDive.x, lastDive.y)
+		}
+		return nil
+	}
+	h := hitTestScrollbarInner(rv, x, y)
+	if h != nil {
+		h.RV = rv
+	}
+	return h
+}
+
+// hitTestScrollbarInner is the single-RenderView scrollbar hit-test body.
+func hitTestScrollbarInner(rv *RenderView, x, y float64) *ScrollbarHit {
 	// First find the deepest element at (x,y), then find its scroll container.
 	el := HitTest(rv, x, y, "")
 	if el == nil {

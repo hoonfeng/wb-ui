@@ -20,6 +20,7 @@ package rendering
 import (
 	"strings"
 
+	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 )
 
@@ -121,6 +122,60 @@ func collectRenderTexts(o RenderObject, list *[]*RenderText) {
 	}
 }
 
+// collectRenderTextsAll is the cross-frame variant of collectRenderTexts:
+// when the traversal reaches an <iframe> element, the child Frame's text is
+// collected inline at that position (browser document order — the embedded
+// document's text appears where the iframe element sits in the parent tree).
+// This gives a single global pre-order covering the whole frame tree, so a
+// selection whose anchor is in one Frame and whose end is in another can be
+// ordered and highlighted correctly.
+func collectRenderTextsAll(o RenderObject, list *[]*RenderText) {
+	if o == nil {
+		return
+	}
+	if rt, ok := o.(*RenderText); ok {
+		if len(rt.Segments()) > 0 {
+			*list = append(*list, rt)
+		}
+		return // RenderText is a leaf
+	}
+	// iframe 元素：子 Frame 文本插在树序位置（含嵌套 iframe 的递归）。
+	if el, isEl := o.Node().(*dom.Element); isEl && el.LocalName() == "iframe" {
+		if sub := IFrameLookupFor(el); sub != nil && sub.RenderView() != nil {
+			if sub.NeedsLayout() {
+				sub.LayoutNow()
+			}
+			collectRenderTextsAll(RenderObject(sub.RenderView()), list)
+		}
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		collectRenderTextsAll(c, list)
+	}
+}
+
+// globalSelTexts 是本次绘制帧的跨 Frame 文本列表（树序，主 Frame + 所有
+// iframe 子 Frame）。Paint 入口由主 Frame 构建一次，子 Frame 的 Paint
+// 在 PaintIFrame 中（主绘制中途）复用——保证每个 Frame 绘制时都能用
+// 全局顺序判定跨 Frame 选区，同时只输出属于自己的高亮段。非绘制路径
+// （测试等）为空时，选区函数回退到单 rv 收集（行为不变）。
+var globalSelTexts []*RenderText
+
+// globalTextList returns the pre-order text list covering the whole frame
+// tree rooted at rv. When a cross-frame list is available (paint path) it is
+// used as-is; otherwise it falls back to a single-frame collection so that
+// non-paint callers (tests) keep the historical behavior.
+func globalTextList(rv *RenderView) []*RenderText {
+	if globalSelTexts != nil {
+		return globalSelTexts
+	}
+	if rv == nil {
+		return nil
+	}
+	var list []*RenderText
+	collectRenderTexts(RenderObject(rv), &list)
+	return list
+}
+
 // positionIndex returns the index of the RenderText in the pre-order list,
 // or -1 if not found. Used to compare two TextPositions for document order.
 func positionIndex(list []*RenderText, rt *RenderText) int {
@@ -144,9 +199,11 @@ func normalizeSelection(sel *Selection) (TextPosition, TextPosition) {
 		}
 		return sel.End, sel.Start
 	}
-	// Different RenderTexts: compare by tree order
+	// Different RenderTexts: compare by tree order. Use the cross-frame
+	// list (paint path) so an anchor in one Frame and an end in another
+	// are ordered by document position; fall back to the single-frame
+	// collection for non-paint callers.
 	var list []*RenderText
-	// We need a root to walk; use the RenderView from the RenderText's view
 	rv := sel.Start.RT.View()
 	if rv == nil {
 		rv = sel.End.RT.View()
@@ -154,10 +211,15 @@ func normalizeSelection(sel *Selection) (TextPosition, TextPosition) {
 	if rv == nil {
 		return sel.Start, sel.End // can't determine order, use as-is
 	}
-	collectRenderTexts(RenderObject(rv), &list)
+	list = globalTextList(rv)
 	si := positionIndex(list, sel.Start.RT)
 	ei := positionIndex(list, sel.End.RT)
 	if si < 0 || ei < 0 {
+		// 跨 Frame 且无全局列表（非绘制路径）：按 View 归属粗排——
+		// 不同 Frame 时无法精确比较，保持原样。
+		if sel.Start.RT.View() == sel.End.RT.View() {
+			return sel.Start, sel.End
+		}
 		return sel.Start, sel.End
 	}
 	if si <= ei {
@@ -364,11 +426,18 @@ func SelectionRects(rv *RenderView) []graphics.Rect {
 		return nil
 	}
 	if start.RT == end.RT {
-		return rectsForRenderText(start.RT, start.Offset, end.Offset)
+		// 选区在别的 Frame 时本 rv 无高亮（该 Frame 绘制时自己输出）。
+		if start.RT.View() == rv {
+			return rectsForRenderText(start.RT, start.Offset, end.Offset)
+		}
+		return nil
 	}
-	// Selection spans multiple RenderTexts: collect all in tree order
-	var list []*RenderText
-	collectRenderTexts(RenderObject(rv), &list)
+	// Selection spans multiple RenderTexts: collect all in tree order —
+	// the cross-frame list covers iframe sub-documents, so a selection
+	// whose anchor/end sits in another Frame is ordered correctly. Only
+	// RenderTexts owned by this rv are emitted: sub-document coordinates
+	// belong to the sub-frame's own canvas (PaintIFrame translates).
+	list := globalTextList(rv)
 	si := positionIndex(list, start.RT)
 	ei := positionIndex(list, end.RT)
 	if si < 0 || ei < 0 {
@@ -377,6 +446,9 @@ func SelectionRects(rv *RenderView) []graphics.Rect {
 	var rects []graphics.Rect
 	for i := si; i <= ei; i++ {
 		rt := list[i]
+		if rt.View() != rv {
+			continue // 属于其他 Frame，由该 Frame 绘制时输出
+		}
 		textLen := rt.Length()
 		if i == si {
 			rects = append(rects, rectsForRenderText(rt, start.Offset, textLen)...)
@@ -742,8 +814,9 @@ func IsOffsetInSelection(rv *RenderView, rt *RenderText, offset int) bool {
 	if start.RT == end.RT {
 		return rt == start.RT && offset >= start.Offset && offset < end.Offset
 	}
-	var list []*RenderText
-	collectRenderTexts(RenderObject(rv), &list)
+	// 跨 Frame 选区用全局树序（Paint 路径）判定 rt 是否落在
+	// [start, end] 之间；回退单 rv 收集（非绘制路径）。
+	list := globalTextList(rv)
 	si := positionIndex(list, start.RT)
 	ei := positionIndex(list, end.RT)
 	ri := positionIndex(list, rt)
@@ -790,8 +863,7 @@ func SelectionRangeForSegment(rv *RenderView, rt *RenderText, segStart, segLen i
 		}
 		return from, to, from < to
 	}
-	var list []*RenderText
-	collectRenderTexts(RenderObject(rv), &list)
+	list := globalTextList(rv)
 	si := positionIndex(list, start.RT)
 	ei := positionIndex(list, end.RT)
 	ri := positionIndex(list, rt)

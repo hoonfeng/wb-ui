@@ -393,10 +393,166 @@ func TestIFrameTextSelectionDive(t *testing.T) {
 	}
 }
 
-// encDataURI 把子文档 HTML 转成安全 data URI：除 alphanumeric/空白外全部
-// URL 编码。iframe src 属性值由双引号界定，HTML 里 `"marker"` 的未编码
-// 双引号会截断属性值（HTML 规范行为）——之前的 ReplaceAll 只编码 <> 漏掉
-// 了引号，导致 data URI 被截断、子文档解析为空。
+// TestIFrameScrollbarHitTestDive 验证 iframe 内滚动条命中下钻（s1）：
+// 点击子文档滚动容器右侧的滚动条区域，HitTestScrollbar 应命中子文档
+// 滚动条，且返回的 RV 是子 Frame 的 RenderView（偏移表存子 rv——主 rv
+// 查不到子 box 偏移，写偏移必须用子 rv）。
+func TestIFrameScrollbarHitTestDive(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="sc" style="position:absolute;left:0;top:0;width:200px;height:60px;overflow:auto"><div style="height:300px">scroll-content</div></div></body></html>`)
+	src := `<html><body style="margin:0"><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 140)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	iframeEl := wv.MainFrame().Document().GetElementById("f1")
+	sub := page.IFrameFrame(iframeEl)
+	if sub == nil {
+		t.Fatal("iframe 子 Frame 未注册")
+	}
+	subRV := sub.RenderView()
+	if subRV == nil {
+		t.Fatal("子 Frame RenderView nil")
+	}
+	subDoc := sub.Document()
+	scEl := subDoc.GetElementById("sc")
+	if scEl == nil {
+		t.Fatal("子文档缺 #sc")
+	}
+	// 子 rv 布局后找 #sc 的 RenderBox（子文档坐标）
+	if sub.NeedsLayout() {
+		sub.LayoutNow()
+	}
+	scBox := subRV.FindRenderBoxForNode(scEl)
+	if scBox == nil {
+		t.Fatal("子文档 #sc 无 RenderBox")
+	}
+	m := rendering.VerticalScrollbarMetrics(subRV, scBox)
+	if !m.OK {
+		t.Fatal("子文档 #sc 应可滚动（高 300 内容 vs 60 视口）")
+	}
+	// 滚动条区域：子坐标 = 主坐标（iframe 在主 (0,0) 且 border 0）
+	// x 在 box 右侧滚动条内（标准滚动条宽 ~15px，取右侧 4px 处），
+	// y 在 track 中部（避开箭头区）。
+	scPB := scBox.PaddingBoxRect()
+	trackY := scPB.Y + 30
+	hitX := scPB.X + scPB.Width - 4
+
+	// 主 rv 命中子文档滚动条 → RV 应为子 rv
+	hit := rendering.HitTestScrollbar(rv, hitX, trackY)
+	if hit == nil {
+		t.Fatalf("HitTestScrollbar(%v,%v) 未命中（应命中子文档滚动条）", hitX, trackY)
+	}
+	if hit.RV != subRV {
+		t.Fatalf("滚动条命中 RV=%p, want 子 rv=%p（子文档滚动条偏移表在子 rv）", hit.RV, subRV)
+	}
+	if hit.Box != scBox {
+		t.Fatalf("滚动条命中 Box 不是子文档 #sc")
+	}
+	if !hit.IsVThumb && !hit.IsVTrack {
+		t.Fatalf("应命中垂直 thumb 或 track（got VThumb=%v VTrack=%v）", hit.IsVThumb, hit.IsVTrack)
+	}
+	// 偏移读写验证：主 rv 查不到子 box 偏移（返回 0），子 rv 写后能读回
+	if sx, sy := rv.BoxScrollOffset(scBox); sx != 0 || sy != 0 {
+		t.Fatalf("主 rv 不应持有子 box 偏移（got %v,%v）", sx, sy)
+	}
+	subRV.SetBoxScrollOffset(scBox, 0, 50)
+	if _, sy := subRV.BoxScrollOffset(scBox); sy != 50 {
+		t.Fatalf("子 rv 写偏移后读回 sy=%v, want 50", sy)
+	}
+}
+
+// collectTestTexts 遍历渲染树收集所有 RenderText（测试辅助）。
+func collectTestTexts(o rendering.RenderObject, list *[]*rendering.RenderText) {
+	if o == nil {
+		return
+	}
+	if rt, ok := o.(*rendering.RenderText); ok {
+		*list = append(*list, rt)
+		return
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		collectTestTexts(c, list)
+	}
+}
+
+// TestIFrameSelectionHighlightCrossFrame 验证跨 iframe 文本选择的渲染
+// 高亮（s2）：选择锚在主文档、终点在 iframe 子文档（或反之）时，主 rv
+// 绘制输出主文档部分的高亮矩形、子 rv 绘制输出子文档部分的高亮矩形。
+func TestIFrameSelectionHighlightCrossFrame(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="s1" style="font-size:16px">sub-one-text</div></body></html>`)
+	src := `<html><body style="margin:0"><div id="m1" style="font-size:16px">main-one-text</div><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0"></iframe><div id="m2" style="font-size:16px">main-two-text</div></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 160)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	iframeEl := wv.MainFrame().Document().GetElementById("f1")
+	sub := page.IFrameFrame(iframeEl)
+	if sub == nil {
+		t.Fatal("iframe 子 Frame 未注册")
+	}
+	subRV := sub.RenderView()
+	// 收集主/子文档文本
+	var mainTexts, subTexts []*rendering.RenderText
+	collectTestTexts(rendering.RenderObject(rv), &mainTexts)
+	if subRV != nil {
+		collectTestTexts(rendering.RenderObject(subRV), &subTexts)
+	}
+	if len(mainTexts) == 0 || len(subTexts) == 0 {
+		t.Fatalf("主/子文档文本缺失（main=%d sub=%d）", len(mainTexts), len(subTexts))
+	}
+	// 选区：主文档第一个文本 → 子文档第一个文本（跨 iframe）
+	rendering.CurrentSelection = &rendering.Selection{
+		Start: rendering.TextPosition{RT: mainTexts[0], Offset: 0},
+		End:   rendering.TextPosition{RT: subTexts[0], Offset: subTexts[0].Length()},
+	}
+	defer func() { rendering.CurrentSelection = nil }()
+
+	// 走完整 Paint 入口（主 Frame 构建跨 Frame 全局文本列表）
+	if _, err := wv.Render(); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// 主 rv：应输出主文档部分的高亮（main-one-text 全选 + main-two-text 全选）
+	mainRects := rendering.SelectionRects(rv)
+	if len(mainRects) == 0 {
+		t.Fatal("跨 iframe 选区：主 rv 应输出主文档部分的高亮矩形")
+	}
+	// 子 rv：应输出子文档部分的高亮
+	subRects := rendering.SelectionRects(subRV)
+	if len(subRects) == 0 {
+		t.Fatal("跨 iframe 选区：子 rv 应输出子文档部分的高亮矩形")
+	}
+	// 命中验证：主文档文本应在选区中，子文档文本也应在选区中
+	if !rendering.IsOffsetInSelection(rv, mainTexts[0], 0) {
+		t.Fatal("主文档文本应被跨 Frame 选区覆盖")
+	}
+	if !rendering.IsOffsetInSelection(subRV, subTexts[0], 0) {
+		t.Fatal("子文档文本应被跨 Frame 选区覆盖")
+	}
+	// 反向选区（子 → 主）也应正确
+	rendering.CurrentSelection = &rendering.Selection{
+		Start: rendering.TextPosition{RT: subTexts[0], Offset: 0},
+		End:   rendering.TextPosition{RT: mainTexts[len(mainTexts)-1], Offset: 1},
+	}
+	if _, err := wv.Render(); err != nil {
+		t.Fatalf("Render(反向): %v", err)
+	}
+	if len(rendering.SelectionRects(rv)) == 0 || len(rendering.SelectionRects(subRV)) == 0 {
+		t.Fatal("反向跨 Frame 选区：主/子 rv 都应输出高亮")
+	}
+}
+
+
 func encDataURI(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
