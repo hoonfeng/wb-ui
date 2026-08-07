@@ -62,12 +62,7 @@ func (d Declaration) String() string {
 	var sb []byte
 	sb = append(sb, d.Name...)
 	sb = append(sb, ':', ' ')
-	for i, tok := range d.Value {
-		if i > 0 {
-			sb = append(sb, ' ')
-		}
-		sb = append(sb, serializeToken(tok)...)
-	}
+	sb = append(sb, valueStringOf(d.Value)...)
 	if d.Important {
 		sb = append(sb, " !important"...)
 	}
@@ -77,14 +72,59 @@ func (d Declaration) String() string {
 // ValueString renders the declaration value as a single space-separated string,
 // suitable for use by the resolver when looking up the raw textual form.
 func (d Declaration) ValueString() string {
+	return valueStringOf(d.Value)
+}
+
+// valueStringOf serializes a token slice into CSSOM-style text: whitespace and
+// comment tokens are dropped, the inter-token separator follows browser rules
+// (see appendValueSeparator) — rgb(0,128,0) round-trips as "rgb(0, 128, 0)".
+func valueStringOf(toks []Token) string {
 	var sb []byte
-	for i, tok := range d.Value {
-		if i > 0 {
-			sb = append(sb, ' ')
+	for i, tok := range toks {
+		if isValueSeparatorToken(tok) {
+			continue
+		}
+		if len(sb) > 0 {
+			appendValueSeparator(&sb, toks[i-1], tok)
 		}
 		sb = append(sb, serializeToken(tok)...)
 	}
 	return string(sb)
+}
+
+// isValueSeparatorToken reports whether the token is pure whitespace/comment —
+// tokenizer noise that must not appear in a serialized value (browsers drop it;
+// only the single inter-token separator remains).
+func isValueSeparatorToken(t Token) bool {
+	switch t.Type {
+	case TokenNonNewlineWhitespace, TokenNewline, TokenComment:
+		return true
+	}
+	return false
+}
+
+// appendValueSeparator writes the CSSOM component-value separator between two
+// consecutive tokens, matching how browsers serialize computed values:
+//   - before a comma → NO space:   rgb(0, 128, 0)
+//   - after a function token "rgb(" → NO space:  rgb(0, 128, 0)
+//   - after a comma → ONE space:                  rgb(0, 128, 0)
+//   - otherwise → ONE space:                      1px solid red
+// Without this, <style>background: rgb(0,128,0)</style> round-trips through the
+// token stream as "rgb( 0 , 128 , 0 )" — getComputedStyle().backgroundColor
+// differs from Chrome's "rgb(0, 128, 0)" and string comparisons fail.
+func appendValueSeparator(sb *[]byte, prev, cur Token) {
+	if cur.Type == TokenComma || cur.Type == TokenRightParenthesis {
+		// "0," / "0)" — no space before the comma or closing paren.
+		return
+	}
+	switch prev.Type {
+	case TokenFunction:
+		// "rgb(" already ends with "("; no separator.
+		return
+	default:
+		// "0, 128" / "1px solid red"
+		*sb = append(*sb, ' ')
+	}
 }
 
 // serializeToken renders a single token back to CSS text. This is a minimal helper

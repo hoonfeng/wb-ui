@@ -40,7 +40,7 @@ func TestCVarTokenization(t *testing.T) {
 		{
 			"font-family-list",
 			":root { --font-ui: 'Inter', system-ui, -apple-system, sans-serif; }",
-			map[string]string{"--font-ui": `"Inter" ,  system-ui ,  -apple-system ,  sans-serif`},
+			map[string]string{"--font-ui": `"Inter", system-ui, -apple-system, sans-serif`},
 		},
 	}
 

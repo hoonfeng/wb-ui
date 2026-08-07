@@ -156,12 +156,10 @@ var verifyCases = []verifyCase{
 				var ok = (typeof s.color === 'string') && (s.color === '#ff0000' || s.color.indexOf('255') >= 0);
 				ok = ok && (s.fontSize === '20px');
 				ok = ok && (s.fontWeight === 'bold' || s.fontWeight === '700');
-				// backgroundColor 格式差异（引擎 rgb( 0 , 128 , 0 ) vs 浏览器 rgb(0, 128, 0)）
-				// —— 只校验 RGB 数值。
+				// 颜色序列化与浏览器一致：rgb(0, 128, 0)（逗号后一空格，无多余空格）
 				var bg = s.backgroundColor || '';
-				var nums = bg.replace(/[^\d,]/g, '');
-				ok = ok && nums.indexOf('0,128,0') >= 0;
-				window.__result = ok ? 'PASS' : 'FAIL: color=' + s.color + ' fs=' + s.fontSize + ' fw=' + s.fontWeight + ' bg=' + bg;
+				ok = ok && bg === 'rgb(0, 128, 0)';
+				window.__result = ok ? 'PASS' : 'FAIL: color=' + s.color + ' fs=' + s.fontSize + ' fw=' + s.fontWeight + ' bg=[' + bg + ']';
 				} catch(e) { window.__result = 'FAIL: ' + (e && e.message || e); }
 			</script>
 		</script></body></html>`,
