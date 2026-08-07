@@ -23,8 +23,21 @@ func RegisterFetch(rt *jsc.Interpreter) {
 
 		// Check bridge routes first (GUI-mode API interception).
 		// If the URL matches a registered Go handler, call it directly
-		// instead of making an HTTP request.
-		if route := bridge.Match(url); route != nil {
+		// instead of making an HTTP request. Method-aware matching: a route
+		// registered with a specific method only intercepts that method.
+		route := bridge.MatchMethod("", url)
+		if route == nil {
+			method := "GET"
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					if m, ok := o.GetByKey("method"); ok && !m.IsUndefined() && !m.IsNull() {
+						method = jscToString(m)
+					}
+				}
+			}
+			route = bridge.MatchMethod(method, url)
+		}
+		if route != nil {
 			return bridgeFetch(in, args, url, route)
 		}
 
@@ -291,17 +304,15 @@ func xhrFireReadyStateChange(in *jsc.Interpreter, obj *jsc.JSObject) {
 
 // bridgeFetch handles a fetch() call that matched a registered bridge route.
 // It calls the Go handler directly and returns a synthetic Response.
+// handler args: [url, options] — the full fetch arguments, so Go-side handlers
+// can inspect method/path/query/body/headers (see bridge.RegisterHTTP).
 func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bridge.Route) jsc.JSValue {
-	// Build handler args: [body, method, headers, url]
+	// Build handler args: [url, options]
 	var handlerArgs []jsc.JSValue
-	if len(args) >= 2 && args[1].IsObject() {
-		o := args[1].AsObject()
-		if o != nil {
-			// Pass the fetch options object as the first argument
-			handlerArgs = append(handlerArgs, args[1])
-		}
-	}
-	if len(handlerArgs) == 0 {
+	handlerArgs = append(handlerArgs, jsc.StringValue(url))
+	if len(args) >= 2 {
+		handlerArgs = append(handlerArgs, args[1])
+	} else {
 		handlerArgs = append(handlerArgs, jsc.Null())
 	}
 
@@ -312,31 +323,42 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 	}
 
 	// Build a synthetic Response.
+	status := 200
 	var bodyText string
-	if result.IsString() {
-		bodyText = result.ToString()
-	} else if result.IsUndefined() || result.IsNull() {
-		bodyText = "null"
-	} else {
-		// Try to convert to string representation
-		if result.IsObject() {
-			obj := result.AsObject()
-			if obj != nil {
-				// Use the object's toString or JSON representation
-				bodyText = fmt.Sprintf("%v", result.Export())
+	if result.IsObject() {
+		obj := result.AsObject()
+		if obj != nil {
+			// RegisterHTTP handlers return {"status": N, "body": "..."}.
+			if st, ok := obj.GetByKey("status"); ok && st.IsNumber() {
+				status = int(st.ToNumber())
+			}
+			if b, ok := obj.GetByKey("body"); ok && b.IsString() {
+				bodyText = b.ToString()
+			} else if b, ok := obj.GetByKey("body"); ok && !b.IsUndefined() && !b.IsNull() {
+				bodyText = fmt.Sprintf("%v", b.Export())
 			} else {
 				bodyText = fmt.Sprintf("%v", result.Export())
 			}
 		} else {
 			bodyText = fmt.Sprintf("%v", result.Export())
 		}
+	} else if result.IsString() {
+		bodyText = result.ToString()
+	} else if result.IsUndefined() || result.IsNull() {
+		bodyText = "null"
+	} else {
+		bodyText = fmt.Sprintf("%v", result.Export())
 	}
 
+	statusText := "OK"
+	if status >= 400 {
+		statusText = "Error"
+	}
 	respObj := jsc.NewObject(in.ObjectPrototype())
 	respObj.SetClassName("Response")
-	respObj.Set("status", jsc.NumberValue(200))
-	respObj.Set("ok", jsc.BooleanValue(true))
-	respObj.Set("statusText", jsc.StringValue("OK (bridge)"))
+	respObj.Set("status", jsc.NumberValue(float64(status)))
+	respObj.Set("ok", jsc.BooleanValue(status >= 200 && status < 300))
+	respObj.Set("statusText", jsc.StringValue(statusText))
 	respObj.Set("url", jsc.StringValue(url))
 
 	textFn := jsc.NewNativeFunction("text", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
@@ -345,7 +367,7 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 	respObj.Set("text", jsc.FunctionValue(textFn))
 
 	jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-	val, err := in2.RunJS(bodyText)
+		val, err := in2.RunJS("(" + bodyText + ")")
 		if err != nil {
 			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
 		}
