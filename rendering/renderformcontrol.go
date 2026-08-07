@@ -1146,11 +1146,10 @@ func paintSelectText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 		padX = 4
 	}
 
-	// Right margin for the dropdown arrow. Reserve ~h*0.6 + 8px for the arrow area.
-	arrowReserve := h*0.6 + 8
-	if arrowReserve > 24 {
-		arrowReserve = 24
-	}
+	// Right margin for the dropdown arrow. The chevron is a fixed 8px wide,
+	// centered ~9.5px from the right edge → reserve ~16px so text clips
+	// before the arrow (matches browser layout).
+	arrowReserve := 16.0
 
 	textColor := applyOpacity(toGraphicsColor(st.Color), op)
 	baselineY := y + (h-textHeight)/2 + ascent
@@ -1415,25 +1414,36 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	info.canvas.Restore()
 }
 
-// paintSelectArrow draws the downward-pointing arrow indicator on the right
+// paintSelectArrow draws the browser-standard dropdown chevron on the right
+// side of a <select> element. It mirrors the native menu-list arrow that
+// Chromium/WebKit rasterize from an inline SVG path (kHTMLSelectArrow):
+// a downward V-shaped stroke (M 3 4.5 L 6 7.5 L 9 4.5 in a 12x12 viewBox)
+// with round caps/joins — NOT a filled triangle. Geometry measured against
+// Edge (headless, 20px/32px selects): V 顶宽 ~6px、总高 ~7px（含 stroke），
+// 垂直居中，中心距右缘 ~9.5px，stroke ≈2px round cap/join，颜色 = 文字色。
 func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, op float64) {
-	c := info.canvas
-	// Arrow area: a region on the right side.
-	arrowW := h * 0.6
-	if arrowW > 16 {
-		arrowW = 16
+	if info == nil || info.canvas == nil {
+		return
 	}
-	ax := x + w - arrowW - 4
-	ay := y + h/2
-	half := arrowW / 2
+	c := info.canvas
+	const strokeW = 2.0
+	// Horizontal center: ~9.5px from the right edge of the border box.
+	cx := x + w - 9.5
+	cy := y + h/2
 	// Use element's text color for arrow, fallback to default.
 	col := toGraphicsColor(st.Color)
 	if col.A == 0 {
 		col = FormControlColors.SelectArrow
 	}
 	col = applyOpacity(col, op)
-	// Downward-pointing triangle (filled).
-	c.FillTriangle(ax, ay-half, ax+half, ay+half, ax-half, ay+half, col)
+	// SVG chevron path (V-shaped polyline): top-left → bottom-tip → top-right.
+	// Points fitted to the Edge reference raster (see file header).
+	pts := []graphics.Point{
+		{X: cx - 3, Y: cy - 2},
+		{X: cx, Y: cy + 3},
+		{X: cx + 3, Y: cy - 2},
+	}
+	c.StrokePath(pts, strokeW, col, "round", "round")
 }
 
 // --- helpers ---

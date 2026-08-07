@@ -158,7 +158,7 @@ button[disabled], input[disabled] {
 select {
 	display: inline-block;
 	padding: 1px;
-	border: 1px solid #c0c0c0;
+	border: 1px solid #767676;
 	background-color: #ffffff;
 	box-sizing: border-box;
 }

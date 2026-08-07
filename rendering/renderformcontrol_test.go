@@ -237,8 +237,18 @@ func TestPaintFormControl_Select(t *testing.T) {
 	if !handled {
 		t.Fatal("PaintFormControl(select) = false, want true (select is a replaced element)")
 	}
-	// The arrow is on the right side near x=106; check that region has non-transparent pixels.
-	if canvas.PixelAt(106, 8).A == 0 {
+	// The chevron is a fixed 8x7 V-stroke centered ~9.5px from the right edge:
+	// box w=120 → cx=110.5, cy=8. The V-tip and the two upper arms pass through
+	// x=110 (tip region) at y=8; check that region has non-transparent pixels.
+	visible := false
+	for yy := 4; yy <= 12 && !visible; yy++ {
+		for xx := 106; xx <= 115 && !visible; xx++ {
+			if canvas.PixelAt(xx, yy).A > 0 {
+				visible = true
+			}
+		}
+	}
+	if !visible {
 		t.Fatal("select arrow painted no visible pixels")
 	}
 }
