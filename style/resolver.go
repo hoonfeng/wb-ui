@@ -2142,13 +2142,24 @@ func (r *Resolver) resolveVarInTokens(cs *ComputedStyle, tokens []css.Token, see
 	for i := 0; i < len(tokens); i++ {
 		t := tokens[i]
 		if t.Type == css.TokenFunction && strings.EqualFold(t.Value, "var") {
-			// Look for the closing right parenthesis.
+			// Find the matching closing right parenthesis. The tokenizer
+			// does NOT emit a TokenLeftParenthesis for function calls — the
+			// opening paren is implied by TokenFunction (consumeIdentLikeToken
+			// consumes the '(' and returns a single TokenFunction). Nested
+			// functions (e.g. var(--a, var(--b)) or var(--a, rgb(1,2,3)))
+			// therefore need depth counted per TokenFunction, not per
+			// TokenLeftParenthesis: with the old depth-0 logic the FIRST
+			// ')' — the inner var()'s closing paren — broke the scan, the
+			// fallback kept a dangling ')' in its tokens, and the resolved
+			// value gained a trailing TokenRightParenthesis that made
+			// parseBorderShorthand/parseColor fail (border-bottom came out
+			// transparent for `var(--border-subtle, var(--border-color))`).
 			depth := 0
 			j := i + 1
 			var args []css.Token
 			for ; j < len(tokens); j++ {
 				tj := tokens[j]
-				if tj.Type == css.TokenLeftParenthesis {
+				if tj.Type == css.TokenFunction {
 					depth++
 				} else if tj.Type == css.TokenRightParenthesis {
 					if depth == 0 {

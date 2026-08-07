@@ -103,14 +103,17 @@ input[type="checkbox"], input[type="radio"] {
 	vertical-align: baseline;
 }
 
-/* Range input renders as a slider. */
+/* Range input renders as a slider. The background stays TRANSPARENT —
+   browsers give appearance-based controls (range/checkbox/radio) a
+   transparent background (the track/thumb are drawn by the theme, and a
+   background-color would paint an opaque bar behind the slider). */
 input[type="range"] {
 	display: inline-block;
 	width: 9.7em;
 	height: 1.2em;
 	padding: 0;
 	border: none;
-	background-color: #ffffff;
+	background-color: transparent;
 	color: #101010;
 	overflow: hidden;
 }
