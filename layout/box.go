@@ -171,6 +171,16 @@ func (b *ElementBox) EstablishesTableFormattingContext() bool {
 
 func (b *ElementBox) IsInlineLevel() bool {
 	if b.style == nil { return false }
+	// Out-of-flow (absolute/fixed) elements are blockified per CSS — they
+	// never join an inline run / anonymous block wrapper. 渲染树的
+	// isInlineLevel 已有此检查（rendertreebuilder.go）；layout 侧漏掉会
+	// 导致两树结构错位：position:fixed 的 inline 元素（如 iframe，默认
+	// display:inline）在 layout 树被包进匿名 wrapper、渲染树直接挂
+	// parent → syncChildren 配对失败 → 元素拿不到布局几何、不参与
+	// hit-test（fixed iframe 不可点击）。
+	if b.IsAbsolutelyPositioned() {
+		return false
+	}
 	// Flex items are blockified (CSS-DISPLAY-3 §2.7): a span inside a flex
 	// container behaves as a block-level flex item even though its computed
 	// display stays inline. Without this, getComputedStyle-equivalent

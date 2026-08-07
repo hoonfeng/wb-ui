@@ -180,6 +180,7 @@ type Host struct {
 	// mirroring browser wheel behavior. Scrollbar thumb drags stay 1:1 and
 	// bypass this entirely (they write BoxScrollOffset directly).
 	smoothBox    *rendering.RenderBox
+	smoothRV     *rendering.RenderView // 拥有 smoothBox 偏移表的 RenderView（iframe 子文档时是子 Frame 视图）
 	smoothCurX   float64
 	smoothCurY   float64
 	smoothTarX   float64
@@ -922,7 +923,14 @@ func (h *Host) Run() {
 			// SetBoxScrollOffset(旧box) 写入的偏移在新树上读不到 →
 			// 滚动条 thumb 跟着动但内容不滚。必须每帧按 DOM 节点
 			// 重新解析当前树中的 box 再写入。
-			smoothBox := rv.FindRenderBoxForNode(h.smoothBox.Node())
+			// ★ iframe 子文档滚动：偏移表在子 Frame 的 RenderView 里
+			// （smoothRV，滚轮命中子 Frame 滚动容器时设置）。主 rv 的
+			// FindRenderBoxForNode 查不到子文档 box——必须用子 rv。
+			srv := h.smoothRV
+			if srv == nil {
+				srv = rv
+			}
+			smoothBox := srv.FindRenderBoxForNode(h.smoothBox.Node())
 			if smoothBox == nil {
 				// 容器被移除/不可达：放弃平滑滚动。
 				h.smoothActive = false
@@ -938,7 +946,7 @@ func (h *Host) Run() {
 						h.smoothCurX, h.smoothCurY = h.smoothTarX, h.smoothTarY
 						h.smoothActive = false
 					}
-					rv.SetBoxScrollOffset(smoothBox, h.smoothCurX, h.smoothCurY)
+					srv.SetBoxScrollOffset(smoothBox, h.smoothCurX, h.smoothCurY)
 					// 更新持有的 box 引用，避免每帧重复查找。
 					h.smoothBox = smoothBox
 					// ★ 派发 scroll DOM 事件，让前端 @scroll 监听器（Vue
@@ -1668,7 +1676,14 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 			cssX := h.cursorX / csX
 			cssY := h.cursorY/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
-			if scrollBox := rv.HitTestScrollContainer(cssX, cssY); scrollBox != nil {
+			// ★ ScrollTargetAt 解析滚动容器 + 其所属 RenderView：iframe 内
+			// 滚动时 box 属于子 Frame，偏移表在子 RenderView（偏移读写与
+			// scrollbar metrics 必须用子 rv——主 rv 查不到子 box 的偏移，
+			// 写入也不生效，因为子文档绘制读自己的偏移表）。
+			tgt := rv.ScrollTargetAt(cssX, cssY)
+			if tgt.Box != nil {
+				scrollBox := tgt.Box
+				srv := tgt.RV
 				if os.Getenv("WB_SCROLL_DEBUG") != "" {
 					boxName := "?"
 					if n := scrollBox.Node(); n != nil {
@@ -1691,7 +1706,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						fmt.Fprintf(os.Stderr, "[scroll] %s\n", v.ToString())
 					}
 				}
-				sx, sy := rv.BoxScrollOffset(scrollBox)
+				sx, sy := srv.BoxScrollOffset(scrollBox)
 				deltaX := int(ev.ScrollX * 40)  // positive = right → sx increases
 				deltaY := -int(ev.ScrollY * 40) // positive = up → sy decreases
 				newSx := int(sx) + deltaX
@@ -1707,7 +1722,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// viewport, not the padding box) so wheel scrolling reaches
 				// the same max as the thumb — the painter's max is
 				// totalH - viewH with viewH = padding-box minus padding.
-				if vm := rendering.VerticalScrollbarMetrics(rv, scrollBox); vm.OK {
+				if vm := rendering.VerticalScrollbarMetrics(srv, scrollBox); vm.OK {
 					maxY := int(vm.MaxScroll)
 					if newSy > maxY {
 						newSy = maxY
@@ -1715,7 +1730,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				} else if newSy > 0 {
 					newSy = 0
 				}
-				if hm := rendering.HorizontalScrollbarMetrics(rv, scrollBox); hm.OK {
+				if hm := rendering.HorizontalScrollbarMetrics(srv, scrollBox); hm.OK {
 					maxX := int(hm.MaxScroll)
 					if newSx > maxX {
 						newSx = maxX
@@ -1729,6 +1744,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// the current interpolated position.
 				if !h.smoothActive || h.smoothBox != scrollBox {
 					h.smoothBox = scrollBox
+					h.smoothRV = srv
 					h.smoothCurX, h.smoothCurY = sx, sy
 				}
 				h.smoothTarX = float64(newSx)
@@ -2395,9 +2411,13 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 					cssX := h.cursorX / csX
 					cssY := h.cursorY / csY
-					scrollBox := rv.HitTestScrollContainer(cssX, cssY)
-					if scrollBox != nil {
-						sx, sy := rv.BoxScrollOffset(scrollBox)
+					// ★ 键盘滚动同样路由到子 Frame：iframe 内滚动容器属于
+					// 子 RenderView，偏移读写用子 rv（同滚轮路径）。
+					tgt := rv.ScrollTargetAt(cssX, cssY)
+					if tgt.Box != nil {
+						scrollBox := tgt.Box
+						srv := tgt.RV
+						sx, sy := srv.BoxScrollOffset(scrollBox)
 						pb := scrollBox.PaddingBoxRect()
 						pageH := pb.Height
 						delta := 0.0
@@ -2418,25 +2438,25 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						if delta != 0 {
 							if ev.Key == int(glfw.KeyLeft) || ev.Key == int(glfw.KeyRight) {
 								newSx := sx + delta
-								cw, _ := rv.BoxContentSize(scrollBox)
+								cw, _ := srv.BoxContentSize(scrollBox)
 								if newSx < 0 {
 									newSx = 0
 								}
 								if maxSx := cw - pb.Width; newSx > maxSx {
 									newSx = maxSx
 								}
-								rv.SetBoxScrollOffset(scrollBox, newSx, sy)
+								srv.SetBoxScrollOffset(scrollBox, newSx, sy)
 								h.dispatchScrollEvent(scrollBox)
 							} else {
 								newSy := sy + delta
-								_, ch := rv.BoxContentSize(scrollBox)
+								_, ch := srv.BoxContentSize(scrollBox)
 								if newSy < 0 {
 									newSy = 0
 								}
 								if maxSy := ch - pb.Height; newSy > maxSy {
 									newSy = maxSy
 								}
-								rv.SetBoxScrollOffset(scrollBox, sx, newSy)
+								srv.SetBoxScrollOffset(scrollBox, sx, newSy)
 								h.dispatchScrollEvent(scrollBox)
 							}
 							break

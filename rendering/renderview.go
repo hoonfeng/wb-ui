@@ -282,6 +282,34 @@ func (v *RenderView) HitTestScrollContainer(x, y float64) *RenderBox {
 	return v.FindScrollContainerForNode(el)
 }
 
+// ScrollTarget 是某点下滚动容器的解析结果。Box 可能属于 iframe 子文档
+// （滚动容器在子渲染树里），其偏移表存在子 RenderView 里——子文档绘制
+// 时读的是子 RenderView.BoxScrollOffset。滚动事件处理必须用 RV（拥有
+// 偏移表的 RenderView）读写偏移，否则主 rv 查不到/写入不生效。
+type ScrollTarget struct {
+	RV  *RenderView
+	Box *RenderBox
+}
+
+// ScrollTargetAt 解析 (x, y) 下的滚动容器及其所属 RenderView。滚轮/键盘
+// 滚动写入偏移时用 tgt.RV（iframe 内滚动 = 子 Frame 的 RenderView）而非
+// 主视图——这是「app 层滚动事件路由到子 Frame」的接入点。
+func (v *RenderView) ScrollTargetAt(x, y float64) ScrollTarget {
+	box := v.HitTestScrollContainer(x, y)
+	if box == nil {
+		return ScrollTarget{}
+	}
+	rv := v
+	if n := box.Node(); n != nil {
+		if od := n.OwnerDocument(); od != nil && od != v.Document() {
+			if sub := IFrameContainingFor(od); sub != nil && sub.RenderView() != nil {
+				rv = sub.RenderView()
+			}
+		}
+	}
+	return ScrollTarget{RV: rv, Box: box}
+}
+
 // BoxContentSize returns the content width and height of a scrollable box,
 // computed as the bounding box of all render children relative to the
 // padding box. Returns (0,0) if no children.

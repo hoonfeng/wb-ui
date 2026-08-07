@@ -150,6 +150,51 @@ func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom
 		}
 	}
 descend:
+	// ★ iframe 下钻（fixed 定位 iframe）：fixed 子树的 iframe 内容也应
+	// 递归到子 Frame hit-test——fixed iframe（如固定悬浮的嵌入面板）
+	// 点击其内容应命中子文档元素。order 继承 iframe 所在 fixed 层，
+	// 子文档元素与 iframe 框同层竞争（面积小者赢）。
+	if ok && ow > 0 && oh > 0 {
+		if el, isEl := o.Node().(*dom.Element); isEl && el.LocalName() == "iframe" {
+			if sub := IFrameLookupFor(el); sub != nil && sub.RenderView() != nil {
+				if box := asRenderBox(o); box != nil {
+					if st := box.Style(); st != nil {
+						pL := lengthValue(st.PaddingLeft)
+						pT := lengthValue(st.PaddingTop)
+						pR := lengthValue(st.PaddingRight)
+						pB := lengthValue(st.PaddingBottom)
+						cx := x - (ox + pL)
+						cy := y - (oy + pT)
+						if cx >= 0 && cy >= 0 && cx < ow-pL-pR && cy < oh-pT-pB {
+							if sub.NeedsLayout() {
+								sub.LayoutNow()
+							}
+							if child := HitTest(sub.RenderView(), cx, cy, attrName); child != nil {
+								area := (ow - pL - pR) * (oh - pT - pB)
+								// ★ 下钻候选直接优先：点击点在 iframe 内容框内，
+								// 子文档元素比 iframe 框本身更深（WebKit
+								// HitTestResult 递归进子 Frame）。同层
+								// （order == bestOrder）时无条件覆盖——内容框
+								// 面积与 iframe 元素面积相等（border 0 时），
+								// 用 area < bestArea 严格比较会漏掉覆盖（fixed
+								// iframe 点击永远命中 iframe 框而非子文档元素）。
+								if *best == nil || order > *bestOrder || order == *bestOrder {
+									*best = child
+									*bestArea = area
+									*bestOrder = order
+								}
+								// 记录下钻信息：滚动容器查找（HitTestScrollContainer）
+								// 需要子坐标与子 Frame 视图。
+								lastDive.sub = sub
+								lastDive.x, lastDive.y = cx, cy
+								lastDive.ok = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	// Descend into children (scroll-offset aware like the normal walk).
 	childX, childY := x, y
 	if rv != nil {

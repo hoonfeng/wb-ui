@@ -172,6 +172,24 @@ func HitTestText(rv *RenderView, x, y float64) TextPosition {
 	if rv == nil {
 		return TextPosition{}
 	}
+	// ★ iframe 下钻：点落在 iframe 内容框内时，HitTest 会递归进子 Frame
+	// 并记录 lastDive（子坐标 + 子视图）。子文档的 RenderText 不在主 rv
+	// 的文本列表里——必须用子坐标递归子文档的 HitTestText（浏览器
+	// 文本选择跨 iframe 的语义：选择锚/终点落在子文档文本上）。
+	el := HitTest(rv, x, y, "")
+	if el != nil {
+		if od := el.OwnerDocument(); od != nil && od != rv.Document() {
+			if lastDive.ok && lastDive.sub != nil && lastDive.sub.Document() == od &&
+				lastDive.sub.RenderView() != nil {
+				sub := lastDive.sub
+				lastDive.ok = false // 一次性消费
+				if sub.NeedsLayout() {
+					sub.LayoutNow()
+				}
+				return HitTestText(sub.RenderView(), lastDive.x, lastDive.y)
+			}
+		}
+	}
 	var best TextPosition
 	var bestDist float64 = -1
 	var list []*RenderText

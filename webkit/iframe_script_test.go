@@ -276,6 +276,123 @@ func TestIFrameScrollContainer(t *testing.T) {
 	}
 }
 
+// TestIFrameScrollTargetRoute 验证滚动事件路由到子 Frame（s1）：
+// ScrollTargetAt 应返回子文档滚动容器 + **子 RenderView**（偏移表属主）。
+// 主 rv.BoxScrollOffset(子box) 查不到，滚轮必须写子 rv 才生效。
+func TestIFrameScrollTargetRoute(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="scrollable" style="position:absolute;left:5px;top:5px;width:150px;height:60px;overflow:auto;background:#eee"><div style="width:140px;height:200px"></div></div></body></html>`)
+	src := `<html><body style="margin:0"><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 140)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	// iframe 内点 (50,30)：目标应为子文档 #scrollable + 子 RenderView
+	tgt := rv.ScrollTargetAt(50, 30)
+	if tgt.Box == nil {
+		t.Fatal("iframe 内滚动目标未命中")
+	}
+	if el, isEl := tgt.Box.Node().(*dom.Element); !isEl || el.GetId() != "scrollable" {
+		t.Fatalf("目标 box 应为子文档 #scrollable")
+	}
+	if tgt.RV == rv {
+		t.Fatal("iframe 内滚动目标 RV 应为子 RenderView（非主 rv）——偏移表在子 rv")
+	}
+	// 子 rv 的偏移读写生效：写偏移后子 rv 能读回（主 rv 读不到）
+	subRV := tgt.RV
+	subRV.SetBoxScrollOffset(tgt.Box, 0, 30)
+	sx, sy := subRV.BoxScrollOffset(tgt.Box)
+	if sy != 30 {
+		t.Fatalf("子 rv 读回偏移 sy=%v, want 30", sy)
+	}
+	if sx != 0 {
+		t.Fatalf("sx=%v", sx)
+	}
+	// 主 rv 查不到子 box 的偏移（证明必须用子 rv 路由）
+	msx, msy := rv.BoxScrollOffset(tgt.Box)
+	if msx != 0 || msy != 0 {
+		t.Fatalf("主 rv 不应持有子 box 偏移（got %v,%v）", msx, msy)
+	}
+
+	// iframe 外点：目标 RV 是主 rv（不误路由）
+	tgt2 := rv.ScrollTargetAt(230, 130)
+	if tgt2.Box != nil && tgt2.RV != rv {
+		t.Fatalf("iframe 外点不应路由到子 rv")
+	}
+}
+
+// TestIFrameFixedHitTestDive 验证 fixed 定位 iframe 下钻（s2）：
+// 主文档 position:fixed 的 iframe（悬浮嵌入面板），点击内容应命中
+// 子文档元素（hitTestFixedInner 下钻路径）。
+func TestIFrameFixedHitTestDive(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="fbtn" style="position:absolute;left:10px;top:10px;width:80px;height:30px;background:#07c"></div></body></html>`)
+	src := `<html><body style="margin:0"><div id="page-content" style="width:600px;height:400px;background:#ccc">main</div><iframe id="f1" src="data:text/html,` + child + `" style="position:fixed;left:10px;top:10px;width:200px;height:100px;border:0"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(640, 480)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	// 点击 fixed iframe 内容 (50,30)（子文档坐标 50,30，落在 #fbtn 10,10 80x30 内）
+	el := rendering.HitTest(rv, 50, 30, "")
+	if el == nil {
+		t.Fatal("fixed iframe 内 hit-test 无命中")
+	}
+	if el.GetId() != "fbtn" {
+		t.Fatalf("fixed iframe 下钻应命中子文档 #fbtn，got id=%q tag=%s", el.GetId(), el.TagName())
+	}
+	// 点击 fixed iframe 外（主文档内容区 (300,200)）→ 主文档元素，不误入子文档
+	el2 := rendering.HitTest(rv, 300, 200, "")
+	if el2 == nil {
+		t.Fatal("主文档 hit-test 无命中")
+	}
+	if el2.OwnerDocument() != wv.MainFrame().Document() {
+		t.Fatalf("fixed iframe 外点击应命中主文档元素（got 子文档元素 id=%q）", el2.GetId())
+	}
+}
+
+// TestIFrameTextSelectionDive 验证文本选择下钻（s3）：点击 iframe 内
+// 子文档文本，HitTestText 应返回子文档的 RenderText 位置（而非无效）。
+func TestIFrameTextSelectionDive(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="txt" style="position:absolute;left:5px;top:5px;font-size:16px">hello-iframe-text</div></body></html>`)
+	src := `<html><body style="margin:0"><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 140)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	// 点击子文档文本区域（iframe (40,20) → 子文档 (40,20)，落在
+	// #txt(5,5) 起的文本行内）
+	pos := rendering.HitTestText(rv, 40, 20)
+	if !pos.IsValid() {
+		t.Fatal("iframe 内文本 hit-test 无命中（应下钻子文档文本）")
+	}
+	// 命中的 RenderText 属于子文档（其 OwnerDocument 非主文档）
+	if pos.RT == nil {
+		t.Fatal("pos.RT nil")
+	}
+	subDoc := page.IFrameFrame(wv.MainFrame().Document().GetElementById("f1")).Document()
+	if od := pos.RT.Node().OwnerDocument(); od != subDoc {
+		t.Fatalf("命中的 RenderText 应属于子文档")
+	}
+	// 点击 iframe 外空白（无文本处）→ 无效位置（不误命中）
+	pos2 := rendering.HitTestText(rv, 230, 130)
+	if pos2.IsValid() {
+		t.Fatalf("iframe 外空白处不应命中文本（got RT=%p）", pos2.RT)
+	}
+}
+
 // encDataURI 把子文档 HTML 转成安全 data URI：除 alphanumeric/空白外全部
 // URL 编码。iframe src 属性值由双引号界定，HTML 里 `"marker"` 的未编码
 // 双引号会截断属性值（HTML 规范行为）——之前的 ReplaceAll 只编码 <> 漏掉
