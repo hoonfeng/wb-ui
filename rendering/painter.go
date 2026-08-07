@@ -1219,6 +1219,58 @@ func colorsEqual(a, b style.Color) bool {
 	return a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A
 }
 
+// PaintIFrame paints the child Frame's document (if any) into an <iframe>
+// element's content box, mirroring RenderIFrame::paint in WebKit. The child
+// frame's RenderView is laid out and painted with a translate to the content
+// box origin and a clip to its size, so the embedded document clips and
+// (when it has its own scroll offsets) scrolls independently of the parent.
+// Returns true when a child document was painted, false otherwise (the caller
+// then falls through to the default box painting).
+func PaintIFrame(box *RenderBox, info *PaintInfo) bool {
+	if box == nil || info == nil || info.canvas == nil {
+		return false
+	}
+	if !box.IsVisible() {
+		return false
+	}
+	el, ok := box.Node().(*dom.Element)
+	if !ok {
+		return false
+	}
+	sub := IFrameLookupFor(el)
+	if sub == nil || sub.RenderView() == nil {
+		return false
+	}
+	st := box.Style()
+	if st == nil {
+		return false
+	}
+	// Content box origin/size (border-box minus padding), mirroring the
+	// coordinate math in PaintImage.
+	pL := lengthValue(st.PaddingLeft)
+	pT := lengthValue(st.PaddingTop)
+	pR := lengthValue(st.PaddingRight)
+	pB := lengthValue(st.PaddingBottom)
+	x := box.X() + pL
+	y := box.Y() + pT
+	w := box.Width() - pL - pR
+	h := box.Height() - pT - pB
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	// Child document layout: the parent's layout pass does not lay out
+	// child frames (they are independent FrameViews); ensure the child
+	// viewport matches the content box and is laid out before painting.
+	sub.LayoutNow()
+	canvas := info.canvas
+	canvas.Save()
+	canvas.Translate(x, y)
+	canvas.Clip(graphics.Rect{X: 0, Y: 0, Width: w, Height: h})
+	Paint(sub.RenderView(), canvas, Rect{X: 0, Y: 0, Width: w, Height: h})
+	canvas.Restore()
+	return true
+}
+
 // PaintImage paints a decoded image for a replaced-element RenderBox (e.g.
 // <img>). The image is drawn at the element's content-box position and size,
 // scaled to fill the box. If the box has no decoded image data attached (e.g.

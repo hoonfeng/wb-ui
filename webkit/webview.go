@@ -20,6 +20,7 @@ import (
 	"wb-ui/page"
 	"wb-ui/platform/graphics"
 	"wb-ui/rendering"
+	"wb-ui/style"
 )
 
 const (
@@ -110,6 +111,15 @@ func NewWebView() *WebView {
 			if e != nil { return "", fmt.Errorf("load script %q: %w", src, e) }
 			return string(d), nil
 		}
+	}
+	// ★ iframe 子文档：渲染侧（paint/hit-test）经 IFrameLookup 取回
+	// iframe 元素的子 Frame 渲染视图（避免 rendering→page 包循环依赖）。
+	rendering.IFrameLookup = func(el *dom.Element) rendering.IFrameSubdocument {
+		f := page.IFrameFrame(el)
+		if f == nil {
+			return nil
+		}
+		return f
 	}
 	return wv
 }
@@ -287,7 +297,47 @@ func (wv *WebView) LoadHTML(src string) error {
 		fr.ExecuteScripts()
 		fr.RebuildRenderTree()
 	}
+	// iframe 子文档：主文档加载完成后，为带 src 的 <iframe> 创建子 Frame
+	// 并加载（WebKit: FrameLoader 在解析到 iframe 元素时创建子 Frame）。
+	// 子 Frame 无 ScriptEngine → 子文档脚本不执行（静默渲染）；布局与
+	// 绘制见 syncIFrameSizes / PaintIFrame。
+	wv.loadIFrameDocuments()
 	return nil
+}
+
+// loadIFrameDocuments 扫描主文档中的 <iframe> 元素，为每个有 src 且尚未
+// 注册子 Frame 的元素创建子 Frame 并加载子文档（fetchURL 支持 http/https/
+// file/data）。相对路径 src 先跳过（无父文档 URL 基准，与 WebKit 的
+// completeURL 行为有差距，留待后续）。
+func (wv *WebView) loadIFrameDocuments() {
+	doc := wv.mainFrame.Document()
+	if doc == nil {
+		return
+	}
+	page.PruneIFrames(doc)
+	var walk func(n dom.Node)
+	walk = func(n dom.Node) {
+		if el, ok := n.(*dom.Element); ok && el.LocalName() == "iframe" {
+			src := el.GetAttribute("src")
+			if src != "" && page.IFrameFrame(el) == nil {
+				data, err := fetchURL(src)
+				if err == nil {
+					f := page.NewFrame(wv.page)
+					// 默认 300x150（iframe 替换元素默认尺寸），
+					// EnsureLayout 后由 syncIFrameSizes 校正。
+					f.View().SetSize(300, 150)
+					if ferr := f.LoadHTML(data); ferr == nil {
+						f.RebuildRenderTree()
+						page.RegisterIFrame(el, f)
+					}
+				}
+			}
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(doc)
 }
 
 func (wv *WebView) LoadURL(url string) error {
@@ -577,6 +627,50 @@ func (wv *WebView) RenderView() *rendering.RenderView {
 func (wv *WebView) EnsureLayout() {
 	view := wv.page.MainFrame().View()
 	if view != nil && view.NeedsLayout() { view.Layout() }
+	wv.syncIFrameSizes()
+}
+
+// syncIFrameSizes 把主文档 iframe 元素的内容框尺寸同步到子 Frame，
+// 尺寸变化时触发子文档重布局（iframe 是 replaced element，子文档内容
+// 在其中渲染；paint 用内容框位置 + clip 绘制子 Frame 的 RenderView）。
+func (wv *WebView) syncIFrameSizes() {
+	rv := wv.RenderView()
+	if rv == nil {
+		return
+	}
+	page.ForEachIFrame(func(el *dom.Element, f *page.Frame) {
+		if f == nil {
+			return
+		}
+		box := rv.FindRenderBoxForNode(el)
+		if box == nil {
+			return
+		}
+		st := box.Style()
+		w, h := box.Width(), box.Height()
+		if st != nil {
+			// 内容框 = border-box 减 padding 与 border（iframe 子文档视口）。
+			w -= iframePadLen(st.PaddingLeft) + iframePadLen(st.PaddingRight) +
+				iframePadLen(st.BorderLeftWidth) + iframePadLen(st.BorderRightWidth)
+			h -= iframePadLen(st.PaddingTop) + iframePadLen(st.PaddingBottom) +
+				iframePadLen(st.BorderTopWidth) + iframePadLen(st.BorderBottomWidth)
+		}
+		if w < 0 { w = 0 }
+		if h < 0 { h = 0 }
+		fv := f.View()
+		if fv != nil && (fv.Width() != int(w) || fv.Height() != int(h)) {
+			fv.SetSize(int(w), int(h))
+		}
+	})
+}
+
+// iframePadLen 提取 style.Length 的像素值（auto/空为 0），与 rendering
+// 包 lengthValue 等价——为避免跨包依赖在此内联。
+func iframePadLen(l style.Length) float64 {
+	if l.Unit == "auto" || l.Unit == "" && l.Value == 0 {
+		return 0
+	}
+	return l.Value
 }
 
 func (wv *WebView) RebuildRenderTree() {

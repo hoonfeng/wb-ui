@@ -301,8 +301,10 @@ func (b *RenderTreeBuilder) resolveStyle(el *dom.Element) *style.ComputedStyle {
 	// attributes map to CSS width/height when no stylesheet rule declared
 	// them (WebKit treats them as low-priority presentation attributes).
 	// Without this, <svg width="18" height="18"> sized to 0×18 and every
-	// icon in the Vue app rendered as a zero-width sliver.
-	if el.LocalName() == "svg" || el.LocalName() == "img" {
+	// icon in the Vue app rendered as a zero-width sliver. iframe 同样：
+	// <iframe width="200" height="100"> 需把属性映射为 CSS 尺寸，子文档
+	// 视口（syncIFrameSizes）才能同步到内容框大小。
+	if el.LocalName() == "svg" || el.LocalName() == "img" || el.LocalName() == "iframe" {
 		if _, declared := cs.Properties["width"]; !declared {
 			if aw := el.GetAttribute("width"); aw != "" {
 				if l, ok := parseAttrLength(aw); ok {

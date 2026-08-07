@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"wb-ui/bridge"
+	"wb-ui/page"
 	"wb-ui/webkit"
 )
 
@@ -23,6 +24,7 @@ type verifyCase struct {
 	html  string
 	setup func(wv *webkit.WebView) // 可选：注册 bridge 路由等
 	wait  time.Duration            // 可选：加载后等待（定时器用例）
+	check func(wv *webkit.WebView) (bool, string) // 可选：Go 侧额外验证（iframe 子 Frame 等 JS 不可见状态）
 }
 
 // runVerify 无头运行全部能力用例并输出报告。
@@ -80,6 +82,14 @@ func runVerifyCase(c verifyCase) (string, string) {
 	if err == nil {
 		jsResult = res.ToString()
 	}
+
+	// Go 侧额外验证（iframe 子 Frame 等 JS 不可见状态）。
+	if c.check != nil {
+		if ok, note := c.check(wv); !ok {
+			return "FAIL", "go-check: " + note + " | js: " + jsResult
+		}
+	}
+
 	elapsed := time.Since(start).Round(time.Millisecond).String()
 
 	status, detail := "FAIL", jsResult
@@ -295,5 +305,51 @@ var verifyCases = []verifyCase{
 				window.__result = ok ? 'PASS' : 'FAIL: attrs color=' + d.style.color + ' title=' + d.title + ' tag=' + d.tagName;
 				} catch(e) { window.__result = 'FAIL: ' + (e && e.message || e); }
 			</script></body></html>`,
+	},
+	{
+		// iframe 子文档：子 Frame 加载 data: 子文档，内容在 iframe 内容框内
+		// 渲染（RenderIFrame）。JS 断言 iframe 元素几何；Go 侧 check 断言
+		// 子 Frame 已创建、子文档已解析、视口尺寸与内容框一致。
+		name: "iframe",
+		html: `<!DOCTYPE html><html><head><style>
+			#box { width:220px; padding:10px; }
+			#f1 { border:1px solid #999; }
+		</style></head><body>
+			<div id="box"><iframe id="f1" width="200" height="100" src="data:text/html,%3Chtml%3E%3Cbody%3E%3Cp%20id='c1'%3Echild%20page%3C/p%3E%3Cdiv%20id='blue'%20style='width:60px;height:30px;background:%2333aaff'%3E%3C/div%3E%3C/body%3E%3C/html%3E"></iframe></div>
+			<script>
+				var f = document.getElementById('f1');
+				var ok = !!f && f.tagName.toLowerCase() === 'iframe';
+				var r = f.getBoundingClientRect();
+				ok = ok && Math.abs(r.width - 200) <= 2 && Math.abs(r.height - 100) <= 2;
+				window.__result = ok ? 'PASS' : 'FAIL: iframe rect=' + r.width + 'x' + r.height;
+			</script></body></html>`,
+		check: func(wv *webkit.WebView) (bool, string) {
+			// Go 侧：iframe 子 Frame 已创建、子文档含 #c1、视口 200x100
+			doc := wv.MainFrame().Document()
+			if doc == nil {
+				return false, "no document"
+			}
+			f := doc.GetElementById("f1")
+			if f == nil {
+				return false, "no #f1 element"
+			}
+			sub := page.IFrameFrame(f)
+			if sub == nil {
+				return false, "iframe 子 Frame 未创建 (page.IFrameFrame nil)"
+			}
+			subDoc := sub.Document()
+			if subDoc == nil {
+				return false, "子文档 nil"
+			}
+			if p := subDoc.GetElementById("c1"); p == nil {
+				return false, "子文档缺少 #c1"
+			}
+			wv.EnsureLayout()
+			sub.LayoutNow()
+			if sub.ViewportWidth() != 200 || sub.ViewportHeight() != 100 {
+				return false, fmt.Sprintf("子视口=%dx%d, want 200x100", sub.ViewportWidth(), sub.ViewportHeight())
+			}
+			return true, ""
+		},
 	},
 }

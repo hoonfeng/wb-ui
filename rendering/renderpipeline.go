@@ -1501,6 +1501,12 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 		PaintImage(box, info)
 		return
 	}
+	// iframe elements: paint the child frame's document into the content box
+	// (RenderIFrame). Returns true when a child document was painted.
+	if el.LocalName() == "iframe" {
+		PaintIFrame(box, info)
+		return
+	}
 }
 
 // paintObjectOutline paints the outline for box-bearing objects during the outline

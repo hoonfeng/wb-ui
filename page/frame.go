@@ -270,6 +270,30 @@ func (f *Frame) RebuildRenderTreeIfNeeded() bool {
 	return true
 }
 
+// LayoutNow 强制立即布局（iframe 子文档绘制前调用；幂等——无待布局
+// 标记时直接返回）。
+func (f *Frame) LayoutNow() {
+	if f.view != nil && f.view.NeedsLayout() {
+		f.view.Layout()
+	}
+}
+
+// ViewportWidth 返回子文档视口宽度（iframe 内容框宽度，CSS 像素）。
+func (f *Frame) ViewportWidth() int {
+	if f.view == nil {
+		return 0
+	}
+	return f.view.Width()
+}
+
+// ViewportHeight 返回子文档视口高度（iframe 内容框高度，CSS 像素）。
+func (f *Frame) ViewportHeight() int {
+	if f.view == nil {
+		return 0
+	}
+	return f.view.Height()
+}
+
 // NeedsLayout reports whether the frame's view requires a layout pass, mirroring
 // the per-frame layout-pending check in WebKit (FrameView::needsLayout()).
 func (f *Frame) NeedsLayout() bool {
