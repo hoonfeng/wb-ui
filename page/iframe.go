@@ -40,6 +40,23 @@ func IFrameFrame(el *dom.Element) *Frame {
 	return iframeRegistry[el]
 }
 
+// IFrameFrameForFrame 反向查询：返回持有子 Frame f 的 iframe 元素；
+// 该子 Frame 未注册时返回 nil。用于清理孤儿子 Frame（如 LoadHTML 后
+// 注册表 Prune 掉旧文档的 iframe）。
+func IFrameFrameForFrame(f *Frame) *dom.Element {
+	if f == nil {
+		return nil
+	}
+	iframeMu.RLock()
+	defer iframeMu.RUnlock()
+	for el, fr := range iframeRegistry {
+		if fr == f {
+			return el
+		}
+	}
+	return nil
+}
+
 // UnregisterIFrame 注销 iframe 元素的子 Frame（元素从文档移除时调用）。
 func UnregisterIFrame(el *dom.Element) {
 	if el == nil {

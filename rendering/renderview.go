@@ -261,6 +261,24 @@ func (v *RenderView) HitTestScrollContainer(x, y float64) *RenderBox {
 	if el == nil {
 		return nil
 	}
+	// ★ iframe 子文档元素：点击点在子 Frame 内。滚动容器应在子 Frame 的
+	// RenderView 里查找（子文档元素不在主渲染树，FindScrollContainerForNode
+	// 查不到）。坐标系已由 hit-test 下钻记录（lastDive：子 Frame 视图 +
+	// 子坐标）。若子 Frame 里也没有滚动容器，返回 nil——不继续向主文档
+	// 找（浏览器 iframe 边界语义：鼠标在 iframe 上时滚动只作用于子文档）。
+	if od := el.OwnerDocument(); od != nil && od != v.Document() {
+		if lastDive.ok && lastDive.sub != nil && lastDive.sub.Document() == od {
+			sub := lastDive.sub
+			lastDive.ok = false // 一次性消费
+			if sub.RenderView() != nil {
+				if sub.NeedsLayout() {
+					sub.LayoutNow()
+				}
+				return sub.RenderView().HitTestScrollContainer(lastDive.x, lastDive.y)
+			}
+		}
+		return nil
+	}
 	return v.FindScrollContainerForNode(el)
 }
 
@@ -704,7 +722,16 @@ func (v *RenderView) syncGeometry() {
 	state := v.layoutState
 	if state == nil { return }
 	if box := asRenderBox(v); box != nil {
-		box.frame = state.GeometryForBox(layoutRoot).ToRect()
+		// ★ RenderView 是视口，其几何恒为 viewport 尺寸——不能被 layout
+		// root（html 元素）的高度覆盖。反例：iframe 子文档 body 无流内容
+		// 时 html 高度为 0，若用 layoutRoot 覆盖则 RenderView 高度变 0，
+		// hit-test 在根 box 就被 inBounds 拦截（所有子元素不可命中）。
+		if v.IsRenderView() {
+			box.frame.X, box.frame.Y = 0, 0
+			box.frame.Width, box.frame.Height = v.viewWidth, v.viewHeight
+		} else {
+			box.frame = state.GeometryForBox(layoutRoot).ToRect()
+		}
 	}
 	for rc := v.FirstChild(); rc != nil; rc = rc.NextSibling() {
 		syncOne(rc, layoutRoot, state)

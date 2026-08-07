@@ -16,6 +16,7 @@ import (
 
 	"wb-ui/bridge"
 	"wb-ui/page"
+	"wb-ui/rendering"
 	"wb-ui/webkit"
 )
 
@@ -346,6 +347,35 @@ var verifyCases = []verifyCase{
 			sub.LayoutNow()
 			if sub.ViewportWidth() != 200 || sub.ViewportHeight() != 100 {
 				return false, fmt.Sprintf("子视口=%dx%d, want 200x100", sub.ViewportWidth(), sub.ViewportHeight())
+			}
+			return true, ""
+		},
+	},
+	// iframe hit-test 下钻：点击 iframe 内容框内的点命中子文档元素
+	// （而非 iframe 元素本身）——渲染引擎 RecursiveHitTest 语义。
+	{
+		name: "iframe-hittest",
+		html: `<!DOCTYPE html><html><body style="margin:0">
+			<iframe id="f1" width="200" height="100" style="border:0" src="data:text/html,%3Chtml%3E%3Cbody%20style='margin:0'%3E%3Cdiv%20id='btn'%20style='position:absolute;left:10px;top:10px;width:80px;height:30px;background:%23e00'%3E%3C/div%3E%3C/body%3E%3C/html%3E"></iframe>
+			<script>
+				var ok = true;
+				window.__result = ok ? 'PASS' : 'FAIL';
+			</script></body></html>`,
+		check: func(wv *webkit.WebView) (bool, string) {
+			wv.Resize(240, 140)
+			wv.RebuildRenderTree()
+			wv.EnsureLayout()
+			rv := wv.MainFrame().RenderView()
+			if rv == nil {
+				return false, "no render view"
+			}
+			// 点击 iframe 内容框内 (50,30)：应命中子文档 #btn
+			el := rendering.HitTest(rv, 50, 30, "")
+			if el == nil {
+				return false, "hit-test 无命中"
+			}
+			if el.GetId() != "btn" {
+				return false, fmt.Sprintf("hit-test 应命中子文档 #btn，got id=%q tag=%s", el.GetId(), el.TagName())
 			}
 			return true, ""
 		},

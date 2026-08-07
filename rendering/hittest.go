@@ -18,6 +18,16 @@ import (
 // debugHitTest enables verbose hit-test diagnostics.
 const debugHitTest = false
 
+// lastDive 记录最近一次 iframe 下钻命中的子 Frame 视图与子坐标系点击点。
+// HitTestScrollContainer 命中子文档元素后，需要用子坐标在子 Frame 的
+// RenderView 里递归查找滚动容器。wb-ui 渲染/交互是单线程模型（app 层
+// 串行处理输入），包级记录无并发风险；多 WebView 时也是顺序调用。
+var lastDive struct {
+	sub IFrameSubdocument
+	x, y float64
+	ok   bool
+}
+
 // boxCoords extracts the bounding rectangle of a RenderObject if it is box-bearing.
 // Returns ok=false for non-box objects (RenderInline, RenderText without a box).
 func boxCoords(o RenderObject) (x, y, w, h float64, ok bool) {
@@ -173,7 +183,11 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 		// Anonymous wrappers (RenderBlockFlow from buildChildren flush) with
 		// zero area have no visual content. Skip bounds check so children are
 		// still visited; they won't become hit candidates (area=0).
-		if ow == 0 && oh == 0 {
+		// ★ 高度 0 的容器（如 body 无流内容时的 html/body）同样 pass-through：
+		//   position:absolute 子元素溢出容器仍应可点击（浏览器 hit-test 语义
+		//   ——absolute 元素不依赖祖先高度）。若按 inBounds 拦截，iframe 子
+		//   文档的 absolute 内容在 html 高度 0 时全部不可命中。
+		if ow == 0 || oh == 0 {
 			// pass through to children
 		} else {
 			inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
@@ -216,6 +230,47 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 				if *best == nil || area < *bestArea {
 					*best = el
 					*bestArea = area
+				}
+			}
+		}
+	}
+
+	// ★ iframe 下钻：命中 iframe 内容框时，把点击点转换到子 Frame
+	// 坐标系，在子文档渲染树里继续 hit-test（WebKit HitTestResult
+	// 递归到子 Frame）。子文档元素比 iframe 框本身更「深」，面积更
+	// 小者胜出——点击 iframe 内容应命中子文档元素而非 iframe 元素。
+	if ok && ow > 0 && oh > 0 {
+		if el, isEl := o.Node().(*dom.Element); isEl && el.LocalName() == "iframe" {
+			if sub := IFrameLookupFor(el); sub != nil && sub.RenderView() != nil {
+				if box := asRenderBox(o); box != nil {
+					if st := box.Style(); st != nil {
+						pL := lengthValue(st.PaddingLeft)
+						pT := lengthValue(st.PaddingTop)
+						pR := lengthValue(st.PaddingRight)
+						pB := lengthValue(st.PaddingBottom)
+						cx := x - (ox + pL)
+						cy := y - (oy + pT)
+						if cx >= 0 && cy >= 0 && cx < ow-pL-pR && cy < oh-pT-pB {
+							if sub.NeedsLayout() {
+								sub.LayoutNow()
+							}
+							if child := HitTest(sub.RenderView(), cx, cy, attrName); child != nil {
+								area := (ow - pL - pR) * (oh - pT - pB)
+								// ★ 下钻候选直接优先：点击点在 iframe 内容框内，
+								// 子文档元素比 iframe 框本身更深（WebKit
+								// HitTestResult 递归进子 Frame）。不能用
+								// area < bestArea 比较——内容框面积与 iframe
+								// 元素面积相等（border 0 时）会漏掉覆盖。
+								*best = child
+								*bestArea = area
+								// 记录下钻信息：滚动容器查找（HitTestScrollContainer）
+								// 需要子坐标与子 Frame 视图。
+								lastDive.sub = sub
+								lastDive.x, lastDive.y = cx, cy
+								lastDive.ok = true
+							}
+						}
+					}
 				}
 			}
 		}

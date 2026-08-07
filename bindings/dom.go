@@ -82,6 +82,11 @@ var (
 // 避免多实例测试（rt1/rt2 各自完整注册）互相影响。
 const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
 
+// IFrameSrcChanged 是 iframe src 属性变化（el.src = x 或
+// setAttribute("src", x)）时的回调，由 webkit 注入以重载子文档
+// （浏览器 iframe navigation 语义）。nil 时静默跳过（测试环境）。
+var IFrameSrcChanged func(el *dom.Element, src string)
+
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// ★ document 切换（LoadHTML 加载新文档）时清理跨文档的全局缓存与
 	// 监听器 side-table：nodeWrapperCache 持有旧文档所有节点的 Go 强
@@ -228,7 +233,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		if len(args) < 2 {
 			return jsc.Undefined()
 		}
-		el.SetAttribute(args[0].ToString(), args[1].ToString())
+		name := args[0].ToString()
+		el.SetAttribute(name, args[1].ToString())
+		// ★ iframe 的 src 是「导航属性」：JS 改 src 应重载子文档
+		// （浏览器 iframe navigation 语义）。webkit 注入 IFrameSrcChanged
+		// 回调处理重载；未注入时静默（如测试环境）。
+		if name == "src" && el.LocalName() == "iframe" && IFrameSrcChanged != nil {
+			IFrameSrcChanged(el, el.GetAttribute("src"))
+		}
 		return jsc.Undefined()
 	})
 	protoAttr("hasAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
@@ -2759,6 +2771,19 @@ obj.SetInternal(el)
 	obj.SetAccessor("title",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetAttribute("title")) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetAttribute("title", v.ToString()) })
+	// ★ iframe 的 src 反射属性：el.src = "..." 触发子文档重载（浏览器
+	// iframe navigation 语义）。getter 返回当前 src 属性值，setter 设属性
+	// 并回调 webkit 重载子 Frame。
+	if el.LocalName() == "iframe" {
+		obj.SetAccessor("src",
+			getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetAttribute("src")) }),
+			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+				el.SetAttribute("src", v.ToString())
+				if IFrameSrcChanged != nil {
+					IFrameSrcChanged(el, v.ToString())
+				}
+			})
+	}
 	// attributes — NamedNodeMap 风格数组：length + 索引（{name,value}）。
 	// CodeMirror 6 的 setAttrs 依赖 dom.attributes.length / attributes[i].name
 	// 做属性同步，缺失会导致 "Cannot read property 'length' of undefined"。

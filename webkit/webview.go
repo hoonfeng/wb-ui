@@ -8,6 +8,7 @@ package webkit
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -44,6 +45,13 @@ type WebView struct {
 	// SetPointerCapabilities 调整为触屏（coarse/none）等场景。
 	hoverCapability  string
 	pointerCapability string
+
+	// currentURL 是主文档的加载 URL（LoadURL 设置）。iframe 相对路径 src
+	// （如 src="page.html"）依赖它做基准解析（WebKit completeURL 语义）。
+	currentURL string
+	// subframeJS 为每个 iframe 子 Frame 维护独立的 JS 全局环境（浏览器
+	// iframe 语义：子文档有自己的 window/document，与父文档互不干扰）。
+	subframeJS map[*page.Frame]*jsc.Interpreter
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -121,7 +129,44 @@ func NewWebView() *WebView {
 		}
 		return f
 	}
+	// ★ iframe src 变化（JS 侧 el.src = x / setAttribute）→ 重载子文档。
+	bindings.IFrameSrcChanged = wv.handleIFrameSrcChanged
+	// ★ iframe 滚动容器查找：给定子文档 Document 反查承载它的子 Frame。
+	rendering.IFrameContaining = func(doc *dom.Document) rendering.IFrameSubdocument {
+		if doc == nil {
+			return nil
+		}
+		var found *page.Frame
+		page.ForEachIFrame(func(_ *dom.Element, f *page.Frame) {
+			if found == nil && f != nil && f.Document() == doc {
+				found = f
+			}
+		})
+		if found == nil {
+			return nil
+		}
+		return found
+	}
 	return wv
+}
+
+// handleIFrameSrcChanged 处理 JS 侧修改 iframe src：解析绝对 URL 后
+// 卸载旧子 Frame 并重新加载（浏览器 iframe navigation 语义）。
+func (wv *WebView) handleIFrameSrcChanged(el *dom.Element, src string) {
+	if el == nil {
+		return
+	}
+	abs := resolveIframeSrc(src, wv.currentURL)
+	// 旧子 Frame 卸载：注销注册表 + 清理其 JS 环境。
+	if old := page.IFrameFrame(el); old != nil {
+		page.UnregisterIFrame(el)
+		delete(wv.subframeJS, old)
+	}
+	if abs == "" {
+		page.Logf("IFrame", "src change: unresolvable %q, unloaded", src)
+		return
+	}
+	wv.loadSubframe(el, abs)
 }
 
 func (wv *WebView) Page() *page.Page          { return wv.page }
@@ -299,37 +344,34 @@ func (wv *WebView) LoadHTML(src string) error {
 	}
 	// iframe 子文档：主文档加载完成后，为带 src 的 <iframe> 创建子 Frame
 	// 并加载（WebKit: FrameLoader 在解析到 iframe 元素时创建子 Frame）。
-	// 子 Frame 无 ScriptEngine → 子文档脚本不执行（静默渲染）；布局与
-	// 绘制见 syncIFrameSizes / PaintIFrame。
+	// 子 Frame 拥有独立 ScriptEngine（独立 JS 全局环境），子文档脚本
+	// 可执行；布局与绘制见 syncIFrameSizes / PaintIFrame。
 	wv.loadIFrameDocuments()
 	return nil
 }
 
 // loadIFrameDocuments 扫描主文档中的 <iframe> 元素，为每个有 src 且尚未
 // 注册子 Frame 的元素创建子 Frame 并加载子文档（fetchURL 支持 http/https/
-// file/data）。相对路径 src 先跳过（无父文档 URL 基准，与 WebKit 的
-// completeURL 行为有差距，留待后续）。
+// file/data）。相对路径 src（如 src="page.html"）以 currentURL（主文档 URL）
+// 为基准解析（WebKit completeURL 语义）。子 Frame 挂独立 ScriptEngine，
+// 子文档的 <script> 在加载后执行。
 func (wv *WebView) loadIFrameDocuments() {
 	doc := wv.mainFrame.Document()
 	if doc == nil {
 		return
 	}
 	page.PruneIFrames(doc)
+	wv.pruneSubframeJS()
 	var walk func(n dom.Node)
 	walk = func(n dom.Node) {
 		if el, ok := n.(*dom.Element); ok && el.LocalName() == "iframe" {
 			src := el.GetAttribute("src")
 			if src != "" && page.IFrameFrame(el) == nil {
-				data, err := fetchURL(src)
-				if err == nil {
-					f := page.NewFrame(wv.page)
-					// 默认 300x150（iframe 替换元素默认尺寸），
-					// EnsureLayout 后由 syncIFrameSizes 校正。
-					f.View().SetSize(300, 150)
-					if ferr := f.LoadHTML(data); ferr == nil {
-						f.RebuildRenderTree()
-						page.RegisterIFrame(el, f)
-					}
+				abs := resolveIframeSrc(src, wv.currentURL)
+				if abs == "" {
+					page.Logf("IFrame", "skip unresolvable src=%q base=%q", src, wv.currentURL)
+				} else {
+					wv.loadSubframe(el, abs)
 				}
 			}
 		}
@@ -340,9 +382,140 @@ func (wv *WebView) loadIFrameDocuments() {
 	walk(doc)
 }
 
+// loadSubframe 为 iframe 元素加载子文档：创建子 Frame、挂独立脚本引擎
+// （ScriptEngine/ScriptLoader/StyleSheetLoader）、加载并执行子文档脚本。
+func (wv *WebView) loadSubframe(el *dom.Element, absSrc string) {
+	data, err := fetchURL(absSrc)
+	if err != nil {
+		page.Logf("IFrame", "fetch %q: %v", absSrc, err)
+		return
+	}
+	f := page.NewFrame(wv.page)
+	// 默认 300x150（iframe 替换元素默认尺寸），EnsureLayout 后由
+	// syncIFrameSizes 校正。
+	f.View().SetSize(300, 150)
+	// 子文档的 <script> 经独立 JS 全局环境执行（见 makeSubframeScriptEngine）。
+	f.ScriptEngine = wv.makeSubframeScriptEngine(f)
+	f.ScriptLoader = func(src string) (string, error) {
+		abs := resolveIframeSrc(src, absSrc)
+		if abs == "" {
+			abs = src
+		}
+		if strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://") || strings.HasPrefix(abs, "data:") {
+			return fetchURL(abs)
+		}
+		fp := strings.TrimPrefix(abs, "file://")
+		d, e := os.ReadFile(fp)
+		if e != nil {
+			return "", fmt.Errorf("load subframe script %q: %w", abs, e)
+		}
+		return string(d), nil
+	}
+	f.StyleSheetLoader = func(href string) (string, error) {
+		abs := resolveIframeSrc(href, absSrc)
+		if abs == "" {
+			abs = href
+		}
+		if strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://") || strings.HasPrefix(abs, "data:") {
+			return fetchURL(abs)
+		}
+		fp := strings.TrimPrefix(abs, "file://")
+		d, e := os.ReadFile(fp)
+		if e != nil {
+			return "", fmt.Errorf("load subframe stylesheet %q: %w", abs, e)
+		}
+		return string(d), nil
+	}
+	if ferr := f.LoadHTML(data); ferr != nil {
+		page.Logf("IFrame", "LoadHTML %q: %v", absSrc, ferr)
+		return
+	}
+	f.RebuildRenderTree()
+	// 子文档脚本：先注册子 Frame 的 DOM bindings，再执行 <script>。
+	if rt := wv.subframeInterpreter(f); rt != nil && f.Document() != nil {
+		bindings.RegisterDOMBindings(rt, f.Document())
+	}
+	f.ExecuteScripts()
+	f.RebuildRenderTree() // 脚本可能改了 DOM，重建渲染树
+	page.RegisterIFrame(el, f)
+}
+
+// makeSubframeScriptEngine 返回子 Frame 的脚本执行回调：子文档脚本在
+// 该子 Frame 独立的 jsc.Interpreter 里执行（浏览器 iframe 语义：子文档
+// 有独立 window/document/全局对象，脚本间互不干扰）。
+func (wv *WebView) makeSubframeScriptEngine(f *page.Frame) func(code string) error {
+	return func(code string) error {
+		rt := wv.subframeInterpreter(f)
+		if rt == nil {
+			return nil
+		}
+		if doc := f.Document(); doc != nil {
+			bindings.RegisterDOMBindings(rt, doc)
+		}
+		_, err := rt.RunJS(code)
+		return err
+	}
+}
+
+// subframeInterpreter 返回子 Frame 的 JS 解释器（惰性创建，与主文档的
+// interpreter 完全独立）。
+func (wv *WebView) subframeInterpreter(f *page.Frame) *jsc.Interpreter {
+	if rt := wv.subframeJS[f]; rt != nil {
+		return rt
+	}
+	rt := jsc.NewInterpreter()
+	rt.SetupGlobal(&jsc.BufferLogger{})
+	_ = jsc.NewEventLoop(rt)
+	rt.InjectBrowserEnv()
+	rt.RegisterWebAPIs()
+	if wv.subframeJS == nil {
+		wv.subframeJS = map[*page.Frame]*jsc.Interpreter{}
+	}
+	wv.subframeJS[f] = rt
+	return rt
+}
+
+// pruneSubframeJS 删除不再注册的子 Frame 的 JS 环境（loadIFrameDocuments
+// 里 PruneIFrames 之后调用，避免子 Frame 对象残留）。
+func (wv *WebView) pruneSubframeJS() {
+	for f := range wv.subframeJS {
+		if page.IFrameFrameForFrame(f) == nil {
+			delete(wv.subframeJS, f)
+		}
+	}
+}
+
+// resolveIframeSrc 把 iframe 的 src 解析为绝对 URL：绝对 scheme（http/
+// https/data/file）原样返回；相对路径以 baseURL 为基准（net/url
+// ResolveReference）；无基准时返回 ""（调用方跳过）。
+func resolveIframeSrc(src, baseURL string) string {
+	if src == "" {
+		return ""
+	}
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") ||
+		strings.HasPrefix(src, "data:") || strings.HasPrefix(src, "file://") {
+		return src
+	}
+	if baseURL == "" {
+		return ""
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	ref, err := url.Parse(src)
+	if err != nil {
+		return ""
+	}
+	return base.ResolveReference(ref).String()
+}
+
 func (wv *WebView) LoadURL(url string) error {
+	wv.currentURL = url
 	src, err := fetchURL(url)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return wv.LoadHTML(src)
 }
 
