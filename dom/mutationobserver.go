@@ -102,8 +102,15 @@ func (mo *MutationObserver) Deliver() {
 
 var (
 	// observerRegistry 按目标节点索引活跃的观察者。
-	observerRegistry   = make(map[Node][]*MutationObserver)
+	observerRegistry = make(map[Node][]*MutationObserver)
 )
+
+// ResetObserverRegistry 清空全局观察者注册表。文档导航/重建（LoadHTML
+// 新文档）时调用，否则旧文档节点被 Go map 强引用、连同其观察者回调
+// 一起永不被 GC（内存探针实测：每次导航累积大量对象）。
+func ResetObserverRegistry() {
+	observerRegistry = make(map[Node][]*MutationObserver)
+}
 
 func registerObserver(target Node, mo *MutationObserver) {
 	observerRegistry[target] = append(observerRegistry[target], mo)

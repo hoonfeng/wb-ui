@@ -83,6 +83,17 @@ var (
 const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
 
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
+	// ★ document 切换（LoadHTML 加载新文档）时清理跨文档的全局缓存与
+	// 监听器 side-table：nodeWrapperCache 持有旧文档所有节点的 Go 强
+	// 引用、registeredListeners/windowEventListeners 持有旧页面注册的
+	// JS 回调、dom.observerRegistry 持有旧节点上的观察者——不清理则每次
+	// 导航累积（内存探针实测：每次 LoadHTML +28MB、+38 万对象）。
+	if registeredDocument != document {
+		clearNodeCache()
+		registeredListeners = map[listenerKey][]*jsListener{}
+		windowEventListeners = map[string][]jsc.JSValue{}
+		dom.ResetObserverRegistry()
+	}
 	// ★ 幂等注册（按 interpreter）：构造函数与 prototype 链只在首次
 	// 调用时构建。后续调用（如 EvalJS 每次执行前）仅刷新 document 引用——
 	// 若每次都重建 Element.prototype，JS 侧对 prototype 的 hook/修改
@@ -480,10 +491,17 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				if k := camelToKebab(prop); k != prop {
 					key = k
 				}
-				if v, ok := computed[key]; ok {
-					cs.Set(prop, jsc.StringValue(v))
-				}
+			if v, ok := computed[key]; ok {
+				cs.Set(prop, jsc.StringValue(v))
 			}
+		}
+		// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
+		// 恒有值（简写会展开到各子属性）；级联只存了 "background" 时补上。
+		if _, ok := computed["background-color"]; !ok {
+			if v, ok2 := computed["background"]; ok2 {
+				cs.Set("backgroundColor", jsc.StringValue(v))
+			}
+		}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) == 0 {
@@ -2557,9 +2575,58 @@ obj.SetInternal(el)
 	if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" || tag == "option" {
 		obj.SetAccessor("value",
 			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				// select.value = 选中 option 的 value 属性或文本（浏览器语义：
+				// select 没有 value 属性，统一走选中项）。
+				if tag == "select" {
+					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+							if opt.HasAttribute("selected") {
+								if v := opt.GetAttribute("value"); v != "" {
+									return jsc.StringValue(v)
+								}
+								return jsc.StringValue(opt.TextContent())
+							}
+						}
+					}
+					return jsc.StringValue("")
+				}
+				// textarea.value = 初始文本内容（浏览器语义：value 反射文本）。
+				if tag == "textarea" {
+					return jsc.StringValue(el.TextContent())
+				}
 				return jsc.StringValue(el.GetAttribute("value"))
 			}),
 			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+				if tag == "select" {
+					// select.value = x：把 value 匹配的 option 设为选中。
+					target := v.ToString()
+					idx := -1
+					i := 0
+					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+							val := opt.GetAttribute("value")
+							if val == "" {
+								val = opt.TextContent()
+							}
+							if val == target {
+								idx = i
+							}
+							i++
+						}
+					}
+					i = 0
+					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+							if i == idx {
+								opt.SetAttribute("selected", "selected")
+							} else {
+								opt.RemoveAttribute("selected")
+							}
+							i++
+						}
+					}
+					return
+				}
 				el.SetAttribute("value", v.ToString())
 			})
 		if tag == "input" {
@@ -2687,6 +2754,11 @@ obj.SetInternal(el)
 	obj.SetAccessor("className",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetClassName()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetClassName(v.ToString()) })
+	// title 反射属性：HTML 元素 title 属性反射 title 属性（removeAttribute
+	// 后返回 ""，与浏览器一致）。此前缺失 → d.title 恒 undefined。
+	obj.SetAccessor("title",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetAttribute("title")) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetAttribute("title", v.ToString()) })
 	// attributes — NamedNodeMap 风格数组：length + 索引（{name,value}）。
 	// CodeMirror 6 的 setAttrs 依赖 dom.attributes.length / attributes[i].name
 	// 做属性同步，缺失会导致 "Cannot read property 'length' of undefined"。
@@ -2701,12 +2773,25 @@ obj.SetInternal(el)
 	}), nil)
 	obj.SetAccessor("innerHTML",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetInnerHTML()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetInnerHTML(v.ToString()) })
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+			el.SetInnerHTML(v.ToString())
+			// ★ 声明式更新（v-html / el.innerHTML = html）后触发渲染树
+			// 重建标记——否则 DOM 变了但界面不刷新（此前只有 appendChild/
+			// style 等路径触发 OnNodeInserted/OnInlineStyleChanged）。
+			if OnNodeInserted != nil && el.IsConnected() {
+				OnNodeInserted(el)
+			}
+		})
 	obj.SetAccessor("outerHTML",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetOuterHTML()) }), nil)
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.TextContent()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetTextContent(v.ToString()) })
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+			el.SetTextContent(v.ToString())
+			if OnNodeInserted != nil && el.IsConnected() {
+				OnNodeInserted(el)
+			}
+		})
 
 	// <template> elements need .content returning a DocumentFragment
 	// (Vue 3 + createStaticVNode depends on this).

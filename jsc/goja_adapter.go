@@ -136,6 +136,45 @@ func (r *Interpreter) RunJobs() {
 	r.vm.RunJobs()
 }
 
+// ValueOf 把 Go 值转换为绑定到本运行时的 JSValue，供宿主主动调用 JS
+// 函数（CallFunction / Call）传参使用。支持 string / bool / int / int64 /
+// float64 / float32 / nil / []any / map[string]any / JSValue；其他类型回退
+// 为 undefined。
+func (r *Interpreter) ValueOf(v any) JSValue {
+	if v == nil {
+		return Null()
+	}
+	switch val := v.(type) {
+	case JSValue:
+		return val
+	case string:
+		return StringValue(val)
+	case bool:
+		return BooleanValue(val)
+	case int:
+		return NumberValue(float64(val))
+	case int64:
+		return NumberValue(float64(val))
+	case float64:
+		return NumberValue(val)
+	case float32:
+		return NumberValue(float64(val))
+	case []any:
+		items := make([]interface{}, len(val))
+		for i, it := range val {
+			items[i] = r.ValueOf(it).val(r.vm)
+		}
+		return JSValue{v: r.vm.NewArray(items...), interp: r}
+	case map[string]any:
+		obj := r.vm.NewObject()
+		for k, mv := range val {
+			obj.Set(k, r.ValueOf(mv).val(r.vm))
+		}
+		return JSValue{v: obj, interp: r}
+	}
+	return Undefined()
+}
+
 // NewNativeFunction 在正确运行时创建原生函数（推荐用法）。
 func (r *Interpreter) NewNativeFunction(name string, fn NativeFunc, _ int) *JSFunction {
 	fv := r.wrapNativeFunc(fn, r)

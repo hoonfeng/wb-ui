@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>wb-ui Browser</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", sans-serif; background: #1e1e2e; color: #cdd6f4; }
+  #chrome {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: #181825; border-bottom: 1px solid #313244;
+    position: sticky; top: 0;
+  }
+  #chrome button {
+    background: #313244; color: #cdd6f4; border: none; border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; font-size: 14px;
+  }
+  #chrome button:hover { background: #45475a; }
+  #chrome button:disabled { opacity: .35; cursor: default; }
+  #addr {
+    flex: 1; background: #11111b; color: #cdd6f4; border: 1px solid #313244;
+    border-radius: 6px; padding: 7px 12px; font-size: 14px; outline: none;
+  }
+  #addr:focus { border-color: #89b4fa; }
+  main { padding: 48px 32px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 8px; }
+  .sub { color: #a6adc8; margin-bottom: 28px; font-size: 14px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card {
+    background: #181825; border: 1px solid #313244; border-radius: 10px;
+    padding: 16px; cursor: pointer; text-decoration: none; color: #cdd6f4;
+    display: block;
+  }
+  .card:hover { border-color: #89b4fa; }
+  .card b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .card span { color: #a6adc8; font-size: 12px; }
+  .hint { margin-top: 28px; font-size: 12px; color: #6c7086; line-height: 1.9; }
+  .hint code { background: #181825; padding: 1px 6px; border-radius: 4px; }
+  #status { position: fixed; right: 14px; bottom: 10px; font-size: 11px; color: #6c7086; }
+</style>
+</head>
+<body>
+<div id="chrome">
+  <button id="back" title="后退">&#8592;</button>
+  <button id="fwd" title="前进">&#8594;</button>
+  <button id="reload" title="刷新">&#8635;</button>
+  <button id="home" title="主页">&#8963;</button>
+  <input id="addr" placeholder="输入 URL 或本地文件路径，回车打开">
+  <button id="go">打开</button>
+</div>
+<main>
+  <h1>wb-ui Browser</h1>
+  <div class="sub">wb-ui 引擎驱动的浏览器验证工具 —— 地址栏输入 URL / 本地 HTML 文件路径</div>
+  <div class="cards">
+    <a class="card" href="#" data-url="data:text/html,<h1>Data URL 页面</h1><p>通过 data: URL 加载</p>">
+      <b>Data URL</b><span>验证 data: 协议加载</span>
+    </a>
+    <a class="card" href="#" data-url="about:blank">
+      <b>about:blank</b><span>空页面基础渲染</span>
+    </a>
+    <a class="card" href="#" data-url="data:text/html,<style>#a{display:flex;gap:8px}.b{flex:1;background:#89b4fa;height:40px}</style><h2>Flex 布局</h2><div id='a'><div class='b'></div><div class='b' style='background:#f38ba8'></div><div class='b' style='background:#a6e3a1'></div></div><p>验证 flex 盒模型</p>">
+      <b>Flex 布局</b><span>验证 flex / 盒模型渲染</span>
+    </a>
+    <a class="card" href="#" data-url="data:text/html,<script>document.body.innerHTML='<h2>JS 驱动</h2><p id=o></p>';document.getElementById('o').textContent='通过 JS 修改 DOM';</script>">
+      <b>JS DOM</b><span>验证脚本执行与 DOM 操作</span>
+    </a>
+  </div>
+  <div class="hint">
+    键盘：<code>Enter</code> 打开地址栏 URL · 窗口标题显示当前页面<br>
+    stdin 驱动：<code>open &lt;url&gt;</code> <code>back</code> <code>fwd</code> <code>reload</code> <code>home</code> <code>quit</code><br>
+    能力验证：<code>go run ./cmd/browser -verify</code>（无头跑完整能力集，输出报告）
+  </div>
+</main>
+<div id="status">ready</div>
+<script>
+(function(){
+  var addr = document.getElementById('addr');
+  var status = document.getElementById('status');
+  var back = document.getElementById('back');
+  var fwd = document.getElementById('fwd');
+
+  function openURL(u) {
+    if (!u || u === 'about:blank') { u = ''; }
+    status.textContent = 'opening ' + (u || 'home');
+    fetch('/_browser/nav', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ url: u }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ status.textContent = d.url || 'ok'; })
+      .catch(function(e){ status.textContent = 'nav failed: ' + e; });
+  }
+
+  document.getElementById('go').onclick = function(){ openURL(addr.value); };
+  addr.onkeydown = function(e){ if (e.key === 'Enter') openURL(addr.value); };
+  back.onclick = function(){ fetch('/_browser/back', {method:'POST'}).catch(function(){}); };
+  fwd.onclick = function(){ fetch('/_browser/fwd', {method:'POST'}).catch(function(){}); };
+  document.getElementById('reload').onclick = function(){ fetch('/_browser/reload', {method:'POST'}).catch(function(){}); };
+  document.getElementById('home').onclick = function(){ openURL(''); };
+
+  document.querySelectorAll('.card').forEach(function(c){
+    c.onclick = function(e){ e.preventDefault(); openURL(c.getAttribute('data-url')); };
+  });
+
+  function refresh() {
+    fetch('/_browser/status').then(function(r){ return r.json(); }).then(function(d){
+      back.disabled = !d.canBack;
+      fwd.disabled = !d.canFwd;
+    }).catch(function(){});
+  }
+  setInterval(refresh, 1500);
+  refresh();
+})();
+</script>
+</body>
+</html>

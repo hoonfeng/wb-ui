@@ -314,15 +314,39 @@ func (tb *TreeBuilder) startTagInBody(tok *Token) {
 		return
 	case name == "math" || name == "svg":
 		// Foreign content: handled approximately as regular elements.
+		// SVG 里的自闭合标签（<rect/> 等）必须真正自闭合，否则 rect 会
+		// 成为开元素把后续 circle/text 全部嵌套进去。
 		tb.reconstructActiveFormatting()
+		if tok.SelfClosing {
+			tb.insertSelfClosingElement(tok)
+			return
+		}
 		tb.insertElement(tok)
 		return
 	default:
 		// Anything else: reconstruct active formatting and insert.
+		// SVG 内容（foreign content）里的自闭合标签按自闭合处理。
 		tb.reconstructActiveFormatting()
+		if tok.SelfClosing && tb.inSVGContent() {
+			tb.insertSelfClosingElement(tok)
+			return
+		}
 		tb.insertElement(tok)
 		return
 	}
+}
+
+// inSVGContent reports whether the current insertion context is inside an
+// <svg> element (foreign-content approximation). Used to honour self-closing
+// tags (<rect/> etc.) only within SVG, keeping regular HTML semantics
+// (where a trailing slash on non-void tags is ignored) intact.
+func (tb *TreeBuilder) inSVGContent() bool {
+	for i := tb.openElements.size() - 1; i >= 0; i-- {
+		if strings.EqualFold(tb.openElements.at(i).LocalName(), "svg") {
+			return true
+		}
+	}
+	return false
 }
 
 // isSpecialBlock reports whether name is a "special" block element handled by

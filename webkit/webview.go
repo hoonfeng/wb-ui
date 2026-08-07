@@ -343,6 +343,82 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 	return result, nil
 }
 
+// CallFunction 调用页面全局 JS 函数（Go 主动调 JS）。这是宿主侧与页面
+// 交互的声明式入口：页面定义 window 上的函数（Vue 组件方法、事件处理
+// 等），Go 侧按名字直接调用并传参、取返回值。
+//
+//	name 支持点路径： "nav" / "app.nav" / "window.app.nav" 等价。
+//	args 支持 Go 标量（string/bool/int/int64/float64/float32）、nil、
+//	[]any、map[string]any——自动转换为对应 JS 值。
+//
+// 浏览器语义：函数内的 this 绑定为全局对象（window.fn() 的 this）。
+// 返回值可直接用 jsc.JSValue 的 ToString/ToNumber/ToBoolean/AsObject 读取。
+func (wv *WebView) CallFunction(name string, args ...any) (jsc.JSValue, error) {
+	if !wv.settings.JavaScriptEnabled {
+		return jsc.Undefined(), ErrJavaScriptDisabled
+	}
+	wv.ensureJSRuntime()
+	parts := strings.Split(name, ".")
+	cur := wv.jsInterpreter.GlobalObject()
+	for i := 0; i < len(parts)-1; i++ {
+		p := strings.TrimSpace(parts[i])
+		if p == "" || p == "window" || p == "globalThis" {
+			continue
+		}
+		v, ok := cur.GetByKey(p)
+		if !ok {
+			return jsc.Undefined(), fmt.Errorf("webkit: CallFunction %q: %q not found", name, p)
+		}
+		o := v.AsObject()
+		if o == nil {
+			return jsc.Undefined(), fmt.Errorf("webkit: CallFunction %q: %q is not an object", name, p)
+		}
+		cur = o
+	}
+	last := strings.TrimSpace(parts[len(parts)-1])
+	fn, ok := cur.GetByKey(last)
+	if !ok {
+		return jsc.Undefined(), fmt.Errorf("webkit: CallFunction %q: function %q not found", name, last)
+	}
+	if !fn.IsCallable() {
+		return jsc.Undefined(), fmt.Errorf("webkit: CallFunction %q: %q is not callable", name, last)
+	}
+	jsArgs := make([]jsc.JSValue, len(args))
+	for i, a := range args {
+		jsArgs[i] = wv.jsInterpreter.ValueOf(a)
+	}
+	global := wv.jsInterpreter.GlobalObject()
+	result, err := wv.jsInterpreter.Call(fn, jsc.ObjectValue(global), jsArgs)
+	if err != nil {
+		return jsc.Undefined(), fmt.Errorf("webkit: CallFunction %q: %w", name, err)
+	}
+	return result, nil
+}
+
+// RenderHTML 以声明式方式更新页面 UI（"类 Vue 模板"的宿主侧入口）：
+// 把 html 解析挂载到指定 id 的元素下（等价 el.innerHTML = html），并
+// 标记渲染树脏 + 需要重排，下一帧自动重建渲染。宿主可拼接 HTML 模板
+// 字符串（含数据）后调用，即可整体刷新一块 UI——无需逐元素命令式
+// 创建/插入/改样式。
+func (wv *WebView) RenderHTML(id, html string) error {
+	doc := wv.mainFrame.Document()
+	if doc == nil {
+		return ErrNoDocument
+	}
+	el := doc.GetElementById(id)
+	if el == nil {
+		return fmt.Errorf("webkit: RenderHTML: element #%s not found", id)
+	}
+	if err := el.SetInnerHTML(html); err != nil {
+		return err
+	}
+	if fr := wv.mainFrame.Frame(); fr != nil {
+		fr.MarkRenderTreeDirty()
+		fr.SetNeedsLayout(true)
+	}
+	return nil
+}
+
 func (wv *WebView) ConsoleOutput() string {
 	if wv.jsLogger == nil { return "" }
 	return wv.jsLogger.String()
