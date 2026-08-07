@@ -643,6 +643,26 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 				}
 			}
 		}
+		// Replaced form controls (input/select/textarea) size from their UA
+		// line-height, NOT their (usually empty) children — otherwise a
+		// select/input in a flex row contributes ~0 and the flex container
+		// under-estimates its height. blockformattingcontext's replaced
+		// fallback uses fontLineGap as the content height; mirror it here so
+		// intrinsic == layout (settings-body: 281 → 393px, fixing the modal
+		// whose flex:1 body collapsed and clipped its content without a
+		// scrollbar — Edge sizes the modal to the full 409px content).
+		if ln == "input" || ln == "select" || ln == "textarea" {
+			fs := fontSizeOf(box)
+			if fs <= 0 {
+				fs = 16
+			}
+			lineH := fontLineGap(box)
+			if lineH <= 0 {
+				lineH = fs * 1.2
+			}
+			_, p, b := computeBoxModel(box, 0, fs)
+			return lineH + p.Top + p.Bottom + b.Top + b.Bottom
+		}
 	}
 	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&
 		(cs.FlexDirection == "column" || cs.FlexDirection == "column-reverse")
