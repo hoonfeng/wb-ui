@@ -237,9 +237,10 @@ func TestPaintFormControl_Select(t *testing.T) {
 	if !handled {
 		t.Fatal("PaintFormControl(select) = false, want true (select is a replaced element)")
 	}
-	// The chevron is a fixed 8x7 V-stroke centered ~9.5px from the right edge:
-	// box w=120 → cx=110.5, cy=8. The V-tip and the two upper arms pass through
-	// x=110 (tip region) at y=8; check that region has non-transparent pixels.
+	// The chevron is the Chromium kHTMLSelectArrow V-stroke (Edge pixel-fitted:
+	// pts (cx-3,cy-1)→(cx,cy+2)→(cx+3,cy-1), stroke 2 round). box w=120 h=16 →
+	// cx=110.5, cy=8. V spans y7..10, arms at x107.5/113.5. Check the arm and
+	// tip regions have non-transparent pixels (x 106..115, y 4..12).
 	visible := false
 	for yy := 4; yy <= 12 && !visible; yy++ {
 		for xx := 106; xx <= 115 && !visible; xx++ {

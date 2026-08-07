@@ -723,6 +723,16 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 				// container taller, not be capped by max(child)).
 				blockChildCount++
 				total += h
+				// Block children's bottom margin contributes to the container's
+				// auto height (settings-body .setting-group margin-bottom:16px
+				// was dropped → modal 487px vs Edge 516px). A container with no
+				// bottom padding/border would let the last child's margin
+				// collapse out; adding it is still closer to Edge than dropping
+				// it, and padded containers (settings-body padding:12px) must
+				// include it (CSS2.1 §8.3.1: padding prevents margin collapse).
+				if csc := c.Style(); csc != nil {
+					total += resolveOrZero(csc.MarginBottom, 0, fontSizeOf(c))
+				}
 			}
 			if h > maxH { maxH = h }
 		case *InlineTextBox:

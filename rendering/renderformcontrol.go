@@ -1426,6 +1426,11 @@ func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 		return
 	}
 	c := info.canvas
+	// Chromium kHTMLSelectArrow（12x12 viewBox: M3 4.5 L6 7.5 L9 4.5）。Edge 像素级
+	// 反推（arrow_scan 扫描验证 score=0）：V 路径臂端 cy-1、尖端 cy+2（高 3px 不对称）、
+	// 臂距 6px、stroke 2px round cap/join。白底黑核心分布（相对 cy）：
+	//   cy-2: 臂 cap 圆顶 2px×2 ｜ cy-1: 臂 3px×2 ｜ cy+0: 汇合 6px ｜ cy+1: 4px ｜
+	//   cy+2: 尖端 2px ｜ cy-3/cy+3: 灰边。颜色 = 文字色，位置距右缘 9.5px。
 	const strokeW = 2.0
 	// Horizontal center: ~9.5px from the right edge of the border box.
 	cx := x + w - 9.5
@@ -1436,12 +1441,16 @@ func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 		col = FormControlColors.SelectArrow
 	}
 	col = applyOpacity(col, op)
-	// SVG chevron path (V-shaped polyline): top-left → bottom-tip → top-right.
-	// Points fitted to the Edge reference raster (see file header).
+	// SVG chevron path (V-shaped polyline), mirroring Chromium's kHTMLSelectArrow
+	// (M 3 4.5 L 6 7.5 L 9 4.5 in a 12x12 viewBox). Edge raster fitted (see header):
+	// 黑核心 y84..88 5 行、臂端黑 2px、汇合 6px、尖端 2px + y89 灰。
+	// pts 臂端 y=cy-1、尖端 y=cy+2（V 路径高 3px，不对称），stroke 2px round cap/join。
+	// Edge 实测（白底黑核心）：y84=cy-2 臂 cap 圆顶 2px、y85=cy-1 臂端、y86=cy
+	// 汇合 6px、y87=cy+1 4px、y88=cy+2 尖端 2px、y89=cy+3 灰。
 	pts := []graphics.Point{
-		{X: cx - 3, Y: cy - 2},
-		{X: cx, Y: cy + 3},
-		{X: cx + 3, Y: cy - 2},
+		{X: cx - 3, Y: cy - 1},
+		{X: cx, Y: cy + 2},
+		{X: cx + 3, Y: cy - 1},
 	}
 	c.StrokePath(pts, strokeW, col, "round", "round")
 }
