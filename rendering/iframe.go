@@ -47,3 +47,68 @@ func IFrameContainingFor(doc *dom.Document) IFrameSubdocument {
 	}
 	return IFrameContaining(doc)
 }
+
+// SetCursorPosRecursive records the cursor position on v and propagates it
+// into iframe sub-frames: when the cursor falls inside an iframe's content
+// box, the coordinate is translated to the child document's local space and
+// set on the sub-frame's RenderView (recursively for nested iframes).
+//
+// Sub-document scrollbar hover highlight is driven by the sub-rv's cursor
+// (renderpipeline.go isHover reads info.rv.CursorPos()); previously only the
+// main RenderView got SetCursorPos, so a child-frame scrollbar never
+// highlighted on hover. Cursors outside a sub-frame are cleared (large
+// negative) so a hover highlight doesn't linger after the mouse leaves.
+func SetCursorPosRecursive(v *RenderView, x, y float64) {
+	if v == nil {
+		return
+	}
+	v.SetCursorPos(x, y)
+	propagateCursorToFrames(v, x, y)
+}
+
+func propagateCursorToFrames(v *RenderView, x, y float64) {
+	if v == nil {
+		return
+	}
+	var walk func(o RenderObject)
+	walk = func(o RenderObject) {
+		if o == nil {
+			return
+		}
+		if el, isEl := o.Node().(*dom.Element); isEl && el.LocalName() == "iframe" {
+			sub := IFrameLookupFor(el)
+			if sub != nil && sub.RenderView() != nil {
+				if rb, ok := o.(*RenderBox); ok {
+					// Content-box origin: border-box + padding (matches
+					// PaintIFrame's coordinate math).
+					st := rb.Style()
+					var pL, pT, pR, pB float64
+					if st != nil {
+						pL = lengthValue(st.PaddingLeft)
+						pT = lengthValue(st.PaddingTop)
+						pR = lengthValue(st.PaddingRight)
+						pB = lengthValue(st.PaddingBottom)
+					}
+					ax := rb.AbsoluteX() + pL
+					ay := rb.AbsoluteY() + pT
+					cw := rb.Width() - pL - pR
+					ch := rb.Height() - pT - pB
+					lx, ly := x-ax, y-ay
+					if lx >= 0 && ly >= 0 && lx <= cw && ly <= ch {
+						sub.RenderView().SetCursorPos(lx, ly)
+						propagateCursorToFrames(sub.RenderView(), lx, ly)
+					} else {
+						// Cursor outside: clear sub-frame cursor (incl.
+						// nested children) so no stale hover remains.
+						sub.RenderView().SetCursorPos(-1e9, -1e9)
+						propagateCursorToFrames(sub.RenderView(), -1e9, -1e9)
+					}
+				}
+			}
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(RenderObject(v))
+}

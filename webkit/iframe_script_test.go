@@ -552,6 +552,225 @@ func TestIFrameSelectionHighlightCrossFrame(t *testing.T) {
 	}
 }
 
+// TestIFrameCursorHoverDive 验证子 Frame 滚动条 hover 高亮的光标下钻
+// （t2）：光标在主坐标 (cx,cy) 落在 iframe 内容框内时，SetCursorPosRecursive
+// 应把换算后的子坐标设置到子 rv（子文档滚动条 hover 读子 rv cursor）；
+// 光标移出 iframe 后子 rv 光标应被清除（大负数），避免 hover 残留。
+func TestIFrameCursorHoverDive(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="s1" style="font-size:16px">sub-text</div></body></html>`)
+	src := `<html><body style="margin:0"><div id="m1" style="font-size:16px">main</div><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0;display:block;margin:0"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 160)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	iframeEl := wv.MainFrame().Document().GetElementById("f1")
+	sub := page.IFrameFrame(iframeEl)
+	if sub == nil {
+		t.Fatal("iframe 子 Frame 未注册")
+	}
+	subRV := sub.RenderView()
+	if subRV == nil {
+		t.Fatal("子 rv 为 nil")
+	}
+	// 找到 iframe box 的绝对位置（主文档坐标）
+	frameBox := rv.FindRenderBoxForNode(iframeEl)
+	if frameBox == nil {
+		t.Fatal("iframe box 未渲染")
+	}
+	absX := frameBox.AbsoluteX()
+	absY := frameBox.AbsoluteY()
+
+	// 光标在 iframe 内部（内容框左上 10,10）→ 子 rv 光标应被设置（换算坐标）
+	insideX := absX + 10
+	insideY := absY + 10
+	rendering.SetCursorPosRecursive(rv, insideX, insideY)
+	sx, sy := subRV.CursorPos()
+	if sx < 5 || sx > 15 || sy < 5 || sy > 15 {
+		t.Fatalf("光标在 iframe 内：子 rv cursor=(%.0f,%.0f), want ≈(10,10)", sx, sy)
+	}
+
+	// 光标移出 iframe（负坐标区域）→ 子 rv 光标被清除（大负数）
+	rendering.SetCursorPosRecursive(rv, -5, -5)
+	sx2, sy2 := subRV.CursorPos()
+	if sx2 > -1e8 || sy2 > -1e8 {
+		t.Fatalf("光标移出 iframe：子 rv cursor=(%.0f,%.0f), want 清除(<-1e8)", sx2, sy2)
+	}
+	// 主 rv 光标仍记录原始坐标（不受子 Frame 传播影响）
+	mx, my := rv.CursorPos()
+	if mx != -5 || my != -5 {
+		t.Fatalf("主 rv cursor=(%.0f,%.0f), want (-5,-5)", mx, my)
+	}
+}
+
+// TestDragSelectionPlainTextLiveUpdate 验证普通文本拖拽选区的实时更新
+// 链路（t1）：模拟 Host 的 Press → CursorMove → Release 状态机——
+// ① Press 在文本上：HitTestText 命中 → CurrentSelection 建立（Active=true，
+// 拖动中高亮跟随）；
+// ② CursorMove 移动：End 实时扩展（终点可落在 iframe 子文档——跨 Frame）；
+// ③ Release：Active=false（停止跟随，选区保留）。
+func TestDragSelectionPlainTextLiveUpdate(t *testing.T) {
+	wv := NewWebView()
+	child := encDataURI(`<html><body style="margin:0"><div id="s1" style="font-size:16px">sub-one sub-two</div></body></html>`)
+	src := `<html><body style="margin:0"><div id="m1" style="font-size:16px">main-one main-two</div><iframe id="f1" src="data:text/html,` + child + `" width="200" height="100" style="border:0;display:block"></iframe></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(240, 160)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	iframeEl := wv.MainFrame().Document().GetElementById("f1")
+	sub := page.IFrameFrame(iframeEl)
+	if sub == nil {
+		t.Fatal("iframe 子 Frame 未注册")
+	}
+	subRV := sub.RenderView()
+	if subRV == nil {
+		t.Fatal("子 rv 为 nil")
+	}
+	// 子 rv 先布局（iframe 子 Frame 独立 FrameView，主 rv 布局不覆盖）。
+	if sub.NeedsLayout() {
+		sub.LayoutNow()
+	}
+	var subTexts []*rendering.RenderText
+	collectTestTexts(rendering.RenderObject(subRV), &subTexts)
+	if len(subTexts) == 0 {
+		t.Fatal("子文档无文本")
+	}
+
+	// ── ① Press：主文档文本上按下（Host 普通文本分支同款逻辑）──
+	var mainTexts []*rendering.RenderText
+	collectTestTexts(rendering.RenderObject(rv), &mainTexts)
+	if len(mainTexts) == 0 {
+		t.Fatal("主文档无文本")
+	}
+	seg0 := mainTexts[0].Segments()[0]
+	anchorX := seg0.X + 2
+	anchorY := seg0.Y + seg0.Height/2
+	press := rendering.HitTestText(rv, anchorX, anchorY)
+	if !press.IsValid() {
+		t.Fatal("Press 应命中主文档文本")
+	}
+	rendering.CurrentSelection = &rendering.Selection{
+		Start:  press,
+		End:    press,
+		Active: true, // 拖动中：高亮跟随
+	}
+	// Press 时 start==end（零宽选区）→ 无高亮矩形、无选中文本（浏览器
+	// 语义：按下未拖动仅放置 caret）。选区已建立（Active=true）——
+	// 拖动开始后 End 扩展才产生高亮。
+	if rendering.CurrentSelection == nil || !rendering.CurrentSelection.Active {
+		t.Fatal("Press 后：CurrentSelection 应建立且 Active=true（拖动中跟随）")
+	}
+
+	// ── ② CursorMove：向 iframe 子文档拖动（跨 Frame 终点）──
+	// 子文档文本的绝对坐标 = 子坐标 + iframe 内容框偏移。
+	frameBox := rv.FindRenderBoxForNode(iframeEl)
+	if frameBox == nil {
+		t.Fatal("iframe box 未渲染")
+	}
+	subSeg := subTexts[0].Segments()[0]
+	subAbsX := subSeg.X + frameBox.AbsoluteX() + 5
+	subAbsY := subSeg.Y + frameBox.AbsoluteY() + 5
+	moved := rendering.HitTestText(rv, subAbsX, subAbsY)
+	if !moved.IsValid() {
+		t.Fatal("CursorMove 终点应命中子文档文本（跨 Frame）")
+	}
+	rendering.CurrentSelection.End = moved
+	// 绘制一帧：Paint 入口构建 globalSelTexts（跨 Frame 全局树序），
+	// 与真实 Host 的 MarkRenderTreeDirty → 下一帧绘制一致。
+	if _, err := wv.Render(); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !rendering.IsOffsetInSelection(subRV, subTexts[0], 0) {
+		t.Fatal("跨 Frame 拖动中：子文档文本应在选区中（高亮跟随）")
+	}
+
+	// ── ③ Release：Active=false，选区保留 ──
+	rendering.CurrentSelection.Active = false
+	if len(rendering.SelectionRects(rv)) == 0 || len(rendering.SelectionRects(subRV)) == 0 {
+		t.Fatal("Release 后：主/子 rv 应保留各自高亮段")
+	}
+}
+
+// TestHoverClearedAfterRebuild 验证「无操作时 agent 输出也影响渲染」的
+// 修复（t3）：鼠标悬停元素后 SetHovered(true)，随后 agent 输出触发渲染
+// 树重建——重建后清除 hover（鼠标移出窗口 / 重建期间），:hover 样式必须
+// 不再应用。之前 SetHovered 不 bump attrVersion，resolver 缓存不失效，
+// 重建后 :hover 样式残留（无交互画面却出现 hover 高亮/按钮变色）。
+func TestHoverClearedAfterRebuild(t *testing.T) {
+	wv := NewWebView()
+	src := `<html><head><style>
+		.btn { color: #222; }
+		.btn:hover { color: #ff0000; }
+	</style></head><body style="margin:0"><button id="b1" class="btn" style="width:120px;height:40px">Hover Me</button></body></html>`
+	if err := wv.LoadHTML(src); err != nil {
+		t.Fatalf("LoadHTML: %v", err)
+	}
+	wv.Resize(200, 120)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+
+	rv := wv.MainFrame().RenderView()
+	btn := wv.MainFrame().Document().GetElementById("b1")
+	if btn == nil {
+		t.Fatal("button not found")
+	}
+	// 找到 button 的 render box，读取计算样式
+	ro := rv.FindRenderBoxForNode(btn)
+	if ro == nil || ro.Style() == nil {
+		t.Fatal("button render box 无样式")
+	}
+	// 初始：无 hover → #222（非红）
+	if c := ro.Style().Color; c.R == 255 {
+		t.Fatalf("初始 color=%v want 非红（#222）", c)
+	}
+
+	// 悬停：:hover 生效（真实流程：SetHovered → MarkRenderTreeDirty →
+	// 下帧 RebuildRenderTree 重新解析样式）
+	btn.SetHovered(true)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+	rv = wv.RenderView()
+	if ro2 := rv.FindRenderBoxForNode(btn); ro2 != nil && ro2.Style() != nil {
+		if c := ro2.Style().Color; c.R != 255 {
+			t.Fatalf("hovered 时 color=%v want red", c)
+		}
+	}
+
+	// 模拟 agent 输出 → 渲染树重建（新 RenderBox，resolver 重新解析）
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+	rv2 := wv.RenderView()
+	btn2 := wv.MainFrame().Document().GetElementById("b1")
+	ro3 := rv2.FindRenderBoxForNode(btn2)
+	if ro3 == nil || ro3.Style() == nil {
+		t.Fatal("重建后 button 无样式")
+	}
+	// 重建后仍悬停（agent 输出不应清除 hover）→ 红色保留
+	if c := ro3.Style().Color; c.R != 255 {
+		t.Fatalf("重建后（仍悬停）color=%v want red（agent 输出不应清除 hover）", c)
+	}
+
+	// 鼠标移出窗口：SetHovered(false) → 缓存必须失效 → :hover 不再应用
+	btn2.SetHovered(false)
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+	rv3 := wv.RenderView()
+	ro4 := rv3.FindRenderBoxForNode(btn2)
+	if ro4 == nil || ro4.Style() == nil {
+		t.Fatal("清除 hover 后 button 无样式")
+	}
+	if c := ro4.Style().Color; c.R == 255 {
+		t.Fatalf("清除 hover 后 color=%v want 非红（:hover 残留！）", c)
+	}
+}
 
 func encDataURI(s string) string {
 	var b strings.Builder

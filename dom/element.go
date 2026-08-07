@@ -154,7 +154,39 @@ func (e *Element) IsHovered() bool { return e.hovered }
 
 // SetHovered sets the hover state. The embedder calls this from mouse-move
 // and mouse-out event handlers.
-func (e *Element) SetHovered(h bool) { e.hovered = h }
+func (e *Element) SetHovered(h bool) {
+	if e.hovered != h {
+		e.hovered = h
+		e.bumpDynamicPseudoVersion()
+	}
+}
+
+// bumpDynamicPseudoVersion 使动态伪类（:hover/:focus/:active）状态变化
+// 波及的 per-element 样式缓存全部失效。resolver 的缓存 key 是元素自身
+// attrVersion，但 :hover 的匹配会跨元素：
+//   - `div:hover a` 选择器：后代的缓存依赖**祖先**的 hovered 状态
+//   - :hover 冒泡匹配（悬停子元素 → 祖先也匹配 :hover）：祖先的缓存
+//     依赖**后代**的 hovered 状态
+// 因此状态变化必须 bump 自身 + 全部祖先 + 全部后代（后代树遍历），
+// 否则清除 hover 后缓存仍返回旧的 :hover 样式（"无操作时渲染被影响"）。
+func (e *Element) bumpDynamicPseudoVersion() {
+	e.attrVersion++
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		p.attrVersion++
+	}
+	var walk func(n Node)
+	walk = func(n Node) {
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			if ce, ok := c.(*Element); ok {
+				ce.attrVersion++
+				walk(ce)
+			} else {
+				walk(c)
+			}
+		}
+	}
+	walk(e)
+}
 
 // IsFocused reports whether the element currently has focus, mirroring the
 // :focus pseudo-class.
@@ -162,7 +194,12 @@ func (e *Element) IsFocused() bool { return e.focused }
 
 // SetFocused sets the focus state. The embedder calls this from focus/blur
 // event handlers.
-func (e *Element) SetFocused(f bool) { e.focused = f }
+func (e *Element) SetFocused(f bool) {
+	if e.focused != f {
+		e.focused = f
+		e.bumpDynamicPseudoVersion() // :focus/:focus-within 跨元素 → 全链失效
+	}
+}
 
 // FocusByKeyboard reports whether the current focus was established by the
 // keyboard (e.g. Tab), driving the :focus-visible pseudo-class.
@@ -171,7 +208,12 @@ func (e *Element) FocusByKeyboard() bool { return e.focusByKeyboard }
 // SetFocusByKeyboard records how focus was established. Call SetFocused(true)
 // and SetFocusByKeyboard(true) together when Tab moves focus; mouse clicks set
 // it false so :focus-visible (UA default outline) does not match.
-func (e *Element) SetFocusByKeyboard(b bool) { e.focusByKeyboard = b }
+func (e *Element) SetFocusByKeyboard(b bool) {
+	if e.focusByKeyboard != b {
+		e.focusByKeyboard = b
+		e.attrVersion++ // :focus-visible 只匹配自身 → 仅 bump 自身
+	}
+}
 
 // IsActive reports whether the element is currently active (being activated
 // by the user, e.g. while a mouse button is pressed), mirroring the :active
@@ -180,7 +222,12 @@ func (e *Element) IsActive() bool { return e.active }
 
 // SetActive sets the active state. The embedder calls this from mouse-down
 // and mouse-up event handlers.
-func (e *Element) SetActive(a bool) { e.active = a }
+func (e *Element) SetActive(a bool) {
+	if e.active != a {
+		e.active = a
+		e.bumpDynamicPseudoVersion() // :active 冒泡（父按钮因子元素 active 匹配）→ 全链失效
+	}
+}
 
 // GetId/SetId and GetClassName/SetClassName are convenience accessors for the common
 // id and class attributes, mirroring Element::id()/className().

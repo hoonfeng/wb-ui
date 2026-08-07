@@ -1762,6 +1762,28 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				h.frameView.ScrollBy(-int(ev.ScrollX*40), -int(ev.ScrollY*40))
 			}
 
+		case window.EventCursorLeave:
+			// ★ 鼠标移出窗口：清除 hover 状态与光标残留。
+			// 之前 SetHovered(true) 留在最后一个 hover 的 DOM 元素上，
+			// 且从不清除——agent 输出/任何渲染树重建时 resolver 读
+			// el.IsHovered() 把 :hover 样式错误应用（"没有操作和悬停
+			// 时 agent 输出也影响渲染"：无交互画面却出现 hover 高亮/
+			// 按钮变色）。离开窗口即视为不再悬停任何元素。
+			if h.hoveredEl != nil {
+				h.hoveredEl.SetHovered(false)
+				h.hoveredEl = nil
+			}
+			// 光标移到视口外：滚动条 hover 高亮（isHover 用 cursor
+			// 位置判定）与子 Frame 光标一并清除。
+			if rv != nil {
+				rendering.SetCursorPosRecursive(rv, -1e9, -1e9)
+				rv.MarkAllDirty()
+			}
+			// 拖拽选区若在鼠标移出窗口后仍进行（按住拖出窗口），
+			// 保留 selEnd 不再更新（浏览器行为：拖出窗口后选区停在
+			// 最后位置，直到鼠标回来）。
+			h.cursorX, h.cursorY = ev.X, ev.Y
+
 		case window.EventCursorMove:
 			h.cursorX, h.cursorY = ev.X, ev.Y
 			csX, csY := h.win.ContentScale()
@@ -1775,8 +1797,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY()) // page coords for scrollbar hover
 
 			// Update RenderView cursor for scrollbar hover highlight.
+			// ★ 递归传播到 iframe 子 Frame：光标落在 iframe 内容框内时
+			// 换算成子文档坐标设置子 rv 的光标（子文档滚动条 hover 高亮
+			// 读子 rv 的 cursor；之前只设主 rv，子 Frame 滚动条永不高亮）。
 			if rv != nil {
-				rv.SetCursorPos(cssX, cssY)
+				rendering.SetCursorPosRecursive(rv, cssX, cssY)
 				// ★ 鼠标移动必须标记重绘：滚动条 thumb 的 hover 高亮由
 				// cursor 位置决定（renderpipeline.go isHover 判定），而 hover
 				// 元素可能未变（移入/移出滚动条轨道不改 DOM hover）。按需
@@ -1803,6 +1828,35 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if h.hysteresisMet {
 					offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
 					rendering.FocusedFormControlSel.End = offset
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
+			}
+
+			// ── Drag-to-select plain text (non form control) ──
+			// 鼠标按住（selecting）且拖过阈值时，实时扩展选区 End 到光标
+			// 位置（Active=true → 高亮跟随拖动）。anchor 在 Press 时由
+			// HitTestText 定位；跨 Frame：HitTestText 对 iframe 下钻，选区
+			// 终点可落在子文档文本上（SelectionRects 按全局树序输出两
+			// Frame 各自的高亮段）。
+			if h.selecting && !h.scrollbarDragging && rv != nil &&
+				h.imeFocusedEl == nil {
+				if !h.hysteresisMet {
+					dx := cssX - h.mouseDownX
+					dy := cssY - h.mouseDownY
+					if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+						// Not yet dragging.
+					} else {
+						h.hysteresisMet = true
+					}
+				}
+				if h.hysteresisMet {
+					h.selEndX = cssX
+					h.selEndY = cssY
+					h.handleDragSelection(rv)
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							fr.MarkRenderTreeDirty()
@@ -2242,7 +2296,38 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						h.selecting = false
 						rendering.FocusedFormControlSel = nil
 					} else {
+						// ★ 普通文本（非 form control）拖拽选区接线。
+						// 此前 handleDragSelection 从未被调用（无调用点、
+						// selAnchor 无赋值）——普通文本按下 selecting 恒为
+						// false，拖选毫无高亮。现在 Press 定位 anchor：
+						// 后续 mousemove 更新 selEnd 实时扩展（跨 Frame 由
+						// HitTestText 下钻支持），Release 保留最终选区。
 						h.selecting = false
+						if rv != nil {
+							tp := rendering.HitTestText(rv, cssX, cssY)
+							if tp.IsValid() {
+								if !h.shiftSelecting {
+									h.selAnchorX = cssX
+									h.selAnchorY = cssY
+									h.selEndX = cssX
+									h.selEndY = cssY
+									h.mouseDownX = cssX
+									h.mouseDownY = cssY
+									h.hysteresisMet = false
+									h.selecting = true
+								}
+								h.handleDragSelection(rv)
+								if mf := h.wv.MainFrame(); mf != nil {
+									if fr := mf.Frame(); fr != nil {
+										fr.MarkRenderTreeDirty()
+									}
+								}
+							} else {
+								// 点击空白：清除遗留选区。
+								h.shiftSelecting = false
+								rendering.ClearSelection()
+							}
+						}
 					}
 				}
 			} else if ev.Action == int(glfw.Release) {
@@ -2291,6 +2376,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if rendering.FocusedFormControlSel != nil {
 								rendering.FocusedFormControlSel.Active = false
 							}
+							if rv != nil && h.imeFocusedEl == nil {
+								// 普通文本点击（未拖动）：清空选区并显示
+								// caret（若命中可编辑文本）。
+								h.handleDragSelection(rv)
+							}
 							continue // not yet dragging; treat as a click
 						}
 						h.hysteresisMet = true
@@ -2304,7 +2394,15 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					// End the drag selection.
 					h.selecting = false
 					h.hysteresisMet = false
-					rendering.FocusedFormControlSel.Active = false
+					if rendering.FocusedFormControlSel != nil {
+						rendering.FocusedFormControlSel.Active = false
+					}
+					if rv != nil && h.imeFocusedEl == nil {
+						// 普通文本拖拽结束：用最后一次 mousemove 的 End
+						// 重算选区（Active=false 停止跟随），跨 Frame 的
+						// 终点保持子文档位置（HitTestText 下钻）。
+						h.handleDragSelection(rv)
+					}
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							fr.MarkRenderTreeDirty()

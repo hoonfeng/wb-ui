@@ -569,6 +569,43 @@ func TestResolver_PseudoClassHover(t *testing.T) {
 	}
 }
 
+// TestResolver_HoverClearedOnCursorLeave 验证「鼠标移出窗口清除 hover」的
+// 修复语义（t3）：SetHovered(false) 后 resolver 不再把 :hover 样式应用到
+// 元素——agent 输出触发渲染树重建时，若 hover 残留未清，:hover 会被错误
+// 应用（无交互画面却出现 hover 高亮/按钮变色）。清除后重建必须恢复正常。
+func TestResolver_HoverClearedOnCursorLeave(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "a")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, `a:hover { color: red; }`))
+
+	// 悬停：:hover 生效
+	el.SetHovered(true)
+	if cs := r.ResolveElement(el); cs.Color.R != 255 {
+		t.Fatalf("hovered 时 color=%v want red", cs.Color)
+	}
+	// 模拟鼠标移出窗口（EventCursorLeave → SetHovered(false)）：
+	// 重建后 :hover 必须不再应用（"无操作时渲染被影响"的根因）。
+	el.SetHovered(false)
+	if cs := r.ResolveElement(el); cs.Color.R != 0 {
+		t.Fatalf("移出窗口后 color=%v want 默认黑色（:hover 残留未清除）", cs.Color)
+	}
+
+	// 嵌套：父元素 hover 残留清除后，子元素 :hover（祖先链冒泡）也应失效。
+	parent := dom.NewElement(doc, "div")
+	parent.AppendChild(el)
+	r2 := NewResolver()
+	r2.AddStyleSheet(newSheet(t, `div:hover a { color: blue; }`))
+	parent.SetHovered(true)
+	if cs := r2.ResolveElement(el); cs.Color.B != 255 {
+		t.Fatalf("父 hovered 冒泡：a color=%v want blue", cs.Color)
+	}
+	parent.SetHovered(false)
+	if cs := r2.ResolveElement(el); cs.Color.B != 0 {
+		t.Fatalf("父 hover 清除后：a color=%v want 默认（祖先链 :hover 残留）", cs.Color)
+	}
+}
+
 func TestResolver_BackgroundShorthandPosSize(t *testing.T) {
 	doc := dom.NewDocument()
 	el := dom.NewElement(doc, "div")

@@ -740,6 +740,7 @@ const (
 	EventMouseButton EventType = iota
 	EventChar
 	EventCursorMove
+	EventCursorLeave // 鼠标移出窗口（清除 hover/光标残留）
 	EventKey
 	EventResize
 	EventScroll

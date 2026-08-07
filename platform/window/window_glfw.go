@@ -30,6 +30,7 @@ const (
 	EventMouseButton EventType = iota
 	EventChar
 	EventCursorMove
+	EventCursorLeave // 鼠标移出窗口（清除 hover/光标残留）
 	EventKey
 	EventResize
 	EventScroll
@@ -217,6 +218,23 @@ func (w *Window) setupCallbacks() {
 			Type: EventCursorMove,
 			X:    x,
 			Y:    y,
+		})
+		w.eventsMu.Unlock()
+	})
+	// ★ 鼠标移出窗口：发 EventCursorLeave，Host 清除 hover 状态与光标
+	// 残留——否则 SetHovered(true) 留在 DOM 元素上，agent 输出触发渲染
+	// 树重建时 resolver 读 IsHovered 把 :hover 样式错误应用（"没有操作
+	// 和悬停时 agent 输出也影响渲染"）。进入窗口不发事件（下次
+	// CursorMove 自然重建 hover）。
+	w.win.SetCursorEnterCallback(func(_ *glfw.Window, entered bool) {
+		if entered {
+			return
+		}
+		w.eventsMu.Lock()
+		w.events = append(w.events, Event{
+			Type: EventCursorLeave,
+			X:    -1e9,
+			Y:    -1e9,
 		})
 		w.eventsMu.Unlock()
 	})
