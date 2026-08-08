@@ -981,27 +981,35 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 			// 确定后按 min/max 约束调整；modal-content max-height:80vh 在此
 			// 生效——内容 965px 压到 80vh=640，否则超屏且内部 flex:1 子项
 			// 不被压缩、settings-body 永不出现滚动条）。
-			// min/max-height 作用于 border-box；几何存的是 content 高。
 			minH, maxH, minAuto, maxAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fontSizeOf(it.box))
 			vpb := g.VerticalBorderAndPadding()
 			bb := g.ContentHeight() + vpb
-			newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
-			if newBB != bb {
-				newContent := newBB - vpb
-				if newContent < 0 {
-					newContent = 0
-				}
-				g.SetContentHeight(newContent)
-				// 容器高度被 clamp（压缩）：重布局 item 内部，让 flex:1
-				// 子项按新高度重新分配主轴（modal-body 从 863 压缩到
-				// 640−header−footer），settings-body 随之出现滚动条。
-				// LayoutState 无 visited 标记，重复布局幂等。
-				ctx := contextFor(it.box, state)
-				ctx.Layout(it.box, state)
-				// 重布局末尾 auto-height 分支可能按内容重置容器高，写回
-				// clamp 后的最终值（子项已按新高度分配，几何正确）。
-				if g.ContentHeight() != newContent {
+			// ★ content 为 0（item 尚未自身布局）时跳过 clamp：replaced
+			// 表单控件（input/select/textarea）的固有高度由 BFC/IFC 兜底
+			// 计算（fontLineGap + padding + border）；此时若按
+			// min-height（如 input UA min-height:1.2em）clamp，0+padding 被
+			// 抬到 min → content 被钉成 min−padding−border 的小值，后续
+			// BFC 兜底因 ContentHeight>0 跳过 → input 高度塌成 15.6px
+			// （浏览器 25px，select 27px 正常——select 无 min-height）。
+			if g.ContentHeight() > 0 {
+				newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
+				if newBB != bb {
+					newContent := newBB - vpb
+					if newContent < 0 {
+						newContent = 0
+					}
 					g.SetContentHeight(newContent)
+					// 容器高度被 clamp（压缩）：重布局 item 内部，让 flex:1
+					// 子项按新高度重新分配主轴（modal-body 从 863 压缩到
+					// 640−header−footer），settings-body 随之出现滚动条。
+					// LayoutState 无 visited 标记，重复布局幂等。
+					ctx := contextFor(it.box, state)
+					ctx.Layout(it.box, state)
+					// 重布局末尾 auto-height 分支可能按内容重置容器高，写回
+					// clamp 后的最终值（子项已按新高度分配，几何正确）。
+					if g.ContentHeight() != newContent {
+						g.SetContentHeight(newContent)
+					}
 				}
 			}
 		} else {
