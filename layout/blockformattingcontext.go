@@ -361,7 +361,12 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if fs <= 0 { fs = 16 }
 		lineH := fontLineGap(box)
 		if lineH <= 0 { lineH = fs * 1.2 }
-		g.SetContentHeight(lineH)
+		// textarea: rows × lineHeight（浏览器标准；rows 默认 2）。
+		h := lineH
+		if el := box.Element(); el != nil && el.LocalName() == "textarea" {
+			h = textareaRows(box) * lineH
+		}
+		g.SetContentHeight(h)
 	}
 }
 

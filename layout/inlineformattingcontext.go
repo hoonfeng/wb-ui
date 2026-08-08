@@ -501,9 +501,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						if chW <= 0 {
 							chW = fs * 0.5
 						}
-						// ~20 cols x 2 rows, plus padding.
+						// ~20 cols x N rows（rows 属性，默认 2），加上 padding。
 						cldG.SetContentWidth(20*chW + 4)
-						cldG.SetContentHeight(2*fontLineGap(cld) + 4)
+						cldG.SetContentHeight(textareaRows(cld)*fontLineGap(cld) + 4)
 					}
 				}
 			}

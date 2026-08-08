@@ -628,6 +628,18 @@ func minContentWidth(box *ElementBox) float64 {
 	return mw
 }
 
+func textareaRows(box *ElementBox) float64 {
+	// Browser default rows=2 (Chromium/WebKit <textarea> UA).
+	if el := box.Element(); el != nil {
+		if v := el.GetAttribute("rows"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return float64(n)
+			}
+		}
+	}
+	return 2
+}
+
 func intrinsicContentHeight(box *ElementBox) float64 {
 	cs := box.Style()
 	// A replaced element (svg/img/canvas) sizes from its attribute height,
@@ -661,7 +673,14 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 				lineH = fs * 1.2
 			}
 			_, p, b := computeBoxModel(box, 0, fs)
-			return lineH + p.Top + p.Bottom + b.Top + b.Bottom
+			// textarea固有高度 = rows × lineHeight + padding + border
+			// （浏览器标准；rows 属性默认 2）。之前只返回单行高度，
+			// 设置面板「指令」rows=6 的 textarea 被压成一行 ≈30px。
+			n := 1.0
+			if ln == "textarea" {
+				n = textareaRows(box)
+			}
+			return n*lineH + p.Top + p.Bottom + b.Top + b.Bottom
 		}
 	}
 	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&
