@@ -63,3 +63,31 @@ func (h *Host) MockSelectOptionAt(el *dom.Element) {
 func (h *Host) MockSelectClose() {
 	h.closeSelectPopup()
 }
+
+// MockMouseMove 模拟鼠标移动到 (cssX, cssY)，走真实 hover 路径：
+// HitTest → SetHovered(旧元素清除/新元素设置) → hoverStyleFastPath
+// （只重算受影响元素的 :hover 样式，不重建渲染树）。返回新 hover 元素。
+func (h *Host) MockMouseMove(wv *webkit.WebView, cssX, cssY float64) *dom.Element {
+	if wv == nil {
+		return nil
+	}
+	rv := wv.RenderView()
+	if rv == nil {
+		return nil
+	}
+	newEl := rendering.HitTest(rv, cssX, cssY, "")
+	oldHover := h.hoveredEl
+	if oldHover != nil {
+		oldHover.SetHovered(false)
+	}
+	if newEl != nil {
+		newEl.SetHovered(true)
+	}
+	h.hoveredEl = newEl
+	if mf := wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			h.hoverStyleFastPath(rv, fr, oldHover, newEl)
+		}
+	}
+	return newEl
+}

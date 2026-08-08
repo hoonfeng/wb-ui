@@ -3066,7 +3066,10 @@ func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, css
 	overlay.SetAttribute("style", fmt.Sprintf("position:fixed;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%dpx;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:9999;overflow-y:auto;", sx, popTop, boxW, popH))
 	// 添加每个 option。
 	current := selEl.Value()
-	optStyle := "display:block;height:24px;line-height:24px;padding:0 8px;font-size:14px;color:var(--text-primary);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
+	// ★ option 全部用 class 驱动样式（布局/hover/选中/禁用态都放样式表，
+	// 见 index.html 的 .select-popup-option 规则族）——内联 style 优先级
+	// 高于外部规则，会阻挡 :hover 伪类的背景切换。与浏览器一致：popup
+	// option 的样式由 CSS 规则管理。
 	for _, opt := range opts {
 		optEl := doc.CreateElement("div")
 		optEl.SetAttribute("class", "select-popup-option")
@@ -3078,12 +3081,8 @@ func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, css
 		optEl.SetAttribute("data-select-popup", "1")
 		if opt.HasAttribute("disabled") {
 			optEl.SetAttribute("class", "select-popup-option select-popup-option-disabled")
-			optEl.SetAttribute("style", optStyle+"color:var(--text-muted);")
 		} else if optVal == current {
 			optEl.SetAttribute("class", "select-popup-option select-popup-option-selected")
-			optEl.SetAttribute("style", optStyle+"background:var(--accent-bg);")
-		} else {
-			optEl.SetAttribute("style", optStyle)
 		}
 		txt := doc.CreateTextNode(opt.TextContent())
 		_ = optEl.AppendChild(txt)
