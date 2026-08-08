@@ -970,6 +970,13 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			}
 		}
 	case "font-family":
+		if valueString == "inherit" {
+			// UA stylesheet uses font-family: inherit for form controls;
+			// the inherited value was already copied from the parent in
+			// ResolveElement via InheritFrom — keep it (do not overwrite
+			// with the literal keyword).
+			break
+		}
 		cs.FontFamily = strings.Trim(valueString, `"'`)
 	case "font-size":
 		if l, ok := parseLength(valueString); ok {
@@ -2266,7 +2273,9 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.Color = c
 			}
 		case "font-family":
-			cs.FontFamily = strings.Trim(resolvedStr, `"'`)
+			if resolvedStr != "inherit" {
+				cs.FontFamily = strings.Trim(resolvedStr, `"'`)
+			}
 		case "font-size":
 			if l, ok := parseLength(resolvedStr); ok {
 				cs.FontSize = l

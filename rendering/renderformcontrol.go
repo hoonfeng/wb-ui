@@ -127,7 +127,7 @@ var FocusedFormControlSel *FormControlSelection
 // was handled (so the caller can skip the default text-paint path), false otherwise.
 //
 // debugPaintLog enables verbose paint diagnostics. Set to true to trace form-control paint calls.
-const debugPaintLog = false
+var debugPaintLog = false
 
 func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 	if box == nil || info == nil || info.canvas == nil {
@@ -1132,12 +1132,13 @@ func paintSelectText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 	}
 	c := info.canvas
 
-	// Read the selected option's text using the html5 wrapper.
+	// Read the selected option's TEXT (not its value attribute) — the
+	// browser paints option.textContent inside the closed box.
 	sel, ok := html5.ToSelectElement(el)
 	if !ok {
 		return
 	}
-	selectedText := sel.Value() // Value() returns the first selected option's text or ""
+	selectedText := sel.SelectedText() // e.g. "DeepSeek" not "deepseek"
 
 	if selectedText == "" {
 		return
@@ -1175,19 +1176,30 @@ func paintSelectText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 	info.canvas.Save()
 	info.canvas.Clip(graphics.Rect{X: x, Y: y, Width: w - arrowReserve, Height: h})
 
-	// Truncate text with "…" if too long.
+	// Truncate text with "…" only when it does not fit the box. When it
+	// fits (the normal case), draw the full text — never collapse a fitting
+	// text into an ellipsis.
 	displayText := selectedText
 	textW := graphics.MeasureText(font, displayText)
-	var runes []rune
 	if textW > maxTextW {
-		// Truncate rune by rune until it fits with "…"
-		runes = []rune(displayText)
-		if len(runes) > 0 {
+		// 超宽：逐字符截断直到 fits（保留省略号）。与浏览器 text-overflow
+		// 一致：截断后的字符 + "…" 必须能放入 maxTextW。
+		runes := []rune(displayText)
+		for len(runes) > 0 {
+			candidate := string(runes) + "…"
+			if graphics.MeasureText(font, candidate) <= maxTextW {
+				displayText = candidate
+				break
+			}
 			runes = runes[:len(runes)-1]
 		}
+		if len(runes) == 0 {
+			displayText = "…"
+		}
 	}
-	if len(runes) == 0 {
-		displayText = "…"
+	if debugPaintLog {
+		log.Printf("[dbg/paint] paintSelectText text=%q at (%.0f,%.0f) font=%s/%v color=(%d,%d,%d) maxW=%.0f",
+			displayText, textX, baselineY, font.Family, font.Size, textColor.R, textColor.G, textColor.B, maxTextW)
 	}
 	c.DrawText(textX, baselineY, displayText, font, textColor)
 	info.canvas.Restore()

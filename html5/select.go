@@ -97,12 +97,22 @@ func (s HTMLSelectElement) Form() *dom.Element {
 }
 
 // SelectedIndex returns the index of the first selected option, or -1 if
-// none is selected. Mirrors HTMLSelectElement::selectedIndex().
+// none is selected. Mirrors HTMLSelectElement::selectedIndex(). Per the HTML
+// spec, when no option is explicitly selected (and the select is not
+// multiple), the FIRST non-disabled option is selected by default.
 func (s HTMLSelectElement) SelectedIndex() int {
 	opts := s.Options()
 	for i, o := range opts {
 		if o.HasAttribute("selected") {
 			return i
+		}
+	}
+	// HTML 标准默认行为：无显式选中时，默认选中第一个非 disabled option。
+	if !s.Multiple() {
+		for i, o := range opts {
+			if !o.HasAttribute("disabled") {
+				return i
+			}
 		}
 	}
 	return -1
@@ -121,9 +131,11 @@ func (s HTMLSelectElement) SetSelectedIndex(idx int) {
 	}
 }
 
-// Value returns the value of the first selected option, or "" if none is
-// selected. For a selected option without a value attribute, the option's
-// text content is returned. Mirrors HTMLSelectElement::value().
+// Value returns the value of the first selected option. For a selected option
+// without a value attribute, the option's text content is returned. Per the
+// HTML spec, when no option is explicitly selected the first non-disabled
+// option's value is returned (default selection). Mirrors
+// HTMLSelectElement::value().
 func (s HTMLSelectElement) Value() string {
 	for _, o := range s.Options() {
 		if !o.HasAttribute("selected") {
@@ -134,6 +146,42 @@ func (s HTMLSelectElement) Value() string {
 			return strings.TrimSpace(textContent(o))
 		}
 		return v
+	}
+	// HTML 标准默认行为：无显式选中时，返回第一个非 disabled option 的 value。
+	if !s.Multiple() {
+		for _, o := range s.Options() {
+			if o.HasAttribute("disabled") {
+				continue
+			}
+			v := o.GetAttribute("value")
+			if v == "" {
+				return strings.TrimSpace(textContent(o))
+			}
+			return v
+		}
+	}
+	return ""
+}
+
+// SelectedText returns the text content of the first selected option. Per the
+// HTML spec, when no option is explicitly selected the first non-disabled
+// option's text is returned (default selection). Mirrors
+// RenderMenuList::text() — this is what the browser paints inside the closed
+// <select> box (NOT the value attribute).
+func (s HTMLSelectElement) SelectedText() string {
+	for _, o := range s.Options() {
+		if !o.HasAttribute("selected") {
+			continue
+		}
+		return strings.TrimSpace(textContent(o))
+	}
+	if !s.Multiple() {
+		for _, o := range s.Options() {
+			if o.HasAttribute("disabled") {
+				continue
+			}
+			return strings.TrimSpace(textContent(o))
+		}
 	}
 	return ""
 }
