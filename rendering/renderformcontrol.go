@@ -51,6 +51,7 @@ var FormControlColors = struct {
 	SliderTrack       graphics.Color
 	SliderThumb       graphics.Color
 	SliderThumbBorder graphics.Color
+	SliderFill        graphics.Color
 	ProgressTrack     graphics.Color
 	ProgressFill      graphics.Color
 	MeterOptimum      graphics.Color
@@ -70,9 +71,13 @@ var FormControlColors = struct {
 	RadioDot:          graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	RadioBg:           graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	RadioBgHot:        graphics.Color{R: 26, G: 115, B: 232, A: 255},
-	SliderTrack:       graphics.Color{R: 200, G: 200, B: 200, A: 255},
-	SliderThumb:       graphics.Color{R: 240, G: 240, B: 240, A: 255},
-	SliderThumbBorder: graphics.Color{R: 120, G: 120, B: 120, A: 255},
+	// Edge (Chromium) 深色主题实测 range 颜色：
+	//   track 未填充 #EFEFEF（239,239,239）、已填充段 #0075FF（0,117,255）、
+	//   thumb 主体 #0075FF + 右侧白色高光（3D 立体感）。
+	SliderTrack:       graphics.Color{R: 239, G: 239, B: 239, A: 255},
+	SliderThumb:       graphics.Color{R: 0, G: 117, B: 255, A: 255},
+	SliderThumbBorder: graphics.Color{R: 0, G: 117, B: 255, A: 255},
+	SliderFill:        graphics.Color{R: 0, G: 117, B: 255, A: 255},
 	ProgressTrack:     graphics.Color{R: 220, G: 220, B: 220, A: 255},
 	ProgressFill:      graphics.Color{R: 60, G: 130, B: 246, A: 255},
 	MeterHigh:         graphics.Color{R: 244, G: 67, B: 54, A: 255},
@@ -955,21 +960,27 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 }
 
 // paintRangeSlider draws a horizontal slider: a track plus a thumb positioned at the
-// value's fraction along the range. Mirrors RenderTheme::paintSlider. Default theme
-// colors for track/thumb, matching browser native rendering.
+// paintRangeSlider draws a horizontal slider: a two-segment rounded track plus
+// a thumb positioned at the value's fraction along the range. Mirrors
+// RenderTheme::paintSlider. Pixel-fitted against Edge (Chromium) native range:
+//   - track: 8px tall (half the input box height), rounded 4px, two segments —
+//     filled portion (0..value) accent blue #0075FF, unfilled portion grey
+//     #EFEFEF. Edge raster: y=104..111 (8 rows), center rows 239,239,239.
+//   - thumb: ~15px circle centered on the value, body #0075FF with a white
+//     highlight arc on its right side (Edge raster shows a vertical white band
+//     at the thumb's right edge).
 func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
 	c := info.canvas
-	// Track: a thin rounded bar centered vertically.
-	trackH := h * 0.3
-	if trackH < 3 {
-		trackH = 3
+	// Track: 8px rounded bar centered vertically (Edge track height = h*0.5 for h=16).
+	trackH := h * 0.5
+	if trackH < 4 {
+		trackH = 4
 	}
 	trackY := y + (h-trackH)/2
-	c.FillRoundRect(x, trackY, w, trackH, trackH/2, applyOpacity(FormControlColors.SliderTrack, op))
-	// Thumb: a small circle positioned at the value fraction.
+
 	min, max := rangeBounds(in)
 	val := parseFloatOr(in.Value(), min)
-	frac := 0.5
+	frac := 0.0
 	if max > min {
 		frac = (val - min) / (max - min)
 		if frac < 0 {
@@ -978,19 +989,23 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 			frac = 1
 		}
 	}
-	thumbR := h * 0.45
+
+	// Unfilled portion first (whole track), then filled portion over it.
+	c.FillRoundRect(x, trackY, w, trackH, trackH/2, applyOpacity(FormControlColors.SliderTrack, op))
+	if frac > 0 {
+		fillW := w * frac
+		c.FillRoundRect(x, trackY, fillW, trackH, trackH/2, applyOpacity(FormControlColors.SliderFill, op))
+	}
+
+	// Thumb: circle (diameter ≈ input height), accent blue. Edge (Chromium)
+	// raster shows a solid blue disc — no white highlight.
+	thumbR := h * 0.5
 	if thumbR < 5 {
 		thumbR = 5
 	}
 	thumbX := x + frac*w
-	// Use element's text color for thumb (accent-color equivalent), fallback default.
-	thumbCol := toGraphicsColor(st.Color)
-	if thumbCol.A == 0 {
-		thumbCol = FormControlColors.SliderThumb
-	}
-	thumbBorder := FormControlColors.SliderThumbBorder
-	c.FillCircle(thumbX, y+h/2, thumbR, applyOpacity(thumbCol, op))
-	c.StrokeCircle(thumbX, y+h/2, thumbR, 1, applyOpacity(thumbBorder, op))
+	cy := y + h/2
+	c.FillCircle(thumbX, cy, thumbR, applyOpacity(FormControlColors.SliderThumb, op))
 }
 
 // paintProgressBar draws a <progress> element: a rounded track with a filled portion

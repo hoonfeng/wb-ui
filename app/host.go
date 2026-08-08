@@ -164,6 +164,14 @@ type Host struct {
 	// Cleared on mouseup. Enables :active pseudo-class matching.
 	activeEl *dom.Element
 
+	// selectPopup is the open <select> dropdown overlay (nil when closed).
+	// Clicking a <select> creates a fixed-position list layer containing its
+	// <option> elements; clicking an option sets the select's value and
+	// dispatches a change event (Vue v-model update), clicking anywhere else
+	// closes the popup. Mirrors RenderMenuList's popup in WebKit.
+	selectPopup       *dom.Element // the overlay container (div.select-popup)
+	selectPopupSelect *dom.Element // the <select> this popup belongs to
+
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
@@ -2016,6 +2024,36 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						activeEl.SetActive(true)
 						h.activeEl = activeEl
 
+						// ── <select> dropdown: open/close popup ──
+						// WebKit RenderMenuList opens a native popup on click.
+						// We emulate it with a fixed-position overlay layer
+						// listing the <option> children. Clicking an option
+						// sets the value + dispatches change (Vue v-model);
+						// clicking outside closes.
+						if h.selectPopup != nil {
+							// popup 打开中：命中 popup 内 option → 选择并关闭；
+							// 否则点击 popup 外 → 关闭。
+							if h.popupContains(activeEl) {
+								h.selectPopupOptionClicked(activeEl)
+								h.closeSelectPopup()
+							} else {
+								h.closeSelectPopup()
+							}
+						}
+						sel := activeEl
+						if sel.LocalName() != "select" {
+							// 允许点击 select 的箭头/内部子元素时也打开（子元素少见）
+							for p := sel.ParentElement(); p != nil; p = p.ParentElement() {
+								if p.LocalName() == "select" {
+									sel = p
+									break
+								}
+							}
+						}
+						if sel.LocalName() == "select" && h.selectPopup == nil {
+							h.handleSelectClick(sel, rv, cssX, cssY)
+						}
+
 						// ── Toggle checkbox / radio on click ──
 						if activeEl.LocalName() == "input" {
 							inputType := activeEl.GetAttribute("type")
@@ -2041,6 +2079,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 										}
 										in.SetChecked(true)
 									}
+									// ★ 派发 change 事件：Vue 的 v-model（checkbox/radio）
+									// 监听 change 更新组件状态。此前只 toggle 了
+									// DOM checked 属性而不派发事件，导致「组件不可
+									// 操作」——视觉上勾选但 Vue 状态未同步。
+									activeEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 									if debugPaintLog {
 										log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
 									}
@@ -2968,10 +3011,142 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	h.processEventLoop()
 	h.wv.RebuildRenderTree()
 }
-func handleFormSubmitClick(el *dom.Element) {
-	if el == nil {
+// handleSelectClick opens the <select> dropdown popup for sel: a
+// fixed-position overlay listing the select's <option> elements, positioned
+// just below the select box. Mirrors WebKit RenderMenuList.showPopup.
+func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, cssX, cssY float64) {
+	selEl, ok := html5.ToSelectElement(sel)
+	if !ok {
 		return
 	}
+	if selEl.Disabled() {
+		return
+	}
+	// 定位 select 的屏幕位置（相对于当前 RenderView 的滚动偏移）。
+	var sx, sy float64
+	var boxW float64 = 180
+	if box := rv.FindRenderBoxForNode(sel); box != nil {
+		sx, sy = box.AbsoluteX(), box.AbsoluteY()
+		if bw := box.Width(); bw > 0 {
+			boxW = bw
+		}
+		// popup 层是 fixed 定位（相对视口），select 的 absolute 坐标
+		// 已含滚动偏移，减去当前滚动量得到视口坐标。
+		if _, sy0 := rv.BoxScrollOffset(box); sy0 > 0 {
+			sy -= sy0
+		}
+	}
+	// 创建浮层容器（fixed 定位，覆盖在 select 下方）。
+	doc := h.wv.MainFrame().Document()
+	if doc == nil {
+		return
+	}
+	overlay := doc.CreateElement("div")
+	overlay.SetAttribute("class", "select-popup")
+	// 高度：option 行数 * 行高（用实际 option 数量；超 8 项滚动）。
+	opts := selEl.Options()
+	rowH := 24
+	n := len(opts)
+	if n > 8 {
+		n = 8
+	}
+	popH := n*rowH + 4
+	// 保持浮层不超出视口底边。
+	viewH := h.wv.Height()
+	if sy+float64(popH) > float64(viewH)-8 {
+		sy = float64(viewH) - float64(popH) - 8
+	}
+	if sy < 0 {
+		sy = 0
+	}
+	overlay.SetAttribute("style", fmt.Sprintf("position:fixed;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%dpx;background:#ffffff;border:1px solid #c0c0c0;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.25);z-index:9999;overflow-y:auto;", sx, sy, boxW, popH))
+	// 添加每个 option。
+	current := selEl.Value()
+	for _, opt := range opts {
+		optEl := doc.CreateElement("div")
+		optEl.SetAttribute("class", "select-popup-option")
+		optVal := opt.GetAttribute("value")
+		if optVal == "" {
+			optVal = opt.TextContent()
+		}
+		optEl.SetAttribute("data-value", optVal)
+		optEl.SetAttribute("data-select-popup", "1")
+		if opt.HasAttribute("disabled") {
+			optEl.SetAttribute("class", "select-popup-option select-popup-option-disabled")
+		}
+		if optVal == current && !opt.HasAttribute("disabled") {
+			optEl.SetAttribute("class", "select-popup-option select-popup-option-selected")
+		}
+		txt := doc.CreateTextNode(opt.TextContent())
+		_ = optEl.AppendChild(txt)
+		_ = overlay.AppendChild(optEl)
+	}
+	// 挂到 body 末尾（fixed 定位层）。
+	body := doc.Body()
+	if body == nil {
+		return
+	}
+	_ = body.AppendChild(overlay)
+	h.selectPopup = overlay
+	h.selectPopupSelect = sel
+	h.wv.RebuildRenderTree()
+	h.wv.EnsureLayout()
+}
+
+// closeSelectPopup removes the open dropdown overlay, if any.
+func (h *Host) closeSelectPopup() {
+	if h.selectPopup == nil {
+		return
+	}
+	body := h.wv.MainFrame().Document().Body()
+	if body != nil {
+		_ = body.RemoveChild(h.selectPopup)
+	}
+	h.selectPopup = nil
+	h.selectPopupSelect = nil
+	h.wv.RebuildRenderTree()
+}
+
+// popupContains reports whether el is inside the currently open popup layer.
+func (h *Host) popupContains(el *dom.Element) bool {
+	if el == nil || h.selectPopup == nil {
+		return false
+	}
+	for p := el; p != nil; p = p.ParentElement() {
+		if p == h.selectPopup {
+			return true
+		}
+	}
+	return false
+}
+
+// selectPopupOptionClicked applies the clicked <option>'s value to the owning
+// <select> and dispatches a change event so Vue v-model updates the model.
+func (h *Host) selectPopupOptionClicked(el *dom.Element) {
+	if el == nil || h.selectPopupSelect == nil {
+		return
+	}
+	if el.LocalName() == "div" && el.GetAttribute("data-value") != "" {
+		// disabled option 不选择。
+		cls := el.GetAttribute("class")
+		if strings.Contains(cls, "disabled") {
+			return
+		}
+		sel := h.selectPopupSelect
+		if selEl, ok := html5.ToSelectElement(sel); ok {
+			selEl.SetValue(el.GetAttribute("data-value"))
+		}
+		// 派发 change（冒泡）→ Vue v-model 更新。
+		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
+		if debugPaintLog {
+			log.Printf("[dbg/click] select set value=%q", el.GetAttribute("data-value"))
+		}
+	}
+}
+
+func handleFormSubmitClick(el *dom.Element) {
+	if el == nil {
+		return	}
 	switch el.LocalName() {
 	case "input":
 		in, ok := html5.ToInputElement(el)

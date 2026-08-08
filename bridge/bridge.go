@@ -77,7 +77,7 @@ func RegisterHTTP(method, pattern string, handler http.HandlerFunc) {
 }
 
 func registerRoute(method, pattern string, handler bindings.GoCallback) {
-	jsName := patternToJSName(pattern)
+	jsName := patternToJSName(method, pattern)
 	globalRoutes = append(globalRoutes, Route{
 		Method:  strings.ToUpper(method),
 		Pattern: pattern,
@@ -226,11 +226,21 @@ func RoutesJSON() string {
 
 // --- internals ---
 
-func patternToJSName(pattern string) string {
+// patternToJSName converts a route pattern to a stable JS function name.
+// Method is included as a suffix so GET and PUT on the same pattern produce
+// distinct JS names (e.g. api_settings_get / api_settings_put). Without this,
+// InjectAll would register both under "api_settings" and the last one (PUT)
+// would silently override the GET handler — breaking GET fetches with EOF
+// body-read errors (data never loads).
+func patternToJSName(method, pattern string) string {
 	s := strings.TrimPrefix(pattern, "/")
 	s = strings.ReplaceAll(s, "/", "_")
 	s = strings.ReplaceAll(s, "*", "_wildcard")
 	s = strings.ReplaceAll(s, "-", "_")
+	m := strings.ToLower(strings.TrimSpace(method))
+	if m != "" {
+		s += "_" + m
+	}
 	return s
 }
 
@@ -264,11 +274,12 @@ func matchPattern(pattern, url string) bool {
 	return url == pattern
 }
 
-// buildRouteMap builds a map[urlPrefix]jsName for the SDK.
+// buildRouteMap builds a map["METHOD urlPrefix"]jsName for the SDK, so the
+// SDK can dispatch GET vs PUT on the same pattern to distinct Go functions.
 func buildRouteMap() map[string]string {
 	m := make(map[string]string)
 	for _, r := range globalRoutes {
-		m[r.Pattern] = r.JSName
+		m[strings.ToUpper(r.Method)+" "+r.Pattern] = r.JSName
 	}
 	return m
 }
@@ -304,7 +315,7 @@ const bridgeSDKTemplate = `(function(global) {
 		});
 	};
 
-	function matchRoute(url) {
+	function matchRoute(url, method) {
 		// Normalize: strip origin (http://host) and query string so patterns
 		// like "/api/users" match the absolute URLs api.js builds via
 		// new URL('/api/...', location.origin).toString().
@@ -321,13 +332,20 @@ const bridgeSDKTemplate = `(function(global) {
 		}
 		var q = nu.indexOf('?');
 		if (q >= 0) nu = nu.substring(0, q);
+		// Prefer method-specific entry "GET /api/...", fall back to any
+		// method for patterns registered without a method.
+		var m = String(method || 'GET').toUpperCase();
 		for (var pattern in ROUTES) {
-			if (pattern.endsWith('/*')) {
-				var prefix = pattern.slice(0, -2);
+			var pm = pattern.indexOf(' ');
+			var pMethod = pm > 0 ? pattern.substring(0, pm) : '';
+			var pPath = pm > 0 ? pattern.substring(pm + 1) : pattern;
+			if (pMethod !== '' && pMethod !== m) continue;
+			if (pPath.endsWith('/*')) {
+				var prefix = pPath.slice(0, -2);
 				if (nu.indexOf(prefix) === 0) return ROUTES[pattern];
-			} else if (pattern.slice(-1) === '/') {
-				if (nu.indexOf(pattern) === 0) return ROUTES[pattern];
-			} else if (nu === pattern) {
+			} else if (pPath.slice(-1) === '/') {
+				if (nu.indexOf(pPath) === 0) return ROUTES[pattern];
+			} else if (nu === pPath) {
 				return ROUTES[pattern];
 			}
 		}
@@ -335,7 +353,7 @@ const bridgeSDKTemplate = `(function(global) {
 	}
 
 	global.fetch = function(url, options) {
-		var jsName = matchRoute(url);
+		var jsName = matchRoute(url, options && options.method);
 		if (jsName && global.go && global.go[jsName]) {
 			try {
 				// Two-layer direct call: JS → native jsc function (window.go.*)

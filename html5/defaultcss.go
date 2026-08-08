@@ -110,7 +110,10 @@ input[type="checkbox"], input[type="radio"] {
 input[type="range"] {
 	display: inline-block;
 	width: 9.7em;
-	height: 1.2em;
+	/* 高度对齐浏览器：Edge(Chromium) 实测 range 约 21px（1.6em @ 13px）。
+	   此前 1.2em(≈16px) 导致温度行 row 高 24 vs 浏览器 30，modal 总高
+	   少 5px（用户反馈「设置UI高度不对」）。 */
+	height: 1.6em;
 	padding: 0;
 	border: none;
 	background-color: transparent;
