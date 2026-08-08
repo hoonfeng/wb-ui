@@ -54,9 +54,9 @@ func (w *Window) cursorFor(shape CursorShape) *glfw.Cursor {
 	case CursorHand:
 		c = glfw.CreateStandardCursor(glfw.HandCursor)
 	case CursorNWSE:
-		c = makeNWSECursor()
+		c = makeSystemDiagCursor(false)
 	case CursorNESW:
-		c = makeNESWCursor()
+		c = makeSystemDiagCursor(true)
 	case CursorNS:
 		c = glfw.CreateStandardCursor(glfw.VResizeCursor)
 	case CursorEW:
@@ -68,16 +68,20 @@ func (w *Window) cursorFor(shape CursorShape) *glfw.Cursor {
 	return c
 }
 
-// makeNWSECursor draws the nwse-resize cursor: a 45° double arrow (↖↘) —
-// white outline (offset +1,+1) under a black body, 32×32, hotspot at center.
-func makeNWSECursor() *glfw.Cursor { return makeDiagCursor(false) }
-
-// makeNESWCursor draws the nesw-resize cursor: the other 45° diagonal (↗↙),
-// mirrored along the vertical axis (WebKit maps nesw-resize → IDC_SIZENESW).
-func makeNESWCursor() *glfw.Cursor { return makeDiagCursor(true) }
+// makeSystemDiagCursor returns the OS theme's diagonal resize cursor
+// (IDC_SIZENWSE / IDC_SIZENESW on Windows — the exact pointer the browser
+// shows over a textarea resize handle). If the system cursor can't be
+// loaded it falls back to the synthesized bitmap.
+func makeSystemDiagCursor(flip bool) *glfw.Cursor {
+	if c := systemDiagCursor(flip); c != nil {
+		return c
+	}
+	return makeDiagCursor(flip)
+}
 
 // makeDiagCursor draws a 45° double-arrow cursor along one diagonal.
 // flip=false → ↘ (nwse-resize), flip=true → ↙ (nesw-resize).
+// This is only a fallback for platforms without a system diagonal cursor.
 func makeDiagCursor(flip bool) *glfw.Cursor {
 	const S = 32
 	img := image.NewNRGBA(image.Rect(0, 0, S, S))
