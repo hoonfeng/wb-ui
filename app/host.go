@@ -190,6 +190,7 @@ type Host struct {
 	resizeDragRV      *rendering.RenderView
 	resizeDragStartY  float64 // cursor Y at drag start (CSS px)
 	resizeDragStartH  float64 // box height at drag start (CSS px)
+	resizeDragCursor  window.CursorShape // 拖动中保持的 resize 光标（按下时按模式记录）
 	// lastCursor tracks the last window cursor shape set (dedupe: only call
 	// SetCursorShape when the shape actually changes).
 	lastCursor window.CursorShape
@@ -1618,7 +1619,12 @@ func (h *Host) updateCursor(rv *rendering.RenderView, cssX, cssY float64) {
 	if h.win == nil {
 		return
 	}
+	// 拖动中保持按下时记录的 resize 光标（鼠标移出手柄区域也不变，
+	// 浏览器行为）；否则按当前 hover 元素计算。
 	shape := cursorShapeForElement(rv, h.hoveredEl, cssX, cssY)
+	if h.resizeDragEl != nil {
+		shape = h.resizeDragCursor
+	}
 	if shape != h.lastCursor {
 		h.lastCursor = shape
 		h.win.SetCursorShape(shape)
@@ -1681,13 +1687,24 @@ func cursorShapeForElement(rv *rendering.RenderView, el *dom.Element, cssX, cssY
 			return window.CursorIBeam
 		}
 	case "textarea":
-		// 右下角 15px resize 手柄优先 → nwse-resize（与 Press 手柄
-		// 命中区域一致，视口坐标）。
+		// 右下角 15px resize 手柄优先（与 Press 手柄命中区域一致，
+		// 视口坐标）。光标方向按 resize 模式区分——对齐浏览器：
+		// resize:vertical → 垂直双向箭头（NS）；horizontal → 水平
+		// 双向箭头（EW）；both → 斜向双向箭头（NWSE）。Edge 实测：
+		// 固定宽度 textarea（resize:vertical）手柄是垂直指针，不是斜的
+		// （之前无条件 NWSE 导致光标与浏览器不符）。
 		if st != nil && rendering.ResizeModeOf(st) != 0 {
 			if rb := rv.FindRenderBoxForNode(el); rb != nil {
 				bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
 				if cssX > bx+bw-15 && cssY > by+bh-15 {
-					return window.CursorNWSE
+					switch rendering.ResizeModeOf(st) {
+					case 2: // vertical
+						return window.CursorNS
+					case 1: // horizontal
+						return window.CursorEW
+					default: // both
+						return window.CursorNWSE
+					}
 				}
 			}
 		}
@@ -2599,10 +2616,20 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 									if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
 										h.resizeDragEl = hitEl
 										h.resizeDragRV = rv
-									h.resizeDragStartY = cssY
-									h.resizeDragStartH = rb.Height()
-									resizeHandle = true
-								}
+										h.resizeDragStartY = cssY
+										h.resizeDragStartH = rb.Height()
+										// 记录拖动中保持的光标（按 resize 模式：
+										// vertical→NS、horizontal→EW、both→NWSE）
+										switch rendering.ResizeModeOf(st) {
+										case 2:
+											h.resizeDragCursor = window.CursorNS
+										case 1:
+											h.resizeDragCursor = window.CursorEW
+										default:
+											h.resizeDragCursor = window.CursorNWSE
+										}
+										resizeHandle = true
+									}
 								}
 							}
 						}
@@ -2722,6 +2749,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if h.resizeDragEl != nil {
 					h.resizeDragEl = nil
 					h.resizeDragRV = nil
+					h.resizeDragCursor = window.CursorArrow
 				}
 				if h.selecting {
 					csX, csY := h.win.ContentScale()
