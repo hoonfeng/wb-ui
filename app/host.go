@@ -190,6 +190,9 @@ type Host struct {
 	resizeDragRV      *rendering.RenderView
 	resizeDragStartY  float64 // cursor Y at drag start (CSS px)
 	resizeDragStartH  float64 // box height at drag start (CSS px)
+	// lastCursor tracks the last window cursor shape set (dedupe: only call
+	// SetCursorShape when the shape actually changes).
+	lastCursor window.CursorShape
 
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
@@ -1595,6 +1598,58 @@ func (h *Host) processEventLoop() {
 // hoverStyleFastPath applies the :hover style change for oldEl → newEl without
 // rebuilding the render tree. Falls back to a full rebuild+layout when the
 // style change affects layout (geometry).
+// updateCursor 根据悬停元素计算窗口光标（CSS cursor 语义）：悬停 textarea
+// 右下角 resize 手柄 → nwse-resize；input/textarea 内容 → 文本光标；按钮、
+// 链接、select、checkbox 等 → 手型；默认箭头。只在形状变化时调用
+// SetCursorShape（避免每帧重设系统光标）。h.hoveredEl 已由 Move 处理更新。
+func (h *Host) updateCursor(rv *rendering.RenderView, cssX, cssY float64) {
+	if h.win == nil {
+		return
+	}
+	shape := window.CursorArrow
+	el := h.hoveredEl
+	if rv != nil && el != nil {
+		// textarea 右下角 15px resize 手柄 → nwse-resize（与 Press 手柄
+		// 命中区域一致）。
+		if el.LocalName() == "textarea" {
+			if rb := rv.FindRenderBoxForNode(el); rb != nil {
+				if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
+					// 视口坐标（减祖先滚动偏移），与 Press 手柄命中一致。
+					bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
+					if cssX > bx+bw-15 && cssY > by+bh-15 {
+						shape = window.CursorNWSE
+					}
+				}
+			}
+		}
+		if shape == window.CursorArrow {
+			switch el.LocalName() {
+			case "input":
+				t := el.GetAttribute("type")
+				switch t {
+				case "checkbox", "radio", "submit", "reset", "button", "range", "color":
+					shape = window.CursorHand
+				default:
+					shape = window.CursorIBeam
+				}
+			case "textarea":
+				shape = window.CursorIBeam
+			case "a", "button", "select", "option", "summary", "label":
+				shape = window.CursorHand
+			default:
+				// class 含 pointer 的通用元素（Vue 应用常用 cursor:pointer）
+				if cls := el.ClassName(); strings.Contains(cls, "pointer") {
+					shape = window.CursorHand
+				}
+			}
+		}
+	}
+	if shape != h.lastCursor {
+		h.lastCursor = shape
+		h.win.SetCursorShape(shape)
+	}
+}
+
 func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldEl, newEl *dom.Element) {
 	if fr == nil || rv == nil {
 		return
@@ -1860,6 +1915,13 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				h.hoveredEl.SetHovered(false)
 				h.hoveredEl = nil
 			}
+			// 光标移出窗口：恢复默认箭头。
+			if h.lastCursor != window.CursorArrow {
+				h.lastCursor = window.CursorArrow
+				if h.win != nil {
+					h.win.SetCursorShape(window.CursorArrow)
+				}
+			}
 			// 光标移到视口外：滚动条 hover 高亮（isHover 用 cursor
 			// 位置判定）与子 Frame 光标一并清除。
 			if rv != nil {
@@ -1889,6 +1951,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// 读子 rv 的 cursor；之前只设主 rv，子 Frame 滚动条永不高亮）。
 			if rv != nil {
 				rendering.SetCursorPosRecursive(rv, cssX, cssY)
+				// ★ 窗口光标（CSS cursor 语义）：悬停 textarea 右下角手柄 →
+				// nwse-resize；input/textarea 内容 → 文本光标；按钮/链接 →
+				// 手型；默认箭头。此前引擎从不设置光标（用户反馈「鼠标
+				// 光标都不会变化」）。
+				h.updateCursor(rv, cssX, cssY)
 				// ★ 鼠标移动必须标记重绘：滚动条 thumb 的 hover 高亮由
 				// cursor 位置决定（renderpipeline.go isHover 判定），而 hover
 				// 元素可能未变（移入/移出滚动条轨道不改 DOM hover）。按需
@@ -2459,19 +2526,24 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						// updates the element's height on mouse move; the
 						// press is consumed so no caret placement happens.
 						if hitEl != nil && hitEl.LocalName() == "textarea" && h.resizeDragEl == nil {
-							if rb := rv.FindRenderBoxForNode(hitEl); rb != nil {
-								if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
-									bx, by, bw, bh := rb.X(), rb.Y(), rb.Width(), rb.Height()
-									const rHandle = 15.0
-									if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
-										h.resizeDragEl = hitEl
-										h.resizeDragRV = rv
-										h.resizeDragStartY = cssY
-										h.resizeDragStartH = bh
-										resizeHandle = true
-									}
-								}
+					if rb := rv.FindRenderBoxForNode(hitEl); rb != nil {
+						if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
+							// ★ 视口坐标比较：rb.X/Y 是 layout 坐标（不含
+							// 祖先滚动容器的滚动偏移），cssX/cssY 是视口
+							// 坐标。settings-body 滚动后 layout 与视口
+							// 偏差可达数百 px → 手柄命中失败 → 「按下不能
+							// 拖动」。BoxViewportRect 减祖先滚动偏移换算。
+							bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
+							const rHandle = 15.0
+							if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
+								h.resizeDragEl = hitEl
+								h.resizeDragRV = rv
+								h.resizeDragStartY = cssY
+								h.resizeDragStartH = rb.Height()
+								resizeHandle = true
 							}
+						}
+					}
 						}
 						if !resizeHandle && hitEl != nil && isFocusableElement(hitEl) {
 							if hitEl != h.imeFocusedEl {

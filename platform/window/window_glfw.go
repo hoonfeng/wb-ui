@@ -72,6 +72,11 @@ type Window struct {
 	events   []Event
 	eventsMu sync.Mutex
 
+	// cursors caches per-shape GLFW cursor objects (lazily created on first
+	// use; see cursor.go). cursorMu guards concurrent access.
+	cursors   map[CursorShape]*glfw.Cursor
+	cursorMu  sync.Mutex
+
 	closeCallback func()
 	dropCallback  func([]string) // files dropped on window
 
@@ -126,9 +131,10 @@ func NewWindow(width, height int, title string) (*Window, error) {
 	// width/height are stored as CSS (logical) pixels; fbWidth/fbHeight are
 	// the physical framebuffer pixels. contentScale is the ratio between them.
 	w := &Window{
-		win:    win,
-		width:  width,  // CSS pixels
-		height: height, // CSS pixels
+		win:     win,
+		width:   width,  // CSS pixels
+		height:  height, // CSS pixels
+		cursors: make(map[CursorShape]*glfw.Cursor),
 	}
 
 	// Get framebuffer size (physical pixels, may differ from CSS size on HiDPI).

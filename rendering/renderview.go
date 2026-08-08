@@ -624,6 +624,29 @@ func hitTestScrollbarInner(rv *RenderView, x, y float64) *ScrollbarHit {
 		hw -= scrollW
 	}
 
+	// ★ textarea resize 手柄让位：CSS resize:vertical/both 的 textarea 右下角
+	// 15px 是拖拽手柄区（浏览器中滚动条 track 底部不覆盖它）。若滚动条矩形
+	// 覆盖手柄区，Press 的 scrollbar hit 先于 resize 检测命中 → 手柄永远
+	// 拖不动（子 agent 编辑框内容溢出有垂直滚动条时必现）。按 Chromium
+	// 语义：垂直滚动条底端让位 15px、水平滚动条右端让位 15px。
+	if el2, ok := scrollBox.Node().(*dom.Element); ok && el2.LocalName() == "textarea" {
+		if st := scrollBox.Style(); st != nil && ResizeModeOf(st) != 0 {
+			const rHandle = 15.0
+			if needsV {
+				vh -= rHandle
+				if vh < 1 {
+					vh = 1
+				}
+			}
+			if needsH {
+				hw -= rHandle
+				if hw < 1 {
+					hw = 1
+				}
+			}
+		}
+	}
+
 	// Get scroll offsets for thumb position calculations. Form controls
 	// scroll their text through per-element FormControlTextScroll, not
 	// BoxScrollOffset — mirror that so the thumb position matches paint.

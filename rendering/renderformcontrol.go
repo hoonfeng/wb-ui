@@ -1518,8 +1518,15 @@ func ResizeModeOf(st *style.ComputedStyle) int {
 }
 
 // paintTextAreaResizeHandle 在 textarea 右下角绘制浏览器（Chromium）风格的
-// resize 手柄：15px 区域内三条 45° 对角线，每条由深灰主体 + 白色高光
-// （右下偏移 1px）组成，形成经典浮雕感。resize:none 或不可拖拽时不绘制。
+// resize 手柄。几何与颜色均来自 Edge headless 像素实测（edge_resize_ref.png，
+// 深色主题）：右下角 15px 区域内 2 条「/」方向 45° 右对齐斜线——
+//   线1: (w-2,h-7)→(w-7,h-1)（长 6px）
+//   线2: (w-1,h-3)→(w-3,h-1)（长 3px）
+// 每条线 = 1px 暗线 + 右下偏移 1px 亮高光（半透明叠加）：
+//   暗 ≈ 背景×0.4（Edge 实测 (5,6,9) vs 背景 13,17,23）
+//   亮 ≈ 背景×0.4 + 255×0.6（Edge 实测 158,159,162）
+// 半透明叠加保证浅色主题下同样正确（Chromium 的行为）。resize:none 或
+// 不可拖拽时不绘制。
 func paintTextAreaResizeHandle(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, op float64) {
 	if info == nil || info.canvas == nil || ResizeModeOf(st) == 0 {
 		return
@@ -1531,18 +1538,27 @@ func paintTextAreaResizeHandle(info *PaintInfo, st *style.ComputedStyle, x, y, w
 	if hx < x || hy < y {
 		return
 	}
-	// 三条斜线（相对手柄左上角 hx,hy），从右下往左上 45°。
-	lines := [3][4]float64{
-		{3, 12, 12, 3},
-		{6, 12, 12, 6},
-		{9, 12, 12, 9},
+	bg := st.BackgroundColor
+	dark := graphics.Color{
+		R: uint8(float64(bg.R) * 0.4), G: uint8(float64(bg.G) * 0.4), B: uint8(float64(bg.B) * 0.4), A: 255,
 	}
-	dark := applyOpacity(graphics.Color{R: 0x90, G: 0x90, B: 0x90, A: 0xFF}, op)
-	light := applyOpacity(graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}, op)
+	light := graphics.Color{
+		R: uint8(float64(bg.R)*0.4 + 255*0.6),
+		G: uint8(float64(bg.G)*0.4 + 255*0.6),
+		B: uint8(float64(bg.B)*0.4 + 255*0.6),
+		A: 255,
+	}
+	dark = applyOpacity(dark, op)
+	light = applyOpacity(light, op)
+	// 两条斜线（相对手柄左上角 hx,hy；与 Press 命中区域一致）。
+	lines := [2][4]float64{
+		{13, 8, 8, 14},  // 线1: (w-2,h-7)→(w-7,h-1)
+		{14, 12, 12, 14}, // 线2: (w-1,h-3)→(w-3,h-1)
+	}
 	for _, ln := range lines {
-		// 高光（白色，右下偏移 1px）
+		// 高光（白色半透明，右下偏移 1px）
 		c.StrokeLine(hx+ln[0]+1, hy+ln[1]+1, hx+ln[2]+1, hy+ln[3]+1, 1.0, light)
-		// 主体（深灰）
+		// 主体（暗线）
 		c.StrokeLine(hx+ln[0], hy+ln[1], hx+ln[2], hy+ln[3], 1.0, dark)
 	}
 }

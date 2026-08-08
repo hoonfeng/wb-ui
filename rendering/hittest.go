@@ -48,6 +48,32 @@ func boxCoords(o RenderObject) (x, y, w, h float64, ok bool) {
 	return 0, 0, 0, 0, false
 }
 
+// BoxViewportRect 返回 box 的视口矩形：layout 坐标减去所有祖先滚动容器
+// 的滚动偏移（与 hitTestWalk 的坐标空间一致——鼠标事件用视口坐标，而
+// RenderBox.X/Y 是未平移的 layout 坐标；滚动容器内容由 paint 阶段
+// canvas translate 呈现）。textarea resize 手柄命中检测（app/host.go
+// Press/updateCursor）必须用视口坐标比较，否则 settings-body 滚动后
+// 手柄区域对不上鼠标位置。
+func BoxViewportRect(rv *RenderView, o RenderObject) (x, y, w, h float64) {
+	var ok bool
+	x, y, w, h, ok = boxCoords(o)
+	if rv == nil || !ok {
+		return
+	}
+	// 沿父链向上累加滚动偏移（box 自身的滚动偏移不影响 box 自身的
+	// 视口位置——只有祖先的滚动会平移它）。
+	for p := o.Parent(); p != nil; p = p.Parent() {
+		if pb := asRenderBox(p); pb != nil {
+			sx, sy := rv.BoxScrollOffset(pb)
+			if sx != 0 || sy != 0 {
+				x -= sx
+				y -= sy
+			}
+		}
+	}
+	return
+}
+
 // HitTest walks the render tree rooted at rv and returns the deepest Element whose
 // bounding box contains (x, y) and that has the given attribute set (e.g. "onclick").
 // When attrName is empty, returns the deepest box-bearing element at the point.

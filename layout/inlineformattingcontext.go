@@ -547,6 +547,40 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				cldG.SetContentHeight(lineH)
 			}
 
+			// ★ min-height / max-height clamp（CSS 2.1 §10.7，border-box 语义）。
+			// replaced/inline-block 才有布局尺寸；min-height 是 border-box
+			// 下限。浏览器中 .inst-textarea{min-height:60px} 让 rows=2 的
+			// textarea 也撑到 60px——此前无 clamp：主 agent(rows=3)=59px、
+			// 子 agent(rows=2)=44px，两者不一致且比浏览器矮（Edge 两者都
+			// 是 60px）。textarea UA box-sizing:border-box → 内容下限 =
+			// min-height - border - padding。
+			if cld.IsReplaced() || (cld.IsInline() && cld.Style().Display == style.DisplayInlineBlock) {
+				if cs := cld.Style(); cs != nil {
+					minH, maxH, minAuto, maxAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, contentWidth, fs)
+					if !minAuto || !maxAuto {
+						b := cldG.BorderTop() + cldG.BorderBottom()
+						p := cldG.PaddingTop() + cldG.PaddingBottom()
+						ch := cldG.ContentHeight()
+						if !minAuto {
+							minContent := minH - b - p
+							if ch < minContent {
+								ch = minContent
+							}
+						}
+						if !maxAuto {
+							maxContent := maxH - b - p
+							if ch > maxContent {
+								ch = maxContent
+							}
+						}
+						if ch < 0 {
+							ch = 0
+						}
+						cldG.SetContentHeight(ch)
+					}
+				}
+			}
+
 			// vertical-align (CSS 2.1 §10.8): inline-block/replaced children
 			// with vertical-align:middle are centered against the line box.
 			// The child was initially placed at currentLine.y+centeringOffset;
