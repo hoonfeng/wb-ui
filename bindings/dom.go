@@ -508,10 +508,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 		}
 		// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
-		// 恒有值（简写会展开到各子属性）；级联只存了 "background" 时补上。
+		// 恒有值（简写会展开到各子属性；无背景时返回透明 rgba(0,0,0,0)）。
 		if _, ok := computed["background-color"]; !ok {
 			if v, ok2 := computed["background"]; ok2 {
 				cs.Set("backgroundColor", jsc.StringValue(v))
+			} else {
+				cs.Set("backgroundColor", jsc.StringValue("rgba(0, 0, 0, 0)"))
 			}
 		}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
@@ -2600,6 +2602,18 @@ obj.SetInternal(el)
 							}
 						}
 					}
+					// HTML 标准：无显式 selected 且非 multiple 时返回第一个
+					// 非 disabled option 的 value。
+					if !el.HasAttribute("multiple") {
+						for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+							if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") && !opt.HasAttribute("disabled") {
+								if v := opt.GetAttribute("value"); v != "" {
+									return jsc.StringValue(v)
+								}
+								return jsc.StringValue(opt.TextContent())
+							}
+						}
+					}
 					return jsc.StringValue("")
 				}
 				// textarea.value = 初始文本内容（浏览器语义：value 反射文本）。
@@ -2695,14 +2709,22 @@ obj.SetInternal(el)
 			nil)
 		obj.SetAccessor("selectedIndex",
 			getter(func(_ *jsc.Interpreter) jsc.JSValue {
+				var firstEnabled = -1
 				idx := 0
 				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
 					if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
 						if opt.HasAttribute("selected") {
 							return jsc.NumberValue(float64(idx))
 						}
+						if firstEnabled < 0 && !opt.HasAttribute("disabled") {
+							firstEnabled = idx
+						}
 						idx++
 					}
+				}
+				// HTML 标准：无显式 selected 时默认选中第一个非 disabled option。
+				if !el.HasAttribute("multiple") && firstEnabled >= 0 {
+					return jsc.NumberValue(float64(firstEnabled))
 				}
 				return jsc.NumberValue(-1)
 			}),
@@ -2730,6 +2752,28 @@ obj.SetInternal(el)
 			}
 			arr := jsc.NewArray(in.ObjectPrototype(), opts)
 			arr.Set("length", jsc.NumberValue(float64(len(opts))))
+			return jsc.ObjectValue(arr)
+		}), nil)
+		// selectedOptions: 选中的 option 数组（浏览器标准：无显式 selected
+		// 且非 multiple 时返回第一个非 disabled option）。
+		obj.SetAccessor("selectedOptions", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			var sel []jsc.JSValue
+			var firstEnabled *dom.Element
+			for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+				if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
+					if opt.HasAttribute("selected") {
+						sel = append(sel, jsc.ObjectValue(wrapElement(in, opt)))
+					}
+					if firstEnabled == nil && !opt.HasAttribute("disabled") {
+						firstEnabled = opt
+					}
+				}
+			}
+			if len(sel) == 0 && !el.HasAttribute("multiple") && firstEnabled != nil {
+				sel = append(sel, jsc.ObjectValue(wrapElement(in, firstEnabled)))
+			}
+			arr := jsc.NewArray(in.ObjectPrototype(), sel)
+			arr.Set("length", jsc.NumberValue(float64(len(sel))))
 			return jsc.ObjectValue(arr)
 		}), nil)
 	}
@@ -3566,6 +3610,26 @@ func collectStyleTexts(doc dom.Node) ([]string, uint64) {
 // computedStyleFor 无限递归（祖先的 out 也含 var() → 再解析 → 再收集…）。
 var computedStyleDepth int
 
+// selectorListHasPseudoElement reports whether any complex selector in the
+// list contains a pseudo-element simple selector (::before / ::after /
+// ::selection / ::placeholder ...). Such rules style the pseudo-element, not
+// the element itself, and must not contribute to getComputedStyle(el).
+func selectorListHasPseudoElement(l *css.SelectorList) bool {
+	if l == nil {
+		return false
+	}
+	for _, cs := range l.Selectors {
+		for _, comp := range cs.Compounds {
+			for _, s := range comp.Selectors {
+				if s.Match == css.MatchPseudoElement {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func computedStyleFor(el dom.Node) map[string]string {
 	if computedStyleDepth > 8 {
 		return map[string]string{}
@@ -3594,6 +3658,14 @@ func computedStyleFor(el dom.Node) map[string]string {
 			switch rl := r.(type) {
 			case *css.StyleRule:
 				if rl.Selectors == nil || len(rl.Selectors.Selectors) == 0 {
+					continue
+				}
+				// ★ 伪元素规则（::selection / ::before / ::after 等）不参与元素
+				// 本身的 computed style：::selection 的 background 只影响选中
+				// 文本高亮，误级联会让 getComputedStyle(el).backgroundColor
+				// 返回 ::selection 的背景（如 var(--accent)）。::before/::after
+				// 由 ResolvePseudoElement 单独处理。
+				if selectorListHasPseudoElement(rl.Selectors) {
 					continue
 				}
 				if !checker.MatchList(rl.Selectors, el) {

@@ -268,13 +268,11 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		info.canvas.RestoreToCount(info.initialSaveCount)
 		info.canvas.Save()
 		info.canvas.ResetFixedTransform()
-		if st := layer.Owner().Style(); st != nil &&
-			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
-			if rb := asRenderBox(layer.Owner()); rb != nil {
-				pb := rb.PaddingBoxRect()
-				info.canvas.Clip(graphics.Rect{X: pb.X, Y: pb.Y, Width: pb.Width, Height: pb.Height})
-			}
-		}
+		// ★ fixed 元素自身的 overflow 由 walkSubtreeExcluded 裁剪子树
+		// （visit 在 clip 前，背景/边框不被裁，只裁 children）。这里
+		// 不能再 clip padding box——会把 owner 自身的 border-box 背景
+		// 和边框一起裁掉（popup 四边框消失的根因）。CSS 规范：
+		// overflow clip 仅作用于内容，元素自身背景/边框完整绘制。
 		// ★ opacity 阈值：opacity∈[0.98,1) 不建 SaveLayer（offscreen 合成在
 		// raster 上 ~0.7ms/次，是 paint 的主成本——200 combos 时 405 次
 		// opacity 层 ≈ 283ms/70%）。直接按 alpha 绘制（painter 的

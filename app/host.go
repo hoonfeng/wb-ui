@@ -3063,10 +3063,10 @@ func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, css
 			popTop = 0
 		}
 	}
-	overlay.SetAttribute("style", fmt.Sprintf("position:fixed;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%dpx;background:#ffffff;border:1px solid #b3b3b3;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.25);z-index:9999;overflow-y:auto;", sx, popTop, boxW, popH))
+	overlay.SetAttribute("style", fmt.Sprintf("position:fixed;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%dpx;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:9999;overflow-y:auto;", sx, popTop, boxW, popH))
 	// 添加每个 option。
 	current := selEl.Value()
-	optStyle := "display:block;height:24px;line-height:24px;padding:0 8px;font-size:14px;color:#333;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
+	optStyle := "display:block;height:24px;line-height:24px;padding:0 8px;font-size:14px;color:var(--text-primary);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"
 	for _, opt := range opts {
 		optEl := doc.CreateElement("div")
 		optEl.SetAttribute("class", "select-popup-option")
@@ -3078,10 +3078,10 @@ func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, css
 		optEl.SetAttribute("data-select-popup", "1")
 		if opt.HasAttribute("disabled") {
 			optEl.SetAttribute("class", "select-popup-option select-popup-option-disabled")
-			optEl.SetAttribute("style", optStyle+"color:#9b9b9b;")
+			optEl.SetAttribute("style", optStyle+"color:var(--text-muted);")
 		} else if optVal == current {
 			optEl.SetAttribute("class", "select-popup-option select-popup-option-selected")
-			optEl.SetAttribute("style", optStyle+"background:#f0f0f0;")
+			optEl.SetAttribute("style", optStyle+"background:var(--accent-bg);")
 		} else {
 			optEl.SetAttribute("style", optStyle)
 		}
