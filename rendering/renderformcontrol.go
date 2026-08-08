@@ -968,9 +968,11 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 //     两段式：已填充段 (0..value) accent blue #0075FF、未填充段灰 #EFEFEF。
 //     Edge 像素：grey track 仅 6 行（y=73..78 与 y=105..110）。
 //   - thumb: 固定 14px 直径圆（Edge 像素 blue 段仅 14 行 y=69..82），
-//     body #0075FF。Chromium 深色主题 thumb 悬停时变暗 (:hover 略暗、
-//     :active 更暗)——用户实测浏览器行为；元素 IsHovered/IsActive 由
-//     app.Host 鼠标跟踪驱动（与 :hover/:active 伪类同源）。
+//     body #0075FF。Chromium 深色主题悬停变色是「分开」的（用户实测）：
+//     悬停在圆(thumb)上 → 蓝条 fill + 圆整体变暗；悬停在条(track)上 →
+//     只有蓝条 fill 变暗（圆不变、灰 track 不变）。:active 按下时蓝条+
+//     圆整体更暗。鼠标在圆内与否用 RenderView.CursorPos（app.Host 每次
+//     鼠标移动写入，页面 CSS 坐标）判定——与 :hover/:active 伪类同源。
 func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
 	c := info.canvas
 	// Track: 固定 6px 圆角条，垂直居中于 input box。浏览器 UA 是固定尺寸
@@ -991,26 +993,51 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 		}
 	}
 
+	// Thumb 几何：固定 14px 直径圆（浏览器 UA 固定值），居中于 track。
+	const thumbR = 7.0
+	thumbX := x + frac*w
+	cy := y + h/2
+
+	// 悬停变色（与浏览器分开，见函数注释）。
+	fillCol := FormControlColors.SliderFill
+	thumbCol := FormControlColors.SliderThumb
+	if in.El != nil {
+		onThumb := false
+		if info.rv != nil {
+			if mx, my := info.rv.CursorPos(); mx > -1e8 {
+				// 与 app.setRangeValueFromX 同一套绝对坐标几何：x 是
+				// 局部坐标（canvas 已 translate），鼠标位置是页面坐标，
+				// 必须用 AbsoluteX/Width 换算 thumb 绝对圆心再判圆内。
+				if ab := info.rv.FindRenderBoxForNode(in.El); ab != nil {
+					absLeft := ab.AbsoluteX()
+					if _, so := info.rv.BoxScrollOffset(ab); so > 0 {
+						absLeft -= so
+					}
+					absThumbX := absLeft + frac*ab.Width()
+					absCy := ab.AbsoluteY() + ab.Height()/2
+					dx, dy := mx-absThumbX, my-absCy
+					onThumb = dx*dx+dy*dy <= thumbR*thumbR
+				}
+			}
+		}
+		if in.El.IsActive() {
+			// 按下（:active）：蓝条 + 圆整体更暗。
+			fillCol = mixWithBlack(fillCol, 0.30)
+			thumbCol = mixWithBlack(thumbCol, 0.30)
+		} else if in.El.IsHovered() {
+			// 悬停条 → 只蓝条变暗；悬停圆 → 圆也变暗（整体）。
+			fillCol = mixWithBlack(fillCol, 0.15)
+			if onThumb {
+				thumbCol = mixWithBlack(thumbCol, 0.15)
+			}
+		}
+	}
+
 	// Unfilled portion first (whole track), then filled portion over it.
 	c.FillRoundRect(x, trackY, w, trackH, trackH/2, applyOpacity(FormControlColors.SliderTrack, op))
 	if frac > 0 {
 		fillW := w * frac
-		c.FillRoundRect(x, trackY, fillW, trackH, trackH/2, applyOpacity(FormControlColors.SliderFill, op))
-	}
-
-	// Thumb: 固定 14px 直径圆（浏览器 UA 固定值），居中于 track。
-	// 此前 thumbR=h*0.5 导致 input≈21px 时 thumb 直径 21px（浏览器 14px，
-	// 圆大一号）。Chromium 深色主题 thumb 悬停变暗、按下更暗。
-	const thumbR = 7.0
-	thumbX := x + frac*w
-	cy := y + h/2
-	thumbCol := FormControlColors.SliderThumb
-	if in.El != nil {
-		if in.El.IsActive() {
-			thumbCol = mixWithBlack(thumbCol, 0.30)
-		} else if in.El.IsHovered() {
-			thumbCol = mixWithBlack(thumbCol, 0.15)
-		}
+		c.FillRoundRect(x, trackY, fillW, trackH, trackH/2, applyOpacity(fillCol, op))
 	}
 	c.FillCircle(thumbX, cy, thumbR, applyOpacity(thumbCol, op))
 }

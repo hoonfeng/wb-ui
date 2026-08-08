@@ -237,6 +237,14 @@ func (f *Frame) RebuildRenderTree() {
 			before = oldRV.ScrollOffsetCount()
 		}
 		f.renderView.RestoreScrollOffsetsFrom(oldRV)
+		// ★ cursor 状态同 scroll offset 一样需要跨重建迁移：paintRangeSlider
+		//   的 hover 分开（悬停圆 vs 悬停条）读 RenderView.CursorPos 判定。
+		//   Rebuild 生成全新 RenderView（cursor 复位 0,0），若鼠标正悬停在
+		//   range 上且 DOM 变化触发重建（拖动改 value 等），paint 会读到
+		//   (0,0) → 误判「悬停到条」→ 圆不变暗。旧 cursor 一并带过去。
+		if ox, oy := oldRV.CursorPos(); ox != 0 || oy != 0 {
+			f.renderView.SetCursorPos(ox, oy)
+		}
 		if os.Getenv("WB_SCROLL_DEBUG") != "" {
 			Logf("RebuildRenderTree", "migrated scroll offsets old=%d new=%d", before, f.renderView.ScrollOffsetCount())
 		}

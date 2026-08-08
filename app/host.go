@@ -3124,12 +3124,28 @@ func (h *Host) setRangeValueFromX(el *dom.Element, rv *rendering.RenderView, css
 	} else if val > maxV {
 		val = maxV
 	}
-	s := fmt.Sprintf("%g", val)
+	// 按 step 属性的小数位格式化（step="0.1" → 1 位小数），避免浮点
+	// 误差产生长尾小数：val = min + Round(frac*range/step)*step 中
+	// 乘法是 float64（如 6*0.1 = 0.6000000000000001），%g 取最短往返
+	// 表示会把误差原样输出，设置面板温度值出现 "0.6000000000000001"。
+	s := strconv.FormatFloat(val, 'f', decimalsForStep(in.Step()), 64)
 	if in.Value() == s {
 		return false
 	}
 	in.SetValue(s)
 	return true
+}
+
+// decimalsForStep returns the number of decimal places implied by a
+// <input> step attribute string ("0.1" → 1, "1" → 0, "0.05" → 2).
+// Mirrors the browser: range values are snapped to the step, and the
+// attribute's textual precision is what the UI displays (0.3, 0.6, …).
+func decimalsForStep(s string) int {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		return len(s) - i - 1
+	}
+	return 0
 }
 
 // parseHostFloat parses a float string with a default on error/empty.

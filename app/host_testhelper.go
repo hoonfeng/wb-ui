@@ -125,6 +125,10 @@ func (h *Host) MockMouseMove(wv *webkit.WebView, cssX, cssY float64) *dom.Elemen
 		return nil
 	}
 	newEl := rendering.HitTest(rv, cssX, cssY, "")
+	// 同步 RenderView 光标位置（真实 EventCursorMove 路径会调用
+	// SetCursorPosRecursive；paintRangeSlider 用 CursorPos 区分
+	// 「悬停到圆」与「悬停到条」，Mock 必须一致）。
+	rendering.SetCursorPosRecursive(rv, cssX, cssY)
 	oldHover := h.hoveredEl
 	if oldHover != nil {
 		oldHover.SetHovered(false)
