@@ -181,6 +181,16 @@ type Host struct {
 	// the range may live in a child frame's render tree).
 	rangeDragRV *rendering.RenderView
 
+	// resizeDragEl tracks an active CSS resize drag on a textarea
+	// (resize:vertical/both — the bottom-right corner handle). Pressing the
+	// handle starts a drag; mouse moves update the element's height (written
+	// back to style="height:Npx" so relayout keeps it); mouseup ends it.
+	// Mirrors browser behavior: the drag is constrained by min/max-height.
+	resizeDragEl      *dom.Element
+	resizeDragRV      *rendering.RenderView
+	resizeDragStartY  float64 // cursor Y at drag start (CSS px)
+	resizeDragStartH  float64 // box height at drag start (CSS px)
+
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
@@ -363,6 +373,47 @@ func (h *Host) markScrollDirty() {
 			fr.MarkRenderTreeDirty()
 		}
 	}
+}
+
+// scrollableVertically reports whether box has a vertical scrollbar range
+// (content taller than the viewport). Used by wheel chaining: a scroll
+// container with no scroll range must bubble the wheel to its parent.
+func scrollableVertically(rv *rendering.RenderView, box *rendering.RenderBox) bool {
+	if rv == nil || box == nil {
+		return false
+	}
+	vm := rendering.VerticalScrollbarMetrics(rv, box)
+	return vm.OK && vm.MaxScroll > 0
+}
+
+// scrollableHorizontally reports whether box has a horizontal scrollbar range.
+func scrollableHorizontally(rv *rendering.RenderView, box *rendering.RenderBox) bool {
+	if rv == nil || box == nil {
+		return false
+	}
+	hm := rendering.HorizontalScrollbarMetrics(rv, box)
+	return hm.OK && hm.MaxScroll > 0
+}
+
+// chainScrollTargetUp walks up from box's DOM node and returns the nearest
+// ancestor scroll container that actually has scroll range in some axis
+// (browser wheel bubbling: a non-scrollable textarea inside a scrollable
+// settings panel must let the wheel move the panel). Returns the original
+// box when no scrollable ancestor exists.
+func chainScrollTargetUp(rv *rendering.RenderView, box *rendering.RenderBox) *rendering.RenderBox {
+	if rv == nil || box == nil {
+		return box
+	}
+	for n := box.Node(); n != nil; n = n.ParentNode() {
+		p := rv.FindScrollContainerForNode(n)
+		if p == nil || p == box {
+			continue
+		}
+		if scrollableVertically(rv, p) || scrollableHorizontally(rv, p) {
+			return p
+		}
+	}
+	return box
 }
 
 // dispatchScrollEvent 向滚动容器派发 scroll DOM 事件（不冒泡，浏览器语义），
@@ -1704,6 +1755,25 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			if tgt.Box != nil {
 				scrollBox := tgt.Box
 				srv := tgt.RV
+				// ★ 链式滚动（浏览器语义）：滚轮命中的滚动容器在该方向
+				// 不可滚（无滚动范围，如内容未溢出的 textarea）时，冒泡到
+				// 父级最近的滚动容器（如外层 settings-body）继续滚动——
+				// 否则「在编辑框区域滚轮窗口不动」（textarea 吃掉事件后
+				// 自身无滚动，外层也收不到）。
+				if !scrollableVertically(srv, scrollBox) && !scrollableHorizontally(srv, scrollBox) {
+					if chained := chainScrollTargetUp(srv, scrollBox); chained != nil && chained != scrollBox {
+						if os.Getenv("WB_SCROLL_DEBUG") != "" {
+							bn := "?"
+							if n := scrollBox.Node(); n != nil {
+								if el, ok := n.(*dom.Element); ok {
+									bn = el.LocalName() + "." + el.GetAttribute("class")
+								}
+							}
+							log.Printf("[scroll] %s not scrollable → chain to parent scroll container", bn)
+						}
+						scrollBox = chained
+					}
+				}
 				if os.Getenv("WB_SCROLL_DEBUG") != "" {
 					boxName := "?"
 					if n := scrollBox.Node(); n != nil {
@@ -1841,6 +1911,44 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 				if h.setRangeValueFromX(h.rangeDragEl, drv, cssX) {
 					h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
+			}
+
+			// ── Textarea CSS resize drag ──
+			// While a resize drag is active (pressed the bottom-right
+			// handle), track the cursor Y: new height = start height + dy,
+			// clamped by min-height/max-height (browser resize semantics).
+			// The result is written back to style="height:Npx" so the next
+			// relayout keeps it (the rows intrinsic height would otherwise
+			// reset it every layout).
+			if h.resizeDragEl != nil {
+				drv := h.resizeDragRV
+				if drv == nil {
+					drv = rv
+				}
+				rb := drv.FindRenderBoxForNode(h.resizeDragEl)
+				if rb == nil {
+					h.resizeDragEl = nil
+				} else {
+					newH := h.resizeDragStartH + (cssY - h.resizeDragStartY)
+					if st := rb.Style(); st != nil {
+						// min-height / max-height constraints (definite px).
+						if st.MinHeight.Unit == "px" && newH < st.MinHeight.Value {
+							newH = st.MinHeight.Value
+						}
+						if st.MaxHeight.Unit == "px" && newH > st.MaxHeight.Value {
+							newH = st.MaxHeight.Value
+						}
+					}
+					if newH < 10 {
+						newH = 10
+					}
+					h.resizeDragEl.SetAttribute("style", fmt.Sprintf("height:%.0fpx", newH))
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							fr.MarkRenderTreeDirty()
@@ -2335,6 +2443,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 
 					// HitTest the click position to find the element under cursor.
 					// If it's a form control (input/textarea/select), set focus.
+					resizeHandle := false
 					if rv != nil {
 						hitEl := rendering.HitTest(rv, cssX, cssY, "")
 						if debugPaintLog {
@@ -2343,18 +2452,39 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								func() string { if hitEl != nil { return hitEl.LocalName() }; return "" }(),
 								func() string { if hitEl != nil { return hitEl.GetAttribute("type") }; return "" }())
 						}
-						if hitEl != nil && isFocusableElement(hitEl) {
+						// ── textarea CSS resize handle ──
+						// Pressing the bottom-right corner (resize:vertical/
+						// both) starts a resize drag instead of focusing /
+						// entering the textarea (browser behavior). The drag
+						// updates the element's height on mouse move; the
+						// press is consumed so no caret placement happens.
+						if hitEl != nil && hitEl.LocalName() == "textarea" && h.resizeDragEl == nil {
+							if rb := rv.FindRenderBoxForNode(hitEl); rb != nil {
+								if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
+									bx, by, bw, bh := rb.X(), rb.Y(), rb.Width(), rb.Height()
+									const rHandle = 15.0
+									if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
+										h.resizeDragEl = hitEl
+										h.resizeDragRV = rv
+										h.resizeDragStartY = cssY
+										h.resizeDragStartH = bh
+										resizeHandle = true
+									}
+								}
+							}
+						}
+						if !resizeHandle && hitEl != nil && isFocusableElement(hitEl) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
 							}
-						} else if h.imeFocusedEl != nil {
+						} else if !resizeHandle && h.imeFocusedEl != nil {
 							h.Unfocus()
 						}
 					}
 
 					// If the click is on a text form control, calculate the
 					// character offset and set the form-control selection.
-					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
+					if !resizeHandle && h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
 						offset := h.calcTextControlOffset(h.imeFocusedEl, cssX, cssY)
 						// Start a mouse-drag selection from this press: the
 						// anchor stays at the press point; subsequent mouse
@@ -2454,6 +2584,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							fr.MarkRenderTreeDirty()
 						}
 					}
+				}
+				// End textarea CSS resize drag.
+				if h.resizeDragEl != nil {
+					h.resizeDragEl = nil
+					h.resizeDragRV = nil
 				}
 				if h.selecting {
 					csX, csY := h.win.ContentScale()

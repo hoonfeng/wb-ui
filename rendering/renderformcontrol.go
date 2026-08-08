@@ -1490,7 +1490,61 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	// re-derives the row/col from FocusedFormControlSel with soft-wrapping).
 	paintFormControlCaret(info, el, st, x, y, w, h, 0, op, sy)
 
+	// CSS resize handle (textarea resize:vertical/both — Chromium-style
+	// diagonal lines in the bottom-right corner).
+	paintTextAreaResizeHandle(info, st, x, y, w, h, op)
+
 	info.canvas.Restore()
+}
+
+// ResizeModeOf 返回 CSS resize 属性的解析结果：
+// 0=none（不可拖拽）、1=horizontal、2=vertical、3=both。
+// 值来自 cs.Properties["resize"]（resolver 把所有声明存入 Properties；
+// UA 默认 textarea{resize:both}，作者样式如 .inst-textarea{resize:vertical}
+// 通过级联覆盖）。
+func ResizeModeOf(st *style.ComputedStyle) int {
+	if st == nil {
+		return 0
+	}
+	switch st.Properties["resize"] {
+	case "horizontal":
+		return 1
+	case "vertical":
+		return 2
+	case "both":
+		return 3
+	}
+	return 0
+}
+
+// paintTextAreaResizeHandle 在 textarea 右下角绘制浏览器（Chromium）风格的
+// resize 手柄：15px 区域内三条 45° 对角线，每条由深灰主体 + 白色高光
+// （右下偏移 1px）组成，形成经典浮雕感。resize:none 或不可拖拽时不绘制。
+func paintTextAreaResizeHandle(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, op float64) {
+	if info == nil || info.canvas == nil || ResizeModeOf(st) == 0 {
+		return
+	}
+	c := info.canvas
+	const hs = 15.0
+	hx := x + w - hs
+	hy := y + h - hs
+	if hx < x || hy < y {
+		return
+	}
+	// 三条斜线（相对手柄左上角 hx,hy），从右下往左上 45°。
+	lines := [3][4]float64{
+		{3, 12, 12, 3},
+		{6, 12, 12, 6},
+		{9, 12, 12, 9},
+	}
+	dark := applyOpacity(graphics.Color{R: 0x90, G: 0x90, B: 0x90, A: 0xFF}, op)
+	light := applyOpacity(graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}, op)
+	for _, ln := range lines {
+		// 高光（白色，右下偏移 1px）
+		c.StrokeLine(hx+ln[0]+1, hy+ln[1]+1, hx+ln[2]+1, hy+ln[3]+1, 1.0, light)
+		// 主体（深灰）
+		c.StrokeLine(hx+ln[0], hy+ln[1], hx+ln[2], hy+ln[3], 1.0, dark)
+	}
 }
 
 // paintSelectArrow draws the browser-standard dropdown chevron on the right

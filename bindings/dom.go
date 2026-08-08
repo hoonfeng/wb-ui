@@ -2653,6 +2653,19 @@ obj.SetInternal(el)
 					}
 					return
 				}
+				// textarea.value = 初始文本内容（浏览器语义：value 反射文本）。
+				if tag == "textarea" {
+					// ★ setter 必须与 getter 对称：value 写入 textarea 时是
+					// 更新文本节点（SetTextContent），而非 SetAttribute("value")
+					// ——浏览器里 textarea 的 value 就是其文本内容，paint
+					// （paintTextAreaText 读 TextContent）与 scrollHeight
+					// 计算（BoxContentSize 读 TextContent）都依赖文本节点。
+					// Vue 的 :value 绑定走 el.value = str（DOM prop），
+					// 此前 setter 落入 SetAttribute 分支 → 文本节点不变 →
+					// 编辑框永远空白、scrollH=0。
+					el.SetTextContent(v.ToString())
+					return
+				}
 				el.SetAttribute("value", v.ToString())
 			})
 		if tag == "input" {
