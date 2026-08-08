@@ -2018,10 +2018,13 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// hysteresis — pressing the track jumps the thumb to the cursor,
 			// then it follows 1:1, mirroring the browser).
 			if h.rangeDragEl != nil {
-				drv := h.rangeDragRV
-				if drv == nil {
-					drv = rv
-				}
+				// ★ 必须用当前帧最新 rv：拖动中渲染树会因 Vue input
+				// 每帧重建（新 RenderView 实例），press 时缓存的
+				// rangeDragRV 是旧实例——其 box 几何（AbsoluteX/Width）
+				// 与新渲染树的鼠标坐标错配 → value 乱跳、thumb 抖动
+				// （「拖拽不跟手」真凶）。按 DOM 节点重新解析。
+				drv := h.resolveDragRV(h.rangeDragEl, h.rangeDragRV)
+				h.rangeDragRV = drv
 				if h.setRangeValueFromX(h.rangeDragEl, drv, cssX) {
 					h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
 					if mf := h.wv.MainFrame(); mf != nil {
@@ -2040,10 +2043,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// relayout keeps it (the rows intrinsic height would otherwise
 			// reset it every layout).
 			if h.resizeDragEl != nil {
-				drv := h.resizeDragRV
-				if drv == nil {
-					drv = rv
-				}
+				// ★ 同 range 拖拽：渲染树重建后旧 resizeDragRV 过期，
+				// 必须按 DOM 节点解析当前实例（box 几何错配会让
+				// 高度计算跳变）。
+				drv := h.resolveDragRV(h.resizeDragEl, h.resizeDragRV)
+				h.resizeDragRV = drv
 				rb := drv.FindRenderBoxForNode(h.resizeDragEl)
 				if rb == nil {
 					h.resizeDragEl = nil
@@ -2171,6 +2175,17 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				if drv == nil {
 					drv = rv // 兼容旧路径：未记录 RV 时回退主视图
 				}
+				// ★ 拖动中渲染树可能已重建（Vue DOM 变更 → 新 RenderView
+				// 实例）：主文档 box 重新解析到当前实例，避免用过期的
+				// 旧实例几何（滚动容器尺寸变化导致 thumb 比例错乱）。
+				if n := h.scrollbarDragBox.Node(); n != nil {
+					if el, ok := n.(*dom.Element); ok {
+						if cur := h.resolveDragRV(el, drv); cur != nil {
+							drv = cur
+						}
+					}
+				}
+				h.scrollbarDragRV = drv
 				csX, csY := h.win.ContentScale()
 				if csX <= 0 {
 					csX = 1
@@ -2377,21 +2392,21 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					if srv == nil {
 						srv = rv // 兼容：未记录 RV 时回退主视图
 					}
-					// ── Thumb drag ──
-					if scrollHit.IsVThumb {
-						h.smoothActive = false // thumb drag is 1:1, not smoothed
-						h.scrollbarDragging = true
-						h.scrollbarDragBox = box
-						h.scrollbarDragRV = srv
-						h.scrollbarDragAxis = true // vertical
-						_, sy := srv.BoxScrollOffset(box)
-						h.scrollbarDragStart = cssY
-						h.scrollbarDragScroll = sy
-						break
-					}
-					if scrollHit.IsHThumb {
-						h.smoothActive = false // thumb drag is 1:1, not smoothed
-						h.scrollbarDragging = true
+							// ── Thumb drag ──
+							if scrollHit.IsVThumb {
+								h.smoothActive = false // thumb drag is 1:1, not smoothed
+								h.scrollbarDragging = true
+								h.scrollbarDragBox = box
+								h.scrollbarDragRV = srv
+								h.scrollbarDragAxis = true // vertical
+								_, sy := srv.BoxScrollOffset(box)
+								h.scrollbarDragStart = cssY
+								h.scrollbarDragScroll = sy
+								break
+							}
+							if scrollHit.IsHThumb {
+								h.smoothActive = false // thumb drag is 1:1, not smoothed
+								h.scrollbarDragging = true
 						h.scrollbarDragBox = box
 						h.scrollbarDragRV = srv
 						h.scrollbarDragAxis = false // horizontal
@@ -2572,24 +2587,24 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						// updates the element's height on mouse move; the
 						// press is consumed so no caret placement happens.
 						if hitEl != nil && hitEl.LocalName() == "textarea" && h.resizeDragEl == nil {
-					if rb := rv.FindRenderBoxForNode(hitEl); rb != nil {
-						if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
-							// ★ 视口坐标比较：rb.X/Y 是 layout 坐标（不含
-							// 祖先滚动容器的滚动偏移），cssX/cssY 是视口
-							// 坐标。settings-body 滚动后 layout 与视口
-							// 偏差可达数百 px → 手柄命中失败 → 「按下不能
-							// 拖动」。BoxViewportRect 减祖先滚动偏移换算。
-							bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
-							const rHandle = 15.0
-							if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
-								h.resizeDragEl = hitEl
-								h.resizeDragRV = rv
-								h.resizeDragStartY = cssY
-								h.resizeDragStartH = rb.Height()
-								resizeHandle = true
+							if rb := rv.FindRenderBoxForNode(hitEl); rb != nil {
+								if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
+									// ★ 视口坐标比较：rb.X/Y 是 layout 坐标（不含
+									// 祖先滚动容器的滚动偏移），cssX/cssY 是视口
+									// 坐标。settings-body 滚动后 layout 与视口
+									// 偏差可达数百 px → 手柄命中失败 → 「按下不能
+									// 拖动」。BoxViewportRect 减祖先滚动偏移换算。
+									bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
+									const rHandle = 15.0
+									if cssX > bx+bw-rHandle && cssY > by+bh-rHandle {
+										h.resizeDragEl = hitEl
+										h.resizeDragRV = rv
+									h.resizeDragStartY = cssY
+									h.resizeDragStartH = rb.Height()
+									resizeHandle = true
+								}
+								}
 							}
-						}
-					}
 						}
 						if !resizeHandle && hitEl != nil && isFocusableElement(hitEl) {
 							if hitEl != h.imeFocusedEl {
@@ -3389,10 +3404,36 @@ func (h *Host) setRangeValueFromX(el *dom.Element, rv *rendering.RenderView, css
 	return true
 }
 
+// resolveDragRV 返回拖拽元素当前所属的 RenderView 实例。
+// ★ 拖动中渲染树会因 Vue input 每帧重建（新 RenderView 实例），press
+// 时缓存的 RV 是旧实例——其 box 几何（AbsoluteX/Width）与当前鼠标坐标
+// 错配 → range value 乱跳、thumb 抖动（「拖拽不跟手」真凶）。按 DOM
+// 节点重新解析：先主文档，再 iframe 子文档；都找不到回退旧值（元素
+// 可能已从树中移除）。
+func (h *Host) resolveDragRV(el *dom.Element, old *rendering.RenderView) *rendering.RenderView {
+	if el == nil {
+		return old
+	}
+	if rv := h.wv.RenderView(); rv != nil && rv.FindRenderBoxForNode(el) != nil {
+		return rv
+	}
+	var found *rendering.RenderView
+	page.ForEachIFrame(func(_ *dom.Element, f *page.Frame) {
+		if found != nil {
+			return
+		}
+		if frv := f.RenderView(); frv != nil && frv.FindRenderBoxForNode(el) != nil {
+			found = frv
+		}
+	})
+	if found != nil {
+		return found
+	}
+	return old
+}
+
 // decimalsForStep returns the number of decimal places implied by a
 // <input> step attribute string ("0.1" → 1, "1" → 0, "0.05" → 2).
-// Mirrors the browser: range values are snapped to the step, and the
-// attribute's textual precision is what the UI displays (0.3, 0.6, …).
 func decimalsForStep(s string) int {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexByte(s, '.'); i >= 0 {

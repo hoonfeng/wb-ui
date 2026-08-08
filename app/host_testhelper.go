@@ -95,6 +95,40 @@ func (h *Host) MockRangeMove(cssX float64) string {
 	return h.rangeDragEl.GetAttribute("value")
 }
 
+// MockEventCursorMove 走真实 EventCursorMove 处理路径：无条件
+// MarkAllDirty（滚动条 hover 高亮依赖 cursor 位置）+ 活跃 range 拖拽
+// 分支（setRangeValueFromX → input 事件 → MarkRenderTreeDirty）。
+// 用于 probe 验证「拖拽中是否每帧重绘」——与 MockRangeMove 的区别是
+// MockRangeMove 只改值不标记重绘，而真实桌面每帧 move 都会 MarkAllDirty。
+func (h *Host) MockEventCursorMove(wv *webkit.WebView, cssX, cssY float64) {
+	if wv == nil {
+		return
+	}
+	rv := wv.RenderView()
+	if rv == nil {
+		return
+	}
+	// 与真实 EventCursorMove 分支一致：光标位置（scrollbar hover 判定）
+	// + 无条件 MarkAllDirty。
+	rendering.SetCursorPosRecursive(rv, cssX, cssY)
+	rv.MarkAllDirty()
+	if h.rangeDragEl != nil {
+		// 与真实 EventCursorMove 分支一致：渲染树重建后旧
+		// rangeDragRV 过期（box 几何错配 → value 抖动），按 DOM
+		// 节点解析当前实例。
+		drv := h.resolveDragRV(h.rangeDragEl, h.rangeDragRV)
+		h.rangeDragRV = drv
+		if h.setRangeValueFromX(h.rangeDragEl, drv, cssX) {
+			h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+			if mf := wv.MainFrame(); mf != nil {
+				if fr := mf.Frame(); fr != nil {
+					fr.MarkRenderTreeDirty()
+				}
+			}
+		}
+	}
+}
+
 // MockRangeRelease 模拟释放鼠标结束拖动：派发 change + 清除 :active/拖动态。
 // 返回最终 value。
 func (h *Host) MockRangeRelease() string {
