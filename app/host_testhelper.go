@@ -2,6 +2,8 @@
 package app
 
 import (
+	"fmt"
+
 	"wb-ui/dom"
 	"wb-ui/rendering"
 	"wb-ui/webkit"
@@ -127,6 +129,35 @@ func (h *Host) MockEventCursorMove(wv *webkit.WebView, cssX, cssY float64) {
 			}
 		}
 	}
+	// 与真实 EventCursorMove 分支一致：textarea CSS resize 拖拽
+	// （渲染树重建后旧 resizeDragRV 过期 → 按 DOM 节点解析当前实例）。
+	if h.resizeDragEl != nil {
+		drv := h.resolveDragRV(h.resizeDragEl, h.resizeDragRV)
+		h.resizeDragRV = drv
+		rb := drv.FindRenderBoxForNode(h.resizeDragEl)
+		if rb == nil {
+			h.resizeDragEl = nil
+		} else {
+			newH := h.resizeDragStartH + (cssY - h.resizeDragStartY)
+			if st := rb.Style(); st != nil {
+				if st.MinHeight.Unit == "px" && newH < st.MinHeight.Value {
+					newH = st.MinHeight.Value
+				}
+				if st.MaxHeight.Unit == "px" && newH > st.MaxHeight.Value {
+					newH = st.MaxHeight.Value
+				}
+			}
+			if newH < 10 {
+				newH = 10
+			}
+			h.resizeDragEl.SetAttribute("style", fmt.Sprintf("height:%.0fpx", newH))
+			if mf := wv.MainFrame(); mf != nil {
+				if fr := mf.Frame(); fr != nil {
+					fr.MarkRenderTreeDirty()
+				}
+			}
+		}
+	}
 }
 
 // MockRangeRelease 模拟释放鼠标结束拖动：派发 change + 清除 :active/拖动态。
@@ -145,6 +176,27 @@ func (h *Host) MockRangeRelease() string {
 	h.rangeDragEl = nil
 	h.rangeDragRV = nil
 	return v
+}
+
+// MockTextareaResizePress 模拟在 textarea 右下角手柄（视口坐标 bx+by+bw+bh
+// 附近 15px 区域）按下：与真实 EventCursorPress 的 resize 分支一致——
+// 记录 resizeDragEl/RV/StartY/StartH，开始高度拖拽。
+func (h *Host) MockTextareaResizePress(el *dom.Element, rv *rendering.RenderView, cssY float64) {
+	if el == nil || rv == nil {
+		return
+	}
+	h.resizeDragEl = el
+	h.resizeDragRV = rv
+	h.resizeDragStartY = cssY
+	if rb := rv.FindRenderBoxForNode(el); rb != nil {
+		h.resizeDragStartH = rb.Height()
+	}
+}
+
+// MockTextareaResizeRelease 模拟释放鼠标结束 resize 拖拽：清空拖动态。
+func (h *Host) MockTextareaResizeRelease() {
+	h.resizeDragEl = nil
+	h.resizeDragRV = nil
 }
 
 // MockMouseMove 模拟鼠标移动到 (cssX, cssY)，走真实 hover 路径：
