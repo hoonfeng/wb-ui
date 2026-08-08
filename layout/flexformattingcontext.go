@@ -50,8 +50,10 @@ type flexItem struct {
 	marginMain      float64
 	marginCross     float64
 	paddingMain     float64 // main-axis padding+border (border-box items)
-	order           int
-	baselineOffset  float64
+	crossResolved   float64 // 交叉轴解析后的 content 高度（row 容器显式 height / stretch），
+	//   供 applyPositions 在 item 自身布局（BFC 会把 auto 高度撑回内容高）后恢复
+	order          int
+	baselineOffset float64
 }
 
 func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
@@ -966,12 +968,44 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 					h = 0
 				}
 				g.SetContentHeight(h)
+				it.crossResolved = h
 			} else if align == "stretch" {
 				stretchH := lineCross - it.marginCross - g.VerticalBorderAndPadding()
-				if stretchH < 0 { stretchH = 0 }
+				if stretchH < 0 {
+					stretchH = 0
+				}
 				g.SetContentHeight(stretchH)
+				it.crossResolved = stretchH
+			}
+			// ★ 交叉轴 min/max-height clamp（CSS-FLEXBOX §9.4.6：cross size
+			// 确定后按 min/max 约束调整；modal-content max-height:80vh 在此
+			// 生效——内容 965px 压到 80vh=640，否则超屏且内部 flex:1 子项
+			// 不被压缩、settings-body 永不出现滚动条）。
+			// min/max-height 作用于 border-box；几何存的是 content 高。
+			minH, maxH, minAuto, maxAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, cbHeight, fontSizeOf(it.box))
+			vpb := g.VerticalBorderAndPadding()
+			bb := g.ContentHeight() + vpb
+			newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
+			if newBB != bb {
+				newContent := newBB - vpb
+				if newContent < 0 {
+					newContent = 0
+				}
+				g.SetContentHeight(newContent)
+				// 容器高度被 clamp（压缩）：重布局 item 内部，让 flex:1
+				// 子项按新高度重新分配主轴（modal-body 从 863 压缩到
+				// 640−header−footer），settings-body 随之出现滚动条。
+				// LayoutState 无 visited 标记，重复布局幂等。
+				ctx := contextFor(it.box, state)
+				ctx.Layout(it.box, state)
+				// 重布局末尾 auto-height 分支可能按内容重置容器高，写回
+				// clamp 后的最终值（子项已按新高度分配，几何正确）。
+				if g.ContentHeight() != newContent {
+					g.SetContentHeight(newContent)
+				}
 			}
 		} else {
+
 			r := resolveLengthAuto(cs.Width, cbWidth, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
 				w := r.Value
@@ -1238,13 +1272,18 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
-			// Re-apply the explicit cross size (height for row flex): the
+			// Re-apply the flex-resolved cross size (height for row flex): the
 			// child's own layout (e.g. a blockified span's BFC) collapses the
-			// content height back to the CSS height without subtracting
+			// content height back to the CSS height (or balloons it to the
+			// content when overflow is scrollable) without subtracting
 			// border-box border/padding — a switch track 34x18 with 1px border
-			// would render 20px tall (18 content + 2 border). The flex-resolved
-			// cross size must win.
-			if isRow && cs != nil {
+			// would render 20px tall, and a flex:1 overflow:auto settings-body
+			// would balloon to its 841px content instead of the stretch slot
+			// (541px). The flex-resolved cross size (explicit height OR
+			// align-items:stretch, recorded in resolveCrossSizes) must win.
+			if isRow && it.crossResolved > 0 {
+				g.SetContentHeight(it.crossResolved)
+			} else if isRow && cs != nil {
 				if h, ok := definiteHeight(cs.Height, g.ContentHeight(), fs); ok && h > 0 {
 					if isBorderBox(it.box) {
 						h -= g.BorderTop() + g.BorderBottom() + g.PaddingTop() + g.PaddingBottom()
