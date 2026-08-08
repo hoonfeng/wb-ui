@@ -1598,56 +1598,102 @@ func (h *Host) processEventLoop() {
 // hoverStyleFastPath applies the :hover style change for oldEl → newEl without
 // rebuilding the render tree. Falls back to a full rebuild+layout when the
 // style change affects layout (geometry).
-// updateCursor 根据悬停元素计算窗口光标（CSS cursor 语义）：悬停 textarea
-// 右下角 resize 手柄 → nwse-resize；input/textarea 内容 → 文本光标；按钮、
-// 链接、select、checkbox 等 → 手型；默认箭头。只在形状变化时调用
-// SetCursorShape（避免每帧重设系统光标）。h.hoveredEl 已由 Move 处理更新。
+// updateCursor 根据悬停元素计算窗口光标，对齐 WebKit EventHandler::selectCursor
+// + CursorWin 的语义：
+//
+//	1. CSS cursor 显式值优先（pointer→手型、text→IBeam、nwse-resize→↘、
+//	   nesw-resize→↙、ns/ew-resize→上下/左右箭头；default/auto 走第 2 步）。
+//	2. cursor:auto（默认）判定（WebKit useHandCursor 语义）：
+//	   - a[href] 链接 → 手型；
+//	   - textarea 右下角 resize 手柄 → nwse-resize（与 Press 命中一致）；
+//	   - 文本输入控件（input 非按钮类 / textarea 本体）→ IBeam；
+//	   - 其余一律默认箭头——包括 button/select/checkbox/radio/range/label
+//	     等原生控件。Chromium/Edge 在 Windows 上这些控件 hover 都是箭头，
+//	     只有 cursor:pointer 的元素才显示手型。之前把这些控件全部设为手型
+//	     导致「鼠标指针不对」（移过按钮/滑块到处是小手）。
+//
+// 只在形状变化时调用 SetCursorShape（避免每帧重设系统光标）。
+// h.hoveredEl 已由 Move 处理更新。
 func (h *Host) updateCursor(rv *rendering.RenderView, cssX, cssY float64) {
 	if h.win == nil {
 		return
 	}
-	shape := window.CursorArrow
-	el := h.hoveredEl
-	if rv != nil && el != nil {
-		// textarea 右下角 15px resize 手柄 → nwse-resize（与 Press 手柄
-		// 命中区域一致）。
-		if el.LocalName() == "textarea" {
-			if rb := rv.FindRenderBoxForNode(el); rb != nil {
-				if st := rb.Style(); st != nil && rendering.ResizeModeOf(st) != 0 {
-					// 视口坐标（减祖先滚动偏移），与 Press 手柄命中一致。
-					bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
-					if cssX > bx+bw-15 && cssY > by+bh-15 {
-						shape = window.CursorNWSE
-					}
-				}
-			}
-		}
-		if shape == window.CursorArrow {
-			switch el.LocalName() {
-			case "input":
-				t := el.GetAttribute("type")
-				switch t {
-				case "checkbox", "radio", "submit", "reset", "button", "range", "color":
-					shape = window.CursorHand
-				default:
-					shape = window.CursorIBeam
-				}
-			case "textarea":
-				shape = window.CursorIBeam
-			case "a", "button", "select", "option", "summary", "label":
-				shape = window.CursorHand
-			default:
-				// class 含 pointer 的通用元素（Vue 应用常用 cursor:pointer）
-				if cls := el.ClassName(); strings.Contains(cls, "pointer") {
-					shape = window.CursorHand
-				}
-			}
-		}
-	}
+	shape := cursorShapeForElement(rv, h.hoveredEl, cssX, cssY)
 	if shape != h.lastCursor {
 		h.lastCursor = shape
 		h.win.SetCursorShape(shape)
 	}
+}
+
+// cursorShapeForElement 计算某元素应显示的窗口光标形状（纯函数，便于
+// 单测）。语义对齐 WebKit EventHandler::selectCursor + CursorWin：
+//
+//	1. CSS cursor 显式值优先（pointer→手型、text→IBeam、nwse-resize→↘、
+//	   nesw-resize→↙、ns/ew-resize→上下/左右箭头；default/auto 走第 2 步）。
+//	2. cursor:auto（默认）判定（WebKit useHandCursor 语义）：
+//	   - a[href] 链接 → 手型；
+//	   - textarea 右下角 resize 手柄 → nwse-resize（与 Press 命中一致）；
+//	   - 文本输入控件（input 非按钮类 / textarea 本体）→ IBeam；
+//	   - 其余一律默认箭头——包括 button/select/checkbox/radio/range/label
+//	     等原生控件。Chromium/Edge 在 Windows 上这些控件 hover 都是箭头，
+//	     只有 cursor:pointer 的元素才显示手型。之前把这些控件全部设为手型
+//	     导致「鼠标指针不对」（移过按钮/滑块到处是小手）。
+func cursorShapeForElement(rv *rendering.RenderView, el *dom.Element, cssX, cssY float64) window.CursorShape {
+	shape := window.CursorArrow
+	if rv == nil || el == nil {
+		return shape
+	}
+	var st *style.ComputedStyle
+	if rb := rv.FindRenderBoxForNode(el); rb != nil {
+		st = rb.Style()
+	}
+	// ① CSS cursor 显式值（浏览器：cursor 属性决定，优先于元素类型）。
+	if st != nil && st.Cursor != "" && st.Cursor != "auto" {
+		switch st.Cursor {
+		case "pointer":
+			return window.CursorHand
+		case "text", "vertical-text":
+			return window.CursorIBeam
+		case "nwse-resize":
+			return window.CursorNWSE
+		case "nesw-resize":
+			return window.CursorNESW
+		case "ns-resize", "row-resize", "n-resize", "s-resize":
+			return window.CursorNS
+		case "ew-resize", "col-resize", "e-resize", "w-resize":
+			return window.CursorEW
+		}
+	}
+	// ② cursor:auto 语义（WebKit useHandCursor：链接→手型；
+	// 可编辑文本→IBeam；其余原生控件→箭头）。
+	switch el.LocalName() {
+	case "a":
+		// 仅带 href 的链接（WebKit isOverLink；a 无 href 是箭头）。
+		if el.GetAttribute("href") != "" {
+			return window.CursorHand
+		}
+	case "input":
+		switch el.GetAttribute("type") {
+		case "checkbox", "radio", "submit", "reset", "button", "range", "color", "file", "hidden":
+			// 原生控件：浏览器默认箭头（不是手型）。
+			return window.CursorArrow
+		default:
+			return window.CursorIBeam
+		}
+	case "textarea":
+		// 右下角 15px resize 手柄优先 → nwse-resize（与 Press 手柄
+		// 命中区域一致，视口坐标）。
+		if st != nil && rendering.ResizeModeOf(st) != 0 {
+			if rb := rv.FindRenderBoxForNode(el); rb != nil {
+				bx, by, bw, bh := rendering.BoxViewportRect(rv, rb)
+				if cssX > bx+bw-15 && cssY > by+bh-15 {
+					return window.CursorNWSE
+				}
+			}
+		}
+		return window.CursorIBeam
+	}
+	return window.CursorArrow
 }
 
 func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldEl, newEl *dom.Element) {

@@ -20,10 +20,13 @@ import (
 type CursorShape int
 
 const (
-	CursorArrow   CursorShape = iota // default
-	CursorIBeam                      // text / textarea body
-	CursorHand                       // pointer (links, buttons, checkbox/select…)
-	CursorNWSE                       // nwse-resize — textarea bottom-right resize handle
+	CursorArrow   CursorShape = iota // default / cursor:default
+	CursorIBeam                      // cursor:text — text input / textarea body
+	CursorHand                       // cursor:pointer — links (a[href]) and explicit pointer
+	CursorNWSE                       // cursor:nwse-resize — ↘ double arrow (textarea handle)
+	CursorNESW                       // cursor:nesw-resize — ↙ double arrow
+	CursorNS                         // cursor:ns-resize — vertical double arrow
+	CursorEW                         // cursor:ew-resize — horizontal double arrow
 )
 
 // SetCursorShape sets the window cursor to the given shape. Repeated calls
@@ -52,6 +55,12 @@ func (w *Window) cursorFor(shape CursorShape) *glfw.Cursor {
 		c = glfw.CreateStandardCursor(glfw.HandCursor)
 	case CursorNWSE:
 		c = makeNWSECursor()
+	case CursorNESW:
+		c = makeNESWCursor()
+	case CursorNS:
+		c = glfw.CreateStandardCursor(glfw.VResizeCursor)
+	case CursorEW:
+		c = glfw.CreateStandardCursor(glfw.HResizeCursor)
 	default:
 		c = glfw.CreateStandardCursor(glfw.ArrowCursor)
 	}
@@ -61,7 +70,15 @@ func (w *Window) cursorFor(shape CursorShape) *glfw.Cursor {
 
 // makeNWSECursor draws the nwse-resize cursor: a 45° double arrow (↖↘) —
 // white outline (offset +1,+1) under a black body, 32×32, hotspot at center.
-func makeNWSECursor() *glfw.Cursor {
+func makeNWSECursor() *glfw.Cursor { return makeDiagCursor(false) }
+
+// makeNESWCursor draws the nesw-resize cursor: the other 45° diagonal (↗↙),
+// mirrored along the vertical axis (WebKit maps nesw-resize → IDC_SIZENESW).
+func makeNESWCursor() *glfw.Cursor { return makeDiagCursor(true) }
+
+// makeDiagCursor draws a 45° double-arrow cursor along one diagonal.
+// flip=false → ↘ (nwse-resize), flip=true → ↙ (nesw-resize).
+func makeDiagCursor(flip bool) *glfw.Cursor {
 	const S = 32
 	img := image.NewNRGBA(image.Rect(0, 0, S, S))
 	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
@@ -91,16 +108,28 @@ func makeNWSECursor() *glfw.Cursor {
 				img.SetNRGBA(x+ox, y+oy, col)
 			}
 		}
-		// Shaft: 3px-thick diagonal from (11,11) to (21,21).
-		for i := -1; i <= 1; i++ {
-			line(11, 11+i, 21, 21+i)
+		if !flip {
+			// Shaft: 3px-thick diagonal from (11,11) to (21,21).
+			for i := -1; i <= 1; i++ {
+				line(11, 11+i, 21, 21+i)
+			}
+			// Head A (top-left): tip (5,5), wings to the shaft.
+			line(5, 5, 11, 9)
+			line(5, 5, 9, 11)
+			// Head B (bottom-right): tip (27,27), wings to the shaft.
+			line(21, 23, 27, 27)
+			line(23, 21, 27, 27)
+		} else {
+			// Mirrored along the vertical axis: shaft (21,11)→(11,21),
+			// head A (top-right) tip (27,5), head B (bottom-left) tip (5,27).
+			for i := -1; i <= 1; i++ {
+				line(21, 11+i, 11, 21+i)
+			}
+			line(27, 5, 21, 9)
+			line(27, 5, 23, 11)
+			line(11, 23, 5, 27)
+			line(13, 21, 5, 27)
 		}
-		// Head A (top-left): tip (5,5), wings to the shaft.
-		line(5, 5, 11, 9)
-		line(5, 5, 9, 11)
-		// Head B (bottom-right): tip (27,27), wings to the shaft.
-		line(21, 23, 27, 27)
-		line(23, 21, 27, 27)
 	}
 	// White outline first (shifted +1), then black body on top.
 	draw(1, 1, white)
