@@ -962,20 +962,21 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 // paintRangeSlider draws a horizontal slider: a track plus a thumb positioned at the
 // paintRangeSlider draws a horizontal slider: a two-segment rounded track plus
 // a thumb positioned at the value's fraction along the range. Mirrors
-// RenderTheme::paintSlider. Pixel-fitted against Edge (Chromium) native range:
-//   - track: 8px tall (half the input box height), rounded 4px, two segments —
-//     filled portion (0..value) accent blue #0075FF, unfilled portion grey
-//     #EFEFEF. Edge raster: y=104..111 (8 rows), center rows 239,239,239.
-//   - thumb: ~15px circle centered on the value, body #0075FF with a white
-//     highlight arc on its right side (Edge raster shows a vertical white band
-//     at the thumb's right edge).
+// RenderTheme::paintSlider. Pixel-fitted against Edge (Chromium) native range
+// (edge_range.png 实测, 2026-08-08):
+//   - track: 固定 6px 高（UA 固定值，与 input box 高度无关），圆角 3px，
+//     两段式：已填充段 (0..value) accent blue #0075FF、未填充段灰 #EFEFEF。
+//     Edge 像素：grey track 仅 6 行（y=73..78 与 y=105..110）。
+//   - thumb: 固定 14px 直径圆（Edge 像素 blue 段仅 14 行 y=69..82），
+//     body #0075FF。Chromium 深色主题 thumb 悬停时变暗 (:hover 略暗、
+//     :active 更暗)——用户实测浏览器行为；元素 IsHovered/IsActive 由
+//     app.Host 鼠标跟踪驱动（与 :hover/:active 伪类同源）。
 func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
 	c := info.canvas
-	// Track: 8px rounded bar centered vertically (Edge track height = h*0.5 for h=16).
-	trackH := h * 0.5
-	if trackH < 4 {
-		trackH = 4
-	}
+	// Track: 固定 6px 圆角条，垂直居中于 input box。浏览器 UA 是固定尺寸
+	// （不随 input 高度缩放），此前用 h*0.5 导致 input≈21px 时 track 10px
+	// 过粗（浏览器 6px）。
+	const trackH = 6.0
 	trackY := y + (h-trackH)/2
 
 	min, max := rangeBounds(in)
@@ -997,33 +998,27 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 		c.FillRoundRect(x, trackY, fillW, trackH, trackH/2, applyOpacity(FormControlColors.SliderFill, op))
 	}
 
-	// Thumb: circle (diameter ≈ input height), accent blue. Edge (Chromium)
-	// raster shows a solid blue disc — no white highlight. Chromium also
-	// brightens the thumb on hover (:hover) and more while pressed (:active),
-	// matching the native slider feel — the element's IsHovered/IsActive are
-	// driven by app.Host mouse tracking (same state the :hover/:active
-	// pseudo-classes use).
-	thumbR := h * 0.5
-	if thumbR < 5 {
-		thumbR = 5
-	}
+	// Thumb: 固定 14px 直径圆（浏览器 UA 固定值），居中于 track。
+	// 此前 thumbR=h*0.5 导致 input≈21px 时 thumb 直径 21px（浏览器 14px，
+	// 圆大一号）。Chromium 深色主题 thumb 悬停变暗、按下更暗。
+	const thumbR = 7.0
 	thumbX := x + frac*w
 	cy := y + h/2
 	thumbCol := FormControlColors.SliderThumb
 	if in.El != nil {
 		if in.El.IsActive() {
-			thumbCol = mixWithWhite(thumbCol, 0.30)
+			thumbCol = mixWithBlack(thumbCol, 0.30)
 		} else if in.El.IsHovered() {
-			thumbCol = mixWithWhite(thumbCol, 0.16)
+			thumbCol = mixWithBlack(thumbCol, 0.15)
 		}
 	}
 	c.FillCircle(thumbX, cy, thumbR, applyOpacity(thumbCol, op))
 }
 
-// mixWithWhite linearly blends a color toward white by the given factor
-// (0..1). Used for slider thumb hover/active brightening — Chromium dark
-// theme brightens the thumb while hovered and more while pressed.
-func mixWithWhite(c graphics.Color, f float64) graphics.Color {
+// mixWithBlack linearly blends a color toward black by the given factor
+// (0..1). Used for slider thumb hover/active darkening — Chromium dark
+// theme darkens the thumb while hovered and more while pressed.
+func mixWithBlack(c graphics.Color, f float64) graphics.Color {
 	if f <= 0 {
 		return c
 	}
@@ -1031,9 +1026,9 @@ func mixWithWhite(c graphics.Color, f float64) graphics.Color {
 		f = 1
 	}
 	return graphics.Color{
-		R: uint8(float64(c.R) + (255-float64(c.R))*f),
-		G: uint8(float64(c.G) + (255-float64(c.G))*f),
-		B: uint8(float64(c.B) + (255-float64(c.B))*f),
+		R: uint8(float64(c.R) * (1 - f)),
+		G: uint8(float64(c.G) * (1 - f)),
+		B: uint8(float64(c.B) * (1 - f)),
 		A: c.A,
 	}
 }
