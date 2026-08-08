@@ -64,6 +64,55 @@ func (h *Host) MockSelectClose() {
 	h.closeSelectPopup()
 }
 
+// MockRangePress 模拟在 cssX 处按下 <input type="range">（真实交互路径）：
+// 设置 :active 状态 → 立即吸附 value（step 取整）→ 派发 input →
+// 进入拖动跟踪。返回新的 value。
+func (h *Host) MockRangePress(el *dom.Element, rv *rendering.RenderView, cssX float64) string {
+	if el == nil || rv == nil {
+		return ""
+	}
+	if h.activeEl != nil {
+		h.activeEl.SetActive(false)
+	}
+	el.SetActive(true)
+	h.activeEl = el
+	if h.setRangeValueFromX(el, rv, cssX) {
+		el.DispatchEvent(dom.NewEvent("input", true, false, false))
+	}
+	h.rangeDragEl = el
+	h.rangeDragRV = rv
+	return el.GetAttribute("value")
+}
+
+// MockRangeMove 模拟拖动中的鼠标移动（range thumb 跟随），返回当前 value。
+func (h *Host) MockRangeMove(cssX float64) string {
+	if h.rangeDragEl == nil {
+		return ""
+	}
+	if h.setRangeValueFromX(h.rangeDragEl, h.rangeDragRV, cssX) {
+		h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+	}
+	return h.rangeDragEl.GetAttribute("value")
+}
+
+// MockRangeRelease 模拟释放鼠标结束拖动：派发 change + 清除 :active/拖动态。
+// 返回最终 value。
+func (h *Host) MockRangeRelease() string {
+	if h.rangeDragEl == nil {
+		return ""
+	}
+	el := h.rangeDragEl
+	v := el.GetAttribute("value")
+	el.DispatchEvent(dom.NewEvent("change", true, false, false))
+	el.SetActive(false)
+	if h.activeEl == el {
+		h.activeEl = nil
+	}
+	h.rangeDragEl = nil
+	h.rangeDragRV = nil
+	return v
+}
+
 // MockMouseMove 模拟鼠标移动到 (cssX, cssY)，走真实 hover 路径：
 // HitTest → SetHovered(旧元素清除/新元素设置) → hoverStyleFastPath
 // （只重算受影响元素的 :hover 样式，不重建渲染树）。返回新 hover 元素。

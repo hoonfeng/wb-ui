@@ -998,14 +998,44 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 	}
 
 	// Thumb: circle (diameter ≈ input height), accent blue. Edge (Chromium)
-	// raster shows a solid blue disc — no white highlight.
+	// raster shows a solid blue disc — no white highlight. Chromium also
+	// brightens the thumb on hover (:hover) and more while pressed (:active),
+	// matching the native slider feel — the element's IsHovered/IsActive are
+	// driven by app.Host mouse tracking (same state the :hover/:active
+	// pseudo-classes use).
 	thumbR := h * 0.5
 	if thumbR < 5 {
 		thumbR = 5
 	}
 	thumbX := x + frac*w
 	cy := y + h/2
-	c.FillCircle(thumbX, cy, thumbR, applyOpacity(FormControlColors.SliderThumb, op))
+	thumbCol := FormControlColors.SliderThumb
+	if in.El != nil {
+		if in.El.IsActive() {
+			thumbCol = mixWithWhite(thumbCol, 0.30)
+		} else if in.El.IsHovered() {
+			thumbCol = mixWithWhite(thumbCol, 0.16)
+		}
+	}
+	c.FillCircle(thumbX, cy, thumbR, applyOpacity(thumbCol, op))
+}
+
+// mixWithWhite linearly blends a color toward white by the given factor
+// (0..1). Used for slider thumb hover/active brightening — Chromium dark
+// theme brightens the thumb while hovered and more while pressed.
+func mixWithWhite(c graphics.Color, f float64) graphics.Color {
+	if f <= 0 {
+		return c
+	}
+	if f > 1 {
+		f = 1
+	}
+	return graphics.Color{
+		R: uint8(float64(c.R) + (255-float64(c.R))*f),
+		G: uint8(float64(c.G) + (255-float64(c.G))*f),
+		B: uint8(float64(c.B) + (255-float64(c.B))*f),
+		A: c.A,
+	}
 }
 
 // paintProgressBar draws a <progress> element: a rounded track with a filled portion

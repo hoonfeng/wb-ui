@@ -172,6 +172,15 @@ type Host struct {
 	selectPopup       *dom.Element // the overlay container (div.select-popup)
 	selectPopupSelect *dom.Element // the <select> this popup belongs to
 
+	// rangeDragEl tracks an active <input type="range"> thumb drag. Pressing
+	// a range snaps the value to the click position immediately (browser
+	// behavior) and starts a drag; subsequent mouse moves update the value
+	// along the track (input events), mouseup dispatches change and ends it.
+	rangeDragEl *dom.Element
+	// rangeDragRV is the RenderView owning the dragged range (iframe-aware:
+	// the range may live in a child frame's render tree).
+	rangeDragRV *rendering.RenderView
+
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
@@ -1819,6 +1828,27 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				rv.MarkAllDirty()
 			}
 
+			// ── Range thumb drag ──
+			// While a range drag is active (mouse held after pressing the
+			// slider), map the cursor x onto the track every move and
+			// dispatch input. A slider drag starts immediately (no 3px
+			// hysteresis — pressing the track jumps the thumb to the cursor,
+			// then it follows 1:1, mirroring the browser).
+			if h.rangeDragEl != nil {
+				drv := h.rangeDragRV
+				if drv == nil {
+					drv = rv
+				}
+				if h.setRangeValueFromX(h.rangeDragEl, drv, cssX) {
+					h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
+				}
+			}
+
 			// ── Drag-to-select inside a focused text form control ──
 			// While the mouse button is held (selecting) and the drag
 			// threshold is met, extend the selection End to the cursor.
@@ -2088,6 +2118,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 										log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
 									}
 									h.wv.RebuildRenderTree()
+								}
+							} else if inputType == "range" {
+								// ── Range slider ──
+								// 浏览器行为：点击 track 立即把 value 吸附到
+								// 点击位置（step 取整）并派发 input，同时进入
+								// 拖动跟踪（thumb 吸到手指下，随鼠标移动继续
+								// 更新）；mouseup 派发 change。
+								if in, ok := html5.ToInputElement(activeEl); ok && !in.Disabled() {
+									if h.setRangeValueFromX(activeEl, rv, cssX) {
+										activeEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+										h.wv.RebuildRenderTree()
+									}
+									h.rangeDragEl = activeEl
+									h.rangeDragRV = rv
+									if debugPaintLog {
+										log.Printf("[dbg/click] range press x=%.0f value=%s", cssX, in.Value())
+									}
 								}
 							}
 						}
@@ -2395,6 +2442,18 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					h.scrollbarDragging = false
 					h.scrollbarDragBox = nil
 					h.scrollbarDragRV = nil
+				}
+				// End range thumb drag: dispatch change (the final value,
+				// after the drag), then clear the drag state.
+				if h.rangeDragEl != nil {
+					h.rangeDragEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+					h.rangeDragEl = nil
+					h.rangeDragRV = nil
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.MarkRenderTreeDirty()
+						}
+					}
 				}
 				if h.selecting {
 					csX, csY := h.win.ContentScale()
@@ -3014,6 +3073,77 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 // handleSelectClick opens the <select> dropdown popup for sel: a
 // fixed-position overlay listing the select's <option> elements, positioned
 // just below the select box. Mirrors WebKit RenderMenuList.showPopup.
+// setRangeValueFromX computes a <input type="range"> value from a horizontal
+// CSS-viewport x coordinate, snapped to the input's step, and writes it back
+// to the DOM (SetValue). Mirrors the browser: clicking the track or dragging
+// the thumb maps the cursor position onto [min,max] in steps. The thumb
+// geometry is the full input box (paintRangeSlider centers the 8px track and
+// draws the thumb across the full width), so the clickable range spans the
+// whole control box.
+func (h *Host) setRangeValueFromX(el *dom.Element, rv *rendering.RenderView, cssX float64) (changed bool) {
+	if el == nil || rv == nil {
+		return false
+	}
+	in, ok := html5.ToInputElement(el)
+	if !ok || in.Disabled() {
+		return false
+	}
+	minV := parseHostFloat(in.Min(), 0)
+	maxV := parseHostFloat(in.Max(), 100)
+	stepV := parseHostFloat(in.Step(), 1)
+	if stepV <= 0 {
+		stepV = 1
+	}
+	if maxV <= minV {
+		maxV = minV + 1
+	}
+	box := rv.FindRenderBoxForNode(el)
+	if box == nil {
+		return false
+	}
+	bw := box.Width()
+	if bw <= 0 {
+		return false
+	}
+	// AbsoluteX is page coordinates; the event x is viewport coordinates —
+	// subtract the box's scroll offset to align (same as handleSelectClick).
+	left := box.AbsoluteX()
+	if _, so := rv.BoxScrollOffset(box); so > 0 {
+		left -= so
+	}
+	frac := (cssX - left) / bw
+	if frac < 0 {
+		frac = 0
+	} else if frac > 1 {
+		frac = 1
+	}
+	val := minV + frac*(maxV-minV)
+	val = minV + math.Round((val-minV)/stepV)*stepV
+	if val < minV {
+		val = minV
+	} else if val > maxV {
+		val = maxV
+	}
+	s := fmt.Sprintf("%g", val)
+	if in.Value() == s {
+		return false
+	}
+	in.SetValue(s)
+	return true
+}
+
+// parseHostFloat parses a float string with a default on error/empty.
+func parseHostFloat(s string, def float64) float64 {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
 func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, cssX, cssY float64) {
 	selEl, ok := html5.ToSelectElement(sel)
 	if !ok {
