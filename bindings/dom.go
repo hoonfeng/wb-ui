@@ -91,6 +91,16 @@ type roEntry struct {
 	lastW       float64
 	lastH       float64
 	initialized bool
+	// debounce（浏览器体验等价）：尺寸连续快速变化（拖拽风暴）时延迟
+	// 触发回调，稳定 66ms 后 fire 一次。引擎重建/布局慢（终端 fit →
+	// xterm.resize → rows 重建可达 200ms+），拖拽期间每帧触发回调 →
+	// 每帧 fit/resize → 每帧大布局 → 拖拽卡帧（「拖快跟不上」）。
+	// 拖拽中终端内容无需实时重排，停止后 fit 一次即可（对齐浏览器
+	// 最终状态，时序允许短暂延迟）。
+	pendingW     float64
+	pendingH     float64
+	pendingSince time.Time
+	firePending  bool
 }
 
 var (
@@ -772,9 +782,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 			if len(args) >= 2 && args[1].IsObject() {
 				if o := args[1].AsObject(); o != nil {
-					for _, k := range []string{"bubbles", "cancelable",
-						"key", "code", "ctrlKey", "shiftKey", "altKey", "metaKey",
-						"repeat", "isComposing"} {
+				for _, k := range []string{"bubbles", "cancelable",
+					"key", "code", "keyCode", "which", "charCode",
+					"ctrlKey", "shiftKey", "altKey", "metaKey",
+					"repeat", "isComposing"} {
 						if v, ok := o.GetByKey(k); ok {
 							ev.Set(k, v)
 						}

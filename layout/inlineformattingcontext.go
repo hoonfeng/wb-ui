@@ -392,7 +392,15 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if !cld.IsReplaced() {
 				csc := cld.Style()
 				hasExplicit := csc != nil && csc.Width.Unit != "" && csc.Width.Unit != "auto"
-				if !hasExplicit {
+				// ★ inline-block 例外（浏览器标准 CSS 2.1 §10.3.9）：
+				// inline-block auto 宽度 = shrink-to-fit（内容宽），不是
+				// 撑满父行宽。此前无显式宽度的 inline-block（xterm 光标
+				// div、badge、按钮等）被 SetContentWidth(父行宽) 撑满 →
+				// 终端 block 光标 172px 整行宽（应为 1 字符 ~8px，用户
+				// 反馈「光标块宽度巨大」）。inline-block 内部是 BFC，换行
+				// 约束不适用（内容按自身 max-content 排版）。
+				isInlineBlock := csc != nil && csc.Display == style.DisplayInlineBlock
+				if !hasExplicit && !isInlineBlock {
 					cldG.SetContentWidth(contentWidth)
 				}
 			}
@@ -438,6 +446,22 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
+
+			// ★ inline-block shrink-to-fit（CSS 2.1 §10.3.9）：无显式宽度
+			// 的 inline-block 宽度 = 内容 max-content（xterm 光标 div 1 字符
+			// ≈ 8px），不撑满父行宽。childCtx.Layout（BFC）不设置容器自身
+			// 的 ContentWidth（容器宽由父级决定），布局后仍为 0 → 需用内部
+			// 文本测量回填（浏览器语义：光标块正好覆盖当前字符）。
+			if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
+				hasExplicitIB := csc.Width.Unit != "" && csc.Width.Unit != "auto"
+				if !hasExplicitIB && cldG.ContentWidth() <= 0 {
+					if txt := inlineBoxTextContent(cld); txt != "" {
+						if tw := measureText(cld, txt); tw > 0 {
+							cldG.SetContentWidth(tw)
+						}
+					}
+				}
+			}
 
 			// Re-apply explicit width: the child's Layout (IFC for inline
 			// content) collapses the box to content width; a definite CSS

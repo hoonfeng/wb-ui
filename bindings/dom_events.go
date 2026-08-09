@@ -199,6 +199,25 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		obj.Set("shiftKey", jsc.BooleanValue(me.ShiftKey()))
 		obj.Set("metaKey", jsc.BooleanValue(me.MetaKey()))
 	}
+	// ★ KeyboardEvent 属性（浏览器标准）：xterm/旧式库读 e.keyCode /
+	// e.key 判断按键（Enter=13、Ctrl+C 等）。此前 eventToJS 未暴露 →
+	// JS 侧 key/keyCode 恒 undefined → xterm 的 Enter 分支永不匹配
+	// （「回车不能触发执行」根因）。
+	if ke, ok := e.(*dom.KeyboardEvent); ok {
+		obj.SetClassName("KeyboardEvent")
+		obj.Set("key", jsc.StringValue(ke.Key()))
+		obj.Set("code", jsc.StringValue(ke.Code()))
+		obj.Set("keyCode", jsc.NumberValue(float64(ke.KeyCode())))
+		obj.Set("which", jsc.NumberValue(float64(ke.KeyCode())))
+		obj.Set("charCode", jsc.NumberValue(float64(ke.CharCode())))
+		obj.Set("repeat", jsc.BooleanValue(ke.Repeat()))
+		obj.Set("isComposing", jsc.BooleanValue(ke.IsComposing()))
+		obj.Set("ctrlKey", jsc.BooleanValue(ke.CtrlKey()))
+		obj.Set("altKey", jsc.BooleanValue(ke.AltKey()))
+		obj.Set("shiftKey", jsc.BooleanValue(ke.ShiftKey()))
+		obj.Set("metaKey", jsc.BooleanValue(ke.MetaKey()))
+		obj.Set("location", jsc.NumberValue(float64(ke.Location())))
+	}
 	return jsc.ObjectValue(obj)
 }
 

@@ -93,6 +93,14 @@ type Host struct {
 	imeInputText   string
 	imeComposing   bool
 	imeComposeText string
+	// downJSFocused records whether the JS mousedown handler (dispatched on
+	// press) called el.focus() during its execution. Browser standard: clicking
+	// a non-focusable element moves focus to <body> (blurring the focused
+	// control), but if the mousedown handler re-focuses a control (xterm's
+	// helper textarea on clicking the terminal), focus is preserved. Without
+	// this flag, every click on the terminal (a div) triggered Unfocus →
+	// cursor disappeared + input stopped ("点击终端后光标消失不可输入").
+	downJSFocused bool
 	// Composition insertion state: base is the element text WITHOUT the
 	// in-progress composition, start is the caret offset where the composition
 	// (and subsequent char input) is inserted. Without this, IME text was
@@ -305,6 +313,9 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	// focus/blur 激活输入+显示光标）。
 	bindings.FocusBridge = func(el *dom.Element, focused bool) {
 		if focused {
+			// mousedown 派发期间 JS el.focus()（xterm 点击终端容器时
+			// textarea.focus()）：标记 so Press 分支不会误 Unfocus。
+			h.downJSFocused = true
 			h.FocusElementByKeyboard(el, false)
 		} else {
 			if h.imeFocusedEl == el {
@@ -2028,7 +2039,7 @@ func (h *Host) termTestTick() {
 	// DOM 状态（xterm rows 渲染 + helper textarea computed style），用于
 	// 复现用户真实场景（仅 PTY 真实输出，无任何测试注入）。
 	queryMode := os.Getenv("WB_TERM_QUERY") != "" && os.Getenv("WB_TERM_TEST") == ""
-	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 {
+	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 && h.termTestStep != 400 && h.termTestStep != 460 {
 		return
 	}
 	switch h.termTestStep {
@@ -2237,7 +2248,14 @@ func (h *Host) termTestTick() {
 						cls: (cur.className || '').toString(),
 						x: Math.round(cr.left), y: Math.round(cr.top), w: Math.round(cr.width), h: Math.round(cr.height),
 						disp: ccs.display, vis: ccs.visibility, anim: ccs.animationName, bg: ccs.backgroundColor,
-						hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0
+						hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0,
+						// ★ 光标宽度诊断：内联 style.width vs computed width——
+						// 若 style.width=13px 但 rect 172px → 引擎布局没应用
+						// 内联宽度（inline-block 宽度计算 bug）。
+						styleW: cur.style ? cur.style.width : 'no-style',
+						styleH: cur.style ? cur.style.height : 'no-style',
+						computedW: ccs.width, computedH: ccs.height,
+						txt: (cur.textContent || '').slice(0, 20)
 					};
 				} else { out.cursor = 'NO_CURSOR_EL'; }
 				// xterm 容器 focus 类（isFocused 的 DOM 反映）
@@ -2325,7 +2343,12 @@ func (h *Host) termTestTick() {
 					x: Math.round(cr.left), y: Math.round(cr.top), w: Math.round(cr.width), h: Math.round(cr.height),
 					anim: ccs.animationName, anim2: ccs.getPropertyValue('animation-name'), animFull: ccs.getPropertyValue('animation'),
 					bg: ccs.backgroundColor, bg2: ccs.getPropertyValue('background-color'),
-					hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0
+					hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0,
+					styleW: cur.style ? cur.style.width : 'no-style',
+					computedW: ccs.width, txt: (cur.textContent || '').slice(0, 20),
+					pos: ccs.position, disp: ccs.display, left: ccs.left, top: ccs.top,
+					parentCls: cur.parentElement ? (cur.parentElement.className || '').toString().slice(0, 40) : '',
+					parentRect: cur.parentElement && cur.parentElement.getBoundingClientRect ? (function(){ var r = cur.parentElement.getBoundingClientRect(); return {x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)}; })() : null
 				};
 			} else { out.cursor = 'NO_CURSOR_EL'; }
 			var xt = document.querySelector('.xterm');
@@ -2355,10 +2378,70 @@ func (h *Host) termTestTick() {
 			return JSON.stringify(out);
 		})()`)
 		log.Printf("[termtest] DIR-RESULT %s", v2.ToString())
-		h.termTestDone = true
-		// ★ dir 输出后再次 dump 渲染树：验证 DOM 变更（treehook）→ 重建
-		// → rows 字符 span 生成 RenderText。
+		// ★ 不置 termTestDone：继续 case 320（用户用真实键盘 Enter 后查询
+		// buffer 行数变化，验证「回车执行」链路 keydown→xterm→PTY）。
 		h.needsResizeDump = true
+	case 400:
+		// ★ JS 派发 keydown Enter 到 textarea（绕过引擎 EventKey，直接走
+		// DOM 事件系统）：若 xterm 处理（写 \r → PTY 执行）→ 说明引擎
+		// EventKey 派发的事件对象有属性问题；若也不处理 → xterm listener
+		// 未绑定 textarea 或 PTY 链路断。
+		_, _ = interp.RunJS(`(function(){
+			var ta = document.querySelector('.xterm-helper-textarea');
+			if (!ta) { window.__jsEnter = 'NO_TEXTAREA'; return; }
+			var ev = new KeyboardEvent('keydown', {
+				key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+				bubbles: true, cancelable: true
+			});
+			var prevented = !ta.dispatchEvent(ev);
+			window.__jsEnter = 'prevented=' + prevented + ' canceled=' + ev.defaultPrevented;
+		})()`)
+		v4, _ := interp.RunJS(`(function(){
+			var out = {jsEnter: window.__jsEnter, taVal: '', evtSys: ''};
+			var ta = document.querySelector('.xterm-helper-textarea');
+			if (ta) out.taVal = (ta.value || '').slice(0, 40);
+			// ★ 引擎事件系统自检：临时注册 keydown listener + dispatch，
+			// 验证 addEventListener('keydown') 在引擎里是否工作。
+			try {
+				var hits = 0;
+				var tmp = function(ev){ hits++; window.__tmpKey = ev.key + '/' + ev.keyCode; };
+				ta.addEventListener('keydown', tmp);
+				ta.dispatchEvent(new KeyboardEvent('keydown', {key:'X', keyCode:88, bubbles:true, cancelable:true}));
+				out.evtSys = 'hits=' + hits + ' last=' + (window.__tmpKey || 'none') + ' sameEl=' + (document.querySelector('.xterm-helper-textarea') === ta);
+				ta.removeEventListener('keydown', tmp);
+			} catch(e) { out.evtSys = 'err:' + (e.message || e); }
+			try {
+				var lt = window.__lastTerm;
+				if (lt && lt.buffer && lt.buffer.active) {
+					out.bufLines = lt.buffer.active.length;
+					out.cursorY = lt.buffer.active.cursorY;
+				}
+			} catch(e) { out.err = String(e.message || e); }
+			return JSON.stringify(out);
+		})()`)
+		log.Printf("[termtest] JS-ENTER %s", v4.ToString())
+	case 460:
+		// ★ 回车执行验证：case 260 聚焦 + fit 后，外部脚本（Win32
+		// WM_KEYDOWN Enter）已发送回车（约 200 帧窗口）。查询 buffer
+		// 行数与最新行——PTY 执行空命令应输出新 prompt（行数 +1 或
+		// 出现新行）。
+		v3, _ := interp.RunJS(`(function(){
+			var out = {lines: [], total: -1};
+			try {
+				var lt = window.__lastTerm;
+				if (lt && lt.buffer && lt.buffer.active) {
+					out.total = lt.buffer.active.length;
+					for (var i = Math.max(0, lt.buffer.active.length - 4); i < lt.buffer.active.length; i++) {
+						var l = lt.buffer.active.getLine(i);
+						out.lines.push(i + ':[' + (l ? l.translateToString().slice(0, 80) : 'null') + ']');
+					}
+					out.cursorY = lt.buffer.active.cursorY;
+				} else { out.err = 'no-buffer'; }
+			} catch(e) { out.err = String(e.message || e); }
+			return JSON.stringify(out);
+		})()`)
+		log.Printf("[termtest] ENTER-RESULT %s", v3.ToString())
+		h.termTestDone = true
 	}
 }
 
@@ -3062,6 +3145,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						// mousedown+mousemove 的 JS 拖拽全部失效。
 						// 坐标用视口 CSS 坐标（clientX/clientY 语义，与
 						// mousemove/mouseup 同基准，位移差值正确）。
+						h.downJSFocused = false
 						activeEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseDown, dom.MouseEventInit{
 							EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
 							ClientX:   ev.X / csX,
@@ -3401,7 +3485,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 							if hitEl != h.imeFocusedEl {
 								h.FocusElement(hitEl)
 							}
-						} else if !resizeHandle && h.imeFocusedEl != nil {
+						} else if !resizeHandle && h.imeFocusedEl != nil && !h.downJSFocused {
+							// ★ 点击不可聚焦元素时失焦（浏览器：焦点移到
+							// body）。但若 mousedown 派发期间 JS 已重新聚焦
+							// （xterm 点击终端容器 → textarea.focus() →
+							// FocusBridge 置 downJSFocused），则保持新焦点
+							// ——否则「点击终端后光标消失+不可输入」。
 							h.Unfocus()
 						}
 					}
@@ -3682,9 +3771,19 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					AltKey:    (ev.Mods & int(glfw.ModAlt)) != 0,
 					MetaKey:   (ev.Mods & int(glfw.ModSuper)) != 0,
 					Repeat:    ev.Action == int(glfw.Repeat),
-					KeyCode:   ev.Key,
+					// ★ DOM keyCode（浏览器标准 Windows VK 码）：xterm 等
+					// 旧式库用 e.keyCode 判断（Enter=13）——此前传 GLFW
+					// 键码（257）导致 Enter 分支永不匹配（回车不能执行）。
+					KeyCode: domKeyCodeValue(ev),
 				})
-				if !h.imeFocusedEl.DispatchEvent(keyEv) {
+				if os.Getenv("WB_EVT_DEBUG") != "" {
+					log.Printf("[evt/key] key=%d name=%q code=%q action=%d focused=%v", ev.Key, domKeyName(ev), domKeyCode(ev), ev.Action, h.imeFocusedEl != nil)
+				}
+				prevented := !h.imeFocusedEl.DispatchEvent(keyEv)
+				if os.Getenv("WB_EVT_DEBUG") != "" {
+					log.Printf("[evt/key] dispatched keydown key=%q → prevented=%v (xterm handler)", domKeyName(ev), prevented)
+				}
+				if prevented {
 					break // JS preventDefault：引擎不做默认编辑/滚动
 				}
 			}
@@ -3945,6 +4044,53 @@ func domKeyName(ev window.Event) string {
 		return fmt.Sprintf("F%d", ev.Key-int(glfw.KeyF1)+1)
 	}
 	return "Unidentified"
+}
+
+// domKeyCodeValue maps a GLFW key code to the DOM legacy keyCode integer
+// (Windows virtual-key codes, what xterm/legacy libs read via e.keyCode).
+// Browser standard: Enter=13, Backspace=8, arrows=37-40, letters/digits =
+// ASCII. Previously the engine passed the raw GLFW scancode (KeyEnter=257),
+// so xterm's `e.keyCode === 13` Enter branch never matched → keydown was
+// dispatched but not preventDefault-ed → "回车不能触发执行".
+func domKeyCodeValue(ev window.Event) int {
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyEnter, glfw.KeyKPEnter:
+		return 13
+	case glfw.KeyBackspace:
+		return 8
+	case glfw.KeyTab:
+		return 9
+	case glfw.KeyEscape:
+		return 27
+	case glfw.KeyDelete:
+		return 46
+	case glfw.KeyInsert:
+		return 45
+	case glfw.KeyLeft:
+		return 37
+	case glfw.KeyUp:
+		return 38
+	case glfw.KeyRight:
+		return 39
+	case glfw.KeyDown:
+		return 40
+	case glfw.KeyHome:
+		return 36
+	case glfw.KeyEnd:
+		return 35
+	case glfw.KeyPageUp:
+		return 33
+	case glfw.KeyPageDown:
+		return 34
+	case glfw.KeySpace:
+		return 32
+	}
+	// Letters/digits/punctuation: GLFW ASCII codes match DOM keyCode for
+	// these (both use ASCII / Windows VK convention).
+	if ev.Key >= 32 && ev.Key <= 126 {
+		return ev.Key
+	}
+	return 0
 }
 
 // domKeyCode maps a GLFW key code to the DOM KeyboardEvent.code value

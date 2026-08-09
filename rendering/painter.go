@@ -763,6 +763,13 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 	if !info.intersects(rectFromLayout(x, y, w, h)) {
 		return
 	}
+	// ★ opacity 必须应用（浏览器标准）：outline 是元素绘制的一部分，受
+	// opacity 影响——opacity:0 的元素 outline 完全不可见。此前遗漏导致
+	// xterm 终端里 opacity:0 的隐藏 textarea 聚焦时（:focus-visible UA
+	// outline）被画出蓝色边框（「终端输入框蓝色边框」根因）。与
+	// PaintBackground/PaintBorder/PaintText 一致：opacityLayerDepth>0 时
+	// SaveLayer 已处理，返回 1.0 不重复乘。
+	color = ApplyOpacityToColor(color, paintOpacity(box, info))
 	// Outline 跟随元素的 border-radius（浏览器行为：圆角 input 的 focus
 	// outline 是圆角矩形，不是直角）。必须二选一：先画直角 StrokeRect
 	// 再叠圆角会在圆角弧外残留直角的角部像素（用户看到的"多余直角边框"）。

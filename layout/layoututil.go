@@ -311,9 +311,52 @@ func fontStyleOf(box *ElementBox) string {
 	if cs == nil { return "normal" }
 	return cs.FontStyle
 }
+
+// inlineBoxTextContent 递归收集 inline-block 盒内的文本内容（InlineTextBox
+// 串联），用于 shrink-to-fit 宽度测量（xterm 光标 div 等无显式宽度
+// inline-block 的内容宽）。空白文本在渲染树构建时被跳过（无 RenderText/
+// InlineTextBox），此时回退到 DOM textContent（浏览器语义：空格也算内容
+// 宽度——光标块覆盖 1 字符宽）。
+func inlineBoxTextContent(box *ElementBox) string {
+	if box == nil {
+		return ""
+	}
+	var sb strings.Builder
+	var walk func(b Box)
+	walk = func(b Box) {
+		if b == nil {
+			return
+		}
+		if t, ok := b.(*InlineTextBox); ok {
+			sb.WriteString(t.text)
+			return
+		}
+		if eb, ok := b.(*ElementBox); ok {
+			for _, c := range eb.Children() {
+				walk(c)
+			}
+		}
+	}
+	for _, c := range box.Children() {
+		walk(c)
+	}
+	if sb.Len() > 0 {
+		return sb.String()
+	}
+	// 布局树无文本（空白被跳过）→ 回退 DOM textContent。
+	if el := box.Element(); el != nil {
+		if tc := el.TextContent(); tc != "" {
+			return tc
+		}
+	}
+	return ""
+}
+
 func measureText(box *ElementBox, text string) float64 {
 	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
+	if fs <= 0 {
+		fs = defaultFontSize
+	}
 	family := fontFamilyOf(box)
 	weight := fontWeightOf(box)
 	fstyle := fontStyleOf(box)
