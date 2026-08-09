@@ -57,6 +57,7 @@ type flexItem struct {
 }
 
 func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	defer profileLayout("ffc")()
 	cs := box.Style()
 	if cs == nil { return }
 	isRow := cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"

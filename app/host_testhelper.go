@@ -124,7 +124,9 @@ func (h *Host) MockEventCursorMove(wv *webkit.WebView, cssX, cssY float64) {
 			h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
 			if mf := wv.MainFrame(); mf != nil {
 				if fr := mf.Frame(); fr != nil {
-					fr.MarkRenderTreeDirty()
+					if !fr.RebuildStyleForElement(h.rangeDragEl) {
+						fr.MarkRenderTreeDirty()
+					}
 				}
 			}
 		}
@@ -153,7 +155,9 @@ func (h *Host) MockEventCursorMove(wv *webkit.WebView, cssX, cssY float64) {
 			h.resizeDragEl.SetAttribute("style", fmt.Sprintf("height:%.0fpx", newH))
 			if mf := wv.MainFrame(); mf != nil {
 				if fr := mf.Frame(); fr != nil {
-					fr.MarkRenderTreeDirty()
+					if !fr.RebuildStyleForElement(h.resizeDragEl) {
+						fr.MarkRenderTreeDirty()
+					}
 				}
 			}
 		}

@@ -195,6 +195,19 @@ type Host struct {
 	// SetCursorShape when the shape actually changes).
 	lastCursor window.CursorShape
 
+	// WB_FRAMETIME=1 / WB_AUTODRAG=1：拖拽帧耗时统计与自动化拖拽（性能
+	// 验证「textarea resize 高度跟手」用——headless probe 测不到 GPU
+	// paint，必须在真实窗口 + vsync 下量化完整帧时间）。
+	ftLog        *os.File // 帧耗时日志（_frametime.log）
+	autodragOn   bool
+	autodragEl   *dom.Element
+	autodragX    float64 // 手柄视口坐标
+	autodragY    float64
+	autodragStep int
+	autodragPanelOpen bool // 设置面板已打开（区分 -100/-200 等待期）
+	autodragStart time.Time
+	autodragSamples []float64
+
 	// scrollbarDrag tracks an active scrollbar thumb drag.
 	scrollbarDragging bool
 	// scrollbarDragBox is the scroll container being dragged.
@@ -972,9 +985,23 @@ func (h *Host) Run() {
 	if perfDebug {
 		perfStart = time.Now()
 	}
+	// WB_AUTODRAG=1：自动模拟 textarea resize 拖拽（找第一个 textarea，
+	// 每秒约 60 帧逐帧 +5px，60 帧后释放），配合 [ft] 帧耗时日志量化
+	// 真实窗口 + GPU paint + vsync 下的拖拽帧时间——验证「高度跟手」。
+	h.autodragOn = os.Getenv("WB_AUTODRAG") != ""
+	if h.autodragOn {
+		h.autodragStep = -999
+	}
 
 	for !h.win.ShouldClose() {
 		perfFrames++
+		// WB_FRAMETIME=1：逐帧测量 layout/paint/events 耗时（拖拽跟手
+		// 性能验证；autodrag 激活时强制开启）。
+		ftMode := h.autodragOn || os.Getenv("WB_FRAMETIME") != ""
+		var ftFrameStart, ftLayoutEnd, ftPaintEnd time.Time
+		if ftMode {
+			ftFrameStart = time.Now()
+		}
 		// Fetch the GPU surface fresh each frame: resize callbacks release
 		// and recreate the surface, so the cached pointer would be dangling.
 		gpuSurf := h.win.GPUSurface()
@@ -985,6 +1012,9 @@ func (h *Host) Run() {
 		h.wv.Resize(h.win.Width(), h.win.Height())
 
 		h.wv.EnsureLayout()
+		if ftMode {
+			ftLayoutEnd = time.Now()
+		}
 		rv := h.wv.RenderView()
 
 		// Smooth wheel scrolling: interpolate the per-box scroll offset
@@ -1372,6 +1402,9 @@ func (h *Host) Run() {
 					gpuCanvas.Release()
 				}
 				h.win.Present()
+				if ftMode {
+					ftPaintEnd = time.Now()
+				}
 			}
 		}
 
@@ -1379,6 +1412,32 @@ func (h *Host) Run() {
 		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
 		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
 		h.processEventLoop()
+		// WB_LAYOUT_PROFILE=1：每帧输出布局耗时分布（BFC/FFC/IFC…）。
+		if os.Getenv("WB_LAYOUT_PROFILE") != "" && needPaint {
+			layout.DumpLayoutProfile()
+		}
+		if ftMode {
+			now := time.Now()
+			total := float64(now.Sub(ftFrameStart).Nanoseconds()) / 1e6
+			layoutMS := float64(ftLayoutEnd.Sub(ftFrameStart).Nanoseconds()) / 1e6
+			// paint 未执行（needPaint=false）时 ftPaintEnd 为零值——用
+			// ftLayoutEnd 兜底，paint 记 0。
+			paintEnd := ftPaintEnd
+			if paintEnd.IsZero() {
+				paintEnd = ftLayoutEnd
+			}
+			paintMS := float64(paintEnd.Sub(ftLayoutEnd).Nanoseconds()) / 1e6
+			eventsMS := total - layoutMS - paintMS
+			// 只记录有实际绘制的帧（空闲帧跳过 Paint 无意义；拖拽帧
+			// needPaint=true 每帧记录，autodragSamples 汇总）。
+			if needPaint {
+				log.Printf("[ft] total=%7.2fms layout=%6.2f paint=%6.2f events=%6.2f needPaint=%v drag=%v",
+					total, layoutMS, paintMS, eventsMS, needPaint, h.autodragOn)
+				if h.autodragOn {
+					h.autodragSamples = append(h.autodragSamples, total)
+				}
+			}
+		}
 	}
 	if perfDebug {
 		elapsed := time.Since(perfStart).Seconds()
@@ -1812,7 +1871,120 @@ func layoutAffectingChanged(a, b *style.ComputedStyle) bool {
 	return false
 }
 
+// autodragTick 自动模拟 textarea resize 拖拽（WB_AUTODRAG=1 时每帧调用）：
+// 自动打开设置面板「指令」tab → 找第一个 textarea 的右下角手柄 → 模拟
+// 按下 → 逐帧 +5px 拖 60 帧 → 释放。帧耗时由 Run 循环的 [ft] 日志记录
+// （autodragSamples 汇总）。目的：在真实窗口（GPU paint + vsync）下量化
+// 拖拽帧时间，验证「高度跟手」。
+// autodragStep 状态机（负值=等待帧计数，0+ = 拖拽进度）：
+//   -1        首次：点击活动栏底部按钮打开设置面板 → 设 -30
+//   -30..-1   等待面板渲染（逐帧递增）
+//   0         点击「指令」tab → 设 -60
+//   -60..-1   等待 tab 渲染（逐帧递增）
+//   0+        找 textarea；找到则开始拖拽（每帧 +5px，60 帧后释放）
+func (h *Host) autodragTick() {
+	if h.autodragEl == nil {
+		interp := h.wv.JSInterpreter()
+		// 首次（step=-999 哨兵，与等待期 -100..-1 不冲突）：打开设置面板
+		if h.autodragStep == -999 {
+			h.autodragStep = -100
+			log.Printf("[autodrag] 打开设置面板")
+			if interp != nil {
+				_, _ = interp.RunJS(`(function(){
+					var btn = document.querySelector('.activity-bottom button');
+					if (btn) { var ev = new Event('click', {bubbles:true}); btn.dispatchEvent(ev); }
+				})()`)
+			}
+			return
+		}
+		// 等待期（-100..-1 或 -200..-1 递增）：到 0 时按阶段注入下一步
+		if h.autodragStep < 0 {
+			h.autodragStep++
+			if h.autodragStep == 0 && !h.autodragPanelOpen {
+				// 面板等待期结束：切到指令 tab，进入 -200 第二阶段
+				h.autodragPanelOpen = true
+				h.autodragStep = -200
+				log.Printf("[autodrag] 切到指令 tab")
+				if interp != nil {
+					_, _ = interp.RunJS(`(function(){
+						var btns = document.querySelectorAll('.settings-tabs button');
+						for (var i=0;i<btns.length;i++){
+							if (btns[i].textContent.indexOf('指令') >= 0) {
+								var ev = new Event('click', {bubbles:true}); btns[i].dispatchEvent(ev); break;
+							}
+						}
+					})()`)
+				}
+			}
+			return
+		}
+		// 找第一个 textarea
+		rv := h.wv.RenderView()
+		if rv == nil {
+			return
+		}
+		var el *dom.Element
+		var walk func(ro rendering.RenderObject)
+		walk = func(ro rendering.RenderObject) {
+			if el != nil || ro == nil {
+				return
+			}
+			if n := ro.Node(); n != nil {
+				if e, ok := n.(*dom.Element); ok && e.LocalName() == "textarea" {
+					el = e
+					return
+				}
+			}
+			for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+				walk(c)
+			}
+		}
+		walk(rendering.RenderObject(rv))
+		if el == nil {
+			return // 面板未就绪，继续等
+		}
+		box := rv.FindRenderBoxForNode(el)
+		if box == nil {
+			return
+		}
+		bx, by, bw, bh := rendering.BoxViewportRect(rv, box)
+		h.autodragX = bx + bw - 5
+		h.autodragY = by + bh - 5
+		h.MockTextareaResizePress(el, rv, h.autodragY)
+		h.autodragEl = el
+		h.autodragStart = time.Now()
+		log.Printf("[autodrag] textarea (%.0f,%.0f %.0fx%.0f) handle=(%.0f,%.0f) start",
+			bx, by, bw, bh, h.autodragX, h.autodragY)
+		return
+	}
+	h.autodragStep++
+	dy := 5.0 * float64(h.autodragStep)
+	h.MockEventCursorMove(h.wv, h.autodragX, h.autodragY+dy)
+	if h.autodragStep >= 60 {
+		h.MockTextareaResizeRelease()
+		el := h.autodragEl
+		h.autodragEl = nil
+		n := len(h.autodragSamples)
+		if n > 0 {
+			sum, maxV := 0.0, 0.0
+			for _, s := range h.autodragSamples {
+				sum += s
+				if s > maxV {
+					maxV = s
+				}
+			}
+			log.Printf("[autodrag] DONE steps=%d avgFrame=%.2fms maxFrame=%.2fms finalH=%s",
+				n, sum/float64(n), maxV, el.GetAttribute("style"))
+		}
+		h.autodragOn = false
+	}
+}
+
 func (h *Host) processEvents(rv *rendering.RenderView) {
+	// WB_AUTODRAG=1：自动拖拽 textarea resize 手柄（真实事件处理位置注入）。
+	if h.autodragOn {
+		h.autodragTick()
+	}
 	// Consume buffered IME events (composition updates, committed chars,
 	// composition end) and apply them to the focused form control. The
 	// Win32 IME handler buffers these in its subclassed WndProc; without
@@ -2044,9 +2216,14 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				h.rangeDragRV = drv
 				if h.setRangeValueFromX(h.rangeDragEl, drv, cssX) {
 					h.rangeDragEl.DispatchEvent(dom.NewEvent("input", true, false, false))
+					// ★ 同 resize：value 变更不改变渲染树结构，跳过全量
+					// rebuild 增量更新该元素样式（thumb 位置由 paint 从
+					// value 重算，无需重建树）。
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
-							fr.MarkRenderTreeDirty()
+							if !fr.RebuildStyleForElement(h.rangeDragEl) {
+								fr.MarkRenderTreeDirty()
+							}
 						}
 					}
 				}
@@ -2083,9 +2260,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						newH = 10
 					}
 					h.resizeDragEl.SetAttribute("style", fmt.Sprintf("height:%.0fpx", newH))
+					// ★ 跳过全量 RebuildRenderTree：style height 变更只影响
+					// 几何，增量重算该元素 ComputedStyle 并同步到渲染树 +
+					// 布局树即可（全树重建在复杂页面 30ms+，是「拖拽不跟手」
+					// 的主因）。结构属性（display/position/float）变化时
+					// RebuildStyleForElement 返回 false，自动回退全量重建。
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
-							fr.MarkRenderTreeDirty()
+							if !fr.RebuildStyleForElement(h.resizeDragEl) {
+								fr.MarkRenderTreeDirty()
+							}
 						}
 					}
 				}

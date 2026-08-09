@@ -65,6 +65,7 @@ func insideFlexItem(box *ElementBox) bool {
 }
 
 func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	defer profileLayout("ifc")()
 	cs := box.Style()
 	if cs == nil {
 		return

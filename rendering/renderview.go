@@ -771,7 +771,18 @@ func (v *RenderView) SetRootLayer(l *RenderLayer)       { v.rootLayer = l }
 func (v *RenderView) Compositor() *RenderLayerCompositor { return v.compositor }
 
 func (v *RenderView) Layout(state *layout.LayoutState) {
-	if state == nil { state = layout.NewLayoutState(v.viewWidth, v.viewHeight) }
+	if state == nil {
+		// ★ 复用上一帧的 LayoutState（geometry map 跨帧保留）：布局仍然
+		// 全量执行（每个 box 几何被覆盖重算），仅省去每帧新建 map +
+		// 全部 box 零值几何的开销（1000+ 节点页面可省数 ms/帧）。
+		// viewport 尺寸变化时不能复用（所有 box 宽度可能变），新建。
+		if v.layoutState != nil && v.layoutState.ViewportWidth == v.viewWidth &&
+			v.layoutState.ViewportHeight == v.viewHeight {
+			state = v.layoutState
+		} else {
+			state = layout.NewLayoutState(v.viewWidth, v.viewHeight)
+		}
+	}
 	v.layoutState = state
 	v.frame.X, v.frame.Y = 0, 0
 	v.frame.Width, v.frame.Height = v.viewWidth, v.viewHeight

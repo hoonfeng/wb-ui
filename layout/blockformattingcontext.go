@@ -48,6 +48,7 @@ type BlockFormattingContext struct {
 }
 
 func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	defer profileLayout("bfc")()
 	if box.Style() == nil {
 		// Can't set Style() through the interface; skip default assignment
 	}

@@ -48,6 +48,7 @@ type gridItem struct {
 }
 
 func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	defer profileLayout("grid")()
 	cs := box.Style()
 	if cs == nil {
 		return

@@ -65,6 +65,7 @@ func parseColspan(cell *ElementBox) int {
 var _ = style.DisplayTable
 
 func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
+	defer profileLayout("table")()
 	cs := box.Style()
 	if cs == nil {
 		return

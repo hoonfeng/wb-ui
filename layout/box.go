@@ -97,6 +97,13 @@ type ElementBox struct {
 
 func (b *ElementBox) NodeType() NodeType            { return b.nodeType }
 func (b *ElementBox) Style() *style.ComputedStyle   { return b.style }
+// SetStyle 更新该 box 的计算样式并沿祖先链标记 dirty（布局增量剪枝用）：
+// 样式变化影响本 box 几何 → 祖先的几何（高度/位置）也可能变化，必须
+// 让整条祖先链在下一次布局时重新计算。
+func (b *ElementBox) SetStyle(cs *style.ComputedStyle) {
+	b.style = cs
+	b.MarkDirty()
+}
 func (b *ElementBox) IsAnonymous() bool             { return false }
 func (b *ElementBox) Parent() *ElementBox           { return b.parentBox }
 func (b *ElementBox) IsTextRun() bool               { return false }

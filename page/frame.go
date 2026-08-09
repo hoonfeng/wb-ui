@@ -278,6 +278,46 @@ func (f *Frame) RebuildRenderTreeIfNeeded() bool {
 	return true
 }
 
+// RebuildStyleForElement 增量更新单个元素的计算样式——拖拽热路径专用
+// （textarea resize / range 拖动每帧触发 style 变更，全量 RebuildRenderTree
+// 重建整棵渲染树在复杂页面下耗时 30ms+，是「拖拽不跟手」的主因）。
+//
+// style 属性变化通常只影响几何（height/width）：重新解析该元素的
+// ComputedStyle 并同步到渲染树 RenderBox 与布局树 ElementBox，然后仅
+// 标记需要布局（不重建渲染树）。若解析结果显示结构属性（display/
+// position/float 等）变化——会改变渲染树形态——则回退到全量重建。
+//
+// 返回 true 表示已按增量路径处理；false 表示回退全量重建（调用方
+// 需 MarkRenderTreeDirty）。找不到 RenderBox 或 resolver 缺失时同样回退。
+func (f *Frame) RebuildStyleForElement(el *dom.Element) bool {
+	if el == nil || f.renderView == nil || f.resolver == nil {
+		return false
+	}
+	rb := f.renderView.FindRenderBoxForNode(el)
+	if rb == nil {
+		return false
+	}
+	cs := f.resolver.ResolveElement(el)
+	if cs == nil {
+		return false
+	}
+	// 结构属性变化必须全量重建渲染树（节点类型/子结构会变）。
+	if old := rb.Style(); old != nil {
+		if old.Display != cs.Display || old.Position != cs.Position ||
+			old.Float != cs.Float || old.Clear != cs.Clear {
+			return false
+		}
+	}
+	rb.SetStyle(cs)
+	if lb := rb.LayoutBox(); lb != nil {
+		lb.SetStyle(cs)
+	}
+	if f.view != nil {
+		f.view.SetNeedsLayout(true)
+	}
+	return true
+}
+
 // LayoutNow 强制立即布局（iframe 子文档绘制前调用；幂等——无待布局
 // 标记时直接返回）。
 func (f *Frame) LayoutNow() {
