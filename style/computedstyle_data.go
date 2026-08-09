@@ -50,6 +50,13 @@ type InheritedData struct {
 	// ── Animation-driven overrides (inherited for animation correctness) ──
 	AnimatedColor           Color
 	AnimatedBackgroundColor Color
+	// AnimatedBackgroundActive：background-color @keyframes 动画是否正在驱动
+	// （含 delay/fill 保持）。动画值为透明 (0,0,0,0) 时 A==0 且等于零值，
+	// 仅靠 AnimatedBackgroundColor 无法区分「无动画」与「动画值透明」——
+	// painter 会误回退静态背景色 → 光标闪烁的隐藏相位仍画静态色（不闪）。
+	// 用显式标志：动画驱动期间置 true，结束后清。
+	AnimatedBackgroundActive bool
+	AnimatedColorActive      bool
 }
 
 // DefaultInheritedData returns InheritedData with spec-mandated initial values.

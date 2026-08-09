@@ -42,6 +42,77 @@ import (
 	"wb-ui/webkit"
 )
 
+// devtoolsScript 注入类似浏览器 DevTools 的调试 API（window.__devtools）：
+//   - __devtools.tree(depth)  元素树（tag/class/几何/关键样式/文本），便于
+//     像浏览器 Elements 面板一样审查布局（比渲染树 dump 更直观）
+//   - __devtools.pick(x, y)   指定坐标处的元素链（从上到下所有命中元素）
+//   - __devtools.sel(selector) 按 CSS 选择器查元素几何 + 父级链
+//   - __devtools.page()       视口/滚动/文档尺寸
+// 几何取自引擎真实布局（getBoundingClientRect → 渲染树几何），诊断
+// 「渲染树与 DOM 几何不一致」「元素被挤压/溢出」类问题免去翻 dump 文件。
+const devtoolsScript = `
+window.__devtools = (function(){
+  function rect(el){ try { var r = el.getBoundingClientRect(); return {x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)}; } catch(e){ return {x:-1,y:-1,w:-1,h:-1}; } }
+  function cls(el){ try { var c = el.className; return (c && c.toString) ? c.toString() : (c || ''); } catch(e){ return ''; } }
+  function cs(el){ try { var s = getComputedStyle(el); return {disp:s.display, pos:s.position, bg:s.backgroundColor, vis:s.visibility, op:s.opacity, overflow:s.overflow, w:s.width, h:s.height, flex:s.flex || s.getPropertyValue('flex'), borderT:s.borderTopWidth, left:s.left, right:s.right, top:s.top, bottom:s.bottom}; } catch(e){ return {}; } }
+  function txt(el){ if (el.childNodes && el.childNodes.length === 1 && el.childNodes[0].nodeType === 3) return el.childNodes[0].nodeValue.replace(/\s+/g,' ').slice(0,30); if (el.childNodes && el.childNodes.length === 0) return ''; return ''; }
+  function node(el, depth){
+    var n = {tag: (el.tagName||'').toLowerCase(), id: el.id||'', cls: cls(el).slice(0,60)};
+    var r = rect(el), s = cs(el);
+    n.x=r.x; n.y=r.y; n.w=r.w; n.h=r.h; n.disp=s.disp; n.pos=s.pos; n.bg=s.bg; n.vis=s.vis; n.op=s.op; n.overflow=s.overflow;
+    var t = txt(el); if (t) n.txt = t;
+    if (depth > 0 && el.children && el.children.length) {
+      n.ch = [];
+      for (var i=0;i<el.children.length;i++){ var c = el.children[i]; if (c && c.tagName) n.ch.push(node(c, depth-1)); }
+    }
+    return n;
+  }
+  return {
+    tree: function(maxDepth){ return JSON.stringify(node(document.documentElement, (maxDepth==null)?3:maxDepth)); },
+    pick: function(x, y){
+      var all = [];
+      function walk(el){
+        if (!el || !el.tagName) return;
+        var r = rect(el);
+        if (x >= r.x && x <= r.x+r.w && y >= r.y && y <= r.y+r.h) {
+          var s = cs(el);
+          var it = {tag:(el.tagName||'').toLowerCase(), cls:cls(el).slice(0,40), x:r.x, y:r.y, w:r.w, h:r.h, disp:s.disp, pos:s.pos, bg:s.bg, vis:s.vis, overflow:s.overflow};
+          var t = txt(el); if (t) it.txt = t;
+          all.push(it);
+        }
+        if (el.children) for (var i=0;i<el.children.length;i++) walk(el.children[i]);
+      }
+      walk(document.documentElement);
+      return JSON.stringify(all);
+    },
+    sel: function(sel){
+      var el = document.querySelector(sel);
+      if (!el) return JSON.stringify({err: 'not found: ' + sel});
+      var r = rect(el), s = cs(el);
+      var out = {sel: sel, tag:(el.tagName||'').toLowerCase(), cls:cls(el).slice(0,60), id:el.id||'', x:r.x, y:r.y, w:r.w, h:r.h, disp:s.disp, pos:s.pos, bg:s.bg, vis:s.vis, op:s.op, overflow:s.overflow, cw:s.w, ch:s.h, borderT:s.borderT};
+      var t = txt(el); if (t) out.txt = t;
+      out.parents = [];
+      var p = el.parentElement;
+      for (var i=0;i<6 && p;i++){
+        var pr = rect(p), ps = cs(p);
+        out.parents.push({tag:(p.tagName||'').toLowerCase(), cls:cls(p).slice(0,40), x:pr.x, y:pr.y, w:pr.w, h:pr.h, disp:ps.disp, pos:ps.pos, bg:ps.bg, overflow:ps.overflow, left:ps.left, right:ps.right, top:ps.top, bottom:ps.bottom});
+        p = p.parentElement;
+      }
+      return JSON.stringify(out);
+    },
+    page: function(){
+      return JSON.stringify({
+        vw: window.innerWidth||0, vh: window.innerHeight||0,
+        dW: document.documentElement ? document.documentElement.scrollWidth : 0,
+        dH: document.documentElement ? document.documentElement.scrollHeight : 0,
+        bodyH: document.body ? document.body.scrollHeight : 0,
+        scrollY: window.scrollY || document.documentElement.scrollTop || 0
+      });
+    }
+  };
+})();
+`
+
 // encodePNG converts RGBA pixels to PNG bytes (for WB_PAINT_DUMP diagnostics).
 func encodePNG(w, h int, rgba []byte) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -301,6 +372,13 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	}
 
 	wv.Resize(width, height)
+	// ★ 注入 __devtools（类似浏览器 DevTools 的调试 API）：页面 JS 已执行，
+	// 用真实渲染几何提供元素树/坐标拾取/选择器查询，诊断布局问题。
+	if interp0 := wv.JSInterpreter(); interp0 != nil {
+		if _, err := interp0.RunJS(devtoolsScript); err != nil {
+			log.Printf("[devtools] inject __devtools failed: %v", err)
+		}
+	}
 	win, err := window.NewWindow(width, height, title)
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
@@ -2039,7 +2117,7 @@ func (h *Host) termTestTick() {
 	// DOM 状态（xterm rows 渲染 + helper textarea computed style），用于
 	// 复现用户真实场景（仅 PTY 真实输出，无任何测试注入）。
 	queryMode := os.Getenv("WB_TERM_QUERY") != "" && os.Getenv("WB_TERM_TEST") == ""
-	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 && h.termTestStep != 320 && h.termTestStep != 400 && h.termTestStep != 460 && h.termTestStep != 1000 {
+	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 && h.termTestStep != 320 && h.termTestStep != 400 && h.termTestStep != 460 && h.termTestStep != 500 {
 		return
 	}
 	switch h.termTestStep {
@@ -2469,31 +2547,22 @@ func (h *Host) termTestTick() {
 			return JSON.stringify(out);
 		})()`)
 		log.Printf("[termtest] ENTER-RESULT %s", v3.ToString())
-		// 不置 termTestDone：继续 case 1000（外部 WM_CHAR 输入命令后查询
-		// 完整 buffer，验证多命令无残留 + 中文回显）。
-	case 1000:
-		// ★ 残留验证：外部脚本（WM_CHAR）已发 echo A / echo B / echo 中文
-		// 测试（约 500 帧窗口）。查询完整 buffer + textarea value——
-		// 若多次命令后旧输入残留（textarea.value 累积未消费 / 渲染残留）
-		// 在此可见。
-		v6, _ := interp.RunJS(`(function(){
-			var out = {lines: [], taVal: ''};
-			try {
-				var lt = window.__lastTerm;
-				if (lt && lt.buffer && lt.buffer.active) {
-					out.total = lt.buffer.active.length;
-					for (var i = 0; i < lt.buffer.active.length; i++) {
-						var l = lt.buffer.active.getLine(i);
-						out.lines.push(i + ':[' + (l ? l.translateToString().slice(0, 100) : 'null') + ']');
-					}
-					out.cursorY = lt.buffer.active.cursorY;
-				} else { out.err = 'no-buffer'; }
-			} catch(e) { out.err = String(e.message || e); }
-			var ta = document.querySelector('.xterm-helper-textarea');
-			if (ta) out.taVal = (ta.value || '').slice(0, 60);
+		// 不置 termTestDone：继续 case 500（__devtools 布局诊断）。
+	case 500:
+		// ★ __devtools 布局诊断：查 main-area / right-container /
+		// bottom-panel / 终端容器 的几何与父级链——定位「终端矩形背景」
+		// （main-area 被右侧面板挤压 / 终端容器尺寸异常）。
+		v7, _ := interp.RunJS(`(function(){
+			var out = {};
+			if (!window.__devtools) return JSON.stringify({err: 'no __devtools'});
+			var sels = ['.app-root', '.main-area', '.right-container', '.bottom-panel', '.panel-content', '.terminal-panel', '.term-content', '.term-xterm-wrap', '.xterm', '.xterm-scrollable-element', '.xterm-viewport', '.xterm-screen', '.xterm-rows', '.status-bar'];
+			for (var i=0;i<sels.length;i++){
+				try { out[sels[i]] = JSON.parse(window.__devtools.sel(sels[i])); } catch(e){ out[sels[i]] = 'err:' + (e.message||e); }
+			}
+			out.page = JSON.parse(window.__devtools.page());
 			return JSON.stringify(out);
 		})()`)
-		log.Printf("[termtest] FINAL-RESULT %s", v6.ToString())
+		log.Printf("[termtest] DEVTOOLS %s", v7.ToString())
 		h.termTestDone = true
 	}
 }

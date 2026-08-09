@@ -317,14 +317,17 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	bg := toGraphicsColor(st.BackgroundColor)
-	// ★ 动画背景色（@keyframes background-color）：光标闪烁动画（xterm
-	// block 光标 0%→50% 插值）写入 AnimatedBackgroundColor，Paint 必须
-	// 消费它，否则动画改了 ComputedStyle 但画面不变（「光标不闪烁」）。
-	// 未动画时 AnimatedBackgroundColor 为零值（A==0）→ 用普通背景色。
-	if st.AnimatedBackgroundColor.A != 0 || st.AnimatedBackgroundColor != (style.Color{}) {
+	// ★ 动画背景色（@keyframes background-color）：光标闪烁动画写入
+	// AnimatedBackgroundColor，Paint 必须消费它，否则动画改了 ComputedStyle
+	// 但画面不变（「光标不闪烁」）。判据用 AnimatedBackgroundActive 标志
+	// （动画驱动期间置位）而非颜色非零——动画值为透明 (0,0,0,0)（光标
+	// 闪烁隐藏相位）时 A==0 且等于零值，颜色判据会误回退静态背景色 →
+	// 隐藏相位仍画静态色（光标恒定不闪）。未动画时标志为 false → 用
+	// 普通背景色。
+	if st.AnimatedBackgroundActive {
 		bg = toGraphicsColor(st.AnimatedBackgroundColor)
 	}
-	if os.Getenv("WB_ANIM_DEBUG") != "" && (st.AnimatedBackgroundColor.A != 0 || st.AnimatedBackgroundColor != (style.Color{})) {
+	if os.Getenv("WB_ANIM_DEBUG") != "" && st.AnimatedBackgroundActive {
 		log.Printf("[anim/paint] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) cls=%q",
 			bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height,
 			func() string { if box.Node() != nil { if el, ok := box.Node().(*dom.Element); ok { return el.ClassName() } }; return "" }())

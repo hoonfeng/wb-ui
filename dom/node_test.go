@@ -2,6 +2,40 @@ package dom
 
 import "testing"
 
+// TestAppendChildDocumentFragment 验证浏览器语义：appendChild(fragment)
+// 把 fragment 的所有子节点转移到目标（fragment 本身不挂载、变空）。
+// xterm 的 open() 用 fragment 批量 append（.xterm-viewport 先进
+// fragment）——此前引擎把 fragment 当单个节点挂载 → viewport 孤立
+// （parentNode=fragment），渲染树无其 box → 终端 viewport 背景矩形/
+// 滚动条消失（「终端矩形背景与浏览器不一致」）。
+func TestAppendChildDocumentFragment(t *testing.T) {
+	doc := NewDocument()
+	parent := doc.CreateElement("div")
+	frag := doc.CreateDocumentFragment()
+	c1 := doc.CreateElement("span")
+	c2 := doc.CreateElement("span")
+	if err := frag.AppendChild(c1); err != nil {
+		t.Fatalf("frag.AppendChild(c1): %v", err)
+	}
+	if err := frag.AppendChild(c2); err != nil {
+		t.Fatalf("frag.AppendChild(c2): %v", err)
+	}
+	// 挂载到 parent
+	if err := parent.AppendChild(frag); err != nil {
+		t.Fatalf("parent.AppendChild(frag): %v", err)
+	}
+	// fragment 的子节点转移到 parent，fragment 变空
+	if parent.FirstChild() != c1 || parent.LastChild() != c2 {
+		t.Errorf("children not transferred: first=%v last=%v", parent.FirstChild() == c1, parent.LastChild() == c2)
+	}
+	if c1.ParentNode() != parent || c2.ParentNode() != parent {
+		t.Errorf("child parent = %v/%v, want parent", c1.ParentNode(), c2.ParentNode())
+	}
+	if frag.FirstChild() != nil {
+		t.Errorf("fragment not emptied after appendChild(fragment)")
+	}
+}
+
 // TestNewDocument verifies that a fresh Document is its own root with no children.
 func TestNewDocument(t *testing.T) {
 	d := NewDocument()

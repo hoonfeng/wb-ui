@@ -139,6 +139,9 @@ func AnimationsAffectLayout(rv *RenderView) bool {
 func applyAnimationToStyle(st *style.ComputedStyle, time float64) bool {
 	kf := KeyframesLookup(st.AnimationName)
 	if kf == nil || len(kf.Keyframes) == 0 {
+		// 无动画定义：动画驱动结束，清除驱动标志（painter 回退静态色）。
+		st.AnimatedBackgroundActive = false
+		st.AnimatedColorActive = false
 		return false
 	}
 	duration := st.AnimationDuration
@@ -178,6 +181,11 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) bool {
 		if st.AnimationFillMode == "forwards" || st.AnimationFillMode == "both" {
 			progress := 1.0
 			applyProgressToStyle(st, kf, progress)
+		} else {
+			// 动画结束且无 forwards/both fill：动画值不再生效，清除驱动
+			// 标志（painter 回退静态色，避免残留最后动画帧）。
+			st.AnimatedBackgroundActive = false
+			st.AnimatedColorActive = false
 		}
 		// Ended: the final keyframe value was already rendered in the last
 		// active frame (progress reached 1.0 there), so no re-paint needed.
@@ -263,9 +271,11 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 	// Color
 	if c, ok := interpolateKeyframeColor(kf, progress, "color"); ok {
 		st.AnimatedColor = style.Color{R: c.R, G: c.G, B: c.B, A: c.A}
+		st.AnimatedColorActive = true
 	}
 	if bg, ok := interpolateKeyframeColor(kf, progress, "background-color"); ok {
 		st.AnimatedBackgroundColor = style.Color{R: bg.R, G: bg.G, B: bg.B, A: bg.A}
+		st.AnimatedBackgroundActive = true
 	}
 }
 

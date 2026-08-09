@@ -311,6 +311,22 @@ func (b *nodeBase) AppendChild(newChild Node) error {
 	if newChild.Contains(b.self) {
 		return ErrHierarchyRequest
 	}
+	// ★ 浏览器语义：appendChild(documentFragment) 把 fragment 的所有
+	// 子节点转移到目标节点（fragment 本身不挂载、变空）。此前把
+	// fragment 当作单个节点挂载 → xterm 的 open() 用 fragment 批量
+	// append（.xterm-viewport 先进 fragment）→ viewport 留在 fragment
+	// 里孤立（parentNode=fragment），渲染树无其 box → viewport 背景
+	// 矩形/滚动条消失（「终端矩形背景与浏览器不一致」根因）。
+	if frag, ok := newChild.(*DocumentFragment); ok {
+		for child := frag.FirstChild(); child != nil; {
+			next := child.NextSibling()
+			if err := b.AppendChild(child); err != nil {
+				return err
+			}
+			child = next
+		}
+		return nil
+	}
 	removeIfPresent(newChild)
 	cb := nodeBaseOf(newChild)
 	cb.parentNode = b.self
