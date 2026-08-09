@@ -2713,6 +2713,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 					}
 				}
+				// ★ 派发 JS mousemove（浏览器标准）：JS 层拖拽
+				// （document.addEventListener('mousemove')，如侧栏分隔条）
+				// 依赖它。此前 EventCursorMove 只做引擎内部 hover/滚动条
+				// 处理，从不派发 mousemove DOM 事件 → JS 拖拽失效。
+				// 坐标用视口 CSS 坐标（clientX/clientY 语义，与 mousedown/
+				// mouseup 同基准）。newEl 为当前指针下元素，Bubbles 冒泡
+				// 到 document。
+				if newEl != nil {
+					newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseMove, dom.MouseEventInit{
+						EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+						ClientX:   ev.X / csX,
+						ClientY:   ev.Y / csY,
+						Button:    dom.MouseButtonNone,
+						Buttons:   0,
+						Detail:    0,
+					}))
+				}
 			}
 
 			// Handle scrollbar thumb drag.
@@ -2844,6 +2861,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						}
 						activeEl.SetActive(true)
 						h.activeEl = activeEl
+
+						// ★ 派发 JS mousedown（浏览器标准）：Vue 的 @mousedown
+						// 与 document.addEventListener('mousedown') 依赖它。
+						// 此前引擎只在内部处理 active/select/checkbox/range/
+						// 滚动条/textarea-resize/选区，从不派发 mousedown DOM
+						// 事件 → 侧栏分隔条、面板分隔条、输入框拖拽等基于
+						// mousedown+mousemove 的 JS 拖拽全部失效。
+						// 坐标用视口 CSS 坐标（clientX/clientY 语义，与
+						// mousemove/mouseup 同基准，位移差值正确）。
+						activeEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseDown, dom.MouseEventInit{
+							EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+							ClientX:   ev.X / csX,
+							ClientY:   ev.Y / csY,
+							Button:    dom.MouseButtonLeft,
+							Buttons:   1,
+							Detail:    1,
+						}))
 
 						// ── <select> dropdown: open/close popup ──
 						// WebKit RenderMenuList opens a native popup on click.
@@ -3273,6 +3307,23 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// must be dispatched here so those handlers actually run.
 				if rv != nil {
 					h.handleClick(rv, ev)
+				}
+				// ★ 派发 JS mouseup（浏览器标准）：拖拽收尾
+				// （document.addEventListener('mouseup')）依赖它。此前
+				// Release 只派发 click，JS 拖拽（mousedown 已派发）在
+				// mouseup 时永远收不了尾（监听不解除 → 拖拽状态悬挂）。
+				// 坐标用视口 CSS 坐标，与 mousedown/mousemove 同基准。
+				if rv != nil {
+					if upEl := rendering.HitTest(rv, ev.X/csX, ev.Y/csY, ""); upEl != nil {
+						upEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseUp, dom.MouseEventInit{
+							EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+							ClientX:   ev.X / csX,
+							ClientY:   ev.Y / csY,
+							Button:    dom.MouseButtonLeft,
+							Buttons:   0,
+							Detail:    1,
+						}))
+					}
 				}
 				// End scrollbar drag if active.
 				if h.scrollbarDragging {
