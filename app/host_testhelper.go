@@ -6,7 +6,10 @@ import (
 	"log"
 	"os"
 
+	"github.com/go-gl/glfw/v3.3/glfw"
+
 	"wb-ui/dom"
+	"wb-ui/platform/window"
 	"wb-ui/rendering"
 	"wb-ui/webkit"
 )
@@ -181,6 +184,28 @@ func (h *Host) MockRangeRelease() string {
 	h.rangeDragEl = nil
 	h.rangeDragRV = nil
 	return v
+}
+
+// MockContextMenu 模拟在 (cssX, cssY) 右键释放：走与真实 Release 分支
+// 一致的 handleContextMenu（HitTest → 派发 contextmenu → 微任务 → 重建）。
+// win 为 nil（NewHostForTest）时按 scale=1 处理。返回命中元素。
+func (h *Host) MockContextMenu(wv *webkit.WebView, cssX, cssY float64) *dom.Element {
+	if wv == nil {
+		return nil
+	}
+	rv := wv.RenderView()
+	if rv == nil {
+		return nil
+	}
+	h.handleContextMenu(rv, window.Event{
+		Type:   window.EventMouseButton,
+		X:      cssX,
+		Y:      cssY,
+		Button: int(glfw.MouseButton2),
+		Action: int(glfw.Release),
+	})
+	el := rendering.HitTest(rv, cssX, cssY, "")
+	return el
 }
 
 // MockTextareaResizePress 模拟在 textarea 右下角手柄（视口坐标 bx+by+bw+bh

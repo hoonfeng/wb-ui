@@ -2344,6 +2344,40 @@ obj.SetInternal(el)
 		if OnNodeInserted != nil { OnNodeInserted(nc) }
 		return a1
 	})))
+	// replaceChildren(...nodes) — 浏览器标准：清空所有子节点后追加
+	// 给定节点；字符串/数字参数自动转为 Text 节点（xterm.js DOM 渲染器
+	// 用它重建终端行：rowElement.replaceChildren(...createRow(...))）。
+	obj.Set("replaceChildren", jsc.FunctionValue(jsc.NewNativeFunction("replaceChildren",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			for c := el.FirstChild(); c != nil; c = el.FirstChild() {
+				el.RemoveChild(c)
+				if OnNodeRemoved != nil {
+					OnNodeRemoved(c)
+				}
+			}
+			for _, a := range args {
+				var n dom.Node
+				if a.IsObject() || a.IsCallable() {
+					n = unwrapNode(a)
+				}
+				if n == nil {
+					txt := dom.NewText(el.OwnerDocument(), a.ToString())
+					el.AppendChild(txt)
+					if OnNodeInserted != nil {
+						OnNodeInserted(txt)
+					}
+					continue
+				}
+				el.AppendChild(n)
+				if OnNodeInserted != nil {
+					OnNodeInserted(n)
+				}
+				if OnStyleNodeAdded != nil && isStyleElement(n) {
+					OnStyleNodeAdded(n)
+				}
+			}
+			return jsc.Undefined()
+		}, 1)))
 	obj.Set("contains", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, _ jsc.JSValue) jsc.JSValue {
 		if n == nil { return jsc.BooleanValue(false) }
 		return jsc.BooleanValue(el.Contains(n))

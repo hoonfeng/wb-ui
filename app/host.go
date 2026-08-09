@@ -200,6 +200,13 @@ type Host struct {
 	// paint，必须在真实窗口 + vsync 下量化完整帧时间）。
 	ftLog        *os.File // 帧耗时日志（_frametime.log）
 	autodragOn   bool
+	// WB_TERM_TEST=1：自动化验证终端（自动点「新建终端」→ 查 xterm DOM/PTY 输出）。
+	termTestStep int
+	termTestDone bool
+	// OnFrame 每帧回调（主线程）：宿主注入，用于在主循环安全地消费
+	// 外部 goroutine 投递的 JS 推送（如终端 PTY 输出）——goja 非线程
+	// 安全，任何跨 goroutine 的 RunJS 都必须经此排队到主线程执行。
+	OnFrame func()
 	autodragEl   *dom.Element
 	autodragX    float64 // 手柄视口坐标
 	autodragY    float64
@@ -1412,6 +1419,11 @@ func (h *Host) Run() {
 		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
 		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
 		h.processEventLoop()
+		// ★ 每帧回调（主线程）：宿主用它消费外部队列的 JS 推送（终端
+		// PTY 输出等）——goroutine 不得直接 RunJS（goja 非线程安全）。
+		if h.OnFrame != nil {
+			h.OnFrame()
+		}
 		// WB_LAYOUT_PROFILE=1：每帧输出布局耗时分布（BFC/FFC/IFC…）。
 		if os.Getenv("WB_LAYOUT_PROFILE") != "" && needPaint {
 			layout.DumpLayoutProfile()
@@ -1871,8 +1883,98 @@ func layoutAffectingChanged(a, b *style.ComputedStyle) bool {
 	return false
 }
 
-// autodragTick 自动模拟 textarea resize 拖拽（WB_AUTODRAG=1 时每帧调用）：
-// 自动打开设置面板「指令」tab → 找第一个 textarea 的右下角手柄 → 模拟
+// termTestTick 自动化验证终端（WB_TERM_TEST=1 时每帧调用）：
+// ① 第 30 帧点击「新建终端」按钮（.term-create-btn）触发 newTerminal
+// ② 第 150 帧查询 xterm DOM（.xterm 是否渲染）与 PTY 输出（term 内容）
+// ③ 输出结果后标记完成
+func (h *Host) termTestTick() {
+	h.termTestStep++
+	interp := h.wv.JSInterpreter()
+	if interp == nil {
+		return
+	}
+	switch h.termTestStep {
+	case 30:
+		log.Printf("[termtest] 点击新建终端按钮")
+		_, _ = interp.RunJS(`(function(){
+			var btn = document.querySelector('.term-create-btn');
+			if (!btn) { window.__termDiag = 'NO_CREATE_BTN'; return; }
+			var ev = new Event('click', {bubbles:true});
+			btn.dispatchEvent(ev);
+		})()`)
+	case 180:
+		// ① 测异步调度：xterm 6 的 write 处理用 setTimeout/microtask 调度，
+		//   渲染依赖 rAF——若某环不驱动则 DOM 渲染器永不渲染。
+		//   ★ 注意：setTimeout/rAF 回调在下一帧 processEventLoop 才执行，
+		//   因此结果在 case 200 读取。
+		_, _ = interp.RunJS(`(function(){
+			window.__st = 0; setTimeout(function(){ window.__st = 1; }, 0);
+			window.__pm = 0; Promise.resolve().then(function(){ window.__pm = 1; });
+			window.__raf = 0;
+			try { requestAnimationFrame(function(){ window.__raf = 1; }); } catch(e) { window.__raf = 'ERR:' + e.message; }
+		})()`)
+		// ② 手动向终端实例推一段测试文本，区分「Go→JS 推送链路」与
+		//   「xterm DOM 渲染器」哪个环节未工作。
+		_, _ = interp.RunJS(`(function(){
+			var ks = Object.keys(window.__desktopTerminals || {});
+			if (ks.length > 0) {
+				var ws = window.__desktopTerminals[ks[0]];
+				if (ws && typeof ws.onmessage === 'function') {
+					ws.onmessage({data: 'TEST-PUSH-123'});
+				}
+			}
+		})()`)
+	case 200:
+		v, _ := interp.RunJS(`(function(){
+			var out = {};
+			out.createBtn = !!document.querySelector('.term-create-btn');
+			out.xtermCount = document.querySelectorAll('.xterm').length;
+			out.rows = document.querySelectorAll('.xterm .xterm-rows > div').length;
+			var lines = [];
+			var divs = document.querySelectorAll('.xterm .xterm-rows > div');
+			for (var i=0;i<Math.min(divs.length, 6);i++){
+				lines.push(i + ':[' + (divs[i].textContent || '').slice(0, 80) + ']');
+			}
+			out.lines = lines.join(' | ');
+			out.recv = window.__termRecv || 0;
+			out.recvLast = window.__termRecvLast || '';
+			out.st = window.__st; out.pm = window.__pm; out.raf = window.__raf;
+			// xterm 内部 buffer 状态（区分「数据没进 buffer」vs「渲染没执行」）
+			try {
+				var lt = window.__lastTerm;
+				if (lt && lt.buffer && lt.buffer.active) {
+					out.bufLines = lt.buffer.active.length;
+					var l0 = lt.buffer.active.getLine(0);
+					out.line0 = l0 ? l0.translateToString().slice(0, 40) : 'null';
+					out.cursorY = lt.buffer.active.cursorY;
+				} else { out.bufLines = 'no-buffer'; }
+			} catch(e) { out.bufErr = String(e.message || e); }
+			out.errs = (window.__errs || []).slice(-5);
+			return JSON.stringify(out);
+		})()`)
+		log.Printf("[termtest] RESULT %s", v.ToString())
+		// ③ 键盘输入方向验证：向终端发送 `dir` 命令，PTY 执行后输出回显。
+		_, _ = interp.RunJS(`(function(){
+			var ks = Object.keys(window.__desktopTerminals || {});
+			if (ks.length > 0) {
+				window.__desktopTerminals[ks[0]].send('dir\r');
+			}
+		})()`)
+	case 260:
+		v2, _ := interp.RunJS(`(function(){
+			var lines = [];
+			var divs = document.querySelectorAll('.xterm .xterm-rows > div');
+			for (var i=0;i<Math.min(divs.length, 8);i++){
+				lines.push(i + ':[' + (divs[i].textContent || '').slice(0, 100) + ']');
+			}
+			return JSON.stringify({lines: lines.join(' | '), errs: (window.__errs || []).slice(-5)});
+		})()`)
+		log.Printf("[termtest] DIR-RESULT %s", v2.ToString())
+		h.termTestDone = true
+	}
+}
+
+// autodragTick 自动模拟 textarea resize 拖拽（WB_AUTODRAG=1 时每帧调用）：// 自动打开设置面板「指令」tab → 找第一个 textarea 的右下角手柄 → 模拟
 // 按下 → 逐帧 +5px 拖 60 帧 → 释放。帧耗时由 Run 循环的 [ft] 日志记录
 // （autodragSamples 汇总）。目的：在真实窗口（GPU paint + vsync）下量化
 // 拖拽帧时间，验证「高度跟手」。
@@ -2002,9 +2104,12 @@ func (h *Host) autodragTick() {
 }
 
 func (h *Host) processEvents(rv *rendering.RenderView) {
-	// WB_AUTODRAG=1：自动拖拽 textarea resize 手柄（真实事件处理位置注入）。
+	// WB_AUTODRAG=1：自动拖拽验证；WB_TERM_TEST=1：终端自动化验证。
 	if h.autodragOn {
 		h.autodragTick()
+	}
+	if os.Getenv("WB_TERM_TEST") != "" && !h.termTestDone {
+		h.termTestTick()
 	}
 	// Consume buffered IME events (composition updates, committed chars,
 	// composition end) and apply them to the focused form control. The
@@ -2495,6 +2600,13 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			cssY := ev.Y/csY + float64(h.wv.Page().MainFrame().View().ScrollY())
 
 			if ev.Action == int(glfw.Press) {
+				// ★ 按钮过滤（浏览器标准）：仅左键触发点击交互（active 状态、
+				// select 弹窗、checkbox/radio/range、选区、resize 拖拽）。
+				// 右键按下在浏览器中只预备 contextmenu，不触发任何点击行为；
+				// Release 时由 handleContextMenu 派发 contextmenu 事件。
+				if ev.Button != int(glfw.MouseButton1) {
+					break // 非左键按下：跳过全部点击交互
+				}
 				if debugPaintLog {
 					log.Printf("[dbg/click] press at css=(%.0f,%.0f)", cssX, cssY)
 				}
@@ -2912,6 +3024,15 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 			} else if ev.Action == int(glfw.Release) {
+				// ── 右键释放：浏览器在 mouseup 之后触发 contextmenu
+				//    （cancelable，前端 @contextmenu.prevent 打开右键菜单）。
+				//    右键不参与 click/active/选区/拖拽清理。──
+				if ev.Button != int(glfw.MouseButton1) {
+					if rv != nil {
+						h.handleContextMenu(rv, ev)
+					}
+					break
+				}
 				// ── Clear active state ──
 				if h.activeEl != nil {
 					h.activeEl.SetActive(false)
@@ -3353,6 +3474,63 @@ func (h *Host) updateCaret(rv *rendering.RenderView) {
 		pos := rendering.TextPosition{RT: found, Offset: found.Length()}
 		rendering.SetCaret(&pos)
 	}
+}
+
+// handleContextMenu 在右键释放时把 contextmenu 事件派发到命中元素
+// （浏览器行为：mouseup 后触发 contextmenu，可冒泡、可取消）。
+// 前端 Vue 的 @contextmenu.prevent 监听器调用 preventDefault 并打开
+// 右键菜单；派发后必须跑微任务队列 + 重建渲染树让菜单 visible 生效。
+func (h *Host) handleContextMenu(rv *rendering.RenderView, ev window.Event) {
+	csX, csY := 1.0, 1.0
+	if h.win != nil {
+		csX, csY = h.win.ContentScale()
+		if csX <= 0 {
+			csX = 1
+		}
+		if csY <= 0 {
+			csY = 1
+		}
+	}
+	cssX := ev.X / csX
+	cssY := ev.Y / csY
+	if fv := h.wv.Page().MainFrame().View(); fv != nil {
+		cssY += float64(fv.ScrollY())
+	}
+
+	deepest := rendering.HitTest(rv, cssX, cssY, "")
+	if deepest == nil {
+		return
+	}
+	if os.Getenv("WB_EVT_DEBUG") != "" {
+		log.Printf("[ctx] hit=%s.%s at (%.0f,%.0f)", deepest.LocalName(), deepest.GetAttribute("class"), cssX, cssY)
+	}
+	me := dom.NewMouseEventFromInit(dom.EventContextMenu, dom.MouseEventInit{
+		EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+		ClientX:   cssX,
+		ClientY:   cssY,
+		Button:    dom.MouseButtonRight,
+		Detail:    1,
+	})
+	deepest.DispatchEvent(me)
+	// Vue 菜单打开（visible=true）是响应式更新：跑微任务 + 事件循环 + 重建。
+	h.processEventLoop()
+	if h.wv.JSInterpreter() != nil {
+		interp := h.wv.JSInterpreter()
+		deadline := time.Now().Add(180 * time.Millisecond)
+		for {
+			interp.RunJobs()
+			h.processEventLoop()
+			el := interp.GetEventLoop()
+			if el == nil || el.PendingTasks() == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	h.wv.RebuildRenderTree()
 }
 
 // handleClick converts the physical-pixel click coordinates to CSS pixels
