@@ -239,8 +239,7 @@ func TestWordBreakInheritedCJK(t *testing.T) {
 			}
 			if eb, ok := ch.(*ElementBox); ok {
 				walk(eb)
-			}
-		}
+			}		}
 	}
 	walk(child)
 	if len(segs) == 0 {
@@ -272,3 +271,85 @@ func TestWordBreakInheritedCJK(t *testing.T) {
 		t.Fatalf("joined=%q want %q", joined, word)
 	}
 }
+
+// layoutPreText lays out text inside a white-space:pre box and returns the
+// per-line rendered strings (spaces preserved, explicit \n breaks).
+func layoutPreText(t *testing.T, text string) []string {
+	t.Helper()
+	box := mkBlock()
+	box.style.WhiteSpace = style.WhiteSpacePre
+	box.style.FontSize = style.Length{Value: 10, Unit: "px"}
+	box.style.Width = style.Length{Value: 60, Unit: "px"}
+	tb := &InlineTextBox{text: text, style: box.style}
+	box.AddChild(tb)
+
+	root := mkBlock()
+	root.AddChild(box)
+	Layout(root, 120, 200)
+
+	var segs []TextSegment
+	var walk func(b *ElementBox)
+	walk = func(b *ElementBox) {
+		for _, ch := range b.Children() {
+			if childTB, ok := ch.(*InlineTextBox); ok {
+				segs = append(segs, childTB.TextSegments...)
+				continue
+			}
+			if eb, ok := ch.(*ElementBox); ok {
+				walk(eb)
+			}
+		}
+	}
+	walk(box)
+
+	// Group segments by line Y (spaces are separate 1-char segments).
+	lines := map[int][]string{}
+	for _, s := range segs {
+		key := int(s.Y / 4)
+		lines[key] = append(lines[key], text[s.Start:s.Start+s.Len])
+	}
+	var keys []int
+	for k := range lines {
+		keys = append(keys, k)
+	}
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[j] < keys[i] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	var out []string
+	for _, k := range keys {
+		out = append(out, strings.Join(lines[k], ""))
+	}
+	return out
+}
+
+// TestWhiteSpacePre: white-space:pre preserves consecutive spaces (no
+// collapsing) and breaks lines ONLY at explicit \n — never soft-wraps.
+// Regression: pre was treated as normal → spaces collapsed + soft-wrap at
+// any width overflow → terminal rows lost spacing / split mid-row.
+func TestWhiteSpacePre(t *testing.T) {
+	lines := layoutPreText(t, "aa  bb\ncc   dd")
+	if len(lines) != 2 {
+		t.Fatalf("white-space:pre produced %d line(s), want 2 (only \\n breaks)", len(lines))
+	}
+	if lines[0] != "aa  bb" {
+		t.Fatalf("line0=%q want %q (spaces preserved)", lines[0], "aa  bb")
+	}
+	if lines[1] != "cc   dd" {
+		t.Fatalf("line1=%q want %q (spaces preserved)", lines[1], "cc   dd")
+	}
+}
+
+// TestWhiteSpacePreNoSoftWrap: pre must NOT soft-wrap when content exceeds
+// the container width (unlike normal/pre-wrap). A long single word stays on
+// one line and overflows.
+func TestWhiteSpacePreNoSoftWrap(t *testing.T) {
+	lines := layoutPreText(t, "AAAAAAAAAAAAAAAAAAAA")
+	if len(lines) != 1 {
+		t.Fatalf("white-space:pre soft-wrapped %d line(s), want 1 (no soft wrap)", len(lines))
+	}
+}
+

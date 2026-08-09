@@ -235,15 +235,67 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			cursor := 0
 			firstWord := true
+			// white-space 模式（pre 系列语义，浏览器标准 CSS Text 3）：
+			//  - pre / pre-wrap / break-spaces：连续空格保留（不折叠），每个
+			//    空格占一个 advance width（xterm 终端行必须，行内字符等宽
+			//    对齐依赖空格保留）。
+			//  - pre / pre-wrap / pre-line：\n 显式换行强制断行。
+			//  - pre / nowrap：禁止软换行（只在 \n 处换行）。
+			ws := cs.WhiteSpace
+			preserveSp := preserveWhiteSpace(ws)
+			preserveNL := preserveNewlines(ws)
+			softWrap := allowSoftWrap(ws)
 			// If this text node starts with whitespace and there's already
 			// content on the current line, advance by spaceWidth. This handles
 			// both pure-whitespace text nodes (" " between inline elements)
 			// and leading-whitespace text nodes (" main" after </span>).
-			if len(runes) > 0 && isInlineWhitespace(runes[0]) && currentLine.widthUsed > 0 {
+			// pre 模式不折叠：前导空格由下方保留分支逐个渲染。
+			if len(runes) > 0 && isInlineWhitespace(runes[0]) && currentLine.widthUsed > 0 && !preserveSp {
 				currentLine.widthUsed += spaceWidth
 			}
 			for cursor < len(runes) {
-				// Skip leading whitespace.
+				// pre 系列：\n 强制换行（浏览器 white-space:pre 语义——
+				// 显式换行符结束当前行，新行从 contentX 开始）。
+				if preserveNL && runes[cursor] == '\n' {
+					lines = append(lines, currentLine)
+					newY := currentLine.y + lineHeight
+					newCx, newCw := availableLineWidth(newY)
+					currentLine = lineInfo{
+						y:          newY,
+						contentX:   newCx,
+						segStart:   len(pending),
+						widthUsed:  0,
+						availWidth: newCw,
+					}
+					firstWord = true
+					cursor++
+					continue
+				}
+				// pre / pre-wrap / break-spaces：空格保留为独立 segment。
+				// （终端每列等宽，空格与字符同宽 7.15px；折叠会破坏列对齐。）
+				if preserveSp && (runes[cursor] == ' ' || runes[cursor] == '\t') {
+					spW := spaceWidth
+					if runes[cursor] == '\t' {
+						spW = spaceWidth * 4 // 浏览器 tab 通常推进到下一个 8 列，
+						// 终端/编辑器常见 4 列；xterm 行内无 tab，此值仅兜底。
+					}
+					pending = append(pending, pendingSeg{
+						textBox: cld,
+						seg: TextSegment{
+							Start: cursor, Len: 1,
+							X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
+							Width: spW, Height: textHeight,
+							LineY: currentLine.y, LineHeight: lineHeight,
+						},
+						lineIdx: len(lines),
+					})
+					currentLine.widthUsed += spW
+					firstWord = false
+					cursor++
+					continue
+				}
+				// Skip leading whitespace（normal/nowrap/pre-line 折叠）。
+				// pre 模式已在上方处理 \n 与空格，这里仅剩 \r/\f。
 				for cursor < len(runes) && isInlineWhitespace(runes[cursor]) {
 					cursor++
 				}
@@ -276,7 +328,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if !firstWord && wi == 0 {
 						nextX += spaceWidth
 					}
-					if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+					if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && softWrap {
 						// Line wrap: record line, start new line with float-aware width.
 						lines = append(lines, currentLine)
 						newY := currentLine.y + lineHeight
@@ -299,7 +351,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					//   word-break/overflow-wrap 均不生效（长词溢出由 overflow
 					//   裁剪/省略号处理）——漏掉此检查会让 .msg-bubble 继承的
 					//   word-break:break-word 把 nowrap 的 tl-tc-param 长词拆行。
-					if wordWidth > currentLine.availWidth && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+					if wordWidth > currentLine.availWidth && softWrap {
 						wordBreak := cs.GetProperty("word-break")
 						overflowWrap := cs.GetProperty("overflow-wrap")
 						if wordBreak == "break-all" || wordBreak == "break-word" || overflowWrap == "break-word" {
@@ -674,7 +726,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					cldW = 0
 				}
 			}
-			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
+			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && allowSoftWrap(cs.WhiteSpace) {
 				lines = append(lines, currentLine)
 				newY := currentLine.y + lineHeight
 				newCx, newCw := availableLineWidth(newY)
@@ -831,6 +883,26 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 // separates words in inline layout.
 func isInlineWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+}
+
+// preserveWhiteSpace reports whether the white-space mode preserves spaces
+// (pre / pre-wrap / break-spaces): consecutive spaces are NOT collapsed and
+// each space occupies its own advance width.
+func preserveWhiteSpace(ws style.WhiteSpaceType) bool {
+	return ws == style.WhiteSpacePre || ws == style.WhiteSpacePreWrap || ws == style.WhiteSpaceBreakSpaces
+}
+
+// preserveNewlines reports whether the white-space mode preserves explicit
+// newline characters (pre / pre-wrap / pre-line): '\n' forces a line break.
+func preserveNewlines(ws style.WhiteSpaceType) bool {
+	return ws == style.WhiteSpacePre || ws == style.WhiteSpacePreWrap || ws == style.WhiteSpacePreLine
+}
+
+// allowSoftWrap reports whether the white-space mode permits soft wrapping at
+// break opportunities. pre and nowrap forbid soft wrap (only explicit '\n'
+// breaks); normal / pre-wrap / pre-line allow it.
+func allowSoftWrap(ws style.WhiteSpaceType) bool {
+	return ws != style.WhiteSpacePre && ws != style.WhiteSpaceNoWrap
 }
 
 // inlineWordSub is one breakable sub-unit split from a whitespace-delimited

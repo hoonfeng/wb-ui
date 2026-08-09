@@ -218,6 +218,16 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		obj.Set("metaKey", jsc.BooleanValue(ke.MetaKey()))
 		obj.Set("location", jsc.NumberValue(float64(ke.Location())))
 	}
+	// ★ WheelEvent 属性（浏览器标准）：xterm 6 的 ScrollableElement 滚轮
+	// 处理读 e.deltaY（deltaMode=像素时 100 左右/格）——不暴露则
+	// StandardWheelEvent.deltaY=0 → 终端滚轮无效。
+	if we, ok := e.(*dom.WheelEvent); ok {
+		obj.SetClassName("WheelEvent")
+		obj.Set("deltaX", jsc.NumberValue(we.DeltaX()))
+		obj.Set("deltaY", jsc.NumberValue(we.DeltaY()))
+		obj.Set("deltaZ", jsc.NumberValue(we.DeltaZ()))
+		obj.Set("deltaMode", jsc.NumberValue(float64(we.DeltaMode())))
+	}
 	return jsc.ObjectValue(obj)
 }
 
@@ -232,6 +242,27 @@ func jsToEvent(v jsc.JSValue) dom.Event {
 	typ := stringProp(o, "type")
 	bubbles := boolProp(o, "bubbles")
 	cancelable := boolProp(o, "cancelable")
+	if hasNumber(o, "deltaY") || hasNumber(o, "deltaX") || hasNumber(o, "deltaMode") {
+		init := dom.WheelEventInit{
+			MouseEventInit: dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: bubbles, Cancelable: cancelable},
+				ClientX:   numProp(o, "clientX"),
+				ClientY:   numProp(o, "clientY"),
+				ScreenX:   numProp(o, "screenX"),
+				ScreenY:   numProp(o, "screenY"),
+				Button:    dom.MouseButton(int(numProp(o, "button"))),
+				CtrlKey:   boolProp(o, "ctrlKey"),
+				AltKey:    boolProp(o, "altKey"),
+				ShiftKey:  boolProp(o, "shiftKey"),
+				MetaKey:   boolProp(o, "metaKey"),
+			},
+			DeltaX:    numProp(o, "deltaX"),
+			DeltaY:    numProp(o, "deltaY"),
+			DeltaZ:    numProp(o, "deltaZ"),
+			DeltaMode: dom.DeltaMode(int(numProp(o, "deltaMode"))),
+		}
+		return dom.NewWheelEventFromInit(typ, init)
+	}
 	if hasNumber(o, "clientX") || hasNumber(o, "clientY") {
 		init := dom.MouseEventInit{
 			EventInit: dom.EventInit{Bubbles: bubbles, Cancelable: cancelable},

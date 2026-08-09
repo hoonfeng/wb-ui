@@ -2881,6 +2881,37 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// scrollbar metrics 必须用子 rv——主 rv 查不到子 box 的偏移，
 			// 写入也不生效，因为子文档绘制读自己的偏移表）。
 			tgt := rv.ScrollTargetAt(cssX, cssY)
+			// ★ 浏览器标准：wheel 事件先派发到 DOM（冒泡），JS 监听器
+			// （如 xterm 6 的 ScrollableElement——终端的滚动完全由 JS 侧
+			// Widget 处理，引擎的滚动容器模型不适用）可通过
+			// preventDefault/stopPropagation 消费；只有未被消费时才由引擎
+			// 自身的滚动容器逻辑处理。此前引擎直接滚动容器、从不派发
+			// DOM wheel 事件 → xterm 收不到 wheel → 终端无法滚动。
+			if tgt.Box != nil {
+				if el, ok := tgt.Box.Node().(*dom.Element); ok {
+					// GLFW ScrollY>0 = 向上滚 → 浏览器 deltaY 为负（内容向
+					// 下移）；每格约 100px（Chrome 鼠标滚轮默认量级）。
+					deltaY := -ev.ScrollY * 100
+					deltaXv := -ev.ScrollX * 100
+					we := dom.NewWheelEventFromInit("wheel", dom.WheelEventInit{
+						MouseEventInit: dom.MouseEventInit{EventInit: dom.EventInit{Bubbles: true, Cancelable: true}},
+						DeltaX:         deltaXv,
+						DeltaY:         deltaY,
+						DeltaMode:      dom.DOMDeltaPixel,
+					})
+					consumed := !el.DispatchEvent(we)
+					if os.Getenv("WB_SCROLL_DEBUG") != "" {
+						log.Printf("[scroll] dom wheel dispatched to %s.%s deltaY=%.0f consumed=%v defaultPrevented=%v",
+							el.LocalName(), el.GetAttribute("class"), deltaY, consumed, we.DefaultPrevented())
+					}
+					if consumed {
+						if os.Getenv("WB_SCROLL_DEBUG") != "" {
+							log.Printf("[scroll] wheel consumed by JS (xterm), skip engine scroll")
+						}
+						break
+					}
+				}
+			}
 			if tgt.Box != nil {
 				scrollBox := tgt.Box
 				srv := tgt.RV

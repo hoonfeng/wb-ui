@@ -635,7 +635,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				computed = map[string]string{}
 			}
 			// 常用属性直接回写到对象属性（camelCase，与浏览器一致）
-			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginBottom", "paddingTop", "paddingBottom", "textAlign", "whiteSpace"} {
+			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginBottom", "paddingTop", "paddingBottom", "textAlign", "whiteSpace", "overflow", "overflowX", "overflowY", "overflowWrap", "wordBreak", "textOverflow", "cursor", "zIndex", "verticalAlign", "maxHeight", "minHeight", "maxWidth", "minWidth", "borderRadius", "boxShadow", "userSelect", "pointerEvents", "top", "left", "right", "bottom", "transform", "flexDirection", "alignItems", "justifyContent", "fontStyle", "fontVariant", "letterSpacing", "textDecoration", "borderTop", "borderBottom", "borderLeft", "borderRight", "borderStyle", "borderWidth", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "padding", "margin", "gap", "rowGap", "columnGap", "gridTemplateColumns", "gridTemplateRows", "boxSizing", "float", "clear", "listStyle", "backgroundImage", "backgroundRepeat", "backgroundPosition", "backgroundSize", "outline", "content", "clipPath"} {
 				key := prop
 				if k := camelToKebab(prop); k != prop {
 					key = k
@@ -743,6 +743,57 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					for _, k := range []string{"bubbles", "cancelable", "clientX", "clientY",
 						"screenX", "screenY", "button", "buttons",
 						"ctrlKey", "shiftKey", "altKey", "metaKey"} {
+						if v, ok := o.GetByKey(k); ok {
+							ev.Set(k, v)
+						}
+					}
+				}
+			}
+			ev.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					this.AsObject().Set("defaultPrevented", jsc.BooleanValue(true))
+					return jsc.Undefined()
+				}, 0)))
+			ev.Set("stopPropagation", jsc.FunctionValue(jsc.NewNativeFunction("stopPropagation",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return ev
+		})))
+
+	// WheelEvent 构造函数（浏览器标准：终端 xterm 等库构造 wheel 事件派发，
+	// 也用于测试/无障碍滚动）。字段含 deltaX/deltaY/deltaZ/deltaMode。
+	g.Set("WheelEvent", jsc.FunctionValue(rt.NewConstructor("WheelEvent",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("target", jsc.Null())
+			ev.Set("clientX", jsc.NumberValue(0))
+			ev.Set("clientY", jsc.NumberValue(0))
+			ev.Set("screenX", jsc.NumberValue(0))
+			ev.Set("screenY", jsc.NumberValue(0))
+			ev.Set("button", jsc.NumberValue(0))
+			ev.Set("buttons", jsc.NumberValue(0))
+			ev.Set("ctrlKey", jsc.BooleanValue(false))
+			ev.Set("shiftKey", jsc.BooleanValue(false))
+			ev.Set("altKey", jsc.BooleanValue(false))
+			ev.Set("metaKey", jsc.BooleanValue(false))
+			ev.Set("deltaX", jsc.NumberValue(0))
+			ev.Set("deltaY", jsc.NumberValue(0))
+			ev.Set("deltaZ", jsc.NumberValue(0))
+			ev.Set("deltaMode", jsc.NumberValue(0))
+			ev.Set("defaultPrevented", jsc.BooleanValue(false))
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					for _, k := range []string{"bubbles", "cancelable", "clientX", "clientY",
+						"screenX", "screenY", "button", "buttons",
+						"ctrlKey", "shiftKey", "altKey", "metaKey",
+						"deltaX", "deltaY", "deltaZ", "deltaMode"} {
 						if v, ok := o.GetByKey(k); ok {
 							ev.Set(k, v)
 						}
