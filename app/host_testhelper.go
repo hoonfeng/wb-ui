@@ -3,6 +3,8 @@ package app
 
 import (
 	"fmt"
+	"log"
+	"os"
 
 	"wb-ui/dom"
 	"wb-ui/rendering"
@@ -137,18 +139,17 @@ func (h *Host) MockEventCursorMove(wv *webkit.WebView, cssX, cssY float64) {
 		drv := h.resolveDragRV(h.resizeDragEl, h.resizeDragRV)
 		h.resizeDragRV = drv
 		rb := drv.FindRenderBoxForNode(h.resizeDragEl)
+		if os.Getenv("WB_RESIZE_DEBUG") != "" {
+			log.Printf("[resize-move] el=%s drv=%p rb=%v cssY=%.1f startY=%.1f startH=%.1f",
+				h.resizeDragEl.LocalName()+"."+h.resizeDragEl.GetAttribute("class"),
+				drv, rb != nil, cssY, h.resizeDragStartY, h.resizeDragStartH)
+		}
 		if rb == nil {
 			h.resizeDragEl = nil
 		} else {
 			newH := h.resizeDragStartH + (cssY - h.resizeDragStartY)
-			if st := rb.Style(); st != nil {
-				if st.MinHeight.Unit == "px" && newH < st.MinHeight.Value {
-					newH = st.MinHeight.Value
-				}
-				if st.MaxHeight.Unit == "px" && newH > st.MaxHeight.Value {
-					newH = st.MaxHeight.Value
-				}
-			}
+			// ★ 与浏览器一致：style 写入 raw 高度（min/max-height 由 CSS
+			// 布局层 clamp），仅保留 10px 下限。
 			if newH < 10 {
 				newH = 10
 			}

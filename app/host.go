@@ -1924,15 +1924,21 @@ func (h *Host) autodragTick() {
 			return
 		}
 		var el *dom.Element
+		var fallback *dom.Element
 		var walk func(ro rendering.RenderObject)
 		walk = func(ro rendering.RenderObject) {
-			if el != nil || ro == nil {
+			if ro == nil {
 				return
 			}
 			if n := ro.Node(); n != nil {
 				if e, ok := n.(*dom.Element); ok && e.LocalName() == "textarea" {
-					el = e
-					return
+					if strings.Contains(e.GetAttribute("class"), "inst-textarea") {
+						if el == nil {
+							el = e
+						}
+					} else if fallback == nil {
+						fallback = e
+					}
 				}
 			}
 			for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
@@ -1940,6 +1946,9 @@ func (h *Host) autodragTick() {
 			}
 		}
 		walk(rendering.RenderObject(rv))
+		if el == nil {
+			el = fallback
+		}
 		if el == nil {
 			return // 面板未就绪，继续等
 		}
@@ -1958,8 +1967,20 @@ func (h *Host) autodragTick() {
 		return
 	}
 	h.autodragStep++
-	dy := 5.0 * float64(h.autodragStep)
+	// 双向拖拽：0..29 向下 +5px/帧；30..59 向上 -5px/帧（回到起点附近）。
+	// 每帧采样 textarea boxH，验证「向下跟手、向上缩跟手」。
+	dy := 5.0 * float64(h.autodragStep+1)
+	if h.autodragStep >= 30 {
+		dy = 5.0 * float64(60-h.autodragStep)
+	}
 	h.MockEventCursorMove(h.wv, h.autodragX, h.autodragY+dy)
+	if h.autodragStep == 0 || h.autodragStep == 30 || (h.autodragStep%10 == 0) {
+		if rv2 := h.wv.RenderView(); rv2 != nil {
+			if bx := rv2.FindRenderBoxForNode(h.autodragEl); bx != nil {
+				log.Printf("[drag] step=%d dy=%+.0f boxH=%.1f style=%q", h.autodragStep, dy, bx.Height(), h.autodragEl.GetAttribute("style"))
+			}
+		}
+	}
 	if h.autodragStep >= 60 {
 		h.MockTextareaResizeRelease()
 		el := h.autodragEl
@@ -2247,15 +2268,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					h.resizeDragEl = nil
 				} else {
 					newH := h.resizeDragStartH + (cssY - h.resizeDragStartY)
-					if st := rb.Style(); st != nil {
-						// min-height / max-height constraints (definite px).
-						if st.MinHeight.Unit == "px" && newH < st.MinHeight.Value {
-							newH = st.MinHeight.Value
-						}
-						if st.MaxHeight.Unit == "px" && newH > st.MaxHeight.Value {
-							newH = st.MaxHeight.Value
-						}
-					}
+					// ★ 与浏览器一致：style 写入 raw 高度，min/max-height 由
+					// CSS 在布局层 clamp（浏览器拖动同样写入 raw 值，
+					// getComputedStyle 才显示 clamp 后的高度）。
+					// 仅保留 10px 下限防止拖没（浏览器无此下限，但 textarea
+					// 拖到 0 无实际意义；min-height 未设置时兜底）。
 					if newH < 10 {
 						newH = 10
 					}
