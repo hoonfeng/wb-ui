@@ -422,6 +422,10 @@ func fontLineGap(box *ElementBox) float64 {
 // cssLineHeight returns the resolved CSS line-height value for the box.
 // It handles px values, unitless numbers (multiplied by font-size), and
 // percentages. Returns 0 if line-height is not explicitly set.
+// ★ line-height:normal 解析为 Unit="normal"：返回字体度量
+// （fontLineGap = ascent+descent+lineGap）——与浏览器一致，而非 1.2×fs。
+// 调用方（inlineformattingcontext）在返回 0 时已回退 fontLineGap，因此
+// normal 只需返回 0 即可自然落到字体度量路径。
 func cssLineHeight(box *ElementBox) float64 {
 	cs := box.Style()
 	if cs == nil { return 0 }
@@ -433,6 +437,10 @@ func cssLineHeight(box *ElementBox) float64 {
 		if lh.Value > 0 { return lh.Value }
 	case "%":
 		if lh.Value > 0 { return lh.Value / 100 * fs }
+	case "normal":
+		// 返回 0 → 调用方用 fontLineGap（ascent+descent+lineGap），
+		// 即浏览器的 line-height:normal 语义。
+		return 0
 	case "":
 		// Unitless number (e.g. 1.2) — multiply by font-size.
 		if lh.Value > 0 { return lh.Value * fs }

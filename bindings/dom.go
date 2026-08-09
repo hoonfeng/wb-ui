@@ -5,6 +5,7 @@ package bindings
 import (
 	"crypto/rand"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"sort"
@@ -1908,20 +1909,51 @@ func applyCanvas2DPatch(rt *jsc.Interpreter) {
             font: '10px sans-serif',
             measureText: function(text){
               var s = doc.createElement('span');
-              s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:' + (this.font || '10px sans-serif');
+              // ★ 不能用 font 简写（wb-ui 可能不解析 font: 简写 → span 落
+              // 默认 16px → 测得 8x19.2）。拆成 style.fontSize/fontFamily
+              // 单独设置（xterm 自己的 measure element 就是 style.fontSize
+              // 路径，实测有效）。
+              var fontSpec = this.font || '10px sans-serif';
+              var m = /([+-]?[\d.]+)px\s*([^;]*)/.exec(fontSpec);
+              s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;display:inline-block;';
+              // ★ line-height:normal 必须——xterm 的 .xterm-char-measure-element
+              // 有它（xterm.css），行高=字体度量 15.22；不设则继承 1.2×fs=15.6。
+              // 配合 wb-ui 的 line-height:normal→字体度量解析，两处一致。
+              s.style.lineHeight = 'normal';
+              if (m) { s.style.fontSize = m[1] + 'px'; s.style.fontFamily = m[2].trim(); }
+              else { s.style.font = fontSpec; }
               s.textContent = String(text);
               var w = 0, h = 0;
               if (doc.body) {
-                doc.body.appendChild(s);
+                // ★ span 高度布局：xterm 自己的 .xterm-char-measure-element
+                // 是 absolute + inline-block + line-height:normal 挂
+                // .xterm-helpers（absolute 容器）能测出真实行高；直接挂
+                // body 时 height 布局为 0。用 absolute holder（模拟 xterm
+                // 结构），holder 也是 div 高度 0 但 span absolute 脱离流。
+                var holder = doc.createElement('div');
+                holder.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;';
+                holder.appendChild(s);
+                doc.body.appendChild(holder);
                 try { var r = s.getBoundingClientRect(); w = r.width || 0; h = r.height || 0; } catch(e) {}
+                // ★ h 优先用 offsetHeight：浏览器 canvas measureText 的
+                // fontBoundingBoxAscent+Descent 是字体真实度量
+                // （Consolas 13px = 15.0，不含 lineGap）；rect.height 含
+                // lineGap（15.22）→ xterm ceil(15.22)=16 vs Edge ceil(15)=15。
+                // offsetHeight 四舍五入 15.22→15，正好对齐 Edge。
+                var oh = 0;
+                try { oh = s.offsetHeight || 0; } catch(e) {}
+                if (oh > 0) { h = oh; }
                 if (w <= 0) { w = s.offsetWidth || 0; }
-                if (h <= 0) { h = s.offsetHeight || 0; }
-                doc.body.removeChild(s);
+                doc.body.removeChild(holder);
               }
               // fallback：wb-ui 对未布局 span 的测量可能为 0——按 font-size 估算
               var fs = parseFloat(this.font) || 13;
               if (w <= 0) { w = String(text).length * fs * 0.6; }
               if (h <= 0) { h = fs * 1.2; }
+              // ★ 高度用 span 实测值（getBoundingClientRect().height 返回
+              // 真实行高 15.22；xterm 用它做 ceil(15.22)=16，Edge 里
+              // fontBoundingBoxAscent+Descent=15）。fba/fbd 用实测 h 的
+              // 0.8/0.2 比例——但注意 h 已是真实字体行高（非估算）。
               var ascent = h * 0.8, descent = h * 0.2;
               return { width: w, actualBoundingBoxAscent: ascent, actualBoundingBoxDescent: descent,
                        fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent, height: h };
@@ -1935,6 +1967,18 @@ func applyCanvas2DPatch(rt *jsc.Interpreter) {
     }
     return el;
   };
+  // ★ OffscreenCanvas 全局：浏览器存在，xterm 的 CharSizeService 优先
+  // 用它做 canvas 测量（measureText('W') 返回浮点精确宽 7.147px），
+  // 缺失时 xterm fallback DOM offsetWidth（229/32=7.15625）→ cell 宽
+  // 差 0.09px/char → 80 列 screen 宽 573 vs 浏览器 572。提供同实现。
+  if (typeof OffscreenCanvas === 'undefined') {
+    window.OffscreenCanvas = function(w, h) {
+      var c = doc.createElement('canvas');
+      c.width = w || 300; c.height = h || 150;
+      return c;
+    };
+    window.OffscreenCanvas.prototype = {};
+  }
   return 'patched';
 })()`); err != nil {
 		fmt.Fprintf(os.Stderr, "[bindings] canvas patch RunJS error: %v\n", err)
@@ -2767,42 +2811,48 @@ obj.SetInternal(el)
 			return jsc.NumberValue(0)
 		}
 		_, vh, _, _, _ := GetElementScrollMetrics(el)
-		return jsc.NumberValue(vh)
+		// ★ 浏览器标准：clientHeight 返回整数。
+		return jsc.NumberValue(math.Round(vh))
 	}), nil)
 	obj.SetAccessor("clientWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if GetElementScrollMetrics == nil {
 			return jsc.NumberValue(0)
 		}
 		vw, _, _, _, _ := GetElementScrollMetrics(el)
-		return jsc.NumberValue(vw)
+		// ★ 浏览器标准：clientWidth 返回整数。
+		return jsc.NumberValue(math.Round(vw))
 	}), nil)
 	obj.SetAccessor("offsetHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if GetElementBoxRect == nil {
 			return jsc.NumberValue(0)
 		}
 		_, _, _, h := GetElementBoxRect(el)
-		return jsc.NumberValue(h)
+		// ★ 浏览器标准：offsetHeight 返回最接近的整数（四舍五入）。
+		// wb-ui 布局几何是浮点（15.22），xterm 用它算 cell.height 时
+		// ceil(15.22)=16 而浏览器 ceil(15)=15——差 1px。
+		return jsc.NumberValue(math.Round(h))
 	}), nil)
 	obj.SetAccessor("offsetWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if GetElementBoxRect == nil {
 			return jsc.NumberValue(0)
 		}
 		_, _, w, _ := GetElementBoxRect(el)
-		return jsc.NumberValue(w)
+		// ★ 浏览器标准：offsetWidth 返回最接近的整数（四舍五入）。
+		return jsc.NumberValue(math.Round(w))
 	}), nil)
 	obj.SetAccessor("offsetTop", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if GetElementBoxRect == nil {
 			return jsc.NumberValue(0)
 		}
 		_, top, _, _ := GetElementBoxRect(el)
-		return jsc.NumberValue(top)
+		return jsc.NumberValue(math.Round(top))
 	}), nil)
 	obj.SetAccessor("offsetLeft", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if GetElementBoxRect == nil {
 			return jsc.NumberValue(0)
 		}
 		left, _, _, _ := GetElementBoxRect(el)
-		return jsc.NumberValue(left)
+		return jsc.NumberValue(math.Round(left))
 	}), nil)
 
 	// Position / dimension (Vue needs these)

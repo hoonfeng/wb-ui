@@ -987,7 +987,14 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "font-style":
 		cs.FontStyle = valueString
 	case "line-height":
-		if l, ok := parseLength(valueString); ok {
+		if strings.EqualFold(strings.TrimSpace(valueString), "normal") {
+			// ★ 浏览器语义：line-height: normal = 字体度量行高
+			// （ascent+descent+lineGap），非 1.2×font-size。xterm 的
+			// .xterm-rows / .xterm-char-measure-element 用 normal，
+			// 之前落默认 1.2 → 行高 16px vs 浏览器 15px。用 Unit
+			// "normal" 标记，由 cssLineHeight 返回 0（走字体度量）。
+			cs.LineHeight = Length{Value: 0, Unit: "normal"}
+		} else if l, ok := parseLength(valueString); ok {
 			cs.LineHeight = l
 		}
 	case "letter-spacing":

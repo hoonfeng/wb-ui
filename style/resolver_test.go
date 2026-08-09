@@ -225,6 +225,20 @@ func TestResolver_LineHeightAndLetterSpacing(t *testing.T) {
 	}
 }
 
+// TestResolver_LineHeightNormal: line-height: normal 解析为 Unit="normal"
+//（字体度量语义，浏览器标准），而非落默认 1.2 倍——xterm 的
+// .xterm-rows/.xterm-char-measure-element 用 normal，错了行高差 1px。
+func TestResolver_LineHeightNormal(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "p")
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, "p { line-height: normal; }"))
+	cs := r.ResolveElement(el)
+	if cs.LineHeight.Unit != "normal" {
+		t.Fatalf("line-height=%+v want Unit=normal（字体度量语义）", cs.LineHeight)
+	}
+}
+
 func TestResolver_TextAlignAndTransform(t *testing.T) {
 	doc := dom.NewDocument()
 	el := dom.NewElement(doc, "p")
