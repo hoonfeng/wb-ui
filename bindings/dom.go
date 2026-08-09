@@ -4183,6 +4183,18 @@ func computedStyleFor(el dom.Node) map[string]string {
 			}
 		}
 	}
+	// ★ 浏览器标准：computed style 对每个属性恒有值（未声明 = initial）。
+	// padding-*/margin-* 四边未声明时补 0px——FitAddon.proposeDimensions 用
+	// getComputedStyle(el).getPropertyValue('padding-top') → parseInt 计算
+	// 可用宽高，空字符串 parseInt = NaN → cols=NaN → fit return → 终端恒
+	// 80 列（可输出宽度错误）。xterm.css 的 .xterm 无 padding 声明，浏览器
+	// 返回 "0px" 而非 ""。
+	for _, k := range []string{"padding-top", "padding-right", "padding-bottom", "padding-left",
+		"margin-top", "margin-right", "margin-bottom", "margin-left"} {
+		if _, ok := out[k]; !ok {
+			out[k] = "0px"
+		}
+	}
 	return out
 }
 
