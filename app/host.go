@@ -2039,7 +2039,7 @@ func (h *Host) termTestTick() {
 	// DOM 状态（xterm rows 渲染 + helper textarea computed style），用于
 	// 复现用户真实场景（仅 PTY 真实输出，无任何测试注入）。
 	queryMode := os.Getenv("WB_TERM_QUERY") != "" && os.Getenv("WB_TERM_TEST") == ""
-	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 && h.termTestStep != 400 && h.termTestStep != 460 {
+	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 && h.termTestStep != 320 && h.termTestStep != 400 && h.termTestStep != 460 && h.termTestStep != 1000 {
 		return
 	}
 	switch h.termTestStep {
@@ -2381,6 +2381,34 @@ func (h *Host) termTestTick() {
 		// ★ 不置 termTestDone：继续 case 320（用户用真实键盘 Enter 后查询
 		// buffer 行数变化，验证「回车执行」链路 keydown→xterm→PTY）。
 		h.needsResizeDump = true
+	case 320:
+		// ★ 中文输入验证：用 xterm.send()（真实输入路径——用户打字/粘贴
+		// 最终都走 send → triggerDataEvent → PTY）。中文以 UTF-8 字节进
+		// PTY → cmd（chcp 65001）解码回显 → 验证「中文输入+中文回显」
+		// 链路（GBK 时代会乱码）。\r 触发 cmd 执行「中文测试」→ 报错
+		// 「不是内部或外部命令」回显中文。
+		_, _ = interp.RunJS(`(function(){
+			var ks = Object.keys(window.__desktopTerminals || {});
+			if (ks.length === 0) { window.__cnInj = 'NO_TERMS'; return; }
+			try {
+				window.__desktopTerminals[ks[0]].send('中文测试\r');
+				window.__cnInj = 'sent via xterm.send';
+			} catch(e) {
+				window.__cnInj = 'err:' + (e.message || e);
+			}
+		})()`)
+		v5, _ := interp.RunJS(`(function(){
+			var out = {inj: window.__cnInj};
+			var lt = window.__lastTerm;
+			if (lt && lt.buffer && lt.buffer.active) {
+				out.bufLines = lt.buffer.active.length;
+				out.cursorY = lt.buffer.active.cursorY;
+				var l = lt.buffer.active.getLine(lt.buffer.active.length - 1);
+				out.lastLine = l ? l.translateToString(true).slice(0, 60) : '';
+			}
+			return JSON.stringify(out);
+		})()`)
+		log.Printf("[termtest] CN-INJECT %s", v5.ToString())
 	case 400:
 		// ★ JS 派发 keydown Enter 到 textarea（绕过引擎 EventKey，直接走
 		// DOM 事件系统）：若 xterm 处理（写 \r → PTY 执行）→ 说明引擎
@@ -2441,6 +2469,31 @@ func (h *Host) termTestTick() {
 			return JSON.stringify(out);
 		})()`)
 		log.Printf("[termtest] ENTER-RESULT %s", v3.ToString())
+		// 不置 termTestDone：继续 case 1000（外部 WM_CHAR 输入命令后查询
+		// 完整 buffer，验证多命令无残留 + 中文回显）。
+	case 1000:
+		// ★ 残留验证：外部脚本（WM_CHAR）已发 echo A / echo B / echo 中文
+		// 测试（约 500 帧窗口）。查询完整 buffer + textarea value——
+		// 若多次命令后旧输入残留（textarea.value 累积未消费 / 渲染残留）
+		// 在此可见。
+		v6, _ := interp.RunJS(`(function(){
+			var out = {lines: [], taVal: ''};
+			try {
+				var lt = window.__lastTerm;
+				if (lt && lt.buffer && lt.buffer.active) {
+					out.total = lt.buffer.active.length;
+					for (var i = 0; i < lt.buffer.active.length; i++) {
+						var l = lt.buffer.active.getLine(i);
+						out.lines.push(i + ':[' + (l ? l.translateToString().slice(0, 100) : 'null') + ']');
+					}
+					out.cursorY = lt.buffer.active.cursorY;
+				} else { out.err = 'no-buffer'; }
+			} catch(e) { out.err = String(e.message || e); }
+			var ta = document.querySelector('.xterm-helper-textarea');
+			if (ta) out.taVal = (ta.value || '').slice(0, 60);
+			return JSON.stringify(out);
+		})()`)
+		log.Printf("[termtest] FINAL-RESULT %s", v6.ToString())
 		h.termTestDone = true
 	}
 }
