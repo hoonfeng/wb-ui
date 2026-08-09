@@ -468,6 +468,13 @@ func paintFormControlCaret(info *PaintInfo, el *dom.Element, st *style.ComputedS
 	if el != FocusedFormControl || !CaretVisibleControl {
 		return
 	}
+	// ★ opacity:0 的控件（xterm 的 helper textarea 是 opacity:0 覆盖层）
+	// 不画引擎 caret——浏览器里隐藏控件不渲染光标；xterm 自己画
+	// .xterm-cursor。此前引擎在 xterm textarea 聚焦时把 caret 画在
+	// 终端区域左上角（双光标/干扰）。
+	if st.Opacity <= 0 {
+		return
+	}
 	c := info.canvas
 	font := toGraphicsFont(st)
 	ascent := c.FontAscent(font)

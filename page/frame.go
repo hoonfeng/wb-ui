@@ -86,6 +86,14 @@ type Frame struct {
 	// a single full render-tree rebuild.
 	needsRenderTreeRebuild bool
 
+	// rebuildCooldown 是重建降频计数器（变更风暴防护）：xterm 等库渲染
+	// 大量 DOM（每块 PTY 输出 appendChild 数百 span）时每帧 MarkRenderTreeDirty
+	// → 每帧全树重建（复杂页面 100-200ms）→ 主循环卡死（「频繁无响应」）。
+	// MarkRenderTreeDirty 重置 cooldown=2：连续变更期间只推迟重建（保持
+	// dirty），变更停歇 2 帧后才重建一次——输出风暴合并为一次重建。
+	// GetElementBoxRect 等强制路径直接调 RebuildRenderTree（绕过 cooldown）。
+	rebuildCooldown int
+
 	// styleFP caches the fingerprint of all <style> textContent + <link> href
 	// seen at the last style extraction. RebuildRenderTree skips the expensive
 	// full style re-extraction (re-parsing the whole Vue bundle CSS) when the
@@ -262,15 +270,29 @@ func (f *Frame) RebuildRenderTree() {
 
 // MarkRenderTreeDirty marks the frame as needing a render tree rebuild in the
 // next layout. Multiple DOM mutations are batched into a single full rebuild.
+// ★ 重建降频：连续 DOM 变更（xterm 输出风暴）期间延迟重建（cooldown），
+// 避免每帧全树重建（100-200ms）卡死主循环。cooldown 只在首次 dirty 时
+// 设置并逐帧递减（不因持续 dirty 无限刷新）——持续变更时每 cooldown+1
+// 帧强制重建一次（内容周期性更新，不会永久停留在旧树）。
 func (f *Frame) MarkRenderTreeDirty() {
 	f.needsRenderTreeRebuild = true
+	if f.rebuildCooldown <= 0 {
+		f.rebuildCooldown = 2
+	}
 }
 
 // RebuildRenderTreeIfNeeded rebuilds the render tree if MarkRenderTreeDirty was
 // called since the last check. It returns true when a rebuild was performed.
 // FrameView.Layout() calls this automatically before laying out.
+// ★ cooldown>0 时保持 dirty 但不重建（变更风暴降频）；cooldown 耗尽后强制
+// 重建——否则持续 DOM 变更（xterm 渲染）会无限推迟重建，渲染树停留在
+// 旧结构（如 resize 前 24 行 → 光标布局在视口外不可见）。
 func (f *Frame) RebuildRenderTreeIfNeeded() bool {
 	if !f.needsRenderTreeRebuild {
+		return false
+	}
+	if f.rebuildCooldown > 0 {
+		f.rebuildCooldown--
 		return false
 	}
 	f.needsRenderTreeRebuild = false

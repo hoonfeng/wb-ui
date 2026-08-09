@@ -309,11 +309,23 @@ func (wv *WebView) LoadHTML(src string) error {
 			}
 		}
 		// Set up callback for inline style changes (el.style.xxx = ...).
+		// ★ 增量优先：纯样式变更（拖拽 sidebar 宽度、range 拖动等）只更新
+		//   目标元素的 ComputedStyle + SetNeedsLayout（relayout 不重建树）。
+		//   此前无条件 MarkRenderTreeDirty → 每帧 RebuildRenderTree 全量
+		//   重建（复杂页面 30ms+）→ 拖拽卡顿/窗口无响应（「频繁无响应」
+		//   根因）。结构属性（display/position/float/clear）变化才回退全量。
 		bindings.OnInlineStyleChanged = func(n dom.Node) {
-			if fr := wv.mainFrame.Frame(); fr != nil {
-				fr.MarkRenderTreeDirty()
-				fr.SetNeedsLayout(true)
+			fr := wv.mainFrame.Frame()
+			if fr == nil {
+				return
 			}
+			if el, ok := n.(*dom.Element); ok {
+				if fr.RebuildStyleForElement(el) {
+					return
+				}
+			}
+			fr.MarkRenderTreeDirty()
+			fr.SetNeedsLayout(true)
 		}
 		// Set up callbacks for DOM mutations (appendChild / removeChild / etc.).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
@@ -791,10 +803,11 @@ func (wv *WebView) injectRenderTreeBridge() {
 			// ★ DOM 变更后渲染树可能尚未重建（treehook 下帧才重建）——
 			// offsetHeight/offsetWidth 此时返回 0 → xterm 初始化测量缓存
 			// NaN → style.height="NaNpx" → 行高异常（310px）→ 终端内容
-			// 画到视口外。强制重建一次再查。
+			// 画到视口外。强制重建一次再查。⚠️ 直接 RebuildRenderTree
+			// （绕过 MarkRenderTreeDirty 的 cooldown 降频——此处必须立即
+			// 拿到几何）。
 			if fr2 := wv.mainFrame.Frame(); fr2 != nil {
-				fr2.MarkRenderTreeDirty()
-				fr2.RebuildRenderTreeIfNeeded()
+				fr2.RebuildRenderTree()
 			}
 			forceLayout()
 			rv = wv.RenderView()

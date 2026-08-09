@@ -12,7 +12,9 @@
 package rendering
 
 import (
+	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -54,8 +56,18 @@ func ApplyAnimations(rv *RenderView) bool {
 			}
 			st := o.Style()
 			if st != nil && st.AnimationName != "" {
+				if os.Getenv("WB_ANIM_DEBUG") != "" {
+					kf := KeyframesLookup(st.AnimationName)
+					log.Printf("[anim] name=%q kf=%v", st.AnimationName, kf != nil)
+				}
 				if applyAnimationToStyle(st, AnimationTime) {
 					active = true
+					if os.Getenv("WB_ANIM_DEBUG") != "" {
+						log.Printf("[anim] name=%q time=%.2f bgAnim=(%d,%d,%d,%d) bgStatic=(%d,%d,%d,%d)",
+							st.AnimationName, AnimationTime,
+							st.AnimatedBackgroundColor.R, st.AnimatedBackgroundColor.G, st.AnimatedBackgroundColor.B, st.AnimatedBackgroundColor.A,
+							st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
+					}
 				}
 			}
 			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
@@ -68,6 +80,54 @@ func ApplyAnimations(rv *RenderView) bool {
 		active = true
 	}
 	return active
+}
+
+// layoutAffectingAnimationProps 是影响布局的动画属性（transform 系列与
+// 几何属性）——这类动画需要每帧 relayout；颜色/opacity 动画只影响绘制
+// （浏览器合成器语义：颜色动画不触发布局）。
+var layoutAffectingAnimationProps = map[string]bool{
+	"transform": true, "translatex": true, "translatey": true,
+	"scale": true, "scalex": true, "scaley": true,
+	"left": true, "top": true, "right": true, "bottom": true,
+	"width": true, "height": true, "margin": true, "marginleft": true,
+	"margintop": true, "marginright": true, "marginbottom": true,
+	"padding": true, "flex": true, "flexgrow": true, "flexshrink": true,
+	"order": true, "gridcolumn": true, "gridrow": true,
+}
+
+// AnimationsAffectLayout 检查当前是否有激活动画影响布局（transform 系列
+// /几何属性）。宿主用它决定动画帧是否 SetNeedsLayout——否则光标闪烁等
+// 无限颜色动画每帧触发全量 relayout（复杂页面 100ms+）→ 帧率暴跌
+// （「频繁无响应」）。颜色/opacity 动画只需重绘（needPaint 已覆盖）。
+func AnimationsAffectLayout(rv *RenderView) bool {
+	if rv == nil || KeyframesLookup == nil {
+		return false
+	}
+	affect := false
+	var walk func(o RenderObject)
+	walk = func(o RenderObject) {
+		if affect || o == nil {
+			return
+		}
+		st := o.Style()
+		if st != nil && st.AnimationName != "" {
+			if kf := KeyframesLookup(st.AnimationName); kf != nil {
+				for _, rule := range kf.Keyframes {
+					for _, d := range rule.Declarations {
+						if layoutAffectingAnimationProps[strings.ToLower(d.Name)] {
+							affect = true
+							return
+						}
+					}
+				}
+			}
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(RenderObject(rv))
+	return affect
 }
 
 // applyAnimationToStyle computes all animated properties for a single element
@@ -496,6 +556,14 @@ func findColorInDecls(decls []css.Declaration, propName string) (graphics.Color,
 	for _, d := range decls {
 		if strings.EqualFold(d.Name, propName) {
 			val := strings.TrimSpace(d.ValueString())
+			// ★ background-color: inherit（xterm 光标闪烁动画 50% 帧）——
+			// 语义是继承父元素背景色（光标与终端背景同色 → 视觉隐藏）。
+			// 引擎无法在此处查父背景，用透明色等价（深色终端背景下
+			// 透明与背景同色效果一致），保证 0%→50% 帧可插值（否则
+			// valid=false → 动画整体不生效 → 光标不闪烁）。
+			if strings.EqualFold(val, "inherit") {
+				return graphics.Color{}, true
+			}
 			if c, ok := parseColorSimple(val); ok {
 				return c, true
 			}

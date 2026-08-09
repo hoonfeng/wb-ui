@@ -317,6 +317,18 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		return
 	}
 	bg := toGraphicsColor(st.BackgroundColor)
+	// ★ 动画背景色（@keyframes background-color）：光标闪烁动画（xterm
+	// block 光标 0%→50% 插值）写入 AnimatedBackgroundColor，Paint 必须
+	// 消费它，否则动画改了 ComputedStyle 但画面不变（「光标不闪烁」）。
+	// 未动画时 AnimatedBackgroundColor 为零值（A==0）→ 用普通背景色。
+	if st.AnimatedBackgroundColor.A != 0 || st.AnimatedBackgroundColor != (style.Color{}) {
+		bg = toGraphicsColor(st.AnimatedBackgroundColor)
+	}
+	if os.Getenv("WB_ANIM_DEBUG") != "" && (st.AnimatedBackgroundColor.A != 0 || st.AnimatedBackgroundColor != (style.Color{})) {
+		log.Printf("[anim/paint] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) cls=%q",
+			bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height,
+			func() string { if box.Node() != nil { if el, ok := box.Node().(*dom.Element); ok { return el.ClassName() } }; return "" }())
+	}
 	if bg.A == 0 {
 		return
 	}

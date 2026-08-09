@@ -65,6 +65,15 @@ type Window struct {
 	gpuCtx    *skia.DirectContext
 	gpuSurface *skia.Surface
 
+	// gpuMu guards gpuSurface: the GLFW framebuffer-size callback runs on
+	// GLFW's poll thread and calls recreateSurface (Release + rebuild) while
+	// the host main loop reads GPUSurface() every frame. Without the lock,
+	// the main loop can observe the wrapper after Release but before the new
+	// surface is stored — its C pointer is already freed → use-after-free →
+	// cgo crash (sk_surface_get_canvas(0x0)) on window maximize/resize
+	// ("最大化时候崩溃").
+	gpuMu sync.RWMutex
+
 	width, height   int
 	fbWidth, fbHeight int
 	contentScaleX, contentScaleY float64
@@ -182,6 +191,8 @@ func NewWindow(width, height int, title string) (*Window, error) {
 // recreateSurface wraps the window's default framebuffer as a Skia surface.
 // Called on initial creation and on resize.
 func (w *Window) recreateSurface() error {
+	w.gpuMu.Lock()
+	defer w.gpuMu.Unlock()
 	if w.gpuSurface != nil {
 		w.gpuSurface.Release()
 		w.gpuSurface = nil
@@ -324,6 +335,8 @@ func (w *Window) setupCallbacks() {
 // GPU surface (avoiding the CPU raster + blit path). The caller must not
 // Release the returned surface; it is owned by the Window.
 func (w *Window) GPUSurface() *skia.Surface {
+	w.gpuMu.RLock()
+	defer w.gpuMu.RUnlock()
 	return w.gpuSurface
 }
 
@@ -363,6 +376,8 @@ func (w *Window) Present() {
 // and swaps buffers. This is the legacy CPU→GPU blit path; prefer painting
 // directly on the GPU surface via GPUSurface() + graphics.NewCanvasFromSurface.
 func (w *Window) Display(srcImg *skia.Image) {
+	w.gpuMu.RLock()
+	defer w.gpuMu.RUnlock()
 	if w.gpuSurface == nil || srcImg == nil {
 		return
 	}
@@ -431,10 +446,12 @@ func (w *Window) SetDropCallback(fn func([]string)) {
 
 // Close destroys the window and releases resources.
 func (w *Window) Close() {
+	w.gpuMu.Lock()
 	if w.gpuSurface != nil {
 		w.gpuSurface.Release()
 		w.gpuSurface = nil
 	}
+	w.gpuMu.Unlock()
 	if w.gpuCtx != nil {
 		w.gpuCtx.Release()
 		w.gpuCtx = nil

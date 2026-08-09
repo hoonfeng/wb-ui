@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"wb-ui.com/goja"
@@ -28,6 +29,27 @@ var OnStyleNodeAdded func(node dom.Node)
 // style attribute is changed via the JS style proxy (el.style.xxx = ...).
 // The embedder should re-resolve styles and rebuild the render tree.
 var OnInlineStyleChanged func(node dom.Node)
+
+// FocusBridge is an optional callback invoked when JS calls el.focus() /
+// el.blur() on an element. The embedder (app.Host) uses it to route JS
+// focus to the engine's focused-element tracking (imeFocusedEl + caret
+// rendering) — without it, JS focus() only flips the DOM flag and the
+// engine never learns about the focused control, so typing goes nowhere
+// and libraries (xterm.js) never receive the focus event that activates
+// their input + cursor rendering.
+var FocusBridge func(el *dom.Element, focused bool)
+
+// SelectionBridge is an optional callback invoked when JS reads/writes an
+// editable element's selection (selectionStart/End, setSelectionRange).
+// The embedder maps it to the engine's form-control selection state
+// (rendering.FocusedFormControlSel), which is also what the caret painter
+// uses — so JS and engine selection stay in sync.
+var SelectionBridge func(el *dom.Element) (start, end int)
+
+// SetSelectionBridge is the write counterpart of SelectionBridge: JS calls
+// el.setSelectionRange(start, end) — the embedder updates the engine's
+// form-control selection (caret position) accordingly.
+var SetSelectionBridge func(el *dom.Element, start, end int)
 
 // OnNodeInserted is an optional callback invoked when a DOM node is added to
 // the document (via appendChild / insertBefore / replaceChild). The embedder
@@ -58,6 +80,101 @@ var (
 	// （offsetLeft/offsetTop/offsetWidth/offsetHeight 用）。
 	GetElementBoxRect func(el *dom.Element) (left, top, width, height float64)
 )
+
+// ── ResizeObserver 真实现（浏览器标准）───────────────
+// observe 注册元素后，宿主每帧调用 ResizeObserverCheck 检测布局尺寸
+// 变化并触发回调（FitAddon 等响应式库依赖它）。stub 版本只回调一次
+// contentRect=0 → xterm 收不到容器尺寸变化 → 保持 80x24 超出容器。
+type roEntry struct {
+	el          *dom.Element
+	cb          jsc.JSValue
+	lastW       float64
+	lastH       float64
+	initialized bool
+}
+
+var (
+	roMu            sync.Mutex
+	resizeObservers []*roEntry
+)
+
+// roElementSize reads the element's laid-out size (0,0 when not laid out yet).
+func roElementSize(el *dom.Element) (float64, float64) {
+	if GetElementBoxRect == nil || el == nil {
+		return 0, 0
+	}
+	_, _, w, h := GetElementBoxRect(el)
+	return w, h
+}
+
+// fireROCallback invokes the observer callback with a ResizeObserverEntry
+// ({target, contentRect:{x,y,width,height}}).
+func fireROCallback(interp *jsc.Interpreter, cb jsc.JSValue, el *dom.Element, w, h float64) {
+	if interp == nil {
+		return
+	}
+	entry := jsc.NewObject(interp.ObjectPrototype())
+	entry.Set("target", jsc.ObjectValue(wrapElement(interp, el)))
+	rect := jsc.NewObject(interp.ObjectPrototype())
+	rect.Set("x", jsc.NumberValue(0))
+	rect.Set("y", jsc.NumberValue(0))
+	rect.Set("width", jsc.NumberValue(w))
+	rect.Set("height", jsc.NumberValue(h))
+	rect.Set("top", jsc.NumberValue(0))
+	rect.Set("left", jsc.NumberValue(0))
+	rect.Set("right", jsc.NumberValue(w))
+	rect.Set("bottom", jsc.NumberValue(h))
+	entry.Set("contentRect", jsc.ObjectValue(rect))
+	_, _ = interp.Call(cb, jsc.Undefined(), []jsc.JSValue{
+		jsc.ObjectValue(jsc.NewArray(nil, []jsc.JSValue{jsc.ObjectValue(entry)})),
+	})
+}
+
+// ResizeObserverCheck 由宿主每帧调用（主循环，布局后）：对比各被观察
+// 元素的布局尺寸，变化时触发回调。与浏览器合成器驱动的 ResizeObserver
+// 语义一致（尺寸变化在下一帧通知）。
+func ResizeObserverCheck(interp *jsc.Interpreter) {
+	if interp == nil {
+		return
+	}
+	roMu.Lock()
+	if len(resizeObservers) == 0 {
+		roMu.Unlock()
+		return
+	}
+	entries := append([]*roEntry(nil), resizeObservers...)
+	roMu.Unlock()
+	for _, e := range entries {
+		w, h := roElementSize(e.el)
+		if !e.initialized {
+			e.initialized = true
+			e.lastW, e.lastH = w, h
+			if os.Getenv("WB_RO_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "[ro] observe init el=%s size=%.0fx%.0f\n", elNameForRO(e.el), w, h)
+			}
+			continue
+		}
+		if w != e.lastW || h != e.lastH {
+			e.lastW, e.lastH = w, h
+			if os.Getenv("WB_RO_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "[ro] RESIZE el=%s %.0fx%.0f → %.0fx%.0f\n", elNameForRO(e.el), e.lastW, e.lastH, w, h)
+			}
+			fireROCallback(interp, e.cb, e.el, w, h)
+		}
+	}
+}
+
+// elNameForRO returns a short debug name for a ResizeObserver target.
+func elNameForRO(el *dom.Element) string {
+	if el == nil {
+		return "<nil>"
+	}
+	cls := el.ClassName()
+	if cls == "" {
+		return el.LocalName()
+	}
+	return el.LocalName() + "." + cls
+}
 
 // MediaQueryContextProvider 提供 matchMedia 评估所需的设备/视口上下文
 // （视口尺寸、devicePixelRatio、颜色方案等）；由宿主（webkit.WebView）
@@ -1461,54 +1578,81 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return obj
 		})))
 
-	// ResizeObserver 构造函数
+	// ResizeObserver 构造函数 — 真实现（浏览器标准）：observe 注册元素后，
+	// 宿主每帧调用 ResizeObserverCheck 检测元素布局尺寸变化并触发回调。
+	// 此前是 stub（observe 只回调一次 contentRect=0）→ FitAddon 等依赖
+	// ResizeObserver 的库收不到尺寸变化 → xterm 保持初始 80x24 超出容器
+	// （底部内容/光标被裁剪不可见）。
 	g.Set("ResizeObserver", jsc.FunctionValue(rt.NewConstructor("ResizeObserver",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
 			if len(args) < 1 || !args[0].IsCallable() {
 				return nil
 			}
 			cb := args[0]
-			var observed []*dom.Element
 			obj := jsc.NewObject(in.ObjectPrototype())
 			obj.Set("observe", jsc.FunctionValue(jsc.NewNativeFunction("observe",
 				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 1 { return jsc.Undefined() }
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
 					targetObj := a[0].AsObject()
-					if targetObj == nil { return jsc.Undefined() }
+					if targetObj == nil {
+						return jsc.Undefined()
+					}
 					target, _ := targetObj.Internal().(*dom.Element)
-					if target == nil { return jsc.Undefined() }
-					observed = append(observed, target)
-					// 通过微任务通知初始尺寸
+					if target == nil {
+						return jsc.Undefined()
+					}
+					roMu.Lock()
+					// 幂等：同一元素重复 observe 只保留一个。
+					replaced := false
+					for _, e := range resizeObservers {
+						if e.el == target {
+							e.cb = cb
+							replaced = true
+							break
+						}
+					}
+					if !replaced {
+						w, h := roElementSize(target)
+						resizeObservers = append(resizeObservers, &roEntry{el: target, cb: cb, lastW: w, lastH: h})
+					}
+					roMu.Unlock()
+					// 浏览器行为：observe 后异步回调一次初始尺寸。
 					el := in.EnsureEventLoop()
-					el.QueueMicrotask(jsc.FunctionValue(jsc.NewNativeFunction("ro-cb",
+					el.QueueMicrotask(jsc.FunctionValue(jsc.NewNativeFunction("ro-cb-init",
 						func(interp2 *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-							entry := jsc.NewObject(interp2.ObjectPrototype())
-							entry.Set("target", jsc.ObjectValue(wrapElement(interp2, target)))
-							entry.Set("contentRect", jsc.ObjectValue(makeDOMRect(interp2, 0, 0, 0, 0)))
-							_, _ = interp2.Call(cb, jsc.Undefined(), []jsc.JSValue{
-								jsc.ObjectValue(jsc.NewArray(nil, []jsc.JSValue{jsc.ObjectValue(entry)})),
-							})
+							w, h := roElementSize(target)
+							fireROCallback(interp2, cb, target, w, h)
 							return jsc.Undefined()
 						}, 0)))
 					return jsc.Undefined()
 				}, 1)))
 			obj.Set("unobserve", jsc.FunctionValue(jsc.NewNativeFunction("unobserve",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 1 { return jsc.Undefined() }
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
 					targetObj := a[0].AsObject()
-					if targetObj == nil { return jsc.Undefined() }
+					if targetObj == nil {
+						return jsc.Undefined()
+					}
 					target, _ := targetObj.Internal().(*dom.Element)
-					for i, el := range observed {
-						if el == target {
-							observed = append(observed[:i], observed[i+1:]...)
+					roMu.Lock()
+					for i, e := range resizeObservers {
+						if e.el == target {
+							resizeObservers = append(resizeObservers[:i], resizeObservers[i+1:]...)
 							break
 						}
 					}
+					roMu.Unlock()
 					return jsc.Undefined()
 				}, 1)))
 			obj.Set("disconnect", jsc.FunctionValue(jsc.NewNativeFunction("disconnect",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-					observed = nil
+					roMu.Lock()
+					resizeObservers = nil
+					roMu.Unlock()
 					return jsc.Undefined()
 				}, 0)))
 			return obj
@@ -2678,15 +2822,24 @@ obj.SetInternal(el)
 			if p := el.ParentNode(); p != nil { p.RemoveChild(el) }
 			return jsc.Undefined()
 		}, 0)))
-	// focus / blur stubs
+	// focus / blur — bridge to the engine's focused-element tracking so JS
+	// focus (xterm textarea.focus(), Vue autofocus, CodeMirror.focus()) also
+	// activates engine typing (imeFocusedEl) and dispatches focus/blur DOM
+	// events (xterm listens for them to show the cursor + arm keyboard input).
 	obj.Set("focus", jsc.FunctionValue(jsc.NewNativeFunction("focus",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			el.SetFocused(true)
+			if FocusBridge != nil {
+				FocusBridge(el, true)
+			}
 			return jsc.Undefined()
 		}, 0)))
 	obj.Set("blur", jsc.FunctionValue(jsc.NewNativeFunction("blur",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			el.SetFocused(false)
+			if FocusBridge != nil {
+				FocusBridge(el, false)
+			}
 			return jsc.Undefined()
 		}, 0)))
 	// form control: value / checked / disabled / type
@@ -2814,6 +2967,45 @@ obj.SetInternal(el)
 						el.RemoveAttribute("disabled")
 					}
 				})
+		}
+		// ── Editable control selection (input/textarea) ──
+		// selectionStart/selectionEnd/setSelectionRange — xterm.js 的
+		// textarea 输入处理（读 selection 计算新增字符/定位光标）与
+		// CodeMirror 6 等编辑器依赖它们。映射到引擎的
+		// FocusedFormControlSel（同时是 caret painter 用的状态），
+		// 保证 JS 读写 selection 与引擎绘制光标一致。
+		if tag == "input" || tag == "textarea" {
+			selGetter := func() (int, int) {
+				if SelectionBridge != nil {
+					if s, e := SelectionBridge(el); s >= 0 && e >= 0 {
+						return s, e
+					}
+				}
+				// Fallback: caret at end of value.
+				val := el.TextContent()
+				if tag == "input" {
+					val = el.GetAttribute("value")
+				}
+				n := len([]rune(val))
+				return n, n
+			}
+			obj.SetAccessor("selectionStart",
+				getter(func(_ *jsc.Interpreter) jsc.JSValue {
+					s, _ := selGetter()
+					return jsc.NumberValue(float64(s))
+				}), nil)
+			obj.SetAccessor("selectionEnd",
+				getter(func(_ *jsc.Interpreter) jsc.JSValue {
+					_, e := selGetter()
+					return jsc.NumberValue(float64(e))
+				}), nil)
+			obj.Set("setSelectionRange", jsc.FunctionValue(jsc.NewNativeFunction("setSelectionRange",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if SetSelectionBridge != nil && len(a) >= 2 {
+						SetSelectionBridge(el, int(a[0].ToNumber()), int(a[1].ToNumber()))
+					}
+					return jsc.Undefined()
+				}, 2)))
 		}
 	}
 
@@ -3848,6 +4040,28 @@ func computedStyleFor(el dom.Node) map[string]string {
 	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
 	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
 	resolveVarInComputed(out, el)
+	// ★ 浏览器语义：getComputedStyle 的 width/height 返回「实际布局尺寸」
+	// （即使无显式 CSS 声明，flex/grid 拉伸的元素也有计算值）。引擎的级联
+	// map 只含声明值——FitAddon.proposeDimensions 用
+	// getComputedStyle(parent).height 算容器可用高度，声明缺失时 parseInt("")
+	// = NaN → fit return → xterm 保持 80x24 超出容器（光标被裁剪）。此处
+	// 声明缺失时从渲染树读布局几何兜底（只对无声明元素产生开销）。
+	if GetElementBoxRect != nil {
+		if e, ok := el.(*dom.Element); ok {
+			if _, has := out["height"]; !has {
+				_, _, _, h := GetElementBoxRect(e)
+				if h > 0 {
+					out["height"] = fmt.Sprintf("%.1fpx", h)
+				}
+			}
+			if _, has := out["width"]; !has {
+				_, _, w, _ := GetElementBoxRect(e)
+				if w > 0 {
+					out["width"] = fmt.Sprintf("%.1fpx", w)
+				}
+			}
+		}
+	}
 	return out
 }
 

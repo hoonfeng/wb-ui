@@ -297,7 +297,54 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}
-	return &Host{win: win, wv: wv}, nil
+	h := &Host{win: win, wv: wv}
+	// ★ JS el.focus()/el.blur() 桥接到引擎聚焦（xterm textarea.focus()、
+	// Vue autofocus 等）：JS 聚焦必须设置引擎的 imeFocusedEl（否则
+	// EventChar 分支 h.imeFocusedEl==nil 丢弃所有字符——「终端不可
+	// 输入」根因）并派发 focus/blur DOM 事件（xterm 监听 textarea
+	// focus/blur 激活输入+显示光标）。
+	bindings.FocusBridge = func(el *dom.Element, focused bool) {
+		if focused {
+			h.FocusElementByKeyboard(el, false)
+		} else {
+			if h.imeFocusedEl == el {
+				h.Unfocus()
+			} else {
+				el.SetFocused(false)
+			}
+		}
+	}
+	// JS selectionStart/End/setSelectionRange ↔ 引擎光标（xterm 输入
+	// 处理读 textarea selection 计算新增字符；setSelectionRange 定位
+	// 点击光标）。
+	bindings.SelectionBridge = func(el *dom.Element) (int, int) {
+		if el == nil || el != h.imeFocusedEl {
+			return -1, -1
+		}
+		if sel := rendering.FocusedFormControlSel; sel != nil {
+			return sel.Start, sel.End
+		}
+		return -1, -1
+	}
+	bindings.SetSelectionBridge = func(el *dom.Element, start, end int) {
+		if el == nil {
+			return
+		}
+		if el != h.imeFocusedEl {
+			h.FocusElementByKeyboard(el, false)
+		}
+		if start < 0 {
+			start = 0
+		}
+		if end < start {
+			end = start
+		}
+		rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+			Start: start, End: end, Active: true,
+		}
+		h.ensureFocusedCaretVisible()
+	}
+	return h, nil
 }
 
 // findFontDir searches for the wb-ui bundled font resources directory.
@@ -509,6 +556,14 @@ func (h *Host) FocusElementByKeyboard(el *dom.Element, byKeyboard bool) {
 		rendering.FocusedFormControl = el
 	} else {
 		rendering.FocusedFormControl = nil
+	}
+	// ★ 派发 focus DOM 事件（不冒泡，浏览器语义）：xterm.js 监听
+	// textarea 的 focus 事件设置 isFocused=true（驱动光标渲染 +
+	// 键盘输入激活）；CodeMirror 也用 focus/blur 事件刷新编辑器状态。
+	// 此前引擎聚焦只改内部状态从不派发事件 → JS 库永远不知道焦点
+	// 已切换（「点击终端无光标」根因之一）。
+	if el != nil {
+		el.DispatchEvent(dom.NewEvent("focus", false, false, false))
 	}
 }
 
@@ -940,7 +995,12 @@ func st2ContentWidth(st *style.ComputedStyle, box *rendering.RenderBox) float64 
 // Call this when the user clicks outside an editable element.
 func (h *Host) Unfocus() {
 	if h.imeFocusedEl != nil {
-		h.imeFocusedEl.SetFocused(false)
+		blurEl := h.imeFocusedEl
+		// ★ 派发 blur DOM 事件（不冒泡）：xterm 监听 textarea blur →
+		// isFocused=false → 隐藏光标。对称于 FocusElementByKeyboard 的
+		// focus 派发。
+		blurEl.DispatchEvent(dom.NewEvent("blur", false, false, false))
+		blurEl.SetFocused(false)
 		h.imeFocusedEl = nil
 		h.imeInputText = ""
 		h.imeComposing = false
@@ -1017,6 +1077,11 @@ func (h *Host) Run() {
 
 	for !h.win.ShouldClose() {
 		perfFrames++
+		phaseDebug := os.Getenv("WB_PHASE_DEBUG") != ""
+		var tPhaseStart time.Time
+		if phaseDebug {
+			tPhaseStart = time.Now()
+		}
 		// WB_FRAMETIME=1：逐帧测量 layout/paint/events 耗时（拖拽跟手
 		// 性能验证；autodrag 激活时强制开启）。
 		ftMode := h.autodragOn || os.Getenv("WB_FRAMETIME") != ""
@@ -1037,11 +1102,28 @@ func (h *Host) Run() {
 		// 每帧幂等注册，LoadHTML 重建 Document 时自动跟随。
 		h.ensureTreeChangeHook()
 
+		// ★ 事件处理提前到布局之前（浏览器语义：输入 → JS handler →
+		// dirty → 同帧布局+渲染）。此前 processEvents 在 Paint 之后，
+		// mousemove 派发 → JS 改宽度 → 布局要等下一帧 → 拖拽延迟 2 帧
+		// （~33ms @60fps）——「分隔栏拖拽不跟手」根因。提前后 mousemove
+		// → Vue onMove 改 style → MarkRenderTreeDirty → 本帧 EnsureLayout
+		// + Paint 反映新宽度（0 帧延迟）。rv 用上一帧布局后的渲染树
+		// （hover/滚动条几何 1 帧滞后可接受，mousemove 派发不依赖几何）。
+		h.processEvents(h.wv.RenderView())
+
 		h.wv.EnsureLayout()
 		if ftMode {
 			ftLayoutEnd = time.Now()
 		}
 		rv := h.wv.RenderView()
+		// ★ 每帧检查 ResizeObserver（布局后）：尺寸变化 → 触发回调 →
+		// xterm FitAddon 按容器尺寸 resize（此前 stub 不通知 → xterm
+		// 保持 80x24 超出容器 → 底部内容/光标被裁剪不可见）。每帧
+		// GetElementBoxRect 对少量被观察元素（1 个）开销可忽略；重建
+		// 风暴已由 rebuildCooldown 降频防护。
+		if interp := h.wv.JSInterpreter(); interp != nil {
+			bindings.ResizeObserverCheck(interp)
+		}
 
 		// Smooth wheel scrolling: interpolate the per-box scroll offset
 		// toward the wheel-event target with an exponential approach
@@ -1145,9 +1227,16 @@ func (h *Host) Run() {
 			rendering.AnimationTime = time.Since(h.animStart).Seconds()
 			animActive = rendering.ApplyAnimations(rv)
 			if animActive {
-				if mf := h.wv.MainFrame(); mf != nil {
-					if fr := mf.Frame(); fr != nil {
-						fr.SetNeedsLayout(true)
+				// ★ 只有影响布局的动画（transform/几何）才 SetNeedsLayout。
+				// 颜色/opacity 动画（光标闪烁等无限动画）只重绘——否则每帧
+				// 全量 relayout/重建（复杂页面 169ms+）→ 帧率 1.4fps
+				// （「频繁无响应」主因）。重绘由 needPaint（含 animActive）
+				// 覆盖。
+				if rendering.AnimationsAffectLayout(rv) {
+					if mf := h.wv.MainFrame(); mf != nil {
+						if fr := mf.Frame(); fr != nil {
+							fr.SetNeedsLayout(true)
+						}
 					}
 				}
 			}
@@ -1208,7 +1297,7 @@ func (h *Host) Run() {
 			// gpuCanvas so the paint + Present path below works on every platform.
 			var gpuCanvas *graphics.Canvas
 			var ownsCanvas bool
-			if gpuSurf != nil {
+			if gpuSurf != nil && gpuSurf.IsValid() {
 				gpuCanvas = graphics.NewCanvasFromSurface(gpuSurf, h.win.FramebufferWidth(), h.win.FramebufferHeight())
 				ownsCanvas = true
 			} else if sw := h.win.Canvas(); sw != nil {
@@ -1448,7 +1537,6 @@ func (h *Host) Run() {
 			}
 		}
 
-		h.processEvents(rv)
 		// 驱动 JS 事件循环：处理到期的 setTimeout/setInterval 宏任务、
 		// Promise.then 微任务、requestAnimationFrame 动画帧回调。
 		h.processEventLoop()
@@ -1456,6 +1544,11 @@ func (h *Host) Run() {
 		// PTY 输出等）——goroutine 不得直接 RunJS（goja 非线程安全）。
 		if h.OnFrame != nil {
 			h.OnFrame()
+		}
+		// WB_PHASE_DEBUG=1：每 10 帧打印各阶段耗时（定位卡顿帧）。
+		if phaseDebug && perfFrames%10 == 0 {
+			eventsMS := float64(time.Since(tPhaseStart).Nanoseconds()) / 1e6
+			log.Printf("[phase] frame=%d total=%6.1fms", perfFrames, eventsMS)
 		}
 		// WB_LAYOUT_PROFILE=1：每帧输出布局耗时分布（BFC/FFC/IFC…）。
 		if os.Getenv("WB_LAYOUT_PROFILE") != "" && needPaint {
@@ -1922,6 +2015,11 @@ func layoutAffectingChanged(a, b *style.ComputedStyle) bool {
 // ③ 输出结果后标记完成
 func (h *Host) termTestTick() {
 	h.termTestStep++
+	if os.Getenv("WB_FRAME_DEBUG") != "" {
+		if h.termTestStep%20 == 0 {
+			log.Printf("[fpsdbg] step=%d now=%s", h.termTestStep, time.Now().Format("15:04:05.000"))
+		}
+	}
 	interp := h.wv.JSInterpreter()
 	if interp == nil {
 		return
@@ -2124,8 +2222,28 @@ func (h *Host) termTestTick() {
 					var l0 = lt.buffer.active.getLine(0);
 					out.line0 = l0 ? l0.translateToString().slice(0, 40) : 'null';
 					out.cursorY = lt.buffer.active.cursorY;
+					out.cursorHidden = lt._coreService ? lt._coreService.isCursorHidden : 'no-core';
 				} else { out.bufLines = 'no-buffer'; }
 			} catch(e) { out.bufErr = String(e.message || e); }
+			// ★ 光标元素诊断（用户反馈「光标不闪烁」）：.xterm-cursor 的
+			// 存在性/类名/animation 属性/背景色——闪烁依赖 xterm-cursor-blink
+			// 类（isFocused）+ CSS animation 驱动。
+			try {
+				var cur = document.querySelector('.xterm .xterm-cursor');
+				if (cur) {
+					var cr = cur.getBoundingClientRect();
+					var ccs = getComputedStyle(cur);
+					out.cursor = {
+						cls: (cur.className || '').toString(),
+						x: Math.round(cr.left), y: Math.round(cr.top), w: Math.round(cr.width), h: Math.round(cr.height),
+						disp: ccs.display, vis: ccs.visibility, anim: ccs.animationName, bg: ccs.backgroundColor,
+						hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0
+					};
+				} else { out.cursor = 'NO_CURSOR_EL'; }
+				// xterm 容器 focus 类（isFocused 的 DOM 反映）
+				var xt2 = document.querySelector('.xterm');
+				if (xt2) { out.xtermFocusCls = (xt2.className || '').toString().slice(0, 60); }
+			} catch(e) { out.cursorErr = String(e.message || e); }
 			out.errs = (window.__errs || []).slice(-5);
 			return JSON.stringify(out);
 		})()`)
@@ -2147,20 +2265,94 @@ func (h *Host) termTestTick() {
 		//   覆盖）——此时 xterm rows 已更新，看 rows 的 RenderText 是否在树里。
 		h.needsResizeDump = true
 		// ③ 键盘输入方向验证：向终端发送 `dir` 命令，PTY 执行后输出回显。
+		//    （WB_TERM_QUERY 卡死排查：dir 输出渲染死循环时注释此段）
+		if os.Getenv("WB_TERM_DIR") != "" {
+			_, _ = interp.RunJS(`(function(){
+				var ks = Object.keys(window.__desktopTerminals || {});
+				if (ks.length > 0) {
+					window.__desktopTerminals[ks[0]].send('dir\r');
+				}
+			})()`)
+		}
+	case 260:
+		// ★ 先聚焦 textarea（JS focus() → FocusBridge → 引擎聚焦 + focus
+		// 事件 → xterm isFocused=true → 光标渲染）——用户「点击终端」的
+		// 等价操作。聚焦后查询光标元素状态（是否存在/闪烁类/动画）。
 		_, _ = interp.RunJS(`(function(){
-			var ks = Object.keys(window.__desktopTerminals || {});
-			if (ks.length > 0) {
-				window.__desktopTerminals[ks[0]].send('dir\r');
+			var ta = document.querySelector('.xterm-helper-textarea');
+			if (ta) ta.focus();
+			// ★ 诊断：手动 fit 看 rows 是否变化（xterm 24 行超出容器）
+			if (window.__lastTerm && window.__lastTerm._core) {
+				try {
+					var dims = window.__lastTerm._core._renderService.dimensions;
+					window.__fitDiag = {
+						cellW: dims && dims.css ? dims.css.cell.width : 'no-dims',
+						cellH: dims && dims.css ? dims.css.cell.height : 'no-dims',
+						rowsBefore: window.__lastTerm.rows
+					};
+					// 手动 fit
+					var t = window.__lastTerm;
+					if (t._fitAddon) {
+						t._fitAddon.fit();
+						window.__fitDiag.rowsAfter = t.rows;
+						window.__fitDiag.fitResult = 'called';
+					} else {
+						window.__fitDiag.fitResult = 'no-fitaddon';
+						// 直接 resize 验证容器行数计算
+						var pe2 = t.element.parentElement;
+						var ph = parseInt(getComputedStyle(pe2).height) || 0;
+						var rows = Math.floor(ph / dims.css.cell.height);
+						t.resize(dims.css.cell.width ? Math.floor(pe2.getBoundingClientRect().width / dims.css.cell.width) : 80, rows);
+						window.__fitDiag.rowsAfter = t.rows;
+						window.__fitDiag.calcRows = rows;
+					}
+				} catch(e) { window.__fitDiag = 'err:' + e.message; }
 			}
 		})()`)
-	case 260:
 		v2, _ := interp.RunJS(`(function(){
 			var lines = [];
 			var divs = document.querySelectorAll('.xterm .xterm-rows > div');
 			for (var i=0;i<Math.min(divs.length, 8);i++){
 				lines.push(i + ':[' + (divs[i].textContent || '').slice(0, 100) + ']');
 			}
-			return JSON.stringify({lines: lines.join(' | '), errs: (window.__errs || []).slice(-5)});
+			var cur = document.querySelector('.xterm .xterm-cursor');
+			var out = {lines: lines.join(' | '), errs: (window.__errs || []).slice(-5)};
+			if (cur) {
+				var cr = cur.getBoundingClientRect();
+				var ccs = getComputedStyle(cur);
+				out.cursor = {
+					cls: (cur.className || '').toString(),
+					x: Math.round(cr.left), y: Math.round(cr.top), w: Math.round(cr.width), h: Math.round(cr.height),
+					anim: ccs.animationName, anim2: ccs.getPropertyValue('animation-name'), animFull: ccs.getPropertyValue('animation'),
+					bg: ccs.backgroundColor, bg2: ccs.getPropertyValue('background-color'),
+					hasBlink: (cur.className || '').toString().indexOf('xterm-cursor-blink') >= 0
+				};
+			} else { out.cursor = 'NO_CURSOR_EL'; }
+			var xt = document.querySelector('.xterm');
+			if (xt) out.xtermCls = (xt.className || '').toString();
+			var ta2 = document.querySelector('.xterm-helper-textarea');
+			if (ta2) {
+				var tcs = getComputedStyle(ta2);
+				out.taFocusStyle = {vis: tcs.visibility, op: tcs.opacity};
+			}
+			out.fitDiag = window.__fitDiag;
+			// ★ 诊断 fit 容器高度（getComputedStyle(parentElement).height）
+			if (window.__lastTerm && window.__lastTerm.element) {
+				try {
+					var pe = window.__lastTerm.element.parentElement;
+					if (pe) {
+						var pcs = getComputedStyle(pe);
+						var sel = window.__lastTerm.element;
+						var secs = getComputedStyle(sel);
+						out.fitParent = {
+							tag: pe.tagName, cls: (pe.className||'').toString().slice(0,40),
+							h: pcs.height, w: pcs.width, rectH: (pe.getBoundingClientRect?pe.getBoundingClientRect().height:0)
+						};
+						out.fitSelf = {h: secs.height, rectH: sel.getBoundingClientRect?sel.getBoundingClientRect().height:0};
+					}
+				} catch(e) { out.fitParent = 'err:' + e.message; }
+			}
+			return JSON.stringify(out);
 		})()`)
 		log.Printf("[termtest] DIR-RESULT %s", v2.ToString())
 		h.termTestDone = true
@@ -3472,6 +3664,30 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 
 		case window.EventKey:
+			// ★ 浏览器标准事件顺序：先派发 keydown 到焦点元素，JS 决定
+			// 是否 preventDefault。preventDefault 后引擎不做默认行为
+			// （编辑/滚动）。xterm.js 的 textarea 聚焦时用 keydown 处理
+			// 快捷键/组合键（Ctrl+C 发送 \x03、箭头发送 \x1b[A、Enter 发
+			// \r）并 preventDefault；普通字符键不 preventDefault → 引擎
+			// EventChar 照常插入 value + 派发 input。此前引擎从不派发
+			// keydown → xterm 的快捷键全部失效（「终端不可输入」根因之
+			// 一：组合键没有入口）。
+			if h.imeFocusedEl != nil && (ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat)) {
+				keyEv := dom.NewKeyboardEventFromInit(dom.EventKeyDown, dom.KeyboardEventInit{
+					EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+					Key:       domKeyName(ev),
+					Code:      domKeyCode(ev),
+					CtrlKey:   (ev.Mods & int(glfw.ModControl)) != 0,
+					ShiftKey:  (ev.Mods & int(glfw.ModShift)) != 0,
+					AltKey:    (ev.Mods & int(glfw.ModAlt)) != 0,
+					MetaKey:   (ev.Mods & int(glfw.ModSuper)) != 0,
+					Repeat:    ev.Action == int(glfw.Repeat),
+					KeyCode:   ev.Key,
+				})
+				if !h.imeFocusedEl.DispatchEvent(keyEv) {
+					break // JS preventDefault：引擎不做默认编辑/滚动
+				}
+			}
 			// ★ Text editing keys (backspace/delete/arrows/home/end) take
 			// priority over scrolling when a form control is focused. Without
 			// this, Backspace/Delete did nothing and arrows scrolled the page.
@@ -3640,6 +3856,184 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			}
 		}
 	}
+}
+
+// domKeyName maps a GLFW key code to the DOM KeyboardEvent.key value
+// (browser semantics). Letters reflect the Shift state (a/A); other keys
+// map to their standard DOM names ("Enter", "ArrowLeft", "F1", ...).
+func domKeyName(ev window.Event) string {
+	shift := (ev.Mods & int(glfw.ModShift)) != 0
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyEnter, glfw.KeyKPEnter:
+		return "Enter"
+	case glfw.KeyBackspace:
+		return "Backspace"
+	case glfw.KeyTab:
+		return "Tab"
+	case glfw.KeyEscape:
+		return "Escape"
+	case glfw.KeyDelete:
+		return "Delete"
+	case glfw.KeyInsert:
+		return "Insert"
+	case glfw.KeyLeft:
+		return "ArrowLeft"
+	case glfw.KeyRight:
+		return "ArrowRight"
+	case glfw.KeyUp:
+		return "ArrowUp"
+	case glfw.KeyDown:
+		return "ArrowDown"
+	case glfw.KeyHome:
+		return "Home"
+	case glfw.KeyEnd:
+		return "End"
+	case glfw.KeyPageUp:
+		return "PageUp"
+	case glfw.KeyPageDown:
+		return "PageDown"
+	case glfw.KeyCapsLock:
+		return "CapsLock"
+	case glfw.KeyLeftShift, glfw.KeyRightShift:
+		return "Shift"
+	case glfw.KeyLeftControl, glfw.KeyRightControl:
+		return "Control"
+	case glfw.KeyLeftAlt, glfw.KeyRightAlt:
+		return "Alt"
+	case glfw.KeyLeftSuper, glfw.KeyRightSuper:
+		return "Meta"
+	case glfw.KeySpace:
+		return " "
+	}
+	// Letters (ASCII 65..90) and digits (48..57): GLFW uses ASCII codes.
+	if ev.Key >= 'A' && ev.Key <= 'Z' {
+		if shift {
+			return string(rune(ev.Key))
+		}
+		return string(rune(ev.Key) + 32) // lowercase
+	}
+	if ev.Key >= '0' && ev.Key <= '9' {
+		return string(rune(ev.Key))
+	}
+	// Punctuation: GLFW ASCII key codes match the character for these.
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyComma:
+		return ","
+	case glfw.KeyPeriod:
+		return "."
+	case glfw.KeySlash:
+		return "/"
+	case glfw.KeySemicolon:
+		return ";"
+	case glfw.KeyApostrophe:
+		return "'"
+	case glfw.KeyLeftBracket:
+		return "["
+	case glfw.KeyRightBracket:
+		return "]"
+	case glfw.KeyBackslash:
+		return "\\"
+	case glfw.KeyGraveAccent:
+		return "`"
+	case glfw.KeyMinus:
+		return "-"
+	case glfw.KeyEqual:
+		return "="
+	}
+	// Function keys F1..F25.
+	if ev.Key >= int(glfw.KeyF1) && ev.Key <= int(glfw.KeyF25) {
+		return fmt.Sprintf("F%d", ev.Key-int(glfw.KeyF1)+1)
+	}
+	return "Unidentified"
+}
+
+// domKeyCode maps a GLFW key code to the DOM KeyboardEvent.code value
+// (physical key identifier, "KeyA"/"Digit1"/"ArrowLeft"/...).
+func domKeyCode(ev window.Event) string {
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyEnter, glfw.KeyKPEnter:
+		return "Enter"
+	case glfw.KeyBackspace:
+		return "Backspace"
+	case glfw.KeyTab:
+		return "Tab"
+	case glfw.KeyEscape:
+		return "Escape"
+	case glfw.KeyDelete:
+		return "Delete"
+	case glfw.KeyInsert:
+		return "Insert"
+	case glfw.KeyLeft:
+		return "ArrowLeft"
+	case glfw.KeyRight:
+		return "ArrowRight"
+	case glfw.KeyUp:
+		return "ArrowUp"
+	case glfw.KeyDown:
+		return "ArrowDown"
+	case glfw.KeyHome:
+		return "Home"
+	case glfw.KeyEnd:
+		return "End"
+	case glfw.KeyPageUp:
+		return "PageUp"
+	case glfw.KeyPageDown:
+		return "PageDown"
+	case glfw.KeyCapsLock:
+		return "CapsLock"
+	case glfw.KeySpace:
+		return "Space"
+	case glfw.KeyLeftShift:
+		return "ShiftLeft"
+	case glfw.KeyRightShift:
+		return "ShiftRight"
+	case glfw.KeyLeftControl:
+		return "ControlLeft"
+	case glfw.KeyRightControl:
+		return "ControlRight"
+	case glfw.KeyLeftAlt:
+		return "AltLeft"
+	case glfw.KeyRightAlt:
+		return "AltRight"
+	case glfw.KeyLeftSuper:
+		return "MetaLeft"
+	case glfw.KeyRightSuper:
+		return "MetaRight"
+	}
+	if ev.Key >= 'A' && ev.Key <= 'Z' {
+		return "Key" + string(rune(ev.Key))
+	}
+	if ev.Key >= '0' && ev.Key <= '9' {
+		return "Digit" + string(rune(ev.Key))
+	}
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyComma:
+		return "Comma"
+	case glfw.KeyPeriod:
+		return "Period"
+	case glfw.KeySlash:
+		return "Slash"
+	case glfw.KeySemicolon:
+		return "Semicolon"
+	case glfw.KeyApostrophe:
+		return "Quote"
+	case glfw.KeyLeftBracket:
+		return "BracketLeft"
+	case glfw.KeyRightBracket:
+		return "BracketRight"
+	case glfw.KeyBackslash:
+		return "Backslash"
+	case glfw.KeyGraveAccent:
+		return "Backquote"
+	case glfw.KeyMinus:
+		return "Minus"
+	case glfw.KeyEqual:
+		return "Equal"
+	}
+	if ev.Key >= int(glfw.KeyF1) && ev.Key <= int(glfw.KeyF25) {
+		return fmt.Sprintf("F%d", ev.Key-int(glfw.KeyF1)+1)
+	}
+	return "Unidentified"
 }
 
 // handleSelection processes text selection based on granularity and drag state.
