@@ -12,6 +12,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -107,6 +108,20 @@ type Host struct {
 	// firstFrame forces a render on the first loop iteration so the window
 	// never stays black before any dirty rect is established.
 	firstFrame bool
+
+	// dumpPNGDone marks the single-shot WB_DUMP_PNG canvas dump (first paint
+	// only). Per-frame dumps ReadPixels from the GPU surface synchronously
+	// and stall the main loop (window appears frozen).
+	dumpPNGDone bool
+
+	// dbgFrame/lastPaintDbg: WB_PAINT_DEBUG 诊断帧计数与状态（needPaint 变化
+	// 或每 60 帧打印一次，确认 Paint 是否执行、gpuCanvas 是否可用）。
+	dbgFrame       int
+	lastPaintDbg   bool
+
+	// treeHookDoc: DOM 结构变更回调已注册的 Document（LoadHTML 重建时
+	// 指针变化，重新注册）。见 ensureTreeChangeHook。
+	treeHookDoc *dom.Document
 
 	// needsResizeDump is set true on EventResize, cleared after DumpRTCallback fires
 	// once on the re-laid-out tree. Prevents dumping every frame.
@@ -1018,6 +1033,10 @@ func (h *Host) Run() {
 		// missed (e.g. maximize/un-maximize on some GLFW/platform combos).
 		h.wv.Resize(h.win.Width(), h.win.Height())
 
+		// ★ DOM 结构变更回调（appendChild 等 → MarkRenderTreeDirty）——
+		// 每帧幂等注册，LoadHTML 重建 Document 时自动跟随。
+		h.ensureTreeChangeHook()
+
 		h.wv.EnsureLayout()
 		if ftMode {
 			ftLayoutEnd = time.Now()
@@ -1162,6 +1181,13 @@ func (h *Host) Run() {
 		//   - 鼠标移动 → EventCursorMove 无条件 MarkAllDirty（滚动条
 		//     hover 高亮依赖 cursor 位置，见 processEvents）
 		needPaint := h.firstFrame || (rv != nil && (rv.IsDirty() || h.smoothActive || animActive || caretTick))
+		if os.Getenv("WB_PAINT_DEBUG") != "" {
+			if needPaint && (h.lastPaintDbg != needPaint || h.dbgFrame%60 == 0) {
+				log.Printf("[paintdbg] frame=%d needPaint=%v firstFrame=%v dirty=%v caret=%v rv=%v",
+					h.dbgFrame, needPaint, h.firstFrame, rv != nil && rv.IsDirty(), caretTick, rv != nil)
+			}
+			h.dbgFrame++
+		}
 		h.firstFrame = false
 		if needPaint {
 			perfRenders++
@@ -1190,6 +1216,9 @@ func (h *Host) Run() {
 				ownsCanvas = false
 			}
 			if gpuCanvas != nil {
+				if os.Getenv("WB_PAINT_DEBUG") != "" {
+					log.Printf("[paintdbg] gpuCanvas ok %dx%d", gpuCanvas.Width(), gpuCanvas.Height())
+				}
 				// Update text selection from stored coordinates against the
 				// current render tree (robust to rebuilds).
 				h.updateSelection(rv)
@@ -1398,12 +1427,16 @@ func (h *Host) Run() {
 					_, _ = h.paintLogFile.WriteString(line)
 					_ = h.paintLogFile.Sync()
 					h.snapMu.Unlock()
-					// ★ WB_DUMP_PNG=1：Paint 后把 canvas（pixelCache 读回）
-					//   内容存 PNG，与 BitBlt 屏幕截图对比——区分"绘制没
-					//   上 canvas"与"canvas 有但屏幕没显示"。
-					if os.Getenv("WB_DUMP_PNG") != "" {
-						dumpCanvasPNG(gpuCanvas, "_canvas_dump.png")
-					}
+				}
+				// ★ WB_DUMP_PNG=1：Paint 后把 canvas（pixelCache 读回）
+				//   内容存 PNG。独立于 WB_PAINT_LOG（paintLogFile 未开时
+				//   也要能 dump）。⚠️ 只 dump 首帧一次——每帧 dump 会从
+				//   GPU surface 同步 ReadPixels（Snapshot+ReadPixels），
+				//   主循环被 GPU 队列阻塞 → 窗口无响应/死锁（用户实测
+				//   WB_DUMP_PNG=1 窗口卡死）。首帧读一次可接受。
+				if os.Getenv("WB_DUMP_PNG") != "" && !h.dumpPNGDone {
+					h.dumpPNGDone = true
+					dumpCanvasPNG(gpuCanvas, "_canvas_dump.png")
 				}
 				if ownsCanvas {
 					gpuCanvas.Release()
@@ -1893,15 +1926,63 @@ func (h *Host) termTestTick() {
 	if interp == nil {
 		return
 	}
+	// WB_TERM_QUERY=1 纯查询模式：不点击、不注入测试数据，只查询终端
+	// DOM 状态（xterm rows 渲染 + helper textarea computed style），用于
+	// 复现用户真实场景（仅 PTY 真实输出，无任何测试注入）。
+	queryMode := os.Getenv("WB_TERM_QUERY") != "" && os.Getenv("WB_TERM_TEST") == ""
+	if queryMode && h.termTestStep != 200 && h.termTestStep != 260 {
+		return
+	}
 	switch h.termTestStep {
 	case 30:
-		log.Printf("[termtest] 点击新建终端按钮")
-		_, _ = interp.RunJS(`(function(){
-			var btn = document.querySelector('.term-create-btn');
-			if (!btn) { window.__termDiag = 'NO_CREATE_BTN'; return; }
-			var ev = new Event('click', {bubbles:true});
-			btn.dispatchEvent(ev);
-		})()`)
+		if os.Getenv("WB_CLICK_TEST") != "" {
+			// ★ 真实点击路径：查按钮中心 → handleClick（HitTest + DOM
+			// click 派发），与用户鼠标点击完全一致。dispatchEvent 是
+			// 直接触发监听器、绕过 HitTest/handleClick，可能掩盖
+			// 「真实点击不生效」问题——用户反馈手动点「新建终端」后
+			// 终端空白（只显示输入字符 w），怀疑 handleClick 链路。
+			log.Printf("[termtest] 真实 handleClick 点击新建终端")
+			v, _ := interp.RunJS(`(function(){
+				var btn = document.querySelector('.term-create-btn');
+				if (!btn) return '';
+				var r = btn.getBoundingClientRect();
+				return JSON.stringify({x: r.left + r.width/2, y: r.top + r.height/2});
+			})()`)
+			var pos struct {
+				X float64 `json:"x"`
+				Y float64 `json:"y"`
+			}
+			if err := json.Unmarshal([]byte(v.ToString()), &pos); err == nil && pos.X > 0 {
+				csX, csY := h.win.ContentScale()
+				if csX <= 0 {
+					csX = 1
+				}
+				if csY <= 0 {
+					csY = 1
+				}
+				rv := h.wv.RenderView()
+				if rv != nil {
+					log.Printf("[termtest] handleClick at css=(%.0f,%.0f)", pos.X, pos.Y)
+					h.handleClick(rv, window.Event{
+						Type:   window.EventMouseButton,
+						X:      pos.X * csX,
+						Y:      pos.Y * csY,
+						Button: int(glfw.MouseButton1),
+						Action: int(glfw.Release),
+					})
+				}
+			} else {
+				log.Printf("[termtest] 按钮 rect 查询失败: %q", v.ToString())
+			}
+		} else {
+			log.Printf("[termtest] 点击新建终端按钮")
+			_, _ = interp.RunJS(`(function(){
+				var btn = document.querySelector('.term-create-btn');
+				if (!btn) { window.__termDiag = 'NO_CREATE_BTN'; return; }
+				var ev = new Event('click', {bubbles:true});
+				btn.dispatchEvent(ev);
+			})()`)
+		}
 	case 180:
 		// ① 测异步调度：xterm 6 的 write 处理用 setTimeout/microtask 调度，
 		//   渲染依赖 rAF——若某环不驱动则 DOM 渲染器永不渲染。
@@ -1938,7 +2019,103 @@ func (h *Host) termTestTick() {
 			out.lines = lines.join(' | ');
 			out.recv = window.__termRecv || 0;
 			out.recvLast = window.__termRecvLast || '';
+			// ★ helper textarea 样式诊断：xterm.css 要求 absolute+opacity:0+
+			// left:-9999em 脱离文档流；若引擎未应用则 textarea 可见占位
+			try {
+				var ta = document.querySelector('.xterm-helper-textarea');
+				if (ta) {
+					var cs = getComputedStyle(ta);
+					out.ta = {pos: cs.position, op: cs.opacity, left: cs.left, top: cs.top, w: cs.width, h: cs.height, z: cs.zIndex, disp: cs.display};
+					out.taValue = (ta.value || '').slice(0, 40);
+					out.taPlaceholder = ta.placeholder || '';
+					var r = ta.getBoundingClientRect();
+					out.taRect = {x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)};
+				} else { out.ta = 'NO_TEXTAREA'; }
+			} catch(e) { out.taErr = String(e.message || e); }
+			// xterm 容器几何（终端区域位置）
+			try {
+				var xt = document.querySelector('.xterm');
+				if (xt) {
+					var xr = xt.getBoundingClientRect();
+					out.xtermRect = {x: Math.round(xr.left), y: Math.round(xr.top), w: Math.round(xr.width), h: Math.round(xr.height)};
+					var csx = getComputedStyle(xt);
+					out.xtermOverflow = csx.overflow;
+				} else { out.xterm = 'NO_XTERM'; }
+			} catch(e) { out.xtermErr = String(e.message || e); }
 			out.st = window.__st; out.pm = window.__pm; out.raf = window.__raf;
+			// xterm 区域含 W 的元素（用户反馈终端显示一长串 W——怀疑 xterm
+			// 字符宽度测量 span「WWWW...」被引擎渲染；浏览器中它应
+			// visibility:hidden 不显示）
+			try {
+				var ws = [];
+				var xels = document.querySelectorAll('.xterm *');
+				for (var i = 0; i < xels.length; i++) {
+					var t = (xels[i].textContent || '');
+					var tr = t.trim();
+					if (tr.indexOf('W') >= 0 && tr.length > 5) {
+						var r = xels[i].getBoundingClientRect();
+						var csx = getComputedStyle(xels[i]);
+						ws.push({tag: xels[i].tagName, cls: (xels[i].className || '').toString().slice(0, 30), txt: t.slice(0, 50), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), disp: csx.display, vis: csx.visibility, pos: csx.position, op: csx.opacity});
+					}
+				}
+				out.termW = ws;
+				// rows 第一个字符 span 的 computed style（渲染树构建是否跳过）
+				try {
+					var r0 = document.querySelector('.xterm-rows > div > span, .xterm-rows div span');
+					if (r0) {
+						var rcs = getComputedStyle(r0);
+						out.rowSpan = {txt: r0.textContent.slice(0, 10), disp: rcs.display, vis: rcs.visibility, pos: rcs.position, fontSz: rcs.fontSize, lineH: rcs.lineHeight, h: rcs.height};
+						var pr = r0.parentNode;
+						var pcs = pr ? getComputedStyle(pr) : null;
+						out.rowDiv = pcs ? {disp: pcs.display, vis: pcs.visibility, pos: pcs.position, fontSz: pcs.fontSize, lineH: pcs.lineHeight, h: pcs.height, styleH: pr.style ? pr.style.height : '', styleLH: pr.style ? pr.style.lineHeight : ''} : 'no-parent';
+					} else { out.rowSpan = 'NO_SPAN'; }
+				} catch(e) { out.rowSpanErr = String(e.message || e); }
+				// xterm 测量元素 offsetHeight/offsetWidth（cellHeight/cellWidth
+				// 计算来源——若返回 NaN/0 则 xterm 算出 NaN 行高）
+				try {
+					var ms = document.querySelector('.xterm-char-measure-element');
+					if (ms) {
+						out.measure = {offsetH: ms.offsetHeight, offsetW: ms.offsetWidth, rectH: ms.getBoundingClientRect().height, rectW: ms.getBoundingClientRect().width};
+					}
+				} catch(e) { out.measureErr = String(e.message || e); }
+				// canvas 2D measureText（xterm 的 cellWidth/cellHeight 计算来源）
+				try {
+					var cv = document.createElement('canvas');
+					var cx = cv.getContext('2d');
+					if (cx && cx.measureText) {
+						cx.font = '13px monospace';
+						var mt = cx.measureText('W');
+						out.cvMeasure = {
+							width: mt.width, actualBB: mt.actualBoundingBoxAscent, actualBBD: mt.actualBoundingBoxDescent,
+							fontBBAscent: mt.fontBoundingBoxAscent, fontBBD: mt.fontBoundingBoxDescent,
+							hasAscent: typeof mt.actualBoundingBoxAscent
+						};
+					} else { out.cvMeasure = 'NO_CTX'; }
+				} catch(e) { out.cvMeasureErr = String(e.message || e); }
+			} catch(e) { out.termWErr = String(e.message || e); }
+			// 文件浏览器诊断：toolbar 标题 + 工作区列表几何/文字（用户反馈
+			// 「文件浏览器那几个文字的那一栏显示异常」，查布局与颜色）
+			try {
+				var fe = document.querySelector('.file-explorer');
+				if (fe) {
+					var fr = fe.getBoundingClientRect();
+					out.fe = {x: Math.round(fr.left), y: Math.round(fr.top), w: Math.round(fr.width), h: Math.round(fr.height)};
+					var items = [];
+					var wss = document.querySelectorAll('.ws-item');
+					for (var i = 0; i < wss.length; i++) {
+						var wr = wss[i].getBoundingClientRect();
+						var nm = wss[i].querySelector('.ws-name');
+						items.push({x: Math.round(wr.left), y: Math.round(wr.top), w: Math.round(wr.width), h: Math.round(wr.height), txt: nm ? nm.textContent.slice(0, 20) : ''});
+					}
+					out.feWs = items;
+					var tt = document.querySelector('.tb-title');
+					if (tt) {
+						var tr = tt.getBoundingClientRect();
+						var tcs = getComputedStyle(tt);
+						out.feTitle = {txt: tt.textContent, x: Math.round(tr.left), y: Math.round(tr.top), w: Math.round(tr.width), h: Math.round(tr.height), color: tcs.color, bg: tcs.backgroundColor, disp: tcs.display};
+					}
+				} else { out.fe = 'NO_FILE_EXPLORER'; }
+			} catch(e) { out.feErr = String(e.message || e); }
 			// xterm 内部 buffer 状态（区分「数据没进 buffer」vs「渲染没执行」）
 			try {
 				var lt = window.__lastTerm;
@@ -1953,6 +2130,22 @@ func (h *Host) termTestTick() {
 			return JSON.stringify(out);
 		})()`)
 		log.Printf("[termtest] RESULT %s", v.ToString())
+		// ★ 稳定后再次 dump canvas（重置一次性标志 → 下帧 Paint 重新 dump）
+		h.dumpPNGDone = false
+		// ★ 测试 DOM 变更 → 渲染树重建链路：appendChild 一个固定节点，
+		//   下帧 dump 看它是否进渲染树（若不在则重建未触发）。
+		_, _ = interp.RunJS(`(function(){
+			var t = document.getElementById('__tree_test');
+			if (!t) {
+				t = document.createElement('div');
+				t.id = '__tree_test';
+				t.style.cssText = 'position:fixed;left:5px;top:500px;width:10px;height:10px;background:red';
+				document.body.appendChild(t);
+			}
+		})()`)
+		// ★ PTY 输出后重新 dump 渲染树（DumpRTCallback 下帧触发，desktop_diag.log
+		//   覆盖）——此时 xterm rows 已更新，看 rows 的 RenderText 是否在树里。
+		h.needsResizeDump = true
 		// ③ 键盘输入方向验证：向终端发送 `dir` 命令，PTY 执行后输出回显。
 		_, _ = interp.RunJS(`(function(){
 			var ks = Object.keys(window.__desktopTerminals || {});
@@ -1971,7 +2164,39 @@ func (h *Host) termTestTick() {
 		})()`)
 		log.Printf("[termtest] DIR-RESULT %s", v2.ToString())
 		h.termTestDone = true
+		// ★ dir 输出后再次 dump 渲染树：验证 DOM 变更（treehook）→ 重建
+		// → rows 字符 span 生成 RenderText。
+		h.needsResizeDump = true
 	}
+}
+
+// ensureTreeChangeHook 每帧幂等注册 DOM 结构变更回调：DOM 变更
+// （appendChild/removeChild/setTextContent 等）→ MarkRenderTreeDirty →
+// 下帧重建渲染树。否则动态 DOM 更新（xterm 每字符 appendChild span 到
+// rows）不触发重建，内容永远不显示。LoadHTML 重建 Document 时指针变化，
+// 自动重新注册。
+func (h *Host) ensureTreeChangeHook() {
+	if h.wv == nil || h.wv.MainFrame() == nil {
+		return
+	}
+	doc := h.wv.MainFrame().Document()
+	if doc == nil || doc == h.treeHookDoc {
+		return
+	}
+	h.treeHookDoc = doc
+	if os.Getenv("WB_TERM_DEBUG") != "" {
+		log.Printf("[treehook] registered doc=%p", doc)
+	}
+	doc.SetTreeChangeCallback(func() {
+		if os.Getenv("WB_TERM_DEBUG") != "" {
+			log.Printf("[treehook] tree change!")
+		}
+		if mf := h.wv.MainFrame(); mf != nil {
+			if fr := mf.Frame(); fr != nil {
+				fr.MarkRenderTreeDirty()
+			}
+		}
+	})
 }
 
 // autodragTick 自动模拟 textarea resize 拖拽（WB_AUTODRAG=1 时每帧调用）：// 自动打开设置面板「指令」tab → 找第一个 textarea 的右下角手柄 → 模拟
@@ -2108,7 +2333,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 	if h.autodragOn {
 		h.autodragTick()
 	}
-	if os.Getenv("WB_TERM_TEST") != "" && !h.termTestDone {
+	if (os.Getenv("WB_TERM_TEST") != "" || os.Getenv("WB_TERM_QUERY") != "") && !h.termTestDone {
 		h.termTestTick()
 	}
 	// Consume buffered IME events (composition updates, committed chars,

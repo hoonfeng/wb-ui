@@ -22,6 +22,29 @@ type Document struct {
 	contentType  string
 	url          string
 	quirks       bool
+
+	// onTreeChange 是 DOM 结构变更（appendChild/insertBefore/removeChild/
+	// setTextContent/setNodeValue 等）通知回调。宿主（app.Host）注册它来
+	// MarkRenderTreeDirty——否则动态 DOM 更新（如 xterm 每字符 appendChild
+	// span 到 rows）不触发渲染树重建，内容永远不显示。
+	// ★ 回调在 DOM 操作线程同步调用；宿主侧只置标志（下帧重建），无重入。
+	onTreeChange func()
+}
+
+// SetTreeChangeCallback 注册 DOM 结构变更回调（宿主在 LoadHTML 后调用）。
+func (d *Document) SetTreeChangeCallback(fn func()) {
+	d.onTreeChange = fn
+}
+
+// notifyTreeChange 在文档树结构变更时通知宿主（仅当节点已挂入文档树）。
+func (b *nodeBase) notifyTreeChange() {
+	if !b.isInDocumentTree() {
+		return
+	}
+	d := b.documentForAdoption()
+	if d != nil && d.onTreeChange != nil {
+		d.onTreeChange()
+	}
 }
 
 // NewDocument creates an empty Document. It is the root of a tree and is its own owner

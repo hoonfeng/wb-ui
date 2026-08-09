@@ -8,6 +8,7 @@ package webkit
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"strings"
@@ -787,9 +788,32 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		box := rv.FindRenderBoxForNode(el)
 		if box == nil {
+			// ★ DOM 变更后渲染树可能尚未重建（treehook 下帧才重建）——
+			// offsetHeight/offsetWidth 此时返回 0 → xterm 初始化测量缓存
+			// NaN → style.height="NaNpx" → 行高异常（310px）→ 终端内容
+			// 画到视口外。强制重建一次再查。
+			if fr2 := wv.mainFrame.Frame(); fr2 != nil {
+				fr2.MarkRenderTreeDirty()
+				fr2.RebuildRenderTreeIfNeeded()
+			}
+			forceLayout()
+			rv = wv.RenderView()
+			if rv != nil {
+				box = rv.FindRenderBoxForNode(el)
+			}
+		}
+		if box == nil {
 			return 0, 0, 0, 0
 		}
-		return box.X(), box.Y(), box.Width(), box.Height()
+		w, h := box.Width(), box.Height()
+		// ★ NaN/负值防御：布局未稳定时（xterm 初始化测量时刻）box 几何
+		// 可能是 NaN——offsetWidth/offsetHeight 返回 NaN 会让 xterm 的
+		// measure() 条件（0!==NaN 恒真）把 NaN 缓存进 _result → 行高
+		// NaN。返回 0 使 xterm 条件为假、不更新缓存（保持 0 待重测）。
+		if math.IsNaN(w) || math.IsNaN(h) || w < 0 || h < 0 {
+			return 0, 0, 0, 0
+		}
+		return box.X(), box.Y(), w, h
 	}
 }
 

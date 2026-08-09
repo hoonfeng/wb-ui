@@ -120,7 +120,11 @@ func (t *Text) NodeName() string { return "#text" }
 func (t *Text) NodeValue() string { return t.data }
 
 // SetNodeValue sets the data, mirroring CharacterData::setNodeValue().
-func (t *Text) SetNodeValue(s string) error { t.SetData(s); return nil }
+func (t *Text) SetNodeValue(s string) error {
+	t.SetData(s)
+	t.notifyTreeChange()
+	return nil
+}
 
 // cloneShallow returns a copy with the same data, mirroring cloneNodeInternal.
 func (t *Text) cloneShallow(doc *Document) Node { return NewText(doc, t.data) }

@@ -344,6 +344,9 @@ var (
 	CgoTimingSaveLayer time.Duration
 )
 
+// wbDrawLogCount: WB_TEXT_DEBUG 时限制 DrawText 内容日志条数（首屏定位用）。
+var wbDrawLogCount int
+
 // CanvasTimingSummary returns the accumulated cgo timing as a string.
 func CanvasTimingSummary() string {
 	return fmt.Sprintf("restore=%v save=%v clip=%v trans=%v draw=%v clipRR=%d saveLayer=%d/%v",
@@ -892,6 +895,10 @@ type Point struct {
 func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	if col.A == 0 || len(text) == 0 {
 		return
+	}
+	if os.Getenv("WB_TEXT_DEBUG") != "" && wbDrawLogCount < 30 {
+		log.Printf("[drawtext] %q at (%.0f,%.0f) family=%q size=%.1f", text, x, y, font.Family, font.Size)
+		wbDrawLogCount++
 	}
 	skFont := c.getSkiaFont(font)
 	if skFont == nil {

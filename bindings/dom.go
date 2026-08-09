@@ -129,6 +129,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				return jsc.ObjectValue(selObj)
 			}, 0)))
 		g.Set("document", jsc.ObjectValue(docObj))
+		// ★ 幂等刷新也需重新应用 canvas 2D 补丁（新 document 对象的
+		// createElement 未包装，xterm 测量仍会失败）。
+		applyCanvas2DPatch(rt)
 		return
 	}
 
@@ -139,6 +142,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("window", jsc.ObjectValue(g))
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
+
+	// ★ devicePixelRatio（浏览器标准）：xterm 的 dpr = window.devicePixelRatio
+	//   （无 fallback）用于 cellHeight = ceil(charSize.height × dpr) 计算。
+	//   此前未定义 → undefined → cell.height = NaN → style.height="NaNpx"
+	//   → 行高异常、终端内容画到视口外（空白）。CSS 像素渲染 → 1。
+	g.Set("devicePixelRatio", jsc.NumberValue(1))
 
 	// ── DOM Constructors (Go 原生) ─────────────────────────
 	// Each constructor's .prototype is extracted and used by the
@@ -1713,8 +1722,70 @@ if len(a) >= 2 { offset = int64(a[1].ToNumber()) }
 			return jsc.ObjectValue(selObj)
 		}, 0)))
 
+	// ★ canvas 2D 测量（xterm.js 的 cellWidth/cellHeight 计算依赖）：
+	// createElement('canvas') 附加 getContext('2d') + measureText。
+	// wb-ui 无原生 canvas 2D——measureText 用 DOM span 实测字符尺寸，
+	// 返回 TextMetrics 结构。此前 canvas 无 getContext → xterm 测量
+	// 得到 NaN → style.height="NaNpx" → 行高异常（310px）→ 终端内容
+	// 画到视口外（y≈918），用户看到终端空白。
+	applyCanvas2DPatch(rt)
 	// 完整注册完成——打上幂等标记（后续调用仅刷新 document）。
 	rt.GlobalObject().Set(domBindingsMarker, jsc.BooleanValue(true))
+}
+
+// applyCanvas2DPatch 包装 document.createElement：canvas 元素附加
+// getContext('2d') + measureText（xterm 的 cellWidth/cellHeight 测量依赖）。
+// 幂等：window.document 每次幂等刷新（新 docObj）都需重新包装。
+func applyCanvas2DPatch(rt *jsc.Interpreter) {
+	if v, err := rt.RunJS(`(function(){
+  var doc = window.document;
+  if (!doc || doc.__canvasPatched) return 'skip';
+  doc.__canvasPatched = true;
+  var orig = doc.createElement.bind(doc);
+  doc.createElement = function(tag){
+    var el = orig(tag);
+    if (el && String(tag).toLowerCase() === 'canvas') {
+      if (!el.getContext) {
+        el.getContext = function(type){
+          if (type !== '2d') return null;
+          if (el.__ctx) return el.__ctx;
+          var ctx = {
+            font: '10px sans-serif',
+            measureText: function(text){
+              var s = doc.createElement('span');
+              s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:' + (this.font || '10px sans-serif');
+              s.textContent = String(text);
+              var w = 0, h = 0;
+              if (doc.body) {
+                doc.body.appendChild(s);
+                try { var r = s.getBoundingClientRect(); w = r.width || 0; h = r.height || 0; } catch(e) {}
+                if (w <= 0) { w = s.offsetWidth || 0; }
+                if (h <= 0) { h = s.offsetHeight || 0; }
+                doc.body.removeChild(s);
+              }
+              // fallback：wb-ui 对未布局 span 的测量可能为 0——按 font-size 估算
+              var fs = parseFloat(this.font) || 13;
+              if (w <= 0) { w = String(text).length * fs * 0.6; }
+              if (h <= 0) { h = fs * 1.2; }
+              var ascent = h * 0.8, descent = h * 0.2;
+              return { width: w, actualBoundingBoxAscent: ascent, actualBoundingBoxDescent: descent,
+                       fontBoundingBoxAscent: ascent, fontBoundingBoxDescent: descent, height: h };
+            }
+          };
+          el.__ctx = ctx;
+          return ctx;
+        };
+        el.toDataURL = function(){ return ''; };
+      }
+    }
+    return el;
+  };
+  return 'patched';
+})()`); err != nil {
+		fmt.Fprintf(os.Stderr, "[bindings] canvas patch RunJS error: %v\n", err)
+	} else if os.Getenv("WB_TERM_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[bindings] canvas patch: %s\n", v.ToString())
+	}
 }
 
 type ElementWrapper struct {

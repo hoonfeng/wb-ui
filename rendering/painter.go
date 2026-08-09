@@ -23,8 +23,10 @@ package rendering
 import (
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"wb-ui/dom"
 	"wb-ui/layout"
@@ -770,13 +772,79 @@ func PaintOutline(box *RenderBox, info *PaintInfo) {
 // inverted color (white) so that it is legible against the selection highlight
 // background, matching browser behavior. text-decoration (underline / line-through)
 // is painted after each run.
+//
+// ★ WB_TEXT_DEBUG=1：每 3s 汇总一次 PaintText 调用统计（调用次数/有段数/
+// 实际 DrawText 次数/被裁剪数），用于排查「DOM/布局正常但文字不显示」。
+var wbTextDebugCalls, wbTextDebugWithSegs, wbTextDebugDraws, wbTextDebugSkipped int
+var wbTextDebugInView, wbTextDebugOutView, wbTextDebugBadY int
+var wbTextDebugLast time.Time
+
+// wbTermLogCount: WB_TEXT_DEBUG 时限制终端区域（y>600）DrawText 日志条数。
+var wbTermLogCount int
+
+func paintTextDebugLog() {
+	if os.Getenv("WB_TEXT_DEBUG") == "" {
+		return
+	}
+	now := time.Now()
+	if wbTextDebugLast.IsZero() {
+		wbTextDebugLast = now
+		return
+	}
+	if now.Sub(wbTextDebugLast) < 3*time.Second {
+		return
+	}
+	log.Printf("[text-debug] 3s: calls=%d segs=%d draws=%d skipped=%d (跳过率 %.0f%%) 视口内y0-800=%d 视口外=%d 负y=%d",
+		wbTextDebugCalls, wbTextDebugWithSegs, wbTextDebugDraws, wbTextDebugSkipped,
+		100*float64(wbTextDebugSkipped)/float64(max(1, wbTextDebugCalls)),
+		wbTextDebugInView, wbTextDebugOutView, wbTextDebugBadY)
+	wbTextDebugCalls, wbTextDebugWithSegs, wbTextDebugDraws, wbTextDebugSkipped = 0, 0, 0, 0
+	wbTextDebugInView, wbTextDebugOutView, wbTextDebugBadY = 0, 0, 0
+	wbTextDebugLast = now
+}
+
 func PaintText(text *RenderText, info *PaintInfo) {
+	wbTextDebugCalls++
+	paintTextDebugLog()
 	if text == nil || info == nil || info.canvas == nil {
 		return
 	}
 	st := text.Style()
 	if st == nil {
 		return
+	}
+	// ★ visibility:hidden/collapse 的文字不绘制（浏览器语义：占位但不画）。
+	// xterm 的字符宽度测量 span（.xterm-char-measure-element 内容 32 个 W，
+	// visibility:hidden + position:absolute）之前被 PaintText 画出 → 终端
+	// 显示一长串 W。paintObjectForeground 的 RenderText 分支绕过
+	// IsVisible()（RenderText 无 box），必须在此处检查。
+	if st.Visibility == "hidden" || st.Visibility == "collapse" {
+		return
+	}
+	// 诊断：32W 测量文本为何仍被绘制（若 Visibility 继承失败会走到这里）
+	if os.Getenv("WB_TEXT_DEBUG") != "" && len(text.OriginalText()) >= 8 {
+		if t8 := text.OriginalText()[:8]; t8 == "WWWWWWWW" {
+			par := text.Parent()
+			pv := "nil"
+			if par != nil {
+				if ps := par.Style(); ps != nil {
+					pv = ps.Visibility
+				}
+			}
+			log.Printf("[text-debug] 32W drawn! self.vis=%q parent.vis=%q", st.Visibility, pv)
+		}
+	}
+	// 终端区域文字诊断：y>600（终端 y=624-778 区域）的 DrawText 前 20 条
+	if os.Getenv("WB_TEXT_DEBUG") != "" && wbTermLogCount < 20 && len(text.Segments()) > 0 {
+		seg0 := text.Segments()[0]
+		if seg0.Y > 600 && seg0.Y < 800 {
+			txt := text.OriginalText()
+			if len(txt) > 20 {
+				txt = txt[:20]
+			}
+			log.Printf("[text-debug] TERMREGION text=%q at (%.0f,%.0f) segs=%d vis=%q", txt, seg0.X, seg0.Y, len(text.Segments()), st.Visibility)
+			wbTermLogCount++
+		}
 	}
 	col := toGraphicsColor(st.Color)
 	if col.A == 0 {
@@ -800,6 +868,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		_ = content
 		return
 	}
+	wbTextDebugWithSegs++
 	runes := []rune(content)
 	rv := info.rv
 	// Browsers default selected text to white so it is legible against the
@@ -862,6 +931,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			continue
 		}
 		if !info.intersects(rectFromLayout(seg.X, seg.Y, seg.Width, seg.Height)) {
+			wbTextDebugSkipped++
 			continue
 		}
 		baseline := seg.Y + ascent
@@ -952,6 +1022,14 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			// Entire segment unselected: draw in normal color.
 			sub := collapseWhitespace(string(runes[seg.Start:end]))
 			if sub != "" {
+				wbTextDebugDraws++
+				if seg.Y >= 0 && seg.Y < 800 {
+					wbTextDebugInView++
+				} else if seg.Y < 0 {
+					wbTextDebugBadY++
+				} else {
+					wbTextDebugOutView++
+				}
 				info.canvas.DrawText(seg.X, baseline, sub, font, col)
 				paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 			}

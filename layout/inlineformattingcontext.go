@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
+	"wb-ui/dom"
 	"wb-ui/style"
 )
 
@@ -638,6 +640,16 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				lineHeight = cldBH
 			}
 			cldW := cldG.BorderBoxWidth() + margin.Horizontal()
+			// ★ 空 inline span（xterm DOM renderer 的空格列 span——子节点
+			// 只有空白 text，渲染树构建跳过空白 → 无 RenderText）的宽度被
+			// 错误算成行宽（572px）→ 后续词水平错位 572px（终端多列错位）。
+			// 浏览器语义：空内联不占行宽。
+			if cld.IsInline() && !cld.IsReplaced() {
+				if el := cld.Element(); el != nil && inlineIsEmpty(el) &&
+					cldG.BorderBoxWidth() >= currentLine.availWidth {
+					cldW = 0
+				}
+			}
 			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && cs.WhiteSpace != style.WhiteSpaceNoWrap {
 				lines = append(lines, currentLine)
 				newY := currentLine.y + lineHeight
@@ -881,6 +893,25 @@ func computeInlineContentWidth(box *ElementBox, state *LayoutState) float64 {
 		return 0
 	}
 	return maxRight - base
+}
+
+// inlineIsEmpty reports whether an inline element has no visible content
+// (no children, or only whitespace-only text children). Used to avoid the
+// xterm whitespace-column span occupying a whole line width.
+func inlineIsEmpty(el *dom.Element) bool {
+	if el.FirstChild() == nil {
+		return true
+	}
+	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+		if t, ok := c.(*dom.Text); ok {
+			if strings.TrimSpace(t.Data()) != "" {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return true
 }
 
 var _ = style.DisplayInline
