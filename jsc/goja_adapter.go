@@ -575,7 +575,20 @@ func NewArray(proto *JSObject, items []JSValue) *JSObject {
 	if proto != nil && proto.interp != nil {
 		interp = proto.interp
 	} else {
-		interp = &Interpreter{vm: goja.New()}
+		// 无 proto 时复用 items 中第一个已绑定 runtime 的对象，避免把
+		// 属于其他 runtime 的对象塞进新建 runtime 的数组 → goja 抛
+		// "Illegal runtime transition of an Object"（ResizeObserver /
+		// MutationObserver / IntersectionObserver 回调、NodeList 等
+		// 元素/记录数组都走这里）。
+		for _, item := range items {
+			if item.interp != nil && item.interp.vm != nil {
+				interp = item.interp
+				break
+			}
+		}
+		if interp == nil {
+			interp = &Interpreter{vm: goja.New()}
+		}
 	}
 	gojaItems := make([]interface{}, len(items))
 	for i, item := range items {
