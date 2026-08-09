@@ -297,6 +297,14 @@ type Host struct {
 	// WB_TERM_TEST=1：自动化验证终端（自动点「新建终端」→ 查 xterm DOM/PTY 输出）。
 	termTestStep int
 	termTestDone bool
+	// WB_DT_DUMP=1：真实模式（无 WB_TERM_QUERY 诊断污染）下帧 300 输出
+	// __devtools 布局诊断——验证真实 fit 后的行数/间隙/光标，不受
+	// termTestTick 的 focus/resize 干扰。
+	dtFrame   int
+	dtDumped  bool
+	// WB_DUMP_PNG_FRAME：Paint 帧计数（WB_DUMP_PNG 在指定帧 dump canvas
+	// 真实绘制像素——终端 fit 完成后才能看到真实间隙/光标）。
+	paintFrame int
 	// OnFrame 每帧回调（主线程）：宿主注入，用于在主循环安全地消费
 	// 外部 goroutine 投递的 JS 推送（如终端 PTY 输出）——goja 非线程
 	// 安全，任何跨 goroutine 的 RunJS 都必须经此排队到主线程执行。
@@ -1381,6 +1389,7 @@ func (h *Host) Run() {
 		}
 
 		if needPaint && rv != nil {
+			h.paintFrame++
 			// Software-rendered backends (X11/Cocoa) expose a CPU canvas; the
 			// GLFW GPU backend wraps its framebuffer surface. Unify both into
 			// gpuCanvas so the paint + Present path below works on every platform.
@@ -1608,13 +1617,37 @@ func (h *Host) Run() {
 				}
 				// ★ WB_DUMP_PNG=1：Paint 后把 canvas（pixelCache 读回）
 				//   内容存 PNG。独立于 WB_PAINT_LOG（paintLogFile 未开时
-				//   也要能 dump）。⚠️ 只 dump 首帧一次——每帧 dump 会从
-				//   GPU surface 同步 ReadPixels（Snapshot+ReadPixels），
-				//   主循环被 GPU 队列阻塞 → 窗口无响应/死锁（用户实测
-				//   WB_DUMP_PNG=1 窗口卡死）。首帧读一次可接受。
+				//   也要能 dump）。⚠️ 每帧 dump 会从 GPU surface 同步
+				//   ReadPixels（Snapshot+ReadPixels），主循环被 GPU 队列
+				//   阻塞 → 窗口无响应/死锁（用户实测 WB_DUMP_PNG=1 窗口
+				//   卡死）。单次 dump 可接受。
+				//   ★ 时机：WB_DUMP_PNG_FRAME 指定帧（默认 0=首帧）；终端
+				//   fit/渲染完成后（帧 300）dump 才能看到真实间隙/光标
+				//   （首帧时终端可能未渲染）。WB_DUMP_PNG 与
+				//   WB_DUMP_PNG_FRAME 任一设置都启用，dump 一次后
+				//   dumpPNGDone 置位。
 				if os.Getenv("WB_DUMP_PNG") != "" && !h.dumpPNGDone {
-					h.dumpPNGDone = true
-					dumpCanvasPNG(gpuCanvas, "_canvas_dump.png")
+					fr := 0
+					if f := os.Getenv("WB_DUMP_PNG_FRAME"); f != "" {
+						fr = atoiOr(f, 0)
+					}
+					if h.paintFrame >= fr {
+						// ★ dump 前读 viewport 区域像素：确认黑色是否在
+						// 帧 300 的 canvas 上（after-fill 每帧黑色但
+						// dump 无黑色——绘制后被覆盖？）
+						if os.Getenv("WB_VIEWPORT_DEBUG") != "" {
+							// viewport 物理区域 ~(409,784 397x189)，读底部
+							// 中点（物理 500, 970）与 scrollable 底下方
+							// （物理 500, 955）
+							c1 := gpuCanvas.PixelAt(500, 970)
+							c2 := gpuCanvas.PixelAt(500, 955)
+							c3 := gpuCanvas.PixelAt(500, 945)
+							log.Printf("[viewport] pre-dump px y=970:(%d,%d,%d) y=955:(%d,%d,%d) y=945:(%d,%d,%d)",
+								c1.R, c1.G, c1.B, c2.R, c2.G, c2.B, c3.R, c3.G, c3.B)
+						}
+						h.dumpPNGDone = true
+						dumpCanvasPNG(gpuCanvas, "_canvas_dump.png")
+					}
 				}
 				if ownsCanvas {
 					gpuCanvas.Release()
@@ -2394,11 +2427,22 @@ func (h *Host) termTestTick() {
 						window.__fitDiag.fitResult = 'called';
 					} else {
 						window.__fitDiag.fitResult = 'no-fitaddon';
-						// 直接 resize 验证容器行数计算
+						// 直接 resize 验证容器行数计算（与 FitAddon 同公式：
+						// innerHeight = parentH - xterm padding - border）
 						var pe2 = t.element.parentElement;
 						var ph = parseInt(getComputedStyle(pe2).height) || 0;
-						var rows = Math.floor(ph / dims.css.cell.height);
-						t.resize(dims.css.cell.width ? Math.floor(pe2.getBoundingClientRect().width / dims.css.cell.width) : 80, rows);
+						var xs = getComputedStyle(t.element);
+						var padT = parseInt(xs.getPropertyValue('padding-top')) || 0;
+						var padB = parseInt(xs.getPropertyValue('padding-bottom')) || 0;
+						var bdT = parseInt(xs.getPropertyValue('border-top-width')) || 0;
+						var bdB = parseInt(xs.getPropertyValue('border-bottom-width')) || 0;
+						var innerH = ph - padT - padB - bdT - bdB;
+						var rows = Math.floor(innerH / dims.css.cell.height);
+						window.__fitDiag.xtermPad = padT + '/' + padB;
+						window.__fitDiag.innerH = innerH;
+						window.__fitDiag.parentH = ph;
+						window.__fitDiag.parentRectH = pe2.getBoundingClientRect().height;
+						t.resize(dims.css.cell.width ? Math.floor(pe2.getBoundingClientRect().width / dims.css.cell.width) : 80, Math.max(1, rows));
 						window.__fitDiag.rowsAfter = t.rows;
 						window.__fitDiag.calcRows = rows;
 					}
@@ -2555,7 +2599,7 @@ func (h *Host) termTestTick() {
 		v7, _ := interp.RunJS(`(function(){
 			var out = {};
 			if (!window.__devtools) return JSON.stringify({err: 'no __devtools'});
-			var sels = ['.app-root', '.main-area', '.right-container', '.bottom-panel', '.panel-content', '.terminal-panel', '.term-content', '.term-xterm-wrap', '.xterm', '.xterm-scrollable-element', '.xterm-viewport', '.xterm-screen', '.xterm-rows', '.status-bar'];
+			var sels = ['.app-root', '.main-area', '.right-container', '.bottom-panel', '.panel-content', '.terminal-panel', '.term-content', '.term-tabs', '.term-tab', '.term-xterm-wrap', '.xterm', '.xterm-scrollable-element', '.xterm-viewport', '.xterm-screen', '.xterm-rows', '.status-bar'];
 			for (var i=0;i<sels.length;i++){
 				try { out[sels[i]] = JSON.parse(window.__devtools.sel(sels[i])); } catch(e){ out[sels[i]] = 'err:' + (e.message||e); }
 			}
@@ -2565,6 +2609,45 @@ func (h *Host) termTestTick() {
 		log.Printf("[termtest] DEVTOOLS %s", v7.ToString())
 		h.termTestDone = true
 	}
+}
+
+// dumpDevtoolsDiag 真实模式下输出 __devtools 布局诊断（WB_DT_DUMP=1 帧 300
+// 调用）：查终端/状态栏几何 + 光标位置 + xterm 行数，验证真实 fit 结果。
+func (h *Host) dumpDevtoolsDiag() {
+	interp := h.wv.JSInterpreter()
+	if interp == nil {
+		log.Printf("[dtdump] no interpreter")
+		return
+	}
+	v, _ := interp.RunJS(`(function(){
+		var out = {};
+		if (!window.__devtools) return JSON.stringify({err: 'no __devtools'});
+		var sels = ['.xterm', '.xterm-viewport', '.xterm-scrollable-element', '.xterm-screen', '.xterm-rows', '.status-bar', '.terminal-panel'];
+		for (var i=0;i<sels.length;i++){
+			try { var o = JSON.parse(window.__devtools.sel(sels[i])); out[sels[i]] = {x:o.x, y:o.y, w:o.w, h:o.h, bg:o.bg, vis:o.vis, disp:o.disp, pos:o.pos}; } catch(e){ out[sels[i]] = 'err:' + (e.message||e); }
+		}
+		// xterm 行数 + 光标
+		var rows = document.querySelectorAll('.xterm-rows > div').length;
+		out.xtermRows = rows;
+		// ★ xterm 内部元素 computed style：渲染树缺失 viewport/scrollable
+		// （painter 未绘制黑色背景）——查 display/visibility/position 是否
+		// 导致渲染树构建跳过。
+		['.xterm', '.xterm-viewport', '.xterm-scrollable-element', '.xterm-screen', '.xterm-rows', '.xterm-helper-textarea'].forEach(function(sel){
+			var e = document.querySelector(sel);
+			if (!e) { out[sel + '-cs'] = 'MISSING'; return; }
+			var s = getComputedStyle(e);
+			out[sel + '-cs'] = {disp: s.display, vis: s.visibility, pos: s.position, w: s.width, h: s.height, op: s.opacity};
+		});
+		var cur = document.querySelector('.xterm-cursor');
+		if (cur) { var cr = cur.getBoundingClientRect(); out.cursor = {x: Math.round(cr.left), y: Math.round(cr.top), w: Math.round(cr.width), h: Math.round(cr.height), cls: (cur.className||'').toString()}; } else { out.cursor = 'NO_CURSOR'; }
+		var t = window.__lastTerm;
+		if (t) { out.termRows = t.rows; out.termCols = t.cols; }
+		return JSON.stringify(out);
+	})()`)
+	log.Printf("[dtdump] %s", v.ToString())
+	// ★ 触发渲染树 re-dump（DumpRTCallback → desktop_diag_*.log）：
+	// 验证 viewport 是否在渲染树（painter 遍历依赖渲染树结构）。
+	h.needsResizeDump = true
 }
 
 // ensureTreeChangeHook 每帧幂等注册 DOM 结构变更回调：DOM 变更
@@ -2732,6 +2815,14 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 	}
 	if (os.Getenv("WB_TERM_TEST") != "" || os.Getenv("WB_TERM_QUERY") != "") && !h.termTestDone {
 		h.termTestTick()
+	}
+	// WB_DT_DUMP=1：真实模式 DEVTOOLS dump（帧 300 一次性）。
+	if os.Getenv("WB_DT_DUMP") != "" && !h.dtDumped {
+		h.dtFrame++
+		if h.dtFrame == 300 {
+			h.dtDumped = true
+			h.dumpDevtoolsDiag()
+		}
 	}
 	// Consume buffered IME events (composition updates, committed chars,
 	// composition end) and apply them to the focused form control. The
@@ -4793,6 +4884,18 @@ func parseHostFloat(s string, def float64) float64 {
 		return def
 	}
 	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// atoiOr parses an int string with a default on error/empty.
+func atoiOr(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s)
 	if err != nil {
 		return def
 	}

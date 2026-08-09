@@ -335,6 +335,16 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if bg.A == 0 {
 		return
 	}
+	// ★ viewport 绘制诊断：xterm-viewport 黑色背景是否实际绘制
+	// （黑色被 paintDebugEnabled 的颜色过滤隐藏，无法从日志确认）。
+	if os.Getenv("WB_VIEWPORT_DEBUG") != "" {
+		if box.Node() != nil {
+			if el, ok := box.Node().(*dom.Element); ok && el.ClassName() == "xterm-viewport" {
+				log.Printf("[viewport] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) op=%.2f intersects=%v",
+					bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height, paintOpacity(box, info), info.intersects(rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())))
+			}
+		}
+	}
 	// Debug: log non-trivial background paints
 	if paintDebugEnabled() && (bg.R != 0 || bg.G != 0 || bg.B != 0) {
 		elName := ""
@@ -366,6 +376,21 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
 	} else {
 		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, bg)
+	}
+	// ★ viewport FillRect 后读像素验证：黑色是否实际写入 canvas
+	// （[viewport] 日志确认进入绘制路径，但 canvas dump 无黑色——
+	// 疑似 FillRect 未生效/坐标错误/被覆盖）。
+	if os.Getenv("WB_VIEWPORT_DEBUG") != "" {
+		if el, ok := box.Node().(*dom.Element); ok && el.ClassName() == "xterm-viewport" {
+			if sdc, ok2 := info.canvas.DeviceClipBounds(); ok2 {
+				// 读 viewport 底部中点像素（物理坐标）
+				c0 := info.canvas.PixelAt(int(sdc.X+sdc.Width/2), int(sdc.Y+sdc.Height-3))
+				log.Printf("[viewport] after-fill pixel=(%d,%d,%d) devclip=(%.0f,%.0f %.0fx%.0f) rect=(%.0f,%.0f %.0fx%.0f)",
+					c0.R, c0.G, c0.B, sdc.X, sdc.Y, sdc.Width, sdc.Height, rect.X, rect.Y, rect.Width, rect.Height)
+			} else {
+				log.Printf("[viewport] after-fill no-devclip")
+			}
+		}
 	}
 	if el, ok := box.Node().(*dom.Element); ok {
 		RecordComponentPaint(el, rect.X, rect.Y, rect.Width, rect.Height, bg, graphics.Color{}, false)

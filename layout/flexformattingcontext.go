@@ -134,6 +134,12 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if bh := state.GeometryForBox(it.box).BorderBoxHeight(); bh > 0 {
 				it.baseSize = bh
 			}
+			// ★ min/max-height 对冻结项同样生效（Chrome：.term-tabs
+			// min-height:28px、内容 25px 时撑到 28）。预布局高度是内容
+			// 实测量，必须再 clamp——否则 min-height 被绕过（term-tabs
+			// 25px vs 浏览器 28px → xterm 容器高 3px → fit 多 1 行 →
+			// 终端内容底部间隙 6px vs 浏览器 19px）。
+			it.baseSize = clampSize(it.baseSize, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
 		}
 		it.hypothetical = it.baseSize
 		it.targetSize = it.baseSize

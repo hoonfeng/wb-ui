@@ -4047,6 +4047,15 @@ func computedStyleFor(el dom.Node) map[string]string {
 			out[strings.ToLower(md.decl.Name)] = strings.TrimSpace(md.decl.ValueString())
 		}
 	}
+	// ★ 简写展开：padding/margin 简写 → 各方向子属性。浏览器
+	// getComputedStyle 对简写返回展开后的子属性（getPropertyValue('padding-top')
+	// 有值）；级联 map 只存简写键时，FitAddon.proposeDimensions 读
+	// padding-top → parseInt("") = NaN → 不减 padding → 行数多算
+	// （.term-xterm-wrap 151px 容器 9 行 vs 浏览器 8 行）→ 终端内容底部
+	// 间隙变小（6px vs 浏览器 19px）。布局层 padding 已生效，只补
+	// computed style 的简写展开即可对齐 fit 计算。
+	expandBoxShorthand(out, "padding", []string{"padding-top", "padding-right", "padding-bottom", "padding-left"})
+	expandBoxShorthand(out, "margin", []string{"margin-top", "margin-right", "margin-bottom", "margin-left"})
 	// 解析 var(--xxx) 引用（自定义属性继承链：:root → body → ... → el）。
 	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
 	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
@@ -4074,6 +4083,42 @@ func computedStyleFor(el dom.Node) map[string]string {
 		}
 	}
 	return out
+}
+
+// expandBoxShorthand 把四边简写（padding/margin 等）展开为子属性：
+// 1 值 → 四边；2 值 → 上下/左右；3 值 → 上/左右/下；4 值 → 上右下左。
+// 仅当简写键存在且子属性键尚未被更具体的规则覆盖时展开。
+func expandBoxShorthand(out map[string]string, shorthand string, subs []string) {
+	v, ok := out[shorthand]
+	if !ok || len(subs) != 4 {
+		return
+	}
+	parts := strings.Fields(v)
+	if len(parts) == 0 {
+		return
+	}
+	var top, right, bottom, left string
+	switch len(parts) {
+	case 1:
+		top, right, bottom, left = parts[0], parts[0], parts[0], parts[0]
+	case 2:
+		top, bottom = parts[0], parts[0]
+		right, left = parts[1], parts[1]
+	case 3:
+		top = parts[0]
+		right, left = parts[1], parts[1]
+		bottom = parts[2]
+	case 4:
+		top, right, bottom, left = parts[0], parts[1], parts[2], parts[3]
+	default:
+		return
+	}
+	vals := []string{top, right, bottom, left}
+	for i, sub := range subs {
+		if _, has := out[sub]; !has {
+			out[sub] = vals[i]
+		}
+	}
 }
 
 // resolveVarInComputed 解析 computedStyle map 中所有 var(--name[,fallback])
