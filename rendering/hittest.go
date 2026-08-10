@@ -166,7 +166,9 @@ func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom
 			if el, isEl := o.Node().(*dom.Element); isEl {
 				if attrName == "" || el.GetAttribute(attrName) != "" {
 					area := ow * oh
-					if *best == nil || order > *bestOrder || (order == *bestOrder && area < *bestArea) {
+					// ★ 同层内同样「后代优先」：fixed 子树中嵌套元素
+					//   （如 modal 里的按钮比其父容器高）也应命中更深者。
+					if *best == nil || order > *bestOrder || (order == *bestOrder && (area < *bestArea || descendantOf(el, *best))) {
 						*best = el
 						*bestArea = area
 						*bestOrder = order
@@ -239,6 +241,26 @@ descend:
 }
 
 
+// descendantOf reports whether el is a strict DOM descendant of anc
+// (walking el's parent chain hits anc). Used by the hit-test pick rule:
+// a deeper element that contains the point must win over its ancestor
+// even if its bounding-box area is LARGER — e.g. a menu button whose
+// height (30px) exceeds its flex container .menubar (29px) by a pixel:
+// area-pick alone would resolve to the container (no listeners) and the
+// click bubbles to a parent handler, so the menu never opens. Browsers
+// always resolve to the deepest element, not the smallest-area one.
+func descendantOf(el, anc *dom.Element) bool {
+	if el == nil || anc == nil {
+		return false
+	}
+	for n := el.ParentNode(); n != nil; n = n.ParentNode() {
+		if e, ok := n.(*dom.Element); ok && e == anc {
+			return true
+		}
+	}
+	return false
+}
+
 // hitTestWalk recursively visits render objects, tracking the smallest (deepest)
 // matching element. When descending into children of a scroll container with a
 // per-box scroll offset (sx, sy), the hit-test point is adjusted by (sx, sy)
@@ -288,7 +310,9 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 			if el, isEl := node.(*dom.Element); isEl {
 				if val := el.GetAttribute(attrName); val != "" {
 					area := ow * oh
-					if *best == nil || area < *bestArea {
+					// ★ 后代优先：el 是已选 best 的 DOM 后代时无条件替换——
+					//   深度 > 面积（浏览器 hit-test 语义：命中最深元素）。
+					if *best == nil || area < *bestArea || descendantOf(el, *best) {
 						*best = el
 						*bestArea = area
 					}
@@ -298,7 +322,7 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 			node := o.Node()
 			if el, isEl := node.(*dom.Element); isEl {
 				area := ow * oh
-				if *best == nil || area < *bestArea {
+				if *best == nil || area < *bestArea || descendantOf(el, *best) {
 					*best = el
 					*bestArea = area
 				}
