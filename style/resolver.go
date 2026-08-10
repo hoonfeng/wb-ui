@@ -25,6 +25,7 @@
 package style
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -969,6 +970,37 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 				cs.BackgroundSize = size
 			}
 		}
+	case "font":
+		// ★ font 简写（浏览器标准）：
+		//   font: [style] [variant] [weight] [stretch]? size[/line-height] family
+		// 此前走 default 存 raw string → 组件内联 `font: 13px/1.4 monospace`
+		// 完全不生效（继承默认字体）。展开到各子属性。
+		if st, v, wt, sz, lh, fam, ok := parseFontShorthand(valueString); ok {
+			if fam != "" {
+				cs.FontFamily = strings.Trim(fam, `"'`)
+			}
+			if sz != "" {
+				if l, ok2 := parseLength(sz); ok2 {
+					cs.FontSize = l
+				}
+			}
+			if wt != "" {
+				cs.FontWeight = wt
+			}
+			if st != "" {
+				cs.FontStyle = st
+			}
+			if v != "" {
+				cs.FontVariant = v
+			}
+			if lh != "" {
+				if strings.EqualFold(strings.TrimSpace(lh), "normal") {
+					cs.LineHeight = Length{Value: 0, Unit: "normal"}
+				} else if l, ok2 := parseLength(lh); ok2 {
+					cs.LineHeight = l
+				}
+			}
+		}
 	case "font-family":
 		if valueString == "inherit" {
 			// UA stylesheet uses font-family: inherit for form controls;
@@ -1789,11 +1821,71 @@ func parseFlexShorthand(s string) (grow, shrink float64, basis Length) {
 	return grow, shrink, basis
 }
 
+// fontSizeTokenRe 匹配 font 简写里的字号 token：13px、13px/1.4、12pt/1.5em 等。
+var fontSizeTokenRe = regexp.MustCompile(`^([0-9]*\.?[0-9]+(?:px|em|rem|pt|%|vh|vw|vmin|vmax))(?:/([0-9]*\.?[0-9]*(?:px|em|rem|pt|%)?))?$`)
+
+// parseFontShorthand 解析 CSS font 简写（浏览器标准）：
+//
+//	font: [ <font-style> || <font-variant> || <font-weight> || <font-stretch> ]?
+//	      <font-size> [ / <line-height> ]? <font-family>
+//
+// 返回展开的 (style, variant, weight, size, lineHeight, family)。family 可含
+// 空格（如 "Times New Roman"），取 size 后的剩余部分；关键字按标准归类。
+func parseFontShorthand(s string) (style, variant, weight, size, lineHeight, family string, ok bool) {
+	tokens := strings.Fields(s)
+	if len(tokens) == 0 {
+		return
+	}
+	// 1) 找 size token（可能含 /line-height 或后随独立 /lh token）
+	sizeIdx := -1
+	for i, tok := range tokens {
+		if m := fontSizeTokenRe.FindStringSubmatch(tok); m != nil {
+			sizeIdx = i
+			size = m[1]
+			if m[2] != "" {
+				lineHeight = m[2]
+			}
+			break
+		}
+	}
+	if sizeIdx < 0 {
+		return
+	}
+	// 2) size 前：style / variant / weight / stretch 关键字
+	for _, tok := range tokens[:sizeIdx] {
+		switch strings.ToLower(tok) {
+		case "italic", "oblique":
+			style = strings.ToLower(tok)
+		case "small-caps":
+			variant = "small-caps"
+		case "bold", "bolder", "lighter":
+			weight = strings.ToLower(tok)
+		case "normal":
+			// normal 既可能是 font-style 也可能是 font-weight，取缺省
+			if style == "" {
+				style = "normal"
+			}
+		default:
+			if n, err := strconv.Atoi(tok); err == nil && n >= 100 && n <= 900 && n%100 == 0 {
+				weight = tok
+			}
+		}
+	}
+	// 3) size 后：独立 /lh token 或 family
+	rest := tokens[sizeIdx+1:]
+	if lineHeight == "" && len(rest) > 0 && strings.HasPrefix(rest[0], "/") {
+		lineHeight = strings.TrimPrefix(rest[0], "/")
+		rest = rest[1:]
+	}
+	family = strings.Join(rest, " ")
+	ok = true
+	return
+}
+
 // parseEdgeShorthand parses a 1-to-4 value edge shorthand like "padding: 10px 20px"
 // or "margin: 1 2 3 4" and returns (top, right, bottom, left). Mirrors the CSS
 // "Edge value shorthand" expansion rules.
-func parseEdgeShorthand(s string) (top, right, bottom, left Length) {
-	parts := strings.Fields(s)
+func parseEdgeShorthand(s string) (top, right, bottom, left Length) {	parts := strings.Fields(s)
 	if len(parts) == 0 {
 		return
 	}
