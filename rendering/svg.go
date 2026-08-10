@@ -46,6 +46,7 @@ type svgFilledShape struct {
 	patternID   string
 	stroke      graphics.Color
 	strokeWidth float64
+	strokeGradientID string // stroke="url(#gradient)" — gradient stroke
 	clipID      string
 	transform   string
 	dashArray   []float64
@@ -101,6 +102,11 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	c2.lineCap = s.lineCap
 	c2.lineJoin = s.lineJoin
 	c2.fillRule = s.fillRule
+	if s.strokeGradientID != "" {
+		if g, ok := ctx.gradients[s.strokeGradientID]; ok && len(g.stops) >= 2 {
+			c2.strokeGradient = g
+		}
+	}
 	if s.opacity > 0 {
 		c2.opacity = s.opacity
 	}
@@ -209,7 +215,60 @@ func paintShapeGradient(canvas *graphics.Canvas, shape svgShape, g *svgGradient)
 		paintGradientOnShape(canvas, g, s.cx-s.r, s.cy-s.r, s.r*2, s.r*2)
 	case *svgEllipse:
 		paintGradientOnShape(canvas, g, s.cx-s.rx, s.cy-s.ry, s.rx*2, s.ry*2)
+	case *svgPath:
+		pts := s.samplePoints()
+		if len(pts) >= 3 {
+			ax, ay, bx, by, colors, pos := gradientParamsForPts(g, pts)
+			canvas.FillPathGradient(pts, ax, ay, bx, by, colors, pos, true)
+		}
+	case *svgPolygon:
+		pts := s.points
+		if s.closed && len(pts) >= 3 {
+			ax, ay, bx, by, colors, pos := gradientParamsForPts(g, pts)
+			canvas.FillPathGradient(pts, ax, ay, bx, by, colors, pos, false)
+		}
 	}
+}
+
+// gradientParamsForPts resolves an svgGradient's axis against the point set's
+// bounding box (objectBoundingBox units are percentages) and returns the world
+// axis plus the Skia color/position arrays.
+func gradientParamsForPts(g *svgGradient, pts []graphics.Point) (ax, ay, bx, by float64, colors []graphics.Color, positions []float32) {
+	if g == nil || len(pts) == 0 {
+		return 0, 0, 1, 1, nil, nil
+	}
+	minX, minY := pts[0].X, pts[0].Y
+	maxX, maxY := pts[0].X, pts[0].Y
+	for _, p := range pts[1:] {
+		if p.X < minX {
+			minX = p.X
+		}
+		if p.Y < minY {
+			minY = p.Y
+		}
+		if p.X > maxX {
+			maxX = p.X
+		}
+		if p.Y > maxY {
+			maxY = p.Y
+		}
+	}
+	w, h := maxX-minX, maxY-minY
+	if g.userSpaceOnUse {
+		ax, ay, bx, by = g.x1, g.y1, g.x2, g.y2
+	} else {
+		ax = minX + g.x1*w
+		ay = minY + g.y1*h
+		bx = minX + g.x2*w
+		by = minY + g.y2*h
+	}
+	colors = make([]graphics.Color, len(g.stops))
+	positions = make([]float32, len(g.stops))
+	for i, st := range g.stops {
+		colors[i] = st.color
+		positions[i] = float32(st.offset)
+	}
+	return
 }
 
 // svgPattern is a <pattern> element: child shapes tiled across the fill
@@ -224,6 +283,7 @@ type svgPaintContext struct {
 	fill        graphics.Color
 	stroke      graphics.Color
 	strokeWidth float64
+	strokeGradient *svgGradient // stroke="url(#gradient)" — gradient stroke
 	opacity     float64
 	gradients   map[string]*svgGradient // gradients defined in <defs>
 	clips       map[string][]svgShape   // clip paths defined in <defs>
@@ -388,8 +448,11 @@ func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		canvas.FillPath(s.points, fill, ctx.fillRule == "evenodd")
 	}
 	// Stroke the outline (closed for polygon, open for polyline).
-	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(s.points) >= 2 {
-		if len(ctx.dashArray) == 0 {
+	if ctx.strokeWidth > 0 && len(s.points) >= 2 && (ctx.stroke.A > 0 || ctx.strokeGradient != nil) {
+		if ctx.strokeGradient != nil {
+			ax, ay, bx, by, colors, pos := gradientParamsForPts(ctx.strokeGradient, s.points)
+			canvas.StrokePathGradient(s.points, ctx.strokeWidth, ax, ay, bx, by, colors, pos, ctx.lineCap, ctx.lineJoin)
+		} else if len(ctx.dashArray) == 0 {
 			canvas.StrokePath(s.points, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
 		} else {
 			segs := len(s.points) - 1
@@ -443,6 +506,61 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		return
 	}
 	fill := ctx.fill
+	pts := s.samplePoints()
+	// Fill via a native Skia path so concave / self-intersecting paths (and
+	// fill-rule="evenodd" stars etc.) rasterize like the browser — the old
+	// triangle fan painted the wrong interior for concave shapes.
+	if fill.A > 0 && len(pts) >= 3 {
+		if os.Getenv("WB_SVG_DEBUG") != "" {
+			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x rule=%s", len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
+		}
+		canvas.FillPath(pts, fill, ctx.fillRule == "evenodd")
+	}
+	// Stroke. With a dash pattern we still walk segments (dashLine handles
+	// the on/off phases); solid strokes use the native path stroke so
+	// stroke-linecap / stroke-linejoin match the browser exactly. Gradient
+	// strokes (stroke="url(#gradient)") use the shader-based path stroke.
+	if ctx.strokeWidth > 0 && len(pts) >= 2 && (ctx.stroke.A > 0 || ctx.strokeGradient != nil) {
+		if ctx.strokeGradient != nil {
+			ax, ay, bx, by, colors, pos := gradientParamsForPts(ctx.strokeGradient, pts)
+			canvas.StrokePathGradient(pts, ctx.strokeWidth, ax, ay, bx, by, colors, pos, ctx.lineCap, ctx.lineJoin)
+		} else if len(ctx.dashArray) == 0 {
+			canvas.StrokePath(pts, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
+		} else {
+			for i := 0; i < len(pts)-1; i++ {
+				dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
+			}
+		}
+	} else if os.Getenv("WB_SVG_DEBUG") != "" && len(pts) >= 2 {
+		log.Printf("[svg] path SKIPPED stroke: stroke.A=%d strokeWidth=%.1f pts=%d", ctx.stroke.A, ctx.strokeWidth, len(pts))
+	}
+	// Markers: paint the referenced <marker> templates at the path start and
+	// end, rotated to the local path direction (orient=auto).
+	if ctx.markers != nil {
+		if s.markerStart != "" {
+			if id := parseURLReference(s.markerStart); id != "" {
+				if m, ok := ctx.markers[id]; ok && len(pts) >= 1 {
+					dir := graphics.Point{X: pts[1].X - pts[0].X, Y: pts[1].Y - pts[0].Y}
+					paintSVGMarker(canvas, ctx, m, pts[0], dir)
+				}
+			}
+		}
+		if s.markerEnd != "" {
+			if id := parseURLReference(s.markerEnd); id != "" {
+				if m, ok := ctx.markers[id]; ok && len(pts) >= 2 {
+					last := pts[len(pts)-1]
+					dir := graphics.Point{X: last.X - pts[len(pts)-2].X, Y: last.Y - pts[len(pts)-2].Y}
+					paintSVGMarker(canvas, ctx, m, last, dir)
+				}
+			}
+		}
+	}
+}
+
+// samplePoints evaluates the path commands into a polyline point list,
+// sampling beziers (C/S/Q/T) and arcs (A) exactly like paint used to inline,
+// so gradient fill/stroke can reuse the same geometry.
+func (s *svgPath) samplePoints() []graphics.Point {
 	var pts []graphics.Point
 	var firstPoint graphics.Point
 	hasFirst := false
@@ -584,50 +702,7 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			}
 		}
 	}
-	// Fill via a native Skia path so concave / self-intersecting paths (and
-	// fill-rule="evenodd" stars etc.) rasterize like the browser — the old
-	// triangle fan painted the wrong interior for concave shapes.
-	if fill.A > 0 && len(pts) >= 3 {
-		if os.Getenv("WB_SVG_DEBUG") != "" {
-			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x rule=%s", len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
-		}
-		canvas.FillPath(pts, fill, ctx.fillRule == "evenodd")
-	}
-	// Stroke. With a dash pattern we still walk segments (dashLine handles
-	// the on/off phases); solid strokes use the native path stroke so
-	// stroke-linecap / stroke-linejoin match the browser exactly.
-	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 && len(pts) >= 2 {
-		if len(ctx.dashArray) == 0 {
-			canvas.StrokePath(pts, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
-		} else {
-			for i := 0; i < len(pts)-1; i++ {
-				dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
-			}
-		}
-	} else if os.Getenv("WB_SVG_DEBUG") != "" && len(pts) >= 2 {
-		log.Printf("[svg] path SKIPPED stroke: stroke.A=%d strokeWidth=%.1f pts=%d", ctx.stroke.A, ctx.strokeWidth, len(pts))
-	}
-	// Markers: paint the referenced <marker> templates at the path start and
-	// end, rotated to the local path direction (orient=auto).
-	if ctx.markers != nil {
-		if s.markerStart != "" {
-			if id := parseURLReference(s.markerStart); id != "" {
-				if m, ok := ctx.markers[id]; ok && len(pts) >= 1 {
-					dir := graphics.Point{X: pts[1].X - pts[0].X, Y: pts[1].Y - pts[0].Y}
-					paintSVGMarker(canvas, ctx, m, pts[0], dir)
-				}
-			}
-		}
-		if s.markerEnd != "" {
-			if id := parseURLReference(s.markerEnd); id != "" {
-				if m, ok := ctx.markers[id]; ok && len(pts) >= 2 {
-					last := pts[len(pts)-1]
-					dir := graphics.Point{X: last.X - pts[len(pts)-2].X, Y: last.Y - pts[len(pts)-2].Y}
-					paintSVGMarker(canvas, ctx, m, last, dir)
-				}
-			}
-		}
-	}
+	return pts
 }
 
 // paintSVGMarker paints a <marker> template at a path vertex: translate to
@@ -1247,12 +1322,22 @@ func parseGradientElement(el *dom.Element) *svgGradient {
 			g.r = 50 // default radius
 		}
 	} else {
-		g.x1 = parseSVGCoord(el.GetAttribute("x1"))
-		g.y1 = parseSVGCoord(el.GetAttribute("y1"))
-		g.x2 = parseSVGCoord(el.GetAttribute("x2"))
-		g.y2 = parseSVGCoord(el.GetAttribute("y2"))
+		if g.userSpaceOnUse {
+			// Absolute user-space coordinates.
+			g.x1 = parseSVGCoord(el.GetAttribute("x1"))
+			g.y1 = parseSVGCoord(el.GetAttribute("y1"))
+			g.x2 = parseSVGCoord(el.GetAttribute("x2"))
+			g.y2 = parseSVGCoord(el.GetAttribute("y2"))
+		} else {
+			// objectBoundingBox: x1/y1/x2/y2 are fractions of the shape bbox;
+			// both "100%" and bare "1" mean 100%.
+			g.x1 = parseGradFraction(el.GetAttribute("x1"))
+			g.y1 = parseGradFraction(el.GetAttribute("y1"))
+			g.x2 = parseGradFraction(el.GetAttribute("x2"))
+			g.y2 = parseGradFraction(el.GetAttribute("y2"))
+		}
 		if g.x2 == 0 && g.y2 == 0 {
-			g.x2 = 100 // default horizontal gradient
+			g.x2 = 1 // default horizontal gradient
 		}
 	}
 	// Parse <stop> child elements
@@ -1280,6 +1365,18 @@ func parseGradientElement(el *dom.Element) *svgGradient {
 		}
 	}
 	return g
+}
+
+// parseGradFraction parses a gradient axis coordinate in objectBoundingBox
+// mode: percentages ("100%") and bare numbers ("1") both mean fractions of
+// the shape bounding box (1 == 100%).
+func parseGradFraction(s string) float64 {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "%") {
+		v, _ := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+		return v / 100
+	}
+	return parseSVGCoord(s)
 }
 
 // paintGradientOnShape draws a gradient-filled rectangle (the simplest case).
@@ -1336,7 +1433,7 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 		}
 		return
 	}
-	if x1 == 0 && y1 == 0 && x2 == 100 && y2 == 0 {
+	if x1 == 0 && y1 == 0 && x2 == 1 && y2 == 0 {
 		// Default: left to right across the bounding box.
 		stops := make([]ColorStop, len(g.stops))
 		for i, s := range g.stops {
@@ -1353,10 +1450,10 @@ func paintGradientOnShape(canvas *graphics.Canvas, g *svgGradient, x, y, w, h fl
 		return
 	}
 	// Arbitrary axis: project each pixel onto the (x1,y1)→(x2,y2) axis.
-	ax := x + x1/100*w
-	ay := y + y1/100*h
-	bx := x + x2/100*w
-	by := y + y2/100*h
+	ax := x + x1*w
+	ay := y + y1*h
+	bx := x + x2*w
+	by := y + y2*h
 	vx, vy := bx-ax, by-ay
 	den := vx*vx + vy*vy
 	if den == 0 {
@@ -1769,7 +1866,11 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			elCtx.fill = parseColorAttribute(fillStr)
 		}
 
-		if strokeStr == "currentColor" {
+		if strokeGradID := parseURLReference(strokeStr); strokeGradID != "" {
+			// Gradient stroke: resolved at paint time via the gradient map;
+			// keep stroke transparent so the shader path draws it.
+			elCtx.stroke = graphics.Color{}
+		} else if strokeStr == "currentColor" {
 			elCtx.stroke = doc.currentColor
 		} else if strokeStr != "" {
 			elCtx.stroke = parseColorAttribute(strokeStr)
@@ -1940,6 +2041,11 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 					wrapper.gradientID = gradientID
 				} else if _, ok := ctx.patterns[gradientID]; ok {
 					wrapper.patternID = gradientID
+				}
+			}
+			if strokeGradID := parseURLReference(strokeStr); strokeGradID != "" {
+				if _, ok := ctx.gradients[strokeGradID]; ok {
+					wrapper.strokeGradientID = strokeGradID
 				}
 			}
 			if clipID := parseURLReference(clipStr); clipID != "" {

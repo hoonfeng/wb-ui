@@ -9,7 +9,9 @@ import (
 
 // TestSVGGradientDiagonal: a linearGradient with x1/y1/x2/y2 diagonal axis
 // paints a gradient that changes along that axis (top-left red → bottom-right
-// blue).
+// blue). Percentages are the unambiguous spelling for objectBoundingBox
+// coordinates ("100%" = 100% of the bbox; bare "1" also means 100%, bare
+// "100" means 100 bbox-widths and renders all-red — verified against Edge).
 func TestSVGGradientDiagonal(t *testing.T) {
 	doc := dom.NewDocument()
 	svgEl := doc.CreateElement("svg")
@@ -20,8 +22,8 @@ func TestSVGGradientDiagonal(t *testing.T) {
 	lg.SetAttribute("id", "diag")
 	lg.SetAttribute("x1", "0")
 	lg.SetAttribute("y1", "0")
-	lg.SetAttribute("x2", "100")
-	lg.SetAttribute("y2", "100")
+	lg.SetAttribute("x2", "100%")
+	lg.SetAttribute("y2", "100%")
 	s1 := doc.CreateElement("stop")
 	s1.SetAttribute("offset", "0%")
 	s1.SetAttribute("stop-color", "red")

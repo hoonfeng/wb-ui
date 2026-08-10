@@ -775,6 +775,93 @@ func (c *Canvas) StrokePath(pts []Point, strokeWidth float64, col Color, cap, jo
 	c.invalidatePixels()
 }
 
+// FillPathGradient fills a closed polygon/polyline with a linear gradient
+// running from (gx1,gy1) to (gx2,gy2) in world space (SVG linearGradient axis
+// resolved against the shape's bounding box by the caller). colors/positions
+// follow the Skia shader convention (positions nil = evenly spaced stops).
+// Used for SVG fill="url(#gradient)" on <path> shapes, which the flat
+// paintGradientOnShape rect-path cannot cover.
+func (c *Canvas) FillPathGradient(pts []Point, gx1, gy1, gx2, gy2 float64, colors []Color, positions []float32, evenOdd bool) {
+	if len(pts) < 3 || len(colors) < 2 {
+		return
+	}
+	path := skia.NewPath()
+	defer path.Release()
+	path.MoveTo(float32(pts[0].X), float32(pts[0].Y))
+	for i := 1; i < len(pts); i++ {
+		path.LineTo(float32(pts[i].X), float32(pts[i].Y))
+	}
+	path.Close()
+	if evenOdd {
+		path.SetFillType(skia.FillTypeEvenOdd)
+	}
+	start := skia.Point{X: float32(gx1), Y: float32(gy1)}
+	end := skia.Point{X: float32(gx2), Y: float32(gy2)}
+	sk := make([]skia.Color, len(colors))
+	for i, col := range colors {
+		sk[i] = colorToSkia(col)
+	}
+	shader := skia.NewLinearGradient(start, end, sk, positions, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	c.canvas.DrawPath(path, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.invalidatePixels()
+}
+
+// StrokePathGradient strokes a polyline with a linear gradient running from
+// (gx1,gy1) to (gx2,gy2) in world space, honoring SVG stroke-linecap /
+// stroke-linejoin. Used for SVG stroke="url(#gradient)" (e.g. the IDE logo's
+// gradient-bracketed <path> strokes), which flat-color StrokePath cannot do.
+func (c *Canvas) StrokePathGradient(pts []Point, strokeWidth float64, gx1, gy1, gx2, gy2 float64, colors []Color, positions []float32, cap, join string) {
+	if strokeWidth <= 0 || len(colors) < 2 || len(pts) < 2 {
+		return
+	}
+	path := skia.NewPath()
+	defer path.Release()
+	path.MoveTo(float32(pts[0].X), float32(pts[0].Y))
+	for i := 1; i < len(pts); i++ {
+		path.LineTo(float32(pts[i].X), float32(pts[i].Y))
+	}
+	start := skia.Point{X: float32(gx1), Y: float32(gy1)}
+	end := skia.Point{X: float32(gx2), Y: float32(gy2)}
+	sk := make([]skia.Color, len(colors))
+	for i, col := range colors {
+		sk[i] = colorToSkia(col)
+	}
+	shader := skia.NewLinearGradient(start, end, sk, positions, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	c.gradientPaint.SetStyle(skia.PaintStyleStroke)
+	c.gradientPaint.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+	c.canvas.DrawPath(path, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.gradientPaint.SetStyle(skia.PaintStyleFill)
+	c.invalidatePixels()
+}
+
 // FillTriangle fills the triangle defined by three points with the supplied color.
 // Used by the select dropdown arrow painter. The triangle is built as a Skia path
 // (MoveTo + 2x LineTo + Close) and filled.
