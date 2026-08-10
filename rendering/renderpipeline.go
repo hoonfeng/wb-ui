@@ -30,7 +30,6 @@ import (
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
-	"wb-ui/widgets"
 
 	"github.com/hoonfeng/goskia/skia"
 )
@@ -1452,7 +1451,7 @@ func parseBlendMode(s string) *skia.BlendMode {
 	}
 	return &m
 }
-// <wb-editor> custom elements by delegating to the editor package's painter, and
+// paintObjectForeground paints non-text foreground content: SVG shapes and
 // native form controls (checkbox/radio/range/progress/meter/select arrow) via
 // PaintFormControl mirroring RenderTheme::paint().
 func paintObjectForeground(o RenderObject, info *PaintInfo) {
@@ -1460,18 +1459,13 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 		PaintText(text, info)
 		return
 	}
-	// Check for <wb-editor> custom elements.
+	// Check for custom elements (SVG handled below).
 	box := asRenderBox(o)
 	if box == nil || !box.IsVisible() {
 		return
 	}
 	el, ok := box.Node().(*dom.Element)
 	if !ok {
-		return
-	}
-	if widgets.IsEditorElement(el) && info.rv != nil {
-		registry := info.rv.EditorRegistry()
-		registry.PaintEditor(el, info.canvas, box.X(), box.Y(), box.Width(), box.Height())
 		return
 	}
 	// SVG elements: parse and paint shapes.

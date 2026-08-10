@@ -106,6 +106,10 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	for _, it := range items {
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
+		if wbFlexDebug {
+			fmt.Fprintf(os.Stderr, "[flex/base] %s: fb=%.1f basisExplicit=%v grow=%.1f shrink=%.1f → base=%.1f minH=%.1f\n",
+				flexName(it.box), it.flexBasis, it.basisExplicit, it.flexGrow, it.flexShrink, it.baseSize, it.minHeight)
+		}
 		// ★ Column flex 冻结项（flex-grow:0 + flex-shrink:0，basis:auto）：
 		//   baseSize 用真实布局高度替代 intrinsic 估算。估算会低估嵌套
 		//   flex/grid 内容（conv-stats 面板实测 271px vs 估算 228px），
@@ -416,10 +420,22 @@ func (c *FlexFormattingContext) resolveItem(box *ElementBox, isRow bool, cbWidth
 	if fb.Unit == "auto" || fb.Unit == "" {
 		if isRow {
 			r := resolveLengthAuto(cs.Width, cbWidth, fs)
-			if !r.Auto && r.Definite { flexBasis = r.Value }
+			if !r.Auto && r.Definite {
+				flexBasis = r.Value
+				// ★ flex-basis:auto 取 main size 属性（width/height）的
+				// definite 值作为明确 basis（CSS §7.2.3）。不标记 explicit
+				// 的话 resolveBaseSize 会把 basis<=0（如 CM6 gutter spacer
+				// height:0px）误判为"basis 未明确"而回退成内容尺寸——
+				// spacer 文本 "99" 的内容行高 18px 被当作 flex 高度，行号
+				// 栏顶部多占一行、行号整体下移、行号高亮与内容高亮错位。
+				basisExplicit = true
+			}
 		} else {
 			r := resolveLengthAuto(cs.Height, cbHeight, fs)
-			if !r.Auto && r.Definite { flexBasis = r.Value }
+			if !r.Auto && r.Definite {
+				flexBasis = r.Value
+				basisExplicit = true
+			}
 		}
 	} else {
 		flexBasis = resolveOrZero(fb, cbWidth, fs)
@@ -1315,7 +1331,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// flex:1 project-section whose tall child balloons it past the
 			// flex container — this used to overflow the sidebar bottom by
 			// ~52px and inflate the frame content size to 829px).
-			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
+			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 || it.basisExplicit {
 				ms := it.finalMainSize
 				if isBorderBox(it.box) {
 					hp := g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
@@ -1408,7 +1424,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// (flex:1; overflow-y:auto) ballooned to its full 2776px content
 			// height instead of the flex slot (~605px), overflowing the
 			// sidebar and spawning the wrong scrollbars.
-			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 {
+			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 || it.basisExplicit {
 				ms := it.finalMainSize
 				if isBorderBox(it.box) {
 					vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
@@ -1441,8 +1457,29 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 						after = rb
 					}
 					if after > ms {
-						// min-height:auto — content wrapped taller than the slot.
+						// min-height:auto — automatic minimum size =
+						// min(content size suggestion, specified size
+						// suggestion)（CSS-FLEXBOX §4.5）。内容尺寸建议用
+						// after（真实内容高度）；specified size suggestion 是
+						// main size 属性（height）的 definite 值——显式
+						// height:0px（如 CM6 gutter spacer，flex-basis:auto
+						// 取 height 为 basis）必须把最小高度压到 0，不能被
+						// 内容行高（"99" 测量文本 18px）撑开；height:auto
+						// 时无 specified 限制，保持内容高度（.welcome-sub
+						// 折行 62px 的场景）。
 						ms = after
+						if hv, ok := definiteHeight(itc.Height, 0, fontSizeOf(it.box)); ok {
+							spec := hv
+							if isBorderBox(it.box) {
+								spec -= g.VerticalBorderAndPadding()
+								if spec < 0 {
+									spec = 0
+								}
+							}
+							if spec < ms {
+								ms = spec
+							}
+						}
 					}
 				}
 				g.SetContentHeight(ms)

@@ -1,5 +1,5 @@
 // Custom element registry for the HTML parser.
-// Allows registering constructors for custom tag names (e.g. <wb-editor>, <wb-markdown>)
+// Allows registering constructors for custom tag names
 // so that the parser instantiates the corresponding Go component instead of a
 // generic dom.Element.
 //

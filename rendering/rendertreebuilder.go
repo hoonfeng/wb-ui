@@ -22,7 +22,6 @@ import (
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
-	"wb-ui/widgets"
 )
 
 // RenderTreeBuilder is the Go translation of WebCore::RenderTreeBuilder. It constructs the
@@ -46,10 +45,6 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 	if doc == nil {
 		return nil
 	}
-	// Transform <wb-markdown> elements: parse their text content as
-	// markdown and replace with rendered DOM nodes before building the
-	// render tree.
-	widgets.ProcessMarkdownElements(doc)
 	root := doc.DocumentElement()
 	if root == nil {
 		// Empty document: still create a RenderView so callers can attach later.
@@ -475,8 +470,7 @@ func defaultDisplayForTag(localName string) style.DisplayType {
 		"fieldset", "form", "h1", "h2", "h3", "h4", "h5", "h6",
 		"ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody",
 		"tfoot", "tr", "td", "th", "caption", "colgroup", "col",
-		"details", "summary", "dialog",
-		"wb-editor", "wb-markdown":
+		"details", "summary", "dialog":
 		return style.DisplayBlock
 	case "head", "title", "meta", "link", "style", "script", "base":
 		return style.DisplayNone

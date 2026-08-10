@@ -11,7 +11,6 @@ import (
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
-	"wb-ui/widgets"
 )
 
 func init() {
@@ -37,7 +36,6 @@ type RenderView struct {
 	compositor  *RenderLayerCompositor
 	rootLayer   *RenderLayer
 	layoutState *layout.LayoutState
-	editorRegistry *widgets.EditorRegistry
 	dirtyRect   Rect
 	scrollOffsetX, scrollOffsetY float64
 	// scrollOffsets stores per-box scroll offsets for overflow:scroll/auto.
@@ -77,11 +75,9 @@ func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
 	}
 	rv.initBase(rv, doc, st)
 	rv.compositor = NewRenderLayerCompositor(rv)
-	rv.editorRegistry = widgets.NewEditorRegistry()
 	return rv
 }
 
-func (v *RenderView) EditorRegistry() *widgets.EditorRegistry { return v.editorRegistry }
 func (v *RenderView) Type() RenderObjectType                 { return ObjectView }
 func (v *RenderView) IsRenderView() bool                     { return true }
 func (v *RenderView) RenderName() string                     { return "RenderView" }

@@ -414,6 +414,37 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	// JS selectionStart/End/setSelectionRange ↔ 引擎光标（xterm 输入
 	// 处理读 textarea selection 计算新增字符；setSelectionRange 定位
 	// 点击光标）。
+	bindings.GetElementComputedFont = func(el *dom.Element) (string, float64, int, string) {
+		if el == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		fr := wv.MainFrame().Frame()
+		if fr == nil || fr.Resolver() == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		cs := fr.Resolver().ResolveElement(el)
+		if cs == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		size := cs.FontSize.Value
+		if size <= 0 {
+			size = 14
+		}
+		w := 400
+		switch strings.ToLower(strings.TrimSpace(cs.FontWeight)) {
+		case "bold", "bolder", "600", "700", "800", "900":
+			w = 700
+		}
+		st := "normal"
+		if strings.EqualFold(cs.FontStyle, "italic") || strings.EqualFold(cs.FontStyle, "oblique") {
+			st = cs.FontStyle
+		}
+		fam := cs.FontFamily
+		if fam == "" {
+			fam = "sans-serif"
+		}
+		return fam, size, w, st
+	}
 	bindings.SelectionBridge = func(el *dom.Element) (int, int) {
 		if el == nil || el != h.imeFocusedEl {
 			return -1, -1
