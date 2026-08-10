@@ -229,6 +229,38 @@ func (h *Host) MockTextareaResizeRelease() {
 	h.resizeDragRV = nil
 }
 
+// MockFocus 在 headless（win=nil）下模拟点击聚焦：设置 imeFocusedEl +
+// focused 标志。真实 desktop 用 FocusElement（win 非 nil）；probe 用
+// MockFocus 跳过 GLFW 窗口依赖。保持与 FocusElement 相同的 imeFocusedEl
+// 语义（EventChar 判定 contenteditable 的依据）。
+func (h *Host) MockFocus(el *dom.Element) {
+	if h.imeFocusedEl != nil && h.imeFocusedEl != el {
+		h.imeFocusedEl.SetFocused(false)
+	}
+	h.imeFocusedEl = el
+	h.imeComposing = false
+	h.imeComposeText = ""
+	if el != nil {
+		el.SetFocused(true)
+		el.SetFocusByKeyboard(false)
+	}
+}
+
+// MockKeyChar 走真实 EventChar 处理路径（handleCharInput，与 processEvents
+// 的 case window.EventChar 共享同一实现）：在 imeFocusedEl 处插入字符并派发
+// input 事件。用于验证 contenteditable（CM6）真实键盘链路——
+// FocusElement 设置 imeFocusedEl + collapse 填充 sstate.ranges 后，按键字符
+// 应插入 DOM 并触发 CM6 readDOMChange 同步 state。
+func (h *Host) MockKeyChar(char rune) {
+	if h.wv == nil {
+		return
+	}
+	h.handleCharInput(window.Event{
+		Type: window.EventChar,
+		Char: char,
+	})
+}
+
 // MockMouseMove 模拟鼠标移动到 (cssX, cssY)，走真实 hover 路径：
 // HitTest → SetHovered(旧元素清除/新元素设置) → hoverStyleFastPath
 // （只重算受影响元素的 :hover 样式，不重建渲染树）。返回新 hover 元素。

@@ -1989,16 +1989,61 @@ idx := int(a[0].ToNumber())
 			return jsc.Undefined()
 		}, 0)))
 	selObj.Set("collapse", jsc.FunctionValue(jsc.NewNativeFunction("collapse",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+		func(rt *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			if len(a) >= 1 {
 				selObj.Set("anchorNode", a[0])
-				offset := int64(0)
-if len(a) >= 2 { offset = int64(a[1].ToNumber()) }
-				selObj.Set("anchorOffset", jsc.NumberValue(float64(offset)))
 				selObj.Set("focusNode", a[0])
+				offset := int64(0)
+				if len(a) >= 2 {
+					offset = int64(a[1].ToNumber())
+				}
+				selObj.Set("anchorOffset", jsc.NumberValue(float64(offset)))
 				selObj.Set("focusOffset", jsc.NumberValue(float64(offset)))
+				// ★ 同步 sstate.ranges：CM6 点击/光标移动用 collapse 写 DOM
+				// selection，InsertTextAtSelection（contenteditable 输入）
+				// 依赖 ranges[0]——collapse 不填充则真实输入永远 false
+				// （「编辑器不可编辑」根因：probe 用 addRange 绕过，真实
+				// 点击走 collapse）。
+				sstate.ranges = []*jsc.JSObject{makeSelRange(rt, a[0], offset, a[0], offset)}
 			}
 			selObj.Set("isCollapsed", jsc.BooleanValue(true))
+			selObj.Set("rangeCount", jsc.NumberValue(float64(len(sstate.ranges))))
+			return jsc.Undefined()
+		}, 2)))
+	selObj.Set("setBaseAndExtent", jsc.FunctionValue(jsc.NewNativeFunction("setBaseAndExtent",
+		func(rt *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) >= 4 {
+				ao := int64(a[1].ToNumber())
+				fo := int64(a[3].ToNumber())
+				selObj.Set("anchorNode", a[0])
+				selObj.Set("anchorOffset", jsc.NumberValue(float64(ao)))
+				selObj.Set("focusNode", a[2])
+				selObj.Set("focusOffset", jsc.NumberValue(float64(fo)))
+				sstate.ranges = []*jsc.JSObject{makeSelRange(rt, a[0], ao, a[2], fo)}
+				selObj.Set("isCollapsed", jsc.BooleanValue(a[0].SameAs(a[2]) && ao == fo))
+				selObj.Set("rangeCount", jsc.NumberValue(1))
+			}
+			return jsc.Undefined()
+		}, 4)))
+	selObj.Set("extend", jsc.FunctionValue(jsc.NewNativeFunction("extend",
+		func(rt *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) < 1 {
+				return jsc.Undefined()
+			}
+			off := int64(0)
+			if len(a) >= 2 {
+				off = int64(a[1].ToNumber())
+			}
+			selObj.Set("focusNode", a[0])
+			selObj.Set("focusOffset", jsc.NumberValue(float64(off)))
+			if len(sstate.ranges) == 0 {
+				sstate.ranges = []*jsc.JSObject{makeSelRange(rt, selObj.GetStr("anchorNode"), int64(selObj.GetStr("anchorOffset").ToNumber()), a[0], off)}
+			} else {
+				sstate.ranges[0].Set("endContainer", a[0])
+				sstate.ranges[0].Set("endOffset", jsc.NumberValue(float64(off)))
+			}
+			selObj.Set("isCollapsed", jsc.BooleanValue(false))
+			selObj.Set("rangeCount", jsc.NumberValue(float64(len(sstate.ranges))))
 			return jsc.Undefined()
 		}, 2)))
 	selObj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
@@ -2523,6 +2568,20 @@ type selState struct {
 }
 
 var sstate = &selState{}
+
+// makeSelRange 构造 Selection 同步用 range 对象（结构同 Range 构造：
+// startContainer/startOffset/endContainer/endOffset），供 collapse /
+// setBaseAndExtent / extend 填充 sstate.ranges——InsertTextAtSelection
+//（contenteditable 光标插入）只读 sstate.ranges[0]。
+func makeSelRange(rt *jsc.Interpreter, anchor jsc.JSValue, anchorOff int64, focus jsc.JSValue, focusOff int64) *jsc.JSObject {
+	r := jsc.NewObject(rt.ObjectPrototype())
+	r.Set("startContainer", anchor)
+	r.Set("startOffset", jsc.NumberValue(float64(anchorOff)))
+	r.Set("endContainer", focus)
+	r.Set("endOffset", jsc.NumberValue(float64(focusOff)))
+	r.Set("collapsed", jsc.BooleanValue(anchor.SameAs(focus) && anchorOff == focusOff))
+	return r
+}
 
 // InsertTextAtSelection 在 DOM Selection 的当前 range 处插入文本（光标处插入）。
 // contenteditable（CodeMirror 6 输入区）依赖此路径：wb-ui 宿主层对

@@ -2839,6 +2839,92 @@ func (h *Host) autodragTick() {
 	}
 }
 
+// handleCharInput 处理单个字符输入（window.EventChar 分支核心逻辑）。
+// 抽成独立方法：真实键盘（processEvents）与测试（MockKeyChar）共享同一
+// 实现，避免「probe 验证通过、真实使用失败」的路径分叉。
+func (h *Host) handleCharInput(ev window.Event) {
+	if h.imeFocusedEl == nil {
+		return
+	}
+	char := string(ev.Char)
+	if isTextFormControl(h.imeFocusedEl) {
+		// Get current value and insert character at cursor position,
+		// replacing any active selection (like a browser).
+		val := focusedElementValue(h.imeFocusedEl)
+		runes := []rune(val)
+		sel := rendering.FocusedFormControlSel
+		// Caret default = END of text when no click positioned it
+		// (browsers focus with the caret at the end; inserting at 0
+		// put every char at the HEAD). A click-positioned caret is
+		// honored regardless of Active — Release sets Active=false
+		// when the drag ends, but the caret must stay where the
+		// click placed it.
+		start, end := len(runes), len(runes)
+		if sel != nil {
+			start, end = sel.Start, sel.End
+		}
+		if start > end {
+			start, end = end, start
+		}
+		if runes == nil {
+			runes = []rune{}
+		}
+		if start < 0 {
+			start = 0
+		}
+		if end < 0 {
+			end = 0
+		}
+		if start > len(runes) {
+			start = len(runes)
+		}
+		if end > len(runes) {
+			end = len(runes)
+		}
+		newRunes := make([]rune, 0, len(runes)+1)
+		newRunes = append(newRunes, runes[:start]...)
+		newRunes = append(newRunes, []rune(char)...)
+		newRunes = append(newRunes, runes[end:]...)
+		newVal := string(newRunes)
+		setFocusedElementValue(h.imeFocusedEl, newVal)
+		if os.Getenv("WB_IME_DEBUG") != "" {
+			log.Printf("[ime] evchar char=%q start=%d end=%d → %q", char, start, end, newVal)
+		}
+		// Cursor lands right after the inserted character.
+		newPos := start + len([]rune(char))
+		if sel == nil {
+			rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+				Start: newPos, End: newPos, Active: true,
+			}
+		} else {
+			sel.Start = newPos
+			sel.End = newPos
+		}
+		if mf := h.wv.MainFrame(); mf != nil {
+			if fr := mf.Frame(); fr != nil {
+				fr.MarkRenderTreeDirty()
+			}
+		}
+		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+		h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+	} else if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
+		// contenteditable（CodeMirror 6 输入区）：光标处插入文本节点，
+		// 派发 input → CM6 的 DOMObserver readDOMChange 同步 state。
+		// 不能用 value/textContent 全文替换（会抹掉结构化 DOM）。
+		ok := bindings.InsertTextAtSelection(char)
+		if mf := h.wv.MainFrame(); mf != nil {
+			if fr := mf.Frame(); fr != nil {
+				fr.MarkRenderTreeDirty()
+			}
+		}
+		if !ok {
+			// 无有效 DOM Selection：仅派发 input，让 CM6 的 input
+			// handler 有机会走 state 更新路径（回退语义）。
+		}
+		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+	}
+}
+
 func (h *Host) processEvents(rv *rendering.RenderView) {
 	// WB_AUTODRAG=1：自动拖拽验证；WB_TERM_TEST=1：终端自动化验证。
 	if h.autodragOn {
@@ -3963,86 +4049,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		case window.EventChar:
-			if h.imeFocusedEl == nil {
-				break
-			}
-			char := string(ev.Char)
-			if isTextFormControl(h.imeFocusedEl) {
-				// Get current value and insert character at cursor position,
-				// replacing any active selection (like a browser).
-				val := focusedElementValue(h.imeFocusedEl)
-				runes := []rune(val)
-				sel := rendering.FocusedFormControlSel
-				// Caret default = END of text when no click positioned it
-				// (browsers focus with the caret at the end; inserting at 0
-				// put every char at the HEAD). A click-positioned caret is
-				// honored regardless of Active — Release sets Active=false
-				// when the drag ends, but the caret must stay where the
-				// click placed it.
-				start, end := len(runes), len(runes)
-				if sel != nil {
-					start, end = sel.Start, sel.End
-				}
-				if start > end {
-					start, end = end, start
-				}
-				if runes == nil {
-					runes = []rune{}
-				}
-				if start < 0 {
-					start = 0
-				}
-				if end < 0 {
-					end = 0
-				}
-				if start > len(runes) {
-					start = len(runes)
-				}
-				if end > len(runes) {
-					end = len(runes)
-				}
-				newRunes := make([]rune, 0, len(runes)+1)
-				newRunes = append(newRunes, runes[:start]...)
-				newRunes = append(newRunes, []rune(char)...)
-				newRunes = append(newRunes, runes[end:]...)
-				newVal := string(newRunes)
-				setFocusedElementValue(h.imeFocusedEl, newVal)
-				if os.Getenv("WB_IME_DEBUG") != "" {
-					log.Printf("[ime] evchar char=%q start=%d end=%d → %q", char, start, end, newVal)
-				}
-				// Cursor lands right after the inserted character.
-				newPos := start + len([]rune(char))
-				if sel == nil {
-					rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-						Start: newPos, End: newPos, Active: true,
-					}
-				} else {
-					sel.Start = newPos
-					sel.End = newPos
-				}
-				if mf := h.wv.MainFrame(); mf != nil {
-					if fr := mf.Frame(); fr != nil {
-						fr.MarkRenderTreeDirty()
-					}
-				}
-				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
-			} else if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
-				// contenteditable（CodeMirror 6 输入区）：光标处插入文本节点，
-				// 派发 input → CM6 的 DOMObserver readDOMChange 同步 state。
-				// 不能用 value/textContent 全文替换（会抹掉结构化 DOM）。
-				ok := bindings.InsertTextAtSelection(char)
-				if mf := h.wv.MainFrame(); mf != nil {
-					if fr := mf.Frame(); fr != nil {
-						fr.MarkRenderTreeDirty()
-					}
-				}
-				if !ok {
-					// 无有效 DOM Selection：仅派发 input，让 CM6 的 input
-					// handler 有机会走 state 更新路径（回退语义）。
-				}
-				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-			}
+			h.handleCharInput(ev)
 
 		case window.EventKey:
 			// ★ 浏览器标准事件顺序：先派发 keydown 到焦点元素，JS 决定
