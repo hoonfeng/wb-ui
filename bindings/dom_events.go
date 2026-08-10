@@ -171,6 +171,23 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 			obj.Set("currentTarget", jsc.ObjectValue(wrapElement(in, el)))
 		}
 	}
+	// ★ composedPath（浏览器标准）：返回事件路径 [target, ..., 根, window]。
+	// CM6 的 mousedown handler 用 event.composedPath() 判断点击是否落在
+	// 编辑器内容区（.cm-content 在路径中）——此前 undefined → 点击行
+	// 定位逻辑走错分支（「点击行事件行偏移」根因之一）。
+	obj.Set("composedPath", jsc.FunctionValue(jsc.NewNativeFunction("composedPath",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			var path []jsc.JSValue
+			if t := e.Target(); t != nil {
+				if n, ok := t.(dom.Node); ok {
+					for ; n != nil; n = n.ParentNode() {
+						path = append(path, nodeToJS(in, n))
+					}
+				}
+			}
+			path = append(path, jsc.ObjectValue(in.GlobalObject()))
+			return jsc.ObjectValue(jsc.NewArray(nil, path))
+		}, 0)))
 	obj.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
 		func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			e.PreventDefault()

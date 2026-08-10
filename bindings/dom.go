@@ -785,6 +785,13 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 					return jsc.Undefined()
 				}, 0)))
+			// composedPath（浏览器标准）：JS 构造的事件派发后 target 在
+			// dispatch 时设置；构造期无 target 返回空数组。CM6 构造
+			// synthetic 事件或测试库可能调用。
+			ev.Set("composedPath", jsc.FunctionValue(jsc.NewNativeFunction("composedPath",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.ObjectValue(jsc.NewArray(nil, nil))
+				}, 0)))
 			return ev
 		})))
 
@@ -833,7 +840,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return ev
 		})))
 
-	// WheelEvent 构造函数（浏览器标准：终端 xterm 等库构造 wheel 事件派发，
+	// KeyboardEvent 构造函数（浏览器标准：终端 xterm 等库构造 wheel 事件派发，
 	// 也用于测试/无障碍滚动）。字段含 deltaX/deltaY/deltaZ/deltaMode。
 	g.Set("WheelEvent", jsc.FunctionValue(rt.NewConstructor("WheelEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
@@ -1852,22 +1859,24 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			r.Set("commonAncestorContainer", jsc.Null())
 
 			r.Set("setStart", jsc.FunctionValue(jsc.NewNativeFunction("setStart",
-				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				func(in *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) >= 2 {
 						o := this.AsObject()
 						o.Set("startContainer", a[0])
-o.Set("startOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
+						o.Set("startOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
 						o.Set("collapsed", jsc.BooleanValue(false))
+						updateCommonAncestor(o, in)
 					}
 					return jsc.Undefined()
 				}, 2)))
 			r.Set("setEnd", jsc.FunctionValue(jsc.NewNativeFunction("setEnd",
-				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				func(in *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) >= 2 {
 						o := this.AsObject()
 						o.Set("endContainer", a[0])
-o.Set("endOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
+						o.Set("endOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
 						o.Set("collapsed", jsc.BooleanValue(false))
+						updateCommonAncestor(o, in)
 					}
 					return jsc.Undefined()
 				}, 2)))
@@ -1901,7 +1910,7 @@ o.Set("endOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
 					return jsc.ObjectValue(c)
 				}, 0)))
 			r.Set("selectNode", jsc.FunctionValue(jsc.NewNativeFunction("selectNode",
-				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				func(in *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) >= 1 {
 						o := this.AsObject()
 						o.Set("startContainer", a[0])
@@ -1909,15 +1918,16 @@ o.Set("endOffset", jsc.NumberValue(float64(int(a[1].ToNumber()))))
 						o.Set("endContainer", a[0])
 						ec := int64(0)
 						if cn := a[0].AsObject().GetStr("childNodes"); !cn.IsUndefined() {
-ec = int64(cn.AsObject().GetStr("length").ToNumber())
+							ec = int64(cn.AsObject().GetStr("length").ToNumber())
 						}
 						o.Set("endOffset", jsc.NumberValue(float64(ec)))
 						o.Set("collapsed", jsc.BooleanValue(false))
+						updateCommonAncestor(o, in)
 					}
 					return jsc.Undefined()
 				}, 1)))
 			r.Set("selectNodeContents", jsc.FunctionValue(jsc.NewNativeFunction("selectNodeContents",
-				func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				func(in *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) >= 1 {
 						o := this.AsObject()
 						o.Set("startContainer", a[0])
@@ -1925,10 +1935,11 @@ ec = int64(cn.AsObject().GetStr("length").ToNumber())
 						o.Set("endContainer", a[0])
 						ec := int64(0)
 						if cn := a[0].AsObject().GetStr("childNodes"); !cn.IsUndefined() {
-ec = int64(cn.AsObject().GetStr("length").ToNumber())
+							ec = int64(cn.AsObject().GetStr("length").ToNumber())
 						}
 						o.Set("endOffset", jsc.NumberValue(float64(ec)))
 						o.Set("collapsed", jsc.BooleanValue(false))
+						updateCommonAncestor(o, in)
 					}
 					return jsc.Undefined()
 				}, 1)))
@@ -2600,7 +2611,105 @@ func makeSelRange(rt *jsc.Interpreter, anchor jsc.JSValue, anchorOff int64, focu
 	r.Set("endContainer", focus)
 	r.Set("endOffset", jsc.NumberValue(float64(focusOff)))
 	r.Set("collapsed", jsc.BooleanValue(anchor.SameAs(focus) && anchorOff == focusOff))
+	updateCommonAncestor(r, rt)
 	return r
+}
+
+// commonAncestorOf 返回 a/b 的最近公共祖先节点（沿 ParentNode 链找首个
+// 同时是两者祖先的节点）。Range.commonAncestorContainer 的标准语义。
+func commonAncestorOf(a, b dom.Node) dom.Node {
+	if a == nil || b == nil {
+		return nil
+	}
+	set := map[dom.Node]bool{}
+	for n := a; n != nil; n = n.ParentNode() {
+		set[n] = true
+	}
+	for n := b; n != nil; n = n.ParentNode() {
+		if set[n] {
+			return n
+		}
+	}
+	return nil
+}
+
+// updateCommonAncestor 用 range 对象的 start/endContainer 计算公共祖先并
+// 写回 commonAncestorContainer（CM6 DOMObserver 依赖它判断变更范围）。
+func updateCommonAncestor(o *jsc.JSObject, in *jsc.Interpreter) {
+	sc := o.GetStr("startContainer")
+	ec := o.GetStr("endContainer")
+	if sc.IsNull() || sc.IsUndefined() || ec.IsNull() || ec.IsUndefined() {
+		o.Set("commonAncestorContainer", jsc.Null())
+		return
+	}
+	sn := unwrapNode(sc)
+	en := unwrapNode(ec)
+	anc := commonAncestorOf(sn, en)
+	if anc == nil {
+		o.Set("commonAncestorContainer", jsc.Null())
+		return
+	}
+	o.Set("commonAncestorContainer", nodeToJS(in, anc))
+}
+
+// compareDocPosition 实现 Node.compareDocumentPosition 的位掩码语义
+// （WHATWG DOM 标准）：
+//
+//	DISCONNECTED=0x01  PRECEDING=0x02  FOLLOWING=0x04
+//	CONTAINS=0x08      CONTAINED_BY=0x10  IMPLEMENTATION_SPECIFIC=0x20
+func compareDocPosition(a, b dom.Node) int {
+	if a == nil || b == nil {
+		return 0x01 | 0x20
+	}
+	if a == b {
+		return 0
+	}
+	// 收集祖先链（自身在最前，根在最后）
+	var ancA, ancB []dom.Node
+	for n := a; n != nil; n = n.ParentNode() {
+		ancA = append(ancA, n)
+	}
+	for n := b; n != nil; n = n.ParentNode() {
+		ancB = append(ancB, n)
+	}
+	// 从根向下找最近公共祖先（ancA[ia] == ancB[ib]）
+	ia, ib := len(ancA)-1, len(ancB)-1
+	lcaIdx := -1 // ancA 中 LCA 的索引
+	for ia >= 0 && ib >= 0 && ancA[ia] == ancB[ib] {
+		lcaIdx = ia
+		ia--
+		ib--
+	}
+	if lcaIdx < 0 {
+		return 0x01 | 0x20 // 不同文档树：DISCONNECTED
+	}
+	if ia < 0 {
+		// a 是 b 的祖先（a 的链遍历完仍全部匹配）
+		return 0x08 | 0x02 // CONTAINS + PRECEDING
+	}
+	if ib < 0 {
+		return 0x10 | 0x04 // CONTAINED_BY + FOLLOWING
+	}
+	// LCA 下的两个分支节点 ancA[ia] 与 ancB[ib]：按子节点顺序比较
+	lca := ancA[lcaIdx]
+	posA, posB := -1, -1
+	idx := 0
+	for c := lca.FirstChild(); c != nil; c = c.NextSibling() {
+		if c == ancA[ia] {
+			posA = idx
+		}
+		if c == ancB[ib] {
+			posB = idx
+		}
+		if posA >= 0 && posB >= 0 {
+			break
+		}
+		idx++
+	}
+	if posA < posB {
+		return 0x02 // PRECEDING
+	}
+	return 0x04 // FOLLOWING
 }
 
 // InsertTextAtSelection 在 DOM Selection 的当前 range 处插入文本（光标处插入）。
@@ -3457,6 +3566,27 @@ obj.SetInternal(el)
 	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(el.NodeType()))
 	}), nil)
+	// ★ getRootNode（浏览器标准）：返回节点的根（无 shadow DOM 时为
+	// document）。CM6 用 getRootNode() 判断节点是否在 shadowRoot/编辑器
+	// 根内——此前 undefined → CM6 的 isEditorRoot 判断异常。
+	obj.Set("getRootNode", jsc.FunctionValue(jsc.NewNativeFunction("getRootNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			doc := el.OwnerDocument()
+			if doc == nil {
+				return jsc.ObjectValue(obj)
+			}
+			return jsc.ObjectValue(wrapDocument(in, doc))
+		}, 0)))
+	// ★ compareDocumentPosition（浏览器标准）：返回位掩码描述 node 相对
+	// el 的文档位置。CM6 的 DOMObserver / 节点排序依赖它。
+	obj.Set("compareDocumentPosition", jsc.FunctionValue(jsc.NewNativeFunction("compareDocumentPosition",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.NumberValue(0)
+			}
+			other := unwrapNode(a[0])
+			return jsc.NumberValue(float64(compareDocPosition(el, other)))
+		}, 1)))
 	obj.SetAccessor("nodeValue", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.Null()
 	}), nil)
@@ -3953,6 +4083,37 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 			if p := t.ParentNode(); p != nil { p.RemoveChild(t) }
 			return jsc.Undefined()
 		}, 0)))
+	// ★ splitText（浏览器标准）：把文本节点在 offset 处拆成两个，
+	// 返回后半部分节点。CM6 的 DOMObserver 处理输入时可能调用。
+	obj.Set("splitText", jsc.FunctionValue(jsc.NewNativeFunction("splitText",
+		func(in *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			off := 0
+			if len(a) >= 1 {
+				off = int(a[0].ToNumber())
+			}
+			tail, err := t.SplitText(off)
+			if err != nil {
+				return jsc.Null()
+			}
+			return nodeToJS(in, tail)
+		}, 1)))
+	// ★ getRootNode / compareDocumentPosition（浏览器标准，同 Element）
+	obj.Set("getRootNode", jsc.FunctionValue(jsc.NewNativeFunction("getRootNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			doc := t.OwnerDocument()
+			if doc == nil {
+				return jsc.ObjectValue(obj)
+			}
+			return jsc.ObjectValue(wrapDocument(in, doc))
+		}, 0)))
+	obj.Set("compareDocumentPosition", jsc.FunctionValue(jsc.NewNativeFunction("compareDocumentPosition",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.NumberValue(0)
+			}
+			other := unwrapNode(a[0])
+			return jsc.NumberValue(float64(compareDocPosition(t, other)))
+		}, 1)))
 	obj.SetAccessor("data",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
@@ -4172,6 +4333,15 @@ func wrapRange(rt *jsc.Interpreter, sn dom.Node, so int, en dom.Node, eo int) *j
 	}), nil)
 	obj.SetAccessor("endContainer", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return nodeJS(rt, st.endNode)
+	}), nil)
+	// ★ commonAncestorContainer（浏览器标准）：CM6 DOMObserver 用它判断
+	// 变更范围；此前缺失 → 读 undefined → readDOMChange 逻辑异常。
+	obj.SetAccessor("commonAncestorContainer", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		anc := commonAncestorOf(st.startNode, st.endNode)
+		if anc == nil {
+			return jsc.Null()
+		}
+		return nodeJS(in, anc)
 	}), nil)
 	obj.SetAccessor("startOffset", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(st.startOff))
