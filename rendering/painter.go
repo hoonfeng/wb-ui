@@ -60,6 +60,36 @@ func toGraphicsColor(c style.Color) graphics.Color {
 	return graphics.Color{R: c.R, G: c.G, B: c.B, A: c.A}
 }
 
+// textInAbsPos reports whether the text's render ancestry contains an
+// absolutely/fixed positioned element. xterm's DOM renderer places every
+// character span as position:absolute + inline-block inside a fixed-height
+// row div. The browser positions such text by the line-box rule
+// baseline = lineTop + (lineHeight - fontHeight)/2 + ascent (half-leading
+// centering inside the span's line box), NOT cap-top flush. In-flow text
+// already has the centering offset folded into seg.Y by layout (painter
+// then uses capHeight for a cap-top-flush baseline that matches the
+// browser for typical in-flow lines). Absolute text gets no such layout
+// centering, so painter must reproduce the browser formula itself —
+// otherwise glyph tops sit ~3px higher than in the browser (the "终端
+// 文字偏上" report). Returns false for nil parents.
+func textInAbsPos(text *RenderText) bool {
+	if text == nil {
+		return false
+	}
+	for p := text.Parent(); p != nil; p = p.Parent() {
+		el, ok := p.Node().(*dom.Element)
+		if !ok {
+			continue
+		}
+		_ = el
+		st := p.Style()
+		if st != nil && (st.Position == style.PositionAbsolute || st.Position == style.PositionFixed) {
+			return true
+		}
+	}
+	return false
+}
+
 // textName returns a short identity (tag.class) for a RenderText's element.
 func textName(text *RenderText) string {
 	if text == nil || text.Node() == nil {
@@ -941,6 +971,26 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// the browser rule (baseline = lineTop + halfLeading + ascent; the
 	// half-leading/centering offset is already folded into seg.Y by layout).
 	cjkAscent, _ := info.canvas.FontCJKMetrics(font)
+	// Absolute-positioned text (xterm DOM renderer spans are
+	// position:absolute + inline-block inside a fixed-height row div): the
+	// browser centers the glyphs by the line-box rule
+	// baseline = top + (lineHeight - fontHeight)/2 + ascent. In-flow text
+	// already got its centering offset folded into seg.Y by layout, but
+	// absolute text did not — painter must reproduce the formula or glyph
+	// tops sit ~3px too high ("终端文字偏上，与浏览器不一致").
+	absBaselineH := baselineH
+	if textInAbsPos(text) {
+		absDescent := graphics.GlobalFontDescent(font)
+		fh := ascent + absDescent
+		hh := 0.0
+		if len(segments) > 0 {
+			hh = segments[0].Height
+		}
+		if hh <= fh {
+			hh = fh
+		}
+		absBaselineH = (hh-fh)/2 + ascent
+	}
 
 	// DEBUG: print segments info
 	debugContent := content
@@ -980,6 +1030,8 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			baseline := seg.Y + baselineH
 			if hasCJKChars([]rune(sub)) {
 				baseline = seg.Y + cjkAscent
+			} else if textInAbsPos(text) {
+				baseline = seg.Y + absBaselineH
 			}
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
 		}
@@ -1023,6 +1075,8 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		baseline := seg.Y + baselineH
 		if hasCJKChars(runes[seg.Start:end]) {
 			baseline = seg.Y + cjkAscent
+		} else if textInAbsPos(text) {
+			baseline = seg.Y + absBaselineH
 		}
 
 	// ── text-overflow:ellipsis ──
