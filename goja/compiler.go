@@ -164,7 +164,7 @@ func (b *binding) emitGetP() {
 func (b *binding) emitSet() {
 	if b.isConst {
 		if b.isStrict || b.scope.c.scope.strict {
-			b.scope.c.emit(throwAssignToConst)
+			b.scope.c.emit1(throwAssignToConst)
 		}
 		return
 	}
@@ -179,7 +179,7 @@ func (b *binding) emitSet() {
 func (b *binding) emitSetP() {
 	if b.isConst {
 		if b.isStrict || b.scope.c.scope.strict {
-			b.scope.c.emit(throwAssignToConst)
+			b.scope.c.emit1(throwAssignToConst)
 		}
 		return
 	}
@@ -972,7 +972,7 @@ func (c *compiler) compile(in *ast.Program, strict, inGlobal bool, evalVm *vm) {
 				needResult: true,
 			}
 			enter = &enterBlock{}
-			c.emit(enter)
+			c.emit1(enter)
 		}
 	}
 	if len(scope.bindings) > 0 && !ownLexScope {
@@ -1273,6 +1273,12 @@ func (c *compiler) compileStandaloneFunctionDecl(v *ast.FunctionDeclaration) {
 
 func (c *compiler) emit(instructions ...instruction) {
 	c.p.code = append(c.p.code, instructions...)
+}
+
+// emit1 是 emit 的单指令快速路径——避免变参 slice 分配（高频基元指令
+// 如 pop/nil/loadUndef 走此路径，编译 10MB bundle 时可省大量小分配）。
+func (c *compiler) emit1(in instruction) {
+	c.p.code = append(c.p.code, in)
 }
 
 func (c *compiler) throwSyntaxError(offset int, msg string) {

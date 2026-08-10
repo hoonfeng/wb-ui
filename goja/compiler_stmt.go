@@ -122,15 +122,15 @@ func (c *compiler) compileTryStatement(v *ast.TryStatement, needResult bool) {
 		bodyNeedResult = needResult
 	}
 	lbl := len(c.p.code)
-	c.emit(nil)
+	c.emit1(nil)
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	c.compileBlockStatement(v.Body, bodyNeedResult)
 	var catchOffset int
 	if v.Catch != nil {
 		lbl2 := len(c.p.code) // jump over the catch block
-		c.emit(nil)
+		c.emit1(nil)
 		catchOffset = len(c.p.code) - lbl
 		if v.Catch.Parameter != nil {
 			c.block = &block{
@@ -154,7 +154,7 @@ func (c *compiler) compileTryStatement(v *ast.TryStatement, needResult bool) {
 				c.scope.bindNameLexical(name, true, offset)
 			})
 			enter := &enterBlock{}
-			c.emit(enter)
+			c.emit1(enter)
 			if pattern, ok := v.Catch.Parameter.(ast.Pattern); ok {
 				c.scope.bindings[0].emitGet()
 				c.emitPattern(pattern, func(target, init compiledExpr) {
@@ -179,7 +179,7 @@ func (c *compiler) compileTryStatement(v *ast.TryStatement, needResult bool) {
 			}
 			c.popScope()
 		} else {
-			c.emit(pop)
+			c.emit1(pop)
 			c.compileBlockStatement(v.Catch.Body, bodyNeedResult)
 		}
 		c.p.code[lbl2] = jump(len(c.p.code) - lbl2)
@@ -189,7 +189,7 @@ func (c *compiler) compileTryStatement(v *ast.TryStatement, needResult bool) {
 		c.emit(enterFinally{})
 		finallyOffset = len(c.p.code) - lbl // finallyOffset should not include enterFinally
 		if bodyNeedResult && finallyBreaking != nil && lp == -1 {
-			c.emit(clearResult)
+			c.emit1(clearResult)
 		}
 		c.compileBlockStatement(v.Finally, false)
 		c.emit(leaveFinally{})
@@ -276,7 +276,7 @@ func (c *compiler) compileLabeledForStatement(v *ast.ForStatement, needResult bo
 	}
 
 	if needResult {
-		c.emit(clearResult) // initial result
+		c.emit1(clearResult) // initial result
 	}
 
 	if enterIterBlock != nil {
@@ -310,11 +310,11 @@ func (c *compiler) compileLabeledForStatement(v *ast.ForStatement, needResult bo
 		} else {
 			expr.emitGetter(true)
 			j = len(c.p.code)
-			c.emit(nil)
+			c.emit1(nil)
 		}
 	}
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	c.compileStatement(v.Body, needResult)
 	loopBlock.cont = len(c.p.code)
@@ -366,7 +366,7 @@ func (c *compiler) compileForInto(into ast.ForInto, needResult bool) (enter *ent
 		case *ast.Identifier:
 			c.compileIdentifierExpression(target).emitSetter(&c.enumGetExpr, false)
 		case ast.Pattern:
-			c.emit(enumGet)
+			c.emit1(enumGet)
 			c.emitPattern(target, c.emitPatternVarAssign, false)
 		default:
 			c.throwSyntaxErrorf(int(target.Idx0()-1), "unsupported for-in var target: %T", target)
@@ -381,15 +381,15 @@ func (c *compiler) compileForInto(into ast.ForInto, needResult bool) (enter *ent
 
 		c.newBlockScope()
 		enter = &enterBlock{}
-		c.emit(enter)
+		c.emit1(enter)
 		switch target := into.Target.(type) {
 		case *ast.Identifier:
 			b := c.createLexicalIdBinding(target.Name, into.IsConst, int(into.Idx)-1)
-			c.emit(enumGet)
+			c.emit1(enumGet)
 			b.emitInitP()
 		case ast.Pattern:
 			c.createLexicalBinding(target, into.IsConst)
-			c.emit(enumGet)
+			c.emit1(enumGet)
 			c.emitPattern(target, func(target, init compiledExpr) {
 				c.emitPatternLexicalAssign(target, init)
 			}, false)
@@ -459,14 +459,14 @@ func (c *compiler) compileLabeledForInOfStatement(into ast.ForInto, source ast.E
 		c.emit(enumerate)
 	}
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	start := len(c.p.code)
 	c.block.cont = start
-	c.emit(nil)
+	c.emit1(nil)
 	enterIterBlock := c.compileForInto(into, needResult)
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	c.compileStatement(body, needResult)
 	if enterIterBlock != nil {
@@ -481,7 +481,7 @@ func (c *compiler) compileLabeledForInOfStatement(into ast.ForInto, source ast.E
 	}
 	c.emit(enumPop, jump(2))
 	c.leaveBlock()
-	c.emit(enumPopClose)
+	c.emit1(enumPopClose)
 }
 
 func (c *compiler) compileLabeledForInStatement(v *ast.ForInStatement, needResult bool, label unistring.String) {
@@ -509,7 +509,7 @@ func (c *compiler) compileLabeledWhileStatement(v *ast.WhileStatement, needResul
 	}
 
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	start := len(c.p.code)
 	c.block.cont = start
@@ -531,10 +531,10 @@ func (c *compiler) compileLabeledWhileStatement(v *ast.WhileStatement, needResul
 	} else {
 		expr.emitGetter(true)
 		j = len(c.p.code)
-		c.emit(nil)
+		c.emit1(nil)
 	}
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	c.compileStatement(v.Body, needResult)
 	c.emit(jump(start - len(c.p.code)))
@@ -547,7 +547,7 @@ end:
 
 func (c *compiler) compileEmptyStatement(needResult bool) {
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 }
 
@@ -638,13 +638,13 @@ L:
 			fallthrough
 		case blockScope:
 			b.breaks = append(b.breaks, len(c.p.code))
-			c.emit(nil)
+			c.emit1(nil)
 		case blockTry:
 			c.emit(leaveTry{})
 		case blockWith:
 			c.emit(leaveWith)
 		case blockLoopEnum:
-			c.emit(enumPopClose)
+			c.emit1(enumPopClose)
 		}
 	}
 	return block
@@ -653,13 +653,13 @@ L:
 func (c *compiler) compileBreak(label *ast.Identifier, idx file.Idx) {
 	block := c.emitBlockExitCode(label, idx, true)
 	block.breaks = append(block.breaks, len(c.p.code))
-	c.emit(nil)
+	c.emit1(nil)
 }
 
 func (c *compiler) compileContinue(label *ast.Identifier, idx file.Idx) {
 	block := c.emitBlockExitCode(label, idx, false)
 	block.conts = append(block.conts, len(c.p.code))
-	c.emit(nil)
+	c.emit1(nil)
 }
 
 func (c *compiler) compileIfBody(s ast.Statement, needResult bool) {
@@ -667,7 +667,7 @@ func (c *compiler) compileIfBody(s ast.Statement, needResult bool) {
 		if s, ok := s.(*ast.FunctionDeclaration); ok && !s.Function.Async && !s.Function.Generator {
 			c.compileFunction(s)
 			if needResult {
-				c.emit(clearResult)
+				c.emit1(clearResult)
 			}
 			return
 		}
@@ -684,7 +684,7 @@ func (c *compiler) compileIfBodyDummy(s ast.Statement) {
 func (c *compiler) compileIfStatement(v *ast.IfStatement, needResult bool) {
 	test := c.compileExpression(v.Test)
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 	if test.constant() {
 		r, ex := c.evalConst(test)
@@ -704,7 +704,7 @@ func (c *compiler) compileIfStatement(v *ast.IfStatement, needResult bool) {
 				c.compileIfBody(v.Alternate, needResult)
 			} else {
 				if needResult {
-					c.emit(clearResult)
+					c.emit1(clearResult)
 				}
 			}
 		}
@@ -712,11 +712,11 @@ func (c *compiler) compileIfStatement(v *ast.IfStatement, needResult bool) {
 	}
 	test.emitGetter(true)
 	jmp := len(c.p.code)
-	c.emit(nil)
+	c.emit1(nil)
 	c.compileIfBody(v.Consequent, needResult)
 	if v.Alternate != nil {
 		jmp1 := len(c.p.code)
-		c.emit(nil)
+		c.emit1(nil)
 		c.p.code[jmp] = jneP(len(c.p.code) - jmp)
 		c.compileIfBody(v.Alternate, needResult)
 		c.p.code[jmp1] = jump(len(c.p.code) - jmp1)
@@ -724,7 +724,7 @@ func (c *compiler) compileIfStatement(v *ast.IfStatement, needResult bool) {
 		if needResult {
 			c.emit(jump(2))
 			c.p.code[jmp] = jneP(len(c.p.code) - jmp)
-			c.emit(clearResult)
+			c.emit1(clearResult)
 		} else {
 			c.p.code[jmp] = jneP(len(c.p.code) - jmp)
 		}
@@ -738,14 +738,14 @@ func (c *compiler) compileReturnStatement(v *ast.ReturnStatement) {
 	if v.Argument != nil {
 		c.emitExpr(c.compileExpression(v.Argument), true)
 	} else {
-		c.emit(loadUndef)
+		c.emit1(loadUndef)
 	}
 	for b := c.block; b != nil; b = b.outer {
 		switch b.typ {
 		case blockTry:
 			c.emit(saveResult, leaveTry{}, loadResult)
 		case blockLoopEnum:
-			c.emit(enumPopClose)
+			c.emit1(enumPopClose)
 		}
 	}
 	if s := c.scope.nearestFunction(); s != nil && s.funcType == funcDerivedCtor {
@@ -806,7 +806,7 @@ func (c *compiler) emitLexicalAssign(name unistring.String, offset int, init com
 		if b.isConst {
 			c.throwSyntaxError(offset, "Missing initializer in const declaration")
 		}
-		c.emit(loadUndef)
+		c.emit1(loadUndef)
 	}
 	b.emitInitP()
 }
@@ -830,12 +830,12 @@ func (c *compiler) emitPatternAssign(target, init compiledExpr) {
 		} else {
 			c.emitVarRef(id.name, id.offset, b)
 			c.emitNamedOrConst(init, id.name)
-			c.emit(putValueP)
+			c.emit1(putValueP)
 		}
 	} else {
 		target.emitRef()
 		c.emitExpr(init, true)
-		c.emit(putValueP)
+		c.emit1(putValueP)
 	}
 }
 
@@ -977,7 +977,7 @@ func (c *compiler) compileBlockStatement(v *ast.BlockStatement, needResult bool)
 			needResult: needResult,
 		}
 		enter = &enterBlock{}
-		c.emit(enter)
+		c.emit1(enter)
 	}
 	c.compileFunctions(funcs)
 	c.compileStatements(v.List, needResult)
@@ -1048,7 +1048,7 @@ func (c *compiler) compileSwitchStatement(v *ast.SwitchStatement, needResult boo
 			needResult: needResult,
 		}
 		enter = &enterBlock{}
-		c.emit(enter)
+		c.emit1(enter)
 		// create anonymous variable for the discriminant
 		bindings := c.scope.bindings
 		var bb []*binding
@@ -1070,7 +1070,7 @@ func (c *compiler) compileSwitchStatement(v *ast.SwitchStatement, needResult boo
 	c.compileFunctions(funcs)
 
 	if needResult {
-		c.emit(clearResult)
+		c.emit1(clearResult)
 	}
 
 	jumps := make([]int, len(v.Body))
@@ -1080,7 +1080,7 @@ func (c *compiler) compileSwitchStatement(v *ast.SwitchStatement, needResult boo
 			if db != nil {
 				db.emitGet()
 			} else {
-				c.emit(dup)
+				c.emit1(dup)
 			}
 			c.compileExpression(s.Test).emitGetter(true)
 			c.emit(op_strict_eq)
@@ -1090,22 +1090,22 @@ func (c *compiler) compileSwitchStatement(v *ast.SwitchStatement, needResult boo
 				c.emit(jneP(3), pop)
 			}
 			jumps[i] = len(c.p.code)
-			c.emit(nil)
+			c.emit1(nil)
 		}
 	}
 
 	if db == nil {
-		c.emit(pop)
+		c.emit1(pop)
 	}
 	jumpNoMatch := -1
 	if v.Default != -1 {
 		if v.Default != 0 {
 			jumps[v.Default] = len(c.p.code)
-			c.emit(nil)
+			c.emit1(nil)
 		}
 	} else {
 		jumpNoMatch = len(c.p.code)
-		c.emit(nil)
+		c.emit1(nil)
 	}
 
 	for i, s := range v.Body {

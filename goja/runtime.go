@@ -1359,6 +1359,11 @@ func compile(name, src string, strict, inGlobal bool, evalVm *vm, parserOptions 
 
 func compileAST(prg *js_ast.Program, strict, inGlobal bool, evalVm *vm) (p *Program, err error) {
 	c := newCompiler()
+	// ★ 顶层指令缓冲预分配：按语句数粗估（每语句 ≈24 条指令），避免
+	// append 频繁扩容整片复制（10MB bundle 可省数百 MB 的 slice copy）。
+	if n := len(prg.Body); n > 0 {
+		c.p.code = make([]instruction, 0, n*24)
+	}
 
 	defer func() {
 		if x := recover(); x != nil {

@@ -191,7 +191,14 @@ func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this 
 	constVal := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		interp := r
 		this := JSValue{v: call.This, interp: interp}
-		args := make([]JSValue, len(call.Arguments))
+		n := len(call.Arguments)
+		var buf [8]JSValue
+		var args []JSValue
+		if n <= len(buf) {
+			args = buf[:n]
+		} else {
+			args = make([]JSValue, n)
+		}
 		for i, a := range call.Arguments {
 			args[i] = JSValue{v: a, interp: interp}
 		}
@@ -209,10 +216,21 @@ func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this 
 }
 
 // wrapNativeFunc 使用指定 goja.Runtime 包装 NativeFunc。
+// ★ 性能：每次调用 make([]JSValue, n) 分配——Vue mount 百万级 DOM API
+// 调用（createElement/setAttribute/style 等）都走此边界。改为栈上小数组
+// （≤8 参数零分配；>8 才 make）。fn 若存储 args 逃逸时编译器自动转堆，
+// 语义不变。
 func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) goja.Value {
 	return r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		this := JSValue{v: call.This, interp: interp}
-		args := make([]JSValue, len(call.Arguments))
+		n := len(call.Arguments)
+		var buf [8]JSValue
+		var args []JSValue
+		if n <= len(buf) {
+			args = buf[:n]
+		} else {
+			args = make([]JSValue, n)
+		}
 		for i, a := range call.Arguments {
 			args[i] = JSValue{v: a, interp: interp}
 		}
