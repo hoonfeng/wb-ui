@@ -1966,7 +1966,13 @@ func applyCanvas2DPatch(rt *jsc.Interpreter) {
               // 路径，实测有效）。
               var fontSpec = this.font || '10px sans-serif';
               var m = /([+-]?[\d.]+)px\s*([^;]*)/.exec(fontSpec);
-              s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;display:inline-block;';
+              // ★ span 必须 position:static（不能 absolute）——wb-ui 引擎
+              // 对 absolute 元素的子内容不布局，getBoundingClientRect 宽=0
+              // → 走 fallback len*fs*0.6（空格 13*0.6=7.8，浏览器真实
+              // 7.1475，差 9%）→「空格间距」偏大。static inline-block +
+              // white-space:pre 在 absolute holder 内可测出真实宽度
+              // （7.1475）。holder 保持 absolute 是为了隐藏+脱离文档流。
+              s.style.cssText = 'position:static;visibility:hidden;white-space:pre;display:inline-block;';
               // ★ line-height:normal 必须——xterm 的 .xterm-char-measure-element
               // 有它（xterm.css），行高=字体度量 15.22；不设则继承 1.2×fs=15.6。
               // 配合 wb-ui 的 line-height:normal→字体度量解析，两处一致。
