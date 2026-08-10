@@ -1024,6 +1024,31 @@ func (c *Canvas) FontCapHeight(font Font) float64 {
 	return float64(-m.Ascent)
 }
 
+// FontCJKMetrics returns the ascent/descent (px) of the CJK fallback
+// typeface (Microsoft YaHei) at the given font's size. CJK glyphs are
+// full-em squares drawn by the CJK font regardless of the CSS family, so
+// their baseline must be positioned from the CJK font's own metrics
+// (browser line-box rule: baseline = lineTop + halfLeading + ascent). The
+// painter uses this instead of capHeight for segments that contain CJK
+// characters, because capHeight (OS/2 sCapHeight) is far smaller than the
+// distance from baseline up to the top of a CJK glyph (~0.85em), which
+// pushed glyph tops above the line box and clipped them.
+func (c *Canvas) FontCJKMetrics(font Font) (ascent, descent float64) {
+	skFont := c.getCJKSkiaFont(font)
+	if skFont == nil {
+		skFont = c.getSkiaFont(font)
+	}
+	if skFont == nil {
+		size := font.Size
+		if size <= 0 {
+			size = 16
+		}
+		return size * 0.8, size * 0.2
+	}
+	m, _ := skFont.Metrics()
+	return float64(-m.Ascent), float64(m.Descent)
+}
+
 // getSkiaFont returns a cached *skia.Font matching the given graphics.Font
 // description, creating one on first use.
 func (c *Canvas) getSkiaFont(font Font) *skia.Font {

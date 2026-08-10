@@ -150,6 +150,23 @@ func BoxGeometry(o RenderObject) (x, y, w, h float64, ok bool) {
 	return box.X(), box.Y(), box.Width(), box.Height(), true
 }
 
+// hasCJKChars reports whether any rune falls in a CJK ideograph/symbol
+// range. Such glyphs are rendered with the CJK fallback font, so their
+// baseline must come from that font's metrics (see FontCJKMetrics).
+func hasCJKChars(rs []rune) bool {
+	for _, r := range rs {
+		switch {
+		case r >= 0x2E80 && r <= 0x9FFF: // CJK radicals, symbols, unified ideographs
+		case r >= 0xF900 && r <= 0xFAFF: // CJK compatibility ideographs
+		case r >= 0x20000 && r <= 0x2FA1F: // CJK ext B..F
+		default:
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // toGraphicsFont builds a graphics.Font from a ComputedStyle, mirroring the FontCascade
 // construction that TextPainter performs before drawing.
 func toGraphicsFont(st *style.ComputedStyle) graphics.Font {
@@ -916,6 +933,14 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	if ch := info.canvas.FontCapHeight(font); ch > 0 {
 		baselineH = ch
 	}
+	// CJK glyphs are drawn with the CJK fallback font (YaHei) whose glyph
+	// top sits ~0.85em above the baseline — capHeight (OS/2 sCapHeight,
+	// ≈0.72em) is far too small, which pushed CJK glyph tops above the line
+	// box and clipped them ("中文显示不全，顶部被裁切"). For segments that
+	// contain CJK we position the baseline at seg.Y + CJK ascent, matching
+	// the browser rule (baseline = lineTop + halfLeading + ascent; the
+	// half-leading/centering offset is already folded into seg.Y by layout).
+	cjkAscent, _ := info.canvas.FontCJKMetrics(font)
 
 	// DEBUG: print segments info
 	debugContent := content
@@ -953,6 +978,9 @@ func PaintText(text *RenderText, info *PaintInfo) {
 				continue
 			}
 			baseline := seg.Y + baselineH
+			if hasCJKChars([]rune(sub)) {
+				baseline = seg.Y + cjkAscent
+			}
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
 		}
 	}
@@ -993,6 +1021,9 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			continue
 		}
 		baseline := seg.Y + baselineH
+		if hasCJKChars(runes[seg.Start:end]) {
+			baseline = seg.Y + cjkAscent
+		}
 
 	// ── text-overflow:ellipsis ──
 		// Walk segments sequentially from the left. Track cumulative width from the
