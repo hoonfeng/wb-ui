@@ -88,6 +88,16 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	// First pass: compute explicit height so we can position.
 	if hAuto {
 		height = layoutAbsoluteHeightForBox(box, state)
+		// ★ auto 高度：layoutAbsoluteHeightForBox 返回 border-box 高度
+		//   （BFC 内容高 + padding + border）。SetContentHeight 存的是
+		//   content 高度，必须减 padding+border——否则 fixed/absolute
+		//   弹层（dropdown/菜单/工具提示）高度虚高 padding+border：
+		//   帮助菜单 dropdown 最后一项下方多 ~10px 空隙（wb-ui 234 vs
+		//   浏览器 233）的根因。
+		height -= border.Vertical() + padding.Vertical()
+		if height < 0 {
+			height = 0
+		}
 	} else if !isBorderBoxForBox(box) {
 		height -= border.Vertical() + padding.Vertical()
 	}

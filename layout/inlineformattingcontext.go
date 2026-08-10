@@ -328,7 +328,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if !firstWord && wi == 0 {
 						nextX += spaceWidth
 					}
-					if nextX+wordWidth > currentLine.availWidth && currentLine.widthUsed > 0 && softWrap {
+					// ★ 断行比较加 0.001 epsilon：文字宽度恰好等于可用宽度
+					//   （如 13px 字体下"关闭"26px 与按钮 content 26px）时，
+					//   浮点微差（26.0000001 > 25.9999999）会误判折行——
+					//   AboutModal 关闭按钮文字竖排（content 31.2 两行）的根因。
+					//   浏览器在宽度相等时不会换行；epsilon 仅吸收亚像素误差，
+					//   不影响真实换行（真实换行需求通常差 > 1px）。
+					if nextX+wordWidth > currentLine.availWidth+0.001 && currentLine.widthUsed > 0 && softWrap {
 						// Line wrap: record line, start new line with float-aware width.
 						lines = append(lines, currentLine)
 						newY := currentLine.y + lineHeight
@@ -358,7 +364,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 							for i, ch := range []rune(word) {
 								chStr := string(ch)
 								chW := measureText(box, chStr)
-								if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth {
+								if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth+0.001 {
 									lines = append(lines, currentLine)
 									newY := currentLine.y + lineHeight
 									newCx, newCw := availableLineWidth(newY)
