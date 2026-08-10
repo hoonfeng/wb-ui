@@ -4687,7 +4687,18 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// addEventListener) fire — previously they never ran, so every
 		// button/icon/switch click did nothing.
 		if deepest != nil {
-			deepest.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
+			// ★ click 必须携带 clientX/clientY（浏览器标准：click 坐标 = 触发
+			// 它的 mousedown/mouseup 坐标）。此前用 NewMouseEvent（clientX/Y=0）
+			// 派发 → CM6 等用 event.clientY 计算点击行的库全部错位（行号差
+			// 一行/恒 0）。
+			deepest.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+				ClientX:   clickCSSX,
+				ClientY:   clickCSSY,
+				Button:    dom.MouseButtonLeft,
+				Buttons:   1,
+				Detail:    1,
+			}))
 		}
 		if h.clickHandler != nil {
 			h.clickHandler(deepest, "", clickCSSX, clickCSSY)
@@ -4767,7 +4778,14 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	}
 	onclickVal := el.GetAttribute("onclick")
 	if onclickVal == "" {
-		el.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
+		el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+			EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+			ClientX:   clickCSSX,
+			ClientY:   clickCSSY,
+			Button:    dom.MouseButtonLeft,
+			Buttons:   1,
+			Detail:    1,
+		}))
 		if h.clickHandler != nil {
 			h.clickHandler(el, "", clickCSSX, clickCSSY)
 		}
@@ -4853,7 +4871,14 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		h.wv.RebuildRenderTree()
 		return
 	}
-	el.DispatchEvent(dom.NewMouseEvent(dom.EventClick, true, true, false))
+	el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+		EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+		ClientX:   clickCSSX,
+		ClientY:   clickCSSY,
+		Button:    dom.MouseButtonLeft,
+		Buttons:   1,
+		Detail:    1,
+	}))
 	if h.clickHandler != nil {
 		h.clickHandler(el, onclickVal, clickCSSX, clickCSSY)
 	}
