@@ -905,6 +905,17 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	content := text.OriginalText()
 	segments := text.Segments()
 	ascent := info.canvas.FontAscent(font)
+	// ★ 浏览器文字在行 box 内：cap 顶部 ≈ 行 box 顶（baseline = half-leading
+	//   + ascent，而对 Consolas 等拉丁字体 ascent ≈ capHeight）。wb-ui 的
+	//   Skia ascent 是 usWinAscent（Consolas 13 ≈ 12px），比浏览器的
+	//   CSS ascent（hhea ≈ 9.7px）大 → 文字整体偏低 ~3-4px（终端里表现为
+	//   「初始文本不从顶部开始 + 行间空隙变大」）。改用 capHeight 定位
+	//   baseline（cap 顶贴行顶），与 Edge/Chrome 对齐。CJK 等无 capHeight
+	//   的字体回退 ascent。
+	baselineH := ascent
+	if ch := info.canvas.FontCapHeight(font); ch > 0 {
+		baselineH = ch
+	}
 
 	// DEBUG: print segments info
 	debugContent := content
@@ -941,7 +952,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			if sub == "" || sub == "\n" {
 				continue
 			}
-			baseline := seg.Y + ascent
+			baseline := seg.Y + baselineH
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
 		}
 	}
@@ -964,7 +975,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// exposed on the render object via ListMarkerText().
 	if marker, mbox := listMarkerForRenderText(text); marker != "" && mbox != nil && len(segments) > 0 {
 		first := segments[0]
-		baseline := first.Y + ascent
+		baseline := first.Y + baselineH
 		// The marker occupies the padding-left zone of the li (40px default);
 		// draw it right-aligned within that zone, 6px before the content start.
 		markerX := first.X - 6 - graphics.MeasureText(font, marker)
@@ -981,7 +992,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			wbTextDebugSkipped++
 			continue
 		}
-		baseline := seg.Y + ascent
+		baseline := seg.Y + baselineH
 
 	// ── text-overflow:ellipsis ──
 		// Walk segments sequentially from the left. Track cumulative width from the

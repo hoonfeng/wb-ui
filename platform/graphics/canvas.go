@@ -1001,6 +1001,29 @@ func (c *Canvas) FontAscent(font Font) float64 {
 	return float64(-m.Ascent)
 }
 
+// FontCapHeight returns the cap height (distance from baseline up to the top
+// of capital letters) of the given font description, in pixels. Browsers
+// position Latin text so its cap top sits near the line-box top
+// (baseline = half-leading + ascent, and ascent ≈ capHeight for most
+// Latin typefaces). Using capHeight for the baseline keeps our text at the
+// same vertical spot as Edge/Chrome. Falls back to ascent (size*0.8) when
+// the font reports no cap height (e.g. some CJK fonts).
+func (c *Canvas) FontCapHeight(font Font) float64 {
+	skFont := c.getSkiaFont(font)
+	if skFont == nil {
+		size := font.Size
+		if size <= 0 {
+			size = 16
+		}
+		return size * 0.8
+	}
+	m, _ := skFont.Metrics()
+	if m.CapHeight > 0 {
+		return float64(m.CapHeight)
+	}
+	return float64(-m.Ascent)
+}
+
 // getSkiaFont returns a cached *skia.Font matching the given graphics.Font
 // description, creating one on first use.
 func (c *Canvas) getSkiaFont(font Font) *skia.Font {
