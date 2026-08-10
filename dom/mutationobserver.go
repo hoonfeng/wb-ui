@@ -131,10 +131,52 @@ func observersFor(target Node) []*MutationObserver {
 	return observerRegistry[target]
 }
 
+// matchingObservers 返回与 changeNode 变更匹配的观察者：
+//   - 直接注册在 changeNode 上的观察者（任意 options）
+//   - 注册在 changeNode 祖先上且 options.Subtree=true 的观察者
+//     （DOM 标准：subtree 观察者接收其后代的所有变更）
+// CodeMirror 6 的 DOMObserver 用 observe(contentDOM, {childList,
+// characterData, subtree:true})——此前只匹配直接注册节点，cm-line 内
+// 文本插入（contenteditable 输入）永不触发 CM6 的 readDOMChange →
+// state 不更新（「能插入 DOM 不能编辑」）。
+func matchingObservers(changeNode Node, optsCheck func(opts *MutationObserverOptions) bool) []*MutationObserver {
+	var out []*MutationObserver
+	seen := map[*MutationObserver]bool{}
+	for n := changeNode; n != nil; n = n.ParentNode() {
+		for _, mo := range observersFor(n) {
+			if seen[mo] {
+				continue
+			}
+			seen[mo] = true
+			for target, opts := range mo.targets {
+				if target == changeNode || (opts.Subtree && nodeIsDescendantOf(changeNode, target)) {
+					if optsCheck(opts) {
+						out = append(out, mo)
+					}
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// nodeIsDescendantOf 报告 node 是否在 ancestor 的子树内（node == ancestor
+// 时返回 false，与 DOM 标准 subtree 语义一致：subtree 观察者不含根自身
+// 的直接变更——直接变更由注册节点自身匹配覆盖）。
+func nodeIsDescendantOf(node, ancestor Node) bool {
+	for n := node.ParentNode(); n != nil; n = n.ParentNode() {
+		if n == ancestor {
+			return true
+		}
+	}
+	return false
+}
+
 // NotifyChildList 通知子节点列表变更。
 // 由 AppendChild/RemoveChild/InsertBefore 调用。
 func NotifyChildList(target Node, added, removed []Node, prevSibling, nextSibling Node) {
-	obs := observersFor(target)
+	obs := matchingObservers(target, func(opts *MutationObserverOptions) bool { return opts.ChildList })
 	if len(obs) == 0 {
 		return
 	}
@@ -147,16 +189,16 @@ func NotifyChildList(target Node, added, removed []Node, prevSibling, nextSiblin
 		NextSibling:     nextSibling,
 	}
 	for _, mo := range obs {
-		if opts, ok := mo.targets[target]; ok && opts.ChildList {
-			mo.QueueRecord(record)
-		}
+		mo.QueueRecord(record)
 	}
 }
 
 // NotifyAttributes 通知属性变更。
 // 由 Element.SetAttribute/RemoveAttribute 调用。
 func NotifyAttributes(target *Element, name, oldValue string) {
-	obs := observersFor(target)
+	obs := matchingObservers(target, func(opts *MutationObserverOptions) bool {
+		return opts.Attributes
+	})
 	if len(obs) == 0 {
 		return
 	}
@@ -168,23 +210,30 @@ func NotifyAttributes(target *Element, name, oldValue string) {
 		AttributeValue: newValue,
 	}
 	for _, mo := range obs {
-		if opts, ok := mo.targets[Node(target)]; ok && opts.Attributes {
-			if len(opts.AttributeFilter) > 0 {
-				found := false
-				for _, f := range opts.AttributeFilter {
-					if f == name {
-						found = true
-						break
-					}
-				}
-				if !found {
+		// 找匹配该观察者的注册节点选项（决定 AttributeFilter/OldValue）
+		for t, opts := range mo.targets {
+			if t == Node(target) || (opts.Subtree && nodeIsDescendantOf(Node(target), t)) {
+				if !opts.Attributes {
 					continue
 				}
+				if len(opts.AttributeFilter) > 0 {
+					found := false
+					for _, f := range opts.AttributeFilter {
+						if f == name {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				}
+				if opts.AttributeOldValue {
+					record.OldValue = oldValue
+				}
+				mo.QueueRecord(record)
+				break
 			}
-			if opts.AttributeOldValue {
-				record.OldValue = oldValue
-			}
-			mo.QueueRecord(record)
 		}
 	}
 }
@@ -192,7 +241,7 @@ func NotifyAttributes(target *Element, name, oldValue string) {
 // NotifyCharacterData 通知文本内容变更。
 // 由 SetTextContent/Text.SetData 调用。
 func NotifyCharacterData(target Node, oldValue string) {
-	obs := observersFor(target)
+	obs := matchingObservers(target, func(opts *MutationObserverOptions) bool { return opts.CharacterData })
 	if len(obs) == 0 {
 		return
 	}
@@ -201,11 +250,17 @@ func NotifyCharacterData(target Node, oldValue string) {
 		Target: target,
 	}
 	for _, mo := range obs {
-		if opts, ok := mo.targets[target]; ok && opts.CharacterData {
-			if opts.CharacterDataOldValue {
-				record.OldValue = oldValue
+		for t, opts := range mo.targets {
+			if t == target || (opts.Subtree && nodeIsDescendantOf(target, t)) {
+				if !opts.CharacterData {
+					continue
+				}
+				if opts.CharacterDataOldValue {
+					record.OldValue = oldValue
+				}
+				mo.QueueRecord(record)
+				break
 			}
-			mo.QueueRecord(record)
 		}
 	}
 }

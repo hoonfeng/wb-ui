@@ -3963,9 +3963,11 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 			}
 		case window.EventChar:
-			log.Printf("[dbg/char] EventChar char=%q imeFocused=%v isText=%v", string(ev.Char), h.imeFocusedEl != nil, h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl))
-			if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-				char := string(ev.Char)
+			if h.imeFocusedEl == nil {
+				break
+			}
+			char := string(ev.Char)
+			if isTextFormControl(h.imeFocusedEl) {
 				// Get current value and insert character at cursor position,
 				// replacing any active selection (like a browser).
 				val := focusedElementValue(h.imeFocusedEl)
@@ -4025,6 +4027,21 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+			} else if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
+				// contenteditable（CodeMirror 6 输入区）：光标处插入文本节点，
+				// 派发 input → CM6 的 DOMObserver readDOMChange 同步 state。
+				// 不能用 value/textContent 全文替换（会抹掉结构化 DOM）。
+				ok := bindings.InsertTextAtSelection(char)
+				if mf := h.wv.MainFrame(); mf != nil {
+					if fr := mf.Frame(); fr != nil {
+						fr.MarkRenderTreeDirty()
+					}
+				}
+				if !ok {
+					// 无有效 DOM Selection：仅派发 input，让 CM6 的 input
+					// handler 有机会走 state 更新路径（回退语义）。
+				}
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 			}
 
 		case window.EventKey:

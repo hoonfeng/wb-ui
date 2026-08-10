@@ -301,6 +301,28 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	})
 	g.Set("Window", jsc.FunctionValue(winCtor))
 
+	// ★ NodeFilter 全局常量（浏览器标准）：前端 createTreeWalker 的
+	// SHOW_TEXT/FILTER_ACCEPT 等常量 + acceptNode 结果。缺 NodeFilter 时
+	// createTreeWalker(SHOW_TEXT) 抛 ReferenceError（# 注释字符定位测量）。
+	nf := jsc.NewObject(rt.ObjectPrototype())
+	nf.Set("FILTER_ACCEPT", jsc.NumberValue(float64(dom.FilterAccept)))
+	nf.Set("FILTER_REJECT", jsc.NumberValue(float64(dom.FilterReject)))
+	nf.Set("FILTER_SKIP", jsc.NumberValue(float64(dom.FilterSkip)))
+	nf.Set("SHOW_ALL", jsc.NumberValue(float64(dom.ShowAll)))
+	nf.Set("SHOW_ELEMENT", jsc.NumberValue(float64(dom.ShowElement)))
+	nf.Set("SHOW_ATTRIBUTE", jsc.NumberValue(float64(dom.ShowAttribute)))
+	nf.Set("SHOW_TEXT", jsc.NumberValue(float64(dom.ShowText)))
+	nf.Set("SHOW_CDATA_SECTION", jsc.NumberValue(float64(dom.ShowCDATASection)))
+	nf.Set("SHOW_ENTITY_REFERENCE", jsc.NumberValue(float64(dom.ShowEntityReference)))
+	nf.Set("SHOW_ENTITY", jsc.NumberValue(float64(dom.ShowEntity)))
+	nf.Set("SHOW_PROCESSING_INSTRUCTION", jsc.NumberValue(float64(dom.ShowProcessingInstruction)))
+	nf.Set("SHOW_COMMENT", jsc.NumberValue(float64(dom.ShowComment)))
+	nf.Set("SHOW_DOCUMENT", jsc.NumberValue(float64(dom.ShowDocument)))
+	nf.Set("SHOW_DOCUMENT_TYPE", jsc.NumberValue(float64(dom.ShowDocumentType)))
+	nf.Set("SHOW_DOCUMENT_FRAGMENT", jsc.NumberValue(float64(dom.ShowDocumentFragment)))
+	nf.Set("SHOW_NOTATION", jsc.NumberValue(float64(dom.ShowNotation)))
+	g.Set("NodeFilter", jsc.ObjectValue(nf))
+
 	// ★ devicePixelRatio（浏览器标准）：xterm 的 dpr = window.devicePixelRatio
 	//   （无 fallback）用于 cellHeight = ceil(charSize.height × dpr) 计算。
 	//   此前未定义 → undefined → cell.height = NaN → style.height="NaNpx"
@@ -2143,6 +2165,30 @@ obj.SetInternal(doc)
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.ObjectValue(wrapRange(in, nil, 0, nil, 0))
 		}, 0)))
+	obj.Set("createTreeWalker", jsc.FunctionValue(jsc.NewNativeFunction("createTreeWalker",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			root := unwrapNode(args[0])
+			if root == nil {
+				return jsc.Null()
+			}
+			what := uint32(dom.ShowAll)
+			if len(args) > 1 {
+				what = uint32(args[1].ToNumber())
+			}
+			var filter dom.NodeFilter
+			if len(args) > 2 && !args[2].IsNull() && !args[2].IsUndefined() {
+				fo := args[2].AsObject()
+				if fo != nil {
+					if af, ok := fo.GetByKey("acceptNode"); ok && !af.IsNull() && !af.IsUndefined() {
+						filter = dom.NodeFilterFunc(func(n dom.Node) dom.NodeFilterResult {
+							res, _ := in.Call(af, jsc.Undefined(), []jsc.JSValue{nodeToJS(in, n)})
+							return dom.NodeFilterResult(uint16(res.ToNumber()))
+						})
+					}
+				}
+			}
+			return jsc.ObjectValue(wrapTreeWalker(in, dom.NewTreeWalker(root, what, filter)))
+		}, 3)))
 	obj.Set("createComment", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapComment(in, doc.CreateComment(arg)))
 	})))
@@ -3856,6 +3902,64 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 	return obj
 }
 
+// ─── TreeWalker（document.createTreeWalker / NodeFilter 常量）───
+// CodeMirror 6 与前端文本测量用 createTreeWalker 遍历文本节点（SHOW_TEXT）。
+
+// wrapTreeWalker 创建一个 JS TreeWalker 对象，包装 dom.TreeWalker。
+func wrapTreeWalker(rt *jsc.Interpreter, w *dom.TreeWalker) *jsc.JSObject {
+	obj := jsc.NewObject(rt.ObjectPrototype())
+	obj.SetClassName("TreeWalker")
+	obj.SetInternal(w)
+
+	obj.Set("root", nodeToJS(rt, w.Root()))
+	obj.Set("whatToShow", jsc.NumberValue(float64(w.WhatToShow())))
+	obj.Set("currentNode", nodeToJS(rt, w.CurrentNode()))
+	syncCurrent := func(in *jsc.Interpreter) {
+		obj.Set("currentNode", nodeToJS(in, w.CurrentNode()))
+	}
+	obj.Set("nextNode", jsc.FunctionValue(jsc.NewNativeFunction("nextNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if n := w.NextNode(); n != nil {
+				syncCurrent(in)
+				return nodeToJS(in, n)
+			}
+			return jsc.Null()
+		}, 0)))
+	obj.Set("previousNode", jsc.FunctionValue(jsc.NewNativeFunction("previousNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if n := w.PreviousNode(); n != nil {
+				syncCurrent(in)
+				return nodeToJS(in, n)
+			}
+			return jsc.Null()
+		}, 0)))
+	obj.Set("parentNode", jsc.FunctionValue(jsc.NewNativeFunction("parentNode",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if n := w.ParentNode(); n != nil {
+				syncCurrent(in)
+				return nodeToJS(in, n)
+			}
+			return jsc.Null()
+		}, 0)))
+	obj.Set("firstChild", jsc.FunctionValue(jsc.NewNativeFunction("firstChild",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if n := w.FirstChild(); n != nil {
+				syncCurrent(in)
+				return nodeToJS(in, n)
+			}
+			return jsc.Null()
+		}, 0)))
+	obj.Set("lastChild", jsc.FunctionValue(jsc.NewNativeFunction("lastChild",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if n := w.LastChild(); n != nil {
+				syncCurrent(in)
+				return nodeToJS(in, n)
+			}
+			return jsc.Null()
+		}, 0)))
+	return obj
+}
+
 // ─── Range（CodeMirror 6 文本测量依赖：textRange → getClientRects）───
 
 // rangeState 保存 Range 对象的边界。
@@ -4053,12 +4157,41 @@ func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
 	// textHeight），位置用 0 即可。字体从父元素 computed style 取。
 	parent, _ := t.ParentNode().(*dom.Element)
 	fam, size, weight, stl := "", 14.0, 400, "normal"
-	if parent != nil && GetElementComputedFont != nil {
-		fam, size, weight, stl = GetElementComputedFont(parent)
+	var elLeft, elTop float64
+	if parent != nil {
+		if GetElementComputedFont != nil {
+			fam, size, weight, stl = GetElementComputedFont(parent)
+		}
+		// ★ 位置（left/top）：浏览器 getClientRects 返回绝对屏幕坐标。
+		// 此前位置用 0（CM6 只读 width/height 不做位置判断），但前端
+		// 字符定位测量（# 注释对齐、TreeWalker 字符 x 偏移）读
+		// rects[0].left 需要真实坐标。GetElementBoxRect 只查询布局缓存
+		// （布局稳定后 forceLayout 是 no-op，不产生测量风暴——风暴根源
+		// 是 dummy 节点增删导致的渲染树重建，纯查询无此问题）。
+		if GetElementBoxRect != nil {
+			elLeft, elTop, _, _ = GetElementBoxRect(parent)
+		}
+		// ★ 内容从 padding 内侧开始：浏览器 Range 的 left = 父元素 border
+		// box 左 + border-left + padding-left（+ 前缀文本宽）。CM6 的
+		// .cm-line 有 padding: 0 2px 0 6px（行首 6px 缩进）——漏加则
+		// 字符 x 偏移少 6px（# 注释与浏览器错位）。border 默认 0 忽略。
+		if cs := computedStyleFor(parent); cs != nil {
+			if v, ok := cs["padding-left"]; ok {
+				if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
+					elLeft += pv
+				}
+			}
+			if v, ok := cs["padding-top"]; ok {
+				if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
+					elTop += pv
+				}
+			}
+		}
 	}
 	prefixW := measureTextWidth(fam, size, weight, stl, prefix)
 	width = measureTextWidth(fam, size, weight, stl, sub)
-	left += prefixW
+	left += prefixW + elLeft
+	top += elTop
 	height = measureLineHeight(fam, size, weight, stl)
 	if width == 0 && height == 0 {
 		return 0, 0, 0, 0, false
