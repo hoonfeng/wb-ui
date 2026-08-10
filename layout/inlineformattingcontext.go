@@ -505,6 +505,38 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 
+			// ★ <br> 强制换行（浏览器语义）：br 产生一个行框（高度 =
+			// lineHeight），即使行内无其他内容。此前 br 零宽不推进
+			// widthUsed → 空行（.cm-line 只有 <br>）无行框 → 块高度 0
+			// → CM6 行高 oracle 测到空行高度 0，输入后重校准把空行
+			// gutter 元素高度设为 0px → 后续行号全部上移错乱（CM6 编辑
+			// 器行号两位数/错位、滚动不绘制）。浏览器里 <div><br></div>
+			// 高度 = line-height（Edge 19.59px / wb-ui 18.2px）。
+			if el := cld.Element(); el != nil && el.LocalName() == "br" {
+				// 提交当前行内容（br 前若有文本，先结束该行）
+				if currentLine.widthUsed > 0 {
+					lines = append(lines, currentLine)
+				}
+				// br 本身占据一个空行框（保证空行高度 = lineHeight）
+				lines = append(lines, lineInfo{
+					y:          currentLine.y,
+					contentX:   currentLine.contentX,
+					segStart:   len(pending),
+					widthUsed:  0,
+					availWidth: currentLine.availWidth,
+				})
+				newY := currentLine.y + lineHeight
+				newCx, newCw := availableLineWidth(newY)
+				currentLine = lineInfo{
+					y:          newY,
+					contentX:   newCx,
+					segStart:   len(pending),
+					widthUsed:  0,
+					availWidth: newCw,
+				}
+				continue
+			}
+
 			// ★ inline-block shrink-to-fit（CSS 2.1 §10.3.9）：无显式宽度
 			// 的 inline-block 宽度 = 内容 max-content（xterm 光标 div 1 字符
 			// ≈ 8px），不撑满父行宽。childCtx.Layout（BFC）不设置容器自身
