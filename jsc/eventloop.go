@@ -216,11 +216,20 @@ func (el *EventLoop) ProcessTasks(_ int64) {
 	now := el.nowMs()
 
 	// 处理宏任务 + 微任务，直到宏任务队列为空。
-	for {
+	// ★ 帧预算（浏览器模型）：一帧只处理有限个宏任务，然后进入
+	// 微任务 + 动画帧阶段——保证 requestAnimationFrame 回调每帧必执行。
+	// 之前无预算时，Vue 渲染/Bridge 轮询持续产生 setTimeout，宏任务循环
+	// 永不退出，flushAnimationFrames 永远到不了 → rAF 回调（CodeMirror 6
+	// 的 measure/行高探测）从不执行 → HeightOracle 停留默认 lineHeight=14
+	// → 行号栏按 14px/行步进而内容 18.2px，逐行错位。剩余宏任务由宿主
+	// 下一帧的 ProcessTasks 继续处理。
+	budget := 500
+	for budget > 0 {
 		task := el.popNextMacrotask(now)
 		if task == nil {
 			break
 		}
+		budget--
 		// 执行宏任务回调。
 		el.executeCallback(task.Callback)
 

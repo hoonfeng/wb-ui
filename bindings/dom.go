@@ -18,6 +18,7 @@ import (
 	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/jsc"
+	"wb-ui/layout"
 )
 
 // OnStyleNodeAdded is an optional callback invoked when a <style> element is
@@ -38,6 +39,12 @@ var OnInlineStyleChanged func(node dom.Node)
 // engine never learns about the focused control, so typing goes nowhere
 // and libraries (xterm.js) never receive the focus event that activates
 // their input + cursor rendering.
+
+// GetElementComputedFont returns the computed font description of an
+// element (family, size px, weight, style). Used by Range.getClientRects
+// to measure text widths for CodeMirror 6's charWidth/lineHeight probing.
+// The embedder (app.Host / webkit.WebView) wires it to the style resolver.
+var GetElementComputedFont func(el *dom.Element) (family string, size float64, weight int, style string)
 var FocusBridge func(el *dom.Element, focused bool)
 
 // SelectionBridge is an optional callback invoked when JS reads/writes an
@@ -163,6 +170,17 @@ func ResizeObserverCheck(interp *jsc.Interpreter) {
 			if os.Getenv("WB_RO_DEBUG") != "" {
 				fmt.Fprintf(os.Stderr, "[ro] observe init el=%s size=%.0fx%.0f\n", elNameForRO(e.el), w, h)
 			}
+			// ★ 浏览器标准：observe 后异步触发一次初始回调（ResizeObserver
+			// 规范：注册后首个已布局帧回调一次，contentRect 为当前尺寸）。
+			// CodeMirror 6 创建后靠这次初始回调 requestMeasure → rAF →
+			// TextWidth.measure（dummy 测 lineHeight/charWidth）；wb-ui 之前
+			// 首次只记录尺寸不回调，CM6 的 HeightOracle 停留默认
+			// lineHeight=14 → 行号栏按 14px/行步进而内容行 18.2px 逐行错位。
+			// 仅尺寸>0 时回调（尺寸 0 的容器如未布局的 xterm 保持原行为，
+			// 避免首次 0 尺寸回调干扰 fit 初始化）。
+			if w > 0 && h > 0 {
+				fireROCallback(interp, e.cb, e.el, w, h)
+			}
 			continue
 		}
 		if w != e.lastW || h != e.lastH {
@@ -270,6 +288,18 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("window", jsc.ObjectValue(g))
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
+
+	// ★ Window 构造器（浏览器标准：window 的构造函数，window instanceof
+	// Window === true）。CodeMirror 6 的 isScrolledToBottom 用
+	// `elt2 instanceof Window` 判断 scroll parent 是否为 window——缺 Window
+	// 时抛 ReferenceError，measure 在 dummy 测量前中断，HeightOracle 停留
+	// 默认 lineHeight=14 → 行号栏按 14px/行步进而内容 ~18.2px 逐行错位。
+	// 注：此处只保证 Window 标识符存在（instanceof 走原生原型判断，window
+	// 不在其链上返回 false → CM6 走元素 scrollTop 分支，不抛异常即够）。
+	winCtor := rt.NewConstructor("Window", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
+		return nil // 浏览器语义：new Window() 抛 TypeError
+	})
+	g.Set("Window", jsc.FunctionValue(winCtor))
 
 	// ★ devicePixelRatio（浏览器标准）：xterm 的 dpr = window.devicePixelRatio
 	//   （无 fallback）用于 cellHeight = ceil(charSize.height × dpr) 计算。
@@ -1568,6 +1598,44 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					mo.Disconnect()
 					return jsc.Undefined()
 				}, 0)))
+			// ★ ignore(fn)：浏览器语义为「fn 执行期间暂停收集变更，结束后恢复」。
+			// CodeMirror 6 的 TextWidth.measure 用 observer.ignore 包裹 dummy
+			// 测量（插入/移除测量元素），缺 ignore 时测量抛异常 → HeightOracle
+			// 停留默认 lineHeight=14 → 行号栏按 14px/行步进而内容 18.2px 错位。
+			// wb-ui 的观察回调经 FlushMutationObservers 在微任务批量投递，
+			// 同步执行 fn 期间产生的记录只在 fn 返回后的微任务才回调，等效暂停。
+			obj.Set("ignore", jsc.FunctionValue(jsc.NewNativeFunction("ignore",
+				func(in *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) < 1 || !a[0].IsCallable() {
+						return jsc.Undefined()
+					}
+					v, _ := in.Call(a[0], jsc.Undefined(), nil)
+					return v
+				}, 1)))
+			// ★ forceFlush()：CodeMirror 6 的 View.measure 在开头调用
+			// observer.forceFlush()（CM6 对 MutationObserver 的私有扩展，立即
+			// 处理积压变更）。wb-ui 缺它时 measure 抛异常 → measureScheduled
+			// 卡在 0 → 后续 requestMeasure 的 `measureScheduled < 0` 判断永不
+			// 成立 → rAF 不再注册 → CM6 的 HeightOracle 永远停在默认 14。
+			// wb-ui 的观察记录由 FlushMutationObservers 在微任务批量投递，
+			// forceFlush 直接取走积压记录投递回调即可。
+			obj.Set("forceFlush", jsc.FunctionValue(jsc.NewNativeFunction("forceFlush",
+				func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					records := mo.TakeRecords()
+					if len(records) > 0 {
+						jsRecords := make([]jsc.JSValue, len(records))
+						for i, r := range records {
+							jsRecords[i] = jsc.ObjectValue(mutationRecordToJS(in, r))
+						}
+						moObj := jsc.NewObject(in.ObjectPrototype())
+						moObj.SetInternal(mo)
+						in.Call(cb, jsc.Undefined(), []jsc.JSValue{
+							jsc.ObjectValue(jsc.NewArray(nil, jsRecords)),
+							jsc.ObjectValue(moObj),
+						})
+					}
+					return jsc.Undefined()
+				}, 0)))
 			obj.Set("takeRecords", jsc.FunctionValue(jsc.NewNativeFunction("takeRecords",
 				func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 					records := mo.TakeRecords()
@@ -2071,6 +2139,10 @@ obj.SetInternal(doc)
 	obj.Set("createTextNode", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapText(in, doc.CreateTextNode(arg)))
 	})))
+	obj.Set("createRange", jsc.FunctionValue(jsc.NewNativeFunction("createRange",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(wrapRange(in, nil, 0, nil, 0))
+		}, 0)))
 	obj.Set("createComment", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapComment(in, doc.CreateComment(arg)))
 	})))
@@ -2106,6 +2178,13 @@ obj.SetInternal(doc)
 	obj.SetAccessor("body", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		if b := doc.Body(); b != nil { return jsc.ObjectValue(wrapElement(in, b)) }
 		return jsc.Null()
+	}), nil)
+	// ★ 浏览器标准：document.defaultView === window。CodeMirror 6 的
+	// view.win 取 ownerDocument.defaultView 并调用 win.requestAnimationFrame
+	// 驱动 measure（HeightOracle 行高探测）；若 defaultView 缺失/非 window，
+	// win 落到无 rAF 的对象 → requestMeasure 抛异常 → 行号栏按默认 14px 步进。
+	obj.SetAccessor("defaultView", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return in.GlobalObject().GetOrZero("window")
 	}), nil)
 	obj.SetAccessor("head", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		if h := doc.Head(); h != nil { return jsc.ObjectValue(wrapElement(in, h)) }
@@ -2930,6 +3009,30 @@ obj.SetInternal(el)
 			r.Set("left", jsc.NumberValue(left))
 			return jsc.ObjectValue(r)
 		}, 0)))
+	// ★ getClientRects：浏览器标准返回元素边框矩形的数组（[1 个 rect]）。
+	// CodeMirror 6 的 clientRectsFor(元素) 用它取行内 span 的宽度/高度
+	// （TextWidth.measure 的 lineMeasure 分支）；缺它时抛异常 → measure
+	// 中断 → HeightOracle 停留默认 lineHeight=14 → 行号栏按 14px/行步进
+	// 而内容 ~18.2px 逐行错位。
+	obj.Set("getClientRects", jsc.FunctionValue(jsc.NewNativeFunction("getClientRects",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			left, top, w, h := 0.0, 0.0, 0.0, 0.0
+			if GetElementBoxRect != nil {
+				left, top, w, h = GetElementBoxRect(el)
+			}
+			r := jsc.NewObject(in.ObjectPrototype())
+			r.Set("x", jsc.NumberValue(left))
+			r.Set("y", jsc.NumberValue(top))
+			r.Set("width", jsc.NumberValue(w))
+			r.Set("height", jsc.NumberValue(h))
+			r.Set("top", jsc.NumberValue(top))
+			r.Set("right", jsc.NumberValue(left+w))
+			r.Set("bottom", jsc.NumberValue(top+h))
+			r.Set("left", jsc.NumberValue(left))
+			arr := jsc.NewArray(in.ObjectPrototype(), []jsc.JSValue{jsc.ObjectValue(r)})
+			arr.Set("length", jsc.NumberValue(1))
+			return jsc.ObjectValue(arr)
+		}, 0)))
 	obj.Set("scrollIntoView", jsc.FunctionValue(jsc.NewNativeFunction("scrollIntoView",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.Undefined()
@@ -3476,7 +3579,13 @@ func (s *styleProxy) Get(key string) goja.Value {
 	vm := s.vm
 	switch key {
 	case "cssText":
-		return vm.ToValue(s.el.GetAttribute("style"))
+		// ★ 浏览器标准：cssText getter 返回序列化形式——每个声明以分号结尾
+		// （Chrome/Firefox 均返回如 "height: 0px; visibility: hidden;"）。
+		// JS 端 `style.cssText += "..."`（CM6 gutter spacer 用）依赖这个分号；
+		// 原实现原样返回 style 属性（"height:0px" 无分号）导致拼接出
+		// "height:0pxvisibility..." 非法声明，spacer 的隐藏/零高样式全失效
+		// （行号栏顶部多渲染一个 "99" 测量元素、行号整体下移一行、行号高亮错位）。
+		return vm.ToValue(serializeCSSText(s.el.GetAttribute("style")))
 	case "setProperty":
 		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) < 2 {
@@ -3595,6 +3704,28 @@ func joinStyle(m map[string]string) string {
 		parts = append(parts, k+":"+v)
 	}
 	return strings.Join(parts, ";")
+}
+
+// serializeCSSText 按浏览器 CSSStyleDeclaration.cssText 序列化 style 属性
+// 字符串：每个声明以分号结尾，声明间用空格分隔（浏览器序列化示例：
+// "height: 0px; visibility: hidden;"）。这保证 JS 端 `style.cssText += "..."`
+// 追加拼接安全（CM6 gutter spacer 依赖）；原实现原样返回 style 属性
+// （无分号）会让追加拼出非法声明（"height:0pxvisibility..."），
+// 导致声明的 visibility/height 全部失效。
+func serializeCSSText(style string) string {
+	if strings.TrimSpace(style) == "" {
+		return ""
+	}
+	parts := strings.Split(style, ";")
+	var out []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part+";")
+	}
+	return strings.Join(out, " ")
 }
 
 // ─── DocumentFragment ──────────────────────────────────
@@ -3723,6 +3854,248 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 		return arrNode(in, t.ChildNodes())
 	}), nil)
 	return obj
+}
+
+// ─── Range（CodeMirror 6 文本测量依赖：textRange → getClientRects）───
+
+// rangeState 保存 Range 对象的边界。
+type rangeState struct {
+	startNode dom.Node
+	startOff  int
+	endNode   dom.Node
+	endOff    int
+}
+
+// wrapRange 创建一个 JS Range 对象。CM6 的 TextWidth.measure 用
+// document.createRange() + setEnd/setStart + getClientRects 探测字符宽度
+// 与行高；缺 createRange 时测量抛异常，HeightOracle 停留在默认
+// lineHeight=14，行号栏按 14px/行步进而内容按真实行高 18.2px，逐行错位。
+func wrapRange(rt *jsc.Interpreter, sn dom.Node, so int, en dom.Node, eo int) *jsc.JSObject {
+	st := &rangeState{startNode: sn, startOff: so, endNode: en, endOff: eo}
+	obj := jsc.NewObject(rt.ObjectPrototype())
+	obj.SetClassName("Range")
+	obj.SetInternal(st)
+
+	nodeVal := func(arg jsc.JSValue) dom.Node {
+		return unwrapNode(arg)
+	}
+
+	obj.Set("setStart", jsc.FunctionValue(jsc.NewNativeFunction("setStart",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.startNode, st.startOff = n, int(args[1].ToNumber())
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("setEnd", jsc.FunctionValue(jsc.NewNativeFunction("setEnd",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.endNode, st.endOff = n, int(args[1].ToNumber())
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("setStartBefore", jsc.FunctionValue(jsc.NewNativeFunction("setStartBefore",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.startNode, st.startOff = n, 0
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("setEndBefore", jsc.FunctionValue(jsc.NewNativeFunction("setEndBefore",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.endNode, st.endOff = n, 0
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("setStartAfter", jsc.FunctionValue(jsc.NewNativeFunction("setStartAfter",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.startNode, st.startOff = n, 1
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("setEndAfter", jsc.FunctionValue(jsc.NewNativeFunction("setEndAfter",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.endNode, st.endOff = n, 1
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("collapse", jsc.FunctionValue(jsc.NewNativeFunction("collapse",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			st.endNode, st.endOff = st.startNode, st.startOff
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("selectNode", jsc.FunctionValue(jsc.NewNativeFunction("selectNode",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.startNode, st.endNode = n, n
+				st.startOff, st.endOff = 0, 1
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("selectNodeContents", jsc.FunctionValue(jsc.NewNativeFunction("selectNodeContents",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if n := nodeVal(args[0]); n != nil {
+				st.startNode, st.endNode = n, n
+				st.startOff, st.endOff = 0, nodeLen(n)
+			}
+			return jsc.Undefined()
+		}, 0)))
+	obj.Set("deleteContents", jsc.FunctionValue(jsc.NewNativeFunction("deleteContents",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Undefined() // no-op：wb-ui 不依赖 Range 修改 DOM
+		}, 0)))
+	obj.Set("cloneRange", jsc.FunctionValue(jsc.NewNativeFunction("cloneRange",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(wrapRange(in, st.startNode, st.startOff, st.endNode, st.endOff))
+		}, 0)))
+	obj.Set("getClientRects", jsc.FunctionValue(jsc.NewNativeFunction("getClientRects",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			var rects []jsc.JSValue
+			if l, t, w, h, ok := rangeRect(st); ok {
+				r := jsc.NewObject(in.ObjectPrototype())
+				r.Set("x", jsc.NumberValue(l))
+				r.Set("y", jsc.NumberValue(t))
+				r.Set("left", jsc.NumberValue(l))
+				r.Set("top", jsc.NumberValue(t))
+				r.Set("width", jsc.NumberValue(w))
+				r.Set("height", jsc.NumberValue(h))
+				r.Set("right", jsc.NumberValue(l+w))
+				r.Set("bottom", jsc.NumberValue(t+h))
+				rects = append(rects, jsc.ObjectValue(r))
+			}
+			arr := jsc.NewArray(in.ObjectPrototype(), rects)
+			arr.Set("length", jsc.NumberValue(float64(len(rects))))
+			return jsc.ObjectValue(arr)
+		}, 0)))
+	obj.Set("getBoundingClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			r := jsc.NewObject(in.ObjectPrototype())
+			l, t, w, h, _ := rangeRect(st)
+			r.Set("x", jsc.NumberValue(l))
+			r.Set("y", jsc.NumberValue(t))
+			r.Set("left", jsc.NumberValue(l))
+			r.Set("top", jsc.NumberValue(t))
+			r.Set("width", jsc.NumberValue(w))
+			r.Set("height", jsc.NumberValue(h))
+			r.Set("right", jsc.NumberValue(l+w))
+			r.Set("bottom", jsc.NumberValue(t+h))
+			return jsc.ObjectValue(r)
+		}, 0)))
+	obj.SetAccessor("startContainer", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return nodeJS(rt, st.startNode)
+	}), nil)
+	obj.SetAccessor("endContainer", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return nodeJS(rt, st.endNode)
+	}), nil)
+	obj.SetAccessor("startOffset", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(st.startOff))
+	}), nil)
+	obj.SetAccessor("endOffset", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(st.endOff))
+	}), nil)
+	obj.SetAccessor("collapsed", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.BooleanValue(st.startNode == st.endNode && st.startOff == st.endOff)
+	}), nil)
+	return obj
+}
+
+func nodeLen(n dom.Node) int {
+	switch v := n.(type) {
+	case *dom.Text:
+		return v.Length()
+	case *dom.Element:
+		c := 0
+		for ch := v.FirstChild(); ch != nil; ch = ch.NextSibling() {
+			c++
+		}
+		return c
+	}
+	return 0
+}
+
+// rangeRect 计算 Range 的边界矩形。支持 Text 节点区间（CM6 探测场景）：
+// 宽度 = 区间文本的实际渲染宽度（前缀偏移 + 子串测量），高度 = 行高。
+// 对非 Text 节点回退到父元素/起始节点的 box rect。
+func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
+	t, isText := st.startNode.(*dom.Text)
+	if !isText || st.endNode != st.startNode {
+		// 非文本区间：用起始节点所在元素的 box。
+		n := st.startNode
+		if n == nil {
+			n = st.endNode
+		}
+		if el, eok := n.(*dom.Element); eok && GetElementBoxRect != nil {
+			l, t, w, h := GetElementBoxRect(el)
+			return l, t, w, h, true
+		}
+		return 0, 0, 0, 0, false
+	}
+	data := t.Data()
+	from, to := st.startOff, st.endOff
+	if from < 0 {
+		from = 0
+	}
+	if to > len(data) {
+		to = len(data)
+	}
+	if to < from {
+		from, to = to, from
+	}
+	sub := data[from:to]
+	prefix := data[:from]
+	// ★ 位置（left/top）不在这里获取：GetElementBoxRect 内部 forceLayout，
+	// CM6 的 TextWidth.measure 在 rAF 中反复调用 getClientRects，若每次都
+	// 强制全量布局会造成测量-布局风暴（dummy 插入/移除反复重建渲染树）。
+	// CM6 只读 rects[0].width（→ charWidth=width/27）与 height（→
+	// textHeight），位置用 0 即可。字体从父元素 computed style 取。
+	parent, _ := t.ParentNode().(*dom.Element)
+	fam, size, weight, stl := "", 14.0, 400, "normal"
+	if parent != nil && GetElementComputedFont != nil {
+		fam, size, weight, stl = GetElementComputedFont(parent)
+	}
+	prefixW := measureTextWidth(fam, size, weight, stl, prefix)
+	width = measureTextWidth(fam, size, weight, stl, sub)
+	left += prefixW
+	height = measureLineHeight(fam, size, weight, stl)
+	if width == 0 && height == 0 {
+		return 0, 0, 0, 0, false
+	}
+	return left, top, width, height, true
+}
+
+func measureTextWidth(fam string, size float64, weight int, stl, text string) float64 {
+	if layout.MeasureTextFunc != nil {
+		return layout.MeasureTextFunc(fam, size, weight, stl, text)
+	}
+	return float64(len([]rune(text))) * size * 0.6
+}
+
+func measureLineHeight(fam string, size float64, weight int, stl string) float64 {
+	if layout.FontMetricsFunc != nil {
+		a, d, g := layout.FontMetricsFunc(fam, size, weight, stl)
+		if h := a + d + g; h > 0 {
+			return h
+		}
+	}
+	return size * 1.2
+}
+
+// nodeJS 返回 node 的 JS 包装（Text → wrapText，Element → wrapElement）。
+func nodeJS(rt *jsc.Interpreter, n dom.Node) jsc.JSValue {
+	switch v := n.(type) {
+	case *dom.Element:
+		return jsc.ObjectValue(wrapElement(rt, v))
+	case *dom.Text:
+		return jsc.ObjectValue(wrapText(rt, v))
+	case *dom.Comment:
+		return jsc.ObjectValue(wrapComment(rt, v))
+	case nil:
+		return jsc.Null()
+	}
+	return jsc.Null()
 }
 
 func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {

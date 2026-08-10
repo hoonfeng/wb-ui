@@ -784,6 +784,22 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		box := rv.FindRenderBoxForNode(el)
 		if box == nil {
+			// ★ DOM 刚插入但渲染树未标脏时（CM6 构造早期查询
+			// scrollDOM.clientHeight/scrollHeight——初始 viewport 计算
+			// 依赖它），IfNeeded 重建看不到新节点 → 返回 0 → CM6 初始
+			// viewport 为空 → 首次 lineHeights 测量落空 → HeightOracle
+			// 停留默认 lineHeight=14 → 行号栏 14px/行与内容 18.2px 错位。
+			// 与 GetElementBoxRect 同策略：强制无条件重建一次再查。
+			if fr2 := wv.mainFrame.Frame(); fr2 != nil {
+				fr2.RebuildRenderTree()
+			}
+			forceLayout()
+			rv = wv.RenderView()
+			if rv != nil {
+				box = rv.FindRenderBoxForNode(el)
+			}
+		}
+		if box == nil {
 			return 0, 0, 0, 0, false
 		}
 		pb := box.PaddingBoxRect()
@@ -827,6 +843,40 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return 0, 0, 0, 0
 		}
 		return box.X(), box.Y(), w, h
+	}
+	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
+	// 的 charWidth/lineHeight 探测；缺 createRange/字体时测量抛异常，
+	// HeightOracle 停留默认 14 → 行号栏按 14px/行步进与内容 18.2px 错位）。
+	bindings.GetElementComputedFont = func(el *dom.Element) (string, float64, int, string) {
+		if el == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		fr := wv.mainFrame.Frame()
+		if fr == nil || fr.Resolver() == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		cs := fr.Resolver().ResolveElement(el)
+		if cs == nil {
+			return "sans-serif", 14, 400, "normal"
+		}
+		size := cs.FontSize.Value
+		if size <= 0 {
+			size = 14
+		}
+		w := 400
+		switch strings.ToLower(strings.TrimSpace(cs.FontWeight)) {
+		case "bold", "bolder", "600", "700", "800", "900":
+			w = 700
+		}
+		st := "normal"
+		if strings.EqualFold(cs.FontStyle, "italic") || strings.EqualFold(cs.FontStyle, "oblique") {
+			st = cs.FontStyle
+		}
+		fam := cs.FontFamily
+		if fam == "" {
+			fam = "sans-serif"
+		}
+		return fam, size, w, st
 	}
 }
 
