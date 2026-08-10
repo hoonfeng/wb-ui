@@ -547,6 +547,11 @@ func (wv *WebView) Resize(width, height int) {
 	if width < 0 { width = 0 }
 	if height < 0 { height = 0 }
 	wv.width, wv.height = width, height
+	// ★ 同步 window.innerWidth/innerHeight（CM6 visiblePixelRange 依赖；
+	// undefined 会让 Math.min(win.innerHeight,…) 产生 NaN → viewport 永不
+	// 更新 → 滚动后行号 gutter 不重渲染）
+	bindings.ViewportWidth = float64(width)
+	bindings.ViewportHeight = float64(height)
 	if view := wv.page.MainFrame().View(); view != nil {
 		view.SetSize(width, height)
 	}
@@ -842,7 +847,27 @@ func (wv *WebView) injectRenderTreeBridge() {
 		if math.IsNaN(w) || math.IsNaN(h) || w < 0 || h < 0 {
 			return 0, 0, 0, 0
 		}
-		return box.X(), box.Y(), w, h
+		// ★ 浏览器语义：getBoundingClientRect 返回「视口相对坐标」——
+		// 扣除所有祖先滚动容器的滚动偏移。CM6 的 visiblePixelRange 用
+		// contentDOM.getBoundingClientRect() 感知滚动（滚动后 rect.top
+		// 应变小）→ 更新 viewport → 行号 gutter 虚拟化重渲染。此前返回
+		// 未扣滚动的布局坐标 → 滚动后 rect 不变 → CM6 viewport 永不更新
+		// → 滚动后行号不刷新（用户「滚动时初始超出区域的行号都没有绘制」）。
+		// ★ 沿 DOM 祖先链查找滚动容器（渲染树 Parent 链在 CM6 scroller
+		// 结构下 Node 查找不可靠——同 Node 指针 BoxScrollOffset 结果不一
+		// 致，疑似 box 实例字段差异；DOM 链 + FindRenderBoxForNode 每次
+		// 命中同一 box，已验证返回正确偏移）。
+		sx, sy := 0.0, 0.0
+		for cur := el.ParentNode(); cur != nil; cur = cur.ParentNode() {
+			if el2, ok := cur.(*dom.Element); ok {
+				if b := rv.FindRenderBoxForNode(el2); b != nil {
+					ox, oy := rv.BoxScrollOffset(b)
+					sx += ox
+					sy += oy
+				}
+			}
+		}
+		return box.X() - sx, box.Y() - sy, w, h
 	}
 	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
 	// 的 charWidth/lineHeight 探测；缺 createRange/字体时测量抛异常，

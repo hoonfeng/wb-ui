@@ -27,6 +27,14 @@ import (
 // styles. When nil, dynamic <style> injection is silently ignored.
 var OnStyleNodeAdded func(node dom.Node)
 
+// ViewportWidth / ViewportHeight 为 window.innerWidth/innerHeight 提供值
+// （webkit.WebView.Resize 同步）。CM6 的 visiblePixelRange 用它们计算可见
+// 像素视口，undefined 会产生 NaN → viewport 永不更新（滚动不重渲染行号）。
+var (
+	ViewportWidth  float64
+	ViewportHeight float64
+)
+
 // OnInlineStyleChanged is an optional callback invoked when an element's
 // style attribute is changed via the JS style proxy (el.style.xxx = ...).
 // The embedder should re-resolve styles and rebuild the render tree.
@@ -288,6 +296,18 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g.Set("window", jsc.ObjectValue(g))
 	g.Set("self", jsc.ObjectValue(g))
 	g.Set("globalThis", jsc.ObjectValue(g))
+
+	// ★ window.innerWidth/innerHeight（浏览器标准）：CodeMirror 6 的
+	// visiblePixelRange 用 Math.min(win.innerHeight, rect.bottom) 计算可见
+	// 像素视口——undefined 参与 Math.min 产出 NaN → viewport 永不更新 →
+	// 滚动后行号 gutter 不重渲染（用户「滚动时行号不绘制」的根因）。
+	// 值由 webkit.WebView.Resize 同步（bindings.ViewportWidth/Height）。
+	g.SetAccessor("innerWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(ViewportWidth)
+	}), nil)
+	g.SetAccessor("innerHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(ViewportHeight)
+	}), nil)
 
 	// ★ Window 构造器（浏览器标准：window 的构造函数，window instanceof
 	// Window === true）。CodeMirror 6 的 isScrolledToBottom 用
