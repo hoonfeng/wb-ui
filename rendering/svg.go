@@ -1038,34 +1038,71 @@ func parseSVGPoints(s string) []graphics.Point {
 
 // --- Path parsing ---
 
+// tokenizeSVGPath splits an SVG path "d" into command letters and numeric
+// tokens, following the SVG 1.1 path grammar. Numbers allow IMPLICIT
+// separators when the next token starts with '-'/'+'/'.' right after a
+// complete number — e.g. `-1.82.33` is `-1.82` + `.33` (leading-dot
+// fraction), `l-8-3-8 3` is four numbers, and `1e-5` is a single exponent
+// number. A naive split on whitespace/comma/minus breaks the gear teeth
+// arcs (`a1.65 1.65 0 0 0-1.82.33` → arc dropped) and scientific notation.
 func tokenizeSVGPath(s string) []string {
 	var tokens []string
 	var cur strings.Builder
-	for _, c := range s {
-		if c == ' ' || c == ',' || c == '\t' || c == '\n' {
-			if cur.Len() > 0 {
-				tokens = append(tokens, cur.String())
-				cur.Reset()
-			}
-			continue
-		}
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
-			if cur.Len() > 0 {
-				tokens = append(tokens, cur.String())
-				cur.Reset()
-			}
-			tokens = append(tokens, string(c))
-			continue
-		}
-		if c == '-' && cur.Len() > 0 {
+	flush := func() {
+		if cur.Len() > 0 {
 			tokens = append(tokens, cur.String())
 			cur.Reset()
 		}
-		cur.WriteRune(c)
 	}
-	if cur.Len() > 0 {
-		tokens = append(tokens, cur.String())
+	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r':
+			flush()
+		case isDigit(c):
+			cur.WriteByte(c)
+		case c == '.':
+			// A second '.' starts a new number (`1.82.33` → `1.82`, `.33`).
+			if strings.Contains(cur.String(), ".") {
+				flush()
+			}
+			cur.WriteByte(c)
+		case c == '+' || c == '-':
+			// After e/E this is the exponent sign; otherwise a new number.
+			cs := cur.String()
+			if cs != "" && (cs[len(cs)-1] == 'e' || cs[len(cs)-1] == 'E') {
+				cur.WriteByte(c)
+			} else {
+				flush()
+				cur.WriteByte(c)
+			}
+		case c == 'e' || c == 'E':
+			// Exponent only when the current number is followed by a digit
+			// (or a sign then a digit); otherwise it is a command letter.
+			if cur.Len() > 0 {
+				var next, afterNext byte
+				if i+1 < len(s) {
+					next = s[i+1]
+				}
+				if i+2 < len(s) {
+					afterNext = s[i+2]
+				}
+				if isDigit(next) || ((next == '+' || next == '-') && isDigit(afterNext)) {
+					cur.WriteByte(c)
+				} else {
+					flush()
+					tokens = append(tokens, string(c))
+				}
+			} else {
+				tokens = append(tokens, string(c))
+			}
+		default: // any other letter is a command
+			flush()
+			tokens = append(tokens, string(c))
+		}
 	}
+	flush()
 	return tokens
 }
 
