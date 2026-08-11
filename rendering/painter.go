@@ -90,6 +90,26 @@ func textInAbsPos(text *RenderText) bool {
 	return false
 }
 
+// textInFlexCentered reports whether the text lives inside a flex container
+// that vertically centers its items (align-items:center). Layout places the
+// text line box at the cross-center (seg.Y = line-box top), but the browser
+// then centers the glyphs inside the line box by the half-leading rule. For
+// such text the painter must add half = (lineHeight - contentHeight)/2 to the
+// baseline, otherwise glyphs sit ~2-3px higher than in the browser whenever
+// the line box is taller than the font content (menus, sidebar headers…).
+func textInFlexCentered(text *RenderText) bool {
+	if text == nil {
+		return false
+	}
+	for p := text.Parent(); p != nil; p = p.Parent() {
+		st := p.Style()
+		if st != nil && st.Display == style.DisplayFlex {
+			return st.AlignItems == "center"
+		}
+	}
+	return false
+}
+
 // textName returns a short identity (tag.class) for a RenderText's element.
 func textName(text *RenderText) string {
 	if text == nil || text.Node() == nil {
@@ -999,6 +1019,32 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		absBaselineH = (hh-fh)/2 + ascent
 	}
 
+	// ★ flex 容器内文本（align-items:center 等）：layout 把行盒垂直居中，
+	// seg.Y = 行盒顶，但行盒内文字还需按浏览器 half-leading 规则居中——
+	// 此前直接用 capHeight 让 cap 顶贴 seg.Y，行盒高于字体内容时文字整体
+	// 偏上（标题栏菜单「帮助」比 Edge 高 ~3px、侧边栏头部 ~2-3px）。
+	// 修正：按「绘制字体」度量重算 baseline = 行盒中心 + (ascent - fontH/2)，
+	// 行盒中心 = seg.Y + LineHeight/2（flex 居中保证行盒中心=容器中心）。
+	// 对 CJK 文本用雅黑度量（FontCJKMetrics），拉丁用 capHeight+descent 近似；
+	// 不再用 capHeight 贴行顶（那只在行盒高=内容高时正确）。
+	flexHalfLeading := 0.0
+	if textInFlexCentered(text) && len(segments) > 0 {
+		seg0 := segments[0]
+		var drawAscent, drawDescent float64
+		if hasCJKChars([]rune(content)) {
+			drawAscent, drawDescent = info.canvas.FontCJKMetrics(font)
+		} else {
+			drawAscent = baselineH
+			drawDescent = graphics.GlobalFontDescent(font)
+		}
+		fontH := drawAscent + drawDescent
+		if fontH > 0 {
+			boxCenter := seg0.Y + seg0.LineHeight/2
+			flexBaseline := boxCenter + drawAscent - fontH/2
+			flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
+		}
+	}
+
 	// DEBUG: print segments info
 	debugContent := content
 	_ = debugContent
@@ -1034,7 +1080,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			if sub == "" || sub == "\n" {
 				continue
 			}
-			baseline := seg.Y + baselineH
+			baseline := seg.Y + baselineH + flexHalfLeading
 			if textInAbsPos(text) {
 				baseline = seg.Y + absBaselineH
 			}
@@ -1060,7 +1106,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// exposed on the render object via ListMarkerText().
 	if marker, mbox := listMarkerForRenderText(text); marker != "" && mbox != nil && len(segments) > 0 {
 		first := segments[0]
-		baseline := first.Y + baselineH
+		baseline := first.Y + baselineH + flexHalfLeading
 		// The marker occupies the padding-left zone of the li (40px default);
 		// draw it right-aligned within that zone, 6px before the content start.
 		markerX := first.X - 6 - graphics.MeasureText(font, marker)
@@ -1077,7 +1123,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			wbTextDebugSkipped++
 			continue
 		}
-		baseline := seg.Y + baselineH
+		baseline := seg.Y + baselineH + flexHalfLeading
 		if textInAbsPos(text) {
 			baseline = seg.Y + absBaselineH
 		}
