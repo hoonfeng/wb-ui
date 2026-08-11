@@ -4529,7 +4529,32 @@ func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
 	width = measureTextWidth(fam, size, weight, stl, sub)
 	left += prefixW + elLeft
 	top += elTop
+	// ★ 高度：浏览器 Range.getClientRects 的高度 = CSS line-height
+	// （行框高，含 half-leading），不是字体行距（ascent+descent+lineGap）。
+	// CM6 用它作为 textHeight → 光标高度 = textHeight——字体行距会让
+	// 光标只有 15.2px（行高 18.2 的 84%），光标顶贴行顶、底空 3.8px →
+	// 「光标与 activeLine 背景不居中/平齐」。优先从父元素 computed
+	// style 读 line-height（"18.2px" 或无单位倍数 "1.4"）。
 	height = measureLineHeight(fam, size, weight, stl)
+	// line-height 走继承链：computedStyleFor 只收集元素自身匹配的声明，
+	// cm-line 的 line-height 通常声明在 .cm-content/.cm-editor 等祖先。
+	// 浏览器 Range.getClientRects 的高度 = 最终 line-height（含继承）。
+	for p := dom.Node(parent); p != nil; p = p.ParentNode() {
+		if pel, ok := p.(*dom.Element); ok {
+			if cs := computedStyleFor(pel); cs != nil {
+				if v, ok := cs["line-height"]; ok && v != "" && v != "normal" {
+					if strings.HasSuffix(v, "px") {
+						if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil && pv > 0 {
+							height = pv
+						}
+					} else if lh, err := strconv.ParseFloat(v, 64); err == nil && lh > 0 {
+						height = lh * size // 无单位倍数：line-height:1.4 → 1.4×font-size
+					}
+					break
+				}
+			}
+		}
+	}
 	if width == 0 && height == 0 {
 		return 0, 0, 0, 0, false
 	}

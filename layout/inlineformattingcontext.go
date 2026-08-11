@@ -439,7 +439,18 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			cldG.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 			// Horizontal margins shift the child and consume line space;
 			// margin-top lowers the child inside the line box.
-			cldG.SetTopLeft(currentLine.y+centeringOffset+margin.Top, currentLine.contentX+currentLine.widthUsed+margin.Left)
+			// ★ 纯 inline（非 replaced/inline-block）子元素：顶贴行框顶
+			// （浏览器语义：inline box 顶 = 行框顶，glyph 垂直居中由绘制层
+			// baseline 公式负责——PaintText 行框居中）。若此处叠加
+			// centeringOffset，inline box 顶=行框顶+half-leading → 内部
+			// 文字的行框 LineY 也被下移 → 行框顶≠背景盒顶（activeLine
+			// 背景不居中、文字偏下的根因）。inline-block/replaced 保留
+			// centeringOffset（垂直居中于行框）。
+			topOffset := centeringOffset
+			if cldCS := cld.Style(); cldCS != nil && cld.IsInline() && !cld.IsReplaced() && cldCS.Display == style.DisplayInline {
+				topOffset = 0
+			}
+			cldG.SetTopLeft(currentLine.y+topOffset+margin.Top, currentLine.contentX+currentLine.widthUsed+margin.Left)
 
 			// ★ 换行约束：无显式宽度的 inline 子元素（含 flex item 文本的
 			//    匿名 inline 包装盒）必须以「父级行宽」而非自身 max-content
@@ -782,7 +793,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					widthUsed:  0,
 					availWidth: newCw,
 				}
-				cldG.SetTopLeft(currentLine.y+centeringOffset, currentLine.contentX+currentLine.widthUsed)
+				// 与初始放置同一规则：纯 inline 顶贴行框顶。
+				topOffset := centeringOffset
+				if csc := cld.Style(); csc != nil && cld.IsInline() && !cld.IsReplaced() && csc.Display == style.DisplayInline {
+					topOffset = 0
+				}
+				cldG.SetTopLeft(currentLine.y+topOffset, currentLine.contentX+currentLine.widthUsed)
 			}
 			// Apply relative offset to inline-level elements that are
 			// relatively positioned (e.g. position:relative with top/left).

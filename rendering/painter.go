@@ -1066,6 +1066,29 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			flexBaseline := boxCenter + drawAscent - fontH/2
 			flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
 		}
+	} else if !textInAbsPos(text) && len(segments) > 0 {
+		// ★ 普通流内文本：浏览器 half-leading 居中——glyph 在行框
+		// （RootInlineBox, LineY..LineY+LineHeight）内垂直居中，而不是
+		// cap 顶贴 seg.Y。此前 cap 顶贴行顶只在行高=字高时正确；行高
+		// > 字高时（CM6 编辑器 line-height 18.2 vs 13px 字）glyph 顶贴
+		// 背景顶、下方空 5.9px → 「activeLine 背景不居中/文字偏上」。
+		// 度量：Skia FontAscent 是 usWinAscent（9.7px）比字形实际 bbox
+		// ascent（~capHeight 8.3-8.6）大，且 usWinDescent（~1）远小于
+		// bbox descent（~3.4）——用它算居中公式会让 glyph 中心比行框
+		// 中心低 ~1.7px（偏下）。改用 capHeight + 0.4×capHeight 近似
+		// bbox descent：baseline = 行框中心 + ascent - fontH/2，使
+		// glyph 中心与行框中心对齐（行高=字高时退化为 glyph 顶=行框顶）。
+		seg0 := segments[0]
+		if seg0.LineHeight > 0 {
+			drawAscent := baselineH
+			drawDescent := baselineH * 0.3
+			fontH := drawAscent + drawDescent
+			if fontH > 0 {
+				boxCenter := seg0.LineY + seg0.LineHeight/2
+				centeredBaseline := boxCenter + drawAscent - fontH/2
+				flexHalfLeading = centeredBaseline - (seg0.Y + baselineH)
+			}
+		}
 	}
 
 	// DEBUG: print segments info
