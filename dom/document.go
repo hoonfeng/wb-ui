@@ -23,6 +23,11 @@ type Document struct {
 	url          string
 	quirks       bool
 
+	// focusedEl 缓存当前 focused 元素（SetFocused 维护）。bindings 的
+	// document.hasFocus()/activeElement 用它 O(1) 查询——此前每次遍历
+	// 全文档元素（O(N)，CM6 每 measure 调 hasFocus → 事件响应慢贡献者）。
+	focusedEl *Element
+
 	// onTreeChange 是 DOM 结构变更（appendChild/insertBefore/removeChild/
 	// setTextContent/setNodeValue 等）通知回调。宿主（app.Host）注册它来
 	// MarkRenderTreeDirty——否则动态 DOM 更新（如 xterm 每字符 appendChild
@@ -30,6 +35,13 @@ type Document struct {
 	// ★ 回调在 DOM 操作线程同步调用；宿主侧只置标志（下帧重建），无重入。
 	onTreeChange func()
 }
+
+// FocusedElement 返回当前 focused 元素（无则 nil），O(1)。
+func (d *Document) FocusedElement() *Element { return d.focusedEl }
+
+// SetFocusedElement 记录 focused 元素（Element.SetFocused 维护，嵌合方
+// 不需要直接调用）。
+func (d *Document) SetFocusedElement(e *Element) { d.focusedEl = e }
 
 // SetTreeChangeCallback 注册 DOM 结构变更回调（宿主在 LoadHTML 后调用）。
 func (d *Document) SetTreeChangeCallback(fn func()) {

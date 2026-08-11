@@ -197,6 +197,15 @@ func (e *Element) IsFocused() bool { return e.focused }
 func (e *Element) SetFocused(f bool) {
 	if e.focused != f {
 		e.focused = f
+		// 维护 owner document 的 focused 元素缓存（document.hasFocus()/
+		// activeElement O(1) 查询）。
+		if doc := e.OwnerDocument(); doc != nil {
+			if f {
+				doc.SetFocusedElement(e)
+			} else if doc.FocusedElement() == e {
+				doc.SetFocusedElement(nil)
+			}
+		}
 		e.bumpDynamicPseudoVersion() // :focus/:focus-within 跨元素 → 全链失效
 	}
 }

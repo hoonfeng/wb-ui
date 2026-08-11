@@ -736,8 +736,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 	bindings.GetElementScrollOffset = func(el *dom.Element) (float64, float64) {
 		return wrapBox(el, func(box *rendering.RenderBox) (float64, float64) {
 			if rv := wv.RenderView(); rv != nil {
-				return rv.BoxScrollOffset(box)
-			}
+				return rv.BoxScrollOffset(box)			}
 			return 0, 0
 		})
 	}
@@ -822,6 +821,44 @@ func (wv *WebView) injectRenderTreeBridge() {
 		vm := rendering.VerticalScrollbarMetrics(rv, box)
 		hm := rendering.HorizontalScrollbarMetrics(rv, box)
 		return pb.Width, pb.Height, tw, th, (vm.OK || hm.OK)
+	}
+	// GetElementBoxRectFast：布局缓存直读（不触发 rebuild/layout）。
+	// computedStyleFor 的 height/width 兜底用它——CM6 measure 期间渲染树
+	// 频繁 dirty，若每次强制全量 rebuild（~22ms）→ 测量-布局风暴。
+	bindings.GetElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
+		rv := wv.RenderView()
+		if rv == nil || el == nil {
+			return 0, 0, 0, 0
+		}
+		box := rv.FindRenderBoxForNode(el)
+		var x0, y0, w, h float64
+		hasGeom := false
+		if box != nil {
+			x0, y0, w, h = box.X(), box.Y(), box.Width(), box.Height()
+			hasGeom = true
+			if x0 == 0 && y0 == 0 {
+				if ro0 := rv.FindRenderObjectForNode(el); ro0 != nil {
+					if st0 := ro0.Style(); st0 != nil && st0.Display == style.DisplayInline {
+						if sx, sy, ok := firstTextSegmentBase(rv, el); ok {
+							x0, y0 = sx, sy
+						}
+					}
+				}
+			}
+		} else if ro := rv.FindRenderObjectForNode(el); ro != nil && ro.LayoutBox() != nil {
+			if ls := rv.LayoutState(); ls != nil {
+				g := ls.GeometryForBox(ro.LayoutBox())
+				x0, y0, w, h = g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
+				hasGeom = true
+			}
+		}
+		if !hasGeom {
+			return 0, 0, 0, 0
+		}
+		if math.IsNaN(w) || math.IsNaN(h) || w < 0 || h < 0 {
+			return 0, 0, 0, 0
+		}
+		return x0, y0, w, h
 	}
 	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
 		forceLayout()

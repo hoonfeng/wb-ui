@@ -95,6 +95,13 @@ var (
 	// GetElementBoxRect 返回元素布局盒 (left, top, width, height)
 	// （offsetLeft/offsetTop/offsetWidth/offsetHeight 用）。
 	GetElementBoxRect func(el *dom.Element) (left, top, width, height float64)
+	// GetElementBoxRectFast 返回元素布局盒（布局缓存直读，不触发
+	// rebuild/layout）。渲染树 dirty 时可能返回旧几何或 0——供
+	// computedStyleFor 的 height/width 兜底用：输入测量场景（CM6
+	// measure 的 getClientRects）渲染树频繁 dirty，若每次强制全量
+	// rebuild（~22ms）会造成测量-布局风暴（事件响应慢主因）。调用方
+	// 只在「布局已稳定」时依赖该值。
+	GetElementBoxRectFast func(el *dom.Element) (left, top, width, height float64)
 )
 
 // ── ResizeObserver 真实现（浏览器标准）───────────────
@@ -276,18 +283,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	selObj.Set("isCollapsed", jsc.BooleanValue(true))
 	selObj.Set("type", jsc.StringValue("None"))
 
-	if _, ok := g.GetByKey(domBindingsMarker); ok {
-		docObj := wrapDocument(rt, document)
-		docObj.Set("getSelection", jsc.FunctionValue(jsc.NewNativeFunction("getSelection",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-				return jsc.ObjectValue(selObj)
-			}, 0)))
-		g.Set("document", jsc.ObjectValue(docObj))
-		// ★ 幂等刷新也需重新应用 canvas 2D 补丁（新 document 对象的
-		// createElement 未包装，xterm 测量仍会失败）。
-		applyCanvas2DPatch(rt)
-		return
-	}
+	// ★ 幂等分支已后移到 selObj 完整初始化之后（见下）——此前在
+	// selObj 方法（collapse/setBaseAndExtent/…）初始化之前 return，
+	// 幂等路径新建的 selObj 只有字段没有方法 → document.getSelection()
+	// 返回无 collapse 的对象 → CM6 点击后 updateSelection 调
+	// rawSel.collapse 抛 "Object has no member 'collapse'" → DOM
+	// selection 不同步 → 真实键盘输入失败（「编辑器不能编辑」根因）。
 
 	docObj := wrapDocument(rt, document)
 	rt.GlobalObject().Set("document", jsc.ObjectValue(docObj))
@@ -444,6 +445,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}
 		name := args[0].ToString()
 		el.SetAttribute(name, args[1].ToString())
+		// ★ computed style 缓存失效（class/style 等属性影响样式匹配）
+		InvalidateComputedStyle(el)
 		// ★ iframe 的 src 是「导航属性」：JS 改 src 应重载子文档
 		// （浏览器 iframe navigation 语义）。webkit 注入 IFrameSrcChanged
 		// 回调处理重载；未注入时静默（如测试环境）。
@@ -463,6 +466,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.Undefined()
 		}
 		el.RemoveAttribute(args[0].ToString())
+		InvalidateComputedStyle(el)
 		return jsc.Undefined()
 	})
 	protoAttr("toggleAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
@@ -2095,6 +2099,24 @@ idx := int(a[0].ToNumber())
 			return jsc.ObjectValue(selObj)
 		}, 0)))
 
+	// ★ 幂等分支：后续 RegisterDOMBindings 调用（每次 EvalJS 前）只刷新
+	// document 引用（新建 docObj 挂完整初始化的 selObj），不重建 prototype。
+	// 必须放在 selObj 全部方法初始化之后（否则幂等路径的 selObj 无
+	// collapse 等方法 → CM6 updateSelection 抛 "Object has no member
+	// 'collapse'" → DOM selection 不同步 → 真实键盘输入失败）。
+	if _, ok := g.GetByKey(domBindingsMarker); ok {
+		idoc := wrapDocument(rt, document)
+		idoc.Set("getSelection", jsc.FunctionValue(jsc.NewNativeFunction("getSelection",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				return jsc.ObjectValue(selObj)
+			}, 0)))
+		g.Set("document", jsc.ObjectValue(idoc))
+		// ★ 幂等刷新也需重新应用 canvas 2D 补丁（新 document 对象的
+		// createElement 未包装，xterm 测量仍会失败）。
+		applyCanvas2DPatch(rt)
+		return
+	}
+
 	// ★ canvas 2D 测量（xterm.js 的 cellWidth/cellHeight 计算依赖）：
 	// createElement('canvas') 附加 getContext('2d') + measureText。
 	// wb-ui 无原生 canvas 2D——measureText 用 DOM span 实测字符尺寸，
@@ -2329,17 +2351,26 @@ obj.SetInternal(doc)
 	}), nil)
 
 	// document.hasFocus() — CodeMirror 6 等库用它判断编辑器是否获得焦点
-	// （决定光标/选区渲染）。wb-ui 由 Element.SetFocused 记录焦点状态。
+	// （决定光标/选区渲染）。wb-ui 由 Element.SetFocused 记录焦点状态，
+	// Document 维护 focused 元素缓存（O(1)，不遍历全文档）。
 	obj.Set("hasFocus", jsc.FunctionValue(jsc.NewNativeFunction("hasFocus",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			els := DocumentQuerySelectorAll(doc, "*")
-			for _, el := range els {
-				if el.IsFocused() {
-					return jsc.BooleanValue(true)
-				}
-			}
-			return jsc.BooleanValue(false)
+			return jsc.BooleanValue(doc.FocusedElement() != nil)
 		}, 0)))
+	// document.activeElement — CM6 的 hasFocus 检查
+	// `document.hasFocus() && document.activeElement == contentDOM`；此前
+	// 缺失 → undefined == contentDOM 恒 false → CM6 updateSelection 视为
+	// 未聚焦 → 点击后 DOM selection 不同步 → 真实键盘输入失败（「编辑器
+	// 不能编辑」根因之一）。浏览器语义：无焦点时返回 body。
+	obj.SetAccessor("activeElement", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if fe := doc.FocusedElement(); fe != nil {
+			return jsc.ObjectValue(wrapElement(in, fe))
+		}
+		if body := doc.Body(); body != nil {
+			return jsc.ObjectValue(wrapElement(in, body))
+		}
+		return jsc.Null()
+	}), nil)
 
 	return obj
 }
@@ -2975,6 +3006,9 @@ obj.SetInternal(el)
 		if OnNodeInserted != nil {
 			OnNodeInserted(nc)
 		}
+		if isStyleElement(nc) {
+			BumpStyleVersion()
+		}
 		return a0
 	})))
 	obj.Set("replaceChild", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, oc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
@@ -3012,8 +3046,11 @@ obj.SetInternal(el)
 				if OnNodeInserted != nil {
 					OnNodeInserted(n)
 				}
-				if OnStyleNodeAdded != nil && isStyleElement(n) {
-					OnStyleNodeAdded(n)
+				if isStyleElement(n) {
+					BumpStyleVersion()
+					if OnStyleNodeAdded != nil {
+						OnStyleNodeAdded(n)
+					}
 				}
 			}
 			return jsc.Undefined()
@@ -3643,6 +3680,9 @@ obj.SetInternal(el)
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.TextContent()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
 			el.SetTextContent(v.ToString())
+			if isStyleElement(el) {
+				BumpStyleVersion()
+			}
 			if OnNodeInserted != nil && el.IsConnected() {
 				OnNodeInserted(el)
 			}
@@ -3675,7 +3715,10 @@ obj.SetInternal(el)
 func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	cls := jsc.NewObject(rt.ObjectPrototype())
 	get := func() []string { return strings.Fields(el.GetClassName()) }
-	set := func(c []string) { el.SetClassName(strings.Join(c, " ")) }
+	set := func(c []string) {
+		el.SetClassName(strings.Join(c, " "))
+		InvalidateComputedStyle(el)
+	}
 
 	cls.Set("add", jsc.FunctionValue(jsc.NewNativeFunction("add",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
@@ -3879,6 +3922,7 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		if os.Getenv("WB_STYLE_DEBUG") != "" {
 			fmt.Fprintf(os.Stderr, "[styleProxy] cssText=%q\n", val.String())
 		}
+		InvalidateComputedStyle(s.el)
 		if OnInlineStyleChanged != nil {
 			OnInlineStyleChanged(s.el)
 		}
@@ -3900,6 +3944,7 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 			fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
 				key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
 		}
+		InvalidateComputedStyle(s.el)
 		if OnInlineStyleChanged != nil {
 			OnInlineStyleChanged(s.el)
 		}
@@ -3930,6 +3975,7 @@ func (s *styleProxy) Delete(key string) bool {
 	props := parseStyle(s.el.GetAttribute("style"))
 	delete(props, key)
 	s.el.SetAttribute("style", joinStyle(props))
+	InvalidateComputedStyle(s.el)
 	return true
 }
 
@@ -4025,8 +4071,11 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 		if n == nil { return jsc.Null() }
 		frag.AppendChild(n)
 		if OnNodeInserted != nil { OnNodeInserted(n) }
-		if OnStyleNodeAdded != nil && isStyleElement(n) {
-			OnStyleNodeAdded(n)
+		if isStyleElement(n) {
+			BumpStyleVersion()
+			if OnStyleNodeAdded != nil {
+				OnStyleNodeAdded(n)
+			}
 		}
 		return a
 	})))
@@ -4373,6 +4422,8 @@ func nodeLen(n dom.Node) int {
 // 宽度 = 区间文本的实际渲染宽度（前缀偏移 + 子串测量），高度 = 行高。
 // 对非 Text 节点回退到父元素/起始节点的 box rect。
 func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
+	t0 := time.Now()
+	defer func() { domStat("rangeRect", time.Since(t0)) }()
 	t, isText := st.startNode.(*dom.Text)
 	if !isText || st.endNode != st.startNode {
 		// 非文本区间：用起始节点所在元素的 box。
@@ -4412,13 +4463,20 @@ func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
 			fam, size, weight, stl = GetElementComputedFont(parent)
 		}
 		// ★ 位置（left/top）：浏览器 getClientRects 返回绝对屏幕坐标。
-		// 此前位置用 0（CM6 只读 width/height 不做位置判断），但前端
-		// 字符定位测量（# 注释对齐、TreeWalker 字符 x 偏移）读
-		// rects[0].left 需要真实坐标。GetElementBoxRect 只查询布局缓存
-		// （布局稳定后 forceLayout 是 no-op，不产生测量风暴——风暴根源
-		// 是 dummy 节点增删导致的渲染树重建，纯查询无此问题）。
-		if GetElementBoxRect != nil {
-			elLeft, elTop, _, _ = GetElementBoxRect(parent)
+		// 前端字符定位测量（# 注释对齐、TreeWalker 字符 x 偏移）读
+		// rects[0].left 需要真实坐标。★ 用 GetElementBoxRectFast（布局
+		// 缓存直读，不强制 rebuild）：CM6 的 TextWidth.measure 在 rAF 里
+		// 对每字符调 getClientRects，此时渲染树可能 dirty（DOM 刚变更），
+		// 若每次 GetElementBoxRect 全量 forceLayout（rebuild ~22ms）→
+		// 测量-布局风暴（每次输入 300ms 的 rangeRect 部分）。文本测量
+		// 只读 width/height（位置对 charWidth/textHeight 无贡献），
+		// dirty 时的旧几何不影响测量正确性。
+		boxFn := GetElementBoxRectFast
+		if boxFn == nil {
+			boxFn = GetElementBoxRect
+		}
+		if boxFn != nil {
+			elLeft, elTop, _, _ = boxFn(parent)
 		}
 		// ★ 内容从 padding 内侧开始：浏览器 Range 的 left = 父元素 border
 		// box 左 + border-left + padding-left（+ 前缀文本宽）。CM6 的
@@ -4814,6 +4872,14 @@ func selectorListHasPseudoElement(l *css.SelectorList) bool {
 }
 
 func computedStyleFor(el dom.Node) map[string]string {
+	t0 := time.Now()
+	defer func() { domStat("computedStyleFor", time.Since(t0)) }()
+	if el == nil {
+		return map[string]string{}
+	}
+	if cached, ok := cssCacheGet(el); ok {
+		return cached
+	}
 	if computedStyleDepth > 8 {
 		return map[string]string{}
 	}
@@ -4928,16 +4994,16 @@ func computedStyleFor(el dom.Node) map[string]string {
 	// getComputedStyle(parent).height 算容器可用高度，声明缺失时 parseInt("")
 	// = NaN → fit return → xterm 保持 80x24 超出容器（光标被裁剪）。此处
 	// 声明缺失时从渲染树读布局几何兜底（只对无声明元素产生开销）。
-	if GetElementBoxRect != nil {
+	if GetElementBoxRectFast != nil {
 		if e, ok := el.(*dom.Element); ok {
 			if _, has := out["height"]; !has {
-				_, _, _, h := GetElementBoxRect(e)
+				_, _, _, h := GetElementBoxRectFast(e)
 				if h > 0 {
 					out["height"] = fmt.Sprintf("%.1fpx", h)
 				}
 			}
 			if _, has := out["width"]; !has {
-				_, _, w, _ := GetElementBoxRect(e)
+				_, _, w, _ := GetElementBoxRectFast(e)
 				if w > 0 {
 					out["width"] = fmt.Sprintf("%.1fpx", w)
 				}
@@ -4956,6 +5022,7 @@ func computedStyleFor(el dom.Node) map[string]string {
 			out[k] = "0px"
 		}
 	}
+	cssCachePut(el, out)
 	return out
 }
 
