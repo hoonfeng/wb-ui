@@ -398,11 +398,14 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 // natural. NSimSun is reserved for the monospace generic family only.
 func (m *FontManager) selectDefaults() {
 	// ★ monospace: 用 Courier New 替代 Consolas。goskia（SkiaSharp）渲染
-	// Consolas 12-18px 的括号类字符（( ) [ ] { }）会退化（左弧丢失、变成
-	// 全高斜线，实测 13px '(' 高 11-12px vs 浏览器 8px——「括号与文字底部
-	// 对齐」的根因）；Courier New 渲染正常（13px '(' 高 8px 曲线完整）。
-	// Edge 里 Consolas 由 DirectWrite 渲染正常，wb-ui 的 Skia 后端无法复现，
-	// 故等宽文本统一走 Courier New（唯一渲染正常的 Windows 等宽字体）。
+	// Consolas 12-18px 的括号类字符（( ) [ ] { }）垂直度量异常——字符被
+	// 画成全高 12px（实测 24 种 edging×hinting×subpixel 组合全部 12px；
+	// 浏览器 DirectWrite 渲染 8px cap 高）——「括号与文字底部对齐」根因；
+	// Courier New 渲染正常（13px '(' 高 8px 曲线完整）。其他等宽字体
+	// （Cascadia Mono/Code、DejaVu Sans Mono、Liberation Mono、Lucida
+	// Console、NSimSun、Segoe UI Mono(不等宽)）同样异常或观感特殊。
+	// 无衬线等宽在 goskia 全部渲染异常，渲染正常的等宽只剩衬线 Courier
+	// New（与 Miriam Mono CLM 同源，OCRA 复古）——故等宽统一走 Courier New。
 	m.monoTF = skia.NewTypeface("Courier New", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 	if m.monoTF == nil {
 		m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
@@ -599,11 +602,14 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 		case "serif", "times", "times new roman", "ui-serif":
 			return "kochi mincho", true // generic �?always available
 		case "monospace", "mono", "ui-monospace":
-			// ★ generic monospace → courier new：goskia 渲染 Consolas 括号类
-			// 字符小字号退化（见 selectDefaults 注释），统一走 Courier New
+			// ★ generic monospace → courier new：goskia 渲染 Consolas 等无衬线
+			// 等宽小字号垂直度量异常（全高 12px vs 浏览器 8px，24 组合不可
+			// 修复），Courier New 是唯一渲染正常的 Windows 等宽（见
+			// selectDefaults 注释），统一走它（findBest 命中 couri.ttf 或
+			// generic 兜底 monoTF）
 			return "courier new", true
 		case "consolas", "courier new", "courier":
-			// ★ 显式 Consolas 也映射到 Courier New（同一渲染缺陷规避）
+			// ★ 显式 Consolas/Courier New 也映射到 Courier New（同一渲染缺陷规避）
 			return "courier new", false
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
