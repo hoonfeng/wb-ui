@@ -8,6 +8,7 @@ package webkit
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/url"
 	"os"
@@ -533,6 +534,7 @@ func (wv *WebView) LoadURL(url string) error {
 }
 
 func (wv *WebView) Render() ([]byte, error) {
+	log.Printf("[render] called")
 	rv := wv.mainFrame.RenderView()
 	if rv == nil { return nil, ErrNoDocument }
 	view := wv.page.MainFrame().View()
@@ -780,6 +782,16 @@ func (wv *WebView) injectRenderTreeBridge() {
 			x = 0
 		}
 		rv.SetBoxScrollOffset(box, x, y)
+		// ★ 浏览器标准：el.scrollTop = N 后须派发 scroll 事件（下一帧/
+		// 微任务，此处同步派发等效）——CM6 监听 scroller 的 scroll 事件
+		// → requestMeasure → viewport 更新 → gutter 行号虚拟化重渲染。
+		// 此前 scrollTop 赋值静默（wheel 路径有 dispatchScrollEvent，JS
+		// 赋值路径没有）→ 程序化滚动（scrollIntoView/滚动条拖到顶后
+		// 设置值/CM6 自动滚动）后行号不刷新——用户「滚动该绘制的行号
+		// 不显示，仍裁切」的直接根因。
+		if el != nil {
+			el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
+		}
 	}
 	bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
 		forceLayout()
@@ -857,13 +869,35 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 结构下 Node 查找不可靠——同 Node 指针 BoxScrollOffset 结果不一
 		// 致，疑似 box 实例字段差异；DOM 链 + FindRenderBoxForNode 每次
 		// 命中同一 box，已验证返回正确偏移）。
+		// ★ sticky 语义：position:sticky 元素（及其子孙）只在「有
+		// top/bottom inset」时钉在滚动容器视口内（CSS: 无 inset 的
+		// sticky 等同 relative，不钉住）——CM6 的 .cm-gutters 是
+		// position:sticky 但无 top/left → 跟随内容竖向滚动（VS Code 式
+		// 行号），其 getBoundingClientRect 必须扣滚动偏移，否则行号
+		// rect 返回布局坐标与绘制错位 → CM6 虚拟化把行号画在错位位置
+		// （用户「滚动后行号裁切」根因）。此前无差别处理 sticky →
+		// gutter 元素不扣滚动 → 行号画在布局位置（视口底部/外）。
+		// 有 top/bottom 的 sticky（如 .tl-think-fold bottom:0）钉住 →
+		// 不扣该滚动容器偏移；更外层滚动容器照常扣。
 		sx, sy := 0.0, 0.0
+		stickySeen := stickyHasInset(box)
 		for cur := el.ParentNode(); cur != nil; cur = cur.ParentNode() {
 			if el2, ok := cur.(*dom.Element); ok {
 				if b := rv.FindRenderBoxForNode(el2); b != nil {
+					if stickySeen {
+						if cs := b.Style(); cs != nil &&
+							(cs.OverflowX == style.OverflowAuto || cs.OverflowX == style.OverflowScroll ||
+								cs.OverflowY == style.OverflowAuto || cs.OverflowY == style.OverflowScroll) {
+							stickySeen = false
+						}
+						continue
+					}
 					ox, oy := rv.BoxScrollOffset(b)
 					sx += ox
 					sy += oy
+					if b.IsStickyPositioned() && stickyHasInset(b) {
+						stickySeen = true
+					}
 				}
 			}
 		}
@@ -907,6 +941,27 @@ func (wv *WebView) injectRenderTreeBridge() {
 
 func (wv *WebView) RenderView() *rendering.RenderView {
 	return wv.mainFrame.RenderView()
+}
+
+// stickyHasInset 报告 sticky 元素是否带 top/bottom inset（CSS 语义：
+// 无 inset 的 position:sticky 等同 relative，滚动时不钉住——CM6 的
+// .cm-gutters 即此例，必须跟随滚动）。与 computeStickyOffset（渲染侧
+// 绘制钉住判定）保持一致，保证 getBoundingClientRect 与绘制坐标同步。
+func stickyHasInset(b *rendering.RenderBox) bool {
+	if b == nil {
+		return false
+	}
+	cs := b.Style()
+	if cs == nil {
+		return false
+	}
+	if t := cs.GetProperty("top"); t != "" && t != "auto" {
+		return true
+	}
+	if btm := cs.GetProperty("bottom"); btm != "" && btm != "auto" {
+		return true
+	}
+	return false
 }
 
 func (wv *WebView) EnsureLayout() {

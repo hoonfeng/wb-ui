@@ -539,6 +539,7 @@ var CanvasClipRRCount int
 // GraphicsContext::fillRect(FloatRect, Color). The rectangle is drawn through the
 // Skia canvas which applies the current transform, clip, and anti-aliasing.
 func (c *Canvas) FillRect(x, y, w, h float64, col Color) {
+	log.Printf("[fill] (%.0f,%.0f) %.0fx%.0f col=#%02x%02x%02x", x, y, w, h, col.R, col.G, col.B)
 	c.fillPaint.SetColor(colorToSkia(col))
 	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
 	c.canvas.DrawRect(r, c.fillPaint)
@@ -987,9 +988,33 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 		log.Printf("[drawtext] %q at (%.0f,%.0f) family=%q size=%.1f", text, x, y, font.Family, font.Size)
 		wbDrawLogCount++
 	}
+	if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
+		m := c.GetMatrix()
+		log.Printf("[gutter-draw-canvas] %q @(%.0f,%.0f) ctm=ty:%.1f → device(%.0f,%.0f)",
+			text, x, y, float64(m.TransY), x+float64(m.TransX), y+float64(m.TransY))
+		// 画完后读像素（device 坐标 = 内容 + ctm；文字在 baseline-13..baseline）
+		devY := y + float64(m.TransY)
+		if devY > 13 && devY < 120 {
+			for _, dy := range []int{-10, -7, -4} {
+				py := int(devY) + dy
+				if py >= 0 && py < c.Height() {
+					px := c.PixelAt(int(x)+4, py)
+					log.Printf("[gutter-after] %q devY=%.0f y=%d pixel=#%02x%02x%02x", text, devY, py, px.R, px.G, px.B)
+				}
+			}
+		}
+	}
 	skFont := c.getSkiaFont(font)
 	if skFont == nil {
+		if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
+			log.Printf("[gutter-font] %q font=%q size=%.1f weight=%d SKFONT=NIL", text, font.Family, font.Size, font.Weight)
+		}
 		return
+	}
+	if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
+		m := c.GetMatrix()
+		cb, ok := c.DeviceClipBounds()
+		log.Printf("[gutter-mtx] %q scaleX=%.2f skewY=%.2f ty=%.2f clip=(%.0f,%.0f,%.0fx%.0f) ok=%v", text, float64(m.ScaleX), float64(m.SkewY), float64(m.TransY), cb.X, cb.Y, cb.Width, cb.Height, ok)
 	}
 	c.fillPaint.SetColor(colorToSkia(col))
 
@@ -1004,8 +1029,14 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	}
 
 	t0 := time.Now()
+	log.Printf("[dtext] %q @(%.1f,%.1f) col=#%02x%02x%02x", text, x, y, col.R, col.G, col.B)
 	c.canvas.DrawText(text, float32(x), float32(y), skFont, c.fillPaint)
 	CgoTimingDraw += time.Since(t0)
+	// ★ 临时诊断：原文字画完立即读像素
+	if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
+		p := c.PixelAt(int(x)+4, int(y)-7)
+		log.Printf("[gutter-raw] %q @(%d,%d) pixel=#%02x%02x%02x col=#%02x%02x%02x", text, int(x), int(y), p.R, p.G, p.B, col.R, col.G, col.B)
+	}
 	c.invalidatePixels()
 }
 
@@ -1148,6 +1179,9 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 		size:   float32(size),
 		weight: font.Weight,
 		style:  font.Style,
+	}
+	if os.Getenv("WB_FONT_DEBUG") != "" && font.Size == 13 {
+		log.Printf("[fontkey] family=%q size=%.1f weight=%d style=%q", font.Family, font.Size, font.Weight, font.Style)
 	}
 	c.fontCacheMu.Lock()
 	defer c.fontCacheMu.Unlock()

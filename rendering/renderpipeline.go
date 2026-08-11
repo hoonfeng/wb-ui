@@ -69,6 +69,9 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if view == nil || canvas == nil {
 		return
 	}
+	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+		log.Printf("[paint-call] rect=%.0f,%.0f %.0fx%.0f dirty=%v", rect.X, rect.Y, rect.Width, rect.Height, view.IsDirty())
+	}
 	if paintStatsEnabled() {
 		paintStatsLayers, paintStatsClipLayers, paintStatsNoClipLayers, paintStatsFixed, paintStatsVisits = 0, 0, 0, 0, 0
 		restoreCountAtEntry := graphics.CanvasRestoreCount
@@ -209,6 +212,10 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	layerRect, clip := layer.CalculateRects()
 	hasClip := clip.Width > 0 && clip.Height > 0
 	_ = layerRect
+	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+		m := info.canvas.GetMatrix()
+		log.Printf("[layer-ctm] %s ctm_ty=%.1f hasClip=%v scrollT=(%.1f,%.1f)", layerName(layer), float64(m.TransY), hasClip, info.scrollTranslateX, info.scrollTranslateY)
+	}
 	if paintStatsEnabled() {
 		paintStatsLayers++
 		if isFixedLayer {
@@ -431,6 +438,9 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 				(st.OverflowX == style.OverflowAuto || st.OverflowX == style.OverflowScroll ||
 					st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
 				if sx, sy := info.rv.BoxScrollOffset(rb); sx != 0 || sy != 0 {
+					if os.Getenv("WB_GUTTER_DEBUG") != "" {
+						log.Printf("[scroll-tr] layer=%s off=(%.0f,%.0f) translate(-%.0f,-%.0f)", layerName(layer), sx, sy, sx, sy)
+					}
 					info.canvas.Save()
 					info.canvas.Translate(-sx, -sy)
 					scrollRestore = true

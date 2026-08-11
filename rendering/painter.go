@@ -907,6 +907,16 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	if st == nil {
 		return
 	}
+	// ★ 行号绘制诊断：WB_GUTTER_DEBUG=1 时打印 x<370（gutter 区）的文本绘制
+	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+		segs := text.Segments()
+		if len(segs) > 0 && segs[0].X < 370 {
+			col := toGraphicsColor(st.Color)
+			log.Printf("[gutter-draw] %q @(%.0f,%.0f) segs=%d vis=%q colA=%d color=(%d,%d,%d) font=(%q,%d,%q,%q)",
+				text.OriginalText(), segs[0].X, segs[0].Y, len(segs), st.Visibility, col.A, col.R, col.G, col.B,
+				st.FontFamily, st.FontSize.Value, st.FontWeight, st.FontStyle)
+		}
+	}
 	// ★ visibility:hidden/collapse 的文字不绘制（浏览器语义：占位但不画）。
 	// xterm 的字符宽度测量 span（.xterm-char-measure-element 内容 32 个 W，
 	// visibility:hidden + position:absolute）之前被 PaintText 画出 → 终端
