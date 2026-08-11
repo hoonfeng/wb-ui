@@ -973,14 +973,11 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	if ch := info.canvas.FontCapHeight(font); ch > 0 {
 		baselineH = ch
 	}
-	// CJK glyphs are drawn with the CJK fallback font (YaHei) whose glyph
-	// top sits ~0.85em above the baseline — capHeight (OS/2 sCapHeight,
-	// ≈0.72em) is far too small, which pushed CJK glyph tops above the line
-	// box and clipped them ("中文显示不全，顶部被裁切"). For segments that
-	// contain CJK we position the baseline at seg.Y + CJK ascent, matching
-	// the browser rule (baseline = lineTop + halfLeading + ascent; the
-	// half-leading/centering offset is already folded into seg.Y by layout).
-	cjkAscent, _ := info.canvas.FontCJKMetrics(font)
+	// ★ CJK 与拉丁文本必须共享同一 baseline（浏览器行为：同一行内中英文
+	//   基线对齐——中文 glyph 顶 ~0.85em、底 ~-0.12em，英文 cap 顶 ~0.72em）。
+	//   此前对含 CJK 的 segment 改用 FontCJKMetrics 的 ascent 定位 baseline，
+	//   导致同一行中文比英文低 ~6px（中英基线错位）；且 .cm-line 等行框
+	//   无 overflow:hidden，中文顶部超出 1.7px 不会被裁切（浏览器同样顶出）。
 	// Absolute-positioned text (xterm DOM renderer spans are
 	// position:absolute + inline-block inside a fixed-height row div): the
 	// browser centers the glyphs by the line-box rule
@@ -1038,9 +1035,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 				continue
 			}
 			baseline := seg.Y + baselineH
-			if hasCJKChars([]rune(sub)) {
-				baseline = seg.Y + cjkAscent
-			} else if textInAbsPos(text) {
+			if textInAbsPos(text) {
 				baseline = seg.Y + absBaselineH
 			}
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
@@ -1083,9 +1078,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			continue
 		}
 		baseline := seg.Y + baselineH
-		if hasCJKChars(runes[seg.Start:end]) {
-			baseline = seg.Y + cjkAscent
-		} else if textInAbsPos(text) {
+		if textInAbsPos(text) {
 			baseline = seg.Y + absBaselineH
 		}
 
