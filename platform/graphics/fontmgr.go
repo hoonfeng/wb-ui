@@ -362,11 +362,6 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	case strings.HasPrefix(name, "consola"):
 		entry.family = "consolas"
 		entry.mono = true
-	case strings.HasPrefix(name, "couri"):
-		// Courier New — 替代 Consolas 的等宽字体（goskia 渲染 Consolas
-		// 括号退化，见 selectDefaults 注释）
-		entry.family = "courier new"
-		entry.mono = true
 	case name == "simsun.ttc":
 		// index 1 of simsun.ttc is NSimSun (新宋�?, a CJK monospace face.
 		entry.family = "nsimsun"
@@ -397,18 +392,14 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 // YaHei (a proportional CJK font) as the default sans-serif so UI text looks
 // natural. NSimSun is reserved for the monospace generic family only.
 func (m *FontManager) selectDefaults() {
-	// ★ monospace: 用 Courier New 替代 Consolas。goskia（SkiaSharp）渲染
-	// Consolas 12-18px 的括号类字符（( ) [ ] { }）垂直度量异常——字符被
-	// 画成全高 12px（实测 24 种 edging×hinting×subpixel 组合全部 12px；
-	// 浏览器 DirectWrite 渲染 8px cap 高）——「括号与文字底部对齐」根因；
-	// Courier New 渲染正常（13px '(' 高 8px 曲线完整）。其他等宽字体
-	// （Cascadia Mono/Code、DejaVu Sans Mono、Liberation Mono、Lucida
-	// Console、NSimSun、Segoe UI Mono(不等宽)）同样异常或观感特殊。
-	// 无衬线等宽在 goskia 全部渲染异常，渲染正常的等宽只剩衬线 Courier
-	// New（与 Miriam Mono CLM 同源，OCRA 复古）——故等宽统一走 Courier New。
-	m.monoTF = skia.NewTypeface("Courier New", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	// monospace: prefer Consolas — the OS standard monospace that Edge falls
+	// back to when Google Fonts (JetBrains Mono) is unreachable, so ASCII/code
+	// metrics match the browser reference (.cs-val "0 / 1.0M" 12px = 56px in
+	// Edge; NSimSun measured 49px). CJK glyphs still fall back per-rune to
+	// the CJK face in drawTextWithFallback.
+	m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 	if m.monoTF == nil {
-		m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+		m.monoTF = m.findBest("consolas", 400, false)
 	}
 	// NSimSun (CJK monospace) as the CJK-capable monospace fallback.
 	if m.monoTF == nil {
@@ -602,15 +593,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 		case "serif", "times", "times new roman", "ui-serif":
 			return "kochi mincho", true // generic �?always available
 		case "monospace", "mono", "ui-monospace":
-			// ★ generic monospace → courier new：goskia 渲染 Consolas 等无衬线
-			// 等宽小字号垂直度量异常（全高 12px vs 浏览器 8px，24 组合不可
-			// 修复），Courier New 是唯一渲染正常的 Windows 等宽（见
-			// selectDefaults 注释），统一走它（findBest 命中 couri.ttf 或
-			// generic 兜底 monoTF）
-			return "courier new", true
-		case "consolas", "courier new", "courier":
-			// ★ 显式 Consolas/Courier New 也映射到 Courier New（同一渲染缺陷规避）
-			return "courier new", false
+			return "consolas", true // generic → always available (Edge falls back to Consolas when Google Fonts unreachable)
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
 		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system",
