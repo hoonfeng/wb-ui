@@ -846,10 +846,43 @@ func (wv *WebView) injectRenderTreeBridge() {
 				box = rv.FindRenderBoxForNode(el)
 			}
 		}
-		if box == nil {
+		var x0, y0, w, h float64
+		hasGeom := false
+		if box != nil {
+			x0, y0, w, h = box.X(), box.Y(), box.Width(), box.Height()
+			hasGeom = true
+			// ★ inline 元素（display:inline 的 span 等）布局后 box.frame
+			// 位置恒 0（文本由 TextSegment 定位，painter 画在 seg.X/seg.Y）——
+			// 用渲染子树首个 RenderText 的 segment 位置兜底：CM6 高亮
+			// token 内文本的 Range.getClientRects 需要真实 x/y，否则恒
+			// (0,0) → posAtCoords 的 x 定位全 miss → 点击落行末（光标进
+			// 下一行/光标处输入插错位置）。
+			if x0 == 0 && y0 == 0 {
+				if ro0 := rv.FindRenderObjectForNode(el); ro0 != nil {
+					if st0 := ro0.Style(); st0 != nil && st0.Display == style.DisplayInline {
+						if sx, sy, ok := firstTextSegmentBase(rv, el); ok {
+							x0, y0 = sx, sy
+						}
+					}
+				}
+			}
+		} else if ro := rv.FindRenderObjectForNode(el); ro != nil && ro.LayoutBox() != nil {
+			// ★ inline 元素（RenderInline，如 CM6 语法高亮 span）不生成
+			// CSS box，asRenderBox 返回 nil → 此前恒 (0,0)。但 inline 参与
+			// 行内布局、LayoutBox 有几何——CM6 高亮 token 内文本的
+			// Range.getClientRects 需要真实位置，否则 tile rect 恒 (0,0) →
+			// posAtCoords 的 x 定位全部 miss → 点击落行末（head=行末尾）
+			// →「点击选中行在下一行」（光标看似在下一行开头）+ 光标处输入
+			// 插错位置（用户「编辑器不能编辑」）。用布局几何兜底。
+			if ls := rv.LayoutState(); ls != nil {
+				g := ls.GeometryForBox(ro.LayoutBox())
+				x0, y0, w, h = g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight()
+				hasGeom = true
+			}
+		}
+		if !hasGeom {
 			return 0, 0, 0, 0
 		}
-		w, h := box.Width(), box.Height()
 		// ★ NaN/负值防御：布局未稳定时（xterm 初始化测量时刻）box 几何
 		// 可能是 NaN——offsetWidth/offsetHeight 返回 NaN 会让 xterm 的
 		// measure() 条件（0!==NaN 恒真）把 NaN 缓存进 _result → 行高
@@ -878,7 +911,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 有 top/bottom 的 sticky（如 .tl-think-fold bottom:0）钉住 →
 		// 不扣该滚动容器偏移；更外层滚动容器照常扣。
 		sx, sy := 0.0, 0.0
-		stickySeen := stickyHasInset(box)
+		stickySeen := box != nil && stickyHasInset(box)
 		for cur := el.ParentNode(); cur != nil; cur = cur.ParentNode() {
 			if el2, ok := cur.(*dom.Element); ok {
 				if b := rv.FindRenderBoxForNode(el2); b != nil {
@@ -899,7 +932,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 				}
 			}
 		}
-		return box.X() - sx, box.Y() - sy, w, h
+		return x0 - sx, y0 - sy, w, h
 	}
 	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
 	// 的 charWidth/lineHeight 探测；缺 createRange/字体时测量抛异常，
@@ -1022,3 +1055,37 @@ var (
 	ErrJavaScriptDisabled = errors.New("webkit: JavaScript is disabled")
 	ErrNotImplemented     = errors.New("webkit: not implemented")
 )
+
+// firstTextSegmentBase 返回 el 渲染子树中首个 RenderText 的文本段位置。
+// inline 元素（display:inline 的 span，如 CM6 语法高亮 token）布局后
+// box.frame 位置恒 0（文本由 TextSegment 定位，painter 画在 seg.X/seg.Y）——
+// Range.getClientRects 对 span 内文本需要真实 x/y 基准，否则返回 (0,0)。
+func firstTextSegmentBase(rv *rendering.RenderView, el *dom.Element) (float64, float64, bool) {
+	ro := rv.FindRenderObjectForNode(el)
+	if ro == nil {
+		return 0, 0, false
+	}
+	var found *rendering.RenderText
+	var walk func(rendering.RenderObject) bool
+	walk = func(o rendering.RenderObject) bool {
+		if o == nil {
+			return false
+		}
+		if rt, ok := o.(*rendering.RenderText); ok && len(rt.Segments()) > 0 {
+			found = rt
+			return true
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			if walk(c) {
+				return true
+			}
+		}
+		return false
+	}
+	walk(ro)
+	if found == nil {
+		return 0, 0, false
+	}
+	s := found.Segments()[0]
+	return s.X, s.Y, true
+}

@@ -219,6 +219,22 @@ func (v *RenderView) FindRenderBoxForNode(n dom.Node) *RenderBox {
 	return asRenderBox(ro)
 }
 
+// FindRenderObjectForNode returns the raw RenderObject for a given DOM node
+// (not coerced to RenderBox). Inline elements (RenderInline, e.g. CM6 语法
+// 高亮 span) do not generate a CSS box so asRenderBox returns nil for them,
+// but they DO carry a layout box with geometry — callers like
+// bindings.GetElementBoxRect need the raw object to read inline geometry.
+func (v *RenderView) FindRenderObjectForNode(n dom.Node) RenderObject {
+	if v.nodeRenderMap == nil || n == nil {
+		return nil
+	}
+	ro, ok := v.nodeRenderMap[n]
+	if !ok {
+		return nil
+	}
+	return ro
+}
+
 // FindScrollContainerForNode walks up from node (through DOM ancestors)
 // looking for the first element whose RenderBox has overflow:scroll or
 // overflow:auto on EITHER axis. The painter's scrollbar gating

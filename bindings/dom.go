@@ -820,7 +820,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			if len(args) >= 2 && args[1].IsObject() {
 				if o := args[1].AsObject(); o != nil {
 					for _, k := range []string{"bubbles", "cancelable", "clientX", "clientY",
-						"screenX", "screenY", "button", "buttons",
+						"screenX", "screenY", "button", "buttons", "detail",
 						"ctrlKey", "shiftKey", "altKey", "metaKey"} {
 						if v, ok := o.GetByKey(k); ok {
 							ev.Set(k, v)

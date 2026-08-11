@@ -211,6 +211,7 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		obj.Set("screenY", jsc.NumberValue(me.ScreenY()))
 		obj.Set("button", jsc.NumberValue(float64(me.Button())))
 		obj.Set("buttons", jsc.NumberValue(float64(me.Buttons())))
+		obj.Set("detail", jsc.NumberValue(float64(me.Detail())))
 		obj.Set("ctrlKey", jsc.BooleanValue(me.CtrlKey()))
 		obj.Set("altKey", jsc.BooleanValue(me.AltKey()))
 		obj.Set("shiftKey", jsc.BooleanValue(me.ShiftKey()))
@@ -288,6 +289,8 @@ func jsToEvent(v jsc.JSValue) dom.Event {
 			ScreenX:   numProp(o, "screenX"),
 			ScreenY:   numProp(o, "screenY"),
 			Button:    dom.MouseButton(int(numProp(o, "button"))),
+			Buttons:   uint16(numProp(o, "buttons")),
+			Detail:    int(numProp(o, "detail")),
 			CtrlKey:   boolProp(o, "ctrlKey"),
 			AltKey:    boolProp(o, "altKey"),
 			ShiftKey:  boolProp(o, "shiftKey"),
