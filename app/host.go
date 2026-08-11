@@ -1659,15 +1659,18 @@ func (h *Host) Run() {
 				//   dumpPNGDone 置位。
 				if os.Getenv("WB_DUMP_PNG") != "" && !h.dumpPNGDone {
 					fr := 0
-					if f := os.Getenv("WB_DUMP_PNG_FRAME"); f != "" {
+					if f := strings.TrimSpace(os.Getenv("WB_DUMP_PNG_FRAME")); f != "" {
 						fr = atoiOr(f, 0)
 					}
 					// ★ WB_DUMP_PNG_DELAY：按启动后秒数 dump（而非帧号）——
 					// 自动化 probe（--probe-editor 打开文件+聚焦后）需要在
 					// 编辑器挂载后的时间点 dump，帧号在按需渲染下不可预测。
 					// 设置后优先于帧号（帧号默认 0=首帧，会抢先触发）。
+					// ⚠️ cmd 的 `set VAR=value && cmd` 会把值设为
+					// "value "（含尾随空格）→ strconv.Atoi 失败回退默认值
+					// → delay/frame 失效立即 dump。必须 TrimSpace。
 					delaySec := -1
-					if d := os.Getenv("WB_DUMP_PNG_DELAY"); d != "" {
+					if d := strings.TrimSpace(os.Getenv("WB_DUMP_PNG_DELAY")); d != "" {
 						delaySec = atoiOr(d, -1)
 					}
 					reachFrame := false
@@ -1677,6 +1680,46 @@ func (h *Host) Run() {
 						reachFrame = h.paintFrame >= fr
 					}
 					if reachFrame {
+						// ★ dump 前诊断 GPU paint 状态：内容偏下（光标/
+						// 行背景不可见或错位）时用 WB_PAINT_TRACE=1 打印
+						// 渲染树 cm-line box + view 滚动 + canvas 矩阵，
+						// 判断是渲染树位置错还是 paint translate 泄漏。
+						if os.Getenv("WB_PAINT_TRACE") != "" {
+							m := gpuCanvas.GetMatrix()
+							log.Printf("[gpu-state] frame=%d ctm_tx=%.1f ctm_ty=%.1f scale=%.2f",
+								h.paintFrame, m.TransX, m.TransY, m.ScaleX)
+							rv := h.wv.RenderView()
+							if rv != nil {
+								sx, sy := rv.ScrollOffset()
+								log.Printf("[gpu-state] view scroll=(%.1f,%.1f) boxScroll=%v dirty=%v needLayout=%v",
+									sx, sy, rv.HasBoxScrollOffset(), rv.IsDirty(), rv.NeedsLayout())
+								if mf := h.wv.MainFrame(); mf != nil {
+									if fr := mf.Frame(); fr != nil {
+										if doc := fr.Document(); doc != nil {
+											els := doc.GetElementsByClassName("cm-line")
+											log.Printf("[gpu-state] cm-line count=%d", len(els))
+											if len(els) > 0 {
+												if rb := rv.FindRenderBoxForNode(els[0]); rb != nil {
+													log.Printf("[gpu-state] cm-line box=(%.1f,%.1f %.1fx%.1f) absY=%.1f",
+														rb.X(), rb.Y(), rb.Width(), rb.Height(), rb.AbsoluteY())
+												} else {
+													log.Printf("[gpu-state] cm-line box=nil")
+												}
+											}
+											// cm-scroller 的 box scroll offset
+											scs := doc.GetElementsByClassName("cm-scroller")
+											if len(scs) > 0 {
+												if rb := rv.FindRenderBoxForNode(scs[0]); rb != nil {
+													bx, by := rv.BoxScrollOffset(rb)
+													log.Printf("[gpu-state] cm-scroller box=(%.1f,%.1f) scroll=(%.1f,%.1f)",
+														rb.AbsoluteX(), rb.AbsoluteY(), bx, by)
+												}
+											}
+										}
+									}
+								}
+							}
+						}
 						// ★ dump 前读 viewport 区域像素：确认黑色是否在
 						// 帧 300 的 canvas 上（after-fill 每帧黑色但
 						// dump 无黑色——绘制后被覆盖？）

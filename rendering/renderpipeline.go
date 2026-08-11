@@ -125,6 +125,11 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 		defer canvas.Restore()
 	}
 
+	// ★ 光标补画兜底：层树遍历（paintLayerTree）偶尔不覆盖光标（光标 box
+	// 在渲染树但层树/裁剪未到达——表现为「光标不可见」偶发）。每次 paint
+	// 重置 CursorPainted，层树画到光标则置位；未置位则补画（直接 FillRect
+	// 白色左边框，绕过层树/裁剪/opacity 动画——静态可见优先）。
+	CursorPainted = false
 	if view.RootLayer() != nil {
 		if os.Getenv("WB_CTM_DEBUG") != "" {
 			m0 := canvas.GetMatrix()
@@ -142,11 +147,76 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	} else {
 		paintSubtreeByPhase(RenderObject(view), info, nil)
 	}
+	// ★ 光标补画：层树遍历（paintLayerTree）偶尔不覆盖光标（光标 box
+	// 在渲染树但层树/裁剪/opacity 未到达——表现为「光标不可见」偶发）。
+	// 只要渲染树有光标 box 就无条件补画（静态白左边框，优先保证可见；
+	// 层树正常时重复绘制 1px 无副作用）。FindRenderBoxForNode 走 map
+	// O(1)；box 缺失（display:none/未重建）时 findCursorBox 返回 nil。
+	if cb := findCursorBox(view); cb != nil {
+		lw := lengthValue(cb.Style().BorderLeftWidth)
+		if lw <= 0 {
+			lw = 1.2
+		}
+		col := graphics.Color{R: 230, G: 237, B: 243, A: 255}
+		if bc := cb.Style().BorderColor("left"); bc.A > 0 {
+			col = toGraphicsColor(bc)
+		}
+		canvas.FillRect(cb.X(), cb.Y(), lw, cb.Height(), col)
+		if el, ok := cb.Node().(*dom.Element); ok {
+			RecordComponentPaint(el, cb.X(), cb.Y(), lw, cb.Height(), graphics.Color{}, col, true)
+		}
+		if !CursorPainted && os.Getenv("WB_PAINT_TRACE") != "" {
+			log.Printf("[cursor-fallback] painted caret at (%.1f,%.1f %.1fx%.1f)", cb.X(), cb.Y(), lw, cb.Height())
+		}
+	}
 
 	// Clear the dirty rect after painting.
 	if view.IsDirty() {
 		view.ClearDirty()
 	}
+}
+
+// fallbackCursorEl caches the .cm-cursor DOM element across paints so the
+// per-frame caret fallback uses the O(1) nodeRenderMap lookup instead of a
+// full render-tree walk. Cleared when the element no longer has a box (CM6
+// re-created it / display:none), triggering a fresh walk.
+var fallbackCursorEl *dom.Element
+
+// findCursorBox locates the .cm-cursor element's RenderBox (the caret).
+// Used by the Paint fallback to guarantee the caret is always drawn even
+// when the layer-tree walk skipped it. Returns nil if the caret has no box
+// in this tree (e.g. display:none).
+func findCursorBox(view *RenderView) *RenderBox {
+	if view == nil {
+		return nil
+	}
+	if fallbackCursorEl != nil {
+		if rb := view.FindRenderBoxForNode(fallbackCursorEl); rb != nil {
+			return rb
+		}
+		fallbackCursorEl = nil
+	}
+	var found *RenderBox
+	var walk func(ro RenderObject)
+	walk = func(ro RenderObject) {
+		if found != nil || ro == nil {
+			return
+		}
+		if n := ro.Node(); n != nil {
+			if el, ok := n.(*dom.Element); ok && el.HasClassName("cm-cursor") {
+				if rb := asRenderBox(ro); rb != nil {
+					found = rb
+					fallbackCursorEl = el
+					return
+				}
+			}
+		}
+		for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(RenderObject(view))
+	return found
 }
 
 // opacityLayerBounds computes the SaveLayer bounds for an opacity layer:

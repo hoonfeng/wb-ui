@@ -24,6 +24,13 @@ var (
 	compPaintLatest = map[string]compPaintEntry{} // key = css class (or tag)
 )
 
+// ★ CursorPainted: per-paint flag — PaintBorder sets it when the caret's
+// border is actually painted. renderpipeline.Paint resets it at entry and,
+// if it is still false after the layer-tree walk (the caret box exists in the
+// render tree but the layer walk never reaches it), draws the caret as a
+// fallback so it never silently disappears (cursor invisible regression).
+var CursorPainted bool
+
 type compPaintEntry struct {
 	cls  string
 	x, y float64

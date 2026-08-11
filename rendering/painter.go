@@ -520,7 +520,19 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		if leftW > 0 {
 			mainC = blC
 		}
+		// ★ 光标真正进入绘制（层树遍历到达）→ 置位，paint 末尾不再补画。
+		if strings.Contains(el.ClassName(), "cm-cursor") && leftW > 0 {
+			CursorPainted = true
+		}
 		RecordComponentPaint(el, x, y, w, h, graphics.Color{}, toGraphicsColor(mainC), false)
+		// ★ WB_PAINT_TRACE=1：光标 PaintBorder 的 opacity/颜色诊断
+		// （用户「没有光标」：记录在但画出来暗/透明 → 看 opacity 与
+		// 边框色 alpha 的实际值）
+		if os.Getenv("WB_PAINT_TRACE") != "" && strings.Contains(el.ClassName(), "cm-cursor") {
+			log.Printf("[cursor-paint] rect=(%.1f,%.1f %.1fx%.1f) borderL=%.1f style=%q colA=%d col=(%d,%d,%d) op=%.2f",
+				x, y, w, h, leftW, st.BorderLeftStyle, toGraphicsColor(mainC).A,
+				toGraphicsColor(mainC).R, toGraphicsColor(mainC).G, toGraphicsColor(mainC).B, op)
+		}
 	}
 	// Transparent borders (e.g. `border: 1px solid transparent` on toolbars
 	// and icon buttons) must not be painted — they occupy layout space but
