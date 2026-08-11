@@ -362,6 +362,11 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	case strings.HasPrefix(name, "consola"):
 		entry.family = "consolas"
 		entry.mono = true
+	case strings.HasPrefix(name, "couri"):
+		// Courier New — 替代 Consolas 的等宽字体（goskia 渲染 Consolas
+		// 括号退化，见 selectDefaults 注释）
+		entry.family = "courier new"
+		entry.mono = true
 	case name == "simsun.ttc":
 		// index 1 of simsun.ttc is NSimSun (新宋�?, a CJK monospace face.
 		entry.family = "nsimsun"
@@ -392,14 +397,15 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 // YaHei (a proportional CJK font) as the default sans-serif so UI text looks
 // natural. NSimSun is reserved for the monospace generic family only.
 func (m *FontManager) selectDefaults() {
-	// monospace: prefer Consolas — the OS standard monospace that Edge falls
-	// back to when Google Fonts (JetBrains Mono) is unreachable, so ASCII/code
-	// metrics match the browser reference (.cs-val "0 / 1.0M" 12px = 56px in
-	// Edge; NSimSun measured 49px). CJK glyphs still fall back per-rune to
-	// the CJK face in drawTextWithFallback.
-	m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	// ★ monospace: 用 Courier New 替代 Consolas。goskia（SkiaSharp）渲染
+	// Consolas 12-18px 的括号类字符（( ) [ ] { }）会退化（左弧丢失、变成
+	// 全高斜线，实测 13px '(' 高 11-12px vs 浏览器 8px——「括号与文字底部
+	// 对齐」的根因）；Courier New 渲染正常（13px '(' 高 8px 曲线完整）。
+	// Edge 里 Consolas 由 DirectWrite 渲染正常，wb-ui 的 Skia 后端无法复现，
+	// 故等宽文本统一走 Courier New（唯一渲染正常的 Windows 等宽字体）。
+	m.monoTF = skia.NewTypeface("Courier New", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 	if m.monoTF == nil {
-		m.monoTF = m.findBest("consolas", 400, false)
+		m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
 	}
 	// NSimSun (CJK monospace) as the CJK-capable monospace fallback.
 	if m.monoTF == nil {
@@ -593,7 +599,12 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 		case "serif", "times", "times new roman", "ui-serif":
 			return "kochi mincho", true // generic �?always available
 		case "monospace", "mono", "ui-monospace":
-			return "consolas", true // generic → always available (Edge falls back to Consolas when Google Fonts unreachable)
+			// ★ generic monospace → courier new：goskia 渲染 Consolas 括号类
+			// 字符小字号退化（见 selectDefaults 注释），统一走 Courier New
+			return "courier new", true
+		case "consolas", "courier new", "courier":
+			// ★ 显式 Consolas 也映射到 Courier New（同一渲染缺陷规避）
+			return "courier new", false
 		case "arial", "helvetica":
 			return "microsoft yahei", false // alias, not generic
 		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system",
