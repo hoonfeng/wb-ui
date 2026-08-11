@@ -105,8 +105,15 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	// Compute the vertical centering offset: when line-height > font metrics,
 	// shift text down so it appears vertically centered within the line.
+	// ★ 纯 inline 子元素（display:inline 的 span 等）：父 IFC 已将其 box 顶
+	// 放在 currentLine.y+centeringOffset（本文件 inline child 的 SetTopLeft），
+	// 若此处再叠加 centeringOffset 会双重居中——CM6 语法高亮 token span
+	// 因此比同行裸文本（括号/花括号等无样式字符）低 3px，视觉上表现为
+	// 「括号与文字底部对齐」（根因）。纯 inline 文本应直接顶贴 box 内容顶
+	// （与父文本共享基线），故 centeringOffset = 0。
 	centeringOffset := 0.0
-	if cssLH > 0 && textHeight < cssLH {
+	isPlainInline := cs != nil && box.IsInline() && !box.IsReplaced() && cs.Display == style.DisplayInline
+	if !isPlainInline && cssLH > 0 && textHeight < cssLH {
 		centeringOffset = (cssLH - textHeight) / 2
 	}
 
