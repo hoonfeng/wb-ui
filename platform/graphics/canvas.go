@@ -539,7 +539,6 @@ var CanvasClipRRCount int
 // GraphicsContext::fillRect(FloatRect, Color). The rectangle is drawn through the
 // Skia canvas which applies the current transform, clip, and anti-aliasing.
 func (c *Canvas) FillRect(x, y, w, h float64, col Color) {
-	log.Printf("[fill] (%.0f,%.0f) %.0fx%.0f col=#%02x%02x%02x", x, y, w, h, col.R, col.G, col.B)
 	c.fillPaint.SetColor(colorToSkia(col))
 	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
 	c.canvas.DrawRect(r, c.fillPaint)
@@ -1029,10 +1028,9 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 	}
 
 	t0 := time.Now()
-	log.Printf("[dtext] %q @(%.1f,%.1f) col=#%02x%02x%02x", text, x, y, col.R, col.G, col.B)
 	c.canvas.DrawText(text, float32(x), float32(y), skFont, c.fillPaint)
 	CgoTimingDraw += time.Since(t0)
-	// ★ 临时诊断：原文字画完立即读像素
+	// ★ 诊断（WB_GUTTER_DEBUG）：原文字画完立即读像素
 	if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
 		p := c.PixelAt(int(x)+4, int(y)-7)
 		log.Printf("[gutter-raw] %q @(%d,%d) pixel=#%02x%02x%02x col=#%02x%02x%02x", text, int(x), int(y), p.R, p.G, p.B, col.R, col.G, col.B)

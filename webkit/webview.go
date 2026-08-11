@@ -8,7 +8,6 @@ package webkit
 import (
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"net/url"
 	"os"
@@ -534,7 +533,6 @@ func (wv *WebView) LoadURL(url string) error {
 }
 
 func (wv *WebView) Render() ([]byte, error) {
-	log.Printf("[render] called")
 	rv := wv.mainFrame.RenderView()
 	if rv == nil { return nil, ErrNoDocument }
 	view := wv.page.MainFrame().View()

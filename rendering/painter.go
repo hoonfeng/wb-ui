@@ -912,7 +912,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		segs := text.Segments()
 		if len(segs) > 0 && segs[0].X < 370 {
 			col := toGraphicsColor(st.Color)
-			log.Printf("[gutter-draw] %q @(%.0f,%.0f) segs=%d vis=%q colA=%d color=(%d,%d,%d) font=(%q,%d,%q,%q)",
+			log.Printf("[gutter-draw] %q @(%.0f,%.0f) segs=%d vis=%q colA=%d color=(%d,%d,%d) font=(%q,%.1f,%q,%q)",
 				text.OriginalText(), segs[0].X, segs[0].Y, len(segs), st.Visibility, col.A, col.R, col.G, col.B,
 				st.FontFamily, st.FontSize.Value, st.FontWeight, st.FontStyle)
 		}

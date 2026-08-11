@@ -5,6 +5,7 @@ package layout
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"sort"
@@ -243,6 +244,12 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state, ch)
 		c.applyPositions(items, box, isRow, isReverse, false, state, crossStart)
+		if os.Getenv("WB_FLEX_DEBUG") != "" && flexName(box) == "div.cm-scroller" {
+			for _, it := range items {
+				cg := state.GeometryForBox(it.box)
+				log.Printf("[flex/end] %s: contentH=%.1f bbH=%.1f top=%.1f", flexName(it.box), cg.ContentHeight(), cg.BorderBoxHeight(), cg.Top())
+			}
+		}
 	}
 
 	// Lay out absolute-positioned children against this flex container as
@@ -963,6 +970,13 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 }
 
 func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState, lineCross float64) {
+	if os.Getenv("WB_FLEX_DEBUG") != "" {
+		ns := make([]string, len(items))
+		for i, it := range items {
+			ns[i] = flexName(it.box)
+		}
+		log.Printf("[flexcross/enter] items=%d isRow=%v names=%v", len(items), isRow, ns)
+	}
 	containerCS := c.Root().Style()
 	alignItems := "stretch"
 	if containerCS != nil && containerCS.AlignItems != "" {
@@ -1016,12 +1030,20 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 			// （浏览器 25px，select 27px 正常——select 无 min-height）。
 			if g.ContentHeight() > 0 {
 				newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
+				if os.Getenv("WB_FLEX_DEBUG") != "" {
+					log.Printf("[flexcross] %s bb=%.0f minH=%.0f maxH=%.0f -> newBB=%.0f", flexName(it.box), bb, minH, maxH, newBB)
+				}
 				if newBB != bb {
 					newContent := newBB - vpb
 					if newContent < 0 {
 						newContent = 0
 					}
 					g.SetContentHeight(newContent)
+					// ★ 同步 crossResolved：applyPositions 用 crossResolved
+					// 重新应用交叉轴尺寸（行 flex 高度），若不同步会把
+					// clamp 结果（CM6 gutter min-height=文档高 12075）覆盖
+					// 回 height:100% 的 538——滚动后行号 30+ 超出容器被裁。
+					it.crossResolved = newContent
 					// 容器高度被 clamp（压缩）：重布局 item 内部，让 flex:1
 					// 子项按新高度重新分配主轴（modal-body 从 863 压缩到
 					// 640−header−footer），settings-body 随之出现滚动条。
@@ -1236,6 +1258,29 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 						h = 0
 					}
 					g.SetContentHeight(h)
+					// ★ min/max-height clamp（与 resolveCrossSizes 一致）：
+					// resolveCrossSizes 已按 min-height（如 CM6 gutter 的
+					// min-height=文档高）把高度钳制到更大值，但这里对
+					// height:100% 的显式高度重新解析会覆盖 clamp 结果
+					// （gutter 12075 → 538）。再次 clamp 防止回退——否则
+					// 滚动后行号 30+ 超出 538 高的 gutter 容器被 overflow
+					// 裁掉（「滚动该绘制的行号消失」根因）。
+					minH, maxH, minAuto, maxAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, ch, fontSizeOf(it.box))
+					vpb := g.VerticalBorderAndPadding()
+					bb := g.ContentHeight() + vpb
+					if g.ContentHeight() > 0 {
+						newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
+						if os.Getenv("WB_FLEX_DEBUG") != "" {
+							log.Printf("[flex/pos-clamp] %s h=%.0f bb=%.0f minH=%.0f -> newBB=%.0f", flexName(it.box), h, bb, minH, newBB)
+						}
+						if newBB != bb {
+							newContent := newBB - vpb
+							if newContent < 0 {
+								newContent = 0
+							}
+							g.SetContentHeight(newContent)
+						}
+					}
 				}
 			}
 		} else {
