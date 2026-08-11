@@ -511,6 +511,17 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	// is by far the most common, so it is handled directly; unequal sides
 	// fall back to the per-side FillRect path below.
 	btC, brC, bbC, blC := st.BorderColor("top"), st.BorderColor("right"), st.BorderColor("bottom"), st.BorderColor("left")
+	// ★ 组件绘制追踪：光标（cm-cursor）是 border 绘制（背景透明）——
+	// 不在 PaintBackground 里记录。此处统一记录，SnapshotComponentPaints
+	// 才有光标条目（「没有光标绘制」反查：先看记录里 cm-cursor 是否出现、
+	// 颜色/位置是否正常）。fg 用主边框色（光标=左边框 1.2px 色）。
+	if el, ok := box.Node().(*dom.Element); ok {
+		mainC := btC
+		if leftW > 0 {
+			mainC = blC
+		}
+		RecordComponentPaint(el, x, y, w, h, graphics.Color{}, toGraphicsColor(mainC), false)
+	}
 	// Transparent borders (e.g. `border: 1px solid transparent` on toolbars
 	// and icon buttons) must not be painted — they occupy layout space but
 	// stay invisible. The rounded-rect fast path must skip them too, just

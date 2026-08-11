@@ -40,6 +40,13 @@ var (
 // The embedder should re-resolve styles and rebuild the render tree.
 var OnInlineStyleChanged func(node dom.Node)
 
+// OnClassChanged is an optional callback invoked when an element's class
+// attribute changes (el.className = ... / classList.add/remove/toggle).
+// ★ 祖先类变化影响后代选择器匹配（如 cm-focused 加在 cm-editor 上决定
+// 后代 .cm-cursor 的 display）——必须清 resolver 样式缓存 + 重建渲染树，
+// 否则后代 ResolveElement 命中旧缓存（光标 display:none 不可见）。
+var OnClassChanged func(el *dom.Element)
+
 // FocusBridge is an optional callback invoked when JS calls el.focus() /
 // el.blur() on an element. The embedder (app.Host) uses it to route JS
 // focus to the engine's focused-element tracking (imeFocusedEl + caret
@@ -447,6 +454,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		el.SetAttribute(name, args[1].ToString())
 		// ★ computed style 缓存失效（class/style 等属性影响样式匹配）
 		InvalidateComputedStyle(el)
+		// ★ class 属性变化（CM6/Vue 用 setAttribute('class') 加 cm-focused）
+		// 影响后代选择器匹配——触发 OnClassChanged（清 resolver 缓存 +
+		// 重建渲染树）。
+		if name == "class" {
+			if OnClassChanged != nil {
+				OnClassChanged(el)
+			}
+		}
 		// ★ iframe 的 src 是「导航属性」：JS 改 src 应重载子文档
 		// （浏览器 iframe navigation 语义）。webkit 注入 IFrameSrcChanged
 		// 回调处理重载；未注入时静默（如测试环境）。
@@ -465,8 +480,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		if len(args) == 0 {
 			return jsc.Undefined()
 		}
-		el.RemoveAttribute(args[0].ToString())
+		name := args[0].ToString()
+		el.RemoveAttribute(name)
 		InvalidateComputedStyle(el)
+		if name == "class" {
+			if OnClassChanged != nil {
+				OnClassChanged(el)
+			}
+		}
 		return jsc.Undefined()
 	})
 	protoAttr("toggleAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
@@ -3632,7 +3653,13 @@ obj.SetInternal(el)
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetId(v.ToString()) })
 	obj.SetAccessor("className",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetClassName()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetClassName(v.ToString()) })
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+			el.SetClassName(v.ToString())
+			InvalidateComputedStyle(el)
+			if OnClassChanged != nil {
+				OnClassChanged(el)
+			}
+		})
 	// title 反射属性：HTML 元素 title 属性反射 title 属性（removeAttribute
 	// 后返回 ""，与浏览器一致）。此前缺失 → d.title 恒 undefined。
 	obj.SetAccessor("title",
@@ -3718,6 +3745,9 @@ func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	set := func(c []string) {
 		el.SetClassName(strings.Join(c, " "))
 		InvalidateComputedStyle(el)
+		if OnClassChanged != nil {
+			OnClassChanged(el)
+		}
 	}
 
 	cls.Set("add", jsc.FunctionValue(jsc.NewNativeFunction("add",

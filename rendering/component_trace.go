@@ -41,9 +41,7 @@ func RecordComponentPaint(el *dom.Element, x, y, w, h float64, bg, fg graphics.C
 	}
 	key := el.LocalName()
 	if cls := el.GetAttribute("class"); cls != "" {
-		// 只取第一个类名做 key，避免每个元素都开新条目
-		first := strings.Fields(cls)[0]
-		key = first
+		key = componentTraceKey(cls)
 	}
 	compPaintMu.Lock()
 	e, ok := compPaintLatest[key]
@@ -67,6 +65,24 @@ func RecordComponentPaint(el *dom.Element, x, y, w, h float64, bg, fg graphics.C
 		compPaintLatest[key] = e
 	}
 	compPaintMu.Unlock()
+}
+
+// componentTraceKey 挑选用于合并记录的类名：优先命中「关键组件」特征类
+// （光标/选中/活动行/折叠箭头等——这些是渲染诊断要单独定位的），否则
+// 退回第一个类名（与元素自身样式 identity 一致）。光标（cm-cursor）是
+// border 绘制（PaintBorder 调 RecordComponentPaint），背景透明——若不
+// 在此优先命中，会落到第一个类名（也是 cm-cursor）——此处特判保证
+// 语义清晰，且 cm-activeLine 这类「多类元素」不被 cm-line 合并吞掉。
+func componentTraceKey(cls string) string {
+	for _, c := range strings.Fields(cls) {
+		switch c {
+		case "cm-cursor", "cm-dropCursor", "cm-activeLine", "cm-selectionBackground",
+			"cm-activeLineGutter", "cm-foldGutter", "cm-cursorLayer", "cm-selectionLayer",
+			"cm-line", "cm-gutters", "cm-content", "cm-scroller", "cm-editor":
+			return c
+		}
+	}
+	return strings.Fields(cls)[0]
 }
 
 // ResetComponentPaints clears the accumulated per-frame entries.

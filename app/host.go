@@ -1662,7 +1662,21 @@ func (h *Host) Run() {
 					if f := os.Getenv("WB_DUMP_PNG_FRAME"); f != "" {
 						fr = atoiOr(f, 0)
 					}
-					if h.paintFrame >= fr {
+					// ★ WB_DUMP_PNG_DELAY：按启动后秒数 dump（而非帧号）——
+					// 自动化 probe（--probe-editor 打开文件+聚焦后）需要在
+					// 编辑器挂载后的时间点 dump，帧号在按需渲染下不可预测。
+					// 设置后优先于帧号（帧号默认 0=首帧，会抢先触发）。
+					delaySec := -1
+					if d := os.Getenv("WB_DUMP_PNG_DELAY"); d != "" {
+						delaySec = atoiOr(d, -1)
+					}
+					reachFrame := false
+					if delaySec >= 0 {
+						reachFrame = int(time.Since(h.animStart).Seconds()) >= delaySec
+					} else {
+						reachFrame = h.paintFrame >= fr
+					}
+					if reachFrame {
 						// ★ dump 前读 viewport 区域像素：确认黑色是否在
 						// 帧 300 的 canvas 上（after-fill 每帧黑色但
 						// dump 无黑色——绘制后被覆盖？）

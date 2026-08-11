@@ -327,6 +327,21 @@ func (wv *WebView) LoadHTML(src string) error {
 			fr.MarkRenderTreeDirty()
 			fr.SetNeedsLayout(true)
 		}
+		// ★ 类变化（el.className / classList.add 等）回调：祖先类影响后代
+		// 选择器匹配（cm-focused 加在 cm-editor 上决定 .cm-cursor 的
+		// display:block）——必须清 resolver 样式缓存（否则后代 ResolveElement
+		// 命中旧缓存 display:none → 渲染树跳过光标）+ 全量重建渲染树。
+		bindings.OnClassChanged = func(el *dom.Element) {
+			fr := wv.mainFrame.Frame()
+			if fr == nil {
+				return
+			}
+			if rsv := fr.Resolver(); rsv != nil {
+				rsv.ClearCache()
+			}
+			fr.MarkRenderTreeDirty()
+			fr.SetNeedsLayout(true)
+		}
 		// Set up callbacks for DOM mutations (appendChild / removeChild / etc.).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
 		bindings.OnNodeInserted = func(n dom.Node) {
@@ -867,11 +882,37 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return 0, 0, 0, 0
 		}
 		box := rv.FindRenderBoxForNode(el)
+		// ★ WB_PAINT_TRACE=1：调试光标（cm-cursor）渲染树 box 查找——
+		// 反向跟踪「光标不可见」：box 是否存在、frame 几何、样式 display。
+		if os.Getenv("WB_PAINT_TRACE") != "" && strings.Contains(el.ClassName(), "cm-cursor") {
+			// ★ WB_PAINT_TRACE=1 诊断光标渲染树 box 查找（反向跟踪光标不可见）
+			dispStr := "n/a"
+			if fr3 := wv.mainFrame.Frame(); fr3 != nil && fr3.Resolver() != nil {
+				if cs3 := fr3.Resolver().ResolveElement(el); cs3 != nil {
+					dispStr = fmt.Sprintf("%v", cs3.Display)
+				}
+			}
+			fmt.Printf("[cursor-dbg] resolverDisp=%s box=%v\n", dispStr, box != nil)
+			if box != nil {
+				fmt.Printf("[cursor-dbg] FindRenderBoxForNode OK frame=(%.1f,%.1f %.1fx%.1f) styleDisp=%v\n",
+					box.X(), box.Y(), box.Width(), box.Height(), box.Style().Display)
+			} else if ro := rv.FindRenderObjectForNode(el); ro != nil {
+				if lb := ro.LayoutBox(); lb != nil {
+					if ls := rv.LayoutState(); ls != nil {
+						g := ls.GeometryForBox(lb)
+						fmt.Printf("[cursor-dbg] box=nil RenderObject OK geom=(%.1f,%.1f %.1fx%.1f)\n",
+							g.Left(), g.Top(), g.BorderBoxWidth(), g.BorderBoxHeight())
+					} else {
+						fmt.Printf("[cursor-dbg] box=nil RenderObject noLayoutState\n")
+					}
+				} else {
+					fmt.Printf("[cursor-dbg] box=nil RenderObject noLayoutBox\n")
+				}
+			} else {
+				fmt.Printf("[cursor-dbg] box=nil RenderObject=nil (渲染树无 cursor 节点)\n")
+			}
+		}
 		if box == nil {
-			// ★ DOM 变更后渲染树可能尚未重建（treehook 下帧才重建）——
-			// offsetHeight/offsetWidth 此时返回 0 → xterm 初始化测量缓存
-			// NaN → style.height="NaNpx" → 行高异常（310px）→ 终端内容
-			// 画到视口外。强制重建一次再查。⚠️ 直接 RebuildRenderTree
 			// （绕过 MarkRenderTreeDirty 的 cooldown 降频——此处必须立即
 			// 拿到几何）。
 			if fr2 := wv.mainFrame.Frame(); fr2 != nil {
