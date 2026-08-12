@@ -66,3 +66,45 @@ func FirstComposedChild(el *Element) Node {
 	}
 	return el.FirstChild()
 }
+
+// AssignedNodes returns the light-DOM nodes assigned to a <slot> element in the
+// flattened tree. It only has meaning for a <slot> inside a shadow tree: it walks up
+// to the owning ShadowRoot, then collects the host's light-DOM children that match the
+// slot's name. A slot without a name attribute (the "default" slot) collects every
+// light-DOM child that does NOT carry a slot attribute; a named slot collects children
+// whose slot attribute equals the slot name. Returns nil for non-slot elements or a
+// slot outside any shadow tree.
+func (e *Element) AssignedNodes() []Node {
+	if e.LocalName() != "slot" {
+		return nil
+	}
+	var sr *ShadowRoot
+	for n := e.ParentNode(); n != nil; n = n.ParentNode() {
+		if s, ok := n.(*ShadowRoot); ok {
+			sr = s
+			break
+		}
+	}
+	if sr == nil || sr.Host() == nil {
+		return nil
+	}
+	slotName := e.GetAttribute("name")
+	host := sr.Host()
+	var assigned []Node
+	for c := host.FirstChild(); c != nil; c = c.NextSibling() {
+		if slotName == "" {
+			// Default slot: every light-DOM child without a slot attribute.
+			if el, ok := c.(*Element); ok && el.GetAttribute("slot") != "" {
+				continue
+			}
+			assigned = append(assigned, c)
+		} else {
+			// Named slot: only children whose slot attribute matches.
+			if el, ok := c.(*Element); ok && el.GetAttribute("slot") == slotName {
+				assigned = append(assigned, c)
+			}
+		}
+	}
+	return assigned
+}
+

@@ -102,3 +102,48 @@ func TestShadowRootChildChain(t *testing.T) {
 		t.Fatalf("second composed child = %v, want %v", c.NextSibling(), second)
 	}
 }
+
+func TestAssignedNodesDefaultSlot(t *testing.T) {
+	doc := NewDocument()
+	host := doc.CreateElement("div")
+	light1 := doc.CreateElement("span")
+	_ = host.AppendChild(light1)
+	light2 := doc.CreateElement("b")
+	_ = host.AppendChild(light2)
+	named := doc.CreateElement("i")
+	named.SetAttribute("slot", "header")
+	_ = host.AppendChild(named)
+
+	sr, _ := host.AttachShadow("open")
+	slot := doc.CreateElement("slot")
+	_ = sr.AppendChild(slot)
+
+	assigned := slot.AssignedNodes()
+	// 默认 slot 匹配无 slot 属性的 light-DOM 节点，排除命名节点。
+	if len(assigned) != 2 {
+		t.Fatalf("assigned = %d nodes, want 2", len(assigned))
+	}
+	if assigned[0] != light1 || assigned[1] != light2 {
+		t.Fatalf("assigned nodes = %v, want [light1 light2]", assigned)
+	}
+}
+
+func TestAssignedNodesNamedSlot(t *testing.T) {
+	doc := NewDocument()
+	host := doc.CreateElement("div")
+	light1 := doc.CreateElement("span")
+	_ = host.AppendChild(light1)
+	named := doc.CreateElement("i")
+	named.SetAttribute("slot", "header")
+	_ = host.AppendChild(named)
+
+	sr, _ := host.AttachShadow("open")
+	slot := doc.CreateElement("slot")
+	slot.SetAttribute("name", "header")
+	_ = sr.AppendChild(slot)
+
+	assigned := slot.AssignedNodes()
+	if len(assigned) != 1 || assigned[0] != named {
+		t.Fatalf("assigned = %v, want [named]", assigned)
+	}
+}

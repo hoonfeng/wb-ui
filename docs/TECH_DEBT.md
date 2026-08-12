@@ -161,6 +161,22 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 
 ## 4. Shadow DOM selector（P2 · 超大工程）
 
+> **已实现基础增量（2026-08-13，提交 `1dff19a` + slot 投影）**：
+> 1. **DOM 层**：`dom.ShadowRoot` 类型 + `Element.AttachShadow(mode)` + `ShadowRoot()`
+>    访问器（closed 返回 nil）+ `FirstComposedChild`（有 shadow root 时返回 shadow
+>    tree 子节点，light DOM 被隐藏）+ `AssignedNodes`（slot 匹配 host light-DOM）。
+> 2. **渲染/布局层**：`rendering/rendertreebuilder.go` 与 `layout/box.go` 的
+>    `buildChildren`/`buildFlexChildren` 统一走 `FirstComposedChild`；`<slot>` 元素
+>    不生成 render object，展开渲染 assigned 节点（slot 投影）。
+> 3. **bindings**：`el.attachShadow({mode})` / `el.shadowRoot` + `wrapShadowRoot`。
+> 4. **测试**：`TestAttachShadow*` / `TestFirstComposedChild` / `TestAssignedNodes*`
+>    / `TestShadowRootRendersInsteadOfLightDOM` / `TestSlotProjection` 全绿，全量
+>    `go test ./...` 通过。
+>
+> **仍缺（后续增量）**：① 样式隔离（shadow 内 `<style>` 仍全局级联，无 `:host`
+> 级联来源）；② `:host`/`::slotted`/`::part` selector 匹配；③ 事件 `composedPath`
+> 无 shadow 路径；④ 多 slot / 嵌套 shadow / fallback content。
+
 ### 现状定位
 - `css/selectorchecker.go:19`：`shadow-DOM :host / :host-context / ::slotted / ::part
   are not implemented`。

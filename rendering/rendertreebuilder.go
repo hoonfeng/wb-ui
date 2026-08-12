@@ -117,16 +117,18 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		parent.AddChild(anon, nil)
 		inlineRun = nil
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		switch v := c.(type) {
+	// appendChildNode 处理单个 DOM 节点（element/text），创建 render object 并
+	// 追加到 parent。inline 节点进 inlineRun，block 节点 flush 后直接挂 parent。
+	appendChildNode := func(node dom.Node) {
+		switch v := node.(type) {
 		case *dom.Element:
 			cs := b.resolveStyle(v)
 			if cs.Display == style.DisplayNone {
-				continue
+				return
 			}
 			child := b.createRenderObject(v, cs)
 			if child == nil {
-				continue
+				return
 			}
 			if b.isInlineLevel(cs) {
 				b.buildChildren(child, v)
@@ -139,18 +141,28 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		case *dom.Text:
 			data := v.Data()
 			if data == "" {
-				continue
+				return
 			}
 			// Skip whitespace-only text nodes that are not part of an inline
 			// run. In HTML, inter-element whitespace between block-level
 			// siblings (e.g. between </head> and <body>) should not generate
 			// anonymous wrappers or visible content.
 			if len(inlineRun) == 0 && isWhitespaceOnly(data) {
-				continue
+				return
 			}
 			rt := NewRenderText(v, inheritedStyle(parent.Style()))
 			inlineRun = append(inlineRun, rt)
 		}
+	}
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		// <slot> 元素：渲染 assigned light-DOM 节点（slot 自身不生成 render object）。
+		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
+			for _, an := range e.AssignedNodes() {
+				appendChildNode(an)
+			}
+			continue
+		}
+		appendChildNode(c)
 	}
 	flush()
 	// ::after 伪元素（最后插入）。
@@ -184,12 +196,12 @@ func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Eleme
 // (created as RenderBlockFlow) per CSS flexbox §4, mirroring the layout package's
 // buildFlexChildren so the two trees have matching structure.
 func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Element) {
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		switch v := c.(type) {
+	appendFlexChild := func(node dom.Node) {
+		switch v := node.(type) {
 		case *dom.Element:
 			cs := b.resolveStyle(v)
 			if cs.Display == style.DisplayNone {
-				continue
+				return
 			}
 			var child RenderObject
 			if isReplacedElement(v.LocalName()) {
@@ -201,18 +213,18 @@ func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Eleme
 				child = b.createRenderObject(v, cs)
 			}
 			if child == nil {
-				continue
+				return
 			}
 			b.buildChildren(child, v)
 			parent.AddChild(child, nil)
 		case *dom.Text:
 			data := v.Data()
 			if data == "" {
-				continue
+				return
 			}
 			// Pure whitespace text nodes between flex items do not generate
 			if isWhitespaceOnly(data) {
-				continue
+				return
 			}
 			// Text nodes inside flex containers must be wrapped in an anonymous
 			// flex items that are block-level).
@@ -223,8 +235,17 @@ func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Eleme
 			rt := NewRenderText(v, inheritedStyle(parent.Style()))
 			anon.AddChild(rt, nil)
 			parent.AddChild(anon, nil)
+		}
 	}
-}
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
+			for _, an := range e.AssignedNodes() {
+				appendFlexChild(an)
+			}
+			continue
+		}
+		appendFlexChild(c)
+	}
 }
 
 // isFlexContainerDisplay reports whether the display value produces a flex

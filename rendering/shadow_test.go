@@ -111,3 +111,51 @@ func TestNoShadowRootRendersLightDOM(t *testing.T) {
 		t.Fatal("light element is not a render descendant of host")
 	}
 }
+
+func TestSlotProjection(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.CreateElement("html")
+	_ = doc.AppendChild(html)
+	body := doc.CreateElement("body")
+	_ = html.AppendChild(body)
+	host := doc.CreateElement("div")
+	_ = body.AppendChild(host)
+
+	// light-DOM 子节点（应投影到 <slot> 位置）。
+	light := doc.CreateElement("span")
+	light.SetTextContent("light")
+	_ = host.AppendChild(light)
+
+	// shadow tree：wrapper 内嵌 <slot>。
+	sr, err := host.AttachShadow("open")
+	if err != nil {
+		t.Fatalf("AttachShadow: %v", err)
+	}
+	wrapper := doc.CreateElement("div")
+	_ = sr.AppendChild(wrapper)
+	slot := doc.CreateElement("slot")
+	_ = wrapper.AppendChild(slot)
+
+	resolver := style.NewResolver()
+	rv := NewRenderTreeBuilder(resolver).Build(doc)
+	if rv == nil {
+		t.Fatal("Build returned nil")
+	}
+
+	// <slot> 自身不生成 render object。
+	if slotRO := findRenderNode(rv, slot); slotRO != nil {
+		t.Fatal("slot element should not generate a render object")
+	}
+	// light-DOM 节点被投影到 slot 位置，成为 host 的 render 后代。
+	hostRO := findRenderNode(rv, host)
+	if hostRO == nil {
+		t.Fatal("host render object not found")
+	}
+	lightRO := findRenderNode(rv, light)
+	if lightRO == nil {
+		t.Fatal("light-DOM node should be projected into slot position")
+	}
+	if !isRenderDescendant(lightRO, hostRO) {
+		t.Fatal("projected light node is not a render descendant of host")
+	}
+}

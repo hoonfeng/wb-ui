@@ -432,11 +432,11 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		box.AddChild(wrap)
 		inlineRun = nil
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		switch v := c.(type) {
+	appendChildNode := func(node dom.Node) {
+		switch v := node.(type) {
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
-			if cs.Display == style.DisplayNone { continue }
+			if cs.Display == style.DisplayNone { return }
 			child := newBoxForElement(v, cs)
 			if child.IsInlineLevel() {
 				buildChildren(child, v, resolver)
@@ -448,9 +448,18 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 			}
 		case *dom.Text:
 			data := v.Data()
-			if data == "" { continue }
+			if data == "" { return }
 			inlineRun = append(inlineRun, &InlineTextBox{text: data, style: box.style})
 		}
+	}
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
+			for _, an := range e.AssignedNodes() {
+				appendChildNode(an)
+			}
+			continue
+		}
+		appendChildNode(c)
 	}
 	flush()
 	// ::after 伪元素（最后）。
@@ -482,17 +491,17 @@ func isFlexContainerDisplay(d style.DisplayType) bool {
 }
 
 func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		switch v := c.(type) {
+	appendFlexChild := func(node dom.Node) {
+		switch v := node.(type) {
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
-			if cs.Display == style.DisplayNone { continue }
+			if cs.Display == style.DisplayNone { return }
 			child := newBoxForElement(v, cs)
 			buildChildren(child, v, resolver)
 			box.AddChild(child)
 		case *dom.Text:
 			data := v.Data()
-			if strings.TrimSpace(data) == "" { continue }
+			if strings.TrimSpace(data) == "" { return }
 			// Anonymous wrapper must NOT inherit non-inherited properties
 			// (width/height/border/padding/margin) from parent — only inherited ones.
 			// This mirrors rendering.inheritedStyle so layout & render trees match.
@@ -507,6 +516,15 @@ func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolve
 			}
 			box.AddChild(anon)
 		}
+	}
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
+			for _, an := range e.AssignedNodes() {
+				appendFlexChild(an)
+			}
+			continue
+		}
+		appendFlexChild(c)
 	}
 }
 
