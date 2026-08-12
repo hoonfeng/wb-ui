@@ -38,3 +38,39 @@ func TestResolveLengthCalcEmpty(t *testing.T) {
 		t.Fatalf("resolveLength(calc, no expr) = definite %v, want indefinite", r.Value)
 	}
 }
+
+// TestParseCSSLengthCalcRelative verifies parseCSSLength defers a calc() with
+// relative units (%、em、vw…) to the "calc" Length form, instead of treating it
+// as auto (which previously swallowed positioned top/left calc()).
+func TestParseCSSLengthCalcRelative(t *testing.T) {
+	l := parseCSSLength("calc(100% - 40px)")
+	if l.Unit != "calc" {
+		t.Fatalf("parseCSSLength(calc(100%% - 40px)).Unit = %q, want %q", l.Unit, "calc")
+	}
+	if l.CalcExpr != "100% - 40px" {
+		t.Fatalf("parseCSSLength(calc(100%% - 40px)).CalcExpr = %q, want %q", l.CalcExpr, "100% - 40px")
+	}
+}
+
+// TestParseCSSLengthCalcAbsolute verifies a pure-absolute calc() resolves
+// immediately to px.
+func TestParseCSSLengthCalcAbsolute(t *testing.T) {
+	l := parseCSSLength("calc(40px + 8px)")
+	if l.Unit != "px" || l.Value != 48 {
+		t.Fatalf("parseCSSLength(calc(40px + 8px)) = {%v %q}, want {48 px}", l.Value, l.Unit)
+	}
+}
+
+// TestResolveOffsetCalc verifies the end-to-end positioned inset path:
+// asLength → resolveOffset → resolveLength re-evaluates calc() with the
+// containing-block size as the % reference.
+func TestResolveOffsetCalc(t *testing.T) {
+	// left: calc(100% - 40px) against a 300px containing block → 260px.
+	v, auto := resolveOffset(asLength("calc(100% - 40px)"), 300)
+	if auto {
+		t.Fatalf("resolveOffset(calc left, cb=300) reported auto, want definite")
+	}
+	if v != 260 {
+		t.Fatalf("resolveOffset(calc left, cb=300) = %v, want 260", v)
+	}
+}

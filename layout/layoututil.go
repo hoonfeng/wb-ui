@@ -125,6 +125,20 @@ func parseCSSLength(s string) style.Length {
 	if s == "" || s == "auto" {
 		return style.Length{Unit: "auto"}
 	}
+	// calc() 表达式：提取内部表达式。含相对单位（%、em、rem、vw、vh 等）
+	// 无法在此处求值（不知道包含块尺寸 / font-size / viewport），保留
+	// calc 标记让 resolveLength 的 "calc" case 带真实 context 求值；纯绝对
+	// 单位则立即求值为 px。与 style.parseLength 的处理逻辑保持一致。
+	if len(s) >= 5 && strings.EqualFold(s[:5], "calc(") && s[len(s)-1] == ')' {
+		expr := s[5 : len(s)-1]
+		if css.CalcHasRelativeUnit(expr) {
+			return style.Length{Unit: "calc", CalcExpr: expr}
+		}
+		if v, err := css.EvalCalcString(expr, css.CalcContext{}); err == nil {
+			return style.Length{Value: v, Unit: "px"}
+		}
+		return style.Length{Unit: "auto"}
+	}
 	// Find the boundary between numeric part and unit.
 	i := 0
 	if i < len(s) && (s[i] == '+' || s[i] == '-') {
