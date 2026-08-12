@@ -1588,21 +1588,25 @@ func parseTextAlign(s string) TextAlignType {
 // it returns a px Length with the computed value. If it contains % and no context is
 // available, it returns ok=false so the caller can try an alternate interpretation.
 func parseLength(s string) (Length, bool) {
-	// Handle calc() expressions.
-	if isCalcValueS(s) {
-		argStr := extractCalcArgS(s)
-		// ★ 含相对单位（%、em、rem、vw、vh、vmin、vmax）的 calc 无法在
+	// Handle math functions: calc(), min(), max(), clamp().
+	if name, full, ok := mathFuncInfoS(s); ok {
+		expr := full
+		if name == "calc" {
+			// calc 保持既有语义：CalcExpr 存内部表达式。
+			expr = extractCalcArgS(s)
+		}
+		// ★ 含相对单位（%、em、rem、vw、vh、vmin、vmax）的表达式无法在
 		// style resolve 阶段求值——此时不知道包含块尺寸 / font-size /
 		// viewport。用空 CalcContext 求值会把 % 解析为 0（ParentWidth=0），
 		// 导致 calc(100% - 40px) 错误地 = -40px（现代 SPA 侧边栏/编辑器
 		// 布局大量使用该模式，宽度会被压成 0）。保留 calc 标记 + 原始
 		// 表达式，让布局引擎带真实 context 重新求值（resolveLength 的
 		// "calc" case）。
-		if css.CalcHasRelativeUnit(argStr) {
-			return Length{Unit: "calc", CalcExpr: argStr}, true
+		if css.CalcHasRelativeUnit(expr) {
+			return Length{Unit: "calc", CalcExpr: expr}, true
 		}
 		// 纯绝对单位（px/pt/cm/mm/in）：无需 context，立即求值。
-		v, err := css.EvalCalcString(argStr, css.CalcContext{})
+		v, err := css.EvalCalcString(expr, css.CalcContext{})
 		if err == nil {
 			return Length{Value: v, Unit: "px"}, true
 		}
@@ -1629,6 +1633,33 @@ func parseLength(s string) (Length, bool) {
 		return Length{}, false
 	}
 	return Length{Value: num, Unit: s[i:]}, true
+}
+
+// mathFuncInfoS detects a CSS math function prefix (calc/min/max/clamp) and
+// returns its lowercased name plus the full balanced function expression
+// (e.g. "min(100%, 600px)"), with ok=true. Used by parseLength to treat
+// min()/max()/clamp() the same as calc().
+func mathFuncInfoS(s string) (name, full string, ok bool) {
+	s = strings.TrimSpace(s)
+	for _, n := range []string{"calc", "min", "max", "clamp"} {
+		if len(s) < len(n)+1 || !strings.EqualFold(s[:len(n)], n) || s[len(n)] != '(' {
+			continue
+		}
+		depth := 0
+		for i := len(n); i < len(s); i++ {
+			switch s[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					return n, s[:i+1], true
+				}
+			}
+		}
+		return n, s, true
+	}
+	return "", "", false
 }
 
 // isCalcValueS reports whether s starts with "calc(" (case-insensitive).

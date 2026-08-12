@@ -125,12 +125,15 @@ func parseCSSLength(s string) style.Length {
 	if s == "" || s == "auto" {
 		return style.Length{Unit: "auto"}
 	}
-	// calc() 表达式：提取内部表达式。含相对单位（%、em、rem、vw、vh 等）
+	// math 函数（calc/min/max/clamp）：含相对单位（%、em、rem、vw、vh 等）
 	// 无法在此处求值（不知道包含块尺寸 / font-size / viewport），保留
 	// calc 标记让 resolveLength 的 "calc" case 带真实 context 求值；纯绝对
 	// 单位则立即求值为 px。与 style.parseLength 的处理逻辑保持一致。
-	if len(s) >= 5 && strings.EqualFold(s[:5], "calc(") && s[len(s)-1] == ')' {
-		expr := s[5 : len(s)-1]
+	if name, full, ok := mathFuncInfo(s); ok {
+		expr := full
+		if name == "calc" {
+			expr = full[5 : len(full)-1] // calc 存内部表达式
+		}
 		if css.CalcHasRelativeUnit(expr) {
 			return style.Length{Unit: "calc", CalcExpr: expr}
 		}
@@ -164,6 +167,31 @@ func parseCSSLength(s string) style.Length {
 		unit = "px"
 	}
 	return style.Length{Value: num, Unit: unit}
+}
+
+// mathFuncInfo detects a CSS math function prefix (calc/min/max/clamp) and
+// returns its lowercased name plus the full balanced function expression.
+func mathFuncInfo(s string) (name, full string, ok bool) {
+	s = strings.TrimSpace(s)
+	for _, n := range []string{"calc", "min", "max", "clamp"} {
+		if len(s) < len(n)+1 || !strings.EqualFold(s[:len(n)], n) || s[len(n)] != '(' {
+			continue
+		}
+		depth := 0
+		for i := len(n); i < len(s); i++ {
+			switch s[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					return n, s[:i+1], true
+				}
+			}
+		}
+		return n, s, true
+	}
+	return "", "", false
 }
 
 

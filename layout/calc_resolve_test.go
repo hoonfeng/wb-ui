@@ -74,3 +74,27 @@ func TestResolveOffsetCalc(t *testing.T) {
 		t.Fatalf("resolveOffset(calc left, cb=300) = %v, want 260", v)
 	}
 }
+
+// TestParseCSSLengthMinMaxClamp verifies parseCSSLength treats min()/max()/
+// clamp() like calc(): relative units defer, absolute resolve eagerly.
+func TestParseCSSLengthMinMaxClamp(t *testing.T) {
+	l := parseCSSLength("min(100%, 600px)")
+	if l.Unit != "calc" || l.CalcExpr != "min(100%, 600px)" {
+		t.Fatalf("parseCSSLength(min(100%%, 600px)) = {%q, %q}, want {calc, min(100%%, 600px)}", l.Unit, l.CalcExpr)
+	}
+	l = parseCSSLength("max(40px, 10px)")
+	if l.Unit != "px" || l.Value != 40 {
+		t.Fatalf("parseCSSLength(max(40px, 10px)) = {%v %q}, want {40 px}", l.Value, l.Unit)
+	}
+}
+
+// TestResolveOffsetClamp verifies end-to-end positioned inset with clamp().
+func TestResolveOffsetClamp(t *testing.T) {
+	v, auto := resolveOffset(asLength("clamp(0px, 100px, 50px)"), 300)
+	if auto {
+		t.Fatalf("resolveOffset(clamp top) reported auto, want definite")
+	}
+	if v != 50 {
+		t.Fatalf("resolveOffset(clamp(0px, 100px, 50px)) = %v, want 50", v)
+	}
+}

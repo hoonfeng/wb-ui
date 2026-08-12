@@ -6,7 +6,7 @@
 // Simplifications:
 //   - no type-checking (CSS calc() restricts mixing types; this port resolves all
 //     values to pixels at evaluation time using the provided context)
-//   - no min() / max() / clamp() support
+//   - min() / max() / clamp() supported (comma-separated calc-sum arguments)
 //   - no rounding / mod / trigonometric operations
 //   - sign handling: leading '+' or '-' on a value node is treated as unary operator
 //     (e.g. calc(-10px + 5px) == -5px)
@@ -148,6 +148,13 @@ func extractCalcInner(tokens []Token) ([]Token, error) {
 		t := tokens[i]
 		switch {
 		case t.Type == TokenLeftParenthesis:
+			depth++
+			inner = append(inner, t)
+		case t.Type == TokenFunction:
+			// A function token already consumed its opening '(' (the tokenizer
+			// folds "min(" into TokenFunction), so its closing ')' arrives as a
+			// lone TokenRightParenthesis. Count the implicit opening paren so
+			// nested functions don't prematurely terminate the outer calc().
 			depth++
 			inner = append(inner, t)
 		case t.Type == TokenRightParenthesis:
@@ -319,21 +326,93 @@ func (p *calcParser) parsePrimary() float64 {
 		}
 		return val
 	case TokenFunction:
-		// Nested calc() — this shouldn't normally happen since the CSS spec
-		// treats nested calc() as equivalent to outer calc(), but handle it
-		// gracefully by evaluating recursively.
-		if t.Value == "calc" {
-			// The tokens for the inner calc() include the function token.
-			// We need to reconstruct from current position backward.
-			// Instead, support by creating a mini-slice from current pos - 1.
-			// But actually let's keep it simple: reconstruct tokens from position-1
-			p.err = fmt.Errorf("css/calc: nested calc() not supported")
+		switch strings.ToLower(t.Value) {
+		case "calc":
+			// Nested calc(): CSS treats nested calc() as equivalent to the
+			// outer calc(), so evaluate the inner expression recursively up
+			// to the matching ')'.
+			val := p.parseExpr()
+			if p.err != nil {
+				return val
+			}
+			close := p.consume()
+			if close.Type != TokenRightParenthesis {
+				p.err = fmt.Errorf("css/calc: expected ')' after nested calc()")
+				return 0
+			}
+			return val
+		case "min", "max", "clamp":
+			return p.parseMinMaxClamp(strings.ToLower(t.Value))
+		default:
+			p.err = fmt.Errorf("css/calc: unexpected function %s() in expression", t.Value)
 			return 0
 		}
-		p.err = fmt.Errorf("css/calc: unexpected function %s() in expression", t.Value)
-		return 0
 	default:
 		p.err = fmt.Errorf("css/calc: unexpected token %v in expression", t)
+		return 0
+	}
+}
+
+// parseMinMaxClamp parses the argument list of min()/max()/clamp() — a
+// comma-separated list of calc-sum expressions — and evaluates the comparison.
+// The opening function token has already been consumed; args are separated by
+// ',' and terminated by the matching ')'.
+func (p *calcParser) parseMinMaxClamp(name string) float64 {
+	if p.err != nil {
+		return 0
+	}
+	var args []float64
+	for {
+		v := p.parseExpr()
+		if p.err != nil {
+			return 0
+		}
+		args = append(args, v)
+		t := p.peek()
+		if t.Type == TokenComma {
+			p.consume()
+			continue
+		}
+		if t.Type == TokenRightParenthesis {
+			p.consume()
+			break
+		}
+		p.err = fmt.Errorf("css/calc: expected ',' or ')' in %s()", name)
+		return 0
+	}
+	switch name {
+	case "min":
+		if len(args) == 0 {
+			p.err = fmt.Errorf("css/calc: min() requires at least one argument")
+			return 0
+		}
+		m := args[0]
+		for _, a := range args[1:] {
+			if a < m {
+				m = a
+			}
+		}
+		return m
+	case "max":
+		if len(args) == 0 {
+			p.err = fmt.Errorf("css/calc: max() requires at least one argument")
+			return 0
+		}
+		m := args[0]
+		for _, a := range args[1:] {
+			if a > m {
+				m = a
+			}
+		}
+		return m
+	case "clamp":
+		if len(args) != 3 {
+			p.err = fmt.Errorf("css/calc: clamp() requires exactly 3 arguments, got %d", len(args))
+			return 0
+		}
+		return math.Max(args[0], math.Min(args[1], args[2]))
+	default:
+		p.err = fmt.Errorf("css/calc: unknown function %s()", name)
 		return 0
 	}
 }
