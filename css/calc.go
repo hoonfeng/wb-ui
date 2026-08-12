@@ -15,6 +15,7 @@ package css
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // CalcContext provides the contextual dimensions needed to resolve relative units
@@ -60,6 +61,47 @@ func EvalCalc(tokens []Token, ctx CalcContext) (float64, error) {
 		return 0, fmt.Errorf("css/calc: unexpected token after expression: %v", p.tokens[p.pos])
 	}
 	return result, nil
+}
+
+// EvalCalcString evaluates a calc() expression given as a raw inner string
+// (e.g. "100% - 40px", without the "calc(" wrapper). It tokenizes the input,
+// wraps it as calc(...) for EvalCalc, and returns the computed pixel value.
+// This is a convenience for callers that hold the expression as text (style
+// resolve stores the raw arg, layout re-evaluates with real context).
+func EvalCalcString(expr string, ctx CalcContext) (float64, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return 0, fmt.Errorf("css/calc: empty calc() expression")
+	}
+	full := "calc(" + expr + ")"
+	tok := NewTokenizer(full)
+	tokens := tok.Tokenize()
+	if len(tokens) > 0 && tokens[len(tokens)-1].Type == TokenEOF {
+		tokens = tokens[:len(tokens)-1]
+	}
+	return EvalCalc(tokens, ctx)
+}
+
+// CalcHasRelativeUnit reports whether a calc() inner expression contains any
+// relative unit (%, em, rem, vw, vh, vmin, vmax). Relative units cannot be
+// resolved without layout context (containing-block size / font-size /
+// viewport), so callers must defer evaluation rather than resolve with a
+// zero-valued CalcContext (which would silently turn % into 0).
+func CalcHasRelativeUnit(expr string) bool {
+	tok := NewTokenizer(expr)
+	tokens := tok.Tokenize()
+	for _, t := range tokens {
+		switch t.Type {
+		case TokenPercentage:
+			return true
+		case TokenDimension:
+			switch t.Unit {
+			case "em", "rem", "vw", "vh", "vmin", "vmax":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // IsCalcValue returns true if the token slice starts with a calc() function

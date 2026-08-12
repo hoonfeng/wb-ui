@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"wb-ui/css"
 	"wb-ui/style"
 )
 
@@ -69,6 +70,25 @@ func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
 			return lengthResult{Value: l.Value * v / 100, Definite: true}
 		}
 		return lengthResult{Definite: false}
+	case "calc":
+		// calc() with relative units deferred from style resolve: re-evaluate
+		// with real context. reference is the containing-block dimension (parent
+		// width for width/margin, parent height for height), fontSize is the
+		// element font-size for em, defaultFontSize for rem, viewport for vw/vh.
+		if l.CalcExpr == "" {
+			return lengthResult{Definite: false}
+		}
+		v, err := css.EvalCalcString(l.CalcExpr, css.CalcContext{
+			ParentWidth:   reference,
+			FontSize:      fontSize,
+			RootFontSize:  defaultFontSize,
+			ViewportWidth:  currentViewportWidth,
+			ViewportHeight: currentViewportHeight,
+		})
+		if err != nil {
+			return lengthResult{Definite: false}
+		}
+		return lengthResult{Value: v, Definite: true}
 	default:
 		return lengthResult{Definite: true}
 	}

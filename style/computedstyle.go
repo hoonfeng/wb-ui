@@ -106,6 +106,11 @@ const (
 type Length struct {
 	Value float64
 	Unit  string
+	// CalcExpr holds the raw calc() inner expression (e.g. "100% - 40px")
+	// when Unit == "calc". It is set when a calc() contains relative units
+	// that cannot be resolved at style-resolution time and must be re-evaluated
+	// by the layout engine with real containing-block / font-size context.
+	CalcExpr string
 }
 
 // IsAuto reports whether the length is the keyword "auto".

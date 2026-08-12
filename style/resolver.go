@@ -1591,28 +1591,20 @@ func parseLength(s string) (Length, bool) {
 	// Handle calc() expressions.
 	if isCalcValueS(s) {
 		argStr := extractCalcArgS(s)
-		// Re-tokenize the calc expression for EvalCalc.
-		calcTok := css.NewTokenizer(argStr)
-		calcTokens := calcTok.Tokenize()
-		// Strip EOF token.
-		if len(calcTokens) > 0 && calcTokens[len(calcTokens)-1].Type == css.TokenEOF {
-			calcTokens = calcTokens[:len(calcTokens)-1]
+		// ★ 含相对单位（%、em、rem、vw、vh、vmin、vmax）的 calc 无法在
+		// style resolve 阶段求值——此时不知道包含块尺寸 / font-size /
+		// viewport。用空 CalcContext 求值会把 % 解析为 0（ParentWidth=0），
+		// 导致 calc(100% - 40px) 错误地 = -40px（现代 SPA 侧边栏/编辑器
+		// 布局大量使用该模式，宽度会被压成 0）。保留 calc 标记 + 原始
+		// 表达式，让布局引擎带真实 context 重新求值（resolveLength 的
+		// "calc" case）。
+		if css.CalcHasRelativeUnit(argStr) {
+			return Length{Unit: "calc", CalcExpr: argStr}, true
 		}
-		// Wrap with "calc(" prefix so IsCalcValue / extractCalcInner work.
-		fullExpr := "calc(" + argStr + ")"
-		fullTok := css.NewTokenizer(fullExpr)
-		fullTokens := fullTok.Tokenize()
-		if len(fullTokens) > 0 && fullTokens[len(fullTokens)-1].Type == css.TokenEOF {
-			fullTokens = fullTokens[:len(fullTokens)-1]
-		}
-		v, err := css.EvalCalc(fullTokens, css.CalcContext{})
+		// 纯绝对单位（px/pt/cm/mm/in）：无需 context，立即求值。
+		v, err := css.EvalCalcString(argStr, css.CalcContext{})
 		if err == nil {
 			return Length{Value: v, Unit: "px"}, true
-		}
-		// If the calc contains % (unresolvable without context), still return ok=true
-		// with a marker unit so the layout engine can re-evaluate with context later.
-		if strings.Contains(argStr, "%") {
-			return Length{Value: 0, Unit: "calc"}, true
 		}
 		return Length{}, false
 	}
