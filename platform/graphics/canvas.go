@@ -1448,6 +1448,37 @@ func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
 	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
 }
 
+// SaveLayerForMask pushes an offscreen layer bounded to rect (device-space),
+// for a subsequent ApplyImageMask that masks the painted content. Mirrors
+// GraphicsContext::beginTransparencyLayer for CSS mask-image.
+func (c *Canvas) SaveLayerForMask(rect Rect) {
+	if c.canvas == nil {
+		return
+	}
+	c.states = append(c.states, c.state)
+	sr := skia.RectXYWH(float32(rect.X), float32(rect.Y), float32(rect.Width), float32(rect.Height))
+	c.canvas.SaveLayer(&sr, nil)
+}
+
+// ApplyImageMask masks the current save-layer's painted content using img's
+// alpha channel, scaling img to fill rect. It uses BlendModeDstIn so only the
+// region where img is opaque survives (img's RGB is ignored — CSS mask-image
+// semantics). Must be called between SaveLayerForMask and Restore.
+func (c *Canvas) ApplyImageMask(img *skia.Image, rect Rect) {
+	if img == nil || c.canvas == nil {
+		return
+	}
+	src := skia.RectXYWH(0, 0, float32(img.Width()), float32(img.Height()))
+	dst := skia.RectXYWH(float32(rect.X), float32(rect.Y), float32(rect.Width), float32(rect.Height))
+	paint := skia.NewPaint()
+	paint.SetStyle(skia.PaintStyleFill)
+	paint.SetAntialias(true)
+	paint.SetBlendMode(skia.BlendModeDstIn)
+	defer paint.Release()
+	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
+	c.invalidatePixels()
+}
+
 // Release frees Skia resources held by this Canvas.
 func (c *Canvas) Release() {
 	if c.fillPaint != nil {

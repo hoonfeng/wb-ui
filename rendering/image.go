@@ -94,6 +94,14 @@ func (di *DecodedImage) Draw(canvas *graphics.Canvas, x, y, w, h float64) {
 	canvas.DrawImage(img, x, y, w, h)
 }
 
+// SkiaImage returns the underlying skia image, or nil if not loaded. Used by
+// the paint pipeline to apply the image's alpha as a CSS mask-image.
+func (di *DecodedImage) SkiaImage() *SkiaImage {
+	di.mu.Lock()
+	defer di.mu.Unlock()
+	return di.skImg
+}
+
 // Release frees the underlying Skia image. After calling Release the
 // DecodedImage must not be used for drawing.
 func (di *DecodedImage) Release() {

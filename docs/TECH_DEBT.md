@@ -116,6 +116,14 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 
 ## 3. 布局三次全树遍历（P1 · 性能）
 
+> **调研结论（2026-08-13）**：`WB_LAYOUT_PROFILE=1` 实测 ide_static.html（真实 IDE 页面）
+> 布局总耗时 620ms，其中 **BFC 292ms（1043 次）+ FFC 238ms（400 次）占 85%**，IFC 44ms（577
+> 次）、grid 38ms、table 7ms。`roundTree` 与 `updateContentSize` 是两次额外 O(n) walk（约
+> 2000 节点 × 2），估算 <5ms（占比 <1%）——**阶段 A（合并这两次 walk）收益微乎其微，不建议
+> 投入**。真正的瓶颈是 BFC/FFC 布局算法本身（单次 FFC 0.6ms、BFC 0.28ms），优化方向应聚焦
+> 阶段 B/C（增量布局/脏子树）或 BFC/FFC 内部算法，均属高风险大工程，需先跑 `dev/consistency`
+> 像素护栏再动手。
+
 ### 现状定位
 一次完整布局存在**三次全树遍历**：
 1. `layout/layout.go:17 Layout()` → `LayoutRoot`（每个 box 的 FormattingContext 布局）
@@ -191,6 +199,13 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 ---
 
 ## 5. `mask-image` 仅存属性不绘制（P3）
+
+> **已实现（2026-08-13）**：图片-as-alpha 遮罩已落地。goskia 补 `Image.MakeShader` 绑定（C API
+> `sk_image_make_shader` 早已存在，仅缺 Go 封装）；`graphics.Canvas` 新增 `SaveLayerForMask` /
+> `ApplyImageMask`（SaveLayer + `BlendModeDstIn` 把图片缩放到元素尺寸作为 alpha 遮罩）；
+> `paintObjectBackground` 在 mask-image 存在时用离屏 layer 遮罩 background/border。像素测试
+> `TestMaskImageAlpha` 验证「mask alpha=0 丢弃、alpha=255 保留」。当前仅遮罩 background/border
+> （未遮罩前景文字/SVG），且 mask-repeat/size/position 尚未解析（默认整图缩放到元素尺寸）。
 
 ### 现状定位
 - `rendering/mask_test.go`：`mask-image` 仅被存为 property（`cs.GetProperty("mask-image")`

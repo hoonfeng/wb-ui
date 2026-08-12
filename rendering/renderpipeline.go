@@ -1550,11 +1550,30 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 			filterCleanup = info.canvas.Restore
 		}
 	}
+	// Apply CSS mask-image: wrap background/border in an offscreen layer and
+	// mask it with the image's alpha channel. Placed innermost (before filter
+	// / blend / clip compositing) so it masks exactly the background+border.
+	var maskApply func()
+	if st := box.Style(); st != nil {
+		if murl, ok := parseBackgroundURL(st.GetProperty("mask-image")); ok {
+			if img := loadBackgroundImage(murl, ""); img != nil && img.Loaded() {
+				bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
+				info.canvas.SaveLayerForMask(Rect{X: bx, Y: by, Width: bw, Height: bh})
+				maskApply = func() {
+					info.canvas.ApplyImageMask(img.SkiaImage(), Rect{X: bx, Y: by, Width: bw, Height: bh})
+					info.canvas.Restore()
+				}
+			}
+		}
+	}
 	// Apply CSS transform if present (inside filter layer). The transform is
 	// applied by walkSubtreeExcluded for the whole subtree; the per-box
 	// background/border painting here must NOT re-apply it.
 	PaintBackground(box, info)
 	PaintBorder(box, info)
+	if maskApply != nil {
+		maskApply()
+	}
 	if filterCleanup != nil {
 		defer filterCleanup()
 	}
