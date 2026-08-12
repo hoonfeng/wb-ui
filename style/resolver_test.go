@@ -944,3 +944,38 @@ func TestResolver_PartLosesToShadowRule(t *testing.T) {
 		t.Fatalf("shadow rule should beat ::part: color=%v want green", cs.Color)
 	}
 }
+
+func TestResolver_PartWithHostPrefix(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "xwidget")
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn")
+	_ = sr.AppendChild(btn)
+
+	sheet := newSheet(t, "xwidget::part(btn) { color: red; } ywidget::part(btn) { color: blue; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(btn)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("xwidget::part(btn) color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_SlottedWithHostPrefix(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "xwidget")
+	sr, _ := host.AttachShadow("open")
+	slot := dom.NewElement(doc, "slot")
+	_ = sr.AppendChild(slot)
+	span := dom.NewElement(doc, "span")
+	_ = host.AppendChild(span) // light-DOM child, assigned to the default slot
+
+	sheet := shadowSheet(t, sr, "xwidget::slotted(span) { color: red; } ywidget::slotted(span) { color: blue; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(span)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("xwidget::slotted(span) color=%v want red", cs.Color)
+	}
+}

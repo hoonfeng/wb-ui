@@ -201,8 +201,17 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 6. **测试**：`TestResolver_Host*` / `TestResolver_SlottedStyle` / `TestResolver_Part*`
 >    + `TestSelector_Match*` 全绿，全量通过。
 >
-> **仍缺（后续增量）**：① `host-selector::part(name)` / `host-selector::slotted(...)`
-> 的前缀跨 shadow 边界前向匹配（当前只支持裸 `::part(name)` / `::slotted(sel)` 形式）；
+> **已实现 host-selector 前缀前向匹配（2026-08-13，本轮）**：
+> `x-widget::part(btn)` / `x-widget::slotted(span)` 中 `::part`/`::slotted` 之前的
+> simple selector 现在匹配 shadow host（CSS Scoping Level 1 forward matching），不再
+> 误匹配候选元素本身。`SelectorChecker.matchCompound` 检测 compound 末尾的
+> `::part`/`::slotted`，将前缀路由到 `shadowHostFor`（`::part`→`ContainingShadowRoot
+> (el).Host()`，`::slotted`→`AssignedSlot` 所在 shadow root 的 host）。
+> 测试：`TestSelector_MatchPartWithHostPrefix` / `_MatchSlottedWithHostPrefix` /
+> `TestResolver_PartWithHostPrefix` / `_SlottedWithHostPrefix` 全绿，全量通过。
+>
+> **仍缺（后续增量）**：① 跨 combinator 的 forward matching（如 `.outer
+> x-widget::part(btn)` 中 descendant/child combinator 跨 shadow boundary 的祖先遍历）；
 > ② 事件 `composedPath` 无 shadow 路径；③ 多 slot / 嵌套 shadow / fallback content。
 
 ### 现状定位

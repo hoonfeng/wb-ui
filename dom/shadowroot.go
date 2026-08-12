@@ -12,8 +12,9 @@
 //     tree). :host / :host-context / ::slotted / ::part cascade origins are routed by
 //     the style resolver with a per-sheet tree-scope depth (CSS Scoping Level 1 §3.3).
 //   - host-selector::part(name) and host-selector::slotted(...) forward-matching across
-//     the shadow boundary (the host-selector prefix matching the shadow host) is NOT
-//     yet implemented — only the bare ::part(name) / ::slotted(sel) forms match.
+//     the shadow boundary (the host-selector prefix matching the shadow host) is
+//     implemented for same-compound prefixes (e.g. x-widget::part(btn)); forward
+//     matching across a combinator (e.g. .outer x-widget::part(btn)) is not.
 
 package dom
 

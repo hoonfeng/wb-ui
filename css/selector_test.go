@@ -714,3 +714,43 @@ func TestSelector_MatchPart(t *testing.T) {
 		t.Fatalf("::part(icon) should not match an element without part=icon")
 	}
 }
+
+func TestSelector_MatchPartWithHostPrefix(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "xwidget")
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn")
+	_ = sr.AppendChild(btn)
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "xwidget::part(btn)"), btn) {
+		t.Fatalf("xwidget::part(btn) should match (host tag prefix + part)")
+	}
+	if c.Match(parseComplex(t, "ywidget::part(btn)"), btn) {
+		t.Fatalf("ywidget::part(btn) should not match host tagged xwidget")
+	}
+	// The host-selector prefix may be a class / attribute, not just a tag.
+	host.SetAttribute("class", "card")
+	if !c.Match(parseComplex(t, ".card::part(btn)"), btn) {
+		t.Fatalf(".card::part(btn) should match (host class prefix + part)")
+	}
+}
+
+func TestSelector_MatchSlottedWithHostPrefix(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "xwidget")
+	sr, _ := host.AttachShadow("open")
+	slot := dom.NewElement(doc, "slot")
+	_ = sr.AppendChild(slot)
+	span := dom.NewElement(doc, "span")
+	_ = host.AppendChild(span) // light-DOM child assigned to the default slot
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "xwidget::slotted(span)"), span) {
+		t.Fatalf("xwidget::slotted(span) should match (host tag prefix + slotted)")
+	}
+	if c.Match(parseComplex(t, "ywidget::slotted(span)"), span) {
+		t.Fatalf("ywidget::slotted(span) should not match host tagged xwidget")
+	}
+}

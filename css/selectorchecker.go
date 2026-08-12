@@ -17,7 +17,9 @@
 //   - :lang() matches by language tag prefix; the document's lang is read via
 //     element.GetAttribute("lang") with a fallback walk to the nearest ancestor
 //   - :host / :host-context match against the shadow host; ::slotted matches a
-//     slot-assigned light-DOM node; ::part matches a shadow element by part name
+//     slot-assigned light-DOM node; ::part matches a shadow element by part name;
+//     a host-selector prefix before ::part / ::slotted (e.g. x-widget::part(btn))
+//     is forward-matched against the shadow host (CSS Scoping Level 1)
 //   - :has() is implemented by walking descendants of the candidate element
 
 package css
@@ -122,14 +124,54 @@ func (c *SelectorChecker) matchComplex(sel ComplexSelector, i int, el *dom.Eleme
 	return false
 }
 
-// matchCompound reports whether all simple selectors in comp match el.
+// matchCompound reports whether all simple selectors in comp match el. For a
+// compound ending in ::part or ::slotted, the simple selectors BEFORE that
+// pseudo-element match the shadow host instead of el (CSS Scoping Level 1 forward
+// matching) — e.g. x-widget::part(btn): ::part(btn) matches the part element el,
+// while x-widget matches el's shadow host.
 func (c *SelectorChecker) matchCompound(comp CompoundSelector, el *dom.Element) bool {
+	if n := len(comp.Selectors); n > 1 {
+		last := comp.Selectors[n-1]
+		if last.Match == MatchPseudoElement &&
+			(last.PseudoElem == PseudoElementPart || last.PseudoElem == PseudoElementSlotted) {
+			host := c.shadowHostFor(el, last.PseudoElem)
+			if host == nil {
+				return false
+			}
+			for _, s := range comp.Selectors[:n-1] {
+				if !c.matchSimple(s, host) {
+					return false
+				}
+			}
+			return c.matchSimple(last, el)
+		}
+	}
 	for _, s := range comp.Selectors {
 		if !c.matchSimple(s, el) {
 			return false
 		}
 	}
 	return true
+}
+
+// shadowHostFor returns the shadow host that the host-selector prefix of a
+// ::part / ::slotted compound must match against. For ::part it is the host of the
+// shadow tree containing el; for ::slotted it is the host of the shadow tree
+// containing the slot that assigns el.
+func (c *SelectorChecker) shadowHostFor(el *dom.Element, pe PseudoElement) *dom.Element {
+	switch pe {
+	case PseudoElementPart:
+		if sr := dom.ContainingShadowRoot(el); sr != nil {
+			return sr.Host()
+		}
+	case PseudoElementSlotted:
+		if slot := el.AssignedSlot(); slot != nil {
+			if sr := dom.ContainingShadowRoot(slot); sr != nil {
+				return sr.Host()
+			}
+		}
+	}
+	return nil
 }
 
 // matchSimple reports whether a single simple selector matches el.
