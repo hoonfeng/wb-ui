@@ -39,6 +39,11 @@ type Element struct {
 	// （浏览器 attribute 变化触发 style recalc）。此前 RebuildRenderTree 的
 	// style 指纹缓存跳过 ClearCache → class 切换样式残留（选中高亮多个并存）。
 	attrVersion uint64
+
+	// shadowRoot holds the shadow tree attached via AttachShadow (nil when absent).
+	// It is NOT part of the child list: the shadow tree replaces the light-DOM
+	// children for rendering/layout (see FirstComposedChild).
+	shadowRoot *ShadowRoot
 }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
@@ -79,6 +84,29 @@ func (e *Element) cloneShallow(doc *Document) Node {
 		}
 	}
 	return c
+}
+
+// AttachShadow attaches a new shadow root to this element, mirroring
+// Element::attachShadow(init). An element may host at most one shadow root; a second
+// call returns ErrNotSupported. The mode is "open" or "closed" ("open" exposes the
+// shadow root via ShadowRoot(), "closed" hides it).
+func (e *Element) AttachShadow(mode string) (*ShadowRoot, error) {
+	if e.shadowRoot != nil {
+		return nil, ErrNotSupported
+	}
+	sr := NewShadowRoot(e.OwnerDocument(), e, mode)
+	e.shadowRoot = sr
+	return sr, nil
+}
+
+// ShadowRoot returns the element's shadow root, mirroring Element::shadowRoot. It
+// returns nil when there is no shadow root or when the root is closed (mode
+// "closed"), matching the DOM spec where closed shadow roots are inaccessible.
+func (e *Element) ShadowRoot() *ShadowRoot {
+	if e.shadowRoot != nil && e.shadowRoot.mode == "closed" {
+		return nil
+	}
+	return e.shadowRoot
 }
 
 // HasAttribute reports whether a named attribute is present, mirroring

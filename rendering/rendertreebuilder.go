@@ -117,7 +117,7 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		parent.AddChild(anon, nil)
 		inlineRun = nil
 	}
-	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *dom.Element:
 			cs := b.resolveStyle(v)
@@ -184,7 +184,7 @@ func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Eleme
 // (created as RenderBlockFlow) per CSS flexbox §4, mirroring the layout package's
 // buildFlexChildren so the two trees have matching structure.
 func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Element) {
-	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *dom.Element:
 			cs := b.resolveStyle(v)

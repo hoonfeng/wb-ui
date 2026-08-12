@@ -3702,6 +3702,32 @@ obj.SetInternal(el)
 			}
 			return jsc.ObjectValue(wrapDocument(in, doc))
 		}, 0)))
+	// ★ attachShadow（浏览器标准）：el.attachShadow({mode:'open'}) 创建 shadow
+	// root。最小实现：支持 {mode} 参数，重复调用返回 null。
+	obj.Set("attachShadow", jsc.FunctionValue(jsc.NewNativeFunction("attachShadow",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			mode := "open"
+			if len(args) > 0 {
+				if o := args[0].AsObject(); o != nil {
+					if mv, ok := o.GetByKey("mode"); ok && !mv.IsUndefined() && !mv.IsNull() {
+						mode = mv.ToString()
+					}
+				}
+			}
+			sr, err := el.AttachShadow(mode)
+			if err != nil || sr == nil {
+				return jsc.Null()
+			}
+			return jsc.ObjectValue(wrapShadowRoot(in, sr))
+		}, 1)))
+	// shadowRoot 访问器：open 时返回 ShadowRoot，closed/无时返回 null。
+	obj.SetAccessor("shadowRoot", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		sr := el.ShadowRoot()
+		if sr == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(wrapShadowRoot(in, sr))
+	}), nil)
 	// ★ compareDocumentPosition（浏览器标准）：返回位掩码描述 node 相对
 	// el 的文档位置。CM6 的 DOMObserver / 节点排序依赖它。
 	obj.Set("compareDocumentPosition", jsc.FunctionValue(jsc.NewNativeFunction("compareDocumentPosition",
@@ -4204,6 +4230,51 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 			}
 			return jsc.Null()
 		}, 1)))
+
+	return obj
+}
+
+// wrapShadowRoot 包装 dom.ShadowRoot 为 JS 对象（最小实现：树导航 + host/mode）。
+func wrapShadowRoot(rt *jsc.Interpreter, sr *dom.ShadowRoot) *jsc.JSObject {
+	obj := jsc.NewObject(rt.ObjectPrototype())
+	obj.SetClassName("ShadowRoot")
+	obj.SetInternal(sr)
+
+	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(sr.NodeType()))
+	}), nil)
+	obj.SetAccessor("nodeName", strAcc(sr.NodeName()), nil)
+	obj.SetAccessor("mode", strAcc(sr.Mode()), nil)
+	obj.SetAccessor("host", nodeAccFn(rt, func() dom.Node { return sr.Host() }), nil)
+	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return sr.FirstChild() }), nil)
+	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return sr.LastChild() }), nil)
+	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrNode(in, sr.ChildNodes())
+	}), nil)
+	obj.SetAccessor("textContent",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(sr.TextContent()) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { sr.SetTextContent(v.ToString()) })
+
+	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
+		if n == nil {
+			return jsc.Null()
+		}
+		sr.AppendChild(n)
+		if OnNodeInserted != nil {
+			OnNodeInserted(n)
+		}
+		return a
+	})))
+	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
+		if n == nil {
+			return jsc.Null()
+		}
+		sr.RemoveChild(n)
+		if OnNodeRemoved != nil {
+			OnNodeRemoved(n)
+		}
+		return a
+	})))
 
 	return obj
 }

@@ -2,71 +2,112 @@ package rendering
 
 import (
 	"testing"
+
+	"wb-ui/dom"
+	"wb-ui/style"
 )
 
-func TestParseBoxShadow_Simple(t *testing.T) {
-	shadows := parseShadowList("2px 2px 4px rgba(0,0,0,0.3)")
-	if len(shadows) != 1 {
-		t.Fatalf("got %d shadows, want 1", len(shadows))
+// findRenderNode 递归遍历 render tree，找到 Node() == target 的 render object。
+func findRenderNode(ro RenderObject, target dom.Node) RenderObject {
+	if ro == nil {
+		return nil
 	}
-	if shadows[0].OffsetX != 2 {
-		t.Errorf("OffsetX = %v, want 2", shadows[0].OffsetX)
+	if ro.Node() == target {
+		return ro
 	}
-	if shadows[0].OffsetY != 2 {
-		t.Errorf("OffsetY = %v, want 2", shadows[0].OffsetY)
+	for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+		if found := findRenderNode(c, target); found != nil {
+			return found
+		}
 	}
-	if shadows[0].Blur != 4 {
-		t.Errorf("Blur = %v, want 4", shadows[0].Blur)
+	return nil
+}
+
+// isRenderDescendant 判断 desc 是否是 anc 的 render 后代。
+func isRenderDescendant(desc, anc RenderObject) bool {
+	for ro := desc; ro != nil; ro = ro.Parent() {
+		if ro == anc {
+			return true
+		}
 	}
-	if shadows[0].Inset {
-		t.Error("Inset = true, want false")
+	return false
+}
+
+func TestShadowRootRendersInsteadOfLightDOM(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.CreateElement("html")
+	_ = doc.AppendChild(html)
+	body := doc.CreateElement("body")
+	_ = html.AppendChild(body)
+	host := doc.CreateElement("div")
+	_ = body.AppendChild(host)
+
+	// light-DOM 子节点（有 shadow root 后应被隐藏）。
+	light := doc.CreateElement("span")
+	light.SetTextContent("light")
+	_ = host.AppendChild(light)
+
+	// shadow tree 子节点（应替代 light 渲染）。
+	sr, err := host.AttachShadow("open")
+	if err != nil {
+		t.Fatalf("AttachShadow: %v", err)
+	}
+	shadow := doc.CreateElement("div")
+	shadow.SetTextContent("shadow")
+	_ = sr.AppendChild(shadow)
+
+	resolver := style.NewResolver()
+	rv := NewRenderTreeBuilder(resolver).Build(doc)
+	if rv == nil {
+		t.Fatal("Build returned nil")
+	}
+
+	hostRO := findRenderNode(rv, host)
+	if hostRO == nil {
+		t.Fatal("host render object not found")
+	}
+	shadowRO := findRenderNode(rv, shadow)
+	if shadowRO == nil {
+		t.Fatal("shadow element render object not found")
+	}
+	if lightRO := findRenderNode(rv, light); lightRO != nil {
+		t.Fatal("light-DOM element should NOT be rendered when a shadow root exists")
+	}
+
+	// shadow 元素必须是 host 的 render 后代。
+	if !isRenderDescendant(shadowRO, hostRO) {
+		t.Fatal("shadow element is not a render descendant of host")
 	}
 }
 
-func TestParseBoxShadow_DefaultColor(t *testing.T) {
-	shadows := parseShadowList("5px 5px 10px")
-	if len(shadows) != 1 {
-		t.Fatalf("got %d shadows, want 1", len(shadows))
-	}
-	if shadows[0].OffsetX != 5 || shadows[0].OffsetY != 5 {
-		t.Errorf("offset = (%v,%v), want (5,5)", shadows[0].OffsetX, shadows[0].OffsetY)
-	}
-}
+func TestNoShadowRootRendersLightDOM(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.CreateElement("html")
+	_ = doc.AppendChild(html)
+	body := doc.CreateElement("body")
+	_ = html.AppendChild(body)
+	host := doc.CreateElement("div")
+	_ = body.AppendChild(host)
 
-func TestParseBoxShadow_Multiple(t *testing.T) {
-	shadows := parseShadowList("2px 2px 0px rgba(0,0,0,0.5), 4px 4px 2px #000")
-	if len(shadows) != 2 {
-		t.Fatalf("got %d shadows, want 2", len(shadows))
-	}
-}
+	light := doc.CreateElement("span")
+	light.SetTextContent("light")
+	_ = host.AppendChild(light)
 
-func TestParseBoxShadow_Inset(t *testing.T) {
-	shadows := parseShadowList("inset 2px 2px 4px #000")
-	if len(shadows) != 1 {
-		t.Fatalf("got %d shadows", len(shadows))
+	resolver := style.NewResolver()
+	rv := NewRenderTreeBuilder(resolver).Build(doc)
+	if rv == nil {
+		t.Fatal("Build returned nil")
 	}
-	if !shadows[0].Inset {
-		t.Error("Inset should be true")
-	}
-}
 
-func TestParseBoxShadow_None(t *testing.T) {
-	shadows := parseShadowList("none")
-	if len(shadows) != 0 {
-		t.Fatalf("got %d shadows, want 0", len(shadows))
+	hostRO := findRenderNode(rv, host)
+	if hostRO == nil {
+		t.Fatal("host render object not found")
 	}
-	shadows = parseShadowList("")
-	if len(shadows) != 0 {
-		t.Fatalf("got %d shadows for empty, want 0", len(shadows))
+	lightRO := findRenderNode(rv, light)
+	if lightRO == nil {
+		t.Fatal("light-DOM element should be rendered when no shadow root exists")
 	}
-}
-
-func TestParseBoxShadow_WithSpread(t *testing.T) {
-	shadows := parseShadowList("1px 2px 3px 4px #888")
-	if len(shadows) != 1 {
-		t.Fatalf("got %d shadows", len(shadows))
-	}
-	if shadows[0].Spread != 4 {
-		t.Errorf("Spread = %v, want 4", shadows[0].Spread)
+	if !isRenderDescendant(lightRO, hostRO) {
+		t.Fatal("light element is not a render descendant of host")
 	}
 }

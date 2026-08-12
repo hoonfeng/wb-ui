@@ -432,7 +432,7 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		box.AddChild(wrap)
 		inlineRun = nil
 	}
-	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
@@ -482,7 +482,7 @@ func isFlexContainerDisplay(d style.DisplayType) bool {
 }
 
 func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
-	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
