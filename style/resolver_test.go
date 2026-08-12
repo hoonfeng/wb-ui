@@ -823,3 +823,124 @@ func TestResolver_DocumentStyleDoesNotPenetrate(t *testing.T) {
 		t.Fatalf("document style penetrated shadow tree: color=%v want default black", cs.Color)
 	}
 }
+
+// ─── CSS Scoping: :host / :host-context / ::slotted / ::part ───
+
+func TestResolver_HostStyleFromShadow(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+
+	sheet := shadowSheet(t, sr, ":host { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(host)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf(":host color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_HostWithSelector(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	host.SetAttribute("class", "foo")
+	sr, _ := host.AttachShadow("open")
+
+	sheet := shadowSheet(t, sr, ":host(.foo) { color: red; } :host(.bar) { color: blue; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(host)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf(":host(.foo) color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_HostContext(t *testing.T) {
+	doc := dom.NewDocument()
+	wrapper := dom.NewElement(doc, "div")
+	wrapper.SetAttribute("class", "dark")
+	host := dom.NewElement(doc, "div")
+	_ = wrapper.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+
+	sheet := shadowSheet(t, sr, ":host-context(.dark) { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(host)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf(":host-context(.dark) color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_HostBeatsDocumentRule(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	host.SetAttribute("class", "host")
+	sr, _ := host.AttachShadow("open")
+
+	docSheet := newSheet(t, ".host { color: blue; }")
+	shadowSheet := shadowSheet(t, sr, ":host { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(docSheet)
+	r.AddStyleSheet(shadowSheet)
+	cs := r.ResolveElement(host)
+	// :host (scope=1) outranks the document .host rule (scope=0) for normal decls.
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf(":host should beat document rule: color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_SlottedStyle(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	slot := dom.NewElement(doc, "slot")
+	_ = sr.AppendChild(slot)
+	span := dom.NewElement(doc, "span")
+	_ = host.AppendChild(span) // light-DOM child, assigned to the default slot
+
+	sheet := shadowSheet(t, sr, "::slotted(span) { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(span)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("::slotted(span) color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_PartStyle(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn")
+	_ = sr.AppendChild(btn)
+
+	sheet := newSheet(t, "::part(btn) { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(btn)
+	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("::part(btn) color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_PartLosesToShadowRule(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn")
+	_ = sr.AppendChild(btn)
+
+	shadowSheet := shadowSheet(t, sr, "button { color: green; }")
+	docSheet := newSheet(t, "::part(btn) { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(shadowSheet)
+	r.AddStyleSheet(docSheet)
+	cs := r.ResolveElement(btn)
+	// shadow-internal button rule (scope=1) outranks the document ::part rule (scope=0).
+	if cs.Color.R != 0 || cs.Color.G != 255 || cs.Color.B != 0 {
+		t.Fatalf("shadow rule should beat ::part: color=%v want green", cs.Color)
+	}
+}

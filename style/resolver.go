@@ -263,7 +263,6 @@ func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
 }
 
 // collectedDecl is an intermediate structure used during cascade sorting.
-// collectedDecl is an intermediate structure used during cascade sorting.
 type collectedDecl struct {
 	decl        css.Declaration
 	origin      css.Origin
@@ -272,6 +271,12 @@ type collectedDecl struct {
 	sourceOrder int
 	selector    string // matched rule selector text (diag only)
 	sbKind      int    // scrollbar pseudo kind: 0=::-webkit-scrollbar, 1=::-webkit-scrollbar-thumb, -1=none
+	// scope is the tree-scope depth of the stylesheet the declaration came from
+	// (0 = document tree, 1 = shadow tree hosted directly in the document, 2 = a
+	// nested shadow tree, …). Per CSS Scoping Level 1 §3.3, for normal declarations
+	// a deeper scope outranks a shallower one (shadow rules beat document rules on
+	// the same element); for !important the order reverses.
+	scope int
 }
 
 // keyStyleProp lists the layout-critical properties whose cascade history the
@@ -322,6 +327,14 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	var collected []collectedDecl
 	for _, sheet := range r.sheets {
 		r.collectSheetDeclarations(sheet, el, &collected)
+		// Cross-shadow-boundary cascade origins (CSS Scoping Level 1): rules that
+		// target an element on the *other* side of a shadow boundary than their own
+		// stylesheet. :host rules style the shadow host; ::slotted rules style
+		// slot-assigned light-DOM nodes; ::part rules style shadow-tree elements
+		// from an outer scope.
+		r.collectShadowHostDeclarations(sheet, el, &collected)
+		r.collectSlottedDeclarations(sheet, el, &collected)
+		r.collectPartDeclarations(sheet, el, &collected)
 	}
 
 	// ::-webkit-scrollbar / ::-webkit-scrollbar-thumb rules (WebKit/Blink
@@ -365,6 +378,7 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 				important:   d.Important,
 				specificity: css.Specificity{A: 1, B: 0, C: 0}, // inline style specificity
 				sourceOrder: 1 << 30,
+				scope:       elScopeDepth(el),
 			})
 		}
 	}
@@ -379,12 +393,20 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 		if ai != bj {
 			return ai < bj
 		}
+		// Tree-scope depth: a deeper scope outranks a shallower one for normal
+		// declarations (shadow rules beat document rules on the same element);
+		// !important reverses the scope order (outer scope wins).
+		if a.scope != b.scope {
+			if a.important {
+				return a.scope > b.scope
+			}
+			return a.scope < b.scope
+		}
 		if c := a.specificity.Compare(b.specificity); c != 0 {
 			return c < 0
 		}
 		return a.sourceOrder < b.sourceOrder
 	})
-
 	// Apply declarations in sorted order; later ones overwrite earlier ones.
 	diag := DiagEnabled("style")
 	if diag {
@@ -478,8 +500,9 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 			r.sheetIndex[sheet] = bkt
 		}
 		order := 0
+		scope := sheetScopeDepth(sheet)
 		for _, ir := range bkt.candidates(el) {
-			order = r.collectPseudoDeclarationsFromRule(ir.rule, sheet.Origin(), el, pe, &collected, order)
+			order = r.collectPseudoDeclarationsFromRule(ir.rule, sheet.Origin(), el, pe, &collected, order, scope)
 		}
 		// @media / @supports bodies are scanned fully (rare).
 		for _, rule := range sheet.Rules() {
@@ -488,9 +511,9 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 				if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 					continue
 				}
-				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order)
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope)
 			case *css.SupportsRule:
-				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order)
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope)
 			}
 		}
 		if !found && len(collected) > 0 {
@@ -513,6 +536,12 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 		bj := importanceRank(b.origin, b.important)
 		if ai != bj {
 			return ai < bj
+		}
+		if a.scope != b.scope {
+			if a.important {
+				return a.scope > b.scope
+			}
+			return a.scope < b.scope
 		}
 		if c := a.specificity.Compare(b.specificity); c != 0 {
 			return c < 0
@@ -547,7 +576,7 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 // collectPseudoDeclarationsFromRule matches one StyleRule's selectors whose
 // pseudo-element equals pe, appending matched declarations. Shared by the
 // indexed and full-scan paths.
-func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, order int) int {
+func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, order, scope int) int {
 	if v.Selectors != nil {
 		for _, sel := range v.Selectors.Selectors {
 			if pseudoElementOf(&sel) != pe {
@@ -564,13 +593,14 @@ func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin cs
 					important:   d.Important,
 					specificity: spec,
 					sourceOrder: order,
+					scope:       scope,
 				})
 				order++
 			}
 		}
 	}
 	if len(v.NestedRules) > 0 {
-		order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order)
+		order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order, scope)
 	}
 	return order
 }
@@ -578,16 +608,16 @@ func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin cs
 // collectPseudoDeclarations 收集匹配「el + 伪元素 pe」的规则声明。
 // 与 collectDeclarations 的区别：不跳过含伪元素的选择器，而是要求选择器的
 // 伪元素恰好等于 pe（`X::after` 在解析 X 的 ::after 时收集）。
-func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, baseOrder int) int {
+func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, baseOrder, scope int) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			order = r.collectPseudoDeclarationsFromRule(v, origin, el, pe, collected, order)
+			order = r.collectPseudoDeclarationsFromRule(v, origin, el, pe, collected, order, scope)
 		case *css.MediaRule:
-			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order)
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope)
 		case *css.SupportsRule:
-			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order)
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope)
 		}
 	}
 	return order
@@ -766,6 +796,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 		r.sheetIndex[sheet] = bkt
 	}
 	origin := sheet.Origin()
+	scope := sheetScopeDepth(sheet)
 	cands := bkt.candidates(el)
 	// Collect in CSS source order (not bucket order) so the cascade's
 	// source-order comparison matches the full scan exactly; sourceOrder is
@@ -773,7 +804,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].order < cands[j].order })
 	order := 0
 	for _, ir := range cands {
-		order = r.collectFromStyleRule(ir.rule, origin, el, collected, order)
+		order = r.collectFromStyleRule(ir.rule, origin, el, collected, order, scope)
 	}
 	// @media / @supports rule bodies are scanned fully (their inner StyleRules
 	// are not in the index — they are few); their stream positions continue
@@ -784,9 +815,9 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue
 			}
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
 		case *css.SupportsRule:
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
 		}
 	}
 }
@@ -794,7 +825,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 // collectFromStyleRule matches one StyleRule's selectors against el and appends
 // matched declarations; recurses into nested rules (CSS nesting) afterwards.
 // This is the per-rule body shared by the indexed and full-scan paths.
-func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order int) int {
+func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order, scope int) int {
 	if v.Selectors != nil {
 		for _, sel := range v.Selectors.Selectors {
 			if r.checker.Match(sel, el) {
@@ -814,6 +845,7 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 						specificity: spec,
 						sourceOrder: order,
 						selector:    sel.String(),
+						scope:       scope,
 					})
 					order++
 				}
@@ -821,7 +853,7 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 		}
 	}
 	if len(v.NestedRules) > 0 {
-		order = r.collectDeclarations(v.NestedRules, origin, el, collected, order)
+		order = r.collectDeclarations(v.NestedRules, origin, el, collected, order, scope)
 	}
 	return order
 }
@@ -829,12 +861,12 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 // collectDeclarations walks a rule list, recursing into @media / @supports rules,
 // and appends matching declarations to collected with their cascade metadata.
 // Used for non-indexed containers (media/supports bodies) and nested rules.
-func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
+func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			order = r.collectFromStyleRule(v, origin, el, collected, order)
+			order = r.collectFromStyleRule(v, origin, el, collected, order, scope)
 		case *css.MediaRule:
 			// Evaluate media queries against the current device/viewport context.
 			// If the parsed query list is empty (parse error or unsupported syntax),
@@ -842,10 +874,10 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue // skip rules inside non-matching @media
 			}
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
 		case *css.SupportsRule:
 			// Supports is treated as always-true in this port.
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
 		case *css.FontFaceRule:
 			// Font face rules do not contribute declarations to elements; they are
 			// registered separately by the font selector.
@@ -865,6 +897,175 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 		}
 	}
 	return order
+}
+
+// ─── cross-shadow-boundary cascade origins (CSS Scoping Level 1) ───
+
+// collectScopedFromRules walks a rule list and appends declarations whose selectors
+// satisfy the given predicate (match) AND match el via the checker. It is the shared
+// traversal for :host / ::slotted / ::part routing — these rules target an element on
+// the far side of a shadow boundary from their stylesheet, so they bypass the normal
+// scoping-root isolation (and the hasPseudoElement skip) that collectSheetDeclarations
+// applies.
+func (r *Resolver) collectScopedFromRules(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int, match func(*css.ComplexSelector) bool) int {
+	order := baseOrder
+	for _, rule := range rules {
+		switch v := rule.(type) {
+		case *css.StyleRule:
+			if v.Selectors != nil {
+				for _, sel := range v.Selectors.Selectors {
+					if !match(&sel) {
+						continue
+					}
+					if !r.checker.Match(sel, el) {
+						continue
+					}
+					spec := css.SpecificityOfComplex(sel)
+					for _, d := range v.Declarations {
+						*collected = append(*collected, collectedDecl{
+							decl:        d,
+							origin:      origin,
+							important:   d.Important,
+							specificity: spec,
+							sourceOrder: order,
+							selector:    sel.String(),
+							scope:       scope,
+						})
+						order++
+					}
+				}
+			}
+			if len(v.NestedRules) > 0 {
+				order = r.collectScopedFromRules(v.NestedRules, origin, el, collected, order, scope, match)
+			}
+		case *css.MediaRule:
+			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
+				continue
+			}
+			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match)
+		case *css.SupportsRule:
+			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match)
+		}
+	}
+	return order
+}
+
+// matchHostSelector reports whether the complex selector contains a :host or
+// :host-context pseudo-class.
+func matchHostSelector(sel *css.ComplexSelector) bool {
+	if sel == nil {
+		return false
+	}
+	for _, comp := range sel.Compounds {
+		for _, s := range comp.Selectors {
+			if s.Match == css.MatchPseudoClass &&
+				(s.PseudoClass == css.PseudoClassHost || s.PseudoClass == css.PseudoClassHostContext) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchSlottedSelector reports whether the complex selector contains a ::slotted
+// pseudo-element.
+func matchSlottedSelector(sel *css.ComplexSelector) bool {
+	if sel == nil {
+		return false
+	}
+	for _, comp := range sel.Compounds {
+		for _, s := range comp.Selectors {
+			if s.Match == css.MatchPseudoElement && s.PseudoElem == css.PseudoElementSlotted {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchPartSelector reports whether the complex selector contains a ::part
+// pseudo-element.
+func matchPartSelector(sel *css.ComplexSelector) bool {
+	if sel == nil {
+		return false
+	}
+	for _, comp := range sel.Compounds {
+		for _, s := range comp.Selectors {
+			if s.Match == css.MatchPseudoElement && s.PseudoElem == css.PseudoElementPart {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// collectShadowHostDeclarations routes :host / :host-context rules to the shadow host.
+// A sheet inside el's shadow tree (scoping root's host == el) contributes its :host
+// rules to el. The scope is the shadow tree's depth, so :host rules outrank the host's
+// own document-tree rules (normal declarations).
+func (r *Resolver) collectShadowHostDeclarations(sheet *css.CSSStyleSheet, el *dom.Element, collected *[]collectedDecl) {
+	if sheet.Origin() == css.OriginUserAgent || !el.HasShadowRoot() {
+		return
+	}
+	sr := sheetScopingRoot(sheet)
+	if sr == nil || sr.Host() != el {
+		return
+	}
+	scope := sr.TreeScopeDepth()
+	order := 0
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchHostSelector)
+}
+
+// collectSlottedDeclarations routes ::slotted rules to slot-assigned light-DOM nodes.
+// When el is a light-DOM child of a shadow host assigned to a slot, the host's shadow
+// tree's sheets contribute their ::slotted rules to el (scope = shadow depth).
+func (r *Resolver) collectSlottedDeclarations(sheet *css.CSSStyleSheet, el *dom.Element, collected *[]collectedDecl) {
+	if sheet.Origin() == css.OriginUserAgent {
+		return
+	}
+	if el.AssignedSlot() == nil {
+		return
+	}
+	parent := el.ParentNode()
+	host, ok := parent.(*dom.Element)
+	if !ok {
+		return
+	}
+	sr := sheetScopingRoot(sheet)
+	if sr == nil || sr.Host() != host {
+		return
+	}
+	scope := sr.TreeScopeDepth()
+	order := 0
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchSlottedSelector)
+}
+
+// collectPartDeclarations routes ::part rules from an outer scope to shadow-tree
+// elements. When el lives inside a shadow tree and carries a `part` attribute, sheets
+// from a shallower scope (document tree, or an ancestor shadow tree) contribute their
+// ::part rules to el. The declaration scope stays the *sheet's* scope, so a document-
+// level ::part rule (scope 0) loses to the element's own shadow rules (scope N) for
+// normal declarations.
+func (r *Resolver) collectPartDeclarations(sheet *css.CSSStyleSheet, el *dom.Element, collected *[]collectedDecl) {
+	if sheet.Origin() == css.OriginUserAgent {
+		return
+	}
+	if len(el.PartNames()) == 0 {
+		return
+	}
+	elSR := dom.ContainingShadowRoot(el)
+	if elSR == nil {
+		return
+	}
+	sr := sheetScopingRoot(sheet)
+	if sr == elSR {
+		// The sheet lives in the same shadow tree as el: ::part only styles elements
+		// from an *outer* scope.
+		return
+	}
+	scope := sheetScopeDepth(sheet)
+	order := 0
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchPartSelector)
 }
 
 // importanceRank returns the cascade ordering key for (origin, !important). The
@@ -2905,6 +3106,31 @@ func sheetScopingRoot(sheet *css.CSSStyleSheet) *dom.ShadowRoot {
 		return nil
 	}
 	return dom.ContainingShadowRoot(owner)
+}
+
+// sheetScopeDepth returns the tree-scope depth of a stylesheet: 0 for a document-level
+// sheet (or UA sheet), N for a sheet inside an N-deep shadow tree. This is the "scope"
+// dimension of the cascade (CSS Scoping Level 1 §3.3).
+func sheetScopeDepth(sheet *css.CSSStyleSheet) int {
+	if sheet.Origin() == css.OriginUserAgent {
+		return 0
+	}
+	sr := sheetScopingRoot(sheet)
+	if sr == nil {
+		return 0
+	}
+	return sr.TreeScopeDepth()
+}
+
+// elScopeDepth returns the tree-scope depth of an element (0 in the document tree, N
+// inside an N-deep shadow tree). Inline style declarations carry this scope so a
+// shadow-tree element's inline style outranks a document-level ::part rule.
+func elScopeDepth(el *dom.Element) int {
+	sr := dom.ContainingShadowRoot(el)
+	if sr == nil {
+		return 0
+	}
+	return sr.TreeScopeDepth()
 }
 
 // splitShorthand splits a CSS shorthand value by the given separator and returns the

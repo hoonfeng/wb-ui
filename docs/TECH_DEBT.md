@@ -185,13 +185,29 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 4. **测试**：`TestResolver_ShadowInheritanceFromHost` / `_ShadowStyleScopedInside` /
 >    `_ShadowStyleDoesNotLeak` / `_DocumentStyleDoesNotPenetrate` 全绿，全量通过。
 >
-> **仍缺（后续增量）**：① `:host`/`::slotted`/`::part` selector 匹配与级联来源
-> （shadow 内容还无法给 host 定样式）；② 事件 `composedPath` 无 shadow 路径；③ 多
-> slot / 嵌套 shadow / fallback content。
+> **已实现级联来源（2026-08-13，本轮）**：
+> 1. **DOM 辅助**：`HasShadowRoot`（closed 也返回 true）/ `AssignedSlot`（slot 分配反向
+>    查询）/ `TreeScopeDepth`（shadow 嵌套深度）/ `PartNames`。
+> 2. **解析器**：`:host()`/`:host-context()`/`::slotted()` 参数解析为 SelectorList，
+>    `::part()` 参数解析为 part-name 列表。
+> 3. **SelectorChecker**：`:host`/`:host(sel)`/`:host-context(sel)`/`::slotted(sel)`/
+>    `::part(name)` 匹配逻辑（对标 CSS Scoping Level 1）。
+> 4. **级联 scope 维度**：`collectedDecl.scope` = 样式表 tree-scope 深度（0=document，
+>    N=N 层 shadow）；排序在 origin/importance 之后按 scope 比较——normal 声明内层
+>    scope 优先、!important 反转（外层优先）。
+> 5. **跨边界路由**：`collectShadowHostDeclarations`（:host 规则→host）、
+>    `collectSlottedDeclarations`（::slotted 规则→assigned light-DOM 节点）、
+>    `collectPartDeclarations`（::part 规则→shadow 内 part 元素）。
+> 6. **测试**：`TestResolver_Host*` / `TestResolver_SlottedStyle` / `TestResolver_Part*`
+>    + `TestSelector_Match*` 全绿，全量通过。
+>
+> **仍缺（后续增量）**：① `host-selector::part(name)` / `host-selector::slotted(...)`
+> 的前缀跨 shadow 边界前向匹配（当前只支持裸 `::part(name)` / `::slotted(sel)` 形式）；
+> ② 事件 `composedPath` 无 shadow 路径；③ 多 slot / 嵌套 shadow / fallback content。
 
 ### 现状定位
-- `css/selectorchecker.go:19`：`shadow-DOM :host / :host-context / ::slotted / ::part
-  are not implemented`。
+- `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，
+  但 host-selector 前缀跨 shadow boundary 前向匹配未实现。
 - `dom/node.go:13`、`dom/element.go:8`：整个 dom 包注释 `shadow tree / custom elements
   / mutation observers / style recalc / rendering hooks are omitted`。
 - `bindings/dom.go:3694` `getRootNode` 已按标准返回根，但注释点明「无 shadow DOM」。

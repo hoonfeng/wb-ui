@@ -109,6 +109,61 @@ func (e *Element) ShadowRoot() *ShadowRoot {
 	return e.shadowRoot
 }
 
+// HasShadowRoot reports whether the element hosts a shadow tree (open or closed).
+// Unlike ShadowRoot() it does NOT hide closed roots — it is the internal predicate
+// used by CSS :host / :host-context matching and slot assignment, which must work
+// for closed shadow roots too (the host always knows its own shadow tree).
+func (e *Element) HasShadowRoot() bool { return e.shadowRoot != nil }
+
+// AssignedSlot returns the <slot> element (inside this element's host's shadow tree)
+// that assigns this element, or nil when this element is not a light-DOM child of a
+// shadow host (or no matching slot exists). Mirrors Element::assignedSlot(). A
+// light-DOM child with a `slot="name"` attribute is assigned to the named slot; one
+// without is assigned to the default (unnamed) slot.
+func (e *Element) AssignedSlot() *Element {
+	parent := e.ParentNode()
+	if parent == nil {
+		return nil
+	}
+	host, ok := parent.(*Element)
+	if !ok || !host.HasShadowRoot() {
+		return nil
+	}
+	slotName := e.GetAttribute("slot")
+	var found *Element
+	var walk func(n Node)
+	walk = func(n Node) {
+		if found != nil {
+			return
+		}
+		if el, ok := n.(*Element); ok && el.LocalName() == "slot" {
+			name := el.GetAttribute("name")
+			if slotName == "" {
+				if name == "" {
+					found = el
+					return
+				}
+			} else if name == slotName {
+				found = el
+				return
+			}
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	for c := host.shadowRoot.FirstChild(); c != nil; c = c.NextSibling() {
+		walk(c)
+	}
+	return found
+}
+
+// PartNames returns the whitespace-separated list of part names from the element's
+// `part` attribute, mirroring Element::partNames(). Used by the ::part() pseudo-element.
+func (e *Element) PartNames() []string {
+	return strings.Fields(e.GetAttribute("part"))
+}
+
 // HasAttribute reports whether a named attribute is present, mirroring
 // Element::hasAttribute(name).
 func (e *Element) HasAttribute(name string) bool {

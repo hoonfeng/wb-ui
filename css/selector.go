@@ -6,7 +6,9 @@
 //   - selectors stored as a slice of CompoundSelector (left-to-right logical order)
 //     rather than WebKit's right-to-left array of single selectors
 //   - qualified names / namespaces collapsed to local name strings
-//   - shadow DOM / part / slotted selectors omitted
+//   - :host / :host-context / ::slotted / ::part are parsed (with selector-list or
+//     part-name-list arguments) and matched by SelectorChecker; ::part's forward-
+//     matching (part forwarding via exportparts) is not implemented
 //   - pseudo-classes for fullscreen / view-transition / view-transition-type omitted
 //   - argument parsing for :nth-* stores An+B as integers (no full An+B syntax for
 //     "even"/"odd" is exposed, but those are precomputed into (2,0) and (2,1))

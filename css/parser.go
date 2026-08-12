@@ -842,14 +842,27 @@ func (p *Parser) parsePseudo() (SimpleSelector, bool) {
 	if p.peek().Type == TokenRightParenthesis {
 		p.consume()
 	}
-	// For :is / :where / :not / :has, parse the argument as a selector list.
-	if pc == PseudoClassIs || pc == PseudoClassWhere || pc == PseudoClassNot || pc == PseudoClassHas {
+	// For :is / :where / :not / :has / :host / :host-context / ::slotted, parse the
+	// argument as a selector list.
+	if pc == PseudoClassIs || pc == PseudoClassWhere || pc == PseudoClassNot || pc == PseudoClassHas ||
+		pc == PseudoClassHost || pc == PseudoClassHostContext || pe == PseudoElementSlotted {
 		argParser := Parser{tokens: append(argTokens, Token{Type: TokenEOF})}
 		list, ok := argParser.parseSelectorList()
 		if !ok {
 			return SimpleSelector{}, false
 		}
 		ss.SelectorList = list
+		return ss, true
+	}
+	// ::part() takes a list of part names (space/comma-separated identifiers).
+	if pe == PseudoElementPart {
+		var names []string
+		for _, t := range argTokens {
+			if t.Type == TokenIdent {
+				names = append(names, t.Value)
+			}
+		}
+		ss.StringList = names
 		return ss, true
 	}
 	// For :nth-* the argument is an An+B expression.

@@ -619,3 +619,98 @@ func TestSelector_MatchHas(t *testing.T) {
 		t.Fatalf("div:has(span) should not match div with no span descendant")
 	}
 }
+
+// ─── CSS Scoping selectors (:host / :host-context / ::slotted / ::part) ───
+
+func parseComplex(t *testing.T, cssText string) ComplexSelector {
+	t.Helper()
+	list := NewParser(cssText).ParseSelectorList()
+	if list == nil || len(list.Selectors) == 0 {
+		t.Fatalf("parse %q failed", cssText)
+	}
+	return list.Selectors[0]
+}
+
+func TestSelector_MatchHost(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "div")
+	_, _ = host.AttachShadow("open")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, ":host"), host) {
+		t.Fatalf(":host should match a shadow host")
+	}
+	plain := dom.NewElement(doc, "div")
+	if c.Match(parseComplex(t, ":host"), plain) {
+		t.Fatalf(":host should not match a plain element")
+	}
+}
+
+func TestSelector_MatchHostWithSelector(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "div")
+	host.SetAttribute("class", "foo")
+	_, _ = host.AttachShadow("open")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, ":host(.foo)"), host) {
+		t.Fatalf(":host(.foo) should match host with class foo")
+	}
+	if c.Match(parseComplex(t, ":host(.bar)"), host) {
+		t.Fatalf(":host(.bar) should not match host with class foo")
+	}
+}
+
+func TestSelector_MatchHostContext(t *testing.T) {
+	doc := newTestDoc(t)
+	wrapper := dom.NewElement(doc, "div")
+	wrapper.SetAttribute("class", "dark")
+	host := dom.NewElement(doc, "div")
+	_ = wrapper.AppendChild(host)
+	_, _ = host.AttachShadow("open")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, ":host-context(.dark)"), host) {
+		t.Fatalf(":host-context(.dark) should match host inside .dark ancestor")
+	}
+	if c.Match(parseComplex(t, ":host-context(.light)"), host) {
+		t.Fatalf(":host-context(.light) should not match host inside .dark ancestor")
+	}
+}
+
+func TestSelector_MatchSlotted(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	slot := dom.NewElement(doc, "slot")
+	_ = sr.AppendChild(slot)
+	span := dom.NewElement(doc, "span")
+	_ = host.AppendChild(span) // light-DOM child assigned to the default slot
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "::slotted(span)"), span) {
+		t.Fatalf("::slotted(span) should match an assigned light-DOM span")
+	}
+	// A non-assigned element must not match ::slotted.
+	other := dom.NewElement(doc, "span")
+	if c.Match(parseComplex(t, "::slotted(span)"), other) {
+		t.Fatalf("::slotted(span) should not match an unassigned span")
+	}
+}
+
+func TestSelector_MatchPart(t *testing.T) {
+	doc := newTestDoc(t)
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn primary")
+	_ = sr.AppendChild(btn)
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "::part(btn)"), btn) {
+		t.Fatalf("::part(btn) should match an element with part=btn")
+	}
+	if c.Match(parseComplex(t, "::part(icon)"), btn) {
+		t.Fatalf("::part(icon) should not match an element without part=icon")
+	}
+}

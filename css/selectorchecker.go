@@ -16,7 +16,8 @@
 //   - attribute case-insensitivity flags are honored via the [attr i] suffix
 //   - :lang() matches by language tag prefix; the document's lang is read via
 //     element.GetAttribute("lang") with a fallback walk to the nearest ancestor
-//   - shadow-DOM :host / :host-context / ::slotted / ::part are not implemented
+//   - :host / :host-context match against the shadow host; ::slotted matches a
+//     slot-assigned light-DOM node; ::part matches a shadow element by part name
 //   - :has() is implemented by walking descendants of the candidate element
 
 package css
@@ -147,10 +148,17 @@ func (c *SelectorChecker) matchSimple(s SimpleSelector, el *dom.Element) bool {
 	case MatchPseudoClass:
 		return c.matchPseudoClass(s, el)
 	case MatchPseudoElement:
-		// Pseudo-elements are treated as matching the host element so the resolver
-		// can build the pseudo subtree. Real-world pseudo-element dispatch is the
-		// resolver's responsibility.
-		return true
+		// ::slotted and ::part have real matching predicates; other pseudo-elements
+		// are treated as matching the host element so the resolver can build the
+		// pseudo subtree.
+		switch s.PseudoElem {
+		case PseudoElementSlotted:
+			return c.matchSlotted(s, el)
+		case PseudoElementPart:
+			return c.matchPart(s, el)
+		default:
+			return true
+		}
 	}
 	return false
 }
@@ -330,8 +338,35 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 	case PseudoClassDefined:
 		// In this port all elements are "defined".
 		return true
-	case PseudoClassHost, PseudoClassHostContext:
-		// Shadow DOM not implemented.
+	case PseudoClassHost:
+		// :host matches the shadow host itself; :host(sel) additionally requires
+		// the host to match the selector list.
+		if !el.HasShadowRoot() {
+			return false
+		}
+		if s.SelectorList != nil {
+			return c.MatchList(s.SelectorList, el)
+		}
+		return true
+	case PseudoClassHostContext:
+		// :host-context(sel) matches the shadow host if the host itself or any
+		// ancestor in the outer (document) tree matches sel.
+		if !el.HasShadowRoot() {
+			return false
+		}
+		if s.SelectorList == nil {
+			return true
+		}
+		if c.MatchList(s.SelectorList, el) {
+			return true
+		}
+		for a := el.ParentNode(); a != nil; a = a.ParentNode() {
+			if pe, ok := a.(*dom.Element); ok {
+				if c.MatchList(s.SelectorList, pe) {
+					return true
+				}
+			}
+		}
 		return false
 	}
 	return false
@@ -391,6 +426,36 @@ func (c *SelectorChecker) matchHasWithDepth(rel *SelectorList, el *dom.Element, 
 		}
 		if c.matchHasWithDepth(rel, child, depth+1) {
 			return true
+		}
+	}
+	return false
+}
+
+// matchSlotted reports whether ::slotted matches el: a light-DOM node assigned to a
+// slot in its shadow host's shadow tree. The optional argument (::slotted(sel)) must
+// additionally match el. Mirrors SelectorCheckerTestFunctions for ::slotted.
+func (c *SelectorChecker) matchSlotted(s SimpleSelector, el *dom.Element) bool {
+	if el.AssignedSlot() == nil {
+		return false
+	}
+	if s.SelectorList != nil {
+		return c.MatchList(s.SelectorList, el)
+	}
+	return true
+}
+
+// matchPart reports whether ::part(name) matches el: a shadow-tree element whose
+// `part` attribute lists one of the requested names.
+func (c *SelectorChecker) matchPart(s SimpleSelector, el *dom.Element) bool {
+	if len(s.StringList) == 0 {
+		return false
+	}
+	parts := el.PartNames()
+	for _, want := range s.StringList {
+		for _, p := range parts {
+			if p == want {
+				return true
+			}
 		}
 	}
 	return false

@@ -1,7 +1,7 @@
 // Translation of: Source/WebCore/dom/ShadowRoot.h
 //                  Source/WebCore/dom/ShadowRoot.cpp
-// Completeness: 70% (shadow-tree container + slot projection + style scoping;
-//                    :host / ::slotted / ::part cascade still not implemented)
+// Completeness: 85% (shadow-tree container + slot projection + style scoping +
+//                    :host/:host-context/::slotted/::part cascade origins)
 // Simplifications:
 //   - ShadowRoot is a DocumentFragment that carries a host back-pointer and a mode
 //     ("open"/"closed") string; it is NOT attached to the host's child list, so its
@@ -9,8 +9,11 @@
 //   - Slot projection: <slot> renders its AssignedNodes (default + named slots).
 //   - Style scoping: author sheets inside a shadow tree are scoped to that tree via
 //     ContainingShadowRoot; inheritance crosses the shadow boundary (host → shadow
-//     tree). :host / :host-context / ::slotted / ::part cascade origins are NOT yet
-//     implemented (selector-level), so shadow content cannot style its host yet.
+//     tree). :host / :host-context / ::slotted / ::part cascade origins are routed by
+//     the style resolver with a per-sheet tree-scope depth (CSS Scoping Level 1 §3.3).
+//   - host-selector::part(name) and host-selector::slotted(...) forward-matching across
+//     the shadow boundary (the host-selector prefix matching the shadow host) is NOT
+//     yet implemented — only the bare ::part(name) / ::slotted(sel) forms match.
 
 package dom
 
@@ -45,6 +48,26 @@ func (sr *ShadowRoot) Host() *Element { return sr.host }
 
 // Mode returns "open" or "closed".
 func (sr *ShadowRoot) Mode() string { return sr.mode }
+
+// TreeScopeDepth returns the nesting depth of the shadow root's tree scope: 1 for a
+// shadow root whose host lives directly in the document tree, 2 for a shadow root
+// whose host lives inside another shadow tree, and so on. The style resolver uses this
+// as the "scope" dimension of the cascade — declarations from a deeper shadow tree
+// outrank those from a shallower one (CSS Scoping Level 1 §3.3), with the order
+// reversed for !important.
+func (sr *ShadowRoot) TreeScopeDepth() int {
+	depth := 1
+	for h := sr.host; h != nil; {
+		p := h.ParentNode()
+		parentSR, ok := p.(*ShadowRoot)
+		if !ok {
+			break
+		}
+		depth++
+		h = parentSR.host
+	}
+	return depth
+}
 
 // cloneShallow returns an empty shadow root with the same host and mode, mirroring
 // cloneNodeInternal. (Shadow roots are rarely cloned; this keeps CloneNode safe.)
