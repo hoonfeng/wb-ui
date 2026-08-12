@@ -152,6 +152,11 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// 只要渲染树有光标 box 就无条件补画（静态白左边框，优先保证可见；
 	// 层树正常时重复绘制 1px 无副作用）。FindRenderBoxForNode 走 map
 	// O(1)；box 缺失（display:none/未重建）时 findCursorBox 返回 nil。
+	// ★ 滚动补偿：fallback 在 paintLayerTree 之后执行，滚动容器的
+	// translate 已 Restore，而 cb.X()/Y() 是内容绝对坐标——不补偿
+	// 容器级 scroll offset 会把光标画在滚动前的位置（固定在屏幕坐标，
+	// 不随内容滚动）。页面级 view.ScrollOffset 已在 Paint 入口
+	// translate（defer Restore 覆盖至此），只需补偿容器级。
 	if cb := findCursorBox(view); cb != nil {
 		lw := lengthValue(cb.Style().BorderLeftWidth)
 		if lw <= 0 {
@@ -161,12 +166,14 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 		if bc := cb.Style().BorderColor("left"); bc.A > 0 {
 			col = toGraphicsColor(bc)
 		}
-		canvas.FillRect(cb.X(), cb.Y(), lw, cb.Height(), col)
+		csx, csy := caretScrollOffset(view, cb)
+		canvas.FillRect(cb.X()-csx, cb.Y()-csy, lw, cb.Height(), col)
 		if el, ok := cb.Node().(*dom.Element); ok {
-			RecordComponentPaint(el, cb.X(), cb.Y(), lw, cb.Height(), graphics.Color{}, col, true)
+			RecordComponentPaint(el, cb.X()-csx, cb.Y()-csy, lw, cb.Height(), graphics.Color{}, col, true)
 		}
-		if !CursorPainted && os.Getenv("WB_PAINT_TRACE") != "" {
-			log.Printf("[cursor-fallback] painted caret at (%.1f,%.1f %.1fx%.1f)", cb.X(), cb.Y(), lw, cb.Height())
+		if os.Getenv("WB_PAINT_TRACE") != "" {
+			log.Printf("[cursor-fallback] painted caret at (%.1f,%.1f %.1fx%.1f) scroll=(%.1f,%.1f) cursorPainted=%v",
+				cb.X()-csx, cb.Y()-csy, lw, cb.Height(), csx, csy, CursorPainted)
 		}
 	}
 
@@ -181,6 +188,17 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 // full render-tree walk. Cleared when the element no longer has a box (CM6
 // re-created it / display:none), triggering a fresh walk.
 var fallbackCursorEl *dom.Element
+
+// FindCursorBox locates the .cm-cursor element's RenderBox (the caret) via
+// a render-tree walk. ★ 2026-08-12：GetElementBoxRect 的滚动补偿对光标
+// 必须用它——FindRenderBoxForNode（nodeRenderMap）在 CM6 每次 measure
+// 重建光标元素后返回**旧 box 实例**，其渲染树父链断在 .cm-editor 之外
+// 拿不到 .cm-scroller 的滚动偏移 → 光标 getBoundingClientRect 不扣滚动
+// （固定屏幕坐标）。walk 找到的是当前树的光标 box，父链正确。
+// 返回 nil 表示光标没有 box（display:none / 未重建）。
+func FindCursorBox(view *RenderView) *RenderBox {
+	return findCursorBox(view)
+}
 
 // findCursorBox locates the .cm-cursor element's RenderBox (the caret).
 // Used by the Paint fallback to guarantee the caret is always drawn even
@@ -217,6 +235,30 @@ func findCursorBox(view *RenderView) *RenderBox {
 	}
 	walk(RenderObject(view))
 	return found
+}
+
+// caretScrollOffset 返回光标 box 到根之间所有滚动容器（overflow:
+// auto/scroll）的累计 scroll offset (x, y)。★ 光标补画（Paint fallback）
+// 在 paintLayerTree 之后执行，滚动容器的 canvas translate 已 Restore，
+// 而 cb.X()/cb.Y() 是内容绝对坐标——漏掉该补偿会把光标画在滚动前的
+// 位置（固定在屏幕坐标，不随内容滚动）。
+func caretScrollOffset(view *RenderView, cb *RenderBox) (float64, float64) {
+	if view == nil || cb == nil {
+		return 0, 0
+	}
+	var sx, sy float64
+	for p := cb.Parent(); p != nil; p = p.Parent() {
+		if rb := asRenderBox(p); rb != nil {
+			if st := rb.Style(); st != nil &&
+				(st.OverflowX == style.OverflowAuto || st.OverflowX == style.OverflowScroll ||
+					st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
+				ox, oy := view.BoxScrollOffset(rb)
+				sx += ox
+				sy += oy
+			}
+		}
+	}
+	return sx, sy
 }
 
 // opacityLayerBounds computes the SaveLayer bounds for an opacity layer:

@@ -716,6 +716,23 @@ func (wv *WebView) Document() *dom.Document {
 	return wv.mainFrame.Document()
 }
 
+// webkitAsRenderBox 把 RenderObject 转换为 *RenderBox（与 rendering 包
+// 内 asRenderBox 等价：RenderBlock/RenderBlockFlow/RenderView 嵌入
+// RenderBox，直接类型断言 *RenderBox 会失败——嵌入字段是值而非接口）。
+func webkitAsRenderBox(o rendering.RenderObject) *rendering.RenderBox {
+	switch v := o.(type) {
+	case *rendering.RenderBox:
+		return v
+	case *rendering.RenderBlock:
+		return &v.RenderBox
+	case *rendering.RenderBlockFlow:
+		return &v.RenderBlock.RenderBox
+	case *rendering.RenderView:
+		return &v.RenderBlockFlow.RenderBlock.RenderBox
+	}
+	return nil
+}
+
 // injectRenderTreeBridge wires the bindings package's render-tree callbacks
 // (Element.scrollTop/scrollHeight/clientHeight/offsetHeight/... accessors) to
 // this WebView's RenderView. Without it those CSSOM properties return 0 and
@@ -901,6 +918,16 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return 0, 0, 0, 0
 		}
 		box := rv.FindRenderBoxForNode(el)
+		// ★ 光标（cm-cursor）用渲染树 walk 找 box：FindRenderBoxForNode
+		// （nodeRenderMap）在 CM6 每次 measure 重建光标元素后映射到旧 box
+		// 实例 → 渲染树父链断在 .cm-editor 拿不到 .cm-scroller 滚动偏移 →
+		// getBoundingClientRect 不扣滚动（光标固定屏幕坐标）。FindCursorBox
+		// walk 当前渲染树，父链正确（与绘制 fallback 同语义）。
+		if strings.Contains(el.ClassName(), "cm-cursor") {
+			if cb := rendering.FindCursorBox(rv); cb != nil {
+				box = cb
+			}
+		}
 		// ★ WB_PAINT_TRACE=1：调试光标（cm-cursor）渲染树 box 查找——
 		// 反向跟踪「光标不可见」：box 是否存在、frame 几何、样式 display。
 		if os.Getenv("WB_PAINT_TRACE") != "" && strings.Contains(el.ClassName(), "cm-cursor") {
@@ -993,10 +1020,14 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 应变小）→ 更新 viewport → 行号 gutter 虚拟化重渲染。此前返回
 		// 未扣滚动的布局坐标 → 滚动后 rect 不变 → CM6 viewport 永不更新
 		// → 滚动后行号不刷新（用户「滚动时初始超出区域的行号都没有绘制」）。
-		// ★ 沿 DOM 祖先链查找滚动容器（渲染树 Parent 链在 CM6 scroller
-		// 结构下 Node 查找不可靠——同 Node 指针 BoxScrollOffset 结果不一
-		// 致，疑似 box 实例字段差异；DOM 链 + FindRenderBoxForNode 每次
-		// 命中同一 box，已验证返回正确偏移）。
+		// ★ 沿渲染树 Parent 链查找滚动容器（★ 2026-08-12 改为渲染树链：
+		// 原 DOM 祖先链对 .cm-cursor 失效——光标 DOM 的祖先链不经过
+		// .cm-scroller（CM6 把 cursorLayer 挂在不同层级/FindRenderBoxForNode
+		// 对祖先 DOM 返回 nil），滚动后光标的 getBoundingClientRect 不扣
+		// 滚动偏移 → 返回布局坐标（内容 top+容器偏移），CM6 认为光标没
+		// 动（「光标固定屏幕坐标」）；fallback 绘制（caretScrollOffset）
+		// 用渲染树链已验证可靠（scroll=(0,200) 正确）——几何桥与绘制
+		// 必须同一坐标语义，统一走渲染树链）。
 		// ★ sticky 语义：position:sticky 元素（及其子孙）只在「有
 		// top/bottom inset」时钉在滚动容器视口内（CSS: 无 inset 的
 		// sticky 等同 relative，不钉住）——CM6 的 .cm-gutters 是
@@ -1008,25 +1039,44 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 有 top/bottom 的 sticky（如 .tl-think-fold bottom:0）钉住 →
 		// 不扣该滚动容器偏移；更外层滚动容器照常扣。
 		sx, sy := 0.0, 0.0
-		stickySeen := box != nil && stickyHasInset(box)
-		for cur := el.ParentNode(); cur != nil; cur = cur.ParentNode() {
-			if el2, ok := cur.(*dom.Element); ok {
-				if b := rv.FindRenderBoxForNode(el2); b != nil {
-					if stickySeen {
-						if cs := b.Style(); cs != nil &&
-							(cs.OverflowX == style.OverflowAuto || cs.OverflowX == style.OverflowScroll ||
-								cs.OverflowY == style.OverflowAuto || cs.OverflowY == style.OverflowScroll) {
-							stickySeen = false
-						}
-						continue
-					}
-					ox, oy := rv.BoxScrollOffset(b)
-					sx += ox
-					sy += oy
-					if b.IsStickyPositioned() && stickyHasInset(b) {
-						stickySeen = true
-					}
+		// ★ stickySeen 必须同时要求「真是 sticky 定位」：CM6 光标
+		// .cm-cursor 是 position:absolute + top:4px（left/top 由 CM6 写
+		// 内联样式），stickyHasInset 只看 top/bottom 属性 → 光标被误判为
+		// sticky → 循环遇 cm-scroller（overflow:auto）时 continue 跳过
+		// 滚动偏移累计 → getBoundingClientRect 不扣滚动（光标固定屏幕
+		// 坐标）。只有真 sticky（IsStickyPositioned）且带 inset 才钉住。
+		stickySeen := box != nil && box.IsStickyPositioned() && stickyHasInset(box)
+		// ★ 渲染树 Parent 链（与绘制 caretScrollOffset 同语义）：从 box
+		// 向上找 overflow 滚动容器累加偏移。box 为 nil（inline 无 CSS box）
+		// 时退化为原 DOM 链兜底（Range 文本测量等场景 box 存在，此处
+		// 主要服务元素几何）。
+		anc := rendering.RenderObject(nil)
+		if box != nil {
+			anc = rendering.RenderObject(box)
+		}
+		for anc != nil && anc.Parent() != nil {
+			par := anc.Parent()
+			pb := webkitAsRenderBox(par)
+			if pb == nil {
+				// inline 祖先（RenderInline）无 CSS box：跳过继续向上。
+				anc = par
+				continue
+			}
+			b := pb
+			anc = par
+			if stickySeen {
+				if cs := b.Style(); cs != nil &&
+					(cs.OverflowX == style.OverflowAuto || cs.OverflowX == style.OverflowScroll ||
+						cs.OverflowY == style.OverflowAuto || cs.OverflowY == style.OverflowScroll) {
+					stickySeen = false
 				}
+				continue
+			}
+			ox, oy := rv.BoxScrollOffset(b)
+			sx += ox
+			sy += oy
+			if b.IsStickyPositioned() && stickyHasInset(b) {
+				stickySeen = true
 			}
 		}
 		return x0 - sx, y0 - sy, w, h
