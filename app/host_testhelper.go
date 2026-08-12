@@ -9,6 +9,7 @@ import (
 	"github.com/go-gl/glfw/v3.3/glfw"
 
 	"wb-ui/dom"
+	"wb-ui/platform/ime"
 	"wb-ui/platform/window"
 	"wb-ui/rendering"
 	"wb-ui/webkit"
@@ -259,6 +260,14 @@ func (h *Host) MockKeyChar(char rune) {
 		Type: window.EventChar,
 		Char: char,
 	})
+}
+
+// ApplyIMEEventsForTest 走真实 IME 事件处理路径（applyIMEEvents，与
+// processEvents 的 PollIMEEvents → applyIMEEvents 同一实现）：模拟
+// Windows IME 组合（compositionupdate）+ 提交（char）序列。用于验证
+// contenteditable（CM6）的 IME 输入链路与文本插入位置。
+func (h *Host) ApplyIMEEventsForTest(events []ime.Event) {
+	h.applyIMEEvents(events)
 }
 
 // MockMouseMove 模拟鼠标移动到 (cssX, cssY)，走真实 hover 路径：

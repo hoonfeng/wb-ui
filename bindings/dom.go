@@ -267,6 +267,9 @@ const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
 var IFrameSrcChanged func(el *dom.Element, src string)
 
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
+	// ★ 保存 interpreter：InsertTextAtSelection 插入后重建 selection
+	// range 需要（makeSelRange 用 rt.ObjectPrototype）。
+	sstate.rt = rt
 	// ★ document 切换（LoadHTML 加载新文档）时清理跨文档的全局缓存与
 	// 监听器 side-table：nodeWrapperCache 持有旧文档所有节点的 Go 强
 	// 引用、registeredListeners/windowEventListeners 持有旧页面注册的
@@ -2659,6 +2662,10 @@ func mutationRecordToJS(in *jsc.Interpreter, r *dom.MutationRecord) *jsc.JSObjec
 // 函数内局部：contenteditable 输入发生在 host 事件循环（非注册期）。
 type selState struct {
 	ranges []*jsc.JSObject
+	// rt 保存 RegisterDOMBindings 的 interpreter，供
+	// InsertTextAtSelection（contenteditable 光标插入）在插入后重建
+	// selection range（新文本节点）时使用。
+	rt *jsc.Interpreter
 }
 
 var sstate = &selState{}
@@ -2803,6 +2810,7 @@ func InsertTextAtSelection(text string) bool {
 	if off < 0 {
 		off = 0
 	}
+	insLen := len([]rune(text))
 	if t, ok := node.(*dom.Text); ok {
 		rs := []rune(t.NodeValue())
 		if off > len(rs) {
@@ -2821,6 +2829,14 @@ func InsertTextAtSelection(text string) bool {
 			if err := p.InsertBefore(ins, tail); err != nil {
 				return false
 			}
+			// ★ 插入后把选区光标移到插入文本之后（浏览器语义「文本往后
+			// 排」）：CM6 每次输入后 DOM 重建（readDOMChange 重写
+			// .cm-line），重建前的 sstate.ranges 指向旧文本节点/旧 offset
+			// → 下一次 InsertTextAtSelection 用旧位置插入 → 文本插到上次
+			// 输入之前（「文本插入到光标前」根因：probe 实测 IME 提交
+			// "拼"后普通字符 X 插到"拼"前面，funcX拼 vs func拼X）。这里
+			// 同步把 ranges[0] 更新为新插入文本节点 + 文本后的 offset。
+			sstate.updateRangeForInsert(ins, insLen)
 			return true
 		}
 		return false
@@ -2843,9 +2859,49 @@ func InsertTextAtSelection(text string) bool {
 		if err := el.InsertBefore(ins, ref); err != nil {
 			return false
 		}
+		sstate.updateRangeForInsert(ins, insLen)
 		return true
 	}
 	return false
+}
+
+// updateRangeForInsert 在文本插入后把 sstate.ranges[0] 更新为
+// 「父元素 + 插入文本之后的子节点索引」。★ 不用新文本节点本身：
+// CM6 每次输入后 readDOMChange 异步重建 .cm-line（旧文本节点被替换/
+// 分离），指向文本节点的 range 在重建后 startContainer.ParentNode()==nil
+// → 下一次 InsertTextAtSelection 插入失败（probe 实测 X 完全没插进去）。
+// 父元素（.cm-line）在重建后仍存在，元素级 offset 表示「第 N 个子节点
+// 之前」，重建后由 CM6 的 collapse 覆盖为精确位置（浏览器语义）。
+// 该 range 仅供下一次输入前短暂使用（同一帧内 readDOMChange 尚未运行）。
+func (s *selState) updateRangeForInsert(ins *dom.Text, insLen int) {
+	if s == nil || s.rt == nil || len(s.ranges) == 0 {
+		return
+	}
+	parent := ins.ParentNode()
+	if parent == nil {
+		return
+	}
+	// 子节点索引：ins 之后的索引 = ins 所在 index + 1（文本节点在
+	// DOM 中子节点粒度，元素 offset 以子节点计——splitText 后 ins 前
+	// 是原节点前半，索引计算需遍历）。
+	idx := 0
+	found := false
+	for c := parent.FirstChild(); c != nil; c = c.NextSibling() {
+		if c == ins {
+			found = true
+			idx++
+			break
+		}
+		idx++
+	}
+	if !found {
+		return
+	}
+	jsv := nodeToJS(s.rt, parent)
+	if jsv.IsNull() || jsv.IsUndefined() {
+		return
+	}
+	s.ranges = []*jsc.JSObject{makeSelRange(s.rt, jsv, int64(idx), jsv, int64(idx))}
 }
 
 // nodeToJS 将 dom.Node 转换为对应的 JS 对象。

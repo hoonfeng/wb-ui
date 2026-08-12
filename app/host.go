@@ -1462,6 +1462,26 @@ func (h *Host) Run() {
 					} else if os.Getenv("WB_IME_DEBUG") != "" {
 						log.Printf("[ime] FormControlCaretPosition not ok (FocusedFormControl set)")
 					}
+				} else if h.imeFocusedEl != nil && strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
+					// ★ contenteditable（CodeMirror 6 编辑器）：
+					// FocusedFormControl 为 nil（非表单控件）→ 之前候选
+					// 窗口永不更新，停留在初始位置（屏幕左上角/旧位置）。
+					// 用光标 box（cm-cursor）的屏幕坐标定位候选窗口——
+					// 与绘制 fallback 同一语义（渲染树 walk + 容器滚动
+					// 补偿 + 闪烁隐藏相位跳过）。
+					if cx, cy, ok := rendering.CaretScreenPosition(rv); ok {
+						cy -= float64(frameView.ScrollY())
+						if cy < 0 {
+							cy = 0
+						}
+						if h.lastIMEX != int32(cx) || h.lastIMEY != int32(cy) {
+							h.lastIMEX, h.lastIMEY = int32(cx), int32(cy)
+							if os.Getenv("WB_IME_DEBUG") != "" {
+								log.Printf("[ime] host SetIMECompositionPos contenteditable css=(%.0f,%.0f) scrollY=%d", cx, cy, frameView.ScrollY())
+							}
+							h.win.SetIMECompositionPos(cx, cy)
+						}
+					}
 				}
 
 				bgColor := findBodyBgColor(rendering.RenderObject(rv))

@@ -63,8 +63,8 @@ func ApplyAnimations(rv *RenderView) bool {
 				if applyAnimationToStyle(st, AnimationTime) {
 					active = true
 					if os.Getenv("WB_ANIM_DEBUG") != "" {
-						log.Printf("[anim] name=%q time=%.2f bgAnim=(%d,%d,%d,%d) bgStatic=(%d,%d,%d,%d)",
-							st.AnimationName, AnimationTime,
+						log.Printf("[anim] name=%q time=%.2f opacity=%.2f static=%.2f bgAnim=(%d,%d,%d,%d) bgStatic=(%d,%d,%d,%d)",
+							st.AnimationName, AnimationTime, st.Opacity, st.StaticOpacity,
 							st.AnimatedBackgroundColor.R, st.AnimatedBackgroundColor.G, st.AnimatedBackgroundColor.B, st.AnimatedBackgroundColor.A,
 							st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
 					}
@@ -244,7 +244,10 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64) bool {
 // progress (0.0–1.0) to the ComputedStyle.
 func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progress float64) {
 	// Opacity
-	if opacity, ok := interpolateKeyframeFloat(kf, progress, "opacity"); ok {
+	// ★ base = st.StaticOpacity：cm-blink 只有 50% 声明 opacity:0，
+	// 0%/100% 未声明 → 用静态值（通常 1.0）→ 动画在 1↔0 之间闪烁
+	// （此前插值对未声明端点返回 false → st.Opacity 永不变 → 光标不闪）。
+	if opacity, ok := interpolateKeyframeFloat(kf, progress, "opacity", st.StaticOpacity); ok {
 		st.Opacity = opacity
 	}
 
@@ -261,10 +264,10 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 		st.ScaleX = s
 		st.ScaleY = s
 	}
-	if sx, ok := interpolateKeyframeFloat(kf, progress, "scaleX"); ok {
+	if sx, ok := interpolateKeyframeFloat(kf, progress, "scaleX", 1.0); ok {
 		st.ScaleX = sx
 	}
-	if sy, ok := interpolateKeyframeFloat(kf, progress, "scaleY"); ok {
+	if sy, ok := interpolateKeyframeFloat(kf, progress, "scaleY", 1.0); ok {
 		st.ScaleY = sy
 	}
 
@@ -298,9 +301,72 @@ func applyTimingFunction(t float64, tf string) float64 {
 	case "ease-in-out":
 		// cubic-bezier(0.42, 0.0, 0.58, 1.0)
 		return cubicBezier(t, 0.42, 0.0, 0.58, 1.0)
+	case "step-start":
+		// Jump to the end immediately: stays at 1 for all t>0.
+		if t > 0 {
+			return 1
+		}
+		return 0
+	case "step-end":
+		// ★ CM6 光标闪烁（step-end = steps(1)）：跳变点位于关键帧序列
+		// 中点（50%）。0~50% 保持 0% 帧值（光标可见 opacity:1），
+		// 50%~100% 跳变到 50% 帧值（opacity:0，隐藏）——硬切换闪烁，
+		// 非线性渐变（用户「光标不闪」修复核心：此前 step-end 走线性
+		// 近似且关键帧插值对未声明端点失效，opacity 从不变化）。
+		if t >= 0.5 {
+			return 0.5 // 采样 50% 关键帧值（隐藏相位）
+		}
+		return 0 // 采样 0% 关键帧值（可见相位）
 	default:
+		// steps(N[, start|end]) — CM6 光标闪烁用 steps(1)（等价 step-end：
+		// 0~50% 保持 opacity:1，50%~100% 跳变 opacity:0，硬切换闪烁）。
+		if n, ok := parseStepsCount(tf); ok {
+			start := strings.Contains(tf, "start")
+			if n == 1 {
+				// steps(1) = step-end：跳变点在 50%（关键帧序列中点），
+				// 0~50% 用 0% 帧（可见），50%~100% 用 50% 帧（隐藏）。
+				if t >= 0.5 {
+					return 0.5
+				}
+				return 0
+			}
+			step := 1.0 / float64(n)
+			idx := int(t / step)
+			if idx >= n {
+				idx = n - 1
+			}
+			if start {
+				// steps(…, start): value jumps at the beginning of each step.
+				return float64(idx+1) / float64(n)
+			}
+			// steps(…, end) default: value jumps at the end of each step.
+			return float64(idx) / float64(n)
+		}
 		return t
 	}
+}
+
+// parseStepsCount extracts N from "steps(N)" / "steps(N, start|end)".
+func parseStepsCount(tf string) (int, bool) {
+	t := strings.TrimSpace(tf)
+	lower := strings.ToLower(t)
+	if !strings.HasPrefix(lower, "steps(") {
+		return 0, false
+	}
+	inner := t[len("steps("):]
+	if i := strings.Index(inner, ")"); i >= 0 {
+		inner = inner[:i]
+	}
+	// Split on comma (may be "4, end" / "4,end").
+	first := inner
+	if i := strings.Index(inner, ","); i >= 0 {
+		first = strings.TrimSpace(inner[:i])
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(first))
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // cubicBezier evaluates a cubic Bezier curve at parameter t using
@@ -402,10 +468,12 @@ func collectKeyframeColors(kf *css.KeyframesRule, propName string) []keyframePoi
 }
 
 // interpolateKeyframeFloat interpolates a numeric property at the given progress.
-// Returns (value, true) if keyframes for that property exist.
-func interpolateKeyframeFloat(kf *css.KeyframesRule, progress float64, propName string) (float64, bool) {
+// base is the element's static computed value, used for undeclared keyframes
+// (CSS: an undeclared keyframe keeps the static value). Pass st.StaticOpacity
+// for opacity so cm-blink (only 50% declares opacity) animates 1→0→1.
+func interpolateKeyframeFloat(kf *css.KeyframesRule, progress float64, propName string, base float64) (float64, bool) {
 	points := collectKeyframeFloats(kf, propName)
-	return interpolateFloatAt(points, progress)
+	return interpolateFloatAt(points, progress, base)
 }
 
 // interpolateKeyframeColor interpolates a color property at the given progress.
@@ -437,7 +505,7 @@ func interpolateTransformTranslate(kf *css.KeyframesRule, progress float64, func
 		return 0, false
 	}
 	sortKeyframes(points)
-	return interpolateFloatAt(points, progress)
+	return interpolateFloatAt(points, progress, 0)
 }
 
 // interpolateTransformScale parses scale from transform declarations.
@@ -446,26 +514,84 @@ func interpolateTransformScale(kf *css.KeyframesRule, progress float64) (float64
 }
 
 // interpolateFloatAt does linear interpolation between sorted keyframe points.
-func interpolateFloatAt(points []keyframePointFloat, progress float64) (float64, bool) {
+// base is used for keyframes that do not declare the property (invalid
+// points): CSS semantics say an undeclared keyframe keeps the element's
+// static computed value. CM6's caret blink (@keyframes cm-blink only
+// declares opacity at 50%; 0%/100% are empty) previously returned false
+// for every progress → st.Opacity never animated → caret never blinked.
+func interpolateFloatAt(points []keyframePointFloat, progress float64, base float64) (float64, bool) {
 	if len(points) == 0 {
 		return 0, false
 	}
+	// ★ 属性在所有关键帧都未声明（points 全 invalid，如 scaleX 在
+	// transform:scale() 动画中）→ 返回 false（不设置），不能让 base 回退
+	// 把「无动画」误报为「动画值=base」（否则 scaleX 分支覆盖 scale() 结果，
+	// 且 cm-blink 的 0%/100% 未声明场景需要 base 但 50% 已声明）。
+	hasValid := false
+	for _, p := range points {
+		if p.valid {
+			hasValid = true
+			break
+		}
+	}
+	if !hasValid {
+		return 0, false
+	}
+	// Resolve effective endpoints: invalid keyframes (property undeclared)
+	// take the static value. A point is "effective" if valid, otherwise the
+	// base substitutes.
+	eff := func(i int) float64 {
+		if points[i].valid {
+			return points[i].value
+		}
+		return base
+	}
+	// ★ 补齐隐式端点：CSS 关键帧未声明某属性时取静态值（base）。
+	// 真实 CM6 的 @keyframes cm-blink 只有 50% 帧（css 解析器丢弃空
+	// 块 0%/100%），points 可能只有 {0.5, 0} 一项——不加端点则任何
+	// progress 都返回该点值 → opacity 恒 0 → 光标不闪。这里按浏览器
+	// 语义补 0%/100% 虚拟端点（值=base），让插值在 1↔0↔1 之间变化
+	// （与显式空帧行为一致）。
+	if len(points) == 1 {
+		p := points[0]
+		if p.offset <= 0 {
+			return p.value, true
+		}
+		if p.offset >= 1 {
+			return p.value, true
+		}
+		// 单点在中部：0% 用 base，100% 用 base。
+		if progress <= p.offset {
+			t := progress / p.offset
+			return base + (p.value-base)*t, true
+		}
+		t := (progress - p.offset) / (1 - p.offset)
+		return p.value + (base-p.value)*t, true
+	}
+	// 首点 offset>0：前面补 base 虚拟点（隐式 0% 帧）。
+	if points[0].offset > 0 && progress <= points[0].offset {
+		t := progress / points[0].offset
+		return base + (eff(0)-base)*t, true
+	}
+	// 尾点 offset<1：后面补 base 虚拟点（隐式 100% 帧）。
+	lastIdx := len(points) - 1
+	if points[lastIdx].offset < 1 && progress >= points[lastIdx].offset {
+		t := (progress - points[lastIdx].offset) / (1 - points[lastIdx].offset)
+		return eff(lastIdx) + (base-eff(lastIdx))*t, true
+	}
 	// If progress is before the first keyframe or after the last, use nearest.
 	if progress <= points[0].offset {
-		return points[0].value, points[0].valid
+		return eff(0), true
 	}
 	last := points[len(points)-1]
 	if progress >= last.offset {
-		return last.value, last.valid
+		return eff(len(points) - 1), true
 	}
 	// Find the two surrounding keyframes.
 	for i := 0; i < len(points)-1; i++ {
 		if progress >= points[i].offset && progress <= points[i+1].offset {
-			if !points[i].valid || !points[i+1].valid {
-				return 0, false
-			}
 			t := (progress - points[i].offset) / (points[i+1].offset - points[i].offset)
-			return points[i].value + (points[i+1].value-points[i].value)*t, true
+			return eff(i) + (eff(i+1)-eff(i))*t, true
 		}
 	}
 	return 0, false

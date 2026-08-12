@@ -189,6 +189,12 @@ type NonInheritedData struct {
 	// ── Sizing / visibility ──
 	VerticalAlign string
 	Opacity       float64
+	// StaticOpacity 是 opacity 的静态计算值（样式解析时保存）。动画
+	// （@keyframes opacity）每帧改写 Opacity，StaticOpacity 保持解析值
+	// 不变——动画插值端点未声明（如 cm-blink 0%/100% 无 opacity）时
+	// 用 StaticOpacity 作 base，恢复静态值（浏览器语义：未声明关键帧
+	// = 元素静态计算值）。
+	StaticOpacity float64
 	ZIndex        int
 
 	// ── Generated content ──
@@ -247,6 +253,7 @@ func DefaultNonInheritedData() *NonInheritedData {
 		ColumnRuleStyle:    "none",
 		ColumnFill:         "balance",
 		Opacity:            1.0,
+		StaticOpacity:      1.0,
 		ZIndex:             0,
 		Content:            "",
 		TransitionProperty: "all",

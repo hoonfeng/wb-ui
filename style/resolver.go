@@ -1284,6 +1284,7 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	case "opacity":
 		if v, err := strconv.ParseFloat(valueString, 64); err == nil {
 			cs.Opacity = v
+			cs.StaticOpacity = v
 		}
 	case "z-index":
 		if v, err := strconv.Atoi(valueString); err == nil {
@@ -2926,6 +2927,12 @@ func parseAnimationShorthand(s string) (name string, duration float64, iteration
 				name = "none"
 			}
 		case pl == "linear", pl == "ease", pl == "ease-in", pl == "ease-out", pl == "ease-in-out":
+			timingFunction = pl
+		case pl == "step-start", pl == "step-end", strings.HasPrefix(pl, "steps("), strings.HasPrefix(pl, "cubic-bezier("):
+			// 函数形式 timing-function（CM6 光标闪烁用 steps(1)）：
+			// 必须识别为 timingFunction 而非动画名——否则 AnimationName
+			// 被错误设为 "steps(1)"，KeyframesLookup 找不到 cm-blink →
+			// 光标 opacity 动画完全不驱动（「光标不闪」根因之一）。
 			timingFunction = pl
 		case pl == "normal", pl == "reverse", pl == "alternate", pl == "alternate-reverse":
 			direction = pl

@@ -157,7 +157,20 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// 容器级 scroll offset 会把光标画在滚动前的位置（固定在屏幕坐标，
 	// 不随内容滚动）。页面级 view.ScrollOffset 已在 Paint 入口
 	// translate（defer Restore 覆盖至此），只需补偿容器级。
+	// ★ 闪烁：CM6 光标闪烁是 .cm-cursorLayer（祖先）的 opacity 动画
+	// （@keyframes cm-blink 50% opacity:0）。层树正常路径经
+	// paintOpacity/CumulativeOpacity 应用祖先 opacity（隐藏相位不画）；
+	// 但 fallback 直接 FillRect 绕过祖先 opacity → 隐藏相位仍画光标 →
+	// 光标恒定不闪。fallback 用 CumulativeOpacity 累计祖先链 opacity，
+	// opacity≈0 时跳过（闪烁隐藏相位）。
 	if cb := findCursorBox(view); cb != nil {
+		if CumulativeOpacity(RenderObject(cb)) <= 0.01 {
+			// 闪烁隐藏相位（祖先 opacity 动画为 0）：不补画。
+			if os.Getenv("WB_PAINT_TRACE") != "" {
+				log.Printf("[cursor-fallback] skip (opacity≈0) cursorPainted=%v", CursorPainted)
+			}
+			goto cursorFallbackDone
+		}
 		lw := lengthValue(cb.Style().BorderLeftWidth)
 		if lw <= 0 {
 			lw = 1.2
@@ -176,6 +189,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 				cb.X()-csx, cb.Y()-csy, lw, cb.Height(), csx, csy, CursorPainted)
 		}
 	}
+cursorFallbackDone:
 
 	// Clear the dirty rect after painting.
 	if view.IsDirty() {
@@ -259,6 +273,25 @@ func caretScrollOffset(view *RenderView, cb *RenderBox) (float64, float64) {
 		}
 	}
 	return sx, sy
+}
+
+// CaretScreenPosition returns the .cm-cursor caret's screen (CSS pixel)
+// coordinates: box layout position minus accumulated container scroll
+// offsets. Used by the Host to position the Windows IME composition/candidate
+// window at the caret for contenteditable editors (CM6) — the form-control
+// path (FormControlCaretPosition) only covers <input>/<textarea>. Returns
+// ok=false when there is no caret box (blink hidden phase / not focused).
+func CaretScreenPosition(view *RenderView) (x, y float64, ok bool) {
+	cb := FindCursorBox(view)
+	if cb == nil {
+		return 0, 0, false
+	}
+	if CumulativeOpacity(RenderObject(cb)) <= 0.01 {
+		// 闪烁隐藏相位：候选窗口不跟随（保持上次位置，避免跳顶）。
+		return 0, 0, false
+	}
+	sx, sy := caretScrollOffset(view, cb)
+	return cb.X() - sx, cb.Y() - sy, true
 }
 
 // opacityLayerBounds computes the SaveLayer bounds for an opacity layer:
