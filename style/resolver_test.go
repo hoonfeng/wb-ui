@@ -745,3 +745,81 @@ func checkLen(t *testing.T, name string, l Length, wantVal float64, wantUnit str
 		t.Errorf("%s.Unit=%q want %q", name, l.Unit, wantUnit)
 	}
 }
+
+// shadowSheet 构造一个 owner 位于 shadow tree 内 <style> 元素的 author 样式表，
+// 模拟 extractAndAddStyles 对 shadow 内 <style> 的提取（owner 决定 scoping root）。
+func shadowSheet(t *testing.T, sr *dom.ShadowRoot, cssText string) *css.CSSStyleSheet {
+	t.Helper()
+	host := sr.Host()
+	styleEl := dom.NewElement(host.OwnerDocument(), "style")
+	_ = sr.AppendChild(styleEl)
+	sheet := css.NewCSSStyleSheetWithOwner(styleEl, "")
+	p := css.NewParser(cssText)
+	p.ParseStyleSheetInto(sheet)
+	return sheet
+}
+
+func TestResolver_ShadowInheritanceFromHost(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, err := host.AttachShadow("open")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shadowChild := dom.NewElement(doc, "span")
+	_ = sr.AppendChild(shadowChild)
+
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, "div { color: green; }"))
+	cs := r.ResolveElement(shadowChild)
+	// shadow tree 顶层元素应通过 shadow root 继承 host 的 color。
+	if cs.Color.G != 255 {
+		t.Fatalf("shadow child color=%v want green inherited from shadow host", cs.Color)
+	}
+}
+
+func TestResolver_ShadowStyleScopedInside(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	span := dom.NewElement(doc, "span")
+	_ = sr.AppendChild(span)
+
+	sheet := shadowSheet(t, sr, "span { color: red; }")
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(span)
+	if cs.Color.R != 255 {
+		t.Fatalf("shadow-internal span color=%v want red", cs.Color)
+	}
+}
+
+func TestResolver_ShadowStyleDoesNotLeak(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	sheet := shadowSheet(t, sr, "span { color: red; }")
+
+	lightSpan := dom.NewElement(doc, "span") // 文档 light DOM，不在 shadow 内
+	r := NewResolver()
+	r.AddStyleSheet(sheet)
+	cs := r.ResolveElement(lightSpan)
+	if cs.Color.R != 0 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("shadow style leaked to document: color=%v want default black", cs.Color)
+	}
+}
+
+func TestResolver_DocumentStyleDoesNotPenetrate(t *testing.T) {
+	doc := dom.NewDocument()
+	host := dom.NewElement(doc, "div")
+	sr, _ := host.AttachShadow("open")
+	span := dom.NewElement(doc, "span")
+	_ = sr.AppendChild(span)
+
+	r := NewResolver()
+	r.AddStyleSheet(newSheet(t, "span { color: red; }"))
+	cs := r.ResolveElement(span)
+	if cs.Color.R != 0 || cs.Color.G != 0 || cs.Color.B != 0 {
+		t.Fatalf("document style penetrated shadow tree: color=%v want default black", cs.Color)
+	}
+}

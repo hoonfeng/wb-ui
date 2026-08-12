@@ -389,7 +389,12 @@ func (f *Frame) styleFingerprint() string {
 		return ""
 	}
 	h := fnv.New64a()
-	styleEls := f.document.GetElementsByTagName("style")
+	var styleEls []*dom.Element
+	dom.WalkComposedTree(f.document, func(n dom.Node) {
+		if el, ok := n.(*dom.Element); ok && strings.EqualFold(el.LocalName(), "style") {
+			styleEls = append(styleEls, el)
+		}
+	})
 	for _, el := range styleEls {
 		h.Write([]byte(el.TextContent()))
 		h.Write([]byte{0})
@@ -426,7 +431,15 @@ func (f *Frame) extractAndAddStyles() {
 	// stripping them flattened every scoped rule to global and leaked
 	// same-name classes across components (e.g. PlanView's .plan-empty
 	// margin-top:40px onto RightPanel's plan-container).
-	styleElements := f.document.GetElementsByTagName("style")
+	// ★ 用 WalkComposedTree 而非 GetElementsByTagName：后者只遍历 light DOM，
+	//   shadow tree 内的 <style> 会被漏掉。WalkComposedTree 进入 shadow tree，
+	//   使 shadow 内样式表也能被提取（其作用域由 style 层的 scoping root 判定）。
+	var styleElements []*dom.Element
+	dom.WalkComposedTree(f.document, func(n dom.Node) {
+		if el, ok := n.(*dom.Element); ok && strings.EqualFold(el.LocalName(), "style") {
+			styleElements = append(styleElements, el)
+		}
+	})
 	Logf("extractAndAddStyles", "styleElementCount=%d", len(styleElements))
 	for i, styleEl := range styleElements {
 		cssText := styleEl.TextContent()

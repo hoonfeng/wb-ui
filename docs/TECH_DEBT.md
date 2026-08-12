@@ -173,9 +173,21 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 >    / `TestShadowRootRendersInsteadOfLightDOM` / `TestSlotProjection` 全绿，全量
 >    `go test ./...` 通过。
 >
-> **仍缺（后续增量）**：① 样式隔离（shadow 内 `<style>` 仍全局级联，无 `:host`
-> 级联来源）；② `:host`/`::slotted`/`::part` selector 匹配；③ 事件 `composedPath`
-> 无 shadow 路径；④ 多 slot / 嵌套 shadow / fallback content。
+> **已实现样式隔离（2026-08-13，本轮）**：
+> 1. **继承链**：`style/resolver.go parentElement` 对「父是 ShadowRoot」的情况返回
+>    shadow host，使 shadow tree 顶层元素从 host 继承（CSS Scoping 继承跨边界）。
+> 2. **作用域隔离**：`collectSheetDeclarations` 开头按 scoping root 过滤——UA sheet
+>    全局作用；author sheet 只在相同 shadow root 内作用（文档级 sheet 不穿透 shadow，
+>    shadow 内 sheet 不泄漏到文档/其它 shadow）。
+> 3. **样式提取**：`page/frame.go` 的 `extractAndAddStyles` + `styleFingerprint` 改用
+>    `dom.WalkComposedTree`（新增）进入 shadow tree 收集 `<style>`（此前
+>    `GetElementsByTagName` 只遍历 light DOM，漏掉 shadow 内 `<style>`）。
+> 4. **测试**：`TestResolver_ShadowInheritanceFromHost` / `_ShadowStyleScopedInside` /
+>    `_ShadowStyleDoesNotLeak` / `_DocumentStyleDoesNotPenetrate` 全绿，全量通过。
+>
+> **仍缺（后续增量）**：① `:host`/`::slotted`/`::part` selector 匹配与级联来源
+> （shadow 内容还无法给 host 定样式）；② 事件 `composedPath` 无 shadow 路径；③ 多
+> slot / 嵌套 shadow / fallback content。
 
 ### 现状定位
 - `css/selectorchecker.go:19`：`shadow-DOM :host / :host-context / ::slotted / ::part

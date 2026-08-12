@@ -1,16 +1,16 @@
 // Translation of: Source/WebCore/dom/ShadowRoot.h
 //                  Source/WebCore/dom/ShadowRoot.cpp
-// Completeness: 40% (minimum viable shadow-tree container; slot assignment /
-//                  style scoping / :host cascade are not yet implemented)
+// Completeness: 70% (shadow-tree container + slot projection + style scoping;
+//                    :host / ::slotted / ::part cascade still not implemented)
 // Simplifications:
 //   - ShadowRoot is a DocumentFragment that carries a host back-pointer and a mode
 //     ("open"/"closed") string; it is NOT attached to the host's child list, so its
 //     ParentNode() is nil (matching the DOM spec where shadowRoot.parentNode === null).
-//   - No slot assignment / flattened-tree composition yet: light-DOM children are
-//     hidden once a shadow root exists (FirstComposedChild returns the shadow root's
-//     children), until <slot> projection lands.
-//   - No style scoping: styles inside the shadow tree still participate in the
-//     document-wide cascade (no :host / ::slotted source).
+//   - Slot projection: <slot> renders its AssignedNodes (default + named slots).
+//   - Style scoping: author sheets inside a shadow tree are scoped to that tree via
+//     ContainingShadowRoot; inheritance crosses the shadow boundary (host → shadow
+//     tree). :host / :host-context / ::slotted / ::part cascade origins are NOT yet
+//     implemented (selector-level), so shadow content cannot style its host yet.
 
 package dom
 
@@ -65,6 +65,42 @@ func FirstComposedChild(el *Element) Node {
 		return el.shadowRoot.FirstChild()
 	}
 	return el.FirstChild()
+}
+
+// ContainingShadowRoot returns the innermost shadow root containing n, walking n's
+// ancestor chain until a ShadowRoot is found. Returns nil when n lives in the
+// document tree (or a detached subtree without a shadow root). This is the scoping
+// predicate the style resolver uses to decide whether an author stylesheet inside a
+// shadow tree applies to a given element (and vice versa).
+func ContainingShadowRoot(n Node) *ShadowRoot {
+	for p := n.ParentNode(); p != nil; p = p.ParentNode() {
+		if sr, ok := p.(*ShadowRoot); ok {
+			return sr
+		}
+	}
+	return nil
+}
+
+// WalkComposedTree performs a depth-first walk of the composed (flattened) tree: for a
+// host element it descends into its shadow tree instead of its light-DOM children.
+// Slot-projected nodes are NOT revisited here (they already appear at their light-DOM
+// position), so each node is visited exactly once. visit is called for every node
+// (elements and text). Used by the style-extraction pass to collect <style> elements
+// that live inside shadow trees, which GetElementsByTagName (light-DOM only) misses.
+func WalkComposedTree(root Node, visit func(Node)) {
+	if root == nil {
+		return
+	}
+	visit(root)
+	if el, ok := root.(*Element); ok && el.shadowRoot != nil {
+		for c := el.shadowRoot.FirstChild(); c != nil; c = c.NextSibling() {
+			WalkComposedTree(c, visit)
+		}
+		return
+	}
+	for c := root.FirstChild(); c != nil; c = c.NextSibling() {
+		WalkComposedTree(c, visit)
+	}
 }
 
 // AssignedNodes returns the light-DOM nodes assigned to a <slot> element in the

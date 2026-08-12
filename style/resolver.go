@@ -751,6 +751,15 @@ func (b *ruleBucket) candidates(el *dom.Element) []indexedRule {
 // to the original full scan; the stream order continues from the indexed rules
 // so the cascade's source-order comparison stays faithful to the CSS source.
 func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.Element, collected *[]collectedDecl) {
+	// ★ 样式作用域隔离（CSS Scoping）：UA sheet 全局作用；author sheet 只在相同
+	// 的 scoping root 内作用——文档级 author sheet 不匹配 shadow tree 内元素，
+	// shadow tree 内 author sheet 也不匹配文档/其它 shadow tree 的元素。这防止
+	// shadow 内的 <style> 泄漏到全局、也防止全局样式穿透进 shadow tree。
+	if sheet.Origin() != css.OriginUserAgent {
+		if sheetScopingRoot(sheet) != dom.ContainingShadowRoot(el) {
+			return
+		}
+	}
 	bkt := r.sheetIndex[sheet]
 	if bkt == nil {
 		bkt = buildRuleBucket(sheet)
@@ -2876,7 +2885,26 @@ func parentElement(el *dom.Element) *dom.Element {
 	if pe, ok := p.(*dom.Element); ok {
 		return pe
 	}
+	// A shadow tree's top-level elements inherit from the shadow host (CSS Scoping:
+	// inheritance crosses the shadow boundary from host to shadow tree). The raw
+	// ParentNode of such an element is the ShadowRoot (a DocumentFragment), not an
+	// Element, so it would otherwise break the inheritance chain.
+	if sr, ok := p.(*dom.ShadowRoot); ok {
+		return sr.Host()
+	}
 	return nil
+}
+
+// sheetScopingRoot returns the shadow root an author stylesheet is scoped to, derived
+// from its owner node's position in the tree. Document-level sheets (owner nil, or an
+// owner outside any shadow tree) return nil. User-agent sheets are never scoped and
+// the caller short-circuits before calling this.
+func sheetScopingRoot(sheet *css.CSSStyleSheet) *dom.ShadowRoot {
+	owner := sheet.OwnerNode()
+	if owner == nil {
+		return nil
+	}
+	return dom.ContainingShadowRoot(owner)
 }
 
 // splitShorthand splits a CSS shorthand value by the given separator and returns the
