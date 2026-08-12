@@ -875,6 +875,25 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		return x0, y0, w, h
 	}
+	// GetTextBasePos：返回文本节点自身首个 render segment 的绝对位置。
+	// ★ 裸文本节点（CM6 行内标点/空格直接挂在 .cm-line 下，父元素是 block
+	// 容器）的 Range.getClientRects 子区间测量：父 box left = 行首，漏掉
+	// 该节点前面兄弟内容宽度 →「空格多的行」posAtCoords 错乱。文本节点
+	// 的 RenderText segment.X 已含行内全部前缀（等于浏览器 Range 起始）。
+	bindings.GetTextBasePos = func(n dom.Node) (float64, float64, bool) {
+		rv := wv.RenderView()
+		if rv == nil || n == nil {
+			return 0, 0, false
+		}
+		ro := rv.FindRenderObjectForNode(n)
+		if rt, ok := ro.(*rendering.RenderText); ok {
+			segs := rt.Segments()
+			if len(segs) > 0 {
+				return segs[0].X, segs[0].Y, true
+			}
+		}
+		return 0, 0, false
+	}
 	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
 		forceLayout()
 		rv := wv.RenderView()

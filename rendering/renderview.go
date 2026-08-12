@@ -984,6 +984,14 @@ func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *lay
 	lChildren := make([]layout.Box, len(orig))
 	copy(lChildren, orig)
 	for rc := parentRO.FirstChild(); rc != nil && len(lChildren) > 0; rc = rc.NextSibling() {
+		// ★ 填 nodeRenderMap：syncOne 只在 ElementBox 匹配时调用，RenderText
+		// 等非 box 节点（CM6 行内裸文本 `(`、`)  `）走 rt 分支 SetSegments
+		// 却不登记 map → bindings.GetTextBasePos（Range.getClientRects 的
+		// 裸文本段位置查询）FindRenderObjectForNode 返回 nil → 子区间 rect
+		// 用父 box 左（行首）→「空格多的行」posAtCoords 错乱。
+		if rv := rc.View(); rv != nil && rc.Node() != nil {
+			rv.nodeRenderMap[rc.Node()] = rc
+		}
 		matched := -1
 		for i, lc := range lChildren {
 			if childEb, ok := lc.(*layout.ElementBox); ok {

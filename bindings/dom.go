@@ -60,6 +60,17 @@ var OnClassChanged func(el *dom.Element)
 // to measure text widths for CodeMirror 6's charWidth/lineHeight probing.
 // The embedder (app.Host / webkit.WebView) wires it to the style resolver.
 var GetElementComputedFont func(el *dom.Element) (family string, size float64, weight int, style string)
+
+// GetTextBasePos returns the layout base position (left, top in page
+// coords) of a text node's first render segment. Range.getClientRects
+// measures text-node substrings relative to the node's own inline origin —
+// for a bare text node whose parent is a block container (e.g. CM6
+// highlights `(` and `)  ` as raw text nodes directly under .cm-line),
+// the parent box's left is the line start, NOT the node's x within the
+// line. Using the render segment's x (which already includes all sibling
+// content before it on the same line) fixes posAtCoords scanning for
+// space-heavy lines ("a   b", indent + comment).
+var GetTextBasePos func(t dom.Node) (left, top float64, ok bool)
 var FocusBridge func(el *dom.Element, focused bool)
 
 // SelectionBridge is an optional callback invoked when JS reads/writes an
@@ -4505,22 +4516,41 @@ func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
 		if boxFn == nil {
 			boxFn = GetElementBoxRect
 		}
-		if boxFn != nil {
-			elLeft, elTop, _, _ = boxFn(parent)
+		// ★ 裸文本节点优先用自身的 render segment 位置：CM6 把行内
+		// `(` / `)  ` 等标点与空格渲染为 cm-line 的裸文本子节点（父元素
+		// 是 block 容器）。父 box 的 left = 行首，不含该节点前面兄弟内容
+		// 的宽度 → 子区间 rect 恒错（posAtCoords 对「空格多的行」错乱：
+		// span 首字符与裸文本标点的 x 全落在行首）。文本节点自身的
+		// RenderText segment.X 已含行内全部前缀宽度（绝对坐标）。
+		textBaseUsed := false
+		if GetTextBasePos != nil {
+			if bx, by, ok := GetTextBasePos(t); ok {
+				elLeft, elTop = bx, by
+				textBaseUsed = true
+			}
+		}
+		if !textBaseUsed {
+			if boxFn != nil {
+				elLeft, elTop, _, _ = boxFn(parent)
+			}
 		}
 		// ★ 内容从 padding 内侧开始：浏览器 Range 的 left = 父元素 border
 		// box 左 + border-left + padding-left（+ 前缀文本宽）。CM6 的
 		// .cm-line 有 padding: 0 2px 0 6px（行首 6px 缩进）——漏加则
 		// 字符 x 偏移少 6px（# 注释与浏览器错位）。border 默认 0 忽略。
-		if cs := computedStyleFor(parent); cs != nil {
-			if v, ok := cs["padding-left"]; ok {
-				if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
-					elLeft += pv
+		// ★ textBaseUsed 时 elLeft 已是文本节点首字符的绝对 x（segment.X
+		// 已含行内全部前缀 + padding），再加 padding 会双计 6px。
+		if !textBaseUsed {
+			if cs := computedStyleFor(parent); cs != nil {
+				if v, ok := cs["padding-left"]; ok {
+					if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
+						elLeft += pv
+					}
 				}
-			}
-			if v, ok := cs["padding-top"]; ok {
-				if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
-					elTop += pv
+				if v, ok := cs["padding-top"]; ok {
+					if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil {
+						elTop += pv
+					}
 				}
 			}
 		}
