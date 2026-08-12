@@ -1,5 +1,7 @@
 // Command pxcheck reads a specific pixel from a rendered PNG (for probe
 // validation): button interior should be transparent (activity-bar bg shows).
+//go:build ignore
+
 package main
 
 import (

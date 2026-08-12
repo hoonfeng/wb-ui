@@ -126,7 +126,9 @@ type imeCharPosition struct {
 	Size     uint32 // dwSize — size of the structure
 	CharPos  uint32 // dwCharPos — character index in the string
 	PtX, PtY int32  // pt — SCREEN coordinates of the character (top-left)
-	Hwnd     uintptr
+	LineHeight         uint32 // cLineHeight — line height in pixels
+	DocLeft, DocTop    int32  // rcDocument — document rectangle (left/top)
+	DocRight, DocBottom int32 // rcDocument — document rectangle (right/bottom)
 }
 
 // ============================================================================
@@ -377,7 +379,7 @@ func (h *WindowsHandler) imeWndProc(hwnd uintptr, msg uint32, wParam, lParam uin
 			// the candidate window's own height — the caret-bottom anchor
 			// alone left the list flush with (covering) the caret line.
 			cp.PtY = pt.Y + y + candidateWindowHeight
-			cp.Hwnd = hwnd
+			cp.Size = uint32(unsafe.Sizeof(imeCharPosition{}))
 			if os.Getenv("WB_IME_DEBUG") != "" {
 				log.Printf("[ime] IMR_QUERYCHARPOSITION charPos=%d screen=(%d,%d) hwnd=%#x", cp.CharPos, cp.PtX, cp.PtY, hwnd)
 			}

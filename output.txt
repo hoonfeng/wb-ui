@@ -1,3 +1,0 @@
-# wb-ui/layout
-layout\inlineformattingcontext.go:177:8: declared and not used: b
-layout\inlineformattingcontext.go:178:8: declared and not used: p

@@ -1,5 +1,7 @@
 // Command absflex_dump renders absflex_test.html and prints geometry of the
 // absolute label inside a flex-centered relative wrapper.
+//go:build ignore
+
 package main
 
 import (

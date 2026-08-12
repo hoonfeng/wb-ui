@@ -38,3 +38,6 @@ dev/consistency/report/
 _debug_*.py 
 _fix_*.py 
 gen_*.py
+# Python bytecode
+__pycache__/
+*.pyc

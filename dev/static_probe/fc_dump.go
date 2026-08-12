@@ -1,5 +1,7 @@
 // Command fc_dump renders flexcenter_test.html and prints the geometry of the
 // three flex-column children, revealing the justify-content:center bug.
+//go:build ignore
+
 package main
 
 import (

@@ -56,7 +56,8 @@ func edgeShot(c TestCase) (string, int, int, error) {
 	}
 	f, err := os.Open(out)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("open screenshot: %w", err)
+		return "", 0, 0, fmt.Errorf("browser produced no screenshot (stderr: %s): %w",
+			strings.TrimSpace(stderr.String()), err)
 	}
 	defer f.Close()
 	img, err := png.Decode(f)
