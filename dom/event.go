@@ -9,7 +9,9 @@
 //   - event timestamps use Go time.Time instead of WTF::MonotonicTime
 //   - isTrusted/IsComposed legacy flags are kept but trusted events are user-created
 //     only via constructors in this port
-//   - composedPath / EventPath shadow-tree details are omitted
+//   - composedPath / EventPath: the composed path is built at dispatch time via
+//     ComposedParent, crossing shadow boundaries for composed events and stopping at
+//     the shadow root for non-composed events; event retargeting is not implemented
 //   - wtf.AtomString is available but event types use native Go strings for ergonomics
 
 package dom
@@ -70,6 +72,7 @@ type eventInternal interface {
 	setCurrentTarget(EventTarget)
 	setEventPhase(EventPhase)
 	setInPassiveListener(bool)
+	setPath([]EventTarget)
 	resetBeforeDispatch()
 	resetAfterDispatch()
 }
@@ -95,6 +98,7 @@ type baseEvent struct {
 	phase                     EventPhase
 	target                    EventTarget
 	currentTarget             EventTarget
+	path                      []EventTarget
 	propagationStopped        bool
 	immediatePropagationStopped bool
 	defaultPrevented          bool
@@ -170,9 +174,14 @@ func (e *baseEvent) StopImmediatePropagation() {
 	e.propagationStopped = true
 }
 
-// ComposedPath returns the event's path. Since shadow DOM is not supported,
-// the path is [Target] when target is set, nil otherwise.
+// ComposedPath returns the event's composed path (the list of targets the event
+// would visit during propagation, from target up to the root, crossing shadow
+// boundaries for composed events). It is computed at dispatch time and stored; for a
+// non-dispatched event it falls back to [target] when a target is set, else nil.
 func (e *baseEvent) ComposedPath() []EventTarget {
+	if e.path != nil {
+		return e.path
+	}
 	if e.target == nil {
 		return nil
 	}
@@ -194,6 +203,7 @@ func (e *baseEvent) setTarget(t EventTarget)           { e.target = t }
 func (e *baseEvent) setCurrentTarget(t EventTarget)    { e.currentTarget = t }
 func (e *baseEvent) setEventPhase(p EventPhase)        { e.phase = p }
 func (e *baseEvent) setInPassiveListener(v bool)       { e.inPassiveListener = v }
+func (e *baseEvent) setPath(p []EventTarget)           { e.path = p }
 
 // resetBeforeDispatch clears the per-dispatch mutable state so a reused Event object
 // starts a fresh propagation pass, mirroring Event::resetBeforeDispatch().
@@ -210,6 +220,7 @@ func (e *baseEvent) resetBeforeDispatch() {
 func (e *baseEvent) resetAfterDispatch() {
 	e.currentTarget = nil
 	e.inPassiveListener = false
+	e.path = nil
 }
 
 // IsBeingDispatched reports whether the dispatch flag is set, mirroring

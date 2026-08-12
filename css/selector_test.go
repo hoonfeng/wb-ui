@@ -754,3 +754,58 @@ func TestSelector_MatchSlottedWithHostPrefix(t *testing.T) {
 		t.Fatalf("ywidget::slotted(span) should not match host tagged xwidget")
 	}
 }
+
+// TestSelector_MatchPartAcrossCombinator covers the cross-shadow-boundary forward
+// matching across a combinator: `.outer x-widget::part(btn)` must match the part
+// element inside x-widget's shadow tree when `.outer` is an ancestor of the host
+// (in the light-DOM tree), NOT an ancestor of the part element (which is impossible,
+// since the part element lives in the shadow tree).
+func TestSelector_MatchPartAcrossCombinator(t *testing.T) {
+	doc := newTestDoc(t)
+	outer := dom.NewElement(doc, "div")
+	outer.SetAttribute("class", "outer")
+	host := dom.NewElement(doc, "xwidget")
+	_ = outer.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "btn")
+	_ = sr.AppendChild(btn)
+	c := NewSelectorChecker()
+
+	// descendant combinator: .outer is an ancestor of the host.
+	if !c.Match(parseComplex(t, ".outer xwidget::part(btn)"), btn) {
+		t.Fatalf(".outer xwidget::part(btn) should match (ancestor .outer + host + part)")
+	}
+	// child combinator: host's direct parent is .outer.
+	if !c.Match(parseComplex(t, ".outer > xwidget::part(btn)"), btn) {
+		t.Fatalf(".outer > xwidget::part(btn) should match (direct parent .outer)")
+	}
+	// negative: no matching ancestor.
+	if c.Match(parseComplex(t, ".nope xwidget::part(btn)"), btn) {
+		t.Fatalf(".nope xwidget::part(btn) should not match (no .nope ancestor)")
+	}
+}
+
+// TestSelector_MatchSlottedAcrossCombinator mirrors the ::slotted variant: the host
+// prefix crosses the boundary, then the combinator walks the host's light-DOM
+// ancestors.
+func TestSelector_MatchSlottedAcrossCombinator(t *testing.T) {
+	doc := newTestDoc(t)
+	outer := dom.NewElement(doc, "div")
+	outer.SetAttribute("class", "outer")
+	host := dom.NewElement(doc, "xwidget")
+	_ = outer.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	slot := dom.NewElement(doc, "slot")
+	_ = sr.AppendChild(slot)
+	span := dom.NewElement(doc, "span")
+	_ = host.AppendChild(span) // light-DOM child assigned to the default slot
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, ".outer xwidget::slotted(span)"), span) {
+		t.Fatalf(".outer xwidget::slotted(span) should match (ancestor .outer)")
+	}
+	if c.Match(parseComplex(t, ".nope xwidget::slotted(span)"), span) {
+		t.Fatalf(".nope xwidget::slotted(span) should not match (no .nope ancestor)")
+	}
+}

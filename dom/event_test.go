@@ -735,8 +735,8 @@ func TestEvent_PropagationChain(t *testing.T) {
 	})
 }
 
-// TestEvent_ComposedPath verifies that ComposedPath returns [Target] when a
-// target is set, and nil when no target is set (no shadow DOM in this port).
+// TestEvent_ComposedPath verifies that ComposedPath returns the full propagation path
+// (target → parents → document) when dispatched, and nil when no target is set.
 func TestEvent_ComposedPath(t *testing.T) {
 	d := NewDocument()
 	root := d.CreateElement("root")
@@ -744,22 +744,60 @@ func TestEvent_ComposedPath(t *testing.T) {
 	leaf := d.CreateElement("leaf")
 	_ = root.AppendChild(leaf)
 
-	// Event with target set via dispatch.
+	// Event with target set via dispatch: path is [leaf, root, document].
 	var captured []EventTarget
 	leaf.AddEventListener("test", EventListenerFunc(func(e Event) {
 		captured = e.ComposedPath()
 	}), false)
 	_ = leaf.DispatchEvent(NewEvent("test", false, false, false))
-	if len(captured) != 1 {
-		t.Fatalf("ComposedPath() length = %d, want 1", len(captured))
+	if len(captured) != 3 {
+		t.Fatalf("ComposedPath() length = %d, want 3 ([leaf, root, document])", len(captured))
 	}
 	if captured[0] != leaf {
 		t.Errorf("ComposedPath()[0] is not the target element")
+	}
+	if captured[1] != root {
+		t.Errorf("ComposedPath()[1] is not the parent element")
 	}
 
 	// Event with no target.
 	e := NewEvent("not-dispatched", false, false, false)
 	if p := e.ComposedPath(); p != nil {
 		t.Fatalf("ComposedPath() = %v, want nil for non-dispatched event", p)
+	}
+}
+
+// TestEvent_ComposedPathShadow verifies that a composed event's path crosses the
+// shadow boundary (shadow-root child → host), while a non-composed event's path
+// stops at the shadow root (does not leak into the host's light-DOM tree).
+func TestEvent_ComposedPathShadow(t *testing.T) {
+	d := NewDocument()
+	host := d.CreateElement("xwidget")
+	_ = d.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	btn := d.CreateElement("button")
+	_ = sr.AppendChild(btn)
+
+	// composed=true: path is [btn, host, document].
+	var composedPath []EventTarget
+	btn.AddEventListener("test", EventListenerFunc(func(e Event) {
+		composedPath = e.ComposedPath()
+	}), false)
+	_ = btn.DispatchEvent(NewEvent("test", false, false, true))
+	if len(composedPath) != 3 {
+		t.Fatalf("composed ComposedPath() length = %d, want 3 ([btn, host, document])", len(composedPath))
+	}
+	if composedPath[1] != host {
+		t.Errorf("composed ComposedPath()[1] = %v, want host", composedPath[1])
+	}
+
+	// composed=false: path stops at the shadow root — [btn].
+	var nonComposedPath []EventTarget
+	btn.AddEventListener("test2", EventListenerFunc(func(e Event) {
+		nonComposedPath = e.ComposedPath()
+	}), false)
+	_ = btn.DispatchEvent(NewEvent("test2", false, false, false))
+	if len(nonComposedPath) != 1 {
+		t.Fatalf("non-composed ComposedPath() length = %d, want 1 ([btn])", len(nonComposedPath))
 	}
 }

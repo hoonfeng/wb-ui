@@ -210,9 +210,20 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 测试：`TestSelector_MatchPartWithHostPrefix` / `_MatchSlottedWithHostPrefix` /
 > `TestResolver_PartWithHostPrefix` / `_SlottedWithHostPrefix` 全绿，全量通过。
 >
-> **仍缺（后续增量）**：① 跨 combinator 的 forward matching（如 `.outer
-> x-widget::part(btn)` 中 descendant/child combinator 跨 shadow boundary 的祖先遍历）；
-> ② 事件 `composedPath` 无 shadow 路径；③ 多 slot / 嵌套 shadow / fallback content。
+> **已实现跨 combinator forward matching + composedPath + fallback（2026-08-13，本轮）**：
+> ① 跨 combinator 前向匹配：`matchComplex` 检测 compound 以 `::part`/`::slotted` 结尾时，
+> 往左 combinator 从 shadow host 出发（新增 `dom.ComposedParent` 穿透 shadow boundary），
+> 使 `.outer x-widget::part(btn)` 中 `.outer` 匹配 host 的祖先而非 part 元素的祖先。
+> ② 事件 composedPath：`DispatchEvent` 用 `buildEventPath`（ComposedParent 穿透 shadow）
+> 构建路径并存到事件；`ComposedPath()` 返回完整路径；composed 事件穿透 shadow boundary、
+> 非 composed 事件在 shadow root 处截断；JS 绑定层 `dom_events.go` 同步穿透。
+> ③ slot fallback content：`AssignedNodes` 无 assigned 节点时返回 `<slot>` 自身子节点。
+> 测试：`TestSelector_MatchPart/SlottedAcrossCombinator` / `TestEvent_ComposedPathShadow` /
+> `TestAssignedNodesFallback*` 全绿，全量通过。
+>
+> **仍缺（后续增量）**：① 事件 retargeting（listener 内 `event.target` 在 shadow
+> boundary 处应 retarget 到 host）；② slot 分配的 composed 事件路径未插入 slot 节点
+> 本身；③ `exportparts`（跨层 part 转发）与 `::part` 的多个 part-name 匹配优化。
 
 ### 现状定位
 - `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，

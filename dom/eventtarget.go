@@ -193,12 +193,12 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		fireEventListeners(b.self, event, false)
 		return !event.DefaultPrevented()
 	}
-	// Build propagation path: index 0 is the target, last index is the root.
-	path := []EventTarget{}
-	for n := Node(b.self); n != nil; n = n.ParentNode() {
-		path = append(path, n)
-	}
+	// Build propagation path: index 0 is the target, last index is the root. The path
+	// crosses shadow boundaries (a shadow-root child's composed parent is the shadow
+	// host) when the event is composed; a non-composed event stops at its shadow root.
+	path := buildEventPath(Node(b.self), event.Composed())
 	ev.setTarget(b.self)
+	ev.setPath(path)
 	ev.resetBeforeDispatch()
 
 	// Capture phase: root -> target's parent.
@@ -254,6 +254,25 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 // is a no-op.
 type defaultActionHandler interface {
 	defaultEventHandler(Event)
+}
+
+// buildEventPath constructs the composed propagation path for an event dispatched at
+// target: the list of targets from target up to the document root. For a composed
+// event the walk crosses shadow boundaries (a shadow-root child's next step is the
+// shadow host, via ComposedParent); for a non-composed event the walk stops at the
+// first shadow root so the path does not leak into the host's light-DOM tree.
+func buildEventPath(target Node, composed bool) []EventTarget {
+	var path []EventTarget
+	for n := target; n != nil; {
+		path = append(path, n)
+		if !composed {
+			if _, isSR := n.ParentNode().(*ShadowRoot); isSR {
+				break
+			}
+		}
+		n = ComposedParent(n)
+	}
+	return path
 }
 
 // nodeBase satisfies defaultActionHandler with a no-op so DispatchEvent can call it

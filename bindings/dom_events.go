@@ -180,8 +180,15 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 			var path []jsc.JSValue
 			if t := e.Target(); t != nil {
 				if n, ok := t.(dom.Node); ok {
-					for ; n != nil; n = n.ParentNode() {
+					for n != nil {
 						path = append(path, nodeToJS(in, n))
+						// 非 composed 事件不穿透 shadow boundary。
+						if !e.Composed() {
+							if _, isSR := n.ParentNode().(*dom.ShadowRoot); isSR {
+								break
+							}
+						}
+						n = dom.ComposedParent(n)
 					}
 				}
 			}

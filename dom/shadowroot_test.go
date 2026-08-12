@@ -147,3 +147,39 @@ func TestAssignedNodesNamedSlot(t *testing.T) {
 		t.Fatalf("assigned = %v, want [named]", assigned)
 	}
 }
+
+func TestAssignedNodesFallbackContent(t *testing.T) {
+	doc := NewDocument()
+	host := doc.CreateElement("div")
+	// No light-DOM children at all — the slot must fall back to its own children.
+	sr, _ := host.AttachShadow("open")
+	slot := doc.CreateElement("slot")
+	fallback := doc.CreateElement("span")
+	fallback.SetAttribute("class", "fallback")
+	_ = slot.AppendChild(fallback)
+	_ = sr.AppendChild(slot)
+
+	assigned := slot.AssignedNodes()
+	if len(assigned) != 1 || assigned[0] != fallback {
+		t.Fatalf("fallback assigned = %v, want [fallback span]", assigned)
+	}
+}
+
+func TestAssignedNodesFallbackNotUsedWhenAssigned(t *testing.T) {
+	doc := NewDocument()
+	host := doc.CreateElement("div")
+	light := doc.CreateElement("span")
+	_ = host.AppendChild(light)
+
+	sr, _ := host.AttachShadow("open")
+	slot := doc.CreateElement("slot")
+	fallback := doc.CreateElement("b")
+	_ = slot.AppendChild(fallback)
+	_ = sr.AppendChild(slot)
+
+	// A real assignment wins over fallback content.
+	assigned := slot.AssignedNodes()
+	if len(assigned) != 1 || assigned[0] != light {
+		t.Fatalf("assigned = %v, want [light] (fallback must not be used)", assigned)
+	}
+}

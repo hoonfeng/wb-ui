@@ -13,8 +13,13 @@
 //     the style resolver with a per-sheet tree-scope depth (CSS Scoping Level 1 §3.3).
 //   - host-selector::part(name) and host-selector::slotted(...) forward-matching across
 //     the shadow boundary (the host-selector prefix matching the shadow host) is
-//     implemented for same-compound prefixes (e.g. x-widget::part(btn)); forward
-//     matching across a combinator (e.g. .outer x-widget::part(btn)) is not.
+//     implemented for both same-compound prefixes (e.g. x-widget::part(btn)) and
+//     cross-combinator prefixes (e.g. .outer x-widget::part(btn), where the combinator
+//     walks from the host via ComposedParent).
+//   - Slot fallback content: AssignedNodes returns the slot's own children when no
+//     light-DOM node is assigned (CSS Scoping Level 1 flattened tree).
+//   - Composed event paths (ComposedPath / ComposedParent) cross shadow boundaries for
+//     composed events and stop at the shadow root for non-composed events.
 
 package dom
 
@@ -105,6 +110,21 @@ func ContainingShadowRoot(n Node) *ShadowRoot {
 	return nil
 }
 
+// ComposedParent returns n's parent in the composed (flattened) tree, crossing the
+// shadow boundary: the composed parent of a shadow-tree child is the shadow host
+// (and the composed parent of a shadow host is its own light-DOM/shadow parent). For
+// a node whose parent is a plain element/document it is just ParentNode(). Returns
+// nil at the document root. This is the single traversal primitive used to walk
+// ancestor chains that must cross shadow boundaries (forward-matching selector
+// combinators, composed event paths).
+func ComposedParent(n Node) Node {
+	p := n.ParentNode()
+	if sr, ok := p.(*ShadowRoot); ok {
+		return sr.Host()
+	}
+	return p
+}
+
 // WalkComposedTree performs a depth-first walk of the composed (flattened) tree: for a
 // host element it descends into its shadow tree instead of its light-DOM children.
 // Slot-projected nodes are NOT revisited here (they already appear at their light-DOM
@@ -132,8 +152,9 @@ func WalkComposedTree(root Node, visit func(Node)) {
 // to the owning ShadowRoot, then collects the host's light-DOM children that match the
 // slot's name. A slot without a name attribute (the "default" slot) collects every
 // light-DOM child that does NOT carry a slot attribute; a named slot collects children
-// whose slot attribute equals the slot name. Returns nil for non-slot elements or a
-// slot outside any shadow tree.
+// whose slot attribute equals the slot name. When no light-DOM node is assigned, the
+// slot's own children are returned as fallback content (CSS Scoping Level 1 flattened
+// tree). Returns nil for non-slot elements or a slot outside any shadow tree.
 func (e *Element) AssignedNodes() []Node {
 	if e.LocalName() != "slot" {
 		return nil
@@ -164,6 +185,15 @@ func (e *Element) AssignedNodes() []Node {
 				assigned = append(assigned, c)
 			}
 		}
+	}
+	if len(assigned) == 0 {
+		// Fallback content: when nothing is assigned, the slot renders its own
+		// children (the light-DOM nodes that live inside <slot> in the shadow tree).
+		var fb []Node
+		for c := e.FirstChild(); c != nil; c = c.NextSibling() {
+			fb = append(fb, c)
+		}
+		return fb
 	}
 	return assigned
 }

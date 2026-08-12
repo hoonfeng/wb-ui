@@ -19,7 +19,8 @@
 //   - :host / :host-context match against the shadow host; ::slotted matches a
 //     slot-assigned light-DOM node; ::part matches a shadow element by part name;
 //     a host-selector prefix before ::part / ::slotted (e.g. x-widget::part(btn))
-//     is forward-matched against the shadow host (CSS Scoping Level 1)
+//     is forward-matched against the shadow host, including across a combinator
+//     (.outer x-widget::part(btn) walks the host's composed ancestors) (CSS Scoping L1)
 //   - :has() is implemented by walking descendants of the candidate element
 
 package css
@@ -78,13 +79,34 @@ func (c *SelectorChecker) matchComplex(sel ComplexSelector, i int, el *dom.Eleme
 		return true
 	}
 	rel := sel.Compounds[i].Relation
-	parent := el.ParentNode()
+
+	// Forward matching (CSS Scoping Level 1): when this compound ends in ::part or
+	// ::slotted, its "composed position" is the shadow host, so the combinator to the
+	// left crosses the shadow boundary and walks from the host — e.g. in
+	// `.outer x-widget::part(btn)`, `.outer` matches an ancestor of the host, not of
+	// the part element (which lives inside the shadow tree).
+	base := el
+	forward := false
+	if pe, ok := c.forwardPseudoOf(sel.Compounds[i]); ok {
+		if h := c.shadowHostFor(el, pe); h != nil {
+			base = h
+			forward = true
+		}
+	}
+	parentOf := func(n dom.Node) dom.Node {
+		if forward {
+			return dom.ComposedParent(n)
+		}
+		return n.ParentNode()
+	}
+
+	parent := parentOf(base)
 	switch rel {
 	case RelationSubselector:
 		// Should not happen at the boundary between compounds.
 		return c.matchComplex(sel, i-1, el)
 	case RelationDescendant:
-		for a := parent; a != nil; a = a.ParentNode() {
+		for a := parent; a != nil; a = parentOf(a) {
 			if pe, ok := a.(*dom.Element); ok {
 				if c.matchComplex(sel, i-1, pe) {
 					return true
@@ -103,7 +125,7 @@ func (c *SelectorChecker) matchComplex(sel ComplexSelector, i int, el *dom.Eleme
 		return c.matchComplex(sel, i-1, pe)
 	case RelationDirectAdjacent:
 		// Previous sibling of same type (element).
-		prev := previousSiblingElement(el)
+		prev := previousSiblingElement(base)
 		for prev != nil {
 			if c.matchComplex(sel, i-1, prev) {
 				return true
@@ -112,7 +134,7 @@ func (c *SelectorChecker) matchComplex(sel ComplexSelector, i int, el *dom.Eleme
 		}
 		return false
 	case RelationIndirectAdjacent:
-		prev := previousSiblingElement(el)
+		prev := previousSiblingElement(base)
 		for prev != nil {
 			if c.matchComplex(sel, i-1, prev) {
 				return true
@@ -172,6 +194,24 @@ func (c *SelectorChecker) shadowHostFor(el *dom.Element, pe PseudoElement) *dom.
 		}
 	}
 	return nil
+}
+
+// forwardPseudoOf reports whether a compound selector ends in ::part or ::slotted
+// (a forward-matching pseudo-element per CSS Scoping Level 1), returning the
+// pseudo-element type. Such a compound matches the element, but the combinators to
+// its left must cross the shadow boundary and walk from the element's shadow host.
+func (c *SelectorChecker) forwardPseudoOf(comp CompoundSelector) (PseudoElement, bool) {
+	if len(comp.Selectors) == 0 {
+		return PseudoElementUnknown, false
+	}
+	last := comp.Selectors[len(comp.Selectors)-1]
+	if last.Match != MatchPseudoElement {
+		return PseudoElementUnknown, false
+	}
+	if last.PseudoElem == PseudoElementPart || last.PseudoElem == PseudoElementSlotted {
+		return last.PseudoElem, true
+	}
+	return PseudoElementUnknown, false
 }
 
 // matchSimple reports whether a single simple selector matches el.
