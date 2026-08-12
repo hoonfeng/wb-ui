@@ -1,0 +1,236 @@
+# wb-ui 遗留问题处理指南
+
+> 本文档汇总 wb-ui 渲染引擎的一批已知遗留缺口，按「优先级 / 改动规模 / 风险」排序，
+> 每个条目给出**现状定位、根因、推荐方案、涉及文件、风险、验证方法**，作为后续
+> 分阶段深入的行动手册。调研基准 commit：`5cfff1c`（calc 相对单位修复）。
+
+## 总览
+
+| # | 遗留项 | 类型 | 优先级 | 改动规模 | 风险 |
+|---|--------|------|--------|----------|------|
+| 1 | positioned `top/left` 不解析 `calc()` | 真实 bug | **P0** | 小（~15 行） | 低 |
+| 2 | `min()/max()/clamp()` 未实现 | 功能缺失 | P1 | 中 | 中 |
+| 3 | 布局三次全树遍历（无增量） | 性能 | P1 | 大 | 高 |
+| 4 | Shadow DOM selector（`:host`/`::slotted`/`::part`） | 功能缺失 | P2 | 超大 | 高 |
+| 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | P3 | 中 | 中（依赖 skia） |
+| — | WebSocket | ~~非问题~~ | — | — | — |
+
+---
+
+## 1. positioned `top/left/right/bottom` 不解析 `calc()`（P0 · 真实 bug）
+
+### 现状定位
+- 宽度/高度路径已支持 calc：`style/resolver.go:1582` `parseLength()` 对 `calc()` 做了
+  相对单位检测，返回 `Length{Unit:"calc", CalcExpr:"..."}`（上一轮 `5cfff1c` 成果）。
+- 定位路径**仍缺失**：`layout/positioned.go:109/110/159/160` 通过
+  `asLength(cs.Properties["left"])` → `layout/layoututil.go:123 parseCSSLength()` 解析
+  `top/left/right/bottom`。
+- `parseCSSLength` 只做「数字 + 单位」切分：遇到 `calc(100% - 40px)` 时 `i==0`
+  （首字符 `c` 非数字）→ 直接返回 `style.Length{Unit:"auto"}`。
+
+### 根因
+`width/height` 走 `style.parseLength`（已补 calc），而 `inset`（top/left/…）走的是
+layout 包自己的 `parseCSSLength`，两条解析路径不一致，calc 支持只补了一半。
+
+### 推荐方案
+在 `layout/layoututil.go` 的 `parseCSSLength` 开头加 calc 分支（复用 `css` 包工具，
+layout 已 import `wb-ui/css`）：
+
+```go
+func parseCSSLength(s string) style.Length {
+    s = strings.TrimSpace(s)
+    if s == "" || s == "auto" {
+        return style.Length{Unit: "auto"}
+    }
+    // ★ 与 style.parseLength 对齐：calc() 含相对单位 → 延迟求值
+    if strings.HasPrefix(s, "calc(") {
+        arg := s[len("calc("):]
+        if strings.HasSuffix(arg, ")") {
+            arg = strings.TrimSuffix(arg, ")")
+        }
+        if css.CalcHasRelativeUnit(arg) {
+            return style.Length{Unit: "calc", CalcExpr: strings.TrimSpace(arg)}
+        }
+        if v, err := css.EvalCalcString(arg, css.CalcContext{}); err == nil {
+            return style.Length{Value: v, Unit: "px"}
+        }
+    }
+    // …原有数字+单位切分…
+}
+```
+
+**链路已验证可打通**：`resolveOffset`（`positioned.go:287`）→ `resolveLengthAuto` →
+`resolveLength`（`layoututil.go:33`）已有 `case "calc"`，用真实 `cbSize`/fontSize/
+viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，无需改动 positioned 侧。
+
+### 涉及文件
+- `layout/layoututil.go`（唯一改动点）
+
+### 风险
+低。`style.Length` 已含 `CalcExpr` 字段，`resolveLength` 已处理 calc，纯增量补丁。
+需注意 `inset` 简写是否走同一条 `cs.Properties` 路径（见下方验证）。
+
+### 验证
+- 新增 `layout` 测试：`position:absolute; top:calc(50% - 20px); left:calc(50% - 30px)`
+  的 box 几何 = 包含块中心偏移后的坐标。
+- `go test ./layout/...`（需 CGO + goskia PATH）。
+
+---
+
+## 2. `min()/max()/clamp()` 未实现（P1 · 功能缺失）
+
+### 现状定位
+- `css/calc.go:9` 注释明确 `no min() / max() / clamp() support`。
+- `parsePrimary()`（calc.go 末尾）：`TokenFunction` 分支仅识别 `calc`（嵌套也直接报
+  `nested calc() not supported`），其它函数名统一报
+  `unexpected function %s() in expression`。
+
+### 根因
+现代 CSS 里 `width: min(100%, 600px)`、`clamp(16px, 4vw, 40px)` 越来越常见（响应式
+侧边栏、编辑器字号），但 calc 求值器只实现了二元算术，缺「多参比较函数」。
+
+### 推荐方案
+分两步：
+1. **求值层**：在 `calcParser` 增加 `parseMinMaxClamp`——解析逗号分隔的参数列表，
+   每个参数递归 `parseExpr()`（参数本身可以是 calc 或嵌套 min/max），`min/max` 取
+   最值、`clamp(min, val, max)` 夹取。相对单位同样依赖 `CalcContext`。
+2. **style 层**：`parseLength` / `isCalcValueS` / `extractCalcArgS` 目前只认 `calc(`。
+   需扩展识别 `min(`/`max(`/`clamp(` 前缀，统一走「含相对单位 → 延迟、纯绝对 → 立即」
+   的同一套分支。
+
+### 涉及文件
+- `css/calc.go`（求值核心）
+- `style/resolver.go`（`parseLength` 前缀识别 + `extractCalcArgS`）
+- `css/calc_string_test.go` / `style/calc_resolve_test.go`（补测试）
+
+### 风险
+中。难点在参数列表的分隔（逗号在嵌套 calc/函数内不参与切分）与 `clamp` 三参校验；
+`min/max` 的语义与 CSS 规范（不接受空参、至少一参）需对齐。
+
+### 验证
+- 单测：`min(600px, 100%)`（context 1000px → 600px）、`clamp(16px, 4vw, 40px)`
+  （vw 800 → 32px）、`max(10px, 5em)`（fontSize 16 → 80px）。
+- 全量 `go test ./...`。
+
+---
+
+## 3. 布局三次全树遍历（P1 · 性能）
+
+### 现状定位
+一次完整布局存在**三次全树遍历**：
+1. `layout/layout.go:17 Layout()` → `LayoutRoot`（每个 box 的 FormattingContext 布局）
+   + `roundTree`（`layout.go:44` 全树 `Geometry.Round()`）。
+2. `page/frameview.go:235 Layout()` → `rv.Layout(nil)` → `v.updateContentSize(rv)`
+   （`frameview.go:259` 全树 walk 求最大 extent）。
+
+### 根因
+无 dirty-subtree 增量：`SetNeedsLayout(true)` 即整树重跑。`layout/layoutstate.go` 已
+有 `GeometryForBox` 缓存，`layout/layoutprofile.go` 提供 `WB_LAYOUT_PROFILE=1` 分 FC
+耗时统计（可先跑一次定位大头），但缺「只重排受影响子树」的脏标记传播。
+
+### 推荐方案（分阶段，勿一步到位）
+- **阶段 A（低风险）**：合并 `roundTree` 到布局主循环末尾（在 `ctx.Layout` 逐 box
+  完成后就地 Round，省一次独立遍历），并让 `updateContentSize` 复用布局时已算出的
+  box 几何而非重新 walk——前提是记录每层 `AbsoluteX/Y + Width/Height` 的边界增量。
+- **阶段 B（中风险）**：`SetNeedsLayout` 携带「脏子树根」而非全局布尔，布局入口
+  从该子树根往下重排，兄弟/祖先几何稳定时短路。
+- **阶段 C（高收益·高复杂）**：为 FormattingContext 引入「尺寸依赖图」，仅当
+  包含块尺寸/font-size 变化时才重排后代（对齐 WebKit 的 `LayoutState` dirty 传播）。
+
+### 涉及文件
+- `layout/layout.go`、`page/frameview.go`（阶段 A）
+- `layout/layoutstate.go`、`page/frame.go`、`app/host.go`（阶段 B/C）
+
+### 风险
+高。布局顺序/几何缓存一致性极易出回归，务必先跑 `dev/consistency`（Edge 像素对比）
+与全量 `go test ./...` 作为护栏。
+
+### 验证
+- `WB_LAYOUT_PROFILE=1 go run ./dev/static_probe/main.go` 看各 FC 耗时分布。
+- 对比改动前后 `dev/consistency` 像素测试无差异。
+
+---
+
+## 4. Shadow DOM selector（P2 · 超大工程）
+
+### 现状定位
+- `css/selectorchecker.go:19`：`shadow-DOM :host / :host-context / ::slotted / ::part
+  are not implemented`。
+- `dom/node.go:13`、`dom/element.go:8`：整个 dom 包注释 `shadow tree / custom elements
+  / mutation observers / style recalc / rendering hooks are omitted`。
+- `bindings/dom.go:3694` `getRootNode` 已按标准返回根，但注释点明「无 shadow DOM」。
+
+### 根因
+这是**跨三层**的系统性缺口，非单点：
+1. **DOM 层**：无 `ShadowRoot` 节点、无 `attachShadow()`、无 slot 分配；
+2. **Selector 层**：`::slotted`/`::part`/`:host` 无匹配逻辑；
+3. **样式层**：shadow 边界不隔离样式，无 `:host` 级联来源。
+
+### 推荐方案
+WebKit 架构参考（`ref/WebKit` 已在本工作区）：
+1. DOM 层：`dom.ShadowRoot` + `Element.attachShadow({mode})` + slot/flattened-tree 遍历
+   （参考 `dom/node.go` 现有树遍历 + `editing/visibleposition.go` 已标注的「shadow
+   roots 遍历」TODO）。
+2. Selector 层：`selectorchecker.go` 增加 `::slotted`（匹配 slot 分配的 light-DOM 节点）、
+   `:host`（匹配 shadow host 的自身 + `:host()` 参数）。
+3. 样式层：shadow 内样式优先于 light DOM 继承（CSS Scoping），`:host` 规则来源单独处理。
+
+### 涉及文件
+- `dom/`（新增 ShadowRoot）、`css/selectorchecker.go`、`css/selector.go`、
+  `style/resolver.go`、`bindings/dom.go`。
+
+### 风险
+高。影响面横跨 DOM 遍历、事件路径（`dom/event.go` 已标注 composedPath 无 shadow）、
+样式级联，建议按「先 attachShadow + slot 基础 → 再 ::slotted/:host → 最后 ::part」拆
+多个可验证增量，每步配独立测试。
+
+### 验证
+- 单测：`el.attachShadow({mode:'open'})` 后 `shadowRoot.innerHTML` 渲染隔离；
+  `::slotted(span)` 命中 slot 分配节点。
+
+---
+
+## 5. `mask-image` 仅存属性不绘制（P3）
+
+### 现状定位
+- `rendering/mask_test.go`：`mask-image` 仅被存为 property（`cs.GetProperty("mask-image")`
+  非空），**无 image-as-alpha 绘制**。
+
+### 根因
+实现 mask 需要「把图片解码为 alpha 通道再对目标做 Skia mask」，当前 goskia 绑定未暴露
+`SkMaskFilter` 或 image-as-alpha 合成路径。
+
+### 推荐方案
+- 短期：确认 goskia 是否有 `MaskFilter`/`SkImageFilter` 绑定（`goskia/skia/` 目录），
+  有则走 `SaveLayer` + `BlendMode::kSrcIn` 的 mask 合成。
+- 若绑定缺失：先补 goskia 侧 API，再在 `rendering` 层接入。
+
+### 涉及文件
+- `goskia/skia/`（若需补绑定）、`rendering/`（mask 合成）。
+
+### 风险
+中。依赖跨仓改动（goskia），需与主项目协调；先用 `mask_test.go` 守回归（保证不 crash）。
+
+### 验证
+- 像素测试：`mask-image: url(mask.png)` 下目标区域 alpha 与图片一致。
+
+---
+
+## 附：WebSocket —— 已完善（非遗留问题）
+
+`bindings/dom.go:1065-1190` 的 WebSocket 已是**完整 stub**：提供 readyState 常量、
+`onopen/onmessage/onerror/onclose`、`send/close/addEventListener/removeEventListener`，
+并通过 `globalThis.__desktopWS.dispatchMessage/dispatchStatus` 供宿主注入事件。这是
+桌面端「无真实网络」场景的**有意设计**（不建连接、不崩溃、事件由宿主推入），
+不是 bug。有真实传输需求时在宿主注入层覆盖 `window.WebSocket` 即可，无需改引擎。
+
+---
+
+## 建议执行顺序
+
+1. **P0 先做**：`parseCSSLength` 补 calc（15 行，收益明确，验证简单）。
+2. **P1-min/max/clamp**：独立于布局，可并行推进，响应式布局刚需。
+3. **P1-布局增量**：先跑 `WB_LAYOUT_PROFILE=1` 定位大头，再决定是否值得投入（阶段 A
+   低风险先行，B/C 视性能缺口再上）。
+4. **P2 Shadow DOM**：最大工程，仅在业务确有 Web Component 需求时启动。
+5. **P3 mask-image**：需先确认 goskia 绑定能力，优先级最低。
