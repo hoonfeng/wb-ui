@@ -4105,6 +4105,32 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 			}
+			// ★ 编辑器点击后光标位置同步（CM6）：selection 在 mouseup
+			// 派发时才提交（mousedown 只开始拖拽），光标 DOM 位置更新
+			// 依赖 CM6 的 requestMeasure→rAF 链（浏览器 <1 帧）。此前
+			// 不在此处驱动，measure 链每帧只推进一次（光标层/背景几何
+			// 迭代），用户看到点击后光标停留在旧位置（点击点左边）
+			// 80-160ms 才跳对——「点击与光标位置不符」。此处同步驱动
+			// 事件循环直到 CM6 的 measure 链排空（限时 180ms，与
+			// contextmenu 分支一致），再 EnsureLayout 让光标新位置
+			// 本帧布局生效。
+			if h.wv.JSInterpreter() != nil {
+				interp := h.wv.JSInterpreter()
+				deadline := time.Now().Add(180 * time.Millisecond)
+				for {
+					interp.RunJobs()
+					h.processEventLoop()
+					el := interp.GetEventLoop()
+					if el == nil || el.PendingTasks() == 0 {
+						break
+					}
+					if time.Now().After(deadline) {
+						break
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+				h.wv.EnsureLayout()
+			}
 		case window.EventChar:
 			h.handleCharInput(ev)
 
