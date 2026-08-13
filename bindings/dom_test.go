@@ -409,3 +409,59 @@ func TestDOMErrorPropagation(t *testing.T) {
 		t.Fatalf("got %q, want 'caught:GoError: dom error'", got)
 	}
 }
+
+// TestInsertTextAtSelectionSyncsSelectionFields 验证 InsertTextAtSelection
+// 插入文本后，window.getSelection() 返回的 Selection 单例（selObj）的
+// anchorNode/anchorOffset/focusNode/focusOffset 字段被同步到「插入文本
+// 之后」的位置——CM6 的 DOMObserver.readSelectionChange 直接读这些字段
+// （而非 getRangeAt），不同步则读到旧光标位置 → IME/字符输入后光标
+// 不后移（「光标停在插入文字前」根因）。
+func TestInsertTextAtSelectionSyncsSelectionFields(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	el := doc.CreateElement("div")
+	el.SetAttribute("contenteditable", "true")
+	doc.AppendChild(el)
+	txt := dom.NewText(doc, "func main")
+	if err := el.AppendChild(txt); err != nil {
+		t.Fatalf("AppendChild: %v", err)
+	}
+
+	// JS 侧 collapse 定位光标到 "func" 后（offset=4）
+	mustRun(t, rt, `
+		var el = document.getElementsByTagName("div")[0];
+		var tn = el.firstChild;
+		window.getSelection().collapse(tn, 4);
+	`)
+	if len(sstate.ranges) == 0 {
+		t.Fatal("collapse did not populate sstate.ranges")
+	}
+
+	// Go 侧在光标处插入 "拼"
+	if !InsertTextAtSelection("拼") {
+		t.Fatal("InsertTextAtSelection returned false")
+	}
+
+	// 文本正确插入："func" 分裂为 "func"+" main"，"拼" 插在中间
+	if got := el.TextContent(); got != "func拼 main" {
+		t.Fatalf("textContent = %q, want %q", got, "func拼 main")
+	}
+
+	// ★ 核心断言：selObj 字段被同步到「插入文本之后」的位置
+	if sstate.selObj == nil {
+		t.Fatal("sstate.selObj is nil")
+	}
+	ao := int(sstate.selObj.GetStr("anchorOffset").ToNumber())
+	// 分裂后子节点：t="func"(idx0), ins="拼"(idx1), tail=" main"(idx2)
+	// updateRangeForInsert 把 offset 设为 ins 之后的索引 = 2
+	if ao != 2 {
+		t.Fatalf("selObj.anchorOffset = %d, want 2 (after inserted text)", ao)
+	}
+	an := sstate.selObj.GetStr("anchorNode")
+	if an.IsNull() || an.IsUndefined() {
+		t.Fatal("selObj.anchorNode is null/undefined (should point to parent element)")
+	}
+	fo := int(sstate.selObj.GetStr("focusOffset").ToNumber())
+	if fo != ao {
+		t.Fatalf("selObj.focusOffset = %d, want %d", fo, ao)
+	}
+}

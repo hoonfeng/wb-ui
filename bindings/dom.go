@@ -303,6 +303,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	selObj.Set("focusOffset", jsc.NumberValue(0))
 	selObj.Set("isCollapsed", jsc.BooleanValue(true))
 	selObj.Set("type", jsc.StringValue("None"))
+	// ★ 保存 Selection 单例：updateRangeForInsert 插入后需同步
+	// anchorNode/focusNode 等字段（CM6 的 DOMObserver 直接读这些字段，
+	// 而非 getRangeAt）——不同步则读到旧光标位置，IME 输入后光标不后移。
+	sstate.selObj = selObj
 
 	// ★ 幂等分支已后移到 selObj 完整初始化之后（见下）——此前在
 	// selObj 方法（collapse/setBaseAndExtent/…）初始化之前 return，
@@ -2666,6 +2670,12 @@ type selState struct {
 	// InsertTextAtSelection（contenteditable 光标插入）在插入后重建
 	// selection range（新文本节点）时使用。
 	rt *jsc.Interpreter
+	// selObj 保存 window.getSelection() 返回的 Selection 单例，供
+	// updateRangeForInsert 在插入后同步 anchorNode/focusNode 等字段——
+	// CM6 的 DOMObserver.readSelectionChange 直接读这些字段（而非
+	// getRangeAt），不同步则读到旧光标位置 → IME/字符输入后光标不后移
+	// （「光标停在插入文字前」根因）。
+	selObj *jsc.JSObject
 }
 
 var sstate = &selState{}
@@ -2902,6 +2912,18 @@ func (s *selState) updateRangeForInsert(ins *dom.Text, insLen int) {
 		return
 	}
 	s.ranges = []*jsc.JSObject{makeSelRange(s.rt, jsv, int64(idx), jsv, int64(idx))}
+	// ★ 同步 window.getSelection() 的 anchor/focus 字段：CM6 的
+	// DOMObserver.readSelectionChange 直接读 selObj.anchorNode/anchorOffset
+	// /focusNode/focusOffset（而非 getRangeAt），不同步则读到旧光标位置
+	// → IME/普通字符输入后光标不后移（显示在插入文字前）。
+	if s.selObj != nil {
+		s.selObj.Set("anchorNode", jsv)
+		s.selObj.Set("anchorOffset", jsc.NumberValue(float64(idx)))
+		s.selObj.Set("focusNode", jsv)
+		s.selObj.Set("focusOffset", jsc.NumberValue(float64(idx)))
+		s.selObj.Set("isCollapsed", jsc.BooleanValue(true))
+		s.selObj.Set("rangeCount", jsc.NumberValue(1))
+	}
 }
 
 // nodeToJS 将 dom.Node 转换为对应的 JS 对象。
