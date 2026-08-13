@@ -1,66 +1,73 @@
 # 增量布局架构改进方案（设计缺陷诊断 + 分阶段修改）
 
-> 日期：2026-08-13
-> 结论先行：**「布局增量风险过大」确实是设计不足导致，但设计的「蓝图」已经画好了（RenderTreeUpdater 已对标 WebKit 翻译 45%），只是「未完成 + 未接入」。「修改设计」的正确路径是补齐骨架，而非硬啃高风险增量重建，也非从零设计。**
+> 日期：2026-08-13（更新）
+> 结论先行：**「布局增量风险过大」是设计不足导致，但设计蓝图已存在（RenderTreeUpdater 45% + 增量布局 B 剪枝）。
+> 通过「分阶段铺路」，已完成低风险的 A/B 阶段与中风险的 C1（粗粒度 text 增量更新），打字不再全量重建。**
 
 ## 一、设计缺陷清单（已用代码验证）
 
-### 缺陷 1：DOM 变更通知 `onTreeChange` 无参数（核心）
-- 位置：`dom/document.go:36` `onTreeChange func()`
-- `notifyTreeChange()` 在 `b *nodeBase` 上调用（`document.go:52`），**节点就在手边却丢弃了**。
-- 6 个调用点：`node.go:346/396/444/475` + `text.go:125`，text 变更（`SetNodeValue→SetData→notifyTreeChange`）也走这里。
-- 宿主 `app/host.go:2818` 只能 `MarkRenderTreeDirty()`（全量重建），无法定位「哪个节点变了」。
-- **修复**：`onTreeChange func(node Node)`，`notifyTreeChange()` 传 `b`。签名变更是编译期可发现的，宿主侧仍可「置标志全量重建」，零行为风险。
+### 缺陷 1：DOM 变更通知 `onTreeChange` 无参数（已修复）
+- `dom/document.go:36` `onTreeChange func()` → `func(Node)`，`notifyTreeChange()` 传 `b`。
+- 宿主能精确定位「哪个节点变了」。
 
-### 缺陷 2：缺「node → render object」反向映射
-- 位置：`rendering/renderobject.go:119` `renderObjectBase.node` 是「render object → node」**单向**。
-- `rendertreeupdater.go:199` `findRenderObject` 靠 `NextInPreOrder()` **线性全树遍历（O(n)）**，注释直言「In this simplified port the search is a linear walk from the view root」。
-- WebKit 用 `Node::renderer()` 指针 + `NodeRenderingContext` 维护 O(1) 映射，wb-ui 退化为线性。
-- **修复**：`RenderView` 加 `nodeMap map[dom.Node]RenderObject`，构建时填充、销毁时清除、insert/remove 时增量维护。
+### 缺陷 2：node→render 映射填充时机晚（已修复）
+- `nodeRenderMap` 早已存在（`renderview.go:56`），`FindRenderObjectForNode` 已用 map O(1)。
+- 真正缺陷：① 映射只在布局后 `syncGeometry` 填充（重建后→布局前窗口为空）；② `RenderTreeUpdater.findRenderObject` 没复用映射、自己线性遍历。
+- 修复：`rebuildNodeMap()` 在 `Build()` 末尾（层树构建前）遍历渲染树填充；`findRenderObject` 改 O(1)。
 
-### 缺陷 3：text 双份存储
-- `rendering/rendertext.go:52` `RenderText.text`（`NewRenderText` 里 `rt.text = t.Data()` 拷贝）。
-- `layout/box.go:313` `InlineTextBox.text`（`BuildLayoutTree` 里 `&InlineTextBox{text: data}` 再拷贝）。
-- text 变更需「三处同步」（DOM data / RenderText.text / InlineTextBox.text），且 `linkLayoutBoxes` 对 text 靠「位置配对」脆弱。
-- **修复**：RenderText 不存副本，`text()` 直接返回 `node.(*dom.Text).Data()`（WebKit 做法）。
+### 缺陷 3：text 双份存储（修正：不是「单一源」问题）
+- `RenderText.text`（rendertext.go）+ `layout.InlineTextBox.text`（box.go）各拷贝一份。
+- **修正**：此前误判为「应做 text 单一源（不存副本）」。实际上 **WebKit 的 RenderText 也存副本（`m_text`）**，text 变更走 `RenderText::setText` 同步副本——「单一源」偏离 WebKit 设计且收益有限。
+- 正确方案：text 变更通过 `RenderText.SetText`（已有）+ 同步布局树 `InlineTextBox.text`（阶段 C1 已做）。
 
-### 缺陷 4：RenderTreeUpdater 存在但未启用（45% 完成）
-- 位置：`rendering/rendertreeupdater.go`，已实现 insert/remove/style-change 三种 ChangeKind。
-- **仅测试引用**（`rendertreebuilder_test.go:203/247`），生产代码（app.Host / page / webkit）未接入。
-- 缺 `ChangeText`（text 变更不支持）——而打字场景的核心正是 text 变更。
-- `applyInsert` 里 `buildChildren(child, v)` 是「全量重建受影响子树」而非 surgical diff（注释自述）。
+### 缺陷 4：RenderTreeUpdater 存在但未启用（已补 ChangeText）
+- 已实现 insert/remove/style-change，缺 `ChangeText`。
+- 阶段 A 补齐 `MarkTextChange`/`applyTextChange`（`5fa3cfd`）。
 
-### 缺陷 5：渲染树/布局树靠「内容匹配」关联
-- `rendertreebuilder.go:405` `linkLayoutBoxes`：element 靠 DOM 指针身份，text/匿名 wrapper 靠「位置配对（sibling index）」，O(children²)。
-- 每次全量重建都要重新匹配（attachLayout 20-30% 的一部分）。
+### 缺陷 5：渲染树/布局树 text 靠「内容匹配」关联（已修复）
+- `linkLayoutBoxes` 对 text 用 `tb.Text() == rt.OriginalText()` 值匹配，同文本多 span 会错配，且 text-transform 时值匹配失败。
+- 阶段 B 改为 `tb.Node() == rt.Node()` 指针匹配（`0d541af`），并给 `layout.InlineTextBox` 加 `node` 引用。
 
 ## 二、关键洞察
 
-1. **RenderTreeUpdater 骨架已存在**——它是对标 `WebCore::RenderTreeUpdater.cpp` 的翻译，说明「增量渲染树更新」的架构蓝图早已画好，只是停在 45% 未完成、未接入宿主。
-2. **缺陷有清晰的依赖链**：缺身份映射（缺陷 2）→ 无法 O(1) 定位 → 通知必须带节点（缺陷 1）→ text 才能单一源（缺陷 3）→ RenderTreeUpdater 才能启用（缺陷 4）→ 布局树才能增量更新（缺陷 5）。
-3. **每一步都可「低风险 + 编译期可验证」地推进**，不需要一步到位。
+1. **RenderTreeUpdater 骨架 + 增量布局 B 剪枝都已存在**——增量更新的「架构蓝图」早已画好，缺的是「接线」。
+2. **`RenderObject.SetLayoutBox`（renderobject.go:185）已建立 render→layout 持久引用**（syncGeometry 时填充），C1 无需新增映射。
+3. **`Frame.RebuildStyleForElement`（frame.go:321）是成熟的增量模式**——C1 完全模仿它：改样式/文本 → 同步布局树 → `f.view.SetNeedsLayout(true)` → 下帧剪枝重排。
 
-## 三、分阶段修改方案（低风险优先）
+## 三、分阶段方案与进度
 
-| 阶段 | 改动 | 收益 | 风险 | 验证 |
-|------|------|------|------|------|
-| 1 | `onTreeChange` 带节点（缺陷 1） | 为增量铺路，零性能影响 | 低 | go build + 全量测试 |
-| 2 | node→render 映射（缺陷 2） | findRenderObject O(n)→O(1) | 低-中 | updater 测试 + 全量测试 |
-| 3 | text 单一源（缺陷 3） | text 变更只改一处 | 中 | 一致性像素测试 |
-| 4 | 启用 RenderTreeUpdater + ChangeText + 布局树增量（缺陷 4/5） | 打字 text 变更走局部 re-layout，省全量重建 ~12ms | 高 | cm6 编辑 probe + 全量测试 |
+| 阶段 | 改动 | 风险 | 状态 |
+|------|------|------|------|
+| 1 | onTreeChange 带节点 | 低 | ✅ c73728f |
+| 2 | nodeRenderMap 提前填充 + findRenderObject O(1) | 低-中 | ✅ bfe4645 |
+| A | RenderTreeUpdater 补 ChangeText | 低 | ✅ 5fa3cfd |
+| B | InlineTextBox node 引用 + node 匹配 | 低-中 | ✅ 0d541af |
+| C1 | text 变更粗粒度增量（打字热路径） | 中 | ✅ ae5d64f |
+| C2 | IFC 行级增量重排 | 高 | ⏳ 后置 |
 
-**阶段 1-3 是「低风险铺路」，阶段 4 才是「最终目标」**。铺路完成后，阶段 4 的复杂度会大幅下降（因为有了身份映射 + text 单一源 + 精确通知）。
+## 四、阶段 C1 的实现（text 变更粗粒度增量）
 
-## 四、与之前结论的关系
+打字链路：JS 改 Text data → `notifyTreeChange(textNode)` → `onTreeChange` 识别 `*dom.Text` →
+`Frame.ApplyTextChange` → `RenderView.ApplyTextChange`：
 
-之前「增量重建收益 -11%、风险高、不建议投入」的结论，是在「未发现 RenderTreeUpdater 骨架 + 未诊断设计缺陷」的前提下做的。现在确认：
+1. `rt.SetText(newData)`（清 segments + dirty）
+2. `containingBlockForText` 向上定位所在 `RenderBlockFlow`，取其 `LayoutBox()`
+3. `syncInlineTextBoxText` 递归同步布局树里 node 匹配的 `InlineTextBox.text`
+4. `blockLB.MarkDirty()`（沿祖先链传播）
+5. `f.view.SetNeedsLayout(true)`
 
-- **收益不变**（打字 -11%），但**风险可被「分阶段铺路」大幅摊薄**。
-- **正确的下一步不是「硬啃阶段 4」**，而是**先做阶段 1-3 的低风险设计修复**，把「增量更新」的基础打好。
+下帧 `EnsureLayout` → `FrameView.Layout` → 增量布局 B 剪枝：仅 dirty block 重排（IFC 全量重排该 block），clean 兄弟子树跳过。**省掉了全量 `RebuildRenderTree`（渲染树+布局树+层树重建）。**
 
-## 五、建议执行顺序
+失败回退：无 RenderText / 未布局（`LayoutBox()` nil）时返回 false，`onTreeChange` 回退 `MarkRenderTreeDirty` 全量重建。
 
-1. **阶段 1（mutation 通知带节点）**：立即可做，几十行改动，纯铺路。
-2. **阶段 2（node 映射）**：紧随其后，让 RenderTreeUpdater 从「死代码」变「可用」。
-3. 阶段 1-2 完成后，重新评估打字场景的「text 变更」能否低成本接入增量路径。
-4. 阶段 3-4 视业务需要（CM6 编辑器是否还有打字卡顿）再决定。
+## 五、验证
+
+- 编译 + 单测：rendering/page/app/webkit 全绿。
+- `TestFrameApplyTextChange`（page）：LoadHTML → Layout → SetData → ApplyTextChange → NeedsLayout → Layout → `rt.Text()=="world"` + segments 非空（**不触发全量重建**，精确验证 C1 增量链路）。
+- `TestUpdaterTextChange` / `TestApplyTextChange`（rendering）。
+- `go run ./cmd/render_test`：69 用例全通过（渲染引擎无回归）。
+- `ime_editor_probe`：IME 组合 + 普通字符打字，CM6 state 同步正确。
+
+## 六、剩余工作（C2，后置）
+
+IFC 行级增量重排（只重排 text 变更所在行，而非整 block）。收益进一步缩小，风险高（WebKit LineLayout 增量是独立大工程）。当前 C1 已覆盖打字主热路径，C2 视「整 block 重排」是否仍是瓶颈再决定。
