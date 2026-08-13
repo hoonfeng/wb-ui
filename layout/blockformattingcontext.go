@@ -504,8 +504,23 @@ func clearSideOf(box *ElementBox) string {
 
 func heightIsAutoForBox(box *ElementBox) bool {
 	if box.Style() == nil { return true }
-	r := resolveLengthAuto(box.Style().Height, 0, 0)
-	return r.Auto
+	cs := box.Style()
+	r := resolveLengthAuto(cs.Height, 0, 0)
+	if !r.Auto {
+		return false
+	}
+	// ★ absolute 元素 top+bottom 都显式设置时（如 inset:0），CSS 规定
+	// 高度由拉伸确定（非 auto）——布局引擎在 layoutAbsolute 已算出
+	// stretch 高度，BFC 的内容高度重算不得覆盖它（否则 absolute 覆盖层
+	// 高度塌陷为内容高，四边边框只剩顶部）。
+	if cs.Position == style.PositionAbsolute || cs.Position == style.PositionFixed {
+		_, topAuto := resolveOffset(asLength(cs.Properties["top"]), 0)
+		_, bottomAuto := resolveOffset(asLength(cs.Properties["bottom"]), 0)
+		if !topAuto && !bottomAuto {
+			return false
+		}
+	}
+	return true
 }
 
 // childNeedsHeightConstraintForBox reports whether a block-level child that is
