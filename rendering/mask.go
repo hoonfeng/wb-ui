@@ -9,6 +9,7 @@ package rendering
 import (
 	"strings"
 
+	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
@@ -86,7 +87,7 @@ func maskGeometry(rect graphics.Rect, size, position string, imgW, imgH int) (dx
 //   - SVG <mask> element (url(file.svg#id)) whose region is already resolved
 //     against the target box by renderSVGMask; its mask-type (luminance default
 //     | alpha) selects the mask value.
-func applyMaskLayer(canvas *graphics.Canvas, st *style.ComputedStyle, rect graphics.Rect) {
+func applyMaskLayer(canvas *graphics.Canvas, st *style.ComputedStyle, rect graphics.Rect, ownerEl *dom.Element) {
 	if canvas == nil || st == nil {
 		return
 	}
@@ -98,6 +99,23 @@ func applyMaskLayer(canvas *graphics.Canvas, st *style.ComputedStyle, rect graph
 	// SVG <mask> source: url(file.svg#maskId) or url(#maskId).
 	if i := strings.LastIndex(murl, "#"); i >= 0 {
 		fileURL, maskID := murl[:i], murl[i+1:]
+		// Same-document reference: mask-image: url(#id) points at an inline
+		// <mask id="id"> element within the same document (e.g. inside an
+		// inline <svg><defs>). Resolve it through the owner's document.
+		if fileURL == "" && ownerEl != nil {
+			if maskEl := ownerEl.OwnerDocument().GetElementById(maskID); maskEl != nil {
+				if strings.EqualFold(maskEl.LocalName(), "mask") {
+					if m := parseMaskElement(maskEl); m != nil {
+						if img := renderSVGMask(m, rect.Width, rect.Height); img != nil {
+							luminance := maskLuminanceFor(st.GetProperty("mask-mode"), true, m.maskType)
+							canvas.ApplyImageMaskMode(img.SkiaImage(), rect, luminance)
+							img.Release()
+							return
+						}
+					}
+				}
+			}
+		}
 		if doc := loadBackgroundSVG(fileURL); doc != nil {
 			if m := doc.masks[maskID]; m != nil {
 				if img := renderSVGMask(m, rect.Width, rect.Height); img != nil {

@@ -978,6 +978,51 @@ type svgMask struct {
 	shapes           []svgShape
 }
 
+// parseMaskElement parses a <mask> element (from <defs>) into an svgMask.
+// Extracted from buildSVGDocument so same-document mask-image: url(#id)
+// references can reuse it directly against a mask element found by
+// GetElementById (inline <svg><mask> in the same document).
+func parseMaskElement(defEl *dom.Element) *svgMask {
+	if defEl == nil {
+		return nil
+	}
+	maskID := defEl.GetAttribute("id")
+	if maskID == "" {
+		return nil
+	}
+	mk := &svgMask{
+		id:               maskID,
+		x:                parseMaskFraction(defEl.GetAttribute("x"), -0.10),
+		y:                parseMaskFraction(defEl.GetAttribute("y"), -0.10),
+		w:                parseMaskFraction(defEl.GetAttribute("width"), 1.20),
+		h:                parseMaskFraction(defEl.GetAttribute("height"), 1.20),
+		maskUnits:        defEl.GetAttribute("maskUnits"),
+		maskContentUnits: defEl.GetAttribute("maskContentUnits"),
+		maskType:         defEl.GetAttribute("mask-type"),
+	}
+	for mc := defEl.FirstChild(); mc != nil; mc = mc.NextSibling() {
+		if mEl, ok := mc.(*dom.Element); ok {
+			if shape := parseSVGElement(mEl); shape != nil {
+				fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 255, G: 255, B: 255, A: 255}}
+				pm := parseStyleAttribute(mEl.GetAttribute("style"))
+				if f := pm["fill"]; f != "" {
+					fs.fill = parseColorAttribute(f)
+				} else if f := mEl.GetAttribute("fill"); f != "" {
+					fs.fill = parseColorAttribute(f)
+				}
+				if st := pm["stroke"]; st != "" {
+					fs.stroke = parseColorAttribute(st)
+				} else if st := mEl.GetAttribute("stroke"); st != "" {
+					fs.stroke = parseColorAttribute(st)
+				}
+				fs.strokeWidth = parseSVGCoord(mEl.GetAttribute("stroke-width"))
+				mk.shapes = append(mk.shapes, fs)
+			}
+		}
+	}
+	return mk
+}
+
 // svgStyleRule is one declaration subset (fill/stroke) extracted from a
 // <style> rule, matched against element class or tag name.
 type svgStyleRule struct {
@@ -1847,39 +1892,8 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 							ctx.markers[mid] = m
 						}
 					case "mask":
-						maskID := defEl.GetAttribute("id")
-						if maskID != "" {
-							mk := &svgMask{
-								id:               maskID,
-								x:                parseMaskFraction(defEl.GetAttribute("x"), -0.10),
-								y:                parseMaskFraction(defEl.GetAttribute("y"), -0.10),
-								w:                parseMaskFraction(defEl.GetAttribute("width"), 1.20),
-								h:                parseMaskFraction(defEl.GetAttribute("height"), 1.20),
-								maskUnits:        defEl.GetAttribute("maskUnits"),
-								maskContentUnits: defEl.GetAttribute("maskContentUnits"),
-								maskType:         defEl.GetAttribute("mask-type"),
-							}
-							for mc := defEl.FirstChild(); mc != nil; mc = mc.NextSibling() {
-								if mEl, ok := mc.(*dom.Element); ok {
-									if shape := parseSVGElement(mEl); shape != nil {
-										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 255, G: 255, B: 255, A: 255}}
-										pm := parseStyleAttribute(mEl.GetAttribute("style"))
-										if f := pm["fill"]; f != "" {
-											fs.fill = parseColorAttribute(f)
-										} else if f := mEl.GetAttribute("fill"); f != "" {
-											fs.fill = parseColorAttribute(f)
-										}
-										if st := pm["stroke"]; st != "" {
-											fs.stroke = parseColorAttribute(st)
-										} else if st := mEl.GetAttribute("stroke"); st != "" {
-											fs.stroke = parseColorAttribute(st)
-										}
-										fs.strokeWidth = parseSVGCoord(mEl.GetAttribute("stroke-width"))
-										mk.shapes = append(mk.shapes, fs)
-									}
-								}
-							}
-							ctx.masks[maskID] = mk
+						if mk := parseMaskElement(defEl); mk != nil {
+							ctx.masks[mk.id] = mk
 						}
 					}
 				}

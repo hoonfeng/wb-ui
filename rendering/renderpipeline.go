@@ -353,7 +353,11 @@ func paintLayerWithEffects(layer *RenderLayer, info *PaintInfo, layerRect layout
 		info.canvas.Restore()
 	}
 	if hasMask {
-		applyMaskLayer(info.canvas, st, maskRect)
+		var ownerEl *dom.Element
+		if owner := layer.Owner(); owner != nil {
+			ownerEl, _ = owner.Node().(*dom.Element)
+		}
+		applyMaskLayer(info.canvas, st, maskRect, ownerEl)
 		info.canvas.Restore()
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"wb-ui/dom"
+	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
 
@@ -76,4 +78,63 @@ func TestMaskImageSVGMaskAlpha(t *testing.T) {
 	if px := canvas.PixelAt(30, 20); px.A != 0 {
 		t.Fatalf("right half (masked out) = %+v, want transparent", px)
 	}
+}
+
+// TestMaskImageSameDocumentReference verifies mask-image: url(#id) resolves an
+// inline <svg><mask id="id"> in the SAME document (not an external file / data
+// URI). This was the last mask-image gap: same-document fragment references.
+func TestMaskImageSameDocumentReference(t *testing.T) {
+	doc := dom.NewDocument()
+	svgEl := doc.CreateElement("svg")
+	defsEl := doc.CreateElement("defs")
+	maskEl := doc.CreateElement("mask")
+	maskEl.SetAttribute("id", "m")
+	maskEl.SetAttribute("maskContentUnits", "objectBoundingBox")
+	rectEl := doc.CreateElement("rect")
+	rectEl.SetAttribute("x", "0.5")
+	rectEl.SetAttribute("y", "0")
+	rectEl.SetAttribute("width", "0.5")
+	rectEl.SetAttribute("height", "1")
+	rectEl.SetAttribute("fill", "white")
+	_ = maskEl.AppendChild(rectEl)
+	_ = defsEl.AppendChild(maskEl)
+	_ = svgEl.AppendChild(defsEl)
+	_ = doc.AppendChild(svgEl)
+
+	cs := style.NewComputedStyle()
+	cs.BackgroundColor = style.Color{R: 255, A: 255}
+	cs.SetProperty("mask-image", "url(#m)")
+	canvas := paintSameDocMaskFixture(t, 40, 40, cs, doc)
+	defer canvas.Release()
+
+	// Left half has no mask content → masked out (transparent).
+	if px := canvas.PixelAt(10, 20); px.A != 0 {
+		t.Fatalf("left half (no mask content) = %+v, want transparent", px)
+	}
+	// Right half covered by the white rect → kept (red background survives).
+	if px := canvas.PixelAt(30, 20); px.R != 255 || px.A != 255 {
+		t.Fatalf("right half (mask kept) = %+v, want red", px)
+	}
+}
+
+// paintSameDocMaskFixture is paintMaskLayerFixture but takes a caller-built
+// document so the test can mount an inline <svg><mask> tree for same-document
+// url(#id) resolution.
+func paintSameDocMaskFixture(t *testing.T, w, h int, cs *style.ComputedStyle, doc *dom.Document) *graphics.Canvas {
+	t.Helper()
+	canvas := graphics.NewCanvas(w, h)
+	rv := NewRenderView(doc, style.NewComputedStyle())
+	rv.SetViewportSize(float64(w), float64(h))
+	box := NewRenderBox(doc.CreateElement("div"), cs)
+	box.SetLocation(0, 0)
+	box.SetSize(float64(w), float64(h))
+	rv.AddChild(box, nil)
+	comp := NewRenderLayerCompositor(rv)
+	rootLayer := comp.BuildLayerTree(RenderObject(rv))
+	if rootLayer == nil {
+		t.Fatal("BuildLayerTree returned nil")
+	}
+	rv.SetRootLayer(rootLayer)
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: float64(w), Height: float64(h)})
+	return canvas
 }

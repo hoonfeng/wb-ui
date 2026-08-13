@@ -361,6 +361,4 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 ### 剩余可优化项（非阻塞，按需）
 - `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
-- 内联 SVG 元素（HTML 内 `<svg>` + `mask-image: url(#id)` 同文档引用）—— 依赖 wb-ui
-  的内联 SVG 渲染能力，当前 SVG 主要走外部文件/data URI 路径（见 MASK_P3_PLAN.md）。
 - 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。

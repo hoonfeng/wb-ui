@@ -120,7 +120,18 @@ P3.3 (mask-mode) ─────────────┘
   `&skia.SamplingLinear`。
 - `TileModeDecal`（Skia raster 后端）在 no-repeat 场景行为异常，改用 clip+ClearRect
   实现 no-repeat 的「tile 外透明」语义。
-- 内联 SVG 元素（HTML 内 `<svg>` 内联 + `mask-image: url(#id)` 同文档引用）依赖 wb-ui
-  的内联 SVG 渲染能力，当前 wb-ui 的 SVG 主要走「外部文件/data URI」路径，内联引用
-  暂未覆盖（见「遗留」）。
+
+### P3.5 同文档 url(#id) 引用（2026-08-13 追加，已实现）
+
+- `rendering/svg.go`：把 `buildSVGDocument` 的 `case "mask"` 解析逻辑提取为独立
+  `parseMaskElement(defEl *dom.Element) *svgMask`，供同文档引用复用。
+- `rendering/mask.go`：`applyMaskLayer` 增加 `ownerEl *dom.Element` 参数——当
+  `mask-image: url(#id)` 的 URL 无文件部分（`fileURL == ""`）时，通过
+  `ownerEl.OwnerDocument().GetElementById(id)` 找到同文档内联 `<mask>` 元素，用
+  `parseMaskElement` + `renderSVGMask` 栅格化遮罩。
+- `rendering/renderpipeline.go`：`paintLayerWithEffects` 从 `layer.Owner().Node()`
+  取出 owner 元素传给 `applyMaskLayer`。
+- 测试：`svg_mask_test.go` 的 `TestMaskImageSameDocumentReference`（内联
+  `<svg><mask id="m">` + `mask-image: url(#m)` 右半遮罩）。
+
 
