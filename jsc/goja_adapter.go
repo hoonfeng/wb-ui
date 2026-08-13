@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/maphash"
+	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"wb-ui.com/goja"
 )
@@ -155,14 +158,22 @@ func (r *Interpreter) runCached(code string) (goja.Value, error) {
 	r.progMu.Lock()
 	if cp, ok := r.progCache[key]; ok && cp.srcLen == len(code) {
 		r.progMu.Unlock()
+		if os.Getenv("WB_JS_TIMING") != "" {
+			t0 := time.Now()
+			ret, err := r.vm.RunProgram(cp.prog)
+			fmt.Printf("[JS-TIMING] cached run=%v srcLen=%d err=%v\n", time.Since(t0), len(code), err)
+			return ret, err
+		}
 		return r.vm.RunProgram(cp.prog)
 	}
 	r.progMu.Unlock()
 
+	t0 := time.Now()
 	prog, err := goja.Compile("cached.js", code, false)
 	if err != nil {
 		return nil, err
 	}
+	compileDur := time.Since(t0)
 
 	r.progMu.Lock()
 	if r.progCache == nil {
@@ -177,7 +188,18 @@ func (r *Interpreter) runCached(code string) (goja.Value, error) {
 	r.progBytes += len(code)
 	r.progMu.Unlock()
 
-	return r.vm.RunProgram(prog)
+	t1 := time.Now()
+	var ms0, ms1 runtime.MemStats
+	runtime.ReadMemStats(&ms0)
+	ret, err := r.vm.RunProgram(prog)
+	runtime.ReadMemStats(&ms1)
+	if os.Getenv("WB_JS_TIMING") != "" {
+		fmt.Printf("[JS-TIMING] compile=%v run=%v gcCount=%d gcPause=%v heap=%dMB->%dMB totalAlloc=%dMB srcLen=%d err=%v\n",
+			compileDur, time.Since(t1), ms1.NumGC-ms0.NumGC,
+			time.Duration(ms1.PauseTotalNs-ms0.PauseTotalNs),
+			ms0.HeapAlloc>>20, ms1.HeapAlloc>>20, ms1.TotalAlloc>>20, len(code), err)
+	}
+	return ret, err
 }
 
 func (r *Interpreter) Evaluate(code string) (interface{}, error) {
