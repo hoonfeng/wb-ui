@@ -15,8 +15,11 @@
 package rendering
 
 import (
+	"log"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"wb-ui/css"
 	"wb-ui/dom"
@@ -51,6 +54,11 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 		view := NewRenderView(doc, defaultStyle(doc))
 		return view
 	}
+	profile := os.Getenv("WB_REBUILD_PROFILE") != ""
+	var t0, t1, t2 time.Time
+	if profile {
+		t0 = time.Now()
+	}
 	rootStyle := b.resolveStyle(root)
 	view := NewRenderView(doc, rootStyle)
 	// Create a render object for the document element itself and attach it as the
@@ -61,11 +69,22 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 		view.AddChild(rootRO, nil)
 		b.buildChildren(rootRO, root)
 	}
+	if profile {
+		t1 = time.Now()
+	}
 	// Build the associated layout tree and link it back.
 	b.attachLayoutTree(view, root)
+	if profile {
+		t2 = time.Now()
+	}
 	// Build the layer tree.
 	view.compositor.BuildLayerTree(view)
 	view.SetRootLayer(view.compositor.RootLayer())
+	if profile {
+		t3 := time.Now()
+		log.Printf("[rebuild-profile] buildChildren=%v attachLayout=%v layerTree=%v total=%v",
+			t1.Sub(t0), t2.Sub(t1), t3.Sub(t2), t3.Sub(t0))
+	}
 	return view
 }
 
