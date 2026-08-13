@@ -311,6 +311,7 @@ type InlineTextBox struct {
 	text         string
 	style        *style.ComputedStyle
 	parentBox    *ElementBox
+	node         dom.Node // 源 DOM Text 节点（增量 text 更新回溯 + node 匹配用）
 	TextSegments []TextSegment
 }
 
@@ -341,6 +342,7 @@ func (t *InlineTextBox) MarkClean()                              {}
 func (t *InlineTextBox) HasLayoutChanged() bool                  { return false }
 func (t *InlineTextBox) Text() string                            { return t.text }
 func (t *InlineTextBox) SetText(s string)                        { t.text = s }
+func (t *InlineTextBox) Node() dom.Node                          { return t.node }
 
 // ─────────────────────────────────────────────────────────────
 //  TextSegment
@@ -493,7 +495,7 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		case *dom.Text:
 			data := v.Data()
 			if data == "" { return }
-			inlineRun = append(inlineRun, &InlineTextBox{text: data, style: box.style})
+			inlineRun = append(inlineRun, &InlineTextBox{text: data, style: box.style, node: v})
 		}
 	}
 	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
@@ -556,7 +558,7 @@ func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolve
 			anonStyle.Display = style.DisplayBlock
 			anon := &ElementBox{
 				nodeType: NodeGenericElement, style: anonStyle,
-				children: []Box{&InlineTextBox{text: data, style: anonStyle}},
+				children: []Box{&InlineTextBox{text: data, style: anonStyle, node: v}},
 			}
 			box.AddChild(anon)
 		}

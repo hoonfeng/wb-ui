@@ -1033,7 +1033,7 @@ func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *lay
 			// RenderText: match either direct InlineTextBox or anonymous-wrapper-wrapped one.
 			for i, lc := range lChildren {
 				// Case 1: direct InlineTextBox child.
-				if tb, ok := lc.(*layout.InlineTextBox); ok && tb.Text() == rt.OriginalText() {
+				if tb, ok := lc.(*layout.InlineTextBox); ok && tb.Node() == rt.Node() {
 					if len(tb.TextSegments) > 0 {
 						segs := make([]InlineTextBox, len(tb.TextSegments))
 						for j, s := range tb.TextSegments {
@@ -1051,7 +1051,7 @@ func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *lay
 				// Case 2: anonymous ElementBox wrapper around InlineTextBox.
 				if childEb, ok := lc.(*layout.ElementBox); ok && childEb.Element() == nil {
 					for _, cc := range childEb.Children() {
-						if tb, ok := cc.(*layout.InlineTextBox); ok && tb.Text() == rt.OriginalText() {
+						if tb, ok := cc.(*layout.InlineTextBox); ok && tb.Node() == rt.Node() {
 							if len(tb.TextSegments) > 0 {
 								segs := make([]InlineTextBox, len(tb.TextSegments))
 								for j, s := range tb.TextSegments {
