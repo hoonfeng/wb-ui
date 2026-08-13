@@ -530,9 +530,9 @@ func (c *SelectorChecker) matchSlotted(s SimpleSelector, el *dom.Element) bool {
 // matchPart reports whether ::part(name) matches el: a shadow-tree element whose
 // `part` attribute lists one of the requested names, or whose part name is re-exported
 // through one or more ancestor shadow hosts via their `exportparts` attribute
-// (CSS Scoping Level 1 §4.5). exportparts maps a shadow-internal part name to an
-// outer name (e.g. host exportparts="x: y" exposes the shadow part "x" as "y" to the
-// host's own host), and the re-export chain is followed layer by layer.
+// (CSS Scoping Level 1 §4.5). exportparts maps a shadow-internal part name to one or
+// more outer names (e.g. host exportparts="x: y, x: z" exposes the shadow part "x" as
+// both "y" and "z"), and the re-export chain is followed layer by layer.
 func (c *SelectorChecker) matchPart(s SimpleSelector, el *dom.Element) bool {
 	if len(s.StringList) == 0 {
 		return false
@@ -564,8 +564,8 @@ func (c *SelectorChecker) matchPart(s SimpleSelector, el *dom.Element) bool {
 		}
 		var next []string
 		for _, p := range visible {
-			if outer, ok := exp[p]; ok {
-				next = append(next, outer)
+			if outers, ok := exp[p]; ok {
+				next = append(next, outers...)
 			}
 		}
 		if len(next) == 0 {
@@ -578,13 +578,14 @@ func (c *SelectorChecker) matchPart(s SimpleSelector, el *dom.Element) bool {
 }
 
 // parseExportparts parses an `exportparts` attribute value into a map of
-// shadow-internal part name -> outer part name. The value is a comma-separated list of
-// `ident : ident` pairs (CSS Scoping Level 1 part-mapping-list).
-func parseExportparts(attr string) map[string]string {
+// shadow-internal part name -> outer part names. The value is a comma-separated list of
+// `ident : ident` pairs (CSS Scoping Level 1 part-mapping-list); a single inner name
+// may be exported to multiple outer names (`exportparts="x: a, x: b"`).
+func parseExportparts(attr string) map[string][]string {
 	if attr == "" {
 		return nil
 	}
-	m := make(map[string]string)
+	m := make(map[string][]string)
 	for _, pair := range strings.Split(attr, ",") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
@@ -594,7 +595,7 @@ func parseExportparts(attr string) map[string]string {
 			inner := strings.TrimSpace(pair[:i])
 			outer := strings.TrimSpace(pair[i+1:])
 			if inner != "" && outer != "" {
-				m[inner] = outer
+				m[inner] = append(m[inner], outer)
 			}
 		}
 	}

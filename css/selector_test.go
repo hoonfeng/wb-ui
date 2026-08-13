@@ -766,6 +766,31 @@ func TestSelector_MatchPartExportpartsMultiLayer(t *testing.T) {
 	}
 }
 
+// TestSelector_MatchPartExportpartsOneToMany verifies a single inner part name can be
+// exported to multiple outer names (`exportparts="inner: a, inner: b"`), per CSS Scoping
+// Level 1 §4.5 part-mapping-list. Before one-to-many support, map[string]string dropped
+// the first outer name and only ::part(b) matched.
+func TestSelector_MatchPartExportpartsOneToMany(t *testing.T) {
+	doc := newTestDoc(t)
+	innerHost := dom.NewElement(doc, "xinner")
+	innerSR, _ := innerHost.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "inner")
+	_ = innerSR.AppendChild(btn)
+	innerHost.SetAttribute("exportparts", "inner: a, inner: b")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "::part(a)"), btn) {
+		t.Fatalf("::part(a) should match the first exported outer name")
+	}
+	if !c.Match(parseComplex(t, "::part(b)"), btn) {
+		t.Fatalf("::part(b) should match the second exported outer name")
+	}
+	if c.Match(parseComplex(t, "::part(nope)"), btn) {
+		t.Fatalf("::part(nope) should not match")
+	}
+}
+
 func TestSelector_MatchPartWithHostPrefix(t *testing.T) {
 	doc := newTestDoc(t)
 	host := dom.NewElement(doc, "xwidget")

@@ -255,13 +255,14 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 下一跳是分配它的 `<slot>`，而非其 light-DOM 父节点），`buildEventPath` 改用之；非
 > composed 事件仍走裸 parent 链并在 shadow root 截断。③ exportparts 跨层转发
 > （CSS Scoping L1 §4.5）：`matchPart` 沿 `exportparts` 属性逐层重命名 part 名，支持
-> 多层嵌套 shadow 的 `inner→mid→outer` 转发链（新增 `parseExportparts`）。
+> 多层嵌套 shadow 的 `inner→mid→outer` 转发链；`parseExportparts` 返回 `map[string][]string`
+> 支持一对多导出（`exportparts="x: a, x: b"` 同时导出 a、b）。
 > 测试：`TestEvent_Retargeting` / `TestEvent_ComposedPathSlot` /
 > `TestSelector_MatchPartExportparts*` 全绿，全量通过。
 >
 > **仍缺（后续增量）**：① `::part` 的多个 part-name 匹配优化（当前 O(names) 线性扫描，
-> 可改为哈希集合）；② `exportparts` 的 `inner` 到多个 `outer` 映射（当前 map 一对一）；
-> ③ 事件 `relatedTarget`（MouseEvent 的 mouseover/out）跨 shadow 边界 retargeting。
+> 可改为哈希集合，收益 <1%）；② 事件 `relatedTarget`（MouseEvent 的 mouseover/out）跨
+> shadow 边界 retargeting（需先实现 mouseover/out 派发，当前无消费方）。
 
 ### 现状定位
 - `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，
@@ -354,8 +355,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 5. **P3 mask-image** → ✅ 已实现（背景/边框 alpha 遮罩）。
 
 ### 剩余可优化项（非阻塞，按需）
-- `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化）。
-- `exportparts` 一对多映射（当前 map 一对一）。
-- 事件 `relatedTarget`（mouseover/out）跨 shadow 边界 retargeting。
+- `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
+- 事件 `relatedTarget`（mouseover/out）跨 shadow 边界 retargeting（需先实现 mouseover/out 派发）。
 - mask-image 前景文字/SVG 遮罩、mask-repeat/size/position 解析。
 - 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。
