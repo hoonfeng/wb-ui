@@ -225,6 +225,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}()
 
+	// sepPending（行级）：字间空格分隔符已被「显式消费」（pre 模式的空间
+	// segment，或 normal 模式的节点边界空白 advance）。下一个 word 不能再
+	// 叠加 spaceWidth——否则 pre 模式下 " = " 之类文本节点的空格后单词会
+	// 再得一个空格宽 → 相邻 span/token 之间出现异常空隙（CM6 .cm-line 的
+	// 裸文本 " = "、"; // " 全中招）；normal 模式下两个相邻的空白文本节点
+	// 也会产生双空格。行级作用域：跨文本节点连续生效，换行时复位。
+	sepPending := false
 	for _, child := range box.Children() {
 		switch cld := child.(type) {
 		case *InlineTextBox:
@@ -258,7 +265,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// and leading-whitespace text nodes (" main" after </span>).
 			// pre 模式不折叠：前导空格由下方保留分支逐个渲染。
 			if len(runes) > 0 && isInlineWhitespace(runes[0]) && currentLine.widthUsed > 0 && !preserveSp {
-				currentLine.widthUsed += spaceWidth
+				if !sepPending {
+					currentLine.widthUsed += spaceWidth
+					sepPending = true
+				}
 			}
 			for cursor < len(runes) {
 				// pre 系列：\n 强制换行（浏览器 white-space:pre 语义——
@@ -275,6 +285,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						availWidth: newCw,
 					}
 					firstWord = true
+					sepPending = false
 					cursor++
 					continue
 				}
@@ -298,6 +309,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					})
 					currentLine.widthUsed += spW
 					firstWord = false
+					// 空格分隔符已被显式渲染：下一个 word 不得再叠加 spaceWidth
+					//（否则 pre 模式下 "= " 后单词前出现双空格空隙）。
+					sepPending = true
 					cursor++
 					continue
 				}
@@ -331,10 +345,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// A space separator applies only between whitespace-
 					// delimited words (wi==0); CJK sub-units split from the
 					// same original word have no space between them.
+					// ★ sepPending：空格已被显式消费（pre 空格 segment /
+					// 节点边界空白 advance）时不再叠加——避免双空格空隙。
 					nextX := currentLine.widthUsed
-					if !firstWord && wi == 0 {
+					if !firstWord && wi == 0 && !sepPending {
 						nextX += spaceWidth
 					}
+					sepPending = false
 					// ★ 断行比较加 0.001 epsilon：文字宽度恰好等于可用宽度
 					//   （如 13px 字体下"关闭"26px 与按钮 content 26px）时，
 					//   浮点微差（26.0000001 > 25.9999999）会误判折行——
@@ -354,6 +371,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 							availWidth: newCw,
 						}
 						firstWord = true
+						sepPending = false
 						nextX = 0
 					}
 					// A single word wider than the whole line: break it per
@@ -383,6 +401,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 										availWidth: newCw,
 									}
 									firstWord = true
+									sepPending = false
 								}
 								pending = append(pending, pendingSeg{
 									textBox: cld,
@@ -806,6 +825,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				applyRelativeOffsetForBox(cld, contentWidth, lineHeight, state)
 			}
 			currentLine.widthUsed += cldW
+			// 有实际宽度的 inline 子元素消费了待处理的空格分隔符：
+			// 后续空白节点的 advance 是新分隔符（<span>foo</span> <span>
+			// bar</span> 后的 "  baz" 前导空格仍贡献一个空格）。
+			if cldW > 0 {
+				sepPending = false
+			}
 		}
 	}
 

@@ -41,3 +41,7 @@ gen_*.py
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Go build cache (local)
+.cache/gocache/
+

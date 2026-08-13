@@ -1,4 +1,4 @@
-﻿package goja
+package goja
 
 import (
 	"fmt"
@@ -63,6 +63,13 @@ type DynamicArray interface {
 type baseDynamicObject struct {
 	val       *Object
 	prototype *Object
+	// symValues holds own Symbol-keyed properties (expando data semantics,
+	// mirroring baseObject.symValues). Vendored extension: the original
+	// goja dynamic object rejected symbol assignment outright
+	// ("Dynamic objects do not support Symbol properties"), which broke
+	// Vue 3.5's patchEvent (stores event invokers on DOM elements via
+	// el[Symbol("_vei")] = {}).
+	symValues *orderedMap
 }
 
 type dynamicObject struct {
@@ -217,6 +224,17 @@ func (o *dynamicObject) getIdx(p valueInt, receiver Value) Value {
 }
 
 func (o *baseDynamicObject) getSym(p *Symbol, receiver Value) Value {
+	if o.symValues != nil {
+		if v := o.symValues.get(p); v != nil {
+			if prop, ok := v.(*valueProperty); ok {
+				if receiver == nil {
+					return prop.get(o.val)
+				}
+				return prop.get(receiver)
+			}
+			return v
+		}
+	}
 	if proto := o.prototype; proto != nil {
 		if receiver == nil {
 			return proto.self.getSym(p, o.val)
@@ -234,7 +252,10 @@ func (o *dynamicObject) getOwnPropIdx(v valueInt) Value {
 	return o.d.Get(v.String())
 }
 
-func (*baseDynamicObject) getOwnPropSym(*Symbol) Value {
+func (o *baseDynamicObject) getOwnPropSym(p *Symbol) Value {
+	if o.symValues != nil {
+		return o.symValues.get(p)
+	}
 	return nil
 }
 
@@ -246,8 +267,34 @@ func (o *dynamicObject) _set(prop string, v Value, throw bool) bool {
 	return false
 }
 
-func (o *baseDynamicObject) _setSym(throw bool) {
-	typeErrorResult(throw, "Dynamic objects do not support Symbol properties")
+func (o *baseDynamicObject) _setSym(name *Symbol, val Value, throw bool) bool {
+	// Own symbol property: data semantics (mirrors baseObject.setOwnSym).
+	var ownDesc Value
+	if o.symValues != nil {
+		ownDesc = o.symValues.get(name)
+	}
+	if ownDesc == nil {
+		if proto := o.prototype; proto != nil {
+			if res, handled := proto.self.setForeignSym(name, val, o.val, throw); handled {
+				return res
+			}
+		}
+		if o.symValues == nil {
+			o.symValues = newOrderedMap(nil)
+		}
+		o.symValues.set(name, val)
+		return true
+	}
+	if prop, ok := ownDesc.(*valueProperty); ok {
+		if !prop.isWritable() {
+			typeErrorResult(throw, "Cannot assign to read only symbol property '%s'", name)
+			return false
+		}
+		prop.set(o.val, val)
+	} else {
+		o.symValues.set(name, val)
+	}
+	return true
 }
 
 func (o *dynamicObject) setOwnStr(p unistring.String, v Value, throw bool) bool {
@@ -276,15 +323,8 @@ func (o *dynamicObject) setOwnIdx(p valueInt, v Value, throw bool) bool {
 	return o._set(prop, v, throw)
 }
 
-func (o *baseDynamicObject) setOwnSym(s *Symbol, v Value, throw bool) bool {
-	if proto := o.prototype; proto != nil {
-		// we know it's foreign because prototype loops are not allowed
-		if res, handled := proto.self.setForeignSym(s, v, o.val, throw); handled {
-			return res
-		}
-	}
-	o._setSym(throw)
-	return false
+func (o *baseDynamicObject) setOwnSym(p *Symbol, v Value, throw bool) bool {
+	return o._setSym(p, v, throw)
 }
 
 func (o *baseDynamicObject) setParentForeignStr(p unistring.String, v, receiver Value, throw bool) (res bool, handled bool) {
@@ -368,8 +408,8 @@ func (o *dynamicObject) hasOwnPropertyIdx(v valueInt) bool {
 	return o.d.Has(v.String())
 }
 
-func (*baseDynamicObject) hasOwnPropertySym(_ *Symbol) bool {
-	return false
+func (o *baseDynamicObject) hasOwnPropertySym(s *Symbol) bool {
+	return o.symValues != nil && o.symValues.has(s)
 }
 
 func (o *baseDynamicObject) checkDynamicObjectPropertyDescr(name fmt.Stringer, descr PropertyDescriptor, throw bool) bool {
@@ -407,8 +447,21 @@ func (o *dynamicObject) defineOwnPropertyIdx(name valueInt, desc PropertyDescrip
 }
 
 func (o *baseDynamicObject) defineOwnPropertySym(name *Symbol, desc PropertyDescriptor, throw bool) bool {
-	o._setSym(throw)
-	return false
+	if desc.Getter != nil || desc.Setter != nil {
+		getterObj, _ := desc.Getter.(*Object)
+		setterObj, _ := desc.Setter.(*Object)
+		if o.symValues == nil {
+			o.symValues = newOrderedMap(nil)
+		}
+		o.symValues.set(name, &valueProperty{
+			getterFunc:   getterObj,
+			setterFunc:   setterObj,
+			configurable: desc.Configurable != FLAG_FALSE,
+			enumerable:   desc.Enumerable != FLAG_FALSE,
+		})
+		return true
+	}
+	return o._setSym(name, desc.Value, throw)
 }
 
 func (o *dynamicObject) _delete(prop string, throw bool) bool {
@@ -427,7 +480,19 @@ func (o *dynamicObject) deleteIdx(idx valueInt, throw bool) bool {
 	return o._delete(idx.String(), throw)
 }
 
-func (*baseDynamicObject) deleteSym(_ *Symbol, _ bool) bool {
+func (o *baseDynamicObject) deleteSym(s *Symbol, throw bool) bool {
+	if o.symValues != nil {
+		if val := o.symValues.get(s); val != nil {
+			if prop, ok := val.(*valueProperty); ok && !prop.configurable {
+				if throw && o.val.runtime != nil {
+					r := o.val.runtime
+					panic(r.NewTypeError("Cannot delete symbol property '%s' of %s", s, r.objectproto_toString(FunctionCall{This: o.val})))
+				}
+				return false
+			}
+			o.symValues.remove(s)
+		}
+	}
 	return true
 }
 
@@ -491,6 +556,11 @@ func (o *dynamicObject) iterateStringKeys() iterNextFunc {
 }
 
 func (o *baseDynamicObject) iterateSymbols() iterNextFunc {
+	if o.symValues != nil {
+		return (&objectSymbolIter{
+			iter: o.symValues.newIter(),
+		}).next
+	}
 	return func() (propIterItem, iterNextFunc) {
 		return propIterItem{}, nil
 	}
@@ -536,7 +606,32 @@ func (o *dynamicObject) stringKeys(all bool, accum []Value) []Value {
 	return accum
 }
 
-func (*baseDynamicObject) symbols(all bool, accum []Value) []Value {
+func (o *baseDynamicObject) symbols(all bool, accum []Value) []Value {
+	if o.symValues != nil {
+		iter := o.symValues.newIter()
+		if all {
+			for {
+				entry := iter.next()
+				if entry == nil {
+					break
+				}
+				accum = append(accum, entry.key)
+			}
+		} else {
+			for {
+				entry := iter.next()
+				if entry == nil {
+					break
+				}
+				if prop, ok := entry.value.(*valueProperty); ok {
+					if !prop.enumerable {
+						continue
+					}
+				}
+				accum = append(accum, entry.key)
+			}
+		}
+	}
 	return accum
 }
 

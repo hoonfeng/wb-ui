@@ -241,6 +241,12 @@ func (h *Host) MockFocus(el *dom.Element) {
 	h.imeFocusedEl = el
 	h.imeComposing = false
 	h.imeComposeText = ""
+	h.imeCompRoot = nil
+	h.imeCompFrom = 0
+	h.imeCompLen = 0
+	h.imeCompText = ""
+	h.imeCompStarted = false
+	h.imeCompEndFired = false
 	if el != nil {
 		el.SetFocused(true)
 		el.SetFocusByKeyboard(false)

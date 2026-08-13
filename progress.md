@@ -465,4 +465,122 @@ go test ./... → 20 包 PASS，1 个预存失败（bindings/TestVue3MountFinal:
 #### 修改文件
 - style/resolver.go — applyDeclaration添加cs.SetProperty + tokensToString修复左括号
 - style/computedstyle.go — NewComputedStyle初始化maps + SetProperty nil-check
+
+## 2026-08-13
+
+### CM6 编辑器四大问题修复（宽度测量 / span 间隙 / IME / 文件打开慢）
+
+#### 1. 文本宽度没有使用标准 Skia
+**根因**：canvas 2D `measureText` 用「DOM span 实测」路径，布局失败时回退
+`len×fs×0.6` 估算（Consolas 13px 空格 = 7.8px vs 浏览器真实 7.1475px，差 9%），
+且每次调用触发 DOM 插入/强制布局/移除（测量风暴）。
+**修复**：
+- `bindings/dom.go` 注册全局 `__wbMeasureText`（Go 原生）：宽度 = Skia
+  advance（W=7.1475 与浏览器一致），高度保持与浏览器 canvas TextMetrics
+  对齐；`applyCanvas2DPatch` 的 measureText 优先走原生路径。
+- `bindings/canvasfont.go` — canvas ctx.font 简写解析（px/weight/style）。
+- `webkit/cm6_measure_skia_test.go` — Range.getClientRects（CM6
+  measureTextSize 路径）宽度与 Skia 一致性回归测试。
+- `bindings/canvasmeasure_test.go` — 原生 measureText 精确 advance 回归测试。
+
+#### 2. span 与 span 之间异常空隙
+**根因**：`layout/inlineformattingcontext.go` 在 pre 模式（CM6 .cm-line 的
+white-space:pre）下，空格被渲染为显式 segment 后，下一个 word 仍按
+`!firstWord` 逻辑再叠加一个 spaceWidth → `" = "` 渲染成 `"  ="`，每个
+token/span 边界多一个空格宽的空隙；normal 模式下相邻空白文本节点同样
+双空格。
+**修复**：行级 `sepPending` 标志——空格分隔符被显式消费（pre 空格 segment /
+节点边界空白 advance）后，下一个 word 不再叠加 spaceWidth；inline 子元素
+放置后复位；换行复位。
+**测试**：`layout/inline_span_gap_test.go`（3 个用例：pre 空格、normal 折叠、
+连续空白节点）——所有段无缝衔接（delta=0.0000）。
+
+#### 3. 输入法输入时文字插入异常
+**根因**：contenteditable（CM6 输入区）的 IME 组合更新完全不写 DOM（组合
+预览不显示），提交时在 DOM Selection 处直接插入——提交字符插到组合预览
+之后（「文字插入到光标前/预览后」）；且 eventToJS 未暴露
+CompositionEvent.data / InputEvent.inputType/data/isComposing → CM6 读到
+undefined，组合提交被当成普通输入。
+**修复**：
+- `bindings/imecomposition.go` — TextOffsetOfSelection / ReplaceTextRange /
+  insertTextAtOffset：按「contenteditable 根文本内容的 rune 偏移」跟踪组合
+  范围（跨 CM6 readDOMChange 重建稳定），替换经 SplitText/RemoveChild/
+  InsertBefore 完成（MutationObserver 记录正常），插入后同步
+  window.getSelection() 到插入文本之后。
+- `app/host.go` — applyIMEEvents 增加 contenteditable 分支：
+  组合更新 → 写 DOM + compositionstart/update + input(insertCompositionText)；
+  提交 → 替换组合范围 + compositionend + input；compositionend 幂等
+  （只派发一次）。新增 imeCompRoot/From/Len/Text/Started/EndFired 状态。
+- `bindings/dom_events.go` — eventToJS 暴露 CompositionEvent.data 与
+  InputEvent.inputType/data/isComposing。
+**测试**：`bindings/imecomposition_test.go`（4 用例）+ `app/host_ime_test.go`
+（2 用例，Host 层组合全流程 + 事件序列断言）。
+
+#### 4. 打开文件加载巨慢
+**根因**：`bindings.wrapElement`/`wrapText` 为每个新建节点立即安装全部自有
+属性（元素 ~90 个、文本 ~16 个，函数闭包 + accessor），每个 createElement
+约 60µs（SetAccessor + newNativeFunc + 闭包 + GC）——CM6 文件打开重绘 DOM、
+Vue 文件树、xterm 行重建全部中招（8000 节点 DOM 构建实测 570ms）。
+**修复**：
+- `jsc/lazy.go` — NewLazyObject：goja DynamicObject 惰性对象（属性按需
+  物化、goja.Value 缓存保证函数同一性、SetPrototype 官方 API 设原型）。
+- `bindings/lazyelement.go` — installElementProperty 按属性名 switch（原
+  wrapElement 全部属性逐字迁移），lazyElemProps 实现 jsc.LazyPropSet
+  （accessor live 求值、data 属性按元素缓存保证 el.classList===el.classList、
+  JS 覆写走 expando 遮蔽）。
+- `bindings/lazytext.go` — Text 节点同模式。
+- `bindings/dom.go` — wrapElement/wrapText 改为 ~15 行的惰性构造器。
+**结果**（webkit/fileopen_perf_test.go 实测）：
+8000 节点 DOM 构建 570ms → 19.4ms（约 29×）；1000 行文件打开场景总耗时
+约 175ms（DOM 构建 19ms + 渲染树重建 155ms，重建为线性布局成本）。
+
+### 验证
+- go test ./...（全部包）PASS
+- go test ./layout/ ./bindings/ ./webkit/ ./app/ ./rendering/ ./jsc/ PASS
+- 新增回归测试：layout/inline_span_gap_test.go（3 用例）、
+  bindings/imecomposition_test.go（4 用例）、bindings/canvasmeasure_test.go、
+  webkit/cm6_measure_skia_test.go、app/host_ime_test.go（2 用例）、
+  webkit/fileopen_perf_test.go（性能探针）
+
+## 2026-08-14
+
+### desktop 项目加载全空白修复（惰性包装器回归 ×2）
+
+**症状**：wb-ui 惰性 DOM 包装器重构后，desktop（gou-ide，wb-ui 宿主）
+加载其 Vue 3.5 前端时全空白——渲染树只有 html/body/#app 空壳，
+Vue 从未挂载。
+
+**根因 1 — goja dynamic object 不支持 Symbol 属性**：Vue 3.5 的
+`patchEvent` 用 `el[Symbol("_vei")] = {}` 在 DOM 元素上存事件 invoker，
+vendored goja 的 dynamicObject 直接抛
+"Dynamic objects do not support Symbol properties" → Vue mount 中断。
+
+**根因 2 — 适配器缓存 accessor 活值**：`jsc.lazyGojaAdapter` 把每次
+Get 的结果都缓存（为函数同一性），但 `firstChild/parentNode` 等
+accessor 是「活值」——缓存后 `wrapper.firstChild` 永远返回旧节点 →
+Vue `insertStaticContent` 的 `while (wrapper.firstChild)
+frag.appendChild(wrapper.firstChild)` 死循环（实测 CPU 100% +
+GC 风暴，mount 永不完成）。
+
+**修复**：
+- `goja/object_dynamic.go` — dynamic object 增加 Symbol 属性支持
+  （baseDynamicObject.symValues *orderedMap：getSym/setOwnSym/
+  hasOwnPropertySym/deleteSym/defineOwnPropertySym/symbols/
+  iterateSymbols，镜像 baseObject 语义；data + accessor 描述符）。
+- `jsc/lazy.go` — 新增可选接口 `LazyLiveProps`（Live(key) bool）；
+  adapter.get 对 live 属性不缓存，每次重新求值。
+- `bindings/lazyelement.go` / `bindings/lazytext.go` — 实现 Live()
+  （静态 accessor 名集合：firstChild/parentNode/innerHTML/…）。
+
+**验证**：
+- `webkit/desktop_blank_repro_test.go` — 加载 gou-ide dist 的
+  index.html（10MB Vue bundle）：修复前 exec 抛 Symbol TypeError /
+  死循环，修复后 1.07s 完成挂载，appHTML=80734、errs=[]（断言防回归；
+  dist 不存在时自动 skip）。
+- `bindings/template_content_test.go` — Vue insertStaticContent 的
+  SVG move 循环（while(wrapper.firstChild) …）终止性回归测试；
+  `bindings/template_parent_test.go` — innerHTML parent 链接回归。
+- go test ./... 全 PASS；go test wb-ui.com/goja/ 全 PASS（含 dynamic
+  object 测试）。
+
 

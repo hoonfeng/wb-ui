@@ -253,6 +253,24 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		obj.Set("deltaZ", jsc.NumberValue(we.DeltaZ()))
 		obj.Set("deltaMode", jsc.NumberValue(float64(we.DeltaMode())))
 	}
+	// ★ CompositionEvent 属性（浏览器标准）：e.data 为组合字符串。
+	// CM6 的 compositionstart/update/end 处理读 e.data——此前不暴露 →
+	// data 恒 undefined → 组合文本进不了 CM6 state（IME 输入异常的
+	// 一部分根因）。
+	if ce, ok := e.(*dom.CompositionEvent); ok {
+		obj.SetClassName("CompositionEvent")
+		obj.Set("data", jsc.StringValue(ce.Data()))
+	}
+	// ★ InputEvent 属性（浏览器标准）：e.inputType / e.data / e.isComposing。
+	// CM6 的 input 处理（inputHandler/readDOMChange）按 inputType 区分
+	// insertText / insertCompositionText / insertFromComposition——
+	// 此前 inputType 恒 undefined，组合提交被当成普通输入处理。
+	if ie, ok := e.(*dom.InputEvent); ok {
+		obj.SetClassName("InputEvent")
+		obj.Set("inputType", jsc.StringValue(ie.InputType()))
+		obj.Set("data", jsc.StringValue(ie.Data()))
+		obj.Set("isComposing", jsc.BooleanValue(ie.IsComposing()))
+	}
 	return jsc.ObjectValue(obj)
 }
 

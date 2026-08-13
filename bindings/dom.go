@@ -347,6 +347,45 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	})
 	g.Set("Window", jsc.FunctionValue(winCtor))
 
+	// ★ __wbMeasureText：canvas 2D measureText 的原生实现（Skia 精确
+	// advance）。此前 canvas measureText 用「DOM span 实测」：插入 span →
+	// 强制布局 → getBoundingClientRect/offsetWidth → 移除，布局失败时回退
+	// len×fs×0.6 估算（空格 7.8px vs 浏览器真实 7.1475px，差 9% ——
+	// 「文本宽度没有使用标准 Skia」根因），且每次调用都触发 DOM 变更 +
+	// 布局，是 CM6/xterm 测量风暴的慢热源。原生路径宽度 = Skia advance
+	// （W=7.1475 与浏览器一致），高度保持与浏览器 canvas TextMetrics
+	// 对齐（fBA+fBD 取整，0.8/0.2 拆分，同此前 DOM 路径行为）。
+	g.Set("__wbMeasureText", jsc.FunctionValue(jsc.NewNativeFunction("__wbMeasureText",
+		func(in *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) < 2 {
+				return jsc.Null()
+			}
+			fontSpec := a[0].ToString()
+			text := a[1].ToString()
+			fam, size, weight, stl := parseCanvasFontSpec(fontSpec)
+			w := 0.0
+			if layout.MeasureTextFunc != nil {
+				w = layout.MeasureTextFunc(fam, size, weight, stl, text)
+			}
+			ascent, descent := size*0.8, size*0.2
+			if layout.FontMetricsFunc != nil {
+				fa, fd, _ := layout.FontMetricsFunc(fam, size, weight, stl)
+				if fa > 0 && fd > 0 {
+					ascent, descent = fa, fd
+				}
+			}
+			h := math.Round(ascent + descent)
+			fba, fbd := h*0.8, h*0.2
+			o := jsc.NewObject(in.ObjectPrototype())
+			o.Set("width", jsc.NumberValue(w))
+			o.Set("fontBoundingBoxAscent", jsc.NumberValue(fba))
+			o.Set("fontBoundingBoxDescent", jsc.NumberValue(fbd))
+			o.Set("actualBoundingBoxAscent", jsc.NumberValue(fba))
+			o.Set("actualBoundingBoxDescent", jsc.NumberValue(fbd))
+			o.Set("height", jsc.NumberValue(h))
+			return jsc.ObjectValue(o)
+		}, 2)))
+
 	// ★ NodeFilter 全局常量（浏览器标准）：前端 createTreeWalker 的
 	// SHOW_TEXT/FILTER_ACCEPT 等常量 + acceptNode 结果。缺 NodeFilter 时
 	// createTreeWalker(SHOW_TEXT) 抛 ReferenceError（# 注释字符定位测量）。
@@ -2186,6 +2225,25 @@ func applyCanvas2DPatch(rt *jsc.Interpreter) {
           var ctx = {
             font: '10px sans-serif',
             measureText: function(text){
+              var fontSpec = this.font || '10px sans-serif';
+              // ★ 原生 Skia 测量（Go 侧 __wbMeasureText）：宽度 = 精确
+              // advance（W=7.1475 与浏览器一致），无 DOM 变更/强制布局。
+              // 此前的 DOM span 实测路径布局失败时回退 len*fs*0.6 估算
+              // （空格宽 7.8 vs 真实 7.1475，差 9%）且每次调用触发
+              // 布局风暴——CM6/xterm 测量慢与宽度不准的根因。
+              if (typeof window.__wbMeasureText === 'function') {
+                try {
+                  var r = window.__wbMeasureText(fontSpec, String(text));
+                  if (r && r.width > 0) {
+                    var asc = r.fontBoundingBoxAscent || r.height * 0.8;
+                    var desc = r.fontBoundingBoxDescent || r.height * 0.2;
+                    return { width: r.width,
+                             actualBoundingBoxAscent: asc, actualBoundingBoxDescent: desc,
+                             fontBoundingBoxAscent: asc, fontBoundingBoxDescent: desc,
+                             height: r.height };
+                  }
+                } catch(e) {}
+              }
               var s = doc.createElement('span');
               // ★ 不能用 font 简写（wb-ui 可能不解析 font: 简写 → span 落
               // 默认 16px → 测得 8x19.2）。拆成 style.fontSize/fontFamily
@@ -3055,6 +3113,10 @@ func makePerformance(rt *jsc.Interpreter) *jsc.JSObject {
 
 // ─── Element ───────────────────────────────────────────
 
+// wrapElement 创建元素包装器。★ 惰性属性：包装器是 goja DynamicObject，
+// 属性在首次访问时经 installElementProperty（bindings/lazyelement.go）
+// 物化——此前每元素立即安装 ~90 个自有属性（~60µs/元素）是 CM6 文件
+// 打开重绘 / Vue 文件树 / xterm 行重建 DOM 构建慢的主因。
 func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	// Return cached wrapper if available
 	if cached, ok := nodeWrapperCache[el]; ok {
@@ -3064,794 +3126,18 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	if domElementProto != nil {
 		proto = domElementProto
 	}
-	obj := jsc.NewObject(proto)
-	obj.SetClassName("Element")
-obj.SetInternal(el)
+	props := &lazyElemProps{
+		el:      el,
+		interp:  rt,
+		cached:  map[string]jsc.JSValue{},
+		expando: map[string]jsc.JSValue{},
+	}
+	obj := jsc.NewLazyObject(rt, proto, props)
+	obj.SetInternal(el)
 	// Cache before returning
 	nodeWrapperCache[el] = obj
-
-	// Attributes — 定义在 Element.prototype（见 RegisterDOMBindings），
-	// 实例不再重复绑定，避免遮蔽 prototype 上的标准方法。
-
-	// Node tree
-	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
-		if n == nil { return jsc.Null() }
-		el.AppendChild(n)
-		if OnNodeInserted != nil { OnNodeInserted(n) }
-		if OnStyleNodeAdded != nil && isStyleElement(n) { OnStyleNodeAdded(n) }
-		return a
-	})))
-	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
-		if n == nil { return jsc.Null() }
-		el.RemoveChild(n)
-		if OnNodeRemoved != nil { OnNodeRemoved(n) }
-		return a
-	})))
-	obj.Set("insertBefore", funcVal(fn2Node(func(in *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
-		if nc == nil {
-			return jsc.Null()
-		}
-		// DocumentFragment: insert all children individually.
-		if frag, ok := nc.(*dom.DocumentFragment); ok {
-			for c := frag.FirstChild(); c != nil; c = frag.FirstChild() {
-				frag.RemoveChild(c)
-				if err := el.InsertBefore(c, rc); err != nil {
-					// 容错：refChild 不在本节点下时回退为追加，避免 Vue vnode/DOM 不一致
-					_ = el.AppendChild(c)
-				}
-				if OnNodeInserted != nil {
-					OnNodeInserted(c)
-				}
-			}
-			return a0
-		}
-		if err := el.InsertBefore(nc, rc); err != nil {
-			// 浏览器对 anchor 不在父下的情况抛 NotFoundError；goja 环境 Vue 的
-			// vnode/DOM 可能短暂不一致（anchor detached），静默失败会让元素
-			// 永远不进 DOM 但 OnNodeInserted 照常触发 → vnode 认为已插入 →
-			// 后续 v-if 关闭/卸载时 unmount 找不到正确 parent，DOM 不移除。
-			// 回退追加保证元素真实进入 DOM，Vue 状态一致。
-			_ = el.AppendChild(nc)
-		}
-		if OnNodeInserted != nil {
-			OnNodeInserted(nc)
-		}
-		if isStyleElement(nc) {
-			BumpStyleVersion()
-		}
-		return a0
-	})))
-	obj.Set("replaceChild", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, oc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
-		if nc == nil || oc == nil { return jsc.Null() }
-		el.ReplaceChild(nc, oc)
-		if OnNodeRemoved != nil { OnNodeRemoved(oc) }
-		if OnNodeInserted != nil { OnNodeInserted(nc) }
-		return a1
-	})))
-	// replaceChildren(...nodes) — 浏览器标准：清空所有子节点后追加
-	// 给定节点；字符串/数字参数自动转为 Text 节点（xterm.js DOM 渲染器
-	// 用它重建终端行：rowElement.replaceChildren(...createRow(...))）。
-	obj.Set("replaceChildren", jsc.FunctionValue(jsc.NewNativeFunction("replaceChildren",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			for c := el.FirstChild(); c != nil; c = el.FirstChild() {
-				el.RemoveChild(c)
-				if OnNodeRemoved != nil {
-					OnNodeRemoved(c)
-				}
-			}
-			for _, a := range args {
-				var n dom.Node
-				if a.IsObject() || a.IsCallable() {
-					n = unwrapNode(a)
-				}
-				if n == nil {
-					txt := dom.NewText(el.OwnerDocument(), a.ToString())
-					el.AppendChild(txt)
-					if OnNodeInserted != nil {
-						OnNodeInserted(txt)
-					}
-					continue
-				}
-				el.AppendChild(n)
-				if OnNodeInserted != nil {
-					OnNodeInserted(n)
-				}
-				if isStyleElement(n) {
-					BumpStyleVersion()
-					if OnStyleNodeAdded != nil {
-						OnStyleNodeAdded(n)
-					}
-				}
-			}
-			return jsc.Undefined()
-		}, 1)))
-	obj.Set("contains", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, _ jsc.JSValue) jsc.JSValue {
-		if n == nil { return jsc.BooleanValue(false) }
-		return jsc.BooleanValue(el.Contains(n))
-	})))
-	obj.Set("cloneNode", jsc.FunctionValue(jsc.NewNativeFunction("cloneNode",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			deep := len(args) > 0 && args[0].ToBoolean()
-			switch v := el.CloneNode(deep).(type) {
-			case *dom.Element:
-				return jsc.ObjectValue(wrapElement(in, v))
-			case *dom.Text:
-				return jsc.ObjectValue(wrapText(in, v))
-			}
-			return jsc.Null()
-		}, 1)))
-	obj.Set("hasChildNodes", funcVal(fn0(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.BooleanValue(el.HasChildNodes())
-	})))
-	obj.Set("isConnected", funcVal(fn0(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.BooleanValue(el.IsConnected())
-	})))
-
-	// CSS 选择器匹配（对标浏览器）
-	obj.Set("matches", jsc.FunctionValue(jsc.NewNativeFunction("matches",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.BooleanValue(false) }
-			return jsc.BooleanValue(ElementMatches(el, args[0].ToString()))
-		}, 1)))
-	obj.Set("closest", jsc.FunctionValue(jsc.NewNativeFunction("closest",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.Null() }
-			if found := ElementClosest(el, args[0].ToString()); found != nil {
-				return jsc.ObjectValue(wrapElement(in, found))
-			}
-			return jsc.Null()
-		}, 1)))
-	obj.Set("querySelector", jsc.FunctionValue(jsc.NewNativeFunction("querySelector",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.Null() }
-			if found := ElementQuerySelector(el, args[0].ToString()); found != nil {
-				return jsc.ObjectValue(wrapElement(in, found))
-			}
-			return jsc.Null()
-		}, 1)))
-	obj.Set("querySelectorAll", jsc.FunctionValue(jsc.NewNativeFunction("querySelectorAll",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return arrElem(in, nil) }
-			return arrElem(in, ElementQuerySelectorAll(el, args[0].ToString()))
-		}, 1)))
-	// insertAdjacentHTML
-	obj.Set("insertAdjacentHTML", jsc.FunctionValue(jsc.NewNativeFunction("insertAdjacentHTML",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) < 2 { return jsc.Undefined() }
-			el.InsertAdjacentHTML(args[0].ToString(), args[1].ToString())
-			if OnStyleNodeAdded != nil {
-				// Check for newly added <style> elements
-				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-					if isStyleElement(c) { OnStyleNodeAdded(c) }
-				}
-			}
-			return jsc.Undefined()
-		}, 2)))
-	// dataset — DOMStringMap 代理 data-* 属性
-	obj.Set("dataset", jsc.ObjectValue(makeDataset(rt, el)))
-
-	// classList
-	obj.Set("classList", jsc.ObjectValue(makeClassList(rt, el)))
-
-	// style — a live object that reads/writes the style attribute
-	obj.Set("style", jsc.ObjectValue(makeStyleObject(rt, el)))
-
-	// Events
-	obj.Set("addEventListener", jsc.FunctionValue(makeAddEventListener(el)))
-	obj.Set("removeEventListener", jsc.FunctionValue(makeRemoveEventListener(el)))
-	obj.Set("dispatchEvent", jsc.FunctionValue(makeDispatchEvent(el)))
-
-	// Tree traversal — dynamic getters so they reflect live DOM tree
-	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return el.ParentNode() }), nil)
-	obj.SetAccessor("parentElement", nodeAccFn(rt, func() dom.Node { return el.ParentElement() }), nil)
-	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return el.NextSibling() }), nil)
-	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return el.PreviousSibling() }), nil)
-	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return el.FirstChild() }), nil)
-	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return el.LastChild() }), nil)
-	obj.SetAccessor("childElementCount", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		n := 0
-		for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-			if _, ok := c.(*dom.Element); ok { n++ }
-		}
-		return jsc.NumberValue(float64(n))
-	}), nil)
-	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		var els []*dom.Element
-		for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-			if e, ok := c.(*dom.Element); ok { els = append(els, e) }
-		}
-		return arrElem(in, els)
-	}), nil)
-	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrNode(in, el.ChildNodes())
-	}), nil)
-	// ownerDocument — needed by Vue 3 when checking element's document
-	obj.SetAccessor("ownerDocument", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return in.GlobalObject().GetOrZero("document")
-	}), nil)
-
-	// ── 滚动 / 尺寸 CSSOM 属性（真实几何，经渲染树桥）──
-	// 前端（Vue scrollToBottom 等）依赖 el.scrollTop = el.scrollHeight /
-	// el.clientHeight / offsetHeight 等；桥未注入（非 webkit 宿主）时安全回退 0。
-	obj.SetAccessor("scrollTop",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue {
-			if GetElementScrollOffset == nil {
-				return jsc.NumberValue(0)
-			}
-			_, y := GetElementScrollOffset(el)
-			return jsc.NumberValue(y)
-		}),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			if SetElementScrollOffset == nil {
-				return
-			}
-			x := 0.0
-			if GetElementScrollOffset != nil {
-				x, _ = GetElementScrollOffset(el)
-			}
-			SetElementScrollOffset(el, x, v.ToNumber())
-		})
-	obj.SetAccessor("scrollLeft",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue {
-			if GetElementScrollOffset == nil {
-				return jsc.NumberValue(0)
-			}
-			x, _ := GetElementScrollOffset(el)
-			return jsc.NumberValue(x)
-		}),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			if SetElementScrollOffset == nil {
-				return
-			}
-			y := 0.0
-			if GetElementScrollOffset != nil {
-				_, y = GetElementScrollOffset(el)
-			}
-			SetElementScrollOffset(el, v.ToNumber(), y)
-		})
-	obj.SetAccessor("scrollHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementScrollMetrics == nil {
-			return jsc.NumberValue(0)
-		}
-		_, _, _, th, _ := GetElementScrollMetrics(el)
-		return jsc.NumberValue(th)
-	}), nil)
-	obj.SetAccessor("scrollWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementScrollMetrics == nil {
-			return jsc.NumberValue(0)
-		}
-		_, _, tw, _, _ := GetElementScrollMetrics(el)
-		return jsc.NumberValue(tw)
-	}), nil)
-	obj.SetAccessor("clientHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementScrollMetrics == nil {
-			return jsc.NumberValue(0)
-		}
-		_, vh, _, _, _ := GetElementScrollMetrics(el)
-		// ★ 浏览器标准：clientHeight 返回整数。
-		return jsc.NumberValue(math.Round(vh))
-	}), nil)
-	obj.SetAccessor("clientWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementScrollMetrics == nil {
-			return jsc.NumberValue(0)
-		}
-		vw, _, _, _, _ := GetElementScrollMetrics(el)
-		// ★ 浏览器标准：clientWidth 返回整数。
-		return jsc.NumberValue(math.Round(vw))
-	}), nil)
-	obj.SetAccessor("offsetHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementBoxRect == nil {
-			return jsc.NumberValue(0)
-		}
-		_, _, _, h := GetElementBoxRect(el)
-		// ★ 浏览器标准：offsetHeight 返回最接近的整数（四舍五入）。
-		// wb-ui 布局几何是浮点（15.22），xterm 用它算 cell.height 时
-		// ceil(15.22)=16 而浏览器 ceil(15)=15——差 1px。
-		return jsc.NumberValue(math.Round(h))
-	}), nil)
-	obj.SetAccessor("offsetWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementBoxRect == nil {
-			return jsc.NumberValue(0)
-		}
-		_, _, w, _ := GetElementBoxRect(el)
-		// ★ 浏览器标准：offsetWidth 返回最接近的整数（四舍五入）。
-		return jsc.NumberValue(math.Round(w))
-	}), nil)
-	obj.SetAccessor("offsetTop", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementBoxRect == nil {
-			return jsc.NumberValue(0)
-		}
-		_, top, _, _ := GetElementBoxRect(el)
-		return jsc.NumberValue(math.Round(top))
-	}), nil)
-	obj.SetAccessor("offsetLeft", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		if GetElementBoxRect == nil {
-			return jsc.NumberValue(0)
-		}
-		left, _, _, _ := GetElementBoxRect(el)
-		return jsc.NumberValue(math.Round(left))
-	}), nil)
-
-	// Position / dimension (Vue needs these)
-	obj.Set("getBoundingClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			r := jsc.NewObject(in.ObjectPrototype())
-			left, top, w, h := 0.0, 0.0, 0.0, 0.0
-			if GetElementBoxRect != nil {
-				left, top, w, h = GetElementBoxRect(el)
-			}
-			r.Set("x", jsc.NumberValue(left))
-			r.Set("y", jsc.NumberValue(top))
-			r.Set("width", jsc.NumberValue(w))
-			r.Set("height", jsc.NumberValue(h))
-			r.Set("top", jsc.NumberValue(top))
-			r.Set("right", jsc.NumberValue(left+w))
-			r.Set("bottom", jsc.NumberValue(top+h))
-			r.Set("left", jsc.NumberValue(left))
-			return jsc.ObjectValue(r)
-		}, 0)))
-	// ★ getClientRects：浏览器标准返回元素边框矩形的数组（[1 个 rect]）。
-	// CodeMirror 6 的 clientRectsFor(元素) 用它取行内 span 的宽度/高度
-	// （TextWidth.measure 的 lineMeasure 分支）；缺它时抛异常 → measure
-	// 中断 → HeightOracle 停留默认 lineHeight=14 → 行号栏按 14px/行步进
-	// 而内容 ~18.2px 逐行错位。
-	obj.Set("getClientRects", jsc.FunctionValue(jsc.NewNativeFunction("getClientRects",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			left, top, w, h := 0.0, 0.0, 0.0, 0.0
-			if GetElementBoxRect != nil {
-				left, top, w, h = GetElementBoxRect(el)
-			}
-			r := jsc.NewObject(in.ObjectPrototype())
-			r.Set("x", jsc.NumberValue(left))
-			r.Set("y", jsc.NumberValue(top))
-			r.Set("width", jsc.NumberValue(w))
-			r.Set("height", jsc.NumberValue(h))
-			r.Set("top", jsc.NumberValue(top))
-			r.Set("right", jsc.NumberValue(left+w))
-			r.Set("bottom", jsc.NumberValue(top+h))
-			r.Set("left", jsc.NumberValue(left))
-			arr := jsc.NewArray(in.ObjectPrototype(), []jsc.JSValue{jsc.ObjectValue(r)})
-			arr.Set("length", jsc.NumberValue(1))
-			return jsc.ObjectValue(arr)
-		}, 0)))
-	obj.Set("scrollIntoView", jsc.FunctionValue(jsc.NewNativeFunction("scrollIntoView",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			return jsc.Undefined()
-		}, 0)))
-	// element.remove() — self-removal from DOM
-	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			if p := el.ParentNode(); p != nil { p.RemoveChild(el) }
-			return jsc.Undefined()
-		}, 0)))
-	// focus / blur — bridge to the engine's focused-element tracking so JS
-	// focus (xterm textarea.focus(), Vue autofocus, CodeMirror.focus()) also
-	// activates engine typing (imeFocusedEl) and dispatches focus/blur DOM
-	// events (xterm listens for them to show the cursor + arm keyboard input).
-	obj.Set("focus", jsc.FunctionValue(jsc.NewNativeFunction("focus",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			el.SetFocused(true)
-			if FocusBridge != nil {
-				FocusBridge(el, true)
-			}
-			return jsc.Undefined()
-		}, 0)))
-	obj.Set("blur", jsc.FunctionValue(jsc.NewNativeFunction("blur",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			el.SetFocused(false)
-			if FocusBridge != nil {
-				FocusBridge(el, false)
-			}
-			return jsc.Undefined()
-		}, 0)))
-	// form control: value / checked / disabled / type
-	tag := strings.ToLower(el.LocalName())
-	if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" || tag == "option" {
-		obj.SetAccessor("value",
-			getter(func(_ *jsc.Interpreter) jsc.JSValue {
-				// select.value = 选中 option 的 value 属性或文本（浏览器语义：
-				// select 没有 value 属性，统一走选中项）。
-				if tag == "select" {
-					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-							if opt.HasAttribute("selected") {
-								if v := opt.GetAttribute("value"); v != "" {
-									return jsc.StringValue(v)
-								}
-								return jsc.StringValue(opt.TextContent())
-							}
-						}
-					}
-					// HTML 标准：无显式 selected 且非 multiple 时返回第一个
-					// 非 disabled option 的 value。
-					if !el.HasAttribute("multiple") {
-						for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-							if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") && !opt.HasAttribute("disabled") {
-								if v := opt.GetAttribute("value"); v != "" {
-									return jsc.StringValue(v)
-								}
-								return jsc.StringValue(opt.TextContent())
-							}
-						}
-					}
-					return jsc.StringValue("")
-				}
-				// textarea.value = 初始文本内容（浏览器语义：value 反射文本）。
-				if tag == "textarea" {
-					return jsc.StringValue(el.TextContent())
-				}
-				return jsc.StringValue(el.GetAttribute("value"))
-			}),
-			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-				if tag == "select" {
-					// select.value = x：把 value 匹配的 option 设为选中。
-					target := v.ToString()
-					idx := -1
-					i := 0
-					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-							val := opt.GetAttribute("value")
-							if val == "" {
-								val = opt.TextContent()
-							}
-							if val == target {
-								idx = i
-							}
-							i++
-						}
-					}
-					i = 0
-					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-							if i == idx {
-								opt.SetAttribute("selected", "selected")
-							} else {
-								opt.RemoveAttribute("selected")
-							}
-							i++
-						}
-					}
-					return
-				}
-				// textarea.value = 初始文本内容（浏览器语义：value 反射文本）。
-				if tag == "textarea" {
-					// ★ setter 必须与 getter 对称：value 写入 textarea 时是
-					// 更新文本节点（SetTextContent），而非 SetAttribute("value")
-					// ——浏览器里 textarea 的 value 就是其文本内容，paint
-					// （paintTextAreaText 读 TextContent）与 scrollHeight
-					// 计算（BoxContentSize 读 TextContent）都依赖文本节点。
-					// Vue 的 :value 绑定走 el.value = str（DOM prop），
-					// 此前 setter 落入 SetAttribute 分支 → 文本节点不变 →
-					// 编辑框永远空白、scrollH=0。
-					el.SetTextContent(v.ToString())
-					return
-				}
-				el.SetAttribute("value", v.ToString())
-			})
-		if tag == "input" {
-			obj.SetAccessor("checked",
-				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					return jsc.BooleanValue(el.HasAttribute("checked"))
-				}),
-				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-					if v.ToBoolean() {
-						el.SetAttribute("checked", "checked")
-					} else {
-						el.RemoveAttribute("checked")
-					}
-				})
-			// ★ type property 反射 attribute：Vue 3 对 input 的 type 走
-			// mustUseProp → el.type = 'text'（property 赋值）。此前 setter
-			// 为 nil → 赋值静默失败 → type attribute 永远缺失 → CSS
-			// `input[type="text"]` 不匹配 → flex:1 等样式全部失效（设置面板
-			// 输入框宽度 0）。浏览器 HTMLInputElement.type 会反射回 attribute。
-			obj.SetAccessor("type",
-				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					if t := el.GetAttribute("type"); t != "" {
-						return jsc.StringValue(t)
-					}
-					// 浏览器默认 input.type = "text"
-					return jsc.StringValue("text")
-				}),
-				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-					el.SetAttribute("type", v.ToString())
-				})
-		}
-		if tag == "input" || tag == "select" || tag == "textarea" || tag == "button" {
-			obj.SetAccessor("disabled",
-				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					return jsc.BooleanValue(el.HasAttribute("disabled"))
-				}),
-				func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-					if v.ToBoolean() {
-						el.SetAttribute("disabled", "disabled")
-					} else {
-						el.RemoveAttribute("disabled")
-					}
-				})
-		}
-		// ── Editable control selection (input/textarea) ──
-		// selectionStart/selectionEnd/setSelectionRange — xterm.js 的
-		// textarea 输入处理（读 selection 计算新增字符/定位光标）与
-		// CodeMirror 6 等编辑器依赖它们。映射到引擎的
-		// FocusedFormControlSel（同时是 caret painter 用的状态），
-		// 保证 JS 读写 selection 与引擎绘制光标一致。
-		if tag == "input" || tag == "textarea" {
-			selGetter := func() (int, int) {
-				if SelectionBridge != nil {
-					if s, e := SelectionBridge(el); s >= 0 && e >= 0 {
-						return s, e
-					}
-				}
-				// Fallback: caret at end of value.
-				val := el.TextContent()
-				if tag == "input" {
-					val = el.GetAttribute("value")
-				}
-				n := len([]rune(val))
-				return n, n
-			}
-			obj.SetAccessor("selectionStart",
-				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					s, _ := selGetter()
-					return jsc.NumberValue(float64(s))
-				}), nil)
-			obj.SetAccessor("selectionEnd",
-				getter(func(_ *jsc.Interpreter) jsc.JSValue {
-					_, e := selGetter()
-					return jsc.NumberValue(float64(e))
-				}), nil)
-			obj.Set("setSelectionRange", jsc.FunctionValue(jsc.NewNativeFunction("setSelectionRange",
-				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if SetSelectionBridge != nil && len(a) >= 2 {
-						SetSelectionBridge(el, int(a[0].ToNumber()), int(a[1].ToNumber()))
-					}
-					return jsc.Undefined()
-				}, 2)))
-		}
-	}
-
-	// ── <select> specific ──
-	// ── <select> specific ──
-	if tag == "select" {
-		obj.SetAccessor("multiple",
-			getter(func(_ *jsc.Interpreter) jsc.JSValue {
-				return jsc.BooleanValue(el.HasAttribute("multiple"))
-			}),
-			nil)
-		obj.SetAccessor("selectedIndex",
-			getter(func(_ *jsc.Interpreter) jsc.JSValue {
-				var firstEnabled = -1
-				idx := 0
-				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-					if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-						if opt.HasAttribute("selected") {
-							return jsc.NumberValue(float64(idx))
-						}
-						if firstEnabled < 0 && !opt.HasAttribute("disabled") {
-							firstEnabled = idx
-						}
-						idx++
-					}
-				}
-				// HTML 标准：无显式 selected 时默认选中第一个非 disabled option。
-				if !el.HasAttribute("multiple") && firstEnabled >= 0 {
-					return jsc.NumberValue(float64(firstEnabled))
-				}
-				return jsc.NumberValue(-1)
-			}),
-			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-				selIdx := int(v.ToNumber())
-				idx := 0
-				for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-					if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-						if idx == selIdx {
-							opt.SetAttribute("selected", "selected")
-						} else {
-							opt.RemoveAttribute("selected")
-						}
-						idx++
-					}
-				}
-			})
-		// options: returns an HTMLOptionsCollection-like object (NodeList of option elements)
-		obj.SetAccessor("options", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			var opts []jsc.JSValue
-			for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-				if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-					opts = append(opts, jsc.ObjectValue(wrapElement(in, opt)))
-				}
-			}
-			arr := jsc.NewArray(in.ObjectPrototype(), opts)
-			arr.Set("length", jsc.NumberValue(float64(len(opts))))
-			return jsc.ObjectValue(arr)
-		}), nil)
-		// selectedOptions: 选中的 option 数组（浏览器标准：无显式 selected
-		// 且非 multiple 时返回第一个非 disabled option）。
-		obj.SetAccessor("selectedOptions", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			var sel []jsc.JSValue
-			var firstEnabled *dom.Element
-			for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-				if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
-					if opt.HasAttribute("selected") {
-						sel = append(sel, jsc.ObjectValue(wrapElement(in, opt)))
-					}
-					if firstEnabled == nil && !opt.HasAttribute("disabled") {
-						firstEnabled = opt
-					}
-				}
-			}
-			if len(sel) == 0 && !el.HasAttribute("multiple") && firstEnabled != nil {
-				sel = append(sel, jsc.ObjectValue(wrapElement(in, firstEnabled)))
-			}
-			arr := jsc.NewArray(in.ObjectPrototype(), sel)
-			arr.Set("length", jsc.NumberValue(float64(len(sel))))
-			return jsc.ObjectValue(arr)
-		}), nil)
-	}
-
-	// ── <option> specific ──
-	if tag == "option" {
-		obj.SetAccessor("selected",
-			getter(func(_ *jsc.Interpreter) jsc.JSValue {
-				return jsc.BooleanValue(el.HasAttribute("selected"))
-			}),
-			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-				if v.ToBoolean() {
-					el.SetAttribute("selected", "selected")
-				} else {
-					el.RemoveAttribute("selected")
-				}
-			})
-	}
-
-	// Accessors for string properties
-
-	// Accessors for string properties
-	obj.SetAccessor("tagName", strAcc(el.TagName()), nil)
-	obj.SetAccessor("nodeName", strAcc(el.NodeName()), nil)
-	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.NumberValue(float64(el.NodeType()))
-	}), nil)
-	// ★ getRootNode（浏览器标准）：返回节点的根（无 shadow DOM 时为
-	// document）。CM6 用 getRootNode() 判断节点是否在 shadowRoot/编辑器
-	// 根内——此前 undefined → CM6 的 isEditorRoot 判断异常。
-	obj.Set("getRootNode", jsc.FunctionValue(jsc.NewNativeFunction("getRootNode",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			doc := el.OwnerDocument()
-			if doc == nil {
-				return jsc.ObjectValue(obj)
-			}
-			return jsc.ObjectValue(wrapDocument(in, doc))
-		}, 0)))
-	// ★ attachShadow（浏览器标准）：el.attachShadow({mode:'open'}) 创建 shadow
-	// root。最小实现：支持 {mode} 参数，重复调用返回 null。
-	obj.Set("attachShadow", jsc.FunctionValue(jsc.NewNativeFunction("attachShadow",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			mode := "open"
-			if len(args) > 0 {
-				if o := args[0].AsObject(); o != nil {
-					if mv, ok := o.GetByKey("mode"); ok && !mv.IsUndefined() && !mv.IsNull() {
-						mode = mv.ToString()
-					}
-				}
-			}
-			sr, err := el.AttachShadow(mode)
-			if err != nil || sr == nil {
-				return jsc.Null()
-			}
-			return jsc.ObjectValue(wrapShadowRoot(in, sr))
-		}, 1)))
-	// shadowRoot 访问器：open 时返回 ShadowRoot，closed/无时返回 null。
-	obj.SetAccessor("shadowRoot", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		sr := el.ShadowRoot()
-		if sr == nil {
-			return jsc.Null()
-		}
-		return jsc.ObjectValue(wrapShadowRoot(in, sr))
-	}), nil)
-	// ★ compareDocumentPosition（浏览器标准）：返回位掩码描述 node 相对
-	// el 的文档位置。CM6 的 DOMObserver / 节点排序依赖它。
-	obj.Set("compareDocumentPosition", jsc.FunctionValue(jsc.NewNativeFunction("compareDocumentPosition",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if len(a) == 0 {
-				return jsc.NumberValue(0)
-			}
-			other := unwrapNode(a[0])
-			return jsc.NumberValue(float64(compareDocPosition(el, other)))
-		}, 1)))
-	obj.SetAccessor("nodeValue", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.Null()
-	}), nil)
-	obj.SetAccessor("id",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetId()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetId(v.ToString()) })
-	obj.SetAccessor("className",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetClassName()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			el.SetClassName(v.ToString())
-			InvalidateComputedStyle(el)
-			if OnClassChanged != nil {
-				OnClassChanged(el)
-			}
-		})
-	// title 反射属性：HTML 元素 title 属性反射 title 属性（removeAttribute
-	// 后返回 ""，与浏览器一致）。此前缺失 → d.title 恒 undefined。
-	obj.SetAccessor("title",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetAttribute("title")) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { el.SetAttribute("title", v.ToString()) })
-	// ★ iframe 的 src 反射属性：el.src = "..." 触发子文档重载（浏览器
-	// iframe navigation 语义）。getter 返回当前 src 属性值，setter 设属性
-	// 并回调 webkit 重载子 Frame。
-	if el.LocalName() == "iframe" {
-		obj.SetAccessor("src",
-			getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetAttribute("src")) }),
-			func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-				el.SetAttribute("src", v.ToString())
-				if IFrameSrcChanged != nil {
-					IFrameSrcChanged(el, v.ToString())
-				}
-			})
-	}
-	// attributes — NamedNodeMap 风格数组：length + 索引（{name,value}）。
-	// CodeMirror 6 的 setAttrs 依赖 dom.attributes.length / attributes[i].name
-	// 做属性同步，缺失会导致 "Cannot read property 'length' of undefined"。
-	obj.SetAccessor("attributes", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		names := el.AttributeNames()
-		return arrayValue(in, len(names), func(i int) jsc.JSValue {
-			attr := jsc.NewObject(in.ObjectPrototype())
-			attr.Set("name", jsc.StringValue(names[i]))
-			attr.Set("value", jsc.StringValue(el.GetAttribute(names[i])))
-			return jsc.ObjectValue(attr)
-		})
-	}), nil)
-	obj.SetAccessor("innerHTML",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetInnerHTML()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			el.SetInnerHTML(v.ToString())
-			// ★ 声明式更新（v-html / el.innerHTML = html）后触发渲染树
-			// 重建标记——否则 DOM 变了但界面不刷新（此前只有 appendChild/
-			// style 等路径触发 OnNodeInserted/OnInlineStyleChanged）。
-			if OnNodeInserted != nil && el.IsConnected() {
-				OnNodeInserted(el)
-			}
-		})
-	obj.SetAccessor("outerHTML",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.GetOuterHTML()) }), nil)
-	obj.SetAccessor("textContent",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(el.TextContent()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
-			el.SetTextContent(v.ToString())
-			if isStyleElement(el) {
-				BumpStyleVersion()
-			}
-			if OnNodeInserted != nil && el.IsConnected() {
-				OnNodeInserted(el)
-			}
-		})
-
-	// <template> elements need .content returning a DocumentFragment
-	// (Vue 3 + createStaticVNode depends on this).
-	if strings.EqualFold(el.LocalName(), "template") {
-		obj.SetAccessor("content",
-			getter(func(in *jsc.Interpreter) jsc.JSValue {
-				doc := el.OwnerDocument()
-				if doc == nil {
-					// Fallback: use a detached fragment if no owner document
-					return jsc.ObjectValue(wrapDocFrag(in, dom.NewDocumentFragment(nil)))
-				}
-				frag := doc.CreateDocumentFragment()
-				// Move all child nodes into the fragment
-				for c := el.FirstChild(); c != nil; c = el.FirstChild() {
-					frag.AppendChild(c)
-				}
-				return jsc.ObjectValue(wrapDocFrag(in, frag))
-			}), nil)
-	}
-
 	return obj
 }
-
 // ─── classList ──────────────────────────────────────────
 
 func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
@@ -4303,6 +3589,8 @@ func wrapShadowRoot(rt *jsc.Interpreter, sr *dom.ShadowRoot) *jsc.JSObject {
 
 // ─── Text / Comment ────────────────────────────────────
 
+// wrapText 创建 Text 节点包装器。★ 惰性属性（同 wrapElement 模式）：
+// 属性在首次访问时经 installTextProperty（bindings/lazytext.go）物化。
 func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 	// Return cached wrapper if available (Vue removeFragment relies on
 	// reference equality of Text/Comment wrappers to terminate traversal).
@@ -4313,74 +3601,17 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 	if domTextProto != nil {
 		proto = domTextProto
 	}
-	obj := jsc.NewObject(proto)
-	obj.SetClassName("Text")
+	props := &lazyTextProps{
+		t:       t,
+		interp:  rt,
+		cached:  map[string]jsc.JSValue{},
+		expando: map[string]jsc.JSValue{},
+	}
+	obj := jsc.NewLazyObject(rt, proto, props)
 	obj.SetInternal(t)
 	nodeWrapperCache[t] = obj
-	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			if p := t.ParentNode(); p != nil { p.RemoveChild(t) }
-			return jsc.Undefined()
-		}, 0)))
-	// ★ splitText（浏览器标准）：把文本节点在 offset 处拆成两个，
-	// 返回后半部分节点。CM6 的 DOMObserver 处理输入时可能调用。
-	obj.Set("splitText", jsc.FunctionValue(jsc.NewNativeFunction("splitText",
-		func(in *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			off := 0
-			if len(a) >= 1 {
-				off = int(a[0].ToNumber())
-			}
-			tail, err := t.SplitText(off)
-			if err != nil {
-				return jsc.Null()
-			}
-			return nodeToJS(in, tail)
-		}, 1)))
-	// ★ getRootNode / compareDocumentPosition（浏览器标准，同 Element）
-	obj.Set("getRootNode", jsc.FunctionValue(jsc.NewNativeFunction("getRootNode",
-		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			doc := t.OwnerDocument()
-			if doc == nil {
-				return jsc.ObjectValue(obj)
-			}
-			return jsc.ObjectValue(wrapDocument(in, doc))
-		}, 0)))
-	obj.Set("compareDocumentPosition", jsc.FunctionValue(jsc.NewNativeFunction("compareDocumentPosition",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if len(a) == 0 {
-				return jsc.NumberValue(0)
-			}
-			other := unwrapNode(a[0])
-			return jsc.NumberValue(float64(compareDocPosition(t, other)))
-		}, 1)))
-	obj.SetAccessor("data",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
-	obj.SetAccessor("textContent",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
-	obj.SetAccessor("nodeValue",
-		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(t.Data()) }),
-		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { t.SetData(v.ToString()) })
-	obj.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.NumberValue(float64(t.Length()))
-	}), nil)
-	obj.SetAccessor("nodeName", strAcc(t.NodeName()), nil)
-	obj.SetAccessor("nodeType", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-		return jsc.NumberValue(float64(t.NodeType()))
-	}), nil)
-	obj.SetAccessor("parentNode", nodeAccFn(rt, func() dom.Node { return t.ParentNode() }), nil)
-	// 树遍历属性（Vue 3 渲染器需要：removeFragment/patch 依赖 nextSibling/previousSibling）
-	obj.SetAccessor("nextSibling", nodeAccFn(rt, func() dom.Node { return t.NextSibling() }), nil)
-	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return t.PreviousSibling() }), nil)
-	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return t.FirstChild() }), nil)
-	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return t.LastChild() }), nil)
-	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrNode(in, t.ChildNodes())
-	}), nil)
 	return obj
 }
-
 // ─── TreeWalker（document.createTreeWalker / NodeFilter 常量）───
 // CodeMirror 6 与前端文本测量用 createTreeWalker 遍历文本节点（SHOW_TEXT）。
 

@@ -180,6 +180,17 @@ type Host struct {
 	imeComposeBase  string
 	imeComposeStart int
 
+	// ★ contenteditable（CodeMirror 6）组合输入状态：DOM 层组合范围。
+	// 组合文本按「contenteditable 根的文本内容 rune 偏移」跟踪（节点引用
+	// 会因 CM6 每次 input 后重建 .cm-line 而失效，rune 偏移跨重建稳定）。
+	// imeCompLen 为当前组合文本在 DOM 中的 rune 长度（下次更新时替换用）。
+	imeCompRoot      *dom.Element // contenteditable 根（组合起点所在）
+	imeCompFrom      int          // 组合起点（root 文本内容 rune 偏移）
+	imeCompLen       int          // 当前组合文本在 DOM 中的 rune 长度
+	imeCompText      string       // 当前组合文本
+	imeCompStarted   bool         // 是否已派发 compositionstart
+	imeCompEndFired  bool         // 是否已派发 compositionend（提交幂等）
+
 	// animStart is the wall-clock time when Run() started, used to compute
 	// the animation clock (AnimationTime) each frame.
 	animStart time.Time
@@ -664,6 +675,12 @@ func (h *Host) FocusElementByKeyboard(el *dom.Element, byKeyboard bool) {
 	h.imeComposeText = ""
 	h.imeComposeBase = ""
 	h.imeComposeStart = 0
+	h.imeCompRoot = nil
+	h.imeCompFrom = 0
+	h.imeCompLen = 0
+	h.imeCompText = ""
+	h.imeCompStarted = false
+	h.imeCompEndFired = false
 	// Mark frame dirty so :focus style updates.
 	if mf := h.wv.MainFrame(); mf != nil {
 		if fr := mf.Frame(); fr != nil {
@@ -1135,6 +1152,12 @@ func (h *Host) Unfocus() {
 		h.imeComposeText = ""
 		h.imeComposeBase = ""
 		h.imeComposeStart = 0
+		h.imeCompRoot = nil
+		h.imeCompFrom = 0
+		h.imeCompLen = 0
+		h.imeCompText = ""
+		h.imeCompStarted = false
+		h.imeCompEndFired = false
 		rendering.FocusedFormControl = nil
 		rendering.FocusedFormControlSel = nil
 		rendering.CaretVisible = false
@@ -5614,9 +5637,28 @@ func (h *Host) setFocusedCaret(pos int) {
 // events and rebuilding the render tree as needed. Text is inserted at the
 // caret (FocusedFormControlSel.Start), replacing any selection — not appended
 // to the end of the value (browser behavior).
+//
+// contenteditable（CodeMirror 6 输入区）按浏览器语义处理：组合期间把组合
+// 文本写入 DOM 的组合范围并派发 compositionstart/update + input
+// (insertCompositionText)，提交时把范围替换为最终文本并派发 compositionend
+// + input。CM6 的 readDOMChange 依赖「DOM 已包含组合文本」同步 state。
 func (h *Host) applyIMEEvents(events []ime.Event) {
 	needsRebuild := false
+	isCE := func() bool {
+		return h.imeFocusedEl != nil && strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true")
+	}
 	for _, ev := range events {
+		if isCE() {
+			switch ev.Kind {
+			case ime.EventCompositionUpdate:
+				h.applyContentEditableCompositionUpdate(ev)
+			case ime.EventCharInput:
+				h.applyContentEditableCharInput(ev)
+			case ime.EventCompositionEnd:
+				h.applyContentEditableCompositionEnd(ev)
+			}
+			continue
+		}
 		switch ev.Kind {
 		case ime.EventCompositionUpdate:
 			if !h.imeComposing {
@@ -5740,20 +5782,9 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 					log.Printf("[scroll/input] IME char=%q value → %q len=%d sel=%s", char, newText, len([]rune(newText)),
 						fmt.Sprintf("Start=%d End=%d", rendering.FocusedFormControlSel.Start, rendering.FocusedFormControlSel.End))
 				}
-				if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
-					// ★ contenteditable（CodeMirror 6 输入区）：光标处插入单个字符，
-					//   不全文替换（全文替换会抹掉 CM6 的 .cm-line/高亮 span 结构，
-					//   且 CM6 发现文本未变不重建 → 布局永久破坏）。插入后派发
-					//   insertText → CM6 readDOMChange 同步 state 并重建结构。
-					if !bindings.InsertTextAtSelection(char) {
-						break // 无有效 selection：跳过 DOM 修改（保住现有结构）
-					}
-					h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-				} else {
-					setFocusedElementValue(h.imeFocusedEl, newText)
-					needsRebuild = true
-					h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-				}
+				setFocusedElementValue(h.imeFocusedEl, newText)
+				needsRebuild = true
+				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 
 				if wasComposing {
 					// End composition
@@ -5791,6 +5822,133 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 		h.ensureFocusedCaretVisible()
 	}
 
+}
+
+// markContentEditableDirty marks the render tree dirty so the next paint
+// reflects contenteditable DOM changes (composition preview / committed text).
+func (h *Host) markContentEditableDirty() {
+	if h.wv == nil {
+		return
+	}
+	if mf := h.wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.MarkRenderTreeDirty()
+		}
+	}
+}
+
+// applyContentEditableCompositionUpdate 处理 contenteditable 的组合更新：
+// 把组合文本写入 DOM 的组合范围（rune 偏移跟踪，跨 CM6 重建稳定），并派发
+// compositionstart/compositionupdate + input(insertCompositionText)。
+func (h *Host) applyContentEditableCompositionUpdate(ev ime.Event) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	if !h.imeComposing {
+		// 组合开始：从 DOM Selection 锚点取组合起点。
+		h.imeComposing = true
+		h.imeCompRoot = el
+		h.imeCompFrom = 0
+		h.imeCompLen = 0
+		h.imeCompText = ""
+		h.imeCompStarted = false
+		h.imeCompEndFired = false
+		if from, ok := bindings.TextOffsetOfSelection(el); ok {
+			h.imeCompFrom = from
+		} else {
+			h.imeCompRoot = nil // 无有效选择：只派发事件，不写 DOM（回退语义）
+		}
+	}
+	newText := ev.Composition
+	if h.imeCompRoot != nil {
+		if _, ok := bindings.ReplaceTextRange(h.imeCompRoot, h.imeCompFrom, h.imeCompLen, newText); ok {
+			h.imeCompLen = len([]rune(newText))
+		}
+	}
+	h.imeCompText = newText
+	if !h.imeCompStarted {
+		h.imeCompStarted = true
+		el.DispatchEvent(dom.NewCompositionEvent("compositionstart", newText))
+	}
+	el.DispatchEvent(dom.NewCompositionEvent("compositionupdate", newText))
+	el.DispatchEvent(dom.NewInputEvent("insertCompositionText", newText, true))
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		log.Printf("[ime] ce-compose update=%q from=%d len=%d", newText, h.imeCompFrom, h.imeCompLen)
+	}
+	h.markContentEditableDirty()
+}
+
+// applyContentEditableCharInput 处理 contenteditable 的字符提交：
+// 组合中 → 把组合范围替换为提交字符 + compositionend + input
+// (insertCompositionText)；非组合 → 光标处插入 + input(insertText)。
+func (h *Host) applyContentEditableCharInput(ev ime.Event) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	char := string(ev.Char)
+	if ev.Char == '\r' {
+		char = "\n" // contenteditable 是多行编辑器，Enter 提交为换行
+	}
+	wasComposing := h.imeComposing
+	if wasComposing {
+		// 组合提交：用最终字符替换 DOM 中的组合预览。
+		if h.imeCompRoot != nil {
+			if _, ok := bindings.ReplaceTextRange(h.imeCompRoot, h.imeCompFrom, h.imeCompLen, char); !ok {
+				bindings.InsertTextAtSelection(char)
+			}
+		} else {
+			bindings.InsertTextAtSelection(char)
+		}
+		h.imeComposing = false
+		h.imeCompEndFired = true
+		if os.Getenv("WB_IME_DEBUG") != "" {
+			log.Printf("[ime] ce-commit char=%q from=%d len=%d", char, h.imeCompFrom, h.imeCompLen)
+		}
+		h.imeCompLen = 0
+		h.imeCompText = ""
+		el.DispatchEvent(dom.NewCompositionEvent("compositionend", char))
+		el.DispatchEvent(dom.NewInputEvent("insertCompositionText", char, false))
+	} else {
+		// 普通字符（组合已由 CharInput 提交后的连续字符，或直接输入）。
+		if !bindings.InsertTextAtSelection(char) {
+			return // 无有效 selection：跳过 DOM 修改（保住现有结构）
+		}
+		el.DispatchEvent(dom.NewInputEvent("insertText", char, false))
+	}
+	h.markContentEditableDirty()
+	el.DispatchEvent(dom.NewEvent("change", true, false, false))
+}
+
+// applyContentEditableCompositionEnd 处理 contenteditable 的组合结束：
+// IME 直接 END（无结果串提交）时，DOM 中保留的组合预览即为最终文本——
+// 派发 compositionend + input(insertFromComposition)。已由 CharInput 提交
+// 过的组合幂等跳过（compositionend 只派发一次）。
+func (h *Host) applyContentEditableCompositionEnd(ev ime.Event) {
+	el := h.imeFocusedEl
+	if el == nil {
+		return
+	}
+	if !h.imeComposing || h.imeCompEndFired {
+		return
+	}
+	finalText := h.imeCompText
+	h.imeComposing = false
+	h.imeCompEndFired = true
+	el.DispatchEvent(dom.NewCompositionEvent("compositionend", finalText))
+	if finalText != "" {
+		el.DispatchEvent(dom.NewInputEvent("insertFromComposition", finalText, false))
+	}
+	if os.Getenv("WB_IME_DEBUG") != "" {
+		log.Printf("[ime] ce-end final=%q", finalText)
+	}
+	h.imeCompRoot = nil
+	h.imeCompFrom = 0
+	h.imeCompLen = 0
+	h.imeCompText = ""
+	h.imeCompStarted = false
+	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 }
 
 // findBodyBgColor walks the render tree to find the body element's background
