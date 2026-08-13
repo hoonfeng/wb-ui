@@ -854,6 +854,9 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowSt
 		}
 		ig.SetContentWidth(aw)
 		ig.SetContentHeight(ah)
+		// ★ 记录 grid 分配的固定高度（行高/stretch），供 item 自身 auto 高度计算
+		// 区分「父分配高度」与「自身 auto 高度残留」（复用 geometry 时）。
+		it.box.SetParentSetHeight(ig.ContentHeight())
 
 		// Position BEFORE layout, so child layout sees correct absolute coordinates.
 		ig.SetTopLeft(rt+mt, cl+ml)

@@ -64,6 +64,13 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
+	// ★ 增量布局 B 剪枝：非根 box 已布局过、内容 clean、子结构未变、尺寸未变、
+	// 且无浮动/绝对定位子 → 跳过内容布局（几何复用上一帧）。位置/尺寸由父
+	// 循环负责更新，此处只跳过「内容（children）布局」。
+	if box.Parent() != nil && box.CanSkipLayout(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight()) && !box.hasSpecialChildren() {
+		return
+	}
+
 	cs := box.Style()
 	isVerticalWM := IsVerticalWritingMode(cs)
 	contentX := g.ContentBoxLeft()
@@ -198,6 +205,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		cursor += collapsedTop
 		ch.SetTopLeft(cursor, ch.Left())
+		// ★ 父默认不分配固定高度（auto 子）；definite/grid 分支会覆盖为非零。
+		// 每次布局重置，避免上一帧父分配值残留（如 height 从 definite 变 auto）。
+		childEb.SetParentSetHeight(0)
 
 		cbHeight := g.ContentHeight()
 		if cbHeight <= 0 && box.Parent() != nil {
@@ -232,6 +242,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					}
 				}
 			}
+			// 记录父分配的固定高度（definite height）。definite 子不走 auto 高度计算，
+			// 此处记录仅为保持 parentSetHeight 语义完整。
+			childEb.SetParentSetHeight(ch.ContentHeight())
 		} else if cbHeight > 0 && childNeedsHeightConstraintForBox(childEb) {
 			remaining := cbHeight - (cursor - g.ContentBoxTop())
 			if remaining > 0 {
@@ -242,6 +255,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				// grids) — a block-level auto-height column-flex child sizes
 				// to its content like Edge's .proj-empty (63px, not 597px).
 				ch.SetContentHeight(math.Max(0, remaining-border.Vertical()-padding.Vertical()))
+				childEb.SetParentSetHeight(ch.ContentHeight())
 			}
 		}
 
@@ -319,8 +333,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		// Preserve any height already set by parent formatting context (e.g. flex cross-axis stretch).
 		// Only for non-root boxes — root uses viewport as initial height which must be replaced.
-		if box.Parent() != nil && blockSize < g.ContentHeight() {
-			blockSize = g.ContentHeight()
+		// ★ 用 parentSetHeight（父分配高度）而非 g.ContentHeight()（可能残留自身 auto 高度）。
+		if box.Parent() != nil && blockSize < box.ParentSetHeight() {
+			blockSize = box.ParentSetHeight()
 		}
 		g.SetContentHeight(blockSize)
 	} else if box.Parent() != nil {
@@ -369,6 +384,8 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		g.SetContentHeight(h)
 	}
+	// ★ 布局完成，记录最终几何快照供下次剪枝判断（含 auto 高度自行计算的结果）。
+	box.MarkCleanWithGeom(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight())
 }
 
 // computeBlockChildBorderBoxWidth resolves border-box width of a block child.

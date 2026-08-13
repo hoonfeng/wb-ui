@@ -65,6 +65,11 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	isReverse := cs.FlexDirection == "row-reverse" || cs.FlexDirection == "column-reverse"
 
 	g := state.GeometryForBox(box)
+	// ★ 增量布局 B 剪枝：flex 容器 clean 且位置/尺寸未变且无绝对定位子 → 跳过整容器
+	// （flex 空间分配是全局的，不能子级跳过；整容器未受影响时才可复用几何）。
+	if box.Parent() != nil && box.CanSkipLayout(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight()) && !box.hasSpecialChildren() {
+		return
+	}
 	_, padding, border := computeBoxModel(box, g.ContentWidth(), fontSizeOf(box))
 	g.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 	g.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
@@ -73,7 +78,6 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
-	initialContentHeight := ch
 
 	var items []*flexItem
 	var deferredAbsolutes []*ElementBox
@@ -97,6 +101,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
 	if len(items) == 0 && len(deferredAbsolutes) == 0 {
+		box.MarkCleanWithGeom(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight())
 		return
 	}
 
@@ -207,7 +212,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if wbFlexDebug {
 				fmt.Fprintf(os.Stderr, "[flex/est] %s estH=%.1f ch=%.1f\n", flexName(box), estH, ch)
 			}
-			if box.Parent() != nil && initialContentHeight > 0 {
+			if box.Parent() != nil && box.ParentSetHeight() > 0 {
 				// Parent set height (grid row stretch / explicit height /
 				// nested flex sizing) pins the container — do NOT inflate it
 				// to the tallest child. Without this, a row-flex grid item
@@ -229,7 +234,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				childH += cg.PaddingTop() + cg.PaddingBottom() + cg.BorderTop() + cg.BorderBottom()
 				estH += childH
 			}
-			if box.Parent() != nil && initialContentHeight > 0 {
+			if box.Parent() != nil && box.ParentSetHeight() > 0 {
 				// Parent set height - don't inflate
 			} else if estH > ch {
 				g.SetContentHeight(estH)
@@ -283,13 +288,14 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// the container; overflowing content must clip, not inflate it.
 			// Without this, a flex grid-item ballooned to its content height
 			// (e.g. right-panel 1068px) instead of staying in its 748px row.
-			if initialContentHeight <= 0 && blockSize > initialContentHeight {
+			if box.ParentSetHeight() <= 0 && blockSize > box.ParentSetHeight() {
 				g.SetContentHeight(blockSize)
 			}
 		} else {
 			g.SetContentHeight(blockSize)
 		}
 	}
+	box.MarkCleanWithGeom(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight())
 }
 
 // layoutWrapped 处理 flex-wrap:wrap / wrap-reverse：将 items 按主轴空间
@@ -1212,6 +1218,9 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 
 	for _, it := range items {
 		g := state.GeometryForBox(it.box)
+		// ★ flex 默认不分配固定 cross 高度（非 stretch item 自己 auto 计算）；
+		// 每次布局重置，避免上一帧 stretch 值残留（align-items 从 stretch 变 flex-start）。
+		it.box.SetParentSetHeight(0)
 		cs := it.box.Style()
 		fs := fontSizeOf(it.box)
 		// Fixed main-axis margin: shift position by margin-start before item.

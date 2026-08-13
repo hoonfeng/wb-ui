@@ -87,6 +87,10 @@ type ElementBox struct {
 	TextSegments    []TextSegment
 	columnInfo      *columnLayoutInfo
 	layoutCache     layoutResult
+	// parentSetHeight 记录「父布局上下文分配的固定高度」（definite height / grid 约束 / flex  stretch）。
+	// 与 contentHeight（既做父输入又做自身 auto 高度输出）分离，避免增量布局复用
+	// geometry 时，上一帧 auto 高度残留被误当成「父设置高度」→ auto 高度不收缩/不扩张。
+	parentSetHeight float64
 	// MarkerText holds the list-item marker ("•", "1.", "a.") when this box is
 	// a display:list-item and its formatting context computed a marker. Empty
 	// for non-list items.
@@ -106,6 +110,8 @@ func (b *ElementBox) SetStyle(cs *style.ComputedStyle) {
 }
 func (b *ElementBox) IsAnonymous() bool             { return false }
 func (b *ElementBox) Parent() *ElementBox           { return b.parentBox }
+func (b *ElementBox) ParentSetHeight() float64      { return b.parentSetHeight }
+func (b *ElementBox) SetParentSetHeight(h float64)  { b.parentSetHeight = h }
 func (b *ElementBox) IsTextRun() bool               { return false }
 func (b *ElementBox) IsReplaced() bool              { return isReplacedNodeType(b.nodeType) }
 func (b *ElementBox) Children() []Box               { return b.children }
@@ -248,6 +254,11 @@ func (b *ElementBox) AddChild(child Box) {
 type layoutResult struct {
 	childCount int
 	dirty      bool
+	laidOut    bool
+	lastX      float64
+	lastY      float64
+	lastWidth  float64
+	lastHeight float64
 }
 
 func (b *ElementBox) MarkDirty() {
@@ -257,6 +268,39 @@ func (b *ElementBox) MarkDirty() {
 }
 func (b *ElementBox) IsDirty() bool          { return b.layoutCache.dirty }
 func (b *ElementBox) MarkClean()             { b.layoutCache = layoutResult{childCount: len(b.children)} }
+
+// MarkCleanWithGeom 在布局完成后记录几何快照（位置 + 内容尺寸），供增量布局
+// 剪枝判断「位置未变 + 尺寸未变可跳过」。位置用 border-box top/left（绝对坐标），
+// 尺寸用最终内容宽高（含 auto 高度自行计算的结果）。
+func (b *ElementBox) MarkCleanWithGeom(x, y, w, h float64) {
+	b.layoutCache = layoutResult{childCount: len(b.children), laidOut: true, lastX: x, lastY: y, lastWidth: w, lastHeight: h}
+}
+
+// CanSkipLayout 判断该 box 的内容布局是否可跳过（增量布局 B 剪枝）：
+// ① 已布局过（laidOut）② 内容未脏（!dirty）③ 子结构未变（childCount 匹配）
+// ④ 位置未变（父更新后的 border-box top/left == 上一帧）⑤ 内容尺寸未变。
+// 位置变化会带动 children 的绝对坐标平移，即使内容不脏也必须重算（否则残影）；
+// 尺寸变化会影响换行/位置，同样必须重算。
+func (b *ElementBox) CanSkipLayout(x, y, w, h float64) bool {
+	return b.layoutCache.laidOut && !b.layoutCache.dirty &&
+		b.layoutCache.childCount == len(b.children) &&
+		b.layoutCache.lastX == x && b.layoutCache.lastY == y &&
+		b.layoutCache.lastWidth == w && b.layoutCache.lastHeight == h
+}
+
+// hasSpecialChildren 判断是否有浮动/绝对定位子：这些子的布局依赖父几何，
+// 父 clean 跳过会遗漏它们的位置更新，保守起见有则不剪枝。
+func (b *ElementBox) hasSpecialChildren() bool {
+	for _, c := range b.children {
+		if eb, ok := c.(*ElementBox); ok {
+			if eb.IsFloated() || eb.IsAbsolutelyPositioned() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (b *ElementBox) HasLayoutChanged() bool { return b.layoutCache.dirty }
 
 // ─────────────────────────────────────────────────────────────
