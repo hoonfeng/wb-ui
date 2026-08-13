@@ -30,12 +30,30 @@ var (
 	styleVer   uint64
 )
 
+// lineHeightEntry 缓存 line-height 继承链解析结果：rangeRect 里 line-height
+// 从文本节点父元素向上逐层 computedStyleFor（CM6 DOM 树 ~17 层祖先），
+// 每次输入 29 次 rangeRect × 17 层 = ~495 次 computedStyleFor（38ms），
+// 但同一父元素的 line-height 在输入期间不变 → 缓存后只解析一次。
+type lineHeightEntry struct {
+	ver    uint64
+	height float64 // 最终 line-height px 值（found=true 时有效）
+	found  bool    // 是否在继承链中找到显式 line-height
+}
+
+var (
+	lineHeightMu    sync.Mutex
+	lineHeightCache = map[interface{}]*lineHeightEntry{}
+)
+
 // BumpStyleVersion 使全部 computed style 缓存失效（样式表变更时调用）。
 func BumpStyleVersion() {
 	atomic.AddUint64(&styleVer, 1)
 	cssCacheMu.Lock()
 	cssCache = map[interface{}]*cssCacheEntry{}
 	cssCacheMu.Unlock()
+	lineHeightMu.Lock()
+	lineHeightCache = map[interface{}]*lineHeightEntry{}
+	lineHeightMu.Unlock()
 }
 
 // InvalidateComputedStyle 清除 el 及其后代元素的缓存（class/style/属性
@@ -44,6 +62,12 @@ func InvalidateComputedStyle(el *dom.Element) {
 	cssCacheMu.Lock()
 	delSubtree(el, cssCache)
 	cssCacheMu.Unlock()
+	// line-height 继承链缓存 key 是文本节点父元素，其 line-height 依赖
+	// 祖先链上的 line-height 声明——内联 style/class 变更可能影响祖先或
+	// 后代的 line-height 继承，保守起见全清（缓存通常很小，仅活跃编辑行）。
+	lineHeightMu.Lock()
+	lineHeightCache = map[interface{}]*lineHeightEntry{}
+	lineHeightMu.Unlock()
 }
 
 func delSubtree(el *dom.Element, cache map[interface{}]*cssCacheEntry) {
@@ -72,4 +96,22 @@ func cssCachePut(n interface{}, props map[string]string) {
 	cssCacheMu.Lock()
 	cssCache[n] = &cssCacheEntry{ver: atomic.LoadUint64(&styleVer), props: props}
 	cssCacheMu.Unlock()
+}
+
+// lineHeightCacheGet 返回缓存的 line-height 继承链结果：(height, found, ok)。
+// ok=false 表示缓存未命中（或版本过期），需要重新遍历继承链解析。
+func lineHeightCacheGet(n interface{}) (float64, bool, bool) {
+	lineHeightMu.Lock()
+	defer lineHeightMu.Unlock()
+	e, ok := lineHeightCache[n]
+	if !ok || e.ver != atomic.LoadUint64(&styleVer) {
+		return 0, false, false
+	}
+	return e.height, e.found, true
+}
+
+func lineHeightCachePut(n interface{}, height float64, found bool) {
+	lineHeightMu.Lock()
+	lineHeightCache[n] = &lineHeightEntry{ver: atomic.LoadUint64(&styleVer), height: height, found: found}
+	lineHeightMu.Unlock()
 }

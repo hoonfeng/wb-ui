@@ -4718,20 +4718,35 @@ func rangeRect(st *rangeState) (left, top, width, height float64, ok bool) {
 	// line-height 走继承链：computedStyleFor 只收集元素自身匹配的声明，
 	// cm-line 的 line-height 通常声明在 .cm-content/.cm-editor 等祖先。
 	// 浏览器 Range.getClientRects 的高度 = 最终 line-height（含继承）。
-	for p := dom.Node(parent); p != nil; p = p.ParentNode() {
-		if pel, ok := p.(*dom.Element); ok {
-			if cs := computedStyleFor(pel); cs != nil {
-				if v, ok := cs["line-height"]; ok && v != "" && v != "normal" {
-					if strings.HasSuffix(v, "px") {
-						if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil && pv > 0 {
-							height = pv
+	// ★ 结果按 parent 缓存：CM6 measure 在 rAF 内对同一父元素的多个字符
+	// 反复调 getClientRects，line-height 在输入期间不变，逐层
+	// computedStyleFor（~17 层 × 29 次 rangeRect = 495 次/输入）纯浪费。
+	if parent != nil {
+		if h, found, ok := lineHeightCacheGet(parent); ok {
+			if found {
+				height = h
+			}
+		} else {
+			found := false
+			for p := dom.Node(parent); p != nil; p = p.ParentNode() {
+				if pel, ok := p.(*dom.Element); ok {
+					if cs := computedStyleFor(pel); cs != nil {
+						if v, ok := cs["line-height"]; ok && v != "" && v != "normal" {
+							if strings.HasSuffix(v, "px") {
+								if pv, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil && pv > 0 {
+									height = pv
+									found = true
+								}
+							} else if lh, err := strconv.ParseFloat(v, 64); err == nil && lh > 0 {
+								height = lh * size // 无单位倍数：line-height:1.4 → 1.4×font-size
+								found = true
+							}
+							break
 						}
-					} else if lh, err := strconv.ParseFloat(v, 64); err == nil && lh > 0 {
-						height = lh * size // 无单位倍数：line-height:1.4 → 1.4×font-size
 					}
-					break
 				}
 			}
+			lineHeightCachePut(parent, height, found)
 		}
 	}
 	if width == 0 && height == 0 {
