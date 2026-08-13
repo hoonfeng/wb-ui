@@ -19,7 +19,10 @@
 //   - Slot fallback content: AssignedNodes returns the slot's own children when no
 //     light-DOM node is assigned (CSS Scoping Level 1 flattened tree).
 //   - Composed event paths (ComposedPath / ComposedParent) cross shadow boundaries for
-//     composed events and stop at the shadow root for non-composed events.
+//     composed events and stop at the shadow root for non-composed events; assigned
+//     nodes route through their <slot>; exportparts re-export is honored by ::part.
+//   - Event retargeting retargets the target to the shadow host for listeners on/above
+//     the host.
 
 package dom
 

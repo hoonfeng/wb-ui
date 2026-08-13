@@ -715,6 +715,57 @@ func TestSelector_MatchPart(t *testing.T) {
 	}
 }
 
+// TestSelector_MatchPartExportparts verifies ::part matching through the exportparts
+// re-export chain (CSS Scoping Level 1 §4.5): a shadow host's exportparts attribute
+// exposes an inner part name under an outer name to the next tree up.
+func TestSelector_MatchPartExportparts(t *testing.T) {
+	doc := newTestDoc(t)
+	innerHost := dom.NewElement(doc, "xinner")
+	innerSR, _ := innerHost.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "inner")
+	_ = innerSR.AppendChild(btn)
+	innerHost.SetAttribute("exportparts", "inner: outer")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "::part(inner)"), btn) {
+		t.Fatalf("::part(inner) should match the element's own part name")
+	}
+	if !c.Match(parseComplex(t, "::part(outer)"), btn) {
+		t.Fatalf("::part(outer) should match via exportparts re-export")
+	}
+	if c.Match(parseComplex(t, "::part(nope)"), btn) {
+		t.Fatalf("::part(nope) should not match")
+	}
+}
+
+// TestSelector_MatchPartExportpartsMultiLayer verifies the exportparts re-export
+// chain across two nested shadow layers: inner -> mid -> outer.
+func TestSelector_MatchPartExportpartsMultiLayer(t *testing.T) {
+	doc := newTestDoc(t)
+	outerHost := dom.NewElement(doc, "xouter")
+	outerSR, _ := outerHost.AttachShadow("open")
+	midHost := dom.NewElement(doc, "xmid")
+	_ = outerSR.AppendChild(midHost)
+	midSR, _ := midHost.AttachShadow("open")
+	btn := dom.NewElement(doc, "button")
+	btn.SetAttribute("part", "inner")
+	_ = midSR.AppendChild(btn)
+	midHost.SetAttribute("exportparts", "inner: mid")
+	outerHost.SetAttribute("exportparts", "mid: outer")
+	c := NewSelectorChecker()
+
+	if !c.Match(parseComplex(t, "::part(outer)"), btn) {
+		t.Fatalf("::part(outer) should match across two exportparts layers")
+	}
+	if !c.Match(parseComplex(t, "::part(mid)"), btn) {
+		t.Fatalf("::part(mid) should match at the middle layer")
+	}
+	if c.Match(parseComplex(t, "::part(nope)"), btn) {
+		t.Fatalf("::part(nope) should not match")
+	}
+}
+
 func TestSelector_MatchPartWithHostPrefix(t *testing.T) {
 	doc := newTestDoc(t)
 	host := dom.NewElement(doc, "xwidget")

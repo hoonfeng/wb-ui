@@ -195,11 +195,24 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 	}
 	// Build propagation path: index 0 is the target, last index is the root. The path
 	// crosses shadow boundaries (a shadow-root child's composed parent is the shadow
-	// host) when the event is composed; a non-composed event stops at its shadow root.
+	// host) and includes slot nodes when the event is composed; a non-composed event
+	// stops at its shadow root.
 	path := buildEventPath(Node(b.self), event.Composed())
 	ev.setTarget(b.self)
 	ev.setPath(path)
 	ev.resetBeforeDispatch()
+
+	// setCurrent applies event retargeting (DOM §2.8): the target a listener observes
+	// is retargeted to the shadow host when the listener sits on or above that host in
+	// the composed tree, so shadow-internal targets do not leak past the boundary.
+	setCurrent := func(et EventTarget) {
+		ev.setCurrentTarget(et)
+		if cn, ok := et.(Node); ok {
+			ev.setTarget(retargetedTarget(Node(b.self), cn))
+		} else {
+			ev.setTarget(et)
+		}
+	}
 
 	// Capture phase: root -> target's parent.
 	if len(path) > 1 {
@@ -208,14 +221,14 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 			if event.PropagationStopped() {
 				break
 			}
-			ev.setCurrentTarget(path[i])
+			setCurrent(path[i])
 			fireEventListeners(path[i], event, true)
 		}
 	}
 
 	// Target phase: fire capture then bubble listeners on the target.
 	if !event.PropagationStopped() {
-		ev.setCurrentTarget(path[0])
+		setCurrent(path[0])
 		ev.setEventPhase(EventAtTarget)
 		fireEventListeners(path[0], event, true)
 		if !event.ImmediatePropagationStopped() {
@@ -230,13 +243,14 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 			if event.PropagationStopped() {
 				break
 			}
-			ev.setCurrentTarget(path[i])
+			setCurrent(path[i])
 			fireEventListeners(path[i], event, false)
 		}
 	}
 
 	ev.setEventPhase(EventNone)
 	ev.setCurrentTarget(nil)
+	ev.setTarget(b.self) // restore the un-retargeted target once dispatch ends
 	ev.resetAfterDispatch()
 
 	// Default action: if not canceled, give the target a chance to perform its default
@@ -256,23 +270,78 @@ type defaultActionHandler interface {
 	defaultEventHandler(Event)
 }
 
+// eventPathParent returns n's next node in a composed event's propagation path
+// (DOM §5.3 flattened tree): a slot-assigned light-DOM node's next step is the
+// <slot> that assigns it (not its light-DOM parent), so the slot node appears in the
+// composed path between the assigned node and the shadow host. Every other node uses
+// ComposedParent, which crosses the shadow boundary.
+func eventPathParent(n Node) Node {
+	if el, ok := n.(*Element); ok {
+		if slot := el.AssignedSlot(); slot != nil {
+			return slot
+		}
+	}
+	return ComposedParent(n)
+}
+
 // buildEventPath constructs the composed propagation path for an event dispatched at
 // target: the list of targets from target up to the document root. For a composed
-// event the walk crosses shadow boundaries (a shadow-root child's next step is the
-// shadow host, via ComposedParent); for a non-composed event the walk stops at the
-// first shadow root so the path does not leak into the host's light-DOM tree.
+// event the walk crosses shadow boundaries and includes slot nodes (via
+// eventPathParent); for a non-composed event it follows the raw parent chain and
+// stops at the shadow root, never leaking into the host's light-DOM tree.
 func buildEventPath(target Node, composed bool) []EventTarget {
 	var path []EventTarget
 	for n := target; n != nil; {
 		path = append(path, n)
+		var next Node
+		if composed {
+			next = eventPathParent(n)
+		} else {
+			next = n.ParentNode()
+		}
+		if next == nil {
+			break
+		}
 		if !composed {
-			if _, isSR := n.ParentNode().(*ShadowRoot); isSR {
+			if _, isSR := next.(*ShadowRoot); isSR {
 				break
 			}
 		}
-		n = ComposedParent(n)
+		n = next
 	}
 	return path
+}
+
+// retargetedTarget returns the target a listener on `current` observes for an event
+// whose real target is `target` (DOM §2.8 event retargeting). When the real target
+// lives inside a shadow tree and `current` sits on or above that tree's host in the
+// composed tree, the target is retargeted — layer by layer for nested shadow trees —
+// to the innermost shadow host that `current` is still inside or above.
+func retargetedTarget(target Node, current Node) Node {
+	rt := target
+	for {
+		sr := ContainingShadowRoot(rt)
+		if sr == nil {
+			break
+		}
+		host := sr.Host()
+		if host == nil || !isComposedInclusiveAncestor(current, host) {
+			break
+		}
+		rt = host
+	}
+	return rt
+}
+
+// isComposedInclusiveAncestor reports whether ancestor is node itself or one of its
+// composed-tree ancestors (walking ComposedParent across shadow boundaries).
+func isComposedInclusiveAncestor(ancestor Node, node Node) bool {
+	for n := node; n != nil; n = ComposedParent(n) {
+		if n == ancestor {
+			return true
+		}
+	}
+	return false
 }
 
 // nodeBase satisfies defaultActionHandler with a no-op so DispatchEvent can call it

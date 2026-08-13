@@ -224,6 +224,22 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > **仍缺（后续增量）**：① 事件 retargeting（listener 内 `event.target` 在 shadow
 > boundary 处应 retarget 到 host）；② slot 分配的 composed 事件路径未插入 slot 节点
 > 本身；③ `exportparts`（跨层 part 转发）与 `::part` 的多个 part-name 匹配优化。
+>
+> **已实现 retargeting + slot 路径 + exportparts（2026-08-13，本轮收尾）**：
+> ① 事件 retargeting（DOM §2.8）：`DispatchEvent` 对每个 currentTarget 调用
+> `retargetedTarget`——当真实 target 位于某 shadow tree 内且 listener 位于该 host 之上
+> （composed 树中）时，target 逐层 retarget 到最内层 shadow host；dispatch 结束后恢复
+> 真实 target。② slot 节点插入 composed 路径：新增 `eventPathParent`（assigned 节点的
+> 下一跳是分配它的 `<slot>`，而非其 light-DOM 父节点），`buildEventPath` 改用之；非
+> composed 事件仍走裸 parent 链并在 shadow root 截断。③ exportparts 跨层转发
+> （CSS Scoping L1 §4.5）：`matchPart` 沿 `exportparts` 属性逐层重命名 part 名，支持
+> 多层嵌套 shadow 的 `inner→mid→outer` 转发链（新增 `parseExportparts`）。
+> 测试：`TestEvent_Retargeting` / `TestEvent_ComposedPathSlot` /
+> `TestSelector_MatchPartExportparts*` 全绿，全量通过。
+>
+> **仍缺（后续增量）**：① `::part` 的多个 part-name 匹配优化（当前 O(names) 线性扫描，
+> 可改为哈希集合）；② `exportparts` 的 `inner` 到多个 `outer` 映射（当前 map 一对一）；
+> ③ 事件 `relatedTarget`（MouseEvent 的 mouseover/out）跨 shadow 边界 retargeting。
 
 ### 现状定位
 - `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，

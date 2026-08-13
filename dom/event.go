@@ -11,7 +11,9 @@
 //     only via constructors in this port
 //   - composedPath / EventPath: the composed path is built at dispatch time via
 //     ComposedParent, crossing shadow boundaries for composed events and stopping at
-//     the shadow root for non-composed events; event retargeting is not implemented
+//     the shadow root for non-composed events; slot-assigned nodes include the <slot>
+//     node in their path; event retargeting retargets the target to the shadow host
+//     for listeners on/above the host (DOM §2.8)
 //   - wtf.AtomString is available but event types use native Go strings for ergonomics
 
 package dom

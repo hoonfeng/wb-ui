@@ -20,7 +20,8 @@
 //     slot-assigned light-DOM node; ::part matches a shadow element by part name;
 //     a host-selector prefix before ::part / ::slotted (e.g. x-widget::part(btn))
 //     is forward-matched against the shadow host, including across a combinator
-//     (.outer x-widget::part(btn) walks the host's composed ancestors) (CSS Scoping L1)
+//     (.outer x-widget::part(btn) walks the host's composed ancestors); ::part also
+//     follows the exportparts re-export chain across nested shadow trees (CSS Scoping L1)
 //   - :has() is implemented by walking descendants of the candidate element
 
 package css
@@ -527,20 +528,80 @@ func (c *SelectorChecker) matchSlotted(s SimpleSelector, el *dom.Element) bool {
 }
 
 // matchPart reports whether ::part(name) matches el: a shadow-tree element whose
-// `part` attribute lists one of the requested names.
+// `part` attribute lists one of the requested names, or whose part name is re-exported
+// through one or more ancestor shadow hosts via their `exportparts` attribute
+// (CSS Scoping Level 1 §4.5). exportparts maps a shadow-internal part name to an
+// outer name (e.g. host exportparts="x: y" exposes the shadow part "x" as "y" to the
+// host's own host), and the re-export chain is followed layer by layer.
 func (c *SelectorChecker) matchPart(s SimpleSelector, el *dom.Element) bool {
 	if len(s.StringList) == 0 {
 		return false
 	}
-	parts := el.PartNames()
-	for _, want := range s.StringList {
-		for _, p := range parts {
-			if p == want {
-				return true
+	wants := s.StringList
+	visible := el.PartNames()
+	cur := el
+	for {
+		for _, p := range visible {
+			for _, w := range wants {
+				if p == w {
+					return true
+				}
+			}
+		}
+		// Walk the exportparts chain: only part names the host re-exports remain
+		// visible to the next outer tree, under their new outer name.
+		sr := dom.ContainingShadowRoot(cur)
+		if sr == nil {
+			break
+		}
+		host := sr.Host()
+		if host == nil {
+			break
+		}
+		exp := parseExportparts(host.GetAttribute("exportparts"))
+		if len(exp) == 0 {
+			break // no re-export: part names do not cross this boundary
+		}
+		var next []string
+		for _, p := range visible {
+			if outer, ok := exp[p]; ok {
+				next = append(next, outer)
+			}
+		}
+		if len(next) == 0 {
+			break // none of the visible part names are re-exported
+		}
+		visible = next
+		cur = host
+	}
+	return false
+}
+
+// parseExportparts parses an `exportparts` attribute value into a map of
+// shadow-internal part name -> outer part name. The value is a comma-separated list of
+// `ident : ident` pairs (CSS Scoping Level 1 part-mapping-list).
+func parseExportparts(attr string) map[string]string {
+	if attr == "" {
+		return nil
+	}
+	m := make(map[string]string)
+	for _, pair := range strings.Split(attr, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		if i := strings.Index(pair, ":"); i >= 0 {
+			inner := strings.TrimSpace(pair[:i])
+			outer := strings.TrimSpace(pair[i+1:])
+			if inner != "" && outer != "" {
+				m[inner] = outer
 			}
 		}
 	}
-	return false
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // previousSiblingElement returns the previous sibling of el that is an Element, or

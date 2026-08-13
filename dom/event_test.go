@@ -801,3 +801,76 @@ func TestEvent_ComposedPathShadow(t *testing.T) {
 		t.Fatalf("non-composed ComposedPath() length = %d, want 1 ([btn])", len(nonComposedPath))
 	}
 }
+
+// TestEvent_ComposedPathSlot verifies that a composed event dispatched on a
+// slot-assigned light-DOM node includes the <slot> node in its path (flattened tree:
+// assigned node → slot → host → document).
+func TestEvent_ComposedPathSlot(t *testing.T) {
+	d := NewDocument()
+	host := d.CreateElement("xwidget")
+	_ = d.AppendChild(host)
+	item := d.CreateElement("span")
+	_ = host.AppendChild(item)
+	sr, _ := host.AttachShadow("open")
+	slot := d.CreateElement("slot")
+	_ = sr.AppendChild(slot)
+
+	if got := item.AssignedSlot(); got != slot {
+		t.Fatalf("AssignedSlot() = %v, want slot", got)
+	}
+
+	var composedPath []EventTarget
+	item.AddEventListener("test", EventListenerFunc(func(e Event) {
+		composedPath = e.ComposedPath()
+	}), false)
+	_ = item.DispatchEvent(NewEvent("test", false, false, true))
+	if len(composedPath) != 4 {
+		t.Fatalf("composed ComposedPath() length = %d, want 4 ([item, slot, host, document])", len(composedPath))
+	}
+	if composedPath[1] != slot {
+		t.Errorf("ComposedPath()[1] = %v, want slot", composedPath[1])
+	}
+	if composedPath[2] != host {
+		t.Errorf("ComposedPath()[2] = %v, want host", composedPath[2])
+	}
+}
+
+// TestEvent_Retargeting verifies DOM §2.8 event retargeting: a listener on a shadow
+// host (or its light-DOM ancestor) observes the host as the event target, while a
+// listener inside the shadow tree observes the real target.
+func TestEvent_Retargeting(t *testing.T) {
+	d := NewDocument()
+	host := d.CreateElement("xwidget")
+	_ = d.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	btn := d.CreateElement("button")
+	_ = sr.AppendChild(btn)
+
+	var innerTarget, hostTarget, docTarget EventTarget
+	btn.AddEventListener("test", EventListenerFunc(func(e Event) {
+		innerTarget = e.Target()
+	}), false)
+	host.AddEventListener("test", EventListenerFunc(func(e Event) {
+		hostTarget = e.Target()
+	}), false)
+	d.AddEventListener("test", EventListenerFunc(func(e Event) {
+		docTarget = e.Target()
+	}), false)
+
+	ev := NewEvent("test", true, false, true)
+	_ = btn.DispatchEvent(ev)
+
+	if innerTarget != btn {
+		t.Errorf("inner listener target = %v, want btn", innerTarget)
+	}
+	if hostTarget != host {
+		t.Errorf("host listener target = %v, want host (retargeted)", hostTarget)
+	}
+	if docTarget != host {
+		t.Errorf("document listener target = %v, want host (retargeted)", docTarget)
+	}
+	// After dispatch the target attribute is restored to the real target.
+	if ev.Target() != btn {
+		t.Errorf("post-dispatch target = %v, want btn", ev.Target())
+	}
+}
