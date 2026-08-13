@@ -357,10 +357,10 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 2. **P1-min/max/clamp** → ✅ 已实现（`a9c69d3`）。
 3. **P1-布局增量** → 🔍 已调研，阶段 A 收益 <1% 暂不投入，B/C 待业务驱动。
 4. **P2 Shadow DOM** → ✅ 已完整实现（`1dff19a` → `2bcf5cc` 提交链）。
-5. **P3 mask-image** → ✅ 已实现（背景/边框 alpha 遮罩）。
+5. **P3 mask-image** → ✅ 已完整实现（子树遮罩 + size/repeat/position/mode + SVG `<mask>`）。
 
 ### 剩余可优化项（非阻塞，按需）
 - `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
-- mask-image 前景文字/子元素遮罩、mask-size/repeat/position/mode、SVG `<mask>` —— 见
-  [MASK_P3_PLAN.md](./MASK_P3_PLAN.md)（P3 已规划，未实现）。
+- 内联 SVG 元素（HTML 内 `<svg>` + `mask-image: url(#id)` 同文档引用）—— 依赖 wb-ui
+  的内联 SVG 渲染能力，当前 SVG 主要走外部文件/data URI 路径（见 MASK_P3_PLAN.md）。
 - 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。

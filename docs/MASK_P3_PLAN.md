@@ -1,6 +1,6 @@
 # mask-image P3 实施计划：前景遮罩 + SVG mask + 属性补全
 
-> 状态：规划文档（未实现）。承接 `docs/TECH_DEBT.md` 项 5 的「剩余可优化项」。
+> 状态：✅ 已实现（2026-08-13）。P3.1 / P3.2 / P3.3 / P3.4 全部落地。
 > 目标：让 CSS `mask-image` 达到 CSS Masking Level 1 的可用语义，并补齐 SVG `<mask>`。
 
 ## 一、现状（以代码为准）
@@ -79,3 +79,48 @@ P3.3 (mask-mode) ─────────────┘
 3. `mask-mode: luminance`（P3.3）。
 4. SVG `<mask>` 元素 + `maskUnits`（P3.4）。
 5. 全量 `go test ./...` 无回归，`rendering/mask_test.go` 扩充为参数化用例。
+
+## 六、实现记录（2026-08-13，全部完成）
+
+### P3.1 子树级遮罩（核心）
+- `rendering/renderlayer.go`：`RequiresLayer` 增加 mask-image 判断——mask 元素必须有
+  自己的 RenderLayer，才能像 opacity 一样在 layer 层包裹整棵子树。
+- `rendering/renderpipeline.go`：新增 `paintLayerWithEffects`（mask 离屏层在最外、
+  opacity 离屏层在内，跨 Background/Foreground/Outline 三个 phase 包裹整棵子树），
+  fixed 分支和普通分支统一走它；移除 `paintObjectBackground` 里只遮 background/border
+  的旧 mask 代码。
+- 效果：mask 现在遮罩文字 + 子元素，不再「文字/子元素穿透遮罩」。
+
+### P3.2 mask-size/repeat/position
+- `rendering/mask.go`：`applyMaskLayer` 复用 `computeBackgroundDest` 解析 size/position；
+  repeat 语义用「clip 到有效区域 + 图片 shader(TileModeRepeat) + `ClearRect` 清除区域外」，
+  no-repeat 时 tile 之外被遮掉（与 background-repeat 的空区域语义不同）。
+
+### P3.3 mask-mode luminance
+- `platform/graphics/canvas.go`：`ApplyImageMaskMode` / `ApplyImageMaskTiled` 增加
+  luminance 参数，用 goskia `NewColorMatrixFilter` 把 RGB 亮度（0.2126R+0.7152G+0.0722B）
+  编码到 alpha；`mask-mode: luminance | alpha | match-source` 全支持。
+
+### P3.4 SVG `<mask>`
+- `rendering/svg.go`：`svgMask` 结构 + `<defs>` 解析 `<mask>`（maskUnits/maskContentUnits/
+  mask-type/x/y/width/height，默认 -10%/-10%/120%/120%）；`renderSVGMask` 把 mask 内容
+  栅格化成 alpha/luminance 图（maskUnits 解析目标区域，maskContentUnits 处理坐标系）。
+- `rendering/mask.go`：`mask-image: url(file.svg#maskId)` / `url(data:...#id)` 引用 SVG
+  mask；`mask-type` 与 CSS `mask-mode` 交互（match-source 时 SVG 默认 luminance）。
+
+### 测试
+- `rendering/mask_test.go`：TestMaskImageAlpha / TestMaskImageMasksDescendants /
+  TestMaskSizeNoRepeat / TestMaskModeLuminance / TestMaskPropertyNoCrash。
+- `rendering/svg_mask_test.go`：TestSVGMaskParseAndRender / TestMaskImageSVGMask /
+  TestMaskImageSVGMaskAlpha。
+- 全量 `go test ./...` 通过，无回归。
+
+### 备注
+- goskia `Image.MakeShader` 的 sampling 参数必须传非 nil（传 nil 会崩溃），已传
+  `&skia.SamplingLinear`。
+- `TileModeDecal`（Skia raster 后端）在 no-repeat 场景行为异常，改用 clip+ClearRect
+  实现 no-repeat 的「tile 外透明」语义。
+- 内联 SVG 元素（HTML 内 `<svg>` 内联 + `mask-image: url(#id)` 同文档引用）依赖 wb-ui
+  的内联 SVG 渲染能力，当前 wb-ui 的 SVG 主要走「外部文件/data URI」路径，内联引用
+  暂未覆盖（见「遗留」）。
+

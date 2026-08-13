@@ -321,6 +321,43 @@ func opacityLayerBounds(info *PaintInfo, layerRect layout.LayoutRect) graphics.R
 	return graphics.Rect{X: layerRect.X - 16, Y: layerRect.Y - 16, Width: w + 32, Height: h + 32}
 }
 
+// paintLayerWithEffects wraps paintLayerContents with the layer owner's
+// mask-image and opacity offscreen layers (mask outermost, opacity inner),
+// mirroring RenderLayer::paintLayer's composited effects. The mask wraps the
+// WHOLE subtree (background + foreground + outline + descendants), matching
+// CSS mask-image semantics — the previous per-box mask only masked
+// background+border and let text/descendants leak through.
+func paintLayerWithEffects(layer *RenderLayer, info *PaintInfo, layerRect layout.LayoutRect) {
+	st := layer.Owner().Style()
+	if st == nil {
+		paintLayerContents(layer, info)
+		return
+	}
+	// mask-image: offscreen layer + DstIn composite (outermost, so it masks
+	// the opacity-composited result too).
+	hasMask := hasMaskImage(st)
+	var maskRect graphics.Rect
+	if hasMask {
+		maskRect = graphics.Rect{X: layerRect.X, Y: layerRect.Y, Width: layerRect.Width, Height: layerRect.Height}
+		info.canvas.SaveLayerForMask(maskRect)
+	}
+	// opacity < 0.98: offscreen layer composited at opacity (inner).
+	needOpacity := st.Opacity < 1.0 && st.Opacity <= 0.98 && os.Getenv("WB_NO_SAVELAYER") == ""
+	if needOpacity {
+		info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
+		info.opacityLayerDepth++
+	}
+	paintLayerContents(layer, info)
+	if needOpacity {
+		info.opacityLayerDepth--
+		info.canvas.Restore()
+	}
+	if hasMask {
+		applyMaskLayer(info.canvas, st, maskRect)
+		info.canvas.Restore()
+	}
+}
+
 // paintLayerTree paints a single render layer and its descendants, mirroring
 // RenderLayer::paintLayer(). The canvas state is saved, the layer's clip is applied, the
 // layer owner's bounded subtree is painted by phase, then each child layer is painted on
@@ -430,15 +467,9 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		// CumulativeOpacity 乘法），0.98+ 的视觉差不可见。
 		// ★ bounds 限制：SaveLayer 只分配元素区域（非全 surface）——
 		// raster 合成从 ~0.7ms 降到 ~µs。
-		if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 {
-			info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
-			info.opacityLayerDepth++
-			paintLayerContents(layer, info)
-			info.opacityLayerDepth--
-			info.canvas.Restore()
-		} else {
-			paintLayerContents(layer, info)
-		}
+		// ★ mask-image 子树遮罩：mask 包裹整棵子树（含 opacity 合成），
+		// 见 paintLayerWithEffects（fixed 分支同样适用）。
+		paintLayerWithEffects(layer, info, layerRect)
 		info.canvas.Restore()
 		// Rebalance the save stack for the outer recursion: ancestors'
 		// saves were popped by RestoreToCount; push a fresh save so the
@@ -540,16 +571,9 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	//   绘制）——GPU 后端 SaveLayer 合成丢失时（内容画进离屏层但 Restore
 	//   合成不上主画布 → 元素整体消失，如状态栏 status-item 文本/圆点），
 	//   用此开关验证"离屏合成是元凶"。
-	if st := layer.Owner().Style(); st != nil && st.Opacity < 1.0 && st.Opacity <= 0.98 &&
-		os.Getenv("WB_NO_SAVELAYER") == "" {
-		info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
-		info.opacityLayerDepth++
-		paintLayerContents(layer, info)
-		info.opacityLayerDepth--
-		info.canvas.Restore()
-	} else {
-		paintLayerContents(layer, info)
-	}
+	// ★ mask-image 子树遮罩：mask 包裹整棵子树（含 opacity 合成），见
+	//   paintLayerWithEffects。
+	paintLayerWithEffects(layer, info, layerRect)
 	if hasClip || isFixedLayer {
 		info.canvas.Restore()
 	}
@@ -1550,30 +1574,14 @@ func paintObjectBackground(o RenderObject, info *PaintInfo) {
 			filterCleanup = info.canvas.Restore
 		}
 	}
-	// Apply CSS mask-image: wrap background/border in an offscreen layer and
-	// mask it with the image's alpha channel. Placed innermost (before filter
-	// / blend / clip compositing) so it masks exactly the background+border.
-	var maskApply func()
-	if st := box.Style(); st != nil {
-		if murl, ok := parseBackgroundURL(st.GetProperty("mask-image")); ok {
-			if img := loadBackgroundImage(murl, ""); img != nil && img.Loaded() {
-				bx, by, bw, bh := box.X(), box.Y(), box.Width(), box.Height()
-				info.canvas.SaveLayerForMask(Rect{X: bx, Y: by, Width: bw, Height: bh})
-				maskApply = func() {
-					info.canvas.ApplyImageMask(img.SkiaImage(), Rect{X: bx, Y: by, Width: bw, Height: bh})
-					info.canvas.Restore()
-				}
-			}
-		}
-	}
+	// CSS mask-image is applied at the RENDER LAYER level (paintLayerWithEffects)
+	// so it masks the whole subtree (background + foreground + descendants),
+	// not just background+border. Do NOT re-apply it here.
 	// Apply CSS transform if present (inside filter layer). The transform is
 	// applied by walkSubtreeExcluded for the whole subtree; the per-box
 	// background/border painting here must NOT re-apply it.
 	PaintBackground(box, info)
 	PaintBorder(box, info)
-	if maskApply != nil {
-		maskApply()
-	}
 	if filterCleanup != nil {
 		defer filterCleanup()
 	}

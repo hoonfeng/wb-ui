@@ -290,6 +290,7 @@ type svgPaintContext struct {
 	dashArray   []float64               // stroke-dasharray pattern
 	patterns    map[string]*svgPattern  // patterns defined in <defs>
 	markers     map[string]*svgMarker   // markers defined in <defs>
+	masks       map[string]*svgMask     // masks defined in <defs>
 	lineCap     string                  // butt|round|square (stroke-linecap)
 	lineJoin    string                  // miter|round|bevel (stroke-linejoin)
 	fillRule    string                  // nonzero|evenodd (fill-rule)
@@ -305,6 +306,7 @@ func defaultSVGContext() *svgPaintContext {
 		clips:       make(map[string][]svgShape),
 		patterns:    make(map[string]*svgPattern),
 		markers:     make(map[string]*svgMarker),
+		masks:       make(map[string]*svgMask),
 	}
 }
 
@@ -947,6 +949,8 @@ type svgDocument struct {
 	styleRules []svgStyleRule
 	// markers carry <marker> templates referenced by marker-start/end.
 	markers map[string]*svgMarker
+	// masks carry <mask> templates referenced by CSS mask-image url(#id).
+	masks map[string]*svgMask
 	// currentColor is the resolved CSS color of the host element; SVG
 	// fill/stroke="currentColor" resolves to it (set by the caller).
 	currentColor graphics.Color
@@ -958,6 +962,20 @@ type svgMarker struct {
 	shapes     []svgShape
 	refX, refY float64
 	orientAuto bool
+}
+
+// svgMask is a parsed <mask> element. Its child shapes' luminance (default) or
+// alpha (mask-type: alpha) selects the mask value. x/y/width/height describe the
+// mask region (default -10%,-10%,120%,120%); maskUnits selects the region's
+// coordinate system (objectBoundingBox relative to the masked element, or
+// userSpaceOnUse absolute); maskContentUnits selects the child shapes' system.
+type svgMask struct {
+	id               string
+	x, y, w, h       float64 // mask region (fractions when maskUnits=objectBoundingBox)
+	maskUnits        string  // objectBoundingBox (default) | userSpaceOnUse
+	maskContentUnits string  // userSpaceOnUse (default) | objectBoundingBox
+	maskType         string  // luminance (default) | alpha
+	shapes           []svgShape
 }
 
 // svgStyleRule is one declaration subset (fill/stroke) extracted from a
@@ -1007,6 +1025,26 @@ func parseSVGCoord(s string) float64 {
 		return 0
 	}
 	return v
+}
+
+// parseMaskFraction parses an SVG mask region coordinate (x/y/width/height).
+// A trailing "%" divides by 100 (so "10%" → 0.10, "120%" → 1.20); a bare number
+// is the fraction/absolute value directly. Empty returns the default.
+func parseMaskFraction(s string, def float64) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return def
+	}
+	if strings.HasSuffix(s, "%") {
+		if v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64); err == nil {
+			return v / 100.0
+		}
+		return def
+	}
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	return def
 }
 
 func parseSVGCoordList(s string) []float64 {
@@ -1808,6 +1846,41 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 							}
 							ctx.markers[mid] = m
 						}
+					case "mask":
+						maskID := defEl.GetAttribute("id")
+						if maskID != "" {
+							mk := &svgMask{
+								id:               maskID,
+								x:                parseMaskFraction(defEl.GetAttribute("x"), -0.10),
+								y:                parseMaskFraction(defEl.GetAttribute("y"), -0.10),
+								w:                parseMaskFraction(defEl.GetAttribute("width"), 1.20),
+								h:                parseMaskFraction(defEl.GetAttribute("height"), 1.20),
+								maskUnits:        defEl.GetAttribute("maskUnits"),
+								maskContentUnits: defEl.GetAttribute("maskContentUnits"),
+								maskType:         defEl.GetAttribute("mask-type"),
+							}
+							for mc := defEl.FirstChild(); mc != nil; mc = mc.NextSibling() {
+								if mEl, ok := mc.(*dom.Element); ok {
+									if shape := parseSVGElement(mEl); shape != nil {
+										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 255, G: 255, B: 255, A: 255}}
+										pm := parseStyleAttribute(mEl.GetAttribute("style"))
+										if f := pm["fill"]; f != "" {
+											fs.fill = parseColorAttribute(f)
+										} else if f := mEl.GetAttribute("fill"); f != "" {
+											fs.fill = parseColorAttribute(f)
+										}
+										if st := pm["stroke"]; st != "" {
+											fs.stroke = parseColorAttribute(st)
+										} else if st := mEl.GetAttribute("stroke"); st != "" {
+											fs.stroke = parseColorAttribute(st)
+										}
+										fs.strokeWidth = parseSVGCoord(mEl.GetAttribute("stroke-width"))
+										mk.shapes = append(mk.shapes, fs)
+									}
+								}
+							}
+							ctx.masks[maskID] = mk
+						}
 					}
 				}
 			}
@@ -1888,6 +1961,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			clips:       ctx.clips,
 			patterns:    ctx.patterns,
 			markers:     ctx.markers,
+			masks:       ctx.masks,
 		}
 
 		// Resolve url(#gradientId) references
@@ -2107,6 +2181,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 	doc.clips = ctx.clips
 	doc.patterns = ctx.patterns
 	doc.markers = ctx.markers
+	doc.masks = ctx.masks
 	return doc
 }
 
@@ -2162,5 +2237,60 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 	ctx.markers = doc.markers
 	for _, s := range doc.shapes {
 		s.paint(canvas, ctx)
+	}
+}
+
+// renderSVGMask rasterizes a <mask> element's content into a decoded image.
+// The image's RGB carries the child shapes' own colors and its alpha carries
+// their coverage, so the caller extracts the mask value as luminance (default)
+// or alpha per mask-type. The mask region is resolved against the masked
+// element's box (targetW×targetH) per maskUnits; child shapes are drawn per
+// maskContentUnits (userSpaceOnUse = target-element coordinates, or
+// objectBoundingBox = 0..1 fractions scaled to the target box).
+func renderSVGMask(m *svgMask, targetW, targetH float64) *DecodedImage {
+	if m == nil || len(m.shapes) == 0 || targetW <= 0 || targetH <= 0 {
+		return nil
+	}
+	// mask region in target-element coordinates.
+	var mx, my, mw, mh float64
+	if m.maskUnits == "userSpaceOnUse" {
+		mx, my, mw, mh = m.x, m.y, m.w, m.h
+	} else { // objectBoundingBox (default)
+		mx, my = m.x*targetW, m.y*targetH
+		mw, mh = m.w*targetW, m.h*targetH
+	}
+	if mw <= 0 || mh <= 0 {
+		return nil
+	}
+	cw, ch := int(math.Ceil(mw)), int(math.Ceil(mh))
+	if cw <= 0 || ch <= 0 {
+		return nil
+	}
+	canvas := graphics.NewCanvas(cw, ch)
+	defer canvas.Release()
+
+	// Shift the mask region origin to the canvas origin, then (for
+	// objectBoundingBox content units) scale child coords 0..1 to the target
+	// box. Canvas transforms pre-concat, so this yields T·S (scale first).
+	canvas.Translate(-mx, -my)
+	if m.maskContentUnits == "objectBoundingBox" {
+		canvas.Scale(targetW, targetH)
+	}
+
+	ctx := defaultSVGContext()
+	ctx.fill = graphics.Color{R: 255, G: 255, B: 255, A: 255}
+	for _, s := range m.shapes {
+		s.paint(canvas, ctx)
+	}
+
+	img := canvas.Snapshot()
+	if img == nil {
+		return nil
+	}
+	return &DecodedImage{
+		skImg:  img,
+		loaded: true,
+		width:  img.Width(),
+		height: img.Height(),
 	}
 }

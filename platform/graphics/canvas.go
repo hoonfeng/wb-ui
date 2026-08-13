@@ -1465,6 +1465,14 @@ func (c *Canvas) SaveLayerForMask(rect Rect) {
 // region where img is opaque survives (img's RGB is ignored — CSS mask-image
 // semantics). Must be called between SaveLayerForMask and Restore.
 func (c *Canvas) ApplyImageMask(img *skia.Image, rect Rect) {
+	c.ApplyImageMaskMode(img, rect, false)
+}
+
+// ApplyImageMaskMode masks the save-layer's painted content using img's alpha
+// (BlendModeDstIn), optionally converting img to a luminance-derived alpha
+// first (mask-mode: luminance → alpha = 0.2126R + 0.7152G + 0.0722B, RGB
+// zeroed). Mirrors CSS Masking Level 1 mask-mode: alpha | luminance.
+func (c *Canvas) ApplyImageMaskMode(img *skia.Image, rect Rect, luminance bool) {
 	if img == nil || c.canvas == nil {
 		return
 	}
@@ -1474,8 +1482,68 @@ func (c *Canvas) ApplyImageMask(img *skia.Image, rect Rect) {
 	paint.SetStyle(skia.PaintStyleFill)
 	paint.SetAntialias(true)
 	paint.SetBlendMode(skia.BlendModeDstIn)
+	if luminance {
+		// 4x5 row-major matrix: A_out = luminance(R,G,B); RGB zeroed (DstIn
+		// only reads alpha, so the RGB rows are irrelevant).
+		cf := skia.NewColorMatrixFilter([20]float32{
+			0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0,
+			0.2126, 0.7152, 0.0722, 0, 0,
+		})
+		paint.SetColorFilter(cf)
+		cf.Release()
+	}
 	defer paint.Release()
 	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
+	c.invalidatePixels()
+}
+
+// ApplyImageMaskTiled masks the save-layer's painted content using img as a
+// mask, tiled per tileX/tileY (Skia tile mode). The mask's first tile occupies
+// tileRect (world coordinates): a local matrix maps that rect to the image's
+// 0..W × 0..H space, and the tile mode fills the rest of maskRect (TileModeDecal
+// → tile outside the first tile is transparent = masked out, matching CSS
+// mask-repeat: no-repeat). luminance converts the image to a luminance-derived
+// alpha first (mask-mode: luminance). Mirrors CSS Masking Level 1 mask-image +
+// mask-repeat + mask-mode.
+func (c *Canvas) ApplyImageMaskTiled(img *skia.Image, maskRect, tileRect Rect, tileX, tileY skia.TileMode, luminance bool) {
+	if img == nil || c.canvas == nil || tileRect.Width <= 0 || tileRect.Height <= 0 {
+		return
+	}
+	// localMatrix: world → texture, so tileRect (world) maps to 0..W × 0..H.
+	sx := float32(img.Width()) / float32(tileRect.Width)
+	sy := float32(img.Height()) / float32(tileRect.Height)
+	m := skia.Matrix{
+		ScaleX: sx, ScaleY: sy,
+		TransX: -float32(tileRect.X) * sx,
+		TransY: -float32(tileRect.Y) * sy,
+		Persp2: 1,
+	}
+	shader := img.MakeShader(tileX, tileY, &skia.SamplingLinear, &m)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	paint := skia.NewPaint()
+	paint.SetStyle(skia.PaintStyleFill)
+	paint.SetAntialias(true)
+	paint.SetBlendMode(skia.BlendModeDstIn)
+	paint.SetShader(shader)
+	if luminance {
+		// 4x5 row-major matrix: A_out = luminance(R,G,B); RGB zeroed.
+		cf := skia.NewColorMatrixFilter([20]float32{
+			0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0,
+			0.2126, 0.7152, 0.0722, 0, 0,
+		})
+		paint.SetColorFilter(cf)
+		cf.Release()
+	}
+	defer paint.Release()
+	dst := skia.RectXYWH(float32(maskRect.X), float32(maskRect.Y), float32(maskRect.Width), float32(maskRect.Height))
+	c.canvas.DrawRect(dst, paint)
 	c.invalidatePixels()
 }
 

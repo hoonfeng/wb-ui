@@ -15,6 +15,8 @@
 package rendering
 
 import (
+	"strings"
+
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
@@ -149,6 +151,12 @@ func RequiresLayer(owner RenderObject) bool {
 		return true
 	}
 	if st.Filter != "" {
+		return true
+	}
+	// CSS mask-image: a masked element must own a layer so its mask can wrap
+	// the ENTIRE subtree (background + foreground + outline + descendants) in
+	// one offscreen layer — mirrors WebKit where a mask forces a RenderLayer.
+	if mv := st.GetProperty("mask-image"); mv != "" && !strings.EqualFold(strings.TrimSpace(mv), "none") {
 		return true
 	}
 	return false

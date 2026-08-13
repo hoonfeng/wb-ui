@@ -15,6 +15,17 @@ import "github.com/hoonfeng/goskia/skia"
 // the rendering package's image pipeline.
 type SkiaImage = skia.Image
 
+// TileMode aliases the goskia shader tile mode, exposed for CSS mask-image
+// tiling (mask-repeat → tile mode).
+type TileMode = skia.TileMode
+
+const (
+	TileModeClamp  = skia.TileModeClamp
+	TileModeRepeat = skia.TileModeRepeat
+	TileModeMirror = skia.TileModeMirror
+	TileModeDecal  = skia.TileModeDecal
+)
+
 // DecodeImage decodes encoded image bytes (PNG, JPEG, WEBP, GIF, ...) into
 // a SkiaImage using Skia's built-in decoder (which bundles libpng, libjpeg,
 // libwebp, etc.). Returns nil on failure (empty data, unsupported format
