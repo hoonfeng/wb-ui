@@ -876,7 +876,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				originY += oy
 			}
 			info.canvas.Translate(originX, originY)
-			if applyTransformOps(info.canvas, st.Transform) {
+			if applyTransformOpsSized(info.canvas, st.Transform, box.Width(), box.Height()) {
 				info.canvas.Translate(-originX, -originY)
 				needsTransformRestore = true
 			} else {

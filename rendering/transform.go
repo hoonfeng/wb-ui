@@ -55,7 +55,7 @@ func tryApplyTransform(canvas *graphics.Canvas, box *RenderBox) func() {
 	}
 
 	canvas.Save()
-	applied := applyTransformOps(canvas, st.Transform)
+	applied := applyTransformOpsSized(canvas, st.Transform, box.Width(), box.Height())
 	if applied {
 		return canvas.Restore
 	}
@@ -66,6 +66,16 @@ func tryApplyTransform(canvas *graphics.Canvas, box *RenderBox) func() {
 // applyTransformOps parses a CSS transform string and applies the operations
 // to the canvas. Returns true if at least one operation was applied.
 func applyTransformOps(canvas *graphics.Canvas, transform string) bool {
+	// No element-size reference: percentages resolve to 0 (CSS 2D transform
+	// percentages are relative to the box's own size; callers that have a box
+	// should use applyTransformOpsSized).
+	return applyTransformOpsSized(canvas, transform, 0, 0)
+}
+
+// applyTransformOpsSized is applyTransformOps with the element's border-box
+// width/height, used to resolve translate() percentages (CSS Transforms §2.1:
+// "percentages refer to the size of the element's border box").
+func applyTransformOpsSized(canvas *graphics.Canvas, transform string, refW, refH float64) bool {
 	transform = strings.TrimSpace(transform)
 	if transform == "" || transform == "none" {
 		return false
@@ -88,22 +98,22 @@ func applyTransformOps(canvas *graphics.Canvas, transform string) bool {
 		args := tok[paren+1 : len(tok)-1]
 		switch fn {
 		case "translatex":
-			if v := parseLength(args); v != 0 {
+			if v := parseTransformLen(args, refW); v != 0 {
 				canvas.Translate(v, 0)
 				applied = true
 			}
 		case "translatey":
-			if v := parseLength(args); v != 0 {
+			if v := parseTransformLen(args, refH); v != 0 {
 				canvas.Translate(0, v)
 				applied = true
 			}
 		case "translate":
 			vals := splitSpaceComma(args)
 			if len(vals) >= 1 {
-				tx := parseLength(vals[0])
+				tx := parseTransformLen(vals[0], refW)
 				ty := tx // default: same as tx
 				if len(vals) >= 2 {
-					ty = parseLength(vals[1])
+					ty = parseTransformLen(vals[1], refH)
 				}
 				if tx != 0 || ty != 0 {
 					canvas.Translate(tx, ty)
@@ -141,8 +151,8 @@ func applyTransformOps(canvas *graphics.Canvas, transform string) bool {
 					if len(vals) >= 3 {
 						// rotate(deg cx cy): rotation about point (cx,cy),
 						// i.e. translate(cx,cy) rotate(deg) translate(-cx,-cy).
-						cx := parseLength(vals[1])
-						cy := parseLength(vals[2])
+						cx := parseTransformLen(vals[1], refW)
+						cy := parseTransformLen(vals[2], refH)
 						canvas.Translate(cx, cy)
 						canvas.Rotate(deg)
 						canvas.Translate(-cx, -cy)
@@ -295,6 +305,16 @@ func splitSpaceComma(s string) []string {
 // parseLength parses a CSS length like "10px", "-5px", "2em".
 // Returns the numeric value (pixels; em/percentage not scaled).
 func parseLength(s string) float64 {
+	return parseTransformLen(s, 0)
+}
+
+// parseTransformLen parses a transform length, resolving CSS percentages
+// against the element's border-box size (ref). Percentage is the standard
+// behavior for translate()/translateX()/translateY() (CSS Transforms §2.1);
+// all other units (px, em, rem, ...) resolve to their numeric value — the
+// pre-existing behavior, accurate for px, approximate for font-relative units
+// (font-size is not available in the paint phase).
+func parseTransformLen(s string, ref float64) float64 {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0
@@ -317,6 +337,9 @@ func parseLength(s string) float64 {
 	num, err := strconv.ParseFloat(s[:i], 64)
 	if err != nil {
 		return 0
+	}
+	if strings.HasSuffix(s, "%") {
+		return num * ref / 100
 	}
 	return num
 }
