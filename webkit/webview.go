@@ -53,6 +53,13 @@ type WebView struct {
 	// subframeJS 为每个 iframe 子 Frame 维护独立的 JS 全局环境（浏览器
 	// iframe 语义：子文档有自己的 window/document，与父文档互不干扰）。
 	subframeJS map[*page.Frame]*jsc.Interpreter
+
+	// domBindingsInjected 标记「当前 document 的 DOM bindings + 渲染树几何桥
+	// 已注入」。LoadHTML 在页面脚本执行前注入一次并置位；EvalJS 仅在未注入
+	// 时兜底注入，避免每次 EvalJS 重复执行 RegisterDOMBindings（幂等分支
+	// wrapDocument + applyCanvas2DPatch 的 RunJS）与 injectRenderTreeBridge
+	// （重赋值 10+ 个包级几何桥闭包）的固定开销。
+	domBindingsInjected bool
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -308,6 +315,8 @@ func (wv *WebView) LoadHTML(src string) error {
 				fr.SetNeedsLayout(true)
 			}
 		}
+		// DOM bindings + 几何桥已注入，EvalJS 无需重复（见 EvalJS 兜底分支）。
+		wv.domBindingsInjected = true
 		// Set up callback for inline style changes (el.style.xxx = ...).
 		// ★ 增量优先：纯样式变更（拖拽 sidebar 宽度、range 拖动等）只更新
 		//   目标元素的 ComputedStyle + SetNeedsLayout（relayout 不重建树）。
@@ -577,13 +586,14 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 		return jsc.Undefined(), ErrJavaScriptDisabled
 	}
 	wv.ensureJSRuntime()
-	if doc := wv.mainFrame.Document(); doc != nil {
+	if doc := wv.mainFrame.Document(); doc != nil && !wv.domBindingsInjected {
+		// ★ 兜底注入：正常路径 LoadHTML 已在页面脚本执行前注入过
+		//   （RegisterDOMBindings + injectRenderTreeBridge + OnStyleNodeAdded），
+		//   EvalJS 无需重复——重复注入不仅浪费（wrapDocument + applyCanvas2DPatch
+		//   的 RunJS + 重赋值 10+ 个包级几何桥闭包），还会让 JS 侧 document
+		//   每次换成新对象（破坏浏览器单例语义）。仅当宿主直接 EvalJS 未走
+		//   LoadHTML 时在此兜底。
 		bindings.RegisterDOMBindings(wv.jsInterpreter, doc)
-		// ★ 渲染树桥：Element.scrollTop/scrollLeft/scrollHeight/scrollWidth/
-		//   clientHeight/clientWidth/offsetHeight/offsetWidth 等 CSSOM 属性需要
-		//   真实布局几何。前端（Vue 聊天列表 scrollToBottom 等）依赖
-		//   el.scrollTop = el.scrollHeight，此前未实现 → 滚动 API 静默失效。
-		//   每次注册 DOM bindings 时重新注入（渲染树可能已重建）。
 		wv.injectRenderTreeBridge()
 		// Ensure callback for dynamic <style> injection.
 		bindings.OnStyleNodeAdded = func(n dom.Node) {
@@ -591,6 +601,7 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 				fr.RebuildRenderTree()
 			}
 		}
+		wv.domBindingsInjected = true
 	}
 	result, err := wv.jsInterpreter.RunJS(script)
 	if err != nil {
