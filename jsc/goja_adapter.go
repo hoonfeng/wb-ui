@@ -4,6 +4,7 @@ package jsc
 import (
 	"encoding/json"
 	"fmt"
+	"hash/maphash"
 	"reflect"
 	"strings"
 	"sync"
@@ -41,6 +42,12 @@ type NativeFunc func(in *Interpreter, this JSValue, args []JSValue) JSValue
 type Interpreter struct {
 	vm        *goja.Runtime
 	eventLoop *EventLoop
+
+	// 编译缓存：大脚本（如前端 bundle）重复执行时跳过 parse+compile。
+	// goja 的 *Program 与 runtime 解耦，可跨 runtime 复用。
+	progMu    sync.Mutex
+	progCache map[uint64]cachedProgram
+	progBytes int
 }
 
 func NewInterpreter() *Interpreter {
@@ -104,11 +111,73 @@ func (r *Interpreter) Run(code string) (interface{}, error) {
 
 // RunJS 执行代码并返回 JSValue。
 func (r *Interpreter) RunJS(code string) (JSValue, error) {
+	// 大脚本走编译缓存：重复加载同一 bundle 时省去 parse+compile
+	// （10MB 量级的 bundle 单次 compile 约 600ms）。
+	if len(code) >= progCacheMinLen {
+		val, err := r.runCached(code)
+		if err != nil {
+			return JSValue{}, err
+		}
+		return JSValue{v: val, interp: r}, nil
+	}
 	val, err := r.vm.RunString(code)
 	if err != nil {
 		return JSValue{}, err
 	}
 	return JSValue{v: val, interp: r}, nil
+}
+
+// progCacheMinLen 是启用编译缓存的脚本长度阈值：小于此长度 parse 开销小，
+// 直接 RunString（避免 hash 与缓存管理开销）。
+const progCacheMinLen = 64 * 1024
+
+// progCacheMaxBytes 是缓存脚本源码的字节数上限（约 3 个 10MB bundle）。
+// Program 编译产物约为源码的 5~7 倍，超限时清空缓存避免内存膨胀。
+const progCacheMaxBytes = 32 * 1024 * 1024
+
+type cachedProgram struct {
+	srcLen int
+	prog   *goja.Program
+}
+
+var progHashSeed = maphash.MakeSeed()
+
+func progHash(s string) uint64 {
+	return maphash.String(progHashSeed, s)
+}
+
+// runCached 编译大脚本并缓存其 *goja.Program，命中缓存时直接 RunProgram。
+// 用 hash + srcLen 双重校验避免 hash 碰撞误命中；编译失败不缓存；
+// 缓存总源码字节超限时整体清空。
+func (r *Interpreter) runCached(code string) (goja.Value, error) {
+	key := progHash(code)
+
+	r.progMu.Lock()
+	if cp, ok := r.progCache[key]; ok && cp.srcLen == len(code) {
+		r.progMu.Unlock()
+		return r.vm.RunProgram(cp.prog)
+	}
+	r.progMu.Unlock()
+
+	prog, err := goja.Compile("cached.js", code, false)
+	if err != nil {
+		return nil, err
+	}
+
+	r.progMu.Lock()
+	if r.progCache == nil {
+		r.progCache = make(map[uint64]cachedProgram)
+	}
+	if r.progBytes+len(code) > progCacheMaxBytes {
+		// 超限：整体清空（简单策略，避免缓存多个大 bundle 导致内存膨胀）。
+		r.progCache = make(map[uint64]cachedProgram)
+		r.progBytes = 0
+	}
+	r.progCache[key] = cachedProgram{srcLen: len(code), prog: prog}
+	r.progBytes += len(code)
+	r.progMu.Unlock()
+
+	return r.vm.RunProgram(prog)
 }
 
 func (r *Interpreter) Evaluate(code string) (interface{}, error) {

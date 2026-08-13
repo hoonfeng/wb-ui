@@ -1,6 +1,7 @@
 package jsc
 
 import (
+	"strings"
 	"testing"
 
 	"wb-ui.com/goja"
@@ -65,5 +66,50 @@ func TestNewArrayNilProtoPrimitivesOnly(t *testing.T) {
 	}
 	if n := arr.obj.Get("length"); n == nil || n.ToInteger() != 2 {
 		t.Fatalf("array length = %v, want 2", n)
+	}
+}
+
+// TestRunJSCompileCache 验证大脚本走编译缓存：同一段 ≥64KB 脚本执行两次，
+// 语义一致且缓存中只有一个条目（第二次命中缓存，不再重新 Compile）。
+func TestRunJSCompileCache(t *testing.T) {
+	rt := NewInterpreter()
+	const n = 40000
+	big := "var __big=[" + strings.Repeat("1,", n-1) + "1];"
+	if len(big) < progCacheMinLen {
+		t.Fatalf("test script too small: %d < %d", len(big), progCacheMinLen)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := rt.RunJS(big); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	rt.progMu.Lock()
+	got := len(rt.progCache)
+	rt.progMu.Unlock()
+	if got != 1 {
+		t.Fatalf("cache entries = %d, want 1", got)
+	}
+	// 缓存命中路径与首次编译路径语义等价：数组长度正确。
+	v, err := rt.RunJS("__big.length")
+	if err != nil {
+		t.Fatalf("read length: %v", err)
+	}
+	if v.ToNumber() != float64(n) {
+		t.Fatalf("__big.length = %v, want %d", v.ToNumber(), n)
+	}
+}
+
+// TestRunJSNoCacheForSmall 小脚本（<64KB）不进入编译缓存，避免 hash/缓存
+// 管理开销盖过 parse 收益。
+func TestRunJSNoCacheForSmall(t *testing.T) {
+	rt := NewInterpreter()
+	if _, err := rt.RunJS("1+1"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	rt.progMu.Lock()
+	got := len(rt.progCache)
+	rt.progMu.Unlock()
+	if got != 0 {
+		t.Fatalf("small script cached: %d entries", got)
 	}
 }
