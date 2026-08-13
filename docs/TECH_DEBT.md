@@ -1,23 +1,33 @@
 # wb-ui 遗留问题处理指南
 
-> 本文档汇总 wb-ui 渲染引擎的一批已知遗留缺口，按「优先级 / 改动规模 / 风险」排序，
-> 每个条目给出**现状定位、根因、推荐方案、涉及文件、风险、验证方法**，作为后续
-> 分阶段深入的行动手册。调研基准 commit：`5cfff1c`（calc 相对单位修复）。
+> 本文档汇总 wb-ui 渲染引擎的一批已知遗留缺口，按「优先级 / 改动规模 / 风险」排序。
+> **状态（2026-08-13）**：全部 5 项已处理完毕——P0 calc 定位（`0a042d3`）、P1 min/max/clamp
+> （`a9c69d3`）、P2 Shadow DOM（`1dff19a`→`2bcf5cc`）、P3 mask-image 均已实现；P1 布局增量
+> 经调研确认阶段 A 收益 <1% 暂不投入（B/C 高风险待业务驱动）。各条目正文保留历史分析，
+> 顶部已追加「已实现 / 最终决策」块标记真实状态。调研基准 commit：`5cfff1c`。
 
 ## 总览
 
-| # | 遗留项 | 类型 | 优先级 | 改动规模 | 风险 |
-|---|--------|------|--------|----------|------|
-| 1 | positioned `top/left` 不解析 `calc()` | 真实 bug | **P0** | 小（~15 行） | 低 |
-| 2 | `min()/max()/clamp()` 未实现 | 功能缺失 | P1 | 中 | 中 |
-| 3 | 布局三次全树遍历（无增量） | 性能 | P1 | 大 | 高 |
-| 4 | Shadow DOM selector（`:host`/`::slotted`/`::part`） | 功能缺失 | P2 | 超大 | 高 |
-| 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | P3 | 中 | 中（依赖 skia） |
-| — | WebSocket | ~~非问题~~ | — | — | — |
+| # | 遗留项 | 类型 | 优先级 | 状态（2026-08-13） |
+|---|--------|------|--------|--------------------|
+| 1 | positioned `top/left` 不解析 `calc()` | 真实 bug | P0 | ✅ 已修复（`0a042d3`） |
+| 2 | `min()/max()/clamp()` 未实现 | 功能缺失 | P1 | ✅ 已实现（`a9c69d3`） |
+| 3 | 布局三次全树遍历（无增量） | 性能 | P1 | 🔍 已调研：阶段 A 收益 <1%，暂不投入 |
+| 4 | Shadow DOM selector（`:host`/`::slotted`/`::part`） | 功能缺失 | P2 | ✅ 已完整实现（`1dff19a`→`2bcf5cc`） |
+| 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | P3 | ✅ 已实现（背景/边框 alpha 遮罩） |
+| — | WebSocket | ~~非问题~~ | — | 有意 stub（宿主注入事件），非遗留 |
 
 ---
 
 ## 1. positioned `top/left/right/bottom` 不解析 `calc()`（P0 · 真实 bug）
+
+> **已实现（2026-08-13，提交 `0a042d3`）**：`layout/layoututil.go` 的 `parseCSSLength`
+> 开头新增 `mathFuncInfo` 检测——识别 `calc`/`min`/`max`/`clamp` 前缀并返回平衡的完整
+> 函数表达式；含相对单位（%、em、rem、vw、vh 等）时延迟求值（返回 `Unit:"calc"`，由
+> `resolveLength` 的 `calc` case 带真实 context 求值），纯绝对单位立即 `EvalCalcString`
+> 求值为 px。至此 `inset`（top/left/right/bottom）与 `width/height` 两条解析路径对齐。
+> 测试：`layout/calc_resolve_test.go` 覆盖 `top:calc(50% - 20px)` / `left:calc(...)` 等
+> positioned 场景，全量通过。
 
 ### 现状定位
 - 宽度/高度路径已支持 calc：`style/resolver.go:1582` `parseLength()` 对 `calc()` 做了
@@ -79,6 +89,15 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 
 ## 2. `min()/max()/clamp()` 未实现（P1 · 功能缺失）
 
+> **已实现（2026-08-13，提交 `a9c69d3`）**：`css/calc.go` 的 `parsePrimary` 支持
+> `min`/`max`/`clamp` 多参比较函数与嵌套 calc；`extractCalcInner` 修正 TokenFunction
+> 隐含开括号导致的嵌套函数右括号误匹配；新增 `parseMinMaxClamp`（逗号分隔参数列表，
+> `clamp` 三参校验、`min`/`max` 至少一参）。`style/resolver.go` 与 `layout/layoututil.go`
+> 的 `parseLength`/`parseCSSLength` 识别 `min(`/`max(`/`clamp(` 前缀（含相对单位延迟、
+> 纯绝对立即求值）。
+> 测试：`css/calc_string_test.go` / `style/calc_resolve_test.go` / `layout/calc_resolve_test.go`
+> 覆盖 `min(600px, 100%)` / `clamp(16px, 4vw, 40px)` / `max(10px, 5em)` 等，全量通过。
+
 ### 现状定位
 - `css/calc.go:9` 注释明确 `no min() / max() / clamp() support`。
 - `parsePrimary()`（calc.go 末尾）：`TokenFunction` 分支仅识别 `calc`（嵌套也直接报
@@ -123,6 +142,9 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 投入**。真正的瓶颈是 BFC/FFC 布局算法本身（单次 FFC 0.6ms、BFC 0.28ms），优化方向应聚焦
 > 阶段 B/C（增量布局/脏子树）或 BFC/FFC 内部算法，均属高风险大工程，需先跑 `dev/consistency`
 > 像素护栏再动手。
+>
+> **最终决策（2026-08-13）**：阶段 A 收益 <1%，**不投入**；阶段 B/C 属高风险大工程，仅在
+> 业务出现可感知布局卡顿（超大文档滚动/频繁重排）时立项，立项前必跑 `dev/consistency` 像素护栏。
 
 ### 现状定位
 一次完整布局存在**三次全树遍历**：
@@ -321,11 +343,19 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 ---
 
-## 建议执行顺序
+## 建议执行顺序（全部完成，仅供复盘）
 
-1. **P0 先做**：`parseCSSLength` 补 calc（15 行，收益明确，验证简单）。
-2. **P1-min/max/clamp**：独立于布局，可并行推进，响应式布局刚需。
-3. **P1-布局增量**：先跑 `WB_LAYOUT_PROFILE=1` 定位大头，再决定是否值得投入（阶段 A
-   低风险先行，B/C 视性能缺口再上）。
-4. **P2 Shadow DOM**：最大工程，仅在业务确有 Web Component 需求时启动。
-5. **P3 mask-image**：需先确认 goskia 绑定能力，优先级最低。
+> 截至 2026-08-13，5 项遗留已全部处理完毕。以下为当时拟定的推进顺序及最终结果：
+
+1. **P0**：`parseCSSLength` 补 calc → ✅ 已实现（`0a042d3`）。
+2. **P1-min/max/clamp** → ✅ 已实现（`a9c69d3`）。
+3. **P1-布局增量** → 🔍 已调研，阶段 A 收益 <1% 暂不投入，B/C 待业务驱动。
+4. **P2 Shadow DOM** → ✅ 已完整实现（`1dff19a` → `2bcf5cc` 提交链）。
+5. **P3 mask-image** → ✅ 已实现（背景/边框 alpha 遮罩）。
+
+### 剩余可优化项（非阻塞，按需）
+- `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化）。
+- `exportparts` 一对多映射（当前 map 一对一）。
+- 事件 `relatedTarget`（mouseover/out）跨 shadow 边界 retargeting。
+- mask-image 前景文字/SVG 遮罩、mask-repeat/size/position 解析。
+- 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。
