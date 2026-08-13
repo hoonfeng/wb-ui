@@ -9,7 +9,9 @@ package page
 import (
 	"testing"
 
+	"wb-ui/dom"
 	"wb-ui/html"
+	"wb-ui/rendering"
 )
 
 // TestNewSettingsDefaults verifies the WebKit defaults returned by NewSettings.
@@ -313,4 +315,55 @@ func TestFrameSetView(t *testing.T) {
 		t.Error("new view's Frame() does not point back to the frame")
 	}
 	_ = orig
+}
+
+// TestFrameApplyTextChange verifies the incremental text-update path (C1): after a DOM
+// Text node's data changes, Frame.ApplyTextChange re-syncs the RenderText and layout
+// InlineTextBox, marks the view as needing layout, and a relayout produces the new text
+// (without a full render-tree rebuild).
+func TestFrameApplyTextChange(t *testing.T) {
+	p := NewPage(nil)
+	mf := p.MainFrame()
+	if err := mf.LoadHTML("<html><body><p>hello</p></body></html>"); err != nil {
+		t.Fatalf("LoadHTML failed: %v", err)
+	}
+	view := mf.View()
+	view.Layout()
+
+	// Locate the "hello" text node.
+	var textNode *dom.Text
+	dom.WalkComposedTree(mf.Document(), func(n dom.Node) {
+		if tn, ok := n.(*dom.Text); ok && tn.Data() == "hello" {
+			textNode = tn
+		}
+	})
+	if textNode == nil {
+		t.Fatal("text node not found")
+	}
+
+	rv := mf.RenderView()
+	ro := rv.FindRenderObjectForNode(textNode)
+	rt, ok := ro.(*rendering.RenderText)
+	if !ok {
+		t.Fatal("RenderText not found for text node")
+	}
+	if rt.Text() != "hello" {
+		t.Fatalf("initial text = %q, want hello", rt.Text())
+	}
+
+	textNode.SetData("world")
+	if !mf.ApplyTextChange(textNode) {
+		t.Fatal("ApplyTextChange returned false")
+	}
+	if !view.NeedsLayout() {
+		t.Error("NeedsLayout() = false after ApplyTextChange")
+	}
+	view.Layout()
+
+	if rt.Text() != "world" {
+		t.Fatalf("text after relayout = %q, want world", rt.Text())
+	}
+	if len(rt.Segments()) == 0 {
+		t.Error("segments empty after relayout")
+	}
 }
