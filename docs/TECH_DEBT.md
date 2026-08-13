@@ -260,9 +260,14 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 测试：`TestEvent_Retargeting` / `TestEvent_ComposedPathSlot` /
 > `TestSelector_MatchPartExportparts*` 全绿，全量通过。
 >
+> **已实现 relatedTarget retargeting + hover 派发（2026-08-13）**：`DispatchEvent` 内
+> relatedTarget 与 target 同步 retarget（DOM §2.8 末段，dispatch 结束后恢复）；新增
+> `EventMouseOver/Out/Enter/Leave` 类型 + `dispatchHoverEvents`（mouseover/out 冒泡带
+> relatedTarget，mouseenter/leave 不冒泡），两个 hover 切换点接入。测试：
+> `TestEvent_RelatedTargetRetargeting` / `TestDispatchHoverEvents` 全绿。
+>
 > **仍缺（后续增量）**：① `::part` 的多个 part-name 匹配优化（当前 O(names) 线性扫描，
-> 可改为哈希集合，收益 <1%）；② 事件 `relatedTarget`（MouseEvent 的 mouseover/out）跨
-> shadow 边界 retargeting（需先实现 mouseover/out 派发，当前无消费方）。
+> 可改为哈希集合，收益 <1%）。
 
 ### 现状定位
 - `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，
@@ -356,6 +361,6 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 ### 剩余可优化项（非阻塞，按需）
 - `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
-- 事件 `relatedTarget`（mouseover/out）跨 shadow 边界 retargeting（需先实现 mouseover/out 派发）。
-- mask-image 前景文字/SVG 遮罩、mask-repeat/size/position 解析。
+- mask-image 前景文字/子元素遮罩、mask-size/repeat/position/mode、SVG `<mask>` —— 见
+  [MASK_P3_PLAN.md](./MASK_P3_PLAN.md)（P3 已规划，未实现）。
 - 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。

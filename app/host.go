@@ -2197,6 +2197,46 @@ func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldE
 	}
 }
 
+// dispatchHoverEvents fires the standard UI Events hover sequence when the pointer
+// moves from oldEl to newEl: mouseout/mouseleave on oldEl (with newEl as relatedTarget
+// for mouseout), then mouseover/mouseenter on newEl (with oldEl as relatedTarget for
+// mouseover). mouseover/mouseout bubble and carry a relatedTarget (retargeted across
+// shadow boundaries by the dispatcher per DOM §2.8); mouseenter/mouseleave do not
+// bubble and have a null relatedTarget. clientX/clientY are viewport CSS coordinates
+// (clientX/clientY semantics, same as mousemove).
+func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY float64) {
+	if oldEl != nil {
+		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOut, dom.MouseEventInit{
+			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
+			ClientX:       clientX,
+			ClientY:       clientY,
+			Button:        dom.MouseButtonNone,
+			RelatedTarget: newEl,
+		}))
+		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseLeave, dom.MouseEventInit{
+			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+			ClientX:   clientX,
+			ClientY:   clientY,
+			Button:    dom.MouseButtonNone,
+		}))
+	}
+	if newEl != nil {
+		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOver, dom.MouseEventInit{
+			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
+			ClientX:       clientX,
+			ClientY:       clientY,
+			Button:        dom.MouseButtonNone,
+			RelatedTarget: oldEl,
+		}))
+		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseEnter, dom.MouseEventInit{
+			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+			ClientX:   clientX,
+			ClientY:   clientY,
+			Button:    dom.MouseButtonNone,
+		}))
+	}
+}
+
 // layoutAffectingChanged reports whether a computed-style change from a to b
 // would alter box geometry (requiring a layout pass). Pure visual properties
 // (color, background, shadow, opacity, transform…) return false — they only
@@ -3417,6 +3457,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						newEl.SetHovered(true)
 					}
 					h.hoveredEl = newEl
+					// ★ 派发 hover DOM 事件（UI Events）：mouseout/mouseleave 到
+					// 离开元素、mouseover/mouseenter 到进入元素；mouseover/out
+					// 冒泡带 relatedTarget（跨 shadow 边界按 DOM §2.8 retarget）。
+					h.dispatchHoverEvents(oldHover, newEl, ev.X/csX, ev.Y/csY)
 					// ★ hover 快速路径：只重算新旧 hover 元素的样式，不重建
 					// 整个渲染树（内容多时全树 rebuild+layout 需数秒）。
 					// 仅当样式变化影响几何时才回退全树布局。
@@ -3532,6 +3576,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 						newEl.SetHovered(true)
 					}
 					h.hoveredEl = newEl
+					h.dispatchHoverEvents(oldHover, newEl, ev.X/csX, ev.Y/csY)
 					if mf := h.wv.MainFrame(); mf != nil {
 						if fr := mf.Frame(); fr != nil {
 							h.hoverStyleFastPath(rv, fr, oldHover, newEl)

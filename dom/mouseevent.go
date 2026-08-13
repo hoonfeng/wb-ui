@@ -26,6 +26,10 @@ const (
 	EventMouseDown   = "mousedown"
 	EventMouseUp     = "mouseup"
 	EventMouseMove   = "mousemove"
+	EventMouseOver   = "mouseover"
+	EventMouseOut    = "mouseout"
+	EventMouseEnter  = "mouseenter"
+	EventMouseLeave  = "mouseleave"
 	EventDblClick    = "dblclick"
 	EventContextMenu = "contextmenu"
 )
@@ -39,6 +43,7 @@ type MouseEventInit struct {
 	Button                              MouseButton
 	Buttons                             uint16
 	Detail                              int
+	RelatedTarget                       EventTarget
 }
 
 // MouseEvent is the Go translation of WebCore::MouseEvent. It embeds baseEvent for the
@@ -81,6 +86,7 @@ func NewMouseEventFromInit(typ string, init MouseEventInit) *MouseEvent {
 		altKey:       init.AltKey,
 		shiftKey:     init.ShiftKey,
 		metaKey:      init.MetaKey,
+		relatedTarget: init.RelatedTarget,
 	}
 	return m
 }

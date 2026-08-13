@@ -874,3 +874,49 @@ func TestEvent_Retargeting(t *testing.T) {
 		t.Errorf("post-dispatch target = %v, want btn", ev.Target())
 	}
 }
+
+// TestEvent_RelatedTargetRetargeting verifies DOM §2.8 last paragraph: a non-null
+// relatedTarget (MouseEvent/FocusEvent) is retargeted the same way as the target. A
+// listener on the shadow host observes the host as relatedTarget, while a listener
+// inside the shadow tree observes the real related target.
+func TestEvent_RelatedTargetRetargeting(t *testing.T) {
+	d := NewDocument()
+	host := d.CreateElement("xwidget")
+	_ = d.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	a := d.CreateElement("button")
+	_ = sr.AppendChild(a)
+	b := d.CreateElement("button")
+	_ = sr.AppendChild(b)
+
+	var innerRT, hostRT, docRT EventTarget
+	a.AddEventListener("mouseover", EventListenerFunc(func(e Event) {
+		innerRT = e.(*MouseEvent).RelatedTarget()
+	}), false)
+	host.AddEventListener("mouseover", EventListenerFunc(func(e Event) {
+		hostRT = e.(*MouseEvent).RelatedTarget()
+	}), false)
+	d.AddEventListener("mouseover", EventListenerFunc(func(e Event) {
+		docRT = e.(*MouseEvent).RelatedTarget()
+	}), false)
+
+	ev := NewMouseEventFromInit(EventMouseOver, MouseEventInit{
+		EventInit:     EventInit{Bubbles: true, Composed: true},
+		RelatedTarget: b,
+	})
+	_ = a.DispatchEvent(ev)
+
+	if innerRT != b {
+		t.Errorf("inner listener relatedTarget = %v, want b (real)", innerRT)
+	}
+	if hostRT != host {
+		t.Errorf("host listener relatedTarget = %v, want host (retargeted)", hostRT)
+	}
+	if docRT != host {
+		t.Errorf("document listener relatedTarget = %v, want host (retargeted)", docRT)
+	}
+	// After dispatch the relatedTarget is restored to the real target.
+	if ev.RelatedTarget() != b {
+		t.Errorf("post-dispatch relatedTarget = %v, want b", ev.RelatedTarget())
+	}
+}

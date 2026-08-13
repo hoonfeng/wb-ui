@@ -202,6 +202,15 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 	ev.setPath(path)
 	ev.resetBeforeDispatch()
 
+	// Save the un-retargeted relatedTarget (if any) so it can be restored after
+	// dispatch; DOM §2.8 retargets relatedTarget alongside target per currentTarget.
+	var rtEv relatedTargetProvider
+	var origRelated EventTarget
+	if rtp, ok := event.(relatedTargetProvider); ok {
+		rtEv = rtp
+		origRelated = rtp.RelatedTarget()
+	}
+
 	// setCurrent applies event retargeting (DOM §2.8): the target a listener observes
 	// is retargeted to the shadow host when the listener sits on or above that host in
 	// the composed tree, so shadow-internal targets do not leak past the boundary.
@@ -209,6 +218,11 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		ev.setCurrentTarget(et)
 		if cn, ok := et.(Node); ok {
 			ev.setTarget(retargetedTarget(Node(b.self), cn))
+			if rtEv != nil && origRelated != nil {
+				if rn, ok := origRelated.(Node); ok {
+					rtEv.SetRelatedTarget(retargetedTarget(rn, cn))
+				}
+			}
 		} else {
 			ev.setTarget(et)
 		}
@@ -251,6 +265,9 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 	ev.setEventPhase(EventNone)
 	ev.setCurrentTarget(nil)
 	ev.setTarget(b.self) // restore the un-retargeted target once dispatch ends
+	if rtEv != nil {
+		rtEv.SetRelatedTarget(origRelated) // restore the un-retargeted relatedTarget
+	}
 	ev.resetAfterDispatch()
 
 	// Default action: if not canceled, give the target a chance to perform its default
@@ -268,6 +285,17 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 // is a no-op.
 type defaultActionHandler interface {
 	defaultEventHandler(Event)
+}
+
+// relatedTargetProvider is satisfied by events carrying a relatedTarget (MouseEvent,
+// FocusEvent) that must be retargeted alongside the target (DOM §2.8 last paragraph:
+// "for events whose relatedTarget is non-null, that value is also retargeted in the
+// same way as the target"). The dispatcher retargets it per-currentTarget so a
+// shadow-internal related target does not leak past the shadow boundary, then restores
+// the original value once dispatch ends.
+type relatedTargetProvider interface {
+	RelatedTarget() EventTarget
+	SetRelatedTarget(EventTarget)
 }
 
 // eventPathParent returns n's next node in a composed event's propagation path
