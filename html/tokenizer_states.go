@@ -515,6 +515,10 @@ func (t *Tokenizer) scriptDataEndTagNameState(c rune) {
 // flushBufferedEndTagScript emits the buffered '</name' as script-data
 // characters and reconsumes in ScriptData.
 func (t *Tokenizer) flushBufferedEndTagScript() {
+	// ★ 先清除 token 中残留的 end-tag name（beginEndTag 已写入 Data），
+	// 否则 "span" 会残留在字符流里（script 内容中 "</span>" 被错误
+	// 输出为 "span</span>"，污染 JS 字符串字面量）。
+	t.token.clear()
 	t.token.appendToCharacterString("</")
 	for _, r := range t.temporaryBuffer {
 		t.token.appendToCharacter(r)
@@ -658,6 +662,9 @@ func (t *Tokenizer) scriptDataEscapedEndTagNameState(c rune) {
 // flushBufferedEndTagEscaped emits the buffered '</name' as script-data
 // characters and reconsumes in ScriptDataEscaped.
 func (t *Tokenizer) flushBufferedEndTagEscaped() {
+	// ★ 与 flushBufferedEndTagScript 相同：清除残留 end-tag name，
+	// 避免 "span" 残留在转义 script 文本中。
+	t.token.clear()
 	t.token.appendToCharacterString("</")
 	for _, r := range t.temporaryBuffer {
 		t.token.appendToCharacter(r)
