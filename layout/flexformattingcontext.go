@@ -1354,6 +1354,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			bw := g.BorderBoxWidth()
 			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
 
+			// ★ stretch 分配的 cross 高度（crossResolved）必须同步到
+			// parentSetHeight，否则子项（如 chat-area）的 auto-height 计算
+			// （heightIsAutoForBox=true，CSS height:auto）看不到父分配的
+			// definite 高度，会按内容撑大——大量消息时 chat-area 被撑到
+			// 80051px，chat-input / conv-sidebar 被挤出视口（「token 统计
+			// 和聊天输入都没显示」根因）。SetParentSetHeight 在循环开头
+			// 被重置为 0，这里必须在子项布局前重新写入。
+			if it.crossResolved > 0 {
+				it.box.SetParentSetHeight(it.crossResolved)
+			}
+
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
@@ -1458,7 +1469,26 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 					flexName(it.box), bw, cw, align, crossPos, crossAdjusted)
 			}
 			g.SetTopLeft(mainPos, crossAdjusted)
-			
+
+			// ★ overflow 非 visible 的 flex item（如 rp-body overflow:hidden、
+			// chat-messages overflow-y:auto）的自动最小尺寸 min-height:auto
+			// = 0（CSS-FLEXBOX §4.5）——flex-resolved 高度（finalMainSize）
+			// 应直接生效，无需先布局子项测内容高度。必须在子项布局前设置
+			// 高度 + parentSetHeight，否则子项的 auto-height 计算
+			// （heightIsAutoForBox=true，CSS height:auto）按内容撑大：
+			// rp-body 被大量消息撑到 80051px → 其 stretch 高度随之膨胀 →
+			// chat-area / conv-sidebar 被撑到 80051 → chat-input 被挤出视口
+			// （「token 统计和聊天输入都没显示」的根因）。
+			if !flexOverflowVisible(cs) && (it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 || it.basisExplicit) {
+				preMs := it.finalMainSize
+				if isBorderBox(it.box) {
+					vp := g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
+					preMs = math.Max(0, preMs-vp)
+				}
+				g.SetContentHeight(preMs)
+				it.box.SetParentSetHeight(preMs)
+			}
+
 			ctx := contextFor(it.box, state)
 			ctx.Layout(it.box, state)
 
