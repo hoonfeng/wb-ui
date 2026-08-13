@@ -2206,12 +2206,20 @@ func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldE
 // (clientX/clientY semantics, same as mousemove).
 func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY float64) {
 	if oldEl != nil {
+		// relatedTarget is the element the pointer moved onto (newEl). Assign it via an
+		// EventTarget interface so a nil newEl stays a true nil interface — passing the
+		// nil *dom.Element directly boxes a "typed nil" (non-nil interface, nil data)
+		// that panics inside retargetedTarget on the first ParentNode call.
+		var mouseOutRel dom.EventTarget
+		if newEl != nil {
+			mouseOutRel = newEl
+		}
 		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOut, dom.MouseEventInit{
 			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
 			ClientX:       clientX,
 			ClientY:       clientY,
 			Button:        dom.MouseButtonNone,
-			RelatedTarget: newEl,
+			RelatedTarget: mouseOutRel,
 		}))
 		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseLeave, dom.MouseEventInit{
 			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
@@ -2221,12 +2229,16 @@ func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY f
 		}))
 	}
 	if newEl != nil {
+		var mouseOverRel dom.EventTarget
+		if oldEl != nil {
+			mouseOverRel = oldEl
+		}
 		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOver, dom.MouseEventInit{
 			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
 			ClientX:       clientX,
 			ClientY:       clientY,
 			Button:        dom.MouseButtonNone,
-			RelatedTarget: oldEl,
+			RelatedTarget: mouseOverRel,
 		}))
 		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseEnter, dom.MouseEventInit{
 			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},

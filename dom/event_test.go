@@ -920,3 +920,39 @@ func TestEvent_RelatedTargetRetargeting(t *testing.T) {
 		t.Errorf("post-dispatch relatedTarget = %v, want b", ev.RelatedTarget())
 	}
 }
+
+// TestEvent_RelatedTargetTypedNil verifies a "typed nil" relatedTarget does not crash
+// dispatch. Host.dispatchHoverEvents produces exactly this when the pointer moves
+// onto/off empty space: RelatedTarget is assigned the nil *dom.Element directly, which
+// boxes a "typed nil" (a non-nil EventTarget interface whose data is nil). Retargeting
+// must treat it as a null relatedTarget (DOM semantics) rather than dereferencing it
+// (which previously panicked in ContainingShadowRoot → ParentNode).
+func TestEvent_RelatedTargetTypedNil(t *testing.T) {
+	d := NewDocument()
+	host := d.CreateElement("xwidget")
+	_ = d.AppendChild(host)
+	sr, _ := host.AttachShadow("open")
+	a := d.CreateElement("button")
+	_ = sr.AppendChild(a)
+
+	fired := false
+	a.AddEventListener("mouseover", EventListenerFunc(func(e Event) {
+		fired = true
+	}), false)
+
+	// Same construction as Host.dispatchHoverEvents: a nil *Element assigned straight
+	// into the EventTarget field of the init dict.
+	var nilEl *Element
+	ev := NewMouseEventFromInit(EventMouseOver, MouseEventInit{
+		EventInit:     EventInit{Bubbles: true, Composed: true},
+		RelatedTarget: nilEl,
+	})
+
+	// Must not panic on the typed-nil relatedTarget.
+	if !a.DispatchEvent(ev) {
+		t.Error("DispatchEvent returned false for a non-prevented event")
+	}
+	if !fired {
+		t.Error("mouseover listener did not fire")
+	}
+}

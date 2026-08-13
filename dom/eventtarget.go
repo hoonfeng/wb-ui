@@ -345,7 +345,29 @@ func buildEventPath(target Node, composed bool) []EventTarget {
 // lives inside a shadow tree and `current` sits on or above that tree's host in the
 // composed tree, the target is retargeted — layer by layer for nested shadow trees —
 // to the innermost shadow host that `current` is still inside or above.
+// isNilNode reports whether n is a nil interface or a "typed nil" (a nil *Element,
+// *Text, *Document, … boxed into the Node interface). Go interfaces compare equal to
+// nil only when both the type and data are nil, so a nil *Element assigned to a Node
+// is "non-nil" and would panic on the first method call (e.g. ParentNode). A null
+// relatedTarget — produced when a hover transition moves onto/off empty space so the
+// old/new hover element is nil — carries exactly such a typed nil, so retargeting must
+// guard against it before touching the node.
+func isNilNode(n Node) bool {
+	if n == nil {
+		return true
+	}
+	v := reflect.ValueOf(n)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	}
+	return false
+}
+
 func retargetedTarget(target Node, current Node) Node {
+	if isNilNode(target) {
+		return nil
+	}
 	rt := target
 	for {
 		sr := ContainingShadowRoot(rt)
