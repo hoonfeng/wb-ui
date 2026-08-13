@@ -33,7 +33,9 @@ type Document struct {
 	// MarkRenderTreeDirty——否则动态 DOM 更新（如 xterm 每字符 appendChild
 	// span 到 rows）不触发渲染树重建，内容永远不显示。
 	// ★ 回调在 DOM 操作线程同步调用；宿主侧只置标志（下帧重建），无重入。
-	onTreeChange func()
+	// ★ 回调携带触发变更的节点，为后续增量渲染树更新（RenderTreeUpdater）
+	//   提供精确的变更定位（此前无参数，宿主只能全量重建）。
+	onTreeChange func(Node)
 }
 
 // FocusedElement 返回当前 focused 元素（无则 nil），O(1)。
@@ -44,7 +46,7 @@ func (d *Document) FocusedElement() *Element { return d.focusedEl }
 func (d *Document) SetFocusedElement(e *Element) { d.focusedEl = e }
 
 // SetTreeChangeCallback 注册 DOM 结构变更回调（宿主在 LoadHTML 后调用）。
-func (d *Document) SetTreeChangeCallback(fn func()) {
+func (d *Document) SetTreeChangeCallback(fn func(Node)) {
 	d.onTreeChange = fn
 }
 
@@ -55,7 +57,7 @@ func (b *nodeBase) notifyTreeChange() {
 	}
 	d := b.documentForAdoption()
 	if d != nil && d.onTreeChange != nil {
-		d.onTreeChange()
+		d.onTreeChange(b.self)
 	}
 }
 

@@ -2815,10 +2815,12 @@ func (h *Host) ensureTreeChangeHook() {
 	if os.Getenv("WB_TERM_DEBUG") != "" {
 		log.Printf("[treehook] registered doc=%p", doc)
 	}
-	doc.SetTreeChangeCallback(func() {
+	doc.SetTreeChangeCallback(func(node dom.Node) {
 		if os.Getenv("WB_TERM_DEBUG") != "" {
-			log.Printf("[treehook] tree change!")
+			log.Printf("[treehook] tree change! node=%s", node.NodeName())
 		}
+		// ★ node 为触发变更的节点。当前仍走全量重建（MarkRenderTreeDirty），
+		//   但 node 已可精确定位变更，为后续接入 RenderTreeUpdater 增量更新预留。
 		if mf := h.wv.MainFrame(); mf != nil {
 			if fr := mf.Frame(); fr != nil {
 				fr.MarkRenderTreeDirty()
