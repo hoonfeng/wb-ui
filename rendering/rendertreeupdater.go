@@ -29,6 +29,9 @@ const (
 	// ChangeStyle means the element's computed style changed; the render object's style
 	// is updated and the subtree may be rebuilt.
 	ChangeStyle
+	// ChangeText means a DOM Text node's data changed; the RenderText's text is
+	// re-synced with the node.
+	ChangeText
 )
 
 // PendingChange records a queued render-tree mutation.
@@ -82,6 +85,12 @@ func (u *RenderTreeUpdater) MarkStyleChange(el *dom.Element, newStyle *style.Com
 	})
 }
 
+// MarkTextChange queues a text-data change for the given text node, mirroring
+// RenderTreeUpdater::updateTextRenderer (which calls RenderText::setText).
+func (u *RenderTreeUpdater) MarkTextChange(node dom.Node) {
+	u.pending = append(u.pending, PendingChange{Node: node, Kind: ChangeText})
+}
+
 // Update flushes all pending changes, applying them to the render tree. This mirrors
 // RenderTreeUpdater::updateRenderTree() which walks the dirty nodes and dispatches.
 func (u *RenderTreeUpdater) Update() {
@@ -96,6 +105,8 @@ func (u *RenderTreeUpdater) Update() {
 			u.applyRemove(ch.Node)
 		case ChangeStyle:
 			u.applyStyleChange(ch)
+		case ChangeText:
+			u.applyTextChange(ch.Node)
 		}
 	}
 	u.pending = u.pending[:0]
@@ -182,6 +193,23 @@ func (u *RenderTreeUpdater) applyStyleChange(ch PendingChange) {
 	// Update the style and dirty the subtree.
 	ro.SetStyle(ch.NewStyle)
 	u.markSubtreeDirty(ro)
+}
+
+// applyTextChange re-syncs the RenderText's text with the DOM Text node's data,
+// mirroring RenderTreeUpdater::updateTextRenderer which calls RenderText::setText.
+// SetText clears the cached inline segments and marks the object dirty so the
+// next layout re-measures and re-breaks the text.
+func (u *RenderTreeUpdater) applyTextChange(node dom.Node) {
+	ro := u.findRenderObject(node)
+	rt, ok := ro.(*RenderText)
+	if !ok {
+		return
+	}
+	t, ok := node.(*dom.Text)
+	if !ok {
+		return
+	}
+	rt.SetText(t.Data())
 }
 
 // markSubtreeDirty flags the object and all descendants as needing layout.

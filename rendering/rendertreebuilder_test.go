@@ -254,3 +254,41 @@ func TestUpdaterRemove(t *testing.T) {
 		t.Fatal("div render object should have nil parent after removal")
 	}
 }
+
+// TestUpdaterTextChange verifies the RenderTreeUpdater re-syncs a RenderText's
+// text after a DOM Text node's data changes (mirrors RenderTreeUpdater::updateTextRenderer).
+func TestUpdaterTextChange(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.CreateElement("html")
+	body := doc.CreateElement("body")
+	textNode := doc.CreateTextNode("hello")
+	doc.AppendChild(html)
+	html.AppendChild(body)
+	body.AppendChild(textNode)
+
+	builder := NewRenderTreeBuilder(nil)
+	view := builder.Build(doc)
+
+	var rt *RenderText
+	for cur := RenderObject(view); cur != nil; cur = cur.NextInPreOrder() {
+		if tr, ok := cur.(*RenderText); ok && cur.Node() == textNode {
+			rt = tr
+			break
+		}
+	}
+	if rt == nil {
+		t.Fatal("RenderText not found before change")
+	}
+	if rt.Text() != "hello" {
+		t.Fatalf("initial text = %q, want %q", rt.Text(), "hello")
+	}
+
+	updater := NewRenderTreeUpdater(view, nil)
+	textNode.SetData("world")
+	updater.MarkTextChange(textNode)
+	updater.Update()
+
+	if rt.Text() != "world" {
+		t.Fatalf("text after update = %q, want %q", rt.Text(), "world")
+	}
+}
