@@ -1,11 +1,13 @@
 package page
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"wb-ui/bindings"
 	"wb-ui/bridge"
 	"wb-ui/jsc"
 )
@@ -367,11 +369,14 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 	respObj.Set("text", jsc.FunctionValue(textFn))
 
 	jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		val, err := in2.RunJS("(" + bodyText + ")")
-		if err != nil {
+		// ★ 性能：不要用 RunJS("(" + body + ")") 把 JSON 当 JS 代码解析——
+		//   goja 对 MB 级 JSON 的 parse+codegen 极慢（启动 22 秒热点之一）。
+		//   改用 Go 侧 encoding/json 解析 + ToJSValue 直转 JS 对象，快一个量级。
+		var parsed any
+		if err := json.Unmarshal([]byte(bodyText), &parsed); err != nil {
 			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
 		}
-		return resolvePromise(in2, val)
+		return resolvePromise(in2, bindings.ToJSValue(parsed))
 	}, 0)
 	respObj.Set("json", jsc.FunctionValue(jsonFn))
 

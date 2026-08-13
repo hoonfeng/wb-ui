@@ -10,6 +10,7 @@
 package layout
 
 import (
+	"os"
 	"strings"
 
 	"wb-ui/css"
@@ -282,6 +283,9 @@ func (b *ElementBox) MarkCleanWithGeom(x, y, w, h float64) {
 // 位置变化会带动 children 的绝对坐标平移，即使内容不脏也必须重算（否则残影）；
 // 尺寸变化会影响换行/位置，同样必须重算。
 func (b *ElementBox) CanSkipLayout(x, y, w, h float64) bool {
+	if os.Getenv("WB_NO_LAYOUT_SKIP") != "" {
+		return false
+	}
 	return b.layoutCache.laidOut && !b.layoutCache.dirty &&
 		b.layoutCache.childCount == len(b.children) &&
 		b.layoutCache.lastX == x && b.layoutCache.lastY == y &&
