@@ -235,6 +235,23 @@ func (v *RenderView) FindRenderObjectForNode(n dom.Node) RenderObject {
 	return ro
 }
 
+// rebuildNodeMap 遍历整棵渲染树，重建 nodeRenderMap（DOM node → RenderObject）。
+// 在渲染树构建完成后立即调用（RenderTreeBuilder.Build 末尾），使
+// FindRenderObjectForNode / FindRenderBoxForNode 在「布局前」即可 O(1) 定位。
+// 此前 nodeRenderMap 只在布局后 syncGeometry 填充，「重建后→布局前」窗口为空，
+// 无法支撑 RenderTreeUpdater 的增量渲染树更新（它需要在布局前定位节点）。
+// 匿名 wrapper / 伪元素无 DOM node（Node()==nil），跳过不登记。
+func (v *RenderView) rebuildNodeMap() {
+	if v.nodeRenderMap == nil {
+		v.nodeRenderMap = make(map[dom.Node]RenderObject)
+	}
+	for ro := RenderObject(v); ro != nil; ro = ro.NextInPreOrder() {
+		if n := ro.Node(); n != nil {
+			v.nodeRenderMap[n] = ro
+		}
+	}
+}
+
 // FindScrollContainerForNode walks up from node (through DOM ancestors)
 // looking for the first element whose RenderBox has overflow:scroll or
 // overflow:auto on EITHER axis. The painter's scrollbar gating

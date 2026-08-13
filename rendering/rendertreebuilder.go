@@ -77,6 +77,11 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 	if profile {
 		t2 = time.Now()
 	}
+	// ★ 提前填充 nodeRenderMap：使 node→RenderObject 在「布局前」即可 O(1)
+	//   查找（供 RenderTreeUpdater 增量更新 / FindRenderObjectForNode 使用）。
+	//   此前映射只在布局后 syncGeometry 填充，构建后到布局前的窗口为空。
+	//   放在层树构建之前，确保层树阶段若需查映射也已就绪。
+	view.rebuildNodeMap()
 	// Build the layer tree.
 	view.compositor.BuildLayerTree(view)
 	view.SetRootLayer(view.compositor.RootLayer())

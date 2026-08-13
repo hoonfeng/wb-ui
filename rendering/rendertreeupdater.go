@@ -192,20 +192,17 @@ func (u *RenderTreeUpdater) markSubtreeDirty(ro RenderObject) {
 	}
 }
 
-// findRenderObject searches the render tree for the object associated with the given DOM
-// node. This mirrors the node->render-object mapping maintained by WebKit's
-// NodeRenderingContext. In this simplified port the search is a linear walk from the
-// view root.
+// findRenderObject returns the render object associated with the given DOM node.
+// This mirrors the node->render-object mapping maintained by WebKit's
+// NodeRenderingContext. It now uses RenderView.nodeRenderMap for O(1) lookup —
+// the map is populated at render-tree build time (RenderTreeBuilder.Build →
+// rebuildNodeMap), so it is available before layout, which incremental updates
+// require. (Previously this was a linear NextInPreOrder walk from the view root.)
 func (u *RenderTreeUpdater) findRenderObject(node dom.Node) RenderObject {
 	if u.view == nil || node == nil {
 		return nil
 	}
-	for cur := RenderObject(u.view); cur != nil; cur = cur.NextInPreOrder() {
-		if cur.Node() == node {
-			return cur
-		}
-	}
-	return nil
+	return u.view.FindRenderObjectForNode(node)
 }
 
 // HasPendingChanges reports whether the updater has queued mutations.
