@@ -2819,10 +2819,13 @@ func (h *Host) ensureTreeChangeHook() {
 		if os.Getenv("WB_TERM_DEBUG") != "" {
 			log.Printf("[treehook] tree change! node=%s", node.NodeName())
 		}
-		// ★ node 为触发变更的节点。当前仍走全量重建（MarkRenderTreeDirty），
-		//   但 node 已可精确定位变更，为后续接入 RenderTreeUpdater 增量更新预留。
 		if mf := h.wv.MainFrame(); mf != nil {
 			if fr := mf.Frame(); fr != nil {
+				// ★ text 变更走增量路径（同步 RenderText + InlineTextBox.text +
+				//   标记所在 block dirty，下帧局部重排）；结构变更仍全量重建。
+				if _, isText := node.(*dom.Text); isText && fr.ApplyTextChange(node) {
+					return
+				}
 				fr.MarkRenderTreeDirty()
 			}
 		}

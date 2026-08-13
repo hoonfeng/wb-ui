@@ -340,6 +340,29 @@ func (f *Frame) RebuildStyleForElement(el *dom.Element) bool {
 	return true
 }
 
+// ApplyTextChange 增量更新单个 Text 节点的内容——打字热路径专用
+// （CM6 编辑器每敲一键触发 text data 变更，全量 RebuildRenderTree 重建
+// 整棵渲染树 + 布局树 + 层树耗时 10ms+，是「打字卡顿」的主因）。
+//
+// 与 RebuildStyleForElement 同理：text 变更只影响所在 block 的 inline 布局，
+// 重新同步 RenderText.text 与布局树 InlineTextBox.text，标记所在 block 的
+// layout box dirty，然后仅标记需要布局（不重建渲染树）。
+//
+// 返回 true 表示已按增量路径处理；false 表示回退全量重建（调用方需
+// MarkRenderTreeDirty）。找不到 RenderText / 所在 block 的 layout box 时回退。
+func (f *Frame) ApplyTextChange(node dom.Node) bool {
+	if node == nil || f.renderView == nil {
+		return false
+	}
+	if !f.renderView.ApplyTextChange(node) {
+		return false
+	}
+	if f.view != nil {
+		f.view.SetNeedsLayout(true)
+	}
+	return true
+}
+
 // LayoutNow 强制立即布局（iframe 子文档绘制前调用；幂等——无待布局
 // 标记时直接返回）。
 func (f *Frame) LayoutNow() {

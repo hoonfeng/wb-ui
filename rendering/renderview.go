@@ -252,6 +252,73 @@ func (v *RenderView) rebuildNodeMap() {
 	}
 }
 
+// ApplyTextChange incrementally updates the render tree and layout tree after a
+// DOM Text node's data changed, avoiding a full rebuild. It re-syncs the
+// RenderText's text (clearing cached segments), re-syncs the corresponding layout
+// InlineTextBox's text (the IFC reads InlineTextBox.Text() during relayout), and
+// marks the containing block's layout box dirty so the next layout re-lays out
+// just that block (incremental layout B prunes clean sibling subtrees).
+//
+// The caller (page.Frame.ApplyTextChange) must also flag the FrameView as needing
+// layout. Returns false when the node has no render object (caller should fall
+// back to a full rebuild).
+func (v *RenderView) ApplyTextChange(node dom.Node) bool {
+	if node == nil {
+		return false
+	}
+	ro := v.FindRenderObjectForNode(node)
+	rt, ok := ro.(*RenderText)
+	if !ok {
+		return false
+	}
+	t, ok := node.(*dom.Text)
+	if !ok {
+		return false
+	}
+	newText := t.Data()
+	rt.SetText(newText)
+
+	blockRO := containingBlockForText(rt)
+	if blockRO == nil {
+		return false
+	}
+	blockLB := blockRO.LayoutBox()
+	if blockLB == nil {
+		return false
+	}
+	syncInlineTextBoxText(blockLB, node, newText)
+	blockLB.MarkDirty()
+	return true
+}
+
+// containingBlockForText walks up from a RenderText to the first RenderBlockFlow
+// (the inline formatting context container). Anonymous wrappers are traversed.
+func containingBlockForText(rt *RenderText) RenderObject {
+	for cur := RenderObject(rt); cur != nil; cur = cur.Parent() {
+		if cur.IsRenderBlockFlow() {
+			return cur
+		}
+	}
+	return nil
+}
+
+// syncInlineTextBoxText finds the InlineTextBox backed by the given DOM node within
+// the block's layout subtree and updates its text (matching by node identity, added
+// in the node-reference change). The IFC reads InlineTextBox.Text() during relayout,
+// so this must be synced before the block is re-laid out.
+func syncInlineTextBoxText(lb *layout.ElementBox, node dom.Node, newText string) {
+	for _, c := range lb.Children() {
+		switch t := c.(type) {
+		case *layout.InlineTextBox:
+			if t.Node() == node {
+				t.SetText(newText)
+			}
+		case *layout.ElementBox:
+			syncInlineTextBoxText(t, node, newText)
+		}
+	}
+}
+
 // FindScrollContainerForNode walks up from node (through DOM ancestors)
 // looking for the first element whose RenderBox has overflow:scroll or
 // overflow:auto on EITHER axis. The painter's scrollbar gating

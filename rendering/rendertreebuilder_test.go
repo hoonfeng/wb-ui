@@ -292,3 +292,38 @@ func TestUpdaterTextChange(t *testing.T) {
 		t.Fatalf("text after update = %q, want %q", rt.Text(), "world")
 	}
 }
+
+// TestApplyTextChange verifies RenderView.ApplyTextChange re-syncs the RenderText's
+// text after a DOM Text node's data change (incremental text update entry point).
+func TestApplyTextChange(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.CreateElement("html")
+	body := doc.CreateElement("body")
+	textNode := doc.CreateTextNode("hello")
+	doc.AppendChild(html)
+	html.AppendChild(body)
+	body.AppendChild(textNode)
+
+	builder := NewRenderTreeBuilder(nil)
+	view := builder.Build(doc)
+
+	var rt *RenderText
+	for cur := RenderObject(view); cur != nil; cur = cur.NextInPreOrder() {
+		if tr, ok := cur.(*RenderText); ok && cur.Node() == textNode {
+			rt = tr
+			break
+		}
+	}
+	if rt == nil {
+		t.Fatal("RenderText not found")
+	}
+
+	textNode.SetData("world")
+	// Not laid out yet, so the containing block has no layout box — ApplyTextChange
+	// may return false (falling back to full rebuild) but must still sync the
+	// RenderText's text.
+	view.ApplyTextChange(textNode)
+	if rt.Text() != "world" {
+		t.Fatalf("text after change = %q, want %q", rt.Text(), "world")
+	}
+}
