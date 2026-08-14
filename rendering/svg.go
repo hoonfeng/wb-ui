@@ -936,6 +936,9 @@ type svgDocument struct {
 	height      float64
 	viewBox     [4]float64 // x, y, w, h (0 if not set)
 	hasVB       bool
+	par         string // preserveAspectRatio 原始属性值（""=默认 xMidYMid meet）
+	viewportW   float64 // 实际渲染视口宽（0=用 width）
+	viewportH   float64 // 实际渲染视口高（0=用 height）
 	elementByID map[string]*dom.Element // used by <use> references
 	// gradients/clips carry defs contents to paint time (the paint context
 	// is fresh per paintSVG call, so the defs parsed during build must be
@@ -1320,6 +1323,60 @@ func parseViewBox(s string) [4]float64 {
 		vb[i] = parseSVGCoord(parts[i])
 	}
 	return vb
+}
+
+// resolveViewBoxTransform 按 preserveAspectRatio 计算 viewBox→viewport 变换。
+// 返回 (sx, sy, dx, dy)，即 Scale(sx,sy) + Translate(dx,dy)（相对 viewport 原点）。
+// 支持：none（独立拉伸填满）、xMin/xMid/xMax × yMin/yMid/yMax 对齐、
+// meet（默认，等比缩放完整显示）/slice（等比缩放填满裁剪）。
+func resolveViewBoxTransform(doc *svgDocument, vw, vh float64) (sx, sy, dx, dy float64) {
+	vb := doc.viewBox
+	vbW, vbH := vb[2], vb[3]
+	if vbW <= 0 || vbH <= 0 || vw <= 0 || vh <= 0 {
+		return 1, 1, 0, 0
+	}
+	align := "xMidYMid"
+	slice := false
+	if doc.par != "" {
+		for _, f := range strings.Fields(doc.par) {
+			switch f {
+			case "defer":
+				continue
+			case "none":
+				align = "none"
+			case "meet":
+				slice = false
+			case "slice":
+				slice = true
+			default:
+				if strings.HasPrefix(f, "x") || strings.Contains(f, "Y") {
+					align = f
+				}
+			}
+		}
+	}
+	if align == "none" {
+		return vw / vbW, vh / vbH, 0, 0
+	}
+	ax := 0.5 // x 对齐：xMin=0 xMid=0.5 xMax=1
+	switch {
+	case strings.HasPrefix(align, "xMin"):
+		ax = 0
+	case strings.HasPrefix(align, "xMax"):
+		ax = 1
+	}
+	ay := 0.5 // y 对齐：yMin=0 yMid=0.5 yMax=1
+	switch {
+	case strings.HasSuffix(align, "YMin"):
+		ay = 0
+	case strings.HasSuffix(align, "YMax"):
+		ay = 1
+	}
+	scale := math.Min(vw/vbW, vh/vbH)
+	if slice {
+		scale = math.Max(vw/vbW, vh/vbH)
+	}
+	return scale, scale, (vw - vbW*scale) * ax, (vh - vbH*scale) * ay
 }
 
 // --- Element parsing ---
@@ -1770,6 +1827,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 		doc.viewBox = parseViewBox(vb)
 		doc.hasVB = true
 	}
+	doc.par = el.GetAttribute("preserveAspectRatio")
 	// If no explicit width/height, use viewBox dimensions
 	if doc.width <= 0 && doc.hasVB {
 		doc.width = doc.viewBox[2]
@@ -2206,21 +2264,21 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 		return
 	}
 
-	// Apply viewBox transform if present. Uses preserveAspectRatio
-	// "xMidYMid meet" (SVG default): uniform scale that fits inside the
-	// viewport, centered — NOT independent x/y stretching.
-	if doc.hasVB && doc.width > 0 && doc.height > 0 {
+	// Apply viewBox transform per preserveAspectRatio (default xMidYMid meet).
+	// viewport 优先用调用方传入的实际渲染尺寸（CSS 拉伸后的 box 尺寸），
+	// 否则退回固有 width/height，保证内联 svg + width:100% 时图形填满容器。
+	vw, vh := doc.viewportW, doc.viewportH
+	if vw <= 0 || vh <= 0 {
+		vw, vh = doc.width, doc.height
+	}
+	if doc.hasVB && vw > 0 && vh > 0 {
 		vb := doc.viewBox
-		vbW := vb[2]
-		vbH := vb[3]
-		if vbW > 0 && vbH > 0 {
-			scale := math.Min(doc.width/vbW, doc.height/vbH)
-			dx := (doc.width - vbW*scale) / 2
-			dy := (doc.height - vbH*scale) / 2
+		if vb[2] > 0 && vb[3] > 0 {
+			sx, sy, dx, dy := resolveViewBoxTransform(doc, vw, vh)
 			canvas.Save()
 			canvas.Translate(x, y)
 			canvas.Translate(dx, dy)
-			canvas.Scale(scale, scale)
+			canvas.Scale(sx, sy)
 			canvas.Translate(-vb[0], -vb[1])
 			defer canvas.Restore()
 
