@@ -517,6 +517,20 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 							lineH = cssControlLineHeight(st, font.Size)
 						}
 					}
+					// ★ pre-wrap（textarea UA 默认）会软换行：长行折行后行宽
+					// ≤ contentW，横向不会真正溢出。直接用整行未折行宽会把
+					// 略超 contentW 的行误判为横向溢出 → 显示不该出现的横向
+					// 滚动条（浏览器软换行下不显示横向滚动条）。仅
+					// wrapModeNone（pre/nowrap/wrap=off）保留整行宽——那才是
+					// 真横向溢出。input 是单行控件，横向滚动本就正常，不受限。
+					contentW := pb.Width - padL - padR
+					if contentW < 1 {
+						contentW = 1
+					}
+					mode := textareaWrapMode(st, el)
+					if local == "textarea" && mode != wrapModeNone && maxW > contentW {
+						maxW = contentW
+					}
 					// Horizontal extent = left padding + text + right padding.
 					if padL+maxW+padR > maxRight-pb.X {
 						maxRight = pb.X + padL + maxW + padR
@@ -527,11 +541,6 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 						// visual rows), not just hard '\n' breaks — otherwise
 						// the scrollbar's total height / thumb ratio is too
 						// small and long text can't scroll far enough.
-						contentW := pb.Width - padL - padR
-						if contentW < 1 {
-							contentW = 1
-						}
-						mode := textareaWrapMode(st, el)
 						wrapped := wrapTextAreaLines(text, font, contentW, mode)
 						rows := float64(len(wrapped))
 						if padT+rows*lineH+padB > maxBottom-pb.Y {
