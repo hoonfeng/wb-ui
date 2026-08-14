@@ -142,7 +142,7 @@ input[type="image"] {
 input[type="submit"], input[type="reset"], input[type="button"],
 button {
 	display: inline-block;
-	padding: 4px 10px;
+	padding: 1px 6px;
 	border: 1px solid #767676;
 	background-color: #f0f0f0;
 	background-image: linear-gradient(to bottom, #efefef 0%, #efefef 28%, #ffffff 28%);

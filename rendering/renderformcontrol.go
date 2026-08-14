@@ -163,8 +163,13 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		// Button is NOT a replaced element — its children (RenderText)
 		// are laid out normally to determine width. The background and
 		// border are painted by the normal PhaseBackground path using
-		// the resolved CSS style. Skip PaintFormControl handling.
-		return false
+		// the resolved CSS style. The LABEL however is drawn here,
+		// CENTERED (browsers center button text both horizontally —
+		// UA text-align:center — and vertically inside the padding box);
+		// the IFC-placed RenderText would otherwise sit top-left of the
+		// content box. paintButtonText computes its own centered coords.
+		paintButtonText(info, el, st, x, y, w, h, op)
+		return true
 	case "textarea":
 		_, sy := float64(0), float64(0)
 		if info.rv != nil {

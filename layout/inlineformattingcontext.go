@@ -859,7 +859,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// overflowing the item-row instead of ellipsizing — the "file names only
 	// show a few characters / overflow the row" report.
 	var totalWidth float64
-	if !isFlexItem(box) {
+	// ★ 绝对/固定定位容器（out-of-flow）：其尺寸由 layoutAbsolute 决定
+	// （box-sizing 扣减 border/padding），此处按子元素宽度回写 content 会
+	// 覆盖正确的 content（如 22x22 border-box 按钮被内部文本盒宽 22 覆盖 →
+	// content 8 变 22 → border-box 36x26）。浏览器中 absolute 元素尺寸
+	// 独立于流内文本宽度，不应被 IFC 收尾修正。
+	if !isFlexItem(box) && !box.IsAbsolutelyPositioned() {
 		for _, ps := range pending {
 			right := ps.seg.X + ps.seg.Width - contentX
 			if right > totalWidth {
@@ -968,7 +973,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		ps.textBox.TextSegments = append(ps.textBox.TextSegments, ps.seg)
 	}
 
-	g.SetContentHeight(math.Max(boxHeight, totalHeight))
+	// ★ 绝对/固定定位容器（out-of-flow）：高度由 layoutAbsolute 决定
+	// （box-sizing 扣减 border/padding），此处按文本内容高度回写会覆盖
+	// 正确值（按钮 height 18 → 22，border-box 失效）。与上方
+	// SetContentWidth 的 absolute 跳过同因。
+	if !box.IsAbsolutelyPositioned() {
+		g.SetContentHeight(math.Max(boxHeight, totalHeight))
+	}
 }
 
 // isInlineWhitespace reports whether r is a CSS whitespace character that

@@ -1647,11 +1647,31 @@ func parseBlendMode(s string) *skia.BlendMode {
 	}
 	return &m
 }
+// insideButton reports whether o is a descendant of a <button> element.
+// Button labels are painted centered by PaintFormControl→paintButtonText,
+// so the IFC-placed RenderText must be skipped to avoid double painting.
+func insideButton(o RenderObject) bool {
+	for cur := o.Parent(); cur != nil; cur = cur.Parent() {
+		if box := asRenderBox(cur); box != nil {
+			if el, ok := box.Node().(*dom.Element); ok && el.LocalName() == "button" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // paintObjectForeground paints non-text foreground content: SVG shapes and
 // native form controls (checkbox/radio/range/progress/meter/select arrow) via
 // PaintFormControl mirroring RenderTheme::paint().
 func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	if text, ok := o.(*RenderText); ok {
+		// ★ <button> 内的文本由 PaintFormControl→paintButtonText 以
+		// 居中坐标绘制；此处 IFC 排版的 RenderText（内容盒左上/右下）
+		// 必须跳过，否则与居中文字重复绘制（− 出现两个）。
+		if insideButton(o) {
+			return
+		}
 		PaintText(text, info)
 		return
 	}
