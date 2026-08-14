@@ -605,14 +605,14 @@ func (c *Canvas) StrokeRect(x, y, w, h, strokeWidth float64, col Color) {
 // stroke is centered on the path geometry; callers should inset by strokeWidth/2 so
 // the entire border stays inside the border-box (matching CSS border painting).
 func (c *Canvas) StrokeRoundRect(x, y, w, h, radius, strokeWidth float64, col Color) {
-	if strokeWidth <= 0 {
+	if strokeWidth <= 0 || col.A == 0 {
 		return
 	}
 	// Inset by half the stroke width so the stroke lies entirely within the
 	// border-box rectangle, matching how CSS rasterizes borders (borders occupy
 	// the space between the padding edge and the border edge).
 	half := strokeWidth / 2
-	rx := float32(radius)
+	rx := radius
 	if rx < 0 {
 		rx = 0
 	}
@@ -623,18 +623,71 @@ func (c *Canvas) StrokeRoundRect(x, y, w, h, radius, strokeWidth float64, col Co
 	if insetW <= 0 || insetH <= 0 {
 		return
 	}
-	halfMin := float32(insetW) / 2
+	halfMin := insetW / 2
 	if insetH < insetW {
-		halfMin = float32(insetH) / 2
+		halfMin = insetH / 2
 	}
 	if rx > halfMin {
 		rx = halfMin
 	}
-	r := skia.RectXYWH(float32(x+half), float32(y+half), float32(insetW), float32(insetH))
-	c.strokePaint.SetColor(colorToSkia(col))
-	c.strokePaint.SetStrokeWidth(float32(strokeWidth))
-	c.canvas.DrawRoundRect(r, rx, rx, c.strokePaint)
-	c.invalidatePixels()
+	// ★ goskia DrawRoundRect + strokePaint 有 bug：右弧/右边描迹缺失
+	// （ring_large 对照验证：StrokeCircle 完整、DrawRoundRect stroke 右缺）。
+	// 完整圆（border-radius:50% 正圆边框，rx 接近半宽且宽高相等）直接走
+	// StrokeCircle（验证正常）：中心线半径 = insetW/2，外缘恰好占满
+	// border box。其余圆角矩形用手绘轮廓折线（StrokePath）。
+	if insetW == insetH && rx >= halfMin*0.85 {
+		c.StrokeCircle(x+w/2, y+h/2, insetW/2, strokeWidth, col)
+		return
+	}
+	pts := roundRectOutline(x+half, y+half, insetW, insetH, rx)
+	c.StrokePath(pts, strokeWidth, col, "butt", "round")
+}
+
+// roundRectOutline 生成圆角矩形中心线轮廓点序列：顺时针从上边左端
+// 开始 → 上边 → 右上弧 → 右边 → 右下弧 → 下边 → 左下弧 → 左边 →
+// 左上弧回到起点（闭合）。圆弧每 90° 细分 8 段折线，近似平滑圆角。
+func roundRectOutline(cx, cy, cw, ch, r float64) []Point {
+	segs := 8
+	if r < 0 {
+		r = 0
+	}
+	hw := cw / 2
+	if r > hw {
+		r = hw
+	}
+	hh := ch / 2
+	if r > hh {
+		r = hh
+	}
+	var pts []Point
+	// 上边（左端 → 右端）
+	pts = append(pts, Point{X: cx + r, Y: cy})
+	pts = append(pts, Point{X: cx + cw - r, Y: cy})
+	// 右上弧 270°→360°
+	pts = appendArcSegs(pts, cx+cw-r, cy+r, r, 270, 360, segs)
+	// 右边
+	pts = append(pts, Point{X: cx + cw, Y: cy + ch - r})
+	// 右下弧 0°→90°
+	pts = appendArcSegs(pts, cx+cw-r, cy+ch-r, r, 0, 90, segs)
+	// 下边
+	pts = append(pts, Point{X: cx + r, Y: cy + ch})
+	// 左下弧 90°→180°
+	pts = appendArcSegs(pts, cx+r, cy+ch-r, r, 90, 180, segs)
+	// 左边
+	pts = append(pts, Point{X: cx, Y: cy + r})
+	// 左上弧 180°→270°
+	pts = appendArcSegs(pts, cx+r, cy+r, r, 180, 270, segs)
+	return pts
+}
+
+// appendArcSegs 追加从 a0° 到 a1° 的圆弧细分点（不含起点 a0，含终点 a1）。
+func appendArcSegs(pts []Point, cx, cy, r float64, a0, a1, segs int) []Point {
+	for i := 1; i <= segs; i++ {
+		a := float64(a0) + float64(a1-a0)*float64(i)/float64(segs)
+		rad := a * math.Pi / 180
+		pts = append(pts, Point{X: cx + r*math.Cos(rad), Y: cy + r*math.Sin(rad)})
+	}
+	return pts
 }
 
 // FillLinearGradient fills the given world-space rectangle with a linear gradient

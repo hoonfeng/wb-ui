@@ -75,13 +75,16 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		if width < 0 { width = 0 }
 	}
 	if isBorderBoxForBox(box) {
-		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
-	} else {
+		// ★ box-sizing:border-box：width 含 border+padding → content 需扣减
+		// （此前未扣，content 虚高 → BorderBoxWidth 多出 border，ring 圆环
+		// 20x16 椭圆的根因；与 BFC layoutBoxContentForBox 的扣减一致）。
 		width -= border.Horizontal() + padding.Horizontal()
-		width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
+		if width < 0 {
+			width = 0
+		}
 	}
+	width = clampSize(width, minW, maxW, minWAuto, maxWAuto)
 	g.SetContentWidth(width)
-
 	_ = minHAuto
 	_ = maxHAuto
 
@@ -98,11 +101,12 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		if height < 0 {
 			height = 0
 		}
-	} else if !isBorderBoxForBox(box) {
-		height -= border.Vertical() + padding.Vertical()
-		// ★ 显式 height:0 + 非零 border（.tri 边框三角形技巧）：
-		// height -= border 后必须 clamp 到 0，否则 contentH 为负 →
+	} else if isBorderBoxForBox(box) {
+		// ★ box-sizing:border-box：height 含 border+padding → content 需扣减
+		// （与 BFC layoutBoxContentForBox 一致）。显式 height:0 + 非零 border
+		// （.tri 边框三角形技巧）：扣减后 clamp 到 0，否则 contentH 为负 →
 		// BorderBoxHeight 错误归零，三角形整体消失。
+		height -= border.Vertical() + padding.Vertical()
 		if height < 0 {
 			height = 0
 		}
