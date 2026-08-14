@@ -393,6 +393,18 @@ func itemCrossSize(it *flexItem, isRow bool, state *LayoutState) float64 {
 			}
 		}
 		if h := g.BorderBoxHeight(); h > 0 {
+			// ★ wrap 行高计算早于 flex item 内容布局：无显式 height 的
+			// item（如 xseg span）此时 geometry 高只有 padding+border
+			// （span 6px），直接用作行高会让 wrap 各行重叠（xseg 5 选项
+			// 2 行挤成一行）。用 intrinsic 内容高（文字行高+padding）
+			// 估算真实高度；有显式 CSS height 时 geometry 高可信。
+			if cs != nil {
+				if _, ok := definiteHeight(cs.Height, 0, fs); !ok {
+					if ih := intrinsicContentHeight(it.box); ih > 0 {
+						return ih
+					}
+				}
+			}
 			return h
 		}
 		return fontLineGap(it.box) + g.PaddingTop() + g.PaddingBottom() + g.BorderTop() + g.BorderBottom()
@@ -938,14 +950,37 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 				scaledBaseSum += it.flexShrink * it.baseSize
 			}
 			if scaledBaseSum > 0 {
-				for _, it := range items {
+				// CSS-FLEXBOX §9.7 自动最小尺寸（min-width:auto / min-height:auto）：
+				// overflow:visible 的 flex item 主轴方向不得被 flex-shrink 压到
+				// min-content（文本最小宽/高）以下——否则无固定宽度的文本子项
+				// （如配置面板 .xseg 形状选项 span）被压扁、文字重叠（"圆形"
+				// 只剩 9px 宽字形）。Chrome 保底不压缩，wb-ui 此前可压到 0。
+				// overflow:hidden/auto 的 item（ellipsis 截断场景）保持可压缩。
+				minBounds := make([]float64, len(items))
+				for i, it := range items {
+					mb := 0.0
+					if isRow {
+						if it.minWidth > mb {
+							mb = it.minWidth
+						}
+						if cs := it.box.Style(); cs != nil && cs.OverflowX == style.OverflowVisible {
+							if mc := minContentWidth(it.box); mc > mb {
+								mb = mc
+							}
+						}
+					} else if it.minHeight > mb {
+						mb = it.minHeight
+					}
+					minBounds[i] = mb
+				}
+				for i, it := range items {
 					if it.frozen || it.flexShrink <= 0 {
 						continue
 					}
 					shrink := -freeSpace * (it.flexShrink * it.baseSize) / scaledBaseSum
 					it.targetSize -= shrink
-					if it.targetSize < 0 {
-						it.targetSize = 0
+					if mb := minBounds[i]; it.targetSize < mb {
+						it.targetSize = mb
 					}
 				}
 			}
