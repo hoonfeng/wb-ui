@@ -1842,7 +1842,14 @@ func parseLength(s string) (Length, bool) {
 	if err != nil {
 		return Length{}, false
 	}
-	return Length{Value: num, Unit: s[i:]}, true
+	unit := s[i:]
+	if unit == "" && num == 0 {
+		// CSS: 无单位的 0 是合法长度，等价 0px（如 .tri 的 width:0;height:0
+		// 边框三角形技巧）。若不归一化为 px，resolveLengthAuto 会把显式
+		// 0 误判为 auto（shrink-to-fit），三角尺寸被 border 撑大。
+		unit = "px"
+	}
+	return Length{Value: num, Unit: unit}, true
 }
 
 // mathFuncInfoS detects a CSS math function prefix (calc/min/max/clamp) and

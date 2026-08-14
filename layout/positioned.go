@@ -100,6 +100,12 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		}
 	} else if !isBorderBoxForBox(box) {
 		height -= border.Vertical() + padding.Vertical()
+		// ★ 显式 height:0 + 非零 border（.tri 边框三角形技巧）：
+		// height -= border 后必须 clamp 到 0，否则 contentH 为负 →
+		// BorderBoxHeight 错误归零，三角形整体消失。
+		if height < 0 {
+			height = 0
+		}
 	}
 	height = clampSize(height, minH, maxH, minHAuto, maxHAuto)
 	g.SetContentHeight(height)

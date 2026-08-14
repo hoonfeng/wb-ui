@@ -929,6 +929,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
 						ebG := state.GeometryForBox(eb)
 						ebG.SetTopLeft(ebG.Top(), ebG.Left()+shift)
+						// ★ 级联平移 absolute 子元素：inline-block（如
+						// .ic-video .tri）在 text-align 居中前已用旧位置
+						// 定位（布局时序），必须跟随父元素平移，否则三角
+						// 形相对图标水平错位。
+						offsetDescendants(eb, shift, 0, state)
 					}
 				}
 			}
@@ -950,6 +955,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				if eb, ok := child.(*ElementBox); ok && eb.IsInlineLevel() {
 					ebG := state.GeometryForBox(eb)
 					ebG.SetTopLeft(ebG.Top()+shift, ebG.Left())
+					offsetDescendants(eb, 0, shift, state)
 				}
 			}
 		}

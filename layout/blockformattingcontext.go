@@ -372,7 +372,15 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		hv, ok := definiteHeight(boxCS.Height, cbHeight, fs)
 		if ok {
 			if isBorderBoxForBox(box) {
-				g.SetContentHeight(hv - g.VerticalBorder() - g.VerticalPadding())
+				// ★ 显式 height:0 + 非零 border（.tri 边框三角形技巧）：
+				// contentH = hv - border 可能为负，必须 clamp 0——
+				// 否则 contentHeight 负值使 BorderBoxHeight 错误归零，
+				// absolute 定位的三角元素整体消失。
+				h := hv - g.VerticalBorder() - g.VerticalPadding()
+				if h < 0 {
+					h = 0
+				}
+				g.SetContentHeight(h)
 			} else {
 				g.SetContentHeight(hv)
 			}
