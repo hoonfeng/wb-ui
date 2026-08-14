@@ -579,11 +579,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// ≈ 8px），不撑满父行宽。childCtx.Layout（BFC）不设置容器自身
 			// 的 ContentWidth（容器宽由父级决定），布局后仍为 0 → 需用内部
 			// 文本测量回填（浏览器语义：光标块正好覆盖当前字符）。
+			// ★ 无条件回填（去掉 ContentWidth()<=0 守卫）：上一轮布局可能
+			// 给 inline-block 残留父行宽（配置面板「编辑」按钮 contentWidth
+			// 残留 147 → 172px 大背景块），守卫会让残留不被重算。
+			// ★ 受 max-width 约束（§10.3.9：shrink-to-fit ≤ max-width）：
+			// 欢迎语内容预览 .txt-view max-width:110px 未截断（148px）的
+			// 根因。
 			if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
 				hasExplicitIB := csc.Width.Unit != "" && csc.Width.Unit != "auto"
-				if !hasExplicitIB && cldG.ContentWidth() <= 0 {
+				if !hasExplicitIB {
 					if txt := inlineBoxTextContent(cld); txt != "" {
 						if tw := measureText(cld, txt); tw > 0 {
+							if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && tw > mw {
+								tw = mw
+							}
 							cldG.SetContentWidth(tw)
 						}
 					}
@@ -776,7 +785,16 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			if !hasExplicitChildWidth {
 				if cw := computeInlineContentWidth(cld, state); cw > 0 {
-					cldG.SetContentWidth(cw)
+					// ★ inline-block 的 shrink-to-fit 受 max-width 约束
+					// （CSS 2.1 §10.3.9）：computeInlineContentWidth 按文本
+					// 实宽回填（txt-view 148.3px），会覆盖 shrink 分支的
+					// max-width clamp（110px）——欢迎语预览未截断的根因。
+				if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
+					if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && cw > mw {
+						cw = mw
+					}
+				}
+				cldG.SetContentWidth(cw)
 				}
 			} else if cldG.ContentWidth() <= 0 {
 				if cw := computeInlineContentWidth(cld, state); cw > 0 {
@@ -818,6 +836,15 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					topOffset = 0
 				}
 				cldG.SetTopLeft(currentLine.y+topOffset, currentLine.contentX+currentLine.widthUsed)
+				// ★ 换行后 inline-block 内部子布局基于换行前的旧 x 生成
+				// （其 childCtx.Layout 在行推进之前执行）：文本 seg 坐标
+				// 保持旧位置 → 渲染端 syncOne 把 frame 扩展至旧 seg 右端
+				// （编辑按钮渲染成 172px 大背景块），文字也画在旧位置
+				// （超出右栏被裁，按钮显示为空块）。重新布局使内部 seg/
+				// 几何基于新位置（幂等：布局只依赖 box 自身位置）。
+				if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
+					childCtx.Layout(cld, state)
+				}
 			}
 			// Apply relative offset to inline-level elements that are
 			// relatively positioned (e.g. position:relative with top/left).
