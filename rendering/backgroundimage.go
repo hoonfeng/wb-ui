@@ -132,22 +132,15 @@ func parseSVGText(text string) *svgDocument {
 	return buildSVGDocument(svgEl)
 }
 
-// paintSVGScaled paints an svgDocument scaled into the destination rect.
-// The SVG's intrinsic width/height define the scale; missing intrinsic size
-// falls back to painting at (x, y) at natural shape coordinates.
+// paintSVGScaled paints an svgDocument into the destination rect (x,y,w,h).
+// It routes through paintSVGTo with the rect as viewport, so viewBox and
+// preserveAspectRatio resolve exactly like inline <svg> elements — and the
+// shared cached svgDocument's mutable viewport fields are never touched.
 func paintSVGScaled(canvas *graphics.Canvas, svg *svgDocument, x, y, w, h float64) {
 	if svg == nil || canvas == nil {
 		return
 	}
-	if svg.width > 0 && svg.height > 0 && w > 0 && h > 0 {
-		canvas.Save()
-		canvas.Translate(x, y)
-		canvas.Scale(w/svg.width, h/svg.height)
-		paintSVG(canvas, svg, 0, 0, graphics.Color{})
-		canvas.Restore()
-	} else {
-		paintSVG(canvas, svg, x, y, graphics.Color{})
-	}
+	paintSVGTo(canvas, svg, x, y, w, h, graphics.Color{})
 }
 
 // paintBackgroundImageTiled draws a decoded background image into the box

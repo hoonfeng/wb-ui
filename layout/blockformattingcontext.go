@@ -157,7 +157,35 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			fmt.Printf("[bfc] dialog-box child (anon) content=%.1f border=%.1f display=%d\n", ch.ContentWidth(), ch.BorderBoxWidth(), childCs.Display)
 		}
 		margin, padding, border := computeBoxModelForBox(childEb, contentWidth, fontSizeOf(childEb))
-		ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+		// ★ auto margin 水平居中（CSS 2.1 §10.3.3）：block 元素在确定宽度
+		// 的 containing block 内，margin-left/right 为 auto 时把剩余空间
+		// 平分给 auto 边 → margin:0 auto 使元素水平居中。此前 auto 被
+		// resolveOrZero 解析成 0，元素永远靠左（部件卡片 picon 不居中等）。
+		mlAuto := childCs.MarginLeft.Unit == "auto"
+		mrAuto := childCs.MarginRight.Unit == "auto"
+		if (mlAuto || mrAuto) && contentWidth > 0 {
+			bw := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
+			// 此刻 auto margin 解析为 0；剩余 = 容器内容宽 - 元素实际占宽
+			// （border-box + 非 auto margin 已含在 bw/margin 中）。
+			free := contentWidth - (bw + margin.Horizontal())
+			nAuto := 0
+			if mlAuto {
+				nAuto++
+			}
+			if mrAuto {
+				nAuto++
+			}
+			if free > 0 && nAuto > 0 {
+				each := free / float64(nAuto)
+				if mlAuto {
+					margin.Left = each
+				}
+				if mrAuto {
+					margin.Right = each
+				}
+				ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
+			}
+		}
 		ch.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 		ch.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 

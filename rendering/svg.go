@@ -2260,14 +2260,28 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 // --- Painting ---
 
 func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFill graphics.Color) {
+	if doc == nil {
+		return
+	}
+	// 兼容旧调用（无显式 viewport）：用 doc 上的 viewportW/H（若已设置），
+	// 否则退回固有 width/height。生产代码一律走 paintSVGTo 显式传 viewport。
+	paintSVGTo(canvas, doc, x, y, doc.viewportW, doc.viewportH, defaultFill)
+}
+
+// paintSVGTo paints the SVG document with an explicit viewport — the actual
+// rendering size of the destination box. viewBox + preserveAspectRatio resolve
+// against (vw,vh); without a viewBox the shapes are drawn at intrinsic
+// coordinates, scaled to the viewport when the SVG declares an intrinsic size.
+//
+// ★ 这是唯一渲染路径：内联 <svg> 元素、<img src="*.svg">、
+// background-image: url(data:image/svg+xml) 都必须调用本函数并把目标矩形
+// 尺寸作为 viewport 传入，三条路径行为才一致。viewport 不得写成共享的
+// svgDocument 字段（svgBackgroundCache 缓存复用的 doc 会被交叉污染，导致
+// 图形不居中/超出边界）。
+func paintSVGTo(canvas *graphics.Canvas, doc *svgDocument, x, y, vw, vh float64, defaultFill graphics.Color) {
 	if doc == nil || len(doc.shapes) == 0 {
 		return
 	}
-
-	// Apply viewBox transform per preserveAspectRatio (default xMidYMid meet).
-	// viewport 优先用调用方传入的实际渲染尺寸（CSS 拉伸后的 box 尺寸），
-	// 否则退回固有 width/height，保证内联 svg + width:100% 时图形填满容器。
-	vw, vh := doc.viewportW, doc.viewportH
 	if vw <= 0 || vh <= 0 {
 		vw, vh = doc.width, doc.height
 	}
@@ -2294,10 +2308,15 @@ func paintSVG(canvas *graphics.Canvas, doc *svgDocument, x, y float64, defaultFi
 		}
 	}
 
-	// No viewBox: simple translation
-	if x != 0 || y != 0 {
+	// No viewBox: translate to (x,y); scale intrinsic coordinates to the
+	// viewport when the SVG declares a size (matches <img> scaling semantics).
+	if x != 0 || y != 0 || (doc.width > 0 && vw > 0 && vw != doc.width) ||
+		(doc.height > 0 && vh > 0 && vh != doc.height) {
 		canvas.Save()
 		canvas.Translate(x, y)
+		if doc.width > 0 && doc.height > 0 && vw > 0 && vh > 0 {
+			canvas.Scale(vw/doc.width, vh/doc.height)
+		}
 		defer canvas.Restore()
 	}
 

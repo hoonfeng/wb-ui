@@ -1670,12 +1670,11 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 				doc.viewBox, len(doc.shapes), cc.R, cc.G, cc.B)
 		}
 		if doc != nil && len(doc.shapes) > 0 {
-			// 用 CSS 布局后的实际渲染尺寸作为 viewBox viewport（模板常以
-			// svg{width:100%;height:100%} 拉伸），否则 preserveAspectRatio
-			// 与等比缩放会按固有尺寸计算，导致图形不填满/内部位置偏移。
-			doc.viewportW = box.Width()
-			doc.viewportH = box.Height()
-			paintSVG(info.canvas, doc, box.X(), box.Y(), graphics.Color{})
+			// viewport = CSS 布局后的实际渲染尺寸（模板常以
+			// svg{width:100%;height:100%} 拉伸），由 paintSVGTo 参数传入，
+			// 不写入共享 doc 字段——svgBackgroundCache 缓存的文档会被
+			// <img>/background-image 路径复用，写入会造成交叉污染。
+			paintSVGTo(info.canvas, doc, box.X(), box.Y(), box.Width(), box.Height(), graphics.Color{})
 		} else if os.Getenv("WB_SVG_DEBUG") != "" {
 			log.Printf("[svg] WARNING: no shapes parsed for svg class=%q", el.GetAttribute("class"))
 		}
