@@ -609,11 +609,19 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 							}
 						}
 					} else {
-						lh := fontLineGap(cb)
-						if lh <= 0 {
-							lh = cfs * 1.2
+						// Intrinsic content height: measure the item's real
+						// content height (fixed-height children, padding,
+						// wrapped text) rather than only the font line gap.
+						// A grid row holding a card with a 26px icon used to
+						// get a ~line-gap row, so tall cards overlapped.
+						content = intrinsicContentHeight(cb)
+						if content <= 0 {
+							lh := fontLineGap(cb)
+							if lh <= 0 {
+								lh = cfs * 1.2
+							}
+							content = lh
 						}
-						content = lh
 					}
 				}
 			}
