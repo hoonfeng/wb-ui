@@ -1208,8 +1208,15 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// 对 CJK 文本用雅黑度量（FontCJKMetrics），拉丁用 capHeight+descent 近似；
 	// 不再用 capHeight 贴行顶（那只在行盒高=内容高时正确）。
 	flexHalfLeading := 0.0
-	if textInFlexCentered(text) && len(segments) > 0 {
-		seg0 := segments[0]
+	// ★ 行框错位保护（inline-block 内部文本）：行框 LineY 可能低于文字顶
+	// （seg.Y < LineY——vertical-align:middle 盒移动后未同步行框，txt-view /
+	// div.btn 等内部文本）。此时 seg.Y 已是文字正确位置（layout 已居中），
+	// 基于错位行框的 half-leading 修正会把文字错误下移（配置器「编辑」
+	// 按钮文字偏下 3px 的根因）——必须跳过修正。
+	lineBoxValid := len(segments) == 0 || segments[0].Y >= segments[0].LineY-0.5
+	if lineBoxValid {
+		if textInFlexCentered(text) && len(segments) > 0 {
+			seg0 := segments[0]
 		var drawAscent, drawDescent float64
 		if hasCJKChars([]rune(content)) {
 			drawAscent, drawDescent = info.canvas.FontCJKMetrics(font)
@@ -1246,6 +1253,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 				flexHalfLeading = centeredBaseline - (seg0.Y + baselineH)
 			}
 		}
+	}
 	}
 
 	// DEBUG: print segments info

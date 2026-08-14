@@ -539,6 +539,25 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				}
 			}
 
+			// ★ inline-block 布局前预设置 shrink-to-fit 宽度（CSS 2.1
+			// §10.3.9）：childCtx.Layout 时若 content width 仍为 0（无显式
+			// 宽度且上面跳过 SetContentWidth(父行宽)），内部 normal 文本会
+			// 按 0 宽布局 → CJK 每字竖排（配置器「编辑」按钮 27px 宽文字
+			// 竖排成多行、属性行被撑高的根因）。浏览器先按 max-content
+			// 测量 inline-block 再布局内部。布局后仍有原 shrink-to-fit
+			// 回填（含 max-width clamp 与重测量），此处只保证内部文本
+			// 按单行 max-content 布局。
+			if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
+				hasExplicitIB := csc.Width.Unit != "" && csc.Width.Unit != "auto"
+				if !hasExplicitIB && cldG.ContentWidth() <= 0 {
+					if txt := inlineBoxTextContent(cld); txt != "" {
+						if tw := measureText(cld, txt); tw > 0 {
+							cldG.SetContentWidth(tw)
+						}
+					}
+				}
+			}
+
 			childCtx := contextFor(cld, state)
 			childCtx.Layout(cld, state)
 

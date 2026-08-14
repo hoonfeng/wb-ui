@@ -1310,13 +1310,30 @@ func paintButtonText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, 
 	if ascent <= 0 {
 		ascent = font.Size * 0.8
 	}
-	descent := graphics.GlobalFontDescent(font)
-	if descent < 0 {
-		descent = 0
+	// ★ 垂直居中（浏览器按钮文字 = glyph 中心对齐盒子中心）：baseline 必须
+	// 用 glyph 实际度量计算，不能用 usWinAscent/usWinDescent——usWinAscent
+	// （如 Segoe UI 12px ≈ 11.2）比字形 bbox ascent（capHeight ≈ 8.6）大，
+	// 用它算 textH + baseline 会让文字整体偏下 1-2px（配置器 −/+ 按钮
+	// 文字偏下的根因）。与 painter.go 的 flex/行框居中同款：
+	//   - CJK 文本用雅黑度量（FontCJKMetrics，glyph 顶 ≈ 0.85em）
+	//   - 拉丁/符号用 capHeight + 0.3×capHeight 近似 bbox descent
+	var drawAscent, drawDescent float64
+	if hasCJKChars([]rune(text)) {
+		drawAscent, drawDescent = c.FontCJKMetrics(font)
+	} else {
+		drawAscent = c.FontCapHeight(font)
+		if drawAscent <= 0 {
+			drawAscent = ascent
+		}
+		drawDescent = drawAscent * 0.3
 	}
-	textH := ascent + descent
+	if drawAscent <= 0 {
+		drawAscent = ascent
+		drawDescent = 0
+	}
+	fontH := drawAscent + drawDescent
 	tx := x + (w-textW)/2
-	ty := y + (h-textH)/2 + ascent
+	ty := y + (h-fontH)/2 + drawAscent
 	c.DrawText(tx, ty, text, font, textColor)
 }
 
