@@ -1755,7 +1755,12 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 
 // parseBorderColorShorthand parses the border-color shorthand (1-4 colors).
 func parseBorderColorShorthand(s string) ([]Color, bool) {
-	parts := strings.Fields(strings.TrimSpace(s))
+	// ★ 括号感知分割（splitShorthandValue）：rgba()/hsl() 函数内部有空格
+	// （ValueString 序列化逗号后加空格，如 "rgba(74, 128, 232, 0.35)"），
+	// strings.Fields 会把它拆成多段 → parseColor("rgba(74,") 失败 →
+	// border-color:rgba(...) 简写整体不生效（.wbox.off 半透明边框色
+	// 未覆盖 .wbox 的 border 简写色的根因）。
+	parts := splitShorthandValue(s)
 	if len(parts) == 0 || len(parts) > 4 {
 		return nil, false
 	}

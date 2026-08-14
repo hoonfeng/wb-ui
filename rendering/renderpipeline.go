@@ -511,43 +511,20 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		// segment children poke out of the radius). Only the layer's OWN
 		// overflow establishes the rounded clip — an ancestor's clip was
 		// already rounded at that ancestor's layer entry.
+		// ★ 修复（2026-08-14）：此 clip 不再 inset 到 padding box——
+		// 原 inset 把 clip 缩进 border 内侧，导致 overflow:hidden 元素
+		// 的自身边框被自己的 clip 裁掉（画布 wbox 边框四边全消失的
+		// 根因）。浏览器语义：overflow clip 只裁剪内容/子元素，元素
+		// 自身背景与边框完整绘制（walkSubtreeExcluded 的 visit(root)
+		// 在自身 clip 之前执行即是此语义）。此处 layer clip 用 border
+		// box（CalculateRects 的 ownRect 已含边框），圆角沿 border box
+		// 外缘；子内容（非 layer 后代）由 walkSubtreeExcluded 的
+		// padding-box clip 精确裁剪，child layer 圆角与边框差 ≤1px
+		// 可接受（优先保证元素自身边框完整）。
 		radius := 0.0
 		if st := layer.Owner().Style(); st != nil &&
 			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
 			radius = lengthValue(st.BorderRadius)
-			if radius > 0 {
-				// Overflow rounded clip applies to the PADDING box (WebKit
-				// RenderLayer::paintLayer clips children to the owner's
-				// rounded padding box): inset the rect by the border widths
-				// and shrink the radius by the border, otherwise the arc is
-				// 1px larger and centered on the border edge — the child
-				// segments start at the padding edge so their corners stay
-				// inside the arc and the pill's ends look square instead of
-				// rounded (the arc must cut INTO the padding area).
-				bw := lengthValue(st.BorderLeftWidth)
-				bh := lengthValue(st.BorderTopWidth)
-				insetX, insetY := bw, bh
-				// If a side has no border, the border edge == padding edge
-				// for that side; use per-side insets.
-				if bw <= 0 {
-					bw = lengthValue(st.BorderRightWidth)
-					insetX = bw
-				}
-				if bh <= 0 {
-					bh = lengthValue(st.BorderBottomWidth)
-					insetY = bh
-				}
-				cw, ch := clip.Width-2*insetX, clip.Height-2*insetY
-				if cw > 0 && ch > 0 {
-					clip.X += insetX
-					clip.Y += insetY
-					clip.Width, clip.Height = cw, ch
-					radius -= (insetX + insetY) / 2
-					if radius < 0 {
-						radius = 0
-					}
-				}
-			}
 		}
 		if radius > 0 {
 			info.canvas.ClipRoundRect(clip.X, clip.Y, clip.Width, clip.Height, radius)

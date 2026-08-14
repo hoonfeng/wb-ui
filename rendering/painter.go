@@ -282,6 +282,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st == nil {
 		return
 	}
+
 	// ★ 滚动容器自身背景固定于视口：paintLayerContents 对容器内容整体
 	// translate(-scroll) 后，背景若用绝对坐标绘制会随内容一起滚动——
 	// 背景滚出容器视口，文字继续滚动到背景区域外显示（"文字在背景外"）。
@@ -486,6 +487,8 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	// ★ 滚动容器自身边框同样固定于视口（与 PaintBackground 同理）：
 	// 补偿 box 自身 scroll offset，抵消 paintLayerContents 的内容 translate。
+
+
 	ox, oy := 0.0, 0.0
 	if info.rv != nil {
 		ox, oy = info.rv.BoxScrollOffset(box)
