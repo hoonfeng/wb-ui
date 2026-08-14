@@ -647,6 +647,36 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 
 	paintLayerContent(layer, info)
 
+	// ★ CSS transform 后代空间：transform 元素的所有后代（含 absolute
+	// child layer，如图标内部的 .sq）都在其变换空间内绘制（CSS 变换
+	// 作用于整个元素子树）。walkSubtreeExposed 只对 owner 自身 + 非
+	// layer 后代应用 transform（paintLayerContent 内、此处之前已
+	// Restore）；child layer 由 paintLayerTree 单独递归（下方循环），
+	// 若不在此重新应用父 transform，absolute 子元素会画在未变换的
+	// 位置（"transform:rotate(45deg) 的图标内部小方块不旋转"）。
+	needsChildTransform := false
+	if childOwner := layer.Owner(); childOwner != nil {
+		if rb := asRenderBox(childOwner); rb != nil && info != nil && info.canvas != nil {
+			if st := rb.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
+				info.canvas.Save()
+				originX, originY := rb.X(), rb.Y()
+				if ox := resolveTransformOrigin(st.TransformOriginX, rb.Width()); ox >= 0 {
+					originX += ox
+				}
+				if oy := resolveTransformOrigin(st.TransformOriginY, rb.Height()); oy >= 0 {
+					originY += oy
+				}
+				info.canvas.Translate(originX, originY)
+				if applyTransformOpsSized(info.canvas, st.Transform, rb.Width(), rb.Height()) {
+					info.canvas.Translate(-originX, -originY)
+					needsChildTransform = true
+				} else {
+					info.canvas.Restore()
+				}
+			}
+		}
+	}
+
 	// Collect child layers and bucket them by stacking position.
 	var neg, auto, pos []*RenderLayer
 	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
@@ -674,6 +704,9 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	}
 	for _, child := range pos {
 		paintLayerTree(child, info)
+	}
+	if needsChildTransform {
+		info.canvas.Restore()
 	}
 	if scrollRestore {
 		info.SetDirtyCheckEnabled(scrollCheckWasEnabled)

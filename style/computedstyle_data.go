@@ -256,6 +256,12 @@ func DefaultNonInheritedData() *NonInheritedData {
 		StaticOpacity:      1.0,
 		ZIndex:             0,
 		Content:            "",
+		// CSS 规范默认 transform-origin 为 50% 50%（盒子中心）。此前为
+		// 零值 Length{}（Unit=""），renderpipeline 的 resolveTransformOrigin
+		// 返回 -1 → 退化为盒子左上角 → rotate/scale 绕左上角旋转导致
+		// 图形"飘"到右上角。
+		TransformOriginX: Length{Value: 50, Unit: "%"},
+		TransformOriginY: Length{Value: 50, Unit: "%"},
 		TransitionProperty: "all",
 		TransitionTimingFunction: "ease",
 		AnimationTimingFunction:  "linear",

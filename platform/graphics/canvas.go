@@ -806,25 +806,33 @@ func (c *Canvas) StrokePath(pts []Point, strokeWidth float64, col Color, cap, jo
 	for i := 1; i < len(pts); i++ {
 		path.LineTo(float32(pts[i].X), float32(pts[i].Y))
 	}
-	c.strokePaint.SetColor(colorToSkia(col))
-	c.strokePaint.SetStrokeWidth(float32(strokeWidth))
+	// ★ 每次新建 paint（不用长期复用的 c.strokePaint）：该成员在复杂
+	// 绘制序列（嵌套 Save/Clip/Transform）下可能残留 shader/filter 等
+	// 状态，导致 DrawPath 偏离当前 canvas 矩阵（transform:rotate 后
+	// 路径不旋转的根因之一）。新 paint 保证干净状态。
+	p := skia.NewPaint()
+	defer p.Release()
+	p.SetStyle(skia.PaintStyleStroke)
+	p.SetAntialias(true)
+	p.SetColor(colorToSkia(col))
+	p.SetStrokeWidth(float32(strokeWidth))
 	switch cap {
 	case "round":
-		c.strokePaint.SetStrokeCap(skia.StrokeCapRound)
+		p.SetStrokeCap(skia.StrokeCapRound)
 	case "square":
-		c.strokePaint.SetStrokeCap(skia.StrokeCapSquare)
+		p.SetStrokeCap(skia.StrokeCapSquare)
 	default:
-		c.strokePaint.SetStrokeCap(skia.StrokeCapButt)
+		p.SetStrokeCap(skia.StrokeCapButt)
 	}
 	switch join {
 	case "round":
-		c.strokePaint.SetStrokeJoin(skia.StrokeJoinRound)
+		p.SetStrokeJoin(skia.StrokeJoinRound)
 	case "bevel":
-		c.strokePaint.SetStrokeJoin(skia.StrokeJoinBevel)
+		p.SetStrokeJoin(skia.StrokeJoinBevel)
 	default:
-		c.strokePaint.SetStrokeJoin(skia.StrokeJoinMiter)
+		p.SetStrokeJoin(skia.StrokeJoinMiter)
 	}
-	c.canvas.DrawPath(path, c.strokePaint)
+	c.canvas.DrawPath(path, p)
 	c.invalidatePixels()
 }
 

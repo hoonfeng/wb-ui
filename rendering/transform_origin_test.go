@@ -3,48 +3,87 @@ package rendering
 import (
 	"testing"
 
+	"wb-ui/css"
+	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
 
-// TestTransformOrigin: resolveTransformOrigin + T(origin)·ops·T(-origin)
-// composition — scale(2) around left-top corner must extend right/down from
-// the corner, not around the center.
-func TestTransformOrigin(t *testing.T) {
-	// box at (10,10) size 40x20, origin left top
-	ox := resolveTransformOrigin(style.Length{Value: 0, Unit: "%"}, 40)
-	oy := resolveTransformOrigin(style.Length{Value: 0, Unit: "%"}, 20)
-	if ox != 0 || oy != 0 {
-		t.Fatalf("left top origin = (%v,%v), want (0,0)", ox, oy)
+// TestTransformOriginDefault: CSS 规范默认 transform-origin 为 50% 50%
+// （盒子中心）。此前 DefaultNonInheritedData 未设默认值 → Length{}（Unit=""）
+// → resolveTransformOrigin 返回 -1 → rotate 绕盒子左上角旋转 → 图形"飘"右上角。
+//
+// 验证：40x40 红方块放 (20,20)，transform:rotate(45deg) 且不写 transform-origin。
+// 修复后绕中心 (40,40) 旋转 → 中心不动、四角在菱形顶点 (40,11.7)/(11.7,40)/
+// (68.3,40)/(40,68.3)，原左上角 (20,20) 区域变背景。
+func TestTransformOriginDefault(t *testing.T) {
+	doc := dom.NewDocument()
+	htmlEl := dom.NewElement(doc, "html")
+	doc.AppendChild(htmlEl)
+	bodyEl := dom.NewElement(doc, "body")
+	htmlEl.AppendChild(bodyEl)
+
+	styleEl := dom.NewElement(doc, "style")
+	styleEl.SetTextContent(`
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1c2438; }
+.box { position:absolute; left:20px; top:20px; width:40px; height:40px; background:#ff0000; transform:rotate(45deg); }
+`)
+	htmlEl.AppendChild(styleEl)
+
+	box := dom.NewElement(doc, "div")
+	box.SetClassName("box")
+	bodyEl.AppendChild(box)
+
+	resolver := style.NewResolver()
+	sheet := css.NewCSSStyleSheet()
+	css.NewParser(styleEl.TextContent()).ParseStyleSheetInto(sheet)
+	resolver.AddStyleSheet(sheet)
+
+	rv := NewRenderTreeBuilder(resolver).Build(doc)
+	if rv == nil {
+		t.Fatal("RenderView is nil")
 	}
-	// percent center
-	ox = resolveTransformOrigin(style.Length{Value: 50, Unit: "%"}, 40)
-	if ox != 20 {
-		t.Fatalf("50%% of 40 = %v, want 20", ox)
+	rv.SetViewportSize(90, 90)
+	rv.Layout(nil)
+
+	canvas := graphics.NewCanvas(90, 90)
+	defer canvas.Release()
+	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 90, Height: 90})
+
+	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\transform_origin_test.png")
+
+	red := func(x, y int) bool {
+		c := canvas.PixelAt(x, y)
+		return int(c.R) > 150 && int(c.G) < 80 && int(c.B) < 80
 	}
-	// px
-	ox = resolveTransformOrigin(style.Length{Value: 10, Unit: "px"}, 40)
-	if ox != 10 {
-		t.Fatalf("10px = %v, want 10", ox)
-	}
-	// empty → -1 (caller falls back to center)
-	if v := resolveTransformOrigin(style.Length{}, 40); v != -1 {
-		t.Fatalf("empty = %v, want -1", v)
+	dark := func(x, y int) bool {
+		c := canvas.PixelAt(x, y)
+		return int(c.R) < 60 && int(c.G) < 80 && int(c.B) < 110
 	}
 
-	// Full pipeline: scale(2) around corner (10,10) of a 40x20 box paints
-	// (10,10)-(90,50). Points at (30,20) and (80,40) must be red; (50,50)
-	// (outside, below the box) must be white.
-	canvas := graphics.NewCanvas(120, 80)
-	defer canvas.Release()
-	canvas.Save()
-	canvas.Translate(10, 10)
-	applyTransformOps(canvas, "scale(2)")
-	canvas.Translate(-10, -10)
-	canvas.FillRect(10, 10, 40, 20, graphics.Color{R: 255, A: 255})
-	canvas.Restore()
-	for _, p := range [][2]int{{30, 20}, {80, 40}, {50, 50}, {85, 45}} {
-		px := canvas.PixelAt(p[0], p[1])
-		t.Logf("(%d,%d)=#%02x%02x%02x", p[0], p[1], px.R, px.G, px.B)
+	checks := []struct {
+		name string
+		x, y int
+		want bool // true=红(方块), false=背景
+	}{
+		{"中心不动(40,40)", 40, 40, true},
+		{"顶角(40,12)", 40, 12, true},
+		{"左角(12,40)", 12, 40, true},
+		{"右边界内侧(66,40)", 66, 40, true},
+		{"底边界内侧(40,66)", 40, 66, true},
+		{"菱形边中点(54,26)", 54, 26, true},
+		{"原左上角(20,20)已移走", 20, 20, false},
+		{"原右上角(60,20)已移走", 60, 20, false},
 	}
+	for _, c := range checks {
+		if c.want {
+			if !red(c.x, c.y) {
+				t.Errorf("%s (%d,%d): 期望红色(方块), 实际 %v", c.name, c.x, c.y, canvas.PixelAt(c.x, c.y))
+			}
+		} else if !dark(c.x, c.y) {
+			t.Errorf("%s (%d,%d): 期望背景深色, 实际 %v", c.name, c.x, c.y, canvas.PixelAt(c.x, c.y))
+		}
+	}
+	t.Log("默认 transform-origin 50% 50% 验证完成")
 }
