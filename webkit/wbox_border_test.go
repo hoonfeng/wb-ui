@@ -65,8 +65,66 @@ stage.innerHTML = h;
 	}
 }
 
-// TestOffBorderAlpha 验证 .wbox.off 的半透明边框色 rgba(74,128,232,.35)
-// 是否保留 alpha（渲染成淡蓝而非纯蓝）。
+// TestTitlebarButtons 验证标题栏 最大化/最小化/关闭 三按钮的图标渲染
+// （.i-max 用 background 实心块，检查 wb-ui 是否渲染 12px 级小元素）。
+func TestTitlebarButtons(t *testing.T) {
+	wv := NewWebView()
+	wv.Resize(900, 100)
+	wv.LoadHTML(`<html><head><style>
+body{margin:0;background:#131722}
+.titlebar{position:absolute;top:0;left:0;right:0;height:32px;background:#141926}
+.tb-btn{position:absolute;top:0;width:40px;height:32px}
+.tb-max{right:80px}.tb-min{right:40px}.tb-close{right:0}
+.i{position:absolute;display:block}
+.i-min{left:14px;top:15px;width:12px;height:2px;background:#c6d2f0}
+.i-max{left:12px;top:11px;width:12px;height:10px;background:#c6d2f0}
+.i-max2{left:15px;top:14px;width:12px;height:10px;background:#c6d2f0}
+</style></head><body>
+<div class="titlebar">
+  <div class="tb-btn tb-max"><div class="i i-max"></div><div class="i i-max2"></div></div>
+  <div class="tb-btn tb-min"><div class="i i-min"></div></div>
+  <div class="tb-btn tb-close"></div>
+</div>
+</body></html>`)
+	if mf := wv.MainFrame(); mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.RebuildRenderTree()
+			fr.SetNeedsLayout(true)
+		}
+	}
+	wv.EnsureLayout()
+	pix, err := wv.Render()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	// tb-max 图标应在 (832-844, 11-21)；tb-min 横线在 (794,16)
+	// （Windows 标准顺序：最小化 right:80 → x780，最大化 right:40 → x820）
+	pts := [][2]int{{838, 13}, {838, 17}, {840, 16}, {794, 16}}
+	for _, p := range pts {
+		i := (p[1]*900 + p[0]) * 4
+		r, g, b, a := pix[i], pix[i+1], pix[i+2], pix[i+3]
+		isLight := a > 100 && r > 150 && g > 150 && b > 150
+		t.Logf("pt (%d,%d) rgba=(%d,%d,%d,%d) isLight=%v", p[0], p[1], r, g, b, a, isLight)
+		if isLight && p[0] == 794 {
+			t.Logf("tb-min 横线渲染 OK")
+		}
+	}
+	// tb-max 图标（832-844, 11-21）应有亮色像素
+	found := false
+	for y := 11; y <= 21; y++ {
+		for x := 832; x <= 844; x++ {
+			i := (y*900 + x) * 4
+			if pix[i+3] > 100 && pix[i] > 150 && pix[i+1] > 150 && pix[i+2] > 150 {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("tb-max 图标 (832-844,11-21) 未渲染亮色像素")
+	}
+}
+
 func TestOffBorderAlpha(t *testing.T) {
 	wv := NewWebView()
 	wv.Resize(900, 640)

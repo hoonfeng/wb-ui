@@ -30,9 +30,15 @@ var OnStyleNodeAdded func(node dom.Node)
 // ViewportWidth / ViewportHeight 为 window.innerWidth/innerHeight 提供值
 // （webkit.WebView.Resize 同步）。CM6 的 visiblePixelRange 用它们计算可见
 // 像素视口，undefined 会产生 NaN → viewport 永不更新（滚动不重渲染行号）。
+// ★ 多 WebView 场景：ViewportSizeForInterpreter（webkit 注入）按解释器
+// 分派，优先返回所属 WebView 的实际视口——挂件 Resize 不再覆盖配置窗口
+// 的 innerWidth。
 var (
 	ViewportWidth  float64
 	ViewportHeight float64
+
+	// ViewportSizeForInterpreter 按 JS 解释器返回其所属 WebView 的视口尺寸。
+	ViewportSizeForInterpreter func(in *jsc.Interpreter) (w, h float64, ok bool)
 )
 
 // OnInlineStyleChanged is an optional callback invoked when an element's
@@ -327,11 +333,22 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// visiblePixelRange 用 Math.min(win.innerHeight, rect.bottom) 计算可见
 	// 像素视口——undefined 参与 Math.min 产出 NaN → viewport 永不更新 →
 	// 滚动后行号 gutter 不重渲染（用户「滚动时行号不绘制」的根因）。
-	// 值由 webkit.WebView.Resize 同步（bindings.ViewportWidth/Height）。
-	g.SetAccessor("innerWidth", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+	// 值由 webkit.WebView.Resize 同步（bindings.ViewportWidth/Height），
+	// 多 WebView 优先按解释器分派（ViewportSizeForInterpreter）。
+	g.SetAccessor("innerWidth", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if ViewportSizeForInterpreter != nil {
+			if w, _, ok := ViewportSizeForInterpreter(in); ok {
+				return jsc.NumberValue(w)
+			}
+		}
 		return jsc.NumberValue(ViewportWidth)
 	}), nil)
-	g.SetAccessor("innerHeight", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+	g.SetAccessor("innerHeight", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if ViewportSizeForInterpreter != nil {
+			if _, h, ok := ViewportSizeForInterpreter(in); ok {
+				return jsc.NumberValue(h)
+			}
+		}
 		return jsc.NumberValue(ViewportHeight)
 	}), nil)
 

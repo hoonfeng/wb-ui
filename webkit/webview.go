@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"wb-ui/bindings"
 	"wb-ui/bridge"
@@ -29,6 +30,240 @@ const (
 	DefaultWebViewWidth  = 800
 	DefaultWebViewHeight = 600
 )
+
+// ★ 多 WebView 绑定分派：bindings 包的几何/事件回调指针（GetElementBoxRect、
+// OnStyleNodeAdded、ViewportWidth 等）是包级全局，单 WebView 时代由每个
+// WebView 的 LoadHTML/injectRenderTreeBridge 直接赋值（后者覆盖前者）。
+// 多 WebView（如直播挂件助手：配置窗口 + N 个挂件离屏窗口）时，后 LoadHTML
+// 的 WebView（挂件重建）会把配置窗口的绑定覆盖掉 → 配置 JS 的
+// getBoundingClientRect 用挂件的 RenderView 查找元素 → 查不到返回 0 →
+// 画布合成位置全错（"部件跳到画布外上方"根因）。
+// 修复：每个 WebView 的绑定闭包存进自己的 wvBridge 表；bindings 包级指针
+// 改为分派器（按元素 OwnerDocument / 解释器 找到所属 WebView，调它的闭包）。
+// 单 WebView 行为与之前完全一致（注册表只有一个），多 WebView 各查各的。
+var (
+	webviewsMu      sync.RWMutex
+	webviews        = map[*WebView]bool{}
+	webviewBridges  = map[*WebView]*wvBridge{}
+	webviewInterps  = map[*jsc.Interpreter]*WebView{}
+	bridgeDispatch  sync.Once
+)
+
+// wvBridge 保存某个 WebView 自己的绑定闭包（injectRenderTreeBridge / LoadHTML
+// 注入时存入，分派器调用时按元素归属取出）。
+type wvBridge struct {
+	getElementBoxRect       func(el *dom.Element) (float64, float64, float64, float64)
+	getElementBoxRectFast   func(el *dom.Element) (float64, float64, float64, float64)
+	getElementScrollMetrics func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool)
+	getElementScrollOffset  func(el *dom.Element) (float64, float64)
+	setElementScrollOffset  func(el *dom.Element, x, y float64)
+	getTextBasePos          func(n dom.Node) (float64, float64, bool)
+	getElementComputedFont  func(el *dom.Element) (string, float64, int, string)
+	onStyleNodeAdded        func(n dom.Node)
+	onInlineStyleChanged    func(n dom.Node)
+	onClassChanged          func(el *dom.Element)
+	onNodeInserted          func(n dom.Node)
+	onNodeRemoved           func(n dom.Node)
+	mediaQueryCtx           func() *css.MediaQueryContext
+	iframeSrcChanged        func(el *dom.Element, src string)
+}
+
+func registerWebView(wv *WebView) {
+	webviewsMu.Lock()
+	webviews[wv] = true
+	webviewsMu.Unlock()
+}
+
+func wvBridgeOf(wv *WebView) *wvBridge {
+	webviewsMu.Lock()
+	defer webviewsMu.Unlock()
+	b := webviewBridges[wv]
+	if b == nil {
+		b = &wvBridge{}
+		webviewBridges[wv] = b
+	}
+	return b
+}
+
+// webViewForNode 返回包含该节点的 WebView（按 OwnerDocument 匹配）。
+func webViewForNode(n dom.Node) *WebView {
+	if n == nil {
+		return nil
+	}
+	doc := n.OwnerDocument()
+	if doc == nil {
+		return nil
+	}
+	webviewsMu.RLock()
+	defer webviewsMu.RUnlock()
+	for wv := range webviews {
+		if wv.mainFrame != nil && wv.mainFrame.Document() == doc {
+			return wv
+		}
+	}
+	return nil
+}
+
+// webViewForInterpreter 返回拥有该 JS 解释器的 WebView。
+func webViewForInterpreter(in *jsc.Interpreter) *WebView {
+	if in == nil {
+		return nil
+	}
+	webviewsMu.RLock()
+	defer webviewsMu.RUnlock()
+	return webviewInterps[in]
+}
+
+// installBridgeDispatch 安装分派器（只装一次）：bindings 包级指针指向
+// 分派闭包，按元素/解释器归属路由到对应 WebView 的 wvBridge 闭包。
+func installBridgeDispatch() {
+	bridgeDispatch.Do(func() {
+		bindings.GetElementBoxRect = func(el *dom.Element) (float64, float64, float64, float64) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return 0, 0, 0, 0
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getElementBoxRect != nil {
+				return b.getElementBoxRect(el)
+			}
+			return 0, 0, 0, 0
+		}
+		bindings.GetElementBoxRectFast = func(el *dom.Element) (float64, float64, float64, float64) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return 0, 0, 0, 0
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getElementBoxRectFast != nil {
+				return b.getElementBoxRectFast(el)
+			}
+			return 0, 0, 0, 0
+		}
+		bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return 0, 0, 0, 0, false
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getElementScrollMetrics != nil {
+				return b.getElementScrollMetrics(el)
+			}
+			return 0, 0, 0, 0, false
+		}
+		bindings.GetElementScrollOffset = func(el *dom.Element) (float64, float64) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return 0, 0
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getElementScrollOffset != nil {
+				return b.getElementScrollOffset(el)
+			}
+			return 0, 0
+		}
+		bindings.SetElementScrollOffset = func(el *dom.Element, x, y float64) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.setElementScrollOffset != nil {
+				b.setElementScrollOffset(el, x, y)
+			}
+		}
+		bindings.GetTextBasePos = func(n dom.Node) (float64, float64, bool) {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return 0, 0, false
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getTextBasePos != nil {
+				return b.getTextBasePos(n)
+			}
+			return 0, 0, false
+		}
+		bindings.GetElementComputedFont = func(el *dom.Element) (string, float64, int, string) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return "sans-serif", 14, 400, "normal"
+			}
+			if b := wvBridgeOf(wv); b != nil && b.getElementComputedFont != nil {
+				return b.getElementComputedFont(el)
+			}
+			return "sans-serif", 14, 400, "normal"
+		}
+		bindings.OnStyleNodeAdded = func(n dom.Node) {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.onStyleNodeAdded != nil {
+				b.onStyleNodeAdded(n)
+			}
+		}
+		bindings.OnInlineStyleChanged = func(n dom.Node) {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.onInlineStyleChanged != nil {
+				b.onInlineStyleChanged(n)
+			}
+		}
+		bindings.OnClassChanged = func(el *dom.Element) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.onClassChanged != nil {
+				b.onClassChanged(el)
+			}
+		}
+		bindings.OnNodeInserted = func(n dom.Node) {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.onNodeInserted != nil {
+				b.onNodeInserted(n)
+			}
+		}
+		bindings.OnNodeRemoved = func(n dom.Node) {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.onNodeRemoved != nil {
+				b.onNodeRemoved(n)
+			}
+		}
+		bindings.MediaQueryContextProvider = func() *css.MediaQueryContext {
+			// 无元素上下文：由最近一次设置 mediaQueryCtx 的 WebView 提供。
+			// 多 WebView 场景 matchMedia 语义不精确（少见），保持单值兜底。
+			webviewsMu.RLock()
+			defer webviewsMu.RUnlock()
+			for wv := range webviews {
+				if b := webviewBridges[wv]; b != nil && b.mediaQueryCtx != nil {
+					return b.mediaQueryCtx()
+				}
+			}
+			return nil
+		}
+		bindings.IFrameSrcChanged = func(el *dom.Element, src string) {
+			wv := webViewForNode(el)
+			if wv == nil {
+				return
+			}
+			if b := wvBridgeOf(wv); b != nil && b.iframeSrcChanged != nil {
+				b.iframeSrcChanged(el, src)
+			}
+		}
+		// window.innerWidth/innerHeight 按解释器归属分派（挂件 Resize
+		// 不再覆盖配置窗口的视口尺寸）。
+		bindings.ViewportSizeForInterpreter = func(in *jsc.Interpreter) (float64, float64, bool) {
+			wv := webViewForInterpreter(in)
+			if wv == nil {
+				return 0, 0, false
+			}
+			return float64(wv.width), float64(wv.height), true
+		}
+	})
+}
 
 type WebView struct {
 	page          *page.Page
@@ -105,6 +340,7 @@ func NewWebView() *WebView {
 		page: p, settings: settings,
 		width: DefaultWebViewWidth, height: DefaultWebViewHeight,
 	}
+	registerWebView(wv)
 	wv.mainFrame = NewWebFrame(wv, p.MainFrame())
 	if mf := p.MainFrame(); mf != nil {
 		mf.StyleSheetLoader = func(href string) (string, error) {
@@ -138,7 +374,8 @@ func NewWebView() *WebView {
 		return f
 	}
 	// ★ iframe src 变化（JS 侧 el.src = x / setAttribute）→ 重载子文档。
-	bindings.IFrameSrcChanged = wv.handleIFrameSrcChanged
+	installBridgeDispatch()
+	wvBridgeOf(wv).iframeSrcChanged = wv.handleIFrameSrcChanged
 	// ★ iframe 滚动容器查找：给定子文档 Document 反查承载它的子 Frame。
 	rendering.IFrameContaining = func(doc *dom.Document) rendering.IFrameSubdocument {
 		if doc == nil {
@@ -279,7 +516,8 @@ func (wv *WebView) LoadHTML(src string) error {
 	if wv.jsInterpreter != nil && wv.mainFrame.Document() != nil {
 		// matchMedia 需要真实视口上下文（尺寸随 wv 变化、颜色方案随
 		// SetPrefersColorScheme 设置；指针能力暂用默认值）。
-		bindings.MediaQueryContextProvider = func() *css.MediaQueryContext {
+		installBridgeDispatch()
+		wvBridgeOf(wv).mediaQueryCtx = func() *css.MediaQueryContext {
 			w, h := wv.width, wv.height
 			if w <= 0 {
 				w = DefaultWebViewWidth
@@ -309,7 +547,7 @@ func (wv *WebView) LoadHTML(src string) error {
 		wv.injectRenderTreeBridge()
 		// Set up callback for dynamic <style> injection (Vue scoped CSS).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
-		bindings.OnStyleNodeAdded = func(n dom.Node) {
+		wvBridgeOf(wv).onStyleNodeAdded = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
 				fr.MarkRenderTreeDirty()
 				fr.SetNeedsLayout(true)
@@ -323,7 +561,7 @@ func (wv *WebView) LoadHTML(src string) error {
 		//   此前无条件 MarkRenderTreeDirty → 每帧 RebuildRenderTree 全量
 		//   重建（复杂页面 30ms+）→ 拖拽卡顿/窗口无响应（「频繁无响应」
 		//   根因）。结构属性（display/position/float/clear）变化才回退全量。
-		bindings.OnInlineStyleChanged = func(n dom.Node) {
+		wvBridgeOf(wv).onInlineStyleChanged = func(n dom.Node) {
 			fr := wv.mainFrame.Frame()
 			if fr == nil {
 				return
@@ -340,7 +578,7 @@ func (wv *WebView) LoadHTML(src string) error {
 		// 选择器匹配（cm-focused 加在 cm-editor 上决定 .cm-cursor 的
 		// display:block）——必须清 resolver 样式缓存（否则后代 ResolveElement
 		// 命中旧缓存 display:none → 渲染树跳过光标）+ 全量重建渲染树。
-		bindings.OnClassChanged = func(el *dom.Element) {
+		wvBridgeOf(wv).onClassChanged = func(el *dom.Element) {
 			fr := wv.mainFrame.Frame()
 			if fr == nil {
 				return
@@ -353,13 +591,13 @@ func (wv *WebView) LoadHTML(src string) error {
 		}
 		// Set up callbacks for DOM mutations (appendChild / removeChild / etc.).
 		// Uses dirty-flag batching: the rebuild is deferred to the next layout.
-		bindings.OnNodeInserted = func(n dom.Node) {
+		wvBridgeOf(wv).onNodeInserted = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
 				fr.MarkRenderTreeDirty()
 				fr.SetNeedsLayout(true)
 			}
 		}
-		bindings.OnNodeRemoved = func(n dom.Node) {
+		wvBridgeOf(wv).onNodeRemoved = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
 				fr.MarkRenderTreeDirty()
 				fr.SetNeedsLayout(true)
@@ -571,9 +809,11 @@ func (wv *WebView) Resize(width, height int) {
 	if width < 0 { width = 0 }
 	if height < 0 { height = 0 }
 	wv.width, wv.height = width, height
-	// ★ 同步 window.innerWidth/innerHeight（CM6 visiblePixelRange 依赖；
-	// undefined 会让 Math.min(win.innerHeight,…) 产生 NaN → viewport 永不
-	// 更新 → 滚动后行号 gutter 不重渲染）
+	// ★ window.innerWidth/innerHeight（CM6 visiblePixelRange 依赖；undefined
+	// 会让 Math.min(win.innerHeight,…) 产生 NaN → viewport 永不更新 → 滚动
+	// 后行号 gutter 不重渲染）。保留 ViewportWidth 兜底值（分派器
+	// ViewportSizeForInterpreter 优先按解释器返回本 WebView 尺寸，多
+	// WebView 场景挂件 Resize 不再污染配置窗口的 innerWidth）。
 	bindings.ViewportWidth = float64(width)
 	bindings.ViewportHeight = float64(height)
 	if view := wv.page.MainFrame().View(); view != nil {
@@ -596,7 +836,8 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 		bindings.RegisterDOMBindings(wv.jsInterpreter, doc)
 		wv.injectRenderTreeBridge()
 		// Ensure callback for dynamic <style> injection.
-		bindings.OnStyleNodeAdded = func(n dom.Node) {
+		installBridgeDispatch()
+		wvBridgeOf(wv).onStyleNodeAdded = func(n dom.Node) {
 			if fr := wv.mainFrame.Frame(); fr != nil {
 				fr.RebuildRenderTree()
 			}
@@ -708,6 +949,11 @@ func (wv *WebView) ResetConsole() {
 func (wv *WebView) ensureJSRuntime() {
 	if wv.jsInterpreter != nil { return }
 	wv.jsInterpreter = jsc.NewInterpreter()
+	// ★ 解释器注册表：window.innerWidth 分派（ViewportSizeForInterpreter）
+	// 按解释器归属查 WebView 视口尺寸（多 WebView 不被挂件 Resize 覆盖）。
+	webviewsMu.Lock()
+	webviewInterps[wv.jsInterpreter] = wv
+	webviewsMu.Unlock()
 	wv.jsLogger = &jsc.BufferLogger{}
 	wv.jsInterpreter.SetupGlobal(wv.jsLogger)
 	// Create event loop (needed by setTimeout/requestAnimationFrame).
@@ -776,14 +1022,15 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		return fn(box)
 	}
-	bindings.GetElementScrollOffset = func(el *dom.Element) (float64, float64) {
+	installBridgeDispatch()
+	wvBridgeOf(wv).getElementScrollOffset = func(el *dom.Element) (float64, float64) {
 		return wrapBox(el, func(box *rendering.RenderBox) (float64, float64) {
 			if rv := wv.RenderView(); rv != nil {
 				return rv.BoxScrollOffset(box)			}
 			return 0, 0
 		})
 	}
-	bindings.SetElementScrollOffset = func(el *dom.Element, x, y float64) {
+	wvBridgeOf(wv).setElementScrollOffset = func(el *dom.Element, x, y float64) {
 		forceLayout()
 		rv := wv.RenderView()
 		box := func() *rendering.RenderBox {
@@ -833,7 +1080,8 @@ func (wv *WebView) injectRenderTreeBridge() {
 			el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
 		}
 	}
-	bindings.GetElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
+	installBridgeDispatch()
+	wvBridgeOf(wv).getElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
 		forceLayout()
 		rv := wv.RenderView()
 		if rv == nil || el == nil {
@@ -870,7 +1118,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// 频繁 dirty，若每次强制全量 rebuild（~22ms）→ 测量-布局风暴。
 	bindings.GetElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
 		rv := wv.RenderView()
-		if rv == nil || el == nil {
+	wvBridgeOf(wv).getElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
 			return 0, 0, 0, 0
 		}
 		box := rv.FindRenderBoxForNode(el)
@@ -908,7 +1156,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// 容器）的 Range.getClientRects 子区间测量：父 box left = 行首，漏掉
 	// 该节点前面兄弟内容宽度 →「空格多的行」posAtCoords 错乱。文本节点
 	// 的 RenderText segment.X 已含行内全部前缀（等于浏览器 Range 起始）。
-	bindings.GetTextBasePos = func(n dom.Node) (float64, float64, bool) {
+	wvBridgeOf(wv).getTextBasePos = func(n dom.Node) (float64, float64, bool) {
 		rv := wv.RenderView()
 		if rv == nil || n == nil {
 			return 0, 0, false
@@ -922,7 +1170,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		return 0, 0, false
 	}
-	bindings.GetElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
+	wvBridgeOf(wv).getElementBoxRect = func(el *dom.Element) (left, top, width, height float64) {
 		forceLayout()
 		rv := wv.RenderView()
 		if rv == nil || el == nil {
@@ -1095,7 +1343,8 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
 	// 的 charWidth/lineHeight 探测；缺 createRange/字体时测量抛异常，
 	// HeightOracle 停留默认 14 → 行号栏按 14px/行步进与内容 18.2px 错位）。
-	bindings.GetElementComputedFont = func(el *dom.Element) (string, float64, int, string) {
+	installBridgeDispatch()
+	wvBridgeOf(wv).getElementComputedFont = func(el *dom.Element) (string, float64, int, string) {
 		if el == nil {
 			return "sans-serif", 14, 400, "normal"
 		}
