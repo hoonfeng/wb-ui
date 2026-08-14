@@ -97,7 +97,7 @@ func (p *htmlParser) parse(parent Node) {
 			}
 			if el, selfClose, ok := p.parseOpenTag(); ok {
 				parent.AppendChild(el)
-				if !selfClose {
+				if !selfClose && !isVoidElement(el) {
 					p.parse(el)
 					p.expectCloseTag(el.tag)
 				}
@@ -120,6 +120,21 @@ func (p *htmlParser) parse(parent Node) {
 
 func (p *htmlParser) startsWith(s string) bool {
 	return strings.HasPrefix(p.src[p.pos:], s)
+}
+
+// voidElements 是 HTML5 空元素集合（无内容、无闭合标签）。
+// 解析时遇到 void 元素应视为立即自闭合：不递归解析子节点、不期待
+// 闭合标签。否则 <input type="text"> 这类无 "/>" 的标签会把后续所有
+// HTML 错误地当作其子节点嵌套（replaced 元素子节点被忽略 → 内容丢失、
+// 兄弟节点结构错乱 → innerHTML 注入的布局整体崩坏）。
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true, "embed": true,
+	"hr": true, "img": true, "input": true, "link": true, "meta": true,
+	"param": true, "source": true, "track": true, "wbr": true,
+}
+
+func isVoidElement(el *Element) bool {
+	return voidElements[strings.ToLower(el.LocalName())]
 }
 
 // parseOpenTag parses a leading "<tag ...>" starting at p.pos (which points at '<').
