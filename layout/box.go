@@ -472,6 +472,13 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		anonStyle.MaxWidth = style.Length{}
 		anonStyle.MinHeight = style.Length{}
 		anonStyle.MaxHeight = style.Length{}
+		// ★ 匿名 inline wrapper 不得继承父的显式宽高：父 width:224px
+		// （如 absolute 弹窗 cp-panel）会让 wrapper 224px 宽 → 内部
+		// input/textarea 的 width:100% 按 wrapper（224）而非父内容区
+		// （198）计算 → 输入框超出面板右边界（欢迎语编辑弹窗 textarea
+		// 溢出根因）。wrapper 应为 width/height:auto → 撑满父内容区。
+		anonStyle.Width = style.Length{}
+		anonStyle.Height = style.Length{}
 		wrap.style = &anonStyle
 		for _, k := range kids {
 			switch c := k.(type) {
