@@ -44,7 +44,19 @@ type Element struct {
 	// It is NOT part of the child list: the shadow tree replaces the light-DOM
 	// children for rendering/layout (see FirstComposedChild).
 	shadowRoot *ShadowRoot
+
+	// onClickJSListener is the listener installed by el.onclick = fn (bindings
+	// layer wraps the JS function as an EventListener and registers it for
+	// "click"). Stored here so a later assignment can remove the old one —
+	// dom.RemoveEventListener matches by Go listener identity.
+	onClickJSListener EventListener
 }
+
+// SetOnClickJSListener / GetOnClickJSListener store the listener installed by the
+// el.onclick IDL attribute (see bindings/lazyelement.go setOnClick). Not part of the
+// DOM spec's Element interface — an internal bridge for the JS wrapper.
+func (e *Element) SetOnClickJSListener(l EventListener) { e.onClickJSListener = l }
+func (e *Element) GetOnClickJSListener() EventListener  { return e.onClickJSListener }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
 // The tag is stored verbatim; TagName returns the uppercased form for HTML and

@@ -33,6 +33,11 @@ type lazyElemProps struct {
 	interp  *jsc.Interpreter
 	cached  map[string]jsc.JSValue // 已物化的 data 属性（含覆写前的原始值）
 	expando map[string]jsc.JSValue // JS 侧自定义属性/方法覆写
+
+	// onclickFn 是用户通过 el.onclick = fn 设置的处理器（IDL 事件处理器
+	// 属性，与内联 onclick attribute 联动：getter 优先返回它，其次返回
+	// 基于 attribute 代码的包装函数）。
+	onclickFn jsc.JSValue
 }
 
 // elemAccessorProps：accessor（活值）属性名集合——每次读取重新求值，
@@ -51,6 +56,7 @@ var elemAccessorProps = map[string]bool{
 	"tagName": true, "nodeName": true, "nodeType": true, "shadowRoot": true, "nodeValue": true,
 	"id": true, "className": true, "title": true, "src": true,
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
+	"onclick": true,
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
@@ -59,6 +65,10 @@ func (p *lazyElemProps) Live(key string) bool { return elemAccessorProps[key] }
 func (p *lazyElemProps) Get(key string) jsc.JSValue {
 	if key == "" {
 		return jsc.Undefined()
+	}
+	// onclick：IDL 事件处理器属性（live 求值，先于 expando）。
+	if key == "onclick" {
+		return p.getOnClick()
 	}
 	if v, ok := p.expando[key]; ok {
 		return v
@@ -84,6 +94,11 @@ func (p *lazyElemProps) Set(key string, v jsc.JSValue) bool {
 	if key == "" {
 		return false
 	}
+	// onclick：IDL 事件处理器属性（live 求值，先于 expando）。
+	if key == "onclick" {
+		p.setOnClick(v)
+		return true
+	}
 	// accessor 属性走 setter；getter-only 静默忽略（浏览器语义）。
 	if _, acc, ok := installElementProperty(p.interp, p.el, key); ok && acc != nil {
 		if acc.set != nil {
@@ -103,6 +118,56 @@ func (p *lazyElemProps) Has(key string) bool {
 	}
 	_, ok := p.expando[key]
 	return ok
+}
+
+// getOnClick 返回 onclick 处理器（浏览器 IDL 事件处理器属性语义）：
+//   - 用户通过 el.onclick = fn 设置过 → 返回该函数（可 el.onclick() 调用）
+//   - 否则元素带内联 onclick attribute → 返回基于属性代码的包装函数
+//     （调用时经 RunJS 执行属性代码，模拟浏览器「onclick 属性代码即处理器」）
+//   - 都没有 → null
+func (p *lazyElemProps) getOnClick() jsc.JSValue {
+	if !p.onclickFn.IsUndefined() {
+		return p.onclickFn
+	}
+	code := p.el.GetAttribute("onclick")
+	if code == "" {
+		return jsc.Null()
+	}
+	interp := p.interp
+	return jsc.FunctionValue(jsc.NewNativeFunction("onclick", func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		if interp == nil {
+			return jsc.Undefined()
+		}
+		v, err := interp.RunJS(code)
+		if err != nil {
+			return jsc.Undefined()
+		}
+		return v
+	}, 0))
+}
+
+// setOnClick 设置 onclick 处理器（浏览器 IDL 语义）：
+//   - 函数 → 注册为 click 监听器（替换旧的 el.onclick 处理器）
+//   - null / undefined → 移除已注册的处理器
+//   - 其他值 → 字符串反射为 onclick attribute（host.go/configwin 的
+//     HitTest("onclick") 读 attribute 执行，保持两种方式一致）
+func (p *lazyElemProps) setOnClick(v jsc.JSValue) {
+	if old := p.el.GetOnClickJSListener(); old != nil {
+		p.el.RemoveEventListener("click", old, false)
+		p.el.SetOnClickJSListener(nil)
+	}
+	p.onclickFn = jsc.JSValue{}
+	if v.IsNull() || v.IsUndefined() {
+		return
+	}
+	if v.IsFunction() {
+		p.onclickFn = v
+		l := &jsListener{interp: p.interp, fn: v}
+		p.el.SetOnClickJSListener(l)
+		p.el.AddEventListener("click", l, false)
+		return
+	}
+	p.el.SetAttribute("onclick", v.ToString())
 }
 
 func (p *lazyElemProps) Delete(key string) bool {
@@ -138,6 +203,7 @@ var (
 		"ownerDocument",
 		"scrollTop", "scrollLeft", "scrollHeight", "scrollWidth",
 		"clientHeight", "clientWidth", "offsetHeight", "offsetWidth", "offsetTop", "offsetLeft",
+		"onclick",
 		"getBoundingClientRect", "getClientRects", "scrollIntoView",
 		"remove", "focus", "blur",
 		"value", "checked", "type", "disabled",
