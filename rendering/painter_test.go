@@ -178,6 +178,60 @@ func TestPaintBorderZeroSizeTriangle(t *testing.T) {
 }
 
 
+// TestPaintBorderZeroSizeTriangleBottom verifies the bottom-side variant of the
+// CSS border-triangle trick (width:0;height:0 + border-bottom solid + transparent
+// left/right — used by the config window image widget icon .ic-image .mnt for the
+// mountain peak). Previously the bottom border was painted as a full-width
+// paintBorderSide rect; for a zero-content box y+h-bottomW == y made that rect
+// span the entire border box, rendering a 10x8 rectangle instead of a triangle.
+// The bottom border must degenerate to a quad whose outer edge is the full
+// bottom span and whose inner edge converges on the left/right border inner
+// corners (a triangle pointing up).
+func TestPaintBorderZeroSizeTriangleBottom(t *testing.T) {
+	canvas, info := newPaintCanvas(t)
+	st := style.NewComputedStyle()
+	red := style.Color{R: 0xFF, G: 0x44, B: 0x44, A: 0xFF}
+	trans := style.Color{A: 0}
+	st.BorderLeftWidth = style.Length{Value: 5, Unit: "px"}
+	st.BorderLeftColor = trans
+	st.BorderLeftStyle = "solid"
+	st.BorderLeftColorSet = true
+	st.BorderRightWidth = style.Length{Value: 5, Unit: "px"}
+	st.BorderRightColor = trans
+	st.BorderRightStyle = "solid"
+	st.BorderRightColorSet = true
+	st.BorderBottomWidth = style.Length{Value: 8, Unit: "px"}
+	st.BorderBottomColor = red
+	st.BorderBottomStyle = "solid"
+	st.BorderBottomColorSet = true
+	// Border box 10x8 at (4,4): content 0x0, bottom 8 + left/right 5.
+	box := newBoxWithStyle(st, 4, 4, 10, 8)
+
+	PaintBorder(box, info)
+
+	r := graphics.Color{R: 0xFF, G: 0x44, B: 0x44, A: 0xFF}
+	// Triangle interior: base (4,12)-(14,12), apex at (9,4) pointing up.
+	if got := canvas.PixelAt(7, 10); got != r {
+		t.Fatalf("triangle interior pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(9, 6); got != r {
+		t.Fatalf("triangle upper interior pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(9, 11); got != r {
+		t.Fatalf("triangle base-center pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(5, 11); got != r {
+		t.Fatalf("triangle base-left pixel = %+v, want %+v", got, r)
+	}
+	// Outside the triangle: above the apex and top-left corner stay transparent.
+	if got := canvas.PixelAt(9, 3); got != (graphics.Color{}) {
+		t.Fatalf("above-apex pixel = %+v, want transparent", got)
+	}
+	if got := canvas.PixelAt(5, 4); got != (graphics.Color{}) {
+		t.Fatalf("top-left corner pixel = %+v, want transparent", got)
+	}
+}
+
 // TestPaintText verifies PaintText draws the text color within a laid-out segment.
 // The test scans the segment's bounding region for non-transparent pixels, since Skia's
 // real font metrics place glyphs below the box top (baseline = top + ascent).

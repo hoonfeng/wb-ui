@@ -551,10 +551,22 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	// Top and bottom span the full width, including the corners.
 	radius := lengthValue(st.BorderRadius)
+	// content 尺寸为 0（w == left+right 且 h == top+bottom，即纯 border
+	// box——CSS 三角形技巧）时，top/bottom 也走 FillPath 四边形退化
+	// （与 left/right 对称）：外缘全宽、内缘汇聚到左右边框交点。
+	// 此前 top/bottom 用 paintBorderSide 全宽矩形，0 尺寸时
+	// y+h-bottomW == y 导致 bottom 矩形铺满整个 border box → 画成
+	// 矩形而非三角形（图片部件 .ic-image .mnt 山形被渲染为矩形）。
+	zeroContent := w <= leftW+rightW+0.5 && h <= topW+bottomW+0.5
 	if topW > 0 && st.BorderTopStyle != "none" {
 		c := ApplyOpacityToColor(toGraphicsColor(btC), op)
 		if radius > 0 {
 			paintRoundedBorderSide(info.canvas, "top", x, y, w, h, topW, radius, c)
+		} else if zeroContent {
+			info.canvas.FillPath([]graphics.Point{
+				{X: x, Y: y}, {X: x + w, Y: y},
+				{X: x + w - rightW, Y: y + topW}, {X: x + leftW, Y: y + topW},
+			}, c, false)
 		} else {
 			paintBorderSide(info.canvas, x, y, w, topW, c, st.BorderTopStyle)
 		}
@@ -563,6 +575,11 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		c := ApplyOpacityToColor(toGraphicsColor(bbC), op)
 		if radius > 0 {
 			paintRoundedBorderSide(info.canvas, "bottom", x, y, w, h, bottomW, radius, c)
+		} else if zeroContent {
+			info.canvas.FillPath([]graphics.Point{
+				{X: x, Y: y + h}, {X: x + w, Y: y + h},
+				{X: x + w - rightW, Y: y + h - bottomW}, {X: x + leftW, Y: y + h - bottomW},
+			}, c, false)
 		} else {
 			paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, c, st.BorderBottomStyle)
 		}
@@ -610,41 +627,44 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 				}, rightCol, false)
 			}
 		}
-		// 重画 top/bottom（仅实色）：覆盖四边形的角部区域，之后按
-		// 对角线恢复 left/right 色（角拼接）。
-		topPainted := false
-		bottomPainted := false
-		if topW > 0 && st.BorderTopStyle != "none" && topCol.A > 0 {
-			if radius > 0 {
-				paintRoundedBorderSide(info.canvas, "top", x, y, w, h, topW, radius, topCol)
-			} else {
-				paintBorderSide(info.canvas, x, y, w, topW, topCol, st.BorderTopStyle)
+		// 重画 top/bottom + 恢复角部（仅非 zeroContent：top/bottom 矩形条
+		// 覆盖角部后需按对角线修正角拼接；纯 border box 的 top/bottom
+		// 三角形已在初始绘制阶段用 FillPath 精确覆盖自身区域，无需重画
+		// 与恢复）。left 四边形内 = 拼接对角线「下方」位于上边、上方位于
+		// 下边，故左上用 below、左下用 aboveRev（与普通元素的
+		// fillBelowRev 方向相反——普通元素 left 边框是中间段矩形，角部在
+		// 对角线下方）。
+		if !zeroContent {
+			topPainted := false
+			bottomPainted := false
+			if topW > 0 && st.BorderTopStyle != "none" && topCol.A > 0 {
+				if radius > 0 {
+					paintRoundedBorderSide(info.canvas, "top", x, y, w, h, topW, radius, topCol)
+				} else {
+					paintBorderSide(info.canvas, x, y, w, topW, topCol, st.BorderTopStyle)
+				}
+				topPainted = true
 			}
-			topPainted = true
-		}
-		if bottomW > 0 && st.BorderBottomStyle != "none" && bottomCol.A > 0 {
-			if radius > 0 {
-				paintRoundedBorderSide(info.canvas, "bottom", x, y, w, h, bottomW, radius, bottomCol)
-			} else {
-				paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, bottomCol, st.BorderBottomStyle)
+			if bottomW > 0 && st.BorderBottomStyle != "none" && bottomCol.A > 0 {
+				if radius > 0 {
+					paintRoundedBorderSide(info.canvas, "bottom", x, y, w, h, bottomW, radius, bottomCol)
+				} else {
+					paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, bottomCol, st.BorderBottomStyle)
+				}
+				bottomPainted = true
 			}
-			bottomPainted = true
-		}
-		// 恢复角部：top 覆盖左上/右上，bottom 覆盖左下/右下。
-		// left 四边形内 = 拼接对角线「下方」位于上边、上方位于下边，
-		// 故左上用 below、左下用 aboveRev（与普通元素的 fillBelowRev 方向
-		// 相反——普通元素 left 边框是中间段矩形，角部在对角线下方）。
-		if topPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(btC, blC) && radius <= 0 {
-			fillDiagBelow(info.canvas, x, y, leftW, topW, leftCol)
-		}
-		if topPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(btC, brC) && radius <= 0 {
-			fillDiagBelowRev(info.canvas, x+w-rightW, y, rightW, topW, rightCol)
-		}
-		if bottomPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(bbC, blC) && radius <= 0 {
-			fillDiagAboveRev(info.canvas, x, y+h-bottomW, leftW, bottomW, leftCol)
-		}
-		if bottomPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(bbC, brC) && radius <= 0 {
-			fillDiagAbove(info.canvas, x+w-rightW, y+h-bottomW, rightW, bottomW, rightCol)
+			if topPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(btC, blC) && radius <= 0 {
+				fillDiagBelow(info.canvas, x, y, leftW, topW, leftCol)
+			}
+			if topPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(btC, brC) && radius <= 0 {
+				fillDiagBelowRev(info.canvas, x+w-rightW, y, rightW, topW, rightCol)
+			}
+			if bottomPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(bbC, blC) && radius <= 0 {
+				fillDiagAboveRev(info.canvas, x, y+h-bottomW, leftW, bottomW, leftCol)
+			}
+			if bottomPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(bbC, brC) && radius <= 0 {
+				fillDiagAbove(info.canvas, x+w-rightW, y+h-bottomW, rightW, bottomW, rightCol)
+			}
 		}
 		return
 	}
