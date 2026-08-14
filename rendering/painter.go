@@ -572,6 +572,80 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	midY := y + topW
 	midH := h - topW - bottomW
 	if midH <= 0 {
+		// ★ 0 content 高元素（width:0;height:0 + border 的 CSS 三角形
+		// 技巧）：box.Height() 是 border box 高，midH = 高-上-下 ≤ 0
+		// 直接 return 会让 left/right 边框整体消失（部件面板视频图标
+		// .tri 播放三角缺失）。
+		// 正确渲染：left/right 的可见形状是四边形——外缘沿 border box
+		// 全高、内缘汇聚到上下边框的交点：(x,y)→(x,y+h)→(x+leftW,
+		// y+h-bottomW)→(x+leftW,y+topW)。top/bottom 同高时退化为等腰
+		// 三角形（标准 CSS 三角形技巧）。
+		// 四边形已包含角拼接斜边（上边 = 左上拼接对角线、下边 = 左下
+		// 拼接对角线）。因此不能用 paintBorderCorners（它的 fillBelowRev
+		// 画对角线「下方」，在 0 尺寸几何中落在四边形外，会把底部填平、
+		// 制造多余小三角）。top/bottom 为实色时才需要按对角线把角部
+		// left/right 色恢复回去（top 覆盖左上/右上、bottom 覆盖左下/右下），
+		// transparent 边不画也不恢复。
+		leftCol := ApplyOpacityToColor(toGraphicsColor(blC), op)
+		rightCol := ApplyOpacityToColor(toGraphicsColor(brC), op)
+		topCol := ApplyOpacityToColor(toGraphicsColor(btC), op)
+		bottomCol := ApplyOpacityToColor(toGraphicsColor(bbC), op)
+		if leftW > 0 && st.BorderLeftStyle != "none" {
+			if radius > 0 {
+				paintRoundedBorderSide(info.canvas, "left", x, y, w, h, leftW, radius, leftCol)
+			} else {
+				info.canvas.FillPath([]graphics.Point{
+					{X: x, Y: y}, {X: x, Y: y + h},
+					{X: x + leftW, Y: y + h - bottomW}, {X: x + leftW, Y: y + topW},
+				}, leftCol, false)
+			}
+		}
+		if rightW > 0 && st.BorderRightStyle != "none" {
+			if radius > 0 {
+				paintRoundedBorderSide(info.canvas, "right", x, y, w, h, rightW, radius, rightCol)
+			} else {
+				info.canvas.FillPath([]graphics.Point{
+					{X: x + w - rightW, Y: y + topW}, {X: x + w - rightW, Y: y + h - bottomW},
+					{X: x + w, Y: y + h}, {X: x + w, Y: y},
+				}, rightCol, false)
+			}
+		}
+		// 重画 top/bottom（仅实色）：覆盖四边形的角部区域，之后按
+		// 对角线恢复 left/right 色（角拼接）。
+		topPainted := false
+		bottomPainted := false
+		if topW > 0 && st.BorderTopStyle != "none" && topCol.A > 0 {
+			if radius > 0 {
+				paintRoundedBorderSide(info.canvas, "top", x, y, w, h, topW, radius, topCol)
+			} else {
+				paintBorderSide(info.canvas, x, y, w, topW, topCol, st.BorderTopStyle)
+			}
+			topPainted = true
+		}
+		if bottomW > 0 && st.BorderBottomStyle != "none" && bottomCol.A > 0 {
+			if radius > 0 {
+				paintRoundedBorderSide(info.canvas, "bottom", x, y, w, h, bottomW, radius, bottomCol)
+			} else {
+				paintBorderSide(info.canvas, x, y+h-bottomW, w, bottomW, bottomCol, st.BorderBottomStyle)
+			}
+			bottomPainted = true
+		}
+		// 恢复角部：top 覆盖左上/右上，bottom 覆盖左下/右下。
+		// left 四边形内 = 拼接对角线「下方」位于上边、上方位于下边，
+		// 故左上用 below、左下用 aboveRev（与普通元素的 fillBelowRev 方向
+		// 相反——普通元素 left 边框是中间段矩形，角部在对角线下方）。
+		if topPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(btC, blC) && radius <= 0 {
+			fillDiagBelow(info.canvas, x, y, leftW, topW, leftCol)
+		}
+		if topPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(btC, brC) && radius <= 0 {
+			fillDiagBelowRev(info.canvas, x+w-rightW, y, rightW, topW, rightCol)
+		}
+		if bottomPainted && leftW > 0 && st.BorderLeftStyle != "none" && !colorsEqual(bbC, blC) && radius <= 0 {
+			fillDiagAboveRev(info.canvas, x, y+h-bottomW, leftW, bottomW, leftCol)
+		}
+		if bottomPainted && rightW > 0 && st.BorderRightStyle != "none" && !colorsEqual(bbC, brC) && radius <= 0 {
+			fillDiagAbove(info.canvas, x+w-rightW, y+h-bottomW, rightW, bottomW, rightCol)
+		}
 		return
 	}
 	// ★ 圆角 per-side 边框：border-radius>0 但 fast path 不满足（典型：仅单边
@@ -695,6 +769,66 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 	}
 }
 
+// fillDiagBelow / fillDiagBelowRev / fillDiagAbove / fillDiagAboveRev 按角
+// 拼接对角线把 corner 矩形的一半填成 col（0 尺寸元素的角恢复专用）：
+//   below    ：对角线 (0,0)→(cw,ch) 下方
+//   belowRev ：对角线 (0,ch)→(cw,0) 下方
+//   above    ：对角线 (0,0)→(cw,ch) 上方
+//   aboveRev ：对角线 (0,ch)→(cw,0) 上方
+// 与 paintBorderCorners 内部闭包等价，只是方向可按需选择——0 尺寸元素
+// 的 left/right 四边形已包含拼接斜边，bottom 覆盖的角部必须恢复对角线
+// 「上方」（四边形内），而普通元素恢复的是「下方」（left 中间段在下方）。
+func fillDiagBelow(canvas *graphics.Canvas, cx, cy, cw, ch float64, col graphics.Color) {
+	if canvas == nil || cw <= 0 || ch <= 0 || col.A == 0 {
+		return
+	}
+	for dy := 0; dy < int(ch); dy++ {
+		for dx := 0; dx < int(cw); dx++ {
+			if float64(dy) > float64(dx)*ch/cw {
+				canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+			}
+		}
+	}
+}
+
+func fillDiagBelowRev(canvas *graphics.Canvas, cx, cy, cw, ch float64, col graphics.Color) {
+	if canvas == nil || cw <= 0 || ch <= 0 || col.A == 0 {
+		return
+	}
+	for dy := 0; dy < int(ch); dy++ {
+		for dx := 0; dx < int(cw); dx++ {
+			if float64(dy) > ch*(1-float64(dx)/cw) {
+				canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+			}
+		}
+	}
+}
+
+func fillDiagAbove(canvas *graphics.Canvas, cx, cy, cw, ch float64, col graphics.Color) {
+	if canvas == nil || cw <= 0 || ch <= 0 || col.A == 0 {
+		return
+	}
+	for dy := 0; dy < int(ch); dy++ {
+		for dx := 0; dx < int(cw); dx++ {
+			if float64(dy) < float64(dx)*ch/cw {
+				canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+			}
+		}
+	}
+}
+
+func fillDiagAboveRev(canvas *graphics.Canvas, cx, cy, cw, ch float64, col graphics.Color) {
+	if canvas == nil || cw <= 0 || ch <= 0 || col.A == 0 {
+		return
+	}
+	for dy := 0; dy < int(ch); dy++ {
+		for dx := 0; dx < int(cw); dx++ {
+			if float64(dy) < ch*(1-float64(dx)/cw) {
+				canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+			}
+		}
+	}
+}
 
 func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, bottomW, leftW float64,
 	blC, brC, btC, bbC style.Color, op float64, st *style.ComputedStyle) {

@@ -125,6 +125,59 @@ func TestPaintBorderNoneSkipped(t *testing.T) {
 	}
 }
 
+// TestPaintBorderZeroSizeTriangle verifies the CSS border-triangle trick
+// (width:0;height:0 + border-left + transparent top/bottom) renders an
+// isosceles triangle: box.Width()/Height() are border-box sizes, so the
+// midH = h-topW-bottomW middle band is 0 and the left/right borders must
+// be drawn as full-height quads converging on the top/bottom border inner
+// corners (previously midH<=0 returned early and the triangle vanished).
+func TestPaintBorderZeroSizeTriangle(t *testing.T) {
+	canvas, info := newPaintCanvas(t)
+	st := style.NewComputedStyle()
+	red := style.Color{R: 0xFF, G: 0x44, B: 0x44, A: 0xFF}
+	trans := style.Color{A: 0}
+	st.BorderTopWidth = style.Length{Value: 5, Unit: "px"}
+	st.BorderTopColor = trans
+	st.BorderTopStyle = "solid"
+	st.BorderTopColorSet = true
+	st.BorderBottomWidth = style.Length{Value: 5, Unit: "px"}
+	st.BorderBottomColor = trans
+	st.BorderBottomStyle = "solid"
+	st.BorderBottomColorSet = true
+	st.BorderLeftWidth = style.Length{Value: 8, Unit: "px"}
+	st.BorderLeftColor = red
+	st.BorderLeftStyle = "solid"
+	st.BorderLeftColorSet = true
+	// Border box 8x10 at (4,4): content is 0x0, border box = left 8 + top/bottom 5.
+	box := newBoxWithStyle(st, 4, 4, 8, 10)
+
+	PaintBorder(box, info)
+
+	r := graphics.Color{R: 0xFF, G: 0x44, B: 0x44, A: 0xFF}
+	// Triangle interior: left edge full height, right tip at (12,9).
+	// Points away from the anti-aliased tip edge.
+	if got := canvas.PixelAt(5, 8); got != r {
+		t.Fatalf("triangle interior pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(6, 6); got != r {
+		t.Fatalf("triangle mid pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(9, 9); got != r {
+		t.Fatalf("triangle near-center pixel = %+v, want %+v", got, r)
+	}
+	if got := canvas.PixelAt(4, 9); got != r {
+		t.Fatalf("triangle left edge pixel = %+v, want %+v", got, r)
+	}
+	// Outside the triangle: upper-right and lower-right must stay transparent.
+	if got := canvas.PixelAt(10, 5); got != (graphics.Color{}) {
+		t.Fatalf("above-triangle pixel = %+v, want transparent", got)
+	}
+	if got := canvas.PixelAt(10, 13); got != (graphics.Color{}) {
+		t.Fatalf("below-triangle pixel = %+v, want transparent", got)
+	}
+}
+
+
 // TestPaintText verifies PaintText draws the text color within a laid-out segment.
 // The test scans the segment's bounding region for non-transparent pixels, since Skia's
 // real font metrics place glyphs below the box top (baseline = top + ascent).
