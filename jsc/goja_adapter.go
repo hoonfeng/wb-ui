@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 // ─── BufferLogger ───────────────────────────────────────

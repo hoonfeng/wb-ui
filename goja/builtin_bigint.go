@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"sync"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 type valueBigInt big.Int

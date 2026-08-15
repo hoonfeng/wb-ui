@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 func main() {

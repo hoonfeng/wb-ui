@@ -3,10 +3,10 @@
 import (
 	"strings"
 
-	"wb-ui.com/goja/ast"
-	"wb-ui.com/goja/file"
-	"wb-ui.com/goja/token"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/ast"
+	"wb-ui/goja/file"
+	"wb-ui/goja/token"
+	"wb-ui/goja/unistring"
 )
 
 func (self *_parser) parseIdentifier() *ast.Identifier {

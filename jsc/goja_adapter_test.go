@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 // TestNewArrayNilProtoReusesItemRuntime 回归：NewArray(nil, items) 此前

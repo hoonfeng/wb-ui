@@ -1,7 +1,7 @@
 ﻿package goja
 
 import (
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 type nativeProxyHandler struct {

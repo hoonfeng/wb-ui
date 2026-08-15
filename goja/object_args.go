@@ -1,6 +1,6 @@
 ﻿package goja
 
-import "wb-ui.com/goja/unistring"
+import "wb-ui/goja/unistring"
 
 type argumentsObject struct {
 	baseObject

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 type asciiString string

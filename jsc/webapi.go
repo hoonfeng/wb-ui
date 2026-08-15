@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 // RegisterWebAPIs registers browser-standard Web APIs as Go native functions.

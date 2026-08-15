@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"wb-ui.com/goja/parser"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/parser"
+	"wb-ui/goja/unistring"
 )
 
 // JsonEncodable allows custom JSON encoding by JSON.stringify()

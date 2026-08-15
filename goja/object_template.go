@@ -2,7 +2,7 @@
 
 import (
 	"fmt"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 	"math"
 	"reflect"
 	"sort"

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sort"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 const (

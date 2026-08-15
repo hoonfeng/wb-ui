@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 	"wb-ui/dom"
 )
 

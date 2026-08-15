@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"wb-ui.com/goja/ast"
-	"wb-ui.com/goja/file"
-	"wb-ui.com/goja/token"
+	"wb-ui/goja/ast"
+	"wb-ui/goja/file"
+	"wb-ui/goja/token"
 	"github.com/go-sourcemap/sourcemap"
 )
 

@@ -17,10 +17,10 @@ import (
 
 	"golang.org/x/text/collate"
 
-	js_ast "wb-ui.com/goja/ast"
-	"wb-ui.com/goja/file"
-	"wb-ui.com/goja/parser"
-	"wb-ui.com/goja/unistring"
+	js_ast "wb-ui/goja/ast"
+	"wb-ui/goja/file"
+	"wb-ui/goja/parser"
+	"wb-ui/goja/unistring"
 )
 
 const (

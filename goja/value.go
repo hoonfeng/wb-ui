@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"unsafe"
 
-	"wb-ui.com/goja/ftoa"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/ftoa"
+	"wb-ui/goja/unistring"
 )
 
 var (

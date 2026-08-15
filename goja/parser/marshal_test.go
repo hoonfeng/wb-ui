@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui.com/goja/ast"
+	"wb-ui/goja/ast"
 )
 
 func marshal(name string, children ...interface{}) interface{} {

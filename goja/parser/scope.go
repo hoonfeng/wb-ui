@@ -1,8 +1,8 @@
 ﻿package parser
 
 import (
-	"wb-ui.com/goja/ast"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/ast"
+	"wb-ui/goja/unistring"
 )
 
 type _scope struct {

@@ -3,9 +3,9 @@
 import (
 	"testing"
 
-	"wb-ui.com/goja/file"
-	"wb-ui.com/goja/parser"
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/file"
+	"wb-ui/goja/parser"
+	"wb-ui/goja/unistring"
 )
 
 func TestTaggedTemplateArgExport(t *testing.T) {

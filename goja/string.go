@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 const (

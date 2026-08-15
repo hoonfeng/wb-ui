@@ -21,7 +21,7 @@
 
 package jsc
 
-import "wb-ui.com/goja"
+import "wb-ui/goja"
 
 // InjectBrowserEnv 注入已有 Go 实现的浏览器 API。
 func (r *Interpreter) InjectBrowserEnv() {

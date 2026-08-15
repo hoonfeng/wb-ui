@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 	"wb-ui/css"
 	"wb-ui/dom"
 	"wb-ui/jsc"

@@ -4,7 +4,7 @@ import (
 	"math"
 	"strconv"
 
-	"wb-ui.com/goja/ftoa/internal/fast"
+	"wb-ui/goja/ftoa/internal/fast"
 )
 
 type FToStrMode int

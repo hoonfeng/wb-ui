@@ -7,9 +7,9 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 
-	"wb-ui.com/goja/parser"
+	"wb-ui/goja/parser"
 	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"

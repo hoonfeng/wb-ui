@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 // Engine JS 引擎封装

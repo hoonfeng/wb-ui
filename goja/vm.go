@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"wb-ui.com/goja/unistring"
+	"wb-ui/goja/unistring"
 )
 
 const (

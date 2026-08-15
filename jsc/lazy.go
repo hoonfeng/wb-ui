@@ -5,7 +5,7 @@
 // createElement 只付对象+Internal 成本，属性按需创建。
 package jsc
 
-import "wb-ui.com/goja"
+import "wb-ui/goja"
 
 // LazyPropSet 是惰性对象的属性供应器。
 type LazyPropSet interface {

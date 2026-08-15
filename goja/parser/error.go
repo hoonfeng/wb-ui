@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"wb-ui.com/goja/file"
-	"wb-ui.com/goja/token"
+	"wb-ui/goja/file"
+	"wb-ui/goja/token"
 )
 
 const (
