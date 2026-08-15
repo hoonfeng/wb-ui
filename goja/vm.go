@@ -380,6 +380,15 @@ type vm struct {
 	interruptVal  interface{}
 	interruptLock sync.Mutex
 
+	// 跨 goroutine 安全（可重入协作锁）：
+	// 从 VM 外部 goroutine 进入 JS 执行前先 lock()（见 Runtime.Lock/Unlock）。
+	// RunProgram 在未持锁时自动加锁；execLocked 为 true（本 goroutine 已持锁，
+	// 如 timer 回调内再触发 RunProgram）时跳过加锁，避免重入死锁。
+	// ★ 协作约定：顶层入口（函数调用/求值/值转换）都必须先 Lock，否则
+	//   execLocked=true 时其他 goroutine 会跳过加锁造成并发访问。
+	execMu     sync.Mutex
+	execLocked atomic.Bool
+
 	curAsyncRunner *asyncRunner
 
 	profTracker *profTracker
@@ -387,6 +396,23 @@ type vm struct {
 
 type instruction interface {
 	exec(*vm)
+}
+
+// lock 获取执行锁并标记持锁（可重入协作锁，见 vm 结构注释）。
+func (v *vm) lock() {
+	v.execMu.Lock()
+	v.execLocked.Store(true)
+}
+
+// unlock 释放执行锁。
+func (v *vm) unlock() {
+	v.execLocked.Store(false)
+	v.execMu.Unlock()
+}
+
+// isExecLocked 当前是否已持锁（本 goroutine 或协作信任的其他 goroutine）。
+func (v *vm) isExecLocked() bool {
+	return v.execLocked.Load()
 }
 
 func intToValue(i int64) Value {

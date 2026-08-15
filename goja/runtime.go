@@ -1439,6 +1439,10 @@ func asUncatchableException(v interface{}) error {
 // RunProgram executes a pre-compiled (see Compile()) code in the global context.
 func (r *Runtime) RunProgram(p *Program) (result Value, err error) {
 	vm := r.vm
+	if !vm.isExecLocked() {
+		vm.lock()
+		defer vm.unlock()
+	}
 	recursive := len(vm.callStack) > 0
 	defer func() {
 		if recursive {
@@ -1490,6 +1494,25 @@ func (r *Runtime) RunProgram(p *Program) (result Value, err error) {
 		r.leave()
 	}
 	return
+}
+
+// Lock 锁定运行时，防止其他 goroutine 并发执行 JS 代码。
+// 从 VM 外部 goroutine 进入 JS 执行（函数调用/求值/值转换）前调用，
+// 完成后必须调用 Unlock 释放。可重入：同一 goroutine 已持锁时重复调用
+// 会安全跳过（RunProgram 等执行入口检测到持锁不重复加锁）。
+// 用途：timer 回调、事件回调等从其他 goroutine 驱动 JS 的入口。
+func (r *Runtime) Lock() {
+	r.vm.lock()
+}
+
+// Unlock 释放 Lock 获得的锁。
+func (r *Runtime) Unlock() {
+	r.vm.unlock()
+}
+
+// IsExecLocked 当前执行锁是否已被持有（供外部判断是否需要加锁）。
+func (r *Runtime) IsExecLocked() bool {
+	return r.vm.isExecLocked()
 }
 
 // CaptureCallStack appends the current call stack frames to the stack slice (which may be nil) up to the specified depth.
