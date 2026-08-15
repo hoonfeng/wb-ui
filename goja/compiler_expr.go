@@ -1715,7 +1715,11 @@ func (e *compiledFunctionLiteral) emitGetter(putOnStack bool) {
 		}
 	case funcMethod, funcClsInit:
 		if e.isAsync {
-			e.c.emit(&newAsyncMethod{newMethod: newMethod{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}, homeObjOffset: e.homeObjOffset}})
+			if e.isGenerator {
+				e.c.emit(&newAsyncGeneratorMethod{newMethod: newMethod{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}, homeObjOffset: e.homeObjOffset}})
+			} else {
+				e.c.emit(&newAsyncMethod{newMethod: newMethod{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}, homeObjOffset: e.homeObjOffset}})
+			}
 		} else {
 			if e.isGenerator {
 				e.c.emit(&newGeneratorMethod{newMethod: newMethod{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}, homeObjOffset: e.homeObjOffset}})
@@ -1725,7 +1729,11 @@ func (e *compiledFunctionLiteral) emitGetter(putOnStack bool) {
 		}
 	case funcRegular:
 		if e.isAsync {
-			e.c.emit(&newAsyncFunc{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}})
+			if e.isGenerator {
+				e.c.emit(&newAsyncGeneratorFunc{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}})
+			} else {
+				e.c.emit(&newAsyncFunc{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}})
+			}
 		} else {
 			if e.isGenerator {
 				e.c.emit(&newGeneratorFunc{newFunc: newFunc{prg: p, length: length, name: name, source: e.source, strict: strict}})
@@ -1746,9 +1754,6 @@ func (c *compiler) compileFunctionLiteral(v *ast.FunctionLiteral, isExpr bool) *
 	if v.Name != nil && (c.scope.strict || strictBody != nil) {
 		c.checkIdentifierName(v.Name.Name, int(v.Name.Idx)-1)
 		c.checkIdentifierLName(v.Name.Name, int(v.Name.Idx)-1)
-	}
-	if v.Async && v.Generator {
-		c.throwSyntaxError(int(v.Function)-1, "Async generators are not supported yet")
 	}
 	r := &compiledFunctionLiteral{
 		name:            v.Name,

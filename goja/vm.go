@@ -4067,6 +4067,29 @@ func (n *newGeneratorMethod) exec(vm *vm) {
 	n._exec(vm, &obj.methodFuncObject)
 }
 
+type newAsyncGeneratorFunc struct {
+	newFunc
+}
+
+func (n *newAsyncGeneratorFunc) exec(vm *vm) {
+	obj := vm.r.newAsyncGeneratorFunc(n.name, n.length, n.strict)
+	obj.prg = n.prg
+	obj.stash = vm.stash
+	obj.privEnv = vm.privEnv
+	obj.src = n.source
+	vm.push(obj.val)
+	vm.pc++
+}
+
+type newAsyncGeneratorMethod struct {
+	newMethod
+}
+
+func (n *newAsyncGeneratorMethod) exec(vm *vm) {
+	obj := vm.r.newAsyncGeneratorMethod(n.name, n.length, n.strict)
+	n._exec(vm, &obj.methodFuncObject)
+}
+
 type newArrowFunc struct {
 	newFunc
 }
@@ -5152,6 +5175,49 @@ var iterate _iterate
 func (_iterate) exec(vm *vm) {
 	iter := vm.r.getIterator(vm.stack[vm.sp-1], nil)
 	vm.iterStack = append(vm.iterStack, iterStackItem{iter: iter})
+	vm.pc++
+}
+
+// iterNextAwait for-await-of 的迭代推进：调 async iterator 的 next()
+// 拿到 Promise，压栈交给后续 await 指令挂起；resume 后由 iterAwaitResume 检查。
+type _iterNextAwait struct{}
+
+var iterNextAwait _iterNextAwait
+
+func (_iterNextAwait) exec(vm *vm) {
+	l := len(vm.iterStack) - 1
+	iter := vm.iterStack[l].iter
+	var res Value
+	var ex *Exception
+	ex = vm.try(func() {
+		res = iter.next(FunctionCall{This: iter.iterator})
+	})
+	if ex != nil {
+		vm.iterStack[l] = iterStackItem{}
+		vm.iterStack = vm.iterStack[:l]
+		vm.throw(ex.val)
+		return
+	}
+	vm.push(res) // Promise → 下一条 await 指令消费
+	vm.pc++
+}
+
+// iterAwaitResume for-await-of 的 resume 检查：await 挂起恢复后，栈顶是
+// 迭代结果 {value, done}；done → 跳到循环尾清理；否则把 value 存入
+// iterStack 供循环体使用。
+type iterAwaitResume int32
+
+func (jmp iterAwaitResume) exec(vm *vm) {
+	l := len(vm.iterStack) - 1
+	res := vm.stack[vm.sp-1]
+	vm.sp--
+	obj := vm.r.toObject(res)
+	if nilSafe(obj.self.getStr("done", nil)).ToBoolean() {
+		// 与 iterNext 一致：不在此清理 iterStack，由循环尾 enumPop 负责
+		vm.pc += int(jmp)
+		return
+	}
+	vm.iterStack[l].val = nilSafe(obj.self.getStr("value", nil))
 	vm.pc++
 }
 

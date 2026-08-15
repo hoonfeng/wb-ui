@@ -1088,6 +1088,470 @@ func (g *generatorObject) _return(v Value) Value {
 	return g.step(res, done, ex)
 }
 
+
+// ─── AsyncGenerator（async function*）──────────────────────────
+
+// asyncGenReqKind AsyncGenerator 请求类型（next/return/throw）。
+type asyncGenReqKind uint8
+
+const (
+	asyncGenReqNext asyncGenReqKind = iota
+	asyncGenReqReturn
+	asyncGenReqThrow
+)
+
+// asyncGenRequest 一个挂起的 AsyncGenerator 请求（规范要求 FIFO 串行执行）。
+type asyncGenRequest struct {
+	kind       asyncGenReqKind
+	arg        Value
+	promiseCap *promiseCapability
+}
+
+// asyncGeneratorObject AsyncGenerator 实例（async function* 的返回对象）。
+// 嵌入 generatorObject 复用 gen 状态机；next/return/throw 返回 Promise，
+// 请求按 FIFO 队列串行处理（active 期间新请求入队等待）。
+type asyncGeneratorObject struct {
+	generatorObject
+	queue     []*asyncGenRequest
+	active    bool             // 有活动请求或内部 await 挂起中
+	curReq    *asyncGenRequest // 当前活动请求（初始内部执行时为 nil）
+	startError Value           // 初始执行异常（首次请求时 reject）
+}
+
+// asyncGeneratorFuncObject async function* 的函数对象。
+type asyncGeneratorFuncObject struct {
+	baseJsFuncObject
+}
+
+// asyncGeneratorMethodFuncObject async *method 的函数对象。
+type asyncGeneratorMethodFuncObject struct {
+	methodFuncObject
+}
+
+func (f *asyncGeneratorFuncObject) Call(call FunctionCall) Value {
+	f.prepareForVmCall(call)
+	return f.asyncGeneratorCall(f.baseJsFuncObject.vmCall, len(call.Arguments))
+}
+
+func (f *asyncGeneratorFuncObject) assertCallable() (func(FunctionCall) Value, bool) {
+	return f.Call, true
+}
+
+func (f *asyncGeneratorFuncObject) export(*objectExportCtx) interface{} {
+	return f.Call
+}
+
+func (f *asyncGeneratorFuncObject) assertConstructor() func(args []Value, newTarget *Object) *Object {
+	return nil
+}
+
+func (f *asyncGeneratorFuncObject) vmCall(_ *vm, nArgs int) {
+	f.asyncGeneratorVmCall(f.baseJsFuncObject.vmCall, nArgs)
+}
+
+func (f *asyncGeneratorMethodFuncObject) Call(call FunctionCall) Value {
+	f.prepareForVmCall(call)
+	return f.asyncGeneratorCall(f.methodFuncObject.vmCall, len(call.Arguments))
+}
+
+func (f *asyncGeneratorMethodFuncObject) assertCallable() (func(FunctionCall) Value, bool) {
+	return f.Call, true
+}
+
+func (f *asyncGeneratorMethodFuncObject) export(*objectExportCtx) interface{} {
+	return f.Call
+}
+
+func (f *asyncGeneratorMethodFuncObject) vmCall(_ *vm, nArgs int) {
+	f.asyncGeneratorVmCall(f.methodFuncObject.vmCall, nArgs)
+}
+
+func (f *baseJsFuncObject) asyncGeneratorCall(vmCall func(*vm, int), nArgs int) Value {
+	o := &Object{runtime: f.val.runtime}
+
+	genObj := &asyncGeneratorObject{
+		generatorObject: generatorObject{
+			baseObject: baseObject{
+				class:      classObject,
+				val:        o,
+				extensible: true,
+			},
+		},
+	}
+	o.self = genObj
+	genObj.asyncInit(vmCall, nArgs)
+	genObj.prototype = o.runtime.getPrototypeFromCtor(f.val, nil, o.runtime.getAsyncGeneratorPrototype())
+	return o
+}
+
+func (f *baseJsFuncObject) asyncGeneratorVmCall(vmCall func(*vm, int), nArgs int) {
+	vm := f.val.runtime.vm
+	vm.push(f.asyncGeneratorCall(vmCall, nArgs))
+	vm.pc++
+}
+
+// asyncInit 创建 AsyncGenerator 对象后立即执行到第一个暂停点
+// （yield / await / return），与同步 generator 的 init 对齐。
+func (g *asyncGeneratorObject) asyncInit(vmCall func(*vm, int), nArgs int) {
+	g.baseObject.init()
+	r := g.val.runtime
+	vm := r.vm
+	g.gen.vm = vm
+
+	g.gen.enter()
+	vmCall(vm, nArgs)
+
+	res, resType, ex := g.gen.step()
+
+	vm.popTryFrame()
+	vm.popCtx()
+
+	if ex != nil {
+		// 初始执行异常：AsyncGenerator 不抛同步错误（返回对象），
+		// 保存错误，首次 next() 时 reject。
+		g.delegated = nil
+		g.state = genStateCompleted
+		g.startError = ex.val
+		return
+	}
+	switch resType {
+	case resultAwait:
+		// 初始 await：挂 promise 链，resolve 后继续内部执行（无请求）
+		g.state = genStateExecuting
+		g.active = true
+		g.curReq = nil
+		g.attachAwait(res)
+	case resultYield:
+		g.state = genStateSuspendedYield
+		g.active = false
+	case resultYieldRes:
+		g.state = genStateSuspendedYieldRes
+		g.active = false
+	case resultNormal:
+		g.state = genStateCompleted
+		g.active = false
+	default:
+		// yield* 委托：MVP 不支持 async generator 内 yield*，标记完成
+		g.delegated = nil
+		g.state = genStateCompleted
+		g.startError = r.NewTypeError("yield* in an async generator is not supported yet")
+	}
+}
+
+// attachAwait 给 await/yield 结果挂 promise 反应（驱动内部状态机继续）。
+func (g *asyncGeneratorObject) attachAwait(res Value) {
+	r := g.val.runtime
+	promise := r.promiseResolve(r.getPromise(), res)
+	promise.self.(*Promise).addReactions(&promiseReaction{
+		typ:     promiseReactionFulfill,
+		handler: &jobCallback{callback: g.awaitFulfilled},
+	}, &promiseReaction{
+		typ:     promiseReactionReject,
+		handler: &jobCallback{callback: g.awaitRejected},
+	})
+}
+
+// attachYield 给 yield 结果挂 promise 反应（规范 AsyncGeneratorYield 会 await 操作数）。
+func (g *asyncGeneratorObject) attachYield(res Value) {
+	r := g.val.runtime
+	promise := r.promiseResolve(r.getPromise(), res)
+	promise.self.(*Promise).addReactions(&promiseReaction{
+		typ:     promiseReactionFulfill,
+		handler: &jobCallback{callback: g.yieldFulfilled},
+	}, &promiseReaction{
+		typ:     promiseReactionReject,
+		handler: &jobCallback{callback: g.yieldRejected},
+	})
+}
+
+// awaitFulfilled await 的 promise resolve 后继续推进（可能带请求或内部执行）。
+func (g *asyncGeneratorObject) awaitFulfilled(call FunctionCall) Value {
+	req := g.curReq
+	arg := call.Argument(0)
+	res, resType, ex := g.gen.next(arg)
+	g.asyncStep(req, res, resType, ex)
+	return _undefined
+}
+
+// awaitRejected await 的 promise reject：把异常注入 generator 继续。
+func (g *asyncGeneratorObject) awaitRejected(call FunctionCall) Value {
+	req := g.curReq
+	reason := call.Argument(0)
+	res, resType, ex := g.gen.nextThrow(reason)
+	g.asyncStep(req, res, resType, ex)
+	return _undefined
+}
+
+// asyncStep 处理一次 gen 推进结果。
+//   - resultAwait：await 表达式 → 等 promise 后继续
+//   - resultYield/YieldRes：产出值（规范 await 操作数）→ resolve {value, done:false}
+//   - resultNormal：完成 → resolve {value, done:true}
+func (g *asyncGeneratorObject) asyncStep(req *asyncGenRequest, res Value, resType resultType, ex *Exception) {
+	r := g.val.runtime
+	if ex != nil {
+		g.delegated = nil
+		g.state = genStateCompleted
+		if req != nil {
+			g.finishReq(req, nil, ex.val)
+		} else {
+			g.active = false
+		}
+		return
+	}
+	switch resType {
+	case resultAwait:
+		// await：保持 active，等 promise settle 后继续
+		g.state = genStateExecuting
+		g.attachAwait(res)
+	case resultYield, resultYieldRes:
+		if resType == resultYield {
+			g.state = genStateSuspendedYield
+		} else {
+			g.state = genStateSuspendedYieldRes
+		}
+		if req != nil {
+			g.curReq = req
+			g.attachYield(res) // 等 yield 值 settle 后产出给 next() 调用者
+		} else {
+			g.active = false
+		}
+	case resultNormal:
+		g.state = genStateCompleted
+		if req != nil {
+			g.finishReq(req, r.createIterResultObject(res, true), nil)
+		} else {
+			g.active = false
+		}
+	default:
+		// yield* 委托：获取 async iterator（回退同步），进入委托循环
+		iter := r.getAsyncIterator(res)
+		g.delegated = iter
+		g.state = genStateExecuting
+		g.curReq = req
+		g.delegatedNext(nil)
+	}
+}
+
+// yieldFulfilled yield 操作数 resolve：产出 {value, done:false}。
+func (g *asyncGeneratorObject) yieldFulfilled(call FunctionCall) Value {
+	req := g.curReq
+	arg := call.Argument(0)
+	g.finishReq(req, g.val.runtime.createIterResultObject(arg, false), nil)
+	return _undefined
+}
+
+// yieldRejected yield 操作数 reject：AsyncGeneratorYield 失败 → generator 异常。
+func (g *asyncGeneratorObject) yieldRejected(call FunctionCall) Value {
+	req := g.curReq
+	g.delegated = nil
+	g.state = genStateCompleted
+	g.finishReq(req, nil, call.Argument(0))
+	return _undefined
+}
+
+// delegatedNext 推进 yield* 委托：调 async iterator 的 next()（await 结果）。
+func (g *asyncGeneratorObject) delegatedNext(arg Value) {
+	r := g.val.runtime
+	iter := g.delegated
+	if iter == nil {
+		// 委托已结束：yield* 表达式结果 undefined，继续原 generator
+		res, resType, ex := g.gen.next(_undefined)
+		g.asyncStep(g.curReq, res, resType, ex)
+		return
+	}
+	var nextRes Value
+	var ex *Exception
+	if arg == nil {
+		ex = r.vm.try(func() { nextRes = iter.next(FunctionCall{This: iter.iterator}) })
+	} else {
+		ex = r.vm.try(func() { nextRes = iter.next(FunctionCall{This: iter.iterator, Arguments: []Value{arg}}) })
+	}
+	if ex != nil {
+		g.delegated = nil
+		g.state = genStateCompleted
+		g.finishReq(g.curReq, nil, ex.val)
+		return
+	}
+	// await next() 结果
+	promise := r.promiseResolve(r.getPromise(), nextRes)
+	promise.self.(*Promise).addReactions(&promiseReaction{
+		typ:     promiseReactionFulfill,
+		handler: &jobCallback{callback: g.delegatedFulfilled},
+	}, &promiseReaction{
+		typ:     promiseReactionReject,
+		handler: &jobCallback{callback: g.delegatedRejected},
+	})
+}
+
+// delegatedFulfilled 委托的 next() 结果处理：done → 结束委托继续原 generator；
+// 否则产出 value。
+func (g *asyncGeneratorObject) delegatedFulfilled(call FunctionCall) Value {
+	r := g.val.runtime
+	res := call.Argument(0)
+	obj := r.toObject(res)
+	done := nilSafe(obj.self.getStr("done", nil)).ToBoolean()
+	if done {
+		// 委托完成：yield* 表达式结果 = value，继续原 generator
+		g.delegated = nil
+		val := nilSafe(obj.self.getStr("value", nil))
+		req := g.curReq
+		res2, resType2, ex2 := g.gen.next(val)
+		g.asyncStep(req, res2, resType2, ex2)
+		return _undefined
+	}
+	// 产出委托值
+	val := nilSafe(obj.self.getStr("value", nil))
+	g.state = genStateSuspendedYield
+	g.finishReq(g.curReq, r.createIterResultObject(val, false), nil)
+	return _undefined
+}
+
+// delegatedRejected 委托的 next() 异常：注入原 generator。
+func (g *asyncGeneratorObject) delegatedRejected(call FunctionCall) Value {
+	g.delegated = nil
+	req := g.curReq
+	reason := call.Argument(0)
+	res, resType, ex := g.gen.nextThrow(reason)
+	g.asyncStep(req, res, resType, ex)
+	return _undefined
+}
+
+// finishReq resolve/reject 当前请求并触发下一个。
+func (g *asyncGeneratorObject) finishReq(req *asyncGenRequest, value Value, rejectVal Value) {
+	if req == nil {
+		return
+	}
+	if rejectVal == nil {
+		req.promiseCap.resolve(value)
+	} else {
+		req.promiseCap.reject(rejectVal)
+	}
+	g.curReq = nil
+	g.active = false
+	g.drain()
+}
+
+// enqueue 入队一个请求（next/return/throw）并触发队列处理。
+func (g *asyncGeneratorObject) enqueue(kind asyncGenReqKind, arg Value) Value {
+	r := g.val.runtime
+	cap := r.newPromiseCapability(r.getPromise())
+	g.queue = append(g.queue, &asyncGenRequest{kind: kind, arg: arg, promiseCap: cap})
+	g.drain()
+	return cap.promise
+}
+
+// drain 按 FIFO 处理队列（同一时刻只有一个活动请求）。
+func (g *asyncGeneratorObject) drain() {
+	if g.active || len(g.queue) == 0 {
+		return
+	}
+	req := g.queue[0]
+	g.queue = g.queue[1:]
+	g.active = true
+	g.curReq = req
+	switch req.kind {
+	case asyncGenReqNext:
+		g.processNext(req)
+	case asyncGenReqReturn:
+		g.processReturn(req)
+	case asyncGenReqThrow:
+		g.processThrow(req)
+	}
+}
+
+// processNext 处理 next() 请求。
+func (g *asyncGeneratorObject) processNext(req *asyncGenRequest) {
+	r := g.val.runtime
+	if g.startError != nil {
+		se := g.startError
+		g.startError = nil
+		g.finishReq(req, nil, se)
+		return
+	}
+	if g.state == genStateCompleted {
+		g.finishReq(req, r.createIterResultObject(_undefined, true), nil)
+		return
+	}
+	var v Value
+	if g.state == genStateSuspendedYieldRes {
+		v = req.arg
+	}
+	g.state = genStateExecuting
+	if g.delegated != nil {
+		// yield* 委托中：next(arg) 转发给委托 iterator
+		g.curReq = req
+		g.delegatedNext(req.arg)
+		return
+	}
+	res, resType, ex := g.gen.next(v)
+	g.asyncStep(req, res, resType, ex)
+}
+
+// processReturn 处理 return() 请求。
+func (g *asyncGeneratorObject) processReturn(req *asyncGenRequest) {
+	r := g.val.runtime
+	if g.startError != nil {
+		se := g.startError
+		g.startError = nil
+		g.finishReq(req, nil, se)
+		return
+	}
+	if g.state == genStateSuspendedStart || g.state == genStateCompleted {
+		g.state = genStateCompleted
+		g.finishReq(req, r.createIterResultObject(req.arg, true), nil)
+		return
+	}
+	g.gen.returning = req.arg
+	g.state = genStateExecuting
+	g.gen.enterNext()
+	canContinue := g.gen.enterNextFinallyFrame()
+	if !canContinue {
+		vm := g.gen.vm
+		g.state = genStateCompleted
+		vm.popTryFrame()
+		ex := vm.restoreStacks(g.gen.iterStackLen, g.gen.refStackLen)
+		if ex != nil {
+			g.finishReq(req, nil, ex.val)
+			return
+		}
+		vm.callStack = vm.callStack[:len(vm.callStack)-1]
+		vm.sp = vm.sb - 1
+		vm.popCtx()
+		g.finishReq(req, r.createIterResultObject(req.arg, true), nil)
+		return
+	}
+	res, done, ex := g.gen.step()
+	vm := g.gen.vm
+	vm.popTryFrame()
+	vm.popCtx()
+	g.asyncStep(req, res, done, ex)
+}
+
+// processThrow 处理 throw() 请求。
+func (g *asyncGeneratorObject) processThrow(req *asyncGenRequest) {
+
+	if g.startError != nil {
+		se := g.startError
+		g.startError = nil
+		g.finishReq(req, nil, se)
+		return
+	}
+	if g.state == genStateSuspendedStart || g.state == genStateCompleted {
+		g.state = genStateCompleted
+		g.finishReq(req, nil, req.arg)
+		return
+	}
+	g.state = genStateExecuting
+	if g.delegated != nil {
+		// yield* 委托中：throw 结束委托并把异常注入原 generator
+		g.delegated = nil
+		res, resType, ex := g.gen.nextThrow(req.arg)
+		g.asyncStep(req, res, resType, ex)
+		return
+	}
+	res, resType, ex := g.gen.nextThrow(req.arg)
+	g.asyncStep(req, res, resType, ex)
+}
 func (f *baseJsFuncObject) generatorCall(vmCall func(*vm, int), nArgs int) Value {
 	o := &Object{runtime: f.val.runtime}
 

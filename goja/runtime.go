@@ -121,6 +121,9 @@ type global struct {
 	GeneratorFunctionPrototype *Object
 	GeneratorFunction          *Object
 	GeneratorPrototype         *Object
+	AsyncGeneratorFunctionPrototype *Object
+	AsyncGeneratorFunction          *Object
+	AsyncGeneratorPrototype         *Object
 
 	AsyncFunctionPrototype *Object
 
@@ -630,6 +633,26 @@ func (r *Runtime) newAsyncMethod(name unistring.String, length int, strict bool)
 	r.initBaseJsFunction(&f.baseJsFuncObject, strict)
 	f.val.self = f
 	f.init(name, intToValue(int64(length)))
+	return
+}
+
+func (r *Runtime) newAsyncGeneratorFunc(name unistring.String, length int, strict bool) (f *asyncGeneratorFuncObject) {
+	f = &asyncGeneratorFuncObject{}
+	r.initBaseJsFunction(&f.baseJsFuncObject, strict)
+	f.class = classFunction
+	f.prototype = r.getAsyncGeneratorFunctionPrototype()
+	f.val.self = f
+	f.init(name, intToValue(int64(length)))
+	f._putProp("prototype", r.newBaseObject(r.getAsyncGeneratorPrototype(), classObject).val, true, false, false)
+	return
+}
+
+func (r *Runtime) newAsyncGeneratorMethod(name unistring.String, length int, strict bool) (f *asyncGeneratorMethodFuncObject) {
+	f = &asyncGeneratorMethodFuncObject{}
+	r.initBaseJsFunction(&f.baseJsFuncObject, strict)
+	f.val.self = f
+	f.init(name, intToValue(int64(length)))
+	f._putProp("prototype", r.newBaseObject(r.getAsyncGeneratorPrototype(), classObject).val, true, false, false)
 	return
 }
 

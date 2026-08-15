@@ -464,6 +464,10 @@ func (c *compiler) compileLabeledForInOfStatement(into ast.ForInto, source ast.E
 	start := len(c.p.code)
 	c.block.cont = start
 	c.emit1(nil)
+	if asyncIter {
+		c.emit1(nil) // await 指令位
+		c.emit1(nil) // iterAwaitResume 指令位
+	}
 	enterIterBlock := c.compileForInto(into, needResult)
 	if needResult {
 		c.emit1(clearResult)
@@ -475,7 +479,13 @@ func (c *compiler) compileLabeledForInOfStatement(into ast.ForInto, source ast.E
 	}
 	c.emit(jump(start - len(c.p.code)))
 	if iter {
-		c.p.code[start] = iterNext(len(c.p.code) - start)
+		if asyncIter {
+			c.p.code[start] = iterNextAwait
+			c.p.code[start+1] = await
+			c.p.code[start+2] = iterAwaitResume(len(c.p.code) - (start + 2))
+		} else {
+			c.p.code[start] = iterNext(len(c.p.code) - start)
+		}
 	} else {
 		c.p.code[start] = enumNext(len(c.p.code) - start)
 	}

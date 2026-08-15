@@ -136,6 +136,7 @@ func (r *Runtime) createSymbol(val *Object) objectImpl {
 	o._putProp("keyFor", r.newNativeFunc(r.symbol_keyfor, "keyFor", 1), true, false, true)
 
 	for _, s := range []*Symbol{
+		SymAsyncIterator,
 		SymHasInstance,
 		SymIsConcatSpreadable,
 		SymIterator,
