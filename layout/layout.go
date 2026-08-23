@@ -11,6 +11,15 @@ var (
 	currentViewportWidth  float64
 )
 
+// SetViewportSize 同步全局 viewport（vh/vw 单位解析用）。
+// ★ 多 WebView 共享包级变量：每个视图布局开始前必须设置自己的
+// viewport——否则 A 视图（如 260x80 挂件）布局后，B 视图（1280x800）
+// 复用 layoutState 时 calc(100vh-76px) 会用 A 的 vh 求值 → 高度塌陷。
+func SetViewportSize(w, h float64) {
+	currentViewportWidth = w
+	currentViewportHeight = h
+}
+
 // Layout is the top-level entry point. It sizes rootBox within viewport and lays
 // out its descendants. Returns LayoutState with computed geometry.
 func Layout(rootBox *ElementBox, viewportWidth, viewportHeight int) *LayoutState {
