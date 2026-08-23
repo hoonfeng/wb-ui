@@ -17,6 +17,7 @@ import (
 	"hash/fnv"
 	"os"
 	"strings"
+	"time"
 
 	"wb-ui/css"
 	"wb-ui/dom"
@@ -93,6 +94,12 @@ type Frame struct {
 	// dirty），变更停歇 2 帧后才重建一次——输出风暴合并为一次重建。
 	// GetElementBoxRect 等强制路径直接调 RebuildRenderTree（绕过 cooldown）。
 	rebuildCooldown int
+
+	// lastTreeDirtyAt 上次 MarkRenderTreeDirty 时刻：两次变更间隔超过
+	// treeDirtyBurstWindow 说明是低频变化（时钟/歌单每秒文本更新），
+	// 非变更风暴——立即重建（cooldown=0），否则低频更新被 cooldown
+	// 无限推迟（每秒 1 次时 cooldown 永不耗尽，渲染树永停留旧结构）。
+	lastTreeDirtyAt time.Time
 
 	// styleFP caches the fingerprint of all <style> textContent + <link> href
 	// seen at the last style extraction. RebuildRenderTree skips the expensive
@@ -262,6 +269,10 @@ func (f *Frame) RebuildRenderTree() {
 	if f.page != nil {
 		f.page.setRenderView(f.renderView)
 	}
+	// ★ 手动重建已完成：清除挂起标记（否则后续 Layout 的
+	// RebuildRenderTreeIfNeeded 判定「重建被推迟」而 defer 布局——
+	// 渲染树已新但布局永远不执行，画面停旧几何）。
+	f.needsRenderTreeRebuild = false
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
@@ -275,11 +286,29 @@ func (f *Frame) RebuildRenderTree() {
 // 设置并逐帧递减（不因持续 dirty 无限刷新）——持续变更时每 cooldown+1
 // 帧强制重建一次（内容周期性更新，不会永久停留在旧树）。
 func (f *Frame) MarkRenderTreeDirty() {
+	// ★ 只在「干净→脏」状态转换时更新 cooldown：一次高层变更（textContent
+	// 赋值）内部会触发多次通知（RemoveChild/AppendChild 结构回调 + JS 侧
+	// OnNodeInserted 桥回调），若每次通知都重设 cooldown=2，低频更新会被
+	// 无限推迟（每秒 1 次 textContent 时 cooldown 永不耗尽 → 渲染树停留
+	// 旧结构 → 时钟/歌单画面不刷新——widget 桥此前靠手动 RebuildRenderTree
+	// 绕过，配置窗口 JS 交互同理）。已是脏态的通知直接合并（不重置）。
+	if f.needsRenderTreeRebuild {
+		return
+	}
 	f.needsRenderTreeRebuild = true
-	if f.rebuildCooldown <= 0 {
+	// 距上次 dirty 超过 burst 窗口 = 低频变更（交互/定时更新）：立即重建
+	//（cooldown=0）；窗口内 = 变更风暴（xterm 输出）→ 降频稀释。
+	if time.Since(f.lastTreeDirtyAt) > treeDirtyBurstWindow {
+		f.rebuildCooldown = 0
+	} else {
 		f.rebuildCooldown = 2
 	}
+	f.lastTreeDirtyAt = time.Now()
 }
+
+// treeDirtyBurstWindow 判定「变更风暴」的间隔阈值：两次脏转换间隔超过
+// 该值视为低频交互/定时更新（立即重建）；否则合并进 cooldown 降频批次。
+const treeDirtyBurstWindow = 100 * time.Millisecond
 
 // RebuildRenderTreeIfNeeded rebuilds the render tree if MarkRenderTreeDirty was
 // called since the last check. It returns true when a rebuild was performed.
@@ -400,6 +429,13 @@ func (f *Frame) ViewportHeight() int {
 // the per-frame layout-pending check in WebKit (FrameView::needsLayout()).
 func (f *Frame) NeedsLayout() bool {
 	return f.view != nil && f.view.NeedsLayout()
+}
+
+// NeedsRenderTreeRebuild 报告是否有挂起的渲染树重建（含降频推迟中的）。
+// 渲染循环（挂件/配置窗口）应在该标记或 NeedsLayout 成立时持续渲染——
+// 否则重建被 cooldown 推迟的帧渲染循环早退，挂起重建永远不执行。
+func (f *Frame) NeedsRenderTreeRebuild() bool {
+	return f.needsRenderTreeRebuild
 }
 
 // SetNeedsLayout marks the frame's view as needing (or not needing) a layout

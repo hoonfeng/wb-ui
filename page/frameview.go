@@ -239,7 +239,16 @@ func (v *FrameView) Layout() {
 		return
 	}
 	// Flush any pending render-tree rebuild from DOM mutations before layout.
-	v.frame.RebuildRenderTreeIfNeeded()
+	rebuilt := v.frame.RebuildRenderTreeIfNeeded()
+	if !rebuilt && v.frame.NeedsRenderTreeRebuild() {
+		// ★ 重建被降频推迟（变更风暴 cooldown）：本次布局不完整（渲染树
+		// 仍是旧结构），保持挂起（不置 LayoutPhaseNone）——渲染循环经
+		// frame.NeedsRenderTreeRebuild() 保持激活，下帧重试，直到重建
+		// 完成才执行布局。若此处清除挂起，重建将永远没有机会再执行
+		//（布局消费后渲染循环停止），画面停留旧结构。
+		Logf("Layout", "defer: rebuild pending (cooldown)")
+		return
+	}
 	rv := v.frame.renderView
 	rv.SetViewportSize(float64(v.width), float64(v.height))
 	rv.Layout(nil)
