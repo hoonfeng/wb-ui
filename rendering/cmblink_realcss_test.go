@@ -73,17 +73,17 @@ func TestCmBlinkRealCSS(t *testing.T) {
 	KeyframesLookup = func(name string) *css.KeyframesRule { return kf }
 	defer func() { KeyframesLookup = orig }()
 	AnimationTime = 0.1
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.001 {
 		t.Fatalf("t=0.1: opacity=%v want 1.0 (visible)", st.Opacity)
 	}
 	AnimationTime = 0.7
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-0.0) > 0.001 {
 		t.Fatalf("t=0.7: opacity=%v want 0.0 (hidden)", st.Opacity)
 	}
 	AnimationTime = 1.3
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.001 {
 		t.Fatalf("t=1.3: opacity=%v want 1.0 (blink cycle)", st.Opacity)
 	}

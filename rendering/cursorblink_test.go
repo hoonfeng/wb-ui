@@ -63,7 +63,7 @@ func TestCursorBlinkAnimation(t *testing.T) {
 
 	// t=0.05（0% 附近）：光标色（白）
 	AnimationTime = 0.05
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if st.AnimatedBackgroundColor.A == 0 || st.AnimatedBackgroundColor.R < 200 {
 		t.Fatalf("t=0.05: bg=%+v want white cursor", st.AnimatedBackgroundColor)
 	}
@@ -71,7 +71,7 @@ func TestCursorBlinkAnimation(t *testing.T) {
 
 	// t=0.75（50% 之后）：透明（inherit → 隐藏）
 	AnimationTime = 0.75
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if st.AnimatedBackgroundColor.A != 0 {
 		t.Fatalf("t=0.75: bg=%+v want transparent (hidden)", st.AnimatedBackgroundColor)
 	}
@@ -79,7 +79,7 @@ func TestCursorBlinkAnimation(t *testing.T) {
 
 	// t=1.05（下一轮 0% 附近）：再次可见
 	AnimationTime = 1.05
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if st.AnimatedBackgroundColor.A == 0 {
 		t.Fatalf("t=1.05: bg=%+v want visible again (blink cycle)", st.AnimatedBackgroundColor)
 	}

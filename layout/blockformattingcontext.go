@@ -188,6 +188,12 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		ch.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 		ch.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
+		// ★ 无条件写入 margin：此前仅 auto-margin 居中分支调用 SetMargin，
+		// 普通元素（body/div 等）的 MarginBefore 恒为 0 —— 垂直 margin 折叠
+		// 的 seed（AdjoiningTopMargin = g.MarginBefore()）与 boxOwn 折扣都
+		// 读到 0，body 与首子 div 的 margin 折叠失效（body 8 + div 10 = 18，
+		// Edge 正确行为 = max(8,10) = 10）。
+		ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
 
 		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
 		ch.SetContentWidth(borderBoxWidth - border.Horizontal() - padding.Horizontal())

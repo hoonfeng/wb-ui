@@ -647,6 +647,7 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 				if applyTransformOpsSized(info.canvas, st.Transform, rb.Width(), rb.Height()) {
 					info.canvas.Translate(-originX, -originY)
 					needsChildTransform = true
+					info.transformDepth++
 				} else {
 					info.canvas.Restore()
 				}
@@ -683,6 +684,7 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 		paintLayerTree(child, info)
 	}
 	if needsChildTransform {
+		info.transformDepth--
 		info.canvas.Restore()
 	}
 	if scrollRestore {
@@ -889,6 +891,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 			if applyTransformOpsSized(info.canvas, st.Transform, box.Width(), box.Height()) {
 				info.canvas.Translate(-originX, -originY)
 				needsTransformRestore = true
+				info.transformDepth++
 			} else {
 				info.canvas.Restore()
 			}
@@ -912,7 +915,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	// ★ 几何先行：先取 box 几何判断无交（便宜），命中后才取 Style 做
 	// 保守条件检查——无交对象（绝大多数）省掉 Style() 调用。
 	doVisit := true
-	if info != nil && info.DirtyCheckEnabled() {
+	if info != nil && info.DirtyCheckEnabled() && info.transformDepth == 0 {
 		dr := info.dirtyRect
 		if dr.Width > 0 && dr.Height > 0 {
 			if box := asRenderBox(root); box != nil && !box.IsStickyPositioned() {
@@ -1336,6 +1339,7 @@ restoreClip:
 		info.canvas.Restore()
 	}
 	if needsTransformRestore {
+		info.transformDepth--
 		info.canvas.Restore()
 	}
 	if needsStickyRestore {

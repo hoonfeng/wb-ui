@@ -814,7 +814,6 @@ func (o *Object) Export() interface{} {
 // ExportType returns the type of the value that is returned by Export().
 func (o *Object) ExportType() reflect.Type {
 	return o.self.exportType()
-	return o.self.exportType()
 }
 
 // Runtime returns the Runtime this Object belongs to.

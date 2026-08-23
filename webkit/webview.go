@@ -295,6 +295,14 @@ type WebView struct {
 	// wrapDocument + applyCanvas2DPatch 的 RunJS）与 injectRenderTreeBridge
 	// （重赋值 10+ 个包级几何桥闭包）的固定开销。
 	domBindingsInjected bool
+
+	// canvas 是渲染输出复用缓冲：Render() 尺寸未变时复用（Skia Surface/
+	// Paint/fontCache 随 Canvas 生命周期，不随每次 Render 重建——高帧率下
+	// 反复 NewCanvas 是分配/释放风暴）；尺寸变化时释放重建。
+	canvas *graphics.Canvas
+
+	// destroyed 标记 WebView 已销毁（Destroy 后不可再使用）。
+	destroyed bool
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -481,6 +489,7 @@ func (wv *WebView) PointerCapability() string {
 var BeforePageScripts func(rt *jsc.Interpreter)
 
 func (wv *WebView) LoadHTML(src string) error {
+	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
 	if wv.mainFrame != nil {
 		fn := func(code string) error {
 			_, err := wv.EvalJS(code)
@@ -794,18 +803,94 @@ func (wv *WebView) LoadURL(url string) error {
 	return wv.LoadHTML(src)
 }
 
+// Destroy 销毁 WebView：从全部全局注册表摘除并断开所有外部引用，
+// 使该 WebView 的 DOM 树/渲染树/样式/JS 解释器整棵树可被 Go GC 回收。
+// 挂件重建（改参数）与窗口关闭必须调用——否则 webviews/webviewBridges/
+// webviewInterps 全局 map 与 bindings 监听 side-table 永久持有旧 WebView
+// （每次改参数累积的内存泄漏根因）。调用后该 WebView 不可再使用
+// （Render/EvalJS 等返回 ErrDestroyed）。
+func (wv *WebView) Destroy() {
+	if wv == nil || wv.destroyed {
+		return
+	}
+	wv.destroyed = true
+	// 1. 从全局注册表摘除（WebView/桥闭包/解释器归属映射）
+	webviewsMu.Lock()
+	delete(webviews, wv)
+	delete(webviewBridges, wv)
+	if wv.jsInterpreter != nil {
+		if cur, ok := webviewInterps[wv.jsInterpreter]; ok && cur == wv {
+			delete(webviewInterps, wv.jsInterpreter)
+		}
+	}
+	webviewsMu.Unlock()
+	// 2. iframe 子文档：注销注册表（iframeRegistry 持子 Frame 与元素）
+	if wv.subframeJS != nil {
+		for f := range wv.subframeJS {
+			var el *dom.Element
+			page.ForEachIFrame(func(e *dom.Element, sf *page.Frame) {
+				if sf == f {
+					el = e
+				}
+			})
+			if el != nil {
+				page.UnregisterIFrame(el)
+			}
+		}
+		wv.subframeJS = nil
+	}
+	// 3. DOM bindings 全局缓存：nodeWrapperCache 持全部旧节点、
+	// registeredListeners/windowEventListeners 持 JS 回调（解释器引用）、
+	// observerRegistry 持目标节点——按本 WebView 的解释器/文档过滤清除
+	// （多 WebView 共存：全表清空会破坏其他 WebView 的监听器）。
+	if wv.jsInterpreter != nil {
+		bindings.ClearPageBindingsFor(wv.jsInterpreter, wv.mainFrame.Document())
+		if el := wv.jsInterpreter.GetEventLoop(); el != nil {
+			el.Reset()
+		}
+	}
+	// 4. 释放渲染 canvas（Skia Surface 等资源）
+	if wv.canvas != nil {
+		wv.canvas.Release()
+		wv.canvas = nil
+	}
+	// 5. 断开内部引用链（page → frame → document → 渲染树）
+	wv.page = nil
+	wv.mainFrame = nil
+	wv.jsInterpreter = nil
+	wv.jsLogger = nil
+}
+
 func (wv *WebView) Render() ([]byte, error) {
+	if wv.destroyed || wv.page == nil || wv.mainFrame == nil {
+		return nil, ErrDestroyed
+	}
 	rv := wv.mainFrame.RenderView()
-	if rv == nil { return nil, ErrNoDocument }
+	if rv == nil {
+		return nil, ErrNoDocument
+	}
 	view := wv.page.MainFrame().View()
-	if view != nil && view.NeedsLayout() { view.Layout() }
-	canvas := graphics.NewCanvas(wv.width, wv.height)
+	if view != nil && view.NeedsLayout() {
+		view.Layout()
+	}
+	// ★ 渲染输出缓冲复用：尺寸未变时复用内部 Canvas（NewCanvas 每次创建
+	// Skia RasterSurface + Paint + fontCache，高帧率下分配/释放风暴）。
+	// 尺寸变化才重建；复用前清成完全透明（缓冲残留上一帧像素，新建
+	// Canvas 初始即透明，清屏后行为一致——非脏区透明，匹配脏区绘制）。
+	if wv.canvas == nil || wv.canvas.Width() != wv.width || wv.canvas.Height() != wv.height {
+		if wv.canvas != nil {
+			wv.canvas.Release()
+		}
+		wv.canvas = graphics.NewCanvas(wv.width, wv.height)
+	}
+	wv.canvas.Clear(graphics.Color{})
 	dirtyRect := graphics.Rect{X: 0, Y: 0, Width: float64(wv.width), Height: float64(wv.height)}
-	rendering.Paint(rv, canvas, dirtyRect)
-	return canvas.Pixels(), nil
+	rendering.Paint(rv, wv.canvas, dirtyRect)
+	return wv.canvas.Pixels(), nil
 }
 
 func (wv *WebView) Resize(width, height int) {
+	if wv.destroyed || wv.page == nil { return }
 	if width < 0 { width = 0 }
 	if height < 0 { height = 0 }
 	wv.width, wv.height = width, height
@@ -822,6 +907,7 @@ func (wv *WebView) Resize(width, height int) {
 }
 
 func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
+	if wv.destroyed { return jsc.Undefined(), ErrDestroyed }
 	if !wv.settings.JavaScriptEnabled {
 		return jsc.Undefined(), ErrJavaScriptDisabled
 	}
@@ -862,6 +948,7 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 // 浏览器语义：函数内的 this 绑定为全局对象（window.fn() 的 this）。
 // 返回值可直接用 jsc.JSValue 的 ToString/ToNumber/ToBoolean/AsObject 读取。
 func (wv *WebView) CallFunction(name string, args ...any) (jsc.JSValue, error) {
+	if wv.destroyed { return jsc.Undefined(), ErrDestroyed }
 	if !wv.settings.JavaScriptEnabled {
 		return jsc.Undefined(), ErrJavaScriptDisabled
 	}
@@ -909,6 +996,7 @@ func (wv *WebView) CallFunction(name string, args ...any) (jsc.JSValue, error) {
 // 字符串（含数据）后调用，即可整体刷新一块 UI——无需逐元素命令式
 // 创建/插入/改样式。
 func (wv *WebView) RenderHTML(id, html string) error {
+	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
 	doc := wv.mainFrame.Document()
 	if doc == nil {
 		return ErrNoDocument
@@ -970,6 +1058,7 @@ func (wv *WebView) JSInterpreter() *jsc.Interpreter {
 }
 
 func (wv *WebView) Document() *dom.Document {
+	if wv.destroyed || wv.mainFrame == nil { return nil }
 	return wv.mainFrame.Document()
 }
 
@@ -1403,6 +1492,7 @@ func stickyHasInset(b *rendering.RenderBox) bool {
 }
 
 func (wv *WebView) EnsureLayout() {
+	if wv.destroyed || wv.page == nil || wv.mainFrame == nil { return }
 	view := wv.page.MainFrame().View()
 	if view != nil && view.NeedsLayout() { view.Layout() }
 	wv.syncIFrameSizes()
@@ -1460,6 +1550,7 @@ func (wv *WebView) RebuildRenderTree() {
 var (
 	ErrNoDocument         = errors.New("webkit: no document loaded")
 	ErrJavaScriptDisabled = errors.New("webkit: JavaScript is disabled")
+	ErrDestroyed          = errors.New("webkit: WebView destroyed")
 	ErrNotImplemented     = errors.New("webkit: not implemented")
 )
 

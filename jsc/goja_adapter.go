@@ -432,6 +432,11 @@ func (v JSValue) SameAs(other JSValue) bool {
 	return v.v == other.v
 }
 
+// Interp 返回该值所属的 JS 解释器（nil = 未绑定原生函数/运行时）。
+// 用于跨解释器注册表（bindings 事件监听 side-table）按解释器过滤清理。
+func (v JSValue) Interp() *Interpreter { return v.interp }
+
+
 func (v JSValue) ToString() string {
 	if v.v == nil || goja.IsUndefined(v.v) || goja.IsNull(v.v) {
 		return ""

@@ -107,6 +107,16 @@ type PaintInfo struct {
 	// ellipsis during text-overflow:ellipsis truncation, so that
 	// walkSubtreeExcluded skips its own ellipsis paint for this container.
 	textOverflowEllipsisPainted bool
+
+	// transformDepth counts how many enclosing CSS transforms are active in
+	// the current paint stack. Objects inside a transform space paint at
+	// positions that differ from their layout coordinates (a translateY
+	// scrolls content INTO the viewport), so dirty-rect culling against the
+	// static geometry wrongly drops them — "vertical scroll content goes
+	// blank after scrolling past the first viewport". Mirrors the
+	// stickyDx/stickyDy handling: visibility tests must follow the painted
+	// position, not the static one.
+	transformDepth int
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty
@@ -147,6 +157,11 @@ func (p *PaintInfo) DirtyCheckEnabled() bool { return p.dirtyCheckEnabled }
 // repaint mode), a zero/negative dirty rect is treated as "paint everything".
 func (p *PaintInfo) intersects(r Rect) bool {
 	if !p.dirtyCheckEnabled {
+		return true
+	}
+	// 在 transform 空间内绘制的对象：静态几何与绘制位置不一致
+	// （translateY 把内容移进视口），一律不剔除（与 sticky 同理）。
+	if p.transformDepth > 0 {
 		return true
 	}
 	dr := p.dirtyRect

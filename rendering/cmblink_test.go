@@ -57,7 +57,7 @@ func TestCmBlinkOpacityAnimation(t *testing.T) {
 	//    0.6s 灭（opacity 0），每 1.2s 循环。
 	//    t=0.1（0.6s 内，即 0%~50%）：opacity 应保持 1（step-end 不跳变）
 	AnimationTime = 0.1
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.001 {
 		t.Fatalf("t=0.1: opacity=%v want 1.0 (visible phase)", st.Opacity)
 	}
@@ -65,7 +65,7 @@ func TestCmBlinkOpacityAnimation(t *testing.T) {
 
 	//    t=0.7（0.6s 后，50%~100%）：opacity 应跳变 0（隐藏相位）
 	AnimationTime = 0.7
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-0.0) > 0.001 {
 		t.Fatalf("t=0.7: opacity=%v want 0.0 (hidden phase)", st.Opacity)
 	}
@@ -73,7 +73,7 @@ func TestCmBlinkOpacityAnimation(t *testing.T) {
 
 	//    t=1.3（下一轮 0.6s 内）：再次可见（闪烁循环）
 	AnimationTime = 1.3
-	applyAnimationToStyle(st, AnimationTime)
+	applyAnimationToStyle(st, AnimationTime, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.001 {
 		t.Fatalf("t=1.3: opacity=%v want 1.0 (blink cycle visible)", st.Opacity)
 	}

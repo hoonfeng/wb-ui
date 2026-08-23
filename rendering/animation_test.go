@@ -73,15 +73,15 @@ func TestAnimateOpacity(t *testing.T) {
 	st.AnimationDuration = 2
 	st.AnimationIterationCount = 1
 
-	applyAnimationToStyle(st, 0)
+	applyAnimationToStyle(st, 0, KeyframesLookup)
 	if st.Opacity != 0 {
 		t.Errorf("opacity at t=0: got %v, want 0", st.Opacity)
 	}
-	applyAnimationToStyle(st, 1)
+	applyAnimationToStyle(st, 1, KeyframesLookup)
 	if math.Abs(st.Opacity-0.5) > 0.01 {
 		t.Errorf("opacity at t=1: got %v, want 0.5", st.Opacity)
 	}
-	applyAnimationToStyle(st, 2)
+	applyAnimationToStyle(st, 2, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.01 {
 		t.Errorf("opacity at t=2: got %v, want 1.0", st.Opacity)
 	}
@@ -100,15 +100,15 @@ func TestAnimateTranslateX(t *testing.T) {
 	st.AnimationDuration = 2
 	st.AnimationIterationCount = 1
 
-	applyAnimationToStyle(st, 0)
+	applyAnimationToStyle(st, 0, KeyframesLookup)
 	if st.TranslateX != 0 {
 		t.Errorf("TranslateX at t=0: got %v, want 0", st.TranslateX)
 	}
-	applyAnimationToStyle(st, 1)
+	applyAnimationToStyle(st, 1, KeyframesLookup)
 	if math.Abs(st.TranslateX-50) > 0.01 {
 		t.Errorf("TranslateX at t=1: got %v, want 50", st.TranslateX)
 	}
-	applyAnimationToStyle(st, 2)
+	applyAnimationToStyle(st, 2, KeyframesLookup)
 	if math.Abs(st.TranslateX-100) > 0.01 {
 		t.Errorf("TranslateX at t=2: got %v, want 100", st.TranslateX)
 	}
@@ -127,7 +127,7 @@ func TestAnimateScale(t *testing.T) {
 	st.AnimationDuration = 1
 	st.AnimationIterationCount = 1
 
-	applyAnimationToStyle(st, 0.5)
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
 	if math.Abs(st.ScaleX-1.5) > 0.01 || math.Abs(st.ScaleY-1.5) > 0.01 {
 		t.Errorf("Scale at t=0.5: got (%v,%v), want (1.5,1.5)", st.ScaleX, st.ScaleY)
 	}
@@ -148,12 +148,12 @@ func TestAnimateDelay(t *testing.T) {
 	st.AnimationDelay = 2
 
 	// Before delay ends: no animation applied, Opacity stays at default (1.0).
-	applyAnimationToStyle(st, 1)
+	applyAnimationToStyle(st, 1, KeyframesLookup)
 	if st.Opacity != 1.0 {
 		t.Errorf("opacity during delay: got %v, want 1.0", st.Opacity)
 	}
 	// After delay: animation progresses.
-	applyAnimationToStyle(st, 2.5)
+	applyAnimationToStyle(st, 2.5, KeyframesLookup)
 	if math.Abs(st.Opacity-0.5) > 0.01 {
 		t.Errorf("opacity after delay at t=2.5: got %v, want 0.5", st.Opacity)
 	}
@@ -174,12 +174,12 @@ func TestAnimateDirectionAlternate(t *testing.T) {
 	st.AnimationDirection = "alternate"
 
 	// 1st iteration: normal (0→1).
-	applyAnimationToStyle(st, 0.5)
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
 	if math.Abs(st.Opacity-0.5) > 0.01 {
 		t.Errorf("1st iter t=0.5: got %v, want 0.5", st.Opacity)
 	}
 	// 2nd iteration: reverse (1→0).
-	applyAnimationToStyle(st, 1.5)
+	applyAnimationToStyle(st, 1.5, KeyframesLookup)
 	if math.Abs(st.Opacity-0.5) > 0.01 {
 		t.Errorf("2nd iter t=1.5: got %v, want 0.5", st.Opacity)
 	}
@@ -200,7 +200,7 @@ func TestAnimateFillModeForwards(t *testing.T) {
 	st.AnimationFillMode = "forwards"
 
 	// After animation ends, opacity should stay at the last keyframe (1).
-	applyAnimationToStyle(st, 3)
+	applyAnimationToStyle(st, 3, KeyframesLookup)
 	if math.Abs(st.Opacity-1.0) > 0.01 {
 		t.Errorf("fill-mode=forwards after end: got %v, want 1.0", st.Opacity)
 	}
@@ -222,7 +222,7 @@ func TestAnimateFillModeBackwards(t *testing.T) {
 	st.AnimationFillMode = "backwards"
 
 	// During delay: apply first keyframe.
-	applyAnimationToStyle(st, 1)
+	applyAnimationToStyle(st, 1, KeyframesLookup)
 	if math.Abs(st.Opacity-0.3) > 0.01 {
 		t.Errorf("fill-mode=backwards during delay: got %v, want 0.3", st.Opacity)
 	}
@@ -242,7 +242,7 @@ func TestAnimateTimingEaseIn(t *testing.T) {
 	st.AnimationIterationCount = 1
 	st.AnimationTimingFunction = "ease-in"
 
-	applyAnimationToStyle(st, 0.5)
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
 	// ease-in: at t=0.5, progress should be < 0.5 (starts slow, accelerates).
 	if st.Opacity >= 0.5 {
 		t.Errorf("ease-in at t=0.5: opacity=%v, expected <0.5 (decelerating start)", st.Opacity)
@@ -262,15 +262,15 @@ func TestAnimateColor(t *testing.T) {
 	st.AnimationDuration = 1
 	st.AnimationIterationCount = 1
 
-	applyAnimationToStyle(st, 0)
+	applyAnimationToStyle(st, 0, KeyframesLookup)
 	if st.AnimatedColor.R != 255 || st.AnimatedColor.B != 0 {
 		t.Errorf("color at t=0: got %+v, want R=255,B=0", st.AnimatedColor)
 	}
-	applyAnimationToStyle(st, 1)
+	applyAnimationToStyle(st, 1, KeyframesLookup)
 	if st.AnimatedColor.R != 0 || st.AnimatedColor.B != 255 {
 		t.Errorf("color at t=1: got %+v, want R=0,B=255", st.AnimatedColor)
 	}
-	applyAnimationToStyle(st, 0.5)
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
 	if st.AnimatedColor.R < 120 || st.AnimatedColor.R > 135 || st.AnimatedColor.B < 120 || st.AnimatedColor.B > 135 {
 		t.Errorf("color at t=0.5: got %+v, want R≈127,B≈127", st.AnimatedColor)
 	}
@@ -289,7 +289,7 @@ func TestAnimateBackgroundColor(t *testing.T) {
 	st.AnimationDuration = 1
 	st.AnimationIterationCount = 1
 
-	applyAnimationToStyle(st, 0.5)
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
 	if st.AnimatedBackgroundColor.R < 120 || st.AnimatedBackgroundColor.R > 135 {
 		t.Errorf("bgcolor at t=0.5: got %+v, want R≈127", st.AnimatedBackgroundColor)
 	}

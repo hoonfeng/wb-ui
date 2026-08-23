@@ -2689,6 +2689,47 @@ func clearNodeCache() {
 	nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
 }
 
+// ClearPageBindingsFor 清除与指定解释器/文档相关的全局 DOM 绑定缓存。
+// WebView.Destroy 调用（挂件重建/窗口关闭时）：这些包级注册表持有
+// 旧文档节点（nodeWrapperCache/observerRegistry 的 key）与 JS 回调
+// （registeredListeners/windowEventListeners 的 jsListener/JSValue 持
+// 解释器引用）——不清理则旧 WebView 的 DOM 树与 JS 堆永不被 GC。
+// 多 WebView 场景按解释器/文档精确过滤（全表清空会破坏其他 WebView
+// 仍在使用的监听器）。
+func ClearPageBindingsFor(interp *jsc.Interpreter, doc *dom.Document) {
+	clearNodeCache()
+	if interp != nil {
+		for k, list := range registeredListeners {
+			kept := list[:0]
+			for _, l := range list {
+				if l.interp != interp {
+					kept = append(kept, l)
+				}
+			}
+			if len(kept) == 0 {
+				delete(registeredListeners, k)
+			} else {
+				registeredListeners[k] = kept
+			}
+		}
+		for k, fns := range windowEventListeners {
+			kept := fns[:0]
+			for _, fn := range fns {
+				if fn.Interp() != interp {
+					kept = append(kept, fn)
+				}
+			}
+			if len(kept) == 0 {
+				delete(windowEventListeners, k)
+			} else {
+				windowEventListeners[k] = kept
+			}
+		}
+	}
+	dom.ClearObserverRegistryFor(doc)
+}
+
+
 // isStyleElement reports whether n is an HTML <style> element.
 func isStyleElement(n dom.Node) bool {
 	if n == nil { return false }

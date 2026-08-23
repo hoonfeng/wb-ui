@@ -144,7 +144,14 @@ func (m *FontManager) RegisterCustomFont(family string, data []byte, index int) 
 func (m *FontManager) loadDir(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[fontmgr] read dir %s failed: %v\n", dir, err)
+		// ★ 空目录（InitFontManager("") 走 OS 字体名查找）不打印错误：
+		// 此前每次进程启动都向 stderr 打一行 "[fontmgr] read dir  failed:
+		// open : ..."——宿主（widget-overlay 等）未配置字体目录时首屏
+		// 日志噪音，且与默认字体按名查找的正常行为无关。仅非空目录
+		// 读取失败才提示（路径配置错误值得告警）。
+		if dir != "" {
+			fmt.Fprintf(os.Stderr, "[fontmgr] read dir %s failed: %v\n", dir, err)
+		}
 		// 目录不可用（如 InitFontManager("")）时仍执行 selectDefaults：
 		// 默认字体通过 skia.NewTypeface 按 OS 字体名查找（Microsoft YaHei
 		// / Consolas / SimSun 等），不依赖本目录已加载的文件，保证文本
@@ -243,11 +250,50 @@ func (m *FontManager) loadSystemFontDir(dir string, loaded *int) int {
 }
 
 // tryLoadFont attempts to load a single font file if its extension is .ttf/.otf/.ttc.
+// systemFontWhitelist 判定系统字体文件是否值得加载。★ 内存优化
+// （2026-08-23）：此前全量 os.ReadFile + Skia 拷贝加载 C:\Windows\Fonts
+// 全部 294 个字体（≈526MB 驻留！），挂件/配置界面实际只用常见西文 +
+// 中文 + emoji/symbol + 等宽。白名单改为精确文件名列表（~55 个文件
+// ≈110MB）：CJK 仅保留微软雅黑（sans）+ 宋体/NSimSun（serif/mono），
+// 其他语种（日/韩/繁/其他族系）通过 Skia 系统字体名查找回退
+// （skia.NewTypeface），不影响 CSS font-family 解析与试水渲染。
+func systemFontWhitelist(fileName string) bool {
+	base := strings.ToLower(fileName)
+	// 精确文件名白名单——只加载挂件/配置 UI 实际会用到的字体：
+	// 中文（雅黑 sans / 宋体 NSimSun mono / 黑体）+ emoji/symbol + 西文主流。
+	// 其余（日/韩/繁/装饰字体合集）由 Skia 系统字体名查找回退，
+	// 避免全量加载 C:\Windows\Fonts 294 个字体（≈526MB 驻留）。
+	exact := map[string]bool{
+		"msyh.ttc": true, "msyhbd.ttc": true,
+		"simsun.ttc": true, "simhei.ttf": true,
+		"seguiemj.ttf": true, "seguisym.ttf": true,
+		"segoeui.ttf": true, "segoeuib.ttf": true, "segoeuii.ttf": true, "segoeuiz.ttf": true,
+		"seguisb.ttf": true, "seguisbi.ttf": true, "seguili.ttf": true,
+		"arial.ttf": true, "arialbd.ttf": true, "ariali.ttf": true, "arialbi.ttf": true,
+		"calibri.ttf": true, "calibrib.ttf": true, "calibrii.ttf": true, "calibriz.ttf": true,
+		"times.ttf": true, "timesbd.ttf": true, "timesi.ttf": true, "timesbi.ttf": true,
+		"georgia.ttf": true, "georgiab.ttf": true, "georgiai.ttf": true, "georgiaz.ttf": true,
+		"tahoma.ttf": true, "tahomabd.ttf": true,
+		"verdana.ttf": true, "verdanab.ttf": true, "verdanai.ttf": true, "verdanaz.ttf": true,
+		"consola.ttf": true, "consolab.ttf": true, "consolai.ttf": true, "consolaz.ttf": true,
+		"cour.ttf": true, "courbd.ttf": true, "couri.ttf": true, "courbi.ttf": true,
+		"impact.ttf": true, "comic.ttf": true, "comicbd.ttf": true, "comici.ttf": true, "comicz.ttf": true,
+		"cambria.ttc": true, "cambriab.ttf": true, "cambriai.ttf": true, "cambriaz.ttf": true,
+		"constan.ttf": true, "constanb.ttf": true, "constani.ttf": true, "constanz.ttf": true,
+		"corbel.ttf": true, "corbelb.ttf": true, "corbeli.ttf": true, "corbelz.ttf": true,
+	}
+	return exact[base]
+}
+
 func (m *FontManager) tryLoadFont(path string, loaded *int) bool {
 	name := strings.ToLower(filepath.Base(path))
 	if !strings.HasSuffix(name, ".ttf") &&
 		!strings.HasSuffix(name, ".otf") &&
 		!strings.HasSuffix(name, ".ttc") {
+		return false
+	}
+	// ★ 白名单过滤（内存优化：跳过非必要字体文件）
+	if !systemFontWhitelist(filepath.Base(path)) {
 		return false
 	}
 	data, err := os.ReadFile(path)

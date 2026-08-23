@@ -797,6 +797,11 @@ func (vm *vm) pushTryFrame(catchPos, finallyPos int32) {
 }
 
 func (vm *vm) popTryFrame() {
+	// ★ 2026-08-19：空栈保护——异常路径（handleThrow 弹光帧 + defer pop）下
+	//   直接切片会越界 panic（slice bounds out of range [:-1]）。
+	if len(vm.tryStack) == 0 {
+		return
+	}
 	vm.tryStack = vm.tryStack[:len(vm.tryStack)-1]
 }
 
@@ -878,8 +883,15 @@ func (vm *vm) throw(v interface{}) {
 }
 
 func (vm *vm) try(f func()) (ex *Exception) {
+	depth := len(vm.tryStack)
 	vm.pushTryFrame(tryPanicMarker, -1)
-	defer vm.popTryFrame()
+	defer func() {
+		// ★ 2026-08-19：异常路径下 handleThrow 可能已弹走 try 帧（含本帧），
+		//   直接 pop 会空栈越界；改为恢复到进入前深度（只弹本帧）。
+		if len(vm.tryStack) > depth {
+			vm.tryStack = vm.tryStack[:depth]
+		}
+	}()
 
 	defer func() {
 		if x := recover(); x != nil {
@@ -892,8 +904,14 @@ func (vm *vm) try(f func()) (ex *Exception) {
 }
 
 func (vm *vm) runTry() (ex *Exception) {
+	depth := len(vm.tryStack)
 	vm.pushTryFrame(tryPanicMarker, -1)
-	defer vm.popTryFrame()
+	defer func() {
+		// ★ 2026-08-19：同 try()——异常路径可能已弹走本帧，恢复到进入前深度。
+		if len(vm.tryStack) > depth {
+			vm.tryStack = vm.tryStack[:depth]
+		}
+	}()
 
 	for {
 		ex = vm.runTryInner()

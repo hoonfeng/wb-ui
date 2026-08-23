@@ -31,7 +31,24 @@ var AnimationTime float64
 // KeyframesLookup is a function that returns the @keyframes rule with the
 // given name, or nil if not found. The embedder sets this to bridge to the
 // style resolver's keyframes collection.
+//
+// ★ 多 WebView 安全：KeyframesLookup 是包级全局，多个 WebView（宿主多
+// 挂件/多窗口）互相覆盖会让 A 页面的 @keyframes 用 B 页面的 resolver 查
+// 询 → A 动画查不到关键帧直接失效（确定性污染）。因此所有查询路径优先
+// 使用 rv.Resolver()（RenderTreeBuilder.Build 已自动挂接），全局变量仅
+// 作为无 resolver 的旧嵌入路径兜底。
 var KeyframesLookup func(name string) *css.KeyframesRule
+
+// keyframesFor 返回某 RenderView 的 @keyframes 查询函数：首选 rv 绑定的
+// resolver（每 WebView 独立，互不污染），无 resolver 时回退全局兜底。
+func keyframesFor(rv *RenderView) func(name string) *css.KeyframesRule {
+	if rv != nil {
+		if rs := rv.Resolver(); rs != nil {
+			return rs.LookupKeyframes
+		}
+	}
+	return KeyframesLookup
+}
 
 // --- Top-level driver -------------------------------------------------------
 
@@ -48,7 +65,7 @@ func ApplyAnimations(rv *RenderView) bool {
 		return false
 	}
 	active := false
-	if KeyframesLookup != nil {
+	if kfLookup := keyframesFor(rv); kfLookup != nil {
 		var walk func(o RenderObject)
 		walk = func(o RenderObject) {
 			if o == nil {
@@ -57,10 +74,10 @@ func ApplyAnimations(rv *RenderView) bool {
 			st := o.Style()
 			if st != nil && st.AnimationName != "" {
 				if os.Getenv("WB_ANIM_DEBUG") != "" {
-					kf := KeyframesLookup(st.AnimationName)
+					kf := kfLookup(st.AnimationName)
 					log.Printf("[anim] name=%q kf=%v", st.AnimationName, kf != nil)
 				}
-				if applyAnimationToStyle(st, AnimationTime) {
+				if applyAnimationToStyle(st, AnimationTime, kfLookup) {
 					active = true
 					if os.Getenv("WB_ANIM_DEBUG") != "" {
 						log.Printf("[anim] name=%q time=%.2f opacity=%.2f static=%.2f bgAnim=(%d,%d,%d,%d) bgStatic=(%d,%d,%d,%d)",
@@ -100,10 +117,14 @@ var layoutAffectingAnimationProps = map[string]bool{
 // 无限颜色动画每帧触发全量 relayout（复杂页面 100ms+）→ 帧率暴跌
 // （「频繁无响应」）。颜色/opacity 动画只需重绘（needPaint 已覆盖）。
 func AnimationsAffectLayout(rv *RenderView) bool {
-	if rv == nil || KeyframesLookup == nil {
+	if rv == nil {
+		return false
+	}
+	if kfLookup := keyframesFor(rv); kfLookup == nil {
 		return false
 	}
 	affect := false
+	kfLookup := keyframesFor(rv)
 	var walk func(o RenderObject)
 	walk = func(o RenderObject) {
 		if affect || o == nil {
@@ -111,7 +132,7 @@ func AnimationsAffectLayout(rv *RenderView) bool {
 		}
 		st := o.Style()
 		if st != nil && st.AnimationName != "" {
-			if kf := KeyframesLookup(st.AnimationName); kf != nil {
+			if kf := kfLookup(st.AnimationName); kf != nil {
 				for _, rule := range kf.Keyframes {
 					for _, d := range rule.Declarations {
 						if layoutAffectingAnimationProps[strings.ToLower(d.Name)] {
@@ -136,8 +157,12 @@ func AnimationsAffectLayout(rv *RenderView) bool {
 // decide whether the frame needs a re-paint. Once the animation has ended the
 // final keyframe value (progress=1.0) was already applied in the last active
 // frame, so returning false lets the host stop re-painting.
-func applyAnimationToStyle(st *style.ComputedStyle, time float64) bool {
-	kf := KeyframesLookup(st.AnimationName)
+func applyAnimationToStyle(st *style.ComputedStyle, time float64,
+	kfLookup func(name string) *css.KeyframesRule) bool {
+	if kfLookup == nil {
+		kfLookup = KeyframesLookup
+	}
+	kf := kfLookup(st.AnimationName)
 	if kf == nil || len(kf.Keyframes) == 0 {
 		// 无动画定义：动画驱动结束，清除驱动标志（painter 回退静态色）。
 		st.AnimatedBackgroundActive = false

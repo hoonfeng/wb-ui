@@ -206,6 +206,20 @@ func (el *EventLoop) QueueMicrotask(callback JSValue) {
 // elapsedMs 是自事件循环启动以来经过的毫秒数。
 // 处理顺序：宏任务 → 微任务（清空） → 重复直到无宏任务 → 动画帧回调。
 // 宿主应在渲染循环中定期调用此方法。
+// Reset 清空事件循环的全部排队任务与运行状态（WebView 销毁时调用：
+// 队列里的 setTimeout/setInterval/rAF 回调持 JS 值引用（闭包），
+// 清空后解释器整堆可完全回收）。
+func (el *EventLoop) Reset() {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	el.macrotasks = nil
+	el.microtasks = nil
+	el.animFrames = nil
+	el.timerIDSeq = 0
+	el.animIDSeq = 0
+	el.running = false
+}
+
 func (el *EventLoop) ProcessTasks(_ int64) {
 	el.running = true
 

@@ -112,6 +112,21 @@ func ResetObserverRegistry() {
 	observerRegistry = make(map[Node][]*MutationObserver)
 }
 
+// ClearObserverRegistryFor 清除指定文档节点的观察者记录。WebView 销毁
+// 时调用（ObserverRegistry 持目标节点 + 观察者回调，不清理则旧文档
+// 整树与回调（JS 值引用）无法回收）。
+func ClearObserverRegistryFor(doc *Document) {
+	if doc == nil {
+		return
+	}
+	for n := range observerRegistry {
+		if n.OwnerDocument() == doc {
+			delete(observerRegistry, n)
+		}
+	}
+}
+
+
 func registerObserver(target Node, mo *MutationObserver) {
 	observerRegistry[target] = append(observerRegistry[target], mo)
 }

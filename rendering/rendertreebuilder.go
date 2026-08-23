@@ -85,6 +85,11 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 	// Build the layer tree.
 	view.compositor.BuildLayerTree(view)
 	view.SetRootLayer(view.compositor.RootLayer())
+	// ★ 构建时自动挂接 resolver：RenderView 从此自带样式解析服务，
+	// 动画系统（@keyframes 查询）按 rv.Resolver() 而非包级全局
+	// KeyframesLookup 查找——多 WebView（宿主多挂件/多窗口）不再互相
+	// 覆盖关键帧，每个页面动画只认自己文档的 @keyframes。
+	view.SetResolver(b.resolver)
 	if profile {
 		t3 := time.Now()
 		log.Printf("[rebuild-profile] buildChildren=%v attachLayout=%v layerTree=%v total=%v",
