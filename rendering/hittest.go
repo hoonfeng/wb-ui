@@ -10,7 +10,6 @@
 package rendering
 
 import (
-	"log"
 	"wb-ui/dom"
 	"wb-ui/style"
 )
@@ -270,6 +269,7 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 		return
 	}
 	ox, oy, ow, oh, ok := boxCoords(o)
+	inBounds := true
 	if !ok {
 		// Non-box objects (inline, text) still recurse into children.
 	} else {
@@ -280,20 +280,21 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 		//   position:absolute 子元素溢出容器仍应可点击（浏览器 hit-test 语义
 		//   ——absolute 元素不依赖祖先高度）。若按 inBounds 拦截，iframe 子
 		//   文档的 absolute 内容在 html 高度 0 时全部不可命中。
-		if ow == 0 || oh == 0 {
-			// pass through to children
-		} else {
-			inBounds := x >= ox && y >= oy && x < ox+ow && y < oy+oh
-			if debugHitTest && o.Node() != nil {
-				if el, isEl := o.Node().(*dom.Element); isEl {
-					tn := el.TagName()
-					cn := el.ClassName()
-					log.Printf("[dbg/ht] %s.%s box=(%.0f,%.0f %.0fx%.0f) pt=(%.0f,%.0f) inBounds=%v",
-						tn, cn, ox, oy, ow, oh, x, y, inBounds)
-				}
-			}
+		if ow > 0 && oh > 0 {
+			inBounds = x >= ox && y >= oy && x < ox+ow && y < oy+oh
 			if !inBounds {
-				return // outside this box's bounds
+				// ★ html/body 视口背景盒不拦截：absolute 子元素可溢出
+				// 塌陷的 html/body（html 高度=内容高而非视口高——裸
+				// position:absolute 控件不撑开文档），出界即跳会漏命
+				// （absolute 输入框在 html 高度塌陷时不可点击/穿透）。
+				// 浏览器 hit-test 语义：html/body 是背景盒，不裁剪其
+				// 溢出子内容（无 overflow 裁剪时）。
+				if el, isEl := o.Node().(*dom.Element); isEl &&
+					(el.LocalName() == "html" || el.LocalName() == "body") {
+					inBounds = true // pass-through：跳过自身候选，继续下钻
+				} else {
+					return // outside this box's bounds
+				}
 			}
 		}
 	}
@@ -304,7 +305,7 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 	// NOT become hit candidates: once one is picked (best==nil, area 0) every
 	// later element loses because its area > 0 can never beat 0, so the empty
 	// container swallows ALL clicks across the viewport.
-	if ok && ow > 0 && oh > 0 {
+	if ok && ow > 0 && oh > 0 && inBounds {
 		if attrName != "" {
 			node := o.Node()
 			if el, isEl := node.(*dom.Element); isEl {

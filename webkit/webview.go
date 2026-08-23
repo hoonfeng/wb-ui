@@ -562,6 +562,29 @@ func (wv *WebView) LoadHTML(src string) error {
 				fr.SetNeedsLayout(true)
 			}
 		}
+		// ★ Go 侧 DOM API 变更（SetAttribute/SetTextContent/appendChild 等
+		// dom 包调用，或 JS bindings 代理触发的节点插入/移除之外的结构
+		// 变化）感知：doc.SetTreeChangeCallback 覆盖 Go 侧直改 DOM 的场景
+		// （configwin 的 setInputValue、openTextEditor 的 JS 之外）、Host
+		// 的 ensureTreeChangeHook 会覆盖本回调（单回调语义）——Host 路径
+		// 使用其更细化的增量文本处理；裸 WebView（配置窗口/挂件）使用
+		// 本默认路径：标记重建 + 布局，渲染循环按脏标记批量重建，调用方
+		// 无需每次渲染前强制 RebuildRenderTree。
+		if doc := wv.mainFrame.Document(); doc != nil {
+			doc.SetTreeChangeCallback(func(node dom.Node) {
+				fr := wv.mainFrame.Frame()
+				if fr == nil {
+					return
+				}
+				// 文本变更走增量路径（同步 RenderText + InlineTextBox.text +
+				// 标记所在 block dirty，下帧局部重排）；结构变更仍全量重建。
+				if _, isText := node.(*dom.Text); isText && fr.ApplyTextChange(node) {
+					return
+				}
+				fr.MarkRenderTreeDirty()
+				fr.SetNeedsLayout(true)
+			})
+		}
 		// DOM bindings + 几何桥已注入，EvalJS 无需重复（见 EvalJS 兜底分支）。
 		wv.domBindingsInjected = true
 		// Set up callback for inline style changes (el.style.xxx = ...).
@@ -1496,6 +1519,18 @@ func (wv *WebView) EnsureLayout() {
 	view := wv.page.MainFrame().View()
 	if view != nil && view.NeedsLayout() { view.Layout() }
 	wv.syncIFrameSizes()
+}
+
+// EnsureHitTestReady 把渲染树与布局同步到最新状态（交互前调用：鼠标
+// 按下/命中测试需要最新树，不能依赖渲染循环的批量重建——JS 改 DOM
+// （弹窗 display 等）后的首个点击若用陈旧树命中会穿透到后方元素）。
+// 通过 FlushRenderTreeDirty 忽略重建 cooldown；树无脏标记时零开销。
+func (wv *WebView) EnsureHitTestReady() {
+	if wv.destroyed || wv.mainFrame == nil { return }
+	if fr := wv.mainFrame.Frame(); fr != nil {
+		fr.FlushRenderTreeDirty()
+	}
+	wv.EnsureLayout()
 }
 
 // syncIFrameSizes 把主文档 iframe 元素的内容框尺寸同步到子 Frame，

@@ -300,6 +300,15 @@ func (f *Frame) RebuildRenderTreeIfNeeded() bool {
 	return true
 }
 
+// FlushRenderTreeDirty 立即重建渲染树（忽略 rebuildCooldown 降频）——
+// 命中测试等交互前需要最新树：JS 改 DOM（弹窗 display 等）后用户立即
+// 点击，cooldown 会让树停留在旧结构 → 点击命中穿透。交互是低频操作，
+// 立即重建开销可忽略；连续渲染仍走批量降频路径。
+func (f *Frame) FlushRenderTreeDirty() {
+	f.rebuildCooldown = 0
+	f.RebuildRenderTreeIfNeeded()
+}
+
 // RebuildStyleForElement 增量更新单个元素的计算样式——拖拽热路径专用
 // （textarea resize / range 拖动每帧触发 style 变更，全量 RebuildRenderTree
 // 重建整棵渲染树在复杂页面下耗时 30ms+，是「拖拽不跟手」的主因）。
