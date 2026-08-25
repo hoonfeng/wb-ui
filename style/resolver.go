@@ -1538,12 +1538,20 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.Order = v
 		}
 	case "gap":
-		if l, ok := parseLength(valueString); ok {
-			cs.Gap = l
+		if r, c, ok := parseGapShorthand(valueString); ok {
 			// The `gap` shorthand sets both row-gap and column-gap (CSS
-			// Box Alignment §gap). Grid/Flex read the longhands directly.
-			cs.RowGap = l
-			cs.ColumnGap = l
+			// Box Alignment §gap): 1 值 = 同值；2 值 = <row> <column>。
+			// Grid/Flex read the longhands directly.
+			cs.RowGap = r
+			cs.ColumnGap = c
+			// 双值（row≠col）时 Gap 保持 0：flex 消费点
+			// （flexGap/cross-gap）在 Gap>0 时优先读 Gap，双值必须
+			// 回落长属性，否则行列被单值覆盖。
+			if r.Value == c.Value && r.Unit == c.Unit {
+				cs.Gap = r
+			} else {
+				cs.Gap = Length{}
+			}
 		}
 	case "row-gap":
 		if l, ok := parseLength(valueString); ok {
@@ -1773,6 +1781,24 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	if d.Important {
 		cs.ImportantProperties[name] = true
 	}
+}
+
+// parseGapShorthand 解析 gap 简写（CSS Box Alignment §gap）：1 值 → row/col 同值；
+// 2 值 → <row-gap> <column-gap>。calc() 等含空格函数值用括号感知分割。
+func parseGapShorthand(s string) (Length, Length, bool) {
+	parts := splitShorthandValue(s)
+	if len(parts) == 1 {
+		l, ok := parseLength(parts[0])
+		return l, l, ok
+	}
+	if len(parts) == 2 {
+		r, ok1 := parseLength(parts[0])
+		c, ok2 := parseLength(parts[1])
+		if ok1 && ok2 {
+			return r, c, true
+		}
+	}
+	return Length{}, Length{}, false
 }
 
 // parseBorderColorShorthand parses the border-color shorthand (1-4 colors).
@@ -2822,11 +2848,16 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 				cs.FlexBasis = l
 			}
 		case "gap":
-			if l, ok := parseLength(resolvedStr); ok {
-				cs.Gap = l
-				// The `gap` shorthand sets both row-gap and column-gap.
-				cs.RowGap = l
-				cs.ColumnGap = l
+			if r, c, ok := parseGapShorthand(resolvedStr); ok {
+				// The `gap` shorthand sets both row-gap and column-gap
+				// （同 first switch：双值 Gap 归零，flex 走长属性）。
+				cs.RowGap = r
+				cs.ColumnGap = c
+				if r.Value == c.Value && r.Unit == c.Unit {
+					cs.Gap = r
+				} else {
+					cs.Gap = Length{}
+				}
 			}
 		case "border":
 			if w, s, c, cset, ok := parseBorderShorthand(resolvedStr); ok {

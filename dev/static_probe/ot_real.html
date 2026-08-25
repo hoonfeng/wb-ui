@@ -23,11 +23,10 @@
      （实测图标/文字中心差 1.3px）；inline-block + vertical-align:middle
      对 inline 文字基线对位偏离 ~20px，画布「图标与文字不齐」根因，
      实测对比后弃用）。 */
-  .gifts { display:flex; flex-wrap:wrap; justify-content:center;
-           margin:0 auto; max-width:100%; }
+  .gifts { display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;
+           width:100%; max-width:100%; margin:0 auto; }
   .gifts .gitem { display:inline-flex; align-items:center; justify-content:center;
-                  width:calc(50% - 10px); box-sizing:border-box;
-                  margin:3px 5px; white-space:nowrap;
+                  box-sizing:border-box; white-space:nowrap;
                   font-size:21px; font-weight:600; color:#ffffff;
                   background:rgba(0,0,0,0.28); border-radius:12px;
                   padding:3px 6px;

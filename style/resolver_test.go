@@ -409,6 +409,27 @@ func TestResolver_FlexProperties(t *testing.T) {
 	checkLen(t, "gap", cs.Gap, 10, "px")
 }
 
+func TestResolver_GapTwoValues(t *testing.T) {
+	doc := dom.NewDocument()
+	el := dom.NewElement(doc, "div")
+	r := NewResolver()
+	// gap: <row> <column> 双值（CSS Box Alignment §gap）——行列必须分别生效。
+	r.AddStyleSheet(newSheet(t, `div { display: grid; gap: 6px 10px; }`))
+	cs := r.ResolveElement(el)
+	checkLen(t, "row-gap", cs.RowGap, 6, "px")
+	checkLen(t, "column-gap", cs.ColumnGap, 10, "px")
+	if cs.Gap.Value != 0 {
+		t.Fatalf("dual-value gap must NOT populate shorthand Gap (flex priority escape), got %v", cs.Gap)
+	}
+	// 单值简写仍同步填充（flex/grid 兼容路径）。
+	r2 := NewResolver()
+	r2.AddStyleSheet(newSheet(t, `div { grid-template-columns: 1fr 1fr; gap: 8px; }`))
+	cs2 := r2.ResolveElement(el)
+	checkLen(t, "gap(single)", cs2.Gap, 8, "px")
+	checkLen(t, "row-gap(single)", cs2.RowGap, 8, "px")
+	checkLen(t, "column-gap(single)", cs2.ColumnGap, 8, "px")
+}
+
 func TestResolver_FlexItemProperties(t *testing.T) {
 	doc := dom.NewDocument()
 	el := dom.NewElement(doc, "div")
