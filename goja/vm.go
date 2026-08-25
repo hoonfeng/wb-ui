@@ -4843,6 +4843,13 @@ func (t try) exec(vm *vm) {
 type leaveTry struct{}
 
 func (leaveTry) exec(vm *vm) {
+	// ★ 2026-08-25：空栈保护——异常路径下 try 帧可能在指令继续执行前已被
+	//   弹光（同 popTryFrame 2026-08-19 修复），直接访问会 panic
+	//   index out of range [-1]（fs-api /api/fs/list 实测崩溃点）。
+	if len(vm.tryStack) == 0 {
+		vm.pc++
+		return
+	}
 	tf := &vm.tryStack[len(vm.tryStack)-1]
 	if tf.finallyPos >= 0 {
 		tf.finallyRet = int32(vm.pc + 1)
@@ -4859,6 +4866,11 @@ func (leaveTry) exec(vm *vm) {
 type enterFinally struct{}
 
 func (enterFinally) exec(vm *vm) {
+	// ★ 2026-08-25：空栈保护，同 leaveTry。
+	if len(vm.tryStack) == 0 {
+		vm.pc++
+		return
+	}
 	tf := &vm.tryStack[len(vm.tryStack)-1]
 	tf.finallyPos = -1
 	vm.pc++
@@ -4867,6 +4879,11 @@ func (enterFinally) exec(vm *vm) {
 type leaveFinally struct{}
 
 func (leaveFinally) exec(vm *vm) {
+	// ★ 2026-08-25：空栈保护，同 leaveTry。
+	if len(vm.tryStack) == 0 {
+		vm.pc++
+		return
+	}
 	tf := &vm.tryStack[len(vm.tryStack)-1]
 	ex, ret := tf.exception, tf.finallyRet
 	tf.exception = nil
