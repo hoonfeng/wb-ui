@@ -70,16 +70,30 @@ func TestScrollContainerContentMovesOnPaint(t *testing.T) {
 		}
 		return false
 	}
-	// 行间距 ~19px（测试字体 line-height）；第 4 行 ≈ textY0+3*19
-	lineGap := 19.0
+	// 行间距 = 行盒高度：默认 line-height 现为 normal（字体度量），
+	// 显式 line-height:1.2 时 16px → 19.2。动态取字体度量，避免字体/行高变化漂移。
+	a, d, g := layout.FontMetricsFunc("serif", 16, 400, "normal")
+	lineGap := a + d + g
+	if lineGap <= 0 {
+		lineGap = 19.0 // 兜底（历史 1.2×16 值）
+	}
 	from := textY0 + int(3*lineGap)
 	to := from - 50
-	t.Logf("4th line: scrollTop=0 at y=%d, scrollTop=50 at y=%d (want -50)", from, to)
-	if !hasInk(c0, from) {
-		t.Errorf("scrollTop=0: no ink at y=%d (expected 4th text line)", from)
+	t.Logf("4th line: scrollTop=0 at y=%d, scrollTop=50 at y=%d (want -50), lineGap=%.1f", from, to, lineGap)
+	// ±3px 容差：行盒高取整/字体度量亚像素差异
+	hasInkNear := func(c *graphics.Canvas, y int) bool {
+		for dy := -3; dy <= 3; dy++ {
+			if hasInk(c, y+dy) {
+				return true
+			}
+		}
+		return false
 	}
-	if !hasInk(c50, to) {
-		t.Errorf("scrollTop=50: no ink at y=%d (4th line should have scrolled here)", to)
+	if !hasInkNear(c0, from) {
+		t.Errorf("scrollTop=0: no ink near y=%d (expected 4th text line)", from)
+	}
+	if !hasInkNear(c50, to) {
+		t.Errorf("scrollTop=50: no ink near y=%d (4th line should have scrolled here)", to)
 	}
 	if textY50 < 0 {
 		t.Fatalf("no visible text after scroll")

@@ -92,7 +92,11 @@ func DefaultInheritedData() *InheritedData {
 		FontWeight:          "400",
 		FontStyle:           "normal",
 		FontVariant:         "normal",
-		LineHeight:          Length{Value: 1.2, Unit: ""},
+		// ★ line-height 初始值 = normal（浏览器/WebKit 语义）：行高取字体
+		// 度量 ascent+descent+lineGap，而非 1.2×font-size。cssLineHeight /
+		// cssControlLineHeight / measureLineHeight 对 Unit="normal" 返回 0
+		// 后均回退字体度量（fontLineGap），各消费点已一致。
+		LineHeight:          Length{Value: 0, Unit: "normal"},
 		TextAlign:           TextAlignStart,
 		WhiteSpace:          WhiteSpaceNormal,
 	TextOverflow:        TextOverflowClip,

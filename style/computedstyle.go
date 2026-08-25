@@ -121,6 +121,9 @@ func (l Length) String() string {
 	if l.IsAuto() {
 		return "auto"
 	}
+	if l.Unit == "normal" {
+		return "normal"
+	}
 	return formatFloat(l.Value) + l.Unit
 }
 

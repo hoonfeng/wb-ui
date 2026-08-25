@@ -7,16 +7,18 @@ import (
 )
 
 // TestInline_SingleLine verifies that a short text run produces a single line whose
-// height matches the line-height (font-size * 1.2 by default).
+// height matches an explicit line-height (font-size * 1.2 with line-height:1.2).
+// ★ 默认 line-height 已改为 normal（字体度量），此处显式 1.2 保证断言确定性。
 func TestInline_SingleLine(t *testing.T) {
 	root := mkBlock()
 	anon := mkAnon()
+	anon.style.LineHeight = style.Length{Value: 1.2, Unit: ""}
 	anon.AddChild(mkTextRun("hi"))
 	root.AddChild(anon)
 
 	state := Layout(root, 800, 600)
 
-	// Default font-size 16, line-height 1.2 -> 19.2.
+	// font-size 16 × line-height 1.2 → 19.2.
 	_, _, _, ah := rectOf(anon, state)
 	assertApprox(t, "anon.Height", ah, 19.2)
 }
@@ -26,6 +28,7 @@ func TestInline_SingleLine(t *testing.T) {
 func TestInline_TextWraps(t *testing.T) {
 	root := mkBlock()
 	anon := mkAnon()
+	anon.style.LineHeight = style.Length{Value: 1.2, Unit: ""}
 	// "hello world": with Skia ~105.6px, with fallback estimate ~88px; both
 	// exceed 80px so wrapping is triggered regardless of the measurer.
 	anon.AddChild(mkTextRun("hello world"))
@@ -69,13 +72,14 @@ func TestInline_TextAlignCenter(t *testing.T) {
 func TestInline_MultipleRuns(t *testing.T) {
 	root := mkBlock()
 	anon := mkAnon()
+	anon.style.LineHeight = style.Length{Value: 1.2, Unit: ""}
 	anon.AddChild(mkTextRun("ab"))
 	anon.AddChild(mkTextRun("cd"))
 	root.AddChild(anon)
 
 	state := Layout(root, 800, 600)
 
-	// Both runs fit on one line; container height is one line.
+	// Both runs fit on one line; container height is one line (19.2).
 	_, _, _, ah := rectOf(anon, state)
 	assertApprox(t, "anon.Height", ah, 19.2)
 }
