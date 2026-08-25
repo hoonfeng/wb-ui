@@ -157,9 +157,23 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	// Determine text-align.
+	// CSS 2.1 §16.2: text-align applies to block containers only. A pure
+	// inline element (display:inline, non-replaced, not a blockified flex
+	// item) is not a block container — its text alignment is decided by the
+	// nearest block container ancestor, which shifts the whole inline run
+	// (including this box's text) via the line's text-align adjustment.
+	// Applying text-align inside the inline box here double-shifts the text
+	// right: the anonymous inline wrapper (inheriting an inline parent's
+	// text-align:center) centered its text against the forced parent-line
+	// width, then the outer IFC centered the wrapper again → net ~+24px
+	// right shift ("flex:1 span 内 text-align:center 文字偏右" — .xseg/.rtab
+	// 选项文字不在胶囊正中).
 	textAlign := style.TextAlignStart
 	if cs != nil {
-		textAlign = cs.TextAlign
+		isPlainInline := cs.Display == style.DisplayInline && !box.IsReplaced()
+		if !isPlainInline || isFlexItem(box) {
+			textAlign = cs.TextAlign
+		}
 	}
 	// (containerWidth was captured before the auto-width expansion above.)
 

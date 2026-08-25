@@ -1077,24 +1077,59 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 		log.Printf("[gutter-mtx] %q scaleX=%.2f skewY=%.2f ty=%.2f clip=(%.0f,%.0f,%.0fx%.0f) ok=%v", text, float64(m.ScaleX), float64(m.SkewY), float64(m.TransY), cb.X, cb.Y, cb.Width, cb.Height, ok)
 	}
 	c.fillPaint.SetColor(colorToSkia(col))
+	c.drawTextWithPaint(x, y, text, font, skFont, c.fillPaint)
+	c.invalidatePixels()
+}
 
+// DrawTextStroke 以 glyph 轮廓描边绘制文本（-webkit-text-stroke 支持）：
+// goskia 的 drawSimpleText 将 PaintStyleStroke+StrokeWidth 应用到字形
+// 轮廓（Skia 原生文本描边，环绕字形平滑——8 方向 text-shadow 模拟在
+// 对角线/圆角处有锯齿，无法达到轮廓描边效果）。
+// strokeWidth <= 0 或 strokeCol 透明时无效果（与 Chromium 语义一致：
+// 描边宽度 0 = 不绘制）。
+func (c *Canvas) DrawTextStroke(x, y float64, text string, font Font, strokeWidth float64, strokeCol Color) {
+	if strokeWidth <= 0 || strokeCol.A == 0 || len(text) == 0 {
+		return
+	}
+	skFont := c.getSkiaFont(font)
+	if skFont == nil {
+		return
+	}
+	c.strokePaint.SetColor(colorToSkia(strokeCol))
+	c.strokePaint.SetStrokeWidth(float32(strokeWidth))
+	c.strokePaint.SetStyle(skia.PaintStyleStroke)
+	c.strokePaint.SetStrokeJoin(skia.StrokeJoinRound)
+	c.strokePaint.SetStrokeCap(skia.StrokeCapButt)
+	if os.Getenv("WB_STROKE_DEBUG") != "" {
+		log.Printf("[stroketext] %q at (%.0f,%.0f) family=%q size=%.1f w=%.1f", text, x, y, font.Family, font.Size, strokeWidth)
+	}
+	c.drawTextWithPaint(x, y, text, font, skFont, c.strokePaint)
+	c.invalidatePixels()
+}
+
+// drawTextWithPaint 是 DrawText/DrawTextStroke 的共享实现：按 paint
+// 的 style 绘制（fill=普通文本；stroke=字形轮廓描边），非 ASCII 走
+// 字体回退（同一 paint——CJK 描边同样生效）。
+func (c *Canvas) drawTextWithPaint(x, y float64, text string, font Font, skFont *skia.Font, paint *skia.Paint) {
+	if len(text) == 0 || skFont == nil {
+		return
+	}
 	// Always use fallback path when text contains non-ASCII characters,
 	// since CJK fallback fonts often lack geometric/dingbat symbols.
 	if containsNonASCII(text) {
 		t0 := time.Now()
-		c.drawTextWithFallback(x, y, text, font, skFont, col)
+		c.drawTextWithFallback(x, y, text, font, skFont, paint)
 		CgoTimingDraw += time.Since(t0)
-		c.invalidatePixels()
 		return
 	}
 
 	t0 := time.Now()
-	c.canvas.DrawText(text, float32(x), float32(y), skFont, c.fillPaint)
+	c.canvas.DrawText(text, float32(x), float32(y), skFont, paint)
 	CgoTimingDraw += time.Since(t0)
 	// ★ 诊断（WB_GUTTER_DEBUG）：原文字画完立即读像素
 	if os.Getenv("WB_GUTTER_DEBUG") != "" && x < 370 && len(text) > 0 && text[0] >= '0' && text[0] <= '9' {
 		p := c.PixelAt(int(x)+4, int(y)-7)
-		log.Printf("[gutter-raw] %q @(%d,%d) pixel=#%02x%02x%02x col=#%02x%02x%02x", text, int(x), int(y), p.R, p.G, p.B, col.R, col.G, col.B)
+		log.Printf("[gutter-raw] %q @(%d,%d) pixel=#%02x%02x%02x", text, int(x), int(y), p.R, p.G, p.B)
 	}
 	c.invalidatePixels()
 }
@@ -1104,7 +1139,7 @@ func (c *Canvas) DrawText(x, y float64, text string, font Font, col Color) {
 // primary font. Emoji uses the emoji fallback font. Symbols (geometric shapes,
 // arrows, etc.) try the primary font first using UnicharToGlyph; if it lacks
 // the glyph, fall back to the symbol font (Segoe UI Symbol), then to emoji.
-func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, col Color) {
+func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, primarySkFont *skia.Font, paint *skia.Paint) {
 	emojiSkFont := c.getEmojiSkiaFont(font)
 	symbolSkFont := c.getSymbolSkiaFont(font)
 	cjkSkFont := c.getCJKSkiaFont(font)
@@ -1144,8 +1179,8 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 				segFont = cjkSkFont
 			}
 		}
-		c.canvas.DrawText(seg, cx, float32(y), segFont, c.fillPaint)
-		if w, _ := segFont.MeasureText(seg, c.fillPaint); w > 0 {
+		c.canvas.DrawText(seg, cx, float32(y), segFont, paint)
+		if w, _ := segFont.MeasureText(seg, paint); w > 0 {
 			cx += w
 		}
 	}
@@ -1224,6 +1259,39 @@ func (c *Canvas) FontCJKMetrics(font Font) (ascent, descent float64) {
 	}
 	m, _ := skFont.Metrics()
 	return float64(-m.Ascent), float64(m.Descent)
+}
+
+// FontCJKBounds returns the tight glyph bounding box (top ≤ 0, bottom ≥ 0,
+// relative to the baseline) of the given TEXT drawn with the CJK fallback
+// typeface — the ACTUAL drawn extents of those glyphs. Unlike FontCJKMetrics
+// (whose ascent/descent are the recommended line-box metrics — Microsoft
+// YaHei 45px reports Ascent/Descent ≈ 47.6/11.8 = 1.06em/0.26em, much
+// larger than the visual 0.85em/0.13em of a Han glyph) and unlike the
+// font-wide Top/Bottom (which include punctuation/symbol extremes),
+// centering formulas (half-leading, flex align-items:center glyph centering)
+// must use the text's tight bounds: centering asymmetric line-box metrics
+// around the box center shifts CJK glyphs down ~1.5–2px ("文字偏下").
+func (c *Canvas) FontCJKBounds(font Font, text string) (top, bottom float64) {
+	skFont := c.getCJKSkiaFont(font)
+	if skFont == nil {
+		skFont = c.getSkiaFont(font)
+	}
+	if skFont == nil || text == "" {
+		size := font.Size
+		if size <= 0 {
+			size = 16
+		}
+		return -size * 0.85, size * 0.13
+	}
+	_, b := skFont.MeasureText(text, c.fillPaint)
+	if b.Top >= 0 && b.Bottom <= 0 {
+		size := font.Size
+		if size <= 0 {
+			size = 16
+		}
+		return -size * 0.85, size * 0.13
+	}
+	return float64(b.Top), float64(b.Bottom)
 }
 
 // getSkiaFont returns a cached *skia.Font matching the given graphics.Font

@@ -409,11 +409,24 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 		}
 		return
 	}
-	sc := lg.Stops[0].Color
-	ec := lg.Stops[len(lg.Stops)-1].Color
+	// 非轴对齐（45/135deg 等）：逐像素按真实投影插值。
+	// ★ 旧实现只取首尾色 + 纵向近似：135deg 七色渐变（首尾同色，
+	// 如调色板彩虹按钮 linear-gradient(135deg,#ff0000,...,#ff0000)）
+	// 渲染成整块纯色——「调色板按钮不显示」的根因。interpolateColor
+	// 走完整 stops；逐像素投影保证对角线方向正确。
 	for py := 0; py < ih; py++ {
-		t := float64(py) / float64(ih)
-		canvas.FillRectNoAA(x, y+float64(py), w, 1, lerpColor(sc, ec, t))
+		posy := y + float64(py) + 0.5
+		for px := 0; px < iw; px++ {
+			posx := x + float64(px) + 0.5
+			t := ((posx-cx)*gx + (posy-cy)*gy - minP) / gradLen
+			if t > 1 {
+				t = 1
+			}
+			if t < 0 {
+				t = 0
+			}
+			canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(lg.Stops, t))
+		}
 	}
 }
 

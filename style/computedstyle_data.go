@@ -33,6 +33,30 @@ type InheritedData struct {
 	Direction       string
 	UnicodeBidi     string
 
+	// TextShadow 是 CSS 继承属性（spec: text-shadow inherited: yes）。
+	// 字体/颜色类的 text-shadow 在父元素设置（如挂件模板 .txt 的描边
+	// 8 方向 text-shadow），子 span/文本节点必须继承才渲染——放
+	// NonInheritedData 会导致描边完全不显示（用户实测「描边不生效」）。
+	TextShadow string
+
+	// ── Text stroke（-webkit-text-stroke，WebKit/Chromium 扩展，继承）──
+	// WebKitTextStrokeWidth 是 -webkit-text-stroke-width：0 = 无描边。
+	// 真实 glyph 轮廓描边（goskia drawSimpleText + PaintStyleStroke），
+	// 取代 8 方向 text-shadow 模拟（对角线粗糙/圆角缺失）。
+	WebKitTextStrokeWidth Length
+	// WebKitTextStrokeColor 是 -webkit-text-stroke-color。Set 标记区分
+	// 「未设置（= 跟随 currentcolor）」与「显式 transparent（画透明）」：
+	// Chromium 中 -webkit-text-stroke-color 初始值即 currentcolor。
+	WebKitTextStrokeColor    Color
+	WebKitTextStrokeColorSet bool
+
+	// PaintOrder 是 paint-order（CSS 继承属性，MDN: inherited yes）：
+	// 控制 -webkit-text-stroke 与填充的绘制顺序。normal/"" = fill 先、
+	// stroke 后（描边画在文字上——Chromium 默认）；"stroke" / "stroke fill"
+	// = 描边先画（文字下、轮廓外扩不覆盖字形——挂件描边常用）。继承性
+	// 保证子元素/文本节点与挂件容器一致。
+	PaintOrder string
+
 	// ── List ──
 	ListStyleType     string
 	ListStylePosition string
@@ -202,7 +226,6 @@ type NonInheritedData struct {
 
 	// ── Effects ──
 	BoxShadow     string
-	TextShadow    string
 	Transform     string
 	TransformOriginX Length
 	TransformOriginY Length

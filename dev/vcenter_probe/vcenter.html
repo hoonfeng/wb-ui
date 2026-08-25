@@ -1,0 +1,20 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+  html,body { height:100%; margin:0; background:#202430; overflow:hidden;
+              font-family:'Segoe UI', 'Microsoft YaHei', sans-serif;
+              user-select:none; -webkit-user-select:none; }
+  /* 文字部件模板（templates.go）一：静态显示 */
+  .txt { position:absolute; inset:0; display:flex; align-items:center;
+         color:#ffffff; font-size:45px; font-weight:600; line-height:1.3;
+         text-shadow:none; }
+  .txt > span { display:block; width:100%; box-sizing:border-box;
+                 white-space:pre-wrap; text-align:center; }
+  /* 场景二：.rtab（应用层绕过：包 div + line-height 26） */
+  .rtab { width:220px; height:24px; text-align:center; font-size:14px; color:#8fa0c0;
+          background:#1a2030; border-radius:6px; overflow:hidden; }
+  .rtab.plain { line-height:24px }        /* 浏览器版行为：直接文本 + line-height */
+  .rtab .rtab-t { height:24px; line-height:26px; text-align:center; color:inherit }
+</style></head><body>
+  <div class="txt"><span>欢迎来到直播间</span></div>
+  <div style="position:absolute;left:20px;bottom:40px"><div class="rtab plain">部件</div></div>
+  <div style="position:absolute;left:270px;bottom:40px"><div class="rtab"><div class="rtab-t">部件</div></div></div>
+</body></html>

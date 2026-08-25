@@ -1677,6 +1677,28 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.BoxShadow = valueString
 	case "text-shadow":
 		cs.TextShadow = valueString
+	case "-webkit-text-stroke", "text-stroke":
+		// 简写：-webkit-text-stroke: <width> || <color>（缺省者恢复初始值：
+		// width=0 / color=currentcolor）。
+		parseTextStrokeShorthand(valueString, cs)
+	case "-webkit-text-stroke-width", "text-stroke-width":
+		if l, ok := parseTextStrokeWidth(valueString); ok {
+			cs.WebKitTextStrokeWidth = l
+		} else {
+			cs.WebKitTextStrokeWidth = Length{}
+		}
+	case "-webkit-text-stroke-color", "text-stroke-color":
+		if c, ok := parseColor(valueString); ok {
+			cs.WebKitTextStrokeColor = c
+			cs.WebKitTextStrokeColorSet = true
+		} else if strings.EqualFold(strings.TrimSpace(valueString), "currentcolor") {
+			// currentcolor：跟随 color 属性（初始值语义）。
+			// ★ 不能在这里直接读 cs.Color——本元素 color 声明的解析顺序
+			// 不定。标记 false：painter 命中「未设置」时用文本绘制色。
+			cs.WebKitTextStrokeColorSet = false
+		}
+	case "paint-order":
+		cs.PaintOrder = valueString
 	case "transform":
 		cs.Transform = valueString
 	case "transform-origin":
@@ -1923,6 +1945,65 @@ func extractCalcArgS(s string) string {
 // parseColor parses a CSS color value. Supports #rgb / #rrggbb / #rrggbbaa / rgb() /
 // parseColor parses a CSS color value. Supports #rgb / #rrggbb / #rrggbbaa / rgb() /
 // rgba() / hsl() / hsla() / named colors.
+// parseTextStrokeWidth 解析 -webkit-text-stroke-width（长度值；0 或缺失 → 无描边）。
+func parseTextStrokeWidth(s string) (Length, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "none") {
+		return Length{}, false
+	}
+	return parseLength(s)
+}
+
+// parseTextStrokeShorthand 解析 -webkit-text-stroke 简写
+// （-webkit-text-stroke: <width> || <color>，任一可省略、顺序任意）。
+// 未出现的子值恢复初始值（width=0 / color=currentcolor→Set=false）。
+func parseTextStrokeShorthand(s string, cs *ComputedStyle) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		cs.WebKitTextStrokeWidth = Length{}
+		return
+	}
+	// 拆分：颜色 token（#hex/rgb()/rgba()/hsl()/hsla()/named）与 width token。
+	// 按空白切分，遇括号整体（rgba(0,0,0,0.5) 含空格/逗号）。
+	var toks []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ' ', '\t', '\n':
+			if depth == 0 {
+				if t := strings.TrimSpace(s[start:i]); t != "" {
+					toks = append(toks, t)
+				}
+				start = i + 1
+			}
+		}
+	}
+	if t := strings.TrimSpace(s[start:]); t != "" {
+		toks = append(toks, t)
+	}
+	cs.WebKitTextStrokeWidth = Length{}
+	cs.WebKitTextStrokeColorSet = false // 缺省 color = currentcolor
+	for _, t := range toks {
+		if l, ok := parseTextStrokeWidth(t); ok && cs.WebKitTextStrokeWidth.Value == 0 && cs.WebKitTextStrokeWidth.Unit == "" {
+			cs.WebKitTextStrokeWidth = l
+			continue
+		}
+		if c, ok := parseColor(t); ok {
+			cs.WebKitTextStrokeColor = c
+			cs.WebKitTextStrokeColorSet = true
+			continue
+		}
+		if strings.EqualFold(t, "currentcolor") {
+			cs.WebKitTextStrokeColorSet = false
+		}
+	}
+}
+
 func parseColor(s string) (Color, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

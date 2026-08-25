@@ -167,7 +167,7 @@ func RequiresLayer(owner RenderObject) bool {
 // port the layer rect is the owner's border-box rect (for boxes) or a zero rect (for
 // non-box objects), and the clip rect is the intersection of the ancestor overflow clip
 // chain.
-func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
+func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, clipSpecified bool) {
 	if l.owner == nil {
 		return
 	}
@@ -294,7 +294,14 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect) {
 			break
 		}
 	}
-	return layerRect, clipRect
+	// ★ clipSpecified 语义：返回的 clipRect 是否「必须应用」——即使与祖先
+	// overflow clip 的空交被 intersectRects 折叠成零 rect（层完全在祖先
+	// 裁剪区外），该层子树也必须被整体裁剪（浏览器语义：无交=全裁）。
+	// 之前 paintLayerTree 用 `clip.Width > 0 && clip.Height > 0` 判断
+	// hasClip，零 rect 被当成「无 clip」→ 层内容零裁剪平铺到容器外
+	// （overflow-y:auto 的 <select> popup 第 9/10 个 option 行溢出容器
+	// ——「窗口捕获窗口选择下拉渲染溢出」根因）。
+	return layerRect, clipRect, hasClip
 }
 
 // intersectRects returns the intersection of two layout rects. If they do not overlap

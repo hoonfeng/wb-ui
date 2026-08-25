@@ -97,13 +97,15 @@ func textInAbsPos(text *RenderText) bool {
 // such text the painter must add half = (lineHeight - contentHeight)/2 to the
 // baseline, otherwise glyphs sit ~2-3px higher than in the browser whenever
 // the line box is taller than the font content (menus, sidebar headers…).
+// ★ inline-flex 同样覆盖（礼物卡片等 display:inline-flex + align-items:
+// center 容器内文本——否则字形贴行顶偏下，图标+文字排不齐的根因）。
 func textInFlexCentered(text *RenderText) bool {
 	if text == nil {
 		return false
 	}
 	for p := text.Parent(); p != nil; p = p.Parent() {
 		st := p.Style()
-		if st != nil && st.Display == style.DisplayFlex {
+		if st != nil && (st.Display == style.DisplayFlex || st.Display == style.DisplayInlineFlex) {
 			return st.AlignItems == "center"
 		}
 	}
@@ -1193,72 +1195,138 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		if len(segments) > 0 {
 			hh = segments[0].Height
 		}
-		if hh <= fh {
-			hh = fh
+		// ★ CJK 视觉 bbox 居中：FontCJKMetrics 的 Ascent/Descent 是推荐行框
+		// 度量（雅黑 45px ≈ 47.6/11.8），远大于字形视觉 bbox（≈0.85em/0.13em），
+		// 居中时用视觉 bbox 使字形中心=行盒中心（「文字部件垂直居中偏下」根因）。
+		if hasCJKChars([]rune(content)) {
+			vTop, vBottom := info.canvas.FontCJKBounds(font, content)
+			if vTop < 0 && vBottom > 0 {
+				drawA := -vTop
+				drawD := vBottom
+				fh = drawA + drawD
+				// ★ 行框同步判别：LineY <= seg.Y（行框在上——xterm absolute
+				// span 场景）→ 从 LineY 起算抵消 layout centeringOffset（原
+				// 精调）；LineY > seg.Y（行框偏下——flex/inline-flex 居中后
+				// 行框停在下方未同步：礼物栏「+N分钟」卡片、画布标题/时钟）
+				// → seg.Y 就是行盒正确顶，直接以它做字形视觉居中——否则
+				// LineY-seg.Y 的错位（实测 +28.2px）被当作 centeringOffset
+				// 累加，字形整体偏下 ~28px（「图标与文字不垂直对齐」根因）。
+				if segments[0].LineHeight > 0 {
+					hh = segments[0].LineHeight
+				}
+				if hh <= fh {
+					hh = fh
+				}
+				if segments[0].LineY <= segments[0].Y+0.5 {
+					absBaselineH = (segments[0].LineY - segments[0].Y) + (hh-fh)/2 + drawA
+				} else {
+					absBaselineH = (hh-fh)/2 + drawA
+				}
+			} else {
+				if hh <= fh {
+					hh = fh
+				}
+				absBaselineH = (hh-fh)/2 + ascent
+			}
+		} else {
+			if hh <= fh {
+				hh = fh
+			}
+			absBaselineH = (hh-fh)/2 + ascent
 		}
-		absBaselineH = (hh-fh)/2 + ascent
 	}
 
 	// ★ flex 容器内文本（align-items:center 等）：layout 把行盒垂直居中，
-	// seg.Y = 行盒顶，但行盒内文字还需按浏览器 half-leading 规则居中——
-	// 此前直接用 capHeight 让 cap 顶贴 seg.Y，行盒高于字体内容时文字整体
-	// 偏上（标题栏菜单「帮助」比 Edge 高 ~3px、侧边栏头部 ~2-3px）。
-	// 修正：按「绘制字体」度量重算 baseline = 行盒中心 + (ascent - fontH/2)，
-	// 行盒中心 = seg.Y + LineHeight/2（flex 居中保证行盒中心=容器中心）。
-	// 对 CJK 文本用雅黑度量（FontCJKMetrics），拉丁用 capHeight+descent 近似；
-	// 不再用 capHeight 贴行顶（那只在行盒高=内容高时正确）。
+	// seg.Y = 行盒顶，行盒内文字还需按浏览器 half-leading 规则居中——
+	// 此前用 capHeight 让 cap 顶贴 seg.Y，行盒高于字体内容时文字整体偏上
+	// （标题栏菜单「帮助」比 Edge 高 ~3px）。修正：baseline = 行盒中心 +
+	// (ascent - fontH/2)，行盒中心 = seg.Y + LineHeight/2。CJK 用字形视觉
+	// bbox（FontCJKBounds），拉丁用 capHeight+descent 近似。
 	flexHalfLeading := 0.0
 	// ★ 行框错位保护（inline-block 内部文本）：行框 LineY 可能低于文字顶
 	// （seg.Y < LineY——vertical-align:middle 盒移动后未同步行框，txt-view /
-	// div.btn 等内部文本）。此时 seg.Y 已是文字正确位置（layout 已居中），
-	// 基于错位行框的 half-leading 修正会把文字错误下移（配置器「编辑」
-	// 按钮文字偏下 3px 的根因）——必须跳过修正。
+	// div.btn 内部文本）。此时 seg.Y 已是文字正确位置，基于错位行框的
+	// half-leading 修正会把文字错误下移（配置器「编辑」按钮文字偏下的
+	// 根因）——必须跳过修正（拉丁保持跳过；CJK 仍按 seg.Y 中心做视觉
+	// bbox 居中，见下方 else if 分支）。
 	lineBoxValid := len(segments) == 0 || segments[0].Y >= segments[0].LineY-0.5
 	if lineBoxValid {
 		if textInFlexCentered(text) && len(segments) > 0 {
 			seg0 := segments[0]
-		var drawAscent, drawDescent float64
-		if hasCJKChars([]rune(content)) {
-			drawAscent, drawDescent = info.canvas.FontCJKMetrics(font)
-		} else {
-			drawAscent = baselineH
-			drawDescent = graphics.GlobalFontDescent(font)
-		}
-		fontH := drawAscent + drawDescent
-		if fontH > 0 {
-			boxCenter := seg0.Y + seg0.LineHeight/2
-			flexBaseline := boxCenter + drawAscent - fontH/2
-			flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
-		}
-	} else if !textInAbsPos(text) && len(segments) > 0 {
-		// ★ 普通流内文本：浏览器 half-leading 居中——glyph 在行框
-		// （RootInlineBox, LineY..LineY+LineHeight）内垂直居中，而不是
-		// cap 顶贴 seg.Y。此前 cap 顶贴行顶只在行高=字高时正确；行高
-		// > 字高时（CM6 编辑器 line-height 18.2 vs 13px 字）glyph 顶贴
-		// 背景顶、下方空 5.9px → 「activeLine 背景不居中/文字偏上」。
-		// 度量：Skia FontAscent 是 usWinAscent（9.7px）比字形实际 bbox
-		// ascent（~capHeight 8.3-8.6）大，且 usWinDescent（~1）远小于
-		// bbox descent（~3.4）——用它算居中公式会让 glyph 中心比行框
-		// 中心低 ~1.7px（偏下）。改用 capHeight + 0.4×capHeight 近似
-		// bbox descent：baseline = 行框中心 + ascent - fontH/2，使
-		// glyph 中心与行框中心对齐（行高=字高时退化为 glyph 顶=行框顶）。
-		seg0 := segments[0]
-		if seg0.LineHeight > 0 {
-			drawAscent := baselineH
-			drawDescent := baselineH * 0.3
+			var drawAscent, drawDescent float64
+			if hasCJKChars([]rune(content)) {
+				vTop, vBottom := info.canvas.FontCJKBounds(font, content)
+				if vTop >= 0 || vBottom <= 0 {
+					drawAscent, drawDescent = info.canvas.FontCJKMetrics(font)
+				} else {
+					drawAscent = -vTop
+					drawDescent = vBottom
+				}
+			} else {
+				drawAscent = baselineH
+				drawDescent = graphics.GlobalFontDescent(font)
+			}
 			fontH := drawAscent + drawDescent
 			if fontH > 0 {
-				boxCenter := seg0.LineY + seg0.LineHeight/2
-				centeredBaseline := boxCenter + drawAscent - fontH/2
+				boxCenter := seg0.Y + seg0.LineHeight/2
+				flexBaseline := boxCenter + drawAscent - fontH/2
+				flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
+			}
+		}
+	} else if !textInAbsPos(text) && len(segments) > 0 {
+		// 普通流内文本（行框错位保护场景）：浏览器 half-leading 居中——
+		// glyph 在行框（LineY..LineY+LineHeight）内垂直居中。CJK 用字形视觉
+		// bbox 居中，拉丁用 capHeight+0.4×近似 descent（终端/div.btn 精调）。
+		seg0 := segments[0]
+		if seg0.LineHeight > 0 {
+			var drawAscent, drawDescent float64
+			if hasCJKChars([]rune(content)) {
+				vTop, vBottom := info.canvas.FontCJKBounds(font, content)
+				if vTop < 0 && vBottom > 0 {
+					drawAscent = -vTop
+					drawDescent = vBottom
+				} else {
+					drawAscent = baselineH
+					drawDescent = baselineH * 0.3
+				}
+			} else {
+				drawAscent = baselineH
+				drawDescent = graphics.GlobalFontDescent(font)
+			}
+			fontH := drawAscent + drawDescent
+			if fontH > 0 {
+				boxCenter := seg0.Y + seg0.LineHeight/2
+				flexBaseline := boxCenter + drawAscent - fontH/2
+				flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
+			}
+		}
+	} else if !textInAbsPos(text) && len(segments) > 0 && hasCJKChars([]rune(content)) {
+		// 行框错位 + CJK：seg.Y 为行盒正确顶做视觉 bbox 居中（.xseg span
+		// 选项文字偏上 ~3px 的根因修复）。
+		seg0 := segments[0]
+		if seg0.LineHeight > 0 {
+			vTop, vBottom := info.canvas.FontCJKBounds(font, content)
+			if vTop < 0 && vBottom > 0 {
+				drawA := -vTop
+				drawD := vBottom
+				fontH := drawA + drawD
+				boxCenter := seg0.Y + seg0.LineHeight/2
+				centeredBaseline := boxCenter + drawA - fontH/2
 				flexHalfLeading = centeredBaseline - (seg0.Y + baselineH)
 			}
 		}
 	}
-	}
 
-	// DEBUG: print segments info
-	debugContent := content
-	_ = debugContent
+	// ★ 文字几何跟踪（WB_TEXT_TRACE=1，短文本逐条）：输出 seg0 布局几何与
+	// 分支判定（abs/flex/boxValid），定位「inline-flex 卡片内字形偏下、
+	// 图标+文字不齐」的垂直对位问题（礼物栏 .gitem 卡片内 .gd 文本）。
+	if os.Getenv("WB_TEXT_TRACE") != "" && len(content) > 0 && len(content) <= 12 && len(segments) > 0 {
+		s0 := segments[0]
+		log.Printf("[text-trace] %q seg0=(X%.1f Y%.1f H%.1f LineY%.1f LH%.2f) abs=%v flex=%v boxValid=%v baseH=%.1f flexHL=%.2f absBaseH=%.2f absBase=%.1f",
+			content, s0.X, s0.Y, s0.Height, s0.LineY, s0.LineHeight,
+			textInAbsPos(text), textInFlexCentered(text), lineBoxValid, baselineH, flexHalfLeading,
+			absBaselineH, s0.Y+absBaselineH)
+	}
 
 	if len(segments) == 0 {
 		// Debug: log which RenderText has no segments
@@ -1269,8 +1337,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	runes := []rune(content)
 	rv := info.rv
 	// Browsers default selected text to white so it is legible against the
-	// semi-transparent blue selection background. A ::selection rule's
-	// color overrides it.
+	// selection background. A ::selection rule's color overrides it.
 	selCol := graphics.Color{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
 	if rv != nil && rv.Resolver() != nil {
 		if _, fg, ok := rv.Resolver().SelectionColors(); ok && fg.A != 0 {
@@ -1321,7 +1388,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		// The marker occupies the padding-left zone of the li (40px default);
 		// draw it right-aligned within that zone, 6px before the content start.
 		markerX := first.X - 6 - graphics.MeasureText(font, marker)
-		info.canvas.DrawText(markerX, baseline, marker, font, col)
+		paintTextStrokeAware(info.canvas, markerX, baseline, marker, font, col, st)
 		_ = mbox
 	}
 
@@ -1390,7 +1457,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 					visibleText := string(subRunes[:lastFit])
 					sub := collapseWhitespace(visibleText)
 					if sub != "" {
-						info.canvas.DrawText(seg.X, baseline, sub, font, col)
+						paintTextStrokeAware(info.canvas, seg.X, baseline, sub, font, col, st)
 						paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 					}
 				}
@@ -1433,7 +1500,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 				} else {
 					wbTextDebugOutView++
 				}
-				info.canvas.DrawText(seg.X, baseline, sub, font, col)
+				paintTextStrokeAware(info.canvas, seg.X, baseline, sub, font, col, st)
 				paintTextDecoration(info.canvas, seg.X, baseline, sub, font, st, col, ascent)
 			}
 			continue
@@ -1445,7 +1512,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		if selFrom > seg.Start {
 			prefixText := collapseWhitespace(string(runes[seg.Start:selFrom]))
 			if prefixText != "" {
-				info.canvas.DrawText(seg.X, baseline, prefixText, font, col)
+				paintTextStrokeAware(info.canvas, seg.X, baseline, prefixText, font, col, st)
 				paintTextDecoration(info.canvas, seg.X, baseline, prefixText, font, st, col, ascent)
 				prefixW = graphics.MeasureText(font, prefixText)
 			}
@@ -1454,7 +1521,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		selText := collapseWhitespace(string(runes[selFrom:selTo]))
 		selW := 0.0
 		if selText != "" {
-			info.canvas.DrawText(seg.X+prefixW, baseline, selText, font, selCol)
+			paintTextStrokeAware(info.canvas, seg.X+prefixW, baseline, selText, font, selCol, st)
 			paintTextDecoration(info.canvas, seg.X+prefixW, baseline, selText, font, st, selCol, ascent)
 			selW = graphics.MeasureText(font, selText)
 		}
@@ -1462,7 +1529,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		if selTo < seg.Start+seg.Len {
 			suffixText := collapseWhitespace(string(runes[selTo : seg.Start+seg.Len]))
 			if suffixText != "" {
-				info.canvas.DrawText(seg.X+prefixW+selW, baseline, suffixText, font, col)
+				paintTextStrokeAware(info.canvas, seg.X+prefixW+selW, baseline, suffixText, font, col, st)
 				paintTextDecoration(info.canvas, seg.X+prefixW+selW, baseline, suffixText, font, st, col, ascent)
 			}
 		}
@@ -1470,9 +1537,110 @@ func PaintText(text *RenderText, info *PaintInfo) {
 }
 
 // paintTextDecoration draws underline and/or line-through decorations for a
+
+// paintTextDecoration draws underline and/or line-through decorations for a
+
+// paintTextDecoration draws underline and/or line-through decorations for a
+
+// paintTextDecoration draws underline and/or line-through decorations for a
 // text run, mirroring InlineTextBox::paintDecoration(). The decoration
 // positions follow CSS conventions: underline sits just below the baseline,
 // line-through crosses the midline of the x-height.
+// paintTextStrokeAware 按 paint-order 绘制文本与 -webkit-text-stroke 描边：
+// - 无描边（width<=0 / 透明）→ 普通 DrawText（零额外开销）
+// - paint-order 默认（normal/fill 先）→ 先画填充再画描边（描边在文字上，
+//   Chromium 默认行为）
+// - paint-order: stroke（或 "stroke fill"）→ 先画描边再画填充（描边在
+//   文字下、轮廓外扩不盖字形——挂件文字描边常用）
+// 描边用 glyph 轮廓（goskia PaintStyleStroke），字形边缘平滑，取代
+// 8 方向 text-shadow 模拟（对角线 45° 有锯齿/星芒）。
+func paintTextStrokeAware(canvas *graphics.Canvas, x, baseline float64, text string, font graphics.Font, col graphics.Color, st *style.ComputedStyle) {
+	sw, sc, has := textStrokeOf(st, col)
+	if !has {
+		canvas.DrawText(x, baseline, text, font, col)
+		return
+	}
+	if textStrokeFirst(st) {
+		canvas.DrawTextStroke(x, baseline, text, font, sw, sc)
+		canvas.DrawText(x, baseline, text, font, col)
+	} else {
+		canvas.DrawText(x, baseline, text, font, col)
+		canvas.DrawTextStroke(x, baseline, text, font, sw, sc)
+	}
+}
+
+// textStrokeOf 从 ComputedStyle 解析描边宽度/颜色（currentcolor 语义）。
+// 返回 ok=false = 不画描边。
+func textStrokeOf(st *style.ComputedStyle, fg graphics.Color) (width float64, stroke graphics.Color, ok bool) {
+	if st == nil {
+		return 0, graphics.Color{}, false
+	}
+	w := st.WebKitTextStrokeWidth
+	if w.Value <= 0 || w.Unit == "%" {
+		return 0, graphics.Color{}, false
+	}
+	width = w.Value
+	switch w.Unit {
+	case "pt":
+		width = w.Value * 96.0 / 72.0
+	case "em":
+		width = w.Value * st.FontSize.Value
+	case "rem":
+		width = w.Value * 16
+	case "px", "":
+		// 直接使用
+	default:
+		if strings.HasPrefix(w.Unit, "calc") {
+			// calc 已由解析器求值为 px 或带 mark；无法求值视为无描边。
+			if w.Value <= 0 {
+				return 0, graphics.Color{}, false
+			}
+		}
+	}
+	if width <= 0 {
+		return 0, graphics.Color{}, false
+	}
+	if st.WebKitTextStrokeColorSet {
+		stroke = toGraphicsColor(st.WebKitTextStrokeColor)
+	} else {
+		stroke = fg // currentcolor
+	}
+	if stroke.A == 0 {
+		return 0, graphics.Color{}, false // 显式 transparent → 无描边
+	}
+	return width, stroke, true
+}
+
+// textStrokeFirst 判断描边是否先于填充绘制（paint-order: stroke [...]）。
+func textStrokeFirst(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	po := strings.ToLower(strings.TrimSpace(st.PaintOrder))
+	if po == "" || po == "normal" || po == "none" {
+		return false // fill 先，stroke 后（Chromium 默认）
+	}
+	// SVG 语法：fill || stroke || markers，逗号分隔亦可
+	po = strings.ReplaceAll(po, ",", " ")
+	si := -1
+	fi := -1
+	for _, t := range strings.Fields(po) {
+		if t == "stroke" && si < 0 {
+			si = 1
+		}
+		if t == "fill" && fi < 0 {
+			fi = 1
+		}
+	}
+	if si < 0 {
+		return false // 无 stroke 项：normal
+	}
+	if fi < 0 {
+		return true // 只有 stroke：先描边
+	}
+	return si < fi
+}
+
 func paintTextDecoration(canvas *graphics.Canvas, x, baseline float64, text string, font graphics.Font, st *style.ComputedStyle, col graphics.Color, ascent float64) {
 	if st == nil || text == "" {
 		return
@@ -1764,6 +1932,13 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	if !box.IsVisible() {
 		return false
 	}
+	if os.Getenv("WB_IMG_DEBUG") != "" {
+		nd := ""
+		if el, ok := box.Node().(*dom.Element); ok {
+			nd = el.LocalName()
+		}
+		log.Printf("[imgdbg] PaintImage enter node=%q box=(%.0f,%.0f) %.0fx%.0f vis=%v", nd, box.X(), box.Y(), box.Width(), box.Height(), box.IsVisible())
+	}
 	img := box.DecodedImage()
 	st := box.Style()
 	if st == nil {
@@ -1788,8 +1963,14 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	if el, ok := box.Node().(*dom.Element); ok {
 		src = el.GetAttribute("src")
 	}
+	if os.Getenv("WB_IMG_DEBUG") != "" {
+		log.Printf("[imgdbg] pre-load img=%v src=%q x=%.0f y=%.0f w=%.0f h=%.0f", img != nil, src, x, y, w, h)
+	}
 	if (img == nil || !img.Loaded()) && src != "" {
 		img = loadBackgroundImage(src, "")
+		if os.Getenv("WB_IMG_DEBUG") != "" {
+			log.Printf("[imgdbg] after load img=%v loaded=%v", img != nil, img != nil && img.Loaded())
+		}
 		if img != nil && img.Loaded() {
 			box.SetDecodedImage(img)
 		} else if sd := loadBackgroundSVG(src); sd != nil {
@@ -1848,6 +2029,9 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 			img.Draw(info.canvas, x, y, w, h)
 		}
 	default: // fill (stretch to the content box)
+		if os.Getenv("WB_IMG_DEBUG") != "" {
+			log.Printf("[imgdbg] drawing %dx%d img at (%.0f,%.0f)", img.Width(), img.Height(), x, y)
+		}
 		img.Draw(info.canvas, x, y, w, h)
 	}
 	return true

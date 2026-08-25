@@ -96,18 +96,29 @@ func parseSingleShadow(s string) *Shadow {
 	sh.OffsetY = parseShadowLength(tokens[1])
 	pos := 2
 
+	// ★ 颜色与长度区分（关键修复）：
+	// CSS 语法 `offset-x offset-y [blur [spread]] [color]`——blur/spread
+	// 可省略，颜色也可省略。旧实现遇 `2px 0 #ff00ff`（文字描边模板
+	// 简写）时把 "#ff00ff" 当长度（parseShadowLength 失败返回 0 ≥ 0 被
+	// 消费）→ 颜色丢失成半透明黑。修复：颜色 token（#hex/rgb/rgba/命名
+	// 色）直接识别，长度 token（数字+单位）才按 blur/spread 消费。
+
 	// Third token (if present) is blur-radius.
 	if pos < len(tokens) {
-		if v := parseShadowLength(tokens[pos]); v >= 0 {
-			sh.Blur = v
-			pos++
+		if _, isCol := parseColorSimple(tokens[pos]); !isCol {
+			if v := parseShadowLength(tokens[pos]); v >= 0 {
+				sh.Blur = v
+				pos++
+			}
 		}
 	}
 
 	// Fourth token (if present) is spread-radius (may be 0 or negative).
 	if pos < len(tokens) {
-		sh.Spread = parseShadowLength(tokens[pos])
-		pos++
+		if _, isCol := parseColorSimple(tokens[pos]); !isCol {
+			sh.Spread = parseShadowLength(tokens[pos])
+			pos++
+		}
 	}
 
 	// Remaining tokens are the color.

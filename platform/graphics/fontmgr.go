@@ -776,34 +776,47 @@ func (m *FontManager) CJKTypeface() *skia.Typeface {
 // to decide whether synthetic embolden (SetEmbolden) is needed: if the returned
 // weight is already >= 600 the Typeface is a real bold face and no faux bold
 // should be applied.
+//
+// ★ 2026-08-24 修复（描边锯齿）：osLookup（skia.NewTypeface 系统名查找，
+// 用于 Microsoft YaHei/Segoe UI 等）返回的 Typeface 不在 m.fonts 集合中，
+// 此前一律返回 0 → 真 Bold（weight 700）被误判为非粗体 → getSkiaFont
+// 叠加 SetEmbolden(true) 二次合成加粗 → Skia 把字形按位图膨胀，glyph
+// 描边（-webkit-text-stroke）作用在膨胀后的像素轮廓上 → 严重锯齿/碎屑。
+// 现在回退查询 Skia 的真实 weight（sk_typeface_get_font_weight）。
 func (m *FontManager) TypefaceWeight(tf *skia.Typeface) int {
 	if m == nil || tf == nil {
 		return 0
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	for _, f := range m.fonts {
 		if f.tf == tf {
+			m.mu.RUnlock()
 			return f.weight
 		}
 	}
-	return 0
+	m.mu.RUnlock()
+	// 不在加载集合中（平台名查找/回退字体）：用 Skia 的真实 weight。
+	return tf.Weight()
 }
 
 // TypefaceIsItalic reports whether the typeface is an italic/oblique variant.
 // Returns false when the typeface is not found in the manager.
+//
+// ★ 2026-08-24：与 TypefaceWeight 同理，osLookup 系统字体不在 m.fonts 中，
+// 回退用 Skia 真实 slant 判断（避免真实 italic 字体被 SetSkewX 二次斜切）。
 func (m *FontManager) TypefaceIsItalic(tf *skia.Typeface) bool {
 	if m == nil || tf == nil {
 		return false
 	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	for _, f := range m.fonts {
 		if f.tf == tf {
+			m.mu.RUnlock()
 			return f.italic
 		}
 	}
-	return false
+	m.mu.RUnlock()
+	return tf.Slant() != skia.FontSlantUpright
 }
 
 // GetGlobalDebugLogger is a hook reserved for debug logging; returns nil when

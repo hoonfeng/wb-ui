@@ -150,7 +150,7 @@ func TestCalculateRects(t *testing.T) {
 	box.SetSize(50, 60)
 
 	layer := NewRenderLayer(box)
-	layerRect, clipRect := layer.CalculateRects()
+	layerRect, clipRect, _ := layer.CalculateRects()
 	if layerRect.X != 5 || layerRect.Y != 10 || layerRect.Width != 50 || layerRect.Height != 60 {
 		t.Fatalf("layerRect = %+v, want {5,10,50,60}", layerRect)
 	}
@@ -168,7 +168,7 @@ func TestCalculateRects(t *testing.T) {
 	box2.SetLocation(5, 10)
 	box2.SetSize(50, 60)
 	layer2 := NewRenderLayer(box2)
-	_, clipRect2 := layer2.CalculateRects()
+	_, clipRect2, _ := layer2.CalculateRects()
 	if clipRect2 != layerRect {
 		t.Fatalf("clipRect(overflow:hidden) = %+v, want %+v", clipRect2, layerRect)
 	}
@@ -196,7 +196,7 @@ func TestLayerWithOverflowClip(t *testing.T) {
 	childLayer := NewRenderLayer(child)
 	parentLayer.AddChild(childLayer)
 
-	_, clipRect := childLayer.CalculateRects()
+	_, clipRect, _ := childLayer.CalculateRects()
 	// The clip should be intersected with the parent's padding box (40x40).
 	if clipRect.Width > 40 {
 		t.Fatalf("clipRect.Width = %v, want <= 40 (clipped by overflow)", clipRect.Width)
@@ -242,7 +242,7 @@ func TestFixedAncestorStopsClipChain(t *testing.T) {
 	scrollLayer.AddChild(fixedLayer)
 	fixedLayer.AddChild(btnLayer)
 
-	_, clipRect := btnLayer.CalculateRects()
+	_, clipRect, _ := btnLayer.CalculateRects()
 	// The fixed ancestor stops the chain: the scroll container's 40x40
 	// overflow clip must NOT be applied to the fixed overlay's child.
 	if clipRect.Width != 0 || clipRect.Height != 0 {
@@ -275,7 +275,7 @@ func TestFixedAncestorOwnClipStillApplies(t *testing.T) {
 	btnLayer := NewRenderLayer(btnBox)
 	fixedLayer.AddChild(btnLayer)
 
-	_, clipRect := btnLayer.CalculateRects()
+	_, clipRect, _ := btnLayer.CalculateRects()
 	if clipRect.Width != 300 || clipRect.Height != 200 {
 		t.Fatalf("clipRect = %+v, want the fixed ancestor's own padding box (300x200)", clipRect)
 	}
@@ -364,7 +364,7 @@ func TestCalculateRectsScrollDeviceCoords(t *testing.T) {
 	scrollLayer.AddChild(itemLayer)
 	itemLayer.AddChild(titleLayer)
 
-	_, clip := titleLayer.CalculateRects()
+	_, clip, _ := titleLayer.CalculateRects()
 	// Device y = 556 - 300 = 256: the title is inside the 98..402 viewport
 	// and must paint. Old behavior: content-coords rect (y=556..573) vs
 	// un-shifted padding box (98..402) → zero → culled → never drawn after
@@ -387,7 +387,7 @@ func TestCalculateRectsScrollDeviceCoords(t *testing.T) {
 	item.AddChild(title2, nil)
 	titleLayer2 := NewRenderLayer(title2)
 	itemLayer.AddChild(titleLayer2)
-	_, clip2 := titleLayer2.CalculateRects()
+	_, clip2, _ := titleLayer2.CalculateRects()
 	if clip2.Width != 0 || clip2.Height != 0 {
 		t.Fatalf("still-below-viewport title clip = %+v, want zero (device y 446..463 > 402)", clip2)
 	}
@@ -400,7 +400,7 @@ func TestCalculateRectsScrollDeviceCoords(t *testing.T) {
 	item.AddChild(title3, nil)
 	titleLayer3 := NewRenderLayer(title3)
 	itemLayer.AddChild(titleLayer3)
-	_, clip3 := titleLayer3.CalculateRects()
+	_, clip3, _ := titleLayer3.CalculateRects()
 	if clip3.Width != 0 || clip3.Height != 0 {
 		t.Fatalf("scrolled-above-viewport title clip = %+v, want zero (device y -190..-173)", clip3)
 	}
@@ -454,7 +454,7 @@ func TestCalculateRectsNestedScroll(t *testing.T) {
 	aLayer.AddChild(bLayer)
 	bLayer.AddChild(cLayer)
 
-	_, clip := cLayer.CalculateRects()
+	_, clip, _ := cLayer.CalculateRects()
 	if clip.Width == 0 || clip.Height == 0 {
 		t.Fatalf("nested-scroll layer clip = %+v, want non-zero", clip)
 	}

@@ -253,6 +253,20 @@ func (e *Element) SetHovered(h bool) {
 	if e.hovered != h {
 		e.hovered = h
 		e.bumpDynamicPseudoVersion()
+		notifyDynamicPseudoChanged(e)
+	}
+}
+
+// DynamicPseudoStateChanged 是动态伪类（:hover/:focus/:active）状态变化
+// 回调（bindings 注册）：除了 dom 层自身信息（attrVersion→resolver 缓存
+// 失效），computedStyleFor 的结果缓存（bindings/csscache.go）只按全局
+// 样式版本失效——hover/focus 状态变化（不影响样式表与属性）也必须失效，
+// 否则 getComputedStyle 返回陈旧值（「鼠标移开 :hover 样式不恢复」根因）。
+var DynamicPseudoStateChanged func(el *Element)
+
+func notifyDynamicPseudoChanged(e *Element) {
+	if DynamicPseudoStateChanged != nil {
+		DynamicPseudoStateChanged(e)
 	}
 }
 
@@ -302,6 +316,7 @@ func (e *Element) SetFocused(f bool) {
 			}
 		}
 		e.bumpDynamicPseudoVersion() // :focus/:focus-within 跨元素 → 全链失效
+		notifyDynamicPseudoChanged(e)
 	}
 }
 
@@ -316,6 +331,7 @@ func (e *Element) SetFocusByKeyboard(b bool) {
 	if e.focusByKeyboard != b {
 		e.focusByKeyboard = b
 		e.attrVersion++ // :focus-visible 只匹配自身 → 仅 bump 自身
+		notifyDynamicPseudoChanged(e)
 	}
 }
 
@@ -330,6 +346,7 @@ func (e *Element) SetActive(a bool) {
 	if e.active != a {
 		e.active = a
 		e.bumpDynamicPseudoVersion() // :active 冒泡（父按钮因子元素 active 匹配）→ 全链失效
+		notifyDynamicPseudoChanged(e)
 	}
 }
 

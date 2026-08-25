@@ -92,11 +92,259 @@ func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
 	if best != nil {
 		return best
 	}
-	// Pass 2: normal tree.
+	// Pass 2: ★ 层叠感知命中（镜像 paintLayerTree 的绘制顺序：后绘制的在
+	// 上、先命中）。z-index/定位浮层（遮罩/弹窗）必须挡下层元素，否则
+	// 点击弹窗空白区会穿透命中下层小面积元素（configwin 弹窗「事件
+	// 穿透到下层」根因：hitTestWalk 按树序+最小面积，z-index:999 遮罩
+	// 的面积远大于下层 wbox → wbox 胜出 → 穿透）。
+	if root := rv.RootLayer(); root != nil {
+		if el := hitTestLayer(root, x, y, attrName, rv); el != nil {
+			return el
+		}
+	}
+	// Pass 3: fallback normal tree walk（层树异常缺失时保持旧行为）。
 	best = nil
 	bestArea = -1
 	hitTestWalk(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
 	return best
+}
+
+// ── 层叠感知命中（mirrors paintLayerTree: layers paint in neg → auto →
+// pos z-order; hit-testing walks the reverse so topmost wins）────────────
+
+// hitTestLayer 在单个层内命中：命中顺序 = 子层 pos（z 大先）→ 子层 auto
+// → 本层普通内容 → 子层 neg（负 z 最底）。同层叠级内按面积最小/后代
+// 优先（与 hitTestWalk 一致）。
+func hitTestLayer(layer *RenderLayer, x, y float64, attrName string, rv *RenderView) *dom.Element {
+	// ★ 层起点滚动补偿：层树递归（hitTestLayer 逐层进入）不是从渲染树
+	// 根连续递归，walkLayerContent 的 childX/childY 逐层补偿在此丢失
+	// 了「祖先滚动偏移」。层 owner 在滚动容器内时（如滚动面板里的
+	// z-index 弹层/浮层），owner 的 box 检查用未补偿视口坐标直接 miss
+	// → 层内容整体漏掉 → 点击穿透到下层元素（「滚动后点弹层内容
+	// 穿透/点错」）。绘制端 paintLayerContents 的内容 translate 按
+	// 完整祖先链累计（滚动容器的 translate 包住内容+子层），命中必须
+	// 镜像同一坐标系变换。用 PresentedBoxScrollOffset（已渲染帧快照）
+	// 保持所见即所点。必须在 transform 逆变换**之前**（transform 空间
+	// 位于滚动 translate 之内，先平移到布局坐标再逆变换到元素本地）。
+	// ★ xIn/yIn：子层递归必须以「视口坐标」进入 —— 每层 hitTestLayer
+	// 入口的都是视口坐标，自己一次性补偿祖先滚动。此前 bucket 递归
+	// 传递的是「本层补偿过的坐标」，层树多层嵌套（滚动容器 > relative
+	// 容器 > absolute 控件）时每层重复加同一祖先滚动偏移 → 深层元素
+	// 命中坐标越界 miss → 「滚动容器内点击 input/文本不可命中（命中
+	// 到容器空白区），光标不出现/出现位置错」。
+	xIn, yIn := x, y
+	if layer != nil && layer.owner != nil && rv != nil {
+		if sx, sy := rv.ScrollStackOffsetFor(layer.owner); sx != 0 || sy != 0 {
+			x += sx
+			y += sy
+		}
+	}
+	// ★ 层 owner 可能带 transform（弹窗 translate(-50%,-50%) 居中/旋转
+	// 图标等）：命中坐标先逆变换到层本地空间（镜像 paint 的正向 canvas
+	// 变换——视觉位置与布局位置不一致，不逆变换则点击视觉位置 miss）。
+	if layer != nil && layer.owner != nil {
+		if st := layer.owner.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
+			w, h := 0.0, 0.0
+			if bx, _, bw, bh, ok := boxCoords(layer.owner); ok {
+				_, _, w, h = bx, 0, bw, bh
+			}
+			x, y, _ = hitInverseTransform(st.Transform, w, h, x, y)
+		}
+	}
+	// 子层（后绘制的在上）：先测 pos+auto（跳过 neg——它们在内容之下）。
+	// ★ 传 xIn/yIn（视口坐标）：子层由自身 hitTestLayer 一次性补偿祖先
+	// 滚动（见函数头注释）；传补偿后坐标会双重补偿（层树多层嵌套——
+	// 滚动容器 > relative 容器 > absolute 控件——深层元素命中越界。
+	// 复现：滚动容器内点击 input/文本命中容器空白，光标不出现）。
+	if el := hitTestLayersBucket(layer, xIn, yIn, attrName, rv, false); el != nil {
+		return el
+	}
+	// 本层普通内容（layer owner + 非层后代）
+	if el := hitTestLayerContent(layer, x, y, attrName, rv); el != nil {
+		return el
+	}
+	// 负 z 子层（最底）
+	return hitTestLayersBucket(layer, xIn, yIn, attrName, rv, true)
+}
+
+// hitTestLayersBucket 按 paint bucket（neg / auto / pos）逆序尝试子层。
+// negOnly=true 只测负 z 桶（内容之后）；否则按 pos(倒序) → auto(倒序)。
+func hitTestLayersBucket(parent *RenderLayer, x, y float64, attrName string, rv *RenderView, negOnly bool) *dom.Element {
+	var neg, auto, pos []*RenderLayer
+	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
+		z := layerZIndex(child)
+		switch {
+		case z < 0:
+			neg = append(neg, child)
+		case z > 0:
+			pos = append(pos, child)
+		default:
+			auto = append(auto, child)
+		}
+	}
+	sortLayerByZ(pos, true)
+	sortLayerByZ(neg, true)
+	try := func(l *RenderLayer) *dom.Element {
+		return hitTestLayer(l, x, y, attrName, rv)
+	}
+	if negOnly {
+		for i := len(neg) - 1; i >= 0; i-- {
+			if el := try(neg[i]); el != nil {
+				return el
+			}
+		}
+		return nil
+	}
+	for i := len(pos) - 1; i >= 0; i-- {
+		if el := try(pos[i]); el != nil {
+			return el
+		}
+	}
+	for i := len(auto) - 1; i >= 0; i-- {
+		if el := try(auto[i]); el != nil {
+			return el
+		}
+	}
+	return nil
+}
+
+// hitTestLayerContent 在层的 owner 子树内找命中（候选=带 attr 的元素，
+// 面积最小/后代优先，与 hitTestWalk 相同规则；跳过有独立子层的后代
+// ——它们由 hitTestLayersBucket 按层叠顺序处理）。
+func hitTestLayerContent(layer *RenderLayer, x, y float64, attrName string, rv *RenderView) *dom.Element {
+	if layer == nil || layer.owner == nil {
+		return nil
+	}
+	skip := make(map[RenderObject]bool, 4)
+	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
+		skip[child.owner] = true
+	}
+	var best *dom.Element
+	var bestArea float64 = -1
+	walkLayerContent(layer.owner, x, y, attrName, &best, &bestArea, rv, skip)
+	return best
+}
+
+// walkLayerContent 是 hitTestWalk 的层内版本：规则一致（box 命中 +
+// attr 匹配 + 面积最小/后代优先 + iframe 下钻），但遇到「有独立层的
+// 后代」不再深入（其子树由层树按层叠顺序命中）。
+func walkLayerContent(o RenderObject, x, y float64, attrName string, best **dom.Element, bestArea *float64, rv *RenderView, skip map[RenderObject]bool) {
+	if o == nil {
+		return
+	}
+	if skip[o] {
+		return
+	}
+	ox, oy, ow, oh, ok := boxCoords(o)
+	inBounds := true
+	if !ok {
+		// Non-box objects (inline, text) still recurse into children.
+	} else {
+		if ow > 0 && oh > 0 {
+			inBounds = x >= ox && y >= oy && x < ox+ow && y < oy+oh
+			if !inBounds {
+				if el, isEl := o.Node().(*dom.Element); isEl &&
+					(el.LocalName() == "html" || el.LocalName() == "body") {
+					inBounds = true // pass-through
+				} else {
+					return
+				}
+			}
+		}
+	}
+	if ok && ow > 0 && oh > 0 && inBounds {
+		if attrName != "" {
+			node := o.Node()
+			if el, isEl := node.(*dom.Element); isEl {
+				if val := el.GetAttribute(attrName); val != "" {
+					area := ow * oh
+					if !pointerEventsNone(o) && (*best == nil || area < *bestArea || descendantOf(el, *best)) {
+						*best = el
+						*bestArea = area
+					}
+				}
+			}
+		} else {
+			node := o.Node()
+			if el, isEl := node.(*dom.Element); isEl {
+				area := ow * oh
+				if !pointerEventsNone(o) && (*best == nil || area < *bestArea || descendantOf(el, *best)) {
+					*best = el
+					*bestArea = area
+				}
+			}
+		}
+	}
+	// ★ 滚动容器偏移补偿（同 hitTestWalk / hitTestFixedInner）：层内命中
+	// 此前直接用视口坐标递归——滚动容器（per-box offset≠0）内子元素的
+	// 布局坐标与视觉位置相差 (sx,sy)，不补偿则滚动后点击命中「未滚动
+	// 位置」的元素：点颜色行实际命中上方字体行（用户「鼠标点击位置与
+	// 生效位置不匹配，不是绝对出现但会触发」根因——仅滚动后出现）。
+	// 注意必须在 iframe 下钻之前：iframe 位于滚动容器内时子帧坐标
+	// 同样要按 (sx,sy) 平移。
+	// ★ 用 PresentedBoxScrollOffset（已渲染帧快照）：视觉帧滞后时命中
+	// 依然按「用户所见」解析（所见即所点），避免滚动后快速点击时
+	// 命中按新偏移解读（时序偏移根因）。
+	childX, childY := x, y
+	if rv != nil {
+		if box := asRenderBox(o); box != nil {
+			sx, sy := rv.PresentedBoxScrollOffset(box)
+			if sx != 0 || sy != 0 {
+				childX = x + sx
+				childY = y + sy
+			}
+		}
+	}
+	// iframe 下钻（与 hitTestWalk 一致）
+	if ok && ow > 0 && oh > 0 {
+		if el, isEl := o.Node().(*dom.Element); isEl && el.LocalName() == "iframe" {
+			if sub := IFrameLookupFor(el); sub != nil && sub.RenderView() != nil {
+				if box := asRenderBox(o); box != nil {
+					if st := box.Style(); st != nil {
+						pL := lengthValue(st.PaddingLeft)
+						pT := lengthValue(st.PaddingTop)
+						pR := lengthValue(st.PaddingRight)
+						pB := lengthValue(st.PaddingBottom)
+						cx := childX - (ox + pL)
+						cy := childY - (oy + pT)
+						if cx >= 0 && cy >= 0 && cx < ow-pL-pR && cy < oh-pT-pB {
+							if sub.NeedsLayout() {
+								sub.LayoutNow()
+							}
+							if child := HitTest(sub.RenderView(), cx, cy, attrName); child != nil {
+								area := (ow - pL - pR) * (oh - pT - pB)
+								*best = child
+								*bestArea = area
+								lastDive.sub = sub
+								lastDive.x, lastDive.y = cx, cy
+								lastDive.ok = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	// 递归（childX/childY 已在函数头按滚动容器的 per-box offset 补偿）
+	for child := o.FirstChild(); child != nil; child = child.NextSibling() {
+		walkLayerContent(child, childX, childY, attrName, best, bestArea, rv, skip)
+	}
+}
+
+// pointerEventsNone reports whether the object's element is excluded from
+// hit-testing via pointer-events: none. Browser semantics: the element and its
+// subtree are skipped unless a descendant explicitly re-enables pointer-events:
+// auto — checking the element itself suffices (re-enabled descendants hit by
+// their own check). Applied identically on all three hit-test walks
+// (fixed-first / layer / fallback tree) so a drag-ghost or toast overlay with
+// pointer-events:none never steals clicks or the :hover target underneath.
+func pointerEventsNone(o RenderObject) bool {
+	if b := asRenderBox(o); b != nil {
+		if st := b.Style(); st != nil && st.PointerEvents == "none" {
+			return true
+		}
+	}
+	return false
 }
 
 // hitTestFixedFirst walks the render tree but only considers subtrees whose
@@ -167,7 +415,7 @@ func hitTestFixedInner(o RenderObject, x, y float64, attrName string, best **dom
 					area := ow * oh
 					// ★ 同层内同样「后代优先」：fixed 子树中嵌套元素
 					//   （如 modal 里的按钮比其父容器高）也应命中更深者。
-					if *best == nil || order > *bestOrder || (order == *bestOrder && (area < *bestArea || descendantOf(el, *best))) {
+					if !pointerEventsNone(o) && (*best == nil || order > *bestOrder || (order == *bestOrder && (area < *bestArea || descendantOf(el, *best)))) {
 						*best = el
 						*bestArea = area
 						*bestOrder = order
@@ -223,10 +471,11 @@ descend:
 		}
 	}
 	// Descend into children (scroll-offset aware like the normal walk).
+	// ★ PresentedBoxScrollOffset（已渲染帧快照）：所见即所点（时序偏移修复）。
 	childX, childY := x, y
 	if rv != nil {
 		if box := asRenderBox(o); box != nil {
-			sx, sy := rv.BoxScrollOffset(box)
+			sx, sy := rv.PresentedBoxScrollOffset(box)
 			if sx != 0 || sy != 0 {
 				childX = x + sx
 				childY = y + sy
@@ -313,7 +562,7 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 					area := ow * oh
 					// ★ 后代优先：el 是已选 best 的 DOM 后代时无条件替换——
 					//   深度 > 面积（浏览器 hit-test 语义：命中最深元素）。
-					if *best == nil || area < *bestArea || descendantOf(el, *best) {
+					if !pointerEventsNone(o) && (*best == nil || area < *bestArea || descendantOf(el, *best)) {
 						*best = el
 						*bestArea = area
 					}
@@ -323,7 +572,7 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 			node := o.Node()
 			if el, isEl := node.(*dom.Element); isEl {
 				area := ow * oh
-				if *best == nil || area < *bestArea || descendantOf(el, *best) {
+				if !pointerEventsNone(o) && (*best == nil || area < *bestArea || descendantOf(el, *best)) {
 					*best = el
 					*bestArea = area
 				}
@@ -376,10 +625,11 @@ func hitTestWalk(o RenderObject, x, y float64, attrName string, best **dom.Eleme
 	// If it does, children are visually shifted by (-sx, -sy),
 	// so we must add (sx, sy) to the hit-test point for children
 	// to correctly map visual clicks to layout positions.
+	// ★ PresentedBoxScrollOffset（已渲染帧快照）：所见即所点（时序偏移修复）。
 	childX, childY := x, y
 	if rv != nil {
 		if box := asRenderBox(o); box != nil {
-			sx, sy := rv.BoxScrollOffset(box)
+			sx, sy := rv.PresentedBoxScrollOffset(box)
 			if sx != 0 || sy != 0 {
 				childX = x + sx
 				childY = y + sy

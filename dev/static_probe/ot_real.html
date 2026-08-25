@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  html,body { height:100%; margin:0; overflow:hidden; background:transparent;
+              font-family:'Segoe UI', 'Microsoft YaHei', sans-serif; user-select:none; -webkit-user-select:none; }
+  .wrap { position:absolute; inset:0; display:flex; flex-direction:column;
+          align-items:center; justify-content:center; gap:4px;
+          background:rgba(10,14,24,0.55); border-radius:18px; box-sizing:border-box;
+          padding:8px 14px; }
+  .title { color:#ffffff; font-size:32px; font-weight:700; line-height:1.1;
+           text-shadow:0 2px 8px rgba(0,0,0,0.6); -webkit-text-stroke:2px #000000;paint-order:stroke; }
+  .time { color:#ffffff; font-size:56px; font-weight:700; line-height:1.05;
+          font-variant-numeric:tabular-nums; -webkit-text-stroke:2px #000000;paint-order:stroke; }
+  .stat { color:#ffffff; opacity:0.85; font-size:12px; font-weight:600;
+          letter-spacing:2px; text-shadow:0 1px 2px rgba(0,0,0,0.6); }
+  .giftline { color:#ffffff; font-size:21px; font-weight:600; min-height:1em;
+              max-width:100%; white-space:nowrap; overflow:hidden;
+              text-overflow:ellipsis; text-shadow:0 1px 2px rgba(0,0,0,0.6); }
+  .giftline img.gic { width:18px; height:18px; vertical-align:-3px;
+                      margin-right:4px; border-radius:3px;
+                      display:inline-block; }
+    /* ★ 礼物栏：已配置规则固定两列（卡片 50% 宽，inline-flex 内
+     align-items:center 垂直居中——引擎 flex item 都有渲染盒、对中精确
+     （实测图标/文字中心差 1.3px）；inline-block + vertical-align:middle
+     对 inline 文字基线对位偏离 ~20px，画布「图标与文字不齐」根因，
+     实测对比后弃用）。 */
+  .gifts { display:flex; flex-wrap:wrap; justify-content:center;
+           margin:0 auto; max-width:100%; }
+  .gifts .gitem { display:inline-flex; align-items:center; justify-content:center;
+                  width:calc(50% - 10px); box-sizing:border-box;
+                  margin:3px 5px; white-space:nowrap;
+                  font-size:21px; font-weight:600; color:#ffffff;
+                  background:rgba(0,0,0,0.28); border-radius:12px;
+                  padding:3px 6px;
+                  text-shadow:0 1px 2px rgba(0,0,0,0.6); }
+  .gifts .gitem img.gic { width:18px; height:18px;
+                          border-radius:4px; margin-right:3px; }
+  .gifts .gitem .gd { color:#7ddc7d; font-weight:700; }
+  .gifts .gitem.minus .gd { color:#ff8a8a; }
+</style></head>
+<body>
+  <div class="wrap">
+    <div class="title" id="otTitle">加班挑战</div>
+    <div class="time" id="otTime" data-rem="3600" data-run="true">--:--:--</div>
+    <div class="stat" id="otStat">进行中</div>
+    <div class="gifts" id="otGifts"><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">+1分钟</b></span><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">+5分钟</b></span><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">+3分钟</b></span><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">+30分钟</b></span><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">+1小时</b></span><span class="gitem"><img class="gic" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="" onerror="this.style.display='none'"><b class="gd">-5分钟</b></span></div>
+    <!-- ★ giftline 初始必须有文本节点（&nbsp;）：wb-ui 渲染树只在
+         初始构建时含文本；空 div 后续 textContent 赋值「无文本→有文本」
+         不触发重绘（而替换已有文本 OK——stat/time 同款） -->
+    <div class="giftline" id="otGift">&nbsp;</div>
+  </div>
+  <script>
+    (function(){
+      var t = document.getElementById('otTime');
+      var s = document.getElementById('otStat');
+      var g = document.getElementById('otGift');
+      var showLog = true;
+      var lastShow = -1;
+
+      // fmt HH:MM:SS（小时可超 24，显示总小时）
+      // ★ raw string + fmt.Sprintf：JS 里的取模符必须双写（生成单个）
+      function fmt(sec){
+        if (sec < 0) sec = 0;
+        var h = Math.floor(sec/3600);
+        var m = Math.floor(sec/60)%60;
+        var x = Math.floor(sec%60);
+        function p(n){ return (n<10?'0':'')+n; }
+        return p(h)+':'+p(m)+':'+p(x);
+      }
+      function paint(sec, running){
+        t.textContent = fmt(sec);
+        var st = '进行中';
+        if (sec <= 0) st = '挑战完成！';
+        else if (!running) st = '已暂停';
+        s.textContent = st;
+        if (window.go && window.go.markDirty) window.go.markDirty();
+      }
+      // Go 每秒推送（权威时钟）
+      // ★ 守卫条件必须是「秒 或 运行态 任一变化」——仅查秒数时，
+      // 暂停/恢复（秒不变）会跳过 paint → 状态文字停留在「进行中」。
+      var lastRun = null;
+      window.otTime = function(sec, running){
+        var r = Number(sec)||0;
+        var rb = !!running;
+        if (r !== lastShow || rb !== lastRun){ paint(r, rb); lastShow = r; lastRun = rb; }
+      };
+      // Go 推送礼物事件（delta=已应用秒数；★ 仅加时/减时礼物会调用——
+      // 未匹配规则的不进画布，只进配置面板礼物日志）；img=礼物图标
+      // （http(s) URL 或 data: URI，可为空）
+      window.otGift = function(name, user, delta, count, platform, img){
+        var d = Number(delta)||0;
+        var c = Number(count)||1;
+        // 事件行差值格式：≥1h 用 H:MM:SS，否则 MM:SS（+30:00 更可读）
+        function fd(sec){
+          var h = Math.floor(sec/3600), m = Math.floor(sec/60)%60, x = sec%60;
+          function p(n){ return (n<10?'0':'')+n; }
+          return h>0 ? h+':'+p(m)+':'+p(x) : p(m<0?0:m)+':'+p(x);
+        }
+        function escHTML(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function escAttr(s){ return escHTML(s).replace(/"/g,'&quot;'); }
+        var sign = d>0 ? '+' : '';
+        var html = '';
+        if (img) html += '<img class="gic" src="'+escAttr(img)+'" alt="">';
+        html += escHTML((user?user+' 送出 ':'')+name+(c>1?' ×'+c:'')+'  '+sign+fd(Math.abs(d)));
+        g.innerHTML = html;
+        g.style.opacity = '1';
+        // 6 秒后淡出（无 CSS 动画依赖，直接置透明度）
+        setTimeout(function(){ g.style.opacity = '0.55'; }, 6000);
+        if (window.go && window.go.markDirty) window.go.markDirty();
+      };
+      // 初始状态：优先 DOM data 属性内嵌（JS 未执行/探针渲染也有值）
+      paint(Number(t.getAttribute('data-rem'))||0, t.getAttribute('data-run')==='true');
+    })();
+  </script>
+</body></html>

@@ -623,6 +623,12 @@ func FormControlCaretPosition(rv *RenderView) (x, y float64, ok bool) {
 		lineH = font.Size * 1.2
 	}
 	boxX, boxY := box.X(), box.Y()
+	// ★ 祖先滚动补偿：box.X/Y 是布局坐标，IME 候选窗口需跟随「可见」
+	// 光标（视口坐标）——控件在滚动容器内时不补偿则候选窗口偏离。
+	if sx, sy3 := rv.ScrollStackOffsetFor(box); sx != 0 || sy3 != 0 {
+		boxX -= sx
+		boxY -= sy3
+	}
 	boxW := box.Width()
 	boxH := box.Height()
 	caretX := boxX + padX

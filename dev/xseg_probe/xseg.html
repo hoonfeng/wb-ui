@@ -1,0 +1,18 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{background:#10141f;margin:0;padding:0}
+.xseg{display:flex;width:400px;margin:30px auto 0;background:#10141f;border:1px solid #2c3b61;border-radius:8px;padding:3px;gap:3px;box-sizing:border-box}
+.xseg span{flex:1;text-align:center;padding:10px 0;font-size:30px;cursor:pointer;color:#8fa0c0;background:transparent}
+.xseg span.ta{background:#1d2b47}
+/* 对照1：文本包一层块级 div（rtab 之前用的绕过方案） */
+.xseg2{display:flex;width:400px;margin:30px auto 0;background:#10141f;border:1px solid #2c3b61;border-radius:8px;padding:3px;gap:3px;box-sizing:border-box}
+.xseg2 span{flex:1;text-align:center;padding:10px 0;font-size:30px;color:#8fa0c0;background:transparent}
+.xseg2 span.ta2{background:#1d2b47}
+.xseg2 .t{height:auto;line-height:40px;text-align:center;color:inherit}
+/* 对照2：非 flex 块容器 + text-align:center */
+.blk{width:400px;margin:30px auto 0;background:#10141f;border:1px solid #2c3b61}
+.blk div{text-align:center;font-size:30px;color:#8fa0c0;padding:10px 0;background:#1d2b47}
+</style></head><body>
+<div class="xseg"><span>左</span><span class="ta">中</span><span>右</span></div>
+<div class="xseg2"><span><div class="t">左</div></span><span class="ta2"><div class="t">中</div></span><span><div class="t">右</div></span></div>
+<div class="blk"><div>块级容器居中</div></div>
+</body></html>

@@ -128,6 +128,22 @@ func installBridgeDispatch() {
 			}
 			return 0, 0, 0, 0
 		}
+		bindings.ElementFromPoint = func(in *jsc.Interpreter, x, y float64) *dom.Element {
+			wv := webViewForInterpreter(in)
+			if wv == nil {
+				return nil
+			}
+			rv := wv.RenderView()
+			if rv == nil {
+				return nil
+			}
+			wv.EnsureHitTestReady()
+			rv = wv.RenderView()
+			if rv == nil {
+				return nil
+			}
+			return rendering.HitTest(rv, x, y, "")
+		}
 		bindings.GetElementBoxRectFast = func(el *dom.Element) (float64, float64, float64, float64) {
 			wv := webViewForNode(el)
 			if wv == nil {
@@ -303,6 +319,70 @@ type WebView struct {
 
 	// destroyed 标记 WebView 已销毁（Destroy 后不可再使用）。
 	destroyed bool
+
+	// interact 引擎级鼠标交互管线（惰性创建）：裸 WebView 宿主（配置
+	// 窗口）喂入 HandleMouseButton/MouseMove/Wheel 获得浏览器标准交互
+	// （含 select 下拉弹层）。app.Host 场景仍走 Host 自身管线。
+	interact *Interaction
+
+	// formFocus 表单交互服务（惰性创建）：焦点管理/点击定位光标/文本
+	// 编辑/blur-Enter 提交 onchange。裸 WebView 宿主（configwin）此前
+	// 自建 NewFormFocus — 统一走引擎入口。
+	formFocus *FormFocus
+}
+
+// FormFocus 返回引擎表单交互服务（首次调用创建；Destroy 后返回 nil）。
+// 标准交互收敛点：点击聚焦（interact.MouseButton 内自动）、键盘编辑
+// （CharInput/KeyInput）、blur/Enter 提交 onchange（Submit）。
+func (wv *WebView) FormFocus() *FormFocus {
+	if wv.destroyed {
+		return nil
+	}
+	if wv.formFocus == nil {
+		wv.formFocus = NewFormFocus(wv)
+	}
+	return wv.formFocus
+}
+
+// Interaction 返回引擎交互管线（首次调用时创建；Destroy 后返回 nil）。
+func (wv *WebView) Interaction() *Interaction {
+	if wv.destroyed {
+		return nil
+	}
+	if wv.interact == nil {
+		wv.interact = &Interaction{wv: wv}
+	}
+	return wv.interact
+}
+
+// HandleMouseButton 向引擎喂入鼠标按键事件（客户区 CSS 像素）：
+// button=0 左键；action=0 按下 / 1 释放。裸 WebView 宿主的标准交互入口。
+func (wv *WebView) HandleMouseButton(x, y float64, button, action int) {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.MouseButton(x, y, button, action)
+	}
+}
+
+// HandleMouseMove 向引擎喂入鼠标移动事件。
+func (wv *WebView) HandleMouseMove(x, y float64) {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.MouseMove(x, y)
+	}
+}
+
+// HandleMouseLeave 鼠标离开窗口（清除 :hover 残留）。
+func (wv *WebView) HandleMouseLeave() {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.MouseLeave()
+	}
+}
+
+// HandleWheel 向引擎喂入滚轮事件（deltaY：Win32 滚轮增量，正=向上）。
+// 滚动目标为最近光标位置（Interaction 内部维护）。
+func (wv *WebView) HandleWheel(deltaY float64) {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.Wheel(deltaY)
+	}
 }
 
 // ensureFonts initializes the global FontManager (if not already done) and
@@ -837,6 +917,9 @@ func (wv *WebView) Destroy() {
 		return
 	}
 	wv.destroyed = true
+	// 交互管线状态（select 弹层元素/悬停元素）随 DOM 失效——断开
+	// 引用让 GC 回收；再次 Interaction() 因 destroyed 返回 nil。
+	wv.interact = nil
 	// 1. 从全局注册表摘除（WebView/桥闭包/解释器归属映射）
 	webviewsMu.Lock()
 	delete(webviews, wv)
@@ -895,6 +978,13 @@ func (wv *WebView) Render() ([]byte, error) {
 	view := wv.page.MainFrame().View()
 	if view != nil && view.NeedsLayout() {
 		view.Layout()
+	}
+	// ★ Layout（含 RebuildRenderTreeIfNeeded）可能重建渲染树→ RenderView
+	// 换新实例——必须重新取，否则 Paint 旧树（画面滞后一帧/停留在旧结构，
+	// 「点击后延迟生效」的另一来源）。
+	rv = wv.mainFrame.RenderView()
+	if rv == nil {
+		return nil, ErrNoDocument
 	}
 	// ★ 渲染输出缓冲复用：尺寸未变时复用内部 Canvas（NewCanvas 每次创建
 	// Skia RasterSurface + Paint + fontCache，高帧率下分配/释放风暴）。
@@ -1450,6 +1540,20 @@ func (wv *WebView) injectRenderTreeBridge() {
 				stickySeen = true
 			}
 		}
+		// ★ transform 元素（弹窗 translate(-50%,-50%) 居中/缩放等）：
+		// getBoundingClientRect/offsetLeft 按 CSSOM-View §4.2 返回**变换
+		// 后**的视口矩形（布局框四角经 transform 的轴对齐包围盒）。此前
+		// 只返回布局框——弹窗视觉居中于 (500,339) 而 rect 报 (640,400)，
+		// 依赖矩形定位/居中的应用全部错位（引擎层根治，应用无需补偿）。
+		// 注释说明：transform 是元素局部变换，与祖先滚动平移可交换，
+		// 先扣滚动再应用 transform 语义正确。
+		if box != nil {
+			if st := box.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
+				if nx, ny, nw, nh, ok := rendering.TransformRect(st.Transform, w, h, x0-sx, y0-sy, w, h); ok {
+					return nx, ny, nw, nh
+				}
+			}
+		}
 		return x0 - sx, y0 - sy, w, h
 	}
 	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
@@ -1489,8 +1593,19 @@ func (wv *WebView) injectRenderTreeBridge() {
 	}
 }
 
-func (wv *WebView) RenderView() *rendering.RenderView {
-	return wv.mainFrame.RenderView()
+func (wv *WebView) RenderView() *rendering.RenderView {	return wv.mainFrame.RenderView()
+}
+
+// TopLayerRects 返回当前文档渲染层树中位于文档内容之上的浮层矩形
+//（z-index>0 / fixed：遮罩/弹窗/toast/下拉）。应用层「外部合成内容」
+//（画布预览挂件像素 blit）合成前查询：与浮层相交的区域不绘制，弹层
+// 遮挡语义自动正确（引擎层提供层叠真相，应用无需 JS 探测弹窗）。
+func (wv *WebView) TopLayerRects() []layout.LayoutRect {
+	rv := wv.RenderView()
+	if rv == nil {
+		return nil
+	}
+	return rv.TopLayerRects()
 }
 
 // stickyHasInset 报告 sticky 元素是否带 top/bottom inset（CSS 语义：

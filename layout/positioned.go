@@ -113,6 +113,14 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	}
 	height = clampSize(height, minH, maxH, minHAuto, maxHAuto)
 	g.SetContentHeight(height)
+	// ★ 显式 height 的 absolute/fixed 盒：尺寸已知，但子内容（弹层 option、
+	// 菜单项等 in-flow 内容）仍须布局——此前只有 auto 高度走
+	// layoutAbsoluteHeightForBox（内含 layoutBoxContentForBox），显式
+	// height 的 select 下拉弹层子选项全部停留 0x0（点击命中空白、
+	// 下拉「没有出现」表现）。
+	if !hAuto {
+		layoutBoxContentForBox(box, state)
+	}
 
 	// Calculate x from left/right.
 	cbg := state.GeometryForBox(cb)

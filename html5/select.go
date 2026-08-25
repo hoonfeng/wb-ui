@@ -141,11 +141,13 @@ func (s HTMLSelectElement) Value() string {
 		if !o.HasAttribute("selected") {
 			continue
 		}
-		v := o.GetAttribute("value")
-		if v == "" {
-			return strings.TrimSpace(textContent(o))
+		// ★ value="" 显式设置时返回空串（浏览器标准）——此前空值回退
+		// textContent，「value=""」选项（如"自动（第一个设备）"）读
+		// value 得到的是显示文本而非空串，表单提交/onchange 脏数据。
+		if o.HasAttribute("value") {
+			return o.GetAttribute("value")
 		}
-		return v
+		return strings.TrimSpace(textContent(o))
 	}
 	// HTML 标准默认行为：无显式选中时，返回第一个非 disabled option 的 value。
 	if !s.Multiple() {
@@ -153,11 +155,10 @@ func (s HTMLSelectElement) Value() string {
 			if o.HasAttribute("disabled") {
 				continue
 			}
-			v := o.GetAttribute("value")
-			if v == "" {
-				return strings.TrimSpace(textContent(o))
+			if o.HasAttribute("value") {
+				return o.GetAttribute("value")
 			}
-			return v
+			return strings.TrimSpace(textContent(o))
 		}
 	}
 	return ""
@@ -190,8 +191,10 @@ func (s HTMLSelectElement) SelectedText() string {
 // selection. If no option matches, all options are deselected.
 func (s HTMLSelectElement) SetValue(v string) {
 	for _, o := range s.Options() {
-		optVal := o.GetAttribute("value")
-		if optVal == "" {
+		optVal := ""
+		if o.HasAttribute("value") {
+			optVal = o.GetAttribute("value")
+		} else {
 			optVal = strings.TrimSpace(textContent(o))
 		}
 		if optVal == v {
@@ -218,7 +221,9 @@ func (s HTMLSelectElement) Validity() ValidityState {
 				continue
 			}
 			val := o.GetAttribute("value")
-			if val == "" {
+			// ★ value="" 显式空值也视为空（标准行为）——仅未设置
+			// value 属性时回退 textContent
+			if !o.HasAttribute("value") {
 				val = strings.TrimSpace(textContent(o))
 			}
 			if val != "" {
@@ -267,8 +272,9 @@ func ToOptionElement(el *dom.Element) (HTMLOptionElement, bool) {
 // Value returns the value attribute, or the text content if no value
 // attribute is set. Mirrors HTMLOptionElement::value().
 func (o HTMLOptionElement) Value() string {
-	if v := o.El.GetAttribute("value"); v != "" {
-		return v
+	// ★ value="" 显式设置时返回空串（浏览器标准）——此前空值回退 textContent
+	if o.El.HasAttribute("value") {
+		return o.El.GetAttribute("value")
 	}
 	return strings.TrimSpace(textContent(o.El))
 }

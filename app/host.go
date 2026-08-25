@@ -149,6 +149,13 @@ type IMEHandler func(events []ime.Event)
 // NewHost and call Run.
 type Host struct {
 	win *window.Window
+	// cls is the clipboard abstraction used by text-editing shortcuts
+	// (Ctrl+C/V/X). Defaults to win (system clipboard); tests inject a
+	// mock. nil-safe via getClip().
+	cls ClipboardIO
+	// menuFn is the default edit-context-menu backend (右键编辑菜单)。
+	// nil → 平台窗口 PopupEditMenu（Win32 TrackPopupMenu）；注入供测试。
+	menuFn func(x, y int, canCut, canCopy, canPaste, canSelectAll bool) int
 	wv  *webkit.WebView
 
 	// clickHandler dispatches non-js: onclick values to embedder code.
@@ -402,7 +409,7 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
 	}
-	h := &Host{win: win, wv: wv}
+	h := &Host{win: win, wv: wv, cls: win}
 	// ★ JS el.focus()/el.blur() 桥接到引擎聚焦（xterm textarea.focus()、
 	// Vue autofocus 等）：JS 聚焦必须设置引擎的 imeFocusedEl（否则
 	// EventChar 分支 h.imeFocusedEl==nil 丢弃所有字符——「终端不可
@@ -960,6 +967,16 @@ func (h *Host) findFormControlBox(el *dom.Element) (box *rendering.RenderBox, bx
 	bh = found.Height()
 	st = found.Style()
 	_, sy = rv.BoxScrollOffset(found)
+	// ★ 祖先滚动补偿：bx/by 是布局坐标（Absolute* 不含滚动），而点击
+	// 坐标 cssX/cssY 是视口坐标。控件在滚动容器内（配置器属性面板
+	// col-right overflow-y:auto 等）时，不补偿则点击换算出的 caret
+	// 偏移与绘制位置相差整个滚动量——「光标出现位置与点击位置
+	// 不一致」根因。用已呈现帧快照（PresentedBoxScrollOffset）与
+	// HitTest 保持同一坐标系（所见即所点）。
+	if sx, sy2 := rv.ScrollStackOffsetFor(found); sx != 0 || sy2 != 0 {
+		bx -= sx
+		by -= sy2
+	}
 	return found, bx, by, bw, bh, sy, st
 }
 
@@ -4395,50 +4412,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 				}
 			}
-			if ev.Action == int(glfw.Press) && (ev.Mods&int(glfw.ModControl)) != 0 {
-				switch ev.Key {
-				case int(glfw.KeyA):
-					// Ctrl+A: select all text in the focused form control.
-					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-						val := focusedElementValue(h.imeFocusedEl)
-						runes := []rune(val)
-						rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-							Start: 0,
-							End:   len(runes),
-						}
-						h.wv.RebuildRenderTree()
-					}
-				case int(glfw.KeyV):
-					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-						clipText := h.win.GetClipboardString()
-						if clipText != "" {
-							h.pasteIntoFocused(clipText)
-						}
-					}
-				case int(glfw.KeyX):
-					if h.imeFocusedEl != nil && isTextFormControl(h.imeFocusedEl) {
-						sel := rendering.FocusedFormControlSel
-						if sel != nil && sel.Start != sel.End {
-							start, end := sel.Start, sel.End
-							if start > end {
-								start, end = end, start
-							}
-							val := focusedElementValue(h.imeFocusedEl)
-							runes := []rune(val)
-							if start >= 0 && end <= len(runes) {
-								cutText := string(runes[start:end])
-								h.win.SetClipboardString(cutText)
-								newVal := string(runes[:start]) + string(runes[end:])
-								setFocusedElementValue(h.imeFocusedEl, newVal)
-								rendering.FocusedFormControlSel = &rendering.FormControlSelection{
-									Start: start, End: start,
-								}
-								h.imeInputText = newVal
-								h.wv.RebuildRenderTree()
-							}
-						}
-					}
-				}
+			// ★ 文本编辑快捷键（Ctrl+A 全选 / Ctrl+C 复制 / Ctrl+V 粘贴 /
+			// Ctrl+X 剪切）：仅文本表单控件聚焦时生效（浏览器语义）。
+			if h.handleTextEditingShortcuts(ev) {
+				// 已处理（复制无 DOM 副作用；粘贴/剪切已派发事件）
 			}
 		}
 	}
@@ -4814,7 +4791,7 @@ func (h *Host) handleContextMenu(rv *rendering.RenderView, ev window.Event) {
 		Button:    dom.MouseButtonRight,
 		Detail:    1,
 	})
-	deepest.DispatchEvent(me)
+	notPrevented := deepest.DispatchEvent(me)
 	// Vue 菜单打开（visible=true）是响应式更新：跑微任务 + 事件循环 + 重建。
 	h.processEventLoop()
 	if h.wv.JSInterpreter() != nil {
@@ -4834,6 +4811,45 @@ func (h *Host) handleContextMenu(rv *rendering.RenderView, ev window.Event) {
 		}
 	}
 	h.wv.RebuildRenderTree()
+
+	// ★ 默认编辑菜单（浏览器语义）：contextmenu 未被 JS preventDefault
+	// 且右击目标是文本编辑控件（input/textarea）→ 引擎弹系统编辑菜单
+	// （剪切/复制/粘贴/全选）。前端自建右键菜单时 preventDefault 即可接管。
+	if notPrevented && isEditContextTarget(deepest) && h.imeFocusedEl != nil &&
+		isTextFormControl(h.imeFocusedEl) {
+		sel := rendering.FocusedFormControlSel
+		hasSel := sel != nil && sel.Start != sel.End
+		cmd := 0
+		menuFn := h.menuFn
+		if menuFn == nil {
+			if h.win != nil {
+				menuFn = h.win.PopupEditMenu
+			}
+		}
+		if menuFn != nil {
+			cmd = menuFn(int(cssX), int(cssY), hasSel, hasSel, true, true)
+			h.executeEditCommand(cmd)
+		}
+	}
+}
+
+// isEditContextTarget 判断右击目标是文本编辑控件（自身或祖先链上有
+// input/textarea——input 内部无子元素，但点击 padding/border 时命中的
+// 仍是 input 自身；对包裹层出现的情况走祖先链）。
+func isEditContextTarget(el *dom.Element) bool {
+	for n := el; n != nil; n = n.ParentElement() {
+		switch n.LocalName() {
+		case "input", "textarea":
+			t := n.GetAttribute("type")
+			switch strings.ToLower(t) {
+			case "checkbox", "radio", "range", "color", "file",
+				"submit", "reset", "button", "image", "hidden":
+				return false
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // handleClick converts the physical-pixel click coordinates to CSS pixels
@@ -5469,6 +5485,142 @@ func (h *Host) handleAnchorClick(el *dom.Element) {
 // FocusedElement returns the currently IME-focused element, or nil if none.
 func (h *Host) FocusedElement() *dom.Element {
 	return h.imeFocusedEl
+}
+
+// ClipboardIO abstracts system clipboard text access for the text-editing
+// shortcuts (Ctrl+C/V/X). The default implementation wraps the platform
+// window (GLFW/Win32); embedder tests inject an in-memory fake.
+type ClipboardIO interface {
+	GetClipboardString() string
+	SetClipboardString(s string)
+}
+
+// getClip returns the active clipboard backend, falling back to the platform
+// window when none was injected (hosts always set one at construction).
+func (h *Host) getClip() ClipboardIO {
+	if h.cls != nil {
+		return h.cls
+	}
+	return h.win
+}
+
+// handleTextEditingShortcuts 处理文本编辑快捷键（Ctrl+A 全选 / Ctrl+C
+// 复制 / Ctrl+V 粘贴 / Ctrl+X 剪切）。仅在文本表单控件聚焦且非 IME 组合
+// 期间生效（浏览器语义）。返回 true 表示已处理。
+//
+// 历史：Ctrl+C（复制）缺失——用户「编辑框复制不可用」根因；Ctrl+X 此前
+// 未派发 input/change 事件（与粘贴不对称，前端 @input 不刷新）。
+func (h *Host) handleTextEditingShortcuts(ev window.Event) bool {
+	if ev.Action != int(glfw.Press) || (ev.Mods&int(glfw.ModControl)) == 0 {
+		return false
+	}
+	if h.imeFocusedEl == nil || !isTextFormControl(h.imeFocusedEl) || h.imeComposing {
+		return false
+	}
+	switch glfw.Key(ev.Key) {
+	case glfw.KeyA:
+		h.editSelectAll()
+	case glfw.KeyC:
+		h.editCopy()
+	case glfw.KeyV:
+		h.editPaste()
+	case glfw.KeyX:
+		h.editCut()
+	default:
+		return false
+	}
+	return true
+}
+
+// editSelectAll 全选当前聚焦文本控件的值（引擎选择状态，供复制/剪切用）。
+func (h *Host) editSelectAll() {
+	if h.imeFocusedEl == nil {
+		return
+	}
+	val := focusedElementValue(h.imeFocusedEl)
+	runes := []rune(val)
+	rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+		Start: 0,
+		End:   len(runes),
+	}
+	h.wv.RebuildRenderTree()
+}
+
+// editCopy 复制当前聚焦文本控件的选中文本到系统剪贴板。
+func (h *Host) editCopy() {
+	if h.imeFocusedEl == nil {
+		return
+	}
+	sel := rendering.FocusedFormControlSel
+	if sel == nil || sel.Start == sel.End {
+		return
+	}
+	start, end := sel.Start, sel.End
+	if start > end {
+		start, end = end, start
+	}
+	val := focusedElementValue(h.imeFocusedEl)
+	runes := []rune(val)
+	if start >= 0 && end <= len(runes) {
+		h.getClip().SetClipboardString(string(runes[start:end]))
+	}
+}
+
+// editPaste 把系统剪贴板文本粘贴进当前聚焦文本控件（光标插入或选区替换）。
+func (h *Host) editPaste() {
+	if h.imeFocusedEl == nil {
+		return
+	}
+	clipText := h.getClip().GetClipboardString()
+	if clipText != "" {
+		h.pasteIntoFocused(clipText)
+	}
+}
+
+// editCut 剪切当前聚焦文本控件的选中文本：剪贴板 = 选区文本，控件删除
+// 选区并派发 input(deleteByCut) + change（浏览器语义）。
+func (h *Host) editCut() {
+	if h.imeFocusedEl == nil {
+		return
+	}
+	sel := rendering.FocusedFormControlSel
+	if sel == nil || sel.Start == sel.End {
+		return
+	}
+	start, end := sel.Start, sel.End
+	if start > end {
+		start, end = end, start
+	}
+	val := focusedElementValue(h.imeFocusedEl)
+	runes := []rune(val)
+	if start >= 0 && end <= len(runes) {
+		cutText := string(runes[start:end])
+		h.getClip().SetClipboardString(cutText)
+		newVal := string(runes[:start]) + string(runes[end:])
+		setFocusedElementValue(h.imeFocusedEl, newVal)
+		rendering.FocusedFormControlSel = &rendering.FormControlSelection{
+			Start: start, End: start,
+		}
+		h.imeInputText = newVal
+		h.wv.RebuildRenderTree()
+		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("deleteByCut", "", false))
+		h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+	}
+}
+
+// executeEditCommand 执行右键编辑菜单命令（命令 ID 来自平台
+// PopupEditMenu / 注入的 menuFn）。无聚焦或未知命令时 no-op。
+func (h *Host) executeEditCommand(cmd int) {
+	switch cmd {
+	case window.EditMenuCut:
+		h.editCut()
+	case window.EditMenuCopy:
+		h.editCopy()
+	case window.EditMenuPaste:
+		h.editPaste()
+	case window.EditMenuSelectAll:
+		h.editSelectAll()
+	}
 }
 
 // pasteIntoFocused inserts text into the currently focused form control,

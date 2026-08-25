@@ -476,6 +476,9 @@ func roIsAnonymous(ro RenderObject) bool {
 func inheritedStyle(parent *style.ComputedStyle) *style.ComputedStyle {
 	cs := style.NewComputedStyle()
 	if parent != nil {
+		// InheritFrom 拷贝全部继承属性（含 paint-order——规范继承属性；
+		// -webkit-text-stroke 的描边/填充绘制顺序随 [父元素→文本节点]
+		// 传递）。
 		cs.InheritFrom(parent)
 	}
 	return cs

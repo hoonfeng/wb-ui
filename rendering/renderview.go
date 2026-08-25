@@ -2,6 +2,7 @@
 package rendering
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -46,6 +47,18 @@ type RenderView struct {
 	// the new box — "scrollbar thumb moves but content does not". DOM nodes
 	// survive rebuilds; paint/hit-test/scrollbar code reads by box.Node().
 	boxScrollOffsets map[dom.Node]graphics.Point
+
+	// presentedBoxScrollOffsets 是「已渲染帧」的 box 滚动偏移快照：
+	// Paint 开始时从 boxScrollOffsets 拷贝（该帧将用这些偏移绘制，
+	// 也就是用户此刻在屏幕上看到的滚动状态）。命中测试（HitTest 族）
+	// 一律读快照而非实时值——渲染节流（configwin 50ms≈20fps）下滚轮
+	// 更新偏移后屏幕仍停留在旧帧，若命中解析用实时值，点击将按「滚动
+	// 后的位置」解释，与用户所见错开一个滚动量（「滚动后点颜色行，
+	// 生效位置偏移——不是绝对出现但会触发」根因：滚轮后快速点击时
+	// 视觉帧未更新）。快照语义=所见即所点；下一帧 Paint 完成时快照
+	// 同步到新偏移，此后命中与视觉一致。键与 boxScrollOffsets 相同
+	//（DOM 节点，跨渲染树重建存活）。
+	presentedBoxScrollOffsets map[dom.Node]graphics.Point
 
 	// nodeRenderMap maps DOM nodes to their corresponding RenderObject.
 	// Populated during syncGeometry() so hit-test and scroll container lookup
@@ -163,6 +176,19 @@ func (v *RenderView) RestoreScrollOffsetsFrom(old *RenderView) {
 		}
 		v.boxScrollOffsets[node] = p
 	}
+	// ★ 已呈现帧快照同样迁移：渲染树重建后到下一帧 Paint 之间的命中
+	// 测试（重建 Trigger 后的交互）读旧快照=旧视觉，保持所见即所点；
+	// 不迁移则快照缺失回退实时值——重建恰在滚动后发生时（如点击重建
+	// 面板），会瞬间回到「滚动后未渲染」的错误解析。
+	for node, p := range old.presentedBoxScrollOffsets {
+		if node == nil {
+			continue
+		}
+		if v.presentedBoxScrollOffsets == nil {
+			v.presentedBoxScrollOffsets = make(map[dom.Node]graphics.Point)
+		}
+		v.presentedBoxScrollOffsets[node] = p
+	}
 }
 
 // ScrollOffsetCount returns the number of boxes with a stored scroll
@@ -186,6 +212,73 @@ func (v *RenderView) BoxScrollOffset(box *RenderBox) (float64, float64) {
 		return 0, 0
 	}
 	return float64(p.X), float64(p.Y)
+}
+
+// SnapshotScrollOffsets 把当前 boxScrollOffsets 拷入 presentedBoxScrollOffsets：
+// 必须在 Paint 绘制开始前调用（该帧视觉将按这些偏移绘制）。此后命中
+// 测试读到的就是当前帧的滚动状态（所见即所点），直到下一帧 Paint。
+// ★ 即使 boxScrollOffsets 为空也建立（空）快照：map 存在=画面已呈现
+// （偏移皆 0）——若空时提前返回，presented 保持 nil，PresentedBoxScrollOffset
+// 会回退实时值，快照机制形同虚设（「滚动后点击偏移」复现测试失败根因）。
+func (v *RenderView) SnapshotScrollOffsets() {
+	if v.presentedBoxScrollOffsets == nil {
+		v.presentedBoxScrollOffsets = make(map[dom.Node]graphics.Point, len(v.boxScrollOffsets))
+	} else {
+		// 复用 map：先清空再拷贝（避免每帧分配）。
+		for k := range v.presentedBoxScrollOffsets {
+			delete(v.presentedBoxScrollOffsets, k)
+		}
+	}
+	for k, p := range v.boxScrollOffsets {
+		v.presentedBoxScrollOffsets[k] = p
+	}
+	if os.Getenv("WB_SCROLL_DEBUG") != "" {
+		var names []string
+		for n, p := range v.presentedBoxScrollOffsets {
+			names = append(names, fmt.Sprintf("%T:(%.0f,%.0f)", n, p.X, p.Y))
+		}
+		log.Printf("[snapshot] presented=%v live=%d", names, len(v.boxScrollOffsets))
+	}
+}
+
+// PresentedBoxScrollOffset 返回「当前已渲染帧」的 box 滚动偏移（命中
+// 测试专用）。快照 map 存在（画面已呈现）时**一律**按快照解析——查不到
+// 即该容器未滚动（0,0），**绝不回退实时值**（快照非空但无此键的
+// 「滚动后未渲染」窗口内回退实时值会复现偏移）。仅快照 map 为 nil
+// （从未渲染过，无视觉可依）才回退实时值。
+func (v *RenderView) PresentedBoxScrollOffset(box *RenderBox) (float64, float64) {
+	if box == nil || box.Node() == nil {
+		return 0, 0
+	}
+	if v.presentedBoxScrollOffsets == nil {
+		// 快照从未建立（该视图从未 Paint 过）：无视觉帧可依，回退实时值。
+		return v.BoxScrollOffset(box)
+	}
+	if p, ok := v.presentedBoxScrollOffsets[box.Node()]; ok {
+		return float64(p.X), float64(p.Y)
+	}
+	// 快照 map 存在但无此键（建快照时该 box 未滚动）：就是 0。
+	return 0, 0
+}
+
+// ScrollStackOffsetFor 返回 o 的**祖先链**（不含 o 自身）上所有滚动容器
+// 的「已呈现」滚动偏移之和。层树递归（hitTestLayer）里每层 owner 的
+// box 检查需要把命中点从视口坐标平移成布局坐标——层起点不是从渲染树
+// 根连续递归而来，逐层的 childX/childY 补偿丢失了祖先滚动偏移（层
+// owner 在滚动容器内时 walkLayerContent 的 owner box 检查直接 miss：
+// 「滚动后点弹层/浮层内容穿透到下层」）。绘制端 paintLayerContents 对
+// 滚动内容同样按完整祖先链 translate（滚动容器的 translate 包住其
+// 内容与子层），命中必须镜像同样的坐标系变换。
+func (v *RenderView) ScrollStackOffsetFor(o RenderObject) (float64, float64) {
+	var sx, sy float64
+	for p := o.Parent(); p != nil; p = p.Parent() {
+		if box := asRenderBox(p); box != nil {
+			px, py := v.PresentedBoxScrollOffset(box)
+			sx += px
+			sy += py
+		}
+	}
+	return sx, sy
 }
 
 // HasBoxScrollOffset reports whether ANY overflow:scroll/auto box currently
@@ -872,6 +965,71 @@ func (v *RenderView) CursorPos() (float64, float64) { return v.cursorX, v.cursor
 func (v *RenderView) SetCursorPos(x, y float64) { v.cursorX, v.cursorY = x, y }
 
 func (v *RenderView) RootLayer() *RenderLayer          { return v.rootLayer }
+
+// TopLayerRects 返回渲染层树中「绘制在文档内容之上」的层 owner 的视口
+// 矩形：z-index>0 的定位/堆叠层（遮罩 z:999/弹窗 1000/toast 1200/下拉）、
+// position:fixed 浮层——镜像 paintLayerTree 的层叠顺序（正 z 层与 fixed
+// 恒在文档内容之上绘制）。★ 应用层「外部合成内容」（配置画布预览的挂件
+// 像素 blit）在语义上是文档内容层——合成前查询本函数，与弹层矩形相交
+// 则跳过/裁剪 → 弹窗/遮罩/下拉对内容的遮挡自动正确（引擎层提供层叠
+// 唯一真相，应用无需 JS 探测弹窗、无需维护弹窗类型清单——此前逐 id
+// 探测漏掉 dcMask 导致删除弹窗打开时媒体帧覆盖遮罩）。
+func (v *RenderView) TopLayerRects() []layout.LayoutRect {
+	var out []layout.LayoutRect
+	if v.rootLayer == nil {
+		return out
+	}
+	var walk func(layer *RenderLayer)
+	walk = func(layer *RenderLayer) {
+		if layer == nil {
+			return
+		}
+		if layer.owner != nil && !layer.owner.IsRenderView() {
+			// ★ display:none 的层（弹窗/遮罩关闭后层树残留）：painter
+			// 不绘制隐藏元素，遮挡查询同样忽略（否则关闭弹窗后矩形
+			// 残留——合成层误以为弹层仍遮挡而持续跳过挂件）。
+			// 双层过滤：渲染树 style（快）+ DOM 内联 style（层树可能
+			// 未随 display:inline 变更重建，DOM 是最新事实）。
+			if st := layer.owner.Style(); st != nil && st.Display == style.DisplayNone {
+				return // 隐藏子树无任何绘制，整体跳过
+			}
+			if el, ok := layer.owner.Node().(*dom.Element); ok {
+				if stAttr := el.GetAttribute("style"); strings.Contains(stAttr, "display:none") {
+					return
+				}
+			}
+			z := layerZIndex(layer)
+			isFixed := false
+			if st := layer.owner.Style(); st != nil {
+				isFixed = st.Position == style.PositionFixed
+			}
+			if z > 0 || isFixed {
+				// owner 的视口矩形（扣除祖先滚动偏移——与元素
+				// getBoundingClientRect 语义一致；弹层多为文档级
+				// absolute/fixed，无祖先滚动，此处兜底保证正确）。
+				x, y, w, h, ok := boxCoords(layer.owner)
+				if ok && w > 0 && h > 0 {
+					vx, vy := x, y
+					for p := layer.owner.Parent(); p != nil; p = p.Parent() {
+						if pb := asRenderBox(p); pb != nil {
+							sx, sy := v.BoxScrollOffset(pb)
+							if sx != 0 || sy != 0 {
+								vx -= sx
+								vy -= sy
+							}
+						}
+					}
+					out = append(out, layout.LayoutRect{X: vx, Y: vy, Width: w, Height: h})
+				}
+			}
+		}
+		for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
+			walk(child)
+		}
+	}
+	walk(v.rootLayer)
+	return out
+}
 func (v *RenderView) SetRootLayer(l *RenderLayer)       { v.rootLayer = l }
 func (v *RenderView) Compositor() *RenderLayerCompositor { return v.compositor }
 

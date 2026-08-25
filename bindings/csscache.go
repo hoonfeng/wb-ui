@@ -115,3 +115,19 @@ func lineHeightCachePut(n interface{}, height float64, found bool) {
 	lineHeightCache[n] = &lineHeightEntry{ver: atomic.LoadUint64(&styleVer), height: height, found: found}
 	lineHeightMu.Unlock()
 }
+
+// init 注册动态伪类状态变化回调：:hover/:focus/:active 状态变化不影响
+// 样式表/属性（BumpStyleVersion/InvalidateComputedStyle 都不触发），但
+// 选择器匹配跨元素（:hover 冒泡、div:hover a、:focus-within、:active 冒泡）
+// ——挂起点（如 tree-head 的子元素）与兄弟分支（gdel 依赖共同祖先的
+// :hover 冒泡匹配）都可能受状态影响的元素，无法按子树精确失效。因此
+// 直接全失效（BumpStyleVersion）：hover/focus/active 切换是低频事件
+// （元素边界才触发），下一次 getComputedStyle 重算的代价可忽略。
+// 不处理则 getComputedStyle 在鼠标移开/焦点转移后仍返回旧值
+// （:hover 视觉不恢复的根因——tb-close 自身恢复但 .tree-head:hover
+//  .gdel 兄弟分支不恢复，实测复现）。
+func init() {
+	dom.DynamicPseudoStateChanged = func(el *dom.Element) {
+		BumpStyleVersion()
+	}
+}

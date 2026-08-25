@@ -69,6 +69,10 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if view == nil || canvas == nil {
 		return
 	}
+	// ★ 帧开始：快照滚动偏移（该帧视觉将按 boxScrollOffsets 绘制）。
+	// 命中测试读快照 → 与用户所见一致（渲染节流下滚动后未渲染帧内
+	// 点击不会按新偏移解析——「滚动后点击生效位置偏移」根因）。
+	view.SnapshotScrollOffsets()
 	if os.Getenv("WB_GUTTER_DEBUG") != "" {
 		log.Printf("[paint-call] rect=%.0f,%.0f %.0fx%.0f dirty=%v", rect.X, rect.Y, rect.Width, rect.Height, view.IsDirty())
 	}
@@ -395,7 +399,7 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 			isFixedLayer = st.Position == style.PositionFixed
 		}
 	}
-	layerRect, clip := layer.CalculateRects()
+	layerRect, clip, clipSpecified := layer.CalculateRects()
 	hasClip := clip.Width > 0 && clip.Height > 0
 	_ = layerRect
 	if os.Getenv("WB_GUTTER_DEBUG") != "" {
@@ -439,6 +443,19 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// cgo 调用（Windows cgo ~20µs/次，这是 paint 80%+ 的时间）。
 	if hasClip || isFixedLayer {
 		info.canvas.Save()
+	}
+	// ★ 空 clip cull（层完全在祖先 overflow clip 之外）：clipSpecified
+	// 而相交结果为零尺寸。浏览器语义 = 整层子树被祖先裁剪（不可见）。
+	// 修复前 hasClip(false) 使该层零裁剪绘制——overflow-y:auto popup 的
+	// 第 9/10 行 option 平铺到容器外（select 下拉渲染溢出根因）。
+	if clipSpecified && (clip.Width <= 0 || clip.Height <= 0) {
+		if hasClip || isFixedLayer {
+			info.canvas.Restore() // 抵消前面的 Save
+		}
+		if paintStatsEnabled() {
+			paintStatsNoClipLayers++
+		}
+		return
 	}
 	if isFixedLayer {
 		// ★ Fixed-position layers paint against the viewport. The previous

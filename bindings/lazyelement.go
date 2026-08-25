@@ -695,12 +695,14 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 		return jsc.JSValue{}, &elemAccessor{
 			get: func() jsc.JSValue {
 				// select.value = 选中 option 的 value 属性或文本（浏览器语义）。
+				// ★ value="" 显式设置时返回空串（标准）——此前空值回退
+				// textContent，「value=""」选项读到的是显示文本（脏数据）。
 				if tag == "select" {
 					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
 						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
 							if opt.HasAttribute("selected") {
-								if v := opt.GetAttribute("value"); v != "" {
-									return jsc.StringValue(v)
+								if opt.HasAttribute("value") {
+									return jsc.StringValue(opt.GetAttribute("value"))
 								}
 								return jsc.StringValue(opt.TextContent())
 							}
@@ -711,8 +713,8 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 					if !el.HasAttribute("multiple") {
 						for c := el.FirstChild(); c != nil; c = c.NextSibling() {
 							if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") && !opt.HasAttribute("disabled") {
-								if v := opt.GetAttribute("value"); v != "" {
-									return jsc.StringValue(v)
+								if opt.HasAttribute("value") {
+									return jsc.StringValue(opt.GetAttribute("value"))
 								}
 								return jsc.StringValue(opt.TextContent())
 							}
@@ -734,7 +736,8 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 					for c := el.FirstChild(); c != nil; c = c.NextSibling() {
 						if opt, ok := c.(*dom.Element); ok && strings.EqualFold(opt.LocalName(), "option") {
 							val := opt.GetAttribute("value")
-							if val == "" {
+							// ★ 仅未设置 value 属性时回退文本（显式 value="" 保持空串）
+							if !opt.HasAttribute("value") {
 								val = opt.TextContent()
 							}
 							if val == target {

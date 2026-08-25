@@ -272,6 +272,11 @@ const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
 // （浏览器 iframe navigation 语义）。nil 时静默跳过（测试环境）。
 var IFrameSrcChanged func(el *dom.Element, src string)
 
+// ElementFromPoint 实现 document.elementFromPoint（webkit 分派器注入，
+// 按解释器归属路由到对应 WebView 的渲染树命中）。视口坐标 → 命中的
+// 最顶层元素（层叠感知：z-index/遮罩/弹窗按绘制顺序，后被绘制者在上）。
+var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
+
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// ★ 保存 interpreter：InsertTextAtSelection 插入后重建 selection
 	// range 需要（makeSelRange 用 rt.ObjectPrototype）。
@@ -2364,6 +2369,37 @@ obj.SetInternal(doc)
 		}
 		return jsc.Null()
 	})))
+	// elementFromPoint（CSSOM-View 标准 API）：层叠感知命中（遮罩/弹窗
+	// 按 z 序，顶层的先命中）。webkit 分派器按解释器归属路由。
+	obj.Set("elementFromPoint", jsc.FunctionValue(jsc.NewNativeFunction("elementFromPoint",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if ElementFromPoint == nil || len(args) < 2 {
+				return jsc.Null()
+			}
+			el := ElementFromPoint(in, args[0].ToNumber(), args[1].ToNumber())
+			if el == nil {
+				return jsc.Null()
+			}
+			return jsc.ObjectValue(wrapElement(in, el))
+		}, 2)))
+	// elementsFromPoint：从顶层到最深的命中元素列表（简化：顶部元素
+	// + 其祖先链按 DOM 级联；空/未命中为空数组）。
+	obj.Set("elementsFromPoint", jsc.FunctionValue(jsc.NewNativeFunction("elementsFromPoint",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			arr := jsc.NewArray(in.ObjectPrototype(), nil)
+			if ElementFromPoint == nil || len(args) < 2 {
+				return jsc.ObjectValue(arr)
+			}
+			el := ElementFromPoint(in, args[0].ToNumber(), args[1].ToNumber())
+			if el == nil {
+				return jsc.ObjectValue(arr)
+			}
+			var items []jsc.JSValue
+			for e := el; e != nil; e = e.ParentElement() {
+				items = append(items, jsc.ObjectValue(wrapElement(in, e)))
+			}
+			return jsc.ObjectValue(jsc.NewArrayForInterp(in, items))
+		}, 2)))
 	obj.Set("createElement", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapElement(in, doc.CreateElement(arg)))
 	})))
