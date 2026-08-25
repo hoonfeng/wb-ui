@@ -111,9 +111,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 因此比同行裸文本（括号/花括号等无样式字符）低 3px，视觉上表现为
 	// 「括号与文字底部对齐」（根因）。纯 inline 文本应直接顶贴 box 内容顶
 	// （与父文本共享基线），故 centeringOffset = 0。
+	// ★ flex item 例外：flex 容器（align-items:center 等）的 inline 子元素是
+	// block 化 item——其 box 顶由 flex 布局定位，内部文本行盒必须自己按
+	// half-leading 居中（「礼物栏图标与 +N分钟 文字不垂直对齐」根因：
+	// b.gd 在 inline-flex 的 span.gitem 内）。flex item 的匿名内容层
+	// （父是 flex item 的 (anon) 盒，box 顶无父 IFC 行盒 offset）同样需要。
+	// ★ 半行距可为负：line-height < 字体度量高时文字上移（top 溢出行盒，
+	// 浏览器语义）——textHeight < cssLH 的旧限制让负半行距静默归零，
+	// 文字中心比行盒中心低 (textHeight-cssLH)/2（gift 卡片实测 1.26px）。
 	centeringOffset := 0.0
-	isPlainInline := cs != nil && box.IsInline() && !box.IsReplaced() && cs.Display == style.DisplayInline
-	if !isPlainInline && cssLH > 0 && textHeight < cssLH {
+	parentIsFlexItem := box.Parent() != nil && isFlexItem(box.Parent())
+	isPlainInline := cs != nil && box.IsInline() && !box.IsReplaced() &&
+		cs.Display == style.DisplayInline && !isFlexItem(box) &&
+		!(box.Element() == nil && parentIsFlexItem)
+	if !isPlainInline && cssLH > 0 {
 		centeringOffset = (cssLH - textHeight) / 2
 	}
 
