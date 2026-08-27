@@ -22,8 +22,9 @@ func main() {
 		if strings.TrimSpace(code) == "" {
 			continue
 		}
-		vm := goja.New()
-		_, err := vm.RunString(code)
+		// 只编译不执行：页面脚本顶层就调 document/window，goja 无 DOM，
+		// RunString 会误报 ReferenceError——语法检查只需 Compile。
+		_, err := goja.Compile("script", code, true)
 		if err != nil {
 			fmt.Printf("--- script#%d ERROR: %v\n", i, err)
 			lines := strings.Split(code, "\n")

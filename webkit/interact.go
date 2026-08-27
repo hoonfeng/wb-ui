@@ -279,6 +279,14 @@ func (i *Interaction) MouseButton(x, y float64, button, action int) {
 // MouseMove 处理鼠标移动：hover 追踪 + mousemove 派发。
 func (i *Interaction) MouseMove(x, y float64) {
 	i.lastX, i.lastY = x, y
+	if i.wv == nil || i.wv.destroyed {
+		return
+	}
+	// ★ 命中测试前同步渲染树（与 MouseButton 同款）：宿主 JS 改 DOM 后
+	// 渲染树重建可能被变更风暴 cooldown 推迟，此窗口内 hover 追踪/
+	// mousemove 派发会在旧树上解析——新元素收不到事件、已删除元素
+	// 仍触发 hover。FlushRenderTreeDirty 树干净时零开销。
+	i.wv.EnsureHitTestReady()
 	rv := i.view()
 	if rv == nil {
 		return
@@ -376,6 +384,15 @@ func (i *Interaction) dispatchHover(oldEl, newEl *dom.Element, x, y float64) {
 // Wheel 处理滚轮：滚动命中容器 + 派发 wheel DOM 事件。deltaY 为滚轮
 // 增量（Win32 符号：正=向上滚，取负为向下滚动）。
 func (i *Interaction) Wheel(deltaY float64) {
+	if i.wv == nil || i.wv.destroyed {
+		return
+	}
+	// ★ 命中测试前同步渲染树（与 MouseButton 同款）：宿主 JS 改 DOM
+	//（innerHTML 重建列表等）后渲染树重建被 cooldown 降频推迟的窗口内，
+	// ScrollTargetAt 在旧树上解析 → 滚动目标丢失 → 滚轮不滚动（DOM 更新
+	// 后立刻滚动失效根因）。FlushRenderTreeDirty 树干净时零开销，滚轮
+	// 事件低频，强制重建成本可忽略。
+	i.wv.EnsureHitTestReady()
 	rv := i.view()
 	if rv == nil {
 		return
@@ -735,13 +752,10 @@ func (i *Interaction) selectPopupOptionClicked(el *dom.Element) {
 		if selEl, ok := html5.ToSelectElement(sel); ok {
 			selEl.SetValue(el.GetAttribute("data-value"))
 		}
+		// change 派发（onchange 属性处理器由 dom 层 InlineEventAttrRunner
+		// 钩子在派发路径统一执行——宿主 JS 面板的 onchange="apply('id',
+		// 'device',this.value)" 生效，此前依赖此处手动执行，现钩子接管）。
 		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
-		// ★ onchange 属性执行（浏览器语义：select 选择变化立即触发生效）：
-		// 宿主 JS 面板用 onchange="apply('id','device',this.value)"——
-		// 只派发 change DOM 事件不会执行属性处理器 → 设备切换不生效。
-		if code := sel.GetAttribute("onchange"); code != "" {
-			execInlineHandler(i.wv, sel, "onchange")
-		}
 	}
 }
 

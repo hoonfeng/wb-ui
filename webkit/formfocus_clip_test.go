@@ -112,8 +112,14 @@ func TestFormFocusCtrlCut(t *testing.T) {
 	if !strings.Contains(s, "deleteByCut") {
 		t.Fatalf("缺少 deleteByCut input, got %s", s)
 	}
-	if !strings.Contains(s, `"chg":1`) {
-		t.Fatalf("缺少 change, got %s", s)
+	if strings.Contains(s, `"chg":1`) {
+		t.Fatalf("剪切未 blur 不应派发 change（浏览器语义：change 在 blur 提交时）, got %s", s)
+	}
+	// blur（焦点清除）→ 值已变 → Submit 派发 change
+	f.Clear()
+	v2, _ := wv.JSInterpreter().RunJS(`JSON.stringify(window.__chg)`)
+	if v2.ToString() != "1" {
+		t.Fatalf("blur 后缺少 change 事件, got %s", v2.ToString())
 	}
 }
 

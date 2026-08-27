@@ -169,6 +169,13 @@ type Host struct {
 	// FocusedElement to know which element is receiving input.
 	imeFocusedEl   *dom.Element
 	imeInputText   string
+	// imeFocusValue is the value snapshot taken when the element gained focus.
+	// Unfocus compares against it to fire the blur "change" event (browser
+	// semantics: change fires on blur when the value differs from the
+	// focus-time snapshot). Separate from imeInputText, which input paths keep
+	// updating as the IME composition baseline — that would make the blur
+	// comparison always equal and change would never fire.
+	imeFocusValue  string
 	imeComposing   bool
 	imeComposeText string
 	// downJSFocused records whether the JS mousedown handler (dispatched on
@@ -697,6 +704,7 @@ func (h *Host) FocusElementByKeyboard(el *dom.Element, byKeyboard bool) {
 	}
 	if el != nil {
 		h.imeInputText = focusedElementValue(el)
+		h.imeFocusValue = focusedElementValue(el)
 	}
 	h.win.SetIMEEnabled(true)
 	// For text-type form controls (<input>/<textarea>), register the element
@@ -1158,6 +1166,12 @@ func st2ContentWidth(st *style.ComputedStyle, box *rendering.RenderBox) float64 
 func (h *Host) Unfocus() {
 	if h.imeFocusedEl != nil {
 		blurEl := h.imeFocusedEl
+		// ★ blur 提交（浏览器语义）：失焦时值相对聚焦快照变化 → 派发
+		// 冒泡 change（onchange 内容属性由 dom 层 InlineEventAttrRunner
+		// 钩子执行）。输入过程中只派 input 事件，change 收敛到这里。
+		if cur := focusedElementValue(blurEl); cur != h.imeFocusValue {
+			blurEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+		}
 		// ★ 派发 blur DOM 事件（不冒泡）：xterm 监听 textarea blur →
 		// isFocused=false → 隐藏光标。对称于 FocusElementByKeyboard 的
 		// focus 派发。
@@ -1179,7 +1193,9 @@ func (h *Host) Unfocus() {
 		rendering.FocusedFormControlSel = nil
 		rendering.CaretVisible = false
 		rendering.CaretVisibleControl = false
-		h.win.SetIMEEnabled(false)
+		if h.win != nil { // 测试宿主无平台窗口
+			h.win.SetIMEEnabled(false)
+		}
 	}
 }
 
@@ -3079,8 +3095,8 @@ func (h *Host) handleCharInput(ev window.Event) {
 				fr.MarkRenderTreeDirty()
 			}
 		}
+		h.imeInputText = newVal
 		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
-		h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 	} else if strings.EqualFold(h.imeFocusedEl.GetAttribute("contenteditable"), "true") {
 		// contenteditable（CodeMirror 6 输入区）：光标处插入文本节点，
 		// 派发 input → CM6 的 DOMObserver readDOMChange 同步 state。
@@ -5604,7 +5620,6 @@ func (h *Host) editCut() {
 		h.imeInputText = newVal
 		h.wv.RebuildRenderTree()
 		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("deleteByCut", "", false))
-		h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 	}
 }
 
@@ -5682,9 +5697,6 @@ func (h *Host) pasteIntoFocused(text string) {
 	inputEvent := dom.NewInputEvent("insertFromPaste", text, false)
 	h.imeFocusedEl.DispatchEvent(inputEvent)
 
-	// Dispatch change event (bubbles, not cancelable).
-	h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
-
 	h.wv.RebuildRenderTree()
 	h.ensureFocusedCaretVisible()
 }
@@ -5735,7 +5747,6 @@ func (h *Host) deleteFocusedChar(forward bool) {
 		inputType = "deleteContentBackward"
 	}
 	el.DispatchEvent(dom.NewInputEvent(inputType, "", false))
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 	h.wv.RebuildRenderTree()
 }
 
@@ -5942,9 +5953,6 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 					// End composition
 					h.imeFocusedEl.DispatchEvent(dom.NewCompositionEvent("compositionend", newText))
 				}
-
-				// Dispatch change event (bubbles, not cancelable)
-				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 			}
 
 		case ime.EventCompositionEnd:
@@ -5963,9 +5971,6 @@ func (h *Host) applyIMEEvents(events []ime.Event) {
 
 				// Dispatch input event with insertFromComposition
 				h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertFromComposition", finalText, false))
-
-				// Dispatch change event
-				h.imeFocusedEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 			}
 		}
 	}
@@ -6070,7 +6075,6 @@ func (h *Host) applyContentEditableCharInput(ev ime.Event) {
 		el.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 	}
 	h.markContentEditableDirty()
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 }
 
 // applyContentEditableCompositionEnd 处理 contenteditable 的组合结束：
@@ -6100,7 +6104,6 @@ func (h *Host) applyContentEditableCompositionEnd(ev ime.Event) {
 	h.imeCompLen = 0
 	h.imeCompText = ""
 	h.imeCompStarted = false
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 }
 
 // findBodyBgColor walks the render tree to find the body element's background

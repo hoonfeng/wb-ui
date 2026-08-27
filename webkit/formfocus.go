@@ -115,8 +115,9 @@ func (f *FormFocus) PollDirty() bool {
 }
 
 // Submit 提交当前聚焦控件的未提交变更（浏览器 blur/Enter 语义）：
-// 值相对聚焦快照变化 → 执行 onchange 属性（this=元素、event=null）+
-// 派发冒泡 change 事件；随后刷新快照（提交后以当前值为基准）。
+// 值相对聚焦快照变化 → 派发冒泡 change 事件（onchange 内容属性由
+// dom 层 InlineEventAttrRunner 钩子在派发路径统一执行，this=元素）；
+// 随后刷新快照（提交后以当前值为基准）。
 // 引擎内表单提交收敛点：Focus/Clear（blur）与 CharInput/KeyInput
 // （input 上的 Enter）统一走这里——应用侧无需再实现 commitInput
 // （configwin 此前自持 data-cf 标记 + new Function 提交，已下沉）。
@@ -126,12 +127,7 @@ func (f *FormFocus) Submit() {
 		return
 	}
 	cur := formControlValue(el)
-	changed := cur != f.value
-	if changed {
-		// onchange 属性执行（与 onclick 同机制：this=元素）
-		if code := el.GetAttribute("onchange"); code != "" {
-			execInlineHandler(f.wv, el, "onchange")
-		}
+	if cur != f.value {
 		el.DispatchEvent(dom.NewEvent("change", true, false, false))
 	}
 	f.value = cur // 快照刷新：无变化也刷新（重复 Submit 幂等）
@@ -470,8 +466,10 @@ func (f *FormFocus) CharInput(ch rune) bool {
 	if !f.applyValue(nv, start+1) {
 		return true // 超 maxlength / readonly：消费但不修改
 	}
+	// 浏览器语义：按键只派 input 事件；change 在 blur/Enter 提交时派发
+	//（onchange 属性届时由 dom 层钩子执行）——每键派 change 会让
+	// onchange 属性（如配置面板 apply→重建挂件）在输入过程中反复触发。
 	el.DispatchEvent(dom.NewInputEvent("insertText", string(ch), false))
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 	return true
 }
 
@@ -508,7 +506,6 @@ func (f *FormFocus) KeyInput(name string) bool {
 			return true
 		}
 		el.DispatchEvent(dom.NewInputEvent("deleteContentBackward", "", false))
-		el.DispatchEvent(dom.NewEvent("change", true, false, false))
 		return true
 	case "Delete":
 		if start == end {
@@ -522,7 +519,6 @@ func (f *FormFocus) KeyInput(name string) bool {
 			return true
 		}
 		el.DispatchEvent(dom.NewInputEvent("deleteContentForward", "", false))
-		el.DispatchEvent(dom.NewEvent("change", true, false, false))
 		return true
 	case "ArrowLeft":
 		if start > 0 {
@@ -555,7 +551,6 @@ func (f *FormFocus) insertAtSel(ch rune) bool {
 		return true
 	}
 	el.DispatchEvent(dom.NewInputEvent("insertText", string(ch), false))
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 	return true
 }
 
@@ -787,7 +782,6 @@ func (f *FormFocus) CtrlShortcut(name string) bool {
 			return true
 		}
 		el.DispatchEvent(dom.NewInputEvent("deleteByCut", "", false))
-		el.DispatchEvent(dom.NewEvent("change", true, false, false))
 		return true
 	case "paste":
 		if f.clip == nil {
@@ -829,7 +823,6 @@ func (f *FormFocus) pasteText(text string) {
 		return
 	}
 	el.DispatchEvent(dom.NewInputEvent("insertFromPaste", text, false))
-	el.DispatchEvent(dom.NewEvent("change", true, false, false))
 }
 
 // ShowDefaultEditMenu 右键释放回调（Interaction 在 contextmenu 未被 JS

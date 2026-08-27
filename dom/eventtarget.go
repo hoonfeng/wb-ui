@@ -16,6 +16,16 @@ package dom
 
 import "reflect"
 
+// InlineEventAttrRunner executes an event-handler content attribute (the "code" in
+// <button onclick="code">) during event dispatch on that element. The DOM package
+// has no scripting engine, so the engine layer (webkit) installs the actual
+// executor; HTML semantics treat the attribute code as a listener registered when
+// the element was created, which is why it runs in every non-capture phase (target
+// and bubbling ancestors) before any addEventListener callbacks — regardless of
+// whether other listeners exist. It is invoked with the attribute owner and the
+// event type ("click" for the "onclick" attribute); nil disables the feature.
+var InlineEventAttrRunner func(el *Element, eventType string)
+
 // EventTarget is the Go translation of WebCore::EventTarget. It is the contract for an
 // object that can receive events. In this port the only concrete EventTargets are DOM
 // nodes (via nodeBase), so AddEventListener/RemoveEventListener/DispatchEvent are
@@ -402,9 +412,24 @@ func (b *nodeBase) defaultEventHandler(Event) {}
 // bubble otherwise) registered on target for the event's type. It honours the Passive
 // flag (preventDefault is ignored inside passive listeners) and the Once flag (the
 // listener is removed after it fires). StopImmediatePropagation aborts the loop.
+//
+// Before the registered listeners it also runs the event-handler content attribute
+// (the "code" in <button onclick="code">): HTML registers that code as a listener at
+// element-creation time, so it fires in the non-capture phases (target and bubbling
+// ancestors) ahead of any addEventListener callbacks — including when the element has
+// no registered listeners at all. The actual execution needs a scripting engine, so
+// it is delegated to InlineEventAttrRunner (installed by the engine layer; nil here).
 func fireEventListeners(target EventTarget, event Event, capture bool) {
 	nb := nodeBaseOfEventTarget(target)
-	if nb == nil || nb.listeners == nil {
+	if nb == nil {
+		return
+	}
+	if !capture && InlineEventAttrRunner != nil {
+		if el, ok := target.(*Element); ok {
+			InlineEventAttrRunner(el, event.Type())
+		}
+	}
+	if nb.listeners == nil {
 		return
 	}
 	typ := event.Type()

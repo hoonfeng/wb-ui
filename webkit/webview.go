@@ -118,6 +118,23 @@ func webViewForInterpreter(in *jsc.Interpreter) *WebView {
 // 分派闭包，按元素/解释器归属路由到对应 WebView 的 wvBridge 闭包。
 func installBridgeDispatch() {
 	bridgeDispatch.Do(func() {
+		// dom 层内容属性事件处理器执行器（HTML onclick="code" 语义）：
+		// 内容属性的 code 视为元素创建时注册的监听器，DispatchEvent 派发
+		// 路径（JS dispatchEvent / Go 直接派发 / 冒泡祖先）都应执行它——
+		// 此前只有 Interaction/Host 点击管线手动执行，页面 JS 用
+		// dispatchEvent(new MouseEvent('click')) 模拟点击时 onclick 落空。
+		// 按元素归属定位 WebView 后复用 execInlineHandler（this=元素）。
+		dom.InlineEventAttrRunner = func(el *dom.Element, eventType string) {
+			attr := "on" + eventType
+			if el.GetAttribute(attr) == "" {
+				return
+			}
+			wv := webViewForNode(el)
+			if wv == nil {
+				return
+			}
+			execInlineHandler(wv, el, attr)
+		}
 		bindings.GetElementBoxRect = func(el *dom.Element) (float64, float64, float64, float64) {
 			wv := webViewForNode(el)
 			if wv == nil {
