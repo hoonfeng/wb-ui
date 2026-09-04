@@ -546,6 +546,15 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 
 	total := 0.0
 	maxW := 0.0
+	// ★ Inline-level 子级（span/a/img 等）与同级的文本共享同一个行盒：
+	//   max-content 语义下它们不软换行、排在一行 → 宽度必须求和。
+	//   之前对非 flex 容器所有子级一律取 max（只适用于块级子级纵向堆叠），
+	//   nowrap 歌词行（flex item 内含多个 span）被量成最宽单个 span 的宽度
+	//   （hdiag5 C: 180px 而非 ~700px），行槽位被压窄，其余文本溢出被
+	//   overflow:hidden 裁剪——只有第一段可见。
+	inlineSum := 0.0
+	blockMax := 0.0
+	hasBlock := false
 	spaceW := measureText(box, " ")
 	if spaceW <= 0 {
 		spaceW = measureText(box, " ")
@@ -558,6 +567,7 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				// width matches what InlineFormattingContext.Layout expects.
 				w := measureTextWordSum(box, c.Text(), spaceW)
 				if isFlexRow { total += w }
+				inlineSum += w
 				if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
@@ -575,6 +585,13 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				}
 			}
 			if isFlexRow { total += cw }
+			if c.IsInlineLevel() {
+				inlineSum += cw
+			} else {
+				// 块级子级纵向堆叠：max-content 取最宽一块。
+				hasBlock = true
+				if cw > blockMax { blockMax = cw }
+			}
 			if cw > maxW { maxW = cw }
 		}
 	}
@@ -596,6 +613,11 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				maxW += gap * float64(count-1)
 			}
 		}
+	} else if inlineSum > 0 || hasBlock {
+		// 非 flex 容器：inline 内容共享一行（求和）；块级子级另起一行
+		// （取 max）。两者并存时取较大者（CSS-SIZING-3 max-content）。
+		maxW = inlineSum
+		if hasBlock && blockMax > maxW { maxW = blockMax }
 	}
 	// Add the box's own padding + border (inline direction).
 	if cs != nil {
