@@ -346,6 +346,29 @@ func (s *svgRect) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		}
 	}
 	if ctx.stroke.A > 0 && ctx.strokeWidth > 0 {
+		if len(ctx.dashArray) > 0 {
+			// ★ stroke-dasharray on rect (media 占位虚线边框等)：沿圆角矩形
+			// 中心线折线采样，按累计弧长推进 dash 相位（与 circle/path 的
+			// dash 一致）。此前 StrokeRoundRect/StrokeRect 只画实线，
+			// dasharray 被静默忽略（浏览器为 8-6 虚线，wb-ui 画实线）。
+			half := ctx.strokeWidth / 2
+			cw := s.w - ctx.strokeWidth
+			ch := s.h - ctx.strokeWidth
+			if cw > 0 && ch > 0 {
+				r := s.rx
+				if r == 0 {
+					r = s.ry
+				}
+				pts := rectCenterlineDashes(s.x+half, s.y+half, cw, ch, r)
+				off := ctx.dashOffset
+				for i := 0; i < len(pts)-1; i++ {
+					dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y,
+						ctx.strokeWidth, ctx.stroke, ctx.dashArray, off, ctx.lineCap)
+					off += math.Hypot(pts[i+1].X-pts[i].X, pts[i+1].Y-pts[i].Y)
+				}
+			}
+			return
+		}
 		if s.rx > 0 || s.ry > 0 {
 			r := s.rx
 			if r == 0 {
@@ -356,6 +379,49 @@ func (s *svgRect) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			canvas.StrokeRect(s.x, s.y, s.w, s.h, ctx.strokeWidth, ctx.stroke)
 		}
 	}
+}
+
+// rectCenterlineDashes 生成圆角矩形中心线折线点序列（闭合环），点位顺序：
+// 上边左端 → 右上弧 → 右边 → 右下弧 → 下边 → 左下弧 → 左边 → 左上弧 →
+// 回到起点。与 canvas.roundRectOutline 一致（r=0 退化为矩形四角直折）。
+// 供 svgRect 的 stroke-dasharray 沿弧长采样（svg.go 不能直接调 canvas
+// 包内未导出函数，此处本地实现同构折线）。
+func rectCenterlineDashes(cx, cy, cw, ch, r float64) []graphics.Point {
+	const arcSegs = 8.0
+	hw := cw / 2
+	hh := ch / 2
+	if r > hw {
+		r = hw
+	}
+	if r > hh {
+		r = hh
+	}
+	arcPts := func(ox, oy, rr, a1, a2 float64) []graphics.Point {
+		var out []graphics.Point
+		for i := 1.0; i <= arcSegs; i++ {
+			a := a1 + (a2-a1)*i/arcSegs
+			out = append(out, graphics.Point{X: ox + rr*math.Cos(a), Y: oy + rr*math.Sin(a)})
+		}
+		return out
+	}
+	var pts []graphics.Point
+	// 上边（左端 → 右上弧起点）
+	pts = append(pts, graphics.Point{X: cx + r, Y: cy})
+	// 右上弧（圆心 cx+cw-r, cy+r；-90° → 0°）
+	pts = append(pts, arcPts(cx+cw-r, cy+r, r, -math.Pi/2, 0)...)
+	// 右边（→ 右下弧起点）
+	pts = append(pts, graphics.Point{X: cx + cw, Y: cy + ch - r})
+	// 右下弧（圆心 cx+cw-r, cy+ch-r；0° → 90°）
+	pts = append(pts, arcPts(cx+cw-r, cy+ch-r, r, 0, math.Pi/2)...)
+	// 下边（右端 → 左下弧起点）
+	pts = append(pts, graphics.Point{X: cx + r, Y: cy + ch})
+	// 左下弧（圆心 cx+r, cy+ch-r；90° → 180°）
+	pts = append(pts, arcPts(cx+r, cy+ch-r, r, math.Pi/2, math.Pi)...)
+	// 左边（→ 左上弧起点）
+	pts = append(pts, graphics.Point{X: cx, Y: cy + r})
+	// 左上弧（圆心 cx+r, cy+r；180° → 270°）
+	pts = append(pts, arcPts(cx+r, cy+r, r, math.Pi, math.Pi*1.5)...)
+	return pts
 }
 
 type svgCircle struct{ cx, cy, r float64 }
