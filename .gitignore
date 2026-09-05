@@ -6,6 +6,7 @@
 *.dylib
 *.test
 *.out
+.pair/
 
 # Build output
 /bin/

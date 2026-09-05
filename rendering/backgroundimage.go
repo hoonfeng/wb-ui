@@ -221,6 +221,12 @@ func SetBackgroundImageLoadedCallback(cb func(url string)) {
 	backgroundImageCache.mu.Unlock()
 }
 
+// LoadImageSync 是 loadBackgroundImage 的导出包装（供 webkit 桥按 <img>
+// 元素的 src 主动解码：canvas 2D drawImage 的图片源）。
+func LoadImageSync(url string) *DecodedImage {
+	return loadBackgroundImage(url, "")
+}
+
 // loadBackgroundImage resolves and decodes a background-image URL.
 // data: URIs and file paths decode synchronously (local, fast). http(s)
 // URLs fetch asynchronously: the first call spawns a goroutine and returns
@@ -243,6 +249,14 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 			go fetchBackgroundImageAsync(url)
 		}
 		return nil
+	} else if strings.HasPrefix(url, "file://") {
+		// file:///F:/path/to.png（模板/贴图资源引用）：剥前缀读文件。
+		p := strings.TrimPrefix(url, "file://")
+		p = strings.TrimPrefix(p, "/")
+		b, err := os.ReadFile(p)
+		if err == nil {
+			data = b
+		}
 	} else if !strings.Contains(url, ":") { // not a scheme, treat as file
 		p := url
 		if baseDir != "" && !strings.HasPrefix(url, "/") && !strings.HasPrefix(url, "\\") {

@@ -8,6 +8,7 @@ package webkit
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/url"
 	"os"
@@ -1240,6 +1241,58 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return 0, 0
 		}
 		return fn(box)
+	}
+	// canvas 2D drawImage(<img>) 的位图源：从渲染树取 <img> 解码图。
+	bindings.SetCanvasImageSourceHook(func(el *dom.Element) *graphics.SkiaImage {
+		if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
+			log.Printf("[canvas2d-hook] img el=%p tag=%q src=%q", el, el.LocalName(), el.GetAttribute("src"))
+		}
+		if fr := wv.mainFrame.Frame(); fr != nil {
+			fr.RebuildRenderTreeIfNeeded()
+		}
+		wv.EnsureLayout()
+		rv := wv.RenderView()
+		if rv == nil || el == nil {
+			if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
+				log.Printf("[canvas2d-hook] rv/el nil (rv=%v)", rv != nil)
+			}
+			return nil
+		}
+		box := rv.FindRenderBoxForNode(el)
+		var img *rendering.DecodedImage
+		if box != nil {
+			img = box.DecodedImage()
+		}
+		if img == nil || !img.Loaded() {
+			// 图片尚未进入 paint 管线（display:none / 未布局）→ 按 src
+			// 主动解码（data: URI / 本地路径同步，http 异步回缓存）。
+			if src := el.GetAttribute("src"); src != "" {
+				img = rendering.LoadImageSync(src)
+				if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
+					log.Printf("[canvas2d-hook] LoadImageSync src=%q → %v", src, img != nil)
+				}
+			}
+		}
+		if img == nil || !img.Loaded() {
+			if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
+				log.Printf("[canvas2d-hook] img not loaded")
+			}
+			return nil
+		}
+		return img.SkiaImage()
+	})
+	installBridgeDispatch()
+	// <img>/<video> src 变化：清除渲染盒的解码图缓存并重建渲染树
+	//（下次绘制按新 src 解码 —— canvas 2D drawImage 源和 <img> 渲染共用）。
+	bindings.OnImageSrcChanged = func(el *dom.Element) {
+		if fr := wv.mainFrame.Frame(); fr != nil {
+			if rv := wv.RenderView(); rv != nil {
+				if box := rv.FindRenderBoxForNode(el); box != nil {
+					box.SetDecodedImage(nil)
+				}
+			}
+			fr.RebuildRenderTreeIfNeeded()
+		}
 	}
 	installBridgeDispatch()
 	wvBridgeOf(wv).getElementScrollOffset = func(el *dom.Element) (float64, float64) {

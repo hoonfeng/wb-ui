@@ -1868,6 +1868,47 @@ func colorsEqual(a, b style.Color) bool {
 	return a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A
 }
 
+// PaintCanvas paints a <canvas> element's backing bitmap into its content
+// box, mirroring HTMLCanvasElement::paint in WebKit. The bitmap is the
+// offscreen surface created by getContext('2d') (CanvasBitmap stored on the
+// dom element); its current contents are blitted (stretched) into the
+// element's content-box position and size — independent of the bitmap's own
+// width/height attributes (browser semantics). Returns true when a bitmap was
+// painted, false otherwise (no canvas surface yet / not visible).
+func PaintCanvas(box *RenderBox, info *PaintInfo) bool {
+	if box == nil || info == nil || info.canvas == nil {
+		return false
+	}
+	if !box.IsVisible() {
+		return false
+	}
+	el, ok := box.Node().(*dom.Element)
+	if !ok {
+		return false
+	}
+	bm, ok := el.CanvasSurface().(*CanvasBitmap)
+	if !ok || bm == nil || bm.Cv == nil {
+		return false
+	}
+	st := box.Style()
+	if st == nil {
+		return false
+	}
+	pL := lengthValue(st.PaddingLeft)
+	pT := lengthValue(st.PaddingTop)
+	pR := lengthValue(st.PaddingRight)
+	pB := lengthValue(st.PaddingBottom)
+	x := box.X() + pL
+	y := box.Y() + pT
+	w := box.Width() - pL - pR
+	h := box.Height() - pT - pB
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	bm.DrawTo(info.canvas, x, y, w, h)
+	return true
+}
+
 // PaintIFrame paints the child Frame's document (if any) into an <iframe>
 // element's content box, mirroring RenderIFrame::paint in WebKit. The child
 // frame's RenderView is laid out and painted with a translate to the content

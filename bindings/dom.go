@@ -53,6 +53,12 @@ var OnInlineStyleChanged func(node dom.Node)
 // 否则后代 ResolveElement 命中旧缓存（光标 display:none 不可见）。
 var OnClassChanged func(el *dom.Element)
 
+// OnImageSrcChanged is an optional callback invoked when an <img>/<video>
+// element's src attribute changes (el.src = ...). The embedder clears the
+// render box's decoded-image cache and marks the render tree dirty so the
+// next paint decodes the new source.
+var OnImageSrcChanged func(el *dom.Element)
+
 // FocusBridge is an optional callback invoked when JS calls el.focus() /
 // el.blur() on an element. The embedder (app.Host) uses it to route JS
 // focus to the engine's focused-element tracking (imeFocusedEl + caret
@@ -472,6 +478,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 
 	attrCtor := rt.NewConstructor("Attr", emptyCtor)
 	g.Set("Attr", jsc.FunctionValue(attrCtor))
+
+	// Image 构造器（new Image() → <img> 元素；canvas 2D drawImage 的
+	// 图片源、live2d 纹理加载依赖）。
+	imgCtor := rt.NewConstructor("Image", func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
+		el := document.CreateElement("img")
+		return wrapElement(in, el)
+	})
+	g.Set("Image", jsc.FunctionValue(imgCtor))
 
 	// Extract .prototype objects
 	nodeProto = jsc.FunctionValue(nodeCtor).AsObject().GetStr("prototype").AsObject()

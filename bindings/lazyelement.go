@@ -14,11 +14,15 @@
 package bindings
 
 import (
+	"bytes"
+	"encoding/base64"
 	"math"
 	"strings"
 
+	"github.com/hoonfeng/goskia/skia"
 	"wb-ui/dom"
 	"wb-ui/jsc"
+	"wb-ui/rendering"
 )
 
 // elemAccessor 表示一个 accessor 属性（getter-only 时 set 为 nil）。
@@ -213,6 +217,7 @@ var (
 		"compareDocumentPosition", "nodeValue",
 		"id", "className", "title", "src",
 		"attributes", "innerHTML", "outerHTML", "textContent", "content",
+		"getContext", "width", "height", "toDataURL",
 	}
 )
 
@@ -959,6 +964,82 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				}
 			}}, true
 
+	// ── <canvas> specific ──
+	case "getContext":
+		if tag != "canvas" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.FunctionValue(jsc.NewNativeFunction("getContext",
+			func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				ctype := "2d"
+				if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
+					ctype = args[0].ToString()
+				}
+				if ctype != "2d" {
+					// WebGL / bitmaprenderer 尚未支持（v1）：返回 null
+					//（浏览器对不支持的类型返回 null，调用方需自理）。
+					return jsc.Null()
+				}
+				return canvas2DGetContext(in, el)
+			}, 1)), nil, true
+	case "width":
+		if tag == "canvas" {
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					w, _ := canvasSizeOf(el)
+					return jsc.NumberValue(float64(w))
+				},
+				set: func(v jsc.JSValue) {
+					el.SetAttribute("width", jsc.NumberValue(math.Round(v.ToNumber())).ToString())
+					resizeCanvasBitmap(el)
+				}}, true
+		}
+		if tag == "img" {
+			// HTMLImageElement.width ≈ 解码图宽度（canvas 2D drawImage
+			// 与纹理尺寸查询依赖；未解码时按 src 同步解码）。
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					return jsc.NumberValue(imgPixelDim(el, true))
+				}}, true
+		}
+		return jsc.JSValue{}, nil, false
+	case "height":
+		if tag == "canvas" {
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					_, h := canvasSizeOf(el)
+					return jsc.NumberValue(float64(h))
+				},
+				set: func(v jsc.JSValue) {
+					el.SetAttribute("height", jsc.NumberValue(math.Round(v.ToNumber())).ToString())
+					resizeCanvasBitmap(el)
+				}}, true
+		}
+		if tag == "img" {
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					return jsc.NumberValue(imgPixelDim(el, false))
+				}}, true
+		}
+		return jsc.JSValue{}, nil, false
+	case "toDataURL":
+		if tag != "canvas" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.FunctionValue(jsc.NewNativeFunction("toDataURL",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				if bm, ok := el.CanvasSurface().(*rendering.CanvasBitmap); ok && bm != nil {
+					if img := bm.SkiaImage(); img != nil {
+						defer img.Release()
+						var buf bytes.Buffer
+						if _, err := img.EncodeTo(&buf, skia.EncodedFormatPNG, 100); err == nil {
+							return jsc.StringValue("data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()))
+						}
+					}
+				}
+				return jsc.StringValue("")
+			}, 0)), nil, true
+
 	// ── 字符串属性 accessor ──
 	case "tagName":
 		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
@@ -1043,15 +1124,20 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("title")) },
 			set: func(v jsc.JSValue) { el.SetAttribute("title", v.ToString()) }}, true
 	case "src":
-		if el.LocalName() != "iframe" {
+		if el.LocalName() != "iframe" && el.LocalName() != "img" && el.LocalName() != "video" {
 			return jsc.JSValue{}, nil, false
 		}
 		return jsc.JSValue{}, &elemAccessor{
 			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("src")) },
 			set: func(v jsc.JSValue) {
 				el.SetAttribute("src", v.ToString())
-				if IFrameSrcChanged != nil {
+				if IFrameSrcChanged != nil && el.LocalName() == "iframe" {
 					IFrameSrcChanged(el, v.ToString())
+				}
+				// img/video：src 变化后清除旧解码图（下次渲染/绘制按新 src
+				// 重新解码）。
+				if el.LocalName() == "img" || el.LocalName() == "video" {
+					OnImageSrcChanged(el)
 				}
 			}}, true
 	case "attributes":

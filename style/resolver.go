@@ -2030,6 +2030,12 @@ func parseTextStrokeShorthand(s string, cs *ComputedStyle) {
 	}
 }
 
+// ParseColorValue 是对 parseColor 的导出包装，供 bindings 层（canvas 2D
+// fillStyle/strokeStyle、颜色字符串解析）复用 CSS 颜色解析。
+func ParseColorValue(s string) (Color, bool) {
+	return parseColor(s)
+}
+
 func parseColor(s string) (Color, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

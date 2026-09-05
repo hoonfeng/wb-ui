@@ -83,6 +83,11 @@ type Canvas struct {
 	fontCache   map[fontKey]*skia.Font
 	fontCacheMu sync.Mutex
 
+	// shaderCache: per-texture image shader 缓存（DrawVerticesFull 用；
+	// 同一纹理每帧复用 shader，避免每 drawable 每次创建/释放——
+	// Live2D 每帧 40+ 次调用，各次 shader 创建开销可观）。
+	shaderCache map[*skia.Image]*skia.Shader
+
 	// Pixel cache: invalidated on any draw operation, populated by Pixels()/PixelAt().
 	pixelCache   []byte
 	pixelCacheMu sync.Mutex
@@ -1577,6 +1582,250 @@ func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
 	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
 }
 
+// ─── Canvas 2D support (HTMLCanvasElement 2D context) ───────────────
+// 这些原语供 bindings 层 CanvasRenderingContext2D 使用：每个绘制操作携带
+// globalAlpha + globalCompositeOperation（blend mode），并以临时 skia.Paint
+// 一次性应用（对齐 WebKit GraphicsContext 每操作取状态的语义）。
+
+// mulAlpha 返回把 col 的 alpha 通道乘以 factor（canvas 2D globalAlpha）后的颜色。
+func mulAlpha(col Color, factor float64) Color {
+	if factor >= 1 {
+		return col
+	}
+	if factor <= 0 {
+		return Color{R: col.R, G: col.G, B: col.B, A: 0}
+	}
+	a := float64(col.A) * factor
+	if a > 255 {
+		a = 255
+	}
+	return Color{R: col.R, G: col.G, B: col.B, A: uint8(a + 0.5)}
+}
+
+// canvasPaint 构造携带颜色/alpha/blend 的临时填充 paint。blend 为 SrcOver
+// （等同 BlendModeSrcOver 零值跳过设置，避免对默认状态的无谓写入）。
+func (c *Canvas) canvasPaint(col Color, alpha float64, blend skia.BlendMode, style skia.PaintStyle) *skia.Paint {
+	p := skia.NewPaint()
+	p.SetAntialias(true)
+	p.SetStyle(style)
+	p.SetColor(colorToSkia(mulAlpha(col, alpha)))
+	if blend != skia.BlendModeSrcOver {
+		p.SetBlendMode(blend)
+	}
+	return p
+}
+
+// FillRectFull 以颜色 + globalAlpha + blend mode 填充矩形（canvas 2D fillRect）。
+func (c *Canvas) FillRectFull(x, y, w, h float64, col Color, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || col.A == 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
+	c.canvas.DrawRect(r, p)
+	c.invalidatePixels()
+}
+
+// FillRectShader 以渐变/图案 shader + globalAlpha + blend mode 填充矩形
+//（canvas 2D fillStyle 为 CanvasGradient/CanvasPattern 时的 fillRect）。
+// shader 的所有权属于调用方（此处不 Release）。
+func (c *Canvas) FillRectShader(x, y, w, h float64, sh *skia.Shader, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || sh == nil || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	p.SetShader(sh)
+	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
+	c.canvas.DrawRect(r, p)
+	c.invalidatePixels()
+}
+
+// FillPathFull 以颜色 + globalAlpha + blend mode 填充已构建好的 path
+//（canvas 2D fill()）。path 的 fill type（nonzero/evenodd）由调用方设定。
+func (c *Canvas) FillPathFull(path *skia.Path, col Color, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || path == nil || col.A == 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// FillPathShader 以渐变/图案 shader + globalAlpha + blend mode 填充 path。
+// shader 的所有权属于调用方。
+func (c *Canvas) FillPathShader(path *skia.Path, sh *skia.Shader, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || path == nil || sh == nil || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	p.SetShader(sh)
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// StrokePathFull 以颜色 + globalAlpha + blend mode 描边 path（canvas 2D stroke()）。
+// cap/join 取 SVG 关键字（butt|round|square / miter|round|bevel）。
+func (c *Canvas) StrokePathFull(path *skia.Path, strokeWidth float64, col Color, alpha float64, cap, join string, blend skia.BlendMode) {
+	if c.canvas == nil || path == nil || col.A == 0 || strokeWidth <= 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleStroke)
+	defer p.Release()
+	p.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		p.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		p.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		p.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		p.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		p.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		p.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// StrokePathShader 以渐变/图案 shader + globalAlpha + blend mode 描边 path。
+// shader 的所有权属于调用方。
+func (c *Canvas) StrokePathShader(path *skia.Path, strokeWidth float64, sh *skia.Shader, alpha float64, cap, join string, blend skia.BlendMode) {
+	if c.canvas == nil || path == nil || sh == nil || strokeWidth <= 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleStroke)
+	defer p.Release()
+	p.SetShader(sh)
+	p.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		p.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		p.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		p.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		p.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		p.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		p.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// DrawImageFull 绘制 src 矩形（img 内的子区域）到目标矩形，携带
+// globalAlpha + blend mode（canvas 2D drawImage 的 9 参形式）。
+func (c *Canvas) DrawImageFull(img *skia.Image, sx, sy, sw, sh, dx, dy, dw, dh float64, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || img == nil || sw <= 0 || sh <= 0 || alpha <= 0 {
+		return
+	}
+	src := skia.RectXYWH(float32(sx), float32(sy), float32(sw), float32(sh))
+	dst := skia.RectXYWH(float32(dx), float32(dy), float32(dw), float32(dh))
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, p)
+	c.invalidatePixels()
+}
+
+// DrawVerticesFull 以纹理三角形网格一次性批量绘制一个 drawable 的全部
+// 三角形（Live2D drawVertices 高性能路径——替代逐三角形 clip+drawImage，
+// 绘制调用从 ~4 千次/帧降到几十次/帧）。
+//
+//   - positions/texs：扁平交错数组 positions=[x0,y0,x1,y1,...]（屏幕坐标）、
+//     texs=[u0,v0,u1,v1,...]（纹理坐标，0..1 归一化）；
+//   - indices：三角形索引（uint16，顶点数 ≤ 65535）；
+//   - alpha/blend 语义同 canvas 2D drawImage（blend 作用到 paint）。
+//
+// 顶点坐标为世界坐标（不乘 canvas 矩阵）；调用方须在预期矩阵下使用
+// （Live2D 渲染器始终在 identity 矩阵绘制）。
+func (c *Canvas) DrawVerticesFull(img *skia.Image, positions []float32, texs []float32, indices []uint16, alpha float64, blend skia.BlendMode) {
+	if c.canvas == nil || img == nil || alpha <= 0 || len(positions) < 6 || len(texs) < 6 || len(indices) < 3 {
+		return
+	}
+	// ★ MakeShader 的采样坐标 = 图像像素空间（实测 2026-09：0..1 uv
+	// 只采样纹理左上 1px 区域 → 全透明；且 sk_image_make_shader 的
+	// localMatrix 参数实测被忽略——uv 必须由调用方换算像素）。
+	iw, ih := img.Width(), img.Height()
+	if iw <= 0 || ih <= 0 {
+		return
+	}
+	uvPix := make([]float32, len(texs))
+	for i := 0; i < len(texs); i += 2 {
+		uvPix[i] = texs[i] * float32(iw)
+		uvPix[i+1] = texs[i+1] * float32(ih)
+	}
+	// ★ 每纹理 shader 复用（缓存 keyed by image 指针；Skia shader 对
+	// image 持引用计数 → image 被外部 Release 后 shader 仍有效）。
+	if c.shaderCache == nil {
+		c.shaderCache = map[*skia.Image]*skia.Shader{}
+	}
+	sh := c.shaderCache[img]
+	if sh == nil {
+		sh = img.MakeShader(skia.TileModeClamp, skia.TileModeClamp, &skia.SamplingLinear, nil)
+		if sh == nil {
+			return
+		}
+		c.shaderCache[img] = sh
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	p.SetShader(sh)
+	v := skia.NewVerticesCopyFlat(skia.TrianglesVertexMode, positions, uvPix, nil, indices)
+	if v == nil {
+		return
+	}
+	defer v.Release()
+	c.canvas.DrawVertices(v, skia.BlendModeSrcOver, p)
+	c.invalidatePixels()
+}
+
+// DrawTextAlpha 以颜色 + globalAlpha + blend mode 绘制文本（canvas 2D
+// fillText）。基线与 DrawText 相同（(x, y) = baseline 起点）。
+func (c *Canvas) DrawTextAlpha(x, y float64, text string, font Font, col Color, alpha float64, blend skia.BlendMode) {
+	if col.A == 0 || alpha <= 0 || len(text) == 0 || c.canvas == nil {
+		return
+	}
+	skFont := c.getSkiaFont(font)
+	if skFont == nil {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	c.drawTextWithPaint(x, y, text, font, skFont, p)
+	c.invalidatePixels()
+}
+
+// StrokeTextAlpha 以颜色 + globalAlpha 描边文本（canvas 2D strokeText）。
+func (c *Canvas) StrokeTextAlpha(x, y float64, text string, font Font, strokeWidth float64, col Color, alpha float64) {
+	if col.A == 0 || alpha <= 0 || strokeWidth <= 0 || len(text) == 0 || c.canvas == nil {
+		return
+	}
+	skFont := c.getSkiaFont(font)
+	if skFont == nil {
+		return
+	}
+	p := c.canvasPaint(col, alpha, skia.BlendModeSrcOver, skia.PaintStyleStroke)
+	defer p.Release()
+	p.SetStrokeWidth(float32(strokeWidth))
+	p.SetStrokeJoin(skia.StrokeJoinRound)
+	p.SetStrokeCap(skia.StrokeCapButt)
+	c.drawTextWithPaint(x, y, text, font, skFont, p)
+	c.invalidatePixels()
+}
+
 // SaveLayerForMask pushes an offscreen layer bounded to rect (device-space),
 // for a subsequent ApplyImageMask that masks the painted content. Mirrors
 // GraphicsContext::beginTransparencyLayer for CSS mask-image.
@@ -1694,6 +1943,12 @@ func (c *Canvas) Release() {
 		c.gradientPaint.Release()
 		c.gradientPaint = nil
 	}
+	for _, sh := range c.shaderCache {
+		if sh != nil {
+			sh.Release()
+		}
+	}
+	c.shaderCache = nil
 	if c.surface != nil && !c.external {
 		c.surface.Release()
 	}

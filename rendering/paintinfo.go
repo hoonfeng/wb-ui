@@ -117,6 +117,17 @@ type PaintInfo struct {
 	// stickyDx/stickyDy handling: visibility tests must follow the painted
 	// position, not the static one.
 	transformDepth int
+
+	// layerClipActive / layerClip / layerClipRadius 是 paintLayerTree 计算
+	// 后传给 paintLayerContents 应用的层 overflow 裁剪（设备坐标，已含
+	// scrollTranslate 补偿）。裁剪实际应用在效果层（mask/opacity
+	// SaveLayer）之后——逃逸子层（包含块在本层之上的定位后代）绘制时
+	// RestoreToCount 到裁剪 Save 之下以临时移除本层裁剪，同时保留祖先
+	// 效果（CSS：逃逸后代不受裁剪祖先的 overflow 约束，但仍受其
+	// opacity/mask 影响）。
+	layerClipActive bool
+	layerClip       Rect
+	layerClipRadius float64
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty

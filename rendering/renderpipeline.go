@@ -421,6 +421,9 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// （脏区 581×66 只覆盖少数层）——提前 return 省掉每层的全部 cgo。
 	// 全量重绘（DirtyCheckEnabled=false）不早退；fixed 层不早退（其
 	// 内容可能在视口任意处）。
+	// ★ 逃逸子层例外：包含块在本层之上的定位子层不受本层 overflow 裁剪，
+	// 本层裁剪虽与脏区无交（或为 0 高），逃逸子层仍可能绘制——存在
+	// 逃逸子层时不早退（border 挂件 body overflow:hidden 0 高场景）。
 	if !isFixedLayer && hasClip && info.DirtyCheckEnabled() {
 		dr := info.dirtyRect
 		if dr.Width > 0 && dr.Height > 0 {
@@ -430,32 +433,37 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 			if cl.Width <= 0 || cl.Height <= 0 ||
 				cl.X >= dr.X+dr.Width || cl.X+cl.Width <= dr.X ||
 				cl.Y >= dr.Y+dr.Height || cl.Y+cl.Height <= dr.Y {
-				return
+				if !hasEscapingChildLayer(layer) {
+					return
+				}
 			}
 		}
 	}
-	// ★ 仅在 hasClip 或 fixed 时 Save（对齐 WebKit RenderLayer::paintLayer
-	// 只在需要时才 saveGraphicsState）：普通 positioned 层（overflow:
-	// visible 且祖先无 overflow，无 clip）不保护 canvas 状态——层内
-	// 的容器 clip（walkSubtreeExcluded 自配对）、scroll translate
-	// （paintLayerContents 自配对）、opacity SaveLayer（自配对）都不会
-	// 泄漏到层外。省掉 2978 层中 1034 个无 clip 层的全部 Save/Restore
-	// cgo 调用（Windows cgo ~20µs/次，这是 paint 80%+ 的时间）。
-	if hasClip || isFixedLayer {
+	// ★ fixed 层单独 Save（弹层视口状态）；普通 hasClip 层的 Save+Clip
+	// 移入 paintLayerContents 入口（★ 效果层（mask/opacity SaveLayer）
+	// 之后应用：逃逸子层弹栈移除本层裁剪时，祖先效果保留——见
+	// paintLayerContents 层裁剪注释）。
+	if isFixedLayer {
 		info.canvas.Save()
 	}
 	// ★ 空 clip cull（层完全在祖先 overflow clip 之外）：clipSpecified
 	// 而相交结果为零尺寸。浏览器语义 = 整层子树被祖先裁剪（不可见）。
 	// 修复前 hasClip(false) 使该层零裁剪绘制——overflow-y:auto popup 的
 	// 第 9/10 行 option 平铺到容器外（select 下拉渲染溢出根因）。
+	// ★ 逃逸子层例外（同上）：本层 0 高 clip 不裁逃逸子层——存在逃逸
+	// 子层时不得整层跳过。
 	if clipSpecified && (clip.Width <= 0 || clip.Height <= 0) {
-		if hasClip || isFixedLayer {
-			info.canvas.Restore() // 抵消前面的 Save
+		if hasEscapingChildLayer(layer) {
+			// fallthrough：整棵子树可能仍有内容绘制
+		} else {
+			if isFixedLayer {
+				info.canvas.Restore() // 抵消前面的 Save
+			}
+			if paintStatsEnabled() {
+				paintStatsNoClipLayers++
+			}
+			return
 		}
-		if paintStatsEnabled() {
-			paintStatsNoClipLayers++
-		}
-		return
 	}
 	if isFixedLayer {
 		// ★ Fixed-position layers paint against the viewport. The previous
@@ -543,25 +551,15 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 			(st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible) {
 			radius = lengthValue(st.BorderRadius)
 		}
-		if radius > 0 {
-			info.canvas.ClipRoundRect(clip.X, clip.Y, clip.Width, clip.Height, radius)
-		} else {
-			info.canvas.Clip(graphics.Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height})
-		}
-		// ★ dirty-rect 层级别早退（局部重绘核心）：启用局部重绘时，层
-		// clip（视口坐标，含 scroll 偏移补偿）与 dirty rect 无交 → 整层
-		// 子树都可跳过（其内容全被此 clip 限制，绝不可能落在脏区内）。
-		// 全量重绘（dirty check 关闭）不受影响。这让 hover/局部变化时
-		// paint 只遍历脏区附近的对象，而非整棵 12K 对象层树。
-		if info.DirtyCheckEnabled() && clip.Width > 0 && clip.Height > 0 {
-			dr := info.dirtyRect
-			if dr.Width <= 0 || dr.Height <= 0 ||
-				clip.X >= dr.X+dr.Width || clip.X+clip.Width <= dr.X ||
-				clip.Y >= dr.Y+dr.Height || clip.Y+clip.Height <= dr.Y {
-				info.canvas.Restore() // 抵消 paintLayerTree 开头的 Save
-				return
-			}
-		}
+		// ★ 裁剪实际应用在 paintLayerContents 入口（效果层之后）：
+		// 逃逸子层（包含块在本层之上的定位后代）绘制时临时移除本层
+		// 裁剪，而祖先 mask/opacity 效果须保留——只有裁剪 Save 位于
+		// 效果 SaveLayer 之内，RestoreToCount 弹到裁剪之下时效果才
+		// 不至于一同丢失。dirty-rect 层级别早退在 424-436 已做
+		// （无 canvas 操作），此处只传参数。
+		info.layerClipActive = true
+		info.layerClip = Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height}
+		info.layerClipRadius = radius
 	}
 	// ★ opacity∈[0.98,1) 直接 alpha 绘制（省 offscreen 合成，见 fixed 分支）。
 	// ★ bounds 限制：SaveLayer 只分配元素区域，raster 合成 ~0.7ms→µs。
@@ -572,15 +570,31 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// ★ mask-image 子树遮罩：mask 包裹整棵子树（含 opacity 合成），见
 	//   paintLayerWithEffects。
 	paintLayerWithEffects(layer, info, layerRect)
-	if hasClip || isFixedLayer {
-		info.canvas.Restore()
-	}
+	// 无外层 Save 需配对（裁剪 Save/Restore 在 paintLayerContents 内完成）
 }
 
 // paintLayerContents paints the layer owner's subtree (excluding child layer
 // owners) then recurses into child layers in CSS stacking order. Shared by the
 // fixed-layer branch (clip-free viewport state) and the normal branch.
 func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
+	// ★ 层 overflow 裁剪在【效果层之后】应用（paintLayerWithEffects 的
+	// mask/opacity SaveLayer 先入栈）：逃逸子层（包含块在本层之上）绘制
+	// 时 RestoreToCount 到裁剪 Save 之下——祖先效果仍生效，只有本层
+	// 裁剪被移除。裁剪实为 CalculateRects 累计值（已含祖先裁剪交），
+	// 每个子层再自应用其累计裁剪即可，无需父层 canvas clip 兜底。
+	layerClipAnchor := -1
+	clipRect, clipRadius, clipActive := info.layerClip, info.layerClipRadius, info.layerClipActive
+	info.layerClipActive = false
+	if clipActive && info != nil && info.canvas != nil {
+		info.canvas.Save()
+		if clipRadius > 0 {
+			info.canvas.ClipRoundRect(clipRect.X, clipRect.Y, clipRect.Width, clipRect.Height, clipRadius)
+		} else {
+			info.canvas.Clip(graphics.Rect{X: clipRect.X, Y: clipRect.Y, Width: clipRect.Width, Height: clipRect.Height})
+		}
+		layerClipAnchor = info.canvas.SaveCount()
+	}
+
 	// ★ Scrolled content — unified scroll translate. A scroll container's
 	// ENTIRE content must move by -scroll as one unit: the non-layer
 	// children painted via paintLayerContent AND the child layers painted by
@@ -649,27 +663,8 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	// 若不在此重新应用父 transform，absolute 子元素会画在未变换的
 	// 位置（"transform:rotate(45deg) 的图标内部小方块不旋转"）。
 	needsChildTransform := false
-	if childOwner := layer.Owner(); childOwner != nil {
-		if rb := asRenderBox(childOwner); rb != nil && info != nil && info.canvas != nil {
-			if st := rb.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
-				info.canvas.Save()
-				originX, originY := rb.X(), rb.Y()
-				if ox := resolveTransformOrigin(st.TransformOriginX, rb.Width()); ox >= 0 {
-					originX += ox
-				}
-				if oy := resolveTransformOrigin(st.TransformOriginY, rb.Height()); oy >= 0 {
-					originY += oy
-				}
-				info.canvas.Translate(originX, originY)
-				if applyTransformOpsSized(info.canvas, st.Transform, rb.Width(), rb.Height()) {
-					info.canvas.Translate(-originX, -originY)
-					needsChildTransform = true
-					info.transformDepth++
-				} else {
-					info.canvas.Restore()
-				}
-			}
-		}
+	if applyLayerChildTransform(layer, info) {
+		needsChildTransform = true
 	}
 
 	// Collect child layers and bucket them by stacking position.
@@ -691,14 +686,50 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	sortLayerByZ(pos, true)
 	// Auto/zero layers stay in tree order (already collected in order).
 
-	for _, child := range neg {
+	// 逃逸子层绘制：本层 overflow 裁剪不适用于「包含块在本层之上」的
+	// 定位层（CSS 2.1 §11.1.1）。绘制时临时移除本层裁剪与其上的
+	// scroll/transform 平移（逃逸层按视口坐标绘制、不受本层滚动/
+	// 变换约束），绘制后按原顺序重放；效果层（mask/opacity）在本层
+	// 裁剪之下，不受影响。
+	paintChild := func(child *RenderLayer) {
+		if layerClipAnchor >= 0 && layerEscapesClip(child, layer) {
+			savedSTX, savedSTY := info.scrollTranslateX, info.scrollTranslateY
+			savedTD := info.transformDepth
+			info.canvas.RestoreToCount(layerClipAnchor - 1)
+			info.scrollTranslateX, info.scrollTranslateY = 0, 0
+			info.transformDepth = 0
+			paintLayerTree(child, info)
+			info.transformDepth = savedTD
+			info.scrollTranslateX, info.scrollTranslateY = savedSTX, savedSTY
+			// 重放本层裁剪 + scroll + transform（与入口 Save 顺序一致）
+			info.canvas.Save()
+			if clipRadius > 0 {
+				info.canvas.ClipRoundRect(clipRect.X, clipRect.Y, clipRect.Width, clipRect.Height, clipRadius)
+			} else {
+				info.canvas.Clip(graphics.Rect{X: clipRect.X, Y: clipRect.Y, Width: clipRect.Width, Height: clipRect.Height})
+			}
+			if scrollRestore {
+				info.canvas.Save()
+				info.canvas.Translate(-scrollSX, -scrollSY)
+				info.scrollTranslateX += scrollSX
+				info.scrollTranslateY += scrollSY
+			}
+			if needsChildTransform {
+				applyLayerChildTransform(layer, info)
+			}
+			return
+		}
 		paintLayerTree(child, info)
+	}
+
+	for _, child := range neg {
+		paintChild(child)
 	}
 	for _, child := range auto {
-		paintLayerTree(child, info)
+		paintChild(child)
 	}
 	for _, child := range pos {
-		paintLayerTree(child, info)
+		paintChild(child)
 	}
 	if needsChildTransform {
 		info.transformDepth--
@@ -714,6 +745,85 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 		info.scrollTranslateY -= scrollSY
 		info.canvas.Restore()
 	}
+	if layerClipAnchor >= 0 {
+		info.canvas.Restore()
+	}
+}
+
+// layerEscapesClip 报告 child 层是否逃逸 parent 层的 overflow 裁剪：
+// child 的 owner 是定位层（absolute/fixed）且其包含块严格位于 parent
+// owner 之上（child 在 parent 的 DOM 子树内但定位基准在 parent 之外）。
+func layerEscapesClip(child, parent *RenderLayer) bool {
+	if child == nil || parent == nil || child.owner == nil || parent.owner == nil {
+		return false
+	}
+	st := child.owner.Style()
+	if st == nil || (st.Position != style.PositionAbsolute && st.Position != style.PositionFixed) {
+		return false
+	}
+	box := asRenderBox(child.owner)
+	if box == nil {
+		return false
+	}
+	cb := box.ContainingBlock()
+	if cb == nil {
+		return false
+	}
+	return cbStrictlyAbove(parent.owner, cb)
+}
+
+// hasEscapingChildLayer 报告 layer 的子树内是否存在逃逸本层 overflow
+// 裁剪的子层。用于层级别早退的守卫：本层裁剪为零/与脏区无交时通常
+// 整层子树可跳过，但逃逸子层不受本层裁剪约束、仍可能绘制。
+func hasEscapingChildLayer(layer *RenderLayer) bool {
+	if layer == nil {
+		return false
+	}
+	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
+		if layerEscapesClip(child, layer) {
+			return true
+		}
+		// 逃逸判定只针对本层直接裁剪链；更深层子层的逃逸由各自父层
+		// 层 paintChild 处理（其父层若不被裁剪，子层随之绘制）。
+	}
+	return false
+}
+
+// applyLayerChildTransform 对 layer 自身重放 CSS transform（Save +
+// Translate + 矩阵运算打包），返回 true 表示已成功应用（需配对 Restore）。
+// 供 paintLayerContents 子层绘制前应用，及逃逸子层绘制后重放。
+func applyLayerChildTransform(layer *RenderLayer, info *PaintInfo) bool {
+	if layer == nil || info == nil || info.canvas == nil {
+		return false
+	}
+	childOwner := layer.Owner()
+	if childOwner == nil {
+		return false
+	}
+	rb := asRenderBox(childOwner)
+	if rb == nil {
+		return false
+	}
+	st := rb.Style()
+	if st == nil || st.Transform == "" || st.AnimationName != "" {
+		return false
+	}
+	info.canvas.Save()
+	originX, originY := rb.X(), rb.Y()
+	if ox := resolveTransformOrigin(st.TransformOriginX, rb.Width()); ox >= 0 {
+		originX += ox
+	}
+	if oy := resolveTransformOrigin(st.TransformOriginY, rb.Height()); oy >= 0 {
+		originY += oy
+	}
+	info.canvas.Translate(originX, originY)
+	if applyTransformOpsSized(info.canvas, st.Transform, rb.Width(), rb.Height()) {
+		info.canvas.Translate(-originX, -originY)
+		info.transformDepth++
+		return true
+	}
+	info.canvas.Restore()
+	return false
 }
 
 // layerZIndex returns the owner's effective z-index for stacking. A z-index only
@@ -1740,6 +1850,12 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	// Image elements (<img>): paint the decoded image if one is attached.
 	if el.LocalName() == "img" {
 		PaintImage(box, info)
+		return
+	}
+	// canvas elements: blit the element's backing bitmap (CanvasBitmap
+	// created by getContext('2d')) into the content box.
+	if el.LocalName() == "canvas" {
+		PaintCanvas(box, info)
 		return
 	}
 	// iframe elements: paint the child frame's document into the content box

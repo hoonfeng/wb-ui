@@ -50,6 +50,13 @@ type Element struct {
 	// "click"). Stored here so a later assignment can remove the old one —
 	// dom.RemoveEventListener matches by Go listener identity.
 	onClickJSListener EventListener
+
+	// canvasSurface holds the engine-side backing draw surface for a <canvas>
+	// element (an *graphics.Canvas created by the bindings layer's getContext;
+	// the rendering pipeline blits it during paint). Stored as any so the dom
+	// package stays free of graphics/rendering imports — the same internal
+	// bridge pattern as onClickJSListener. Nil for non-canvas elements.
+	canvasSurface any
 }
 
 // SetOnClickJSListener / GetOnClickJSListener store the listener installed by the
@@ -57,6 +64,12 @@ type Element struct {
 // DOM spec's Element interface — an internal bridge for the JS wrapper.
 func (e *Element) SetOnClickJSListener(l EventListener) { e.onClickJSListener = l }
 func (e *Element) GetOnClickJSListener() EventListener  { return e.onClickJSListener }
+
+// SetCanvasSurface / CanvasSurface store the engine-side offscreen draw surface
+// for a <canvas> element (bindings writes, rendering reads at paint time).
+// The surface type is opaque (any) to keep the dom package dependency-free.
+func (e *Element) SetCanvasSurface(s any) { e.canvasSurface = s }
+func (e *Element) CanvasSurface() any     { return e.canvasSurface }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
 // The tag is stored verbatim; TagName returns the uppercased form for HTML and

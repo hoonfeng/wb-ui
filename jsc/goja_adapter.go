@@ -262,6 +262,18 @@ func (r *Interpreter) ValueOf(v any) JSValue {
 			obj.Set(k, r.ValueOf(mv).val(r.vm))
 		}
 		return JSValue{v: obj, interp: r}
+	case []byte:
+		// []byte → Uint8Array（live2d 模型字节 / 通用二进制透传）。
+		vm := r.vm
+		ab := vm.NewArrayBuffer(val)
+		ctorVal := vm.Get("Uint8Array")
+		abVal := vm.ToValue(ab)
+		if ctor, ok := ctorVal.(*goja.Object); ok {
+			if v, err := vm.Call(ctor, goja.Undefined(), abVal); err == nil {
+				return JSValue{v: v, interp: r}
+			}
+		}
+		return JSValue{v: abVal, interp: r}
 	}
 	return Undefined()
 }

@@ -349,7 +349,7 @@ func (b *RenderTreeBuilder) resolveStyle(el *dom.Element) *style.ComputedStyle {
 	// icon in the Vue app rendered as a zero-width sliver. iframe 同样：
 	// <iframe width="200" height="100"> 需把属性映射为 CSS 尺寸，子文档
 	// 视口（syncIFrameSizes）才能同步到内容框大小。
-	if el.LocalName() == "svg" || el.LocalName() == "img" || el.LocalName() == "iframe" {
+	if el.LocalName() == "svg" || el.LocalName() == "img" || el.LocalName() == "iframe" || el.LocalName() == "canvas" {
 		if _, declared := cs.Properties["width"]; !declared {
 			if aw := el.GetAttribute("width"); aw != "" {
 				if l, ok := parseAttrLength(aw); ok {

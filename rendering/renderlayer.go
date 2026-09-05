@@ -210,6 +210,28 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 	if cs := l.owner.Style(); cs != nil {
 		isFixed = cs.Position == style.PositionFixed
 	}
+	// ★ CSS 2.1 §11.1.1：overflow 裁剪只作用于「包含块是该裁剪元素自身
+	// 或其子孙」的后代；包含块在裁剪祖先之上的定位后代不受其裁剪
+	// （经典例子：非定位 body 设 overflow:hidden 且高度为 0，其内
+	// absolute 子元素的包含块=视口 —— body 的 0 高裁剪不得生效，
+	// 否则整棵 absolute 子树被裁没：border 挂件/形状边框全透明的根因）。
+	// 层链上每一级 overflow clip 依次收窄——从最近祖先到包含块之间
+	// 应用，越过包含块（更高祖先）即停止。
+	isOutOfFlow := false
+	var escapeCB RenderObject
+	if cs := l.owner.Style(); cs != nil {
+		isOutOfFlow = cs.Position == style.PositionAbsolute || cs.Position == style.PositionFixed
+		if isOutOfFlow {
+			if box := asRenderBox(l.owner); box != nil {
+				escapeCB = box.ContainingBlock()
+				if isFixed {
+					// fixed 的包含块恒为视口：所有祖先 overflow 都不适用
+					// （paintLayerTree 的 fixed 重置同样按视口处理）。
+					escapeCB = nil
+				}
+			}
+		}
+	}
 	view := l.owner.View()
 	totalSX, totalSY := 0.0, 0.0
 	if view != nil && !isFixed {
@@ -261,6 +283,10 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 			continue
 		}
 		if cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible {
+			// 定位后代逃逸：包含块在此祖先之上 → 该级 overflow clip 不适用。
+			if isOutOfFlow && escapeCB != nil && cbStrictlyAbove(cur.owner, escapeCB) {
+				continue
+			}
 			ancestorRect := cb.PaddingBoxRect()
 			sx, sy := 0.0, 0.0
 			if view != nil {
@@ -302,6 +328,19 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 	// （overflow-y:auto 的 <select> popup 第 9/10 个 option 行溢出容器
 	// ——「窗口捕获窗口选择下拉渲染溢出」根因）。
 	return layerRect, clipRect, hasClip
+}
+
+// cbStrictlyAbove reports whether cb is a strict ancestor of a (a lies inside
+// cb's subtree). Used by the overflow-clip escape rule in CalculateRects:
+// a positioned descendant whose containing block is strictly above the
+// clipping ancestor is not clipped by that ancestor (CSS 2.1 §11.1.1).
+func cbStrictlyAbove(a, cb RenderObject) bool {
+	for cur := a.Parent(); cur != nil; cur = cur.Parent() {
+		if cur == cb {
+			return true
+		}
+	}
+	return false
 }
 
 // intersectRects returns the intersection of two layout rects. If they do not overlap
