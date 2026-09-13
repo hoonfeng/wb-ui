@@ -584,7 +584,15 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 	if base <= 0 && (!it.basisExplicit || (it.basisPercent && containerMainSize <= 0)) {
 		if isRow {
 			// Row flex: main axis = width → use intrinsic content width.
-			base = intrinsicContentWidth(it.box, isRow)
+			// ★ 表单控件（input/textarea）的固有宽度由 size/cols 决定，是
+			// **内容**宽（与 flexBasis（来自 width）同语义）；而
+			// intrinsicContentWidth 返回的是外盒宽，直接当内容宽用会多算
+			// 一次 padding+border（text-row 的 input 161px，期望 153px）。
+			if w, _, ok := formControlContentSize(it.box); ok && w > 0 {
+				base = w
+			} else {
+				base = intrinsicContentWidth(it.box, isRow)
+			}
 		} else {
 			// Column flex: main axis = height → use intrinsic content height.
 			base = intrinsicContentHeight(it.box)
@@ -631,6 +639,16 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 		return tablePreferredWidth(box) + p.Horizontal() + b.Horizontal()
 	}
 
+	// ★ 表单控件的 UA 固有宽度（input 的 size、textarea 的 cols）：控件没有
+	//   子元素可量，若不在这里取值，flex 里的 input/textarea 内容宽为 0，
+	//   只剩下 padding+border 的 8px（form-control-geometry 的 text-row /
+	//   checkbox-row / range-row / textarea-row 全部错位）。
+	if w, _, ok := formControlContentSize(box); ok && w > 0 {
+		// 只返回固有**内容**宽：函数末尾统一再加自身的 padding + border。
+		// 多算会污染 flex 容器的 max-content（text-row 量成 161 而非 153）。
+		return w
+	}
+
 	isFlexRow := cs != nil && box.EstablishesFlexFormattingContext() &&
 		cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
 
@@ -661,6 +679,11 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
+			// max-content 包含子项的 margin（CSS-SIZING-3 §5）：绝对定位的
+			// flex 容器 shrink-to-fit 时，控件的 UA margin（checkbox 4+3px、
+			// range 2+2px）必须计入——否则容器被量窄，控件紧接着被
+			// flex-shrink 压扁（form-control-geometry 的 checkbox/range 两项）。
+			cw += boxMarginHorizontal(c)
 			// Replaced / SVG elements (svg with width="N" attribute, img,
 			// canvas, iframe) size from their attribute/intrinsic dimensions,
 			// NOT their (usually empty) children — otherwise a 12px svg icon
@@ -860,19 +883,28 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			if fs <= 0 {
 				fs = 16
 			}
-			lineH := fontLineGap(box)
-			if lineH <= 0 {
-				lineH = fs * 1.2
+			// 作者显式高度（content box）优先。
+			if cs != nil {
+				if hv, ok := definiteHeight(cs.Height, 0, fs); ok && hv > 0 {
+					return hv
+				}
+			}
+			// UA 固有尺寸：input = 单行行盒、textarea = rows × 行盒
+			// （rows 默认 2；设置面板「指令」rows=6 的 textarea 曾被压成
+			// 一行 ≈30px）。两者都要再加上 UA padding/border。
+			ch := 0.0
+			if _, hh, ok := formControlContentSize(box); ok && hh > 0 {
+				ch = hh
+			} else {
+				// select 没有固有高度（宽度取决于最宽选项）：退化为单行行盒。
+				lineH := fontLineGap(box)
+				if lineH <= 0 {
+					lineH = fs * 1.2
+				}
+				ch = lineH
 			}
 			_, p, b := computeBoxModel(box, 0, fs)
-			// textarea固有高度 = rows × lineHeight + padding + border
-			// （浏览器标准；rows 属性默认 2）。之前只返回单行高度，
-			// 设置面板「指令」rows=6 的 textarea 被压成一行 ≈30px。
-			n := 1.0
-			if ln == "textarea" {
-				n = textareaRows(box)
-			}
-			return n*lineH + p.Top + p.Bottom + b.Top + b.Bottom
+			return ch + p.Top + p.Bottom + b.Top + b.Bottom
 		}
 	}
 	isColFlex := cs != nil && box.EstablishesFlexFormattingContext() &&

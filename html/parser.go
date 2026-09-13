@@ -13,6 +13,7 @@ package html
 
 import (
 	"errors"
+	"strings"
 
 	"wb-ui/dom"
 )
@@ -30,18 +31,42 @@ func Parse(src string) (*dom.Document, error) {
 	doc := dom.NewDocument()
 	tok := NewTokenizer(src)
 	tb := NewTreeBuilder(doc, tok)
+	sawDoctype := false
 	for {
 		t := tok.NextToken()
 		if t == nil {
 			break
+		}
+		// The DOCTYPE decides quirks mode (HTML "the initial insertion mode"):
+		// a document without one, with a foreign/other doctype name, or with a
+		// tokenizer-detected force-quirks is parsed in quirks mode. This port
+		// previously never set the flag, so quirks-only CSS behaviours (the
+		// legacy 1em bottom margin on <form>, border-box sizing of form
+		// controls) were unavailable.
+		if t.Type == TokenDoctype && !sawDoctype {
+			sawDoctype = true
+			doc.SetQuirks(!isStandardsDoctype(t))
 		}
 		tb.ConstructTree(t)
 		if t.Type == TokenEOF {
 			break
 		}
 	}
+	if !sawDoctype {
+		doc.SetQuirks(true)
+	}
 	tb.Finished()
 	return doc, nil
+}
+
+// isStandardsDoctype reports whether a DOCTYPE token selects standards
+// (no-quirks) mode. Only a plain `<!DOCTYPE html>` — the HTML5 doctype — does;
+// a force-quirks token or any other name stays in quirks mode.
+func isStandardsDoctype(t *Token) bool {
+	if t == nil || t.DoctypeData == nil || t.DoctypeData.ForceQuirks {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(t.Data), "html")
 }
 
 // ParseDocument is an alias for Parse that matches the naming used by other

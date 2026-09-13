@@ -403,6 +403,10 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// DisplayBlock — mirroring the browser UA stylesheet. Author declarations (CSS
 	// in <style> or the style attribute) override this default via the cascade.
 	applyDefaultDisplay(cs, el)
+	// …followed by the UA box-model defaults for form controls (padding, border,
+	// margins, control font-size) — an author `width:100px` on an <input> must
+	// yield a 108px border box, exactly as in a browser.
+	applyFormControlUserAgentDefaults(cs, el)
 
 	// Collect declarations in cascade order (indexed: only candidate rules
 	// whose rightmost compound mentions the element's tag/id/class are matched,
@@ -4076,4 +4080,100 @@ func parseSeconds(s string) float64 {
 		return 0
 	}
 	return v
+}
+
+// uaControlFontSize is the user-agent font-size of form controls. Browsers size
+// controls from their own 13.3333px font (`font: 400 13.3333px Arial` in
+// Chromium's html.css), not from the document's 16px default — which is what
+// makes a text input's content box 15px tall and its border box 21px.
+const uaControlFontSize = 13.3333
+
+// uaControlBorderColor is Chromium's light-theme control border colour (the
+// `2px solid` stand-in for its system-coloured inset border).
+var uaControlBorderColor = Color{R: 0x76, G: 0x76, B: 0x76, A: 0xff}
+
+// applyFormControlUserAgentDefaults mirrors the UA stylesheet entries for form
+// controls (Chromium html.css). Without them an author `width: 100px` on an
+// <input> produced a 100px border box: the UA padding (1px 2px) and the 2px
+// control border every browser adds were missing, so each author-sized control
+// came out 8px too small (form-control-geometry "author dimensions use content
+// box" wants a 108px border box).
+//
+// The values modelled here are:
+//
+//	input[type=text]     { padding: 1px 2px; border: 2px solid }
+//	textarea             { padding: 2px;     border: 2px solid }
+//	input[type=checkbox] { margin: 3px 3px 3px 4px }
+//	input[type=radio]    { margin: 3px 3px 0 5px }
+//	input[type=range]    { margin: 2px }
+//	form                 { margin-block-end: 1em }  ← quirks mode only
+//
+// Intrinsic sizes keyed off the size/cols/rows attributes live in the layout
+// package (formControlContentSize) — those are content-box sizes, so the padding
+// and border set here are added on top by the box model.
+func applyFormControlUserAgentDefaults(cs *ComputedStyle, el *dom.Element) {
+	if el == nil {
+		return
+	}
+	px := func(v float64) Length { return Length{Value: v, Unit: "px"} }
+	setPadding := func(t, r, b, l float64) {
+		cs.PaddingTop, cs.PaddingRight, cs.PaddingBottom, cs.PaddingLeft = px(t), px(r), px(b), px(l)
+	}
+	setMargin := func(t, r, b, l float64) {
+		cs.MarginTop, cs.MarginRight, cs.MarginBottom, cs.MarginLeft = px(t), px(r), px(b), px(l)
+	}
+	setBorder := func(w float64, c Color) {
+		cs.BorderTopWidth, cs.BorderRightWidth = px(w), px(w)
+		cs.BorderBottomWidth, cs.BorderLeftWidth = px(w), px(w)
+		cs.BorderTopStyle, cs.BorderRightStyle = "solid", "solid"
+		cs.BorderBottomStyle, cs.BorderLeftStyle = "solid", "solid"
+		cs.BorderTopColor, cs.BorderRightColor = c, c
+		cs.BorderBottomColor, cs.BorderLeftColor = c, c
+		// Explicit colour (not currentColor) — painters check the *Set flags
+		// before drawing, so an unset control border would stay invisible.
+		cs.BorderTopColorSet, cs.BorderRightColorSet = true, true
+		cs.BorderBottomColorSet, cs.BorderLeftColorSet = true, true
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "input":
+		switch strings.ToLower(el.GetAttribute("type")) {
+		case "hidden":
+			// No box at all (display:none from the UA sheet) — leave untouched.
+			return
+		case "checkbox":
+			setMargin(3, 3, 3, 4)
+		case "radio":
+			setMargin(3, 3, 0, 5)
+		case "range":
+			setMargin(2, 2, 2, 2)
+		default:
+			setPadding(1, 2, 1, 2)
+			setBorder(2, uaControlBorderColor)
+			// Quirks mode keeps the legacy border-box sizing of controls
+			// (standards mode is content-box: an author `width: 100px` is a
+			// 108px border box there, a 100px one in quirks).
+			if el.OwnerDocument() != nil && el.OwnerDocument().Quirks() {
+				cs.BoxSizing = "border-box"
+			}
+		}
+		cs.FontSize = px(uaControlFontSize)
+	case "textarea":
+		setPadding(2, 2, 2, 2)
+		setBorder(2, uaControlBorderColor)
+		if el.OwnerDocument() != nil && el.OwnerDocument().Quirks() {
+			cs.BoxSizing = "border-box"
+		}
+		cs.FontSize = px(uaControlFontSize)
+	case "select":
+		if el.OwnerDocument() != nil && el.OwnerDocument().Quirks() {
+			cs.BoxSizing = "border-box"
+		}
+		cs.FontSize = px(uaControlFontSize)
+	case "form":
+		// Quirks mode keeps the legacy one-em bottom margin on <form>
+		// (Chromium's html.css guards it so that standards mode drops it).
+		if doc := el.OwnerDocument(); doc != nil && doc.Quirks() {
+			cs.MarginBottom = Length{Value: 1, Unit: "em"}
+		}
+	}
 }

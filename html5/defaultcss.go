@@ -19,7 +19,6 @@ const UAStyleSheetCSS = `
 
 form {
 	display: block;
-	margin: 0 0 1em 0;
 }
 
 /* Default focus ring. Chrome/Edge UA uses :focus-visible, so mouse clicks do
@@ -57,29 +56,21 @@ input, button, select, textarea {
 	vertical-align: middle;
 }
 
-/* All input elements use border-box sizing regardless of type (matches
-   browsers: an <input> without an explicit type is type=text). Without
-   this, width:100% on an input overflows its container by padding+border. */
+/* Text-like controls share Chromium's geometry: the 2px control border with
+   1px 2px padding is what turns an author width:100px into a 108px border
+   box (form-control-geometry "author dimensions use content box"). The default
+   sizing is content-box — quirks mode switches controls to border-box (see
+   style.applyFormControlUserAgentDefaults). */
 input {
-	box-sizing: border-box;
-}
-
-/* Text inputs share a common border/padding. */
-input[type="text"], input[type="password"], input[type="search"],
-input[type="email"], input[type="url"], input[type="tel"],
-input[type="number"], input[type="date"], input[type="time"],
-input[type="month"], input[type="week"], input[type="datetime-local"] {
-	padding: 2px 4px;
-	border: 1px solid #767676;
+	padding: 1px 2px;
+	border: 2px solid #767676;
 	background-color: #ffffff;
-	min-height: 1.2em;
 }
 
 textarea {
-	padding: 2px 4px;
-	border: 1px solid #767676;
+	padding: 2px;
+	border: 2px solid #767676;
 	background-color: #ffffff;
-	box-sizing: border-box;
 	resize: both;
 	overflow: auto;
 	/* Browser UA default: soft-wrap at any character. An explicit
@@ -94,13 +85,21 @@ input[type="color"] {
 	border: 1px solid #c0c0c0;
 }
 
-/* Checkbox and radio are inline with no border. */
+/* Checkbox and radio are fixed 13×13 UA boxes carrying Chromium's margins
+   (checkbox 3px 3px 3px 4px, radio 3px 3px 0 5px) and no border/padding of
+   their own — the generic input rule above must not box them in. */
 input[type="checkbox"], input[type="radio"] {
 	display: inline-block;
-	width: 1em;
-	height: 1em;
-	margin: 0 0.2em 0 0;
+	width: 13px;
+	height: 13px;
+	padding: 0;
+	border: none;
+	margin: 3px 3px 3px 4px;
 	vertical-align: baseline;
+}
+
+input[type="radio"] {
+	margin: 3px 3px 0 5px;
 }
 
 /* Range input renders as a slider. The background stays TRANSPARENT —
@@ -109,13 +108,16 @@ input[type="checkbox"], input[type="radio"] {
    background-color would paint an opaque bar behind the slider). */
 input[type="range"] {
 	display: inline-block;
-	width: 9.7em;
+	/* Chromium: 129×16 (the width no longer scales with the control font, so
+	   it stays 129px whatever font-size the page sets). */
+	width: 129px;
 	/* 高度对齐浏览器：Edge(Chromium) 实测 range 约 21px（1.6em @ 13px）。
 	   此前 1.2em(≈16px) 导致温度行 row 高 24 vs 浏览器 30，modal 总高
 	   少 5px（用户反馈「设置UI高度不对」）。 */
 	height: 1.6em;
 	padding: 0;
 	border: none;
+	margin: 2px;
 	background-color: transparent;
 	color: #101010;
 	overflow: hidden;

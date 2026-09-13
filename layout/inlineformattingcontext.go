@@ -727,21 +727,25 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					}
 				} else if el := cld.Element(); el != nil {
 					// SELECT / TEXTAREA default sizes (browser defaults):
-					// select ≈ 45px wide, textarea ≈ 2 columns x 2 rows.
+					// select ≈ 45px wide; input/textarea size from their
+					// UA intrinsic geometry (size / cols / rows attributes).
 					switch el.LocalName() {
 					case "select":
 						cldG.SetContentWidth(45)
 						if cldG.ContentHeight() <= 0 {
 							cldG.SetContentHeight(fs * 1.4)
 						}
-					case "textarea":
-						chW := measureText(cld, "0")
-						if chW <= 0 {
-							chW = fs * 0.5
+					case "textarea", "input":
+						// 固有内容盒：input = size×8+9 宽 × 单行高；
+						// textarea = cols×8 宽 × rows×行高（见 layout/formcontrol.go）。
+						if w, h, ok := formControlContentSize(cld); ok {
+							if cldG.ContentWidth() <= 0 && w > 0 {
+								cldG.SetContentWidth(w)
+							}
+							if cldG.ContentHeight() <= 0 && h > 0 {
+								cldG.SetContentHeight(h)
+							}
 						}
-						// ~20 cols x N rows（rows 属性，默认 2），加上 padding。
-						cldG.SetContentWidth(20*chW + 4)
-						cldG.SetContentHeight(textareaRows(cld)*fontLineGap(cld) + 4)
 					}
 				}
 			}

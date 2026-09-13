@@ -475,8 +475,10 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if lineH <= 0 { lineH = fs * 1.2 }
 		// textarea: rows × lineHeight（浏览器标准；rows 默认 2）。
 		h := lineH
-		if el := box.Element(); el != nil && el.LocalName() == "textarea" {
-			h = textareaRows(box) * lineH
+		if _, hh, ok := formControlContentSize(box); ok && hh > 0 {
+			// 表单控件的 UA 固有内容高：input 单行行盒、textarea rows × 行盒
+			// （rows 默认 2）。见 layout/formcontrol.go。
+			h = hh
 		} else if el := box.Element(); el != nil {
 			// ★ A resource with a usable intrinsic size / ratio (<img>,
 			// <video poster>) sizes from the resource rather than from the

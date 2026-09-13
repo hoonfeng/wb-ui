@@ -70,6 +70,13 @@ func replacedIntrinsicSize(box *ElementBox) intrinsicSize {
 		src = el.GetAttribute("poster")
 	case "object":
 		src = el.GetAttribute("data")
+	case "input", "textarea":
+		// Form controls have a UA-defined intrinsic size keyed off their
+		// size/cols/rows attributes — nothing to probe on disk.
+		if w, h, ok := formControlContentSize(box); ok {
+			return intrinsicSize{w: w, h: h}
+		}
+		return intrinsicSize{}
 	default:
 		return intrinsicSize{}
 	}
