@@ -193,16 +193,37 @@ func (b *RenderBox) ContainingBlock() RenderObject {
 	return b.containingBlockBase()
 }
 
-// ParentBox returns the parent cast to *RenderBox, or nil, mirroring
-// RenderBox::parentBox().
-func (b *RenderBox) ParentBox() *RenderBox {
-	if b.parent == nil {
+// embeddedRenderBox returns the RenderBox embedded in a render object, if any.
+// RenderBlock / RenderBlockFlow / RenderView embed RenderBox **by value**, so a
+// concrete `.(*RenderBox)` assertion misses them; box-model helpers must go
+// through this accessor instead of asserting the concrete type.
+func embeddedRenderBox(o RenderObject) *RenderBox {
+	switch v := o.(type) {
+	case nil:
 		return nil
-	}
-	if pb, ok := b.parent.(*RenderBox); ok {
-		return pb
+	case *RenderBox:
+		return v
+	case *RenderBlock:
+		return &v.RenderBox
+	case *RenderBlockFlow:
+		return &v.RenderBlock.RenderBox
+	case *RenderView:
+		return &v.RenderBlockFlow.RenderBlock.RenderBox
 	}
 	return nil
+}
+
+// ParentBox returns the parent cast to *RenderBox, or nil, mirroring
+// RenderBox::parentBox().
+//
+// ★ 直接子类型断言（*RenderBox）几乎总是失败：渲染树里的块级盒子实际是
+// RenderBlock / RenderBlockFlow（它们**内嵌** RenderBox 而不是别名），所以
+// `b.parent.(*RenderBox)` 对「父是块盒」的情况返回 nil。盒模型 API 因此
+// 静默退化——flex-whitespace-items 里 `.main{float:left}` 位于 flex 容器内
+// 本应忽略 float，却因为读不到父样式而仍被当作浮动，背景被排到 float 层
+// （在后续兄弟之后绘制）把 `.sidebar` 整块盖掉。
+func (b *RenderBox) ParentBox() *RenderBox {
+	return embeddedRenderBox(b.parent)
 }
 
 // FirstChildBox returns the first child cast to *RenderBox, mirroring
