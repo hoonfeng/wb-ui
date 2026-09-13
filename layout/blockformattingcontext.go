@@ -435,6 +435,16 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if blockSize < 0 {
 			blockSize = 0
 		}
+		// ★ aspect-ratio：height:auto 且内容宽已定时，块高 = 内容宽 / ratio
+		// （CSS-SIZING-4 §5.1 内在尺寸遵循比例）。夹具
+		// flex-post-ratio-cross-size 的 #visual（absolute, width:100%,
+		// height:auto, aspect-ratio:1.75571）已在 layoutAbsolute 里按 296px
+		// 定位，随后 layoutBoxContentForBox → 本分支把 cursor-blockStart(=0)
+		// 写回并把高度覆盖成 0；这里按比例恢复。仅 cs.AspectRatio>0 的元素
+		// 参与（其余元素该字段为 0，行为不变）。
+		if boxCS.AspectRatio > 0 && blockSize <= 0 && g.ContentWidth() > 0 {
+			blockSize = g.ContentWidth() / boxCS.AspectRatio
+		}
 		// Preserve any height already set by parent formatting context (e.g. flex cross-axis stretch).
 		// Only for non-root boxes — root uses viewport as initial height which must be replaced.
 		// ★ 用 parentSetHeight（父分配高度）而非 g.ContentHeight()（可能残留自身 auto 高度）。

@@ -210,6 +210,16 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	_ = minHAuto
 	_ = maxHAuto
 
+	// ★ aspect-ratio + height:auto：高度由主轴（宽度）推出（CSS-SIZING-4
+	// §5.2）。width 已在上面解析完成（含 box-sizing 扣减与 clamp），content
+	// 高 = content 宽 / ratio。夹具 flex-post-ratio-cross-size 的 #visual
+	// （absolute, width:100%, height:auto, aspect-ratio:1.75571）由此得到
+	// 520/1.75571 = 296px，覆盖在 302px 高的 #media 上、底部露出 6px 底色。
+	// 推得的高度仍受 min/max-height 约束（下方 clampSize）。
+	if hAuto && cs.AspectRatio > 0 && width > 0 {
+		height = width / cs.AspectRatio
+		hAuto = false
+	}
 	// First pass: compute explicit height so we can position.
 	if hAuto {
 		height = layoutAbsoluteHeightForBox(box, state)

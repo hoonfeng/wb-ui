@@ -238,6 +238,11 @@ type NonInheritedData struct {
 	// 用 StaticOpacity 作 base，恢复静态值（浏览器语义：未声明关键帧
 	// = 元素静态计算值）。
 	StaticOpacity float64
+	// AspectRatio 是 aspect-ratio 的数值形式（宽/高）：1.72 与 16 / 9 都归一到
+	// 该浮点值。0 = 未指定（auto/none），此时不参与尺寸推导。
+	// 用途见 CSS-SIZING-4 §5：一轴尺寸确定后另一轴由比例推出
+	// （width:100%; height:auto; aspect-ratio:1.72 → 高 = 宽/1.72）。
+	AspectRatio float64
 	ZIndex        int
 
 	// ── Generated content ──

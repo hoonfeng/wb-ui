@@ -592,6 +592,22 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 				base = w
 			} else {
 				base = intrinsicContentWidth(it.box, isRow)
+				// intrinsicContentWidth 返回的是**外盒**宽（含自身 padding +
+				// border），而主轴写入端（applyPositions 的 SetContentWidth）
+				// 只在 border-box 项才扣 padding——非 border-box 项在此记下
+				// paddingMain，让写入端统一按「外盒尺寸 → content」扣减。
+				// 例：inline-block 的 flex item #brand（padding-left:32px，
+				// 内含 350px 的 span）外盒宽 382px，不扣就会写成 content=382
+				// → 实际外盒 414px，space-between 的兄弟 #links 从期望
+				// x=525 被推到 557（inline-block-flex-items 夹具）。
+				if !isBorderBox(it.box) {
+					_, pb, bd := computeBoxModel(it.box, 0, fontSizeOf(it.box))
+					if isRow {
+						it.paddingMain = pb.Left + pb.Right + bd.Left + bd.Right
+					} else {
+						it.paddingMain = pb.Top + pb.Bottom + bd.Top + bd.Bottom
+					}
+				}
 			}
 		} else {
 			// Column flex: main axis = height → use intrinsic content height.
@@ -867,6 +883,73 @@ func textareaRows(box *ElementBox) float64 {
 	return 2
 }
 
+// ratioCrossSizeInRowFlex 估算「行 flex 容器里的 aspect-ratio 子项」的交叉轴
+// （高度）尺寸。
+//
+// CSS-SIZING-4 §5.2 要求 aspect-ratio 参与内在尺寸计算：容器 auto / min-content
+// 高度必须反映子项按比例推出的高度（flex-post-ratio-cross-size 的 #row 高度
+// 由 #media 的 302 决定，而不是兄弟 #copy 的 150）。
+//
+// 主轴尺寸按「显式 width → 按 flex-grow 分配容器内容宽」估算（忽略 base
+// size：夹具形态是 flex:1 1 0 平分，够用且不引入循环）。真实布局阶段由
+// resolveCrossSizes 用分配完成的主轴尺寸精确计算交叉轴，两者在平分形态下
+// 一致；估算只影响容器的 auto 高度。
+func ratioCrossSizeInRowFlex(parent, child *ElementBox) (float64, bool) {
+	ccs := child.Style()
+	if ccs == nil || ccs.AspectRatio <= 0 {
+		return 0, false
+	}
+	fs := fontSizeOf(child)
+	_, pad, bd := computeBoxModel(child, 0, fs)
+	mainContent, have := 0.0, false
+	if !ccs.Width.IsAuto() {
+		if wv, ok := definiteWidth(ccs.Width, 0, fs); ok && wv > 0 {
+			mainContent, have = wv, true
+		}
+	}
+	if ccs.FlexGrow > 0 {
+		avail := 0.0
+		if pfs := fontSizeOf(parent); parent.Style() != nil && !parent.Style().Width.IsAuto() {
+			if wv, ok := definiteWidth(parent.Style().Width, 0, pfs); ok && wv > 0 {
+				avail = wv
+			}
+		}
+		if avail <= 0 {
+			avail = intrinsicContentWidth(parent, true)
+		}
+		if avail > 0 {
+			n := 0
+			growSum := 0.0
+			for _, c := range parent.Children() {
+				if !c.IsInFlow() {
+					continue
+				}
+				if ccs2 := c.Style(); ccs2 != nil {
+					growSum += ccs2.FlexGrow
+					n++
+				}
+			}
+			if n > 1 {
+				avail -= flexGap(parent.Style(), true, fontSizeOf(parent), avail) * float64(n-1)
+			}
+			if growSum > 0 {
+				if share := avail * ccs.FlexGrow / growSum; share > mainContent {
+					mainContent, have = share, true
+				}
+			}
+		}
+	}
+	if !have {
+		return 0, false
+	}
+	mainBB := mainContent + pad.Left + pad.Right + bd.Left + bd.Right
+	cross := mainBB/ccs.AspectRatio - (pad.Top + pad.Bottom + bd.Top + bd.Bottom)
+	if cross < 0 {
+		cross = 0
+	}
+	return cross, true
+}
+
 func intrinsicContentHeight(box *ElementBox) float64 {
 	cs := box.Style()
 	// A replaced element (svg/img/canvas) sizes from its attribute height,
@@ -935,6 +1018,9 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 	// block containers (non-flex/grid) sum stacked block children.
 	isFlexOrGrid := cs != nil && box.EstablishesFlexFormattingContext() ||
 		(cs != nil && (cs.Display == style.DisplayGrid || cs.Display == style.DisplayInlineGrid))
+	// 行 flex 容器（含 flex-wrap 行）：子项的交叉轴 = 高度，aspect-ratio 子项
+	// 的高度要由主轴（宽度）推出（见 ratioCrossSizeInRowFlex）。
+	isFlexRowParent := cs != nil && box.EstablishesFlexFormattingContext() && !isColFlex
 
 	total := 0.0
 	maxH := 0.0
@@ -956,6 +1042,14 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			if cs := c.Style(); cs != nil {
 				if hv, ok := definiteHeight(cs.Height, 0, fontSizeOf(c)); ok && hv > 0 {
 					h = hv
+				} else if isFlexRowParent {
+					// ★ aspect-ratio 子项（父是行 flex 容器）：交叉轴高度由
+					// 主轴尺寸推出（CSS-SIZING-4 §5.2），估算失败才递归内容高。
+					if rh, ok := ratioCrossSizeInRowFlex(box, c); ok {
+						h = rh
+					} else {
+						h = intrinsicContentHeight(c)
+					}
 				} else {
 					h = intrinsicContentHeight(c)
 				}
@@ -1243,6 +1337,25 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				}
 				g.SetContentHeight(h)
 				it.crossResolved = h
+			} else if ratio := cs.AspectRatio; ratio > 0 {
+				// ★ CSS-SIZING-4 §5 + CSS-FLEXBOX §9.4：交叉轴为 auto 且
+				// 声明 aspect-ratio 时，交叉轴尺寸由**已解析的主轴尺寸**推出
+				// （flex-post-ratio-cross-size 的 #media：flex:1 1 0 分配
+				// 到 520 宽 ⇒ 高 = 520/1.72 = 302）。必须在 stretch 之前
+				// 判定：比例已经给出了确定的交叉轴尺寸，stretch 不再适用。
+				// 比例作用于 border box，因此先把主轴还原成 border box 再
+				// 除，最后减去交叉轴的 padding/border 得到内容高。
+				mainBB := it.finalMainSize
+				if !isBorderBox(it.box) {
+					mainBB += g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+				}
+				crossBB := mainBB / ratio
+				contentH := crossBB - g.VerticalBorderAndPadding()
+				if contentH < 0 {
+					contentH = 0
+				}
+				g.SetContentHeight(contentH)
+				it.crossResolved = contentH
 			} else if align == "stretch" {
 				stretchH := lineCross - it.marginCross - g.VerticalBorderAndPadding()
 				if stretchH < 0 {
@@ -1502,10 +1615,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		if isRow {
 			ms := it.finalMainSize
 			g.SetContentWidth(ms)
-			// box-sizing: border-box → convert total to content.
-			if isBorderBox(it.box) {
-				hp := g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
-				g.SetContentWidth(math.Max(0, ms - hp))
+			// finalMainSize 是**外盒**主轴尺寸（border-box 项的 width 值含
+			// padding；非 border-box 项的 base 来自 intrinsicContentWidth，
+			// 同样是外盒宽——见 resolveBaseSize），写入 content 时要扣掉自身
+			// padding+border。it.paddingMain 由 buildFlexItems（border-box）
+			// 或 resolveBaseSize（外盒语义项）填好。
+			hp := it.paddingMain
+			if hp <= 0 {
+				hp = g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+			}
+			if isBorderBox(it.box) || it.paddingMain > 0 {
+				g.SetContentWidth(math.Max(0, ms-hp))
 			}
 			if cs != nil {
 				r := resolveLengthAuto(cs.Height, ch, fontSizeOf(it.box))
@@ -1649,8 +1769,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// ~52px and inflate the frame content size to 829px).
 			if it.flexGrow > 0 || it.flexShrink > 0 || it.flexBasis > 0 || it.basisExplicit {
 				ms := it.finalMainSize
-				if isBorderBox(it.box) {
-					hp := g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+				// finalMainSize 是外盒主轴尺寸：border-box 项的 width 值含
+				// padding，非 border-box 项（base 来自 intrinsicContentWidth）
+				// 同样是外盒宽——两者都要扣掉自身 padding+border 才是 content
+				// 宽（it.paddingMain 由 buildFlexItems / resolveBaseSize 填）。
+				// 漏扣会让 inline-block 的 flex item（#brand，padding-left:32）
+				// 外盒多出 32px（414 vs 382），space-between 的兄弟偏 32px。
+				hp := it.paddingMain
+				if hp <= 0 {
+					hp = g.PaddingLeft() + g.PaddingRight() + g.BorderLeft() + g.BorderRight()
+				}
+				if isBorderBox(it.box) || it.paddingMain > 0 {
 					ms = math.Max(0, ms-hp)
 				}
 				g.SetContentWidth(ms)

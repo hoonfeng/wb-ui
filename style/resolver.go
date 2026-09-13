@@ -1829,6 +1829,11 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		}
 	case "box-sizing":
 		cs.BoxSizing = valueString
+	case "aspect-ratio":
+		// CSS-SIZING-4 §5：`<ratio>` = `auto || <number> [ / <number> ]`。
+		// 本引擎只承载数值比例（auto 关键字忽略）。`16 / 9` 归一为 1.777…，
+		// 单值 `1.72` 即宽/高。解析失败（含 none/auto）保留 0 = 不参与推导。
+		cs.AspectRatio = parseAspectRatio(valueString)
 	case "visibility":
 		cs.Visibility = valueString
 		// 静态值同步保存：@keyframes visibility 动画的插值 base 与
@@ -2537,6 +2542,31 @@ func hexDigit(c byte) uint8 {
 //   - <n> <n> <basis> => <n> <n> <basis>
 // Numeric values map to grow then shrink; the first non-numeric, non-keyword token is
 // the basis. The default basis for the numeric form is 0% (per spec).
+// parseAspectRatio 解析 aspect-ratio 的 <ratio> 值（CSS-SIZING-4 §5）：
+//   - "1.72"    -> 1.72
+//   - "16 / 9"  -> 1.777…
+//   - "auto" / "none" / 空 / 非法 -> 0（不参与尺寸推导）
+// auto 可与比例组合（`auto 16 / 9`）：只取比例部分。
+func parseAspectRatio(v string) float64 {
+	s := strings.TrimSpace(strings.ToLower(v))
+	if s == "" || s == "auto" || s == "none" {
+		return 0
+	}
+	s = strings.TrimSpace(strings.TrimPrefix(s, "auto"))
+	if i := strings.Index(s, "/"); i >= 0 {
+		w, err1 := strconv.ParseFloat(strings.TrimSpace(s[:i]), 64)
+		h, err2 := strconv.ParseFloat(strings.TrimSpace(s[i+1:]), 64)
+		if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+			return 0
+		}
+		return w / h
+	}
+	if r, err := strconv.ParseFloat(s, 64); err == nil && r > 0 {
+		return r
+	}
+	return 0
+}
+
 func parseFlexShorthand(s string) (grow, shrink float64, basis Length) {
 	parts := strings.Fields(s)
 	// Initial value: 0 1 auto.

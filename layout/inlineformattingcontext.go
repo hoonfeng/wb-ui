@@ -617,6 +617,21 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						if tw := measureText(cld, txt); tw > 0 {
 							cldG.SetContentWidth(tw)
 						}
+					} else if iw := intrinsicContentWidth(cld, false); iw > 0 {
+						// ★ 无文本的 inline-block：max-content 由子盒决定
+						// （CSS 2.1 §10.3.9 shrink-to-fit 的 max-content 项）。
+						// 不设置的话内部 IFC 以 0 可用宽建行：#chips 的三个
+						// inline-block li 全部落在 x=0 重叠、容器宽被量成单个
+						// li 的 30px（inline-block-flex-items 期望 90x20 横排）。
+						// intrinsicContentWidth 返回外盒宽 → 扣自身 padding+border。
+						_, pb, bd := computeBoxModel(cld, 0, fontSizeOf(cld))
+						iw -= pb.Horizontal() + bd.Horizontal()
+						if avail := contentWidth - margin.Horizontal() - pb.Horizontal() - bd.Horizontal(); avail > 0 && iw > avail {
+							iw = avail
+						}
+						if iw > 0 {
+							cldG.SetContentWidth(iw)
+						}
 					}
 				}
 			}
