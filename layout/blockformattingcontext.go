@@ -297,7 +297,19 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			state.AdjoiningTopMargin = collapsedTop
 		} else {
-			collapsedTop = math.Max(pendingMargin, topMargin)
+			// 相邻兄弟的垂直 margin 折叠（CSS2.1 §8.3.1）：两正取 max、
+			// 两负取 min、一正一负**相加**。此前统一 Max()：负 margin 会被
+			// 兄弟的正 margin（或 0）吞掉，`.identity-transform{margin-top:-80px}`
+			// 因此完全不下移也不上提（transform-containing-block 期望 y=230，
+			// 实测 y=310）。
+			switch {
+			case pendingMargin >= 0 && topMargin >= 0:
+				collapsedTop = math.Max(pendingMargin, topMargin)
+			case pendingMargin < 0 && topMargin < 0:
+				collapsedTop = math.Min(pendingMargin, topMargin)
+			default:
+				collapsedTop = pendingMargin + topMargin
+			}
 		}
 		cursor += collapsedTop
 		ch.SetTopLeft(cursor, ch.Left())
