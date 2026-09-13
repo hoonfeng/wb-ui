@@ -424,7 +424,13 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// ★ 逃逸子层例外：包含块在本层之上的定位子层不受本层 overflow 裁剪，
 	// 本层裁剪虽与脏区无交（或为 0 高），逃逸子层仍可能绘制——存在
 	// 逃逸子层时不早退（border 挂件 body overflow:hidden 0 高场景）。
-	if !isFixedLayer && hasClip && info.DirtyCheckEnabled() {
+	// ★ transform 空间例外：层处于 transform 祖先内（info.transformDepth>0）
+	// 时，层几何是布局坐标而实际绘制空间被祖先 transform 平移——clip 与
+	// dirty rect 的比较不可靠（布局 y 可能在视口外，transform 平移后实际
+	// 绘制进视口，如 transform 居中的弹窗内 button/giftlog 层），必须保守
+	// 不早退（与 walkSubtreeExcluded 的 transformDepth==0 才做对象级剔除
+	// 一致）。
+	if !isFixedLayer && info.transformDepth == 0 && hasClip && info.DirtyCheckEnabled() {
 		dr := info.dirtyRect
 		if dr.Width > 0 && dr.Height > 0 {
 			cl := clip
@@ -452,9 +458,12 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// 第 9/10 行 option 平铺到容器外（select 下拉渲染溢出根因）。
 	// ★ 逃逸子层例外（同上）：本层 0 高 clip 不裁逃逸子层——存在逃逸
 	// 子层时不得整层跳过。
+	// ★ transform 空间例外（同上）：transform 祖先内的层，布局坐标与
+	// 绘制空间不一致，clip 折叠为零不代表层不可见（transform 居中弹窗的
+	// button/giftlog 层布局 y>视口高，实际被平移进视口）——不得整层早退。
 	if clipSpecified && (clip.Width <= 0 || clip.Height <= 0) {
-		if hasEscapingChildLayer(layer) {
-			// fallthrough：整棵子树可能仍有内容绘制
+		if hasEscapingChildLayer(layer) || info.transformDepth > 0 {
+			// fallthrough：逃逸子层可能绘制；transform 空间内 clip 无效
 		} else {
 			if isFixedLayer {
 				info.canvas.Restore() // 抵消前面的 Save
@@ -887,6 +896,45 @@ func collectChildLayerOwners(layer *RenderLayer) map[RenderObject]bool {
 	return set
 }
 
+// isFloatedRenderObject reports whether o is a floated box (float: left|right).
+// Used to order float painting after in-flow block backgrounds, per CSS 2.1
+// appendix E (step 4 paints in-flow block backgrounds/borders, step 5 paints
+// floats, step 7 paints inline content). RenderBox.IsFloated mirrors
+// RenderBox::isFloating().
+func isFloatedRenderObject(o RenderObject) bool {
+	box := asRenderBox(o)
+	return box != nil && box.IsFloated()
+}
+
+// collectFloatSubtrees returns the set of render objects that belong to a
+// floated subtree (the float itself plus all its descendants, including nested
+// floats). Used to paint floats after all in-flow block backgrounds in the
+// layer, per CSS 2.1 appendix E (step 4 = in-flow block backgrounds/borders,
+// step 5 = floats).
+func collectFloatSubtrees(root RenderObject) map[RenderObject]bool {
+	set := map[RenderObject]bool{}
+	if root == nil {
+		return set
+	}
+	var walk func(o RenderObject, mark bool)
+	walk = func(o RenderObject, mark bool) {
+		if o == nil {
+			return
+		}
+		if !mark && isFloatedRenderObject(o) {
+			mark = true
+		}
+		if mark {
+			set[o] = true
+		}
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c, mark)
+		}
+	}
+	walk(root, false)
+	return set
+}
+
 // paintSubtreeByPhase walks the subtree rooted at root (inclusive) in pre-order three
 // times, once per paint phase, invoking the corresponding per-object painter. Nodes in
 // the excluded set are not painted and their subtrees are not descended into (they are
@@ -896,7 +944,33 @@ func paintSubtreeByPhase(root RenderObject, info *PaintInfo, excluded map[Render
 		return
 	}
 	info.SetPhase(PhaseBackground)
-	walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) { paintObjectBackground(o, info) })
+	// ★ CSS 2.1 附录 E 绘制顺序（step 4 块背景/边框 → step 5 floats →
+	// step 7 行内内容）：同一层内所有 in-flow 块级盒背景先绘制，浮动盒
+	// （含其整棵子树）随后绘制在其上。此前按 pre-order 统一绘制，DOM
+	// 顺序在前的 float 会被之后的普通块背景覆盖——float-bfc-continuation
+	// 中 400px 右浮动被后续 section 里的 h2/div 背景盖掉下半段（float
+	// 只剩 250px 可见），float-flow-bands 的 aside 同样只剩残余区域。
+	// 排序范围必须是**整层**而非单个父容器：float 与其"覆盖者"常分处不同
+	// wrapper（float 在 section#intro 内，覆盖它的 h2 在 section#following
+	// 内），只在同父内分组无法修正跨 wrapper 的排序。
+	// 两遍都从 root 开始遍历，故祖先的 overflow 裁剪 / scroll / transform
+	// 对两遍完全一致（float 在裁剪容器内仍被正确裁切）。
+	if floats := collectFloatSubtrees(root); len(floats) > 0 {
+		walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) {
+			if floats[o] {
+				return
+			}
+			paintObjectBackground(o, info)
+		})
+		walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) {
+			if !floats[o] {
+				return
+			}
+			paintObjectBackground(o, info)
+		})
+	} else {
+		walkSubtreeExcluded(root, excluded, info, func(o RenderObject, _ *PaintInfo) { paintObjectBackground(o, info) })
+	}
 	// Paint selection highlight after backgrounds but before text, so text
 	// appears on top of the selection. Only done at the RenderView root.
 	if rv, ok := root.(*RenderView); ok {
@@ -951,7 +1025,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	// （每对象 × 3 phase 的 visit 调用）。sticky（滚动 pin 后可能移入
 	// 视口）/ transform（改变绘制空间）/ filter / opacity<1 元素保守
 	// 不跳过——它们的实际绘制范围可能与布局 box 不一致。
-	if info != nil && info.DirtyCheckEnabled() {
+	// ★ 祖先 transform 例外（与 1044 行对象级剔除一致）：层处于
+	// transform 祖先内（info.transformDepth>0）时，布局坐标与绘制空间
+	// 不一致——overflow 容器布局 y 可能在视口外（transform 居中弹窗内的
+	// button/giftlog），实际被平移绘制进视口，不得做子树级早退。
+	if info != nil && info.DirtyCheckEnabled() && info.transformDepth == 0 {
 		dr := info.dirtyRect
 		if dr.Width > 0 && dr.Height > 0 {
 			if box := asRenderBox(root); box != nil {

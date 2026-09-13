@@ -60,7 +60,8 @@ func TestResolver_Inheritance(t *testing.T) {
 	r := NewResolver()
 	r.AddStyleSheet(newSheet(t, "div { color: green; }"))
 	cs := r.ResolveElement(child)
-	if cs.Color.G != 255 {
+	// CSS green = #008000 (G=128); the assertion used to encode the lime alias.
+	if cs.Color.G != 128 {
 		t.Fatalf("color=%v want green inherited from div", cs.Color)
 	}
 }
@@ -794,7 +795,7 @@ func TestResolver_ShadowInheritanceFromHost(t *testing.T) {
 	r.AddStyleSheet(newSheet(t, "div { color: green; }"))
 	cs := r.ResolveElement(shadowChild)
 	// shadow tree 顶层元素应通过 shadow root 继承 host 的 color。
-	if cs.Color.G != 255 {
+	if cs.Color.G != 128 { // CSS green = #008000
 		t.Fatalf("shadow child color=%v want green inherited from shadow host", cs.Color)
 	}
 }
@@ -961,7 +962,9 @@ func TestResolver_PartLosesToShadowRule(t *testing.T) {
 	r.AddStyleSheet(docSheet)
 	cs := r.ResolveElement(btn)
 	// shadow-internal button rule (scope=1) outranks the document ::part rule (scope=0).
-	if cs.Color.R != 0 || cs.Color.G != 255 || cs.Color.B != 0 {
+	// CSS `green` is #008000 (CSS Color 4); this used to assert 0,255,0 because
+	// the named-color table aliased green to lime.
+	if cs.Color.R != 0 || cs.Color.G != 128 || cs.Color.B != 0 {
 		t.Fatalf("shadow rule should beat ::part: color=%v want green", cs.Color)
 	}
 }

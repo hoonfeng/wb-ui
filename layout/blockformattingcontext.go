@@ -156,6 +156,39 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if os.Getenv("WB_LAYOUT_DEBUG") != "" && childEb.Element() == nil && box.Element() != nil && box.Element().GetAttribute("class") == "dialog-box" {
 			fmt.Printf("[bfc] dialog-box child (anon) content=%.1f border=%.1f display=%d\n", ch.ContentWidth(), ch.BorderBoxWidth(), childCs.Display)
 		}
+		// ★ BFC 根在 float 带内收缩（CSS 2.1 §9.5）：建立 BFC 的块级盒
+		// （overflow != visible、display:flow-root、inline-block/table/flex/grid）
+		// 的 border box 不得与 float 重叠，因此宽度按当前 y 处的可用带计算，
+		// 并从带的左边界开始排版。此前块级盒恒按容器全宽计算，右侧 float 旁的
+		// `.avoids-float{overflow:hidden}` 块仍占满容器宽并盖住 float 区域，
+		// float 被后续内容挤下、整条 float 带错位（float-flow-bands 5 项、
+		// float-bfc-continuation 5 项、nested-float-clearance、
+		// opposing-header-floats 等失败）。行内路径早已做同样的带裁剪
+		// （inlineformattingcontext.go 的 availableLineWidth），块级缺失。
+		childAvailWidth := contentWidth
+		childLeft := contentX
+		if fc != nil && !fc.isEmpty() &&
+			!childEb.IsFloated() && !childEb.IsAbsolutelyPositioned() &&
+			childEb.EstablishesBlockFormattingContext() {
+			// cursor 与 fc.originY 同为绝对坐标；contentEdgesAt 返回相对
+			// fc.originX 的带边界，需平移到容器坐标系再 clamp 到容器内容区。
+			left, right := fc.contentEdgesAt(cursor - fc.originY)
+			if fc.originX != contentX {
+				dx := contentX - fc.originX
+				left += dx
+				right += dx
+			}
+			if left < contentX {
+				left = contentX
+			}
+			if right > contentX+contentWidth {
+				right = contentX + contentWidth
+			}
+			if right-left > 0 {
+				childLeft = left
+				childAvailWidth = right - left
+			}
+		}
 		margin, padding, border := computeBoxModelForBox(childEb, contentWidth, fontSizeOf(childEb))
 		// ★ auto margin 水平居中（CSS 2.1 §10.3.3）：block 元素在确定宽度
 		// 的 containing block 内，margin-left/right 为 auto 时把剩余空间
@@ -164,10 +197,10 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		mlAuto := childCs.MarginLeft.Unit == "auto"
 		mrAuto := childCs.MarginRight.Unit == "auto"
 		if (mlAuto || mrAuto) && contentWidth > 0 {
-			bw := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
+			bw := computeBlockChildBorderBoxWidth(childEb, childAvailWidth, margin, border, padding, state)
 			// 此刻 auto margin 解析为 0；剩余 = 容器内容宽 - 元素实际占宽
 			// （border-box + 非 auto margin 已含在 bw/margin 中）。
-			free := contentWidth - (bw + margin.Horizontal())
+			free := childAvailWidth - (bw + margin.Horizontal())
 			nAuto := 0
 			if mlAuto {
 				nAuto++
@@ -195,9 +228,9 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		// Edge 正确行为 = max(8,10) = 10）。
 		ch.SetMargin(margin.Top, margin.Right, margin.Bottom, margin.Left)
 
-		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, contentWidth, margin, border, padding, state)
+		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, childAvailWidth, margin, border, padding, state)
 		ch.SetContentWidth(borderBoxWidth - border.Horizontal() - padding.Horizontal())
-		ch.SetTopLeft(0, g.ContentBoxLeft()+margin.Left) // Y set below
+		ch.SetTopLeft(0, childLeft+margin.Left) // Y set below
 
 		clearSide := clearSideOf(childEb)
 		if clearSide != "" && fc != nil {
@@ -345,23 +378,15 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				blockSize = fb - contentY
 			}
 		}
-		// Even without BFC, expand height to encompass this container's own
-		// float children (clearfix behavior). Without this, a container whose
-		// only children are floats would have zero height.
-		if !establishesBFC {
-			maxFloatBottom := 0.0
-			for _, child := range box.Children() {
-				if eb, ok := child.(*ElementBox); ok && eb.IsFloated() {
-					ch := state.GeometryForBox(eb)
-					if b := ch.Top() + ch.BorderBoxHeight(); b > maxFloatBottom {
-						maxFloatBottom = b
-					}
-				}
-			}
-			if maxFloatBottom > contentY+blockSize {
-				blockSize = maxFloatBottom - contentY
-			}
-		}
+		// ★ 非 BFC 容器的 auto 高度**不**包含浮动子盒（CSS 2.1 §10.6.3：自动
+		// 高度只由 in-flow 内容决定）。此前这里无条件把浮动子的底边并入容器
+		// 高度，等于给所有块容器加了隐式 clearfix：float-bfc-continuation 中
+		// `section#intro`（内含 400px 右浮动 + 250px 普通块）被撑到 400px，
+		// 其后的 `section#following` 整体下移 150px（heading 期望 y=250、实测
+		// y=400，beside/after 同样错位）。需要包含浮动子的容器应显式使用
+		// clearfix / flow-root / overflow:hidden —— 这三条路径已分别由
+		// ::after{clear}伪元素的 clear 处理（见上方 clearSide 分支）与
+		// establishesBFC 分支的 fc.maxFloatBottom() 承担，无需隐式兜底。
 		if blockSize < 0 {
 			blockSize = 0
 		}
@@ -494,7 +519,12 @@ func layoutFloatedChild(child *ElementBox, contentX, contentY, contentWidth floa
 	isLeft := cs.Float != "right"
 	// Use container's FC-relative y as startY so placeFloat's collision
 	// detection correctly sees sibling floats at the same y level.
-	fcY := contentY - fc.originY
+	// ★ 必须计入 float 自身的 margin-top（浮动盒的外边距不与任何外边距折叠，
+	// CSS 2.1 §8.3.1）：漏掉它会让 `float{ margin-top:20px }` 紧贴容器顶放置 —
+	// opposing-header-floats 的 #tagline（margin-top:60）落在 y=0（期望 60）、
+	// nested-float-clearance 的 .nested-float（margin-top:20）落在 y=0
+	// （期望 20，且 x 应为前一左浮动右侧的 120）。
+	fcY := contentY - fc.originY + margin.Top
 	// Include margin in the width passed to placeFloat so subsequent floats
 	// are spaced apart by their margins (not placing right against each other).
 	marginBoxW := borderBox + margin.Horizontal()

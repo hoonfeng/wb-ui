@@ -7,6 +7,8 @@
 package layout
 
 import (
+	"strings"
+
 	"wb-ui/dom"
 	"wb-ui/style"
 )
@@ -20,23 +22,133 @@ func containingBlockForAbsolute(box *ElementBox, root *ElementBox) *ElementBox {
 	// app-root was placed at x=0 (the ancestor's padding box) instead of
 	// 1280−16−width (the viewport).
 	if box.IsFixedPositioned() {
+		// …unless an ancestor establishes a containing block for fixed
+		// descendants (transform / filter / perspective / will-change /
+		// containment — see createsContainingBlockForFixed).
+		for cur := box.Parent(); cur != nil; cur = cur.Parent() {
+			if cur == root {
+				break
+			}
+			if createsContainingBlockForFixed(cur.Style()) {
+				return cur
+			}
+		}
 		return root
 	}
 	for cur := box.Parent(); cur != nil; cur = cur.Parent() {
 		if cur == root {
 			return root
 		}
-		cs := cur.Style()
-		if cs == nil {
-			continue
-		}
-		switch cs.Position {
-		case style.PositionRelative, style.PositionAbsolute,
-			style.PositionFixed, style.PositionSticky:
+		if createsContainingBlockForAbsolute(cur.Style()) {
 			return cur
 		}
 	}
 	return root
+}
+
+// ── Containing-block triggers ──
+//
+// CSS 2.1 §10.1 only names *positioned* ancestors, but the modern effects and
+// containment specs add more triggers: an element with a transform, filter,
+// perspective, will-change hint, or layout/paint containment becomes the
+// containing block of its absolutely positioned descendants.
+//
+// wb-ui recognised only `position`, so an absolutely positioned box inside e.g.
+// a `transform`ed card resolved its insets against a much higher ancestor: the
+// badge lost its anchor and landed (clipped or overlapping) somewhere else —
+// silently, because the layout still produced *a* box. Fixture:
+// render-repros/modern-containing-block-triggers.html (filter / perspective /
+// contain:layout / will-change / content-visibility, plus the fixed variants).
+
+// createsContainingBlockForAbsolute reports whether cs makes its element the
+// containing block of absolutely positioned descendants.
+func createsContainingBlockForAbsolute(cs *style.ComputedStyle) bool {
+	if cs == nil {
+		return false
+	}
+	switch cs.Position {
+	case style.PositionRelative, style.PositionAbsolute,
+		style.PositionFixed, style.PositionSticky:
+		return true
+	}
+	return hasContainmentTrigger(cs)
+}
+
+// createsContainingBlockForFixed reports whether cs traps `position:fixed`
+// descendants. A fixed box is positioned against the viewport (CSS 2.1 §10.1),
+// but the effects/containment specs make these elements its containing block
+// all the same — note that `position:relative` alone does NOT.
+func createsContainingBlockForFixed(cs *style.ComputedStyle) bool {
+	return hasContainmentTrigger(cs)
+}
+
+// hasContainmentTrigger reports whether cs carries any effect/containment that
+// establishes a containing block (for absolute *and* fixed descendants).
+func hasContainmentTrigger(cs *style.ComputedStyle) bool {
+	if cs == nil {
+		return false
+	}
+	// CSS Transforms L1 §3 / Filter Effects L1 §3 / CSS Position 3:
+	// transform, filter and backdrop-filter create a containing block for every
+	// non-none value (a blur(0) or translate(0) still counts).
+	if !isNoneValue(cs.Transform) || !isNoneValue(cs.Filter) || !isNoneValue(cs.BackdropFilter) {
+		return true
+	}
+	if !isNoneValue(cs.GetProperty("perspective")) {
+		return true
+	}
+	// Will Change L1 §2: the hint is honoured as if the named property were
+	// already applied.
+	for _, kw := range splitCSSKeywords(cs.GetProperty("will-change")) {
+		switch kw {
+		case "transform", "perspective", "filter", "backdrop-filter":
+			return true
+		}
+	}
+	// CSS Containment L1 §3: layout containment (and paint containment, which
+	// implies it) creates a containing block. `size` alone does not.
+	for _, kw := range splitCSSKeywords(cs.GetProperty("contain")) {
+		switch kw {
+		case "layout", "paint", "strict", "content":
+			return true
+		}
+	}
+	// CSS Containment L2: content-visibility:auto applies layout containment.
+	if strings.EqualFold(strings.TrimSpace(cs.GetProperty("content-visibility")), "auto") {
+		return true
+	}
+	// CSS Containment L3 container queries: `container-type: size` applies
+	// layout containment (containing block); `inline-size` applies inline-size
+	// containment only and does NOT create one. The fixture's negative control
+	// pins that distinction: a badge inside `container-type:inline-size` is
+	// expected at the root's bottom-right corner.
+	if strings.EqualFold(strings.TrimSpace(cs.GetProperty("container-type")), "size") {
+		return true
+	}
+	return false
+}
+
+// isNoneValue reports whether a CSS value is absent or the `none` keyword.
+func isNoneValue(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "" || strings.EqualFold(v, "none")
+}
+
+// splitCSSKeywords splits a space/comma separated keyword list, lower-cased.
+func splitCSSKeywords(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == ','
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f != "" {
+			out = append(out, strings.ToLower(f))
+		}
+	}
+	return out
 }
 
 // layoutAbsolute sizes and positions an absolutely-positioned box.

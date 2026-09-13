@@ -1782,6 +1782,12 @@ func (c *Canvas) DrawVerticesFull(img *skia.Image, positions []float32, texs []f
 	}
 	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
 	defer p.Release()
+	// ★ Live2D 纹理网格：关抗锯齿（AA 光栅成本 ~2-3X，模型 4696 三角形
+	// @1440x900 软件光栅 ~140ms/帧的元凶之一）。drawVertices 网格共享边
+	// 由 Skia 精确覆盖（顶点一致光栅化无缝隙），AA 主要省在程序性边缘
+	// ——角色像素边缘 1px 锯齿在 30fps 动画中不可感知。若需保留 AA 可
+	// 在渲染器 JS wbDrawVertices 分支切换（质量/性能权衡点）。
+	p.SetAntialias(false)
 	p.SetShader(sh)
 	v := skia.NewVerticesCopyFlat(skia.TrianglesVertexMode, positions, uvPix, nil, indices)
 	if v == nil {

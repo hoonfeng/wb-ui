@@ -67,9 +67,12 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	colGap := gridGap(cs.ColumnGap, fs, cw)
 	rowGap := gridGap(cs.RowGap, fs, ch)
+	// auto-fit collapses the tracks that no item occupies, so the repetition
+	// count of `repeat(auto-fit, …)` needs the number of in-flow children.
+	inFlowChildren := gridInFlowChildCount(box)
 
-	colTracks := gridParseTracks(cs.GridTemplateColumns, cw, fs)
-	rowTracks := gridParseTracks(cs.GridTemplateRows, ch, fs)
+	colTracks := gridParseTracks(cs.GridTemplateColumns, cw, fs, colGap, inFlowChildren)
+	rowTracks := gridParseTracks(cs.GridTemplateRows, ch, fs, rowGap, inFlowChildren)
 
 	nCols := len(colTracks)
 	nRows := len(rowTracks)
@@ -287,18 +290,26 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 // ── Track parsing ──
 
-func gridParseTracks(value string, avail, fs float64) []gridTrack {
+func gridParseTracks(value string, avail, fs, gap float64, itemCount int) []gridTrack {
 	if value == "" || value == "none" {
 		return nil
 	}
 	out := make([]gridTrack, 0)
-	for _, tok := range gridTokenize(gridExpandRepeat(value)) {
+	for _, tok := range gridTokenize(gridExpandRepeat(value, avail, gap, itemCount)) {
 		out = append(out, gridParseOne(tok, avail, fs))
 	}
 	return out
 }
 
-func gridExpandRepeat(in string) string {
+// gridExpandRepeat rewrites every repeat() function into an explicit track list.
+// `auto-fill` / `auto-fit` are resolved against the container's available size:
+// the count is the largest number of tracks whose definite minimum size (plus
+// the gap) fits, and auto-fit additionally drops the tracks no item will occupy.
+// Previously the repetition count was parsed with strconv.Atoi, which fails on
+// `auto-fill`/`auto-fit` and made the whole repeat() be dropped: the container
+// got no explicit columns, so every item collapsed to width 0 (fixture
+// render-repros/grid-auto-repeat.html).
+func gridExpandRepeat(in string, avail, gap float64, itemCount int) string {
 	for {
 		idx := strings.Index(in, "repeat(")
 		if idx < 0 {
@@ -325,8 +336,17 @@ func gridExpandRepeat(in string) string {
 			in = in[:idx] + in[end:]
 			continue
 		}
-		cnt, _ := strconv.Atoi(strings.TrimSpace(inner[:ci]))
+		countToken := strings.TrimSpace(inner[:ci])
 		trk := strings.TrimSpace(inner[ci+1:])
+		cnt := 0
+		switch {
+		case strings.EqualFold(countToken, "auto-fill"):
+			cnt = gridAutoRepeatCount(trk, avail, gap, false, itemCount)
+		case strings.EqualFold(countToken, "auto-fit"):
+			cnt = gridAutoRepeatCount(trk, avail, gap, true, itemCount)
+		default:
+			cnt, _ = strconv.Atoi(countToken)
+		}
 		if cnt <= 0 {
 			in = in[:idx] + in[end:]
 			continue
@@ -341,6 +361,57 @@ func gridExpandRepeat(in string) string {
 		in = in[:idx] + rep + in[end:]
 	}
 	return in
+}
+
+// gridInFlowChildCount counts the children that take part in grid placement
+// (in-flow and visible). auto-fit uses it to collapse the tracks left empty.
+func gridInFlowChildCount(box *ElementBox) int {
+	n := 0
+	for _, child := range box.Children() {
+		if child.IsInFlow() && child.IsVisible() {
+			n++
+		}
+	}
+	return n
+}
+
+// gridAutoRepeatCount resolves the repetition count of
+// `repeat(auto-fill|auto-fit, <track>)`: the largest number of tracks of the
+// track's definite minimum size (plus the gap) that fits in avail. auto-fit
+// additionally collapses the tracks no item occupies — otherwise an empty track
+// would keep its minimum size and squeeze the occupied ones.
+func gridAutoRepeatCount(track string, avail, gap float64, autoFit bool, itemCount int) int {
+	step := gridTrackDefiniteMin(track) + gap
+	if step <= 0 || avail <= 0 {
+		return 1
+	}
+	n := int(math.Floor((avail + gap) / step))
+	if n < 1 {
+		n = 1
+	}
+	if autoFit && itemCount > 0 && itemCount < n {
+		n = itemCount
+	}
+	return n
+}
+
+// gridTrackDefiniteMin returns the definite (px) minimum size of a track
+// definition, or 0 when the definition has none — `fr`, `auto` and percentages
+// are not definite for this purpose.
+func gridTrackDefiniteMin(track string) float64 {
+	s := strings.TrimSpace(track)
+	if strings.HasPrefix(s, "minmax(") {
+		inner := strings.TrimSuffix(s[len("minmax("):], ")")
+		if i := strings.Index(inner, ","); i >= 0 {
+			s = strings.TrimSpace(inner[:i])
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(s), "px") {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(s[:len(s)-2]), 64); err == nil {
+			return v
+		}
+	}
+	return 0
 }
 
 func gridTokenize(in string) []string {

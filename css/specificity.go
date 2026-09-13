@@ -90,6 +90,16 @@ func specificityOfSimple(s SimpleSelector) Specificity {
 		// Attribute selectors are case-insensitivity flags only; they contribute (0,1,0).
 		return Specificity{B: 1}
 	case MatchTag:
+		// The universal selector is modeled as MatchTag with value "*", but per
+		// Selectors Level 3 it contributes (0,0,0). Counting it as a type
+		// selector made `*{...}` tie with `html{...}` / `div{...}` and, sitting
+		// later in source order, win the cascade — which silently disabled the
+		// universal half of the common border-box reset
+		// (`html{box-sizing:border-box}*,:before,:after{box-sizing:inherit}`),
+		// leaving every box on content-box arithmetic.
+		if s.Value == "*" {
+			return Specificity{}
+		}
 		return Specificity{C: 1}
 	case MatchPseudoClass:
 		return pseudoClassSpecificity(s)

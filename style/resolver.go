@@ -310,8 +310,9 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	cs := NewComputedStyle()
 	// Inherit from the parent first so that non-matched properties keep their
 	// inherited values.
+	var parentCS *ComputedStyle
 	if parent := parentElement(el); parent != nil {
-		parentCS := r.ResolveElement(parent)
+		parentCS = r.ResolveElement(parent)
 		cs.InheritFrom(parentCS)
 	}
 
@@ -467,8 +468,41 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// 因此不会重演「map 顺序随机重放 border/border-left」的顺序 bug。
 	r.resolveVarInProperties(cs)
 
+	// `inherit` on a property that does not inherit by default. InheritFrom only
+	// copies inheritable properties, so the keyword stayed a literal string in
+	// the computed style — see resolveInheritKeyword.
+	resolveInheritKeyword(cs, parentCS)
+
 	r.cache[el] = cachedStyle{cs: cs, ver: el.AttrVersion()}
 	return cs
+}
+
+// resolveInheritKeyword resolves the `inherit` keyword for properties that do
+// NOT inherit by default. CSS Cascade §2.3 allows `inherit` on any property, but
+// InheritFrom only copies the inheritable ones, so such a declaration reached
+// the computed style as the literal string "inherit" and every downstream
+// comparison against a real value failed.
+//
+// box-sizing is the one that matters in practice: the universal border-box
+// reset
+//
+//	html { box-sizing: border-box }
+//	*, *::before, *::after { box-sizing: inherit }
+//
+// (Bootstrap, Tailwind, normalize.css and most modern resets) depends on it.
+// Unresolved, every element kept content-box arithmetic and borders/padding
+// added to the declared width/height — fixture render-repros/box-sizing.html
+// expects a 190x60 background box and got 220x89. `parent` is nil for the root
+// element, where the keyword falls back to the initial value.
+func resolveInheritKeyword(cs, parent *ComputedStyle) {
+	if cs == nil || cs.BoxSizing != "inherit" {
+		return
+	}
+	if parent != nil {
+		cs.BoxSizing = parent.BoxSizing
+		return
+	}
+	cs.BoxSizing = ""
 }
 
 // declContainsVar reports whether the declaration value references a var()
@@ -568,6 +602,9 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 
 	// 兜底：展开剩余未展开的 var()（如 scrollbar 属性），见 ResolveElement 注释。
 	r.resolveVarInProperties(cs)
+
+	// 与 ResolveElement 一致：不可继承属性上的 inherit 关键字按宿主元素解析。
+	resolveInheritKeyword(cs, hostCS)
 
 	content := cs.GetProperty("content")
 	return cs, content, true
@@ -1511,6 +1548,19 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.FlexDirection = valueString
 	case "flex-wrap":
 		cs.FlexWrap = valueString
+	case "flex-flow":
+		// CSS Flexible Box §5.2：flex-flow 是 `<flex-direction> || <flex-wrap>`
+		// 的简写，两个分量任意顺序、可只给其中一个；省略的分量重置为初始值
+		// （row / nowrap），整体非法时整条声明丢弃、不得部分应用。
+		// 此前根本没解析（属性只出现在 bindings 的白名单里），
+		// `flex-flow: column` / `flex-flow: row nowrap` 全被丢弃 —— 列方向按
+		// 行排、nowrap 重置失效（flex-flow 夹具 5 项失败）。语法解析放在
+		// css.ParseFlexFlow，供 CSS.supports('flex-flow', value) 复用，避免
+		// 「引擎接受的语法」与「supports 判定」出现分歧。
+		if ff, ok := css.ParseFlexFlow(valueString); ok {
+			cs.FlexDirection = ff.Direction
+			cs.FlexWrap = ff.Wrap
+		}
 	case "justify-content":
 		cs.JustifyContent = valueString
 	case "align-items":
@@ -1751,6 +1801,28 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.BackdropFilter = valueString
 	case "background-image":
 		cs.BackgroundImage = valueString
+	case "grid":
+		// CSS Grid L1 §7.3 `grid` shorthand. Two grammars:
+		//   <grid-template-rows> / [ auto-flow && dense? ] <grid-auto-columns>?
+		//   [ auto-flow && dense? ] <grid-auto-rows>? / <grid-template-columns>
+		// Only the longhands were applied before, so `grid: …` was stored in the
+		// Properties map and silently did nothing: the container ended up with no
+		// explicit tracks and every item collapsed to width 0 (fixture
+		// render-repros/grid-shorthand.html — both the literal value and the same
+		// value passed through a custom property).
+		if g, ok := parseGridShorthand(valueString); ok {
+			cs.GridTemplateRows = g.TemplateRows
+			cs.GridTemplateColumns = g.TemplateCols
+			if g.AutoRows != "" {
+				cs.GridAutoRows = g.AutoRows
+			}
+			if g.AutoCols != "" {
+				cs.GridAutoColumns = g.AutoCols
+			}
+			if g.Flow != "" {
+				cs.GridAutoFlow = g.Flow
+			}
+		}
 	case "background-repeat":
 		cs.BackgroundRepeat = valueString
 	case "background-position":
@@ -1905,13 +1977,13 @@ func parseLength(s string) (Length, bool) {
 	return Length{Value: num, Unit: unit}, true
 }
 
-// mathFuncInfoS detects a CSS math function prefix (calc/min/max/clamp) and
+// mathFuncInfoS detects a CSS math function prefix (calc/min/max/clamp/round) and
 // returns its lowercased name plus the full balanced function expression
 // (e.g. "min(100%, 600px)"), with ok=true. Used by parseLength to treat
-// min()/max()/clamp() the same as calc().
+// min()/max()/clamp()/round() the same as calc().
 func mathFuncInfoS(s string) (name, full string, ok bool) {
 	s = strings.TrimSpace(s)
-	for _, n := range []string{"calc", "min", "max", "clamp"} {
+	for _, n := range []string{"calc", "min", "max", "clamp", "round"} {
 		if len(s) < len(n)+1 || !strings.EqualFold(s[:len(n)], n) || s[len(n)] != '(' {
 			continue
 		}
@@ -2545,48 +2617,239 @@ func hueToRGB(p, q, t float64) float64 {
 	return p
 }
 
-// namedColor returns the RGB value of a CSS named color. The set here covers the
-// basic 16 plus the common HTML colors.
-func namedColor(name string) (Color, bool) {
-	switch strings.ToLower(name) {
-	case "black":
-		return Color{0, 0, 0, 0xFF}, true
-	case "white":
-		return Color{255, 255, 255, 0xFF}, true
-	case "red":
-		return Color{255, 0, 0, 0xFF}, true
-	case "green", "lime":
-		return Color{0, 255, 0, 0xFF}, true
-	case "blue":
-		return Color{0, 0, 255, 0xFF}, true
-	case "yellow":
-		return Color{255, 255, 0, 0xFF}, true
-	case "cyan", "aqua":
-		return Color{0, 255, 255, 0xFF}, true
-	case "magenta", "fuchsia":
-		return Color{255, 0, 255, 0xFF}, true
-	case "silver":
-		return Color{192, 192, 192, 0xFF}, true
-	case "gray", "grey":
-		return Color{128, 128, 128, 0xFF}, true
-	case "maroon":
-		return Color{128, 0, 0, 0xFF}, true
-	case "olive":
-		return Color{128, 128, 0, 0xFF}, true
-	case "navy":
-		return Color{0, 0, 128, 0xFF}, true
-	case "teal":
-		return Color{0, 128, 128, 0xFF}, true
-	case "purple":
-		return Color{128, 0, 128, 0xFF}, true
-	case "orange":
-		return Color{255, 165, 0, 0xFF}, true
-	case "pink":
-		return Color{255, 192, 203, 0xFF}, true
-	case "brown":
-		return Color{165, 42, 42, 0xFF}, true
+// gridShorthandTracks holds the longhands a `grid` shorthand expands into.
+type gridShorthandTracks struct {
+	TemplateRows string
+	TemplateCols string
+	AutoRows     string
+	AutoCols     string
+	Flow         string
+}
+
+// parseGridShorthand expands the `grid` shorthand (CSS Grid L1 §7.3). ok=false
+// when the value does not follow the `<tracks> / <tracks>` grammar (`none`, or
+// a malformed value): the caller then leaves the longhands untouched.
+func parseGridShorthand(value string) (gridShorthandTracks, bool) {
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 {
+		return gridShorthandTracks{}, false
 	}
-	return Color{}, false
+	left := strings.TrimSpace(parts[0])
+	right := strings.TrimSpace(parts[1])
+	if left == "" || right == "" {
+		return gridShorthandTracks{}, false
+	}
+	switch {
+	case containsAutoFlow(left):
+		// `[auto-flow && dense?] <auto-rows>? / <columns>`: the auto-placed axis
+		// is the row axis, so the right side is the explicit *column* template and
+		// whatever remains on the left is grid-auto-rows (not a row template).
+		return gridShorthandTracks{
+			TemplateCols: right,
+			AutoRows:     stripAutoFlow(left),
+			Flow:         "row",
+		}, true
+	case containsAutoFlow(right):
+		// `<rows> / [auto-flow && dense?] <auto-columns>?`.
+		return gridShorthandTracks{
+			TemplateRows: left,
+			AutoCols:     stripAutoFlow(right),
+			Flow:         "column",
+		}, true
+	default:
+		return gridShorthandTracks{TemplateRows: left, TemplateCols: right}, true
+	}
+}
+
+// containsAutoFlow reports whether one `grid` shorthand side carries the
+// `auto-flow` keyword.
+func containsAutoFlow(part string) bool {
+	for _, kw := range strings.Fields(part) {
+		if strings.EqualFold(kw, "auto-flow") {
+			return true
+		}
+	}
+	return false
+}
+
+// stripAutoFlow removes the `auto-flow` / `dense` keywords from one `grid`
+// shorthand side, leaving the optional track list.
+func stripAutoFlow(part string) string {
+	var keep []string
+	for _, kw := range strings.Fields(part) {
+		if strings.EqualFold(kw, "auto-flow") || strings.EqualFold(kw, "dense") {
+			continue
+		}
+		keep = append(keep, kw)
+	}
+	return strings.Join(keep, " ")
+}
+
+// cssNamedColors is the CSS Color 4 named color table (the full 148 keywords,
+// including the gray/grey and aqua/cyan/fuchsia/magenta aliases).
+//
+// Only the basic 16 were implemented before, so any other keyword — lightgray,
+// steelblue, tomato, whitesmoke, dodgerblue … — failed to parse and the
+// declaration was dropped silently: `background:lightgray` painted nothing.
+// The table also fixes `green`, which had been aliased to lime (#00FF00 instead
+// of #008000) and therefore painted every `green` element in the wrong color.
+var cssNamedColors = map[string]Color{
+	// Basic 16 (CSS 2.1).
+	"black":   {0x00, 0x00, 0x00, 0xFF},
+	"silver":  {0xC0, 0xC0, 0xC0, 0xFF},
+	"gray":    {0x80, 0x80, 0x80, 0xFF},
+	"white":   {0xFF, 0xFF, 0xFF, 0xFF},
+	"maroon":  {0x80, 0x00, 0x00, 0xFF},
+	"red":     {0xFF, 0x00, 0x00, 0xFF},
+	"purple":  {0x80, 0x00, 0x80, 0xFF},
+	"fuchsia": {0xFF, 0x00, 0xFF, 0xFF},
+	"green":   {0x00, 0x80, 0x00, 0xFF},
+	"lime":    {0x00, 0xFF, 0x00, 0xFF},
+	"olive":   {0x80, 0x80, 0x00, 0xFF},
+	"yellow":  {0xFF, 0xFF, 0x00, 0xFF},
+	"navy":    {0x00, 0x00, 0x80, 0xFF},
+	"blue":    {0x00, 0x00, 0xFF, 0xFF},
+	"teal":    {0x00, 0x80, 0x80, 0xFF},
+	"aqua":    {0x00, 0xFF, 0xFF, 0xFF},
+	// Extended keywords.
+	"aliceblue":            {0xF0, 0xF8, 0xFF, 0xFF},
+	"antiquewhite":         {0xFA, 0xEB, 0xD7, 0xFF},
+	"aquamarine":           {0x7F, 0xFF, 0xD4, 0xFF},
+	"azure":                {0xF0, 0xFF, 0xFF, 0xFF},
+	"beige":                {0xF5, 0xF5, 0xDC, 0xFF},
+	"bisque":               {0xFF, 0xE4, 0xC4, 0xFF},
+	"blanchedalmond":       {0xFF, 0xEB, 0xCD, 0xFF},
+	"blueviolet":           {0x8A, 0x2B, 0xE2, 0xFF},
+	"brown":                {0xA5, 0x2A, 0x2A, 0xFF},
+	"burlywood":            {0xDE, 0xB8, 0x87, 0xFF},
+	"cadetblue":            {0x5F, 0x9E, 0xA0, 0xFF},
+	"chartreuse":           {0x7F, 0xFF, 0x00, 0xFF},
+	"chocolate":            {0xD2, 0x69, 0x1E, 0xFF},
+	"coral":                {0xFF, 0x7F, 0x50, 0xFF},
+	"cornflowerblue":       {0x64, 0x95, 0xED, 0xFF},
+	"cornsilk":             {0xFF, 0xF8, 0xDC, 0xFF},
+	"crimson":              {0xDC, 0x14, 0x3C, 0xFF},
+	"cyan":                 {0x00, 0xFF, 0xFF, 0xFF},
+	"darkblue":             {0x00, 0x00, 0x8B, 0xFF},
+	"darkcyan":             {0x00, 0x8B, 0x8B, 0xFF},
+	"darkgoldenrod":        {0xB8, 0x86, 0x0B, 0xFF},
+	"darkgray":             {0xA9, 0xA9, 0xA9, 0xFF},
+	"darkgreen":            {0x00, 0x64, 0x00, 0xFF},
+	"darkgrey":             {0xA9, 0xA9, 0xA9, 0xFF},
+	"darkkhaki":            {0xBD, 0xB7, 0x6B, 0xFF},
+	"darkmagenta":          {0x8B, 0x00, 0x8B, 0xFF},
+	"darkolivegreen":       {0x55, 0x6B, 0x2F, 0xFF},
+	"darkorange":           {0xFF, 0x8C, 0x00, 0xFF},
+	"darkorchid":           {0x99, 0x32, 0xCC, 0xFF},
+	"darkred":              {0x8B, 0x00, 0x00, 0xFF},
+	"darksalmon":           {0xE9, 0x96, 0x7A, 0xFF},
+	"darkseagreen":         {0x8F, 0xBC, 0x8F, 0xFF},
+	"darkslateblue":        {0x48, 0x3D, 0x8B, 0xFF},
+	"darkslategray":        {0x2F, 0x4F, 0x4F, 0xFF},
+	"darkslategrey":        {0x2F, 0x4F, 0x4F, 0xFF},
+	"darkturquoise":        {0x00, 0xCE, 0xD1, 0xFF},
+	"darkviolet":           {0x94, 0x00, 0xD3, 0xFF},
+	"deeppink":             {0xFF, 0x14, 0x93, 0xFF},
+	"deepskyblue":          {0x00, 0xBF, 0xFF, 0xFF},
+	"dimgray":              {0x69, 0x69, 0x69, 0xFF},
+	"dimgrey":              {0x69, 0x69, 0x69, 0xFF},
+	"dodgerblue":           {0x1E, 0x90, 0xFF, 0xFF},
+	"firebrick":            {0xB2, 0x22, 0x22, 0xFF},
+	"floralwhite":          {0xFF, 0xFA, 0xF0, 0xFF},
+	"forestgreen":          {0x22, 0x8B, 0x22, 0xFF},
+	"gainsboro":            {0xDC, 0xDC, 0xDC, 0xFF},
+	"ghostwhite":           {0xF8, 0xF8, 0xFF, 0xFF},
+	"gold":                 {0xFF, 0xD7, 0x00, 0xFF},
+	"goldenrod":            {0xDA, 0xA5, 0x20, 0xFF},
+	"greenyellow":          {0xAD, 0xFF, 0x2F, 0xFF},
+	"grey":                 {0x80, 0x80, 0x80, 0xFF},
+	"honeydew":             {0xF0, 0xFF, 0xF0, 0xFF},
+	"hotpink":              {0xFF, 0x69, 0xB4, 0xFF},
+	"indianred":            {0xCD, 0x5C, 0x5C, 0xFF},
+	"indigo":               {0x4B, 0x00, 0x82, 0xFF},
+	"ivory":                {0xFF, 0xFF, 0xF0, 0xFF},
+	"khaki":                {0xF0, 0xE6, 0x8C, 0xFF},
+	"lavender":             {0xE6, 0xE6, 0xFA, 0xFF},
+	"lavenderblush":        {0xFF, 0xF0, 0xF5, 0xFF},
+	"lawngreen":            {0x7C, 0xFC, 0x00, 0xFF},
+	"lemonchiffon":         {0xFF, 0xFA, 0xCD, 0xFF},
+	"lightblue":            {0xAD, 0xD8, 0xE6, 0xFF},
+	"lightcoral":           {0xF0, 0x80, 0x80, 0xFF},
+	"lightcyan":            {0xE0, 0xFF, 0xFF, 0xFF},
+	"lightgoldenrodyellow": {0xFA, 0xFA, 0xD2, 0xFF},
+	"lightgray":            {0xD3, 0xD3, 0xD3, 0xFF},
+	"lightgreen":           {0x90, 0xEE, 0x90, 0xFF},
+	"lightgrey":            {0xD3, 0xD3, 0xD3, 0xFF},
+	"lightpink":            {0xFF, 0xB6, 0xC1, 0xFF},
+	"lightsalmon":          {0xFF, 0xA0, 0x7A, 0xFF},
+	"lightseagreen":        {0x20, 0xB2, 0xAA, 0xFF},
+	"lightskyblue":         {0x87, 0xCE, 0xFA, 0xFF},
+	"lightslategray":       {0x77, 0x88, 0x99, 0xFF},
+	"lightslategrey":       {0x77, 0x88, 0x99, 0xFF},
+	"lightsteelblue":       {0xB0, 0xC4, 0xDE, 0xFF},
+	"lightyellow":          {0xFF, 0xFF, 0xE0, 0xFF},
+	"limegreen":            {0x32, 0xCD, 0x32, 0xFF},
+	"linen":                {0xFA, 0xF0, 0xE6, 0xFF},
+	"magenta":              {0xFF, 0x00, 0xFF, 0xFF},
+	"mediumaquamarine":     {0x66, 0xCD, 0xAA, 0xFF},
+	"mediumblue":           {0x00, 0x00, 0xCD, 0xFF},
+	"mediumorchid":         {0xBA, 0x55, 0xD3, 0xFF},
+	"mediumpurple":         {0x93, 0x70, 0xDB, 0xFF},
+	"mediumseagreen":       {0x3C, 0xB3, 0x71, 0xFF},
+	"mediumslateblue":      {0x7B, 0x68, 0xEE, 0xFF},
+	"mediumspringgreen":    {0x00, 0xFA, 0x9A, 0xFF},
+	"mediumturquoise":      {0x48, 0xD1, 0xCC, 0xFF},
+	"mediumvioletred":      {0xC7, 0x15, 0x85, 0xFF},
+	"midnightblue":         {0x19, 0x19, 0x70, 0xFF},
+	"mintcream":            {0xF5, 0xFF, 0xFA, 0xFF},
+	"mistyrose":            {0xFF, 0xE4, 0xE1, 0xFF},
+	"moccasin":             {0xFF, 0xE4, 0xB5, 0xFF},
+	"navajowhite":          {0xFF, 0xDE, 0xAD, 0xFF},
+	"oldlace":              {0xFD, 0xF5, 0xE6, 0xFF},
+	"olivedrab":            {0x6B, 0x8E, 0x23, 0xFF},
+	"orange":               {0xFF, 0xA5, 0x00, 0xFF},
+	"orangered":            {0xFF, 0x45, 0x00, 0xFF},
+	"orchid":               {0xDA, 0x70, 0xD6, 0xFF},
+	"palegoldenrod":        {0xEE, 0xE8, 0xAA, 0xFF},
+	"palegreen":            {0x98, 0xFB, 0x98, 0xFF},
+	"paleturquoise":        {0xAF, 0xEE, 0xEE, 0xFF},
+	"palevioletred":        {0xDB, 0x70, 0x93, 0xFF},
+	"papayawhip":           {0xFF, 0xEF, 0xD5, 0xFF},
+	"peachpuff":            {0xFF, 0xDA, 0xB9, 0xFF},
+	"peru":                 {0xCD, 0x85, 0x3F, 0xFF},
+	"pink":                 {0xFF, 0xC0, 0xCB, 0xFF},
+	"plum":                 {0xDD, 0xA0, 0xDD, 0xFF},
+	"powderblue":           {0xB0, 0xE0, 0xE6, 0xFF},
+	"rebeccapurple":        {0x66, 0x33, 0x99, 0xFF},
+	"rosybrown":            {0xBC, 0x8F, 0x8F, 0xFF},
+	"royalblue":            {0x41, 0x69, 0xE1, 0xFF},
+	"saddlebrown":          {0x8B, 0x45, 0x13, 0xFF},
+	"salmon":               {0xFA, 0x80, 0x72, 0xFF},
+	"sandybrown":           {0xF4, 0xA4, 0x60, 0xFF},
+	"seagreen":             {0x2E, 0x8B, 0x57, 0xFF},
+	"seashell":             {0xFF, 0xF5, 0xEE, 0xFF},
+	"sienna":               {0xA0, 0x52, 0x2D, 0xFF},
+	"skyblue":              {0x87, 0xCE, 0xEB, 0xFF},
+	"slateblue":            {0x6A, 0x5A, 0xCD, 0xFF},
+	"slategray":            {0x70, 0x80, 0x90, 0xFF},
+	"slategrey":            {0x70, 0x80, 0x90, 0xFF},
+	"snow":                 {0xFF, 0xFA, 0xFA, 0xFF},
+	"springgreen":          {0x00, 0xFF, 0x7F, 0xFF},
+	"steelblue":            {0x46, 0x82, 0xB4, 0xFF},
+	"tan":                  {0xD2, 0xB4, 0x8C, 0xFF},
+	"thistle":              {0xD8, 0xBF, 0xD8, 0xFF},
+	"tomato":               {0xFF, 0x63, 0x47, 0xFF},
+	"turquoise":            {0x40, 0xE0, 0xD0, 0xFF},
+	"violet":               {0xEE, 0x82, 0xEE, 0xFF},
+	"wheat":                {0xF5, 0xDE, 0xB3, 0xFF},
+	"whitesmoke":           {0xF5, 0xF5, 0xF5, 0xFF},
+	"yellowgreen":          {0x9A, 0xCD, 0x32, 0xFF},
+}
+
+// namedColor returns the RGB value of a CSS named color.
+func namedColor(name string) (Color, bool) {
+	c, ok := cssNamedColors[strings.ToLower(strings.TrimSpace(name))]
+	return c, ok
 }
 
 // resolveCustomProperties iterates over the custom property map and resolves

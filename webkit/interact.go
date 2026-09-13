@@ -21,6 +21,8 @@
 package webkit
 
 import (
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -184,6 +186,13 @@ func (i *Interaction) MouseButton(x, y float64, button, action int) {
 		}
 		// ── Active 状态 + mousedown 派发 ──
 		activeEl := rendering.HitTest(rv, x, y, "")
+		if os.Getenv("WB_CONFIG_DEBUG") != "" {
+			elInfo := "nil"
+			if activeEl != nil {
+				elInfo = activeEl.LocalName() + "#" + activeEl.GetAttribute("id") + "." + activeEl.GetAttribute("class")
+			}
+			log.Printf("[interact] press x=%.0f y=%.0f hit=%s", x, y, elInfo)
+		}
 		if activeEl != nil {
 			activeEl.SetActive(true)
 			i.activeEl = activeEl
@@ -621,13 +630,13 @@ func (i *Interaction) handleSelectClick(sel *dom.Element, rv *rendering.RenderVi
 	var boxW float64 = 180
 	var boxH float64 = 0
 	if box := rv.FindRenderBoxForNode(sel); box != nil {
-		sx, sy = box.AbsoluteX(), box.AbsoluteY()
-		boxH = box.Height()
-		if bw := box.Width(); bw > 0 {
-			boxW = bw
-		}
-		if _, sy0 := rv.BoxScrollOffset(box); sy0 > 0 {
-			sy -= sy0
+		// BoxViewportRect 返回视口坐标（布局坐标减去所有祖先滚动容器的滚动偏移），
+		// 与 position:fixed 定位一致；AbsoluteX/Y 是布局坐标，不含滚动补偿。
+		vx, vy, vw, vh := rendering.BoxViewportRect(rv, box)
+		sx, sy = vx, vy
+		boxH = vh
+		if vw > 0 {
+			boxW = vw
 		}
 	}
 	doc := i.wv.MainFrame().Document()

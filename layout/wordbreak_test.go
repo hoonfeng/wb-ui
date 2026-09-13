@@ -353,3 +353,50 @@ func TestWhiteSpacePreNoSoftWrap(t *testing.T) {
 	}
 }
 
+// TestMinContentBreakAll: min-content of a long English word under
+// word-break:break-all is per-character (one char width), NOT the whole word
+// — otherwise flex cross-axis fit-content (max(min-content, avail)) is pinned
+// to the word width and the item overflows its container instead of wrapping.
+// Regression: 弹幕气泡 .text word-break:break-all 的 52 字符英文词把气泡撑
+// 到 817px（容器 420px），文字横着溢出被裁。
+func TestMinContentBreakAll(t *testing.T) {
+	cs := style.NewComputedStyle()
+	cs.Display = style.DisplayInline
+	cs.FontSize = style.Length{Value: 10, Unit: "px"}
+	cs.SetProperty("word-break", "break-all")
+	box := &ElementBox{nodeType: NodeGenericElement, style: cs}
+	word := "SUPERCALIFRAGILISTICEXPIALIDOCIOUS"
+	tb := &InlineTextBox{text: word, style: cs}
+	box.AddChild(tb)
+
+	mc := minContentWidth(box)
+	full := measureText(box, word)
+	if mc >= full {
+		t.Fatalf("minContentWidth(break-all)=%.1f should be much smaller than full word %.1f", mc, full)
+	}
+	if mc > full/float64(len([]rune(word)))+2 {
+		t.Fatalf("minContentWidth(break-all)=%.1f: want ≈ single-char width, got whole-word-ish", mc)
+	}
+}
+
+// TestMinContentBreakAllNoWrap: word-break:break-all under white-space:nowrap
+// must NOT make min-content per-character (nowrap forbids all soft wrap —
+// same rule as InlineFormattingContext), so min-content stays the word width.
+func TestMinContentBreakAllNoWrap(t *testing.T) {
+	cs := style.NewComputedStyle()
+	cs.Display = style.DisplayInline
+	cs.FontSize = style.Length{Value: 10, Unit: "px"}
+	cs.SetProperty("word-break", "break-all")
+	cs.WhiteSpace = style.WhiteSpaceNoWrap
+	box := &ElementBox{nodeType: NodeGenericElement, style: cs}
+	word := "SUPERCALIFRAGILISTICEXPIALIDOCIOUS"
+	tb := &InlineTextBox{text: word, style: cs}
+	box.AddChild(tb)
+
+	mc := minContentWidth(box)
+	full := measureText(box, word)
+	if mc < full-0.5 {
+		t.Fatalf("minContentWidth(nowrap+break-all)=%.1f want full word %.1f (nowrap forbids char breaks)", mc, full)
+	}
+}
+

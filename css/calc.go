@@ -343,6 +343,8 @@ func (p *calcParser) parsePrimary() float64 {
 			return val
 		case "min", "max", "clamp":
 			return p.parseMinMaxClamp(strings.ToLower(t.Value))
+		case "round":
+			return p.parseRound()
 		default:
 			p.err = fmt.Errorf("css/calc: unexpected function %s() in expression", t.Value)
 			return 0
@@ -411,10 +413,83 @@ func (p *calcParser) parseMinMaxClamp(name string) float64 {
 			return 0
 		}
 		return math.Max(args[0], math.Min(args[1], args[2]))
+	case "round":
+		// 旧式写法 round(A, B) 已由 parseRound 处理；这里兜底说明用法。
+		p.err = fmt.Errorf("css/calc: round() requires 2 arguments")
+		return 0
 	default:
 		p.err = fmt.Errorf("css/calc: unknown function %s()", name)
 		return 0
 	}
+}
+
+// parseRound evaluates round(<rounding-strategy>?, A, B) — CSS Values §10.6:
+// A is rounded to the nearest integer multiple of B (B may be a length or a
+// number). The optional leading strategy keyword selects the rounding mode;
+// the default is "nearest" (ties round toward +∞, matching math.Round).
+//
+//   - nearest : closest multiple, ties toward +∞
+//   - up      : toward +∞
+//   - down    : toward -∞
+//   - to-zero : toward 0
+//
+// The opening round( function token has already been consumed.
+func (p *calcParser) parseRound() float64 {
+	if p.err != nil {
+		return 0
+	}
+	strategy := "nearest"
+	var args []float64
+	for {
+		if t := p.peek(); t.Type == TokenIdent && len(args) == 0 {
+			p.consume()
+			switch strings.ToLower(t.Value) {
+			case "nearest", "up", "down", "to-zero":
+				strategy = strings.ToLower(t.Value)
+			default:
+				p.err = fmt.Errorf("css/calc: unknown round() rounding strategy %q", t.Value)
+				return 0
+			}
+		} else {
+			args = append(args, p.parseExpr())
+			if p.err != nil {
+				return 0
+			}
+		}
+		t := p.peek()
+		if t.Type == TokenComma {
+			p.consume()
+			continue
+		}
+		if t.Type == TokenRightParenthesis {
+			p.consume()
+			break
+		}
+		p.err = fmt.Errorf("css/calc: expected ',' or ')' in round()")
+		return 0
+	}
+	if len(args) != 2 {
+		p.err = fmt.Errorf("css/calc: round() requires 2 arguments, got %d", len(args))
+		return 0
+	}
+	a, b := args[0], args[1]
+	if b == 0 {
+		// Step 0 degenerates: the result is A itself (no rounding possible).
+		return a
+	}
+	q := a / b
+	var r float64
+	switch strategy {
+	case "up":
+		r = math.Ceil(q)
+	case "down":
+		r = math.Floor(q)
+	case "to-zero":
+		r = math.Trunc(q)
+	default: // nearest
+		r = math.Round(q)
+	}
+	return r * b
 }
 
 // resolveUnit converts a numeric value with a CSS unit to pixels using the context.

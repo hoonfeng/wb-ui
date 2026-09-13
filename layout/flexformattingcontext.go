@@ -78,6 +78,24 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// need. ContentBoxLeft() already accounts for the padding offset.
 	cw := g.ContentWidth()
 	ch := g.ContentHeight()
+	// ★ min-height / max-height 约束 flex 容器的交叉轴尺寸（CSS Flexible Box
+	// §9.4 + CSS 2.1 §10.7）：auto 高度容器此前只按内容高做交叉轴居中，
+	// min-height 被完全忽略——bootstrap-float-clearfix 的
+	// `.centered{min-height:900px; display:flex; align-items:center}` 里 500px
+	// 的卡片被贴在顶部（期望居中于 900 高容器 → y=200，实测 y=0）。
+	// 交叉轴尺寸（row flex 的 ch / column flex 的 cw）用 min/max-height 先行
+	// clamp，后续 align-items:center/flex-end、stretch 与换行都以该尺寸为
+	// 基准；容器自身的最终 geometry 仍由块级布局的 min-height clamp 决定
+	// （blockformattingcontext.go 的 resolveMinMax 分支），两者一致。
+	if isRow {
+		if minH, maxH, minAuto, maxAuto := resolveMinMax(cs.MinHeight, cs.MaxHeight, ch, fontSizeOf(box)); !minAuto || !maxAuto {
+			ch = clampSize(ch, minH, maxH, minAuto, maxAuto)
+		}
+	} else {
+		if minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cw, fontSizeOf(box)); !minAuto || !maxAuto {
+			cw = clampSize(cw, minW, maxW, minAuto, maxAuto)
+		}
+	}
 
 	var items []*flexItem
 	var deferredAbsolutes []*ElementBox
@@ -647,6 +665,23 @@ func minContentWidth(box *ElementBox) float64 {
 		}
 	}
 	mw := 0.0
+	// ★ word-break 字符级可断：break-all / break-word / overflow-wrap:break-word
+	//   时任意字符间是软换行点（与 InlineFormattingContext 的逐字符断行逻辑
+	//   一致），min-content 的最长不可断段退化为「最宽单字符」（CJK 同理），
+	//   而不是整词宽——否则长英文词把 fit-content 下限撑到整词宽
+	//   （弹幕气泡 .text word-break:break-all 的 52 字符英文词 706px →
+	//   交叉轴 fit-content=706px 超出容器 420px，max-width:100% 失效，
+	//   气泡右侧溢出被裁；逐字符可断后 min-content≈14px → fit 正确回落
+	//   到可用宽度，气泡按容器宽换行）。white-space:nowrap/pre 时软换行
+	//   被禁止，word-break/overflow-wrap 均不生效（与 IFC 行为一致）。
+	cs := box.Style()
+	charBreakable := false
+	if cs != nil {
+		wb := cs.GetProperty("word-break")
+		ow := cs.GetProperty("overflow-wrap")
+		charBreakable = (wb == "break-all" || wb == "break-word" || ow == "break-word") &&
+			allowSoftWrap(cs.WhiteSpace)
+	}
 	wordW := func(text string) float64 {
 		longest := 0.0
 		for _, word := range strings.Fields(text) {
@@ -661,7 +696,7 @@ func minContentWidth(box *ElementBox) float64 {
 					break
 				}
 			}
-			if cjk {
+			if cjk || charBreakable {
 				for _, r := range runes {
 					cw := measureText(box, string(r))
 					if cw > w {
@@ -1169,6 +1204,22 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	cw := cg.ContentWidth()
 	ch := cg.ContentHeight()
 	containerCS := container.Style()
+	// ★ 交叉轴尺寸的 min/max 约束（同 Layout 开头的处理）：flex 布局期间容器
+	// 几何仍是父给的初值（auto 高度 = 0），min-height 要到块级布局收尾才写回
+	// 几何，直接用 cg.ContentHeight() 会让 align-items:center/flex-end 与
+	// stretch 以 0 高为基准——min-height:900px 容器里的 500px 卡片被贴在顶部
+	// （bootstrap-float-clearfix 与 f2 探针：期望 y=200，实测 y=0）。
+	if containerCS != nil {
+		if isRow {
+			if minH, maxH, minAuto, maxAuto := resolveMinMax(containerCS.MinHeight, containerCS.MaxHeight, ch, fontSizeOf(container)); !minAuto || !maxAuto {
+				ch = clampSize(ch, minH, maxH, minAuto, maxAuto)
+			}
+		} else {
+			if minW, maxW, minAuto, maxAuto := resolveMinMax(containerCS.MinWidth, containerCS.MaxWidth, cw, fontSizeOf(container)); !minAuto || !maxAuto {
+				cw = clampSize(cw, minW, maxW, minAuto, maxAuto)
+			}
+		}
+	}
 
 	mainPos := cx
 	crossPos := crossStart

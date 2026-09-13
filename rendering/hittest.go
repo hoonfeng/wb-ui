@@ -142,6 +142,13 @@ func hitTestLayer(layer *RenderLayer, x, y float64, attrName string, rv *RenderV
 	// ★ 层 owner 可能带 transform（弹窗 translate(-50%,-50%) 居中/旋转
 	// 图标等）：命中坐标先逆变换到层本地空间（镜像 paint 的正向 canvas
 	// 变换——视觉位置与布局位置不一致，不逆变换则点击视觉位置 miss）。
+	// ★ 逆变换后子层递归必须使用变换后坐标：子层（如弹窗内的
+	// button——UA overflow:hidden 层化，自身无 transform）的布局坐标在
+	// 弹窗空间内——若用未逆变换的视口坐标对照其布局 box 必然 miss
+	// （「点完成按钮无反应」根因：命中落到弹窗普通元素）。
+	// 未做逆变换时维持 xIn/yIn（视口坐标）：纯滚动嵌套场景下子层由
+	// 自身 hitTestLayer 一次性补偿祖先滚动（双重补偿 bug 的既有防线）。
+	transformed := false
 	if layer != nil && layer.owner != nil {
 		if st := layer.owner.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
 			w, h := 0.0, 0.0
@@ -149,6 +156,7 @@ func hitTestLayer(layer *RenderLayer, x, y float64, attrName string, rv *RenderV
 				_, _, w, h = bx, 0, bw, bh
 			}
 			x, y, _ = hitInverseTransform(st.Transform, w, h, x, y)
+			transformed = true
 		}
 	}
 	// 子层（后绘制的在上）：先测 pos+auto（跳过 neg——它们在内容之下）。
@@ -156,14 +164,24 @@ func hitTestLayer(layer *RenderLayer, x, y float64, attrName string, rv *RenderV
 	// 滚动（见函数头注释）；传补偿后坐标会双重补偿（层树多层嵌套——
 	// 滚动容器 > relative 容器 > absolute 控件——深层元素命中越界。
 	// 复现：滚动容器内点击 input/文本命中容器空白，光标不出现）。
-	if el := hitTestLayersBucket(layer, xIn, yIn, attrName, rv, false); el != nil {
+	// ★ transform 层的子层例外：必须传已逆变换坐标（见上注释），
+	// 否则 transform 弹窗内 button/giftlog 等自身无 transform 的层化
+	// 盒子命中全 miss。
+	bx2, by2 := xIn, yIn
+	if transformed {
+		bx2, by2 = x, y
+	}
+	if el := hitTestLayersBucket(layer, bx2, by2, attrName, rv, false); el != nil {
 		return el
 	}
 	// 本层普通内容（layer owner + 非层后代）
 	if el := hitTestLayerContent(layer, x, y, attrName, rv); el != nil {
 		return el
 	}
-	// 负 z 子层（最底）
+	// 负 z 子层（最底）——同子层坐标规则（transform 层传变换后坐标）
+	if transformed {
+		return hitTestLayersBucket(layer, x, y, attrName, rv, true)
+	}
 	return hitTestLayersBucket(layer, xIn, yIn, attrName, rv, true)
 }
 

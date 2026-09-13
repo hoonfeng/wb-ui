@@ -38,7 +38,15 @@ func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
 	case "em":
 		return lengthResult{Value: l.Value * fontSize, Definite: fontSize > 0}
 	case "rem":
-		return lengthResult{Value: l.Value * defaultFontSize, Definite: defaultFontSize > 0}
+		return lengthResult{Value: l.Value * remBase(), Definite: remBase() > 0}
+	case "ex":
+		// x-height 单位（CSS Values and Units §5.1.1）。字体度量接口
+		// (layout.FontMetricsFunc) 只给 ascent/descent/lineGap，没有 x-height，
+		// 因此按规范允许的 fallback 用 0.5em 近似（浏览器在字体缺 x-height
+		// 信息时同样如此）。此前 ex 未被识别，resolveLength 落空返回 0 ——
+		// `padding: 0.7ex 1.4ex` 整个失效（list-indentation 的 #ex-box 期望
+		// 44x22，实测退化为内容盒 20x10）。
+		return lengthResult{Value: l.Value * fontSize * 0.5, Definite: fontSize > 0}
 	case "%":
 		if reference > 0 { return lengthResult{Value: l.Value * reference / 100, Definite: true} }
 		return lengthResult{Definite: false}
@@ -74,14 +82,14 @@ func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
 		// calc() with relative units deferred from style resolve: re-evaluate
 		// with real context. reference is the containing-block dimension (parent
 		// width for width/margin, parent height for height), fontSize is the
-		// element font-size for em, defaultFontSize for rem, viewport for vw/vh.
+		// element font-size for em, the root font-size for rem, viewport for vw/vh.
 		if l.CalcExpr == "" {
 			return lengthResult{Definite: false}
 		}
 		v, err := css.EvalCalcString(l.CalcExpr, css.CalcContext{
 			ParentWidth:   reference,
 			FontSize:      fontSize,
-			RootFontSize:  defaultFontSize,
+			RootFontSize:  remBase(),
 			ViewportWidth:  currentViewportWidth,
 			ViewportHeight: currentViewportHeight,
 		})
@@ -195,7 +203,36 @@ func mathFuncInfo(s string) (name, full string, ok bool) {
 }
 
 
+// defaultFontSize is the initial font size (CSS `medium`) and the rem fallback
+// when the root element's font-size is unknown.
 const defaultFontSize = 16.0
+
+// currentRootFontSize is the root element's computed font-size in px.
+//
+// `rem` must resolve against THIS value (CSS Values §5.1: "equal to the computed
+// value of font-size on the root element"), not against the initial 16px: a page
+// with `html{font-size:18px}`, or the very common `html{font-size:62.5%}` reset,
+// sizes every rem-based padding/margin/gap/font-size from it. wb-ui hard-coded
+// the 16px base, so all rem lengths on such pages were wrong (fixture
+// render-repros/relative-box-edges.html: `padding-left:2rem` with
+// `html{font-size:18px}` is 36px, not 32px).
+var currentRootFontSize float64
+
+// SetRootFontSize sets the px value one `rem` resolves to. A non-positive value
+// restores the 16px fallback. BuildLayoutTree calls it with the root element's
+// computed font-size before laying out; embedders that lay out without a tree
+// (widget renderers) may call it directly.
+func SetRootFontSize(px float64) {
+	currentRootFontSize = px
+}
+
+// remBase returns the px value one `rem` resolves to.
+func remBase() float64 {
+	if currentRootFontSize > 0 {
+		return currentRootFontSize
+	}
+	return defaultFontSize
+}
 
 // ── Box model ────────────────────────────────────────────────
 

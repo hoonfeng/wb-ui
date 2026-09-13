@@ -1461,6 +1461,19 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			if s == "" {
 				return jsc.BooleanValue(false)
 			}
+			// 两参数形式 CSS.supports(property, value)：property 需为已知 CSS
+			// 属性且 value 符合该属性语法。此前忽略第二个参数、把属性名当选择器
+			// 解析（"flex-flow" 是合法 tag 名 → 恒 true），于是合法与非法值都
+			// 被判为支持（flex-flow 夹具的 "CSS supports accepts only the
+			// shorthand grammar" 需要拒绝 "row column"/"none"）。
+			if len(args) >= 2 {
+				prop := strings.ToLower(strings.TrimSpace(args[0].ToString()))
+				val := strings.TrimSpace(args[1].ToString())
+				if !isKnownCSSProperty(prop) || val == "" {
+					return jsc.BooleanValue(false)
+				}
+				return jsc.BooleanValue(cssValueSupported(prop, val))
+			}
 			// (property: value) 声明形式：校验 property 为已知 CSS 属性
 			if strings.HasPrefix(s, "(") && strings.Contains(s, ":") {
 				inner := strings.TrimSuffix(strings.TrimPrefix(s, "("), ")")
@@ -4794,6 +4807,31 @@ func selectorHasUnknownPseudo(sel *css.SelectorList) bool {
 		}
 	}
 	return false
+}
+
+// cssValueSupported reports whether value is valid syntax for prop. Only the
+// shorthands whose grammar the engine actually implements are checked; every
+// other known property falls back to "accepted", which matches CSS.supports'
+// role as a feature-detection API rather than a full CSS validator.
+func cssValueSupported(prop, value string) bool {
+	switch prop {
+	case "flex-flow":
+		_, ok := css.ParseFlexFlow(value)
+		return ok
+	case "flex-direction":
+		switch strings.ToLower(value) {
+		case "row", "row-reverse", "column", "column-reverse":
+			return true
+		}
+		return false
+	case "flex-wrap":
+		switch strings.ToLower(value) {
+		case "nowrap", "wrap", "wrap-reverse":
+			return true
+		}
+		return false
+	}
+	return true
 }
 
 // knownCSSProps 是 CSS.supports('(prop: value)') 判断用的已知属性表

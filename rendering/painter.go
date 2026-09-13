@@ -1268,9 +1268,41 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			}
 			fontH := drawAscent + drawDescent
 			if fontH > 0 {
-				boxCenter := seg0.Y + seg0.LineHeight/2
+				boxCenter := seg0.LineY + seg0.LineHeight/2
 				flexBaseline := boxCenter + drawAscent - fontH/2
 				flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
+			}
+		} else if len(segments) > 0 && !textInAbsPos(text) {
+			// 普通流内文本（行框有效）：lineHeight > 字体内容高度时，
+			// 浏览器按 half-leading 规则将字形在行框内垂直居中。
+			// 缺少此修正时，line-height=height 的容器内文字偏上
+			// （rtab 垂直居中失效根因）。
+			// 修复：boxCenter 用 LineY（行框顶）而非 Y（已偏移的段顶），
+			// 让 layout 层的 centeringOffset 在最终 baseline 中正确抵消。
+			// CJK 用字形视觉 bbox（FontCJKBounds）居中，
+			// 拉丁用 capHeight+descent 近似。
+			seg0 := segments[0]
+			if seg0.LineHeight > 0 {
+				var drawAscent, drawDescent float64
+				if hasCJKChars([]rune(content)) {
+					vTop, vBottom := info.canvas.FontCJKBounds(font, content)
+					if vTop < 0 && vBottom > 0 {
+						drawAscent = -vTop
+						drawDescent = vBottom
+					} else {
+						drawAscent = baselineH
+						drawDescent = baselineH * 0.3
+					}
+				} else {
+					drawAscent = baselineH
+					drawDescent = graphics.GlobalFontDescent(font)
+				}
+				fontH := drawAscent + drawDescent
+				if fontH > 0 && seg0.LineHeight > fontH {
+					boxCenter := seg0.LineY + seg0.LineHeight/2
+					centeredBaseline := boxCenter + drawAscent - fontH/2
+					flexHalfLeading = centeredBaseline - (seg0.Y + baselineH)
+				}
 			}
 		}
 	} else if !textInAbsPos(text) && len(segments) > 0 {

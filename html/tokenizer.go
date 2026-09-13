@@ -145,8 +145,12 @@ func (t *Tokenizer) NextToken() *Token {
 }
 
 // takeEmitted returns the ready token and resets the ready flag.
+// ★ 发出前 flush 构建缓冲（属性值/文本/注释按 O(总长) 一次性拼装）。
 func (t *Tokenizer) takeEmitted() *Token {
 	out := t.emitted
+	if out != nil {
+		out.flushBuffers()
+	}
 	t.emitted = nil
 	t.tokenReady = false
 	return out
@@ -169,7 +173,7 @@ func (t *Tokenizer) emitCurrentToken() {
 // called before the tokenizer begins building a tag/comment/doctype token, so
 // that text preceding a tag is not lost when the shared token is cleared.
 func (t *Tokenizer) flushText() {
-	if t.token.Type == TokenCharacter && t.token.Data != "" {
+	if t.token.Type == TokenCharacter && (t.token.Data != "" || len(t.token.dataBuf) > 0) {
 		t.emitCurrentToken()
 	}
 }
@@ -272,7 +276,7 @@ func (t *Tokenizer) handleEOF() {
 	case stateData, stateRCDATA, stateRAWTEXT, stateScriptData, statePLAINTEXT,
 		stateCDATASection, stateCDATASectionRightSquareBracket,
 		stateCDATASectionDoubleRightSquareBracket:
-		if t.token.Type == TokenCharacter && t.token.Data != "" {
+		if t.token.Type == TokenCharacter && (t.token.Data != "" || len(t.token.dataBuf) > 0) {
 			t.emitCurrentToken()
 			return
 		}

@@ -358,18 +358,41 @@ type TextSegment struct {
 	LineY, LineHeight float64
 }
 
-// hasInlineChildren reports whether box directly holds InlineTextBox children
-// (i.e., its children are inline-level text runs that need InlineFormattingContext).
+// hasInlineChildren reports whether box's children are *all* inline-level, i.e.
+// the box is a block container holding inline content that the
+// InlineFormattingContext must lay out as line boxes.
+//
+// "All" is load-bearing: a block container that mixes inline-level and
+// block-level children is not an inline-content container — the block-level
+// children are laid out by the block formatting context (with the runs of
+// inline-level children between them grouped into anonymous blocks). Testing
+// only for the *presence* of an inline child made any mixed container dispatch
+// to the InlineFormattingContext, which lays out line boxes and silently drops
+// block-level children: e.g. `body::before{content:""}` (an inline-level
+// pseudo box that buildChildren appends directly, bypassing the anonymous-block
+// grouping) turned `body` into an inline container, so its block-level children
+// were never laid out and collapsed to 0x0 — every descendant then painted at
+// zero size (`*::before/*::after` resets, the common
+// `*,:before,:after{box-sizing:inherit}` idiom, hit exactly this).
 func hasInlineChildren(box *ElementBox) bool {
+	hasInline := false
 	for _, c := range box.children {
 		if _, ok := c.(*InlineTextBox); ok {
-			return true
+			hasInline = true
+			continue
 		}
-		if eb, ok := c.(*ElementBox); ok && eb.IsInlineLevel() {
-			return true
+		eb, ok := c.(*ElementBox)
+		if !ok {
+			return false
 		}
+		if !eb.IsInlineLevel() {
+			// A block-level (or out-of-flow) child means this container's
+			// content is not one inline formatting context.
+			return false
+		}
+		hasInline = true
 	}
-	return false
+	return hasInline
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -379,6 +402,11 @@ func hasInlineChildren(box *ElementBox) bool {
 func BuildLayoutTree(root *dom.Element, resolver *style.Resolver) Box {
 	if root == nil { return nil }
 	cs := resolveStyleOrDefault(resolver, root)
+	// The root element's computed font-size is the `rem` base for the whole
+	// document (CSS Values §5.1) — see remBase.
+	if cs != nil && cs.FontSize.Value > 0 && (cs.FontSize.Unit == "px" || cs.FontSize.Unit == "") {
+		SetRootFontSize(cs.FontSize.Value)
+	}
 	box := newBoxForElement(root, cs)
 	buildChildren(box, root, resolver)
 	return box

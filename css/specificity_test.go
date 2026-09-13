@@ -270,19 +270,31 @@ func TestSpecificity_NthChildWithOfClause(t *testing.T) {
 }
 
 func TestSpecificity_UniversalSelectorContributesZero(t *testing.T) {
-	// Universal selector "*" is modeled as MatchTag with value "*". The spec says
-	// universal selectors contribute (0,0,0); our implementation does not special-case
-	// the value "*" so it counts as a type selector (0,0,1). This test documents the
-	// current behavior so future changes are intentional.
+	// Universal selector "*" is modeled as MatchTag with value "*"; per Selectors
+	// Level 3 it contributes (0,0,0). It used to count as a type selector
+	// (0,0,1), which let `*{...}` tie with and (via source order) override
+	// type-selector rules such as `html{box-sizing:border-box}`.
 	sel := ComplexSelector{
 		Compounds: []CompoundSelector{
 			{Selectors: []SimpleSelector{{Match: MatchTag, Value: "*"}}},
 		},
 	}
 	got := SpecificityOfComplex(sel)
-	// Documented: "*" currently counts as a tag.
-	want := Specificity{A: 0, B: 0, C: 1}
+	want := Specificity{A: 0, B: 0, C: 0}
 	if got != want {
 		t.Fatalf("got %v want %v", got, want)
+	}
+
+	// A compound of "*" plus a class must still contribute the class (0,1,0).
+	sel2 := ComplexSelector{
+		Compounds: []CompoundSelector{
+			{Selectors: []SimpleSelector{
+				{Match: MatchTag, Value: "*"},
+				{Match: MatchClass, Value: "box"},
+			}},
+		},
+	}
+	if got := SpecificityOfComplex(sel2); got != (Specificity{B: 1}) {
+		t.Fatalf("* .box: got %v want (0,1,0)", got)
 	}
 }

@@ -290,6 +290,18 @@ func (b *RenderTreeBuilder) createRenderObject(el *dom.Element, cs *style.Comput
 	if isReplacedElement(el.LocalName()) {
 		return NewRenderBox(el, cs)
 	}
+	// CSS Display §2.7 blockification: an out-of-flow box (position:absolute or
+	// fixed) is blockified — `<span style="position:absolute">` generates a
+	// block-level box, never an inline one. A RenderInline owns no box of its own
+	// (it is a participant in the parent's inline formatting context), so leaving
+	// the span inline meant it had no box at all: its insets were never resolved,
+	// and its background/border were never painted. The "absolutely positioned
+	// <span>" idiom (badges, bubbles, close buttons, loading overlays) therefore
+	// rendered as nothing. isInlineLevel() already blockified such elements for
+	// anonymous-run grouping; the render object type has to follow.
+	if cs != nil && (cs.Position == style.PositionAbsolute || cs.Position == style.PositionFixed) {
+		return NewRenderBlockFlow(el, cs)
+	}
 	switch cs.Display {
 	case style.DisplayInline:
 		// True inline-level elements (span / a / em) become RenderInline, which
