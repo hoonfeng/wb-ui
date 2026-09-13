@@ -574,7 +574,17 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 			cs := resolveStyleOrDefault(resolver, v)
 			if cs.Display == style.DisplayNone { return }
 			child := newBoxForElement(v, cs)
-			if child.IsInlineLevel() {
+			if cs.Float == "left" || cs.Float == "right" {
+				// in-flow 浮动子**不打断**父的行内内容（CSS2.1 §9.5：浮动盒
+				// 半脱离正常流，同一父内的行内内容仍在同一个 IFC 中绕排）。
+				// 此前浮动走 else 分支 flush()，把行内 run 切成两个匿名块 →
+				// 后续行内内容被迫换行（right-float-navigation：left-one 与
+				// left-two 应在同一行 x=0/64，实测 left-two 掉到 y=30 被
+				// overflow:hidden 裁掉）。浮动也不进 inlineRun（它是块级盒）。
+				// 渲染树侧有完全相同的分支，两棵树必须结构一致。
+				buildChildren(child, v, resolver)
+				box.AddChild(child)
+			} else if child.IsInlineLevel() {
 				buildChildren(child, v, resolver)
 				inlineRun = append(inlineRun, child)
 			} else {

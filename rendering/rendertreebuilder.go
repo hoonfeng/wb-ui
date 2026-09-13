@@ -192,7 +192,12 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 			if child == nil {
 				return
 			}
-			if b.isInlineLevel(cs) {
+			if cs.Float == "left" || cs.Float == "right" {
+				// 与 layout/box.go 一致：浮动子不打断父的行内内容（不 flush
+				// 匿名块、不进 inlineRun），保证两棵树逐节点对应。
+				b.buildChildren(child, v)
+				parent.AddChild(child, nil)
+			} else if b.isInlineLevel(cs) {
 				b.buildChildren(child, v)
 				inlineRun = append(inlineRun, child)
 			} else {
