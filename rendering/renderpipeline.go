@@ -393,12 +393,13 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// container (e.g. sidebar-content) still covers the whole window.
 	// The browser never clips fixed elements by ancestor overflow unless
 	// that ancestor establishes a containing block (transform/filter).
-	isFixedLayer := false
-	if layer.Owner() != nil {
-		if st := layer.Owner().Style(); st != nil {
-			isFixedLayer = st.Position == style.PositionFixed
-		}
-	}
+	// ★ 只有「视口固定」的层才走 fixed 分支：该分支 RestoreToCount 到
+	// 绘制入口 + ResetFixedTransform，丢弃全部祖先画布状态（含祖先的
+	// transform 矩阵）。被 transform/filter 祖先捕获的 fixed 的包含块
+	// 就是那个祖先，它的绘制必须留在祖先的变换空间内（否则画在未变换
+	// 的原点：fixture transform-containing-block 的 `.fixed-transformed`
+	// 落在 (305,215) 而非 (335,235)），见 isViewportFixed。
+	isFixedLayer := isViewportFixed(layer.Owner())
 	layerRect, clip, clipSpecified := layer.CalculateRects()
 	hasClip := clip.Width > 0 && clip.Height > 0
 	_ = layerRect

@@ -82,6 +82,16 @@ func createsContainingBlockForFixed(cs *style.ComputedStyle) bool {
 	return hasContainmentTrigger(cs)
 }
 
+// CreatesContainingBlockForFixed is createsContainingBlockForFixed exported for
+// the rendering package, which must reach the SAME conclusion when deciding
+// whether a position:fixed layer is still viewport-anchored. A fixed box trapped
+// by a transform/filter ancestor is painted inside that ancestor's transform
+// space (see rendering.isViewportFixed), so the two packages may never disagree
+// about which ancestors trap it.
+func CreatesContainingBlockForFixed(cs *style.ComputedStyle) bool {
+	return createsContainingBlockForFixed(cs)
+}
+
 // hasContainmentTrigger reports whether cs carries any effect/containment that
 // establishes a containing block (for absolute *and* fixed descendants).
 func hasContainmentTrigger(cs *style.ComputedStyle) bool {

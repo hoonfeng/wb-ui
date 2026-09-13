@@ -206,10 +206,11 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 	// layer initially inside keeps a clip pinned to the OLD viewport bottom
 	// and gets culled once scrolled away — "内容初始被裁切的部分滚动后
 	// 永远不显示 / 显示错位".
-	isFixed := false
-	if cs := l.owner.Style(); cs != nil {
-		isFixed = cs.Position == style.PositionFixed
-	}
+	// ★ 只有「视口固定」的 fixed 才享受 fixed 语义（不被祖先 overflow 裁剪、
+	// 不累加祖先滚动偏移——fixed 的包含块恒为视口）。被 transform/filter
+	// 祖先捕获的 fixed 的包含块就是那个祖先，必须像 absolute 一样被祖先
+	// 裁剪、并跟随祖先变换绘制，见 isViewportFixed。
+	isFixed := isViewportFixed(l.owner)
 	// ★ CSS 2.1 §11.1.1：overflow 裁剪只作用于「包含块是该裁剪元素自身
 	// 或其子孙」的后代；包含块在裁剪祖先之上的定位后代不受其裁剪
 	// （经典例子：非定位 body 设 overflow:hidden 且高度为 0，其内
@@ -225,8 +226,11 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 			if box := asRenderBox(l.owner); box != nil {
 				escapeCB = box.ContainingBlock()
 				if isFixed {
-					// fixed 的包含块恒为视口：所有祖先 overflow 都不适用
-					// （paintLayerTree 的 fixed 重置同样按视口处理）。
+					// 视口固定的包含块恒为视口：所有祖先 overflow 都不
+					// 适用（paintLayerTree 的 fixed 重置同样按视口处理）。
+					// 被 transform 祖先捕获的 fixed 不属于此列——它的
+					// 包含块就是那个祖先（box.ContainingBlock() 已正确
+					// 返回它），祖先 overflow 照常裁剪。
 					escapeCB = nil
 				}
 			}
@@ -252,7 +256,7 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 				totalSX += sx
 				totalSY += sy
 			}
-			if cs.Position == style.PositionFixed {
+			if isViewportFixed(cur.owner) {
 				break
 			}
 		}
@@ -316,7 +320,7 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 		// gets its own layer (RequiresLayer) and paints via the normal
 		// layer branch, where this chain wrongly re-applied e.g. the
 		// sidebar-content overflow clip, culling the paint.
-		if cs.Position == style.PositionFixed {
+		if isViewportFixed(cur.owner) {
 			break
 		}
 	}
@@ -341,6 +345,43 @@ func cbStrictlyAbove(a, cb RenderObject) bool {
 		}
 	}
 	return false
+}
+
+// isViewportFixed reports whether box is a position:fixed box that is STILL
+// anchored to the viewport — i.e. no ancestor establishes a containing block
+// for fixed descendants (transform / filter / backdrop-filter / perspective /
+// will-change / containment; the same trigger set layout/positioned.go uses via
+// layout.CreatesContainingBlockForFixed).
+//
+// A fixed box trapped by such an ancestor belongs to that ancestor's
+// containing-block chain: layout/positioned.go already resolves its insets
+// against that ancestor (`.transformer`'s padding box in fixture
+// transform-containing-block), and it must be *painted* inside that ancestor's
+// transform space too, exactly like an absolute box. Treating it as
+// viewport-fixed dropped the ancestor transform — paintLayerTree's fixed branch
+// calls RestoreToCount(info.initialSaveCount) + ResetFixedTransform, discarding
+// every ancestor canvas state including the transform matrix — so
+// `.fixed-transformed` (left:150; top:100) painted at its untransformed origin
+// (305,215) instead of (335,235), i.e. without `.transformer`'s
+// translate(30px,20px).
+//
+// Ancestor overflow clips and ancestor scroll translates apply to such a box as
+// well (its containing block is the transformed ancestor), which the callers
+// get for free once it stops taking the viewport-fixed path.
+func isViewportFixed(box RenderObject) bool {
+	if box == nil {
+		return false
+	}
+	st := box.Style()
+	if st == nil || st.Position != style.PositionFixed {
+		return false
+	}
+	for p := box.Parent(); p != nil; p = p.Parent() {
+		if layout.CreatesContainingBlockForFixed(p.Style()) {
+			return false
+		}
+	}
+	return true
 }
 
 // intersectRects returns the intersection of two layout rects. If they do not overlap
