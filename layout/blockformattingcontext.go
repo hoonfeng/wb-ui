@@ -623,6 +623,19 @@ func heightIsAutoForBox(box *ElementBox) bool {
 	cs := box.Style()
 	r := resolveLengthAuto(cs.Height, 0, 0)
 	if !r.Auto {
+		// ★ 百分比（含 calc）高度只有在**包含块高度确定**时才有确定值。
+		// 包含块高度为 auto（由内容决定）时，CSS2.1 §10.5 规定百分比高度按
+		// auto 计算 → 由内容撑开。此前恒返回 false：`#wrapper{height:100%}`
+		// 的父 `#outer` 高 auto，于是 #wrapper 高度被算成确定值 0，整条
+		// height:100% 链高度塌成 0、后续流元素叠在 y=0 上
+		// （percentage-height-indefinite-parent 的第 2 项）。
+		// html 根元素的包含块是初始包含块（视口尺寸确定），所以
+		// parentBox==nil 时不按 auto 处理，`html,body{height:100%}` 链条不受影响。
+		if heightPercentDependent(cs.Height) {
+			if pb := box.parentBox; pb != nil && heightIsAutoForBox(pb) {
+				return true
+			}
+		}
 		return false
 	}
 	// ★ absolute 元素 top+bottom 都显式设置时（如 inset:0），CSS 规定
