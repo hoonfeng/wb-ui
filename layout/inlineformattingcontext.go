@@ -237,6 +237,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		segStart    int     // index into pending (first seg on this line)
 		widthUsed   float64 // actual used width (contentX .. last-right-edge)
 		availWidth  float64 // available width for this line (adjusted for floats)
+		// boxCount 记录本行放置过的 inline 级 ElementBox 数量。0 宽度的
+		// atomic inline（img.zero 之类 width:0/height:0 的替换元素）不贡献
+		// widthUsed，但浏览器里它所在的行盒依然存在并带 strut 高度
+		//（CSS2.1 §10.8：行盒高度至少是 strut）——只在 widthUsed>0 时保留行
+		// 会把该行丢掉，容器高度塌成 0（inline-replaced-flow 的
+		// "atomic inline run retains its line-height strut"）。
+		boxCount int
 	}
 
 	// Initialize first line with float-aware available width.
@@ -937,6 +944,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				applyRelativeOffsetForBox(cld, contentWidth, lineHeight, state)
 			}
 			currentLine.widthUsed += cldW
+			currentLine.boxCount++
 			// 有实际宽度的 inline 子元素消费了待处理的空格分隔符：
 			// 后续空白节点的 advance 是新分隔符（<span>foo</span> <span>
 			// bar</span> 后的 "  baz" 前导空格仍贡献一个空格）。
@@ -947,7 +955,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	// Append the final in-progress line.
-	if currentLine.widthUsed > 0 {
+	// ★ 判定条件是「行内有内容」而非「宽度 > 0」：0 宽度的 atomic inline
+	//（img.zero）也产生一个带 strut 高度的行盒，丢弃它会让容器高度塌成 0。
+	if currentLine.widthUsed > 0 || currentLine.boxCount > 0 {
 		lines = append(lines, currentLine)
 	}
 
