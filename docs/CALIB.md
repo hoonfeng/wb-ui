@@ -85,11 +85,11 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 | 夹具 | 探针内不可达的原因 | 引擎侧覆盖方式 |
 |------|--------------------|----------------|
 | `animation-fill-forwards` | `.dismissed` 由内联 `<script>` 的 `classList.add` 添加，脚本不执行 ⇒ 动画从未绑定，`#overlay` 保持静态可见（红），而期望是终态隐藏后露出的 `#content` 绿 | **已实现**：有限动画结束时 `fill:forwards` 保持终帧（`opacity:0` + `visibility:hidden`），`rendering/animation_test.go:TestAnimateVisibilityFillForwards`；visibility 的离散插值（CSS-ANIM：区间任一端点 `visible` ⇒ 区间内 `visible`）本轮补齐，另见 `TestAnimateVisibilityBothHidden` |
-| `eventtarget-lifecycle` | 需要 `addEventListener` / `dispatchEvent` 时序 | DOM 事件层单测（非渲染管线） |
-| `modern-hydration-contracts`、`modern-streams` | 需要 JS 运行时 API | 同上 |
+| `eventtarget-lifecycle` | 需要 `addEventListener` / `dispatchEvent` 时序（探针无事件循环） | DOM 事件层单测：`dom/event_test.go:TestDispatchEventTargetPhase`（捕获/目标/冒泡三阶段时序）、`TestRemoveAllEventListeners`；`bindings/dom_test.go:TestDOMAddEventListenerAsMethodCall` / `TestDOMAddEventListenerInvokedFromGo` / `TestDOMAddEventListenerMouseEventFields` / `TestDOMRemoveEventListener` |
+| `modern-hydration-contracts`、`modern-streams` | 需要 JS 运行时（流式解析 + 水合） | **无专项单测**：水合契约本身由页面脚本驱动，wb-ui 只提供 DOM/JS 运行时，覆盖在宿主（gou-ide）集成层；此处如实记为未覆盖 |
 | `media-text-track` | 需要 `<track>` 媒体加载 | 未实现（媒体能力） |
 | `flex-flow` | 11 项里 10 项通过；仅剩「CSS supports accepts only the shorthand grammar」需要 `CSS.supports()`（JS API） | `css/values_test.go:TestParseFlexFlow` 覆盖语法，布局行为已由其余 10 项像素验证 |
-| `viewport-consistency` | 3 项里仅第 3 项「page JavaScript sees the screenshot viewport」需要 `window.innerWidth/innerHeight` 与 `visualViewport`（JS API） | 前两项（width / height 媒体查询）本轮修复：`style.Resolver` 的媒体上下文此前恒为 0×0（`min-height` 恒不匹配、`max-width` 恒匹配），现由 `RenderView.SetViewportSize` / `Frame.syncMediaQueryViewport` 与真实视口同步 |
+| `viewport-consistency` | 3 项里仅第 3 项「page JavaScript sees the screenshot viewport」需要 `window.innerWidth/innerHeight` 与 `visualViewport`（JS API） | 前两项（width / height 媒体查询）本轮修复：`style.Resolver` 的媒体上下文此前恒为 0×0（`min-height` 恒不匹配、`max-width` 恒匹配），现由 `RenderView.SetViewportSize` / `Frame.syncMediaQueryViewport` 与真实视口同步。单测：`rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync`（900x1000 命中、1200x800 不命中的交叉像素断言 + 不同步时 0×0 分支的反向对照） |
 
 ### 尺寸媒体查询的视口同步（本轮）
 
