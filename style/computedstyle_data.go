@@ -64,6 +64,12 @@ type InheritedData struct {
 
 	// ── Visibility / interaction ──
 	Visibility    string
+	// StaticVisibility 是 visibility 的静态计算值（样式解析时保存），与
+	// StaticOpacity 同一套理由：@keyframes 里声明 visibility 的动画每帧
+	// 改写 Visibility，StaticVisibility 保持解析值不变——插值端点未声明
+	// 该属性时用它作 base，动画结束且无 forwards/both fill 时也用它恢复
+	// （否则关闭动画把弹层永久留在 hidden）。
+	StaticVisibility string
 	Cursor        string
 	UserSelect    string
 	PointerEvents string
@@ -102,6 +108,7 @@ func DefaultInheritedData() *InheritedData {
 	TextOverflow:        TextOverflowClip,
 		Direction:           "ltr",
 		Visibility:          "visible",
+		StaticVisibility:    "visible",
 		Cursor:              "auto",
 		UserSelect:          "auto",
 		PointerEvents:       "auto",

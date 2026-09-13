@@ -211,6 +211,13 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64,
 			// 标志（painter 回退静态色，避免残留最后动画帧）。
 			st.AnimatedBackgroundActive = false
 			st.AnimatedColorActive = false
+			// visibility 同样回退静态值（否则「淡出 + visibility:hidden」
+			// 动画结束后元素永久不可见——它只是结束，不是隐藏指令）。
+			if st.StaticVisibility != "" {
+				st.Visibility = st.StaticVisibility
+			} else {
+				st.Visibility = "visible"
+			}
 		}
 		// Ended: the final keyframe value was already rendered in the last
 		// active frame (progress reached 1.0 there), so no re-paint needed.
@@ -304,6 +311,18 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 	if bg, ok := interpolateKeyframeColor(kf, progress, "background-color"); ok {
 		st.AnimatedBackgroundColor = style.Color{R: bg.R, G: bg.G, B: bg.B, A: bg.A}
 		st.AnimatedBackgroundActive = true
+	}
+
+	// Visibility（离散可插值）。CSS-ANIM 规定：visibility 按离散属性插值，
+	// **但**当区间任一端点是 visible 时，区间内插值结果就是 visible ——
+	// 这正是「淡出并在结束帧 visibility:hidden」（fixture
+	// animation-fill-forwards 的 @keyframes dismiss-overlay）应有的行为：
+	// 元素在动画过程中始终 visible，只在到达终态时消失。
+	// 此前完全不处理该属性 ⇒ 结束帧的 visibility:hidden 对引擎状态无效
+	// （元素 opacity 归零但仍占位、仍参与绘制剔除与命中判定），
+	// fill:forwards 的终态因此只实现了一半。
+	if vis, ok := interpolateKeyframeVisibility(kf, progress, st.StaticVisibility); ok {
+		st.Visibility = vis
 	}
 }
 
@@ -505,6 +524,116 @@ func interpolateKeyframeFloat(kf *css.KeyframesRule, progress float64, propName 
 func interpolateKeyframeColor(kf *css.KeyframesRule, progress float64, propName string) (graphics.Color, bool) {
 	points := collectKeyframeColors(kf, propName)
 	return interpolateColorAt(points, progress)
+}
+
+// keyframePointVisibility holds a visibility keyword at a keyframe offset.
+type keyframePointVisibility struct {
+	offset float64
+	value  string // "visible" | "hidden" | "collapse"
+	valid  bool
+}
+
+// collectKeyframeVisibility collects every keyframe offset that declares
+// visibility, sorted by offset.
+func collectKeyframeVisibility(kf *css.KeyframesRule) []keyframePointVisibility {
+	seen := map[float64]bool{}
+	var points []keyframePointVisibility
+	for _, rule := range kf.Keyframes {
+		for _, key := range rule.Keys {
+			offset := parseKeyframeOffset(key)
+			if offset < 0 {
+				continue
+			}
+			if seen[offset] {
+				continue
+			}
+			seen[offset] = true
+			val, ok := findKeywordInDecls(rule.Declarations, "visibility")
+			points = append(points, keyframePointVisibility{offset: offset, value: val, valid: ok})
+		}
+	}
+	for i := 0; i < len(points); i++ {
+		for j := i + 1; j < len(points); j++ {
+			if points[j].offset < points[i].offset {
+				points[i], points[j] = points[j], points[i]
+			}
+		}
+	}
+	return points
+}
+
+// interpolateKeyframeVisibility evaluates the discrete `visibility` property at
+// the given progress.
+//
+// CSS Animations interpolates visibility discretely, with one exception: if
+// either endpoint of the interval is `visible`, the interpolated value is
+// `visible` for the whole interval. That exception is what makes the common
+// dismiss pattern (`to { opacity: 0; visibility: hidden }`) behave like a real
+// fade — the element stays visible while opacity animates, and only disappears
+// at the very end.
+//
+// base is the element's static computed value (st.StaticVisibility), used for
+// keyframes that do not declare the property.
+func interpolateKeyframeVisibility(kf *css.KeyframesRule, progress float64, base string) (string, bool) {
+	points := collectKeyframeVisibility(kf)
+	if len(points) == 0 {
+		return "", false
+	}
+	hasValid := false
+	for _, p := range points {
+		if p.valid {
+			hasValid = true
+			break
+		}
+	}
+	if !hasValid {
+		// 属性在所有关键帧都未声明 → 不设置（与 interpolateFloatAt 同规则：
+		// 不能让 base 回退把「无动画」误报为「动画值 = base」）。
+		return "", false
+	}
+	baseVis := strings.ToLower(strings.TrimSpace(base))
+	if baseVis == "" {
+		baseVis = "visible"
+	}
+	eff := func(i int) string {
+		if points[i].valid {
+			return points[i].value
+		}
+		return baseVis
+	}
+	// 区间合并：任一端点 visible ⇒ visible（见函数注释）；否则离散取起点。
+	merge := func(a, b string) string {
+		if a == "visible" || b == "visible" {
+			return "visible"
+		}
+		return a
+	}
+	if len(points) == 1 {
+		p := points[0]
+		if progress <= p.offset {
+			return merge(baseVis, eff(0)), true
+		}
+		return merge(eff(0), baseVis), true
+	}
+	if progress <= points[0].offset {
+		return eff(0), true
+	}
+	lastIdx := len(points) - 1
+	if progress >= points[lastIdx].offset {
+		return eff(lastIdx), true
+	}
+	for i := 0; i < len(points)-1; i++ {
+		if progress >= points[i].offset && progress <= points[i+1].offset {
+			if progress == points[i].offset {
+				return eff(i), true
+			}
+			if progress == points[i+1].offset {
+				return eff(i + 1), true
+			}
+			return merge(eff(i), eff(i+1)), true
+		}
+	}
+	return "", false
 }
 
 // interpolateTransformTranslate parses translateX or translateY from
@@ -731,6 +860,21 @@ func findColorInDecls(decls []css.Declaration, propName string) (graphics.Color,
 		}
 	}
 	return graphics.Color{}, false
+}
+
+// findKeywordInDecls returns the lower-cased keyword value of a declaration
+// (visibility and the other keyword-valued animatable properties).
+func findKeywordInDecls(decls []css.Declaration, propName string) (string, bool) {
+	for _, d := range decls {
+		if strings.EqualFold(d.Name, propName) {
+			v := strings.ToLower(strings.TrimSpace(d.ValueString()))
+			if v == "" {
+				return "", false
+			}
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // findTransformInDecls searches declarations for a transform property and

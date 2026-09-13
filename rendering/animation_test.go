@@ -392,3 +392,104 @@ func TestExtractTransformFunc(t *testing.T) {
 		}
 	}
 }
+
+// --- visibility + fill:forwards (fixture animation-fill-forwards) -----------
+
+// TestAnimateVisibilityFillForwards covers the dismiss pattern of fixture
+// animation-fill-forwards:
+//
+//	@keyframes dismiss-overlay { from { opacity: 1 }
+//	                             to   { opacity: 0; visibility: hidden } }
+//	#overlay { animation: dismiss-overlay 100ms ease-out forwards }
+//
+// Expected engine behaviour (CSS-ANIM): visibility interpolates discretely but
+// an interval with a `visible` endpoint stays `visible`, so the element is only
+// hidden once the animation ENDS; fill:forwards then holds that final frame
+// (opacity 0 + visibility hidden). Without forwards the static value must come
+// back. The fixture itself cannot assert this (cssprobe never runs the <script>
+// that adds `.dismissed`), so the semantics are pinned here instead.
+func TestAnimateVisibilityFillForwards(t *testing.T) {
+	kf := &css.KeyframesRule{
+		Name: "dismiss-overlay",
+		Keyframes: []css.KeyframeRule{
+			{Keys: []string{"from"}, Declarations: []css.Declaration{
+				{Name: "opacity", Value: tokenizeValue("1")},
+				{Name: "visibility", Value: tokenizeValue("visible")},
+			}},
+			{Keys: []string{"to"}, Declarations: []css.Declaration{
+				{Name: "opacity", Value: tokenizeValue("0")},
+				{Name: "visibility", Value: tokenizeValue("hidden")},
+			}},
+		},
+	}
+	setupLookup(kf)
+	st := style.NewComputedStyle()
+	st.AnimationName = "dismiss-overlay"
+	st.AnimationDuration = 0.1 // 100ms
+	st.AnimationIterationCount = 1
+	st.AnimationFillMode = "forwards"
+
+	// t=0 (from frame): fully visible.
+	applyAnimationToStyle(st, 0, KeyframesLookup)
+	if st.Opacity != 1 {
+		t.Errorf("opacity at t=0: got %v, want 1", st.Opacity)
+	}
+	if st.Visibility != "visible" {
+		t.Errorf("visibility at t=0: got %q, want visible", st.Visibility)
+	}
+
+	// Mid-flight: one endpoint is visible → the element stays visible while it
+	// fades (discrete interpolation with the visible-endpoint exception).
+	if active := applyAnimationToStyle(st, 0.05, KeyframesLookup); !active {
+		t.Error("animation should still be active at t=50ms")
+	}
+	if st.Visibility != "visible" {
+		t.Errorf("visibility mid-flight: got %q, want visible", st.Visibility)
+	}
+
+	// Ended (>100ms) with fill:forwards → the final frame is held.
+	if active := applyAnimationToStyle(st, 0.2, KeyframesLookup); active {
+		t.Error("ended animation must not report active")
+	}
+	if st.Opacity != 0 {
+		t.Errorf("opacity after end (forwards): got %v, want 0", st.Opacity)
+	}
+	if st.Visibility != "hidden" {
+		t.Errorf("visibility after end (forwards): got %q, want hidden", st.Visibility)
+	}
+
+	// Ended without forwards → static visibility is restored (the animation
+	// merely ended; it is not a permanent hide instruction).
+	st.AnimationFillMode = "none"
+	applyAnimationToStyle(st, 0.3, KeyframesLookup)
+	if st.Visibility != "visible" {
+		t.Errorf("visibility after end (no fill): got %q, want static visible", st.Visibility)
+	}
+}
+
+// TestAnimateVisibilityBothHidden checks the discrete rule for intervals whose
+// endpoints are BOTH hidden/collapse: the value stays at the interval start.
+func TestAnimateVisibilityBothHidden(t *testing.T) {
+	kf := &css.KeyframesRule{
+		Name: "collapse-then-show",
+		Keyframes: []css.KeyframeRule{
+			{Keys: []string{"0%"}, Declarations: []css.Declaration{
+				{Name: "visibility", Value: tokenizeValue("hidden")},
+			}},
+			{Keys: []string{"100%"}, Declarations: []css.Declaration{
+				{Name: "visibility", Value: tokenizeValue("collapse")},
+			}},
+		},
+	}
+	setupLookup(kf)
+	st := style.NewComputedStyle()
+	st.AnimationName = "collapse-then-show"
+	st.AnimationDuration = 1
+	st.AnimationIterationCount = 1
+
+	applyAnimationToStyle(st, 0.5, KeyframesLookup)
+	if st.Visibility != "hidden" {
+		t.Errorf("both-hidden interval at t=0.5: got %q, want hidden (interval start)",
+			st.Visibility)
+	}
+}

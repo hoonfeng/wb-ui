@@ -1817,6 +1817,9 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.BoxSizing = valueString
 	case "visibility":
 		cs.Visibility = valueString
+		// 静态值同步保存：@keyframes visibility 动画的插值 base 与
+		// 动画结束后的恢复值都取自它（见 StaticVisibility 注释）。
+		cs.StaticVisibility = valueString
 	case "opacity":
 		if v, err := strconv.ParseFloat(valueString, 64); err == nil {
 			cs.Opacity = v
