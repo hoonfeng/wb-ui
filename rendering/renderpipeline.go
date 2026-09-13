@@ -1931,6 +1931,15 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 		PaintImage(box, info)
 		return
 	}
+	// <video poster> / <audio poster>：poster 是替代画面（HTML §4.8.8），
+	// 按与 <img> 相同的规则绘制（object-fit / object-position / 圆角 / 不
+	// 透明度）。此前只认 <img>，三个 poster 全是空白（video-poster 4 项）。
+	if ln := el.LocalName(); ln == "video" || ln == "audio" {
+		if strings.TrimSpace(el.GetAttribute("poster")) != "" {
+			PaintImage(box, info)
+		}
+		return
+	}
 	// canvas elements: blit the element's backing bitmap (CanvasBitmap
 	// created by getContext('2d')) into the content box.
 	if el.LocalName() == "canvas" {

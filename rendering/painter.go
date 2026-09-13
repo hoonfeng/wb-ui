@@ -2048,6 +2048,12 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	var src string
 	if el, ok := box.Node().(*dom.Element); ok {
 		src = el.GetAttribute("src")
+		// <video>/<audio> 的替代画面来自 poster 属性（没有 src 图像）。
+		if src == "" {
+			if ln := el.LocalName(); ln == "video" || ln == "audio" {
+				src = el.GetAttribute("poster")
+			}
+		}
 	}
 	if debugenv.Enabled("WB_IMG_DEBUG") {
 		log.Printf("[imgdbg] pre-load img=%v src=%q x=%.0f y=%.0f w=%.0f h=%.0f", img != nil, src, x, y, w, h)
@@ -2060,7 +2066,32 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		if img != nil && img.Loaded() {
 			box.SetDecodedImage(img)
 		} else if sd := loadBackgroundSVG(src); sd != nil {
-			paintSVGScaled(info.canvas, sd, x, y, w, h)
+			// ★ SVG 资源（典型 data:image/svg+xml）走矢量路径时同样要遵循
+			// object-fit / object-position（CSS Images §3）：此前直接按
+			// content box 拉伸（等价 fill）。video-poster 的 #position-only
+			// （100x100, cover, right）应只显示 300x100 资源最右 100px（纯蓝），
+			// 实测把整张图压成三条 33px 竖条。
+			fit := strings.ToLower(st.GetProperty("object-fit"))
+			opx, opy := parseObjectPosition(st.GetProperty("object-position"))
+			sw, sh := svgIntrinsicSize(sd)
+			dx, dy, dw, dh := objectFitDest(sw, sh, x, y, w, h, fit, opx, opy)
+			if dw > 0 && dh > 0 {
+				// cover / none 会让目标矩形溢出内容盒（cover 300x100 → 100x100
+				// 时左右各溢出 100px），必须裁剪，否则画到邻居元素上。
+				needClip := dx < x-0.01 || dy < y-0.01 || dw > w+0.01 || dh > h+0.01
+				if needClip {
+					// ★ 用 Save/Clip/Restore 配对，不要用 ResetClip：后者走
+					// SkClipOp::kReplace（非标准），在部分后端/状态下会让
+					// Skia 崩溃（全量探针跑到 SVG 海报时 Exception
+					// 0xc000001d，栈顶 sk_canvas_clip_rect_with_operation op=5）。
+					info.canvas.Save()
+					info.canvas.Clip(graphics.Rect{X: x, Y: y, Width: w, Height: h})
+				}
+				paintSVGScaled(info.canvas, sd, dx, dy, dw, dh)
+				if needClip {
+					info.canvas.Restore()
+				}
+			}
 			return true
 		}
 	}
@@ -2121,6 +2152,52 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 		img.Draw(info.canvas, x, y, w, h)
 	}
 	return true
+}
+
+// svgIntrinsicSize 返回 SVG 文档的固有尺寸（width/height 属性，缺失时退回
+// viewBox 尺寸）——object-fit 的比例计算需要资源的固有尺寸。
+func svgIntrinsicSize(doc *svgDocument) (float64, float64) {
+	if doc == nil {
+		return 0, 0
+	}
+	w, h := doc.width, doc.height
+	if doc.hasVB {
+		if w <= 0 {
+			w = doc.viewBox[2]
+		}
+		if h <= 0 {
+			h = doc.viewBox[3]
+		}
+	}
+	return w, h
+}
+
+// objectFitDest 按 CSS Images §3 的 object-fit 计算资源（固有尺寸 iw×ih）
+// 在内容盒 (x,y,w,h) 内的目标矩形；(opx,opy) 是 object-position 解析出的
+// 0..1 比例偏移（默认 0.5）。
+func objectFitDest(iw, ih, x, y, w, h float64, fit string, opx, opy float64) (dx, dy, dw, dh float64) {
+	if iw <= 0 || ih <= 0 {
+		return x, y, w, h
+	}
+	switch fit {
+	case "cover":
+		ratio := w / iw
+		if h/ih > ratio {
+			ratio = h / ih
+		}
+		dw, dh = iw*ratio, ih*ratio
+	case "contain":
+		ratio := w / iw
+		if h/ih < ratio {
+			ratio = h / ih
+		}
+		dw, dh = iw*ratio, ih*ratio
+	case "none":
+		dw, dh = iw, ih
+	default: // fill：拉伸到内容盒
+		return x, y, w, h
+	}
+	return x + (w-dw)*opx, y + (h-dh)*opy, dw, dh
 }
 
 // parseObjectPosition parses an object-position value ("left top",

@@ -190,6 +190,15 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		// (left+right both set with width:auto is the stretch case, handled
 		// below before this width is used.)
 		content := intrinsicContentWidth(box, false)
+		// ★ 替换元素（<video poster> / <img> / <canvas>）的 auto 宽度取资源
+		// 固有宽（CSS 2.1 §10.3.7 的 shrink-to-fit ∋ 固有尺寸，CSS Images 3
+		// 默认尺寸算法）：只量子盒会得到 0，固有 300x100 的 poster 于是被
+		// 量成 0 宽（video-poster 的 #intrinsic 期望 300x100 三色竖条）。
+		if box.IsReplaced() {
+			if rw, _, ok := replacedContentSize(box, cbWidth, cbHeight); ok && rw > 0 {
+				content = rw
+			}
+		}
 		avail := cbWidth - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
 		if avail < 0 { avail = 0 }
 		width = content
