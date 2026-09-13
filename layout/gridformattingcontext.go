@@ -111,6 +111,15 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if !ok || !child.IsInFlow() || !child.IsVisible() {
 			continue
 		}
+		// ★ Anonymous boxes that only wrap inter-element whitespace are not
+		// grid items (CSS Grid §6.1: an anonymous item must have
+		// non-whitespace content). Treating one as an item consumed the first
+		// cell and pushed every real item one column right, wrapping the last
+		// one to the next row (replaced-block-wrapper: #frame landed in
+		// column 2 and #media wrapped to row 2, so neither panel matched).
+		if anonymousWhitespaceBox(childEb) {
+			continue
+		}
 		it := &gridItem{
 			box:      childEb,
 			colStart: gridParseLine(childEb.GridColumnStart()),
@@ -958,12 +967,16 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowSt
 		ig.SetPadding(padding.Top, padding.Right, padding.Bottom, padding.Left)
 		ig.SetBorder(border.Top, border.Right, border.Bottom, border.Left)
 
-		if isBorderBox(it.box) {
-			hp := padding.Left + padding.Right + border.Left + border.Right
-			vp := padding.Top + padding.Bottom + border.Top + border.Bottom
-			aw = math.Max(0, aw-hp)
-			ah = math.Max(0, ah-vp)
-		}
+		// ★ The available width/height is the interior of the item's margin
+		// box, so padding and border come off in *both* box-sizing modes: a
+		// stretched item's border box fills the cell either way, hence a
+		// content-box item with 20px padding lays out at cell−40, not at the
+		// full cell width (replaced-grid-order: the padded media wrapper grew
+		// to 340px inside a 300px column and its 100%-wide image overflowed).
+		hp := padding.Left + padding.Right + border.Left + border.Right
+		vp := padding.Top + padding.Bottom + border.Top + border.Bottom
+		aw = math.Max(0, aw-hp)
+		ah = math.Max(0, ah-vp)
 		ig.SetContentWidth(aw)
 		ig.SetContentHeight(ah)
 		// ★ 记录 grid 分配的固定高度（行高/stretch），供 item 自身 auto 高度计算
@@ -987,6 +1000,39 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowSt
 			ig.SetContentHeight(maxH)
 		}
 	}
+}
+
+// anonymousWhitespaceBox reports whether box is an anonymous box (one that has
+// no DOM element of its own) whose only content is whitespace. CSS Grid §6.1:
+// whitespace-only text does not generate an anonymous grid item, so such a box
+// must be skipped during placement.
+//
+// The "actually has content" test matters: synthetic trees (unit tests,
+// detached fragments) also build boxes with no DOM element, and those are real
+// items — an *empty* anonymous box is therefore not discarded here.
+func anonymousWhitespaceBox(box *ElementBox) bool {
+	if box.Element() != nil {
+		return false
+	}
+	sawText := false
+	var walk func(b *ElementBox) bool
+	walk = func(b *ElementBox) bool {
+		for _, c := range b.Children() {
+			switch v := c.(type) {
+			case *InlineTextBox:
+				if strings.TrimSpace(v.Text()) != "" {
+					return false
+				}
+				sawText = true
+			case *ElementBox:
+				if v.Element() != nil || !walk(v) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return walk(box) && sawText
 }
 
 func clamp(v, lo, hi int) int {

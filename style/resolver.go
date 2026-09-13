@@ -689,6 +689,18 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 		return nil, "", false
 	}
 
+	// ★ A ::before/::after pseudo-element generates a box only when it
+	// declares a usable `content` (CSS 2.1 §12.1): `content: normal` — the
+	// initial value, i.e. no declaration at all — and `content: none` generate
+	// no box. Page resets such as `*, ::before, ::after { box-sizing: inherit }`
+	// match every element, and fabricating an empty box for each of them made
+	// every grid container place a stray first item (shifting all real items one
+	// column right and wrapping the last one to the next row) and left empty
+	// pseudo boxes in every flex/block container.
+	if !pseudoDeclaresContent(collected) {
+		return nil, "", false
+	}
+
 	cs := NewComputedStyle()
 	// 伪元素从宿主元素继承（WebKit：伪元素继承宿主 computed style）。
 	hostCS := r.ResolveElement(el)
@@ -739,6 +751,24 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 
 	content := cs.GetProperty("content")
 	return cs, content, true
+}
+
+// pseudoDeclaresContent reports whether the collected declarations contain a
+// `content` value that actually generates a box: `none` and `normal` (the
+// initial value) do not, while an empty string (`content: ""`, the usual
+// decorative-reset) does.
+func pseudoDeclaresContent(decls []collectedDecl) bool {
+	for _, cd := range decls {
+		if cd.decl.Name != "content" {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(cd.decl.ValueString())) {
+		case "none", "normal":
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // collectPseudoDeclarationsFromRule matches one StyleRule's selectors whose
