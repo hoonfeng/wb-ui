@@ -24,11 +24,11 @@ package rendering
 import (
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
@@ -161,7 +161,7 @@ func applyElementTransitions(el *dom.Element, isPseudo bool, st *style.ComputedS
 	if dur <= 0 {
 		return false
 	}
-	transDebug := os.Getenv("WB_TRANS_DEBUG") != ""
+	transDebug := debugenv.Enabled("WB_TRANS_DEBUG")
 	key := transitionKey{el: el, pseudo: isPseudo}
 	reg := transitionRegistry[key]
 	if reg == nil {

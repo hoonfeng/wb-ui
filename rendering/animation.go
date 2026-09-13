@@ -14,11 +14,11 @@ package rendering
 import (
 	"log"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 
 	"wb-ui/css"
+	"wb-ui/debugenv"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
 )
@@ -73,13 +73,13 @@ func ApplyAnimations(rv *RenderView) bool {
 			}
 			st := o.Style()
 			if st != nil && st.AnimationName != "" {
-				if os.Getenv("WB_ANIM_DEBUG") != "" {
+				if debugenv.Enabled("WB_ANIM_DEBUG") {
 					kf := kfLookup(st.AnimationName)
 					log.Printf("[anim] name=%q kf=%v", st.AnimationName, kf != nil)
 				}
 				if applyAnimationToStyle(st, AnimationTime, kfLookup) {
 					active = true
-					if os.Getenv("WB_ANIM_DEBUG") != "" {
+					if debugenv.Enabled("WB_ANIM_DEBUG") {
 						log.Printf("[anim] name=%q time=%.2f opacity=%.2f static=%.2f bgAnim=(%d,%d,%d,%d) bgStatic=(%d,%d,%d,%d)",
 							st.AnimationName, AnimationTime, st.Opacity, st.StaticOpacity,
 							st.AnimatedBackgroundColor.R, st.AnimatedBackgroundColor.G, st.AnimatedBackgroundColor.B, st.AnimatedBackgroundColor.A,

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/style"
 )
 
@@ -78,7 +79,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentY := g.ContentBoxTop()
 	boxHeight := g.ContentHeight()
 	contentWidth := g.ContentWidth()
-	if os.Getenv("WB_LAYOUT_DEBUG") != "" && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
+	if debugenv.Enabled("WB_LAYOUT_DEBUG") && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
 		fmt.Printf("[ifc] dialog-box: contentWidth=%.1f padL=%.1f parent=%v\n", contentWidth, g.PaddingLeft(), box.Parent())
 	}
 	// Reference width for text-align: the container's REAL content-box width,
@@ -99,7 +100,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	// 行高诊断（WBUI_IFC_DEBUG=1）：字体度量与 CSS line-height 的最终取值，
 	// 用于定位"行高与真实浏览器不一致"的夹具（font-metric-line-height）。
-	if os.Getenv("WBUI_IFC_DEBUG") != "" {
+	if debugenv.Enabled("WBUI_IFC_DEBUG") {
 		name, class := "<anon>", ""
 		if el := box.Element(); el != nil {
 			name, class = el.NodeName(), el.GetAttribute("class")
@@ -543,7 +544,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				cs := cld.Style()
 				if cs != nil {
 					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {
-						if os.Getenv("WB_LAYOUT_DEBUG") != "" && cld.Element() != nil && cld.Element().NodeName() == "INPUT" {
+						if debugenv.Enabled("WB_LAYOUT_DEBUG") && cld.Element() != nil && cld.Element().NodeName() == "INPUT" {
 							fmt.Printf("[in] INPUT width: %% of contentWidth=%.1f → %v (container=%v class=%q)\n", contentWidth, w, box.Element(), func() string {
 								if box.Element() != nil {
 									return box.Element().GetAttribute("class")

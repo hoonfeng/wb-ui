@@ -4,10 +4,10 @@ package rendering
 import (
 	"fmt"
 	"log"
-	"os"
 	"strings"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/html5"
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
@@ -136,7 +136,7 @@ func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
 	if v.boxScrollOffsets == nil {
 		v.boxScrollOffsets = make(map[dom.Node]graphics.Point)
 	}
-	if os.Getenv("WB_SCROLL_DEBUG") != "" {
+	if debugenv.Enabled("WB_SCROLL_DEBUG") {
 		if el, ok := box.Node().(*dom.Element); ok {
 			log.Printf("[scroll/set] BoxScrollOffset %s → (%.1f, %.1f)", el.LocalName(), x, y)
 		}
@@ -232,7 +232,7 @@ func (v *RenderView) SnapshotScrollOffsets() {
 	for k, p := range v.boxScrollOffsets {
 		v.presentedBoxScrollOffsets[k] = p
 	}
-	if os.Getenv("WB_SCROLL_DEBUG") != "" {
+	if debugenv.Enabled("WB_SCROLL_DEBUG") {
 		var names []string
 		for n, p := range v.presentedBoxScrollOffsets {
 			names = append(names, fmt.Sprintf("%T:(%.0f,%.0f)", n, p.X, p.Y))

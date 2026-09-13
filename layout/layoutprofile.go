@@ -4,8 +4,8 @@
 package layout
 
 import (
+	"wb-ui/debugenv"
 	"log"
-	"os"
 	"time"
 )
 
@@ -19,7 +19,7 @@ var (
 func layProfileInit() {
 	if !layProfileInited {
 		layProfileInited = true
-		layProfileEnabled = os.Getenv("WB_LAYOUT_PROFILE") != ""
+		layProfileEnabled = debugenv.Enabled("WB_LAYOUT_PROFILE")
 	}
 }
 

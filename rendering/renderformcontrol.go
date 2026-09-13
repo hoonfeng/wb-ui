@@ -26,12 +26,12 @@ package rendering
 
 import (
 	"log"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/html5"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
@@ -1401,7 +1401,7 @@ func paintTextAreaText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle
 	// visible — the scrollbar thumb follows BoxScrollOffset while the text
 	// used to stay put (user: "scrollbar moves but content doesn't").
 	textY := y + padY + ascent - sy
-	if os.Getenv("WB_TA_DEBUG") != "" {
+	if debugenv.Enabled("WB_TA_DEBUG") {
 		log.Printf("[ta] paint sy=%.1f boxY=%.1f textY=%.1f", sy, y, textY)
 	}
 

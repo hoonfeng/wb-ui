@@ -19,7 +19,6 @@ package rendering
 
 import (
 	"log"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	"time"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
@@ -51,12 +51,12 @@ var (
 )
 
 func paintDebugEnabled() bool {
-	paintDebugOnce.Do(func() { paintDebugFlag = os.Getenv("WB_PAINT_DEBUG") != "" })
+	paintDebugOnce.Do(func() { paintDebugFlag = debugenv.Enabled("WB_PAINT_DEBUG") })
 	return paintDebugFlag
 }
 
 func paintStatsEnabled() bool {
-	paintStatsOnce.Do(func() { paintStatsFlag = os.Getenv("WB_PAINT_STATS") != "" })
+	paintStatsOnce.Do(func() { paintStatsFlag = debugenv.Enabled("WB_PAINT_STATS") })
 	return paintStatsFlag
 }
 
@@ -73,7 +73,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// 命中测试读快照 → 与用户所见一致（渲染节流下滚动后未渲染帧内
 	// 点击不会按新偏移解析——「滚动后点击生效位置偏移」根因）。
 	view.SnapshotScrollOffsets()
-	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+	if debugenv.Enabled("WB_GUTTER_DEBUG") {
 		log.Printf("[paint-call] rect=%.0f,%.0f %.0fx%.0f dirty=%v", rect.X, rect.Y, rect.Width, rect.Height, view.IsDirty())
 	}
 	if paintStatsEnabled() {
@@ -135,7 +135,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// 白色左边框，绕过层树/裁剪/opacity 动画——静态可见优先）。
 	CursorPainted = false
 	if view.RootLayer() != nil {
-		if os.Getenv("WB_CTM_DEBUG") != "" {
+		if debugenv.Enabled("WB_CTM_DEBUG") {
 			m0 := canvas.GetMatrix()
 			log.Printf("[ctm] Paint entry scaleX=%.3f tx=%.1f ty=%.1f", m0.ScaleX, m0.TransX, m0.TransY)
 		}
@@ -144,7 +144,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 		if paintStatsEnabled() {
 			log.Printf("[paint-timing] tree=%v", time.Since(tTree).Round(time.Microsecond))
 		}
-		if os.Getenv("WB_CTM_DEBUG") != "" {
+		if debugenv.Enabled("WB_CTM_DEBUG") {
 			m1 := canvas.GetMatrix()
 			log.Printf("[ctm] after-layerTree scaleX=%.3f tx=%.1f ty=%.1f depth=%d", m1.ScaleX, m1.TransX, m1.TransY, canvas.SaveCount())
 		}
@@ -170,7 +170,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	if cb := findCursorBox(view); cb != nil {
 		if CumulativeOpacity(RenderObject(cb)) <= 0.01 {
 			// 闪烁隐藏相位（祖先 opacity 动画为 0）：不补画。
-			if os.Getenv("WB_PAINT_TRACE") != "" {
+			if debugenv.Enabled("WB_PAINT_TRACE") {
 				log.Printf("[cursor-fallback] skip (opacity≈0) cursorPainted=%v", CursorPainted)
 			}
 			goto cursorFallbackDone
@@ -188,7 +188,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 		if el, ok := cb.Node().(*dom.Element); ok {
 			RecordComponentPaint(el, cb.X()-csx, cb.Y()-csy, lw, cb.Height(), graphics.Color{}, col, true)
 		}
-		if os.Getenv("WB_PAINT_TRACE") != "" {
+		if debugenv.Enabled("WB_PAINT_TRACE") {
 			log.Printf("[cursor-fallback] painted caret at (%.1f,%.1f %.1fx%.1f) scroll=(%.1f,%.1f) cursorPainted=%v",
 				cb.X()-csx, cb.Y()-csy, lw, cb.Height(), csx, csy, CursorPainted)
 		}
@@ -346,7 +346,7 @@ func paintLayerWithEffects(layer *RenderLayer, info *PaintInfo, layerRect layout
 		info.canvas.SaveLayerForMask(maskRect)
 	}
 	// opacity < 0.98: offscreen layer composited at opacity (inner).
-	needOpacity := st.Opacity < 1.0 && st.Opacity <= 0.98 && os.Getenv("WB_NO_SAVELAYER") == ""
+	needOpacity := st.Opacity < 1.0 && st.Opacity <= 0.98 && !debugenv.Enabled("WB_NO_SAVELAYER")
 	if needOpacity {
 		info.canvas.SaveLayerWithOpacityBounds(st.Opacity, opacityLayerBounds(info, layerRect))
 		info.opacityLayerDepth++
@@ -402,7 +402,7 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	layerRect, clip, clipSpecified := layer.CalculateRects()
 	hasClip := clip.Width > 0 && clip.Height > 0
 	_ = layerRect
-	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+	if debugenv.Enabled("WB_GUTTER_DEBUG") {
 		m := info.canvas.GetMatrix()
 		log.Printf("[layer-ctm] %s ctm_ty=%.1f hasClip=%v scrollT=(%.1f,%.1f)", layerName(layer), float64(m.TransY), hasClip, info.scrollTranslateX, info.scrollTranslateY)
 	}
@@ -628,7 +628,7 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 				(st.OverflowX == style.OverflowAuto || st.OverflowX == style.OverflowScroll ||
 					st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
 				if sx, sy := info.rv.BoxScrollOffset(rb); sx != 0 || sy != 0 {
-					if os.Getenv("WB_GUTTER_DEBUG") != "" {
+					if debugenv.Enabled("WB_GUTTER_DEBUG") {
 						log.Printf("[scroll-tr] layer=%s off=(%.0f,%.0f) translate(-%.0f,-%.0f)", layerName(layer), sx, sy, sx, sy)
 					}
 					info.canvas.Save()
@@ -1381,7 +1381,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							}
 							cursorX, cursorY = info.rv.CursorPos()
 						}
-						if style.DiagEnabled("scrollbar") && os.Getenv("WB_SB_DEBUG") != "" {
+						if style.DiagEnabled("scrollbar") && debugenv.Enabled("WB_SB_DEBUG") {
 							if el, ok := box.Node().(*dom.Element); ok {
 								style.Diagf("scrollbar", "VSB-GEO %q pb=(%.0f,%.0f %.0fx%.0f) scrollT=(%.0f,%.0f) self=(%.0f,%.0f) sy=%.0f",
 									el.GetAttribute("class"), pb.X, pb.Y, pb.Width, pb.Height,
@@ -1903,7 +1903,7 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 			cc = toGraphicsColor(st.Color)
 		}
 		doc := buildSVGDocument(el, cc)
-		if os.Getenv("WB_SVG_DEBUG") != "" {
+		if debugenv.Enabled("WB_SVG_DEBUG") {
 			log.Printf("[svg] paintObjectForeground svg class=%q xy=(%.0f,%.0f) wh=(%.0f,%.0f) viewBox=%v shapes=%d currentColor=#%02x%02x%02x",
 				el.GetAttribute("class"), box.X(), box.Y(), box.Width(), box.Height(),
 				doc.viewBox, len(doc.shapes), cc.R, cc.G, cc.B)
@@ -1914,7 +1914,7 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 			// 不写入共享 doc 字段——svgBackgroundCache 缓存的文档会被
 			// <img>/background-image 路径复用，写入会造成交叉污染。
 			paintSVGTo(info.canvas, doc, box.X(), box.Y(), box.Width(), box.Height(), graphics.Color{})
-		} else if os.Getenv("WB_SVG_DEBUG") != "" {
+		} else if debugenv.Enabled("WB_SVG_DEBUG") {
 			log.Printf("[svg] WARNING: no shapes parsed for svg class=%q", el.GetAttribute("class"))
 		}
 		return

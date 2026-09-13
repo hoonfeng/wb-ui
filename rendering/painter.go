@@ -23,12 +23,12 @@ package rendering
 import (
 	"log"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"wb-ui/dom"
+	"wb-ui/debugenv"
 	"wb-ui/layout"
 	"wb-ui/platform/graphics"
 	"wb-ui/style"
@@ -397,7 +397,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if st.AnimatedBackgroundActive {
 		bg = toGraphicsColor(st.AnimatedBackgroundColor)
 	}
-	if os.Getenv("WB_ANIM_DEBUG") != "" && st.AnimatedBackgroundActive {
+	if debugenv.Enabled("WB_ANIM_DEBUG") && st.AnimatedBackgroundActive {
 		log.Printf("[anim/paint] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) cls=%q",
 			bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height,
 			func() string { if box.Node() != nil { if el, ok := box.Node().(*dom.Element); ok { return el.ClassName() } }; return "" }())
@@ -407,7 +407,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	}
 	// ★ viewport 绘制诊断：xterm-viewport 黑色背景是否实际绘制
 	// （黑色被 paintDebugEnabled 的颜色过滤隐藏，无法从日志确认）。
-	if os.Getenv("WB_VIEWPORT_DEBUG") != "" {
+	if debugenv.Enabled("WB_VIEWPORT_DEBUG") {
 		if box.Node() != nil {
 			if el, ok := box.Node().(*dom.Element); ok && el.ClassName() == "xterm-viewport" {
 				log.Printf("[viewport] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) op=%.2f intersects=%v",
@@ -450,7 +450,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	// ★ viewport FillRect 后读像素验证：黑色是否实际写入 canvas
 	// （[viewport] 日志确认进入绘制路径，但 canvas dump 无黑色——
 	// 疑似 FillRect 未生效/坐标错误/被覆盖）。
-	if os.Getenv("WB_VIEWPORT_DEBUG") != "" {
+	if debugenv.Enabled("WB_VIEWPORT_DEBUG") {
 		if el, ok := box.Node().(*dom.Element); ok && el.ClassName() == "xterm-viewport" {
 			if sdc, ok2 := info.canvas.DeviceClipBounds(); ok2 {
 				// 读 viewport 底部中点像素（物理坐标）
@@ -533,7 +533,7 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 		// ★ WB_PAINT_TRACE=1：光标 PaintBorder 的 opacity/颜色诊断
 		// （用户「没有光标」：记录在但画出来暗/透明 → 看 opacity 与
 		// 边框色 alpha 的实际值）
-		if os.Getenv("WB_PAINT_TRACE") != "" && strings.Contains(el.ClassName(), "cm-cursor") {
+		if debugenv.Enabled("WB_PAINT_TRACE") && strings.Contains(el.ClassName(), "cm-cursor") {
 			log.Printf("[cursor-paint] rect=(%.1f,%.1f %.1fx%.1f) borderL=%.1f style=%q colA=%d col=(%d,%d,%d) op=%.2f",
 				x, y, w, h, leftW, st.BorderLeftStyle, toGraphicsColor(mainC).A,
 				toGraphicsColor(mainC).R, toGraphicsColor(mainC).G, toGraphicsColor(mainC).B, op)
@@ -1079,7 +1079,7 @@ var wbTextDebugLast time.Time
 var wbTermLogCount int
 
 func paintTextDebugLog() {
-	if os.Getenv("WB_TEXT_DEBUG") == "" {
+	if !debugenv.Enabled("WB_TEXT_DEBUG") {
 		return
 	}
 	now := time.Now()
@@ -1110,7 +1110,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		return
 	}
 	// ★ 行号绘制诊断：WB_GUTTER_DEBUG=1 时打印 x<370（gutter 区）的文本绘制
-	if os.Getenv("WB_GUTTER_DEBUG") != "" {
+	if debugenv.Enabled("WB_GUTTER_DEBUG") {
 		segs := text.Segments()
 		if len(segs) > 0 && segs[0].X < 370 {
 			col := toGraphicsColor(st.Color)
@@ -1128,7 +1128,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		return
 	}
 	// 诊断：32W 测量文本为何仍被绘制（若 Visibility 继承失败会走到这里）
-	if os.Getenv("WB_TEXT_DEBUG") != "" && len(text.OriginalText()) >= 8 {
+	if debugenv.Enabled("WB_TEXT_DEBUG") && len(text.OriginalText()) >= 8 {
 		if t8 := text.OriginalText()[:8]; t8 == "WWWWWWWW" {
 			par := text.Parent()
 			pv := "nil"
@@ -1141,7 +1141,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		}
 	}
 	// 终端区域文字诊断：y>600（终端 y=624-778 区域）的 DrawText 前 20 条
-	if os.Getenv("WB_TEXT_DEBUG") != "" && wbTermLogCount < 20 && len(text.Segments()) > 0 {
+	if debugenv.Enabled("WB_TEXT_DEBUG") && wbTermLogCount < 20 && len(text.Segments()) > 0 {
 		seg0 := text.Segments()[0]
 		if seg0.Y > 600 && seg0.Y < 800 {
 			txt := text.OriginalText()
@@ -1352,7 +1352,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// ★ 文字几何跟踪（WB_TEXT_TRACE=1，短文本逐条）：输出 seg0 布局几何与
 	// 分支判定（abs/flex/boxValid），定位「inline-flex 卡片内字形偏下、
 	// 图标+文字不齐」的垂直对位问题（礼物栏 .gitem 卡片内 .gd 文本）。
-	if os.Getenv("WB_TEXT_TRACE") != "" && len(content) > 0 && len(content) <= 12 && len(segments) > 0 {
+	if debugenv.Enabled("WB_TEXT_TRACE") && len(content) > 0 && len(content) <= 12 && len(segments) > 0 {
 		s0 := segments[0]
 		log.Printf("[text-trace] %q seg0=(X%.1f Y%.1f H%.1f LineY%.1f LH%.2f) abs=%v flex=%v boxValid=%v baseH=%.1f flexHL=%.2f absBaseH=%.2f absBase=%.1f",
 			content, s0.X, s0.Y, s0.Height, s0.LineY, s0.LineHeight,
@@ -2005,7 +2005,7 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	if !box.IsVisible() {
 		return false
 	}
-	if os.Getenv("WB_IMG_DEBUG") != "" {
+	if debugenv.Enabled("WB_IMG_DEBUG") {
 		nd := ""
 		if el, ok := box.Node().(*dom.Element); ok {
 			nd = el.LocalName()
@@ -2036,12 +2036,12 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	if el, ok := box.Node().(*dom.Element); ok {
 		src = el.GetAttribute("src")
 	}
-	if os.Getenv("WB_IMG_DEBUG") != "" {
+	if debugenv.Enabled("WB_IMG_DEBUG") {
 		log.Printf("[imgdbg] pre-load img=%v src=%q x=%.0f y=%.0f w=%.0f h=%.0f", img != nil, src, x, y, w, h)
 	}
 	if (img == nil || !img.Loaded()) && src != "" {
 		img = loadBackgroundImage(src, "")
-		if os.Getenv("WB_IMG_DEBUG") != "" {
+		if debugenv.Enabled("WB_IMG_DEBUG") {
 			log.Printf("[imgdbg] after load img=%v loaded=%v", img != nil, img != nil && img.Loaded())
 		}
 		if img != nil && img.Loaded() {
@@ -2102,7 +2102,7 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 			img.Draw(info.canvas, x, y, w, h)
 		}
 	default: // fill (stretch to the content box)
-		if os.Getenv("WB_IMG_DEBUG") != "" {
+		if debugenv.Enabled("WB_IMG_DEBUG") {
 			log.Printf("[imgdbg] drawing %dx%d img at (%.0f,%.0f)", img.Width(), img.Height(), x, y)
 		}
 		img.Draw(info.canvas, x, y, w, h)

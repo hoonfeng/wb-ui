@@ -13,9 +13,10 @@ import (
 	"strings"
 
 	"wb-ui/style"
+	"wb-ui/debugenv"
 )
 
-var wbFlexDebug = os.Getenv("WB_FLEX_DEBUG") != ""
+var wbFlexDebug = debugenv.Enabled("WB_FLEX_DEBUG")
 
 func flexName(box *ElementBox) string {
 	if box == nil { return "<nil>" }
@@ -279,7 +280,7 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 		c.resolveCrossSizes(items, isRow, isReverse, false, cw, ch, state, ch)
 		c.applyPositions(items, box, isRow, isReverse, false, state, crossStart)
-		if os.Getenv("WB_FLEX_DEBUG") != "" && flexName(box) == "div.cm-scroller" {
+		if debugenv.Enabled("WB_FLEX_DEBUG") && flexName(box) == "div.cm-scroller" {
 			for _, it := range items {
 				cg := state.GeometryForBox(it.box)
 				log.Printf("[flex/end] %s: contentH=%.1f bbH=%.1f top=%.1f", flexName(it.box), cg.ContentHeight(), cg.BorderBoxHeight(), cg.Top())
@@ -1100,7 +1101,7 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 }
 
 func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _ bool, cbWidth, cbHeight float64, state *LayoutState, lineCross float64) {
-	if os.Getenv("WB_FLEX_DEBUG") != "" {
+	if debugenv.Enabled("WB_FLEX_DEBUG") {
 		ns := make([]string, len(items))
 		for i, it := range items {
 			ns[i] = flexName(it.box)
@@ -1160,7 +1161,7 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 			// （浏览器 25px，select 27px 正常——select 无 min-height）。
 			if g.ContentHeight() > 0 {
 				newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
-				if os.Getenv("WB_FLEX_DEBUG") != "" {
+				if debugenv.Enabled("WB_FLEX_DEBUG") {
 					log.Printf("[flexcross] %s bb=%.0f minH=%.0f maxH=%.0f -> newBB=%.0f", flexName(it.box), bb, minH, maxH, newBB)
 				}
 				if newBB != bb {
@@ -1423,7 +1424,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 					bb := g.ContentHeight() + vpb
 					if g.ContentHeight() > 0 {
 						newBB := clampSize(bb, minH, maxH, minAuto, maxAuto)
-						if os.Getenv("WB_FLEX_DEBUG") != "" {
+						if debugenv.Enabled("WB_FLEX_DEBUG") {
 							log.Printf("[flex/pos-clamp] %s h=%.0f bb=%.0f minH=%.0f -> newBB=%.0f", flexName(it.box), h, bb, minH, newBB)
 						}
 						if newBB != bb {

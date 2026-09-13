@@ -13,12 +13,12 @@ package rendering
 import (
 	"log"
 	"math"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"wb-ui/css"
+	"wb-ui/debugenv"
 	"wb-ui/dom"
 	"wb-ui/platform/graphics"
 
@@ -458,7 +458,7 @@ func (s *svgCircle) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 type svgEllipse struct{ cx, cy, rx, ry float64 }
 func (s *svgEllipse) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	r := (s.rx + s.ry) / 2
-	if os.Getenv("WB_SVG_DEBUG") != "" {
+	if debugenv.Enabled("WB_SVG_DEBUG") {
 		log.Printf("[svg] ellipse/circle: c=(%.1f,%.1f) r=%.1f fill=#%02x%02x%02x stroke=#%02x%02x%02x w=%.1f dash=%d",
 			s.cx, s.cy, r, ctx.fill.R, ctx.fill.G, ctx.fill.B,
 			ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth, len(ctx.dashArray))
@@ -505,7 +505,7 @@ type svgPolygon struct {
 }
 
 func (s *svgPolygon) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
-	if os.Getenv("WB_SVG_DEBUG") != "" {
+	if debugenv.Enabled("WB_SVG_DEBUG") {
 		log.Printf("[svg] polygon: pts=%d closed=%v fill=#%02x%02x%02x stroke=#%02x%02x%02x w=%.1f",
 			len(s.points), s.closed, ctx.fill.R, ctx.fill.G, ctx.fill.B,
 			ctx.stroke.R, ctx.stroke.G, ctx.stroke.B, ctx.strokeWidth)
@@ -579,7 +579,7 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	// fill-rule="evenodd" stars etc.) rasterize like the browser — the old
 	// triangle fan painted the wrong interior for concave shapes.
 	if fill.A > 0 && len(pts) >= 3 {
-		if os.Getenv("WB_SVG_DEBUG") != "" {
+		if debugenv.Enabled("WB_SVG_DEBUG") {
 			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x rule=%s", len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
 		}
 		canvas.FillPath(pts, fill, ctx.fillRule == "evenodd")
@@ -599,7 +599,7 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 				dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
 			}
 		}
-	} else if os.Getenv("WB_SVG_DEBUG") != "" && len(pts) >= 2 {
+	} else if debugenv.Enabled("WB_SVG_DEBUG") && len(pts) >= 2 {
 		log.Printf("[svg] path SKIPPED stroke: stroke.A=%d strokeWidth=%.1f pts=%d", ctx.stroke.A, ctx.strokeWidth, len(pts))
 	}
 	// Markers: paint the referenced <marker> templates at the path start and

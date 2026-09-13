@@ -16,12 +16,12 @@ package rendering
 
 import (
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"wb-ui/css"
+	"wb-ui/debugenv"
 	"wb-ui/dom"
 	"wb-ui/layout"
 	"wb-ui/style"
@@ -54,7 +54,7 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 		view := NewRenderView(doc, defaultStyle(doc))
 		return view
 	}
-	profile := os.Getenv("WB_REBUILD_PROFILE") != ""
+	profile := debugenv.Enabled("WB_REBUILD_PROFILE")
 	var t0, t1, t2 time.Time
 	if profile {
 		t0 = time.Now()

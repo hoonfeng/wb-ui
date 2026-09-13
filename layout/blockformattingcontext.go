@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"wb-ui/style"
+	"wb-ui/debugenv"
 )
 
 var diagFloats *os.File
@@ -22,7 +23,7 @@ func initDiagFloats() *os.File {
 	if diagFloats != nil {
 		return diagFloats
 	}
-	if os.Getenv("WBUI_FLOAT_DIAG") == "" {
+	if !debugenv.Enabled("WBUI_FLOAT_DIAG") {
 		return nil
 	}
 	f, err := os.Create("diag_floats.txt")
@@ -76,7 +77,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
 	contentWidth := g.ContentWidth()
-	if os.Getenv("WB_LAYOUT_DEBUG") != "" && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
+	if debugenv.Enabled("WB_LAYOUT_DEBUG") && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
 		fmt.Printf("[bfc] dialog-box: contentWidth=%.1f parent=%v children=%d\n", contentWidth, box.Parent(), len(box.Children()))
 	}
 
@@ -153,7 +154,7 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 
 		ch := state.GeometryForBox(childEb)
-		if os.Getenv("WB_LAYOUT_DEBUG") != "" && childEb.Element() == nil && box.Element() != nil && box.Element().GetAttribute("class") == "dialog-box" {
+		if debugenv.Enabled("WB_LAYOUT_DEBUG") && childEb.Element() == nil && box.Element() != nil && box.Element().GetAttribute("class") == "dialog-box" {
 			fmt.Printf("[bfc] dialog-box child (anon) content=%.1f border=%.1f display=%d\n", ch.ContentWidth(), ch.BorderBoxWidth(), childCs.Display)
 		}
 		// ★ BFC 根在 float 带内收缩（CSS 2.1 §9.5）：建立 BFC 的块级盒

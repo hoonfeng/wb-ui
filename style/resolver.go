@@ -539,6 +539,13 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	}
 	r.resolveCustomProperties(cs)
 
+	// ★ 边框族的声明（物理 + 逻辑）延后应用：逻辑属性（border-inline-start 等）
+	// 需要 direction 才能映射到物理边，而 direction 与边框声明同处一个级联、可能
+	// 声明在边框之后。这里按级联顺序收集，待普通属性（含 direction）应用完毕后再
+	// 统一按序应用——logical 与 physical 的「后者覆盖前者」语义因此仍然成立
+	// （logical-borders 夹具：`.b{border-right:4px;border-inline-start:12px}` 应由
+	// 逻辑声明胜出，`.c{border-inline-start:12px;border-right:4px}` 由物理声明胜出）。
+	var borderDecls []css.Declaration
 	for _, cd := range collected {
 		if strings.HasPrefix(cd.decl.Name, "--") {
 			continue
@@ -547,8 +554,13 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 		if declContainsVar(d.Value) {
 			d.Value = r.resolveVarInTokens(cs, d.Value, map[string]bool{})
 		}
+		if isBorderPropertyName(d.Name) {
+			borderDecls = append(borderDecls, d)
+			continue
+		}
 		applyDeclaration(cs, d)
 	}
+	applyBorderDeclarations(cs, borderDecls)
 
 	// 兜底：展开剩余未展开的 var()（例如 applyScrollbarDeclarations 写入
 	// Properties 的 -webkit-scrollbar-* 属性）。此时普通属性（border 系列
@@ -1256,6 +1268,97 @@ func importanceRank(origin css.Origin, important bool) int {
 // applyDeclaration applies a single CSS declaration to a ComputedStyle. Properties
 // that the resolver knows how to interpret are set on typed fields; the rest are
 // stored in the Properties map for later retrieval.
+// isBorderPropertyName 报告声明名是否属于边框族（物理、逻辑与简写）。
+// 这类声明统一延迟应用，见 ResolveElement 的边框延后处理。
+func isBorderPropertyName(name string) bool {
+	return strings.HasPrefix(strings.ToLower(name), "border")
+}
+
+// applyBorderDeclarations 按级联顺序应用边框声明（物理 + 逻辑）。
+//
+// CSS Writing Modes §7.1–7.2：逻辑边框属性（border-inline-start 等）按 direction /
+// 书写模式映射到物理边，并与物理属性在**同一级联顺序**里互相覆盖。映射需要
+// direction，而 direction 可能与边框声明同处一个级联（甚至声明在之后），因此调用
+// 方把边框声明延迟到普通属性（含 direction）应用完毕后再交给本函数按序处理：每条
+// 逻辑声明就地展开成物理声明，再走 applyDeclaration 覆盖对应物理边。
+func applyBorderDeclarations(cs *ComputedStyle, decls []css.Declaration) {
+	rtl := strings.EqualFold(cs.Direction, "rtl")
+	for _, d := range decls {
+		for _, pd := range mapLogicalBorderDecl(d, rtl) {
+			applyDeclaration(cs, pd)
+		}
+	}
+}
+
+// mapLogicalBorderDecl 把一条逻辑边框声明展开为对应的物理声明；非逻辑属性原样返回。
+// 展开可能得到两条（border-inline / border-block 简写作用于两侧）。
+//
+//   - border-inline-start / -end（含 -width/-style/-color）→ border-left/right…
+//   - border-block-start / -end → border-top/bottom…
+//   - border-inline / -block（含 -width/-style/-color）→ 两侧
+//
+// direction:rtl 时行内轴起点在右侧（CSS Writing Modes §7.1）：inline-start → right、
+// inline-end → left；块轴在水平书写模式下即 block-start → top、block-end → bottom。
+// width/style/color 简写的值是 1~2 个分量（start, end），单值时两侧相同。
+func mapLogicalBorderDecl(d css.Declaration, rtl bool) []css.Declaration {
+	name := strings.ToLower(d.Name)
+	var rest string
+	inline := false
+	switch {
+	case name == "border-inline" || strings.HasPrefix(name, "border-inline-"):
+		rest = strings.TrimPrefix(name, "border-inline")
+		inline = true
+	case name == "border-block" || strings.HasPrefix(name, "border-block-"):
+		rest = strings.TrimPrefix(name, "border-block")
+	default:
+		return []css.Declaration{d}
+	}
+	rest = strings.TrimPrefix(rest, "-")
+	startEdge, endEdge := "left", "right"
+	if rtl {
+		startEdge, endEdge = "right", "left"
+	}
+	if !inline {
+		startEdge, endEdge = "top", "bottom"
+	}
+	switch {
+	case rest == "":
+		// 单值简写 <'border-top'>：作用于两侧，值不是分量列表、不可拆。
+		return []css.Declaration{
+			{Name: "border-" + startEdge, Value: d.Value, Important: d.Important},
+			{Name: "border-" + endEdge, Value: d.Value, Important: d.Important},
+		}
+	case rest == "start":
+		return []css.Declaration{{Name: "border-" + startEdge, Value: d.Value, Important: d.Important}}
+	case rest == "end":
+		return []css.Declaration{{Name: "border-" + endEdge, Value: d.Value, Important: d.Important}}
+	case strings.HasPrefix(rest, "start-"), strings.HasPrefix(rest, "end-"):
+		suffix := strings.TrimPrefix(rest, "start-")
+		edge := startEdge
+		if strings.HasPrefix(rest, "end-") {
+			suffix = strings.TrimPrefix(rest, "end-")
+			edge = endEdge
+		}
+		return []css.Declaration{{Name: "border-" + edge + "-" + suffix, Value: d.Value, Important: d.Important}}
+	default:
+		// width / style / color 简写：1~2 个分量（start, end）。
+		parts := splitShorthandValue(d.ValueString())
+		if len(parts) == 0 {
+			return nil
+		}
+		if len(parts) == 1 {
+			parts = append(parts, parts[0])
+		}
+		asTokens := func(s string) []css.Token {
+			return []css.Token{{Type: css.TokenIdent, Value: s}}
+		}
+		return []css.Declaration{
+			{Name: "border-" + startEdge + "-" + rest, Value: asTokens(parts[0]), Important: d.Important},
+			{Name: "border-" + endEdge + "-" + rest, Value: asTokens(parts[1]), Important: d.Important},
+		}
+	}
+}
+
 func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	name := strings.ToLower(d.Name)
 	valueString := d.ValueString()

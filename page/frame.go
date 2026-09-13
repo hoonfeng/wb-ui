@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"wb-ui/css"
+	"wb-ui/debugenv"
 	"wb-ui/dom"
 	"wb-ui/html"
 	"wb-ui/html5"
@@ -260,7 +261,7 @@ func (f *Frame) RebuildRenderTree() {
 		if ox, oy := oldRV.CursorPos(); ox != 0 || oy != 0 {
 			f.renderView.SetCursorPos(ox, oy)
 		}
-		if os.Getenv("WB_SCROLL_DEBUG") != "" {
+		if debugenv.Enabled("WB_SCROLL_DEBUG") {
 			Logf("RebuildRenderTree", "migrated scroll offsets old=%d new=%d", before, f.renderView.ScrollOffsetCount())
 		}
 		objCount = countRenderObjects(rendering.RenderObject(f.renderView))
