@@ -880,7 +880,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// The child (e.g. anonymous wrapper around text) may use a
 			// different font-size (inherited or from CSS), producing a
 			// taller line than fontLineGap(box) estimates.
-			if cldBH := cldG.BorderBoxHeight(); cldBH > lineHeight {
+			// ★ 含垂直 margin：inline-block/replaced 子盒参与行盒计算的是它的
+			// margin 盒（CSS 2.1 §10.8）。漏掉 margin 会让相邻行的盒子直接
+			// 贴在一起——img-density-and-alt 的 .box{display:inline-block;
+			// margin:6px} 三个红框因此粘连成一个连通色块（父高 124 而应为
+			// 136），每个独立边框都量不出来。水平方向本已计入（见下面的
+			// cldW），垂直方向是对称补齐。
+			if cldBH := cldG.BorderBoxHeight() + margin.Vertical(); cldBH > lineHeight {
 				lineHeight = cldBH
 			}
 			cldW := cldG.BorderBoxWidth() + margin.Horizontal()

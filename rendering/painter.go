@@ -919,6 +919,19 @@ func paintBorderSide(canvas *graphics.Canvas, x, y, w, h float64, col graphics.C
 	if canvas == nil || col.A == 0 || w <= 0 || h <= 0 {
 		return
 	}
+	// ★ 设备像素对齐：边框若落在亚像素位置（如 y=577.6），FillRect 会把最外
+	// 与最内一行画成混色（抗锯齿），一条纯色外框于是被拆成互不连通的行——
+	// cssprobe 的像素判据（精确色 + 连通块尺寸）因此量不出 304x104 的红框
+	// （img-density-and-alt 的 G 项：上下边 1px 高、左右边与角不相连）。
+	// 浏览器对边框边同样做设备像素对齐。这里取整的是**外边界**而不是宽高，
+	// 尺寸因此不会被 ±0.5 漂移；不足 1px 的细边保持原样（否则会被取整掉）。
+	if style == "solid" {
+		nx0, ny0 := math.Round(x), math.Round(y)
+		nx1, ny1 := math.Round(x+w), math.Round(y+h)
+		if nx1-nx0 >= 1 && ny1-ny0 >= 1 {
+			x, y, w, h = nx0, ny0, nx1-nx0, ny1-ny0
+		}
+	}
 	switch style {
 	case "solid":
 		canvas.FillRect(x, y, w, h, col)

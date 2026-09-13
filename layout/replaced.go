@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"wb-ui/dom"
 )
 
 // maxResourceProbeBytes bounds how much of a local file is read while probing
@@ -57,6 +59,13 @@ func replacedIntrinsicSize(box *ElementBox) intrinsicSize {
 	switch el.LocalName() {
 	case "img", "embed":
 		src = el.GetAttribute("src")
+		// ★ srcset 的当前候选把固有像素折算成 CSS 像素（CSS Images 3 §4.1）：
+		// `… 2x` 的 648px 资源在 1x 视口下占 324 CSS px，`… 648w
+		// sizes="300px"` 则取 sizes 的 300px。此前只读 src，因此只有 srcset
+		// 的图片完全量不出尺寸（img-density-and-alt 的 B/C 两项）。
+		if is, ok := srcsetIntrinsic(el); ok {
+			return is
+		}
 	case "video", "audio":
 		src = el.GetAttribute("poster")
 	case "object":
@@ -65,6 +74,108 @@ func replacedIntrinsicSize(box *ElementBox) intrinsicSize {
 		return intrinsicSize{}
 	}
 	return lookupIntrinsic(src)
+}
+
+// srcsetIntrinsic resolves the intrinsic size of an <img>'s current srcset
+// candidate, scaled into CSS pixels by its density (Nx) or width (Nw + sizes)
+// descriptor.
+func srcsetIntrinsic(el *dom.Element) (intrinsicSize, bool) {
+	url, desc, ok := firstSrcsetCandidate(el.GetAttribute("srcset"))
+	if !ok {
+		return intrinsicSize{}, false
+	}
+	is := lookupIntrinsic(url)
+	if is.w <= 0 || is.h <= 0 {
+		return intrinsicSize{}, false
+	}
+	switch {
+	case strings.HasSuffix(desc, "x"):
+		d, err := strconv.ParseFloat(strings.TrimSuffix(desc, "x"), 64)
+		if err != nil || d <= 0 {
+			return intrinsicSize{}, false
+		}
+		is.w, is.h = is.w/d, is.h/d
+	case strings.HasSuffix(desc, "w"):
+		w, err := strconv.ParseFloat(strings.TrimSuffix(desc, "w"), 64)
+		if err != nil || w <= 0 {
+			return intrinsicSize{}, false
+		}
+		cssW := w
+		if v := firstSizesLength(el.GetAttribute("sizes")); v > 0 {
+			cssW = v
+		}
+		is.h = is.h * (cssW / is.w)
+		is.w = cssW
+	default:
+		// No descriptor: the candidate is 1x, i.e. its size as-is.
+	}
+	if is.w <= 0 || is.h <= 0 {
+		return intrinsicSize{}, false
+	}
+	is.ratio = is.w / is.h
+	return is, true
+}
+
+// firstSrcsetCandidate returns the first srcset entry's URL and descriptor.
+// A data: URI contains a comma of its own, so the list is only split on commas
+// when it starts with a plain URL; otherwise the trailing descriptor is peeled
+// off the whole value.
+func firstSrcsetCandidate(srcset string) (url, desc string, ok bool) {
+	s := strings.TrimSpace(srcset)
+	if s == "" {
+		return "", "", false
+	}
+	first := s
+	if !strings.HasPrefix(strings.ToLower(s), "data:") {
+		if i := strings.IndexByte(s, ','); i >= 0 {
+			first = s[:i]
+		}
+	}
+	fields := strings.Fields(first)
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	if len(fields) > 1 {
+		if last := strings.ToLower(fields[len(fields)-1]); isSrcsetDescriptor(last) {
+			desc = last
+			fields = fields[:len(fields)-1]
+		}
+	}
+	url = strings.Join(fields, " ")
+	return url, desc, url != ""
+}
+
+func isSrcsetDescriptor(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	switch s[len(s)-1] {
+	case 'x', 'w':
+	default:
+		return false
+	}
+	_, err := strconv.ParseFloat(s[:len(s)-1], 64)
+	return err == nil
+}
+
+// firstSizesLength returns the first absolute length in a `sizes` attribute
+// ("(max-width: 600px) 300px, 50vw" → 300). Viewport-relative lengths need the
+// layout viewport, which the sizing pass does not own, so they report 0.
+func firstSizesLength(sizes string) float64 {
+	for _, part := range strings.Split(sizes, ",") {
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		v := fields[len(fields)-1]
+		if !strings.HasSuffix(v, "px") {
+			continue
+		}
+		if f, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 64); err == nil && f > 0 {
+			return f
+		}
+	}
+	return 0
 }
 
 func lookupIntrinsic(src string) intrinsicSize {
