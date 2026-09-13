@@ -85,8 +85,11 @@ body { margin: 0; font-family: sans-serif; font-size: 12px; }
 	}
 	// Sanity: the title must actually wrap (2 lines) for this regression test
 	// to exercise the post-layout line-height growth.
-	if title.h < 2*14 || title.h > 3*14 {
-		t.Fatalf("title height %.1f: expected 2 wrapped lines (~28.8px), test scenario invalid", title.h)
+	// 行高区间按字体度量留出裕量，不再硬编码 14px：`sans-serif` 现在按平台
+	// 映射到 Arial（graphics.firstConcreteFamily），12px 文本 normal 行高从
+	// 14.4 变为 13.8，2 行高度 27.6 会被 `2*14` 误判为「场景无效」。
+	if title.h < 2*13 || title.h > 3*15 {
+		t.Fatalf("title height %.1f: expected 2 wrapped lines (~27.6px), test scenario invalid", title.h)
 	}
 	sumCenter := sum.top + sum.h/2
 	t.Logf("summary y=%.1f h=%.1f center=%.1f | title h=%.1f", sum.top, sum.h, sumCenter, title.h)

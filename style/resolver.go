@@ -262,6 +262,86 @@ func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
 	}
 }
 
+// hintSourceOrder 是表现提示（presentational hints）的 sourceOrder。
+//
+// HTML 规范把表现提示定义为「作者级最低优先级」：它压过 UA 样式表，但被
+// 任何作者规则覆盖。用 UA origin 表达是错的——级联先比 specificity，UA 的
+// `table{border-spacing:2px}` 是 (0,0,1) 而提示是 (0,0,0)，UA 会赢
+// （实测 `cellspacing="0"` 完全无效，单元格仍偏移 2px）。因此用 author
+// origin + 最小源序：作者规则（specificity ≥ 提示或源序更大）胜出，UA 规则
+// 因 origin 更低而全部输给提示。
+const hintSourceOrder = -1
+
+// presentationalHintsFor 把元素的 HTML 表现属性映射为 CSS 声明。
+//
+// HTML 标准 §15.3.3 定义的 mapping 之一：表格的 cellspacing / cellpadding
+// 属性分别映射到 border-spacing 与每个单元格的 padding。这类提示必须排在
+// UA 样式表之后、作者样式之前——否则 `cellpadding="8"` 会被 UA 的
+// `th,td{padding:1px}` 吃掉，或反过来盖掉作者的 `td{padding:3px}`。
+func presentationalHintsFor(el *dom.Element) []collectedDecl {
+	if el == nil {
+		return nil
+	}
+	switch el.LocalName() {
+	case "table":
+		// <table cellspacing="N"> → border-spacing: Npx
+		if n, ok := attrPX(el.GetAttribute("cellspacing")); ok {
+			return hintDecls("border-spacing:"+strconv.FormatFloat(n, 'g', -1, 64)+"px", el)
+		}
+	case "td", "th":
+		// 单元格 padding 来自最近的 table 祖先的 cellpadding 属性。
+		if n, ok := cellPaddingFor(el); ok {
+			return hintDecls("padding:"+strconv.FormatFloat(n, 'g', -1, 64)+"px", el)
+		}
+	}
+	return nil
+}
+
+// attrPX 解析 HTML 属性里的非负像素数值（"0"、"8"）。
+func attrPX(v string) (float64, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// cellPaddingFor 查找元素所属表格的 cellpadding 属性值。
+func cellPaddingFor(el *dom.Element) (float64, bool) {
+	for n := el.ParentNode(); n != nil; n = n.ParentNode() {
+		e, ok := n.(*dom.Element)
+		if !ok {
+			continue
+		}
+		if e.LocalName() == "table" {
+			return attrPX(e.GetAttribute("cellpadding"))
+		}
+	}
+	return 0, false
+}
+
+// hintDecls 把一段声明文本解析为表现提示声明（UA origin + hintSourceOrder）。
+func hintDecls(text string, el *dom.Element) []collectedDecl {
+	p := css.NewParserWithOrigin(text, css.OriginUserAgent)
+	decls := p.ParseDeclarationList()
+	out := make([]collectedDecl, 0, len(decls))
+	for _, d := range decls {
+		out = append(out, collectedDecl{
+			decl:        d,
+			origin:      css.OriginAuthor,
+			important:   d.Important,
+			specificity: css.Specificity{},
+			sourceOrder: hintSourceOrder,
+			scope:       elScopeDepth(el),
+		})
+	}
+	return out
+}
+
 // collectedDecl is an intermediate structure used during cascade sorting.
 type collectedDecl struct {
 	decl        css.Declaration
@@ -384,6 +464,14 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 		}
 	}
 
+	// HTML 表现提示（presentational hints，HTML 标准 §15.3.3）：由元素属性
+	// 派生的声明，优先级**高于 UA 样式表、低于作者样式**。目前覆盖表格的
+	// cellspacing（→ border-spacing）与 cellpadding（→ 单元格 padding）。
+	// 层级用「UA origin + 极大的 sourceOrder」表达：同 origin 内 sourceOrder
+	// 大者胜（压过 UA 规则），而作者 origin 整体排在 UA 之后（作者声明覆盖
+	// 提示，例如 `#author-padding td{padding:3px}` 胜过 `cellpadding="8"`）。
+	collected = append(collected, presentationalHintsFor(el)...)
+
 	// Sort by (origin, importance, specificity, sourceOrder). Higher origin first
 	// (user > author > UA), then important > non-important, then specificity, then
 	// source order.
@@ -473,6 +561,22 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// the computed style — see resolveInheritKeyword.
 	resolveInheritKeyword(cs, parentCS)
 
+	// ★ `<table>` 元素把 legacy 对齐值归一为 start。Chrome 实测（headless
+	// 注入 getComputedStyle）：`<center><table>` 中 table 的 computed
+	// textAlign 是 start（td/tr/tbody 全 start），单元格内 inline-block
+	// 左对齐；而 `display:table` 的 div 仍保留 -webkit-center，`<table
+	// style="text-align:center">` 也能正常继承 center。即重置只针对
+	// **table 元素上的 legacy 值**（无论继承还是自身声明），不是表格盒
+	// 类型。legacy-center 夹具 "centered table resets legacy alignment
+	// internally"：期望 td 内 inline-block x=100，此前被外层 center 的
+	// -webkit-center 继承居中到 x=160。
+	if el.NodeName() == "TABLE" {
+		switch cs.TextAlign {
+		case TextAlignWebkitCenter, TextAlignWebkitLeft, TextAlignWebkitRight:
+			cs.TextAlign = TextAlignStart
+		}
+	}
+
 	r.cache[el] = cachedStyle{cs: cs, ver: el.AttrVersion()}
 	return cs
 }
@@ -495,14 +599,29 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 // expects a 190x60 background box and got 220x89. `parent` is nil for the root
 // element, where the keyword falls back to the initial value.
 func resolveInheritKeyword(cs, parent *ComputedStyle) {
-	if cs == nil || cs.BoxSizing != "inherit" {
+	if cs == nil {
 		return
 	}
-	if parent != nil {
-		cs.BoxSizing = parent.BoxSizing
-		return
+	if cs.BoxSizing == "inherit" {
+		if parent != nil {
+			cs.BoxSizing = parent.BoxSizing
+		} else {
+			cs.BoxSizing = ""
+		}
 	}
-	cs.BoxSizing = ""
+	// vertical-align 本身不继承（CSS 2.1 §10.8），但 UA 样式表用显式 inherit
+	// 把它传下去：`tbody{vertical-align:middle}` + `tr{vertical-align:inherit}`
+	// + `td,th{vertical-align:inherit}` 就是浏览器「表格单元格内容默认垂直居中」
+	// 的实现方式。不解析该关键字时 td 的字段一直是字面量 "inherit"，
+	// 表格布局无从判断（table-track-geometry 的 "row-group default vertically
+	// centers cell content"：期望 60px 行内 20px 方块居中于 y=260，实测贴顶 240）。
+	if cs.VerticalAlign == "inherit" {
+		if parent != nil && parent.VerticalAlign != "" && parent.VerticalAlign != "inherit" {
+			cs.VerticalAlign = parent.VerticalAlign
+		} else {
+			cs.VerticalAlign = "baseline"
+		}
+	}
 }
 
 // declContainsVar reports whether the declaration value references a var()
@@ -1524,6 +1643,22 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		}
 	case "border-collapse":
 		cs.BorderCollapse = parseBorderCollapse(valueString)
+	case "border-spacing":
+		// `border-spacing: <length> [<length>]`（CSS 2.1 §17.6.1）：单值同时
+		// 设置水平与垂直；两值时先水平后垂直。只对 border-collapse:separate
+		// 的表格生效（collapse 时该属性被忽略——判定在表格布局里）。
+		spacing := strings.Fields(strings.TrimSpace(valueString))
+		if len(spacing) >= 1 {
+			if l, ok := parseLength(spacing[0]); ok {
+				cs.BorderSpacingH = l
+				cs.BorderSpacingV = l
+			}
+		}
+		if len(spacing) >= 2 {
+			if l, ok := parseLength(spacing[1]); ok {
+				cs.BorderSpacingV = l
+			}
+		}
 	case "box-sizing":
 		cs.BoxSizing = valueString
 	case "visibility":
@@ -1908,6 +2043,14 @@ func parseTextAlign(s string) TextAlignType {
 		return TextAlignJustify
 	case "end":
 		return TextAlignEnd
+	// ★ legacy 值：HTML 的 <center> 用 -webkit-center（Blink/WebKit），
+	// Gecko 用 -moz-center。行内语义等同 center，另让块级子盒居中。
+	case "-webkit-center", "-moz-center":
+		return TextAlignWebkitCenter
+	case "-webkit-left", "-moz-left":
+		return TextAlignWebkitLeft
+	case "-webkit-right", "-moz-right":
+		return TextAlignWebkitRight
 	}
 	return TextAlignStart
 }
@@ -2252,8 +2395,17 @@ func parseFlexShorthand(s string) (grow, shrink float64, basis Length) {
 	return grow, shrink, basis
 }
 
-// fontSizeTokenRe 匹配 font 简写里的字号 token：13px、13px/1.4、12pt/1.5em 等。
-var fontSizeTokenRe = regexp.MustCompile(`^([0-9]*\.?[0-9]+(?:px|em|rem|pt|%|vh|vw|vmin|vmax))(?:/([0-9]*\.?[0-9]*(?:px|em|rem|pt|%)?))?$`)
+// fontSizeTokenRe 匹配 font 简写里的字号 token：13px、13px/1.4、12pt/1.5em、
+// 12px/normal 以及以斜杠收尾的 12px/ 等。
+//
+// ★ `/normal`（以及 thin/thick 之外的关键字形式）必须被捕获：此前 line-height
+// 组只允许「数字 + 可选单位」，`font: 12px/normal Arial` 整个 token 匹配失败
+// → 简写不展开、size 丢失、family 被解析成 `normal "Arial"`（把 line-height
+// 关键字一起吞进字体名）→ 字体族无从匹配、退回默认 typeface，行高与字宽全错
+// （font-metric-line-height 夹具：期望 Arial 网格对齐行高 14px，实测按默认
+// 字体度量 16px，整列 marker 下移 20px）。
+// 允许斜杠后为空（`12px/` 与后随独立 token 的情形在 parseFontShorthand 里接续）。
+var fontSizeTokenRe = regexp.MustCompile(`^([0-9]*\.?[0-9]+(?:px|em|rem|pt|%|vh|vw|vmin|vmax))(?:/(normal|[0-9]*\.?[0-9]*(?:px|em|rem|pt|%)?))?$`)
 
 // parseFontShorthand 解析 CSS font 简写（浏览器标准）：
 //
@@ -2304,9 +2456,26 @@ func parseFontShorthand(s string) (style, variant, weight, size, lineHeight, fam
 	}
 	// 3) size 后：独立 /lh token 或 family
 	rest := tokens[sizeIdx+1:]
-	if lineHeight == "" && len(rest) > 0 && strings.HasPrefix(rest[0], "/") {
-		lineHeight = strings.TrimPrefix(rest[0], "/")
-		rest = rest[1:]
+	if lineHeight == "" && len(rest) > 0 {
+		switch {
+		case rest[0] == "/":
+			// `font: 12px / normal Arial`：斜杠独立成 token，行高是下一个 token。
+			if len(rest) > 1 {
+				lineHeight = rest[1]
+				rest = rest[2:]
+			} else {
+				rest = rest[1:]
+			}
+		case strings.HasPrefix(rest[0], "/"):
+			// `font: 12px/1.4 Arial` 或 `font: 12px/ normal Arial`（斜杠粘在
+			// 字号 token 尾部且其后另有 token）。
+			lineHeight = strings.TrimPrefix(rest[0], "/")
+			rest = rest[1:]
+			if lineHeight == "" && len(rest) > 0 {
+				lineHeight = rest[0]
+				rest = rest[1:]
+			}
+		}
 	}
 	family = strings.Join(rest, " ")
 	ok = true

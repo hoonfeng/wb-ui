@@ -63,6 +63,18 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cs == nil { return }
 	isRow := cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
 	isReverse := cs.FlexDirection == "row-reverse" || cs.FlexDirection == "column-reverse"
+	// ★ RTL：row 的主轴是 inline 轴，main-start 与内容盒的 inline-start 一致
+	// （CSS Flexbox §5.1）——direction:rtl 下 `flex-direction:row` 从右往左排
+	// （等价于 LTR 的 row-reverse），而 row-reverse 在 RTL 下反过来从左往右。
+	// column 的主轴是块轴，不受 direction 影响。此前 flex 完全忽略 direction，
+	// RTL 页面的 flex 行仍从左排（direction-rtl 的 .case.flex 期望首个
+	// item 在 x=850，实测 x=0）。翻转 isReverse 后，下方所有主轴逻辑
+	// （起点 = 容器右边界、justify-content 的 flex-start/end 语义、逐项
+	// 向左推进）自动按 RTL 生效 —— items 的顺序仍是文档序（规范要求），
+	// 只有推进方向改变。
+	if isRow && isRTL(cs) {
+		isReverse = !isReverse
+	}
 
 	g := state.GeometryForBox(box)
 	// ★ 增量布局 B 剪枝：flex 容器 clean 且位置/尺寸未变且无绝对定位子 → 跳过整容器
@@ -327,8 +339,15 @@ func (c *FlexFormattingContext) layoutWrapped(items []*flexItem, container *Elem
 	if !isRow {
 		mainSize = ch
 	}
-	gapMain := flexGap(cs, isRow, fontSizeOf(container))
-	gapCross := flexGap(cs, !isRow, fontSizeOf(container))
+	// mainSize 已在上面按主轴选好。gap 的百分比参考容器在**该方向**的内容
+	// 尺寸：row 容器的主轴 gap 是 column-gap（参考宽度 cw）、cross 是
+	// row-gap（参考高度 ch）；column 容器相反。
+	crossRef := ch
+	if !isRow {
+		crossRef = cw
+	}
+	gapMain := flexGap(cs, isRow, fontSizeOf(container), mainSize)
+	gapCross := flexGap(cs, !isRow, fontSizeOf(container), crossRef)
 	wrapReverse := cs.FlexWrap == "wrap-reverse"
 
 	// 1. 行分组：累计 base+margin+gap，超 mainSize 开新行。
@@ -559,6 +578,17 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	// For row-direction flex containers, the max-content inline size is the SUM
 	// of children (plus gap), matching CSS-FLEXBOX §9.9.2. For block/non-flex
 	// containers it's the max of children.
+	// ★ 表格例外：max-content 宽度由列语义决定（单元格 width 是内容宽、列间
+	// border-spacing、单元格 padding），通用的「求和 / 取最大子盒」会算出错误
+	// 值。绝对定位表格的收缩宽度正走这条路（positioned.go 的 shrink-to-fit
+	// 调 intrinsicContentWidth）：`table{position:absolute}` 的两列表格
+	// （#zero-padding 列 40/50）应得 90，实测按最宽子盒量成 50；#ua-default
+	// 应得 16（10 + padding2 + 间距 2×2），实测 12。
+	if box.EstablishesTableFormattingContext() {
+		_, p, b := computeBoxModel(box, 0, fontSizeOf(box))
+		return tablePreferredWidth(box) + p.Horizontal() + b.Horizontal()
+	}
+
 	isFlexRow := cs != nil && box.EstablishesFlexFormattingContext() &&
 		cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
 
@@ -946,7 +976,9 @@ func (c *FlexFormattingContext) distributeFreeSpace(items []*flexItem, container
 	if len(items) > 1 {
 		if p := items[0].box.Parent(); p != nil {
 			if pcs := p.Style(); pcs != nil {
-				gap = flexGap(pcs, isRow, fontSizeOf(items[0].box))
+				// reference = 主轴容器尺寸（row 容器的主轴 gap 是 column-gap，
+				// 百分比按宽度解析）。
+				gap = flexGap(pcs, isRow, fontSizeOf(items[0].box), containerMainSize)
 			}
 		}
 	}
@@ -1245,7 +1277,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 	// CSS gap (flex gap) between items.
 	gap := 0.0
 	if containerCS != nil {
-		gap = flexGap(containerCS, isRow, fontSizeOf(container))
+		ref := ch
+		if isRow {
+			ref = cw
+		}
+		gap = flexGap(containerCS, isRow, fontSizeOf(container), ref)
 	}
 
 	if isRow {
@@ -1854,23 +1890,37 @@ func alignOf(box *ElementBox, containerCS *style.ComputedStyle) string {
 }
 
 // flexGap returns the effective gap for the flex container.
-func flexGap(cs *style.ComputedStyle, isRow bool, fontSize float64) float64 {
-	var gapV float64
+// flexGap resolves the used value of the flex container's main/cross gap.
+//
+// The previous implementation read the raw `style.Length` value and only
+// scaled `em` — so `gap: 1rem` produced 1px, `gap: 2vw` produced 2px and
+// `gap: calc(8px + 1em)` produced 0 (the calc branch left Unit="calc" with
+// Value=0). Gaps now go through resolveLength, which knows rem (root
+// font-size), vw/vh/vmin/vmax (viewport), % (reference = container content
+// size) and calc() with a real context — the same path used for every other
+// length in the engine. Negative gaps are invalid and clamp to 0.
+func flexGap(cs *style.ComputedStyle, isRow bool, fontSize, reference float64) float64 {
+	if cs == nil {
+		return 0
+	}
+	// `gap` is the shorthand for row-gap / column-gap; the longhand wins when
+	// it carries an explicit value (only `normal` defers to the shorthand).
+	explicit := cs.RowGap
 	if isRow {
-		gapV = cs.ColumnGap.Value
-		if cs.Gap.Value > 0 {
-			gapV = cs.Gap.Value
-		}
-	} else {
-		gapV = cs.RowGap.Value
-		if cs.Gap.Value > 0 {
-			gapV = cs.Gap.Value
-		}
+		explicit = cs.ColumnGap
 	}
-	if cs.Gap.Unit == "em" {
-		gapV *= fontSize
+	if explicit.Unit == "" || explicit.Unit == "normal" {
+		explicit = cs.Gap
 	}
-	return gapV
+	switch explicit.Unit {
+	case "", "normal", "auto":
+		return 0
+	}
+	r := resolveLength(explicit, reference, fontSize)
+	if !r.Definite {
+		return 0
+	}
+	return math.Max(0, r.Value)
 }
 
 var _ = style.DisplayFlex

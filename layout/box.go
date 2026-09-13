@@ -404,8 +404,8 @@ func BuildLayoutTree(root *dom.Element, resolver *style.Resolver) Box {
 	cs := resolveStyleOrDefault(resolver, root)
 	// The root element's computed font-size is the `rem` base for the whole
 	// document (CSS Values §5.1) — see remBase.
-	if cs != nil && cs.FontSize.Value > 0 && (cs.FontSize.Unit == "px" || cs.FontSize.Unit == "") {
-		SetRootFontSize(cs.FontSize.Value)
+	if px := rootFontSizePx(cs); px > 0 {
+		SetRootFontSize(px)
 	}
 	box := newBoxForElement(root, cs)
 	buildChildren(box, root, resolver)

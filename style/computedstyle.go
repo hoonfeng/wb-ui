@@ -100,6 +100,12 @@ const (
 	TextAlignRight
 	TextAlignCenter
 	TextAlignJustify
+	// ★ legacy 对齐值（HTML 的 <center> UA 样式 = text-align:-webkit-center）。
+	// 行内内容表现与对应标准值相同，额外让**块级子盒**水平居中/靠边——
+	// 见 TextAlignType.InlineEquivalent 与 blockformattingcontext 的定位分支。
+	TextAlignWebkitCenter
+	TextAlignWebkitLeft
+	TextAlignWebkitRight
 )
 
 // Length represents a CSS length value with a numeric value and a unit.
@@ -627,8 +633,46 @@ func textAlignTypeName(t TextAlignType) string {
 		return "center"
 	case TextAlignJustify:
 		return "justify"
+	case TextAlignWebkitCenter:
+		return "-webkit-center"
+	case TextAlignWebkitLeft:
+		return "-webkit-left"
+	case TextAlignWebkitRight:
+		return "-webkit-right"
 	}
 	return "start"
+}
+
+// InlineEquivalent 返回 legacy 对齐值在**行内内容**上的等价标准值。
+//
+// HTML 的 <center> 元素 UA 样式是 `text-align: -webkit-center`：行内内容的
+// 居中表现与 `center` 完全一致（legacy-center 夹具的 #pure-center 行），
+// 两者的区别只在于 legacy 值还让**块级子盒**水平居中。因此行内布局统一
+// 通过本方法归一后再对齐，块级子盒居中则由 BFC 的定位分支处理。
+func (t TextAlignType) InlineEquivalent() TextAlignType {
+	switch t {
+	case TextAlignWebkitCenter:
+		return TextAlignCenter
+	case TextAlignWebkitLeft:
+		return TextAlignLeft
+	case TextAlignWebkitRight:
+		return TextAlignRight
+	}
+	return t
+}
+
+// LegacyBlockAlign 报告 legacy 对齐值的块级子盒对齐方向："center"（居中）、
+// "right"（靠右）、"left"（靠左）；非 legacy 值返回空串。
+func (t TextAlignType) LegacyBlockAlign() string {
+	switch t {
+	case TextAlignWebkitCenter:
+		return "center"
+	case TextAlignWebkitRight:
+		return "right"
+	case TextAlignWebkitLeft:
+		return "left"
+	}
+	return ""
 }
 
 // ── Lookup functions (used by the resolver) ──

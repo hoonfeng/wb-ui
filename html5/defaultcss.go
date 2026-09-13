@@ -233,6 +233,12 @@ details:not([open]) > :not(summary) {
 table {
 	display: table;
 	border-collapse: separate;
+	/* border-spacing 的初始值是 0，但浏览器的 UA 样式表把表格默认间距设为
+	   2px（对应 HTML 的 cellspacing 属性默认值）。缺这一条时所有未显式声明
+	   border-spacing 的表格都少了 2px 外间距，单元格内容整体偏左上
+	   （table-track-geometry 的 "UA cell padding is one pixel on every edge"
+	   期望内容落在 (2,2)，实测 (0,0)）。 */
+	border-spacing: 2px;
 	text-indent: 0;
 	box-sizing: border-box;
 }
@@ -240,15 +246,21 @@ caption {
 	display: table-caption;
 	text-align: center;
 }
-thead { display: table-header-group; }
-tbody { display: table-row-group; }
-tfoot { display: table-footer-group; }
-tr { display: table-row; }
+/* 行组/行的 vertical-align 默认 middle，单元格用 inherit 链继承：
+   td 的 vertical-align 初始值虽然是 baseline，但浏览器 UA 表让 td/th 继承
+   行/行组的值，于是无显式声明时单元格内容垂直居中
+   （table-track-geometry 的 "row-group default vertically centers cell
+   content" 期望 60px 高单元格里的 20px 方块居中于 y=260，实测贴顶 240）。 */
+thead { display: table-header-group; vertical-align: middle; }
+tbody { display: table-row-group; vertical-align: middle; }
+tfoot { display: table-footer-group; vertical-align: middle; }
+tr { display: table-row; vertical-align: inherit; }
 col { display: table-column; }
 colgroup { display: table-column-group; }
 th, td {
 	display: table-cell;
 	padding: 1px;
+	vertical-align: inherit;
 }
 th {
 	font-weight: bold;
@@ -459,7 +471,10 @@ q {
 
 center {
 	display: block;
-	text-align: center;
+	/* ★ -webkit-center（而非标准 center）：<center> 不仅居中行内内容，
+	   还让块级子盒（定宽 div、表格等）在容器内水平居中。此前写成标准
+	   center，legacy-center 夹具的 .block-box 期望 x=150 实测 x=0。 */
+	text-align: -webkit-center;
 }
 `
 

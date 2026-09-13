@@ -40,13 +40,12 @@ func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
 	case "rem":
 		return lengthResult{Value: l.Value * remBase(), Definite: remBase() > 0}
 	case "ex":
-		// x-height 单位（CSS Values and Units §5.1.1）。字体度量接口
-		// (layout.FontMetricsFunc) 只给 ascent/descent/lineGap，没有 x-height，
-		// 因此按规范允许的 fallback 用 0.5em 近似（浏览器在字体缺 x-height
-		// 信息时同样如此）。此前 ex 未被识别，resolveLength 落空返回 0 ——
-		// `padding: 0.7ex 1.4ex` 整个失效（list-indentation 的 #ex-box 期望
-		// 44x22，实测退化为内容盒 20x10）。
-		return lengthResult{Value: l.Value * fontSize * 0.5, Definite: fontSize > 0}
+		// x-height 单位（CSS Values and Units §5.1.1）。用字体真实 x-height
+		// （embedder 通过 XHeightFunc 注入 Skia 度量）；不可用时退回 0.5em。
+		// 此前恒定 0.5em，Arial 16px 下 1.4ex 得 11.2px 而非 12.1px，
+		// `padding: 0.7ex 1.4ex` 的盒子是 42x21 而非 44x22
+		// （list-indentation 的 ex 项；Arial x-height/em ≈ 0.54）。
+		return lengthResult{Value: l.Value * exBase(fontSize), Definite: fontSize > 0}
 	case "%":
 		if reference > 0 { return lengthResult{Value: l.Value * reference / 100, Definite: true} }
 		return lengthResult{Definite: false}
@@ -234,6 +233,119 @@ func remBase() float64 {
 	return defaultFontSize
 }
 
+// rootFontSizePx resolves the root element's used font-size in px — the value
+// one `rem` resolves to for the whole document.
+//
+// The root element has no parent to inherit from, so its relative font-sizes
+// resolve against the *initial* font size (CSS 2.1 §15.7): `html{font-size:62.5%}`
+// is 10px, `html{font-size:1.5em}` is 24px. The previous implementation only
+// accepted a px unit (Unit == "px"), so a percentage root font-size was silently
+// ignored and every `rem` in the document resolved against the 16px fallback —
+// `gap: 4rem calc(1rem + 2vw)` in a 62.5% document produced gaps of 64px/34px
+// instead of 40px/28px (contextual-grid-gap).
+//
+// Returns 0 when the root font-size cannot be determined (the caller then keeps
+// the previous / default rem base).
+func rootFontSizePx(cs *style.ComputedStyle) float64 {
+	if cs == nil || cs.FontSize.Value <= 0 {
+		return 0
+	}
+	switch cs.FontSize.Unit {
+	case "px", "":
+		return cs.FontSize.Value
+	case "%":
+		return cs.FontSize.Value / 100 * defaultFontSize
+	case "em", "rem":
+		// On the root element itself both relative units resolve against the
+		// initial font size (rem would otherwise be self-referential).
+		return cs.FontSize.Value * defaultFontSize
+	}
+	return 0
+}
+
+// XHeightFunc 查询给定字体的 x-height（px，正值），由 embedder 注入
+// （Skia 的 FontMetrics().XHeight）。未注入或返回非正值时，ex 单位按规范
+// 允许的 fallback 用 0.5×font-size（CSS Values and Units §5.1.1）。
+var XHeightFunc func(family string, size float64, weight int, style string) float64
+
+// fontContext 记录"当前正在解析长度的元素字体"。
+//
+// 长度解析是纯函数 API（resolveLength(l, reference, fontSize)），只有
+// font-size 一个字体维度，而 ex 需要完整的 (family, weight, style) 才能查
+// x-height。因此 fontSizeOf 在算出元素字号时顺手记录本上下文（每次元素布局
+// 前都会调用它），resolveLength 的 ex 分支据此查询真实 x-height。
+type fontContext struct {
+	family string
+	size   float64
+	weight int
+	style  string
+}
+
+var currentFontContext fontContext
+
+// exBase 返回当前解析上下文里 1ex 的 px 值：优先字体真实 x-height，
+// 度量不可用时退回 0.5×font-size（规范允许的近似）。
+func exBase(fontSize float64) float64 {
+	if XHeightFunc != nil {
+		fc := currentFontContext
+		size := fc.size
+		if size <= 0 {
+			size = fontSize
+		}
+		if size > 0 {
+			if xh := XHeightFunc(fc.family, size, fc.weight, fc.style); xh > 0 {
+				return xh
+			}
+		}
+	}
+	return fontSize * 0.5
+}
+
+// isRTL reports whether a box is laid out from right to left.
+//
+// `direction` was parsed into the computed style from the start
+// (style/computedstyle_data.go Direction) and had a resolver test, but no
+// layout code ever read it: RTL pages laid out as if `direction: ltr`
+// everywhere. Per CSS 2.1 §10.3.3 the containing block's direction decides
+// which margin is ignored when a block is over-constrained, and per
+// CSS Flexbox §5.1 / CSS Grid §7.1 the inline axis (flex main axis, grid
+// column axis) starts at the content box's inline-start edge — which is the
+// right edge for RTL.
+func isRTL(cs *style.ComputedStyle) bool {
+	return cs != nil && cs.Direction == "rtl"
+}
+
+// legacyBlockAlignOf 报告容器 computed style 上的 legacy 对齐方向
+// （"center"/"right"/"left"），非 legacy 值（含 nil 样式）返回空串。
+// 供 BFC 对块级子盒做水平居中/靠边，见 TextAlignType.LegacyBlockAlign。
+func legacyBlockAlignOf(cs *style.ComputedStyle) string {
+	if cs == nil {
+		return ""
+	}
+	return cs.TextAlign.LegacyBlockAlign()
+}
+
+// isTableInternalBox 报告盒是否是表格内部盒（表节/行/单元格/列/列组/标题）。
+//
+// 这类盒的尺寸由表格布局算法决定（行高、列宽），行内内容**不得**回写它们的
+// 宽度：固定布局下 `table-layout:fixed` 的第二行单元格含 nowrap 长文本时，
+// IFC 收尾的「按内容回写容器宽」会把列轨道宽 50 覆盖成文本宽 277.3
+// （fixed-table-layout 的 "later separate row cannot resize first track"），
+// 浏览器中单元格宽度与内容无关、内容只会溢出或换行。
+func isTableInternalBox(b *ElementBox) bool {
+	if b == nil || b.style == nil {
+		return false
+	}
+	switch b.style.Display {
+	case style.DisplayTableRowGroup, style.DisplayTableHeaderGroup,
+		style.DisplayTableFooterGroup, style.DisplayTableRow,
+		style.DisplayTableColumnGroup, style.DisplayTableColumn,
+		style.DisplayTableCell, style.DisplayTableCaption:
+		return true
+	}
+	return false
+}
+
 // ── Box model ────────────────────────────────────────────────
 
 func computeBoxModel(box *ElementBox, cbContentWidth, fontSizeVal float64) (margin, padding, border Edges) {
@@ -314,11 +426,36 @@ func isBorderBoxForBox(box *ElementBox) bool {
 
 // ── Font helpers ─────────────────────────────────────────────
 
+// fontSizeOf 返回盒子的 used font-size（px），并记录当前字体上下文——
+// ex 单位需要完整的字体信息（见 fontContext）。
 func fontSizeOf(box *ElementBox) float64 {
+	fs := resolveFontSizeOf(box)
+	recordFontContext(box, fs)
+	return fs
+}
+
+// recordFontContext 记录元素字体，供 ex 的度量查询使用。字号无法确定
+// （<=0）时不覆盖上一个上下文。
+func recordFontContext(box *ElementBox, size float64) {
+	if box == nil || size <= 0 {
+		return
+	}
+	if cs := box.Style(); cs == nil {
+		return
+	}
+	currentFontContext = fontContext{
+		family: fontFamilyOf(box),
+		size:   size,
+		weight: fontWeightOf(box),
+		style:  fontStyleOf(box),
+	}
+}
+
+func resolveFontSizeOf(box *ElementBox) float64 {
 	cs := box.Style()
 	if cs == nil {
 		if p := box.Parent(); p != nil {
-			return fontSizeOf(p)
+			return resolveFontSizeOf(p)
 		}
 		return defaultFontSize
 	}
@@ -328,11 +465,17 @@ func fontSizeOf(box *ElementBox) float64 {
 	// The anonymous wrapper's style.FontSize is copied from the parent's raw
 	// declaration, so treat it as inherited-computed by walking to the parent.
 	if box.Element() == nil && box.Parent() != nil && cs.FontSize.Unit != "" && cs.FontSize.Unit != "px" {
-		return fontSizeOf(box.Parent())
+		return resolveFontSizeOf(box.Parent())
 	}
 	parentSize := 0.0
 	if box.Parent() != nil {
-		parentSize = fontSizeOf(box.Parent())
+		parentSize = resolveFontSizeOf(box.Parent())
+	} else {
+		// 根元素（无父）：百分比与 em 相对**初始**字号解析（CSS 2.1 §15.7），
+		// 否则 reference<=0 让 resolveLength 返回 !Definite，font-size:62.5%
+		// 落回 16px——根字号错误又会让全文档的 rem 都按 16 解析
+		// （contextual-grid-gap 的 gap:4rem 得到 64px 而非 40px）。
+		parentSize = defaultFontSize
 	}
 	// em/rem/% font-sizes resolve against the parent's font-size:
 	//   - em  → value × parent font-size
@@ -349,7 +492,16 @@ func fontSizeOf(box *ElementBox) float64 {
 	default:
 		r = resolveLength(cs.FontSize, 0, 0)
 	}
-	if !r.Definite || r.Value <= 0 {
+	if !r.Definite {
+		return defaultFontSize
+	}
+	// ★ 显式 font-size:0 是合法值（CSS 允许 0）：文字零宽且不可见。此前
+	// `r.Value <= 0` 与「解析失败」一并回退 16px，于是 `font-size:0`
+	// （消除 inline-block 间隙的常用技巧）失效——行内空白仍按 16px
+	// 度量出约 4.4px 并计入行宽 used，使 legacy-center 首行的居中
+	// inline-box 偏左 2px（实测 x=148，期望 150）；文字也会以 16px 画出
+	// 而不是隐藏。仅负值（非法）与未解析（Definite=false）回退默认字号。
+	if r.Value < 0 {
 		return defaultFontSize
 	}
 	return r.Value
@@ -453,7 +605,8 @@ func inlineBoxTextContent(box *ElementBox) string {
 
 func measureText(box *ElementBox, text string) float64 {
 	fs := fontSizeOf(box)
-	if fs <= 0 {
+	// fs == 0 是显式 font-size:0（合法的零宽文字），只有未解析出的负值才回退。
+	if fs < 0 {
 		fs = defaultFontSize
 	}
 	family := fontFamilyOf(box)
@@ -472,7 +625,7 @@ func measureText(box *ElementBox, text string) float64 {
 // exceeds whole" discrepancy that causes unwanted line wraps.
 func measureTextWordSum(box *ElementBox, text string, spaceWidth float64) float64 {
 	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
+	if fs < 0 { fs = defaultFontSize }
 	family := fontFamilyOf(box)
 	weight := fontWeightOf(box)
 	fstyle := fontStyleOf(box)
@@ -515,7 +668,14 @@ func fontLineGap(box *ElementBox) float64 {
 	fs := fontSizeOf(box)
 	if fs <= 0 { fs = defaultFontSize }
 	a, d, lg := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
-	return a + d + lg
+	// ★ 网格对齐（grid fitting）：浏览器把 ascent/descent/lineGap **各自**
+	// 四舍五入到整数像素后再相加得到 line-height:normal 的行高，而不是用
+	// 浮点度量求和。Chrome 实测（font-metric-line-height 夹具的期望值即由此
+	// 得来）：Arial 9.3333px → round(8.449)+round(1.978)+round(0.305) = 10
+	// （浮点求和为 10.73，20 行累计偏移 15px）；Arial 12px → 11+3+0 = 14
+	// （浮点 13.8）；Times 13px → 12+3+1 = 16（浮点 14.9）。不取整会让多行
+	// 文本的垂直位置逐步漂移，行盒高度也不再是浏览器那样的整数值。
+	return math.Round(a) + math.Round(d) + math.Round(lg)
 }
 
 // cssLineHeight returns the resolved CSS line-height value for the box.

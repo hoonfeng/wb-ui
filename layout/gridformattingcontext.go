@@ -256,6 +256,13 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	colPos := gridTrackPos(colState, g.ContentBoxLeft(), colGap)
 	rowPos := gridTrackPos(rowState, g.ContentBoxTop(), rowGap)
+	// ★ RTL：列线从内容盒的 inline-start 侧起编号（CSS Grid §7.1），
+	// direction:rtl 下 inline-start 是右边 —— 整条列带贴右，剩余空间留在
+	// 左侧。此前列位置恒从 ContentBoxLeft 向右累加，RTL 网格的 item 全部
+	// 偏左（direction-rtl 的 .case.grid 期望首列 track 在 x=850，实测 x=0）。
+	if isRTL(cs) {
+		colPos = gridMirrorLines(colPos, g.ContentBoxLeft()+cw)
+	}
 
 	gridPlaceItems(items, colPos, rowPos, colState, rowState, colGap, rowGap, state)
 
@@ -538,18 +545,22 @@ func gridLenOrInf(s string, avail, fs float64) float64 {
 }
 
 func gridGap(l style.Length, fs, avail float64) float64 {
-	if l.Unit == "" || l.Value <= 0 {
+	if l.Unit == "" || l.Unit == "normal" || l.Unit == "auto" {
 		return 0
 	}
-	switch l.Unit {
-	case "px":
-		return l.Value
-	case "em":
-		return l.Value * fs
-	case "%":
-		return avail * l.Value / 100.0
+	// 复用 resolveLength 的完整单位/上下文支持：rem 取根字号、vw/vh/vmin/vmax
+	// 取视口、% 按容器对应尺寸、calc() 带真实 context 求值。此前这里只认
+	// px/em/%，其余单位落到 default 分支返回**字面量**——`gap: 4rem` 变成 4px、
+	// `gap: calc(1rem + 2vw)` 因为 Unit=="calc" 且 Value==0 直接返回 0，
+	// 于是 `gap: 4rem calc(1rem + 2vw)` 的行/列间距双双失效
+	// （contextual-grid-gap：期望行间距 40px、列间距 calc(10px + 18px)=28px，
+	// 实测 4px 与 0）。
+	r := resolveLength(l, avail, fs)
+	if !r.Definite {
+		return 0
 	}
-	return l.Value
+	// gap 不接受负值（CSS Box Alignment §8.1 视同 0）。
+	return math.Max(0, r.Value)
 }
 
 // ── Line parsing ──
@@ -868,6 +879,23 @@ func gridTrackPos(states []gridTrackState, start, gap float64) []float64 {
 	}
 	return p
 }
+
+// gridMirrorLines 把按 LTR（列线 1 在最左）累加出的列线位置镜像到 RTL：
+// 列线 1 落在 inline-start（右侧），其余列线依次向左。列线编号语义不变
+// （索引仍是逻辑顺序），只有物理 x 变成递减——因此调用方取单元左边界时
+// 要用 min(p[cs], p[ce]) 而不是 p[cs]。right 为内容盒的右边界。
+func gridMirrorLines(p []float64, right float64) []float64 {
+	out := make([]float64, len(p))
+	if len(p) == 0 {
+		return out
+	}
+	base := p[0]
+	for i, v := range p {
+		out[i] = right - (v - base)
+	}
+	return out
+}
+
 func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowState []gridTrackState, colGap, rowGap float64, state *LayoutState) {
 	nCols := len(colPos) - 1
 	nRows := len(rowPos) - 1
@@ -886,6 +914,11 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowSt
 
 		cl := colPos[cs]
 		rt := rowPos[rs]
+		// RTL 网格的列线是镜像的（x 递减），单元左边界是两条列线中较小的
+		// 那条；LTR 下 colPos[cs] < colPos[ce]，min 结果不变。
+		if clEnd := colPos[ce]; clEnd < cl {
+			cl = clEnd
+		}
 		// Cell size: sum of spanned track sizes + internal gaps only. Using
 		// colPos[ce]-colPos[cs] would include the trailing gap after every
 		// non-last track, over-sizing the cell by one gap.

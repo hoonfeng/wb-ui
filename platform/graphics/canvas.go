@@ -16,6 +16,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -1336,6 +1337,14 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 		tf = mgr.LookupTypeface(font.Family, weight, font.Style)
 	}
 	if tf == nil {
+		// ★ Skia 的 NewTypeface 只接受**单一**字体名，而 CSS 的 font-family
+		// 是候选列表（"Arial, sans-serif"）。没有字体管理器时（无头探针、
+		// 未初始化字体的嵌入方）整串传给 Skia 必然匹配失败 → DefaultTypeface，
+		// 所有度量退化为默认字体：与 LookupTypeface 的解析不一致
+		// （margin/font-size 相关布局在探针与真实运行时表现不同），
+		// 也让度量型单位（ex、文本宽度）全部偏移。先取列表里第一个具体
+		// 字体名（跳过 serif/sans-serif 等通用关键字）再交给 Skia。
+		concrete := firstConcreteFamily(font.Family)
 		slant := skia.FontSlantUpright
 		switch font.Style {
 		case "italic":
@@ -1344,7 +1353,7 @@ func (c *Canvas) getSkiaFont(font Font) *skia.Font {
 			slant = skia.FontSlantOblique
 		}
 		fs := skia.FontStyle{Weight: weight, Width: 5, Slant: slant}
-		tf = skia.NewTypeface(font.Family, fs)
+		tf = skia.NewTypeface(concrete, fs)
 	}
 	if tf == nil {
 		tf = skia.DefaultTypeface()
@@ -2030,6 +2039,13 @@ func globalSkiaFont(font Font) *skia.Font {
 		tf = mgr.LookupTypeface(font.Family, weight, font.Style)
 	}
 	if tf == nil {
+		// ★ Skia 的 NewTypeface 只接受**单一**字体名，而 CSS 的 font-family
+		// 是候选列表（"Arial, sans-serif"）。没有字体管理器时（无头探针、
+		// 未初始化字体的嵌入方）整串传给 Skia 必然匹配失败 → DefaultTypeface，
+		// 所有度量退化为默认字体：与 LookupTypeface 的解析不一致，也让
+		// 度量型单位（ex、文本宽度）全部偏移。取列表里第一个具体字体名
+		// （跳过 serif/sans-serif 等通用关键字）再交给 Skia。
+		concrete := firstConcreteFamily(font.Family)
 		slant := skia.FontSlantUpright
 		switch font.Style {
 		case "italic":
@@ -2038,7 +2054,7 @@ func globalSkiaFont(font Font) *skia.Font {
 			slant = skia.FontSlantOblique
 		}
 		fs := skia.FontStyle{Weight: weight, Width: 5, Slant: slant}
-		tf = skia.NewTypeface(font.Family, fs)
+		tf = skia.NewTypeface(concrete, fs)
 	}
 	if tf == nil {
 		tf = skia.DefaultTypeface()
@@ -2077,8 +2093,15 @@ func MeasureText(font Font, text string) float64 {
 		return 0
 	}
 	sz := font.Size
-	if sz <= 0 {
+	// ★ 显式 font-size:0 合法：文字零宽（不可见），不得回退默认字号。
+	// 此前 sz<=0 一律取 16，`font-size:0`（消除 inline-block 间隙的常用
+	// 技巧）失效：行内空白被量成约 4.4px 并计入行宽 used，legacy-center
+	// 首行的居中 inline-box 因此偏左 2px（实测 x=148，期望 150）。
+	if sz < 0 {
 		sz = 16
+	}
+	if sz == 0 {
+		return 0
 	}
 	key := widthCacheKey{font: fontKey{family: font.Family, size: float32(sz), weight: font.Weight, style: font.Style}, text: text}
 	globalWidthCacheMu.Lock()
@@ -2241,6 +2264,51 @@ func globalCJKSkiaFont(font Font) *skia.Font {
 	return f
 }
 
+// firstConcreteFamily 返回 font-family 候选列表里第一个"具体"字体名。
+// "Arial, sans-serif" → "Arial"；"sans-serif" → "sans-serif"（全是通用
+// 关键字时原样返回，交给 Skia/字体管理器做平台映射）。保留原始大小写，
+// 因为 Skia 的字体名匹配对大小写敏感。
+func firstConcreteFamily(list string) string {
+	// 通用关键字 → 平台字体名（Windows 上的浏览器默认映射）。没有字体管理器
+	// 时 Skia 对 "sans-serif" 这类关键字匹配不到真实字体，会退回
+	// DefaultTypeface——度量与浏览器差很多（13px 下标称 sans-serif 的行高
+	// 17.3px vs Arial 的 14.5px），依赖行高/字宽的布局整体偏移
+	// （table-track-geometry 的 "separate spacing reserves the outer table
+	// edges" 期望单元格高 23，实测 25.3）。
+	generic := map[string]string{
+		"serif":        "Times New Roman",
+		"sans-serif":   "Arial",
+		"monospace":    "Consolas",
+		"cursive":      "Comic Sans MS",
+		"fantasy":      "Impact",
+		"system-ui":    "Segoe UI",
+		"ui-serif":     "Times New Roman",
+		"ui-sans-serif": "Arial",
+		"ui-monospace": "Consolas",
+		"ui-rounded":   "Arial",
+		"math":         "Cambria Math",
+		"emoji":        "Segoe UI Emoji",
+		"fangsong":     "FangSong",
+	}
+	parts := strings.Split(list, ",")
+	for _, p := range parts {
+		name := strings.Trim(strings.TrimSpace(p), `"'`)
+		if name == "" {
+			continue
+		}
+		if mapped, ok := generic[strings.ToLower(name)]; ok {
+			return mapped
+		}
+		return name
+	}
+	if len(parts) > 0 {
+		if name := strings.Trim(strings.TrimSpace(parts[0]), `"'`); name != "" {
+			return name
+		}
+	}
+	return list
+}
+
 // GlobalFontAscent returns the ascent (positive distance from baseline to the
 // font's recommended top) for the given font. Mirrors Canvas.FontAscent but
 // usable without a Canvas instance. Falls back to size * 0.8 on failure.
@@ -2266,6 +2334,23 @@ func GlobalFontDescent(font Font) float64 {
 	}
 	m, _ := skFont.Metrics()
 	return float64(m.Descent)
+}
+
+// GlobalFontXHeight returns the font's x-height in px — the height of the
+// lowercase "x" glyph, which is what the CSS `ex` unit resolves to (CSS Values
+// and Units §5.1.1). Comes from Skia's FontMetrics().XHeight. Returns 0 when
+// the font cannot be resolved or the metric is unavailable; the layout engine
+// then falls back to the spec-permitted 0.5em approximation.
+func GlobalFontXHeight(font Font) float64 {
+	skFont := globalSkiaFont(font)
+	if skFont == nil {
+		return 0
+	}
+	m, _ := skFont.Metrics()
+	if m.XHeight <= 0 {
+		return 0
+	}
+	return float64(m.XHeight)
 }
 
 // GlobalFontLineGap returns the line gap (leading) for the given font,

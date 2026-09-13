@@ -1,6 +1,7 @@
 package rendering
 
 import (
+	"math"
 	"testing"
 
 	"wb-ui/css"
@@ -79,10 +80,26 @@ body { margin: 0; font-family: sans-serif; font-size: 12px; }
 	}
 	g := rv.LayoutState().GeometryForBox(lb)
 	t.Logf("title box: w=%.1f h=%.1f", g.BorderBoxWidth(), g.BorderBoxHeight())
-	if g.BorderBoxHeight() < 2*14 {
-		t.Errorf("title height %.1f: CJK did not wrap to 2 lines (flex-shrunk box)", g.BorderBoxHeight())
+	// 直接数文本段的不同 Y 得到真实行数（注释里的本意），不再用硬编码
+	// 14px 行高做高度阈值：`font-family: sans-serif` 现在按平台映射到 Arial
+	// （graphics.firstConcreteFamily），12px 文本的 normal 行高从 14.4 变成
+	// 13.8，2 行高度 27.6 < 2*14 会被误判成「没有换行」。
+	lines := map[float64]bool{}
+	for _, seg := range lb.TextSegments {
+		lines[math.Round(seg.Y)] = true
 	}
-	if g.BorderBoxHeight() > 3*14 {
-		t.Errorf("title height %.1f: CJK wrapped to >2 lines (1 char per line?)", g.BorderBoxHeight())
+	if len(lines) == 0 {
+		// 无文本段（文本可能挂在匿名盒上）：退回按行高区间判断。
+		lineH := g.BorderBoxHeight() / 2
+		if lineH < 12 || lineH > 16 {
+			t.Errorf("title height %.1f: unexpected line height", g.BorderBoxHeight())
+		}
+		return
+	}
+	if len(lines) < 2 {
+		t.Errorf("title lines %d (h=%.1f): CJK did not wrap to 2 lines (flex-shrunk box)", len(lines), g.BorderBoxHeight())
+	}
+	if len(lines) > 2 {
+		t.Errorf("title lines %d (h=%.1f): CJK wrapped to >2 lines (1 char per line?)", len(lines), g.BorderBoxHeight())
 	}
 }

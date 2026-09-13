@@ -315,6 +315,10 @@ func buildLayout(htmlText string) (*rendering.RenderView, error) {
 		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
+	// ex 单位用字体真实 x-height（Skia FontMetrics().XHeight）。
+	layout.XHeightFunc = func(family string, size float64, weight int, style2 string) float64 {
+		return graphics.GlobalFontXHeight(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2})
+	}
 
 	doc, err := html.Parse(htmlText)
 	if err != nil {

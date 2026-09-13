@@ -403,6 +403,10 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style}
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
+	// ex 单位（padding/margin/width 等）解析为字体真实 x-height。
+	layout.XHeightFunc = func(family string, size float64, weight int, style string) float64 {
+		return graphics.GlobalFontXHeight(graphics.Font{Family: family, Size: size, Weight: weight, Style: style})
+	}
 
 	wv.Resize(width, height)
 	// ★ 注入 __devtools（类似浏览器 DevTools 的调试 API）：页面 JS 已执行，

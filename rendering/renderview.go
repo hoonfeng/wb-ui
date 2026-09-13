@@ -1154,7 +1154,12 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				}
 				rt.SetSegments(segs)
 				// Expand the wrapper frame to encompass text content.
-				if box := asRenderBox(ro); box != nil && len(segs) > 0 {
+				// ★ 表格内部盒（单元格/行/表节）例外：它们的尺寸由表格布局算法
+				// 决定（列轨道宽），frame 必须严格等于布局几何。含 nowrap 长文本
+				// 的单元格在此被撑到文本宽——fixed-table-layout 的
+				// "later separate row cannot resize first track" 背景从 50px 画成
+				// 277.3px；浏览器中内容只溢出、不改变单元格尺寸。
+				if box := asRenderBox(ro); box != nil && len(segs) > 0 && !renderIsTableInternalBox(ro) {
 					textRight := segs[0].X + segs[0].Width
 					frameRight := box.frame.X + box.frame.Width
 					if textRight > frameRight && !renderIsFlexItem(ro) {
@@ -1176,7 +1181,9 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 	// any child text that extends beyond the geometry-based frame. This
 	// prevents overflow:hidden from clipping text in flex items whose
 	// layout geometry is narrower than actual text content.
-	if box := asRenderBox(ro); box != nil && box.Parent() != nil {
+	// ★ 表格内部盒同样排除：单元格的 frame 由列轨道与行高决定（见
+	// renderIsTableInternalBox），溢出文本不得撑开背景框。
+	if box := asRenderBox(ro); box != nil && box.Parent() != nil && !renderIsTableInternalBox(ro) {
 		var maxRight, maxBottom float64
 		frameRight := box.frame.X + box.frame.Width
 		frameBottom := box.frame.Y + box.frame.Height
@@ -1229,6 +1236,29 @@ func renderIsFlexItem(ro RenderObject) bool {
 	}
 	d := pcs.Display
 	return (d == style.DisplayFlex || d == style.DisplayInlineFlex) && !lb.IsAbsolutelyPositioned()
+}
+
+// renderIsTableInternalBox 报告渲染对象对应的布局盒是否是表格内部盒（表节/行/
+// 单元格）。这类盒的尺寸由表格布局算法决定（列轨道宽、行高），syncOne 不得按文本
+// 内容扩展它们的 frame：`table-layout:fixed` 的单元格含 nowrap 长文本时，单元格
+// 背景会被撑到文本宽（fixed-table-layout 的 "later separate row cannot resize
+// first track"：50px 的轨道画成 277.3px），而浏览器中内容只会溢出单元格。
+func renderIsTableInternalBox(ro RenderObject) bool {
+	lb := ro.LayoutBox()
+	if lb == nil {
+		return false
+	}
+	cs := lb.Style()
+	if cs == nil {
+		return false
+	}
+	switch cs.Display {
+	case style.DisplayTableCell, style.DisplayTableRow,
+		style.DisplayTableRowGroup, style.DisplayTableHeaderGroup,
+		style.DisplayTableFooterGroup:
+		return true
+	}
+	return false
 }
 
 func syncChildren(parentRO RenderObject, parentLB *layout.ElementBox, state *layout.LayoutState) {

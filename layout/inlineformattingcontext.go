@@ -97,6 +97,16 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cssLH > 0 {
 		lineHeight = cssLH
 	}
+	// 行高诊断（WBUI_IFC_DEBUG=1）：字体度量与 CSS line-height 的最终取值，
+	// 用于定位"行高与真实浏览器不一致"的夹具（font-metric-line-height）。
+	if os.Getenv("WBUI_IFC_DEBUG") != "" {
+		name, class := "<anon>", ""
+		if el := box.Element(); el != nil {
+			name, class = el.NodeName(), el.GetAttribute("class")
+		}
+		fmt.Fprintf(os.Stderr, "[ifc] <%s class=%q> fs=%.4f fontLineGap=%.4f cssLH=%.4f lineHeight=%.4f family=%q\n",
+			name, class, fs, fontLineGap(box), cssLineHeight(box), lineHeight, fontFamilyOf(box))
+	}
 	// Text segment height should be the actual font metrics height, not CSS
 	// line-height. The line-height determines line spacing and centering.
 	textHeight := fontLineGap(box)
@@ -183,7 +193,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cs != nil {
 		isPlainInline := cs.Display == style.DisplayInline && !box.IsReplaced()
 		if !isPlainInline || isFlexItem(box) {
-			textAlign = cs.TextAlign
+			// legacy 值（-webkit-center 等）在行内内容上等价于对应标准值，
+			// 其"块级子盒居中"的额外语义由 BFC 处理（见 InlineEquivalent）。
+			textAlign = cs.TextAlign.InlineEquivalent()
 		}
 	}
 	// (containerWidth was captured before the auto-width expansion above.)
@@ -935,7 +947,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 覆盖正确的 content（如 22x22 border-box 按钮被内部文本盒宽 22 覆盖 →
 	// content 8 变 22 → border-box 36x26）。浏览器中 absolute 元素尺寸
 	// 独立于流内文本宽度，不应被 IFC 收尾修正。
-	if !isFlexItem(box) && !box.IsAbsolutelyPositioned() {
+	// ★ 表格内部盒（行/单元格/表节等）例外：它们的宽度由表格布局算法决定
+	// （列轨道宽），行内文本不得回写——否则 `table-layout:fixed` 的第二行
+	// 单元格含 nowrap 长文本时，列轨道宽 50 会被文本宽 277.3 覆盖
+	// （fixed-table-layout 的 "later separate row cannot resize first track"，见
+	// isTableInternalBox）。浏览器中单元格宽度与内容无关，内容只会溢出。
+	if !isFlexItem(box) && !box.IsAbsolutelyPositioned() && !isTableInternalBox(box) {
 		for _, ps := range pending {
 			right := ps.seg.X + ps.seg.Width - contentX
 			if right > totalWidth {

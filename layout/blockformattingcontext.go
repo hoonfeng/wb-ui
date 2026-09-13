@@ -230,6 +230,34 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 		borderBoxWidth := computeBlockChildBorderBoxWidth(childEb, childAvailWidth, margin, border, padding, state)
 		ch.SetContentWidth(borderBoxWidth - border.Horizontal() - padding.Horizontal())
+		// ★ RTL（CSS 2.1 §10.3.3 over-constrained）：定宽块级盒在包含块内
+		// 有剩余空间、且两侧 margin 都非 auto 时，LTR 忽略 margin-right
+		// （盒子贴 inline-start = 左边），RTL 忽略 margin-left（盒子贴
+		// inline-start = 右边，剩余空间留在左侧）。此前完全没有方向处理，
+		// RTL 页面的定宽块仍贴左（direction-rtl 的 .case{width:300px} 期望
+		// x=600，实测 x=0）。auto margin 分支已在上方把剩余空间分给 auto
+		// 边（LTR/RTL 规则相同），故此处只处理两侧都非 auto 的情形。
+		if !mlAuto && !mrAuto && isRTL(box.Style()) {
+			if free := childAvailWidth - borderBoxWidth - margin.Horizontal(); free > 0 {
+				childLeft += free
+			}
+		}
+		// ★ legacy 对齐值（-webkit-center / -webkit-left / -webkit-right）：
+		// `<center>` 的 UA 样式就是 `text-align: -webkit-center`，它除居中
+		// 行内内容外还让**块级子盒**在容器内水平居中/靠边（HTML Rendering
+		// 规范）。此前该值未被解析，行内与块级都退化为 start：legacy-center
+		// 夹具的 .block-box 期望 x=150 实测 x=0。auto margin 分支（把剩余
+		// 空间分给 auto 边）已在上方处理，此处只处理两侧都非 auto 的情形。
+		if align := legacyBlockAlignOf(box.Style()); align != "" && !mlAuto && !mrAuto {
+			if free := childAvailWidth - borderBoxWidth - margin.Horizontal(); free > 0 {
+				switch align {
+				case "center":
+					childLeft += free / 2
+				case "right":
+					childLeft += free
+				}
+			}
+		}
 		ch.SetTopLeft(0, childLeft+margin.Left) // Y set below
 
 		clearSide := clearSideOf(childEb)

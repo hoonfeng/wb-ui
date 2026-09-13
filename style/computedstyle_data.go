@@ -159,6 +159,13 @@ type NonInheritedData struct {
 	// Border collapse mode (table only): separate (default) or collapse.
 	BorderCollapse BorderCollapseType
 
+	// Border spacing (border-collapse: separate only): the horizontal and
+	// vertical distance kept between adjacent cell borders *and* between the
+	// cells and the table's own content edge (CSS 2.1 §17.6.1). Ignored when
+	// border-collapse is collapse.
+	BorderSpacingH Length
+	BorderSpacingV Length
+
 	// Border radius (single value for all corners).
 	BorderRadius Length
 
