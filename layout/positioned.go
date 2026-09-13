@@ -257,6 +257,10 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	x := cbg.PaddingBoxLeft()
 	cbIsFlex := cb.Style() != nil && (cb.Style().Display == style.DisplayFlex || cb.Style().Display == style.DisplayInlineFlex)
 	cbRow := cbIsFlex && cb.Style().FlexDirection != "column" && cb.Style().FlexDirection != "column-reverse"
+	// 静态位置：left/right（或 top/bottom）均为 auto 的轴上，absolute 盒应使用
+	// 「假若它仍在正常流中」的位置（CSS2.1 §10.3.7 / §10.6.4），而不是贴包含块
+	// padding box 边缘。
+	staticX, staticY, hasStatic := staticPositionFor(box, root, state)
 	switch {
 	case !leftAuto && !rightAuto:
 		x = cbg.PaddingBoxLeft() + left + margin.Left
@@ -266,6 +270,9 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		x = cbg.PaddingBoxLeft() + cbWidth - right - margin.Right - g.BorderBoxWidth()
 	default:
 		x = cbg.PaddingBoxLeft() + margin.Left
+		if hasStatic {
+			x = staticX + margin.Left
+		}
 		// Static position of an absolutely-positioned child of a flex
 		// container follows the flex alignment (CSS-FLEXBOX §5.1): the
 		// cross axis uses align-items, the main axis uses justify-content.
@@ -311,6 +318,9 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		y = cbg.PaddingBoxTop() + cbHeight - bottom - margin.Bottom - g.BorderBoxHeight()
 	default:
 		y = cbg.PaddingBoxTop() + margin.Top
+		if hasStatic {
+			y = staticY + margin.Top
+		}
 		if cbIsFlex {
 			justify := cb.Style().JustifyContent
 			if !cbRow {
@@ -329,6 +339,50 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 
 	// Layout content now that position and size are fully known.
 	layoutBoxContentForBox(box, state)
+}
+
+// staticPositionFor 返回 absolute/fixed 盒在**正常流**中本该处于的位置（绝对
+// 坐标，不含该轴的 margin），用于 left/right（或 top/bottom）均为 auto 的轴：
+// CSS2.1 §10.3.7 / §10.6.4 规定此时使用「静态位置」——即假设该盒保持 in-flow
+// （position:static）时的位置，而不是贴到包含块的 padding box 边缘。
+// 计算：父盒内容区原点 + 此前 in-flow 兄弟在垂直方向的累计外框高度
+// （absolute-static-position 夹具四项：父的 padding 偏移 + 前导兄弟高度）。
+// 返回 ok=false 表示没有静态位置可用（无父盒、父即布局根、或父是 flex/grid
+// 容器——后者的静态位置由 align-items / justify-content 决定，见调用方专门分支），
+// 调用方回退到包含块 padding box 边缘（旧行为）。
+func staticPositionFor(box *ElementBox, root *ElementBox, state *LayoutState) (float64, float64, bool) {
+	parent := box.parentBox
+	if parent == nil || parent == root {
+		return 0, 0, false
+	}
+	if parent.Style() != nil {
+		switch parent.Style().Display {
+		case style.DisplayFlex, style.DisplayInlineFlex,
+			style.DisplayGrid, style.DisplayInlineGrid:
+			return 0, 0, false
+		}
+	}
+	pg := state.GeometryForBox(parent)
+	if pg == nil {
+		return 0, 0, false
+	}
+	sx := pg.ContentBoxLeft()
+	sy := pg.ContentBoxTop()
+	for _, sib := range parent.Children() {
+		if sib == box {
+			break
+		}
+		eb, ok := sib.(*ElementBox)
+		if !ok || !eb.IsInFlow() || !eb.IsVisible() {
+			continue
+		}
+		sg := state.GeometryForBox(eb)
+		if sg == nil {
+			continue
+		}
+		sy += sg.MarginBoxHeight()
+	}
+	return sx, sy, true
 }
 
 func cbPaddingBoxSizeForBox(cb *ElementBox, root *ElementBox, state *LayoutState) (float64, float64) {
