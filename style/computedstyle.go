@@ -436,6 +436,10 @@ func (c *ComputedStyle) GetProperty(name string) string {
 		return c.AlignContent
 	case "align-self":
 		return c.AlignSelf
+	case "justify-self":
+		return c.JustifySelf
+	case "justify-items":
+		return c.JustifyItems
 	case "gap":
 		return c.Gap.String()
 	case "row-gap":

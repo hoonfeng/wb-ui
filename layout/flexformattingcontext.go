@@ -410,9 +410,50 @@ func (c *FlexFormattingContext) layoutWrapped(items []*flexItem, container *Elem
 	if !isRow {
 		crossStart = g.ContentBoxLeft()
 	}
+	// ★ align-content（CSS Box Alignment §5）：整组 flex 行在容器跨轴上按
+	// align-content 对齐，space-* 关键字把剩余空间分到行之间。此前多行 flex 的
+	// 行组恒贴在跨轴起点，`align-content: space-between` 的最后一行不落到底部
+	// （item-self-alignment 的 #flex-content 期望第二行 y=480，实测 400）。
+	// stretch 保持既有行为（行高不放大）。
+	lineExtra := 0.0
+	if n := len(lines); n > 0 {
+		crossContainer := g.ContentHeight()
+		if !isRow {
+			crossContainer = g.ContentWidth()
+		}
+		usedCross := 0.0
+		for _, h := range lineHeights {
+			usedCross += h
+		}
+		if n > 1 {
+			usedCross += gapCross * float64(n-1)
+		}
+		if free := crossContainer - usedCross; free > 0 {
+			var alignContent string
+			if cs := container.Style(); cs != nil {
+				alignContent = cs.AlignContent
+			}
+			switch gridKeyword(alignContent, "stretch") {
+			case "center":
+				crossStart += free / 2
+			case "end", "flex-end", "bottom", "right":
+				crossStart += free
+			case "space-between":
+				if n > 1 {
+					lineExtra = free / float64(n-1)
+				}
+			case "space-around":
+				lineExtra = free / float64(n)
+				crossStart += lineExtra / 2
+			case "space-evenly":
+				lineExtra = free / float64(n+1)
+				crossStart += lineExtra
+			}
+		}
+	}
 	for li, line := range lines {
 		if li > 0 {
-			crossStart += lineHeights[li-1] + gapCross
+			crossStart += lineHeights[li-1] + gapCross + lineExtra
 		}
 		c.applyPositions(line, container, isRow, isReverse, false, state, crossStart)
 	}

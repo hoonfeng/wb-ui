@@ -265,6 +265,12 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	colPos := gridTrackPos(colState, g.ContentBoxLeft(), colGap)
 	rowPos := gridTrackPos(rowState, g.ContentBoxTop(), rowGap)
+	// ★ content-distribution（CSS Box Alignment §5）：轨道组在容器内容盒内按
+	// justify-content/align-content 对齐，space-* 关键字把剩余空间分到轨道之间。
+	// 此前轨道恒从内容盒起点排起，`place-content: center end` 的容器里轨道组
+	// 全贴起点（item-self-alignment 的 #grid-content 两个轨道项）。
+	colPos = gridDistributeTracks(colPos, colState, g.ContentBoxLeft(), cw, colGap, gridKeyword(cs.JustifyContent, "start"))
+	rowPos = gridDistributeTracks(rowPos, rowState, g.ContentBoxTop(), ch, rowGap, gridKeyword(cs.AlignContent, "start"))
 	// ★ RTL：列线从内容盒的 inline-start 侧起编号（CSS Grid §7.1），
 	// direction:rtl 下 inline-start 是右边 —— 整条列带贴右，剩余空间留在
 	// 左侧。此前列位置恒从 ContentBoxLeft 向右累加，RTL 网格的 item 全部
@@ -273,7 +279,8 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		colPos = gridMirrorLines(colPos, g.ContentBoxLeft()+cw)
 	}
 
-	gridPlaceItems(items, colPos, rowPos, colState, rowState, colGap, rowGap, state)
+	gridPlaceItems(items, colPos, rowPos, colState, rowState, colGap, rowGap,
+		gridKeyword(cs.AlignItems, "stretch"), gridKeyword(cs.JustifyItems, "stretch"), state)
 
 	// Lay out absolutely/fixed-positioned children against this grid
 	// container as their containing block (CSS-GRID-1 §9.2). Previously they
@@ -905,7 +912,71 @@ func gridMirrorLines(p []float64, right float64) []float64 {
 	return out
 }
 
-func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowState []gridTrackState, colGap, rowGap float64, state *LayoutState) {
+// gridKeyword resolves an alignment keyword, treating the initial values
+// (empty, `auto`, `normal`) as "not specified" so the fallback wins: an item's
+// align-self:auto falls back to the container's align-items, and the
+// container's initial value to stretch (CSS Box Alignment §4–6).
+func gridKeyword(value, fallback string) string {
+	switch v := strings.ToLower(strings.TrimSpace(value)); v {
+	case "", "auto", "normal":
+		return fallback
+	default:
+		return v
+	}
+}
+
+// gridDistributeTracks applies align-content/justify-content to a track line
+// list: the free space inside the container is used to shift the whole track
+// group and/or to spread the tracks apart (CSS Box Alignment §5).
+func gridDistributeTracks(pos []float64, states []gridTrackState, origin, containerSize, gap float64, keyword string) []float64 {
+	n := len(states)
+	if len(pos) < 2 || n == 0 || containerSize <= 0 {
+		return pos
+	}
+	used := 0.0
+	for i := range states {
+		used += states[i].size
+	}
+	free := containerSize - used
+	if n > 1 {
+		free -= gap * float64(n-1)
+	}
+	if free <= 0 {
+		return pos
+	}
+	offset, extra := 0.0, 0.0
+	switch keyword {
+	case "center":
+		offset = free / 2
+	case "end", "flex-end", "right", "bottom":
+		offset = free
+	case "space-between":
+		if n > 1 {
+			extra = free / float64(n-1)
+		}
+	case "space-around":
+		extra = free / float64(n)
+		offset = extra / 2
+	case "space-evenly":
+		extra = free / float64(n+1)
+		offset = extra
+	default:
+		// start / stretch / normal / auto: tracks begin at the content-box
+		// origin, which is what gridTrackPos already produced.
+		return pos
+	}
+	out := make([]float64, len(pos))
+	out[0] = origin + offset
+	for i := 0; i < n; i++ {
+		out[i+1] = out[i] + states[i].size
+		if i < n-1 {
+			out[i+1] += gap + extra
+		}
+	}
+	return out
+}
+
+func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowState []gridTrackState, colGap, rowGap float64, alignItems, justifyItems string, state *LayoutState) {
 	nCols := len(colPos) - 1
 	nRows := len(rowPos) - 1
 
@@ -975,16 +1046,63 @@ func gridPlaceItems(items []*gridItem, colPos, rowPos []float64, colState, rowSt
 		// to 340px inside a 300px column and its 100%-wide image overflowed).
 		hp := padding.Left + padding.Right + border.Left + border.Right
 		vp := padding.Top + padding.Bottom + border.Top + border.Bottom
-		aw = math.Max(0, aw-hp)
-		ah = math.Max(0, ah-vp)
-		ig.SetContentWidth(aw)
-		ig.SetContentHeight(ah)
+		// ★ Self-alignment (CSS Box Alignment §6): a definite width/height
+		// keeps its own size and is then positioned by justify-self/align-self;
+		// otherwise the item stretches across the cell. The item's own
+		// align-self/justify-self (when not auto) override the container's
+		// align-items/justify-items, whose initial value means stretch.
+		itemCS := it.box.Style()
+		fsItem := fontSizeOf(it.box)
+		align, justify := alignItems, justifyItems
+		if itemCS != nil {
+			align = gridKeyword(itemCS.AlignSelf, align)
+			justify = gridKeyword(itemCS.JustifySelf, justify)
+		}
+		contentW := math.Max(0, aw-hp)
+		if itemCS != nil {
+			if w, ok := definiteWidth(itemCS.Width, aw, fsItem); ok && w > 0 {
+				if isBorderBox(it.box) {
+					contentW = math.Max(0, w-hp)
+				} else {
+					contentW = w
+				}
+			}
+		}
+		contentH := math.Max(0, ah-vp)
+		if itemCS != nil {
+			if h, ok := definiteHeight(itemCS.Height, ah, fsItem); ok && h > 0 {
+				if isBorderBox(it.box) {
+					contentH = math.Max(0, h-vp)
+				} else {
+					contentH = h
+				}
+			}
+		}
+		ig.SetContentWidth(contentW)
+		ig.SetContentHeight(contentH)
 		// ★ 记录 grid 分配的固定高度（行高/stretch），供 item 自身 auto 高度计算
 		// 区分「父分配高度」与「自身 auto 高度残留」（复用 geometry 时）。
-		it.box.SetParentSetHeight(ig.ContentHeight())
+		it.box.SetParentSetHeight(contentH)
 
 		// Position BEFORE layout, so child layout sees correct absolute coordinates.
-		ig.SetTopLeft(rt+mt, cl+ml)
+		// The border box sits inside the cell according to the alignment
+		// keywords; start (and stretch) keep the cell's leading edge.
+		bbw, bbh := contentW+hp, contentH+vp
+		x := cl + ml
+		switch justify {
+		case "center":
+			x = cl + ml + math.Max(0, (aw-bbw)/2)
+		case "end", "flex-end", "right":
+			x = cl + ml + math.Max(0, aw-bbw)
+		}
+		y := rt + mt
+		switch align {
+		case "center":
+			y = rt + mt + math.Max(0, (ah-bbh)/2)
+		case "end", "flex-end", "bottom":
+			y = rt + mt + math.Max(0, ah-bbh)
+		}
+		ig.SetTopLeft(y, x)
 
 		ctx := contextFor(it.box, state)
 		if ctx != nil {

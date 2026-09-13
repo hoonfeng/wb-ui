@@ -366,7 +366,9 @@ var keyStyleProp = map[string]bool{
 	"min-width": true, "max-width": true, "min-height": true, "max-height": true,
 	"flex": true, "flex-grow": true, "flex-shrink": true, "flex-basis": true,
 	"flex-direction": true, "flex-wrap": true, "justify-content": true,
-	"align-items": true, "align-self": true, "gap": true,
+	"align-items": true, "align-self": true, "align-content": true, "gap": true,
+	"justify-items": true, "justify-self": true,
+	"place-items": true, "place-self": true, "place-content": true,
 	"margin": true, "margin-top": true, "margin-right": true, "margin-bottom": true, "margin-left": true,
 	"padding": true, "padding-top": true, "padding-right": true, "padding-bottom": true, "padding-left": true,
 	"border": true, "border-width": true, "border-top-width": true, "border-right-width": true,
@@ -751,6 +753,21 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 
 	content := cs.GetProperty("content")
 	return cs, content, true
+}
+
+// applyPlaceShorthand expands the two-axis `place-*` shorthands (CSS Box
+// Alignment §7): `place-items: <align> <justify>` sets both axes, and a single
+// value applies to both.
+func applyPlaceShorthand(value string, align, justify *string) {
+	fields := strings.Fields(value)
+	switch len(fields) {
+	case 0:
+		return
+	case 1:
+		*align, *justify = fields[0], fields[0]
+	default:
+		*align, *justify = fields[0], fields[1]
+	}
 }
 
 // pseudoDeclaresContent reports whether the collected declarations contain a
@@ -1839,6 +1856,16 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.AlignSelf = valueString
 	case "justify-self":
 		cs.JustifySelf = valueString
+	case "justify-items":
+		cs.JustifyItems = valueString
+	case "place-items":
+		// CSS Box Alignment §7: `place-items: <align-items> <justify-items>`,
+		// and a single value applies to both axes.
+		applyPlaceShorthand(valueString, &cs.AlignItems, &cs.JustifyItems)
+	case "place-self":
+		applyPlaceShorthand(valueString, &cs.AlignSelf, &cs.JustifySelf)
+	case "place-content":
+		applyPlaceShorthand(valueString, &cs.AlignContent, &cs.JustifyContent)
 	case "flex-basis":
 		if l, ok := parseLength(valueString); ok {
 			cs.FlexBasis = l

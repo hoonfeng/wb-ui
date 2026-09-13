@@ -191,6 +191,7 @@ type NonInheritedData struct {
 	JustifyContent      string
 	AlignItems          string
 	AlignContent        string
+	JustifyItems        string
 	GridTemplateColumns string
 	GridTemplateRows    string
 	GridTemplateAreas   string
