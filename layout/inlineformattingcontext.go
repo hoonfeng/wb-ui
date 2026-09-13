@@ -541,6 +541,24 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// Set CSS width if definite BEFORE Layout so box-sizing:border-box
 			// correctly limits the content width used by the child's Layout.
 			if cldG.ContentWidth() <= 0 {
+				// ★ Replaced elements (img/video/canvas) size from their
+				// resource, not from the line box (CSS 2.1 §10.3.2/§10.6.2 +
+				// CSS Images 3 default sizing): an auto-width inline <img>
+				// takes the intrinsic width, and a ratio-only resource (SVG
+				// carrying just a viewBox, i.e. most data-URI icons) fills
+				// the available line width with height = width / ratio.
+				// Without this a ratio-only SVG stayed 0×18 (line height)
+				// and its wrapper never reserved the intrinsic box.
+				if cld.IsReplaced() {
+					if rw, rh, ok := replacedContentSize(cld, contentWidth, g.ContentHeight()); ok && rw > 0 {
+						cldG.SetContentWidth(rw)
+						if rh > 0 && cldG.ContentHeight() <= 0 {
+							cldG.SetContentHeight(rh)
+						}
+					}
+				}
+			}
+			if cldG.ContentWidth() <= 0 {
 				cs := cld.Style()
 				if cs != nil {
 					if w, ok := definiteWidth(cs.Width, contentWidth, fs); ok && w > 0 {

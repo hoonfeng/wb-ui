@@ -477,6 +477,15 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		h := lineH
 		if el := box.Element(); el != nil && el.LocalName() == "textarea" {
 			h = textareaRows(box) * lineH
+		} else if el := box.Element(); el != nil {
+			// ★ A resource with a usable intrinsic size / ratio (<img>,
+			// <video poster>) sizes from the resource rather than from the
+			// line box (CSS 2.1 §10.6.2): a block-level ratio-only SVG fills
+			// the available width and takes height = width / ratio, instead
+			// of collapsing to the 18px line height.
+			if _, rh, ok := replacedContentSize(box, g.ContentWidth(), g.ContentHeight()); ok && rh > 0 {
+				h = rh
+			}
 		}
 		g.SetContentHeight(h)
 	}
