@@ -728,6 +728,19 @@ func minContentWidth(box *ElementBox) float64 {
 	}
 	if el := box.Element(); el != nil {
 		ln := el.LocalName()
+		// ★ 强制换行：<br> 被 blockify 成 flex item 后仍占一个行盒（Chromium 为
+		// 它生成匿名 flex item），尺寸是继承的行高而不是 0——forced-line-breaks
+		// 的 .flex 列（font:16px/20px）期望 10px 间隔块之后的 marker 落在 y=30
+		// （10 + 行高 20），此前 br 贡献 0 导致 marker 顶到 y=10。
+		if ln == "br" {
+			if lh := fontLineGap(box); lh > 0 {
+				return lh
+			}
+			if fs := fontSizeOf(box); fs > 0 {
+				return fs * 1.2
+			}
+			return 0
+		}
 		if ln == "svg" || ln == "img" || ln == "canvas" {
 			if w := el.GetAttribute("width"); w != "" {
 				if f, err := strconv.ParseFloat(w, 64); err == nil && f > 0 {
