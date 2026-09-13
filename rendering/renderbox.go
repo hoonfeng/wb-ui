@@ -275,7 +275,25 @@ func (b *RenderBox) IsStickyPositioned() bool {
 
 // IsFloated reports whether this box is floated, mirroring RenderBox::isFloating().
 func (b *RenderBox) IsFloated() bool {
-	return b.style != nil && (b.style.Float == "left" || b.style.Float == "right")
+	if b.style == nil {
+		return false
+	}
+	if b.style.Float != "left" && b.style.Float != "right" {
+		return false
+	}
+	// float/clear 对 flex / grid item 无效（CSS-FLEXBOX §3 / CSS-GRID §6），
+	// 必须与 layout.ElementBox.IsFloated 保持一致：否则布局树已正确地把带遗留
+	// float 的 flex item 当 in-flow 处理，渲染树却仍视其浮动 → 绘制分层把它排到
+	// float 层（在 in-flow 兄弟**之后**绘制）→ 它盖住后续兄弟的背景
+	// （flex-whitespace-items：`.main{float:left}` 盖住 `.sidebar`，蓝块整块消失）。
+	if p := b.ParentBox(); p != nil && p.style != nil {
+		switch p.style.Display {
+		case style.DisplayFlex, style.DisplayInlineFlex,
+			style.DisplayGrid, style.DisplayInlineGrid:
+			return false
+		}
+	}
+	return true
 }
 
 // IsInFlow reports whether this box participates in normal flow, mirroring

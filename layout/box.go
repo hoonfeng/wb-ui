@@ -139,7 +139,25 @@ func (b *ElementBox) IsInline() bool {
 }
 
 func (b *ElementBox) IsFloated() bool {
-	return b.style != nil && (b.style.Float == "left" || b.style.Float == "right")
+	if b.style == nil {
+		return false
+	}
+	if b.style.Float != "left" && b.style.Float != "right" {
+		return false
+	}
+	// CSS-FLEXBOX §3 / CSS-GRID §6：float 与 clear 对 flex / grid item **无效**
+	//（"float and clear do not create floating or clearance for flex items"）。
+	// 不在这里忽略的话，带遗留 float 的 flex item 会被判为 out-of-flow：
+	// IsInFlow()==false → flex/grid 布局在 item 收集处整段 continue，
+	// 元素变成 0×0、不绘制（flex-whitespace-items 的 `.main { float:left }`）。
+	if b.parentBox != nil && b.parentBox.style != nil {
+		switch b.parentBox.style.Display {
+		case style.DisplayFlex, style.DisplayInlineFlex,
+			style.DisplayGrid, style.DisplayInlineGrid:
+			return false
+		}
+	}
+	return true
 }
 
 func (b *ElementBox) IsAbsolutelyPositioned() bool {
@@ -421,6 +439,39 @@ func resolveStyleOrDefault(resolver *style.Resolver, el *dom.Element) *style.Com
 	return style.NewComputedStyle()
 }
 
+// walkComposedChildren 遍历 el 的组合树子节点：<slot> 展开为其分配节点，
+// display:contents 元素展开为其子节点（该元素自身不生成盒 —— CSS-DISPLAY-3
+// §2.5：contents 元素的子节点提升到父容器的格式化上下文中，例如 flex 容器里的
+// contents 元素，其子元素直接成为该容器的 flex item）。
+// 渲染树侧有完全相同的展开（rendering/rendertreebuilder.go 的
+// walkComposedChildren），两棵树结构一致，linkLayoutBoxes 才能按顺序配对。
+func walkComposedChildren(el *dom.Element, resolver *style.Resolver, emit func(dom.Node)) {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		walkComposedNode(c, resolver, emit)
+	}
+}
+
+// walkComposedNode 处理单个组合树节点：slot / display:contents 递归展开，
+// 其余节点（含 display:none —— 由调用方过滤，与展开前行为一致）原样 emit。
+func walkComposedNode(node dom.Node, resolver *style.Resolver, emit func(dom.Node)) {
+	e, ok := node.(*dom.Element)
+	if !ok {
+		emit(node)
+		return
+	}
+	if e.LocalName() == "slot" {
+		for _, an := range e.AssignedNodes() {
+			walkComposedNode(an, resolver, emit)
+		}
+		return
+	}
+	if resolveStyleOrDefault(resolver, e).Display == style.DisplayContents {
+		walkComposedChildren(e, resolver, emit)
+		return
+	}
+	emit(node)
+}
+
 func defaultDisplayForTag(localName string) style.DisplayType {
 	switch localName {
 	case "html", "body", "div", "p", "section", "article", "header", "footer",
@@ -537,15 +588,9 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 			inlineRun = append(inlineRun, &InlineTextBox{text: data, style: box.style, node: v})
 		}
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
-			for _, an := range e.AssignedNodes() {
-				appendChildNode(an)
-			}
-			continue
-		}
-		appendChildNode(c)
-	}
+	// 组合树遍历：<slot> 展开为分配节点，display:contents 元素展开为子节点
+	// （contents 元素自身不生成盒，只有它的子节点参与父容器的布局）。
+	walkComposedChildren(el, resolver, appendChildNode)
 	flush()
 	// ::after 伪元素（最后）。
 	appendPseudoAfter(box, el, resolver)
@@ -602,15 +647,8 @@ func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolve
 			box.AddChild(anon)
 		}
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
-			for _, an := range e.AssignedNodes() {
-				appendFlexChild(an)
-			}
-			continue
-		}
-		appendFlexChild(c)
-	}
+	// 同上：contents 元素的子节点直接成为 flex/grid 容器的 item。
+	walkComposedChildren(el, resolver, appendFlexChild)
 }
 
 // ─── Transitional type alias ────────────────────────────────

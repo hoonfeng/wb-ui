@@ -102,6 +102,39 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 // Mixed inline/block siblings are grouped: consecutive inline children are wrapped in
 // an anonymous RenderBlockFlow so the block container holds either all-block or
 // all-inline children.
+// walkComposedChildren 遍历 el 的组合树子节点：<slot> 展开为其分配节点，
+// display:contents 元素展开为其子节点（该元素自身不生成渲染对象 ——
+// CSS-DISPLAY-3 §2.5：contents 元素的子节点提升到父容器的格式化上下文中，
+// 例如 flex 容器里的 contents 元素，其子元素直接成为该容器的 flex item）。
+// 与 layout/box.go 的 walkComposedChildren 完全对应：两棵树必须逐节点配对，
+// 否则 linkLayoutBoxes 会错位（元素拿不到布局几何、不参与绘制与 hit-test）。
+func (b *RenderTreeBuilder) walkComposedChildren(el *dom.Element, emit func(dom.Node)) {
+	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
+		b.walkComposedNode(c, emit)
+	}
+}
+
+// walkComposedNode 处理单个组合树节点：slot / display:contents 递归展开，
+// 其余节点原样 emit（display:none 由调用方过滤，与展开前行为一致）。
+func (b *RenderTreeBuilder) walkComposedNode(node dom.Node, emit func(dom.Node)) {
+	e, ok := node.(*dom.Element)
+	if !ok {
+		emit(node)
+		return
+	}
+	if e.LocalName() == "slot" {
+		for _, an := range e.AssignedNodes() {
+			b.walkComposedNode(an, emit)
+		}
+		return
+	}
+	if cs := b.resolveStyle(e); cs != nil && cs.Display == style.DisplayContents {
+		b.walkComposedChildren(e, emit)
+		return
+	}
+	emit(node)
+}
+
 func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) {
 	// Replaced elements are leaf nodes in the render tree — they have no render
 	// tree children. This mirrors WebKit where RenderReplaced / RenderMenuList do
@@ -183,16 +216,8 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 			inlineRun = append(inlineRun, rt)
 		}
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		// <slot> 元素：渲染 assigned light-DOM 节点（slot 自身不生成 render object）。
-		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
-			for _, an := range e.AssignedNodes() {
-				appendChildNode(an)
-			}
-			continue
-		}
-		appendChildNode(c)
-	}
+	// 组合树遍历：<slot> 展开为分配节点，display:contents 元素展开为子节点。
+	b.walkComposedChildren(el, appendChildNode)
 	flush()
 	// ::after 伪元素（最后插入）。
 	b.appendPseudoAfter(parent, el)
@@ -266,15 +291,8 @@ func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Eleme
 			parent.AddChild(anon, nil)
 		}
 	}
-	for c := dom.FirstComposedChild(el); c != nil; c = c.NextSibling() {
-		if e, ok := c.(*dom.Element); ok && e.LocalName() == "slot" {
-			for _, an := range e.AssignedNodes() {
-				appendFlexChild(an)
-			}
-			continue
-		}
-		appendFlexChild(c)
-	}
+	// 同上：contents 元素的子节点直接成为 flex/grid 容器的 item。
+	b.walkComposedChildren(el, appendFlexChild)
 }
 
 // isFlexContainerDisplay reports whether the display value produces a flex
