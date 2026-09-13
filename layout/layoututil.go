@@ -113,6 +113,17 @@ func definiteHeight(l style.Length, reference, fontSize float64) (float64, bool)
 	return r.Value, true
 }
 
+// heightPercentDependent reports whether a height's used value needs a
+// percentage reference — a plain `%`, or a calc() carrying one. When the
+// containing block's height is not definite such a height behaves as auto
+// (CSS 2.1 §10.5), so callers must not invent a reference for it.
+func heightPercentDependent(l style.Length) bool {
+	if l.Unit == "%" {
+		return true
+	}
+	return l.Unit == "calc" && strings.Contains(l.CalcExpr, "%")
+}
+
 func asLength(v interface{}) style.Length {
 	if v == nil { return style.Length{Unit: "auto"} }
 	switch x := v.(type) {

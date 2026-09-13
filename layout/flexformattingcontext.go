@@ -741,6 +741,24 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	return maxW
 }
 
+// breakRowHeight returns the line-box height a forced break (<br>) occupies
+// once it is blockified into a flex item: the inherited CSS line-height when
+// the page sets one, otherwise the font's line gap. Chromium generates an
+// anonymous flex item for such a <br>, and a zero-height one makes every
+// following item jump up into the break.
+func breakRowHeight(box *ElementBox) float64 {
+	if lh := cssLineHeight(box); lh > 0 {
+		return lh
+	}
+	if lh := fontLineGap(box); lh > 0 {
+		return lh
+	}
+	if fs := fontSizeOf(box); fs > 0 {
+		return fs * 1.2
+	}
+	return 0
+}
+
 // minContentWidth returns the min-content inline size: the width of the
 // longest unbreakable segment (longest whitespace-delimited word for text;
 // CJK characters are individually breakable so a CJK run contributes only
@@ -756,13 +774,7 @@ func minContentWidth(box *ElementBox) float64 {
 		// 的 .flex 列（font:16px/20px）期望 10px 间隔块之后的 marker 落在 y=30
 		// （10 + 行高 20），此前 br 贡献 0 导致 marker 顶到 y=10。
 		if ln == "br" {
-			if lh := fontLineGap(box); lh > 0 {
-				return lh
-			}
-			if fs := fontSizeOf(box); fs > 0 {
-				return fs * 1.2
-			}
-			return 0
+			return breakRowHeight(box)
 		}
 		if ln == "svg" || ln == "img" || ln == "canvas" {
 			if w := el.GetAttribute("width"); w != "" {
@@ -863,6 +875,14 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 	// (.tb-btn 21.8px vs Edge 20px = 14 icon + 2×2 padding + 2×1 border).
 	if el := box.Element(); el != nil {
 		ln := el.LocalName()
+		// ★ <br> 被 blockify 成 flex item 后仍占一个行盒，高度取继承的
+		// line-height（forced-line-breaks 的 .flex 列 font:16px/20px → 20px），
+		// 否则它贡献 0 高度、后面的 item 直接贴上来。
+		if ln == "br" {
+			if h := breakRowHeight(box); h > 0 {
+				return h
+			}
+		}
 		if ln == "svg" || ln == "img" || ln == "canvas" {
 			if ht := el.GetAttribute("height"); ht != "" {
 				if f, err := strconv.ParseFloat(ht, 64); err == nil && f > 0 {

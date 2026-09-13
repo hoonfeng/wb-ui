@@ -324,12 +324,16 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						ch.SetContentHeight(hv)
 					}
 				}
-			} else {
+			} else if !heightPercentDependent(cs.Height) {
 				// Even when cbHeight is 0 (parent not yet sized), apply a
 				// definite px/em height from CSS. This is critical for replaced
 				// elements (input, select) whose height is set via CSS.
+				// ★ 百分比高度依赖包含块高度：包含块高度不确定时按 auto 处理
+				// （CSS 2.1 §10.5）。此前拿魔数 100 当参照，`height:100%` 的
+				// #wrapper 被撑成 100px，percentage-height-indefinite-parent
+				// 的 #after 被推到 y=100（期望 y=24，即紧跟内容撑开的高度）。
 				fs := fontSizeOf(childEb)
-				hv, ok := definiteHeight(cs.Height, 100, fs)
+				hv, ok := definiteHeight(cs.Height, 0, fs)
 				if ok && hv > 0 {
 					if isBorderBoxForBox(childEb) {
 						ch.SetContentHeight(hv - border.Vertical() - padding.Vertical())

@@ -140,6 +140,12 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		items = append(items, it)
 	}
 	if len(items) == 0 {
+		// A grid whose only children are absolutely positioned has no in-flow
+		// items at all — their containing block still has to be resolved
+		// (abs-fill C: `position:relative; display:grid` with a single
+		// `position:absolute; inset:0` child stayed 0×0 because this early
+		// return skipped the absolute pass below).
+		layoutGridAbsolutes(box, state)
 		return
 	}
 
@@ -287,13 +293,7 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// were silently dropped — .toast-container (position:fixed; top:40px;
 	// right:16px) inside app-root stayed at 0x0 instead of the viewport
 	// corner. position:fixed resolves against the viewport (root).
-	root := stateRootForBox(box)
-	for _, child := range box.Children() {
-		if childEb, ok := child.(*ElementBox); ok && childEb.IsAbsolutelyPositioned() {
-			cb := containingBlockForAbsolute(childEb, root)
-			layoutAbsolute(childEb, cb, root, state)
-		}
-	}
+	layoutGridAbsolutes(box, state)
 
 	lastRowEnd := rowPos[len(rowPos)-1]
 	contentH := math.Max(0, lastRowEnd-g.ContentBoxTop())
@@ -312,6 +312,21 @@ func (c *GridFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 
 // ── Track parsing ──
+
+// layoutGridAbsolutes lays out a grid container's absolutely (and fixed)
+// positioned children against it as their containing block (CSS-GRID-1 §9.2).
+// position:fixed resolves against the viewport, i.e. the layout root.
+func layoutGridAbsolutes(box *ElementBox, state *LayoutState) {
+	root := stateRootForBox(box)
+	for _, child := range box.Children() {
+		eb, ok := child.(*ElementBox)
+		if !ok || !eb.IsAbsolutelyPositioned() {
+			continue
+		}
+		cb := containingBlockForAbsolute(eb, root)
+		layoutAbsolute(eb, cb, root, state)
+	}
+}
 
 func gridParseTracks(value string, avail, fs, gap float64, itemCount int) []gridTrack {
 	if value == "" || value == "none" {
@@ -677,8 +692,11 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 					if w, ok := definiteWidth(csb.Width, avail, cfs); ok && w > 0 {
 						declared = w
 					}
-				} else {
-					if h, ok := definiteHeight(csb.Height, 100, cfs); ok && h > 0 {
+				} else if !heightPercentDependent(csb.Height) {
+					// 百分比高度在这里没有确定的参照（包含块高度未知）→ 按
+					// auto 处理；此前的魔数 100 会把 `height:100%` 的轨道项
+					// 量成 100px。
+					if h, ok := definiteHeight(csb.Height, 0, cfs); ok && h > 0 {
 						declared = h
 					}
 				}
