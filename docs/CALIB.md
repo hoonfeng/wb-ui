@@ -44,6 +44,10 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 | right-float-navigation | 0.267% | (64,0)-(143,29)：右侧 float 之后的第 2 个 inline-block 没有留在同一行 |
 | table-row-geometry | 0.255% | 行高/单元格内容的细节差（文本位置为主） |
 | tables | 3.956% | **主要是文本位置差 1-2px**（字体度量差异）叠加 T3/T5 的色块尺寸差；该夹具 cssprobe 检查**全部通过** |
+| flex-post-ratio-cross-size | 0.316%（2840px） | 集中在 y=296..472 的整行边缘：`#row` 高度 302.3 的**亚像素高度**（aspect-ratio 推得）与参照取整不同，且 `#visual` 底部 6px 色带的边界随之下移半像素；cssprobe 检查 4/4 通过 |
+| video-poster | 0.038%（340px） | 全部落在 `#positioned`（20,150)-(119,249)：`border-radius:20px` + `opacity:.5` 的圆角/半透明合成差；poster 的本体、object-fit:cover、object-position:right 与其余两项检查一致 |
+| inline-block-flex-items | 0.012%（105px） | 单像素级边缘（`#brand` 右缘 382、`#links` 左缘 525 的 1px 边界）；该项的 flex/table 结构检查 3/3 通过 |
+| flex-whitespace-items | 0.000%（0px） | 与参照逐像素一致（direct flex sidebar 225x180@(0,0)、body 675x200@(225,0)） |
 
 ## 结论
 
@@ -54,6 +58,21 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    若干色块位置/尺寸）。后续可把 `dev/calib` 的差异占比纳入回归基线，作为整体
    一致性的补充指标。
 3. 文本位置差 1-2px 属字体度量范畴（hinting/行高取整），非结构性布局错误。
+4. 本轮（aspect-ratio / flex 外盒尺寸 / 空 inline-block / `<video poster>`）后
+   cssprobe 为 **53/61 夹具、239/248 检查**；剩余 8 个夹具里 7 个是探针边界
+   （见下表），第 8 个 `logical-borders` 是参照「不斜切」与标准 CSS 相左
+   （固定 4/6，58px）。新增的一致性数字见上表 4 行。
+   - `aspect-ratio`：flex item 交叉轴由主轴推出（`resolveCrossSizes` +
+     `ratioCrossSizeInRowFlex` 供容器 auto 高度估算）、absolute 盒 `height:auto`
+     由宽度推高（`layoutAbsolute`）、BFC auto 高度分支同样按比例兜底。
+   - flex 主轴写入统一按「外盒尺寸 → content」扣 padding+border：
+     `finalMainSize` 与非 border-box 项的 `paddingMain`（inline-block flex item
+     外盒 414 → 382）。
+   - 无文本的 inline-block 用 `intrinsicContentWidth` 作 shrink-to-fit 宽
+     （`#chips` 30 → 90，三个 inline-block li 由重叠变横排）。
+   - `<video poster>`：poster 走 `PaintImage`，SVG 资源矢量路径也遵循
+     object-fit / object-position 并裁剪到内容盒，absolute + width:auto 的替换
+     元素取资源固有宽。
 
 ## 夹具限制（探针能力边界，非引擎缺口）
 
