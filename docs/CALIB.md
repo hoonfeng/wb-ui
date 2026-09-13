@@ -70,9 +70,19 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 | `modern-hydration-contracts`、`modern-streams` | 需要 JS 运行时 API | 同上 |
 | `media-text-track` | 需要 `<track>` 媒体加载 | 未实现（媒体能力） |
 | `flex-flow` | 11 项里 10 项通过；仅剩「CSS supports accepts only the shorthand grammar」需要 `CSS.supports()`（JS API） | `css/values_test.go:TestParseFlexFlow` 覆盖语法，布局行为已由其余 10 项像素验证 |
-| `viewport-consistency` | 3 项里仅第 3 项「page JavaScript sees the screenshot viewport」需要 `window.innerHeight`（JS） | ⚠️ 第 2 项「height media query uses the screenshot viewport」**不是** JS 依赖，属真缺口（`@media (height: …)` 未按视口高匹配），见下 |
+| `viewport-consistency` | 3 项里仅第 3 项「page JavaScript sees the screenshot viewport」需要 `window.innerWidth/innerHeight` 与 `visualViewport`（JS API） | 前两项（width / height 媒体查询）本轮修复：`style.Resolver` 的媒体上下文此前恒为 0×0（`min-height` 恒不匹配、`max-width` 恒匹配），现由 `RenderView.SetViewportSize` / `Frame.syncMediaQueryViewport` 与真实视口同步 |
 
-仍待处理（真缺口，非探针边界）：
+### 尺寸媒体查询的视口同步（本轮）
 
-- `viewport-consistency` 的 height 媒体查询项：`@media (height: 1000px)` 未命中，
-  元素按不匹配分支落成 `#087f5b`。
+`@media` 的 width/height 之前按 **0×0** 求值——`style.Resolver.mediaQueryCtx`
+只在被显式设置时才有值，而真实链路（`page/frameview.go` → `RenderView`）从未
+设置它。于是 `@media (min-width: 600px)` 恒不匹配、`@media (max-width: 950px)`
+恒匹配（0 ≤ 950），所有尺寸媒体查询都落在错误分支上。
+
+修复：`Resolver.SetViewportSize` 变化时清 ComputedStyle 缓存并报告变化；
+`RenderView.SetViewportSize` 与 `Frame.syncMediaQueryViewport`（渲染树 Build
+之前调用）把它与真实视口同步；探针侧在 Build 之前显式设置。
+
+已知取舍：视口尺寸变化**不会**主动标记渲染树重建（尺寸抖动会让 iframe 子文档
+每帧重建，滚动偏移与跨 frame 选区失效）。因此 resize 后的媒体查询分支要等
+下一次渲染树重建（DOM 变更/样式变更触发）才切换，而首帧加载与重建路径已正确。

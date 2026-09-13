@@ -187,6 +187,7 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	}
 
 	f.extractAndAddStyles()
+	f.syncMediaQueryViewport()
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(doc)
 	objCount := 0
@@ -238,6 +239,7 @@ func (f *Frame) RebuildRenderTree() {
 			Logf("RebuildRenderTree", "style fingerprint unchanged, skip re-extract (len=%d)", len(fp))
 		}
 	}
+	f.syncMediaQueryViewport()
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	oldRV := f.renderView
 	f.renderView = builder.Build(f.document)
@@ -408,6 +410,19 @@ func (f *Frame) LayoutNow() {
 	if f.view != nil && f.view.NeedsLayout() {
 		f.view.Layout()
 	}
+}
+
+// syncMediaQueryViewport 把 FrameView 的视口尺寸交给样式解析器，供 @media
+// 的 width/height 求值。必须在渲染树 Build（首次构建 / 重建都会重新解析
+// 样式）**之前**调用：resolver 的媒体上下文默认是 0x0，不设置的话
+// @media (min-width: …) 恒不匹配、@media (max-width: …) 恒匹配（0 <= 950），
+// 即所有尺寸媒体查询都落在错误分支。SetViewportSize 在尺寸变化时会清
+// ComputedStyle 缓存，因此重建后的解析必然使用新尺寸。
+func (f *Frame) syncMediaQueryViewport() bool {
+	if f.resolver == nil || f.view == nil {
+		return false
+	}
+	return f.resolver.SetViewportSize(f.view.Width(), f.view.Height())
 }
 
 // ViewportWidth 返回子文档视口宽度（iframe 内容框宽度，CSS 像素）。

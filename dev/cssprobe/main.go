@@ -326,6 +326,11 @@ func buildLayout(htmlText string) (*rendering.RenderView, error) {
 	}
 	resolver := style.NewResolver()
 	resolver.AddStyleSheet(html5.NewUAStyleSheet())
+	// @media 求值需要视口尺寸：必须在 Build（首次解析样式）之前设置，
+	// 否则所有 width/height 媒体查询按 0x0 评估——min-width 恒不匹配、
+	// max-width 恒匹配（fixture viewport-consistency 的
+	// @media (min-height: 900px) 正是因此不命中）。
+	resolver.SetViewportSize(viewportW, viewportH)
 	applyDocumentCSS(doc, resolver)
 
 	builder := rendering.NewRenderTreeBuilder(resolver)

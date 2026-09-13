@@ -956,6 +956,24 @@ func hitTestScrollbarInner(rv *RenderView, x, y float64) *ScrollbarHit {
 
 func (v *RenderView) SetViewportSize(w, h float64) {
 	if v.viewWidth != w || v.viewHeight != h { v.viewWidth, v.viewHeight = w, h; v.Dirty() }
+	// ★ 媒体查询上下文必须跟随视图尺寸：style.Resolver.mediaQueryCtx 是
+	// @media 求值的唯一依据，而它默认是零值（0×0）。此前只有 bindings 的
+	// MediaQueryContextProvider（JS 侧 matchMedia）拿到真实尺寸，样式解析
+	// 侧仍按 0×0 评估——`@media (min-width: 600px)` 恒不匹配、
+	// `@media (max-width: 950px)` 恒匹配（0 ≤ 950），即所有宽度/高度媒体
+	// 查询都落在错误分支上（fixture viewport-consistency 的
+	// `@media (min-height: 900px)` 未命中即是此根因）。
+	v.syncMediaQueryViewport()
+}
+
+// syncMediaQueryViewport mirrors the view size into the style resolver's media
+// query context (the viewport width/height @media is evaluated against).
+// Non-size features (color scheme, hover, pointer) keep their own defaults.
+func (v *RenderView) syncMediaQueryViewport() {
+	if v.resolver == nil {
+		return
+	}
+	v.resolver.SetViewportSize(int(v.viewWidth), int(v.viewHeight))
 }
 
 // CursorPos returns the last tracked cursor position in CSS pixels.

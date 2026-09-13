@@ -238,6 +238,13 @@ func (v *FrameView) Layout() {
 		Logf("Layout", "skip: no frame/renderView")
 		return
 	}
+	// ★ 视口尺寸先同步给样式解析器（@media 求值的输入），再重建渲染树：
+	// 尺寸变化时 ComputedStyle 缓存被清，本帧若正好有挂起的重建，解析就会
+	// 用上新尺寸。★ 这里刻意**不**为尺寸变化主动 MarkRenderTreeDirty：
+	// 渲染树重建会重置滚动偏移/选择状态，iframe 子文档（首帧 view 尺寸由
+	// 父文档布局写入，布局过程中反复变化）会因此每帧重建——滚动条、
+	// 跨 frame 选区全部失效（app 包 iframe 测试回归）。
+	v.frame.syncMediaQueryViewport()
 	// Flush any pending render-tree rebuild from DOM mutations before layout.
 	rebuilt := v.frame.RebuildRenderTreeIfNeeded()
 	if !rebuilt && v.frame.NeedsRenderTreeRebuild() {

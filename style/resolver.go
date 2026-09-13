@@ -171,10 +171,24 @@ func (r *Resolver) LookupKeyframes(name string) *css.KeyframesRule {
 }
 
 // SetViewportSize updates the viewport dimensions used for media query evaluation.
-// This is typically called when the FrameView is resized.
-func (r *Resolver) SetViewportSize(w, h int) {
+// This is typically called when the FrameView is resized. It reports whether the
+// size actually changed — callers use that to re-resolve styles (@media branches
+// follow the viewport, so a resize invalidates every ComputedStyle computed
+// against the old size; the cache is dropped here for the same reason).
+func (r *Resolver) SetViewportSize(w, h int) bool {
+	if r.mediaQueryCtx.Width == w && r.mediaQueryCtx.Height == h {
+		return false
+	}
 	r.mediaQueryCtx.Width = w
 	r.mediaQueryCtx.Height = h
+	// ★ 视口尺寸是 @media 求值的输入：尺寸一变，之前按旧尺寸算出的
+	// ComputedStyle（含 width/height 媒体查询分支）全部失效。不清缓存
+	// 的话 resize 之后元素样式仍停留在旧分支（例如 `@media (min-width:
+	// 600px)` 的布局在窗口由窄变宽后不恢复）。
+	if r.cache != nil {
+		r.ClearCache()
+	}
+	return true
 }
 
 // SetMediaQueryContext replaces the entire media query evaluation context.
