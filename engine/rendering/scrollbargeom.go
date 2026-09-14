@@ -1,0 +1,215 @@
+// Translation of: Source/WebCore/rendering/RenderScrollbar.cpp (geometry part)
+//
+// 滚动条几何的单一事实来源：绘制（renderpipeline.go）与宿主交互
+// （app/host.go 的拖动/滚轮）共用同一套公式，避免两侧参数漂移
+// （此前拖动端用 padding-box 高度、绘制端用内容盒高度，且轨道长
+// 差了一个 arrowGap，导致 thumb 拖动位移与内容滚动量不成比例、
+// 滚不到底等异常）。
+package rendering
+
+import (
+	"wb-ui/engine/style"
+)
+
+const (
+	sbArrowSize = 12.0 // 箭头按钮边长
+	sbArrowGap  = 5.0  // 箭头与轨道间的间隙
+)
+
+// ScrollbarMetrics 描述一条滚动条（垂直或水平）的几何。
+// 绘制端据此画 thumb；宿主拖动/滚轮据此把指针位移映射为滚动偏移，
+// 保证 thumb 移动 1px 对应内容滚动 (MaxScroll / travel) px，与绘制一致。
+type ScrollbarMetrics struct {
+	OK        bool    // 应绘制滚动条（内容溢出 + overflow 允许）
+	TrackLen  float64 // thumb 可移动轨道长（track 总长减箭头与 gap）
+	ThumbLen  float64 // thumb 长度（最小 18，最大 TrackLen-4，与绘制一致）
+	MaxScroll float64 // sx/sy 最大值 = 内容总长 - 可视内容长
+	ViewLen   float64 // 可视内容长（内容盒）
+	TotalLen  float64 // 内容总长
+}
+
+// scrollbarWidthFor mirrors the CSS scrollbar-width property used by the
+// painter: 12px default, 8px thin, 0 none (still scrollable). It also honors
+// ::-webkit-scrollbar { width: Npx } (Blink/WebKit custom width — wins over
+// the standard property, matching Chrome).
+func scrollbarWidthFor(st *style.ComputedStyle) float64 {
+	if st == nil {
+		return 12
+	}
+	switch st.GetProperty("scrollbar-width") {
+	case "thin":
+		return 8
+	case "none":
+		return 0
+	}
+	if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
+		if l, ok := parseLengthAny(wv); ok && l > 0 {
+			return l
+		}
+	}
+	return 12
+}
+
+// webkitCustomScrollbar reports whether the element has Blink/WebKit custom
+// scrollbar styling (::-webkit-scrollbar { width/background } or
+// ::-webkit-scrollbar-thumb). Custom webkit scrollbars render WITHOUT the
+// classic arrow buttons and their thumb fills the full scrollbar width —
+// unlike the default flat style (12px + arrow buttons).
+func webkitCustomScrollbar(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	return st.GetProperty("-webkit-scrollbar-width") != "" ||
+		st.GetProperty("-webkit-scrollbar-height") != "" ||
+		st.GetProperty("-webkit-scrollbar-thumb-color") != "" ||
+		st.GetProperty("-webkit-scrollbar-track-color") != "" ||
+		st.GetProperty("-webkit-scrollbar-thumb-radius") != ""
+}
+
+// boxViewAndContent returns the client viewport (padding-box, per CSSOM —
+// clientWidth/clientHeight include padding) and the content extent
+// (BoxContentSize). Gating an overflow:auto box against the content-box
+// height makes every vertically-padded container look "overflowed" (the
+// content extent counts content + top padding), so ws-section /
+// project-section / sidebar-content all showed spurious scrollbars even
+// when content fit exactly. The painter, hit-test and drag geometry all
+// share this single source.
+func boxViewAndContent(rv *RenderView, box *RenderBox) (viewW, viewH, totalW, totalH float64) {
+	pb := box.PaddingBoxRect()
+	viewW = pb.Width
+	viewH = pb.Height
+	if viewW < 1 {
+		viewW = 1
+	}
+	if viewH < 1 {
+		viewH = 1
+	}
+	totalW, totalH = rv.BoxContentSize(box)
+	return
+}
+
+// needsScrollbars mirrors the painter's needsV/needsH decision:
+// overflow:scroll always, overflow:auto when content exceeds the viewport,
+// never when overflow:hidden (or visible).
+func needsScrollbars(st *style.ComputedStyle, totalW, totalH, viewW, viewH float64) (needV, needH bool) {
+	if st == nil {
+		return false, false
+	}
+	needV = (st.OverflowY == style.OverflowScroll ||
+		(st.OverflowY == style.OverflowAuto && totalH > viewH)) &&
+		st.OverflowY != style.OverflowHidden
+	needH = (st.OverflowX == style.OverflowScroll ||
+		(st.OverflowX == style.OverflowAuto && totalW > viewW)) &&
+		st.OverflowX != style.OverflowHidden
+	return
+}
+
+// ScrollRange 返回元素作为滚动容器时允许的滚动范围：max* 为内容总长与可视
+// 长之差（CSSOM View 的滚动上限），horizontal/vertical 表示该轴是否可滚动。
+//
+// ★ 与 VerticalScrollbarMetrics 的 OK 字段不是同一件事：后者回答"滚动条该
+// 怎么画"，容器小到放不下箭头按钮时（vh <= 2*arrow+2*gap）它返回 OK=false
+// （不绘制滚动条），但**元素依然可滚动**。浏览器里 10×10 的
+// overflow:scroll 容器照样 scrollTop = 15（滚动条画不下就不画）。因此
+// scrollTop/scrollLeft 赋值与 scrollTo/scrollBy 的判定必须走本函数，否则
+// 小尺寸滚动容器上的程序化滚动会被静默丢弃（React 19 水合契约里的
+// scroller.scrollTo(...) 正是这种容器：10×10 + 100×100 内容）。
+func ScrollRange(rv *RenderView, box *RenderBox) (maxX, maxY float64, horizontal, vertical bool) {
+	if rv == nil || box == nil {
+		return 0, 0, false, false
+	}
+	viewW, viewH, totalW, totalH := boxViewAndContent(rv, box)
+	needV, needH := needsScrollbars(box.Style(), totalW, totalH, viewW, viewH)
+	if needV {
+		maxY = totalH - viewH
+		if maxY < 0 {
+			maxY = 0
+		}
+		vertical = true
+	}
+	if needH {
+		maxX = totalW - viewW
+		if maxX < 0 {
+			maxX = 0
+		}
+		horizontal = true
+	}
+	return
+}
+
+// VerticalScrollbarMetrics computes the vertical scrollbar geometry for a
+// box, using exactly the same viewport/extent/arrow constants as the
+// painter. Returns OK=false when no vertical scrollbar should be drawn.
+func VerticalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics {
+	if rv == nil || box == nil {
+		return ScrollbarMetrics{}
+	}
+	viewW, viewH, totalW, totalH := boxViewAndContent(rv, box)
+	needV, needH := needsScrollbars(box.Style(), totalW, totalH, viewW, viewH)
+	if !needV || totalH <= viewH {
+		return ScrollbarMetrics{}
+	}
+	pb := box.PaddingBoxRect()
+	vh := pb.Height
+	if needH {
+		vh -= scrollbarWidthFor(box.Style())
+	}
+	webkit := webkitCustomScrollbar(box.Style())
+	if !webkit && vh <= sbArrowSize*2+sbArrowGap*2 {
+		return ScrollbarMetrics{}
+	}
+	trackLen := vh
+	if !webkit {
+		trackLen = vh - sbArrowSize*2 - sbArrowGap*2
+	}
+	thumbLen := trackLen * viewH / totalH
+	if thumbLen < 18 {
+		thumbLen = 18
+	}
+	if thumbLen > trackLen-4 {
+		thumbLen = trackLen - 4
+	}
+	maxSy := totalH - viewH
+	if maxSy <= 0 {
+		maxSy = 1
+	}
+	return ScrollbarMetrics{OK: true, TrackLen: trackLen, ThumbLen: thumbLen, MaxScroll: maxSy, ViewLen: viewH, TotalLen: totalH}
+}
+
+// HorizontalScrollbarMetrics computes the horizontal scrollbar geometry.
+// Returns OK=false when no horizontal scrollbar should be drawn.
+func HorizontalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics {
+	if rv == nil || box == nil {
+		return ScrollbarMetrics{}
+	}
+	viewW, viewH, totalW, totalH := boxViewAndContent(rv, box)
+	needV, needH := needsScrollbars(box.Style(), totalW, totalH, viewW, viewH)
+	if !needH || totalW <= viewW {
+		return ScrollbarMetrics{}
+	}
+	pb := box.PaddingBoxRect()
+	hw := pb.Width
+	if needV {
+		hw -= scrollbarWidthFor(box.Style())
+	}
+	webkit := webkitCustomScrollbar(box.Style())
+	if !webkit && hw <= sbArrowSize*2+sbArrowGap*2 {
+		return ScrollbarMetrics{}
+	}
+	trackLen := hw
+	if !webkit {
+		trackLen = hw - sbArrowSize*2 - sbArrowGap*2
+	}
+	thumbLen := trackLen * viewW / totalW
+	if thumbLen < 18 {
+		thumbLen = 18
+	}
+	if thumbLen > trackLen-4 {
+		thumbLen = trackLen - 4
+	}
+	maxSx := totalW - viewW
+	if maxSx <= 0 {
+		maxSx = 1
+	}
+	return ScrollbarMetrics{OK: true, TrackLen: trackLen, ThumbLen: thumbLen, MaxScroll: maxSx, ViewLen: viewW, TotalLen: totalW}
+}

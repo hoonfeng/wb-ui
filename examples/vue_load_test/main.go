@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/jsc"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/js/jsc"
 )
 
 func main() {

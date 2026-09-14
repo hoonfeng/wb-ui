@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"wb-ui/bridge"
-	"wb-ui/jsc"
+	"wb-ui/engine/js/jsc"
 )
 
 func main() {

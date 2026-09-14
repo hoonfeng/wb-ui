@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"wb-ui/goja"
+	"wb-ui/engine/js/goja"
 )
 
 func main() {

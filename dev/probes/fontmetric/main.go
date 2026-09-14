@@ -15,7 +15,7 @@ import (
 	"os"
 	"strconv"
 
-	"wb-ui/platform/graphics"
+	"wb-ui/engine/platform/graphics"
 )
 
 func main() {

@@ -7,7 +7,7 @@ package main
 import (
 	"fmt"
 
-	"wb-ui/platform/graphics"
+	"wb-ui/engine/platform/graphics"
 )
 
 func printMetrics(tag string) {

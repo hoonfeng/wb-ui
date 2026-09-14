@@ -21,7 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 	"wb-ui/ui"
 	"wb-ui/webkit"
 )

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 )
 
 func treeProbeSpans(doc *dom.Document, cls string) []*dom.Element {

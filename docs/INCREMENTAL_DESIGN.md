@@ -7,7 +7,7 @@
 ## 一、设计缺陷清单（已用代码验证）
 
 ### 缺陷 1：DOM 变更通知 `onTreeChange` 无参数（已修复）
-- `dom/document.go:36` `onTreeChange func()` → `func(Node)`，`notifyTreeChange()` 传 `b`。
+- `engine/dom/document.go:36` `onTreeChange func()` → `func(Node)`，`notifyTreeChange()` 传 `b`。
 - 宿主能精确定位「哪个节点变了」。
 
 ### 缺陷 2：node→render 映射填充时机晚（已修复）

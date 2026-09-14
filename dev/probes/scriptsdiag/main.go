@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	"wb-ui/jsc"
+	"wb-ui/engine/js/jsc"
 	"wb-ui/webkit"
 )
 

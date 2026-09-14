@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"wb-ui/rendering"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 

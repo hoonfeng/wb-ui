@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -37,7 +38,12 @@ var EdgePath = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.ex
 var TempDir = "C:\\Temp\\wbui_consistency"
 
 // ReportDir receives the per-case comparison reports.
-var ReportDir = filepath.Join("dev", "consistency", "report")
+// 用 runtime.Caller 定位包目录，使报告始终落在 dev/suites/consistency/report
+// （与 .gitignore 规则一致），不受调用者 CWD（go run 自仓库根 / go test 自包目录）影响。
+var ReportDir = func() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "report")
+}()
 
 func main() {
 	caseName := flag.String("case", "", "run a single case by name")

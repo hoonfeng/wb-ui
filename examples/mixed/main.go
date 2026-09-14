@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"wb-ui/bindings"
-	"wb-ui/jsc"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/js/jsc"
 	"wb-ui/webkit"
 )
 

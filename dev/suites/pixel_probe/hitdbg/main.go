@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"os"
 
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/html"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"wb-ui/jsc"
+	"wb-ui/engine/js/jsc"
 )
 
 // TestRegisterHTTP_DirectCall verifies that a handler registered via

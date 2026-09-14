@@ -44,10 +44,10 @@ const defaultHTML = `<!DOCTYPE html>
     <h1>Hello from wb-ui</h1>
     <p>This page was parsed, laid out and painted entirely in Go.</p>
     <ul>
-      <li>HTML parsing via wb-ui/html</li>
-      <li>Style resolution via wb-ui/style</li>
-      <li>Block layout via wb-ui/layout</li>
-      <li>Software raster via wb-ui/rendering</li>
+      <li>HTML parsing via wb-ui/engine/html</li>
+      <li>Style resolution via wb-ui/engine/style</li>
+      <li>Block layout via wb-ui/engine/layout</li>
+      <li>Software raster via wb-ui/engine/rendering</li>
     </ul>
   </body>
 </html>`

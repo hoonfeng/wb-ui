@@ -15,17 +15,17 @@ import (
 	"strings"
 	"sync"
 
-	"wb-ui/bindings"
+	"wb-ui/engine/js/bindings"
 	"wb-ui/bridge"
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/jsc"
-	"wb-ui/layout"
-	"wb-ui/page"
-	"wb-ui/platform/graphics"
-	"wb-ui/popover"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/js/jsc"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/page"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/popover"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 const (

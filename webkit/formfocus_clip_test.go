@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/rendering"
 )
 
 type ffMockClip struct{ s string }

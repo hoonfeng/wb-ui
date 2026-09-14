@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 	"wb-ui/webkit"
 )
 

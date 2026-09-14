@@ -10,13 +10,13 @@ import (
 	"os"
 	"strings"
 
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/html"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 // boxish is the subset of RenderBox's API the probe needs. RenderBox is embedded

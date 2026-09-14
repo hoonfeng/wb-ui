@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"wb-ui/rendering"
+	"wb-ui/engine/rendering"
 )
 
 func TestZZSelDebug(t *testing.T) {

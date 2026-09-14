@@ -6,7 +6,7 @@ package app
 import (
 	"testing"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 )
 
 func TestIsTextFormControl_Nil(t *testing.T) {
@@ -136,7 +136,7 @@ func TestSetFocusedElementValue_Nil(t *testing.T) {
 // TestSetFocusedElementValue_FlipsUserValidity 覆盖 app 层的用户输入写入点
 // （IME/组合输入的字符提交都经 setFocusedElementValue）与 user validity 的
 // 联动：控件在焦点会话内被写入使有效性翻转的值 → 立即获得 user validity
-// （MDN :user-valid 第 3 条，见 html5/uservalidity.go）；没有焦点会话时
+// （MDN :user-valid 第 3 条，见 engine/html5/uservalidity.go）；没有焦点会话时
 // （程序化写值）不置位。
 func TestSetFocusedElementValue_FlipsUserValidity(t *testing.T) {
 	doc := dom.NewDocument()

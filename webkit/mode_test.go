@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"wb-ui/bridge"
-	"wb-ui/page"
+	"wb-ui/engine/page"
 )
 
 const modeMinimalHTML = `<!DOCTYPE html><html><head></head><body><div id="box">x</div></body></html>`

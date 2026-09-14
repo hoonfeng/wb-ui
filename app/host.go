@@ -28,18 +28,18 @@ import (
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 
-	"wb-ui/css"
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/page"
-	"wb-ui/platform/graphics"
-	"wb-ui/platform/ime"
-	"wb-ui/platform/window"
-	"wb-ui/popover"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/page"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/platform/ime"
+	"wb-ui/engine/platform/window"
+	"wb-ui/engine/popover"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 	"wb-ui/webkit"
 )
 
@@ -767,7 +767,7 @@ func setFocusedElementValue(el *dom.Element, text string) {
 	if el.LocalName() == "textarea" {
 		el.SetTextContent(text)
 		// 用户输入改了值 → user validity 的「焦点会话内有效性翻转即时生效」
-		// （MDN :user-valid 第 3 条；见 html5/uservalidity.go）。
+		// （MDN :user-valid 第 3 条；见 engine/html5/uservalidity.go）。
 		html5.NoteUserInput(el)
 		return
 	}

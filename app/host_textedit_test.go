@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/platform/window"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/platform/window"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 
 	"github.com/go-gl/glfw/v3.3/glfw"

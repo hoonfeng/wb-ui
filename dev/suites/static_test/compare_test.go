@@ -12,19 +12,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/html"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 func main() {
 	wd := "."
-	htmlPath := filepath.Join(wd, "dev", "static_test", "layout_bench.html")
+	htmlPath := filepath.Join(wd, "dev", "suites", "static_test", "layout_bench.html")
 	data, err := os.ReadFile(htmlPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
@@ -50,7 +50,7 @@ func main() {
 	state := layout.NewLayoutState(1280, 800)
 	rv.Layout(state)
 
-	outPath := filepath.Join(wd, "dev", "static_test", "compare_report.txt")
+	outPath := filepath.Join(wd, "dev", "suites", "static_test", "compare_report.txt")
 	f, _ := os.Create(outPath)
 	defer f.Close()
 
@@ -125,7 +125,7 @@ func main() {
 	canvas := graphics.NewCanvas(1280, 800)
 	canvas.Clear(graphics.Color{R: 0, G: 0, B: 0, A: 0})
 	rendering.Paint(rv, canvas, rendering.Rect{Width: 1280, Height: 800})
-	pngPath := filepath.Join(wd, "dev", "static_test", "wbui_compare.png")
+	pngPath := filepath.Join(wd, "dev", "suites", "static_test", "wbui_compare.png")
 	savePNG(canvas, pngPath)
 	cov := calcCoverage(canvas)
 

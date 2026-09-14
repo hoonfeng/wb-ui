@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"wb-ui/rendering"
+	"wb-ui/engine/rendering"
 )
 
 // mediaHTTPFixture：图片与 @import 的 fixture。

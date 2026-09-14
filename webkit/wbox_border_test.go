@@ -3,7 +3,7 @@ package webkit
 import (
 	"testing"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 )
 
 // TestWboxBorderSides 用真实 LoadHTML+Render 管道验证配置画布 wbox 圆角边框

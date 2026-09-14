@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"wb-ui/bridge"
-	"wb-ui/page"
-	"wb-ui/rendering"
+	"wb-ui/engine/page"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 

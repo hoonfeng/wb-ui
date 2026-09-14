@@ -1,8 +1,8 @@
 /* Stylesheet for the mixed Go+HTML+CSS+JS demo.
  *
- * wb-ui's CSS engine (wb-ui/css) parses this stylesheet, the style resolver
- * (wb-ui/style) attaches computed styles to each element, and the layout
- * engine (wb-ui/layout) uses them when painting. No external CSS library is
+ * wb-ui's CSS engine (wb-ui/engine/css) parses this stylesheet, the style resolver
+ * (wb-ui/engine/style) attaches computed styles to each element, and the layout
+ * engine (wb-ui/engine/layout) uses them when painting. No external CSS library is
  * involved; everything below is handled by the translated WebKit CSS pipeline.
  */
 

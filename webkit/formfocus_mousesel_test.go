@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
 )
 
 func mouseSelTestWebView(t *testing.T, src string) (*WebView, *FormFocus) {

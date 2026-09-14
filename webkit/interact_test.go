@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/html5"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/rendering"
 )
 
 func interactTestWebView(t *testing.T, src string) *WebView {

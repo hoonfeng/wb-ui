@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/layout"
-	"wb-ui/rendering"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/rendering"
 )
 
 // TestFoldedSummaryRealCSS: 引擎级对照——真实 folded-summary 结构 + 真实 CSS

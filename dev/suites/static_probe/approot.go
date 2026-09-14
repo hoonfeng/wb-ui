@@ -7,14 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/html"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 func mergeCSSFromDOM(doc *dom.Document, resolver *style.Resolver) {
@@ -58,7 +58,7 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	path := filepath.Join("dev", "static_probe", "grid_app.html")
+	path := filepath.Join("dev", "suites", "static_probe", "grid_app.html")
 	data, _ := os.ReadFile(path)
 	doc, _ := html.Parse(string(data))
 	resolver := style.NewResolver()

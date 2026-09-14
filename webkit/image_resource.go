@@ -4,7 +4,7 @@
 //
 // 为什么接线在 webkit 层：只有 WebView 知道「当前文档 URL」与「运行模式」。
 // 渲染层此前自己 httpGet 并直接读工作目录，代价是 UI 库模式下会真的联网、
-// 真实页面里的相对图片必然加载失败（见 rendering/image_resource.go 包注释）。
+// 真实页面里的相对图片必然加载失败（见 engine/rendering/image_resource.go 包注释）。
 //
 // 接线链：Frame.ImageLoader（本文件的 loader）→ RenderTreeBuilder →
 // RenderView → Paint 入口 → loadBackgroundImage。
@@ -15,9 +15,9 @@ import (
 	"errors"
 	"strings"
 
-	"wb-ui/dom"
-	"wb-ui/page"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/page"
+	"wb-ui/engine/rendering"
 )
 
 // webViewImageLoader 实现 rendering.ImageResourceLoader。

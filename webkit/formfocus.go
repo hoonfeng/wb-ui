@@ -26,12 +26,12 @@ import (
 	"time"
 	"unicode"
 
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/html5"
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 // FormFocus 服务状态。
@@ -574,7 +574,7 @@ func (f *FormFocus) applyValue(nv string, caret int) bool {
 	}
 	setFormControlValue(el, nv)
 	// 用户击键/粘贴改变了值 → user validity 的「焦点会话内有效性翻转即时
-	// 生效」规则（MDN :user-valid 第 3 条；见 html5/uservalidity.go）。
+	// 生效」规则（MDN :user-valid 第 3 条；见 engine/html5/uservalidity.go）。
 	// 放在写值之后：判定要用修改后的值。
 	html5.NoteUserInput(el)
 	f.setCaret(caret)
@@ -752,7 +752,7 @@ func (f *FormFocus) SetEditMenu(fn func(x, y int, canCut, canCopy, canPaste, can
 	f.menuFn = fn
 }
 
-// 编辑菜单命令 ID（与 platform/window.EditMenu* 数值一致——宿主菜单
+// 编辑菜单命令 ID（与 engine/platform/window.EditMenu* 数值一致——宿主菜单
 // 后端返回命令，本服务执行）。
 const (
 	EditMenuCmdCut       = 1

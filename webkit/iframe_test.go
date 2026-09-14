@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/page"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/page"
 )
 
 // TestIFrameLoadAndRender 验证 iframe 子文档加载：

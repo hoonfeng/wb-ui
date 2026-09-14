@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"wb-ui/jsc"
+	"wb-ui/engine/js/jsc"
 )
 
 const desktopDistDir = `F:\syproject\gou-ide\cmd\companion\web-ui\dist`

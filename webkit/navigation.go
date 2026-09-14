@@ -4,7 +4,7 @@ package webkit
 // 引擎的接线。
 //
 // bindings 层只提供出口（NavigationRequest / ReloadRequest，见
-// bindings/navigation.go）：引擎没有自己的网络层，换文档必须由宿主装配
+// engine/js/bindings/navigation.go）：引擎没有自己的网络层，换文档必须由宿主装配
 // （LoadURL）。这里把出口落到 WebView，并在装配完成后把导航结果写回
 // window.history（NoteDocumentNavigation）——history.length 因此反映真实
 // 文档数、back/forward 能遍历到上一个文档。
@@ -13,10 +13,10 @@ import (
 	neturl "net/url"
 	"sync"
 
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/jsc"
-	"wb-ui/page"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/js/jsc"
+	"wb-ui/engine/page"
 )
 
 var installNavigationOnce sync.Once
@@ -186,7 +186,7 @@ func (wv *WebView) navigateToFragment(frag string, kind bindings.NavKind) bool {
 		doc.SetURL(newURL)
 		bindings.NoteDocumentNavigation(wv.jsInterpreter, newURL, kind)
 		// ★ URL 变了 → 依赖 URL 的选择器必须重新匹配：`:target` 匹配「URL
-		// fragment 指向的元素」（见 css/selectorchecker.go），是纯 CSS 的
+		// fragment 指向的元素」（见 engine/css/selectorchecker.go），是纯 CSS 的
 		// hash 路由写法（`#tab1:target{display:block}`）。样式解析器按元素
 		// 缓存 ComputedStyle，不清缓存就仍是旧匹配结果 → 清缓存 + 标记重建
 		// （与 onClassChanged 的失效路径一致：祖先变化影响后代匹配）。

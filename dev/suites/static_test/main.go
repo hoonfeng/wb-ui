@@ -11,21 +11,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"wb-ui/css"
-	"wb-ui/dom"
-	"wb-ui/html"
-	"wb-ui/html5"
-	"wb-ui/layout"
-	"wb-ui/platform/graphics"
-	"wb-ui/rendering"
-	"wb-ui/style"
+	"wb-ui/engine/css"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/rendering"
+	"wb-ui/engine/style"
 )
 
 func main() {
 	wd := "."
 	fmt.Printf("Running static_test in %s\n", wd)
 
-	htmlPath := filepath.Join(wd, "dev", "static_test", "ide_static.html")
+	htmlPath := filepath.Join(wd, "dev", "suites", "static_test", "ide_static.html")
 	data, err := os.ReadFile(htmlPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: cannot read %s: %v\n", htmlPath, err)
@@ -66,7 +66,7 @@ func main() {
 	}
 
 	// ─── 3b. Dump file creation (before diagnostics) ───
-	dumpPath := filepath.Join(wd, "dev", "static_test", "ide_vue_diag.txt")
+	dumpPath := filepath.Join(wd, "dev", "suites", "static_test", "ide_vue_diag.txt")
 	f, err := os.Create(dumpPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: create diag: %v\n", err)
@@ -112,7 +112,7 @@ func main() {
 	canvas.Clear(graphics.Color{R: 0, G: 0, B: 0, A: 0}) // transparent to see actual painted areas
 	rendering.Paint(rv, canvas, rendering.Rect{Width: 1280, Height: 800})
 
-	outPath := filepath.Join(wd, "dev", "static_test", "ide_vue_output.png")
+	outPath := filepath.Join(wd, "dev", "suites", "static_test", "ide_vue_output.png")
 	
 	savePNG(canvas, outPath)
 

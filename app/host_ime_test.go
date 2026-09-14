@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/platform/ime"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/platform/ime"
 	"wb-ui/webkit"
 )
 

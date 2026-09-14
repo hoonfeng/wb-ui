@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"wb-ui/html5"
-	"wb-ui/rendering"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/rendering"
 )
 
 // TestFormFocusCharInputFlipsValidityInFocusSession 覆盖引擎真实键入路径

@@ -3,11 +3,11 @@ package app
 import (
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/layout"
-	"wb-ui/platform/graphics"
-	"wb-ui/platform/window"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/layout"
+	"wb-ui/engine/platform/graphics"
+	"wb-ui/engine/platform/window"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 

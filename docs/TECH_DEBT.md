@@ -21,19 +21,19 @@
 
 ## 1. positioned `top/left/right/bottom` 不解析 `calc()`（P0 · 真实 bug）
 
-> **已实现（2026-08-13，提交 `0a042d3`）**：`layout/layoututil.go` 的 `parseCSSLength`
+> **已实现（2026-08-13，提交 `0a042d3`）**：`engine/layout/layoututil.go` 的 `parseCSSLength`
 > 开头新增 `mathFuncInfo` 检测——识别 `calc`/`min`/`max`/`clamp` 前缀并返回平衡的完整
 > 函数表达式；含相对单位（%、em、rem、vw、vh 等）时延迟求值（返回 `Unit:"calc"`，由
 > `resolveLength` 的 `calc` case 带真实 context 求值），纯绝对单位立即 `EvalCalcString`
 > 求值为 px。至此 `inset`（top/left/right/bottom）与 `width/height` 两条解析路径对齐。
-> 测试：`layout/calc_resolve_test.go` 覆盖 `top:calc(50% - 20px)` / `left:calc(...)` 等
+> 测试：`engine/layout/calc_resolve_test.go` 覆盖 `top:calc(50% - 20px)` / `left:calc(...)` 等
 > positioned 场景，全量通过。
 
 ### 现状定位
-- 宽度/高度路径已支持 calc：`style/resolver.go:1582` `parseLength()` 对 `calc()` 做了
+- 宽度/高度路径已支持 calc：`engine/style/resolver.go:1582` `parseLength()` 对 `calc()` 做了
   相对单位检测，返回 `Length{Unit:"calc", CalcExpr:"..."}`（上一轮 `5cfff1c` 成果）。
-- 定位路径**仍缺失**：`layout/positioned.go:109/110/159/160` 通过
-  `asLength(cs.Properties["left"])` → `layout/layoututil.go:123 parseCSSLength()` 解析
+- 定位路径**仍缺失**：`engine/layout/positioned.go:109/110/159/160` 通过
+  `asLength(cs.Properties["left"])` → `engine/layout/layoututil.go:123 parseCSSLength()` 解析
   `top/left/right/bottom`。
 - `parseCSSLength` 只做「数字 + 单位」切分：遇到 `calc(100% - 40px)` 时 `i==0`
   （首字符 `c` 非数字）→ 直接返回 `style.Length{Unit:"auto"}`。
@@ -43,8 +43,8 @@
 layout 包自己的 `parseCSSLength`，两条解析路径不一致，calc 支持只补了一半。
 
 ### 推荐方案
-在 `layout/layoututil.go` 的 `parseCSSLength` 开头加 calc 分支（复用 `css` 包工具，
-layout 已 import `wb-ui/css`）：
+在 `engine/layout/layoututil.go` 的 `parseCSSLength` 开头加 calc 分支（复用 `css` 包工具，
+layout 已 import `wb-ui/engine/css`）：
 
 ```go
 func parseCSSLength(s string) style.Length {
@@ -74,7 +74,7 @@ func parseCSSLength(s string) style.Length {
 viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，无需改动 positioned 侧。
 
 ### 涉及文件
-- `layout/layoututil.go`（唯一改动点）
+- `engine/layout/layoututil.go`（唯一改动点）
 
 ### 风险
 低。`style.Length` 已含 `CalcExpr` 字段，`resolveLength` 已处理 calc，纯增量补丁。
@@ -89,17 +89,17 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 
 ## 2. `min()/max()/clamp()` 未实现（P1 · 功能缺失）
 
-> **已实现（2026-08-13，提交 `a9c69d3`）**：`css/calc.go` 的 `parsePrimary` 支持
+> **已实现（2026-08-13，提交 `a9c69d3`）**：`engine/css/calc.go` 的 `parsePrimary` 支持
 > `min`/`max`/`clamp` 多参比较函数与嵌套 calc；`extractCalcInner` 修正 TokenFunction
 > 隐含开括号导致的嵌套函数右括号误匹配；新增 `parseMinMaxClamp`（逗号分隔参数列表，
-> `clamp` 三参校验、`min`/`max` 至少一参）。`style/resolver.go` 与 `layout/layoututil.go`
+> `clamp` 三参校验、`min`/`max` 至少一参）。`engine/style/resolver.go` 与 `engine/layout/layoututil.go`
 > 的 `parseLength`/`parseCSSLength` 识别 `min(`/`max(`/`clamp(` 前缀（含相对单位延迟、
 > 纯绝对立即求值）。
-> 测试：`css/calc_string_test.go` / `style/calc_resolve_test.go` / `layout/calc_resolve_test.go`
+> 测试：`engine/css/calc_string_test.go` / `engine/style/calc_resolve_test.go` / `engine/layout/calc_resolve_test.go`
 > 覆盖 `min(600px, 100%)` / `clamp(16px, 4vw, 40px)` / `max(10px, 5em)` 等，全量通过。
 
 ### 现状定位
-- `css/calc.go:9` 注释明确 `no min() / max() / clamp() support`。
+- `engine/css/calc.go:9` 注释明确 `no min() / max() / clamp() support`。
 - `parsePrimary()`（calc.go 末尾）：`TokenFunction` 分支仅识别 `calc`（嵌套也直接报
   `nested calc() not supported`），其它函数名统一报
   `unexpected function %s() in expression`。
@@ -118,9 +118,9 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
    的同一套分支。
 
 ### 涉及文件
-- `css/calc.go`（求值核心）
-- `style/resolver.go`（`parseLength` 前缀识别 + `extractCalcArgS`）
-- `css/calc_string_test.go` / `style/calc_resolve_test.go`（补测试）
+- `engine/css/calc.go`（求值核心）
+- `engine/style/resolver.go`（`parseLength` 前缀识别 + `extractCalcArgS`）
+- `engine/css/calc_string_test.go` / `engine/style/calc_resolve_test.go`（补测试）
 
 ### 风险
 中。难点在参数列表的分隔（逗号在嵌套 calc/函数内不参与切分）与 `clamp` 三参校验；
@@ -148,14 +148,14 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 
 ### 现状定位
 一次完整布局存在**三次全树遍历**：
-1. `layout/layout.go:17 Layout()` → `LayoutRoot`（每个 box 的 FormattingContext 布局）
+1. `engine/layout/layout.go:17 Layout()` → `LayoutRoot`（每个 box 的 FormattingContext 布局）
    + `roundTree`（`layout.go:44` 全树 `Geometry.Round()`）。
-2. `page/frameview.go:235 Layout()` → `rv.Layout(nil)` → `v.updateContentSize(rv)`
+2. `engine/page/frameview.go:235 Layout()` → `rv.Layout(nil)` → `v.updateContentSize(rv)`
    （`frameview.go:259` 全树 walk 求最大 extent）。
 
 ### 根因
-无 dirty-subtree 增量：`SetNeedsLayout(true)` 即整树重跑。`layout/layoutstate.go` 已
-有 `GeometryForBox` 缓存，`layout/layoutprofile.go` 提供 `WB_LAYOUT_PROFILE=1` 分 FC
+无 dirty-subtree 增量：`SetNeedsLayout(true)` 即整树重跑。`engine/layout/layoutstate.go` 已
+有 `GeometryForBox` 缓存，`engine/layout/layoutprofile.go` 提供 `WB_LAYOUT_PROFILE=1` 分 FC
 耗时统计（可先跑一次定位大头），但缺「只重排受影响子树」的脏标记传播。
 
 ### 推荐方案（分阶段，勿一步到位）
@@ -168,8 +168,8 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
   包含块尺寸/font-size 变化时才重排后代（对齐 WebKit 的 `LayoutState` dirty 传播）。
 
 ### 涉及文件
-- `layout/layout.go`、`page/frameview.go`（阶段 A）
-- `layout/layoutstate.go`、`page/frame.go`、`app/host.go`（阶段 B/C）
+- `engine/layout/layout.go`、`engine/page/frameview.go`（阶段 A）
+- `engine/layout/layoutstate.go`、`engine/page/frame.go`、`app/host.go`（阶段 B/C）
 
 ### 风险
 高。布局顺序/几何缓存一致性极易出回归，务必先跑 `dev/suites/consistency`（Edge 像素对比）
@@ -187,7 +187,7 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 1. **DOM 层**：`dom.ShadowRoot` 类型 + `Element.AttachShadow(mode)` + `ShadowRoot()`
 >    访问器（closed 返回 nil）+ `FirstComposedChild`（有 shadow root 时返回 shadow
 >    tree 子节点，light DOM 被隐藏）+ `AssignedNodes`（slot 匹配 host light-DOM）。
-> 2. **渲染/布局层**：`rendering/rendertreebuilder.go` 与 `layout/box.go` 的
+> 2. **渲染/布局层**：`engine/rendering/rendertreebuilder.go` 与 `engine/layout/box.go` 的
 >    `buildChildren`/`buildFlexChildren` 统一走 `FirstComposedChild`；`<slot>` 元素
 >    不生成 render object，展开渲染 assigned 节点（slot 投影）。
 > 3. **bindings**：`el.attachShadow({mode})` / `el.shadowRoot` + `wrapShadowRoot`。
@@ -196,12 +196,12 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 >    `go test ./...` 通过。
 >
 > **已实现样式隔离（2026-08-13，本轮）**：
-> 1. **继承链**：`style/resolver.go parentElement` 对「父是 ShadowRoot」的情况返回
+> 1. **继承链**：`engine/style/resolver.go parentElement` 对「父是 ShadowRoot」的情况返回
 >    shadow host，使 shadow tree 顶层元素从 host 继承（CSS Scoping 继承跨边界）。
 > 2. **作用域隔离**：`collectSheetDeclarations` 开头按 scoping root 过滤——UA sheet
 >    全局作用；author sheet 只在相同 shadow root 内作用（文档级 sheet 不穿透 shadow，
 >    shadow 内 sheet 不泄漏到文档/其它 shadow）。
-> 3. **样式提取**：`page/frame.go` 的 `extractAndAddStyles` + `styleFingerprint` 改用
+> 3. **样式提取**：`engine/page/frame.go` 的 `extractAndAddStyles` + `styleFingerprint` 改用
 >    `dom.WalkComposedTree`（新增）进入 shadow tree 收集 `<style>`（此前
 >    `GetElementsByTagName` 只遍历 light DOM，漏掉 shadow 内 `<style>`）。
 > 4. **测试**：`TestResolver_ShadowInheritanceFromHost` / `_ShadowStyleScopedInside` /
@@ -270,11 +270,11 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 可改为哈希集合，收益 <1%）。
 
 ### 现状定位
-- `css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，
+- `engine/css/selectorchecker.go`：`:host`/`:host-context`/`::slotted`/`::part` 匹配已实现，
   但 host-selector 前缀跨 shadow boundary 前向匹配未实现。
-- `dom/node.go:13`、`dom/element.go:8`：整个 dom 包注释 `shadow tree / custom elements
+- `engine/dom/node.go:13`、`engine/dom/element.go:8`：整个 dom 包注释 `shadow tree / custom elements
   / mutation observers / style recalc / rendering hooks are omitted`。
-- `bindings/dom.go:3694` `getRootNode` 已按标准返回根，但注释点明「无 shadow DOM」。
+- `engine/js/bindings/dom.go:3694` `getRootNode` 已按标准返回根，但注释点明「无 shadow DOM」。
 
 ### 根因
 这是**跨三层**的系统性缺口，非单点：
@@ -285,18 +285,18 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 ### 推荐方案
 WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 1. DOM 层：`dom.ShadowRoot` + `Element.attachShadow({mode})` + slot/flattened-tree 遍历
-   （参考 `dom/node.go` 现有树遍历 + `editing/visibleposition.go` 已标注的「shadow
+   （参考 `engine/dom/node.go` 现有树遍历 + `engine/editing/visibleposition.go` 已标注的「shadow
    roots 遍历」TODO）。
 2. Selector 层：`selectorchecker.go` 增加 `::slotted`（匹配 slot 分配的 light-DOM 节点）、
    `:host`（匹配 shadow host 的自身 + `:host()` 参数）。
 3. 样式层：shadow 内样式优先于 light DOM 继承（CSS Scoping），`:host` 规则来源单独处理。
 
 ### 涉及文件
-- `dom/`（新增 ShadowRoot）、`css/selectorchecker.go`、`css/selector.go`、
-  `style/resolver.go`、`bindings/dom.go`。
+- `dom/`（新增 ShadowRoot）、`engine/css/selectorchecker.go`、`engine/css/selector.go`、
+  `engine/style/resolver.go`、`engine/js/bindings/dom.go`。
 
 ### 风险
-高。影响面横跨 DOM 遍历、事件路径（`dom/event.go` 已标注 composedPath 无 shadow）、
+高。影响面横跨 DOM 遍历、事件路径（`engine/dom/event.go` 已标注 composedPath 无 shadow）、
 样式级联，建议按「先 attachShadow + slot 基础 → 再 ::slotted/:host → 最后 ::part」拆
 多个可验证增量，每步配独立测试。
 
@@ -316,7 +316,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 > （未遮罩前景文字/SVG），且 mask-repeat/size/position 尚未解析（默认整图缩放到元素尺寸）。
 
 ### 现状定位
-- `rendering/mask_test.go`：`mask-image` 仅被存为 property（`cs.GetProperty("mask-image")`
+- `engine/rendering/mask_test.go`：`mask-image` 仅被存为 property（`cs.GetProperty("mask-image")`
   非空），**无 image-as-alpha 绘制**。
 
 ### 根因
@@ -329,7 +329,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 - 若绑定缺失：先补 goskia 侧 API，再在 `rendering` 层接入。
 
 ### 涉及文件
-- `goskia/skia/`（若需补绑定）、`rendering/`（mask 合成）。
+- `goskia/skia/`（若需补绑定）、`engine/rendering/`（mask 合成）。
 
 ### 风险
 中。依赖跨仓改动（goskia），需与主项目协调；先用 `mask_test.go` 守回归（保证不 crash）。
@@ -341,7 +341,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 ## 附：WebSocket —— 已完善（非遗留问题）
 
-`bindings/dom.go:1065-1190` 的 WebSocket 已是**完整 stub**：提供 readyState 常量、
+`engine/js/bindings/dom.go:1065-1190` 的 WebSocket 已是**完整 stub**：提供 readyState 常量、
 `onopen/onmessage/onerror/onclose`、`send/close/addEventListener/removeEventListener`，
 并通过 `globalThis.__desktopWS.dispatchMessage/dispatchStatus` 供宿主注入事件。这是
 桌面端「无真实网络」场景的**有意设计**（不建连接、不崩溃、事件由宿主推入），
@@ -382,18 +382,18 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | flex/grid 容器里的 `::backdrop` | 模态 `<dialog>` 作为 flex/grid item 时也生成遮罩：`buildFlexChildren` 两侧（layout + rendering）与块级路径同位置插入（fixed 定位子项不占 flex item 槽位） | `e8d2108` |
 | `:target` 语义 | 此前只判「URL 非空 且有 id」→ 任意带 id 的元素在任意非空 URL 下都匹配；改为 URL fragment（百分号解码）与元素 id 相等，`#top` 无 `id="top"` 元素时回退根元素 | `f307666` |
 | `ToggleEvent.oldState/newState` | dom 新增 `ToggleEvent`（`beforetoggle` 可取消）；`eventToJS` 暴露两个字段；`<dialog>` 与 `<details>` 的 `toggle`/`beforetoggle` 都带上迁移方向 | `db8d9b8` |
-| 约束校验伪类 | `:valid` / `:invalid` / `:in-range` / `:out-of-range` 从硬编码 false 改为查「注入的约束校验状态」：`css/validity.go` 定义纯数据 `FormValidity` + 注入点（css 不能 import html5——html5 为 UA 表已 import css），`html5` 在 init 里注入实现。barred 元素（disabled/readonly/datalist 后代/type=hidden,reset,button 等）两者都不匹配；`:in-range` 只匹配「有范围限制」（min/max 存在且能按类型解析）的元素；日期类类型的 min/max 也进入 `ValidityState`（此前只有 number/range） | `46963a2` |
+| 约束校验伪类 | `:valid` / `:invalid` / `:in-range` / `:out-of-range` 从硬编码 false 改为查「注入的约束校验状态」：`engine/css/validity.go` 定义纯数据 `FormValidity` + 注入点（css 不能 import html5——html5 为 UA 表已 import css），`html5` 在 init 里注入实现。barred 元素（disabled/readonly/datalist 后代/type=hidden,reset,button 等）两者都不匹配；`:in-range` 只匹配「有范围限制」（min/max 存在且能按类型解析）的元素；日期类类型的 min/max 也进入 `ValidityState`（此前只有 number/range） | `46963a2` |
 | 约束校验 IDL | 元素级 `validity`（11 个只读布尔属性）/ `validationMessage` / `willValidate` / `checkValidity()` / `reportValidity()` / `setCustomValidity()`；表单级 `checkValidity()` / `reportValidity()` / `noValidate`。判定逻辑复用 html5 的 ValidityState；`setCustomValidity` 走样式失效链。顺带修 `<input>` 的 `Validity()` 漏检 customError（`setCustomValidity` 后 `checkValidity()` 仍返回 true） | `83377cc` |
-| 提交时交互校验 | 新增 `html5/interactive.go`：对每个无效控件派发 `invalid` 事件（不冒泡）、返回列表供宿主聚焦第一个；`requestSubmit`/提交按钮点击在未声明 `novalidate`/`formnovalidate` 时先校验，失败即中止（连 `submit` 事件都不派发）。顺带修 `form.submit()` 语义：规范里它**不**校验、也**不**派发 submit 事件（此前等价于 requestSubmit） | `83377cc` |
+| 提交时交互校验 | 新增 `engine/html5/interactive.go`：对每个无效控件派发 `invalid` 事件（不冒泡）、返回列表供宿主聚焦第一个；`requestSubmit`/提交按钮点击在未声明 `novalidate`/`formnovalidate` 时先校验，失败即中止（连 `submit` 事件都不派发）。顺带修 `form.submit()` 语义：规范里它**不**校验、也**不**派发 submit 事件（此前等价于 requestSubmit） | `83377cc` |
 | `:user-valid` / `:user-invalid` | dom 新增 user validity 状态；css 新增枚举 + 名称 + 解析（含枚举三向往返测试）；匹配要求「candidate 且 user validity 为 true」。引擎在 change 事件路径（失焦提交/点击 checkbox-radio/选择 option/拖动 range）与控制点（交互校验=提交尝试）置位，并经注入钩子重算样式；脚本 `dispatchEvent(new Event('change'))` 不置位（与浏览器一致） | `54d2888` |
 | 约束校验的像素级夹具 | `dev/suites/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
 | `:user-valid` / `:user-invalid` 的焦点会话规则 | 补上 MDN 列出的第 3 条：值在控件获得焦点时无效、而用户在焦点仍在控件内时把它改成了有效（`:user-invalid` 是镜像方向）→ 立即获得 user validity。dom 增加焦点会话记忆（`SetFocusValidity`/`FocusValidity`，失焦清除）与 `OnElementFocused` 注入钩子（dom 不依赖 html5）；`html5.NoteFocusGained` / `NoteUserInput` 做判定（未翻转不置位、无焦点会话不置位）；三条真实值写入路径全部接线——`app.Host.setFocusedElementValue`（IME/组合输入）、`webkit.FormFocus.applyValue`（键入/退格/粘贴）、`app.Host.setRangeValueFromX`（range 点击与拖动），漏一条这条规则就静默失效 | `93c3032` |
 | `ToggleEvent.source` | 把 IDL 里的 `source`（`Element?`）落地：dom 增加字段 + `ToggleEventInit.Source` + 构造参数 + `Source()`；bindings 暴露为 `null` 或对应元素对象。非 null 只出现在 popover 的 invoker 场景（已随 Popover API 落地，见下表），其余路径按规范恒为 `null`：dialog 的 `close()`/`requestClose()` 传 null、`form method=dialog` 提交传 null、close watcher 读的 request close source element 槽只被 `requestClose()` 写过（写的也是 null）、details 的 toggle 任务只初始化 oldState/newState。字段存在的意义是让 `e.source === null` 与 MDN 的 `event.source === undefined` 特性检测得到和浏览器一样的结果 | `8487f72` |
-| 日期类输入的 step mismatch | 新增 `html5/step.go`：date 以天、month 以月（月长不等，不能换算成毫秒）、week 以周、time 与 datetime-local 以秒换算，default step 分别为 1 天/1 月/1 周/60 秒/60 秒；step base 按 min → value 内容属性 → default step base（只有 week 定义了它：−259,200,000 ms）→ 0；step 缺失/解析失败/≤0 时退回 default step 而不是跳过（只有 `step="any"` 跳过）；整数轴（毫秒/月，< 2^53）用整数取模精确判定，number/range 的容差路径顺带修掉 `0.3`（step=0.1）被浮点误差误判成 mismatch 的问题 | `0673d69` |
+| 日期类输入的 step mismatch | 新增 `engine/html5/step.go`：date 以天、month 以月（月长不等，不能换算成毫秒）、week 以周、time 与 datetime-local 以秒换算，default step 分别为 1 天/1 月/1 周/60 秒/60 秒；step base 按 min → value 内容属性 → default step base（只有 week 定义了它：−259,200,000 ms）→ 0；step 缺失/解析失败/≤0 时退回 default step 而不是跳过（只有 `step="any"` 跳过）；整数轴（毫秒/月，< 2^53）用整数取模精确判定，number/range 的容差路径顺带修掉 `0.3`（step=0.1）被浮点误差误判成 mismatch 的问题 | `0673d69` |
 | `<input type=week>` 的 ISO 周解析 | 修 `parseWeek`：Go 的时间布局里 `2006-W02` 的 `02` 是「月中的第几天」，早期实现用它解析周值，于是 `1970-W03` 被读成 1970-01-03、`1970-W01…W04` 全部落进同一周（week 的 min/max 与 step 相位因此失真）。改为自行解析「四位以上年 + `-W` + 两位周号」、按 ISO 规则（含 1 月 4 日的那一周是 W01）求周一，并校验第 53 周只在该年真的存在时才合法 | `0673d69` |
-| Popover API | HTML §6.12 整套落地：dom 的 popover visibility state + top layer 近似栈（`dom/popoverstate.go`）；新 `popover` 包实现 show/hide/toggle 三个算法、check popover validity、auto/hint 互斥与 topmost popover ancestor、light dismiss 的 pointerdown/pointerup 两阶段、close request（Esc）、invoker 的激活行为（`popovertarget*` 与 `commandfor`/`command`）；JS 层 `HTMLElement.popover`（枚举属性反射）+ 三个方法 + 四个 invoker 属性 + `ToggleEvent` 构造器；`:popover-open` 伪类与 UA 样式（未显示不生成盒、显示中的 fixed + `z-index:1100` 近似 top layer、`::backdrop` 默认透明不吃指针事件，backdrop 盒的判定泛化为 `dom.Element.NeedsBackdrop`）；宿主两条路径（`webkit.Interaction`、`app.Host`）都接 light dismiss / Esc / invoker。已知差异见下 | `634f4b0`、`3422a1a`、`3d56853`、`1b2aa8c` |
+| Popover API | HTML §6.12 整套落地：dom 的 popover visibility state + top layer 近似栈（`engine/dom/popoverstate.go`）；新 `popover` 包实现 show/hide/toggle 三个算法、check popover validity、auto/hint 互斥与 topmost popover ancestor、light dismiss 的 pointerdown/pointerup 两阶段、close request（Esc）、invoker 的激活行为（`popovertarget*` 与 `commandfor`/`command`）；JS 层 `HTMLElement.popover`（枚举属性反射）+ 三个方法 + 四个 invoker 属性 + `ToggleEvent` 构造器；`:popover-open` 伪类与 UA 样式（未显示不生成盒、显示中的 fixed + `z-index:1100` 近似 top layer、`::backdrop` 默认透明不吃指针事件，backdrop 盒的判定泛化为 `dom.Element.NeedsBackdrop`）；宿主两条路径（`webkit.Interaction`、`app.Host`）都接 light dismiss / Esc / invoker。已知差异见下 | `634f4b0`、`3422a1a`、`3d56853`、`1b2aa8c` |
 | Popover API 的像素夹具 | `dev/suites/cssprobe` 新增 `popover`（7 条：hidePopover 后回到不生成盒、`:popover-open` 上色、后打开的 auto 关掉先前的、嵌套 auto 保留 popover 祖先、manual 与 auto 互不影响、UA 定位居中）与 `popover-backdrop`（2 条：作者上色的 backdrop 铺满视口、popover 画在自己 backdrop 之上）。反向验证：`:popover-open` 恒 false → 5 条失败；去掉 UA 的 `display:none` → 2 条失败；backdrop 改成不透明 → 3 条失败 | `1b2aa8c` |
-| Worker（并发脚本执行） | 新增 `worker` 包（每个 Worker 一个**独立 goja 运行时 + 独立 goroutine + 独立事件循环**，两个运行时之间只传 JSON 文本）与 `bindings/worker.go`（`Worker` 的 postMessage/onmessage/onerror/addEventListener/terminate + `MessageEvent`；worker → 主线程的消息由主事件循环的宏任务派发，主运行时的 JS 只在主线程 tick 里执行）。脚本来源：`data:` URL 或宿主注入的 `bindings.SetWorkerScriptFetcher`；worker 全局提供 self/name/close/importScripts/setTimeout 家族/console。单测 `worker/worker_test.go`（6 项）+ `bindings/worker_test.go`（12 项，含「worker 忙等 400ms 时主线程定时器照常推进」的并发本质断言） | `5a4a75c`、`ff965d5` |
+| Worker（并发脚本执行） | 新增 `worker` 包（每个 Worker 一个**独立 goja 运行时 + 独立 goroutine + 独立事件循环**，两个运行时之间只传 JSON 文本）与 `engine/js/bindings/worker.go`（`Worker` 的 postMessage/onmessage/onerror/addEventListener/terminate + `MessageEvent`；worker → 主线程的消息由主事件循环的宏任务派发，主运行时的 JS 只在主线程 tick 里执行）。脚本来源：`data:` URL 或宿主注入的 `bindings.SetWorkerScriptFetcher`；worker 全局提供 self/name/close/importScripts/setTimeout 家族/console。单测 `engine/js/worker/worker_test.go`（6 项）+ `engine/js/bindings/worker_test.go`（12 项，含「worker 忙等 400ms 时主线程定时器照常推进」的并发本质断言） | `5a4a75c`、`ff965d5` |
 
 ### Worker 的已知差异（有意保留）
 
@@ -470,7 +470,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `document.URL` / `location.href` 与文档不符 | `document.URL` 是注册时求值的静态快照（恒为空串）；`location` 是写死 `about:blank`/`file:` 的静态桩；`LoadURL` 也从未 `doc.SetURL` | `LoadURL` 把 URL 写进 `Document`（`LoadHTML` 视为 `about:blank`，内部拆出 `loadHTMLFrom(src, docURL)`）；`document.URL` 与 `location.href/protocol/host/hostname/port/pathname/search/hash/origin` 改为**动态 accessor**；`history.pushState/replaceState` 改为更新文档 URL（同源路径相对当前文档解析），不再直接写 location 字段 |
 | 重定向后的文档基地址是「请求 URL」而不是「最终 URL」 | `fetchHTTP` 只返回响应正文，`LoadURL` 只能拿入参 URL 当基准——`http://host` 被 301 到 `https://host/` 后，页面里的 `style.css` 会解析回 `http://host/style.css` | 新增 `fetchURLWithFinalURL`（内部用 `resp.Request.URL`）→ `LoadURL` 用**最终 URL** 作为文档基地址；`fetchURL` 保持原签名，其余调用点不受影响 |
 
-回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/probes/browser_http_probe`（诊断脚本，47 条断言全 PASS）。
+回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`engine/dom/url_test.go`（12 例解析表）、`dev/probes/browser_http_probe`（诊断脚本，47 条断言全 PASS）。
 反向验证：隐去相对解析 → 3 条断言失败（含 `unsupported protocol scheme ""`）；恢复 Content-Type 返回 error → 「服务器收到了 /style.css 但样式不生效」；把 fetch 基地址去掉 → 相对 fetch 失败；把重定向基准改回请求 URL → 服务器日志显示 `/style.css`（而非 `/b/style.css`）。
 
 ### 图片（`<img src>`）与 CSS `@import` 接通外部资源通道
@@ -569,7 +569,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   自定义属性里的 `url()` 全部通道一次覆盖，将来新增的读 URL 属性也自动受益。
   `@keyframes` 的声明不在级联链路上，由 `addKeyframesFromSheet` 按来源表就地
   绝对化（幂等）。`@import` 继续用 `resolveURLAgainst`（同一函数的通用形式）。
-  回归资产：`style/url_base_test.go`（6 项：外部表逐属性 / 简写与多层 /
+  回归资产：`engine/style/url_base_test.go`（6 项：外部表逐属性 / 简写与多层 /
   内联保持文档基准 / 绝对引用原样 / `@keyframes` / `@import` 链），
   `webkit/browser_http_media_test.go`（`TestBrowserModeStylesheetURLBaseForCSSURLs`、
   `TestBrowserModeDocumentBaseForInlineURLs`——文档与样式表刻意放在**不同深度**
@@ -586,14 +586,14 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   / `-webkit-line-clamp` / `-webkit-appearance` / `-webkit-gradient(…)` 旧渐变
   语法 / 本引擎已有专门实现的 `-webkit-text-stroke*`）——机械映射会产生
   「看起来生效但语义不同」的错误结果，比不支持更糟。回归：
-  `style/url_base_test.go:TestPrefixedPropertyAliases`（反向验证：让归一恒
+  `engine/style/url_base_test.go:TestPrefixedPropertyAliases`（反向验证：让归一恒
   原样返回 → 5 条断言失败）。
 - **多层 `background-image` 取第一层（已实现）**：`parseBackgroundURL` 用
   `strings.IndexByte(inner, ')')` 而不是 `LastIndex`——`url(a.png), url(b.png)`
   是常见写法，`LastIndex` 会得到 `a.png), url(b.png` 这种垃圾 URL，连第一层都
   加载不出来（多层叠加未实现，但第一层必须正确）。带引号形式按引号配对截断，
   避免引号内的 `)` 提前结束。回归：
-  `rendering/backgroundurl_layers_test.go`（反向验证：换回 `LastIndex` → 2 条
+  `engine/rendering/backgroundurl_layers_test.go`（反向验证：换回 `LastIndex` → 2 条
   断言失败）。
 - **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
   「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式

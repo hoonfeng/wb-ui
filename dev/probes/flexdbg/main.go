@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"wb-ui/dom"
-	"wb-ui/layout"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/layout"
 )
 
 func buildTestDocument() *dom.Document {

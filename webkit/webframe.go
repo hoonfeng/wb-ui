@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"wb-ui/dom"
-	"wb-ui/page"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/page"
+	"wb-ui/engine/rendering"
 )
 
 // WebFrame is the Go translation of WebKit::WebFrame (the WebContent-side frame

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"wb-ui/dom"
+	"wb-ui/engine/dom"
 )
 
 // TestDispatchHoverEvents 验证 hover 事件派发序列（UI Events）：

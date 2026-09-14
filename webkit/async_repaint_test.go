@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"wb-ui/rendering"
+	"wb-ui/engine/rendering"
 )
 
 // TestAsyncImageLoadMarksFrameDirty：图片到达时必须由**引擎自己**置脏。

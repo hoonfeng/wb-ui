@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/dom"
-	"wb-ui/page"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/page"
+	"wb-ui/engine/rendering"
 )
 
 // TestIFrameScriptExecutes 验证 iframe 子文档的 <script> 真正执行：

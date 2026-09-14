@@ -7,9 +7,9 @@ import (
 	"math"
 	"testing"
 
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/platform/graphics"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/platform/graphics"
 )
 
 func TestCM6RangeMeasurementMatchesSkia(t *testing.T) {

@@ -27,11 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"wb-ui/bindings"
-	"wb-ui/dom"
-	"wb-ui/html5"
-	"wb-ui/popover"
-	"wb-ui/rendering"
+	"wb-ui/engine/js/bindings"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/html5"
+	"wb-ui/engine/popover"
+	"wb-ui/engine/rendering"
 )
 
 // Interaction 是 WebView 的鼠标交互管线段。每个 WebView 一个（惰性创建），

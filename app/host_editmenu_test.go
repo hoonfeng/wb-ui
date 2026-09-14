@@ -9,8 +9,8 @@ package app
 import (
 	"testing"
 
-	"wb-ui/platform/window"
-	"wb-ui/rendering"
+	"wb-ui/engine/platform/window"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 

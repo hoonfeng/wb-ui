@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"wb-ui/rendering"
+	"wb-ui/engine/rendering"
 )
 
 func npDialogHTML() string {

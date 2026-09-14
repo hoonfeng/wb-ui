@@ -1,7 +1,7 @@
 // Application script for the mixed Go+HTML+CSS+JS demo.
 //
-// This script is run through wb-ui's JavaScript runtime (wb-ui/jsc) with the DOM
-// bindings (wb-ui/bindings) installed, so `document` resolves to the loaded
+// This script is run through wb-ui's JavaScript runtime (wb-ui/engine/js/jsc) with the DOM
+// bindings (wb-ui/engine/js/bindings) installed, so `document` resolves to the loaded
 // page and `go.GetTime` / `go.Calculate` resolve to Go functions registered by
 // the host via bindings.RegisterGoFunction. The script demonstrates the JS ->
 // Go direction of the bridge: it calls into Go and renders the result back into

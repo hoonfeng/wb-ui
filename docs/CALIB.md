@@ -71,26 +71,26 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
    复核记录（2026-09 批次）：新增 Fullscreen API、`:modal` / `:open` /
    `:closed` 伪类、`<dialog>` JS 接口与 `::backdrop` 遮罩后，cssprobe 复测仍为
    **61/61 夹具、248/248 检查**，无回归。这批改动的验收落在单元测试上：
-   `bindings/fullscreen_test.go`、`bindings/dialog_test.go`、
-   `css/fullscreen_selector_test.go`、`css/modal_selector_test.go`、
-   `css/openstate_selector_test.go`、`html5/fullscreen_ua_test.go`、
-   `rendering/dialog_backdrop_test.go`（结构中无 DOM 节点的 `::backdrop` 盒 +
+   `engine/js/bindings/fullscreen_test.go`、`engine/js/bindings/dialog_test.go`、
+   `engine/css/fullscreen_selector_test.go`、`engine/css/modal_selector_test.go`、
+   `engine/css/openstate_selector_test.go`、`engine/html5/fullscreen_ua_test.go`、
+   `engine/rendering/dialog_backdrop_test.go`（结构中无 DOM 节点的 `::backdrop` 盒 +
    像素级的 10% 黑遮罩压暗）。
    复核记录（2026-09 批次·续）：随后的 `<dialog>` 状态算法重写（`open` 纯反射、
    `beforetoggle`、`toggle`/`close` 同批派发）、`PseudoElementName` 补
    `-webkit-scrollbar{,-thumb,-track}`、`:default` / `:indeterminate` 表单状态
    伪类、flex/grid 容器里的 `::backdrop` 三批改动，cssprobe 复测同样为
-   **61/61 夹具、248/248 检查**。对应单测：`bindings/dialog_test.go`（`open`
-   纯反射 + 事件顺序 + `<details>` toggle）、`css/selector_test.go`（枚举↔名称表
+   **61/61 夹具、248/248 检查**。对应单测：`engine/js/bindings/dialog_test.go`（`open`
+   纯反射 + 事件顺序 + `<details>` toggle）、`engine/css/selector_test.go`（枚举↔名称表
    ↔查询表三向往返、`:modal`/`::backdrop` 解析分流）、
-   `css/formstate_selector_test.go`、`bindings/formstate_test.go`、
-   `layout/box_backdrop_test.go`（flex/inline-flex/grid/inline-grid 四种容器）、
-   `rendering/dialog_backdrop_test.go`（flex 场景 + `LayoutBox()` 链接断言 + 像素）。
+   `engine/css/formstate_selector_test.go`、`engine/js/bindings/formstate_test.go`、
+   `engine/layout/box_backdrop_test.go`（flex/inline-flex/grid/inline-grid 四种容器）、
+   `engine/rendering/dialog_backdrop_test.go`（flex 场景 + `LayoutBox()` 链接断言 + 像素）。
    复核记录（2026-09 批次·续 2）：再补 `:target` 语义修正与 `ToggleEvent`
    （`toggle`/`beforetoggle` 带 `oldState`/`newState`）两批后，cssprobe 仍为
    **61/61 夹具、248/248 检查**（`:target` 此前会误匹配所有带 id 的元素，UA 表
-   没有 `:target` 规则，故不影响夹具）。单测：`css/selector_test.go` 的
-   `TestSelector_TargetPseudoClass`、`bindings/toggleevent_test.go`。
+   没有 `:target` 规则，故不影响夹具）。单测：`engine/css/selector_test.go` 的
+   `TestSelector_TargetPseudoClass`、`engine/js/bindings/toggleevent_test.go`。
 
    复核记录（2026-09 批次·续 3，约束校验）：新增夹具 `constraint-validation`
    后为 **62/62 夹具、255/255 检查**。该夹具是本轮唯一新增的像素资产：
@@ -142,7 +142,7 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
    week 的解析修复另有一条可直接复现的证据：Go 的布局 `2006-W02` 里的 `02` 是
    「月中的第几天」，`time.Parse("2006-W02", "1970-W03")` 返回 1970-01-03——用标准库
    就能演示早期实现为何把 `1970-W01…W04` 读成同一周。真值表见
-   `html5/week_test.go`。
+   `engine/html5/week_test.go`。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。
@@ -198,31 +198,31 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
 
 | 夹具 | 曾经的性质 | 实现落点 |
 |------|------------|----------|
-| `media-text-track` | `<track>`/TextTrack 模型缺失 | `bindings/media.go`（`HTMLTrackElement.track` 同元素同实例、`video.textTracks` live 列表、`TextTrack`/`TextTrackCueList`/`TextTrackList`/`VTTCue`、`load`/`error` 事件）+ `bindings/webvtt.go`（WebVTT 解析、`data:` URL 解码）；单测 `bindings/media_test.go`（含「track 元素与 video.textTracks[i] 是同一对象」的标识契约） |
-| `modern-streams` | ReadableStream/TransformStream/TextEncoderStream 缺失 | `jsc/streams.go`（ReadableStream + controller、`getReader().read()` 返回 Promise、`pipeThrough`/`pipeTo`、TransformStream + TextEncoderStream/TextDecoderStream）；单测 `jsc/streams_test.go`（形状即夹具脚本：分块 + flush + await 读回） |
-| `logical-borders` | 拐角颜色归属方向 | `rendering/painter.go:paintBorderCorners`（bottom 侧两角改填「含该边外边缘」的三角）；单测 `rendering/border_corner_direction_test.go`（四角方向 + 回归点）；基准见下节 |
+| `media-text-track` | `<track>`/TextTrack 模型缺失 | `engine/js/bindings/media.go`（`HTMLTrackElement.track` 同元素同实例、`video.textTracks` live 列表、`TextTrack`/`TextTrackCueList`/`TextTrackList`/`VTTCue`、`load`/`error` 事件）+ `engine/js/bindings/webvtt.go`（WebVTT 解析、`data:` URL 解码）；单测 `engine/js/bindings/media_test.go`（含「track 元素与 video.textTracks[i] 是同一对象」的标识契约） |
+| `modern-streams` | ReadableStream/TransformStream/TextEncoderStream 缺失 | `engine/js/jsc/streams.go`（ReadableStream + controller、`getReader().read()` 返回 Promise、`pipeThrough`/`pipeTo`、TransformStream + TextEncoderStream/TextDecoderStream）；单测 `engine/js/jsc/streams_test.go`（形状即夹具脚本：分块 + flush + await 读回） |
+| `logical-borders` | 拐角颜色归属方向 | `engine/rendering/painter.go:paintBorderCorners`（bottom 侧两角改填「含该边外边缘」的三角）；单测 `engine/rendering/border_corner_direction_test.go`（四角方向 + 回归点）；基准见下节 |
 
 ### 脚本模式下修复的夹具
 
 | 夹具 | 缺口 | 落点 |
 |------|------|------|
-| `eventtarget-lifecycle` | 仅缺脚本执行（`class LifecycleTarget extends EventTarget` + `new Event` + 自定义属性） | 引擎侧 `EventTarget`/`Event`/`dispatchEvent` 早已实现：`dom/event_test.go:TestDispatchEventTargetPhase`、`bindings/dom_test.go:TestDOMAddEventListenerAsMethodCall` 等 |
-| `flex-flow` | 仅缺第 11 项「CSS supports accepts only the shorthand grammar」——由脚本查询 `CSS.supports()` | `bindings` 的 `CSS.supports` 已有实现；布局 10 项此前已通过（`css/values_test.go:TestParseFlexFlow` 覆盖语法） |
-| `animation-fill-forwards` | 探针不推进动画时钟（`WebView.Render` 不应用动画） | 见上文「动画时钟」；`rendering/animation_test.go:TestAnimateVisibilityFillForwards`（`fill:forwards` 保持终帧 + visibility 离散插值） |
-| `viewport-consistency` | 页面脚本读 `visualViewport.width/height` 抛 `ReferenceError`，**整段脚本中断**（不是只有那一行失效） | 新增 `window.visualViewport`（CSSOM View §4.2）：宽高与 `innerWidth/innerHeight` 同源（按解释器分派）、`scale=1`、offset/page=0、事件方法 no-op（`bindings/dom.go`）。另：前两项媒体查询由 `RenderView.SetViewportSize`/`Frame.syncMediaQueryViewport` 修复，`rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync` 覆盖 |
-| `modern-hydration-contracts` | React 19 水合契约：`document.currentScript`、`el.attributes instanceof NamedNodeMap` + **live 集合**、`removeAttributeNode`、`hasAttributes`、`scrollTo({left,top,behavior})`/`scrollBy` | `bindings/dom.go`（`NamedNodeMap` 构造器 + 同元素同实例的 live 集合缓存 `namedNodeMapFor`、`hasAttributes`/`removeAttributeNode`、`Element.prototype.scrollTo`/`scrollBy`）、`page/frame.go`（脚本执行期间设置 `bindings.CurrentScriptElement`，结束恢复）、`rendering/scrollbargeom.go` + `webkit`（新增 `ScrollRange`：可滚动性判定不再用滚动条几何——10×10 的 `overflow:scroll` 容器此前被静默丢弃 `scrollTop` 赋值） |
+| `eventtarget-lifecycle` | 仅缺脚本执行（`class LifecycleTarget extends EventTarget` + `new Event` + 自定义属性） | 引擎侧 `EventTarget`/`Event`/`dispatchEvent` 早已实现：`engine/dom/event_test.go:TestDispatchEventTargetPhase`、`engine/js/bindings/dom_test.go:TestDOMAddEventListenerAsMethodCall` 等 |
+| `flex-flow` | 仅缺第 11 项「CSS supports accepts only the shorthand grammar」——由脚本查询 `CSS.supports()` | `bindings` 的 `CSS.supports` 已有实现；布局 10 项此前已通过（`engine/css/values_test.go:TestParseFlexFlow` 覆盖语法） |
+| `animation-fill-forwards` | 探针不推进动画时钟（`WebView.Render` 不应用动画） | 见上文「动画时钟」；`engine/rendering/animation_test.go:TestAnimateVisibilityFillForwards`（`fill:forwards` 保持终帧 + visibility 离散插值） |
+| `viewport-consistency` | 页面脚本读 `visualViewport.width/height` 抛 `ReferenceError`，**整段脚本中断**（不是只有那一行失效） | 新增 `window.visualViewport`（CSSOM View §4.2）：宽高与 `innerWidth/innerHeight` 同源（按解释器分派）、`scale=1`、offset/page=0、事件方法 no-op（`engine/js/bindings/dom.go`）。另：前两项媒体查询由 `RenderView.SetViewportSize`/`Frame.syncMediaQueryViewport` 修复，`engine/rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync` 覆盖 |
+| `modern-hydration-contracts` | React 19 水合契约：`document.currentScript`、`el.attributes instanceof NamedNodeMap` + **live 集合**、`removeAttributeNode`、`hasAttributes`、`scrollTo({left,top,behavior})`/`scrollBy` | `engine/js/bindings/dom.go`（`NamedNodeMap` 构造器 + 同元素同实例的 live 集合缓存 `namedNodeMapFor`、`hasAttributes`/`removeAttributeNode`、`Element.prototype.scrollTo`/`scrollBy`）、`engine/page/frame.go`（脚本执行期间设置 `bindings.CurrentScriptElement`，结束恢复）、`engine/rendering/scrollbargeom.go` + `webkit`（新增 `ScrollRange`：可滚动性判定不再用滚动条几何——10×10 的 `overflow:scroll` 容器此前被静默丢弃 `scrollTop` 赋值） |
 
 ### 同轮补齐的平台能力夹具（媒体轨道与流）
 
 | 夹具 | 缺口 | 落点 |
 |------|------|------|
-| `media-text-track` | `<track>` → `HTMLTrackElement.track`（WebVTT + `data:` URL 异步加载 + `load` 事件）与 `video.textTracks` 缺失，脚本读 `element.track` 得 `undefined` → 抛错中断 | `bindings/media.go`（同一 `<track>` 元素同一 TextTrack 实例；`video.textTracks` 为 live 列表，`textTracks[i]` 与 `<track>.track` 是**同一对象**）+ `bindings/webvtt.go`（WEBVTT 头 / cue 块 / 时间戳 / settings、percent 与 base64 的 `data:` 解码）。单测 `bindings/media_test.go`（6 项，含 live 列表、`load`/`error` 时序、VTTCue 构造） |
-| `modern-streams` | `ReadableStream` / `TransformStream` / `TextEncoderStream` 均为 `undefined` | `jsc/streams.go`：构造器 + 原型、`enqueue/close/error` 控制器、`getReader().read()` 返回 Promise（队列空时挂起）、`pipeThrough`/`pipeTo` 直接接线（无背压）、`TextEncoderStream`/`TextDecoderStream` 复用 Go 侧 `TextEncoder`/`TextDecoder`。单测 `jsc/streams_test.go`（3 项） |
+| `media-text-track` | `<track>` → `HTMLTrackElement.track`（WebVTT + `data:` URL 异步加载 + `load` 事件）与 `video.textTracks` 缺失，脚本读 `element.track` 得 `undefined` → 抛错中断 | `engine/js/bindings/media.go`（同一 `<track>` 元素同一 TextTrack 实例；`video.textTracks` 为 live 列表，`textTracks[i]` 与 `<track>.track` 是**同一对象**）+ `engine/js/bindings/webvtt.go`（WEBVTT 头 / cue 块 / 时间戳 / settings、percent 与 base64 的 `data:` 解码）。单测 `engine/js/bindings/media_test.go`（6 项，含 live 列表、`load`/`error` 时序、VTTCue 构造） |
+| `modern-streams` | `ReadableStream` / `TransformStream` / `TextEncoderStream` 均为 `undefined` | `engine/js/jsc/streams.go`：构造器 + 原型、`enqueue/close/error` 控制器、`getReader().read()` 返回 Promise（队列空时挂起）、`pipeThrough`/`pipeTo` 直接接线（无背压）、`TextEncoderStream`/`TextDecoderStream` 复用 Go 侧 `TextEncoder`/`TextDecoder`。单测 `engine/js/jsc/streams_test.go`（3 项） |
 
 ### 尺寸媒体查询的视口同步（本轮）
 
 `@media` 的 width/height 之前按 **0×0** 求值——`style.Resolver.mediaQueryCtx`
-只在被显式设置时才有值，而真实链路（`page/frameview.go` → `RenderView`）从未
+只在被显式设置时才有值，而真实链路（`engine/page/frameview.go` → `RenderView`）从未
 设置它。于是 `@media (min-width: 600px)` 恒不匹配、`@media (max-width: 950px)`
 恒匹配（0 ≤ 950），所有尺寸媒体查询都落在错误分支上。
 
@@ -254,7 +254,7 @@ wb-ui 此前 top 侧两角正确、**bottom 侧两角填到了对面**：`fillBe
 方块1 右下角）。
 
 复现与锁定：`dev/suites/cssprobe -filter logical-borders`（夹具期望的右边框 10x79、
-底边框 198x6 正是该方向的结果）；`rendering/border_corner_direction_test.go`
+底边框 198x6 正是该方向的结果）；`engine/rendering/border_corner_direction_test.go`
 锁定四角方向与 6 个回归采样点（把填充改回旧写法即失败）。
 
 ## 探针的帧循环（事件循环 + 重建 cooldown）

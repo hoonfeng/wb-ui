@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 
-	"wb-ui/dom"
-	"wb-ui/platform/ime"
-	"wb-ui/platform/window"
-	"wb-ui/rendering"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/platform/ime"
+	"wb-ui/engine/platform/window"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 
