@@ -62,6 +62,10 @@ var elemAccessorProps = map[string]bool{
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
 	"onclick": true,
 	"track":   true, "textTracks": true,
+	// <dialog> / <details> 的 live 状态：open 与 returnValue 会随
+	// show/showModal/close 变化，缓存住就会读到过期值（:modal / :open 匹配
+	// 与事件回调里读 d.open 都会错）。
+	"open": true, "returnValue": true,
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
@@ -233,6 +237,7 @@ var (
 		"getContext", "width", "height", "toDataURL",
 		"track", "textTracks",
 		"requestFullscreen", "exitFullscreen", "fullscreenElement", "fullscreenEnabled",
+		"open", "show", "showModal", "close", "returnValue",
 	}
 )
 
@@ -1254,6 +1259,64 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				return jsc.ObjectValue(wrapDocFrag(in, frag))
 			})(rt, jsc.JSValue{})
 		}}, true
+
+	// ── <dialog> / <details>（open 状态）──
+	case "open":
+		// open 属性（HTML 反射）：<details> 与 <dialog> 是仅有的两个以属性
+		// 表达打开状态的元素（<select> 的 open 是内部状态，不属于属性）。
+		if tag != "details" && tag != "dialog" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue { return jsc.BooleanValue(el.HasAttribute("open")) },
+			set: func(v jsc.JSValue) {
+				want := v.ToBoolean()
+				if want == el.HasAttribute("open") {
+					return
+				}
+				if want {
+					el.SetAttribute("open", "")
+				} else {
+					// 关闭：清模态状态（否则 :modal 会残留匹配）。
+					el.RemoveAttribute("open")
+					el.SetModalState(false)
+				}
+				invalidateDialogStyle(el)
+			}}, true
+	case "show", "showModal":
+		if tag != "dialog" {
+			return jsc.JSValue{}, nil, false
+		}
+		method := key
+		modal := key == "showModal"
+		return funcVal(rt.NewNativeFunction(method,
+			func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				dialogShow(in, el, method, modal)
+				return jsc.Undefined()
+			}, 0)), nil, true
+	case "close":
+		if tag != "dialog" {
+			return jsc.JSValue{}, nil, false
+		}
+		return funcVal(rt.NewNativeFunction("close",
+			func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				dialogClose(in, el, args)
+				return jsc.Undefined()
+			}, 1)), nil, true
+	case "returnValue":
+		// HTMLDialogElement.returnValue：规范是 DOMString 内部状态；本引擎与
+		// html5.HTMLDialogElement 一致，用 data-returnvalue 属性承载，Go 侧与
+		// JS 侧共享同一份值。
+		if tag != "dialog" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue {
+				return jsc.StringValue(el.GetAttribute("data-returnvalue"))
+			},
+			set: func(v jsc.JSValue) {
+				el.SetAttribute("data-returnvalue", v.ToString())
+			}}, true
 	}
 	return jsc.JSValue{}, nil, false
 }

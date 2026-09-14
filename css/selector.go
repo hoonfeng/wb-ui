@@ -10,9 +10,10 @@
 //     part-name-list arguments) and matched by SelectorChecker; ::part forward-matching
 //     through one or more `exportparts` layers is implemented (matchPart +
 //     parseExportparts follow the re-export chain host by host)
-//   - :fullscreen / :open / :closed are implemented; view-transition pseudo-elements
-//     are parsed but never match (no view-transition machinery in this port), and
-//     :modal / :popover-open / :autofill / :picture-in-picture are not modelled
+//   - :fullscreen / :open / :closed / :modal are implemented; view-transition
+//     pseudo-elements are parsed but never match (no view-transition machinery in
+//     this port), and :popover-open / :autofill / :picture-in-picture are not
+//     modelled (no popover / autofill / picture-in-picture in this port)
 //   - argument parsing for :nth-* stores An+B as integers (no full An+B syntax for
 //     "even"/"odd" is exposed, but those are precomputed into (2,0) and (2,1))
 //   - pseudo-element argument form (e.g. ::highlight(name)) stores the argument string
@@ -119,6 +120,7 @@ const (
 	PseudoClassFullscreen
 	PseudoClassOpen
 	PseudoClassClosed
+	PseudoClassModal
 )
 
 // PseudoElement enumerates the supported pseudo-elements, mirroring
@@ -454,6 +456,8 @@ func PseudoClassName(p PseudoClass) string {
 		return "open"
 	case PseudoClassClosed:
 		return "closed"
+	case PseudoClassModal:
+		return "modal"
 	}
 	return ""
 }
@@ -599,6 +603,8 @@ func LookupPseudoClass(name string) PseudoClass {
 		return PseudoClassOpen
 	case "closed":
 		return PseudoClassClosed
+	case "modal":
+		return PseudoClassModal
 	}
 	return PseudoClassUnknown
 }

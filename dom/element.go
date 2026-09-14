@@ -5,7 +5,8 @@
 //   - Element embeds nodeBase (no separate ContainerNode layer); attribute storage is a
 //     Go map plus an insertion-ordered name slice instead of WebKit's ElementData
 //   - qualified names / namespaces are collapsed to a plain local tag name
-//   - shadow DOM, custom elements, animation/ARIA hooks are omitted
+//   - shadow DOM is implemented (ShadowRoot + slot projection, see shadowroot.go);
+//     custom elements and animation/ARIA hooks are omitted
 //   - setInnerHTML uses a small stack-based HTML fragment parser (see documentfragment.go)
 //   - getInnerHTML serialises a conservative HTML form (always closing tags, text escaped)
 
@@ -33,6 +34,12 @@ type Element struct {
 	focused         bool
 	focusByKeyboard bool // true when focus came from keyboard (Tab) — drives :focus-visible
 	active          bool
+
+	// modal 是 HTML 的「模态状态」（in the modal state）：<dialog> 经
+	// showModal() 打开、或将来模态 popover 显示时由宿主置位。它为 true 时
+	// :modal 伪类匹配（HTML 渲染规范 + Selectors-4），渲染层可据此把元素
+	// 画在最上层。由宿主（html5/bindings）设置，dom 包本身不改变它。
+	modal bool
 
 	// attrVersion 随属性变更递增，样式解析器据此失效 per-element 缓存：
 	// class/type/checked 等影响 CSS 选择器匹配的属性变化后必须重算样式
@@ -70,6 +77,22 @@ func (e *Element) GetOnClickJSListener() EventListener  { return e.onClickJSList
 // The surface type is opaque (any) to keep the dom package dependency-free.
 func (e *Element) SetCanvasSurface(s any) { e.canvasSurface = s }
 func (e *Element) CanvasSurface() any     { return e.canvasSurface }
+
+// SetModalState / ModalState store the element's HTML "modal state"
+// (in the modal state), set by the embedding application when it opens a
+// <dialog> through showModal() (html5.HTMLDialogElement.ShowModal). The CSS
+// selector engine reads it for the :modal pseudo-class.
+func (e *Element) SetModalState(v bool) { e.modal = v }
+func (e *Element) ModalState() bool     { return e.modal }
+
+// IsModalDialog reports whether the element is a <dialog> that is in the modal
+// state (HTML §4.11.6): opened through showModal() and still open. This is the
+// single predicate behind the :modal pseudo-class (css/selectorchecker.go) and
+// the ::backdrop box generation (layout/rendering), so all three agree.
+func (e *Element) IsModalDialog() bool {
+	return e != nil && strings.EqualFold(e.tag, "dialog") &&
+		e.HasAttribute("open") && e.modal
+}
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.
 // The tag is stored verbatim; TagName returns the uppercased form for HTML and

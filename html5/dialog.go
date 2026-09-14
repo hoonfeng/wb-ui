@@ -2,26 +2,9 @@ package html5
 
 import "wb-ui/dom"
 
-// dialogState tracks per-element modal state. Since <dialog> elements are
-// plain *dom.Element instances (wrapped by HTMLDialogElement), we keep the
-// modal flag in a side map rather than on the DOM node itself.
-var dialogState = map[*dom.Element]struct{}{}
-
-// markDialogModal records that the dialog was opened via showModal().
-func markDialogModal(el *dom.Element) {
-	dialogState[el] = struct{}{}
-}
-
-// clearDialogModal removes the modal flag.
-func clearDialogModal(el *dom.Element) {
-	delete(dialogState, el)
-}
-
-// isDialogModal reports whether the dialog was opened via showModal().
-func isDialogModal(el *dom.Element) bool {
-	_, ok := dialogState[el]
-	return ok
-}
+// The modal flag lives on the DOM node itself (dom.Element.SetModalState), not
+// in a side map: the CSS selector engine needs it for the :modal pseudo-class,
+// and css cannot depend on html5.
 
 // --- HTMLDialogElement ---
 
@@ -49,7 +32,7 @@ func (d HTMLDialogElement) Open() bool {
 // makes the dialog visible. Mirrors HTMLDialogElement::show().
 func (d HTMLDialogElement) Show() {
 	d.El.SetAttribute("open", "open")
-	clearDialogModal(d.El)
+	d.El.SetModalState(false)
 }
 
 // ShowModal opens the dialog as a modal overlay. It adds the "open"
@@ -57,13 +40,13 @@ func (d HTMLDialogElement) Show() {
 // pseudo-element in rendering). Mirrors HTMLDialogElement::showModal().
 func (d HTMLDialogElement) ShowModal() {
 	d.El.SetAttribute("open", "open")
-	markDialogModal(d.El)
+	d.El.SetModalState(true)
 }
 
 // IsModal reports whether this dialog was opened via ShowModal rather than
 // Show. Mirrors HTMLDialogElement::isModal().
 func (d HTMLDialogElement) IsModal() bool {
-	return d.Open() && isDialogModal(d.El)
+	return d.Open() && d.El.ModalState()
 }
 
 // Close closes the dialog. If returnValue is provided, it is stored as the
@@ -74,7 +57,7 @@ func (d HTMLDialogElement) Close(returnValue ...string) {
 		d.SetReturnValue(returnValue[0])
 	}
 	d.El.RemoveAttribute("open")
-	clearDialogModal(d.El)
+	d.El.SetModalState(false)
 	// Dispatch a "close" event on the element
 	evt := dom.NewEvent("close", false, false, false)
 	_ = d.El.DispatchEvent(evt)
