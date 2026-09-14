@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Popover visibility and :popover-open</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body { background: #ffffff; font: 16px Arial, sans-serif; }
+
+    /* 每个待断言位置铺一块灰底：popover 隐藏（不生成盒）时它露出来，显示时被
+       popover 盖住。灰底与卡片同尺寸同位置，于是两个方向的断言都能用「精确几何
+       的连通色块」表达（cssprobe 只认整块同色组件，不认大背景里的一块区域）。 */
+    .track {
+      position: fixed; left: 20px; width: 200px; height: 30px;
+      background: #adb5bd;
+    }
+
+    /* 断言用的卡片：尺寸写死、定位自己接管（不依赖 UA 的居中近似），底色由
+       :popover-open 决定 —— 于是「盒是否存在」与「状态是否匹配」都被像素断言。
+       作者样式优先级高于 UA 表，因此这里能覆盖 [popover] 的定位与内边距。
+       transform:none 同时保证嵌套的 popover 不会被祖先的 transform 变成包含块。 */
+    .card {
+      width: 200px; height: 30px;
+      border: 0; padding: 0; margin: 0; overflow: visible;
+      position: fixed; left: 20px; transform: none;
+      background: #c92a2a; /* 显示中但未匹配到 :popover-open 时的颜色（红 = 失败） */
+    }
+    .card:popover-open { background: #2f9e44; }
+
+    #ta { top: 20px; }
+    #tp { top: 60px; }
+    #tc { top: 140px; }
+    #td { top: 180px; }
+    #tg { top: 220px; }
+    #tchild { top: 100px; left: 240px; }
+    #a { top: 20px; }
+    #parent { top: 60px; }
+    #child { top: 100px; left: 240px; }
+    #c { top: 140px; }
+    #d { top: 180px; }
+    #g { top: 220px; }
+
+    /* UA 定位路径单独验证：不覆盖 position/top/left/transform，只给尺寸，
+       于是位置完全由 UA 规则（fixed + top/left 50% + translate(-50%,-50%)）决定。 */
+    #centered {
+      width: 200px; height: 30px;
+      border: 0; padding: 0; margin: 0;
+      background: #1971c2;
+    }
+  </style>
+</head>
+<body>
+  <div class="track" id="ta"></div>
+  <div class="track" id="tc"></div>
+  <div class="track" id="tp"></div>
+  <div class="track" id="tchild"></div>
+  <div class="track" id="td"></div>
+  <div class="track" id="tg"></div>
+
+  <!-- a：显示后又隐藏 → 最终不生成盒，露出灰底（hidePopover 必须撤销显示） -->
+  <div id="a" popover class="card"></div>
+  <!-- c / parent：两个「无 popover 祖先」的 auto，后打开的 parent 必须关掉 c -->
+  <div id="c" popover class="card"></div>
+  <!-- parent 是 auto，child 嵌在它内部（也是 auto）：child 打开时父必须留在栈里
+       （规范 find the topmost popover ancestor），两者同时显示。 -->
+  <div id="parent" popover class="card">
+    <div id="child" popover class="card"></div>
+  </div>
+  <!-- d：manual，先在 auto 之前打开，之后打开 auto 不该关掉它 -->
+  <div id="d" popover="manual" class="card"></div>
+  <!-- g：manual，最后打开，不该关掉任何 auto（与 parent/child 的断言互相印证） -->
+  <div id="g" popover="manual" class="card"></div>
+  <!-- centered：manual + UA 定位（打开它不干扰上面的 auto 结果） -->
+  <div id="centered" popover="manual"></div>
+
+  <script>
+    const a = document.getElementById("a");
+    const c = document.getElementById("c");
+    const d = document.getElementById("d");
+    const g = document.getElementById("g");
+    const parent = document.getElementById("parent");
+    const child = document.getElementById("child");
+    const centered = document.getElementById("centered");
+
+    a.showPopover();
+    a.hidePopover();   // 隐藏后必须回到「不生成盒」
+
+    c.showPopover();   // auto（稍后被 parent 关闭）
+    d.showPopover();   // manual：不能关闭 c
+
+    parent.showPopover();  // auto：关闭 c，但必须留下 d（manual）
+    child.showPopover();   // 嵌套 auto：parent 必须留在栈里
+
+    g.showPopover();       // manual：不能关闭 parent / child
+
+    centered.showPopover();
+  </script>
+</body>
+</html>

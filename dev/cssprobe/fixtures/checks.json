@@ -269,6 +269,19 @@
     {"name": "content sizes the indefinite percentage-height chain", "color": "#087f5b", "x": 0, "y": 0, "height": 24},
     {"name": "following flow starts after the content-sized chain", "color": "#e8590c", "x": 0, "y": 24, "width": 400, "height": 20}
   ],
+  "popover-backdrop": [
+    {"name": "::backdrop fills the viewport below the popover", "color": "#7048e8", "x": 0, "y": 30, "width": 900, "height": 970},
+    {"name": "the popover paints above its own backdrop", "color": "#2f9e44", "x": 0, "y": 0, "width": 900, "height": 30}
+  ],
+  "popover": [
+    {"name": "hidePopover removes the box again (base shows through)", "color": "#adb5bd", "x": 20, "y": 20, "width": 200, "height": 30},
+    {"name": "auto popover opened later closed the earlier one", "color": "#adb5bd", "x": 20, "y": 140, "width": 200, "height": 30},
+    {"name": "shown auto popover paints via :popover-open", "color": "#2f9e44", "x": 20, "y": 60, "width": 200, "height": 30},
+    {"name": "nested auto popover keeps its popover ancestor open", "color": "#2f9e44", "x": 240, "y": 100, "width": 200, "height": 30},
+    {"name": "manual popover is not closed by an auto popover", "color": "#2f9e44", "x": 20, "y": 180, "width": 200, "height": 30},
+    {"name": "manual popover does not close open auto popovers", "color": "#2f9e44", "x": 20, "y": 220, "width": 200, "height": 30},
+    {"name": "UA host styles center a popover in the viewport", "color": "#1971c2", "x": 350, "y": 485, "width": 200, "height": 30}
+  ],
   "relative-box-edges": [
     {"name": "vh margin resolves against viewport height", "color": "#087f5b", "x": 0, "y": 150, "width": 100, "height": 40},
     {"name": "vw margin resolves against viewport width", "color": "#1971c2", "x": 90, "y": 200, "width": 100, "height": 40},

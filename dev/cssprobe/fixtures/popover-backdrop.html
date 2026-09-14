@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Popover ::backdrop</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body { background: #ffffff; font: 16px Arial, sans-serif; }
+
+    /* 普通内容（z-index 0）：显示中的 popover 的 ::backdrop 必须盖住它。 */
+    #content { position: absolute; left: 0; top: 0; width: 900px; height: 400px; background: #adb5bd; }
+
+    /* 卡片做成横贯视口上方的横条：backdrop 的可见区域于是成为视口下方的一整块
+       （连通区域的外接矩形就是这块，几何可精确断言；若卡片只在角落，紫色会绕
+       着它连通成整个视口，外接矩形反而失去区分度）。 */
+    #p {
+      width: 900px; height: 30px;
+      border: 0; padding: 0; margin: 0;
+      position: fixed; left: 0; top: 0; transform: none;
+      background: #2f9e44;
+    }
+
+    /* 规范里 ::backdrop 默认透明（popover 不会自动把页面变暗），作者可以自己上色。
+       这里只给颜色，铺满视口的定位（position:fixed + inset:0）由 UA 规则提供
+       （html5/defaultcss.go 的 `:popover-open::backdrop`）—— 因此这条断言同时验证
+       「作者能改 backdrop 颜色」与「UA 规则把 backdrop 撑满视口」。 */
+    #p::backdrop { background: #7048e8; }
+  </style>
+</head>
+<body>
+  <div id="content"></div>
+  <div id="p" popover></div>
+  <script>
+    document.getElementById("p").showPopover();
+  </script>
+</body>
+</html>
