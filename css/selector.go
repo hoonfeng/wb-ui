@@ -14,6 +14,10 @@
 //     pseudo-elements are parsed but never match (no view-transition machinery in
 //     this port), and :popover-open / :autofill / :picture-in-picture are not
 //     modelled (no popover / autofill / picture-in-picture in this port)
+//   - :valid / :invalid / :in-range / :out-of-range consult an injected
+//     FormValidityResolver (css/validity.go): the constraint-validation state
+//     lives in the html5 package, which already imports css, so the checker
+//     takes a plain data snapshot instead of importing it back
 //   - argument parsing for :nth-* stores An+B as integers (no full An+B syntax for
 //     "even"/"odd" is exposed, but those are precomputed into (2,0) and (2,1))
 //   - pseudo-element argument form (e.g. ::highlight(name)) stores the argument string

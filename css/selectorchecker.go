@@ -26,6 +26,9 @@
 //   - :target compares the element's id with the document URL's fragment (after
 //     percent-decoding); the HTML "top" fallback matches the root element when no
 //     element has id="top"
+//   - :valid / :invalid / :in-range / :out-of-range are answered by the injected
+//     form-validity resolver (css/validity.go). Without an injection point they
+//     never match, so the css package stays usable standalone (tests, probes)
 
 package css
 
@@ -437,9 +440,27 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 		return el.HasAttribute("required")
 	case PseudoClassOptional:
 		return !el.HasAttribute("required")
-	case PseudoClassValid, PseudoClassInvalid, PseudoClassInRange, PseudoClassOutOfRange:
-		// Constraint-validation pseudo-classes are not modeled.
-		return false
+	case PseudoClassValid:
+		// :valid 匹配「candidate for constraint validation 且没有违反任何
+		// 约束」的元素（HTML §4.10.21）。barred 的元素（disabled/readonly/
+		// datalist 后代等）两者都不匹配。
+		fv, ok := formValidityOf(el)
+		return ok && fv.WillValidate && fv.Valid
+	case PseudoClassInvalid:
+		fv, ok := formValidityOf(el)
+		return ok && fv.WillValidate && !fv.Valid
+	case PseudoClassInRange, PseudoClassOutOfRange:
+		// 只匹配有范围限制的元素（min/max 存在且能解析）：没有范围限制时
+		// 两者都不匹配（MDN :in-range "only applies to elements that have
+		// (and can take) a range limitation"）。
+		fv, ok := formValidityOf(el)
+		if !ok || !fv.WillValidate || !fv.RangeLimited {
+			return false
+		}
+		if s.PseudoClass == PseudoClassOutOfRange {
+			return fv.OutOfRange
+		}
+		return !fv.OutOfRange
 	case PseudoClassDefault:
 		// HTML §4.16.2：默认按钮、已勾选的 checkbox/radio、已选中的 option。
 		switch strings.ToLower(el.LocalName()) {

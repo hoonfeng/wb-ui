@@ -236,6 +236,37 @@ func (b HTMLButtonElement) Form() *dom.Element { return FindFormAncestor(b.El) }
 // Autofocus reports whether the button has the autofocus attribute.
 func (b HTMLButtonElement) Autofocus() bool { return attrBool(b.El, "autofocus") }
 
+// WillValidate 报告该 button 是否参与约束校验：type 为 reset/button 时被排除
+// （HTML §4.10.6），submit（含默认值）时是候选——可以 setCustomValidity 让它
+// 无效，从而阻止表单提交。disabled 同样排除。
+func (b HTMLButtonElement) WillValidate() bool { return !barredButton(b) }
+
+// Validity returns the button's ValidityState. A button has no intrinsic
+// constraints, so only a custom error (setCustomValidity with a non-empty
+// message) can make it invalid. Mirrors HTMLButtonElement::validity().
+func (b HTMLButtonElement) Validity() ValidityState {
+	v := ValidityState{}
+	if msg, ok := customErrorMessages[b.El]; ok && msg != "" {
+		v.CustomError = true
+	}
+	return v
+}
+
+// SetCustomValidity sets a custom error message for this button (non-empty
+// message makes the button invalid).
+func (b HTMLButtonElement) SetCustomValidity(message string) {
+	customErrorMessages[b.El] = message
+}
+
+// CheckValidity returns true if the button satisfies its constraints
+// (always true unless a custom error was set).
+func (b HTMLButtonElement) CheckValidity() bool {
+	if !b.WillValidate() {
+		return true
+	}
+	return b.Validity().Valid()
+}
+
 // Click performs the button's default action. For type=submit this triggers
 // form submission; for type=reset it resets the form's controls to their
 // default values. Mirrors HTMLButtonElement::click().

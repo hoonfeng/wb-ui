@@ -310,21 +310,21 @@ func (i HTMLInputElement) Validity() ValidityState {
 		v.TooShort = true
 	}
 
-	// range checks (min/max/step) for number/range/date/time
+	// 范围（min/max）：对 number/range 与日期类类型都生效——inputRangeState
+	// 按输入类型解析后比较（空值/不可解析值不越界）。
+	if _, under, over := inputRangeState(i); under {
+		v.RangeUnderflow = true
+	} else if over {
+		v.RangeOverflow = true
+	}
+
+	// step mismatch：只对 number/range 检查。日期类类型的 step 单位换算
+	// （date=天、week=周、time=秒、month=月）是本端口的已知缺口，见
+	// docs/TECH_DEBT.md。
 	if t == InputNumber || t == InputRange {
 		if val != "" {
 			num, err := parseFloat(val)
 			if err == nil {
-				if i.Min() != "" {
-					if min, err := parseFloat(i.Min()); err == nil && num < min {
-						v.RangeUnderflow = true
-					}
-				}
-				if i.Max() != "" {
-					if max, err := parseFloat(i.Max()); err == nil && num > max {
-						v.RangeOverflow = true
-					}
-				}
 				if i.Step() != "" && i.Step() != "any" {
 					if step, err := parseFloat(i.Step()); err == nil && step > 0 {
 						var base float64
@@ -344,17 +344,22 @@ func (i HTMLInputElement) Validity() ValidityState {
 		}
 	}
 
+	// 自定义错误消息（setCustomValidity 的非空消息）：与 select/textarea 的
+	// Validity() 一致。此前 input 漏了这一项——setCustomValidity("...") 之后
+	// validity.customError 仍为 false、checkValidity() 仍返回 true。
+	if msg, ok := customErrorMessages[i.El]; ok && msg != "" {
+		v.CustomError = true
+	}
+
 	return v
 }
 
-// WillValidate reports whether this input participates in constraint
-// validation. Disabled/hidden inputs do not.
+// WillValidate 报告该 input 是否参与约束校验（HTML §4.10.21.1 的
+// "candidate for constraint validation"）。被排除的情形：disabled、
+// readonly（仅对支持 readonly 的输入类型）、type 为 hidden/reset/button、
+// 位于 <datalist> 内——见 constraint.go 的 barredInput。
 func (i HTMLInputElement) WillValidate() bool {
-	t := i.Type()
-	if i.Disabled() || t == InputHidden || t == InputReset || t == InputButton {
-		return false
-	}
-	return true
+	return !barredInput(i)
 }
 
 // CheckValidity returns true if the input's value satisfies all

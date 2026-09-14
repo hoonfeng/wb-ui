@@ -134,8 +134,10 @@ func (t HTMLTextAreaElement) Autofocus() bool {
 // --- Validation ---
 
 // WillValidate reports whether the textarea participates in validation.
+// Disabled and readonly textareas are barred from constraint validation
+// (HTML §4.10.7 — see constraint.go's barredTextArea).
 func (t HTMLTextAreaElement) WillValidate() bool {
-	return !t.Disabled()
+	return !barredTextArea(t)
 }
 
 // Validity returns the ValidityState for this textarea.

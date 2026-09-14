@@ -206,8 +206,10 @@ func (s HTMLSelectElement) SetValue(v string) {
 }
 
 // WillValidate reports whether the select participates in validation.
+// Only disabled selects are barred — select has no readonly attribute
+// (see constraint.go's barredSelect).
 func (s HTMLSelectElement) WillValidate() bool {
-	return !s.Disabled()
+	return !barredSelect(s)
 }
 
 // Validity returns the ValidityState for this select. A required select is
