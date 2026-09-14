@@ -573,6 +573,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// TextTrack、TextTrackCueList、TextTrackList、VTTCue。
 	registerMediaTypes(rt, g)
 
+	// ── 媒体元素（HTMLMediaElement/HTMLVideoElement/HTMLAudioElement）──
+	// 属性与方法在 bindings/media_element.go（原型链在下方接到 HTMLElement）。
+	registerMediaElementTypes(rt, g)
+
 	// Extract .prototype objects
 	nodeProto = jsc.FunctionValue(nodeCtor).AsObject().GetStr("prototype").AsObject()
 	elementProto = jsc.FunctionValue(eltCtor).AsObject().GetStr("prototype").AsObject()
@@ -591,6 +595,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	commentProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	docFragProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	attrProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	// <video>/<audio> 包装器使用 HTMLVideoElement/HTMLAudioElement 原型
+	//（→ HTMLMediaElement → HTMLElement），因此 `video instanceof HTMLMediaElement`
+	// 成立、且媒体方法仍在原型链上可达。
+	if domMediaProto != nil {
+		domMediaProto.Set("__proto__", jsc.ObjectValue(htmlElementProto))
+	}
 
 	// Store for wrapper functions (package-level).
 	domElementProto = elementProto
@@ -3505,6 +3515,10 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	proto := rt.ObjectPrototype()
 	if domElementProto != nil {
 		proto = domElementProto
+	}
+	// <video>/<audio> 走媒体元素原型（HTMLMediaElement 家族）。
+	if mp := mediaElementPrototypeFor(el); mp != nil {
+		proto = mp
 	}
 	props := &lazyElemProps{
 		el:      el,

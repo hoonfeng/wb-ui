@@ -65,7 +65,11 @@ var elemAccessorProps = map[string]bool{
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
-func (p *lazyElemProps) Live(key string) bool { return elemAccessorProps[key] }
+// 媒体属性（<video>/<audio>）也是 live——duration/paused/readyState 会随
+// 状态机变化，缓存住就会读到过期值。
+func (p *lazyElemProps) Live(key string) bool {
+	return elemAccessorProps[key] || hasMediaElementProp(p.el, key)
+}
 
 func (p *lazyElemProps) Get(key string) jsc.JSValue {
 	if key == "" {
@@ -119,6 +123,9 @@ func (p *lazyElemProps) Set(key string, v jsc.JSValue) bool {
 
 func (p *lazyElemProps) Has(key string) bool {
 	if _, ok := elemKnownProps[key]; ok {
+		return true
+	}
+	if hasMediaElementProp(p.el, key) {
 		return true
 	}
 	_, ok := p.expando[key]
@@ -183,8 +190,13 @@ func (p *lazyElemProps) Delete(key string) bool {
 
 func (p *lazyElemProps) Keys() []string {
 	out := make([]string, 0, len(elemKnownPropNames)+len(p.expando))
-	for _, k := range elemKnownPropNames {
-		out = append(out, k)
+	out = append(out, elemKnownPropNames...)
+	// 媒体元素额外列出 HTMLMediaElement 的属性（按标签判定——div 等不含）。
+	if p.el != nil {
+		switch p.el.LocalName() {
+		case "video", "audio":
+			out = append(out, mediaElementPropList...)
+		}
 	}
 	for k := range p.expando {
 		out = append(out, k)
@@ -234,6 +246,14 @@ func init() {
 // 原属性定义逐字一致（捕获 el）。
 func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (jsc.JSValue, *elemAccessor, bool) {
 	tag := strings.ToLower(el.LocalName())
+	// <video>/<audio> 的 HTMLMediaElement 属性（媒体状态机、事件、Promise 语义）
+	// 集中在 media_element.go 实现；这里做一次标签判定后委派，避免在下面的大
+	// switch 里散落 30+ 个媒体 case。
+	if isMediaElementTag(tag) && isMediaElementProp(key) {
+		if v, acc, ok := installMediaElementProperty(rt, el, key); ok {
+			return v, acc, true
+		}
+	}
 	switch key {
 	case "constructor":
 		o := jsc.NewObject(rt.ObjectPrototype())

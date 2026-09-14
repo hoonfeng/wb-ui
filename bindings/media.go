@@ -97,6 +97,10 @@ func clearMediaCachesFor(interp *jsc.Interpreter, doc *dom.Document) {
 		delete(mediaProtos, interp)
 		mediaProtoMu.Unlock()
 	}
+
+	// 媒体元素状态（bindings/media_element.go：HTMLMediaElement 家族）同样按
+	// 文档清理——否则旧文档的元素会一直被状态表引用。
+	clearMediaElementCacheFor(doc)
 }
 
 // ─── 注册（构造器 + 原型）────────────────────────────────
