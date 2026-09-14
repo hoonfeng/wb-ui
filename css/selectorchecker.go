@@ -23,10 +23,14 @@
 //     (.outer x-widget::part(btn) walks the host's composed ancestors); ::part also
 //     follows the exportparts re-export chain across nested shadow trees (CSS Scoping L1)
 //   - :has() is implemented by walking descendants of the candidate element
+//   - :target compares the element's id with the document URL's fragment (after
+//     percent-decoding); the HTML "top" fallback matches the root element when no
+//     element has id="top"
 
 package css
 
 import (
+	"net/url"
 	"strings"
 
 	"wb-ui/dom"
@@ -372,11 +376,30 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 		// :has(rel) — match any descendant matching rel.
 		return c.matchHas(s.SelectorList, el)
 	case PseudoClassTarget:
+		// Selectors-4 / HTML §4.11.9：:target 匹配文档的 **target element** ——
+		// URL fragment（百分号解码后）等于元素 id 的元素。此前只判「URL 非空
+		// 且有 id」，于是任何带 id 的元素在任意非空 URL 下都匹配。
 		doc := el.OwnerDocument()
 		if doc == nil {
 			return false
 		}
-		return doc.URL() != "" && el.GetId() != ""
+		frag, ok := urlFragment(doc.URL())
+		if !ok {
+			return false
+		}
+		if id := el.GetId(); id != "" && id == frag {
+			return true
+		}
+		if frag == "top" {
+			// HTML：fragment 为 "top" 且文档里没有 id="top" 的元素时，目标
+			// 元素是根元素。
+			if doc.GetElementById("top") != nil {
+				return false
+			}
+			p := el.ParentNode()
+			return el.GetId() == "" && (p == nil || p.NodeType() == dom.NodeDocument)
+		}
+		return false
 	case PseudoClassLang:
 		lang := lookupLang(el)
 		for _, want := range s.StringList {
@@ -828,6 +851,25 @@ func isFormControl(el *dom.Element) bool {
 		return true
 	}
 	return false
+}
+
+// urlFragment returns the percent-decoded fragment of rawURL (the part after
+// "#"), and false when the URL has no (or an empty) fragment. Used by :target:
+// the fragment is compared against element ids, mirroring the URL parser's
+// percent-decoding of the "fragment" component.
+func urlFragment(rawURL string) (string, bool) {
+	i := strings.LastIndex(rawURL, "#")
+	if i < 0 {
+		return "", false
+	}
+	frag := rawURL[i+1:]
+	if frag == "" {
+		return "", false
+	}
+	if dec, err := url.PathUnescape(frag); err == nil {
+		frag = dec
+	}
+	return frag, true
 }
 
 // formControlType returns an <input>/<button>/<select>/<textarea> type with the

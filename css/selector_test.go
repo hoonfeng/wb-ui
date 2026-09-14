@@ -1011,3 +1011,77 @@ func TestSelector_MatchSlottedAcrossCombinator(t *testing.T) {
 		t.Fatalf(".nope xwidget::slotted(span) should not match (no .nope ancestor)")
 	}
 }
+
+// TestSelector_TargetPseudoClass :target 匹配「文档 URL 的 fragment 指向的元素」
+// （HTML §4.11.9）——不是「URL 非空 + 元素有 id」。
+func TestSelector_TargetPseudoClass(t *testing.T) {
+	doc := dom.NewDocument()
+	html := dom.NewElement(doc, "html")
+	doc.AppendChild(html)
+	body := dom.NewElement(doc, "body")
+	html.AppendChild(body)
+	sec := dom.NewElement(doc, "div")
+	sec.SetId("sec1")
+	body.AppendChild(sec)
+	other := dom.NewElement(doc, "div")
+	other.SetId("sec2")
+	body.AppendChild(other)
+	noID := dom.NewElement(doc, "div")
+	body.AppendChild(noID)
+
+	c := NewSelectorChecker()
+	sel := mustParseOneSelector(t, ":target")
+
+	// 无 URL / 无 fragment：都不匹配。
+	if c.Match(sel, sec) {
+		t.Fatal("URL 为空时 :target 不应匹配")
+	}
+	doc.SetURL("https://example.com/page")
+	if c.Match(sel, sec) {
+		t.Fatal("URL 没有 fragment 时 :target 不应匹配")
+	}
+	doc.SetURL("https://example.com/page#")
+	if c.Match(sel, sec) {
+		t.Fatal("空 fragment 时 :target 不应匹配")
+	}
+
+	// fragment 指向某个 id：只有那个元素匹配。
+	doc.SetURL("https://example.com/page#sec1")
+	if !c.Match(sel, sec) {
+		t.Fatal("fragment=sec1 时应匹配 #sec1")
+	}
+	if c.Match(sel, other) {
+		t.Fatal("fragment=sec1 时不应匹配 #sec2")
+	}
+	if c.Match(sel, noID) {
+		t.Fatal("无 id 的元素不应匹配 :target")
+	}
+
+	// fragment 需百分号解码（id 里有空格 / 非 ASCII）。
+	sp := dom.NewElement(doc, "div")
+	sp.SetId("a b")
+	body.AppendChild(sp)
+	doc.SetURL("https://example.com/page#a%20b")
+	if !c.Match(sel, sp) {
+		t.Fatal("fragment 应百分号解码后与 id 比较（#a%20b ↔ id=\"a b\"）")
+	}
+
+	// "top" 回退：文档里没有 id="top" 时根元素是 target element。
+	doc.SetURL("https://example.com/page#top")
+	if !c.Match(sel, html) {
+		t.Fatal("fragment=top 且无 id=top 元素时应匹配根元素")
+	}
+	if c.Match(sel, sec) {
+		t.Fatal("fragment=top 时普通元素不应匹配 :target")
+	}
+	// 真有 id="top" 的元素时，"top" 不再回退到根元素。
+	topEl := dom.NewElement(doc, "div")
+	topEl.SetId("top")
+	body.AppendChild(topEl)
+	if c.Match(sel, html) {
+		t.Fatal("存在 id=top 元素时根元素不应再匹配 :target")
+	}
+	if !c.Match(sel, topEl) {
+		t.Fatal("存在 id=top 元素时它应匹配 :target")
+	}
+}

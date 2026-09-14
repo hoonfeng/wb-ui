@@ -76,6 +76,16 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    `css/openstate_selector_test.go`、`html5/fullscreen_ua_test.go`、
    `rendering/dialog_backdrop_test.go`（结构中无 DOM 节点的 `::backdrop` 盒 +
    像素级的 10% 黑遮罩压暗）。
+   复核记录（2026-09 批次·续）：随后的 `<dialog>` 状态算法重写（`open` 纯反射、
+   `beforetoggle`、`toggle`/`close` 同批派发）、`PseudoElementName` 补
+   `-webkit-scrollbar{,-thumb,-track}`、`:default` / `:indeterminate` 表单状态
+   伪类、flex/grid 容器里的 `::backdrop` 三批改动，cssprobe 复测同样为
+   **61/61 夹具、248/248 检查**。对应单测：`bindings/dialog_test.go`（`open`
+   纯反射 + 事件顺序 + `<details>` toggle）、`css/selector_test.go`（枚举↔名称表
+   ↔查询表三向往返、`:modal`/`::backdrop` 解析分流）、
+   `css/formstate_selector_test.go`、`bindings/formstate_test.go`、
+   `layout/box_backdrop_test.go`（flex/inline-flex/grid/inline-grid 四种容器）、
+   `rendering/dialog_backdrop_test.go`（flex 场景 + `LayoutBox()` 链接断言 + 像素）。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。

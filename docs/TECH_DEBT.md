@@ -376,6 +376,10 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | Fullscreen API | `Element.requestFullscreen()` / `document.exitFullscreen()` / `fullscreenElement` / `fullscreenEnabled`；事件异步派发（元素先于 document）、重复请求不派发、未连接元素派发 `fullscreenerror` 并 reject；UA 表加 `:fullscreen:not(:root)` 铺满规则；宿主钩子 `OnFullscreenChanged` | `4fd6d1b` |
 | `<dialog>` JS 接口 | `open` 属性反射（`<details>` 共用）、`show()` / `showModal()` / `close()`、`returnValue`；已打开时按规范抛错（用 TypeError 兜底），`toggle` / `close` 异步派发；状态迁移走样式失效链 | `fb39d5f` |
 | `::backdrop` 遮罩 | 解析（css 层已有）+ 生成（layout/rendering 在模态 dialog 之前插入伪元素盒/对象）+ 绘制（UA 规则 `position:fixed; inset:0; rgba(0,0,0,.1)`）；`ResolvePseudoElement` 不再要求 `::backdrop` 声明 `content` | `3583e6b` |
+| `<dialog>` 状态算法重写 | 按 HTML §4.11.6 对齐：`open` 纯反射（移除属性**不**退出模态状态）；`show()`/`showModal()` 目标态相同时静默返回、不同时抛错；打开/关闭先同步派发**可取消**的 `beforetoggle`，再排队 `toggle`；关闭时 `toggle` 与 `close` 在同一批任务里按序派发（分两次排队实测顺序会颠倒）；`<details>` 的 open 切换派发 `toggle`（§4.11.4）；UA 表补 `dialog:not([open]){display:none}` | `a93a1d0` |
+| CSS 表单状态伪类 | `:default`（表单首个 submit/reset 默认按钮、已勾选 checkbox/radio、已选中 option）与 `:indeterminate`（checkbox 的 IDL 状态、radio 组无勾选、`<progress>` 无 value）；`input.indeterminate` IDL 属性（不写内容属性） | `9a1794f` |
+| 伪元素名称表一致性 | `PseudoElementName` 漏了 `-webkit-scrollbar{,-thumb,-track}`（查询表有、名称表无 → 序列化出裸 `::`）；新增「枚举 ↔ 名称表 ↔ 查询表」三向往返测试与序列化断言锁死这类漂移 | `9a1794f` |
+| flex/grid 容器里的 `::backdrop` | 模态 `<dialog>` 作为 flex/grid item 时也生成遮罩：`buildFlexChildren` 两侧（layout + rendering）与块级路径同位置插入（fixed 定位子项不占 flex item 槽位） | `e8d2108` |
 
 ### 仍未建模（有意保留）
 - **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
@@ -385,5 +389,8 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 - view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
 - `ToggleEvent.newState`：`toggle` 事件已派发，但不带 `newState` 字段（没有
   ToggleEvent 建模）。
-- 模态 `<dialog>` 作为 **flex/grid item** 时不生成 `::backdrop`（layout 与
-  rendering 的 flex 分支都未插入，两侧保持一致；块级父容器下正常）。
+- 约束校验伪类（`:valid` / `:invalid` / `:in-range` / `:out-of-range`）：与上面
+  的 `:autofill` / `:user-valid` 同因——本端口没有表单约束校验模型
+  （`checkValidity()` / constraint validation API 未实现），没有判定依据，故
+  返回 false。注意 `:default` / `:indeterminate` 不属于这一类（它们的状态本端口
+  全都拿得到），已在上面闭环。
