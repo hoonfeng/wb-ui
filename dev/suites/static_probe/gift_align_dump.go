@@ -33,9 +33,8 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	path := "dev/static_probe/ot_real.html"
+	path := "dev/suites/static_probe/ot_real.html"
 	if len(os.Args) > 1 {
-		path = os.Args[1]
 		path = os.Args[1]
 	}
 	fmt.Println("html:", path)

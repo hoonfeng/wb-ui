@@ -6,7 +6,7 @@
 // CSS / 内联脚本 / fetch 全部走真实 HTTP 栈（并记录服务器实际收到的请求），
 // 再用 ModeToolkit 复验同样的动作不产生任何网络请求。
 //
-//	go run ./dev/browser_http_probe
+//	go run ./dev/probes/browser_http_probe
 package main
 
 import (

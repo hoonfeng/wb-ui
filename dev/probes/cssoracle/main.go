@@ -1,12 +1,12 @@
 // Command cssoracle 用**真实浏览器**（Chrome/Edge headless）渲染
-// dev/cssprobe 的同一批夹具，并与 checks.json 的期望逐条比对。
+// dev/suites/cssprobe 的同一批夹具，并与 checks.json 的期望逐条比对。
 //
 // 用途：把"夹具期望错了"与"wb-ui 渲染错了"分开。cssprobe 只能告诉我们
 // 「渲染结果 ≠ 期望」；cssoracle 给出第三个事实来源——期望本身是否等于
 // 真实浏览器。修复夹具失败项时的顺序因此固定为：
 //
-//	go run ./dev/cssoracle -filter <fixture>   # 期望是否与浏览器一致？
-//	go run ./dev/cssprobe  -filter <fixture> -v # wb-ui 与同一期望的差距
+//	go run ./dev/probes/cssoracle -filter <fixture>   # 期望是否与浏览器一致？
+//	go run ./dev/suites/cssprobe  -filter <fixture> -v # wb-ui 与同一期望的差距
 //
 // 判定：
 //
@@ -16,11 +16,11 @@
 //
 // 用法：
 //
-//	go run ./dev/cssoracle                      # 全部夹具
-//	go run ./dev/cssoracle -filter legacy       # 名字匹配正则
-//	go run ./dev/cssoracle -v                   # 同时列出 MATCH 项
-//	go run ./dev/cssoracle -json oracle.json    # 机器可读结果
-//	go run ./dev/cssoracle -dump /tmp/oracle    # 保留浏览器截图
+//	go run ./dev/probes/cssoracle                      # 全部夹具
+//	go run ./dev/probes/cssoracle -filter legacy       # 名字匹配正则
+//	go run ./dev/probes/cssoracle -v                   # 同时列出 MATCH 项
+//	go run ./dev/probes/cssoracle -json oracle.json    # 机器可读结果
+//	go run ./dev/probes/cssoracle -dump /tmp/oracle    # 保留浏览器截图
 package main
 
 import (
@@ -36,7 +36,7 @@ import (
 	"sort"
 	"strings"
 
-	"wb-ui/dev/probelib"
+	"wb-ui/dev/lib/probelib"
 )
 
 type checkResult struct {
@@ -61,9 +61,10 @@ type fixtureResult struct {
 func defaultFixtureDir() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return "dev/cssprobe/fixtures"
+		return "dev/suites/cssprobe/fixtures"
 	}
-	return filepath.Join(filepath.Dir(file), "..", "cssprobe", "fixtures")
+	// dev/probes/cssoracle → ../../suites/cssprobe/fixtures
+	return filepath.Join(filepath.Dir(file), "..", "..", "suites", "cssprobe", "fixtures")
 }
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"wb-ui.com/goja"
+	"wb-ui/goja"
 )
 
 func main() {

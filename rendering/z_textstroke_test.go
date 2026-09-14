@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -111,6 +112,7 @@ func dumpCanvasPNG(c *graphics.Canvas, path string) {
 			img.SetNRGBA(x, y, color.NRGBA{R: p.R, G: p.G, B: p.B, A: p.A})
 		}
 	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	if f, err := os.Create(path); err == nil {
 		png.Encode(f, img)
 		f.Close()
@@ -172,7 +174,7 @@ func TestTextStrokeRenderPixels(t *testing.T) {
 		t.Logf("computed: findTxtBox nil")
 	}
 	t.Logf("stroke 渲染: magenta=%d white=%d other=%d", magenta, white, other)
-	dumpCanvasPNG(c, "F:/syproject/wb-ui/dev/strokecheck/painter_stroke.png")
+	dumpCanvasPNG(c, filepath.Join("..", "dev", "output", "painter_stroke.png"))
 	if magenta < 50 {
 		t.Fatalf("描边像素不足（magenta=%d）— -webkit-text-stroke 未渲染", magenta)
 	}
@@ -196,7 +198,7 @@ func TestTextStrokeRenderPixels(t *testing.T) {
 	}
 	magenta2, white2, _ := pixelStats(c2)
 	t.Logf("paint-order:stroke: magenta=%d white=%d", magenta2, white2)
-	dumpCanvasPNG(c2, "F:/syproject/wb-ui/dev/strokecheck/painter_po.png")
+	dumpCanvasPNG(c2, filepath.Join("..", "dev", "output", "painter_po.png"))
 	if magenta2 < 50 {
 		t.Fatalf("paint-order 描边像素不足（magenta=%d）", magenta2)
 	}

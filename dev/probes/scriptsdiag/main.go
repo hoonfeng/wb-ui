@@ -10,7 +10,7 @@
 //
 // Usage:
 //
-//	go run ./dev/scriptsdiag -file dev/cssprobe/fixtures/modern-streams.html
+//	go run ./dev/probes/scriptsdiag -file dev/suites/cssprobe/fixtures/modern-streams.html
 package main
 
 import (

@@ -5,8 +5,8 @@
 //
 // 用法：
 //
-//	go run ./dev/fontmetric            # 默认字族/字号矩阵
-//	go run ./dev/fontmetric Arial 12   # 指定字族与字号
+//	go run ./dev/probes/fontmetric            # 默认字族/字号矩阵
+//	go run ./dev/probes/fontmetric Arial 12   # 指定字族与字号
 package main
 
 import (

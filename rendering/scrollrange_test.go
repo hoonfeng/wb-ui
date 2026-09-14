@@ -2,7 +2,7 @@
 // 与滚动条几何（VerticalScrollbarMetrics.OK =「该不该画滚动条」）是两件事：
 // 容器小到放不下箭头按钮时滚动条不画，但元素依然可以滚动。把滚动条几何当
 // 「可否滚动」用，会让小尺寸滚动容器上的 scrollTop 赋值被静默丢弃——
-// dev/cssprobe 的 modern-hydration-contracts 正是这种容器（10×10 +
+// dev/suites/cssprobe 的 modern-hydration-contracts 正是这种容器（10×10 +
 // overflow:scroll + 100×100 内容，脚本随后读回 scrollLeft/scrollTop === 15）。
 //
 // 本测试同时断言两者在小容器上的分歧：滚动范围成立（canY/canX = true、上限 90），

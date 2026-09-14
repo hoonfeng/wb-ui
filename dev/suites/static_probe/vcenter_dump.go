@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Command vcenter_dump renders dev/vcenter_probe/vcenter.html and prints the
+// Command vcenter_dump renders dev/fixtures/xseg/xseg_real.html and prints the
 // geometry of .txt (flex align-items:center) box, its span flex item, and
 // text segments — to diagnose vertical centering of CJK text in flex.
 package main
@@ -57,7 +57,7 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	data, _ := os.ReadFile(filepath.Join("dev", "xseg_probe", "xseg_real.html"))
+	data, _ := os.ReadFile(filepath.Join("dev", "fixtures", "xseg", "xseg_real.html"))
 	doc, _ := html.Parse(string(data))
 	resolver := style.NewResolver()
 	resolver.AddStyleSheet(html5.NewUAStyleSheet())

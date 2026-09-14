@@ -6,16 +6,16 @@
 
 ```bash
 # 运行全部用例
-go run ./dev/consistency
+go run ./dev/suites/consistency
 
 # 运行单个用例
-go run ./dev/consistency -case layout_block
+go run ./dev/suites/consistency -case layout_block
 
 # 指定浏览器路径（默认 Edge）
-go run ./dev/consistency -edge "C:\path\to\chrome.exe"
+go run ./dev/suites/consistency -edge "C:\path\to\chrome.exe"
 ```
 
-报告输出到 `dev/consistency/report/<case>.txt`（gitignored）。
+报告输出到 `dev/suites/consistency/report/<case>.txt`（gitignored）。
 
 ## 架构
 

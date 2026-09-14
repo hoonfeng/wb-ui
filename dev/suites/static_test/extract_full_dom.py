@@ -1,5 +1,5 @@
 """extract_full_dom.py — 从 9090 端口抓取 Vue 渲染后的完整 DOM + 计算样式"""
-import asyncio, json, re
+import asyncio, json, os, re
 from playwright.async_api import async_playwright
 
 async def extract():
@@ -77,12 +77,14 @@ async def extract():
             };
         }""")
 
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "output")
+        os.makedirs(out_dir, exist_ok=True)
         # 保存完整 JSON
-        with open("F:/syproject/wb-ui/dev/static_test/full_dom.json", "w", encoding="utf-8") as f:
+        with open(os.path.join(out_dir, "full_dom.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
         # 同时也截图
-        await page.screenshot(path="F:/syproject/wb-ui/dev/static_test/browser_screenshot.png")
+        await page.screenshot(path=os.path.join(out_dir, "browser_screenshot.png"))
 
         print(f"OK: {json.dumps(data, ensure_ascii=False)[:500]}")
         await browser.close()

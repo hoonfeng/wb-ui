@@ -7,7 +7,7 @@ import (
 	"wb-ui/dom"
 )
 
-// newMediaFixtureDoc 构建 dev/cssprobe/fixtures/media-text-track.html 的 DOM
+// newMediaFixtureDoc 构建 dev/suites/cssprobe/fixtures/media-text-track.html 的 DOM
 // 结构：<video> + 一个 data: URL 的 <track> 字幕，外加结果容器。
 func newMediaFixtureDoc(doc *dom.Document) (*dom.Element, *dom.Element) {
 	video := doc.CreateElement("video")

@@ -1,5 +1,5 @@
 // Command window_test loads an HTML file in a wb-ui window for interactive testing.
-// Usage: go run ./dev/window_test --html PATH
+// Usage: go run ./dev/probes/window_test --html PATH
 package main
 
 import (

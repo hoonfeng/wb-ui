@@ -38,10 +38,13 @@ _temp/
 ui-toolkit-demo.png
  
 # Consistency suite runtime reports
-dev/consistency/report/
-# Temp debug scripts 
-_debug_*.py 
-_fix_*.py 
+dev/suites/consistency/report/
+
+# 诊断套件（dev/）的产物统一出口：探针输出的 PNG / JSON / 日志
+dev/output/
+
+# Temp debug scripts
+# 注意：gen_*.py 同时命中了 dev/suites/static_test/gen_*.py（夹具生成器，有意忽略）
 gen_*.py
 # Python bytecode
 __pycache__/

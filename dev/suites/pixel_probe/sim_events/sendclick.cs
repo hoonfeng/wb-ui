@@ -50,7 +50,7 @@ class SendClick
         int targetY = int.Parse(args[1]);
 
         // Find wb-ui window
-        IntPtr hwnd = FindWindow(null, "wb-ui: dev/pixel_probe/test_html/step17_form.html");
+        IntPtr hwnd = FindWindow(null, "wb-ui: dev/suites/pixel_probe/test_html/step17_form.html");
         if (hwnd == IntPtr.Zero)
         {
             // Try partial match

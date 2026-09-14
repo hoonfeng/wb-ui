@@ -3,7 +3,7 @@
 // max-* 恒匹配——所有尺寸媒体查询都落在错误分支上（`@media (min-width:600px)`
 // 的页面永远看到桌面样式，`@media (max-width:950px)` 的页面永远看到移动样式）。
 //
-// 本测试是 dev/cssprobe/fixtures/viewport-consistency.html 前两项检查的单测
+// 本测试是 dev/suites/cssprobe/fixtures/viewport-consistency.html 前两项检查的单测
 // 对应物（第三项要页面脚本读 innerWidth/visualViewport，探针与单测都不执行脚本）。
 // 同一页面用两个视口渲染形成交叉验证：既验证命中，也验证不命中。
 package rendering_test
@@ -34,7 +34,7 @@ const mediaViewportHTML = `<!doctype html>
 <div id="width-probe" class="probe"></div>
 <div id="height-probe" class="probe"></div>`
 
-// renderMediaViewport 走与 dev/cssprobe 相同的链路：视口尺寸在 Build（首次
+// renderMediaViewport 走与 dev/suites/cssprobe 相同的链路：视口尺寸在 Build（首次
 // 样式解析）之前写进 resolver，Build 后再由 RenderView 同步一次。真实链路中
 // 前者是 page.Frame.syncMediaQueryViewport（渲染树重建前调用），后者是
 // RenderView.SetViewportSize。

@@ -321,7 +321,7 @@ func normalizeColor(s string) string {
 	return strings.Join(nums, ",")
 }
 
-// writeReport persists the comparison to dev/consistency/report/<name>.txt.
+// writeReport persists the comparison to dev/suites/consistency/report/<name>.txt.
 func writeReport(r CaseResult) {
 	path := filepath.Join(ReportDir, r.Case.Name+".txt")
 	f, err := os.Create(path)

@@ -8,16 +8,16 @@ CSS 矛盾、或想量化「通过检查」与「视觉一致」的差距时，�
 
 | 工具 | 用途 |
 |------|------|
-| `dev/calib` | 同一夹具分别用 wb-ui 与 obscura 渲染，输出差异像素占比、差异区域排名、可选差异图（绿=仅 wb-ui、红=仅 obscura） |
-| `dev/tddiag` | 并排打印元素的 computed display 与布局几何——定位「谁把宽度/高度写坏了」 |
-| `dev/cssprobe` | 夹具 + 期望检查（`-v` 明细、`-tree` 渲染树、`-dump` PNG） |
+| `dev/probes/calib` | 同一夹具分别用 wb-ui 与 obscura 渲染，输出差异像素占比、差异区域排名、可选差异图（绿=仅 wb-ui、红=仅 obscura） |
+| `dev/probes/tddiag` | 并排打印元素的 computed display 与布局几何——定位「谁把宽度/高度写坏了」 |
+| `dev/suites/cssprobe` | 夹具 + 期望检查（`-v` 明细、`-tree` 渲染树、`-dump` PNG） |
 
 用法：
 
 ```bash
-go run ./dev/calib -fixture dev/cssprobe/fixtures/tables.html -top 6 -out /tmp/diff.png
-go run ./dev/tddiag -file dev/cssprobe/fixtures/fixed-table-layout.html -depth 7
-go run ./dev/cssprobe -v -filter 'table-row-geometry'
+go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -top 6 -out /tmp/diff.png
+go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout.html -depth 7
+go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
 ```
 
 ## obscura 构建状态
@@ -33,7 +33,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
   ref/obscura/target/release/paint_file.exe <in.html> <out.png> [width] [height] [base_url]
   ```
 
-  `dev/calib` 默认调用该二进制（`-obscura` 可换路径）。
+  `dev/probes/calib` 默认调用该二进制（`-obscura` 可换路径）。
 
 ## 一致性基线（900x1000 视口，差异像素占全图比例）
 
@@ -58,7 +58,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    **0.000%**（逐像素一致）。教训：参照与「标准」冲突时先查第三方实现（Edge），
    不要凭对标准的记忆下结论。
 2. `tables` 的 3.96% 差异说明：**cssprobe 的色块检查通过 ≠ 视觉一致**（检查只覆盖
-   若干色块位置/尺寸）。后续可把 `dev/calib` 的差异占比纳入回归基线，作为整体
+   若干色块位置/尺寸）。后续可把 `dev/probes/calib` 的差异占比纳入回归基线，作为整体
    一致性的补充指标。
 3. 文本位置差 1-2px 属字体度量范畴（hinting/行高取整），非结构性布局错误。
 4. cssprobe 现状：**61/61 夹具、248/248 检查**（默认 `-scripts auto`，见下文
@@ -162,7 +162,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 
 判别「探针边界 vs 真缺口」的方法（仍然有效）：看失败的实际像素是不是夹具里
 **另一条静态规则**的颜色（`closest` 会直接指出）⇒ 脚本没跑到那一步；再用
-`dev/scriptsdiag` 逐项列出脚本可见的平台 API，确认缺的是哪一类能力。
+`dev/probes/scriptsdiag` 逐项列出脚本可见的平台 API，确认缺的是哪一类能力。
 
 复核后修正了一个判断错误：**缺失的 Web API 会让整段脚本抛 `ReferenceError`
 中断**，而不是只让那一行失效——因此「媒体/Streams 子系统的缺失」同样会表现为
@@ -171,7 +171,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 
 ## 探针的脚本执行模式（-scripts）
 
-`dev/cssprobe` 默认对含 `<script>` 的夹具走 **WebView 路径**（`webkit.NewWebView`
+`dev/suites/cssprobe` 默认对含 `<script>` 的夹具走 **WebView 路径**（`webkit.NewWebView`
 → `Resize` → `LoadHTML` → `Render`），其余夹具走纯 CSS 管线；`-scripts off` 强制
 全部走纯 CSS 管线（历史基线），`-scripts on` 强制全部走 WebView。
 
@@ -190,7 +190,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
   动画——时钟由宿主 `app.Host` 每帧推进）。
 - ★ 执行顺序：含 `<script>` 的夹具**排在最后**。WebView 构造时会初始化字体管理器
   （`webkit.ensureFonts`），装载系统字体后 serif/mono 的 fallback 度量随之变化，
-  而参照实现的文本度量恰好等同「未加载系统字体」的 wb-ui（`dev/calib` 实测
+  而参照实现的文本度量恰好等同「未加载系统字体」的 wb-ui（`dev/probes/calib` 实测
   `right-float-navigation` 差异 **0.000%**，逐像素相同）。脚本夹具若先跑，后续纯
   CSS 夹具的几何会被改写（实测 `font-metric-line-height` 行盒偏 40px、
   `right-float-navigation` 偏 4px、`table-row-geometry`/`table-track-geometry`
@@ -253,7 +253,7 @@ wb-ui 此前 top 侧两角正确、**bottom 侧两角填到了对面**：`fillBe
 `logical-borders` 夹具 6/6、与 obscura **0.000%**（此前 0.006%，58px 集中在
 方块1 右下角）。
 
-复现与锁定：`dev/cssprobe -filter logical-borders`（夹具期望的右边框 10x79、
+复现与锁定：`dev/suites/cssprobe -filter logical-borders`（夹具期望的右边框 10x79、
 底边框 198x6 正是该方向的结果）；`rendering/border_corner_direction_test.go`
 锁定四角方向与 6 个回归采样点（把填充改回旧写法即失败）。
 

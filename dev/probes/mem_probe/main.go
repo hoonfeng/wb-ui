@@ -1,5 +1,5 @@
 // wb-ui 内存探针：循环 LoadHTML / Render 测量堆增长，定位泄漏或频繁分配。
-// 用法：go run ./dev/mem_probe
+// 用法：go run ./dev/probes/mem_probe
 package main
 
 import (

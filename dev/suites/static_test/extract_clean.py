@@ -110,10 +110,12 @@ async def extract():
             return walk(document.body, 0, '');
         }""")
 
-        with open("F:/syproject/wb-ui/dev/static_test/clean_dom.json", "w", encoding="utf-8") as f:
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "output")
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "clean_dom.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        await pg.screenshot(path="F:/syproject/wb-ui/dev/static_test/browser_ref.png")
+        await pg.screenshot(path=os.path.join(out_dir, "browser_ref.png"))
         print(f"OK: {len(json.dumps(data, ensure_ascii=False))} bytes")
         await b.close()
 

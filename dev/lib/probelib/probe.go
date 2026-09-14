@@ -1,4 +1,4 @@
-// Package probelib 提供 CSS 夹具（dev/cssprobe/fixtures）的公共原语：
+// Package probelib 提供 CSS 夹具（dev/suites/cssprobe/fixtures）的公共原语：
 // checks.json 读取、纯色连通域检测、期望比对，以及「真实浏览器参照」
 // 所需的浏览器探测与截图封装。
 //

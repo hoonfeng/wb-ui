@@ -6,7 +6,7 @@ import (
 )
 
 // TestStreamsHydrationPipeline 覆盖现代 SSR 水合的分块流契约
-// （dev/cssprobe/fixtures/modern-streams.html 的核心脚本）：
+// （dev/suites/cssprobe/fixtures/modern-streams.html 的核心脚本）：
 //
 //	ReadableStream({start}) → pipeThrough(TextEncoderStream)
 //	→ pipeThrough(TransformStream{transform,flush}) → getReader().read()

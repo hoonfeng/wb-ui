@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/dop251/goja"
+	"wb-ui/goja"
 )
 
 func main() {

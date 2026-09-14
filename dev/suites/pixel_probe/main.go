@@ -1,6 +1,6 @@
 // Command pixel_probe renders HTML through wb-ui full pipeline and reads pixels.
 //
-// Usage: go run ./dev/pixel_probe --html FILE [--css FILE] [--w 1280] [--h 800] [--out PNG]
+// Usage: go run ./dev/suites/pixel_probe --html FILE [--css FILE] [--w 1280] [--h 800] [--out PNG]
 //
 // Environment: CGO_ENABLED=1 (required for goskia)
 

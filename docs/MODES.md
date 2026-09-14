@@ -165,7 +165,7 @@ go run ./examples/uitoolkit -mode browser -out out.png
 # （同一 URL 只取一次）、nosniff 的 MIME 拒绝、装配期 location 导航、html/body
 # 背景传播（读回画布像素）、外部样式表里 url() 的基准（请求落在样式表同级目录
 # 且画出的像素来自那一份，而不是文档同级那一份）；再用 UI 库模式复验同一组动作 0 网络
-go run ./dev/browser_http_probe
+go run ./dev/probes/browser_http_probe
 ```
 
 输出会打印组件来源、点击回调次数、`typeof fetch/XMLHttpRequest/Worker/WebSocket`
@@ -219,6 +219,6 @@ go run ./dev/browser_http_probe
 | 模式接线 | `webkit/mode.go`（枚举/装配策略/资源解析器）、`webkit/webview.go` 的 4 处注入分派、`page.RegisterFetchWithPolicy`、`bindings.HideBrowserThreadGlobals` |
 | UI 构建层 | `ui/ui.go`（View/Node）、`ui/registry.go`（双源组件） |
 | 顺带修复 | `page/frame.go` `SetDocument` 未同步 `styleFP` → 每次 LoadHTML 后首次重建会重复全量重扫样式（`<link>` 重复加载）；`file://` 的 URL 规范形式 `file:///C:/x` 之前读不到（前导斜杠） |
-| 浏览器行为对齐（本批七项） | `<base href>` 基准（`dom.Document.BaseHref` + `page.Frame.SetPendingDocumentURL` + `WebView.LoadHTMLWithBaseURL`）、html/body 背景传播（`rendering.Paint` 入口）、`location`/`history` 导航（`webkit/navigation.go`）、异步资源到位自动置脏（`rendering.AddBackgroundImageLoadedListener`）、外部资源内存缓存与 nosniff MIME（`webkit/resource_cache.go`）、UI 库模式全局真删除（`jsc.JSObject.Delete`）；回归：`webkit/{base_url,navigation,async_repaint,resource_cache}_test.go` + `dev/browser_http_probe` |
-| 资源通道收尾（紧跟其后） | 样式表内 `url()` 的基准（`style/resolver.go`：`collectedDecl.sheetBase` + 收集链传参 + `absolutizeCollectedURLs` 在 token 层绝对化，`@keyframes` 由 `addKeyframesFromSheet` 就地处理）、WebKit 前缀属性别名（`prefixedPropertyAliases` + `unprefixPropertyName`——`-webkit-mask-image` 等此前是无人消费的陌生属性）、多层 `background-image: url(a), url(b)` 取第一层（`rendering/backgroundimage.go` 的 `parseBackgroundURL` 用 `IndexByte` 而非 `LastIndex`）；回归：`style/url_base_test.go`、`rendering/backgroundurl_layers_test.go`、`webkit/browser_http_media_test.go`（+2）、`dev/browser_http_probe`（47 项断言） |
+| 浏览器行为对齐（本批七项） | `<base href>` 基准（`dom.Document.BaseHref` + `page.Frame.SetPendingDocumentURL` + `WebView.LoadHTMLWithBaseURL`）、html/body 背景传播（`rendering.Paint` 入口）、`location`/`history` 导航（`webkit/navigation.go`）、异步资源到位自动置脏（`rendering.AddBackgroundImageLoadedListener`）、外部资源内存缓存与 nosniff MIME（`webkit/resource_cache.go`）、UI 库模式全局真删除（`jsc.JSObject.Delete`）；回归：`webkit/{base_url,navigation,async_repaint,resource_cache}_test.go` + `dev/probes/browser_http_probe` |
+| 资源通道收尾（紧跟其后） | 样式表内 `url()` 的基准（`style/resolver.go`：`collectedDecl.sheetBase` + 收集链传参 + `absolutizeCollectedURLs` 在 token 层绝对化，`@keyframes` 由 `addKeyframesFromSheet` 就地处理）、WebKit 前缀属性别名（`prefixedPropertyAliases` + `unprefixPropertyName`——`-webkit-mask-image` 等此前是无人消费的陌生属性）、多层 `background-image: url(a), url(b)` 取第一层（`rendering/backgroundimage.go` 的 `parseBackgroundURL` 用 `IndexByte` 而非 `LastIndex`）；回归：`style/url_base_test.go`、`rendering/backgroundurl_layers_test.go`、`webkit/browser_http_media_test.go`（+2）、`dev/probes/browser_http_probe`（47 项断言） |
 | fragment 同文档导航 | `location.hash` 此前**只有 getter**（赋值静默丢弃）→ 靠 hash 做锚点跳转/单页路由的页面全失效。现在 `location.hash` / `location.href = "#x"` / `location.assign("#x")` 走「同文档导航」：`bindings/dom.go` 给 hash 补 setter 并按 `sameDocumentURL` 分流、`bindings/navigation.go` 新增 `FragmentNavigation` 出口 + `DispatchHashChange`（hashchange 监听器此前被误派成 `type="popstate"`）、`webkit/navigation.go` 的 `navigateToFragment`/`scrollToAnchor`（页面级滚动同时写 `rendering.RenderView` 与 `page.FrameView`；空 inline 锚点 `<a name>` 无渲染盒时退化为「文档序中其后第一个有盒子的节点」）+ `:target` 重新匹配；`history.back()` 在同 fragment 条目间遍历时 `popstate`、`hashchange` 都派发；回归：`webkit/fragment_nav_test.go`（3 项，含像素级滚动/`:target` 断言与 UI 库模式拒绝） |

@@ -3,8 +3,8 @@
 // 看起来与标准 CSS 矛盾时（例如相邻边框是否 45° 斜切），用本工具可以直接看出
 // 差异到底在哪、有多大，而不是盯着单个检查项的 want 猜。
 //
-//	go run ./dev/calib -fixture dev/cssprobe/fixtures/logical-borders.html
-//	go run ./dev/calib -fixture dev/cssprobe/fixtures/tables.html -out /tmp/diff.png
+//	go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/logical-borders.html
+//	go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -out /tmp/diff.png
 //
 // obscura 侧走它的离线绘制入口 crates/obscura-render/src/bin/paint_file.rs
 // （不依赖 V8，可在 v8 静态库损坏时照常使用）；-obscura 可指定其他二进制路径。

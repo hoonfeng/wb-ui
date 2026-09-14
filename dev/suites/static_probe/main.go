@@ -105,6 +105,9 @@ func renderPage(path string, w, h int, out string) error {
 			})
 		}
 	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return fmt.Errorf("mkdir out dir: %w", err)
+	}
 	f, err := os.Create(out)
 	if err != nil {
 		return err
@@ -118,21 +121,21 @@ func renderPage(path string, w, h int, out string) error {
 }
 
 func main() {
-	wd := "dev/static_probe"
+	wd := "dev/output"
 	// 1. ide_static.html (real IDE layout, ~636KB)
-	if err := renderPage("dev/static_test/ide_static.html", 1280, 800, filepath.Join(wd, "ide_now.png")); err != nil {
+	if err := renderPage("dev/suites/static_test/ide_static.html", 1280, 800, filepath.Join(wd, "ide_now.png")); err != nil {
 		fmt.Fprintln(os.Stderr, "ide_static:", err)
 	} else {
 		fmt.Println("ide_static OK")
 	}
 	// 2. grid_app.html (correct grid+flex IDE layout)
-	if err := renderPage("dev/static_probe/grid_app.html", 1280, 800, filepath.Join(wd, "grid_app.png")); err != nil {
+	if err := renderPage("dev/suites/static_probe/grid_app.html", 1280, 800, filepath.Join(wd, "grid_app.png")); err != nil {
 		fmt.Fprintln(os.Stderr, "grid_app:", err)
 	} else {
 		fmt.Println("grid_app OK")
 	}
 	// 3. desc_test.html (descendant selector + background:none)
-	if err := renderPage("dev/static_probe/desc_test.html", 1280, 800, filepath.Join(wd, "desc_test.png")); err != nil {
+	if err := renderPage("dev/suites/static_probe/desc_test.html", 1280, 800, filepath.Join(wd, "desc_test.png")); err != nil {
 		fmt.Fprintln(os.Stderr, "desc_test:", err)
 	} else {
 		fmt.Println("desc_test OK")

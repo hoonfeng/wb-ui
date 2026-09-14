@@ -140,11 +140,11 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 > 次）、grid 38ms、table 7ms。`roundTree` 与 `updateContentSize` 是两次额外 O(n) walk（约
 > 2000 节点 × 2），估算 <5ms（占比 <1%）——**阶段 A（合并这两次 walk）收益微乎其微，不建议
 > 投入**。真正的瓶颈是 BFC/FFC 布局算法本身（单次 FFC 0.6ms、BFC 0.28ms），优化方向应聚焦
-> 阶段 B/C（增量布局/脏子树）或 BFC/FFC 内部算法，均属高风险大工程，需先跑 `dev/consistency`
+> 阶段 B/C（增量布局/脏子树）或 BFC/FFC 内部算法，均属高风险大工程，需先跑 `dev/suites/consistency`
 > 像素护栏再动手。
 >
 > **最终决策（2026-08-13）**：阶段 A 收益 <1%，**不投入**；阶段 B/C 属高风险大工程，仅在
-> 业务出现可感知布局卡顿（超大文档滚动/频繁重排）时立项，立项前必跑 `dev/consistency` 像素护栏。
+> 业务出现可感知布局卡顿（超大文档滚动/频繁重排）时立项，立项前必跑 `dev/suites/consistency` 像素护栏。
 
 ### 现状定位
 一次完整布局存在**三次全树遍历**：
@@ -172,12 +172,12 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 - `layout/layoutstate.go`、`page/frame.go`、`app/host.go`（阶段 B/C）
 
 ### 风险
-高。布局顺序/几何缓存一致性极易出回归，务必先跑 `dev/consistency`（Edge 像素对比）
+高。布局顺序/几何缓存一致性极易出回归，务必先跑 `dev/suites/consistency`（Edge 像素对比）
 与全量 `go test ./...` 作为护栏。
 
 ### 验证
-- `WB_LAYOUT_PROFILE=1 go run ./dev/static_probe/main.go` 看各 FC 耗时分布。
-- 对比改动前后 `dev/consistency` 像素测试无差异。
+- `WB_LAYOUT_PROFILE=1 go run ./dev/suites/static_probe/main.go` 看各 FC 耗时分布。
+- 对比改动前后 `dev/suites/consistency` 像素测试无差异。
 
 ---
 
@@ -386,13 +386,13 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | 约束校验 IDL | 元素级 `validity`（11 个只读布尔属性）/ `validationMessage` / `willValidate` / `checkValidity()` / `reportValidity()` / `setCustomValidity()`；表单级 `checkValidity()` / `reportValidity()` / `noValidate`。判定逻辑复用 html5 的 ValidityState；`setCustomValidity` 走样式失效链。顺带修 `<input>` 的 `Validity()` 漏检 customError（`setCustomValidity` 后 `checkValidity()` 仍返回 true） | `83377cc` |
 | 提交时交互校验 | 新增 `html5/interactive.go`：对每个无效控件派发 `invalid` 事件（不冒泡）、返回列表供宿主聚焦第一个；`requestSubmit`/提交按钮点击在未声明 `novalidate`/`formnovalidate` 时先校验，失败即中止（连 `submit` 事件都不派发）。顺带修 `form.submit()` 语义：规范里它**不**校验、也**不**派发 submit 事件（此前等价于 requestSubmit） | `83377cc` |
 | `:user-valid` / `:user-invalid` | dom 新增 user validity 状态；css 新增枚举 + 名称 + 解析（含枚举三向往返测试）；匹配要求「candidate 且 user validity 为 true」。引擎在 change 事件路径（失焦提交/点击 checkbox-radio/选择 option/拖动 range）与控制点（交互校验=提交尝试）置位，并经注入钩子重算样式；脚本 `dispatchEvent(new Event('change'))` 不置位（与浏览器一致） | `54d2888` |
-| 约束校验的像素级夹具 | `dev/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
+| 约束校验的像素级夹具 | `dev/suites/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
 | `:user-valid` / `:user-invalid` 的焦点会话规则 | 补上 MDN 列出的第 3 条：值在控件获得焦点时无效、而用户在焦点仍在控件内时把它改成了有效（`:user-invalid` 是镜像方向）→ 立即获得 user validity。dom 增加焦点会话记忆（`SetFocusValidity`/`FocusValidity`，失焦清除）与 `OnElementFocused` 注入钩子（dom 不依赖 html5）；`html5.NoteFocusGained` / `NoteUserInput` 做判定（未翻转不置位、无焦点会话不置位）；三条真实值写入路径全部接线——`app.Host.setFocusedElementValue`（IME/组合输入）、`webkit.FormFocus.applyValue`（键入/退格/粘贴）、`app.Host.setRangeValueFromX`（range 点击与拖动），漏一条这条规则就静默失效 | `93c3032` |
 | `ToggleEvent.source` | 把 IDL 里的 `source`（`Element?`）落地：dom 增加字段 + `ToggleEventInit.Source` + 构造参数 + `Source()`；bindings 暴露为 `null` 或对应元素对象。非 null 只出现在 popover 的 invoker 场景（已随 Popover API 落地，见下表），其余路径按规范恒为 `null`：dialog 的 `close()`/`requestClose()` 传 null、`form method=dialog` 提交传 null、close watcher 读的 request close source element 槽只被 `requestClose()` 写过（写的也是 null）、details 的 toggle 任务只初始化 oldState/newState。字段存在的意义是让 `e.source === null` 与 MDN 的 `event.source === undefined` 特性检测得到和浏览器一样的结果 | `8487f72` |
 | 日期类输入的 step mismatch | 新增 `html5/step.go`：date 以天、month 以月（月长不等，不能换算成毫秒）、week 以周、time 与 datetime-local 以秒换算，default step 分别为 1 天/1 月/1 周/60 秒/60 秒；step base 按 min → value 内容属性 → default step base（只有 week 定义了它：−259,200,000 ms）→ 0；step 缺失/解析失败/≤0 时退回 default step 而不是跳过（只有 `step="any"` 跳过）；整数轴（毫秒/月，< 2^53）用整数取模精确判定，number/range 的容差路径顺带修掉 `0.3`（step=0.1）被浮点误差误判成 mismatch 的问题 | `0673d69` |
 | `<input type=week>` 的 ISO 周解析 | 修 `parseWeek`：Go 的时间布局里 `2006-W02` 的 `02` 是「月中的第几天」，早期实现用它解析周值，于是 `1970-W03` 被读成 1970-01-03、`1970-W01…W04` 全部落进同一周（week 的 min/max 与 step 相位因此失真）。改为自行解析「四位以上年 + `-W` + 两位周号」、按 ISO 规则（含 1 月 4 日的那一周是 W01）求周一，并校验第 53 周只在该年真的存在时才合法 | `0673d69` |
 | Popover API | HTML §6.12 整套落地：dom 的 popover visibility state + top layer 近似栈（`dom/popoverstate.go`）；新 `popover` 包实现 show/hide/toggle 三个算法、check popover validity、auto/hint 互斥与 topmost popover ancestor、light dismiss 的 pointerdown/pointerup 两阶段、close request（Esc）、invoker 的激活行为（`popovertarget*` 与 `commandfor`/`command`）；JS 层 `HTMLElement.popover`（枚举属性反射）+ 三个方法 + 四个 invoker 属性 + `ToggleEvent` 构造器；`:popover-open` 伪类与 UA 样式（未显示不生成盒、显示中的 fixed + `z-index:1100` 近似 top layer、`::backdrop` 默认透明不吃指针事件，backdrop 盒的判定泛化为 `dom.Element.NeedsBackdrop`）；宿主两条路径（`webkit.Interaction`、`app.Host`）都接 light dismiss / Esc / invoker。已知差异见下 | `634f4b0`、`3422a1a`、`3d56853`、`1b2aa8c` |
-| Popover API 的像素夹具 | `dev/cssprobe` 新增 `popover`（7 条：hidePopover 后回到不生成盒、`:popover-open` 上色、后打开的 auto 关掉先前的、嵌套 auto 保留 popover 祖先、manual 与 auto 互不影响、UA 定位居中）与 `popover-backdrop`（2 条：作者上色的 backdrop 铺满视口、popover 画在自己 backdrop 之上）。反向验证：`:popover-open` 恒 false → 5 条失败；去掉 UA 的 `display:none` → 2 条失败；backdrop 改成不透明 → 3 条失败 | `1b2aa8c` |
+| Popover API 的像素夹具 | `dev/suites/cssprobe` 新增 `popover`（7 条：hidePopover 后回到不生成盒、`:popover-open` 上色、后打开的 auto 关掉先前的、嵌套 auto 保留 popover 祖先、manual 与 auto 互不影响、UA 定位居中）与 `popover-backdrop`（2 条：作者上色的 backdrop 铺满视口、popover 画在自己 backdrop 之上）。反向验证：`:popover-open` 恒 false → 5 条失败；去掉 UA 的 `display:none` → 2 条失败；backdrop 改成不透明 → 3 条失败 | `1b2aa8c` |
 | Worker（并发脚本执行） | 新增 `worker` 包（每个 Worker 一个**独立 goja 运行时 + 独立 goroutine + 独立事件循环**，两个运行时之间只传 JSON 文本）与 `bindings/worker.go`（`Worker` 的 postMessage/onmessage/onerror/addEventListener/terminate + `MessageEvent`；worker → 主线程的消息由主事件循环的宏任务派发，主运行时的 JS 只在主线程 tick 里执行）。脚本来源：`data:` URL 或宿主注入的 `bindings.SetWorkerScriptFetcher`；worker 全局提供 self/name/close/importScripts/setTimeout 家族/console。单测 `worker/worker_test.go`（6 项）+ `bindings/worker_test.go`（12 项，含「worker 忙等 400ms 时主线程定时器照常推进」的并发本质断言） | `5a4a75c`、`ff965d5` |
 
 ### Worker 的已知差异（有意保留）
@@ -456,7 +456,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | 每次 LoadHTML 后样式重复全量重扫 | `page.Frame.SetDocument` 提取样式后未同步 `styleFP` → 紧随其后的首次 `RebuildRenderTree` 判定「指纹变化」→ 再全量重扫一次：`<style>` 重复解析、`<link>` 重复加载（宿主 `StyleSheetLoader` / `ResourceResolver` 被重复调用一次）。修复后整条加载路径上 resolver 只被请求 1 次（`ui.TestToolkitModeResourceResolver` 断言 `calls == 1`） |
 | `file://` 标准 URL 形式读不到文件 | 旧的 `strings.TrimPrefix(href, "file://")` 对 `file:///C:/dir/f.css` 留下前导斜杠 → `os.ReadFile` 必然失败（只有 `file://C:/dir/f.css` 这种非标准写法能读）。新增 `webkit.fileURLPath` 走 `net/url` 解析：盘符路径去前导斜杠、支持 `file:///home/u/f.css` 与 UNC `file://host/share/f` |
 
-### 真实 HTTP 路径修复（用 `dev/browser_http_probe` 发现）
+### 真实 HTTP 路径修复（用 `dev/probes/browser_http_probe` 发现）
 
 「嵌入浏览器」此前只用 `data:` URL 与内存替换验证过，没人用**真实服务器**跑过——
 补上真起 HTTP 服务器（`httptest`）的端到端探针后，一次暴露 4 个缺口（均为
@@ -470,7 +470,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `document.URL` / `location.href` 与文档不符 | `document.URL` 是注册时求值的静态快照（恒为空串）；`location` 是写死 `about:blank`/`file:` 的静态桩；`LoadURL` 也从未 `doc.SetURL` | `LoadURL` 把 URL 写进 `Document`（`LoadHTML` 视为 `about:blank`，内部拆出 `loadHTMLFrom(src, docURL)`）；`document.URL` 与 `location.href/protocol/host/hostname/port/pathname/search/hash/origin` 改为**动态 accessor**；`history.pushState/replaceState` 改为更新文档 URL（同源路径相对当前文档解析），不再直接写 location 字段 |
 | 重定向后的文档基地址是「请求 URL」而不是「最终 URL」 | `fetchHTTP` 只返回响应正文，`LoadURL` 只能拿入参 URL 当基准——`http://host` 被 301 到 `https://host/` 后，页面里的 `style.css` 会解析回 `http://host/style.css` | 新增 `fetchURLWithFinalURL`（内部用 `resp.Request.URL`）→ `LoadURL` 用**最终 URL** 作为文档基地址；`fetchURL` 保持原签名，其余调用点不受影响 |
 
-回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，47 条断言全 PASS）。
+回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/probes/browser_http_probe`（诊断脚本，47 条断言全 PASS）。
 反向验证：隐去相对解析 → 3 条断言失败（含 `unsupported protocol scheme ""`）；恢复 Content-Type 返回 error → 「服务器收到了 /style.css 但样式不生效」；把 fetch 基地址去掉 → 相对 fetch 失败；把重定向基准改回请求 URL → 服务器日志显示 `/style.css`（而非 `/b/style.css`）。
 
 ### 图片（`<img src>`）与 CSS `@import` 接通外部资源通道
@@ -574,7 +574,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   `webkit/browser_http_media_test.go`（`TestBrowserModeStylesheetURLBaseForCSSURLs`、
   `TestBrowserModeDocumentBaseForInlineURLs`——文档与样式表刻意放在**不同深度**
   的目录，否则两种基准会算出同一个 URL 而抓不到回归，这是反向验证暴露的
-  fixture 陷阱），`dev/browser_http_probe` 的「样式表内 url() 的基准」4 条断言。
+  fixture 陷阱），`dev/probes/browser_http_probe` 的「样式表内 url() 的基准」4 条断言。
   反向验证：把 `sheetBaseURL` 改成恒返回 "" → `webkit` 两条测试立即失败
   （请求落到文档同级、`#bg` 像素由红变蓝），恢复后通过。
 - **WebKit 前缀属性与标准属性同义（已实现）**：`prefixedPropertyAliases` +

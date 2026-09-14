@@ -2,7 +2,7 @@
 // 后的 border box 几何，用于定位「表格单元格宽度被内容撑开」这类问题——渲染树的
 // 尺寸看不出是哪一层写坏了，把 display 与实际几何并排打印即可分辨。
 //
-//	go run ./dev/tddiag -file dev/cssprobe/fixtures/fixed-table-layout.html
+//	go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout.html
 package main
 
 import (

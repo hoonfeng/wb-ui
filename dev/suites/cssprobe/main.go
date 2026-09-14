@@ -16,13 +16,13 @@
 //
 // Usage:
 //
-//	go run ./dev/cssprobe                     # every fixture
-//	go run ./dev/cssprobe -filter float       # fixtures matching a regexp
-//	go run ./dev/cssprobe -v                  # also list passing checks
-//	go run ./dev/cssprobe -dump /tmp/out      # write rendered PNGs
-//	go run ./dev/cssprobe -json report.json   # machine-readable results
-//	go run ./dev/cssprobe -scripts off        # never run <script> (CSS-only pipeline)
-//	go run ./dev/cssprobe -scripts on         # always render through the WebView pipeline
+//	go run ./dev/suites/cssprobe                     # every fixture
+//	go run ./dev/suites/cssprobe -filter float       # fixtures matching a regexp
+//	go run ./dev/suites/cssprobe -v                  # also list passing checks
+//	go run ./dev/suites/cssprobe -dump /tmp/out      # write rendered PNGs
+//	go run ./dev/suites/cssprobe -json report.json   # machine-readable results
+//	go run ./dev/suites/cssprobe -scripts off        # never run <script> (CSS-only pipeline)
+//	go run ./dev/suites/cssprobe -scripts on         # always render through the WebView pipeline
 package main
 
 import (
@@ -191,7 +191,7 @@ func main() {
 	// 脚本夹具经 WebView 路径渲染（见 -scripts），而 WebView 构造时会初始化
 	// 字体管理器（webkit.ensureFonts → InitFontManager + LoadSystemFonts）：
 	// 装载系统字体后 serif/mono 的 fallback 解析与度量随之变化。参考实现
-	// （obscura）的文本度量恰好等同"未加载系统字体"的 wb-ui —— dev/calib 实测
+	// （obscura）的文本度量恰好等同"未加载系统字体"的 wb-ui —— dev/probes/calib 实测
 	// right-float-navigation 差异 0.000%（逐像素相同）。因此脚本夹具一旦先跑，
 	// 后续纯 CSS 夹具的几何就被字体环境改写，实测 font-metric-line-height 行盒
 	// 偏 40px、right-float-navigation 偏 4px、table-row-geometry 与

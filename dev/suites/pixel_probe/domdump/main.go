@@ -27,7 +27,7 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	data, err := os.ReadFile("dev/pixel_probe/test_html/step17_form.html")
+	data, err := os.ReadFile("dev/suites/pixel_probe/test_html/step17_form.html")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 		os.Exit(1)

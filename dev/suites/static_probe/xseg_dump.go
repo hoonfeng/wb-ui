@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Command xseg_dump renders dev/xseg_probe/xseg.html and prints the geometry
+// Command xseg_dump renders dev/fixtures/xseg/xseg.html and prints the geometry
 // of the xseg flex container, each flex:1 span, and its inline text segments.
 // Purpose: diagnose text-align:center inside flex items shifting text right.
 package main
@@ -57,7 +57,7 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	data, _ := os.ReadFile(filepath.Join("dev", "xseg_probe", "xseg.html"))
+	data, _ := os.ReadFile(filepath.Join("dev", "fixtures", "xseg", "xseg.html"))
 	doc, _ := html.Parse(string(data))
 	resolver := style.NewResolver()
 	resolver.AddStyleSheet(html5.NewUAStyleSheet())

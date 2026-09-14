@@ -7,14 +7,14 @@
 //	2. Renders the same HTML through the wb-ui full pipeline (parse → style →
 //	   layout → render tree) and extracts the same per-element data.
 //	3. Compares the two and writes a structured diff report to
-//	   dev/consistency/report/<name>.txt.
+//	   dev/suites/consistency/report/<name>.txt.
 //
 // Coverage: layout, styles, animations, form-control polymorphism, interaction.
 //
 // Usage:
 //
-//	go run ./dev/consistency -case layout_basic
-//	go run ./dev/consistency            (run all cases)
+//	go run ./dev/suites/consistency -case layout_basic
+//	go run ./dev/suites/consistency            (run all cases)
 //
 // Requires Edge (or Chrome) at a configurable path; see EdgePath.
 
