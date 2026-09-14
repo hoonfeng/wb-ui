@@ -25,6 +25,8 @@
 package style
 
 import (
+	neturl "net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -234,14 +236,37 @@ func (r *Resolver) Invalidate(el *dom.Element) {
 	}
 }
 
+// maxImportDepth 限制 @import 链的递归深度。CSS 规范未规定上限，浏览器用
+// 实现上限挡住病态嵌套与 A→B→A 循环导入（否则递归无限展开）。
+const maxImportDepth = 8
+
 // resolveImports walks all rules in the sheet, and for each @import rule
 // that has a non-empty Href, fetches the CSS via StyleSheetLoader, parses
 // it, and adds the resulting sheet to the resolver. This recursively resolves
 // @import chains up to a reasonable depth. Media-conditional imports are
 // checked against the current media query context.
+//
+// 注意导入表的插入位置：本函数在 AddStyleSheet 里先于「当前表入列」执行，
+// 所以 @import 的规则在源序上排在导入语句所在表之前 —— 与 CSS-CASCADE-5
+// §3（@import 必须先于其他规则）的层叠顺序一致。
 func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
-	if r.StyleSheetLoader == nil {
+	r.resolveImportsDepth(sheet, 0)
+}
+
+// resolveImportsDepth 是 resolveImports 的递归体，depth 为 @import 链深度。
+//
+// ★ 基准 URL：相对 @import 按 CSS 规范相对于**样式表自身的 URL** 解析，
+// 不是文档 URL。此前把 imp.Href 原样交给 loader（loader 按文档 URL 解析）→
+// 子目录里的样式表（`/css/main.css` 内写 `@import "theme.css"`）会去请求文档
+// 同级而不是 `/css/theme.css`。这里先用样式表自身的 BaseURL 解析（见
+// resolveImportURL），导入表再带着解析后的 URL 递归 —— 嵌套 @import 逐级正确。
+func (r *Resolver) resolveImportsDepth(sheet *css.CSSStyleSheet, depth int) {
+	if r.StyleSheetLoader == nil || sheet == nil || depth >= maxImportDepth {
 		return
+	}
+	base := sheet.BaseURL()
+	if base == "" {
+		base = sheet.Href()
 	}
 	for _, rule := range sheet.Rules() {
 		imp, ok := rule.(*css.ImportRule)
@@ -259,21 +284,55 @@ func (r *Resolver) resolveImports(sheet *css.CSSStyleSheet) {
 				continue
 			}
 		}
-		cssText, err := r.StyleSheetLoader(imp.Href)
+		href := resolveImportURL(base, imp.Href)
+		if href == "" {
+			continue
+		}
+		cssText, err := r.StyleSheetLoader(href)
 		if err != nil || cssText == "" {
 			continue
 		}
-		importedSheet := css.NewCSSStyleSheetWithOwner(nil, imp.Href)
+		importedSheet := css.NewCSSStyleSheetWithOwner(nil, href)
+		importedSheet.SetHref(href)
 		importedSheet.SetOrigin(imp.Origin)
 		p := css.NewParser(cssText)
 		p.ParseStyleSheetInto(importedSheet)
 
 		// Recursively resolve imports in the imported sheet.
-		r.resolveImports(importedSheet)
+		r.resolveImportsDepth(importedSheet, depth+1)
 
 		r.sheets = append(r.sheets, importedSheet)
 		r.addKeyframesFromSheet(importedSheet)
 	}
+}
+
+// resolveImportURL 以样式表 URL 为基准解析 @import 的 href：
+//   - 带 scheme 的绝对引用与协议相对引用（https://…、app://theme.css、
+//     //host/x.css）原样返回：宿主自定义逻辑名/绝对引用不参与解析；
+//   - 基准是绝对 URL（http(s)/file）→ 标准 URL 解析（浏览器语义）；
+//   - 基准是相对路径（无文档 URL 的场景：LoadHTML 直出内容时的
+//     `<link href="css/main.css">`）→ 按目录拼接并保持相对形式，交由下层
+//     loader 继续按文档 URL/宿主规则处理。
+func resolveImportURL(base, href string) string {
+	if href == "" {
+		return ""
+	}
+	if u, err := neturl.Parse(href); err == nil && u.IsAbs() {
+		return href
+	}
+	if strings.HasPrefix(href, "//") {
+		return href
+	}
+	if base == "" {
+		return href
+	}
+	if u, err := neturl.Parse(base); err == nil && u.IsAbs() {
+		return dom.ResolveURL(base, href)
+	}
+	if strings.HasPrefix(href, "/") {
+		return href
+	}
+	return path.Join(path.Dir(base), href)
 }
 
 // hintSourceOrder 是表现提示（presentational hints）的 sourceOrder。

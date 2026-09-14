@@ -227,12 +227,46 @@ func LoadImageSync(url string) *DecodedImage {
 	return loadBackgroundImage(url, "")
 }
 
+// LoadImageWithLoader 用宿主提供的 loader 加载并解码图片（canvas 2D
+// drawImage 的图片源）：与 paint 路径同一条策略链——URL 解析、宿主
+// ResourceResolver 优先、模式门禁都由 loader 决定。loader 为 nil 时等价于
+// LoadImageSync（内置行为）。
+//
+// 注意这是**同步**加载（JS 的 drawImage 需要立即拿到图）；宿主接线时
+// 引用通常已在 paint 路径取回过（命中缓存）。
+func LoadImageWithLoader(url string, loader ImageResourceLoader) *DecodedImage {
+	return loadBackgroundImageWith(url, "", loader)
+}
+
 // loadBackgroundImage resolves and decodes a background-image URL.
 // data: URIs and file paths decode synchronously (local, fast). http(s)
 // URLs fetch asynchronously: the first call spawns a goroutine and returns
 // nil; subsequent paints pick the image from the cache once loaded. This
 // keeps the render thread unblocked by network latency.
 func loadBackgroundImage(url, baseDir string) *DecodedImage {
+	return loadBackgroundImageWith(url, baseDir, currentImageLoaderForDraw())
+}
+
+// loadBackgroundImageWith 是 loadBackgroundImage 的实现体。loader 非 nil
+// （宿主接线，见 image_resource.go）时：先把引用按文档基准解析为绝对 URL，
+// data: 之外的引用一律交给 loader 取字节（宿主决定 ResourceResolver 优先、
+// http(s) 是否允许、本地文件读取）——UI 库模式下网络引用因此被拒绝，而不是
+// 由渲染层静默联网。loader 为 nil 时保持既有内置行为（独立渲染/探针场景
+// 逐字节不变）。
+func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *DecodedImage {
+	if loader != nil && url != "" {
+		// ★ 模式门禁先于缓存查询：backgroundImageCache 是进程级全局的，
+		//   若另一个 WebView（浏览器模式）已经加载过同一 URL，缓存命中会
+		//   让 UI 库模式下被拒绝的图片照样显示——门禁被缓存旁路（探针实测：
+		//   ModeToolkit 里的 `<img src="http://…/pic.png">` 显示出了浏览器
+		//   模式刚取回的图）。
+		if !loader.AllowsExternal() {
+			return nil
+		}
+		if abs := loader.ResolveURL(url); abs != "" {
+			url = abs
+		}
+	}
 	backgroundImageCache.mu.Lock()
 	defer backgroundImageCache.mu.Unlock()
 	if img, ok := backgroundImageCache.imgs[url]; ok {
@@ -241,6 +275,15 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	var data []byte
 	if b, ok := decodeDataURI(url); ok {
 		data = b
+	} else if loader != nil {
+		// 宿主接线：data: 之外的引用（http(s)/file/相对）交给宿主。首次
+		// 调用异步启动并返回 nil，goroutine 填充缓存 + 触发已加载回调，
+		// 之后的 paint 命中缓存即画出。
+		if !backgroundImageCache.loading[url] {
+			backgroundImageCache.loading[url] = true
+			go fetchImageViaLoaderAsync(url, loader)
+		}
+		return nil
 	} else if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
 		// Remote image: async fetch once per URL. Return nil now; the
 		// goroutine fills the cache and fires the loaded callback.
@@ -276,6 +319,25 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 	}
 	backgroundImageCache.imgs[url] = img
 	return img
+}
+
+// fetchImageViaLoaderAsync 通过宿主 loader 取图片（可能真的走网络、命中宿主
+// ResourceResolver，或被 UI 库模式拒绝），解码后写入缓存并触发已加载回调。
+// 失败不写缓存（与既有 http 路径一致：下一次 paint 会重试）。
+func fetchImageViaLoaderAsync(url string, loader ImageResourceLoader) {
+	data, err := loader.Load(url)
+	backgroundImageCache.mu.Lock()
+	delete(backgroundImageCache.loading, url)
+	if err == nil && len(data) > 0 {
+		if img := NewDecodedImage(data); img != nil {
+			backgroundImageCache.imgs[url] = img
+		}
+	}
+	cb := bgImageLoadedCallback
+	backgroundImageCache.mu.Unlock()
+	if cb != nil {
+		cb(url)
+	}
 }
 
 // fetchBackgroundImageAsync downloads an http(s) image off-thread and stores

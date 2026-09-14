@@ -33,11 +33,21 @@ import (
 // display: none suppresses render object creation. Text nodes become RenderText leaves.
 type RenderTreeBuilder struct {
 	resolver *style.Resolver
+	// imageLoader 是宿主接线的图片资源策略（可为 nil），随重建传给新的
+	// RenderView——渲染树每次重建都会换 RenderView 实例，接线必须跟着
+	// 走，否则重建后图片又退回渲染层内置的「自带网络」行为。
+	imageLoader ImageResourceLoader
 }
 
 // NewRenderTreeBuilder constructs a builder that uses the given style resolver.
 func NewRenderTreeBuilder(resolver *style.Resolver) *RenderTreeBuilder {
 	return &RenderTreeBuilder{resolver: resolver}
+}
+
+// SetImageLoader attaches the host image-resource wiring that every
+// RenderView built by this builder should carry (see image_resource.go).
+func (b *RenderTreeBuilder) SetImageLoader(l ImageResourceLoader) {
+	b.imageLoader = l
 }
 
 // Build constructs the render tree for the given document and returns the root
@@ -52,6 +62,7 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 	if root == nil {
 		// Empty document: still create a RenderView so callers can attach later.
 		view := NewRenderView(doc, defaultStyle(doc))
+		view.SetImageLoader(b.imageLoader)
 		return view
 	}
 	profile := debugenv.Enabled("WB_REBUILD_PROFILE")
@@ -90,6 +101,7 @@ func (b *RenderTreeBuilder) Build(doc *dom.Document) *RenderView {
 	// KeyframesLookup 查找——多 WebView（宿主多挂件/多窗口）不再互相
 	// 覆盖关键帧，每个页面动画只认自己文档的 @keyframes。
 	view.SetResolver(b.resolver)
+	view.SetImageLoader(b.imageLoader)
 	if profile {
 		t3 := time.Now()
 		log.Printf("[rebuild-profile] buildChildren=%v attachLayout=%v layerTree=%v total=%v",

@@ -538,6 +538,10 @@ func NewWebViewWithMode(mode Mode) *WebView {
 		//   ErrExternalResourceBlocked，不做隐式外部访问）。
 		mf.StyleSheetLoader = func(href string) (string, error) { return wv.loadExternalResource(href) }
 		mf.ScriptLoader = func(src string) (string, error) { return wv.loadExternalResource(src) }
+		// ★ 图片资源接线（<img src>/background-image/mask-image/SVG <image>）：
+		//   同一策略链——宿主 ResourceResolver 优先、相对引用按文档 URL
+		//   解析、UI 库模式拒绝 http(s)/file（渲染层不再自己 httpGet）。
+		mf.ImageLoader = &webViewImageLoader{wv: wv}
 	}
 	// ★ iframe 子文档：渲染侧（paint/hit-test）经 IFrameLookup 取回
 	// iframe 元素的子 Frame 渲染视图（避免 rendering→page 包循环依赖）。
@@ -935,6 +939,9 @@ func (wv *WebView) loadSubframe(el *dom.Element, absSrc string) {
 		}
 		return wv.loadExternalResource(abs)
 	}
+	// 子文档图片的相对引用以**子文档 URL** 为基准（不是主文档）：
+	// iframe 内 `<img src="logo.png">` 应取子文档同级，而非主文档同级。
+	f.ImageLoader = &webViewImageLoader{wv: wv, docURL: absSrc}
 	if ferr := f.LoadHTML(data); ferr != nil {
 		page.Logf("IFrame", "LoadHTML %q: %v", absSrc, ferr)
 		return
@@ -1400,11 +1407,12 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		if img == nil || !img.Loaded() {
 			// 图片尚未进入 paint 管线（display:none / 未布局）→ 按 src
-			// 主动解码（data: URI / 本地路径同步，http 异步回缓存）。
+			// 主动解码（data: URI 同步；其余经 WebView 的图片接线取字节，
+			// 异步回缓存 —— 宿主 ResourceResolver 与模式门禁同样生效）。
 			if src := el.GetAttribute("src"); src != "" {
-				img = rendering.LoadImageSync(src)
+				img = rendering.LoadImageWithLoader(src, &webViewImageLoader{wv: wv})
 				if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
-					log.Printf("[canvas2d-hook] LoadImageSync src=%q → %v", src, img != nil)
+					log.Printf("[canvas2d-hook] LoadImage src=%q → %v", src, img != nil)
 				}
 			}
 		}

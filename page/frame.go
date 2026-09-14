@@ -73,6 +73,13 @@ type Frame struct {
 	// sets this to a file-based loader that reads from the local filesystem.
 	StyleSheetLoader func(href string) (string, error)
 
+	// ImageLoader is the host wiring for image resources: `@import` 之外的
+	// 图片引用（<img src>、background-image、mask-image、SVG <image href>）
+	// 的 URL 解析与取字节。样式表的 `@import` 同样经 StyleSheetLoader 走
+	// 宿主策略（见 SetDocument 的接线）。由 WebView 按运行模式与
+	// ResourceResolver 设置（见 rendering.ImageResourceLoader）。
+	ImageLoader rendering.ImageResourceLoader
+
 	// ScriptLoader is an optional callback for loading external scripts
 	// referenced by <script src="..."> elements. It receives the src URL and
 	// should return the JS text, or an error. When nil AND ResourceLoader is
@@ -186,6 +193,13 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 		f.resolver.ClearCache()
 		Logf("SetDocument", "cleared resolver cache")
 	}
+	// ★ @import 接线：样式解析器的 @import 走本 frame 的外部样式表通道
+	//   （与 <link> 同一条：宿主 ResourceResolver 优先 + 运行模式门禁）。
+	//   此前 style.Resolver.StyleSheetLoader 从未被设置 → resolveImports
+	//   第一行就 return → 页面里所有 @import 静默跳过（真实站点普遍用
+	//   @import 拆分样式）。闭包读 f.StyleSheetLoader 字段：宿主后续替换
+	//   该字段时接线自动跟随。
+	f.resolver.StyleSheetLoader = f.importStyleSheetLoader()
 
 	f.extractAndAddStyles()
 	// ★ 指纹同步：SetDocument 已按当前文档提取过样式，这里记下指纹，
@@ -195,6 +209,7 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	f.styleFP = f.styleFingerprint()
 	f.syncMediaQueryViewport()
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
+	builder.SetImageLoader(f.ImageLoader)
 	f.renderView = builder.Build(doc)
 	objCount := 0
 	if f.renderView != nil {
@@ -208,6 +223,19 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 		f.view.SetNeedsLayout(true)
 	}
 	Logf("SetDocument", "done")
+}
+
+// importStyleSheetLoader 返回本 frame 的 `@import` 加载器：它与 <link> 共用
+// StyleSheetLoader 通道（宿主 ResourceResolver 优先 + 运行模式门禁），差别
+// 只在「谁是发起者」——@import 由样式解析器在解析样式表时同步调用。
+// StyleSheetLoader 为 nil 时返回错误（resolver 按规范跳过该 @import）。
+func (f *Frame) importStyleSheetLoader() func(href string) (string, error) {
+	return func(href string) (string, error) {
+		if f.StyleSheetLoader == nil {
+			return "", errors.New("page: no stylesheet loader configured")
+		}
+		return f.StyleSheetLoader(href)
+	}
 }
 
 // ExecuteScripts walks the document's <script> elements and executes both
@@ -247,6 +275,7 @@ func (f *Frame) RebuildRenderTree() {
 	}
 	f.syncMediaQueryViewport()
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
+	builder.SetImageLoader(f.ImageLoader)
 	oldRV := f.renderView
 	f.renderView = builder.Build(f.document)
 	objCount := 0

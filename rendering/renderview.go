@@ -72,6 +72,13 @@ type RenderView struct {
 	// resolver holds the style resolver used to build this tree; paint code
 	// (e.g. PaintSelection for ::selection colors) reads it lazily.
 	resolver *style.Resolver
+
+	// imageLoader 是本文档的图片资源接线（宿主按运行模式提供，见
+	// image_resource.go）。paint 期间由 Paint 入口设为「当前 loader」，
+	// loadBackgroundImage 据此解析 URL 并取字节——宿主 ResourceResolver
+	// 优先、UI 库模式拒绝网络。由 RenderTreeBuilder 在重建渲染树时重新
+	// 赋值（每次 Build 都是新的 RenderView）。
+	imageLoader ImageResourceLoader
 }
 
 // SetResolver attaches the style resolver used to build the render tree.
@@ -79,6 +86,13 @@ func (v *RenderView) SetResolver(r *style.Resolver) { v.resolver = r }
 
 // Resolver returns the attached style resolver (may be nil).
 func (v *RenderView) Resolver() *style.Resolver { return v.resolver }
+
+// SetImageLoader attaches the host image-resource wiring (may be nil: the
+// built-in data:/file/http behavior is used then).
+func (v *RenderView) SetImageLoader(l ImageResourceLoader) { v.imageLoader = l }
+
+// ImageLoader returns the attached image-resource wiring (may be nil).
+func (v *RenderView) ImageLoader() ImageResourceLoader { return v.imageLoader }
 
 func NewRenderView(doc *dom.Document, st *style.ComputedStyle) *RenderView {
 	rv := &RenderView{

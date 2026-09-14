@@ -103,6 +103,13 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	}
 	info := NewPaintInfo(canvas, paintRect)
 	info.rv = view
+	// 图片资源策略：把当前绘制文档的 loader 提升为「当前 loader」
+	// （save/restore 支持同一帧内嵌套 Paint——iframe 子 Frame）。渲染层
+	// 因此不再自己决定图片 URL 能不能联网：宿主 ResourceResolver 优先、
+	// UI 库模式拒绝网络引用（见 image_resource.go）。未接线的 RenderView
+	// （独立渲染/探针）保持内置行为。
+	prevImageLoader := swapCurrentImageResourceLoader(view.ImageLoader())
+	defer swapCurrentImageResourceLoader(prevImageLoader)
 	// ★ 存在任何容器级 scroll offset 时禁用 dirty check：painter 的
 	// intersects() 用未 translate 的绝对坐标判断对象是否在脏区内。
 	// 滚动后内容 translate 进入视口，但绝对坐标仍在旧视口外 →
