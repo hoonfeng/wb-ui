@@ -1310,7 +1310,11 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				// <details> 的 open 状态变化要派发 toggle（HTML §4.11.4：
 				// 「当 open 属性被切换时排队 details toggle 事件任务」）。
 				if tag == "details" {
-					queueDialogToggle(rt, el)
+					if want {
+						queueDialogToggle(rt, el, dom.ToggleStateClosed, dom.ToggleStateOpen)
+					} else {
+						queueDialogToggle(rt, el, dom.ToggleStateOpen, dom.ToggleStateClosed)
+					}
 				}
 			}}, true
 	case "show", "showModal":

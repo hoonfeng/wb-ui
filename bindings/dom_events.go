@@ -271,6 +271,15 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 		obj.Set("data", jsc.StringValue(ie.Data()))
 		obj.Set("isComposing", jsc.BooleanValue(ie.IsComposing()))
 	}
+	// ★ ToggleEvent 属性（HTML §4.11.4 / §4.11.6）：<details> 与 <dialog> 的
+	// toggle / beforetoggle 事件带 oldState / newState，页面常用 `e.newState
+	// === "open"` 在一个处理器里区分「正在打开」和「正在关闭」——此前派发的是
+	// 普通 Event，两个字段恒 undefined。
+	if te, ok := e.(*dom.ToggleEvent); ok {
+		obj.SetClassName("ToggleEvent")
+		obj.Set("oldState", jsc.StringValue(te.OldState()))
+		obj.Set("newState", jsc.StringValue(te.NewState()))
+	}
 	return jsc.ObjectValue(obj)
 }
 
