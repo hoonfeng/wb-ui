@@ -7,9 +7,12 @@
 //     rather than WebKit's right-to-left array of single selectors
 //   - qualified names / namespaces collapsed to local name strings
 //   - :host / :host-context / ::slotted / ::part are parsed (with selector-list or
-//     part-name-list arguments) and matched by SelectorChecker; ::part's forward-
-//     matching (part forwarding via exportparts) is not implemented
-//   - pseudo-classes for fullscreen / view-transition / view-transition-type omitted
+//     part-name-list arguments) and matched by SelectorChecker; ::part forward-matching
+//     through one or more `exportparts` layers is implemented (matchPart +
+//     parseExportparts follow the re-export chain host by host)
+//   - :fullscreen / :open / :closed are implemented; view-transition pseudo-elements
+//     are parsed but never match (no view-transition machinery in this port), and
+//     :modal / :popover-open / :autofill / :picture-in-picture are not modelled
 //   - argument parsing for :nth-* stores An+B as integers (no full An+B syntax for
 //     "even"/"odd" is exposed, but those are precomputed into (2,0) and (2,1))
 //   - pseudo-element argument form (e.g. ::highlight(name)) stores the argument string
@@ -113,6 +116,9 @@ const (
 	PseudoClassDefined
 	PseudoClassHost
 	PseudoClassHostContext
+	PseudoClassFullscreen
+	PseudoClassOpen
+	PseudoClassClosed
 )
 
 // PseudoElement enumerates the supported pseudo-elements, mirroring
@@ -442,6 +448,12 @@ func PseudoClassName(p PseudoClass) string {
 		return "host"
 	case PseudoClassHostContext:
 		return "host-context"
+	case PseudoClassFullscreen:
+		return "fullscreen"
+	case PseudoClassOpen:
+		return "open"
+	case PseudoClassClosed:
+		return "closed"
 	}
 	return ""
 }
@@ -581,6 +593,12 @@ func LookupPseudoClass(name string) PseudoClass {
 		return PseudoClassHost
 	case "host-context":
 		return PseudoClassHostContext
+	case "fullscreen":
+		return PseudoClassFullscreen
+	case "open":
+		return PseudoClassOpen
+	case "closed":
+		return PseudoClassClosed
 	}
 	return PseudoClassUnknown
 }

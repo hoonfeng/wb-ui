@@ -36,7 +36,19 @@ type Document struct {
 	// ★ 回调携带触发变更的节点，为后续增量渲染树更新（RenderTreeUpdater）
 	//   提供精确的变更定位（此前无参数，宿主只能全量重建）。
 	onTreeChange func(Node)
+
+	// fullscreenElement 是当前处于全屏的元素（HTML §4.11.6 全屏 API 的文档
+	// 状态）。本引擎不接管窗口/顶层的真实全屏渲染——这里维护规范要求的状态，
+	// 供 CSS `:fullscreen` 与 fullscreenchange 事件消费；是否真的把宿主窗口切到
+	// 全屏由宿主（bindings 的使用方）决定。
+	fullscreenElement *Element
 }
+
+// FullscreenElement 返回当前处于全屏的元素（无则 nil）。
+func (d *Document) FullscreenElement() *Element { return d.fullscreenElement }
+
+// SetFullscreenElement 设置/清除全屏元素（全屏 API 的实现方调用）。
+func (d *Document) SetFullscreenElement(e *Element) { d.fullscreenElement = e }
 
 // FocusedElement 返回当前 focused 元素（无则 nil），O(1)。
 func (d *Document) FocusedElement() *Element { return d.focusedEl }

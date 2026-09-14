@@ -421,6 +421,16 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 	case PseudoClassDefined:
 		// In this port all elements are "defined".
 		return true
+	case PseudoClassFullscreen:
+		// HTML §4.11.6：:fullscreen 匹配 document.fullscreenElement。
+		if doc := el.OwnerDocument(); doc != nil {
+			return doc.FullscreenElement() == el
+		}
+		return false
+	case PseudoClassOpen:
+		return isOpenStateElement(el) && el.HasAttribute("open")
+	case PseudoClassClosed:
+		return isOpenStateElement(el) && !el.HasAttribute("open")
 	case PseudoClassHost:
 		// :host matches the shadow host itself; :host(sel) additionally requires
 		// the host to match the selector list.
@@ -525,6 +535,17 @@ func (c *SelectorChecker) matchSlotted(s SimpleSelector, el *dom.Element) bool {
 		return c.MatchList(s.SelectorList, el)
 	}
 	return true
+}
+
+// isOpenStateElement reports whether el is one of the elements that have an "open
+// state" (HTML §4.16.4: details / dialog / select). :open / :closed only have
+// meaning for those elements — for everything else both never match.
+func isOpenStateElement(el *dom.Element) bool {
+	switch el.LocalName() {
+	case "details", "dialog", "select":
+		return true
+	}
+	return false
 }
 
 // matchPart reports whether ::part(name) matches el: a shadow-tree element whose
