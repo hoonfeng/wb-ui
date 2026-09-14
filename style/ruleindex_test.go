@@ -95,7 +95,7 @@ func TestRuleIndex_MatchesFullScan(t *testing.T) {
 	fullScan := func(r *Resolver, el *dom.Element) []string {
 		var collected []collectedDecl
 		for _, sheet := range r.sheets {
-			r.collectDeclarations(sheet.Rules(), sheet.Origin(), el, &collected, 0, sheetScopeDepth(sheet))
+			r.collectDeclarations(sheet.Rules(), sheet.Origin(), el, &collected, 0, sheetScopeDepth(sheet), sheetBaseURL(sheet))
 		}
 		sort.SliceStable(collected, func(i, j int) bool {
 			return collected[i].sourceOrder < collected[j].sourceOrder

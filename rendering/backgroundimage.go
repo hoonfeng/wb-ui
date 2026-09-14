@@ -31,15 +31,31 @@ func parseBackgroundURL(s string) (string, bool) {
 		return "", false
 	}
 	inner := s[4:]
-	if i := strings.LastIndex(inner, ")"); i >= 0 {
+	// ★ 取**第一个** url() 的内容，不是最后一个 ")"：多层背景
+	// `background-image: url(a.png), url(b.png)` 是合法且常见的写法，用
+	// LastIndex 会把整串当成 URL（`a.png), url(b.png`），连第一层都画不出来。
+	// （本引擎只绘制第一层背景图——多层叠加未实现——但第一层的解析必须正确。）
+	inner = strings.TrimSpace(inner)
+	// 带引号形式按引号配对截断，避免引号内的 ")" 提前结束。
+	if len(inner) > 0 && (inner[0] == '"' || inner[0] == '\'') {
+		if j := strings.IndexByte(inner[1:], inner[0]); j >= 0 {
+			return outerTrim(inner[1 : 1+j]), true
+		}
+		return outerTrim(inner[1:]), true
+	}
+	if i := strings.IndexByte(inner, ')'); i >= 0 {
 		inner = inner[:i]
 	}
-	inner = strings.TrimSpace(inner)
-	// Strip optional quotes.
-	if len(inner) >= 2 && (inner[0] == '"' || inner[0] == '\'') {
-		inner = inner[1 : len(inner)-1]
+	return outerTrim(inner), true
+}
+
+// outerTrim 去掉一层成对的引号（tokenizer 已解引，这里兜底手写字符串）。
+func outerTrim(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
 	}
-	return inner, true
+	return s
 }
 
 // httpGet fetches a URL's body with a short timeout. Returns nil on error.

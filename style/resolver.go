@@ -160,8 +160,19 @@ func NewResolver() *Resolver {
 // AddStyleSheet adds a parsed stylesheet and collects any @keyframes rules
 // from it for animation lookup.
 func (r *Resolver) addKeyframesFromSheet(sheet *css.CSSStyleSheet) {
+	// @keyframes 里的声明不走级联收集链路（不产生 collectedDecl），但同样
+	// 可以有 url()（`@keyframes fade{to{background-image:url(bg.png)}}`）——
+	// 按来源样式表基准就地绝对化一次（幂等：重复 AddStyleSheet 同一张表安全）。
+	base := sheetBaseURL(sheet)
 	for _, rule := range sheet.Rules() {
 		if kf, ok := rule.(*css.KeyframesRule); ok {
+			if base != "" {
+				for i := range kf.Keyframes {
+					for j := range kf.Keyframes[i].Declarations {
+						kf.Keyframes[i].Declarations[j] = absolutizeDeclURLs(kf.Keyframes[i].Declarations[j], base)
+					}
+				}
+			}
 			r.keyframes[kf.Name] = kf
 		}
 	}
@@ -284,7 +295,7 @@ func (r *Resolver) resolveImportsDepth(sheet *css.CSSStyleSheet, depth int) {
 				continue
 			}
 		}
-		href := resolveImportURL(base, imp.Href)
+		href := resolveURLAgainst(base, imp.Href)
 		if href == "" {
 			continue
 		}
@@ -306,14 +317,16 @@ func (r *Resolver) resolveImportsDepth(sheet *css.CSSStyleSheet, depth int) {
 	}
 }
 
-// resolveImportURL 以样式表 URL 为基准解析 @import 的 href：
+// resolveURLAgainst 以**来源样式表的 URL** 为基准解析引用。两个调用面共用
+// 同一套规则：`@import` 的 href，以及样式表内 `url()` 的值（CSS Values 3
+// §4.4：样式表里的相对 URL 在解析时即相对样式表自身解析，与文档 URL 无关）。
 //   - 带 scheme 的绝对引用与协议相对引用（https://…、app://theme.css、
 //     //host/x.css）原样返回：宿主自定义逻辑名/绝对引用不参与解析；
 //   - 基准是绝对 URL（http(s)/file）→ 标准 URL 解析（浏览器语义）；
 //   - 基准是相对路径（无文档 URL 的场景：LoadHTML 直出内容时的
 //     `<link href="css/main.css">`）→ 按目录拼接并保持相对形式，交由下层
 //     loader 继续按文档 URL/宿主规则处理。
-func resolveImportURL(base, href string) string {
+func resolveURLAgainst(base, href string) string {
 	if href == "" {
 		return ""
 	}
@@ -424,12 +437,80 @@ type collectedDecl struct {
 	sourceOrder int
 	selector    string // matched rule selector text (diag only)
 	sbKind      int    // scrollbar pseudo kind: 0=::-webkit-scrollbar, 1=::-webkit-scrollbar-thumb, -1=none
+	// sheetBase 是这条声明所属样式表的 URL（"" = 文档：内联 <style>、style
+	// 属性、表现提示，以及 UA 样式表）。
+	//
+	// CSS 规范要求样式表里的相对 URL 在**解析时**就相对样式表自身解析
+	// （CSS Values 3 §4.4；CSS Syntax §5.4「url() 是 URL token，解析时即
+	// 相对样式表的 base URL」），与文档 URL 无关。收集阶段把来源表带下来、
+	// 应用前统一绝对化（absolutizeCollectedURLs）：收集链路原先只认识 origin
+	// 与 scope，不认识「声明从哪张表来」——这正是外部样式表里的
+	// `url(image.png)` 被按文档 URL 解析（请求到文档同级目录）的根因。
+	sheetBase string
 	// scope is the tree-scope depth of the stylesheet the declaration came from
 	// (0 = document tree, 1 = shadow tree hosted directly in the document, 2 = a
 	// nested shadow tree, …). Per CSS Scoping Level 1 §3.3, for normal declarations
 	// a deeper scope outranks a shallower one (shadow rules beat document rules on
 	// the same element); for !important the order reverses.
 	scope int
+}
+
+// sheetBaseURL 返回样式表的基准 URL：外部样式表（<link>/@import 加载）为自身
+// 的 URL；内联 <style> 为 ""（其相对引用按文档 URL 解析——与浏览器一致，
+// 内联样式表的 base 就是文档的 base）。
+func sheetBaseURL(sheet *css.CSSStyleSheet) string {
+	if sheet == nil {
+		return ""
+	}
+	if b := sheet.BaseURL(); b != "" {
+		return b
+	}
+	return sheet.Href()
+}
+
+// absolutizeDeclURLs 把声明值里的相对 url() 按其来源样式表基准解析为绝对 URL
+// （CSS Values 3 §4.4）。base 为空（内联样式 / style 属性 / 表现提示）时原样
+// 返回：这些声明的相对引用以文档 URL 为基准，由渲染层的图片 loader 解析。
+//
+// ★ 为什么处理 token 流而不是逐个属性：`background-image`、`mask-image`、
+// `list-style-image`、`border-image-source`、`content`、简写 `background` 以及
+// 自定义属性 `--x: url(…)` 的取值全来自同一条 token 流，改在这一层即所有通道
+// 一起生效，也不会漏掉任何一个读 URL 的属性（将来新增属性同样自动覆盖）。
+func absolutizeDeclURLs(d css.Declaration, base string) css.Declaration {
+	if base == "" {
+		return d
+	}
+	hit := false
+	for _, t := range d.Value {
+		if t.Type == css.TokenURL && t.Value != "" && resolveURLAgainst(base, t.Value) != t.Value {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		return d
+	}
+	val := make([]css.Token, len(d.Value))
+	copy(val, d.Value)
+	for i := range val {
+		if val[i].Type != css.TokenURL {
+			continue
+		}
+		if abs := resolveURLAgainst(base, val[i].Value); abs != "" {
+			val[i].Value = abs
+		}
+	}
+	d.Value = val
+	return d
+}
+
+// absolutizeCollectedURLs 对一批已收集的声明做「来源样式表基准」绝对化。
+// ResolveElement / ResolvePseudoElement 在级联排序前调用，之后所有取值路径
+// （含简写展开与 var() 替换）拿到的都已是绝对 URL。
+func absolutizeCollectedURLs(cds []collectedDecl) {
+	for i := range cds {
+		cds[i].decl = absolutizeDeclURLs(cds[i].decl, cds[i].sheetBase)
+	}
 }
 
 // keyStyleProp lists the layout-critical properties whose cascade history the
@@ -509,9 +590,10 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 			bkt = buildRuleBucket(sheet)
 			r.sheetIndex[sheet] = bkt
 		}
+		base := sheetBaseURL(sheet)
 		order := 0
 		for _, ir := range bkt.candidates(el) {
-			order = r.collectScrollbarFromRule(ir.rule, sheet.Origin(), el, &sbDecls, order)
+			order = r.collectScrollbarFromRule(ir.rule, sheet.Origin(), el, &sbDecls, order, base)
 		}
 		for _, rule := range sheet.Rules() {
 			switch v := rule.(type) {
@@ -519,12 +601,13 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 				if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 					continue
 				}
-				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order)
+				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order, base)
 			case *css.SupportsRule:
-				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order)
+				order = r.collectScrollbarDeclarations(v.Rules, sheet.Origin(), el, &sbDecls, order, base)
 			}
 		}
 	}
+	absolutizeCollectedURLs(sbDecls)
 	applyScrollbarDeclarations(cs, sbDecls)
 
 	// Inline style attribute (high specificity, last source order in author origin).
@@ -550,6 +633,13 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 	// 大者胜（压过 UA 规则），而作者 origin 整体排在 UA 之后（作者声明覆盖
 	// 提示，例如 `#author-padding td{padding:3px}` 胜过 `cellpadding="8"`）。
 	collected = append(collected, presentationalHintsFor(el)...)
+
+	// ★ 来源样式表的 url() 基准（CSS Values 3 §4.4）：外部样式表里的相对
+	// url() 相对**样式表自身**解析；内联 <style> / style 属性 / 表现提示的
+	// sheetBase 为 ""，保持「相对文档」并由渲染层按文档 URL 解析。绝对化放在
+	// 级联排序之前，因此后面所有取值路径（简写展开、var() 替换、渲染层的
+	// 图片 loader）拿到的都已是绝对 URL。
+	absolutizeCollectedURLs(collected)
 
 	// Sort by (origin, importance, specificity, sourceOrder). Higher origin first
 	// (user > author > UA), then important > non-important, then specificity, then
@@ -745,8 +835,9 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 		}
 		order := 0
 		scope := sheetScopeDepth(sheet)
+		base := sheetBaseURL(sheet)
 		for _, ir := range bkt.candidates(el) {
-			order = r.collectPseudoDeclarationsFromRule(ir.rule, sheet.Origin(), el, pe, &collected, order, scope)
+			order = r.collectPseudoDeclarationsFromRule(ir.rule, sheet.Origin(), el, pe, &collected, order, scope, base)
 		}
 		// @media / @supports bodies are scanned fully (rare).
 		for _, rule := range sheet.Rules() {
@@ -755,9 +846,9 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 				if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 					continue
 				}
-				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope)
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope, base)
 			case *css.SupportsRule:
-				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope)
+				order = r.collectPseudoDeclarations(v.Rules, sheet.Origin(), el, pe, &collected, order, scope, base)
 			}
 		}
 		if !found && len(collected) > 0 {
@@ -767,6 +858,10 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 	if !found {
 		return nil, "", false
 	}
+
+	// 与 ResolveElement 同规则：::before/::after 的 `content: url(…)`、
+	// `background-image` 等相对 url() 按来源样式表基准绝对化。
+	absolutizeCollectedURLs(collected)
 
 	// ★ A ::before/::after pseudo-element generates a box only when it
 	// declares a usable `content` (CSS 2.1 §12.1): `content: normal` — the
@@ -871,7 +966,7 @@ func pseudoDeclaresContent(decls []collectedDecl) bool {
 // collectPseudoDeclarationsFromRule matches one StyleRule's selectors whose
 // pseudo-element equals pe, appending matched declarations. Shared by the
 // indexed and full-scan paths.
-func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, order, scope int) int {
+func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, order, scope int, sheetBase string) int {
 	if v.Selectors != nil {
 		for _, sel := range v.Selectors.Selectors {
 			if pseudoElementOf(&sel) != pe {
@@ -889,13 +984,14 @@ func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin cs
 					specificity: spec,
 					sourceOrder: order,
 					scope:       scope,
+					sheetBase:   sheetBase,
 				})
 				order++
 			}
 		}
 	}
 	if len(v.NestedRules) > 0 {
-		order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order, scope)
+		order = r.collectPseudoDeclarations(v.NestedRules, origin, el, pe, collected, order, scope, sheetBase)
 	}
 	return order
 }
@@ -903,16 +999,16 @@ func (r *Resolver) collectPseudoDeclarationsFromRule(v *css.StyleRule, origin cs
 // collectPseudoDeclarations 收集匹配「el + 伪元素 pe」的规则声明。
 // 与 collectDeclarations 的区别：不跳过含伪元素的选择器，而是要求选择器的
 // 伪元素恰好等于 pe（`X::after` 在解析 X 的 ::after 时收集）。
-func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, baseOrder, scope int) int {
+func (r *Resolver) collectPseudoDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, pe css.PseudoElement, collected *[]collectedDecl, baseOrder, scope int, sheetBase string) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			order = r.collectPseudoDeclarationsFromRule(v, origin, el, pe, collected, order, scope)
+			order = r.collectPseudoDeclarationsFromRule(v, origin, el, pe, collected, order, scope, sheetBase)
 		case *css.MediaRule:
-			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope)
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope, sheetBase)
 		case *css.SupportsRule:
-			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope)
+			order = r.collectPseudoDeclarations(v.Rules, origin, el, pe, collected, order, scope, sheetBase)
 		}
 	}
 	return order
@@ -1092,6 +1188,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 	}
 	origin := sheet.Origin()
 	scope := sheetScopeDepth(sheet)
+	base := sheetBaseURL(sheet)
 	cands := bkt.candidates(el)
 	// Collect in CSS source order (not bucket order) so the cascade's
 	// source-order comparison matches the full scan exactly; sourceOrder is
@@ -1099,7 +1196,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].order < cands[j].order })
 	order := 0
 	for _, ir := range cands {
-		order = r.collectFromStyleRule(ir.rule, origin, el, collected, order, scope)
+		order = r.collectFromStyleRule(ir.rule, origin, el, collected, order, scope, base)
 	}
 	// @media / @supports rule bodies are scanned fully (their inner StyleRules
 	// are not in the index — they are few); their stream positions continue
@@ -1110,9 +1207,9 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue
 			}
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope, base)
 		case *css.SupportsRule:
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope, base)
 		}
 	}
 }
@@ -1120,7 +1217,7 @@ func (r *Resolver) collectSheetDeclarations(sheet *css.CSSStyleSheet, el *dom.El
 // collectFromStyleRule matches one StyleRule's selectors against el and appends
 // matched declarations; recurses into nested rules (CSS nesting) afterwards.
 // This is the per-rule body shared by the indexed and full-scan paths.
-func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order, scope int) int {
+func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order, scope int, sheetBase string) int {
 	if v.Selectors != nil {
 		for _, sel := range v.Selectors.Selectors {
 			if r.checker.Match(sel, el) {
@@ -1141,6 +1238,7 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 						sourceOrder: order,
 						selector:    sel.String(),
 						scope:       scope,
+						sheetBase:   sheetBase,
 					})
 					order++
 				}
@@ -1148,7 +1246,7 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 		}
 	}
 	if len(v.NestedRules) > 0 {
-		order = r.collectDeclarations(v.NestedRules, origin, el, collected, order, scope)
+		order = r.collectDeclarations(v.NestedRules, origin, el, collected, order, scope, sheetBase)
 	}
 	return order
 }
@@ -1156,12 +1254,12 @@ func (r *Resolver) collectFromStyleRule(v *css.StyleRule, origin css.Origin, el 
 // collectDeclarations walks a rule list, recursing into @media / @supports rules,
 // and appends matching declarations to collected with their cascade metadata.
 // Used for non-indexed containers (media/supports bodies) and nested rules.
-func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int) int {
+func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int, sheetBase string) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			order = r.collectFromStyleRule(v, origin, el, collected, order, scope)
+			order = r.collectFromStyleRule(v, origin, el, collected, order, scope, sheetBase)
 		case *css.MediaRule:
 			// Evaluate media queries against the current device/viewport context.
 			// If the parsed query list is empty (parse error or unsupported syntax),
@@ -1169,10 +1267,10 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue // skip rules inside non-matching @media
 			}
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope, sheetBase)
 		case *css.SupportsRule:
 			// Supports is treated as always-true in this port.
-			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope)
+			order = r.collectDeclarations(v.Rules, origin, el, collected, order, scope, sheetBase)
 		case *css.FontFaceRule:
 			// Font face rules do not contribute declarations to elements; they are
 			// registered separately by the font selector.
@@ -1202,7 +1300,7 @@ func (r *Resolver) collectDeclarations(rules []css.Rule, origin css.Origin, el *
 // the far side of a shadow boundary from their stylesheet, so they bypass the normal
 // scoping-root isolation (and the hasPseudoElement skip) that collectSheetDeclarations
 // applies.
-func (r *Resolver) collectScopedFromRules(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int, match func(*css.ComplexSelector) bool) int {
+func (r *Resolver) collectScopedFromRules(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder, scope int, match func(*css.ComplexSelector) bool, sheetBase string) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
@@ -1225,21 +1323,22 @@ func (r *Resolver) collectScopedFromRules(rules []css.Rule, origin css.Origin, e
 							sourceOrder: order,
 							selector:    sel.String(),
 							scope:       scope,
+							sheetBase:   sheetBase,
 						})
 						order++
 					}
 				}
 			}
 			if len(v.NestedRules) > 0 {
-				order = r.collectScopedFromRules(v.NestedRules, origin, el, collected, order, scope, match)
+				order = r.collectScopedFromRules(v.NestedRules, origin, el, collected, order, scope, match, sheetBase)
 			}
 		case *css.MediaRule:
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue
 			}
-			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match)
+			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match, sheetBase)
 		case *css.SupportsRule:
-			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match)
+			order = r.collectScopedFromRules(v.Rules, origin, el, collected, order, scope, match, sheetBase)
 		}
 	}
 	return order
@@ -1308,7 +1407,7 @@ func (r *Resolver) collectShadowHostDeclarations(sheet *css.CSSStyleSheet, el *d
 	}
 	scope := sr.TreeScopeDepth()
 	order := 0
-	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchHostSelector)
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchHostSelector, sheetBaseURL(sheet))
 }
 
 // collectSlottedDeclarations routes ::slotted rules to slot-assigned light-DOM nodes.
@@ -1332,7 +1431,7 @@ func (r *Resolver) collectSlottedDeclarations(sheet *css.CSSStyleSheet, el *dom.
 	}
 	scope := sr.TreeScopeDepth()
 	order := 0
-	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchSlottedSelector)
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchSlottedSelector, sheetBaseURL(sheet))
 }
 
 // collectPartDeclarations routes ::part rules from an outer scope to shadow-tree
@@ -1360,7 +1459,7 @@ func (r *Resolver) collectPartDeclarations(sheet *css.CSSStyleSheet, el *dom.Ele
 	}
 	scope := sheetScopeDepth(sheet)
 	order := 0
-	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchPartSelector)
+	order = r.collectScopedFromRules(sheet.Rules(), sheet.Origin(), el, collected, order, scope, matchPartSelector, sheetBaseURL(sheet))
 }
 
 // importanceRank returns the cascade ordering key for (origin, !important). The
@@ -1486,9 +1585,91 @@ func mapLogicalBorderDecl(d css.Declaration, rtl bool) []css.Declaration {
 	}
 }
 
+// prefixedPropertyAliases 把 WebKit/Blink 前缀属性映射到与之**语义等价**的
+// 标准属性名。只收录「前缀写法 = 标准写法」的那些（Chromium 里就是同一个
+// CSSPropertyID）：不改变解析结果，只是让前缀写法也能被消费点读到。
+//
+// 刻意不收录语义**不同**的前缀属性：`-webkit-box-orient` / `-webkit-line-clamp`
+// / `-webkit-appearance` / `-webkit-box-reflect` / `-webkit-text-stroke*`
+// （本引擎对其有专门实现）都不在此表内。
+var prefixedPropertyAliases = map[string]string{
+	// mask 图片通道（本引擎读标准名；前缀写法此前完全不生效）
+	"-webkit-mask":           "mask",
+	"-webkit-mask-image":     "mask-image",
+	"-webkit-mask-size":      "mask-size",
+	"-webkit-mask-position":  "mask-position",
+	"-webkit-mask-repeat":    "mask-repeat",
+	"-webkit-mask-mode":      "mask-mode",
+	"-webkit-mask-composite": "mask-composite",
+	"-webkit-mask-origin":    "mask-origin",
+	"-webkit-mask-clip":      "mask-clip",
+	"-webkit-mask-type":      "mask-type",
+	// background 通道的尺寸/裁剪（background-image 本身无前缀写法）
+	"-webkit-background-size":   "background-size",
+	"-webkit-background-clip":   "background-clip",
+	"-webkit-background-origin": "background-origin",
+	// 其余常见等价前缀（老页面 / 挂件模板里的 `-webkit-` 兼容写法）
+	"-webkit-border-radius":              "border-radius",
+	"-webkit-border-top-left-radius":     "border-top-left-radius",
+	"-webkit-border-top-right-radius":    "border-top-right-radius",
+	"-webkit-border-bottom-left-radius":  "border-bottom-left-radius",
+	"-webkit-border-bottom-right-radius": "border-bottom-right-radius",
+	"-webkit-box-shadow":                 "box-shadow",
+	"-webkit-box-sizing":                 "box-sizing",
+	"-webkit-opacity":                    "opacity",
+	"-webkit-transform":                  "transform",
+	"-webkit-transform-origin":           "transform-origin",
+	"-webkit-transform-style":            "transform-style",
+	"-webkit-backface-visibility":        "backface-visibility",
+	"-webkit-perspective":                "perspective",
+	"-webkit-filter":                     "filter",
+	"-webkit-transition":                 "transition",
+	"-webkit-transition-property":        "transition-property",
+	"-webkit-transition-duration":        "transition-duration",
+	"-webkit-transition-timing-function": "transition-timing-function",
+	"-webkit-transition-delay":           "transition-delay",
+	"-webkit-animation":                  "animation",
+	"-webkit-animation-name":             "animation-name",
+	"-webkit-animation-duration":         "animation-duration",
+	"-webkit-animation-timing-function":  "animation-timing-function",
+	"-webkit-animation-delay":            "animation-delay",
+	"-webkit-animation-iteration-count":  "animation-iteration-count",
+	"-webkit-animation-direction":        "animation-direction",
+	"-webkit-animation-fill-mode":        "animation-fill-mode",
+	"-webkit-animation-play-state":       "animation-play-state",
+	"-webkit-user-select":                "user-select",
+	"-webkit-flex":                       "flex",
+	"-webkit-flex-direction":             "flex-direction",
+	"-webkit-flex-wrap":                  "flex-wrap",
+	"-webkit-flex-grow":                  "flex-grow",
+	"-webkit-flex-shrink":                "flex-shrink",
+	"-webkit-flex-basis":                 "flex-basis",
+	"-webkit-justify-content":            "justify-content",
+	"-webkit-align-items":                "align-items",
+	"-webkit-align-self":                 "align-self",
+	"-webkit-align-content":              "align-content",
+	"-webkit-order":                      "order",
+}
+
+// unprefixPropertyName 把前缀属性名映射为等价的标准属性名（无别名时原样返回）。
+func unprefixPropertyName(name string) string {
+	if alias, ok := prefixedPropertyAliases[name]; ok {
+		return alias
+	}
+	return name
+}
+
 func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 	name := strings.ToLower(d.Name)
 	valueString := d.ValueString()
+	// ★ WebKit/Blink 前缀属性的等价别名：浏览器里 `-webkit-mask-image` 与
+	// `mask-image` 是**同一个属性**（Chromium 内部即同一 CSSPropertyID，前缀
+	// 只是历史写法），本引擎的消费点（style 的 switch、rendering 的
+	// GetProperty）却只认标准名——不归一的话 `-webkit-mask-image` 会变成一条
+	// 谁都不读的陌生属性：mask 图片通道静默失效。挂件模板与老页面大量使用
+	// 前缀写法（`-webkit-mask-image`、`-webkit-transform`、`-webkit-animation`）。
+	// 归一后两者落到同一条处理路径，声明顺序也自然决定覆盖关系（与浏览器一致）。
+	name = unprefixPropertyName(name)
 
 	// If the declaration value is a calc() expression, store the raw tokens so the
 	// layout engine can resolve them later with proper context (parent width, etc.).
@@ -3771,7 +3952,7 @@ func webkitScrollbarPseudo(sel *css.ComplexSelector) int {
 // own computed style — width:4px on a scrollbar must not shrink the element).
 // collectScrollbarFromRule matches one StyleRule whose selector is a
 // ::-webkit-scrollbar pseudo, appending matched declarations.
-func (r *Resolver) collectScrollbarFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order int) int {
+func (r *Resolver) collectScrollbarFromRule(v *css.StyleRule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, order int, sheetBase string) int {
 	if v.Selectors != nil {
 		for _, sel := range v.Selectors.Selectors {
 			if k := webkitScrollbarPseudo(&sel); k >= 0 && r.checker.Match(sel, el) {
@@ -3785,6 +3966,7 @@ func (r *Resolver) collectScrollbarFromRule(v *css.StyleRule, origin css.Origin,
 						sourceOrder: order,
 						selector:    sel.String(),
 						sbKind:      k,
+						sheetBase:   sheetBase,
 					})
 					order++
 				}
@@ -3792,24 +3974,24 @@ func (r *Resolver) collectScrollbarFromRule(v *css.StyleRule, origin css.Origin,
 		}
 	}
 	if len(v.NestedRules) > 0 {
-		order = r.collectScrollbarDeclarations(v.NestedRules, origin, el, collected, order)
+		order = r.collectScrollbarDeclarations(v.NestedRules, origin, el, collected, order, sheetBase)
 	}
 	return order
 }
 
-func (r *Resolver) collectScrollbarDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int) int {
+func (r *Resolver) collectScrollbarDeclarations(rules []css.Rule, origin css.Origin, el *dom.Element, collected *[]collectedDecl, baseOrder int, sheetBase string) int {
 	order := baseOrder
 	for _, rule := range rules {
 		switch v := rule.(type) {
 		case *css.StyleRule:
-			order = r.collectScrollbarFromRule(v, origin, el, collected, order)
+			order = r.collectScrollbarFromRule(v, origin, el, collected, order, sheetBase)
 		case *css.MediaRule:
 			if len(v.Parsed) > 0 && !css.MatchesAny(v.Parsed, r.mediaQueryCtx) {
 				continue
 			}
-			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order, sheetBase)
 		case *css.SupportsRule:
-			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order)
+			order = r.collectScrollbarDeclarations(v.Rules, origin, el, collected, order, sheetBase)
 		}
 	}
 	return order

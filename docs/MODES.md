@@ -37,6 +37,7 @@ wb-ui 的渲染/布局/DOM/CSS/事件管线是同一套，但**装配阶段接�
 | 同上的**相对引用**（`href="a.css"` / `src="/js/x.js"`），以文档 URL 为基准 | ✅ | ❌（同上一格） |
 | `<img src>` / `background-image` / `mask-image` / SVG `<image href>` 的图片加载（含相对引用） | ✅ | ❌ 只有 `data:` URL 与宿主 `ResourceResolver` |
 | CSS `@import`（相对引用以**样式表 URL** 为基准，含嵌套链） | ✅ | ❌（同外部样式表格） |
+| CSS `url()` 的基准：外部样式表内以**样式表 URL** 为基准，内联 `<style>` / `style` 属性内以**文档 URL** 为基准 | ✅ | ✅（解析与取字节无关，但非 `data:` 的内容仍需可联网） |
 | `<iframe src>` 子文档装配 | ✅ | ❌ 不装配（`<iframe>` 元素仍参与布局/绘制） |
 | `<base href>` 改写文档内相对引用的基准 | ✅ | ✅（由文档本身决定，与「能否联网」无关） |
 | `location.assign/replace/reload` / `location.href` 赋值导航、`history.back/forward` | ✅ | ❌ 拒绝（`SetOnNavigationBlocked` 可感知） |
@@ -70,6 +71,7 @@ wv.LoadURL("http://localhost:9090/")
 | `<script src="app.js">`（页面 `/dir/page.html`） | `http://host/dir/app.js`（文档相对） |
 | `<img src="logo.png">` / `background-image:url(bg.png)` | 同上规则；图片**异步**取回，下一帧绘制出来 |
 | `<link href="/css/a.css">` 里的 `@import "b.css"` | `/css/b.css`——**以样式表 URL 为基准**（不是文档 URL） |
+| `<link href="/css/a.css">` 里的 `background-image:url(bg.png)` | `http://host/css/bg.png`——**以样式表 URL 为基准**（CSS Values 3 §4.4：`url()` 在解析时即相对样式表自身解析）；同一页面里 `style="background-image:url(bg.png)"` 与内联 `<style>` 的相对 `url()` 则按**文档 URL** 解析 |
 | `fetch("/api/users")` / `xhr.open("GET", "items.json")` | 同上规则；桥路由仍先按**原样** URL 匹配（宿主按 `"/api/users"` 注册的路由不受影响） |
 | `<iframe src="child.html">` | 同文档相对规则（`resolveIframeSrc`） |
 | `<base href="/assets/">` 之后的 `href="theme.css"` | `/assets/theme.css`——`<base>` 改写**整篇文档**的基准（`document.baseURI` 可见） |
@@ -159,7 +161,8 @@ go run ./examples/uitoolkit -mode browser -out out.png
 # 相对 URL、document.URL/location、导航与重定向后的基准跟随、CSS @import
 # （含「以样式表 URL 为基准」的子目录场景）、<base href> 改写基准、资源内存缓存
 # （同一 URL 只取一次）、nosniff 的 MIME 拒绝、装配期 location 导航、html/body
-# 背景传播（读回画布像素）；再用 UI 库模式复验同一组动作 0 网络
+# 背景传播（读回画布像素）、外部样式表里 url() 的基准（请求落在样式表同级目录
+# 且画出的像素来自那一份，而不是文档同级那一份）；再用 UI 库模式复验同一组动作 0 网络
 go run ./dev/browser_http_probe
 ```
 
@@ -178,11 +181,12 @@ go run ./dev/browser_http_probe
   模式的另一个 WebView 已经把它取回。
 - **`LoadHTML` 下图片引用没有文档基准**：相对路径按宿主进程工作目录读取
   （与 `<link>` 的既有行为一致）；需要浏览器语义时用 `LoadURL`。
-- **外部样式表里 `url()` 的相对基准是文档 URL**（已知差异，未实现）：CSS 规范
-  要求以**样式表自身 URL** 为基准——`/css/theme.css` 里的
-  `background-image:url(bg.png)` 应当请求 `/css/bg.png`，本引擎会请求
-  `/bg.png`（声明不带来源样式表 base，图片解析只有文档基准）。绝对 URL 与
-  `data:` 不受影响。修法与成本见 `docs/TECH_DEBT.md` 的同名条目。
+- **样式表内 `url()` 的基准**：CSS 规范要求以**样式表自身 URL** 为基准
+  （CSS Values 3 §4.4，与 `@import` 同一规则），已实现——`/css/theme.css` 里的
+  `background-image:url(bg.png)` 请求 `/css/bg.png`；内联 `<style>` 与
+  `style` 属性里的相对 `url()` 按**文档 URL** 解析（内联样式的 base 就是文档
+  的 base）。绝对引用、协议相对、`data:` 与宿主逻辑名（`app://…`）一律原样
+  保留。实现与回归见 `docs/TECH_DEBT.md`「样式表内 `url()` 的基准」条目。
 - **MIME 检查放在按用途的消费端**：取内容层（`fetchHTTP`）带回 `Content-Type` /
   `X-Content-Type-Options` / `Cache-Control`，由 `<link>` / `<script src>` 的
   消费端判定——浏览器也在那里（同一个响应可能是 `<link>`、`<script src>` 或
@@ -213,4 +217,5 @@ go run ./dev/browser_http_probe
 | 模式接线 | `webkit/mode.go`（枚举/装配策略/资源解析器）、`webkit/webview.go` 的 4 处注入分派、`page.RegisterFetchWithPolicy`、`bindings.HideBrowserThreadGlobals` |
 | UI 构建层 | `ui/ui.go`（View/Node）、`ui/registry.go`（双源组件） |
 | 顺带修复 | `page/frame.go` `SetDocument` 未同步 `styleFP` → 每次 LoadHTML 后首次重建会重复全量重扫样式（`<link>` 重复加载）；`file://` 的 URL 规范形式 `file:///C:/x` 之前读不到（前导斜杠） |
-| 浏览器行为对齐（本批七项） | `<base href>` 基准（`dom.Document.BaseHref` + `page.Frame.SetPendingDocumentURL` + `WebView.LoadHTMLWithBaseURL`）、html/body 背景传播（`rendering.Paint` 入口）、`location`/`history` 导航（`webkit/navigation.go`）、异步资源到位自动置脏（`rendering.AddBackgroundImageLoadedListener`）、外部资源内存缓存与 nosniff MIME（`webkit/resource_cache.go`）、UI 库模式全局真删除（`jsc.JSObject.Delete`）；回归：`webkit/{base_url,navigation,async_repaint,resource_cache}_test.go` + `dev/browser_http_probe`（27 项断言） |
+| 浏览器行为对齐（本批七项） | `<base href>` 基准（`dom.Document.BaseHref` + `page.Frame.SetPendingDocumentURL` + `WebView.LoadHTMLWithBaseURL`）、html/body 背景传播（`rendering.Paint` 入口）、`location`/`history` 导航（`webkit/navigation.go`）、异步资源到位自动置脏（`rendering.AddBackgroundImageLoadedListener`）、外部资源内存缓存与 nosniff MIME（`webkit/resource_cache.go`）、UI 库模式全局真删除（`jsc.JSObject.Delete`）；回归：`webkit/{base_url,navigation,async_repaint,resource_cache}_test.go` + `dev/browser_http_probe` |
+| 资源通道收尾（紧跟其后） | 样式表内 `url()` 的基准（`style/resolver.go`：`collectedDecl.sheetBase` + 收集链传参 + `absolutizeCollectedURLs` 在 token 层绝对化，`@keyframes` 由 `addKeyframesFromSheet` 就地处理）、WebKit 前缀属性别名（`prefixedPropertyAliases` + `unprefixPropertyName`——`-webkit-mask-image` 等此前是无人消费的陌生属性）、多层 `background-image: url(a), url(b)` 取第一层（`rendering/backgroundimage.go` 的 `parseBackgroundURL` 用 `IndexByte` 而非 `LastIndex`）；回归：`style/url_base_test.go`、`rendering/backgroundurl_layers_test.go`、`webkit/browser_http_media_test.go`（+2）、`dev/browser_http_probe`（47 项断言） |

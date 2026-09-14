@@ -470,7 +470,7 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `document.URL` / `location.href` 与文档不符 | `document.URL` 是注册时求值的静态快照（恒为空串）；`location` 是写死 `about:blank`/`file:` 的静态桩；`LoadURL` 也从未 `doc.SetURL` | `LoadURL` 把 URL 写进 `Document`（`LoadHTML` 视为 `about:blank`，内部拆出 `loadHTMLFrom(src, docURL)`）；`document.URL` 与 `location.href/protocol/host/hostname/port/pathname/search/hash/origin` 改为**动态 accessor**；`history.pushState/replaceState` 改为更新文档 URL（同源路径相对当前文档解析），不再直接写 location 字段 |
 | 重定向后的文档基地址是「请求 URL」而不是「最终 URL」 | `fetchHTTP` 只返回响应正文，`LoadURL` 只能拿入参 URL 当基准——`http://host` 被 301 到 `https://host/` 后，页面里的 `style.css` 会解析回 `http://host/style.css` | 新增 `fetchURLWithFinalURL`（内部用 `resp.Request.URL`）→ `LoadURL` 用**最终 URL** 作为文档基地址；`fetchURL` 保持原签名，其余调用点不受影响 |
 
-回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，23 项断言全 PASS）。
+回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，47 条断言全 PASS）。
 反向验证：隐去相对解析 → 3 条断言失败（含 `unsupported protocol scheme ""`）；恢复 Content-Type 返回 error → 「服务器收到了 /style.css 但样式不生效」；把 fetch 基地址去掉 → 相对 fetch 失败；把重定向基准改回请求 URL → 服务器日志显示 `/style.css`（而非 `/b/style.css`）。
 
 ### 图片（`<img src>`）与 CSS `@import` 接通外部资源通道
@@ -552,22 +552,49 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   脚本发起的导航**排队到装配结束后执行**，不在装配中途重入换文档；宿主
   `LoadURL` 与 location 导航都进历史栈（`history.length` 反映文档数）。UI 库
   模式拒绝导航，宿主可用 `SetOnNavigationBlocked` 感知。
-- **外部样式表里 `url()` 的相对基准是文档 URL，不是样式表 URL**（已知差异 ·
-  未实现）：CSS 规范里 `url()` 以**样式表自身 URL** 为基准（与 `@import` 同一
-  规则）——`/css/theme.css` 里的 `background-image:url(bg.png)` 应当请求
-  `/css/bg.png`。本引擎拿不到「当前声明来自哪张样式表」：`collectedDecl` 不带
-  来源 base，图片解析只有文档基准（`webkit/image_resource.go` 的
-  `webViewImageLoader.ResolveURL` → `documentBaseURL()`；`style/resolver.go:330`
-  的 `dom.ResolveURL(base, href)` 同理）。影响面：绝对 URL 与 `data:` 不受
-  影响，只有「外部样式表里的相对 `url()`」这一类会请求错路径（真实站点用
-  `./images/x.png` 组织资源时很常见）。
-  **修法**：`collectedDecl` 加 `sheetBaseURL string`；6 个收集点
-  （`style/resolver.go:406/535/885/1136/1220/3780`）填来源样式表的 `BaseURL`
-  （内联 `style=""` 属性用文档 URL）；应用侧优先用 `decl.sheetBaseURL`、为空
-  回退文档 URL。成本主要是**跨函数签名传递**：`collectFromStyleRule` /
-  `collectDeclarations` / `collectScopedFromRules` / `collectSheetDeclarations` /
-  `collectPseudoDeclarations` / `collectScrollbarFromRule` 等上游都要多一个 base
-  参数。评估结论：本轮不做（收益面只覆盖一类引用），按需再投。
+- **样式表内 `url()` 的基准 = 样式表自身 URL（已实现）**：CSS Values 3 §4.4
+  规定样式表里的 `url()` 在**解析时**即相对样式表自身解析（与 `@import` 同一
+  规则）——`/css/theme.css` 里的 `background-image:url(bg.png)` 请求
+  `/css/bg.png`；而内联 `<style>` 与元素 `style` 属性里的相对 `url()` 相对
+  **文档** URL（内联样式的 base 就是文档的 base）；绝对引用 / 协议相对
+  （`//cdn/x.png`）/ `data:` / 宿主逻辑名（`app://…`）一律原样保留。
+  实现：`collectedDecl.sheetBase` 随声明带上来源样式表（收集链路的最后一参：
+  `collectSheetDeclarations` / `collectFromStyleRule` / `collectDeclarations` /
+  `collectScopedFromRules` / `collectPseudoDeclarations{,FromRule}` /
+  `collectScrollbarFromRule`，由 `sheetBaseURL(sheet)` 提供，内联表为 ""），
+  `ResolveElement` / `ResolvePseudoElement` 在级联排序前调
+  `absolutizeCollectedURLs` 绝对化。★ 绝对化在 **token 层**重写 `url()`
+  （`absolutizeDeclURLs`），因此 `background-image` / `mask-image` /
+  `list-style-image` / `content` / `border-image-source` / 简写 `background` /
+  自定义属性里的 `url()` 全部通道一次覆盖，将来新增的读 URL 属性也自动受益。
+  `@keyframes` 的声明不在级联链路上，由 `addKeyframesFromSheet` 按来源表就地
+  绝对化（幂等）。`@import` 继续用 `resolveURLAgainst`（同一函数的通用形式）。
+  回归资产：`style/url_base_test.go`（6 项：外部表逐属性 / 简写与多层 /
+  内联保持文档基准 / 绝对引用原样 / `@keyframes` / `@import` 链），
+  `webkit/browser_http_media_test.go`（`TestBrowserModeStylesheetURLBaseForCSSURLs`、
+  `TestBrowserModeDocumentBaseForInlineURLs`——文档与样式表刻意放在**不同深度**
+  的目录，否则两种基准会算出同一个 URL 而抓不到回归，这是反向验证暴露的
+  fixture 陷阱），`dev/browser_http_probe` 的「样式表内 url() 的基准」4 条断言。
+  反向验证：把 `sheetBaseURL` 改成恒返回 "" → `webkit` 两条测试立即失败
+  （请求落到文档同级、`#bg` 像素由红变蓝），恢复后通过。
+- **WebKit 前缀属性与标准属性同义（已实现）**：`prefixedPropertyAliases` +
+  `unprefixPropertyName` 在 `applyDeclaration` 入口归一前缀名。此前
+  `-webkit-mask-image` / `-webkit-mask-size` / `-webkit-transform` /
+  `-webkit-animation` / `-webkit-background-clip` 等只是被存进 `Properties` 的
+  陌生键，没有任何消费点读它们——**mask 图片通道对前缀写法完全失效**（挂件
+  模板与老页面大量使用前缀）。刻意不收录语义不同的前缀（`-webkit-box-orient`
+  / `-webkit-line-clamp` / `-webkit-appearance` / `-webkit-gradient(…)` 旧渐变
+  语法 / 本引擎已有专门实现的 `-webkit-text-stroke*`）——机械映射会产生
+  「看起来生效但语义不同」的错误结果，比不支持更糟。回归：
+  `style/url_base_test.go:TestPrefixedPropertyAliases`（反向验证：让归一恒
+  原样返回 → 5 条断言失败）。
+- **多层 `background-image` 取第一层（已实现）**：`parseBackgroundURL` 用
+  `strings.IndexByte(inner, ')')` 而不是 `LastIndex`——`url(a.png), url(b.png)`
+  是常见写法，`LastIndex` 会得到 `a.png), url(b.png` 这种垃圾 URL，连第一层都
+  加载不出来（多层叠加未实现，但第一层必须正确）。带引号形式按引号配对截断，
+  避免引号内的 `)` 提前结束。回归：
+  `rendering/backgroundurl_layers_test.go`（反向验证：换回 `LastIndex` → 2 条
+  断言失败）。
 - **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
   「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式
   响应式时走 web 方式（Vue 等在页面脚本里做）。

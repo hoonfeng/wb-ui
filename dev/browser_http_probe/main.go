@@ -42,6 +42,24 @@ const probeHTML = `<!DOCTYPE html>
 // 固有尺寸 → 绘制像素」的端到端断言，比"收到请求"更接近用户可见结果。
 var redPNG = mkRedPNG()
 
+// bluePNG 是 4x4 纯蓝 PNG：给「错误基准」那一侧的图片用，于是断言不只
+// 「正确路径被请求」，还能验证**画出来的颜色**来自正确的那份文件。
+var bluePNG = mkBluePNG()
+
+func mkBluePNG() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.Set(x, y, color.RGBA{B: 255, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
 func mkRedPNG() []byte {
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {
@@ -324,6 +342,38 @@ func main() {
 			`body{background:rgb(18,52,86);margin:0}</style></head>`+
 			`<body><div id="who">BG</div></body></html>`)
 	})
+	// 外部样式表里相对 url() 的基准：必须是**样式表自身 URL**（CSS Values 3
+	// §4.4），不是文档 URL。文档 /cssurl/page/index.html、样式表
+	// /cssurl/theme/css/site.css——★ 两者深度必须不同：同深度
+	// （/cssurl/theme/）时"样式表基准"与"文档基准"会算出同一个 URL，断言就
+	// 抓不到回归（这正是反向验证暴露过的 fixture 陷阱）。
+	// 样式表里 `url(../assets/bg.png)`：
+	//   样式表基准 → /cssurl/theme/assets/bg.png（红，正确那份）
+	//   文档基准   → /cssurl/assets/bg.png（蓝，错误那份也真实存在）
+	mux.HandleFunc("/cssurl/page/index.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head>`+
+			`<style>body{margin:0;background:#fff}</style>`+
+			`<link rel="stylesheet" href="../theme/css/site.css"></head>`+
+			`<body><div id="bg"></div></body></html>`)
+	})
+	mux.HandleFunc("/cssurl/theme/css/site.css", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/css")
+		fmt.Fprint(w, `#bg{width:24px;height:24px;margin:0;`+
+			`background-image:url(../assets/bg.png);background-size:100% 100%}`)
+	})
+	mux.HandleFunc("/cssurl/theme/assets/bg.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(redPNG)
+	})
+	mux.HandleFunc("/cssurl/assets/bg.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(bluePNG)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -484,6 +534,40 @@ func main() {
 			"body 背景传播到画布：画布底部像素 = rgba(%d,%d,%d,%d)（want 18,52,86,255）", bpr, bpg, bpb, bpa)
 	}
 	bgc.Destroy()
+
+	// ── 外部样式表里相对 url() 的基准 = 样式表自身 URL ─────────
+	fmt.Println("── 样式表内 url() 的基准 ──")
+	cssw := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	cssw.Resize(240, 160)
+	if err := cssw.LoadURL(srv.URL + "/cssurl/page/index.html"); err != nil {
+		check(false, "LoadURL(/cssurl/page/index.html): %v", err)
+	}
+	// ★ 先渲染等待，**再**断言：外部样式表与背景图都是异步取回的，断言写在
+	// 等待之前就会看到"还没请求"的假失败（探针第一版正是这个顺序问题）。
+	// 固定渲染若干帧、不用「像素变红就 break」：那个条件会被上一个 WebView
+	// 留在共享底层缓冲里的残留像素误判（首帧即"红"→ 立刻退出）。页面自带
+	// 白底（body{background:#fff}，经背景传播铺满画布）压掉残留，红因此
+	// 只可能来自样式表引用的那张图。
+	for i := 0; i < 30; i++ {
+		if _, err := cssw.Render(); err != nil {
+			check(false, "Render(/cssurl/page/index.html): %v", err)
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	check(logHas(log, "/cssurl/theme/css/site.css"),
+		"外部样式表 /cssurl/theme/css/site.css 已加载：%v", logHas(log, "/cssurl/theme/css/site.css"))
+	check(logHas(log, "/cssurl/theme/assets/bg.png"),
+		"样式表里的 url(../assets/bg.png) 按**样式表**基准请求 /cssurl/theme/assets/bg.png：%v（服务器共收到：%s）",
+		logHas(log, "/cssurl/theme/assets/bg.png"), log.dump())
+	check(!logHas(log, "/cssurl/assets/bg.png"),
+		"没有按**文档**基准误请求 /cssurl/assets/bg.png：%v", !logHas(log, "/cssurl/assets/bg.png"))
+	pix, _ := cssw.Render()
+	cpr, cpg, cpb, cpa := pixelAt(pix, 240, 12, 12)
+	check(cpr > 200 && cpg < 80 && cpb < 80 && cpa > 200,
+		"背景图取自样式表同级文件：(12,12) 像素 = rgba(%d,%d,%d,%d)（want 红；蓝表示落到了文档基准那份）",
+		cpr, cpg, cpb, cpa)
+	cssw.Destroy()
 
 	// ── 用途二：UI 框架（同样的动作不得产生网络）──────────────
 	fmt.Println("\n── ModeToolkit（UI 框架）──")

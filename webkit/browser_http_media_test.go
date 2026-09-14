@@ -83,6 +83,53 @@ func mediaHTTPFixture(t *testing.T) (*httptest.Server, *httpRequestLog) {
 			`#bg{width:24px;height:24px;background-image:url(logo.png);background-size:100% 100%}`+
 			`</style></head><body><div id="bg"></div></body></html>`)
 
+	// 外部样式表里的相对 url()：CSS 规范要求以**样式表自身 URL** 为基准
+	// （CSS Values 3 §4.4 / CSS Syntax §5.4），与文档 URL 无关。
+	// ★ 两个目录必须在**不同深度**上：文档 /cssurl/page/index.html、
+	//   样式表 /cssurl/theme/css/site.css，样式表里 `url(../assets/bg.png)`：
+	//   样式表基准 → /cssurl/theme/assets/bg.png（红，正确）
+	//   文档基准   → /cssurl/assets/bg.png（蓝，错误的那份也真实存在）
+	//   同深度（/cssurl/theme/）时两种基准会算出同一个 URL，测试就抓不到回归
+	//   ——这条是反向验证暴露出来的 fixture 缺陷。
+	serve("/cssurl/page/index.html", "text/html; charset=utf-8",
+		`<!DOCTYPE html><html><head><link rel="stylesheet" href="../theme/css/site.css">`+
+			`</head><body><div id="bg"></div></body></html>`)
+	serve("/cssurl/theme/css/site.css", "text/css",
+		`#bg{width:24px;height:24px;background-image:url(../assets/bg.png);background-size:100% 100%}`)
+	mux.HandleFunc("/cssurl/theme/assets/bg.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{R: 255, A: 255}))
+	})
+	mux.HandleFunc("/cssurl/assets/bg.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{B: 255, A: 255}))
+	})
+
+	// 同一条 `url(…)` 写在两处的基准对照：内联（style 属性 / 内联 <style>）
+	// 相对**文档**，外部样式表相对**样式表自身**。两个文件名各自只存在于
+	// 一个目录里，"正确路径被请求 + 错误路径未被请求" 四条断言因此能各自
+	// 指认基准，而不只是看到 404。
+	serve("/cssurl/page/inline.html", "text/html; charset=utf-8",
+		`<!DOCTYPE html><html><head><link rel="stylesheet" href="../theme/inline.css">`+
+			`</head><body>`+
+			`<div id="a" style="width:24px;height:24px;background-size:100% 100%;`+
+			`background-image:url(inline-only.png)"></div>`+
+			`<div id="b"></div></body></html>`)
+	serve("/cssurl/theme/inline.css", "text/css",
+		`#b{width:24px;height:24px;background-size:100% 100%;background-image:url(sheet-only.png)}`)
+	mux.HandleFunc("/cssurl/page/inline-only.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{G: 255, A: 255}))
+	})
+	mux.HandleFunc("/cssurl/theme/sheet-only.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{R: 255, G: 255, A: 255}))
+	})
+
 	// @import 页：文档在 /imp/page/，样式表在 /imp/css/，样式表里再嵌套
 	// 一层 `../shared/base.css`（验证逐级基准拼接）。
 	serve("/imp/page/index.html", "text/html; charset=utf-8",
@@ -310,6 +357,85 @@ func TestBrowserModeHTTPBackgroundImage(t *testing.T) {
 	}
 	if !log.has("/logo.png") {
 		t.Errorf("服务器未收到 /logo.png（实际收到：%v）", log.paths())
+	}
+}
+
+// TestBrowserModeStylesheetURLBaseForCSSURLs：外部样式表里的相对 url() 必须
+// 相对**样式表自身 URL** 解析（CSS Values 3 §4.4），不是文档 URL。文档在
+// /cssurl/page/、样式表在 /cssurl/theme/css/，`url(../assets/bg.png)` 因此：
+//
+//	正确基准（样式表）→ /cssurl/theme/assets/bg.png（红）
+//	错误基准（文档）  → /cssurl/assets/bg.png（蓝，刻意真实存在）
+//
+// 三路证据：请求路径、**是否**请求了错误路径、以及画出来的像素颜色。
+func TestBrowserModeStylesheetURLBaseForCSSURLs(t *testing.T) {
+	srv, log := mediaHTTPFixture(t)
+	wv := modeWebView(t, ModeBrowser)
+	if err := wv.LoadURL(srv.URL + "/cssurl/page/index.html"); err != nil {
+		t.Fatalf("LoadURL(/cssurl/page/index.html): %v", err)
+	}
+
+	// #bg 是 body 第一个子元素（body margin 8px）→ 占 (8,8)-(32,32)，取中心。
+	const x, y = 20, 20
+	var r, g, b, a uint8
+	for i := 0; i < 80; i++ {
+		pix, err := wv.Render()
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		r, g, b, a = pixelAt(pix, wv.Width(), x, y)
+		if r > 200 || b > 200 {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !log.has("/cssurl/theme/css/site.css") {
+		t.Fatalf("外部样式表未加载（服务器收到：%v）", log.paths())
+	}
+	if !log.has("/cssurl/theme/assets/bg.png") {
+		t.Errorf("服务器未收到样式表同级的 /cssurl/theme/assets/bg.png（实际收到：%v）", log.paths())
+	}
+	if log.has("/cssurl/assets/bg.png") {
+		t.Errorf("相对 url() 被按**文档** URL 解析：请求了 /cssurl/assets/bg.png（应相对样式表 → /cssurl/theme/assets/bg.png）")
+	}
+	if !(r > 200 && g < 80 && b < 80 && a > 200) {
+		t.Errorf("#bg 中心 (%d,%d) 像素 = rgba(%d,%d,%d,%d), want 红（= 样式表同级图片；服务器收到：%v）",
+			x, y, r, g, b, a, log.paths())
+	}
+}
+
+// TestBrowserModeDocumentBaseForInlineURLs：`style` 属性（内联声明）里的相对
+// url() 按**文档** URL 解析——它是文档的一部分，不是某张样式表的一部分；
+// 同一页面里外部样式表的相对 url() 按**样式表** URL 解析。互不串用。
+//
+// 两个文件名各自只存在一个目录，四条断言（两条正、两条负）因此能分别指认
+// 两条通道的基准，而不是笼统地"404 了"。
+func TestBrowserModeDocumentBaseForInlineURLs(t *testing.T) {
+	srv, log := mediaHTTPFixture(t)
+	wv := modeWebView(t, ModeBrowser)
+	if err := wv.LoadURL(srv.URL + "/cssurl/page/inline.html"); err != nil {
+		t.Fatalf("LoadURL(/cssurl/page/inline.html): %v", err)
+	}
+	wv.EnsureHitTestReady()
+	for i := 0; i < 40; i++ {
+		if _, err := wv.Render(); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !log.has("/cssurl/page/inline-only.png") {
+		t.Errorf("内联 style 属性里的相对 url() 未按文档 URL 解析：未收到 /cssurl/page/inline-only.png（实际：%v）",
+			log.paths())
+	}
+	if !log.has("/cssurl/theme/sheet-only.png") {
+		t.Errorf("外部样式表里的相对 url() 未按样式表 URL 解析：未收到 /cssurl/theme/sheet-only.png（实际：%v）",
+			log.paths())
+	}
+	if log.has("/cssurl/theme/inline-only.png") {
+		t.Errorf("内联声明被当成样式表内的声明（按样式表基准解析了内联 url()）")
+	}
+	if log.has("/cssurl/page/sheet-only.png") {
+		t.Errorf("外部样式表里的 url() 被按文档基准解析（请求了 /cssurl/page/sheet-only.png）")
 	}
 }
 
