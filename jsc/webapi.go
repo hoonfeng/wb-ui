@@ -20,6 +20,7 @@ import (
 func (r *Interpreter) RegisterWebAPIs() {
 	r.registerTextEncoder()
 	r.registerTextDecoder()
+	r.registerStreams()
 	r.registerCrypto()
 	r.registerStructuredClone()
 	r.registerPerformance()
