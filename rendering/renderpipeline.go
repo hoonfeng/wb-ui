@@ -128,6 +128,18 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// clip-free state via RestoreToCount (see paintLayerTree).
 	info.initialSaveCount = canvas.SaveCount()
 
+	// ★ 背景传播（CSS-BACKGROUNDS-3 §2.11.2）：html 的背景（html 没有背景
+	//   时改用 body 的）画到画布上，元素自身不再重复绘制。浏览器对照：
+	//   页面只写 `body{background:#333}` 就整屏暗色，而引擎此前只有 body
+	//   盒那点高度被染色——这正是 ui 测试里锁定的已知差异。
+	//   调用点在页面滚动 translate 之前 = 画布坐标 → 传播的背景固定于
+	//   视口、不随页面滚动（与浏览器一致）。子文档（iframe）走嵌套 Paint，
+	//   用自己的 viewport 尺寸 + 已被 PaintIFrame 裁剪的画布，因此子文档
+	//   背景铺满的是 iframe 区域而不是外层画布。
+	if src := paintViewportBackground(view, info); src != nil {
+		info.skipBackgroundBox = src
+	}
+
 	// Apply scroll offset as a canvas translate.
 	scrollX, scrollY := view.ScrollOffset()
 	if scrollX != 0 || scrollY != 0 {
@@ -212,6 +224,68 @@ cursorFallbackDone:
 // per-frame caret fallback uses the O(1) nodeRenderMap lookup instead of a
 // full render-tree walk. Cleared when the element no longer has a box (CM6
 // re-created it / display:none), triggering a fresh walk.
+// paintViewportBackground 把 html/body 的背景传播到画布（viewport），返回
+// 被传播的渲染盒（调用方据此让它在自身路径上只画阴影、不画背景）；没有可
+// 传播的背景时返回 nil。
+//
+// 规范：CSS Backgrounds and Borders 3 §2.11.2 —— 根元素（html）的背景覆盖
+// 整个画布；若 html 的 background-image 为 none 且 background-color 为
+// transparent，则改用 **body** 的背景覆盖画布，且 body 元素自身不再绘制背景
+// （html 与 body 的背景绝不重复画两次）。这是浏览器里
+// `body{background:#333}` 整屏变暗的由来，也是大量页面唯一的背景来源。
+//
+// 画布矩形取**该文档自己的 viewport**（ViewWidth/ViewHeight）：子文档
+// （iframe）的 Paint 是嵌套调用、画布已被裁剪到内容盒，因此子文档背景铺满
+// 的是 iframe 区域，不会污染外层画布。
+func paintViewportBackground(view *RenderView, info *PaintInfo) *RenderBox {
+	if view == nil || info == nil || info.canvas == nil {
+		return nil
+	}
+	doc := view.Document()
+	if doc == nil {
+		return nil
+	}
+	w, h := view.ViewWidth(), view.ViewHeight()
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	rect := Rect{X: 0, Y: 0, Width: w, Height: h}
+	// 根元素（html）有背景 → 用它，并让 html 盒跳过自身背景。
+	if htmlBox := view.FindRenderBoxForNode(doc.DocumentElement()); hasPaintedBackground(htmlBox) {
+		paintBackgroundFill(htmlBox, htmlBox.Style(), info, rect, 1)
+		return htmlBox
+	}
+	// html 没有背景 → 传播 body 的（body 自身不再画）。
+	bodyBox := view.FindRenderBoxForNode(doc.Body())
+	if !hasPaintedBackground(bodyBox) {
+		return nil
+	}
+	paintBackgroundFill(bodyBox, bodyBox.Style(), info, rect, 1)
+	return bodyBox
+}
+
+// hasPaintedBackground 报告盒是否有「可绘制的背景」（背景色不透明或背景图
+// 不是 none）——传播判定用。动画背景色（@keyframes background-color 驱动期
+// 间写入 AnimatedBackgroundColor）同样算有：否则闪烁动画的元素会被判成
+// 透明并触发 body 传播，画出多余的一层。
+func hasPaintedBackground(box *RenderBox) bool {
+	if box == nil {
+		return false
+	}
+	st := box.Style()
+	if st == nil {
+		return false
+	}
+	if toGraphicsColor(st.BackgroundColor).A != 0 {
+		return true
+	}
+	if st.AnimatedBackgroundActive && toGraphicsColor(st.AnimatedBackgroundColor).A != 0 {
+		return true
+	}
+	bg := strings.TrimSpace(st.BackgroundImage)
+	return bg != "" && bg != "none"
+}
+
 var fallbackCursorEl *dom.Element
 
 // FindCursorBox locates the .cm-cursor element's RenderBox (the caret) via

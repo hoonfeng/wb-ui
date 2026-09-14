@@ -221,6 +221,63 @@ func SetBackgroundImageLoadedCallback(cb func(url string)) {
 	backgroundImageCache.mu.Unlock()
 }
 
+// bgImageLoadedListeners 是「图片加载完成」的多监听器集合：单回调
+// （bgImageLoadedCallback）给纯 rendering 用法（测试/探针），监听器给宿主
+// 接线——多个 WebView 各自关心自己文档里的图片，单回调会被后注册者覆盖。
+var bgImageLoadedListeners = struct {
+	mu   sync.Mutex
+	next int
+	fns  map[int]func(string)
+}{fns: map[int]func(string){}}
+
+// AddBackgroundImageLoadedListener 注册图片（异步）加载完成监听器，返回
+// 幂等的注销函数。
+//
+// 为什么需要它：浏览器里资源到位就会 invalidate 重绘，而本引擎的按需渲染
+// （app.Host.Run 里 `rv.IsDirty()` 为假即跳过 Paint）不会自己发现「缓存里
+// 多了一张图」——`<img>` / background-image 的字节在后台 goroutine 取回后
+// 没有任何人置脏，图片就**永远不画出来**。宿主（webkit.WebView）用本接口
+// 接线：图片到位 → 标记渲染树脏 + MarkAllDirty。
+func AddBackgroundImageLoadedListener(fn func(string)) func() {
+	if fn == nil {
+		return func() {}
+	}
+	bgImageLoadedListeners.mu.Lock()
+	bgImageLoadedListeners.next++
+	id := bgImageLoadedListeners.next
+	bgImageLoadedListeners.fns[id] = fn
+	bgImageLoadedListeners.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			bgImageLoadedListeners.mu.Lock()
+			delete(bgImageLoadedListeners.fns, id)
+			bgImageLoadedListeners.mu.Unlock()
+		})
+	}
+}
+
+// notifyBackgroundImageLoaded 触发「图片加载完成」（成功与失败都触发，与
+// 既有单回调语义一致）。在取字节的 goroutine 里调用：先取快照再回调，不持
+// 锁调用外部代码。
+func notifyBackgroundImageLoaded(url string) {
+	backgroundImageCache.mu.Lock()
+	cb := bgImageLoadedCallback
+	backgroundImageCache.mu.Unlock()
+	if cb != nil {
+		cb(url)
+	}
+	bgImageLoadedListeners.mu.Lock()
+	fns := make([]func(string), 0, len(bgImageLoadedListeners.fns))
+	for _, fn := range bgImageLoadedListeners.fns {
+		fns = append(fns, fn)
+	}
+	bgImageLoadedListeners.mu.Unlock()
+	for _, fn := range fns {
+		fn(url)
+	}
+}
+
 // LoadImageSync 是 loadBackgroundImage 的导出包装（供 webkit 桥按 <img>
 // 元素的 src 主动解码：canvas 2D drawImage 的图片源）。
 func LoadImageSync(url string) *DecodedImage {
@@ -333,11 +390,8 @@ func fetchImageViaLoaderAsync(url string, loader ImageResourceLoader) {
 			backgroundImageCache.imgs[url] = img
 		}
 	}
-	cb := bgImageLoadedCallback
 	backgroundImageCache.mu.Unlock()
-	if cb != nil {
-		cb(url)
-	}
+	notifyBackgroundImageLoaded(url)
 }
 
 // fetchBackgroundImageAsync downloads an http(s) image off-thread and stores
@@ -351,11 +405,8 @@ func fetchBackgroundImageAsync(url string) {
 			backgroundImageCache.imgs[url] = img
 		}
 	}
-	cb := bgImageLoadedCallback
 	backgroundImageCache.mu.Unlock()
-	if cb != nil {
-		cb(url)
-	}
+	notifyBackgroundImageLoaded(url)
 }
 
 // bgSizeMode describes how background-size scales the image.

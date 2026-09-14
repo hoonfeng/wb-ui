@@ -119,6 +119,9 @@ func modeProbeAPISurface(t *testing.T, mode Mode) map[string]string {
 		xhr: typeof XMLHttpRequest,
 		worker: typeof Worker,
 		ws: typeof WebSocket,
+		workerIn: ("Worker" in window) ? "true" : "false",
+		wsIn: ("WebSocket" in window) ? "true" : "false",
+		xhrIn: ("XMLHttpRequest" in window) ? "true" : "false",
 		document: typeof document,
 		window: typeof window,
 		querySelector: typeof document.querySelector,
@@ -142,6 +145,12 @@ func TestModeBrowserAPISurface(t *testing.T) {
 	if m["document"] != "object" || m["querySelector"] != "function" {
 		t.Errorf("ModeBrowser 下 DOM 绑定缺失：document=%q querySelector=%q", m["document"], m["querySelector"])
 	}
+	// 浏览器模式下 `in` 判定与实际能力一致（属性真的存在）。
+	for _, k := range []string{"workerIn", "wsIn", "xhrIn"} {
+		if m[k] != "true" {
+			t.Errorf("ModeBrowser 下 %s = %q，want true", k, m[k])
+		}
+	}
 }
 
 // TestModeToolkitAPISurface：UI 库模式保留 DOM/fetch（宿主桥），
@@ -154,6 +163,14 @@ func TestModeToolkitAPISurface(t *testing.T) {
 	for _, k := range []string{"xhr", "worker", "ws"} {
 		if m[k] != "undefined" {
 			t.Errorf("ModeToolkit 下 %s = %q，应为 undefined", k, m[k])
+		}
+	}
+	// ★ 真删除：`"Worker" in window` 必须是 false（浏览器里该 API 不存在时正是
+	//   如此）。置 undefined 只能让 typeof 判定正确，靠 in 做 feature detect
+	//   的库仍会误判「有 Worker」。
+	for _, k := range []string{"workerIn", "wsIn", "xhrIn"} {
+		if m[k] != "false" {
+			t.Errorf("ModeToolkit 下 %s = %q，want false（全局应被真删除，不是置 undefined）", k, m[k])
 		}
 	}
 	if m["document"] != "object" || m["querySelector"] != "function" {

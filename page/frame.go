@@ -41,6 +41,9 @@ type Frame struct {
 	// document is the currently-loaded DOM Document, mirroring
 	// LocalFrame::document().
 	document *dom.Document
+	// pendingDocumentURL 是下次 SetDocument 时写入文档的 URL（见
+	// SetPendingDocumentURL）：文档装配过程中就要用它解析相对引用。
+	pendingDocumentURL string
 
 	// renderView is the root of the render tree built from document, mirroring
 	// the render view reached via LocalFrame::contentRenderer() / FrameView.
@@ -136,6 +139,34 @@ func (f *Frame) Page() *Page { return f.page }
 // LocalFrame::document(). It returns nil until LoadHTML or SetDocument is called.
 func (f *Frame) Document() *dom.Document { return f.document }
 
+// resolveRef 按**文档基准**（浏览器语义的 document.baseURI = 文档 URL 经
+// `<base href>` 修正）把页面里写下的引用解析成绝对 URL。
+//
+// 为什么由 Frame 解析、而不是交给宿主的 loader 内部解析：
+// `<link href>` / `<script src>` 的加载发生在**文档装配过程中**（宿主可能还
+// 没来得及登记「当前文档基准」，`<base>` 更是刚刚才解析出来），而基准本身是
+// 文档的属性。宿主 loader 收到的因此已经是绝对引用——`loadExternalResource`
+// 里对绝对引用的二次解析是恒等的，宿主仍可用 ResourceResolver 按原样引用
+// 覆盖（那一步在解析之前）。
+func (f *Frame) resolveRef(ref string) string {
+	if ref == "" || f.document == nil {
+		return ref
+	}
+	if abs := dom.ResolveURL(f.document.BaseURL(), ref); abs != "" {
+		return abs
+	}
+	return ref
+}
+
+// SetPendingDocumentURL 设置**下次文档装配**时写入的文档 URL（浏览器的
+// document.URL / baseURI 语义）。宿主必须在 LoadHTML 之前调用。
+//
+// 为什么需要它：`<link href>` / `<script src>` 的加载发生在文档装配过程中
+// （SetDocument → extractAndAddStyles），此刻文档就必须知道自己是谁——否则
+// 相对引用只能按「空基准」解析，宿主事后再 SetURL 已经太晚（样式与脚本都已
+// 按错误基准请求过）。
+func (f *Frame) SetPendingDocumentURL(u string) { f.pendingDocumentURL = u }
+
 // RenderView returns the root render object for the frame's document, mirroring
 // the render view obtained via FrameView::renderView() in WebKit.
 func (f *Frame) RenderView() *rendering.RenderView { return f.renderView }
@@ -185,6 +216,14 @@ func (f *Frame) LoadHTML(src string) error {
 func (f *Frame) SetDocument(doc *dom.Document) {
 	Logf("SetDocument", "start hasResolver=%v", f.resolver != nil)
 	f.document = doc
+	// ★ 文档 URL 必须在**装配文档的这一步**就位：下面 extractAndAddStyles 会立刻
+	//   加载 `<link href>`/`<script src>`，而相对引用的解析基准就是文档基准
+	//   （document.baseURI = 文档 URL 经 `<base href>` 修正）。宿主在 LoadHTML
+	//   之前用 SetPendingDocumentURL 提供它；不提供（LoadHTML 直出内容）时保持
+	//   「没有来源 URL」的既有行为。
+	if doc != nil && f.pendingDocumentURL != "" {
+		doc.SetURL(f.pendingDocumentURL)
+	}
 	if f.resolver == nil {
 		f.resolver = style.NewResolver()
 		f.resolver.AddStyleSheet(html5.NewUAStyleSheet())
@@ -586,6 +625,11 @@ func (f *Frame) extractAndAddStyles() {
 		if href == "" {
 			continue
 		}
+		// ★ 按文档基准（含 `<base href>`）解析成绝对 URL 再加载：① 相对引用
+		//   在装配过程中就要解析，此时宿主的「当前基准」可能还没登记；② 该
+		//   绝对 URL 同时成为样式表的 BaseURL，`@import` 的逐级解析因此不再
+		//   依赖二次解析。
+		href = f.resolveRef(href)
 		linkCount++
 		Logf("extractAndAddStyles", "link[%d]: href=%q", linkCount, href)
 		if f.ResourceLoader != nil {
@@ -672,18 +716,20 @@ func (f *Frame) executeInlineScripts() {
 		}
 
 		if src := s.Src(); src != "" {
-			Logf("ScriptLoad", "[%d] external: src=%q type=%q", i, src, t)
+			// 同 <link>：按文档基准（含 `<base href>`）解析成绝对 URL。
+			abs := f.resolveRef(src)
+			Logf("ScriptLoad", "[%d] external: src=%q type=%q", i, abs, t)
 			if f.ResourceLoader != nil {
-				f.ResourceLoader.LoadScript(src, &frameScriptClient{
+				f.ResourceLoader.LoadScript(abs, &frameScriptClient{
 					frame: f,
-					src:   src,
+					src:   abs,
 					el:    el,
 				})
 				Logf("ScriptLoad", "[%d] async queued", i)
 				continue
 			}
 			if f.ScriptLoader != nil {
-				code, err := f.ScriptLoader(src)
+				code, err := f.ScriptLoader(abs)
 				if err != nil {
 					Logf("ScriptLoad", "[%d] LOAD FAIL: %v", i, err)
 					continue
@@ -692,7 +738,7 @@ func (f *Frame) executeInlineScripts() {
 					Logf("ScriptLoad", "[%d] empty content", i)
 					continue
 				}
-				Logf("ScriptLoad", "[%d] exec: src=%q len=%d", i, src, len(code))
+				Logf("ScriptLoad", "[%d] exec: src=%q len=%d", i, abs, len(code))
 				// Execute directly — no try/catch wrapper.
 				if err := f.runScriptForElement(el, code); err != nil {
 					Logf("ScriptLoad", "[%d] EXEC FAIL: %v", i, err)

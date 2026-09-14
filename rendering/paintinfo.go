@@ -47,6 +47,11 @@ type Rect = graphics.Rect
 type PaintInfo struct {
 	// canvas is the destination GraphicsContext, mirroring PaintInfo::context.
 	canvas *graphics.Canvas
+	// skipBackgroundBox 是「背景已传播到画布」的那个盒（html 或 body，
+	// 见 paintViewportBackground）。PaintBackground 对它只画阴影、不画背景：
+	// CSS-BACKGROUNDS-3 §2.11.2 规定传播之后元素自身不再绘制背景，画布上那
+	// 一份才是它。
+	skipBackgroundBox *RenderBox
 	// dirtyRect is the area that needs repainting, mirroring PaintInfo::rect.
 	dirtyRect Rect
 	// phase is the current paint pass, mirroring PaintInfo::phase.

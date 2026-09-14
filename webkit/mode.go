@@ -128,28 +128,41 @@ func (wv *WebView) SetResourceResolver(fn ResourceResolver) {
 		return
 	}
 	wv.resourceResolver = fn
+	// 换 resolver = 取内容的语义变了：清空资源缓存，否则旧 resolver 提供的
+	// 内容会继续被使用（缓存见 resource_cache.go）。
+	wv.ClearResourceCache()
 }
 
-// loadExternalResource 把外部资源引用解析为内容，是 `<link rel=stylesheet>`
-// 与 `<script src>` 的**统一接线点**。
-//
-// 注意：CSS 的 `@import` 不走这里——它由 `style.Resolver.resolveImports`
-// 处理，而该 resolver 的 StyleSheetLoader 尚未接线（`@import` 目前不加载，
-// 见 docs/MODES.md 已知边界）。
+// loadExternalResource 把外部资源引用解析为内容，是**所有外部资源**的统一
+// 接线点：`<link rel=stylesheet>`、`<script src>`、CSS `@import`
+// （Frame.importStyleSheetLoader → StyleSheetLoader → 本方法），以及
+// `<img src>`/background-image（rendering.ImageResourceLoader →
+// webViewImageLoader.Load → 本方法）。
 //
 // 顺序：
-//  1. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统），
+//  1. 缓存命中（按解析后的绝对 URL 索引，见 resource_cache.go）
+//  2. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统），
 //     先按脚本写下的原样引用问一次（宿主常用逻辑名），绝对化后再问一次
-//  2. 相对引用以文档 URL 为基准解析为绝对 URL（浏览器语义）
-//  3. data: URL（内联内容，非外部输入，两种模式都允许）
-//  4. http(s) / file://（仅 ModeBrowser；UI 库模式返回
-//     ErrExternalResourceBlocked）
-func (wv *WebView) loadExternalResource(ref string) (string, error) {
+//  3. 相对引用以**文档基准**（document.baseURI = 文档 URL + `<base href>`）
+//     解析为绝对 URL（浏览器语义）
+//  4. data: URL（内联内容，非外部输入，两种模式都允许）
+//  5. 模式门禁：http(s)/file 仅 ModeBrowser（UI 库模式返回
+//     ErrExternalResourceBlocked）——★ 门禁在缓存查询**之前**，否则别的
+//     WebView（浏览器模式）留下的缓存会让被拒绝的引用穿透模式承诺
+//  6. 取内容 + 按用途做 MIME 检查（nosniff 语义）+ 写缓存
+func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (string, error) {
 	if ref == "" {
 		return "", errors.New("webkit: empty resource reference")
 	}
+	cache := wv.resourceCacheFor()
 	if wv.resourceResolver != nil {
+		// resolver 的结果也缓存（键带前缀，与取内容通道区分）：UI 库模式下
+		// 样式重扫会重复问同一个引用，宿主不必再自己套一层缓存。
+		if r, ok := cache.get("resolver:" + ref); ok {
+			return r.content, nil
+		}
 		if content, ok := wv.resourceResolver(ref); ok {
+			cache.put("resolver:"+ref, cachedResource{content: content})
 			return content, nil
 		}
 	}
@@ -158,30 +171,89 @@ func (wv *WebView) loadExternalResource(ref string) (string, error) {
 	//   交给下面的分支必然失败（os.ReadFile("app.css") 会去读宿主进程的
 	//   当前工作目录）。无文档 URL（LoadHTML 直出内容）时不做解析，保持
 	//   既有行为（相对当前目录的文件读取）。
-	if abs := dom.ResolveURL(wv.documentURL(), ref); abs != ref {
+	if abs := dom.ResolveURL(wv.documentBaseURL(), ref); abs != ref {
+		if r, ok := cache.get("resolver:" + abs); ok {
+			return r.content, nil
+		}
 		if wv.resourceResolver != nil {
 			if content, ok := wv.resourceResolver(abs); ok {
+				cache.put("resolver:"+abs, cachedResource{content: content})
 				return content, nil
 			}
 		}
 		ref = abs
 	}
 	if strings.HasPrefix(ref, "data:") {
-		return fetchURL(ref)
+		if r, ok := cache.get(ref); ok {
+			return r.content, nil
+		}
+		res, err := fetchResource(ref)
+		if err != nil {
+			return "", err
+		}
+		if !mimeAllowed(purpose, res.contentType, res.nosniff) {
+			return "", fmt.Errorf("webkit: %q: Content-Type %q 不适用于 %s（nosniff）",
+				ref, res.contentType, purpose)
+		}
+		cache.put(ref, cachedResource{content: res.content, contentType: res.contentType})
+		return res.content, nil
 	}
 	if !wv.mode.allowsExternalURLs() {
 		return "", fmt.Errorf("%w: %q（UI 库模式请用 SetResourceResolver 提供，或改用 data: URL）",
 			ErrExternalResourceBlocked, ref)
 	}
+	// ★ 缓存查询放在模式门禁之后（见函数注释第 5 条）。
+	if r, ok := cache.get(ref); ok {
+		return r.content, nil
+	}
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
-		return fetchURL(ref)
+		res, err := fetchResource(ref)
+		if err != nil {
+			return "", err
+		}
+		if !mimeAllowed(purpose, res.contentType, res.nosniff) {
+			// 浏览器语义：nosniff 下类型不符的资源**不采用**（样式不生效、
+			// 脚本不执行），控制台给一条错误。
+			return "", fmt.Errorf("webkit: %q: Content-Type %q 不适用于 %s（X-Content-Type-Options: nosniff）",
+				ref, res.contentType, purpose)
+		}
+		if !res.noStore {
+			cache.put(ref, cachedResource{content: res.content, contentType: res.contentType})
+		}
+		return res.content, nil
 	}
 	fp := fileURLPath(ref)
 	d, err := os.ReadFile(fp)
 	if err != nil {
 		return "", fmt.Errorf("load resource %q: %w", ref, err)
 	}
+	cache.put(ref, cachedResource{content: string(d)})
 	return string(d), nil
+}
+
+// resourceCacheFor 返回本 WebView 的资源缓存（惰性创建）。
+func (wv *WebView) resourceCacheFor() *resourceCache {
+	if wv == nil {
+		return nil
+	}
+	wv.resourceCacheMu.Lock()
+	defer wv.resourceCacheMu.Unlock()
+	if wv.resourceCache == nil {
+		wv.resourceCache = newResourceCache()
+	}
+	return wv.resourceCache
+}
+
+// ClearResourceCache 清空资源内存缓存（宿主内容变化、需要强制重新取内容时用；
+// SetResourceResolver 会自动清空）。
+func (wv *WebView) ClearResourceCache() {
+	if wv == nil {
+		return
+	}
+	wv.resourceCacheMu.Lock()
+	c := wv.resourceCache
+	wv.resourceCacheMu.Unlock()
+	c.clear()
 }
 
 // fileURLPath 把 file:// 引用转成本地文件路径。

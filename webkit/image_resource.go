@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"wb-ui/dom"
+	"wb-ui/page"
 	"wb-ui/rendering"
 )
 
@@ -25,6 +26,10 @@ type webViewImageLoader struct {
 	// docURL 非空时作为解析基准（iframe 子文档：基准是子文档 URL）；
 	// 为空时用 WebView 当前文档 URL（主框架，跟随 LoadURL 与重定向）。
 	docURL string
+	// frame 是子文档（iframe）的 Frame（主文档为 nil）。有它时基准取
+	// **子文档自己的** document.baseURI——子文档里的 `<base href>` 与子文档
+	// URL 都算数（渲染线程与 DOM 同线程，可以直读文档树）。
+	frame *page.Frame
 }
 
 // 编译期断言：渲染层的图片资源接线契约。
@@ -35,13 +40,22 @@ func (l *webViewImageLoader) baseURL() string {
 	if l == nil {
 		return ""
 	}
+	// 子文档：自己的 document.baseURI（子文档 URL + 子文档的 `<base href>`）。
+	if l.frame != nil {
+		if doc := l.frame.Document(); doc != nil {
+			if b := doc.BaseURL(); b != "" {
+				return b
+			}
+		}
+	}
 	if l.docURL != "" {
 		return l.docURL
 	}
 	if l.wv == nil {
 		return ""
 	}
-	return l.wv.documentURL()
+	// 主文档：document.baseURI（文档 URL + `<base href>`）。
+	return l.wv.documentBaseURL()
 }
 
 // ResolveURL 按文档基准解析图片引用。返回空串表示「无需解析 / 无法解析」，
@@ -85,7 +99,7 @@ func (l *webViewImageLoader) Load(absURL string) ([]byte, error) {
 	if l == nil || l.wv == nil {
 		return nil, errors.New("webkit: image loader detached from webview")
 	}
-	content, err := l.wv.loadExternalResource(absURL)
+	content, err := l.wv.loadExternalResource(absURL, PurposeImage)
 	if err != nil {
 		return nil, err
 	}

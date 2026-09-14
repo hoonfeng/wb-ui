@@ -812,7 +812,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	}
 	loc.SetAccessor("href", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(locHref())
-	}), nil)
+	}), func(in *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+		// `location.href = url` 等价于 location.assign(url)（浏览器语义）。
+		// 此前只有 getter——赋值被静默丢弃，靠 href 赋值做跳转的代码全部失效。
+		requestNavigation(in, document, v.ToString(), NavPush)
+	})
 	loc.SetAccessor("protocol", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if s := locURL().Scheme; s != "" {
 			return jsc.StringValue(s + ":")
@@ -857,35 +861,32 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		return jsc.StringValue("")
 	}), nil)
 	loc.Set("assign", jsc.FunctionValue(jsc.NewNativeFunction("assign",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 1 {
+				requestNavigation(in, document, args[0].ToString(), NavPush)
+			}
 			return jsc.Undefined()
 		}, 1)))
 	loc.Set("replace", jsc.FunctionValue(jsc.NewNativeFunction("replace",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) >= 1 {
+				requestNavigation(in, document, args[0].ToString(), NavReplace)
+			}
 			return jsc.Undefined()
 		}, 1)))
 	loc.Set("reload", jsc.FunctionValue(jsc.NewNativeFunction("reload",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			requestReload(in)
 			return jsc.Undefined()
 		}, 0)))
 	g.Set("location", jsc.ObjectValue(loc))
 
 	// ─── Navigation State ───
-	type navEntry struct {
-		state map[string]interface{}
-		title string
-		url   string
-	}
-	navState := struct {
-		entries      []navEntry
-		index        int
-		popListeners []struct {
-			fn      jsc.JSValue
-			capture bool
-		}
-	}{
-		entries: []navEntry{{url: "/"}},
-	}
+	// 历史栈是**按解释器注册**的包级对象（不是本函数的局部变量）：宿主的
+	// 文档导航（LoadHTML/LoadURL 装配、location.assign 触发的导航）完成后要
+	// 回写它（见 navigation.go 的 NoteDocumentNavigation）——history.length
+	// 因此反映真实文档数、back/forward 能遍历到上一个文档。
+	navState := navStateFor(rt)
 	updateLocation := func(url string) {
 		// pushState/replaceState 改的是**文档 URL**（同源路径相对当前文档
 		// 解析），location 的 accessor 自动反映新值——不再直接写 location
@@ -903,9 +904,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			} else {
 				hist.Set("state", jsc.Null())
 			}
+		} else {
+			hist.Set("state", jsc.Null())
 		}
 		hist.Set("length", jsc.NumberValue(float64(len(navState.entries))))
 	}
+	// 装配注册：宿主导航完成后（NoteDocumentNavigation）需要回写 length/state。
+	navState.hist = hist
+	navState.refresh = updateHistState
 	dispatchPopstate := func() {
 		if len(navState.popListeners) == 0 {
 			return
@@ -938,6 +944,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 			if len(args) >= 3 {
 				urlStr = args[2].ToString()
+			}
+			// 空栈（文档还没经过宿主装配登记，例如纯 bindings 用法）：先补一条
+			// 当前文档条目，否则下面的切片会越界。
+			if len(navState.entries) == 0 {
+				navState.entries = append(navState.entries, navEntry{url: document.URL()})
+				navState.index = 0
 			}
 			navState.entries = navState.entries[:navState.index+1]
 			navState.entries = append(navState.entries, navEntry{state: state, url: urlStr})
@@ -972,42 +984,46 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			updateHistState()
 			return jsc.Undefined()
 		}, 3)))
+	// goToIndex 是 back/forward/go 的共同实现。目标是**宿主导航条目**且与当前
+	// 文档不同 → 请求宿主真的换文档（跨文档遍历；浏览器里这种遍历完成后不派发
+	// popstate，popstate 只用于同文档历史遍历——指针由宿主装配完成后的
+	// NoteDocumentNavigation(NavTraverse) 移动）。同文档条目（pushState 写的）
+	// 仍按原行为移动指针 + 派发 popstate。
+	goToIndex := func(target int) {
+		if target < 0 || target >= len(navState.entries) {
+			return
+		}
+		e := navState.entries[target]
+		if e.hostNavigated && e.url != "" && e.url != document.URL() {
+			if NavigationRequest != nil {
+				NavigationRequest(rt, e.url, NavTraverse)
+			}
+			return
+		}
+		navState.index = target
+		updateHistState()
+		if e.url != "" {
+			updateLocation(e.url)
+		}
+		dispatchPopstate()
+	}
 	hist.Set("go", jsc.FunctionValue(jsc.NewNativeFunction("go",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			delta := 0
 			if len(args) >= 1 && args[0].IsNumber() {
 				delta = int(args[0].ToNumber())
 			}
-			newIdx := navState.index + delta
-			if newIdx < 0 || newIdx >= len(navState.entries) {
-				return jsc.Undefined()
-			}
-			navState.index = newIdx
-			updateHistState()
-			updateLocation(navState.entries[navState.index].url)
-			dispatchPopstate()
+			goToIndex(navState.index + delta)
 			return jsc.Undefined()
 		}, 1)))
 	hist.Set("back", jsc.FunctionValue(jsc.NewNativeFunction("back",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			if navState.index <= 0 {
-				return jsc.Undefined()
-			}
-			navState.index--
-			updateHistState()
-			updateLocation(navState.entries[navState.index].url)
-			dispatchPopstate()
+			goToIndex(navState.index - 1)
 			return jsc.Undefined()
 		}, 0)))
 	hist.Set("forward", jsc.FunctionValue(jsc.NewNativeFunction("forward",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			if navState.index >= len(navState.entries)-1 {
-				return jsc.Undefined()
-			}
-			navState.index++
-			updateHistState()
-			updateLocation(navState.entries[navState.index].url)
-			dispatchPopstate()
+			goToIndex(navState.index + 1)
 			return jsc.Undefined()
 		}, 0)))
 	updateHistState()
@@ -2820,6 +2836,12 @@ obj.SetInternal(doc)
 	// 此前传的是注册时的值快照（doc.URL() 在装配时求值）→ 恒为空串。
 	obj.SetAccessor("URL", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(doc.URL())
+	}), nil)
+	// document.baseURI：**所有相对引用的解析基准**（浏览器语义）——存在
+	// `<base href>` 时是按其解析后的绝对 URL，否则等于 document.URL。
+	// 动态读：脚本随时可以插入/修改/删除 `<base>`，浏览器里立即生效。
+	obj.SetAccessor("baseURI", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(doc.BaseURL())
 	}), nil)
 	// 全屏 API（HTML §4.11.6）：状态由 Element.requestFullscreen / 本方法维护，
 	// CSS 的 :fullscreen 与 fullscreenchange 事件消费它。是否把宿主窗口真的切到

@@ -349,6 +349,12 @@ type WebView struct {
 	//
 	// 读写加锁：LoadURL 在宿主线程写，fetch/XHR 在解释器线程读。
 	currentURL   string
+	// baseHref 是主文档 `<base href>` 的原始值缓存。文档基准（document.baseURI）
+	// = ResolveURL(currentURL, baseHref)（见 documentBaseURL）。为什么缓存而不是
+	// 每次读 Document.BaseURL()：fetch/XHR 在**解释器线程**解析相对 URL，而
+	// 遍历 DOM 树找 `<base>` 是宿主线程的活动（跨线程读同一棵树会有数据竞争）。
+	// 宿主线程在装配完成与 DOM 变更回调里刷新（refreshBaseHref）。
+	baseHref     string
 	currentURLMu sync.RWMutex
 	// subframeJS 为每个 iframe 子 Frame 维护独立的 JS 全局环境（浏览器
 	// iframe 语义：子文档有自己的 window/document，与父文档互不干扰）。
@@ -389,6 +395,40 @@ type WebView struct {
 	// resourceResolver 是宿主资源解析器（可选）：两种模式都先经它，
 	// UI 库模式下是外部资源引用的唯一通道。
 	resourceResolver ResourceResolver
+	// resourceCache 是本 WebView 的资源内存缓存（惰性创建，见
+	// resource_cache.go）：浏览器 memory cache 语义——同一 URL 只取一次。
+	resourceCacheMu sync.Mutex
+	resourceCache   *resourceCache
+
+	// imageLoadedOff 是「图片异步加载完成」全局监听器的注销函数
+	// （NewWebViewWithMode 注册、Destroy 注销）。不注销会让渲染层的全局
+	// 监听器集合永久持有已销毁的 WebView。
+	imageLoadedOff func()
+	// resourceLoadedMu 保护 onResourceLoaded（回调在取字节的 goroutine 里
+	// 触发，宿主可能在任意线程设置）。
+	resourceLoadedMu sync.Mutex
+	// onResourceLoaded 是宿主可选的「异步资源加载完成」回调（见
+	// SetOnResourceLoaded）：引擎内部已自动置脏重绘，本回调供宿主做日志/
+	// 统计/自定义刷新。
+	onResourceLoaded func(url string)
+
+	// navMu 保护导航状态（页面脚本在解释器线程发起导航，宿主线程读写）。
+	navMu sync.Mutex
+	// pendingNavKind 是本次导航的种类（location.replace/reload/history 遍历
+	// 与普通导航在历史栈上行为不同），由 loadHTMLFrom 装配完成后消费一次。
+	pendingNavKind bindings.NavKind
+	pendingNavSet  bool
+	// reloadHandler 是 location.reload() 的宿主实现（见 SetReloadHandler）：
+	// 没有来源 URL 的文档（LoadHTML 直出内容）引擎无处重新取内容。
+	reloadHandler func() bool
+	// onNavigationBlocked 是「导航被模式门禁拒绝」的回调（见
+	// SetOnNavigationBlocked）。
+	onNavigationBlocked func(url string)
+	// assembling 标记「正在装配文档」：装配期间页面脚本发起的导航（location
+	// 赋值等）排队到装配结束再执行（见 navigateTo / finishAssembly），
+	// queuedNav 保存该请求。
+	assembling bool
+	queuedNav  *queuedNavigation
 }
 
 // FormFocus 返回引擎表单交互服务（首次调用创建；Destroy 后返回 nil）。
@@ -536,13 +576,23 @@ func NewWebViewWithMode(mode Mode) *WebView {
 		//   ResourceResolver（两种模式一致）→ data: URL → 仅 Browser
 		//   模式下才允许 http(s)/file（UI 库模式返回
 		//   ErrExternalResourceBlocked，不做隐式外部访问）。
-		mf.StyleSheetLoader = func(href string) (string, error) { return wv.loadExternalResource(href) }
-		mf.ScriptLoader = func(src string) (string, error) { return wv.loadExternalResource(src) }
+		mf.StyleSheetLoader = func(href string) (string, error) {
+			return wv.loadExternalResource(href, PurposeStylesheet)
+		}
+		mf.ScriptLoader = func(src string) (string, error) {
+			return wv.loadExternalResource(src, PurposeScript)
+		}
 		// ★ 图片资源接线（<img src>/background-image/mask-image/SVG <image>）：
 		//   同一策略链——宿主 ResourceResolver 优先、相对引用按文档 URL
 		//   解析、UI 库模式拒绝 http(s)/file（渲染层不再自己 httpGet）。
 		mf.ImageLoader = &webViewImageLoader{wv: wv}
 	}
+	// ★ 异步图片加载完成 → 自动置脏重绘（浏览器语义：资源到位即
+	//   invalidate）。按需渲染的宿主（app.Host 的空闲帧跳过 Paint）若不等
+	//   这个通知，后台 goroutine 取回的图片**永远不会画出来**——此前
+	//   rendering.SetBackgroundImageLoadedCallback 只有测试在用，主链路
+	//   没有人接线。
+	wv.imageLoadedOff = rendering.AddBackgroundImageLoadedListener(wv.onAsyncImageLoaded)
 	// ★ iframe 子文档：渲染侧（paint/hit-test）经 IFrameLookup 取回
 	// iframe 元素的子 Frame 渲染视图（避免 rendering→page 包循环依赖）。
 	rendering.IFrameLookup = func(el *dom.Element) rendering.IFrameSubdocument {
@@ -554,6 +604,9 @@ func NewWebViewWithMode(mode Mode) *WebView {
 	}
 	// ★ iframe src 变化（JS 侧 el.src = x / setAttribute）→ 重载子文档。
 	installBridgeDispatch()
+	// ★ 页面脚本发起的导航（location.assign/replace/reload、history 遍历）→
+	//   本 WebView 的 LoadURL（见 navigation.go）。
+	installNavigationDispatch()
 	wvBridgeOf(wv).iframeSrcChanged = wv.handleIFrameSrcChanged
 	// ★ iframe 滚动容器查找：给定子文档 Document 反查承载它的子 Frame。
 	rendering.IFrameContaining = func(doc *dom.Document) rendering.IFrameSubdocument {
@@ -672,11 +725,32 @@ func (wv *WebView) LoadHTML(src string) error {
 	return wv.loadHTMLFrom(src, "")
 }
 
+// LoadHTMLWithBaseURL 同 LoadHTML，但给文档一个**来源 URL**：它成为
+// document.URL / location.href，并作为相对引用的解析基准（document.baseURI）。
+//
+// 用途：宿主自己提供内容（内嵌页面、UI 库模式下的模板），但页面里写的是相对
+// 引用，需要一个基准才解析得出来（LoadHTML 的 about:blank 没有基准）。浏览器
+// 里等价于文档里写 `<base href>`——两者可以同时用：`<base href>` 的值会以这个
+// URL 为基准再解析一次（document.baseURI 语义）。
+//
+// 与 LoadURL 的区别：**不取内容、不联网**，只给文档一个基准，因此 UI 库模式
+// 也允许（外部资源仍然只经宿主 ResourceResolver 或 data: URL）。
+func (wv *WebView) LoadHTMLWithBaseURL(src, baseURL string) error {
+	return wv.loadHTMLFrom(src, baseURL)
+}
+
 // loadHTMLFrom 是 LoadHTML 的实现体。docURL 是文档的来源 URL（LoadURL
 // 传真实 URL，LoadHTML 传 ""），它决定 location.href / document.URL 以及
 // 所有相对引用（<link>/<script src>/fetch/XHR/iframe src）的解析基准。
 func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
+	// ★ 装配期间标记 + 结束处理：页面脚本里发起的导航（location 赋值、
+	// history 遍历）排队到装配结束后执行——浏览器里导航是异步的，不会在
+	// 当前脚本执行中途替换文档/渲染树。
+	wv.navMu.Lock()
+	wv.assembling = true
+	wv.navMu.Unlock()
+	defer wv.finishAssembly()
 	wv.setDocumentURL(docURL)
 	// 模式在此刻生效并锁定（注入阶段按模式接线，见 mode.go）。
 	wv.modeLocked = true
@@ -711,6 +785,14 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		}
 	}
 
+	// ★ 文档 URL 必须在**文档装配之前**就位（见 page.Frame.SetPendingDocumentURL）：
+	//   `<link href>`/`<script src>` 的加载发生在装配过程中，需要文档基准才能
+	//   解析相对引用。事后再 doc.SetURL 已经太晚——样式与脚本已按空基准请求
+	//   过（相对引用落到宿主进程工作目录）。
+	//   注：host（LoadURL）传的是**重定向后的最终 URL**，见本函数注释。
+	if fr := wv.mainFrame.Frame(); fr != nil {
+		fr.SetPendingDocumentURL(docURL)
+	}
 	if err := wv.mainFrame.LoadHTML(src); err != nil {
 		return err
 	}
@@ -719,8 +801,13 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	// 的是提供器而不是快照：LoadURL 再次导航后立刻按新文档 URL 解析。
 	if doc := wv.mainFrame.Document(); doc != nil {
 		doc.SetURL(docURL)
+		// 文档基准（document.baseURI）：`<base href>` 在解析时就已经在文档里，
+		// 这里刷新一次缓存（fetch/XHR 的解释器线程只读缓存）。
+		wv.refreshBaseHref()
 		if wv.jsInterpreter != nil {
-			page.SetDocumentBaseProvider(wv.jsInterpreter, func() string { return wv.documentURL() })
+			// ★ 相对引用基准 = document.baseURI（含 `<base href>`）：loadExternalResource
+			//   （link/script/img/@import）与 fetch/XHR 共用同一个基准定义。
+			page.SetDocumentBaseProvider(wv.jsInterpreter, func() string { return wv.documentBaseURL() })
 		}
 	}
 	// DOM bindings MUST be registered BEFORE executing page scripts so that
@@ -788,6 +875,9 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		// 无需每次渲染前强制 RebuildRenderTree。
 		if doc := wv.mainFrame.Document(); doc != nil {
 			doc.SetTreeChangeCallback(func(node dom.Node) {
+				// `<base>` 的插入/移除会改变文档基准（浏览器里立即生效）——
+				// 结构变更回调里重新缓存一次。
+				wv.refreshBaseHref()
 				fr := wv.mainFrame.Frame()
 				if fr == nil {
 					return
@@ -803,6 +893,12 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		}
 		// DOM bindings + 几何桥已注入，EvalJS 无需重复（见 EvalJS 兜底分支）。
 		wv.domBindingsInjected = true
+		// ★ 文档级导航 → window.history 条目（必须在 RegisterDOMBindings 之后：
+		//   历史栈是 DOM bindings 装配时创建的）。浏览器语义：文档导航追加条目、
+		//   history.length 随之增长；location.replace/reload 覆盖当前条目；
+		//   history 遍历只移动指针。此前宿主的 LoadHTML/LoadURL 完全不进历史栈
+		//   → history.length 恒为 1、back() 永远无操作。
+		bindings.NoteDocumentNavigation(wv.jsInterpreter, docURL, wv.takeNavKind())
 		// Set up callback for inline style changes (el.style.xxx = ...).
 		// ★ 增量优先：纯样式变更（拖拽 sidebar 宽度、range 拖动等）只更新
 		//   目标元素的 ComputedStyle + SetNeedsLayout（relayout 不重建树）。
@@ -894,7 +990,10 @@ func (wv *WebView) loadIFrameDocuments() {
 		if el, ok := n.(*dom.Element); ok && el.LocalName() == "iframe" {
 			src := el.GetAttribute("src")
 			if src != "" && page.IFrameFrame(el) == nil {
-				base := wv.documentURL()
+				// 基准是主文档的 document.baseURI（含 `<base href>`），不是裸的
+				// 文档 URL——`<base href="/app/">` 下 `src="page.html"` 指向
+				// /app/page.html，与浏览器一致。
+				base := wv.documentBaseURL()
 				abs := resolveIframeSrc(src, base)
 				if abs == "" {
 					page.Logf("IFrame", "skip unresolvable src=%q base=%q", src, base)
@@ -922,26 +1021,43 @@ func (wv *WebView) loadSubframe(el *dom.Element, absSrc string) {
 	// 默认 300x150（iframe 替换元素默认尺寸），EnsureLayout 后由
 	// syncIFrameSizes 校正。
 	f.View().SetSize(300, 150)
+	// subframeBase 返回子文档的解析基准：优先子文档自己的 document.baseURI
+	// （子文档 URL + 子文档里的 `<base href>`），文档还没建立时回退 iframe src。
+	// 子文档的 `<link>`/`<script src>`/`<img>` 都按它解析（浏览器语义：iframe
+	// 内文档是一个独立文档，基准是它自己的 baseURI）。
+	subframeBase := func() string {
+		if sdoc := f.Document(); sdoc != nil {
+			if b := sdoc.BaseURL(); b != "" {
+				return b
+			}
+		}
+		return absSrc
+	}
 	// 子文档的 <script> 经独立 JS 全局环境执行（见 makeSubframeScriptEngine）。
 	f.ScriptEngine = wv.makeSubframeScriptEngine(f)
 	f.ScriptLoader = func(src string) (string, error) {
-		abs := resolveIframeSrc(src, absSrc)
+		abs := resolveIframeSrc(src, subframeBase())
 		if abs == "" {
 			abs = src
 		}
 		// 子框架资源与主文档同策略（含宿主 ResourceResolver）。
-		return wv.loadExternalResource(abs)
+		return wv.loadExternalResource(abs, PurposeScript)
 	}
 	f.StyleSheetLoader = func(href string) (string, error) {
-		abs := resolveIframeSrc(href, absSrc)
+		abs := resolveIframeSrc(href, subframeBase())
 		if abs == "" {
 			abs = href
 		}
-		return wv.loadExternalResource(abs)
+		return wv.loadExternalResource(abs, PurposeStylesheet)
 	}
-	// 子文档图片的相对引用以**子文档 URL** 为基准（不是主文档）：
-	// iframe 内 `<img src="logo.png">` 应取子文档同级，而非主文档同级。
-	f.ImageLoader = &webViewImageLoader{wv: wv, docURL: absSrc}
+	// 子文档图片的相对引用以**子文档自己的基准**（子文档 URL + 子文档里的
+	// `<base href>`）解析，不是主文档：iframe 内 `<img src="logo.png">` 应取
+	// 子文档同级。frame 让 loader 能读到子文档的 document.baseURI。
+	f.ImageLoader = &webViewImageLoader{wv: wv, docURL: absSrc, frame: f}
+	// 子文档 URL = iframe src 的绝对地址（浏览器里 iframe 内文档的
+	// document.URL/location.href 就是它），必须在装配前就位——子文档的
+	// `<link>`/`<script src>`/`<img>` 都要按它解析相对引用。
+	f.SetPendingDocumentURL(absSrc)
 	if ferr := f.LoadHTML(data); ferr != nil {
 		page.Logf("IFrame", "LoadHTML %q: %v", absSrc, ferr)
 		return
@@ -1046,6 +1162,44 @@ func (wv *WebView) setDocumentURL(u string) {
 	wv.currentURLMu.Unlock()
 }
 
+// documentBaseURL 返回主文档的**解析基准**（浏览器的 document.baseURI）：
+// 文档 URL 存在 `<base href>` 时按其解析，否则就是文档 URL 本身。
+//
+// 页面里所有相对引用都用它当基准——`<link href>`、`<script src>`、
+// `<img src>`/background-image、CSS `@import`、iframe src、fetch/XHR。
+// `<base href="/assets/">` 是真实站点把静态资源挪到子目录的常规手段，此前
+// 引擎完全不认它（相对引用一律按文档 URL 解析 → 全部 404）。
+//
+// 纯字符串（不读 DOM），因此可以在解释器线程安全调用。
+func (wv *WebView) documentBaseURL() string {
+	if wv == nil {
+		return ""
+	}
+	wv.currentURLMu.RLock()
+	u, href := wv.currentURL, wv.baseHref
+	wv.currentURLMu.RUnlock()
+	if href == "" {
+		return u
+	}
+	return dom.ResolveURL(u, href)
+}
+
+// refreshBaseHref 重新读 `<base href>` 并缓存（宿主线程调用：装配完成时、
+// DOM 结构变更回调里）。解释器线程只读缓存值（见 documentBaseURL）。
+func (wv *WebView) refreshBaseHref() {
+	if wv == nil || wv.mainFrame == nil {
+		return
+	}
+	doc := wv.mainFrame.Document()
+	if doc == nil {
+		return
+	}
+	h := doc.BaseHref()
+	wv.currentURLMu.Lock()
+	wv.baseHref = h
+	wv.currentURLMu.Unlock()
+}
+
 func (wv *WebView) LoadURL(url string) error {
 	// ★ 模式接线（4/4）：导航是浏览器能力。UI 库模式拒绝换源——宿主用
 	//   LoadHTML 给出初始文档，之后不再导航（避免页面被替换后 Go 侧
@@ -1090,6 +1244,13 @@ func (wv *WebView) Destroy() {
 	// 1b. 文档基地址提供器（page 的全局登记表，闭包捕获本 WebView）——
 	// 不摘除会让全局表永久持有已销毁的 WebView。
 	page.ClearDocumentBaseProvider(wv.jsInterpreter)
+	// 1c. 图片加载完成监听器（rendering 的全局集合同样捕获本 WebView）。
+	if wv.imageLoadedOff != nil {
+		wv.imageLoadedOff()
+		wv.imageLoadedOff = nil
+	}
+	// 1d. 导航历史栈（bindings 的全局表持有 JS 值/闭包）。
+	bindings.ResetNavigationStates(wv.jsInterpreter)
 	// 2. iframe 子文档：注销注册表（iframeRegistry 持子 Frame 与元素）
 	if wv.subframeJS != nil {
 		for f := range wv.subframeJS {
@@ -1125,6 +1286,47 @@ func (wv *WebView) Destroy() {
 	wv.mainFrame = nil
 	wv.jsInterpreter = nil
 	wv.jsLogger = nil
+}
+
+// SetOnResourceLoaded 注册「异步资源（图片）取回完成」回调，传 nil 清除。
+//
+// 浏览器语义对照：资源到位即触发重绘，本引擎因此**不需要**宿主做任何事
+// 就会重画（onAsyncImageLoaded 内部置脏 + 全量重绘）。本回调只供宿主侧
+// 观察：日志、统计、把新资源同步给虚拟摄像头等。回调在取字节的 goroutine
+// 里执行——不要在回调里直接操作 DOM/渲染树，应转投宿主自己的主循环。
+func (wv *WebView) SetOnResourceLoaded(fn func(url string)) {
+	if wv == nil {
+		return
+	}
+	wv.resourceLoadedMu.Lock()
+	wv.onResourceLoaded = fn
+	wv.resourceLoadedMu.Unlock()
+}
+
+// onAsyncImageLoaded 是渲染层「图片加载完成」通知的接收端（成功与失败都
+// 会触发）：标记渲染树脏 + 全量重绘，让按需渲染的宿主（app.Host 空闲帧跳过
+// Paint）在下一帧画出新图片。图片可能改变布局（`<img>` 没有宽高属性时布局
+// 依赖图片固有尺寸），因此一并请求重新布局——Frame.MarkRenderTreeDirty
+// 内部有 cooldown 合并连续变更。
+func (wv *WebView) onAsyncImageLoaded(url string) {
+	if wv == nil || wv.destroyed {
+		return
+	}
+	if mf := wv.mainFrame; mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.MarkRenderTreeDirty()
+			fr.SetNeedsLayout(true)
+		}
+		if rv := mf.RenderView(); rv != nil {
+			rv.MarkAllDirty()
+		}
+	}
+	wv.resourceLoadedMu.Lock()
+	fn := wv.onResourceLoaded
+	wv.resourceLoadedMu.Unlock()
+	if fn != nil {
+		fn(url)
+	}
 }
 
 func (wv *WebView) Render() ([]byte, error) {

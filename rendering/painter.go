@@ -276,49 +276,26 @@ func paintOpacity(o RenderObject, info *PaintInfo) float64 {
 // (background clips to the border-box by default). Background images are not supported in
 // this port. Painting is skipped when the background is fully transparent or the box is
 // outside the dirty rect.
-func PaintBackground(box *RenderBox, info *PaintInfo) {
-	if box == nil || info == nil || info.canvas == nil {
-		return
-	}
-	st := box.Style()
-	if st == nil {
-		return
-	}
-
-	// ★ 滚动容器自身背景固定于视口：paintLayerContents 对容器内容整体
-	// translate(-scroll) 后，背景若用绝对坐标绘制会随内容一起滚动——
-	// 背景滚出容器视口，文字继续滚动到背景区域外显示（"文字在背景外"）。
-	// CSS background-attachment:scroll（默认）背景相对元素固定、不随内容
-	// 滚动。这里补偿 box 自身的 scroll offset：祖先滚动（box 整体随祖先
-	// 内容移动）保留，只有该 box 自身的内容滚动被抵消，背景钉回视口。
-	ox, oy := 0.0, 0.0
-	if info.rv != nil {
-		ox, oy = info.rv.BoxScrollOffset(box)
-	}
-	// ★ intersects 检查用 sticky 偏移后的位置：sticky 元素绘制坐标 = 布局
-	// 坐标 + 页面滚动 translate + sticky pin translate（canvas 已应用），
-	// 但 dirty-rect 检查用的是未 translate 的布局坐标。pin 后元素被拉进
-	// 视口，静态 rect 却在视口外 → 误 cull。这里仅修正检查矩形，绘制
-	// 仍用 box.X()/box.Y()（canvas translate 已在绘制路径中）。
-	checkRect := rectFromLayout(box.X()+ox+info.stickyDx, box.Y()+oy+info.stickyDy, box.Width(), box.Height())
-	if !info.intersects(checkRect) {
-		return
-	}
-	rect := rectFromLayout(box.X()+ox, box.Y()+oy, box.Width(), box.Height())
-	// Paint box-shadow before the background (shadows sit behind the element).
-	// Paint shadows even when the background is transparent. Inset shadows are
-	// excluded here — they paint ABOVE the background (see below).
-	if st.BoxShadow != "" && st.BoxShadow != "none" {
-		r := lengthValue(st.BorderRadius)
-		shadows := parseShadowList(st.BoxShadow)
-		op := paintOpacity(box, info)
-		paintBoxShadow(info.canvas, box.X()+ox, box.Y()+oy, box.Width(), box.Height(), r, shadows, op, false)
-	}
+// paintBackgroundFill 绘制背景**填充**：background-image 层（真实图片 / SVG /
+// 渐变）与 background-color（分层顺序：色在最下、渐变自下而上、第一层在最上）。
+// 不画边框与阴影。
+//
+// 返回 true 表示「调用方应跳过 inset 阴影」——保持既有语义：图片/渐变分支
+// 原本直接 return，透明纯色也 return，只有真正画了纯色才继续画 inset 阴影。
+//
+// 为什么抽成函数：背景填充有两个调用方——元素自身（PaintBackground）与
+// 「html/body 背景传播到画布」（CSS-BACKGROUNDS-3 §2.11.2，见
+// renderpipeline.go 的 paintViewportBackground）。两处必须画出**完全一致**的
+// 背景（渐变方向、background-size/position、平铺），各写一份必然漂移。
+// rect 因此由调用方给出：元素自身盒，或传播时的整个 viewport 矩形；opacity
+// 同理（元素路径传 paintOpacity(box, info)，传播路径传 1——传播到画布的背景
+// 不再是元素自身绘制效果的一部分）。
+func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInfo, rect Rect, opacity float64) bool {
 	// background-image: url(...) — decode and draw with size/position.
 	if url, ok := parseBackgroundURL(st.BackgroundImage); ok {
 		if img := loadBackgroundImage(url, ""); img != nil && img.Loaded() {
-			// Raster image: dest math uses the intrinsic size for cover/
-			// contain aspect ratio.
+			// Raster image: dest math uses the intrinsic size for
+			// cover/contain aspect ratio.
 			dx, dy, dw, dh := computeBackgroundDest(rect.X, rect.Y, rect.Width, rect.Height,
 				st.BackgroundSize, st.BackgroundPosition, img.Width(), img.Height())
 			paintBackgroundImageTiled(info.canvas, img, rect.X, rect.Y, rect.Width, rect.Height,
@@ -330,7 +307,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 				st.BackgroundSize, st.BackgroundPosition)
 			paintSVGScaled(info.canvas, svg, dx, dy, dw, dh)
 		}
-		return
+		return true
 	}
 
 	// Paint gradient layers (background-image). Multiple comma-separated
@@ -370,7 +347,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		}
 		// Color beneath the layers.
 		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
-			bgc = ApplyOpacityToColor(bgc, paintOpacity(box, info))
+			bgc = ApplyOpacityToColor(bgc, opacity)
 			if r > 0 {
 				info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bgc)
 			} else {
@@ -384,7 +361,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		for i := len(bgLayers) - 1; i >= 0; i-- {
 			drawGradientLayer(i)
 		}
-		return
+		return true
 	}
 	bg := toGraphicsColor(st.BackgroundColor)
 	// ★ 动画背景色（@keyframes background-color）：光标闪烁动画写入
@@ -400,10 +377,17 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	if debugenv.Enabled("WB_ANIM_DEBUG") && st.AnimatedBackgroundActive {
 		log.Printf("[anim/paint] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) cls=%q",
 			bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height,
-			func() string { if box.Node() != nil { if el, ok := box.Node().(*dom.Element); ok { return el.ClassName() } }; return "" }())
+			func() string {
+				if box.Node() != nil {
+					if el, ok := box.Node().(*dom.Element); ok {
+						return el.ClassName()
+					}
+				}
+				return ""
+			}())
 	}
 	if bg.A == 0 {
-		return
+		return true
 	}
 	// ★ viewport 绘制诊断：xterm-viewport 黑色背景是否实际绘制
 	// （黑色被 paintDebugEnabled 的颜色过滤隐藏，无法从日志确认）。
@@ -411,7 +395,7 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 		if box.Node() != nil {
 			if el, ok := box.Node().(*dom.Element); ok && el.ClassName() == "xterm-viewport" {
 				log.Printf("[viewport] bg=(%d,%d,%d,%d) rect=(%.0f,%.0f %.0fx%.0f) op=%.2f intersects=%v",
-					bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height, paintOpacity(box, info), info.intersects(rectFromLayout(box.X(), box.Y(), box.Width(), box.Height())))
+					bg.R, bg.G, bg.B, bg.A, rect.X, rect.Y, rect.Width, rect.Height, opacity, info.intersects(rect))
 			}
 		}
 	}
@@ -438,9 +422,9 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 				func() bool { _, h := info.canvas.ClipRect(); return h }())
 		}
 	}
-	bg = ApplyOpacityToColor(bg, paintOpacity(box, info))
+	bg = ApplyOpacityToColor(bg, opacity)
 	if bg.A == 0 {
-		return
+		return true
 	}
 	if r := lengthValue(st.BorderRadius); r > 0 {
 		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r, bg)
@@ -464,6 +448,65 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	}
 	if el, ok := box.Node().(*dom.Element); ok {
 		RecordComponentPaint(el, rect.X, rect.Y, rect.Width, rect.Height, bg, graphics.Color{}, false)
+	}
+	return false
+}
+
+func PaintBackground(box *RenderBox, info *PaintInfo) {
+	if box == nil || info == nil || info.canvas == nil {
+		return
+	}
+	st := box.Style()
+	if st == nil {
+		return
+	}
+
+	// ★ 滚动容器自身背景固定于视口：paintLayerContents 对容器内容整体
+	// translate(-scroll) 后，背景若用绝对坐标绘制会随内容一起滚动——
+	// 背景滚出容器视口，文字继续滚动到背景区域外显示（"文字在背景外"）。
+	// CSS background-attachment:scroll（默认）背景相对元素固定、不随内容
+	// 滚动。这里补偿 box 自身的 scroll offset：祖先滚动（box 整体随祖先
+	// 内容移动）保留，只有该 box 自身的内容滚动被抵消，背景钉回视口。
+	ox, oy := 0.0, 0.0
+	if info.rv != nil {
+		ox, oy = info.rv.BoxScrollOffset(box)
+	}
+	// ★ intersects 检查用 sticky 偏移后的位置：sticky 元素绘制坐标 = 布局
+	// 坐标 + 页面滚动 translate + sticky pin translate（canvas 已应用），
+	// 但 dirty-rect 检查用的是未 translate 的布局坐标。pin 后元素被拉进
+	// 视口，静态 rect 却在视口外 → 误 cull。这里仅修正检查矩形，绘制
+	// 仍用 box.X()/box.Y()（canvas translate 已在绘制路径中）。
+	checkRect := rectFromLayout(box.X()+ox+info.stickyDx, box.Y()+oy+info.stickyDy, box.Width(), box.Height())
+	if !info.intersects(checkRect) {
+		return
+	}
+	rect := rectFromLayout(box.X()+ox, box.Y()+oy, box.Width(), box.Height())
+	// Paint box-shadow before the background (shadows sit behind the element).
+	// Paint shadows even when the background is transparent. Inset shadows are
+	// excluded here — they paint ABOVE the background (see below).
+	if st.BoxShadow != "" && st.BoxShadow != "none" {
+		r := lengthValue(st.BorderRadius)
+		shadows := parseShadowList(st.BoxShadow)
+		op := paintOpacity(box, info)
+		paintBoxShadow(info.canvas, box.X()+ox, box.Y()+oy, box.Width(), box.Height(), r, shadows, op, false)
+	}
+	// ★ 背景已传播到画布时不在元素自身上重复绘制（CSS-BACKGROUNDS-3
+	//   §2.11.2：html/body 的背景传播到画布后，画的就是画布上那一份）。
+	//   阴影仍然画——它属于元素自身的绘制效果，与背景传播无关。
+	if info.skipBackgroundBox == box {
+		if st.BoxShadow != "" && st.BoxShadow != "none" {
+			shadows := parseShadowList(st.BoxShadow)
+			op := paintOpacity(box, info)
+			paintBoxShadow(info.canvas, box.X()+ox, box.Y()+oy, box.Width(), box.Height(), lengthValue(st.BorderRadius), shadows, op, true)
+		}
+		return
+	}
+	// ★ 背景填充（图片 / 渐变 / 纯色）统一走 paintBackgroundFill：元素自身
+	//   路径与「html/body 背景传播到画布」路径（renderpipeline.go 的
+	//   paintViewportBackground）共用同一份实现——两处要画的背景必须逐像素
+	//   一致（渐变方向、background-size/position、平铺），各写一份必然漂移。
+	if skip := paintBackgroundFill(box, st, info, rect, paintOpacity(box, info)); skip {
+		return
 	}
 	// Inset shadows paint ABOVE the background (below the border): inset 6px
 	// left shadow casts onto the element's own background.

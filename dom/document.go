@@ -299,6 +299,60 @@ func (d *Document) URL() string { return d.url }
 // SetURL sets the document URL.
 func (d *Document) SetURL(u string) { d.url = u }
 
+// --- 文档基准：`<base href>` / document.baseURI ---
+
+// findBaseElement 返回文档里**第一个带 href 的 `<base>` 元素**。HTML 规范：
+// document 的基准只由第一个带 href 的 base 元素决定，后续 base 的 href 被忽略。
+//
+// 惰性扫描（不缓存）：`<base>` 随时可能被脚本插入/删除/改属性，浏览器里立即
+// 生效；缓存就需要一整套失效钩子。而扫描成本极低——base 在 `<head>` 里，
+// 通常第一层子节点就命中，没有 base 时是一次简单的树遍历（无分配，命中即
+// 短路）。
+func (d *Document) findBaseElement() *Element {
+	var found *Element
+	var walk func(n Node)
+	walk = func(n Node) {
+		if found != nil {
+			return
+		}
+		if el, ok := n.(*Element); ok {
+			if el.LocalName() == "base" && strings.TrimSpace(el.GetAttribute("href")) != "" {
+				found = el
+				return
+			}
+		}
+		for c := n.FirstChild(); c != nil && found == nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(d)
+	return found
+}
+
+// BaseHref 返回 `<base href>` 的原始值（未解析）；没有时返回 ""。
+func (d *Document) BaseHref() string {
+	if el := d.findBaseElement(); el != nil {
+		return strings.TrimSpace(el.GetAttribute("href"))
+	}
+	return ""
+}
+
+// BaseURL 返回文档基准（浏览器的 document.baseURI）：存在 `<base href>` 时是
+// 按文档 URL 解析后的绝对 URL，否则就是文档 URL 本身。
+//
+// 这是页面里**所有**相对引用的解析基准——`<link href>`、`<script src>`、
+// `<img src>`、background-image、CSS `@import`、fetch/XHR、iframe src。
+// `<base href="/assets/">` 是真实站点把静态资源挪到子目录的常规手段，此前
+// 引擎完全不认它（相对引用一律按文档 URL 解析 → 全部 404）。
+func (d *Document) BaseURL() string {
+	u := d.url
+	href := d.BaseHref()
+	if href == "" {
+		return u
+	}
+	return ResolveURL(u, href)
+}
+
 // --- Element Factory (specialized element registration) ---
 
 // ElementConstructor is a function that creates a specialized *Element for the

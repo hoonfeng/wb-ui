@@ -61,6 +61,9 @@ var elemAccessorProps = map[string]bool{
 	"selectionStart": true, "selectionEnd": true,
 	"multiple": true, "selectedIndex": true, "options": true, "selectedOptions": true, "selected": true,
 	"tagName": true, "nodeName": true, "nodeType": true, "shadowRoot": true, "nodeValue": true,
+	// baseURI：文档基准（document.baseURI）随时可能因导航或 <base href> 变化，
+	// 活值——适配器层缓存住就会读到过期 URL。
+	"baseURI": true,
 	"id": true, "className": true, "title": true, "src": true,
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
 	"onclick": true,
@@ -232,6 +235,7 @@ var (
 		"parentNode", "parentElement", "nextSibling", "previousSibling",
 		"firstChild", "lastChild", "childElementCount", "children", "childNodes",
 		"ownerDocument",
+		"baseURI",
 		"scrollTop", "scrollLeft", "scrollHeight", "scrollWidth",
 		"clientHeight", "clientWidth", "offsetHeight", "offsetWidth", "offsetTop", "offsetLeft",
 		"onclick",
@@ -565,6 +569,17 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			return getter(func(in *jsc.Interpreter) jsc.JSValue {
 				return in.GlobalObject().GetOrZero("document")
 			})(rt, jsc.JSValue{})
+		}}, true
+
+	// node.baseURI：所属文档的基准 URL（浏览器：Node.baseURI ===
+	// document.baseURI，除非元素自己带了 xml:base）。活值：导航后文档 URL、
+	// 脚本插入/修改 `<base href>` 都会立刻改变它。
+	case "baseURI":
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			if d := el.OwnerDocument(); d != nil {
+				return jsc.StringValue(d.BaseURL())
+			}
+			return jsc.StringValue("")
 		}}, true
 
 	// ── 滚动 / 尺寸 CSSOM 属性（真实几何，经渲染树桥）──

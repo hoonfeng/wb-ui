@@ -527,6 +527,19 @@ func (o *JSObject) SetInternal(v interface{}) {
 	o.obj.Internal = v
 }
 
+// Delete 删除对象的一个自有属性（等价 JS 的 `delete obj.key`）。属性不存在
+// 也算成功（JS 语义）；属性不可配置时返回 false。
+//
+// 用途：bindings 隐藏浏览器全局（HideGlobal）——把 `Worker`/`WebSocket` 从
+// global 上**真正删掉**，`"Worker" in window` 因此是 false。置 undefined 只能
+// 让 `typeof` 判定正确，`in` 仍为 true，靠 `in` 做 feature detect 的库会误判。
+func (o *JSObject) Delete(key string) bool {
+	if o == nil || o.obj == nil || key == "" {
+		return false
+	}
+	return o.obj.Delete(key) == nil
+}
+
 func (o *JSObject) Set(key string, val JSValue) {
 	if o == nil || o.obj == nil {
 		return

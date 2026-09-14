@@ -7,9 +7,10 @@
 // （typeof Worker === "undefined"）必须得到正确结论，否则会在运行时
 // 走到不存在的实现上。
 //
-// 实现方式：把对应全局置为 undefined（jsc 层未暴露 goja 的 delete）。
-// 已知边界：`"Worker" in window` 仍为 true（属性存在但值为 undefined），
-// 记入 docs/TECH_DEBT.md。
+// 实现方式：把对应全局从 global 上**真正删除**（jsc.JSObject.Delete →
+// goja Object.Delete）。因此 `typeof Worker === "undefined"` 与
+// `"Worker" in window === false` 都成立——与浏览器里「这个 API 不存在」完全
+// 一致。属性不可配置（删除失败）时退回置 undefined，至少保证 typeof 判定正确。
 
 package bindings
 
@@ -17,13 +18,16 @@ import (
 	"wb-ui/jsc"
 )
 
-// HideGlobal 把 JS 全局 name 置为 undefined（幂等）。
+// HideGlobal 把 JS 全局 name 从 global 上删除（幂等）；删除失败时置 undefined。
 func HideGlobal(rt *jsc.Interpreter, name string) {
 	if rt == nil || name == "" {
 		return
 	}
 	g := rt.GlobalObject()
 	if g == nil {
+		return
+	}
+	if g.Delete(name) {
 		return
 	}
 	g.Set(name, jsc.Undefined())

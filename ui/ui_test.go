@@ -123,21 +123,43 @@ func TestNativeBuildPixels(t *testing.T) {
 	}
 }
 
-// TestBodyBackgroundPropagationKnownGap：<body> 背景不传播到画布根
-// （浏览器会把 body/html 的背景作为画布背景绘制），这是引擎既有边界，
-// 与运行模式无关——此测试锁定「两种模式行为一致」，避免模式接线引入
-// 渲染差异。宿主给界面铺底色请用尺寸铺满的容器元素（见上一条测试）。
-func TestBodyBackgroundPropagationKnownGap(t *testing.T) {
-	probe := func(mode webkit.Mode) [4]uint8 {
-		wv, v := newTestView(t, mode)
-		v.Style(`body{margin:0;background:#ff0000}`)
-		r, g, b, a := pixelRGBA(t, wv, 10, 10)
-		return [4]uint8{r, g, b, a}
+// TestBodyBackgroundPropagatesToCanvas：html/body 背景传播到画布根
+// （CSS-BACKGROUNDS-3 §2.11.2，与浏览器一致）。
+//
+// 浏览器行为：页面只写 `body{background:#f00}` 时**整屏**都被染色（body 的
+// 背景传播到画布、body 元素自身不再画）；html 与 body 都有背景时用 html 的。
+// 引擎此前不传播——只有 body 盒（内容高度）那一条被染色。取视口右下角像素
+// （空的 body 盒之外），只有传播生效才会是背景色。
+//
+// 反向验证：注释掉 renderpipeline.go 里 paintViewportBackground 的调用后，
+// 两条用例都会立刻失败（像素保持透明）。
+func TestBodyBackgroundPropagatesToCanvas(t *testing.T) {
+	cases := []struct {
+		name string
+		css  string
+		want [3]uint8
+	}{
+		{"body 背景传播到画布", `body{margin:0;background:#ff0000}`, [3]uint8{255, 0, 0}},
+		{"html 背景优先于 body", `html{background:#00ff00} body{margin:0;background:#ff0000}`, [3]uint8{0, 255, 0}},
 	}
-	browser := probe(webkit.ModeBrowser)
-	toolkit := probe(webkit.ModeToolkit)
-	if browser != toolkit {
-		t.Fatalf("body 背景像素两模式不一致：browser=%v toolkit=%v", browser, toolkit)
+	for _, tc := range cases {
+		// 两种模式行为一致：传播属于渲染层，模式接线不应影响画面。
+		for _, mode := range []webkit.Mode{webkit.ModeBrowser, webkit.ModeToolkit} {
+			wv, v := newTestView(t, mode)
+			v.Style(tc.css)
+			x, y := wv.Width()-5, wv.Height()-5
+			r, g, b, a := pixelRGBA(t, wv, x, y)
+			if a < 200 || r != tc.want[0] || g != tc.want[1] || b != tc.want[2] {
+				t.Errorf("%s（%s）：视口 (%d,%d) = rgba(%d,%d,%d,%d), want rgb%v 且不透明",
+					tc.name, mode, x, y, r, g, b, a, tc.want)
+			}
+		}
+	}
+	// 两边都没有背景时画布保持透明（不能凭空引入一层底色）。
+	wv, v := newTestView(t, webkit.ModeBrowser)
+	v.Style(`body{margin:0}`)
+	if _, _, _, a := pixelRGBA(t, wv, 10, 10); a != 0 {
+		t.Errorf("html/body 都没有背景时画布应保持透明，实际 alpha=%d", a)
 	}
 }
 

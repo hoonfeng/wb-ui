@@ -128,34 +128,59 @@ func fetchURL(rawURL string) (string, error) {
 //
 // 非 HTTP（data:/file:）与无重定向时，最终 URL 等于入参。
 func fetchURLWithFinalURL(rawURL string) (body, finalURL string, err error) {
-	if rawURL == "" {
-		return "", "", errEmptyURL
-	}
+	r, err := fetchResource(rawURL)
+	return r.content, r.finalURL, err
+}
 
+// resourceResponse 是一次外部取内容的完整结果：内容 + 取内容协议层的元数据。
+//
+// 为什么要元数据：① MIME 检查——`<link rel=stylesheet>` / `<script src>` 在
+// 响应带 `X-Content-Type-Options: nosniff` 时按类型**拒绝**（与浏览器一致）；
+// ② 缓存策略——`Cache-Control: no-store/no-cache`、`Pragma: no-cache` 不缓存。
+// 取内容层只**报告**这些头，怎么用交给各用途的消费端（浏览器同样把 MIME 检查
+// 放在消费端：同一个响应可能是 CSS、JS 或 JSON）。
+type resourceResponse struct {
+	content     string
+	finalURL    string
+	contentType string // 原始 Content-Type 头（没有时为空串）
+	nosniff     bool   // X-Content-Type-Options: nosniff
+	noStore     bool   // Cache-Control: no-store/no-cache 或 Pragma: no-cache
+}
+
+// fetchResource 取 URL 的内容与元数据（data: / http(s): / file:）。
+func fetchResource(rawURL string) (resourceResponse, error) {
+	if rawURL == "" {
+		return resourceResponse{}, errEmptyURL
+	}
 	// data: URI — inline data.
 	if strings.HasPrefix(rawURL, "data:") {
 		body, err := fetchDataURI(rawURL)
-		return body, rawURL, err
+		return resourceResponse{content: body, finalURL: rawURL, contentType: dataURIMediaType(rawURL)}, err
 	}
-
 	// http:// or https:// — network request.
 	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
-		return fetchHTTP(rawURL)
+		return fetchHTTPResource(rawURL)
 	}
-
-	// file:// — local filesystem.
+	// file:// — local filesystem（没有响应头：Content-Type 留空，消费端按
+	// 「无类型」宽松处理，与浏览器对 file 的推断近似）。
 	if strings.HasPrefix(rawURL, "file://") {
 		body, err := fetchFile(rawURL)
-		return body, rawURL, err
+		return resourceResponse{content: body, finalURL: rawURL}, err
 	}
-
-	return "", rawURL, fmt.Errorf("webkit: unsupported URL scheme: %s", rawURL)
+	return resourceResponse{finalURL: rawURL}, fmt.Errorf("webkit: unsupported URL scheme: %s", rawURL)
 }
 
-// fetchHTTP performs an HTTP GET request with a 30-second timeout, follows
-// redirects, limits the response body to 10 MB, and logs non-HTML
-// Content-Types. It also returns the final URL after redirects.
+// fetchHTTP 取 http(s) 内容（只返回内容与最终 URL）。
 func fetchHTTP(rawURL string) (string, string, error) {
+	r, err := fetchHTTPResource(rawURL)
+	return r.content, r.finalURL, err
+}
+
+// fetchHTTPResource performs an HTTP GET request with a 30-second timeout,
+// follows redirects, limits the response body to 10 MB, and returns the
+// content together with the response metadata (Content-Type / nosniff /
+// Cache-Control) that the resource consumers need.
+func fetchHTTPResource(rawURL string) (resourceResponse, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// CheckRedirect follows redirects (default behaviour, up to 10).
@@ -163,20 +188,28 @@ func fetchHTTP(rawURL string) (string, string, error) {
 
 	resp, err := client.Get(rawURL)
 	if err != nil {
-		return "", rawURL, fmt.Errorf("webkit: GET %s: %w", rawURL, err)
+		return resourceResponse{finalURL: rawURL}, fmt.Errorf("webkit: GET %s: %w", rawURL, err)
 	}
 	defer resp.Body.Close()
 
 	// Check for non-2xx status codes.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", rawURL, fmt.Errorf("webkit: GET %s returned %s", rawURL, resp.Status)
+		return resourceResponse{finalURL: rawURL}, fmt.Errorf("webkit: GET %s returned %s", rawURL, resp.Status)
 	}
 
-	// 重定向后的最终 URL（无重定向时等于 rawURL）：调用方用它当文档基地址。
-	finalURL := rawURL
-	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
+	res := resourceResponse{
+		finalURL:    rawURL,
+		contentType: resp.Header.Get("Content-Type"),
 	}
+	// 重定向后的最终 URL（无重定向时等于 rawURL）：调用方用它当文档基地址。
+	if resp.Request != nil && resp.Request.URL != nil {
+		res.finalURL = resp.Request.URL.String()
+	}
+	res.nosniff = strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Content-Type-Options")), "nosniff")
+	cc := strings.ToLower(resp.Header.Get("Cache-Control"))
+	pragma := strings.ToLower(resp.Header.Get("Pragma"))
+	res.noStore = strings.Contains(cc, "no-store") || strings.Contains(cc, "no-cache") ||
+		strings.Contains(pragma, "no-cache")
 
 	// Content-Type：只记录提示，**不**阻断。
 	//
@@ -186,9 +219,10 @@ func fetchHTTP(rawURL string) (string, string, error) {
 	// javascript 或 fetch() 的 application/json。按「非 HTML 即失败」判断
 	// 会让真实网络下的外部 CSS/JS **全部**加载失败（相对 URL 修好后立刻
 	// 暴露：服务器收到了请求、内容也拿到了，样式却不生效）。
-	// 浏览器把 MIME 检查放在各用途的消费端（<script> 拒非 JS MIME 等），
-	// 引擎尚未实现那一层，因此这里内容照常返回。
-	if ct := resp.Header.Get("Content-Type"); ct != "" && !isHTMLCompatible(parseMediaType(ct)) {
+	// 浏览器把 MIME 检查放在各用途的消费端（nosniff 下 <script> 拒非 JS MIME
+	// 等）——那一层现在由 loadExternalResource 按用途实现（见 resource_cache.go），
+	// 这里内容照常返回。
+	if ct := res.contentType; ct != "" && !isHTMLCompatible(parseMediaType(ct)) {
 		page.Logf("fetchHTTP", "%s: Content-Type %q（非 HTML，内容照常返回）", rawURL, ct)
 	}
 
@@ -196,13 +230,14 @@ func fetchHTTP(rawURL string) (string, string, error) {
 	limitedReader := io.LimitReader(resp.Body, maxBodySize+1)
 	body, err := io.ReadAll(limitedReader)
 	if err != nil {
-		return "", finalURL, fmt.Errorf("webkit: reading %s: %w", rawURL, err)
+		return res, fmt.Errorf("webkit: reading %s: %w", rawURL, err)
 	}
 	if int64(len(body)) > maxBodySize {
-		return "", finalURL, fmt.Errorf("webkit: %s: %w", rawURL, errOversizedResponse)
+		return res, fmt.Errorf("webkit: %s: %w", rawURL, errOversizedResponse)
 	}
 
-	return string(body), finalURL, nil
+	res.content = string(body)
+	return res, nil
 }
 
 // fetchFile reads a file:// URL from the local filesystem. It handles the
@@ -303,6 +338,21 @@ func parseMediaType(ct string) string {
 		return strings.TrimSpace(strings.ToLower(ct[:idx]))
 	}
 	return strings.TrimSpace(strings.ToLower(ct))
+}
+
+// dataURIMediaType 返回 data: URL 的媒体类型（RFC 2397），缺省按规范是
+// `text/plain;charset=US-ASCII`。
+func dataURIMediaType(uri string) string {
+	rest := strings.TrimPrefix(uri, "data:")
+	if i := strings.IndexByte(rest, ','); i >= 0 {
+		rest = rest[:i]
+	}
+	rest = strings.TrimSuffix(rest, ";base64")
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "text/plain;charset=US-ASCII"
+	}
+	return rest
 }
 
 // isHTMLCompatible returns true if the media type is HTML-compatible
