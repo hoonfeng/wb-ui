@@ -643,6 +643,7 @@ func (f *Frame) executeInlineScripts() {
 				f.ResourceLoader.LoadScript(src, &frameScriptClient{
 					frame: f,
 					src:   src,
+					el:    el,
 				})
 				Logf("ScriptLoad", "[%d] async queued", i)
 				continue
@@ -708,6 +709,9 @@ func (f *Frame) runScriptForElement(el *dom.Element, code string) error {
 type frameScriptClient struct {
 	frame *Frame
 	src   string
+	// el 是加载中的 <script> 元素：异步脚本执行期间 document.currentScript
+	// 必须指向它（与同步路径 runScriptForElement 一致）。
+	el *dom.Element
 }
 
 func (c *frameScriptClient) NotifyFinished(resource *CachedResource) {
@@ -726,7 +730,16 @@ func (c *frameScriptClient) NotifyFinished(resource *CachedResource) {
 		return
 	}
 	Logf("ScriptLoad", "async exec: src=%q len=%d", c.src, len(code))
-	if err := c.frame.ScriptEngine(code); err != nil {
+	// ★ 走 runScriptForElement 而不是直接 ScriptEngine：外部脚本是异步执行的，
+	// 期间 currentScript 必须指向该 <script>（React 19 的水合流程据此定位宿主
+	// 脚本；读到 undefined 时 appendChild(undefined) 抛错、整段脚本中断）。
+	var err error
+	if c.el != nil {
+		err = c.frame.runScriptForElement(c.el, code)
+	} else {
+		err = c.frame.ScriptEngine(code)
+	}
+	if err != nil {
 		Logf("ScriptLoad", "async EXEC FAIL: src=%q %v", c.src, err)
 	} else {
 		Logf("ScriptLoad", "async OK: src=%q", c.src)
