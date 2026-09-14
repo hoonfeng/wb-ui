@@ -387,20 +387,23 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | 提交时交互校验 | 新增 `html5/interactive.go`：对每个无效控件派发 `invalid` 事件（不冒泡）、返回列表供宿主聚焦第一个；`requestSubmit`/提交按钮点击在未声明 `novalidate`/`formnovalidate` 时先校验，失败即中止（连 `submit` 事件都不派发）。顺带修 `form.submit()` 语义：规范里它**不**校验、也**不**派发 submit 事件（此前等价于 requestSubmit） | `83377cc` |
 | `:user-valid` / `:user-invalid` | dom 新增 user validity 状态；css 新增枚举 + 名称 + 解析（含枚举三向往返测试）；匹配要求「candidate 且 user validity 为 true」。引擎在 change 事件路径（失焦提交/点击 checkbox-radio/选择 option/拖动 range）与控制点（交互校验=提交尝试）置位，并经注入钩子重算样式；脚本 `dispatchEvent(new Event('change'))` 不置位（与浏览器一致） | `54d2888` |
 | 约束校验的像素级夹具 | `dev/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
+| `:user-valid` / `:user-invalid` 的焦点会话规则 | 补上 MDN 列出的第 3 条：值在控件获得焦点时无效、而用户在焦点仍在控件内时把它改成了有效（`:user-invalid` 是镜像方向）→ 立即获得 user validity。dom 增加焦点会话记忆（`SetFocusValidity`/`FocusValidity`，失焦清除）与 `OnElementFocused` 注入钩子（dom 不依赖 html5）；`html5.NoteFocusGained` / `NoteUserInput` 做判定（未翻转不置位、无焦点会话不置位）；三条真实值写入路径全部接线——`app.Host.setFocusedElementValue`（IME/组合输入）、`webkit.FormFocus.applyValue`（键入/退格/粘贴）、`app.Host.setRangeValueFromX`（range 点击与拖动），漏一条这条规则就静默失效 | `93c3032` |
+| `ToggleEvent.source` | 把 IDL 里的 `source`（`Element?`）落地：dom 增加字段 + `ToggleEventInit.Source` + 构造参数 + `Source()`；bindings 暴露为 `null` 或对应元素对象。本端口恒为 `null`，而且这是规范行为：dialog 的 `close()`/`requestClose()` 传 null、`form method=dialog` 提交传 null、close watcher 读的 request close source element 槽只被 `requestClose()` 写过（写的也是 null）、details 的 toggle 任务只初始化 oldState/newState；非 null 只出现在 popover 的 invoker 场景（Popover API 未立项）。字段存在的意义是让 `e.source === null` 与 MDN 的 `event.source === undefined` 特性检测得到和浏览器一样的结果 | `8487f72` |
+| 日期类输入的 step mismatch | 新增 `html5/step.go`：date 以天、month 以月（月长不等，不能换算成毫秒）、week 以周、time 与 datetime-local 以秒换算，default step 分别为 1 天/1 月/1 周/60 秒/60 秒；step base 按 min → value 内容属性 → default step base（只有 week 定义了它：−259,200,000 ms）→ 0；step 缺失/解析失败/≤0 时退回 default step 而不是跳过（只有 `step="any"` 跳过）；整数轴（毫秒/月，< 2^53）用整数取模精确判定，number/range 的容差路径顺带修掉 `0.3`（step=0.1）被浮点误差误判成 mismatch 的问题 | `0673d69` |
+| `<input type=week>` 的 ISO 周解析 | 修 `parseWeek`：Go 的时间布局里 `2006-W02` 的 `02` 是「月中的第几天」，早期实现用它解析周值，于是 `1970-W03` 被读成 1970-01-03、`1970-W01…W04` 全部落进同一周（week 的 min/max 与 step 相位因此失真）。改为自行解析「四位以上年 + `-W` + 两位周号」、按 ISO 规则（含 1 月 4 日的那一周是 W01）求周一，并校验第 53 周只在该年真的存在时才合法 | `0673d69` |
 
 ### 仍未建模（有意保留）
 - **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
-  属性/状态机一整套，未立项。
+  属性/状态机一整套，未立项。`ToggleEvent.source` 字段本身已实现（恒为 null，见上表），
+  但「source 非 null」的那条路径（popover 的 invoker：`popovertarget` / `command`
+  元素）要等这条立项。
 - `:autofill` / `:picture-in-picture`：本引擎没有表单自动填充或画中画模型，
   无判定依据，故作永不匹配。
 - view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
-- `ToggleEvent.source`：`oldState` / `newState` 已闭环（见上表），但规范里的
-  `source`（谁触发了状态切换：调用者元素或 null）没有对应的调用者建模。
-- 日期类输入的 step mismatch：`number` / `range` 已按 step 校验；
-  `date` / `month` / `week` / `time` / `datetime-local` 的 step 单位换算
-  （天 / 周 / 秒 / 月，含 step base）未实现，因而这些类型上的 `step` 属性被忽略
-  （min/max 已按类型解析并进入 `ValidityState`）。
-- `:user-valid` / `:user-invalid` 的「获得焦点时无效 → 之后每次击键立即重算」
-  规则（MDN 列出的第 3 条）未实现：需要在控件获得焦点的时刻记录「当时是否
-  无效」，再在 input 事件路径按该记忆置位。当前表现为「需要失焦或提交过之后
-  `:user-invalid` 才出现」——保守取值（不会提前误报），但比浏览器迟缓。
+- **`<input>` / `<textarea>` 的 value 用内容属性建模**（本端口的简化）：规范里
+  value 还带一层「dirty value flag」内部状态，属性只在初始值/反射时参与。这一差异
+  在本轮新增的 step 校验里立刻显形——step base 的第 2 步取「value 内容属性」，而本
+  端口的用户输入直接改写该属性，于是**没有 min 的控件在用户输入后 base 跟着漂移**，
+  再也不可能出现 step mismatch（浏览器里用户输入不改属性，base 保持稳定）。有 min
+  的元素不受影响（base 取 min），而那正是规范推荐的写法。彻底对齐需要引入 dirty
+  value flag，会牵动渲染取值、表单提交与配置面板的取值路径，未立项。

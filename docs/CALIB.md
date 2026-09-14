@@ -115,6 +115,34 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    input/textarea 的 readonly（仅支持 readonly 的类型）、input type=hidden/
    reset/button、button type=reset/button、datalist 后代）。待 Edge 恢复后应补
    真值表对照。
+
+   复核记录（2026-09 批次·续 4，step / user validity 焦点会话 / ToggleEvent.source）：
+   **夹具与检查数不变**（62/62、255/255）——这三项都不产生新的像素资产：
+   `:user-valid` / `:user-invalid` 的焦点会话规则、`ToggleEvent.source` 与日期类的
+   step mismatch 都不改变静态夹具的初始渲染（step 只在值不满足相位时才翻转
+   `:valid`/`:invalid`，而夹具里的值都满足相位；`source` 只存在于事件对象上）。
+   回归靠单测覆盖：html5 的 step / week / user validity 用例矩阵、bindings 的
+   `ToggleEvent.source` 端到端（区分 null 与 undefined）、dom 的焦点钩子契约、
+   webkit 与 app 的真实输入路径。
+
+   浏览器对照情况：`msedge.exe --headless` 仍然无输出，因此 step / week 的行为依据
+   换成了三件更强的证据——① WHATWG HTML 原文（§4.10.5.3.8 的 allowed value step 与
+   step base 算法逐条比对，各 type 状态的 default step / step scale factor 也按原文
+   取值：date 1 天、month 1 月、week 1 周（default step base −259,200,000 ms）、
+   time 与 datetime-local 60 秒）；② WPT
+   `html/semantics/forms/constraints/form-validation-validity-stepMismatch.html`
+   的用例（date `1970-01-03` vs `1970-01-02`、month `1970-03` vs `1970-04`、
+   week `1970-W03` vs `1970-W04`、time/datetime-local `…:02` vs `…:03`、
+   number `3` 在 step=2 下 mismatch）——它们与 WPT validator 的 `ctl.value = …`
+   （IDL 赋值 ⇒ 元素没有 value 内容属性 ⇒ step base 回退到 default）一起解释了
+   「为什么这些用例的 base 不是 value」；③ Blink 的 `InputType::FindStepBase`
+   （min → value 内容属性 → default），确认「value 内容属性可作为 step base」不只是
+   纸上规定。
+
+   week 的解析修复另有一条可直接复现的证据：Go 的布局 `2006-W02` 里的 `02` 是
+   「月中的第几天」，`time.Parse("2006-W02", "1970-W03")` 返回 1970-01-03——用标准库
+   就能演示早期实现为何把 `1970-W01…W04` 读成同一周。真值表见
+   `html5/week_test.go`。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。
