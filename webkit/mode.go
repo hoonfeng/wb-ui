@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"wb-ui/dom"
 )
 
 // Mode 是 WebView 的运行模式。
@@ -117,6 +119,10 @@ func (wv *WebView) SetMode(m Mode) error {
 // SetResourceResolver 设置宿主资源解析器（见 ResourceResolver）。两种
 // 模式都先经它；UI 库模式下它是外部引用的唯一通道，因此通常在装配前
 // 设置（运行时替换也生效——解析器在每次资源引用时调用）。
+//
+// 每次外部引用最多问两轮：先按页面写下的**原样**引用（宿主常用逻辑名
+// `app://theme.css`），未命中且该引用可被文档 URL 绝对化时再问一次
+// **绝对 URL** 形式（宿主也可只认其中一种）。
 func (wv *WebView) SetResourceResolver(fn ResourceResolver) {
 	if wv == nil {
 		return
@@ -124,13 +130,19 @@ func (wv *WebView) SetResourceResolver(fn ResourceResolver) {
 	wv.resourceResolver = fn
 }
 
-// loadExternalResource 把外部资源引用解析为内容，是 <link rel=stylesheet>、
-// <script src>、@import 等所有外部资源引用的**统一接线点**。
+// loadExternalResource 把外部资源引用解析为内容，是 `<link rel=stylesheet>`
+// 与 `<script src>` 的**统一接线点**。
+//
+// 注意：CSS 的 `@import` 不走这里——它由 `style.Resolver.resolveImports`
+// 处理，而该 resolver 的 StyleSheetLoader 尚未接线（`@import` 目前不加载，
+// 见 docs/MODES.md 已知边界）。
 //
 // 顺序：
-//  1. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统）
-//  2. data: URL（内联内容，非外部输入，两种模式都允许）
-//  3. http(s) / file://（仅 ModeBrowser；UI 库模式返回
+//  1. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统），
+//     先按脚本写下的原样引用问一次（宿主常用逻辑名），绝对化后再问一次
+//  2. 相对引用以文档 URL 为基准解析为绝对 URL（浏览器语义）
+//  3. data: URL（内联内容，非外部输入，两种模式都允许）
+//  4. http(s) / file://（仅 ModeBrowser；UI 库模式返回
 //     ErrExternalResourceBlocked）
 func (wv *WebView) loadExternalResource(ref string) (string, error) {
 	if ref == "" {
@@ -140,6 +152,19 @@ func (wv *WebView) loadExternalResource(ref string) (string, error) {
 		if content, ok := wv.resourceResolver(ref); ok {
 			return content, nil
 		}
+	}
+	// ★ 相对引用以「文档 URL」为基准解析（浏览器语义）：真实页面里
+	//   <link href="app.css"> / <script src="/js/x.js"> 都是相对路径，原样
+	//   交给下面的分支必然失败（os.ReadFile("app.css") 会去读宿主进程的
+	//   当前工作目录）。无文档 URL（LoadHTML 直出内容）时不做解析，保持
+	//   既有行为（相对当前目录的文件读取）。
+	if abs := dom.ResolveURL(wv.documentURL(), ref); abs != ref {
+		if wv.resourceResolver != nil {
+			if content, ok := wv.resourceResolver(abs); ok {
+				return content, nil
+			}
+		}
+		ref = abs
 	}
 	if strings.HasPrefix(ref, "data:") {
 		return fetchURL(ref)

@@ -9,6 +9,7 @@ import (
 
 	"wb-ui/bindings"
 	"wb-ui/bridge"
+	"wb-ui/dom"
 	"wb-ui/jsc"
 )
 
@@ -27,35 +28,50 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		if len(args) < 1 {
 			return rejectPromise(in, fmt.Errorf("fetch: missing url argument"))
 		}
-		url := jscToString(args[0])
-		if url == "" {
+		raw := jscToString(args[0])
+		if raw == "" {
 			return rejectPromise(in, fmt.Errorf("fetch: url must be a non-empty string"))
+		}
+		// ★ 相对 URL 以「文档 URL」为基准解析（浏览器语义）：真实页面几乎
+		//   都写 fetch("/api/x")，原样交给 http.NewRequest 会直接失败
+		//   （unsupported protocol scheme ""）。无文档 URL（LoadHTML 直出
+		//   的内容）时原样返回，行为不变。
+		url := dom.ResolveURL(DocumentBase(in), raw)
+
+		method := "GET"
+		if len(args) >= 2 && args[1].IsObject() {
+			if o := args[1].AsObject(); o != nil {
+				if m, ok := o.GetByKey("method"); ok && !m.IsUndefined() && !m.IsNull() {
+					method = jscToString(m)
+				}
+			}
 		}
 
 		// Check bridge routes first (GUI-mode API interception).
 		// If the URL matches a registered Go handler, call it directly
 		// instead of making an HTTP request. Method-aware matching: a route
 		// registered with a specific method only intercepts that method.
-		route := bridge.MatchMethod("", url)
-		if route == nil {
-			method := "GET"
-			if len(args) >= 2 && args[1].IsObject() {
-				if o := args[1].AsObject(); o != nil {
-					if m, ok := o.GetByKey("method"); ok && !m.IsUndefined() && !m.IsNull() {
-						method = jscToString(m)
-					}
-				}
+		//
+		// 匹配顺序：先按脚本写下的原样 URL（既有行为：宿主按 "/api/x"
+		// 注册路由），未命中再按解析后的绝对 URL 匹配（宿主把路由注册成
+		// 绝对 URL 的场景）。
+		matchRoute := func(u string) *bridge.Route {
+			if r := bridge.MatchMethod("", u); r != nil {
+				return r
 			}
-			route = bridge.MatchMethod(method, url)
+			return bridge.MatchMethod(method, u)
+		}
+		route := matchRoute(raw)
+		if route == nil && url != raw {
+			route = matchRoute(url)
 		}
 		if route != nil {
 			return bridgeFetch(in, args, url, route)
 		}
 		if !allowNetwork {
-			return rejectPromise(in, fmt.Errorf("fetch(%s): 网络请求在 UI 库模式下被禁用（只有宿主注册的桥路由可用）", url))
+			return rejectPromise(in, fmt.Errorf("fetch(%s): 网络请求在 UI 库模式下被禁用（只有宿主注册的桥路由可用）", raw))
 		}
 
-		method := "GET"
 		var body io.Reader
 		headers := http.Header{}
 		if len(args) >= 2 {
@@ -63,9 +79,6 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 			if opts.IsObject() {
 				o := opts.AsObject()
 				if o != nil {
-					if m, ok := o.GetByKey("method"); ok && !m.IsUndefined() && !m.IsNull() {
-						method = jscToString(m)
-					}
 					if b, ok := o.GetByKey("body"); ok && !b.IsUndefined() && !b.IsNull() {
 						body = strings.NewReader(jscToString(b))
 					}
@@ -182,7 +195,8 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		}
 		obj := this.AsObject()
 		method := jscToString2(obj, "_method")
-		url := jscToString2(obj, "_url")
+		// ★ 相对 URL 以文档 URL 为基准解析（与 fetch 同一规则）。
+		url := dom.ResolveURL(DocumentBase(in), jscToString2(obj, "_url"))
 		if method == "" {
 			method = "GET"
 		}

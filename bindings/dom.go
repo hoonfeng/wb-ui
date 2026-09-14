@@ -790,15 +790,72 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		return jsc.Undefined()
 	})
 
-	// location 桩
+	// location：与**文档 URL** 联动。
+	//
+	// 此前是写死 "about:blank"/"file:" 的静态桩——LoadURL 导航后页面脚本
+	// 读 location 拿到的仍是 about:blank，按 location 分支的前端路由会走
+	// 错分支；而引擎解析相对引用读的是 doc.URL，两者必须同源（同一个
+	// 文档 URL，一次 SetDocumentURL 全部生效）。
 	loc := jsc.NewObject(rt.ObjectPrototype())
-	loc.Set("href", jsc.StringValue("about:blank"))
-	loc.Set("origin", jsc.StringValue(""))
-	loc.Set("hostname", jsc.StringValue(""))
-	loc.Set("pathname", jsc.StringValue("/"))
-	loc.Set("search", jsc.StringValue(""))
-	loc.Set("hash", jsc.StringValue(""))
-	loc.Set("protocol", jsc.StringValue("file:"))
+	locHref := func() string {
+		if u := document.URL(); u != "" {
+			return u
+		}
+		return "about:blank"
+	}
+	locURL := func() *url.URL {
+		u, err := url.Parse(locHref())
+		if err != nil || u == nil {
+			return &url.URL{Path: locHref()}
+		}
+		return u
+	}
+	loc.SetAccessor("href", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(locHref())
+	}), nil)
+	loc.SetAccessor("protocol", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if s := locURL().Scheme; s != "" {
+			return jsc.StringValue(s + ":")
+		}
+		return jsc.StringValue("")
+	}), nil)
+	loc.SetAccessor("host", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(locURL().Host)
+	}), nil)
+	loc.SetAccessor("hostname", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(locURL().Hostname())
+	}), nil)
+	loc.SetAccessor("port", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(locURL().Port())
+	}), nil)
+	loc.SetAccessor("pathname", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		p := locURL().EscapedPath()
+		if p == "" {
+			// about:blank / 无 URL：保持历史上的 "/"。
+			p = "/"
+		}
+		return jsc.StringValue(p)
+	}), nil)
+	loc.SetAccessor("search", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if q := locURL().RawQuery; q != "" {
+			return jsc.StringValue("?" + q)
+		}
+		return jsc.StringValue("")
+	}), nil)
+	loc.SetAccessor("hash", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if f := locURL().Fragment; f != "" {
+			return jsc.StringValue("#" + f)
+		}
+		return jsc.StringValue("")
+	}), nil)
+	loc.SetAccessor("origin", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		u := locURL()
+		switch u.Scheme {
+		case "http", "https", "file":
+			return jsc.StringValue(u.Scheme + "://" + u.Host)
+		}
+		return jsc.StringValue("")
+	}), nil)
 	loc.Set("assign", jsc.FunctionValue(jsc.NewNativeFunction("assign",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			return jsc.Undefined()
@@ -830,18 +887,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		entries: []navEntry{{url: "/"}},
 	}
 	updateLocation := func(url string) {
-		loc.Set("href", jsc.StringValue(url))
-		if idx := strings.Index(url, "?"); idx >= 0 {
-			loc.Set("pathname", jsc.StringValue(url[:idx]))
-			loc.Set("search", jsc.StringValue(url[idx:]))
-		} else if idx := strings.Index(url, "#"); idx >= 0 {
-			loc.Set("pathname", jsc.StringValue(url[:idx]))
-			loc.Set("hash", jsc.StringValue(url[idx:]))
-		} else {
-			loc.Set("pathname", jsc.StringValue(url))
-			loc.Set("search", jsc.StringValue(""))
-			loc.Set("hash", jsc.StringValue(""))
-		}
+		// pushState/replaceState 改的是**文档 URL**（同源路径相对当前文档
+		// 解析），location 的 accessor 自动反映新值——不再直接写 location
+		// 的字段（写字段会与 accessor 打架，且 document.URL 不跟着变）。
+		document.SetURL(dom.ResolveURL(document.URL(), url))
 	}
 
 	// ─── window.history (real implementation) ───
@@ -2766,7 +2815,12 @@ obj.SetInternal(doc)
 	obj.SetAccessor("title",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(doc.Title()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { doc.SetTitle(v.ToString()) })
-	obj.SetAccessor("URL", strAcc(doc.URL()), nil)
+	// document.URL 必须**动态读**：LoadURL 导航后 location.href 与
+	// document.URL 要立刻反映新文档的 URL（相对引用解析也读它）。
+	// 此前传的是注册时的值快照（doc.URL() 在装配时求值）→ 恒为空串。
+	obj.SetAccessor("URL", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(doc.URL())
+	}), nil)
 	// 全屏 API（HTML §4.11.6）：状态由 Element.requestFullscreen / 本方法维护，
 	// CSS 的 :fullscreen 与 fullscreenchange 事件消费它。是否把宿主窗口真的切到
 	// 全屏由宿主决定（见 bindings.OnFullscreenChanged）。

@@ -341,9 +341,15 @@ type WebView struct {
 	hoverCapability  string
 	pointerCapability string
 
-	// currentURL 是主文档的加载 URL（LoadURL 设置）。iframe 相对路径 src
-	// （如 src="page.html"）依赖它做基准解析（WebKit completeURL 语义）。
-	currentURL string
+	// currentURL 是主文档的加载 URL（LoadURL 设置，LoadHTML 直出内容时为
+	// ""）。它是「文档基地址」的唯一来源：iframe 相对路径 src
+	// （如 src="page.html"）、外部资源引用（<link href="a.css"> /
+	// <script src="/js/x.js">）与页面脚本的 fetch("/api") 都依赖它做基准
+	// 解析（WebKit completeURL 语义）。
+	//
+	// 读写加锁：LoadURL 在宿主线程写，fetch/XHR 在解释器线程读。
+	currentURL   string
+	currentURLMu sync.RWMutex
 	// subframeJS 为每个 iframe 子 Frame 维护独立的 JS 全局环境（浏览器
 	// iframe 语义：子文档有自己的 window/document，与父文档互不干扰）。
 	subframeJS map[*page.Frame]*jsc.Interpreter
@@ -570,7 +576,7 @@ func (wv *WebView) handleIFrameSrcChanged(el *dom.Element, src string) {
 	if el == nil {
 		return
 	}
-	abs := resolveIframeSrc(src, wv.currentURL)
+	abs := resolveIframeSrc(src, wv.documentURL())
 	// 旧子 Frame 卸载：注销注册表 + 清理其 JS 环境。
 	if old := page.IFrameFrame(el); old != nil {
 		page.UnregisterIFrame(el)
@@ -655,8 +661,19 @@ func (wv *WebView) PointerCapability() string {
 // desktop mode) that must be visible to the application code.
 var BeforePageScripts func(rt *jsc.Interpreter)
 
+// LoadHTML 用给定内容装配主文档。内容没有来源 URL：文档基地址为空，
+// 相对引用没有基准可解析（<link href="x.css"> 仍按既有规则走「相对当前
+// 目录的文件读取」）。需要真实网页的相对 URL 语义时用 LoadURL。
 func (wv *WebView) LoadHTML(src string) error {
+	return wv.loadHTMLFrom(src, "")
+}
+
+// loadHTMLFrom 是 LoadHTML 的实现体。docURL 是文档的来源 URL（LoadURL
+// 传真实 URL，LoadHTML 传 ""），它决定 location.href / document.URL 以及
+// 所有相对引用（<link>/<script src>/fetch/XHR/iframe src）的解析基准。
+func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
+	wv.setDocumentURL(docURL)
 	// 模式在此刻生效并锁定（注入阶段按模式接线，见 mode.go）。
 	wv.modeLocked = true
 	if wv.mainFrame != nil {
@@ -692,6 +709,15 @@ func (wv *WebView) LoadHTML(src string) error {
 
 	if err := wv.mainFrame.LoadHTML(src); err != nil {
 		return err
+	}
+	// 文档 URL 写进 Document（location.href / document.URL 读它），并把
+	// 「当前文档基地址」登记给 page（fetch / XHR 解析相对 URL 用）。登记
+	// 的是提供器而不是快照：LoadURL 再次导航后立刻按新文档 URL 解析。
+	if doc := wv.mainFrame.Document(); doc != nil {
+		doc.SetURL(docURL)
+		if wv.jsInterpreter != nil {
+			page.SetDocumentBaseProvider(wv.jsInterpreter, func() string { return wv.documentURL() })
+		}
 	}
 	// DOM bindings MUST be registered BEFORE executing page scripts so that
 	// JS frameworks (Vue/React) have access to document.getElementById,
@@ -864,9 +890,10 @@ func (wv *WebView) loadIFrameDocuments() {
 		if el, ok := n.(*dom.Element); ok && el.LocalName() == "iframe" {
 			src := el.GetAttribute("src")
 			if src != "" && page.IFrameFrame(el) == nil {
-				abs := resolveIframeSrc(src, wv.currentURL)
+				base := wv.documentURL()
+				abs := resolveIframeSrc(src, base)
 				if abs == "" {
-					page.Logf("IFrame", "skip unresolvable src=%q base=%q", src, wv.currentURL)
+					page.Logf("IFrame", "skip unresolvable src=%q base=%q", src, base)
 				} else {
 					wv.loadSubframe(el, abs)
 				}
@@ -992,6 +1019,26 @@ func resolveIframeSrc(src, baseURL string) string {
 	return base.ResolveReference(ref).String()
 }
 
+// documentURL 返回主文档的当前 URL（无来源 URL 时 ""）。并发安全：宿主
+// 线程（LoadURL/LoadHTML）写、解释器线程（fetch/XHR/资源加载）读。
+func (wv *WebView) documentURL() string {
+	if wv == nil {
+		return ""
+	}
+	wv.currentURLMu.RLock()
+	defer wv.currentURLMu.RUnlock()
+	return wv.currentURL
+}
+
+func (wv *WebView) setDocumentURL(u string) {
+	if wv == nil {
+		return
+	}
+	wv.currentURLMu.Lock()
+	wv.currentURL = u
+	wv.currentURLMu.Unlock()
+}
+
 func (wv *WebView) LoadURL(url string) error {
 	// ★ 模式接线（4/4）：导航是浏览器能力。UI 库模式拒绝换源——宿主用
 	//   LoadHTML 给出初始文档，之后不再导航（避免页面被替换后 Go 侧
@@ -999,12 +1046,14 @@ func (wv *WebView) LoadURL(url string) error {
 	if !wv.mode.allowsNavigation() {
 		return fmt.Errorf("%w: LoadURL(%q) in %s mode", ErrModeNotSupported, url, wv.mode)
 	}
-	wv.currentURL = url
-	src, err := fetchURL(url)
+	src, finalURL, err := fetchURLWithFinalURL(url)
 	if err != nil {
 		return err
 	}
-	return wv.LoadHTML(src)
+	// 取到内容后才换文档 URL：加载失败不应改变当前文档的基地址。
+	// 用**重定向后的最终 URL**：浏览器里文档的 base URL 是最终地址，
+	// 相对引用据此解析（http→https 跳转后仍按 http 解析会指错站点）。
+	return wv.loadHTMLFrom(src, finalURL)
 }
 
 // Destroy 销毁 WebView：从全部全局注册表摘除并断开所有外部引用，
@@ -1031,6 +1080,9 @@ func (wv *WebView) Destroy() {
 		}
 	}
 	webviewsMu.Unlock()
+	// 1b. 文档基地址提供器（page 的全局登记表，闭包捕获本 WebView）——
+	// 不摘除会让全局表永久持有已销毁的 WebView。
+	page.ClearDocumentBaseProvider(wv.jsInterpreter)
 	// 2. iframe 子文档：注销注册表（iframeRegistry 持子 Frame 与元素）
 	if wv.subframeJS != nil {
 		for f := range wv.subframeJS {

@@ -112,14 +112,30 @@ var (
 	maxBodySize          int64 = 10 * 1024 * 1024 // 10 MB
 )
 
+// fetchURL 取 URL 的内容（data: / http(s): / file:）。
 func fetchURL(rawURL string) (string, error) {
+	body, _, err := fetchURLWithFinalURL(rawURL)
+	return body, err
+}
+
+// fetchURLWithFinalURL 同 fetchURL，但额外返回**最终 URL**：HTTP 重定向后
+// 它是响应实际所在的地址。
+//
+// 为什么需要它：浏览器里文档的 base URL 是**重定向之后的**地址，相对引用
+// 据此解析。真实站点「http → https」「补尾斜杠」「跳到 /index.html」都是
+// 常态——只用请求 URL 当基准，`http://host` 被跳转到 `https://host/` 后，
+// 页面里的 `style.css` 会被解析回 `http://host/style.css`（错的地址）。
+//
+// 非 HTTP（data:/file:）与无重定向时，最终 URL 等于入参。
+func fetchURLWithFinalURL(rawURL string) (body, finalURL string, err error) {
 	if rawURL == "" {
-		return "", errEmptyURL
+		return "", "", errEmptyURL
 	}
 
 	// data: URI — inline data.
 	if strings.HasPrefix(rawURL, "data:") {
-		return fetchDataURI(rawURL)
+		body, err := fetchDataURI(rawURL)
+		return body, rawURL, err
 	}
 
 	// http:// or https:// — network request.
@@ -129,15 +145,17 @@ func fetchURL(rawURL string) (string, error) {
 
 	// file:// — local filesystem.
 	if strings.HasPrefix(rawURL, "file://") {
-		return fetchFile(rawURL)
+		body, err := fetchFile(rawURL)
+		return body, rawURL, err
 	}
 
-	return "", fmt.Errorf("webkit: unsupported URL scheme: %s", rawURL)
+	return "", rawURL, fmt.Errorf("webkit: unsupported URL scheme: %s", rawURL)
 }
 
 // fetchHTTP performs an HTTP GET request with a 30-second timeout, follows
-// redirects, limits the response body to 10 MB, and checks Content-Type.
-func fetchHTTP(rawURL string) (string, error) {
+// redirects, limits the response body to 10 MB, and logs non-HTML
+// Content-Types. It also returns the final URL after redirects.
+func fetchHTTP(rawURL string) (string, string, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// CheckRedirect follows redirects (default behaviour, up to 10).
@@ -145,36 +163,46 @@ func fetchHTTP(rawURL string) (string, error) {
 
 	resp, err := client.Get(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("webkit: GET %s: %w", rawURL, err)
+		return "", rawURL, fmt.Errorf("webkit: GET %s: %w", rawURL, err)
 	}
 	defer resp.Body.Close()
 
 	// Check for non-2xx status codes.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("webkit: GET %s returned %s", rawURL, resp.Status)
+		return "", rawURL, fmt.Errorf("webkit: GET %s returned %s", rawURL, resp.Status)
 	}
 
-	// Check Content-Type (lenient: warn but still return the content).
-	ct := resp.Header.Get("Content-Type")
-	if ct != "" {
-		ctBase := parseMediaType(ct)
-		if !isHTMLCompatible(ctBase) {
-			// Non-HTML content — warn but continue.
-			return "", fmt.Errorf("webkit: GET %s: unexpected Content-Type %q (content returned anyway)", rawURL, ct)
-		}
+	// 重定向后的最终 URL（无重定向时等于 rawURL）：调用方用它当文档基地址。
+	finalURL := rawURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+
+	// Content-Type：只记录提示，**不**阻断。
+	//
+	// 这里原先返回 error（注释写的是 "warn but still return the content"，
+	// 实现却返回了空串）——fetch 层并不知道调用方的用途：同一个响应可能是
+	// <link rel=stylesheet> 的 text/css、<script src> 的 application/
+	// javascript 或 fetch() 的 application/json。按「非 HTML 即失败」判断
+	// 会让真实网络下的外部 CSS/JS **全部**加载失败（相对 URL 修好后立刻
+	// 暴露：服务器收到了请求、内容也拿到了，样式却不生效）。
+	// 浏览器把 MIME 检查放在各用途的消费端（<script> 拒非 JS MIME 等），
+	// 引擎尚未实现那一层，因此这里内容照常返回。
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !isHTMLCompatible(parseMediaType(ct)) {
+		page.Logf("fetchHTTP", "%s: Content-Type %q（非 HTML，内容照常返回）", rawURL, ct)
 	}
 
 	// Read with size limit.
 	limitedReader := io.LimitReader(resp.Body, maxBodySize+1)
 	body, err := io.ReadAll(limitedReader)
 	if err != nil {
-		return "", fmt.Errorf("webkit: reading %s: %w", rawURL, err)
+		return "", finalURL, fmt.Errorf("webkit: reading %s: %w", rawURL, err)
 	}
 	if int64(len(body)) > maxBodySize {
-		return "", fmt.Errorf("webkit: %s: %w", rawURL, errOversizedResponse)
+		return "", finalURL, fmt.Errorf("webkit: %s: %w", rawURL, errOversizedResponse)
 	}
 
-	return string(body), nil
+	return string(body), finalURL, nil
 }
 
 // fetchFile reads a file:// URL from the local filesystem. It handles the
