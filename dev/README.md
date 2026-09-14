@@ -48,7 +48,7 @@
 | `l2djscheck` | Live2D 模板脚本的语法检查（读主项目生成的脚本；`//go:build ignore`） | `go run dev/probes/l2djscheck/main.go` |
 | `leakprobe` | WebView 创建 → LoadHTML → Render → Destroy 多轮，验证 DOM/渲染树/JS 解释器整棵树可回收（挂件重建泄漏回归；`//go:build ignore`） | `go run dev/probes/leakprobe/main.go` |
 | `mem_probe` | 循环 LoadHTML / Render 测堆增长，定位泄漏与高频分配 | `go run ./dev/probes/mem_probe` |
-| `pipeline_trace` | 采集渲染管线日志（配合 `cmd/pipeline_diag` 分析；JSON 写 `dev/output/`） | `go run ./dev/probes/pipeline_trace <log>` |
+| `pipeline_trace` | 解析渲染树日志（配合 `cmd/pipeline_diag` 分析；JSON + 文本报告写在日志同目录，惯例放 `dev/output/`） | `go run ./dev/probes/pipeline_trace <desktop_diag.log>` |
 | `quicktest` | 最小冒烟（Skia 画布可用性 + 字体度量） | `go run ./dev/probes/quicktest` |
 | `scriptsdiag` | 把夹具跑进 WebView 环境，报告脚本输出、脚本可见的平台 API、夹具自评结论 | `go run ./dev/probes/scriptsdiag -file dev/suites/cssprobe/fixtures/modern-streams.html` |
 | `skia_check` | Skia 冒烟：`Init` → 建光栅表面 → `Clear` → 退出码（原根目录 `check_skia_build.go`） | `go run ./dev/probes/skia_check` |

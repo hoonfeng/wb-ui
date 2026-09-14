@@ -7,16 +7,18 @@
 ## 一、设计缺陷清单（已用代码验证）
 
 ### 缺陷 1：DOM 变更通知 `onTreeChange` 无参数（已修复）
-- `engine/dom/document.go:36` `onTreeChange func()` → `func(Node)`，`notifyTreeChange()` 传 `b`。
+- `engine/dom/document.go` 的 `onTreeChange` 字段：`func()` → `func(Node)`，`notifyTreeChange()` 传 `b`。
 - 宿主能精确定位「哪个节点变了」。
 
 ### 缺陷 2：node→render 映射填充时机晚（已修复）
-- `nodeRenderMap` 早已存在（`renderview.go:56`），`FindRenderObjectForNode` 已用 map O(1)。
+- `nodeRenderMap` 早已存在（`engine/rendering/renderview.go` 的 `RenderView` 字段），
+  `FindRenderObjectForNode` 已用 map O(1)。
 - 真正缺陷：① 映射只在布局后 `syncGeometry` 填充（重建后→布局前窗口为空）；② `RenderTreeUpdater.findRenderObject` 没复用映射、自己线性遍历。
 - 修复：`rebuildNodeMap()` 在 `Build()` 末尾（层树构建前）遍历渲染树填充；`findRenderObject` 改 O(1)。
 
 ### 缺陷 3：text 双份存储（修正：不是「单一源」问题）
-- `RenderText.text`（rendertext.go）+ `layout.InlineTextBox.text`（box.go）各拷贝一份。
+- `RenderText.text`（`engine/rendering/rendertext.go`）+ `layout.InlineTextBox.text`
+  （`engine/layout/box.go`）各拷贝一份。
 - **修正**：此前误判为「应做 text 单一源（不存副本）」。实际上 **WebKit 的 RenderText 也存副本（`m_text`）**，text 变更走 `RenderText::setText` 同步副本——「单一源」偏离 WebKit 设计且收益有限。
 - 正确方案：text 变更通过 `RenderText.SetText`（已有）+ 同步布局树 `InlineTextBox.text`（阶段 C1 已做）。
 
@@ -31,8 +33,10 @@
 ## 二、关键洞察
 
 1. **RenderTreeUpdater 骨架 + 增量布局 B 剪枝都已存在**——增量更新的「架构蓝图」早已画好，缺的是「接线」。
-2. **`RenderObject.SetLayoutBox`（renderobject.go:185）已建立 render→layout 持久引用**（syncGeometry 时填充），C1 无需新增映射。
-3. **`Frame.RebuildStyleForElement`（frame.go:321）是成熟的增量模式**——C1 完全模仿它：改样式/文本 → 同步布局树 → `f.view.SetNeedsLayout(true)` → 下帧剪枝重排。
+2. **`RenderObject.SetLayoutBox`（`engine/rendering/renderobject.go`）已建立 render→layout 持久引用**
+   （`syncGeometry` 时填充），C1 无需新增映射。
+3. **`Frame.RebuildStyleForElement`（`engine/page/frame.go`）是成熟的增量模式**——
+   C1 完全模仿它：改样式/文本 → 同步布局树 → `f.view.SetNeedsLayout(true)` → 下帧剪枝重排。
 
 ## 三、分阶段方案与进度
 

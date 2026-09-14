@@ -14,7 +14,7 @@
 | 2 | `min()/max()/clamp()` 未实现 | 功能缺失 | P1 | ✅ 已实现（`a9c69d3`） |
 | 3 | 布局三次全树遍历（无增量） | 性能 | P1 | 🔍 已调研：阶段 A 收益 <1%，暂不投入 |
 | 4 | Shadow DOM selector（`:host`/`::slotted`/`::part`） | 功能缺失 | P2 | ✅ 已完整实现（`1dff19a`→`2bcf5cc`） |
-| 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | P3 | ✅ 已实现（背景/边框 alpha 遮罩） |
+| 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | P3 | ✅ 已完整实现（子树遮罩 + size/repeat/position/mode + SVG `<mask>`，见 `docs/MASK_P3_PLAN.md`） |
 | — | WebSocket | ~~非问题~~ | — | 有意 stub（宿主注入事件），非遗留 |
 
 ---
@@ -145,6 +145,15 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 >
 > **最终决策（2026-08-13）**：阶段 A 收益 <1%，**不投入**；阶段 B/C 属高风险大工程，仅在
 > 业务出现可感知布局卡顿（超大文档滚动/频繁重排）时立项，立项前必跑 `dev/suites/consistency` 像素护栏。
+>
+> **后续进展（2026-08-13，本项调研之后）**：**阶段 B 已实现**——`421f7f5`「增量布局 B 脏
+> 子树剪枝」：`ElementBox.CanSkipLayout` 在 BFC/FFC 布局入口短路，位置 / 尺寸 / 子结构 /
+> 脏标记四条件全未变才跳过（浮动与绝对定位子保守不剪枝，`WB_NO_LAYOUT_SKIP=1` 可关）；
+> **阶段 C 的粗粒度一半也已实现**——`ae5d64f`：text 变更走 `RenderView.ApplyTextChange`，
+> 只重排 dirty block，省掉整棵渲染树重建。因此上文「B/C 待业务驱动时立项」已被这两次改动
+> 取代：**仍待做的只剩 C 的行级增量（IFC 行级重排）**，收益更小、风险高，视「整 block
+> 重排」是否仍是瓶颈再决定。详见 `docs/INCREMENTAL_DESIGN.md` 与 `docs/PERF_PLAN.md`
+> 的「布局增量」一节。
 
 ### 现状定位
 一次完整布局存在**三次全树遍历**：
@@ -310,10 +319,18 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 > **已实现（2026-08-13）**：图片-as-alpha 遮罩已落地。goskia 补 `Image.MakeShader` 绑定（C API
 > `sk_image_make_shader` 早已存在，仅缺 Go 封装）；`graphics.Canvas` 新增 `SaveLayerForMask` /
-> `ApplyImageMask`（SaveLayer + `BlendModeDstIn` 把图片缩放到元素尺寸作为 alpha 遮罩）；
-> `paintObjectBackground` 在 mask-image 存在时用离屏 layer 遮罩 background/border。像素测试
-> `TestMaskImageAlpha` 验证「mask alpha=0 丢弃、alpha=255 保留」。当前仅遮罩 background/border
-> （未遮罩前景文字/SVG），且 mask-repeat/size/position 尚未解析（默认整图缩放到元素尺寸）。
+> `ApplyImageMask`（SaveLayer + `BlendModeDstIn` 把图片缩放到元素尺寸作为 alpha 遮罩）。
+> 像素测试 `TestMaskImageAlpha` 验证「mask alpha=0 丢弃、alpha=255 保留」。
+>
+> **此后已补齐全部后续项**（详见 `docs/MASK_P3_PLAN.md` 的 P3.1~P3.5）：
+> ① 遮罩提升到**整棵子树**——`paintLayerWithEffects` 跨 Background / Foreground / Outline
+> 三个 phase 包裹子树，文字与子元素不再穿透；`paintObjectBackground` 里只遮 background/border
+> 的旧代码已移除。② `mask-size` / `mask-repeat` / `mask-position` 解析
+> （`engine/rendering/mask.go` 的 `applyMaskLayer` 复用 `computeBackgroundDest`）。
+> ③ `mask-mode: alpha | luminance | match-source`（`graphics.Canvas.ApplyImageMaskMode`
+> 用 `NewColorMatrixFilter` 把亮度编码进 alpha）。④ SVG `<mask>` 元素
+> （maskUnits / maskContentUnits / mask-type）。⑤ 同文档 `mask-image: url(#id)` 引用。
+> 测试：`engine/rendering/mask_test.go`（5 项）+ `engine/rendering/svg_mask_test.go`（4 项）。
 
 ### 现状定位
 - `engine/rendering/mask_test.go`：`mask-image` 仅被存为 property（`cs.GetProperty("mask-image")`
@@ -355,13 +372,15 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 
 1. **P0**：`parseCSSLength` 补 calc → ✅ 已实现（`0a042d3`）。
 2. **P1-min/max/clamp** → ✅ 已实现（`a9c69d3`）。
-3. **P1-布局增量** → 🔍 已调研，阶段 A 收益 <1% 暂不投入，B/C 待业务驱动。
+3. **P1-布局增量** → 🔍 阶段 A 收益 <1% 不投入；**阶段 B 已实现**（`421f7f5` 脏子树剪枝）、
+   **C 的粗粒度 text 增量已实现**（`ae5d64f`），仅剩 C 的行级增量（IFC 行级重排）后置。
 4. **P2 Shadow DOM** → ✅ 已完整实现（`1dff19a` → `2bcf5cc` 提交链）。
 5. **P3 mask-image** → ✅ 已完整实现（子树遮罩 + size/repeat/position/mode + SVG `<mask>`）。
 
 ### 剩余可优化项（非阻塞，按需）
 - `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
-- 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。
+- 布局增量（阶段 C 的行级增量）：脏子树剪枝（B）与粗粒度 text 增量已落地
+  （`421f7f5` / `ae5d64f`）；IFC 行级增量（C2）收益更小、风险高，业务驱动时再立项。
 
 ---
 

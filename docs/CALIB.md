@@ -30,10 +30,11 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
 - **渲染侧不依赖 v8**，离线绘制入口可直接使用（已构建）：
 
   ```bash
-  ref/obscura/target/release/paint_file.exe <in.html> <out.png> [width] [height] [base_url]
+  F:\syproject\ref\obscura\target\release\paint_file.exe <in.html> <out.png> [width] [height] [base_url]
   ```
 
-  `dev/probes/calib` 默认调用该二进制（`-obscura` 可换路径）。
+  obscura 是工作区里的**兄弟项目**（`F:\syproject\ref\obscura`），不在本仓库内；
+  `dev/probes/calib` 的 `defaultObscura` 就是该绝对路径（`-obscura` 可换路径）。
 
 ## 一致性基线（900x1000 视口，差异像素占全图比例）
 
@@ -61,8 +62,8 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
    若干色块位置/尺寸）。后续可把 `dev/probes/calib` 的差异占比纳入回归基线，作为整体
    一致性的补充指标。
 3. 文本位置差 1-2px 属字体度量范畴（hinting/行高取整），非结构性布局错误。
-4. cssprobe 现状：**61/61 夹具、248/248 检查**（默认 `-scripts auto`，见下文
-   「探针的脚本执行模式」）；`-scripts off`（纯 CSS 管线）为 54/61、241/248，
+4. cssprobe 现状：**64/64 夹具、264/264 检查**（默认 `-scripts auto`，见下文
+   「探针的脚本执行模式」）；`-scripts off`（纯 CSS 管线）为 54/64、248/264，
    保留为对照基线——两者之差就是「必须执行脚本才能满足契约」的夹具集合。
    **没有剩余失败夹具**：此前的 3 项（`logical-borders` 拐角方向、
    `media-text-track`、`modern-streams`）已分别通过修正边框绘制、补
@@ -143,6 +144,16 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
    「月中的第几天」，`time.Parse("2006-W02", "1970-W03")` 返回 1970-01-03——用标准库
    就能演示早期实现为何把 `1970-W01…W04` 读成同一周。真值表见
    `engine/html5/week_test.go`。
+
+   复核记录（2026-09 批次·续 5，popover）：新增夹具 `popover` / `popover-backdrop`
+   后为 **64/64 夹具、264/264 检查**（`1b2aa8c`）——这是本页记录链上
+   「62 → 64」的那一步。两个夹具与 Fullscreen / `<dialog>` 的 `::backdrop` 同属
+   「顶层 UI 遮罩」路径：普通页面零新增节点，只在 popover / 模态 dialog 存在时
+   多一个渲染对象与布局盒。两者都**依赖脚本**调用 `showPopover()`，因此在
+   `-scripts off` 下失败，属「必须执行脚本才能满足契约」的夹具集合
+   （这也是 `-scripts off` 的夹具分母从 61 变为 64 的构成）。检查数 +9 的构成 =
+   `popover` 7 条 + `popover-backdrop` 2 条（明细见 `docs/TECH_DEBT.md` 的
+   「Popover API 的像素夹具」）。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。
