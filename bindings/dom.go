@@ -1504,6 +1504,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	wsCtorObj.Set("CLOSED", jsc.NumberValue(3))
 	g.Set("WebSocket", jsc.FunctionValue(wsCtor))
 
+	// Worker / MessageEvent：并发脚本执行（独立 goja 运行时 + 消息泵）。
+	installWorker(rt, g)
+
 	// DOMParser
 	domParserDoc := document // capture for closures
 	g.Set("DOMParser", jsc.FunctionValue(rt.NewConstructor("DOMParser",
