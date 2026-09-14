@@ -166,8 +166,19 @@ type canvas2DCtxState struct {
 	el   *dom.Element
 	bm   *rendering.CanvasBitmap
 	path *skia.Path // 当前路径（beginPath 重建）
-	// lineDash 由 JS 属性 lineDashOffset 之外独立阵列维护（v1 不参与绘制）。
-	saved []canvas2DSaved
+	// dash 是 setLineDash 设置的虚线阵列（配合 lineDashOffset 参与描边绘制）。
+	dash []float32
+	// geom 是路径的几何副本（自维护：skia 的 Path 不可反查点集），供
+	// isPointInPath / isPointInStroke 做精确几何判定。
+	geom    []geomSubpath
+	geomCur int // 当前子路径索引（-1 = 无）
+	saved   []canvas2DSaved
+}
+
+// geomSubpath 是一条子路径的采样点（直线段的原点 + 曲线/圆弧的细分点）。
+type geomSubpath struct {
+	pts    []geomPoint
+	closed bool
 }
 
 // canvas2DSaved 是 save() 时快照的 JS 样式属性。
@@ -188,6 +199,7 @@ type canvas2DSaved struct {
 	textBaseline string
 	globalCompositeOperation string
 	shadowColor string
+	lineDash []float32
 }
 
 // ─── JS 属性读取 helpers ────────────────────────────────────────────
@@ -373,24 +385,291 @@ func buildGradientShader(o *jsc.JSObject) *skia.Shader {
 	return nil
 }
 
-// resolveFill 解析 this 的 fillStyle/strokeStyle 属性 → (颜色, shader)。
-// shader 非 nil 时调用方负责 Release。
-func resolveStyle(o *jsc.JSObject, key string) (graphics.Color, *skia.Shader) {
+// resolveFill 解析 this 的 fillStyle/strokeStyle 属性 → (颜色, shader, owns)。
+// shader 非 nil 时：owns=true 表示调用方负责 Release（渐变 shader 每次新建）；
+// owns=false 表示 shader 由图案注册表长期持有，**不可** Release。
+func resolveStyle(o *jsc.JSObject, key string) (graphics.Color, *skia.Shader, bool) {
 	v, ok := o.GetByKey(key)
 	if !ok || v.IsUndefined() || v.IsNull() {
-		return graphics.Color{R: 0, G: 0, B: 0, A: 255}, nil
+		return graphics.Color{R: 0, G: 0, B: 0, A: 255}, nil, false
 	}
 	if v.IsString() {
-		return c2dColor(v.ToString()), nil
+		return c2dColor(v.ToString()), nil, false
 	}
 	if obj := v.AsObject(); obj != nil {
+		// CanvasPattern（createPattern 产物）
+		if pv, ok2 := obj.GetByKey("__wbPattern"); ok2 && pv.ToBoolean() {
+			if idV, ok3 := obj.GetByKey("__wbShaderId"); ok3 {
+				if sh := patternShaderFor(int(idV.ToNumber())); sh != nil {
+					return graphics.Color{A: 255}, sh, false
+				}
+			}
+			return graphics.Color{A: 255}, nil, false
+		}
 		if gv, ok2 := obj.GetByKey("__wbGradient"); ok2 {
 			if gs := gv.ToString(); gs != "" && gs != "undefined" {
-				return graphics.Color{A: 255}, buildGradientShader(obj)
+				return graphics.Color{A: 255}, buildGradientShader(obj), true
 			}
 		}
 	}
-	return graphics.Color{R: 0, G: 0, B: 0, A: 255}, nil
+	return graphics.Color{R: 0, G: 0, B: 0, A: 255}, nil, false
+}
+
+// ─── CanvasPattern 注册表 ────────────────────────────────────────────
+//
+// createPattern 生成的 Skia shader 存在这里：shader 对源 image 持引用，因此
+// 图案的生命周期与源位图解耦（img 的 src 变化释放解码缓存也不会让图案悬空）。
+// 注册表不清理——CanvasPattern 没有显式销毁接口、goja 对象也没有 finalizer，
+// 而一个页面创建的图案数量有限（通常个位数）。
+var (
+	patternMu      sync.Mutex
+	patternNextID  int
+	patternShaders = map[int]*skia.Shader{}
+)
+
+func registerPatternShader(sh *skia.Shader) int {
+	patternMu.Lock()
+	defer patternMu.Unlock()
+	patternNextID++
+	patternShaders[patternNextID] = sh
+	return patternNextID
+}
+
+func patternShaderFor(id int) *skia.Shader {
+	patternMu.Lock()
+	defer patternMu.Unlock()
+	return patternShaders[id]
+}
+
+// c2dEffect 读取 ctx 的阴影（shadowColor/shadowBlur/shadowOffsetX/Y）与虚线
+// （setLineDash + lineDashOffset）状态，交给 graphics 的效果化绘制方法。
+func c2dEffect(o *jsc.JSObject, dash []float32, dashPhase float64) graphics.CanvasEffect {
+	eff := graphics.CanvasEffect{DashPhase: float32(dashPhase)}
+	if len(dash) >= 2 {
+		eff.DashIntervals = dash
+	}
+	col := c2dColor(c2dStr(o, "shadowColor", "rgba(0, 0, 0, 0)"))
+	blur := c2dNum(o, "shadowBlur", 0)
+	dx := c2dNum(o, "shadowOffsetX", 0)
+	dy := c2dNum(o, "shadowOffsetY", 0)
+	if col.A > 0 && (blur > 0 || dx != 0 || dy != 0) {
+		eff.ShadowColor = col
+		eff.ShadowAlpha = 1 // 颜色自带 alpha（c2dColor 已解析 rgba 的 a 分量）
+		eff.ShadowDX, eff.ShadowDY = dx, dy
+		if blur > 0 {
+			eff.ShadowSigma = blur / 2 // Skia 的 sigma ≈ 模糊半径的一半
+		}
+	}
+	return eff
+}
+
+// ctxEffect 是 c2dEffect 的常用入口（从 ctx 对象 + Go 侧状态取效果）。
+func ctxEffect(o *jsc.JSObject, s *canvas2DCtxState) graphics.CanvasEffect {
+	if s == nil || o == nil {
+		return graphics.CanvasEffect{}
+	}
+	return c2dEffect(o, s.dash, c2dNum(o, "lineDashOffset", 0))
+}
+
+// ─── 路径几何副本（isPointInPath / isPointInStroke）──────────────────
+//
+// skia 的 Path 只进不出（无法反查点集），因此路径构建时同步维护一份采样几何：
+// 直线记端点、曲线与圆弧按足够密的步长细分。判定在用户空间进行——路径与查询
+// 点都在同一用户空间，无需逆变换（与 canvas 2D 规范一致）。
+type geomPoint struct{ X, Y float64 }
+
+func (s *canvas2DCtxState) geomReset() {
+	s.geom = s.geom[:0]
+	s.geomCur = -1
+}
+
+func (s *canvas2DCtxState) geomNewSubpath(x, y float64) {
+	s.geom = append(s.geom, geomSubpath{pts: []geomPoint{{X: x, Y: y}}})
+	s.geomCur = len(s.geom) - 1
+}
+
+func (s *canvas2DCtxState) geomLineTo(x, y float64) {
+	if s.geomCur < 0 {
+		s.geomNewSubpath(x, y)
+		return
+	}
+	sub := &s.geom[s.geomCur]
+	sub.pts = append(sub.pts, geomPoint{X: x, Y: y})
+}
+
+func (s *canvas2DCtxState) geomCurPoint() (geomPoint, bool) {
+	if s.geomCur < 0 {
+		return geomPoint{}, false
+	}
+	pts := s.geom[s.geomCur].pts
+	if len(pts) == 0 {
+		return geomPoint{}, false
+	}
+	return pts[len(pts)-1], true
+}
+
+func (s *canvas2DCtxState) geomClose() {
+	if s.geomCur >= 0 {
+		s.geom[s.geomCur].closed = true
+	}
+}
+
+// geomSampleCubic 采样三次贝塞尔（起点取当前点）。
+func (s *canvas2DCtxState) geomSampleCubic(x1, y1, x2, y2, x3, y3 float64, steps int) {
+	p0, ok := s.geomCurPoint()
+	if !ok {
+		s.geomNewSubpath(x3, y3)
+		return
+	}
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		mt := 1 - t
+		x := mt*mt*mt*p0.X + 3*mt*mt*t*x1 + 3*mt*t*t*x2 + t*t*t*x3
+		y := mt*mt*mt*p0.Y + 3*mt*mt*t*y1 + 3*mt*t*t*y2 + t*t*t*y3
+		s.geomLineTo(x, y)
+	}
+}
+
+// geomSampleQuad 采样二次贝塞尔（起点取当前点）。
+func (s *canvas2DCtxState) geomSampleQuad(x1, y1, x2, y2 float64, steps int) {
+	p0, ok := s.geomCurPoint()
+	if !ok {
+		s.geomNewSubpath(x2, y2)
+		return
+	}
+	for i := 1; i <= steps; i++ {
+		t := float64(i) / float64(steps)
+		mt := 1 - t
+		x := mt*mt*p0.X + 2*mt*t*x1 + t*t*x2
+		y := mt*mt*p0.Y + 2*mt*t*y1 + t*t*y2
+		s.geomLineTo(x, y)
+	}
+}
+
+// geomArcPoints 采样椭圆弧（角度语义与 appendArc/appendEllipse 一致：ccw 决定
+// 扫描方向；先从当前点直线连到弧起点）。
+func (s *canvas2DCtxState) geomArcPoints(cx, cy, rx, ry, start, end, rotation float64, ccw bool) {
+	delta := end - start
+	if !ccw {
+		if delta <= -2*math.Pi {
+			delta = 2 * math.Pi
+		} else if delta < 0 {
+			delta += 2 * math.Pi
+		} else if delta > 2*math.Pi {
+			delta = 2 * math.Pi
+		}
+	} else {
+		if delta >= 2*math.Pi {
+			delta = -2 * math.Pi
+		} else if delta > 0 {
+			delta -= 2 * math.Pi
+		} else if delta < -2*math.Pi {
+			delta = -2 * math.Pi
+		}
+	}
+	steps := int(math.Ceil(math.Abs(delta) / (math.Pi / 24)))
+	if steps < 4 {
+		steps = 4
+	}
+	cosR, sinR := math.Cos(rotation), math.Sin(rotation)
+	pt := func(a float64) geomPoint {
+		x := rx * math.Cos(a)
+		y := ry * math.Sin(a)
+		return geomPoint{X: cx + x*cosR - y*sinR, Y: cy + x*sinR + y*cosR}
+	}
+	p0 := pt(start)
+	s.geomLineTo(p0.X, p0.Y) // 规范：arc 先连到弧起点
+	for i := 1; i <= steps; i++ {
+		p := pt(start + delta*float64(i)/float64(steps))
+		s.geomLineTo(p.X, p.Y)
+	}
+}
+
+// pointInGeom 射线法判定点是否在路径内（evenOdd=true 用奇偶规则，否则非零规则）。
+func (s *canvas2DCtxState) pointInGeom(x, y float64, evenOdd bool) bool {
+	winding := 0
+	crossings := 0
+	for _, sub := range s.geom {
+		n := len(sub.pts)
+		if n < 2 {
+			continue
+		}
+		limit := n - 1
+		if sub.closed {
+			limit = n
+		}
+		for i := 0; i < limit; i++ {
+			a := sub.pts[i]
+			b := sub.pts[(i+1)%n]
+			if a.Y == b.Y {
+				continue
+			}
+			// 半开区间（a.Y <= y < b.Y 之类）避免顶点重复计数。
+			if (a.Y <= y && b.Y > y) || (b.Y <= y && a.Y > y) {
+				xin := a.X + (y-a.Y)/(b.Y-a.Y)*(b.X-a.X)
+				if xin > x {
+					crossings++
+					if a.Y <= y {
+						winding++
+					} else {
+						winding--
+					}
+				}
+			}
+		}
+	}
+	if evenOdd {
+		return crossings%2 == 1
+	}
+	return winding != 0
+}
+
+// pointNearGeom 判定点是否落在路径描边上（到任一线段距离 ≤ halfWidth）。
+func (s *canvas2DCtxState) pointNearGeom(x, y, halfWidth float64) bool {
+	for _, sub := range s.geom {
+		n := len(sub.pts)
+		if n == 0 {
+			continue
+		}
+		if n == 1 {
+			if dist2d(x, y, sub.pts[0].X, sub.pts[0].Y) <= halfWidth {
+				return true
+			}
+			continue
+		}
+		limit := n - 1
+		if sub.closed {
+			limit = n
+		}
+		for i := 0; i < limit; i++ {
+			a := sub.pts[i]
+			b := sub.pts[(i+1)%n]
+			if pointSegmentDistance(x, y, a.X, a.Y, b.X, b.Y) <= halfWidth {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dist2d(x0, y0, x1, y1 float64) float64 {
+	dx, dy := x0-x1, y0-y1
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
+// pointSegmentDistance 点到线段的距离。
+func pointSegmentDistance(px, py, x0, y0, x1, y1 float64) float64 {
+	dx, dy := x1-x0, y1-y0
+	if dx == 0 && dy == 0 {
+		return dist2d(px, py, x0, y0)
+	}
+	t := ((px-x0)*dx + (py-y0)*dy) / (dx*dx + dy*dy)
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	return dist2d(px, py, x0+t*dx, y0+t*dy)
 }
 
 // ─── path 构建 ──────────────────────────────────────────────────────
@@ -401,6 +680,7 @@ func (s *canvas2DCtxState) beginPath() {
 		s.path.Release()
 	}
 	s.path = skia.NewPath()
+	s.geomReset()
 }
 
 func (s *canvas2DCtxState) curPath() *skia.Path {
@@ -593,6 +873,7 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 				textBaseline:                c2dStr(obj, "textBaseline", "alphabetic"),
 				globalCompositeOperation:    c2dStr(obj, "globalCompositeOperation", "source-over"),
 				shadowColor:                 c2dStr(obj, "shadowColor", "rgba(0, 0, 0, 0)"),
+				lineDash:                    append([]float32(nil), s.dash...),
 			}
 			s.saved = append(s.saved, snap)
 			return jsc.Undefined()
@@ -622,6 +903,7 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 				obj.Set("textBaseline", jsc.StringValue(snap.textBaseline))
 				obj.Set("globalCompositeOperation", jsc.StringValue(snap.globalCompositeOperation))
 				obj.Set("shadowColor", jsc.StringValue(snap.shadowColor))
+				s.dash = append([]float32(nil), snap.lineDash...)
 			}
 			if bm.Cv != nil {
 				bm.Cv.Restore()
@@ -680,6 +962,57 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			}
 			return jsc.Undefined()
 		}, 0)))
+	// getTransform：返回 DOMMatrix 形态对象（a..f，对应 skia 的 3x3 仿射）。
+	o.Set("getTransform", jsc.FunctionValue(jsc.NewNativeFunction("getTransform",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			m := skia.Matrix{}
+			if bm.Cv != nil {
+				m = bm.Cv.GetMatrix()
+			}
+			obj := jsc.NewObject(rt.ObjectPrototype())
+			obj.SetClassName("DOMMatrix")
+			vals := []float64{float64(m.ScaleX), float64(m.SkewY), float64(m.SkewX), float64(m.ScaleY), float64(m.TransX), float64(m.TransY)}
+			for i, key := range []string{"a", "b", "c", "d", "e", "f"} {
+				obj.Set(key, jsc.NumberValue(vals[i]))
+			}
+			obj.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.StringValue("matrix(" +
+						numStr(vals[0]) + ", " + numStr(vals[1]) + ", " + numStr(vals[2]) + ", " +
+						numStr(vals[3]) + ", " + numStr(vals[4]) + ", " + numStr(vals[5]) + ")")
+				}, 0)))
+			return jsc.ObjectValue(obj)
+		}, 0)))
+	// reset()：清空路径、变换、线型与全部样式属性到初始值（canvas 2D 新 API）。
+	o.Set("reset", jsc.FunctionValue(jsc.NewNativeFunction("reset",
+		func(_ *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			if bm.Cv != nil {
+				bm.Cv.ResetMatrix()
+				bm.Cv.ResetClip()
+			}
+			s.dash = nil
+			s.beginPath()
+			obj := this.AsObject()
+			if obj != nil {
+				obj.Set("fillStyle", jsc.StringValue("#000000"))
+				obj.Set("strokeStyle", jsc.StringValue("#000000"))
+				obj.Set("lineWidth", jsc.NumberValue(1))
+				obj.Set("lineCap", jsc.StringValue("butt"))
+				obj.Set("lineJoin", jsc.StringValue("miter"))
+				obj.Set("miterLimit", jsc.NumberValue(10))
+				obj.Set("lineDashOffset", jsc.NumberValue(0))
+				obj.Set("font", jsc.StringValue("10px sans-serif"))
+				obj.Set("textAlign", jsc.StringValue("start"))
+				obj.Set("textBaseline", jsc.StringValue("alphabetic"))
+				obj.Set("globalAlpha", jsc.NumberValue(1))
+				obj.Set("globalCompositeOperation", jsc.StringValue("source-over"))
+				obj.Set("shadowBlur", jsc.NumberValue(0))
+				obj.Set("shadowColor", jsc.StringValue("rgba(0, 0, 0, 0)"))
+				obj.Set("shadowOffsetX", jsc.NumberValue(0))
+				obj.Set("shadowOffsetY", jsc.NumberValue(0))
+			}
+			return jsc.Undefined()
+		}, 0)))
 
 	// ── 矩形 ─────────────────────────────────────────────────────
 	o.Set("fillRect", jsc.FunctionValue(jsc.NewNativeFunction("fillRect",
@@ -688,15 +1021,18 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			if obj == nil || bm.Cv == nil {
 				return jsc.Undefined()
 			}
-			col, sh := resolveStyle(obj, "fillStyle")
+			col, sh, owns := resolveStyle(obj, "fillStyle")
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			blend := c2dBlend(c2dStr(obj, "globalCompositeOperation", "source-over"))
+			eff := ctxEffect(obj, s)
 			x, y, w, h := argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0)
 			if sh != nil {
-				defer sh.Release()
-				bm.Cv.FillRectShader(x, y, w, h, sh, alpha, blend)
+				if owns {
+					defer sh.Release()
+				}
+				bm.Cv.FillRectShaderEffect(x, y, w, h, sh, alpha, blend, eff)
 			} else {
-				bm.Cv.FillRectFull(x, y, w, h, col, alpha, blend)
+				bm.Cv.FillRectFullEffect(x, y, w, h, col, alpha, blend, eff)
 			}
 			return jsc.Undefined()
 		}, 4)))
@@ -706,12 +1042,13 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			if obj == nil || bm.Cv == nil {
 				return jsc.Undefined()
 			}
-			col, sh := resolveStyle(obj, "strokeStyle")
+			col, sh, owns := resolveStyle(obj, "strokeStyle")
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			blend := c2dBlend(c2dStr(obj, "globalCompositeOperation", "source-over"))
 			lw := c2dNum(obj, "lineWidth", 1)
 			cap := c2dStr(obj, "lineCap", "butt")
 			join := c2dStr(obj, "lineJoin", "miter")
+			eff := ctxEffect(obj, s)
 			x, y, w, h := argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0)
 			rp := skia.NewPath()
 			defer rp.Release()
@@ -721,10 +1058,12 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			rp.LineTo(float32(x), float32(y+h))
 			rp.Close()
 			if sh != nil {
-				defer sh.Release()
-				bm.Cv.StrokePathShader(rp, lw, sh, alpha, cap, join, blend)
+				if owns {
+					defer sh.Release()
+				}
+				bm.Cv.StrokePathShaderEffect(rp, lw, sh, alpha, cap, join, blend, eff)
 			} else {
-				bm.Cv.StrokePathFull(rp, lw, col, alpha, cap, join, blend)
+				bm.Cv.StrokePathFullEffect(rp, lw, col, alpha, cap, join, blend, eff)
 			}
 			return jsc.Undefined()
 		}, 4)))
@@ -745,32 +1084,42 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 	o.Set("closePath", jsc.FunctionValue(jsc.NewNativeFunction("closePath",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			s.curPath().Close()
+			s.geomClose()
 			return jsc.Undefined()
 		}, 0)))
 	o.Set("moveTo", jsc.FunctionValue(jsc.NewNativeFunction("moveTo",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			s.curPath().MoveTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)))
+			x, y := argNum(a, 0, 0), argNum(a, 1, 0)
+			s.curPath().MoveTo(float32(x), float32(y))
+			s.geomNewSubpath(x, y)
 			return jsc.Undefined()
 		}, 2)))
 	o.Set("lineTo", jsc.FunctionValue(jsc.NewNativeFunction("lineTo",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			s.curPath().LineTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)))
+			x, y := argNum(a, 0, 0), argNum(a, 1, 0)
+			s.curPath().LineTo(float32(x), float32(y))
+			s.geomLineTo(x, y)
 			return jsc.Undefined()
 		}, 2)))
 	o.Set("bezierCurveTo", jsc.FunctionValue(jsc.NewNativeFunction("bezierCurveTo",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			s.curPath().CubicTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)), float32(argNum(a, 2, 0)), float32(argNum(a, 3, 0)), float32(argNum(a, 4, 0)), float32(argNum(a, 5, 0)))
+			s.geomSampleCubic(argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0), argNum(a, 4, 0), argNum(a, 5, 0), 24)
 			return jsc.Undefined()
 		}, 6)))
 	o.Set("quadraticCurveTo", jsc.FunctionValue(jsc.NewNativeFunction("quadraticCurveTo",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			s.curPath().QuadTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)), float32(argNum(a, 2, 0)), float32(argNum(a, 3, 0)))
+			s.geomSampleQuad(argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0), 16)
 			return jsc.Undefined()
 		}, 4)))
 	o.Set("arc", jsc.FunctionValue(jsc.NewNativeFunction("arc",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			appendArc(s.curPath(), argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0),
-				argNum(a, 3, 0), argNum(a, 4, 0), argBool(a, 5, false))
+			cx, cy, r := argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0)
+			start, end := argNum(a, 3, 0), argNum(a, 4, 0)
+			ccw := argBool(a, 5, false)
+			appendArc(s.curPath(), cx, cy, r, start, end, ccw)
+			s.geomArcPoints(cx, cy, r, r, start, end, 0, ccw)
 			return jsc.Undefined()
 		}, 5)))
 	o.Set("ellipse", jsc.FunctionValue(jsc.NewNativeFunction("ellipse",
@@ -783,14 +1132,35 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			a0, a1 := argN(5, 0), argN(6, 2*math.Pi)
 			ccw := argBool(a, 7, false)
 			appendEllipse(p, cx, cy, rx, ry, a0, a1, ccw)
+			s.geomArcPoints(cx, cy, rx, ry, a0, a1, 0, ccw)
 			return jsc.Undefined()
 		}, 7)))
 	o.Set("rect", jsc.FunctionValue(jsc.NewNativeFunction("rect",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			r := skia.RectXYWH(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)), float32(argNum(a, 2, 0)), float32(argNum(a, 3, 0)))
+			x, y, w, h := argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0)
+			r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
 			s.curPath().AddRect(r, skia.PathDirectionCW)
+			s.geomNewSubpath(x, y)
+			s.geomLineTo(x+w, y)
+			s.geomLineTo(x+w, y+h)
+			s.geomLineTo(x, y+h)
+			s.geomClose()
 			return jsc.Undefined()
 		}, 4)))
+	o.Set("arcTo", jsc.FunctionValue(jsc.NewNativeFunction("arcTo",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			appendArcTo(s.curPath(), s, argNum(a, 0, 0), argNum(a, 1, 0),
+				argNum(a, 2, 0), argNum(a, 3, 0), argNum(a, 4, 0))
+			return jsc.Undefined()
+		}, 5)))
+	// roundRect(x, y, w, h, radii)：radii 支持数字、[all]、[tl,br]、[tl,tr,br]、
+	// [tl,tr,br,bl] 与 [{x,y},...] 形式（CSS 圆角简写语义）。
+	o.Set("roundRect", jsc.FunctionValue(jsc.NewNativeFunction("roundRect",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			appendRoundRect(s.curPath(), s, argNum(a, 0, 0), argNum(a, 1, 0),
+				argNum(a, 2, 0), argNum(a, 3, 0), parseRoundRectRadii(a, 4))
+			return jsc.Undefined()
+		}, 1)))
 	o.Set("fill", jsc.FunctionValue(jsc.NewNativeFunction("fill",
 		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			obj := this.AsObject()
@@ -802,14 +1172,17 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			} else {
 				s.path.SetFillType(skia.FillTypeWinding)
 			}
-			col, sh := resolveStyle(obj, "fillStyle")
+			col, sh, owns := resolveStyle(obj, "fillStyle")
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			blend := c2dBlend(c2dStr(obj, "globalCompositeOperation", "source-over"))
+			eff := ctxEffect(obj, s)
 			if sh != nil {
-				defer sh.Release()
-				bm.Cv.FillPathShader(s.path, sh, alpha, blend)
+				if owns {
+					defer sh.Release()
+				}
+				bm.Cv.FillPathShaderEffect(s.path, sh, alpha, blend, eff)
 			} else {
-				bm.Cv.FillPathFull(s.path, col, alpha, blend)
+				bm.Cv.FillPathFullEffect(s.path, col, alpha, blend, eff)
 			}
 			return jsc.Undefined()
 		}, 1)))
@@ -819,20 +1192,42 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			if obj == nil || bm.Cv == nil || s.path == nil {
 				return jsc.Undefined()
 			}
-			col, sh := resolveStyle(obj, "strokeStyle")
+			col, sh, owns := resolveStyle(obj, "strokeStyle")
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			blend := c2dBlend(c2dStr(obj, "globalCompositeOperation", "source-over"))
 			lw := c2dNum(obj, "lineWidth", 1)
 			cap := c2dStr(obj, "lineCap", "butt")
 			join := c2dStr(obj, "lineJoin", "miter")
+			eff := ctxEffect(obj, s)
 			if sh != nil {
-				defer sh.Release()
-				bm.Cv.StrokePathShader(s.path, lw, sh, alpha, cap, join, blend)
+				if owns {
+					defer sh.Release()
+				}
+				bm.Cv.StrokePathShaderEffect(s.path, lw, sh, alpha, cap, join, blend, eff)
 			} else {
-				bm.Cv.StrokePathFull(s.path, lw, col, alpha, cap, join, blend)
+				bm.Cv.StrokePathFullEffect(s.path, lw, col, alpha, cap, join, blend, eff)
 			}
 			return jsc.Undefined()
 		}, 0)))
+	// isPointInPath / isPointInStroke：基于路径的几何副本做精确判定（skia 的
+	// Path 无法反查点集，几何副本在路径构建时同步维护；坐标为用户空间，与规范
+	// 一致——查询点同样在用户空间，无需逆变换）。
+	o.Set("isPointInPath", jsc.FunctionValue(jsc.NewNativeFunction("isPointInPath",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			evenOdd := argStr(a, 2, "nonzero") == "evenodd"
+			return jsc.BooleanValue(s.pointInGeom(argNum(a, 0, 0), argNum(a, 1, 0), evenOdd))
+		}, 2)))
+	o.Set("isPointInStroke", jsc.FunctionValue(jsc.NewNativeFunction("isPointInStroke",
+		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			lw := 1.0
+			if obj := this.AsObject(); obj != nil {
+				lw = c2dNum(obj, "lineWidth", 1)
+			}
+			if lw <= 0 {
+				return jsc.BooleanValue(false)
+			}
+			return jsc.BooleanValue(s.pointNearGeom(argNum(a, 0, 0), argNum(a, 1, 0), lw/2))
+		}, 2)))
 	o.Set("clip", jsc.FunctionValue(jsc.NewNativeFunction("clip",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			if bm.Cv == nil || s.path == nil {
@@ -856,9 +1251,13 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			}
 			text := a[0].ToString()
 			font := c2dFont(obj)
-			col, sh := resolveStyle(obj, "fillStyle")
+			col, sh, owns := resolveStyle(obj, "fillStyle")
 			if sh != nil {
-				sh.Release() // 文本 v1 不支持 shader 填充，回退纯色
+				// 文本 v1 不支持 shader 填充，回退纯色；仅释放自建的渐变 shader
+				//（图案 shader 由图案注册表持有，Release 会释放底层对象）。
+				if owns {
+					sh.Release()
+				}
 			}
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			blend := c2dBlend(c2dStr(obj, "globalCompositeOperation", "source-over"))
@@ -874,9 +1273,11 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			}
 			text := a[0].ToString()
 			font := c2dFont(obj)
-			col, sh := resolveStyle(obj, "strokeStyle")
+			col, sh, owns := resolveStyle(obj, "strokeStyle")
 			if sh != nil {
-				sh.Release()
+				if owns {
+					sh.Release()
+				}
 			}
 			alpha := c2dNum(obj, "globalAlpha", 1)
 			lw := c2dNum(obj, "lineWidth", 1)
@@ -1094,8 +1495,78 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 	}
 	o.Set("createLinearGradient", jsc.FunctionValue(jsc.NewNativeFunction("createLinearGradient", makeGrad("linear", 4), 4)))
 	o.Set("createRadialGradient", jsc.FunctionValue(jsc.NewNativeFunction("createRadialGradient", makeGrad("radial", 6), 6)))
+	// createPattern(image, repetition)：图案源可以是 <canvas>（取当前内容快照）
+	// 或 <img>；生成的 Skia shader 存进图案注册表（shader 自带源图引用，
+	// 图案不随源图释放而失效）。
+	o.Set("createPattern", jsc.FunctionValue(jsc.NewNativeFunction("createPattern",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) < 2 {
+				return jsc.Null()
+			}
+			img, owned := sourceImageOf(a[0])
+			if img == nil {
+				return jsc.Null() // 规范：源不可用时返回 null
+			}
+			if owned {
+				defer img.Release() // MakeShader 内部会 ref 源图
+			}
+			tileX, tileY := skia.TileModeRepeat, skia.TileModeRepeat
+			switch argStr(a, 1, "repeat") {
+			case "repeat-x":
+				tileY = skia.TileModeDecal
+			case "repeat-y":
+				tileX = skia.TileModeDecal
+			case "no-repeat":
+				tileX, tileY = skia.TileModeDecal, skia.TileModeDecal
+			}
+			sh := img.MakeShader(tileX, tileY, &skia.SamplingLinear, nil)
+			if sh == nil {
+				return jsc.Null()
+			}
+			pat := jsc.NewObject(rt.ObjectPrototype())
+			pat.SetClassName("CanvasPattern")
+			pat.Set("__wbPattern", jsc.BooleanValue(true))
+			pat.Set("__wbShaderId", jsc.NumberValue(float64(registerPatternShader(sh))))
+			pat.Set("__wbRepetition", jsc.StringValue(argStr(a, 1, "repeat")))
+			pat.Set("setTransform", jsc.FunctionValue(jsc.NewNativeFunction("setTransform",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					// 图案局部矩阵（DOMMatrix）本引擎暂不支持：接受调用，
+					// 不改变平铺结果（不影响基本图案填充）。
+					return jsc.Undefined()
+				}, 1)))
+			return jsc.ObjectValue(pat)
+		}, 2)))
 
 	// ── 像素 ─────────────────────────────────────────────────────
+	// createImageData(width, height) / createImageData(imageData)：返回全透明
+	// 的新 ImageData（与 getImageData 同构：data 的 length 为 4*w*h）。
+	o.Set("createImageData", jsc.FunctionValue(jsc.NewNativeFunction("createImageData",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			var iw, ih int
+			if v := a[0]; v.IsObject() {
+				src := v.AsObject()
+				wv, _ := src.GetByKey("width")
+				hv, _ := src.GetByKey("height")
+				iw, ih = int(wv.ToNumber()), int(hv.ToNumber())
+			} else {
+				iw, ih = int(argNum(a, 0, 0)), int(argNum(a, 1, 0))
+			}
+			if iw <= 0 || ih <= 0 {
+				// 规范抛 IndexSizeError；用原生 TypeError 抛出让脚本能 catch。
+				panic(rt.VM().NewTypeError("createImageData: width/height must be positive"))
+			}
+			ret := jsc.NewObject(rt.ObjectPrototype())
+			ret.Set("__wbImageData", jsc.BooleanValue(true))
+			ret.Set("width", jsc.NumberValue(float64(iw)))
+			ret.Set("height", jsc.NumberValue(float64(ih)))
+			arr := jsc.NewObject(rt.ObjectPrototype())
+			for i := 0; i < iw*ih*4; i++ {
+				arr.Set(strconv.Itoa(i), jsc.NumberValue(0))
+			}
+			arr.Set("length", jsc.NumberValue(float64(iw*ih*4)))
+			ret.Set("data", jsc.ObjectValue(arr))
+			return jsc.ObjectValue(ret)
+		}, 2)))
 	o.Set("getImageData", jsc.FunctionValue(jsc.NewNativeFunction("getImageData",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			ret := jsc.NewObject(rt.ObjectPrototype())
@@ -1166,33 +1637,61 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			}
 			dx := int(argNum(a, 1, 0))
 			dy := int(argNum(a, 2, 0))
+			// dirty 矩形（第 4-7 参：dirtyX/dirtyY/dirtyWidth/dirtyHeight）：
+			// 只更新 ImageData 的该子区域；越界部分按规范夹取。
+			sx0, sy0, sw, sh := 0, 0, iw, ih
+			if len(a) >= 7 {
+				sx0, sy0 = int(argNum(a, 3, 0)), int(argNum(a, 4, 0))
+				sw, sh = int(argNum(a, 5, 0)), int(argNum(a, 6, 0))
+				if sx0 < 0 {
+					sw += sx0
+					sx0 = 0
+				}
+				if sy0 < 0 {
+					sh += sy0
+					sy0 = 0
+				}
+				if sx0+sw > iw {
+					sw = iw - sx0
+				}
+				if sy0+sh > ih {
+					sh = ih - sy0
+				}
+				if sw <= 0 || sh <= 0 {
+					return jsc.Undefined()
+				}
+			}
 			// 浏览器语义：putImageData 不受 transform/clip 影响。
 			bm.Cv.Save()
 			bm.Cv.ResetMatrix()
-			rgba := make([]byte, 0, 4*iw*ih)
-			for i := 0; i < iw*ih; i++ {
-				r, _ := dObj.GetByKey(strconv.Itoa(i*4 + 0))
-				g, _ := dObj.GetByKey(strconv.Itoa(i*4 + 1))
-				b, _ := dObj.GetByKey(strconv.Itoa(i*4 + 2))
-				al, _ := dObj.GetByKey(strconv.Itoa(i*4 + 3))
-				ar := uint8(clampByte(r.ToNumber()))
-				ag := uint8(clampByte(g.ToNumber()))
-				ab := uint8(clampByte(b.ToNumber()))
-				aa := uint8(clampByte(al.ToNumber()))
-				if aa != 0 && aa != 255 {
-					// 非预乘输入 → 预乘存储
-					ar = uint8(int(ar) * int(aa) / 255)
-					ag = uint8(int(ag) * int(aa) / 255)
-					ab = uint8(int(ab) * int(aa) / 255)
+			rgba := make([]byte, 0, 4*sw*sh)
+			for yy := sy0; yy < sy0+sh; yy++ {
+				for xx := sx0; xx < sx0+sw; xx++ {
+					i := yy*iw + xx
+					r, _ := dObj.GetByKey(strconv.Itoa(i*4 + 0))
+					g, _ := dObj.GetByKey(strconv.Itoa(i*4 + 1))
+					b, _ := dObj.GetByKey(strconv.Itoa(i*4 + 2))
+					al, _ := dObj.GetByKey(strconv.Itoa(i*4 + 3))
+					ar := uint8(clampByte(r.ToNumber()))
+					ag := uint8(clampByte(g.ToNumber()))
+					ab := uint8(clampByte(b.ToNumber()))
+					aa := uint8(clampByte(al.ToNumber()))
+					if aa != 0 && aa != 255 {
+						// 非预乘输入 → 预乘存储
+						ar = uint8(int(ar) * int(aa) / 255)
+						ag = uint8(int(ag) * int(aa) / 255)
+						ab = uint8(int(ab) * int(aa) / 255)
+					}
+					rgba = append(rgba, ar, ag, ab, aa)
 				}
-				rgba = append(rgba, ar, ag, ab, aa)
 			}
 			src, err := skia.NewImageFromPixels(
-				skia.NewImageInfo(iw, ih, skia.ColorTypeRGBA8888, skia.AlphaTypePremul),
-				rgba, iw*4)
+				skia.NewImageInfo(sw, sh, skia.ColorTypeRGBA8888, skia.AlphaTypePremul),
+				rgba, sw*4)
 			if err == nil && src != nil {
 				defer src.Release()
-				bm.Cv.DrawImageFull(src, 0, 0, float64(iw), float64(ih), float64(dx), float64(dy), float64(iw), float64(ih), 1, skia.BlendModeSrcOver)
+				bm.Cv.DrawImageFull(src, 0, 0, float64(sw), float64(sh),
+					float64(dx+sx0), float64(dy+sy0), float64(sw), float64(sh), 1, skia.BlendModeSrcOver)
 			}
 			bm.Cv.Restore()
 			return jsc.Undefined()
@@ -1200,17 +1699,261 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 
 	// ── 线型（v1 仅接收调用；虚线绘制忽略）──────────────────────
 	o.Set("setLineDash", jsc.FunctionValue(jsc.NewNativeFunction("setLineDash",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			s.dash = nil
+			if len(a) == 0 {
+				return jsc.Undefined()
+			}
+			arr := a[0].AsObject()
+			if arr == nil {
+				return jsc.Undefined()
+			}
+			lv, ok := arr.GetByKey("length")
+			if !ok {
+				return jsc.Undefined()
+			}
+			n := int(lv.ToNumber())
+			vals := make([]float32, 0, n)
+			allZero := true
+			for i := 0; i < n; i++ {
+				v, _ := arr.GetByKey(strconv.Itoa(i))
+				f := v.ToNumber()
+				if math.IsNaN(f) || f < 0 {
+					f = 0
+				}
+				if f > 0 {
+					allZero = false
+				}
+				vals = append(vals, float32(f))
+			}
+			// 规范：奇数个元素复制一遍凑成偶数；全 0 视为实线（无虚线）。
+			if len(vals)%2 == 1 {
+				vals = append(vals, vals...)
+			}
+			if !allZero && len(vals) >= 2 {
+				s.dash = vals
+			}
 			return jsc.Undefined()
 		}, 1)))
 	o.Set("getLineDash", jsc.FunctionValue(jsc.NewNativeFunction("getLineDash",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			arr := jsc.NewObject(rt.ObjectPrototype())
-			arr.Set("length", jsc.NumberValue(0))
+			for i, v := range s.dash {
+				arr.Set(strconv.Itoa(i), jsc.NumberValue(float64(v)))
+			}
+			arr.Set("length", jsc.NumberValue(float64(len(s.dash))))
 			return jsc.ObjectValue(arr)
 		}, 0)))
 
 	return o
+}
+
+// numStr 把浮点数格式化为 JS 风格的最短表示（getTransform().toString 用）。
+func numStr(v float64) string {
+	return strconv.FormatFloat(v, 'g', -1, 64)
+}
+
+// appendArcTo 实现 canvas 2D 的 arcTo(x1,y1,x2,y2,r)：从当前点到「P0→P1、
+// P1→P2 两条切线的切点之间」画一段圆弧（skia 与几何副本同步）。
+//
+// 规范要点：当前点不存在时等价于 moveTo(x1,y1)；半径 0 或三点共线退化为
+// lineTo(x1,y1)；半径大于可用切线长度时按规范放大（保证弧与两边相切）。
+func appendArcTo(p *skia.Path, s *canvas2DCtxState, x1, y1, x2, y2, r float64) {
+	p0, ok := s.geomCurPoint()
+	if !ok {
+		p.MoveTo(float32(x1), float32(y1))
+		s.geomNewSubpath(x1, y1)
+		return
+	}
+	if math.IsNaN(r) || r < 0 {
+		r = 0
+	}
+	v1x, v1y := p0.X-x1, p0.Y-y1
+	v2x, v2y := x2-x1, y2-y1
+	l1, l2 := math.Hypot(v1x, v1y), math.Hypot(v2x, v2y)
+	degenerate := func() {
+		p.LineTo(float32(x1), float32(y1))
+		s.geomLineTo(x1, y1)
+	}
+	if l1 == 0 || l2 == 0 || r == 0 {
+		degenerate()
+		return
+	}
+	cosT := (v1x*v2x + v1y*v2y) / (l1 * l2)
+	if cosT > 1 {
+		cosT = 1
+	} else if cosT < -1 {
+		cosT = -1
+	}
+	theta := math.Acos(cosT)
+	if theta <= 1e-9 || math.IsNaN(theta) {
+		degenerate()
+		return
+	}
+	// 切点到 P1 的距离（半径过大时按规范夹取到可用切线长度）。
+	tanLen := r / math.Tan(theta/2)
+	if limit := math.Min(l1, l2); tanLen > limit {
+		tanLen = limit
+		r = tanLen * math.Tan(theta/2)
+	}
+	u1x, u1y := v1x/l1, v1y/l1
+	u2x, u2y := v2x/l2, v2y/l2
+	t1x, t1y := x1+u1x*tanLen, y1+u1y*tanLen
+	t2x, t2y := x1+u2x*tanLen, y1+u2y*tanLen
+	// 圆心在角平分线上。
+	bx, by := u1x+u2x, u1y+u2y
+	bl := math.Hypot(bx, by)
+	if bl == 0 {
+		degenerate()
+		return
+	}
+	dist := r / math.Sin(theta/2)
+	cx, cy := x1+bx/bl*dist, y1+by/bl*dist
+	p.LineTo(float32(t1x), float32(t1y))
+	s.geomLineTo(t1x, t1y)
+	start := math.Atan2(t1y-cy, t1x-cx)
+	end := math.Atan2(t2y-cy, t2x-cx)
+	// 走短弧（两切点之间的弧 < π）：负向增量用 ccw=true。
+	delta := end - start
+	for delta > math.Pi {
+		delta -= 2 * math.Pi
+	}
+	for delta <= -math.Pi {
+		delta += 2 * math.Pi
+	}
+	ccw := delta < 0
+	appendArc(p, cx, cy, r, start, end, ccw)
+	s.geomArcPoints(cx, cy, r, r, start, end, 0, ccw)
+}
+
+// resolveRadius 解析单个圆角半径值（数字或 {x, y}）。
+func resolveRadius(v jsc.JSValue) geomPoint {
+	if o := v.AsObject(); o != nil {
+		xv, _ := o.GetByKey("x")
+		yv, _ := o.GetByKey("y")
+		return geomPoint{X: xv.ToNumber(), Y: yv.ToNumber()}
+	}
+	f := v.ToNumber()
+	if math.IsNaN(f) || f < 0 {
+		f = 0
+	}
+	return geomPoint{X: f, Y: f}
+}
+
+// parseRoundRectRadii 解析 roundRect 的 radii 参数（CSS 圆角简写顺序：
+// 单值 / [tl,br] / [tl,tr,br] / [tl,tr,br,bl]，元素可为数字或 {x,y}）。
+func parseRoundRectRadii(a []jsc.JSValue, idx int) [4]geomPoint {
+	var out [4]geomPoint
+	if len(a) <= idx {
+		return out
+	}
+	v := a[idx]
+	obj := v.AsObject()
+	if obj == nil {
+		r := resolveRadius(v)
+		for i := 0; i < 4; i++ {
+			out[i] = r
+		}
+		return out
+	}
+	lv, ok := obj.GetByKey("length")
+	if !ok {
+		// 单个 {x, y}
+		r := resolveRadius(v)
+		for i := 0; i < 4; i++ {
+			out[i] = r
+		}
+		return out
+	}
+	n := int(lv.ToNumber())
+	var vals [4]geomPoint
+	got := 0
+	for i := 0; i < n && i < 4; i++ {
+		item, _ := obj.GetByKey(strconv.Itoa(i))
+		vals[i] = resolveRadius(item)
+		got++
+	}
+	if got == 0 {
+		return out
+	}
+	switch got {
+	case 1:
+		for i := 0; i < 4; i++ {
+			out[i] = vals[0]
+		}
+	case 2:
+		out[0], out[1], out[2], out[3] = vals[0], vals[0], vals[1], vals[1]
+	case 3:
+		out[0], out[1], out[2], out[3] = vals[0], vals[1], vals[2], vals[1]
+	default:
+		out = vals
+	}
+	return out
+}
+
+// appendRoundRectCorner 用一段三次贝塞尔近似椭圆角弧（≤90°），同步几何副本。
+func appendRoundRectCorner(p *skia.Path, s *canvas2DCtxState, cx, cy, rx, ry, a0, a1 float64) {
+	if rx <= 0 || ry <= 0 {
+		p.LineTo(float32(cx), float32(cy))
+		s.geomLineTo(cx, cy)
+		return
+	}
+	x0 := cx + rx*math.Cos(a0)
+	y0 := cy + ry*math.Sin(a0)
+	x1 := cx + rx*math.Cos(a1)
+	y1 := cy + ry*math.Sin(a1)
+	k := 4.0 / 3.0 * math.Tan((a1-a0)/4.0)
+	c1x, c1y := x0-k*rx*math.Sin(a0), y0+k*ry*math.Cos(a0)
+	c2x, c2y := x1+k*rx*math.Sin(a1), y1-k*ry*math.Cos(a1)
+	p.CubicTo(float32(c1x), float32(c1y), float32(c2x), float32(c2y), float32(x1), float32(y1))
+	s.geomSampleCubic(c1x, c1y, c2x, c2y, x1, y1, 8)
+}
+
+// appendRoundRect 构造圆角矩形路径（radii 顺序 tl/tr/br/bl；负值归零、
+// 超过半宽半高按规范夹取）。
+func appendRoundRect(p *skia.Path, s *canvas2DCtxState, x, y, w, h float64, radii [4]geomPoint) {
+	if w < 0 {
+		x += w
+		w = -w
+	}
+	if h < 0 {
+		y += h
+		h = -h
+	}
+	clampR := func(r geomPoint) geomPoint {
+		out := r
+		if math.IsNaN(out.X) || out.X < 0 {
+			out.X = 0
+		}
+		if math.IsNaN(out.Y) || out.Y < 0 {
+			out.Y = 0
+		}
+		if out.X > w/2 {
+			out.X = w / 2
+		}
+		if out.Y > h/2 {
+			out.Y = h / 2
+		}
+		return out
+	}
+	tl, tr, br, bl := clampR(radii[0]), clampR(radii[1]), clampR(radii[2]), clampR(radii[3])
+	const halfPi = math.Pi / 2
+	p.MoveTo(float32(x+tl.X), float32(y))
+	s.geomNewSubpath(x+tl.X, y)
+	p.LineTo(float32(x+w-tr.X), float32(y))
+	s.geomLineTo(x+w-tr.X, y)
+	appendRoundRectCorner(p, s, x+w-tr.X, y+tr.Y, tr.X, tr.Y, -halfPi, 0)
+	p.LineTo(float32(x+w), float32(y+h-br.Y))
+	s.geomLineTo(x+w, y+h-br.Y)
+	appendRoundRectCorner(p, s, x+w-br.X, y+h-br.Y, br.X, br.Y, 0, halfPi)
+	p.LineTo(float32(x+bl.X), float32(y+h))
+	s.geomLineTo(x+bl.X, y+h)
+	appendRoundRectCorner(p, s, x+bl.X, y+h-bl.Y, bl.X, bl.Y, halfPi, math.Pi)
+	p.LineTo(float32(x), float32(y+tl.Y))
+	s.geomLineTo(x, y+tl.Y)
+	appendRoundRectCorner(p, s, x+tl.X, y+tl.Y, tl.X, tl.Y, math.Pi, 3*halfPi)
+	p.Close()
+	s.geomClose()
 }
 
 // appendEllipse 追加椭圆弧（rx/ry 半径，a0..a1 角，忽略 rotation——v1）。

@@ -1735,6 +1735,151 @@ func (c *Canvas) StrokePathShader(path *skia.Path, strokeWidth float64, sh *skia
 	c.invalidatePixels()
 }
 
+// ─── canvas 2D 效果（阴影 / 虚线）──────────────────────────────────
+
+// CanvasEffect 描述 canvas 2D 的非几何绘制效果：阴影（shadowColor/shadowBlur/
+// shadowOffsetX/shadowOffsetY）与虚线（setLineDash/lineDashOffset）。零值表示
+// 无效果——与不带 Effect 的绘制方法完全等价。
+type CanvasEffect struct {
+	ShadowColor Color
+	ShadowAlpha float64 // shadowColor 的 alpha 分量（0..1；shadowColor 为 rgba 时）
+	ShadowDX    float64 // shadowOffsetX
+	ShadowDY    float64 // shadowOffsetY
+	ShadowSigma float64 // shadowBlur / 2（Skia 的 sigma 语义）
+
+	DashIntervals []float32 // 偶数个：on,off,on,off,...
+	DashPhase     float32   // lineDashOffset
+}
+
+// HasShadow 判定是否需要绘制阴影（颜色可见 + 有模糊或偏移；全零偏移且无模糊
+// 时阴影与形状重合，画了也看不见）。
+func (e CanvasEffect) HasShadow() bool {
+	return e.ShadowAlpha > 0 && e.ShadowColor.A > 0 &&
+		(e.ShadowSigma > 0 || e.ShadowDX != 0 || e.ShadowDY != 0)
+}
+
+// applyCanvasEffect 把效果装到 paint 上：阴影用 DropShadow 图像滤镜（一次
+// 绘制同时得到形状与其阴影，匹配 canvas 2D 的 shadow 语义）；虚线用 Dash
+// 路径效果（仅描边有意义）。
+func applyCanvasEffect(p *skia.Paint, eff CanvasEffect) {
+	if eff.HasShadow() {
+		sc := mulAlpha(eff.ShadowColor, eff.ShadowAlpha)
+		f := skia.NewDropShadowImageFilter(
+			float32(eff.ShadowDX), float32(eff.ShadowDY),
+			float32(eff.ShadowSigma), float32(eff.ShadowSigma),
+			colorToSkia(sc), nil)
+		if f != nil {
+			p.SetImageFilter(f)
+			f.Release() // paint 自带引用（sk_paint_set_imagefilter 内部 ref）
+		}
+	}
+	if len(eff.DashIntervals) >= 2 {
+		if pe := skia.NewDashPathEffect(eff.DashIntervals, eff.DashPhase); pe != nil {
+			p.SetPathEffect(pe)
+			pe.Release()
+		}
+	}
+}
+
+// applyStrokeStyle 设置描边宽度与 cap/join（SVG 关键字）。
+func applyStrokeStyle(p *skia.Paint, strokeWidth float64, cap, join string) {
+	p.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		p.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		p.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		p.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		p.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		p.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		p.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+}
+
+// FillRectFullEffect 同 FillRectFull，并应用阴影/虚线效果。
+func (c *Canvas) FillRectFullEffect(x, y, w, h float64, col Color, alpha float64, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || col.A == 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawRect(skia.RectXYWH(float32(x), float32(y), float32(w), float32(h)), p)
+	c.invalidatePixels()
+}
+
+// FillRectShaderEffect 同 FillRectShader，并应用阴影效果（shader 所有权属于
+// 调用方）。
+func (c *Canvas) FillRectShaderEffect(x, y, w, h float64, sh *skia.Shader, alpha float64, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || sh == nil || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	p.SetShader(sh)
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawRect(skia.RectXYWH(float32(x), float32(y), float32(w), float32(h)), p)
+	c.invalidatePixels()
+}
+
+// FillPathFullEffect 同 FillPathFull，并应用阴影效果。
+func (c *Canvas) FillPathFullEffect(path *skia.Path, col Color, alpha float64, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || path == nil || col.A == 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// FillPathShaderEffect 同 FillPathShader，并应用阴影效果。
+func (c *Canvas) FillPathShaderEffect(path *skia.Path, sh *skia.Shader, alpha float64, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || path == nil || sh == nil || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleFill)
+	defer p.Release()
+	p.SetShader(sh)
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// StrokePathFullEffect 同 StrokePathFull，并应用阴影/虚线效果。
+func (c *Canvas) StrokePathFullEffect(path *skia.Path, strokeWidth float64, col Color, alpha float64, cap, join string, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || path == nil || col.A == 0 || strokeWidth <= 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(col, alpha, blend, skia.PaintStyleStroke)
+	defer p.Release()
+	applyStrokeStyle(p, strokeWidth, cap, join)
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
+// StrokePathShaderEffect 同 StrokePathShader，并应用阴影/虚线效果。
+func (c *Canvas) StrokePathShaderEffect(path *skia.Path, strokeWidth float64, sh *skia.Shader, alpha float64, cap, join string, blend skia.BlendMode, eff CanvasEffect) {
+	if c.canvas == nil || path == nil || sh == nil || strokeWidth <= 0 || alpha <= 0 {
+		return
+	}
+	p := c.canvasPaint(Color{R: 255, G: 255, B: 255, A: 255}, alpha, blend, skia.PaintStyleStroke)
+	defer p.Release()
+	p.SetShader(sh)
+	applyStrokeStyle(p, strokeWidth, cap, join)
+	applyCanvasEffect(p, eff)
+	c.canvas.DrawPath(path, p)
+	c.invalidatePixels()
+}
+
 // DrawImageFull 绘制 src 矩形（img 内的子区域）到目标矩形，携带
 // globalAlpha + blend mode（canvas 2D drawImage 的 9 参形式）。
 func (c *Canvas) DrawImageFull(img *skia.Image, sx, sy, sw, sh, dx, dy, dw, dh float64, alpha float64, blend skia.BlendMode) {
