@@ -58,10 +58,14 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    若干色块位置/尺寸）。后续可把 `dev/calib` 的差异占比纳入回归基线，作为整体
    一致性的补充指标。
 3. 文本位置差 1-2px 属字体度量范畴（hinting/行高取整），非结构性布局错误。
-4. 本轮（aspect-ratio / flex 外盒尺寸 / 空 inline-block / `<video poster>`）后
-   cssprobe 为 **53/61 夹具、239/248 检查**；剩余 8 个夹具里 7 个是探针边界
-   （见下表），第 8 个 `logical-borders` 是参照「不斜切」与标准 CSS 相左
-   （固定 4/6，58px）。新增的一致性数字见上表 4 行。
+4. cssprobe 现状：**58/61 夹具、244/248 检查**（默认 `-scripts auto`，见下文
+   「探针的脚本执行模式」）；`-scripts off`（纯 CSS 管线）为 53/61、239/248，
+   保留为对照基线。剩余 3 个夹具 = 1 个参照差异（`logical-borders`：参照
+   「不斜切」与标准 CSS 相左，固定 4/6，58px）+ 2 个 Web 平台子系统缺失
+   （`media-text-track`、`modern-streams`，见「夹具限制」表）。
+5. 上一轮（aspect-ratio / flex 外盒尺寸 / 空 inline-block / `<video poster>`）
+   修复 4 项，本轮脚本模式再修复 5 项（落点见「脚本模式下修复的夹具」）；
+   一致性数字见上表 4 行。
    - `aspect-ratio`：flex item 交叉轴由主轴推出（`resolveCrossSizes` +
      `ratioCrossSizeInRowFlex` 供容器 auto 高度估算）、absolute 盒 `height:auto`
      由宽度推高（`layoutAbsolute`）、BFC auto 高度分支同样按比例兜底。
@@ -76,20 +80,55 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 
 ## 夹具限制（探针能力边界，非引擎缺口）
 
-`dev/cssprobe` 只做 HTML 解析 + CSS 计算 + 布局 + 绘制，**不执行 `<script>`**
-（也没有媒体加载 / DOM 事件运行时）。下列夹具的期望因此在本探针内不可达：
-失败原因是探针边界，**不记为渲染能力缺口**，对应能力改用 Go 单测或宿主集成
-测试覆盖。判断「是探针边界还是真缺口」的方法：期望色是否由页面脚本/媒体 API
-产生（`closest` 报出的实际像素恰好是夹具里另一条静态规则的颜色 ⇒ 脚本没跑）。
+判据：期望色是否由**页面脚本或媒体 API** 产生，且该能力是否落在 CSS 渲染引擎
+（探针与 wb-ui 的定位）之外。下列 3 项在本探针内不可达，失败原因是探针边界，
+**不记为渲染能力缺口**。判断「是探针边界还是真缺口」的方法：期望色是否由页面
+脚本/媒体 API 产生（`closest` 报出的实际像素恰好是夹具里另一条静态规则的
+颜色 ⇒ 脚本没跑），以及缺失的是否是 CSS 引擎职责（`dev/scriptsdiag` 逐项列出
+脚本可用的平台 API）。
+
+## 探针的脚本执行模式（-scripts）
+
+`dev/cssprobe` 默认对含 `<script>` 的夹具走 **WebView 路径**（`webkit.NewWebView`
+→ `Resize` → `LoadHTML` → `Render`），其余夹具走纯 CSS 管线；`-scripts off` 强制
+全部走纯 CSS 管线（历史基线），`-scripts on` 强制全部走 WebView。
+
+- 为什么要两条路径：夹具期望值来自参照实现（obscura/Chromium），其中一部分夹具的
+  行为**只存在于脚本执行之后**（`classList` 触发动画、`CSS.supports` 报语法支持、
+  页面读 `innerWidth`/`visualViewport`、React 19 的属性清空契约）。用纯 CSS 管线
+  跑这类夹具，检验的是初始 HTML 而不是夹具的契约。
+- 判定标准两条路径相同（精确同色 + 连通块 + ±1px），只是驱动不同：WebView 路径
+  接上了 JS 运行时、DOM 绑定与媒体查询视口。
+- 合成底色：WebView 从全透明表面开始（`Canvas.Clear(zero)`），参照实现合成到不透明
+  白底，故探针把读回像素**预乘合成到白底**（`out = c + (255-a)`；`goskia
+  Image.ReadPixels` 返回预乘 RGBA）。
+- 动画时钟：有限动画夹具断言的是**动画结束后的终态**（`fill:forwards`），参照截图
+  同样在页面稳定后拍摄。探针没有帧循环，因此在取图前把 `rendering.AnimationTime`
+  推到 10s 并调用一次 `rendering.ApplyAnimations`（`WebView.Render` 自身不应用
+  动画——时钟由宿主 `app.Host` 每帧推进）。
+- ★ 执行顺序：含 `<script>` 的夹具**排在最后**。WebView 构造时会初始化字体管理器
+  （`webkit.ensureFonts`），装载系统字体后 serif/mono 的 fallback 度量随之变化，
+  而参照实现的文本度量恰好等同「未加载系统字体」的 wb-ui（`dev/calib` 实测
+  `right-float-navigation` 差异 **0.000%**，逐像素相同）。脚本夹具若先跑，后续纯
+  CSS 夹具的几何会被改写（实测 `font-metric-line-height` 行盒偏 40px、
+  `right-float-navigation` 偏 4px、`table-row-geometry`/`table-track-geometry`
+  偏 1-3px）。字体管理器没有回滚 API，故用排序把这种跨夹具状态污染限制在尾部。
 
 | 夹具 | 探针内不可达的原因 | 引擎侧覆盖方式 |
 |------|--------------------|----------------|
-| `animation-fill-forwards` | `.dismissed` 由内联 `<script>` 的 `classList.add` 添加，脚本不执行 ⇒ 动画从未绑定，`#overlay` 保持静态可见（红），而期望是终态隐藏后露出的 `#content` 绿 | **已实现**：有限动画结束时 `fill:forwards` 保持终帧（`opacity:0` + `visibility:hidden`），`rendering/animation_test.go:TestAnimateVisibilityFillForwards`；visibility 的离散插值（CSS-ANIM：区间任一端点 `visible` ⇒ 区间内 `visible`）本轮补齐，另见 `TestAnimateVisibilityBothHidden` |
-| `eventtarget-lifecycle` | 需要 `addEventListener` / `dispatchEvent` 时序（探针无事件循环） | DOM 事件层单测：`dom/event_test.go:TestDispatchEventTargetPhase`（捕获/目标/冒泡三阶段时序）、`TestRemoveAllEventListeners`；`bindings/dom_test.go:TestDOMAddEventListenerAsMethodCall` / `TestDOMAddEventListenerInvokedFromGo` / `TestDOMAddEventListenerMouseEventFields` / `TestDOMRemoveEventListener` |
-| `modern-hydration-contracts`、`modern-streams` | 需要 JS 运行时（流式解析 + 水合） | **无专项单测**：水合契约本身由页面脚本驱动，wb-ui 只提供 DOM/JS 运行时，覆盖在宿主（gou-ide）集成层；此处如实记为未覆盖 |
-| `media-text-track` | 需要 `<track>` 媒体加载 | 未实现（媒体能力） |
-| `flex-flow` | 11 项里 10 项通过；仅剩「CSS supports accepts only the shorthand grammar」需要 `CSS.supports()`（JS API） | `css/values_test.go:TestParseFlexFlow` 覆盖语法，布局行为已由其余 10 项像素验证 |
-| `viewport-consistency` | 3 项里仅第 3 项「page JavaScript sees the screenshot viewport」需要 `window.innerWidth/innerHeight` 与 `visualViewport`（JS API） | 前两项（width / height 媒体查询）本轮修复：`style.Resolver` 的媒体上下文此前恒为 0×0（`min-height` 恒不匹配、`max-width` 恒匹配），现由 `RenderView.SetViewportSize` / `Frame.syncMediaQueryViewport` 与真实视口同步。单测：`rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync`（900x1000 命中、1200x800 不命中的交叉像素断言 + 不同步时 0×0 分支的反向对照） |
+| `media-text-track` | 需要 `<track>` → `HTMLTrackElement.track`（TextTrack + WebVTT 解析）与 `video.textTracks`，且 cues 就绪依赖 `data:` URL 的异步加载与 `load` 事件时序；探针没有媒体元素模型。`dev/scriptsdiag` 实测 `trackElement.track`、`video.textTracks` 均为 `undefined` | 未实现（媒体子系统，不属 CSS 引擎范围）。wb-ui 的 `<video>`/camera 挂件走帧注入（`vcam`），不经 DOM 媒体模型 |
+| `modern-streams` | 需要 `ReadableStream` + `TransformStream` + `TextEncoderStream`（`pipeThrough` / `getReader()` / Promise 微任务队列，Web Streams 标准）；实测三者均为 `undefined`（`TextDecoder` 已有：`jsc/webapi.go:RegisterWebAPIs`） | 未实现（Web Streams 子系统） |
+| `logical-borders` | 4/6：参照（obscura）对相邻边框拐角**不斜切**，wb-ui 按标准做 45° 斜接（差 58px @(190,74)-(199,79)）。曾试「右下角改填 bottom 色」与 FillPath 三角，bbox 更差 | 保持标准化不牺牲，固定 4/6（结论 1） |
+
+### 脚本模式下修复的夹具（本轮）
+
+| 夹具 | 缺口 | 落点 |
+|------|------|------|
+| `eventtarget-lifecycle` | 仅缺脚本执行（`class LifecycleTarget extends EventTarget` + `new Event` + 自定义属性） | 引擎侧 `EventTarget`/`Event`/`dispatchEvent` 早已实现：`dom/event_test.go:TestDispatchEventTargetPhase`、`bindings/dom_test.go:TestDOMAddEventListenerAsMethodCall` 等 |
+| `flex-flow` | 仅缺第 11 项「CSS supports accepts only the shorthand grammar」——由脚本查询 `CSS.supports()` | `bindings` 的 `CSS.supports` 已有实现；布局 10 项此前已通过（`css/values_test.go:TestParseFlexFlow` 覆盖语法） |
+| `animation-fill-forwards` | 探针不推进动画时钟（`WebView.Render` 不应用动画） | 见上文「动画时钟」；`rendering/animation_test.go:TestAnimateVisibilityFillForwards`（`fill:forwards` 保持终帧 + visibility 离散插值） |
+| `viewport-consistency` | 页面脚本读 `visualViewport.width/height` 抛 `ReferenceError`，**整段脚本中断**（不是只有那一行失效） | 新增 `window.visualViewport`（CSSOM View §4.2）：宽高与 `innerWidth/innerHeight` 同源（按解释器分派）、`scale=1`、offset/page=0、事件方法 no-op（`bindings/dom.go`）。另：前两项媒体查询由 `RenderView.SetViewportSize`/`Frame.syncMediaQueryViewport` 修复，`rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync` 覆盖 |
+| `modern-hydration-contracts` | React 19 水合契约：`document.currentScript`、`el.attributes instanceof NamedNodeMap` + **live 集合**、`removeAttributeNode`、`hasAttributes`、`scrollTo({left,top,behavior})`/`scrollBy` | `bindings/dom.go`（`NamedNodeMap` 构造器 + 同元素同实例的 live 集合缓存 `namedNodeMapFor`、`hasAttributes`/`removeAttributeNode`、`Element.prototype.scrollTo`/`scrollBy`）、`page/frame.go`（脚本执行期间设置 `bindings.CurrentScriptElement`，结束恢复）、`rendering/scrollbargeom.go` + `webkit`（新增 `ScrollRange`：可滚动性判定不再用滚动条几何——10×10 的 `overflow:scroll` 容器此前被静默丢弃 `scrollTop` 赋值） |
 
 ### 尺寸媒体查询的视口同步（本轮）
 

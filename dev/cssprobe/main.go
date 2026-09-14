@@ -21,6 +21,8 @@
 //	go run ./dev/cssprobe -v                  # also list passing checks
 //	go run ./dev/cssprobe -dump /tmp/out      # write rendered PNGs
 //	go run ./dev/cssprobe -json report.json   # machine-readable results
+//	go run ./dev/cssprobe -scripts off        # never run <script> (CSS-only pipeline)
+//	go run ./dev/cssprobe -scripts on         # always render through the WebView pipeline
 package main
 
 import (
@@ -46,6 +48,7 @@ import (
 	"wb-ui/platform/graphics"
 	"wb-ui/rendering"
 	"wb-ui/style"
+	"wb-ui/webkit"
 )
 
 // The reference viewport matches obscura's run.sh (OBSCURA_SHOT_W/H) and
@@ -56,6 +59,14 @@ const (
 	viewportH = 1000
 	minArea   = 20 // check.py: components smaller than this are noise
 	tolerance = 1  // check.py: |actual - expected| <= 1
+
+	// animationSettledTime is the animation clock (seconds) the scripted path
+	// renders at. Fixtures that assert an animation's outcome describe the state
+	// after it finishes (finite forwards animation → final hidden state), and the
+	// reference screenshots were taken on a settled page; the probe has no frame
+	// loop, so it advances the clock past any finite animation instead of
+	// sampling the opening frame.
+	animationSettledTime = 10.0
 )
 
 // Check is one expected solid-color component (checks.json entry).
@@ -119,6 +130,12 @@ func main() {
 	tree := flag.Bool("tree", false, "print the laid-out render tree for each fixture")
 	jsonOut := flag.String("json", "", "write machine-readable results to this file")
 	dir := flag.String("fixtures", defaultFixtureDir(), "fixture directory (HTML + checks.json)")
+	// -scripts selects how a fixture whose behavior is script-driven is driven.
+	// "auto" routes fixtures containing <script> through the WebView pipeline
+	// (JS runtime + DOM bindings + media-query viewport) and everything else
+	// through the CSS-only pipeline, i.e. each fixture runs the way it was
+	// authored; "off" pins the CSS-only pipeline for A/B comparison.
+	scripts := flag.String("scripts", "auto", "execute fixture <script> elements: auto|on|off")
 	flag.Parse()
 
 	var filterRE *regexp.Regexp
@@ -129,6 +146,10 @@ func main() {
 			os.Exit(2)
 		}
 		filterRE = re
+	}
+	if *scripts != "auto" && *scripts != "on" && *scripts != "off" {
+		fmt.Fprintf(os.Stderr, "cssprobe: bad -scripts %q (want auto|on|off)\n", *scripts)
+		os.Exit(2)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(*dir, "checks.json"))
@@ -154,6 +175,31 @@ func main() {
 		fmt.Fprintln(os.Stderr, "cssprobe: no fixtures selected")
 		os.Exit(2)
 	}
+
+	// ★ 执行顺序：纯 CSS 夹具在前，含 <script> 的夹具在后。
+	//
+	// 脚本夹具经 WebView 路径渲染（见 -scripts），而 WebView 构造时会初始化
+	// 字体管理器（webkit.ensureFonts → InitFontManager + LoadSystemFonts）：
+	// 装载系统字体后 serif/mono 的 fallback 解析与度量随之变化。参考实现
+	// （obscura）的文本度量恰好等同"未加载系统字体"的 wb-ui —— dev/calib 实测
+	// right-float-navigation 差异 0.000%（逐像素相同）。因此脚本夹具一旦先跑，
+	// 后续纯 CSS 夹具的几何就被字体环境改写，实测 font-metric-line-height 行盒
+	// 偏 40px、right-float-navigation 偏 4px、table-row-geometry 与
+	// table-track-geometry 偏 1-3px。字体管理器没有回滚 API，故用排序把这种
+	// 跨夹具状态污染限制在尾部（尾部夹具自身就需要 WebView）。
+	scriptFixtures := map[string]bool{}
+	for _, name := range names {
+		if src, err := os.ReadFile(filepath.Join(*dir, name+".html")); err == nil &&
+			strings.Contains(string(src), "<script") {
+			scriptFixtures[name] = true
+		}
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		if scriptFixtures[names[i]] != scriptFixtures[names[j]] {
+			return !scriptFixtures[names[i]] // script-driven fixtures last
+		}
+		return names[i] < names[j] // keep the alphabetical order within each group
+	})
 
 	if *dump != "" {
 		if err := os.MkdirAll(*dump, 0o755); err != nil {
@@ -186,7 +232,8 @@ func main() {
 			treeWriter = os.Stdout
 			fmt.Printf("--- %s render tree ---\n", name)
 		}
-		res := runFixture(name, string(src), checks[name], dumpPath, treeWriter)
+		useScripts := *scripts == "on" || (*scripts == "auto" && strings.Contains(string(src), "<script"))
+		res := runFixture(name, string(src), checks[name], dumpPath, treeWriter, useScripts)
 		results = append(results, res)
 
 		status := "PASS"
@@ -253,9 +300,9 @@ func main() {
 
 // runFixture renders one fixture and evaluates every expected component. When
 // dumpPath is non-empty the rendered image is written there for visual review.
-func runFixture(name, htmlText string, checks []Check, dumpPath string, tree io.Writer) FixtureResult {
+func runFixture(name, htmlText string, checks []Check, dumpPath string, tree io.Writer, useScripts bool) FixtureResult {
 	res := FixtureResult{Name: name}
-	img, err := renderFixture(htmlText, tree)
+	img, err := renderFixture(htmlText, tree, useScripts)
 	if err != nil {
 		res.Error = err.Error()
 		return res
@@ -348,7 +395,10 @@ func buildLayout(htmlText string) (*rendering.RenderView, error) {
 // renderFixture runs the fixture through wb-ui's pipeline at the reference
 // viewport and returns the composited RGBA image. When tree is non-nil the
 // laid-out render tree is written there for diagnosis.
-func renderFixture(htmlText string, tree io.Writer) (*image.RGBA, error) {
+func renderFixture(htmlText string, tree io.Writer, useScripts bool) (*image.RGBA, error) {
+	if useScripts {
+		return renderFixtureWithScripts(htmlText, tree)
+	}
 	rv, err := buildLayout(htmlText)
 	if err != nil {
 		return nil, err
@@ -378,6 +428,81 @@ func renderFixture(htmlText string, tree io.Writer) (*image.RGBA, error) {
 		}
 	}
 	return img, nil
+}
+
+// renderFixtureWithScripts renders a fixture through the WebView pipeline so
+// that its <script> elements actually run. Several fixtures assert behavior that
+// only exists once a script has executed (classList mutation triggering an
+// animation, CSS.supports reporting the shorthand grammar, a page reading
+// innerWidth/visualViewport); running them through the CSS-only pipeline tests
+// the initial markup instead of the fixture's contract.
+//
+// The contract itself is unchanged — the fixture still passes only if layout AND
+// paint produce the expected solid-color component — only the driver differs:
+// WebView wires up the JS runtime, the DOM bindings and the media-query
+// viewport, which is the environment the reference expectations were authored in.
+func renderFixtureWithScripts(htmlText string, tree io.Writer) (*image.RGBA, error) {
+	wv := webkit.NewWebView()
+	defer wv.Destroy()
+	wv.Resize(viewportW, viewportH)
+	if err := wv.LoadHTML(htmlText); err != nil {
+		return nil, fmt.Errorf("webkit LoadHTML: %w", err)
+	}
+	// Drive the animation clock and apply animations once so a finished forwards
+	// animation paints its final state. rendering.AnimationTime is the
+	// embedder-owned clock (app.Host advances it every frame) and WebView.Render
+	// does not apply animations by itself, so without this a fixture that asserts
+	// an animation's *outcome* would sample its opening frame. EnsureLayout comes
+	// first so Render() below does not rebuild the render tree underneath the
+	// styles we just animated.
+	wv.EnsureLayout()
+	if rv := wv.RenderView(); rv != nil {
+		rendering.AnimationTime = animationSettledTime
+		rendering.ApplyAnimations(rv)
+	}
+	if tree != nil {
+		if rv := wv.RenderView(); rv != nil {
+			dumpTree(tree, rendering.RenderObject(rv), 0)
+		}
+	}
+	pix, err := wv.Render()
+	if err != nil {
+		return nil, fmt.Errorf("webkit Render: %w", err)
+	}
+	w, h := wv.Width(), wv.Height()
+	if len(pix) != w*h*4 {
+		return nil, fmt.Errorf("webkit Render: %d bytes for %dx%d", len(pix), w, h)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, viewportW, viewportH))
+	// WebView composites onto a fully transparent surface (Canvas.Clear(zero)),
+	// while Chromium/obscura composite onto opaque white — and the fixture
+	// expectations describe the latter. Composite the readback over white so the
+	// strict same-color comparison stays meaningful. The readback is
+	// premultiplied (goskia Image.ReadPixels), and white contributes
+	// 255*(255-a)/255 = (255-a) per channel, so the premultiplied result is just
+	// the sum, which is the straight value once A is opaque.
+	for y := 0; y < viewportH && y < h; y++ {
+		for x := 0; x < viewportW && x < w; x++ {
+			i := (y*w + x) * 4
+			r, g, b, a := pix[i], pix[i+1], pix[i+2], pix[i+3]
+			img.SetRGBA(x, y, color.RGBA{
+				R: overWhite(r, a), G: overWhite(g, a), B: overWhite(b, a), A: 255,
+			})
+		}
+	}
+	return img, nil
+}
+
+// overWhite composites one premultiplied channel c (alpha a) onto opaque white.
+func overWhite(c, a byte) byte {
+	if a == 255 {
+		return c
+	}
+	v := int(c) + 255 - int(a)
+	if v > 255 {
+		v = 255
+	}
+	return byte(v)
 }
 
 // applyDocumentCSS feeds <style> text and style="" attributes found in the
