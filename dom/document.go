@@ -42,6 +42,12 @@ type Document struct {
 	// 供 CSS `:fullscreen` 与 fullscreenchange 事件消费；是否真的把宿主窗口切到
 	// 全屏由宿主（bindings 的使用方）决定。
 	fullscreenElement *Element
+
+	// popover 是文档上的 popover 子系统状态（HTML §6.12）：top layer 中显示中
+	// 的 popover 序列、hint 栈父元素、light dismiss 的 pointerdown 记忆与重入
+	// 标记。字段定义见 popoverstate.go；由 wb-ui/popover 包维护，dom 包本身
+	// 不改变它。
+	popover PopoverDocumentState
 }
 
 // FullscreenElement 返回当前处于全屏的元素（无则 nil）。

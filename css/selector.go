@@ -10,10 +10,11 @@
 //     part-name-list arguments) and matched by SelectorChecker; ::part forward-matching
 //     through one or more `exportparts` layers is implemented (matchPart +
 //     parseExportparts follow the re-export chain host by host)
-//   - :fullscreen / :open / :closed / :modal are implemented; view-transition
-//     pseudo-elements are parsed but never match (no view-transition machinery in
-//     this port), and :popover-open / :autofill / :picture-in-picture are not
-//     modelled (no popover / autofill / picture-in-picture in this port)
+//   - :fullscreen / :open / :closed / :modal / :popover-open are implemented;
+//     view-transition pseudo-elements are parsed but never match (no
+//     view-transition machinery in this port), and :autofill /
+//     :picture-in-picture are not modelled (no autofill or picture-in-picture
+//     in this port)
 //   - :valid / :invalid / :in-range / :out-of-range consult an injected
 //     FormValidityResolver (css/validity.go): the constraint-validation state
 //     lives in the html5 package, which already imports css, so the checker
@@ -127,6 +128,11 @@ const (
 	PseudoClassModal
 	PseudoClassUserValid
 	PseudoClassUserInvalid
+	// PseudoClassPopoverOpen 是 HTML §6.12 的 `:popover-open`：匹配
+	// 「popover visibility state 为 showing」的元素（唯一判据是元素的
+	// dom.PopoverState.Showing）。它加在枚举末尾而非按章节插入，是为了不
+	// 改动既有枚举值（值被序列化/测试引用）。
+	PseudoClassPopoverOpen
 )
 
 // PseudoElement enumerates the supported pseudo-elements, mirroring
@@ -468,6 +474,8 @@ func PseudoClassName(p PseudoClass) string {
 		return "user-valid"
 	case PseudoClassUserInvalid:
 		return "user-invalid"
+	case PseudoClassPopoverOpen:
+		return "popover-open"
 	}
 	return ""
 }
@@ -625,6 +633,8 @@ func LookupPseudoClass(name string) PseudoClass {
 		return PseudoClassUserValid
 	case "user-invalid":
 		return PseudoClassUserInvalid
+	case "popover-open":
+		return PseudoClassPopoverOpen
 	}
 	return PseudoClassUnknown
 }

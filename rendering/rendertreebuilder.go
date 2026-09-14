@@ -257,12 +257,14 @@ func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Eleme
 		return block
 	}
 
-// createBackdropObject 为模态 <dialog> 的 ::backdrop 创建渲染对象（非模态 /
-// 无 ::backdrop 规则 / display:none 时返回 nil）。它没有 DOM 节点，样式由
-// style.Resolver.ResolvePseudoElement 解析（UA 规则给出 position:fixed +
-// inset:0 + 半透明背景），因此绘制时铺满视口。
+// createBackdropObject 为 top layer 元素的 ::backdrop 创建渲染对象（模态
+// <dialog>、显示中的 popover；无 ::backdrop 规则 / display:none 时返回 nil）。
+// 它没有 DOM 节点，样式由 style.Resolver.ResolvePseudoElement 解析（UA 规则
+// 给出 position:fixed + inset:0；模态 dialog 是半透明黑，popover 是透明不吃
+// 指针事件），因此绘制时铺满视口。判定与 layout 侧的 backdropBoxFor 共用
+// dom.Element.NeedsBackdrop。
 func (b *RenderTreeBuilder) createBackdropObject(el *dom.Element) RenderObject {
-	if b.resolver == nil || el == nil || !el.IsModalDialog() {
+	if b.resolver == nil || el == nil || !el.NeedsBackdrop() {
 		return nil
 	}
 	cs, _, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementBackdrop)

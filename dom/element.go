@@ -36,10 +36,18 @@ type Element struct {
 	active          bool
 
 	// modal 是 HTML 的「模态状态」（in the modal state）：<dialog> 经
-	// showModal() 打开、或将来模态 popover 显示时由宿主置位。它为 true 时
-	// :modal 伪类匹配（HTML 渲染规范 + Selectors-4），渲染层可据此把元素
-	// 画在最上层。由宿主（html5/bindings）设置，dom 包本身不改变它。
+	// showModal() 打开时由宿主（html5/bindings）置位。它为 true 时 :modal
+	// 伪类匹配（HTML 渲染规范 + Selectors-4），渲染层可据此生成 ::backdrop
+	// 遮罩盒。popover 不进入模态状态（规范的 popover 只用 top layer），
+	// 因此与它无关。dom 包本身不改变它。
 	modal bool
+
+	// popover 是元素的 popover 子系统状态（HTML §6.12）：可见状态（showing /
+	// hidden）、opened in popover mode、trigger、关闭时要恢复的焦点等。字段定义
+	// 见 popoverstate.go；由 wb-ui/popover 包维护，dom 包本身不改变它。
+	// CSS 选择器引擎读 Showing 判 :popover-open，UA 样式表用
+	// [popover]:not(:popover-open) 让未显示的 popover 不生成盒。
+	popover PopoverState
 
 	// indeterminate 是 <input type="checkbox"> 的「不确定状态」：由
 	// HTMLInputElement.indeterminate IDL 属性设置（**不是** HTML 内容属性，
@@ -150,6 +158,24 @@ func (e *Element) ClearFocusValidity() {
 // 使用（见 html5.NoteFocusGained）。dom 包不能依赖 html5，故用注入方式——与
 // DynamicPseudoStateChanged 同一模式。
 var OnElementFocused func(el *Element)
+
+// OnElementAttributeChanged 是「属性变更步骤」的回调（HTML 的 attribute change
+// steps）：属性被新增/修改/删除时触发，携带属性名、旧值/新值与两者当时是否
+// 存在（“值空串”与“属性不存在”都对应空串，但状态不同——例如 popover="" 是
+// Auto 状态、没有 popover 属性是 No Popover 状态）。
+//
+// 与 MutationObserver 的通知（NotifyAttributes）分开：后者只在有观察者时才
+// 有意义且需要构造记录，本钩子是无条件的、供引擎子系统消费（popover 子系统
+// 用它实现 §6.12 的 attribute change steps：正在显示的 popover 属性状态变化
+// 时关闭它）。由 wb-ui/popover 在 init 里注册——dom 包不依赖它。
+var OnElementAttributeChanged func(el *Element, localName, oldValue string, oldExisted bool, newValue string, newExisted bool)
+
+// notifyAttributeChanged 触发上面的属性变更回调（未注册时无操作）。
+func notifyAttributeChanged(el *Element, name, oldValue string, oldExisted bool, newValue string, newExisted bool) {
+	if OnElementAttributeChanged != nil {
+		OnElementAttributeChanged(el, name, oldValue, oldExisted, newValue, newExisted)
+	}
+}
 
 // IsModalDialog reports whether the element is a <dialog> in the modal state
 // (HTML §4.11.6). The modal state is set by showModal() and cleared by close()/
@@ -306,6 +332,8 @@ func (e *Element) SetAttribute(name, value string) {
 	if !existed || oldValue != value {
 		e.attrVersion++
 		NotifyAttributes(e, key, oldValue)
+		// 属性变更步骤（HTML attribute change steps）：无条件的引擎钩子。
+		notifyAttributeChanged(e, key, oldValue, existed, value, true)
 	}
 }
 
@@ -321,6 +349,7 @@ func (e *Element) RemoveAttribute(name string) bool {
 	// MutationObserver: notify attributes removed
 	e.attrVersion++
 	NotifyAttributes(e, key, oldValue)
+	notifyAttributeChanged(e, key, oldValue, true, "", false)
 	return true
 }
 

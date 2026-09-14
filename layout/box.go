@@ -634,12 +634,12 @@ func appendPseudoAfter(box *ElementBox, el *dom.Element, resolver *style.Resolve
 	}
 }
 
-// backdropBoxFor 返回模态 <dialog> 的 ::backdrop 伪元素盒（非模态 / 无
-// ::backdrop 规则时返回 nil）。盒无 DOM 节点，标记 NodePseudoElement。
-// 模态判定与 :modal 伪类、渲染树的 backdrop 对象共用
-// dom.Element.IsModalDialog。
+// backdropBoxFor 返回 top layer 元素的 ::backdrop 伪元素盒（模态 <dialog>、
+// 显示中的 popover；无 ::backdrop 规则时返回 nil）。盒无 DOM 节点，标记
+// NodePseudoElement。判定与 :modal / :popover-open 伪类、渲染树的 backdrop
+// 对象共用 dom.Element.NeedsBackdrop。
 func backdropBoxFor(el *dom.Element, resolver *style.Resolver) *ElementBox {
-	if resolver == nil || !el.IsModalDialog() {
+	if resolver == nil || !el.NeedsBackdrop() {
 		return nil
 	}
 	cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementBackdrop)

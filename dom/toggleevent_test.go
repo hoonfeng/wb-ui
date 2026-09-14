@@ -9,8 +9,8 @@ func TestToggleEventSource(t *testing.T) {
 	doc := NewDocument()
 	btn := doc.CreateElement("button")
 
-	// 显式构造：source 原样保留（nil 表示「没有触发者」——本端口 dialog /
-	// details 的所有路径都传 nil，见 Source 的注释）。
+	// 显式构造：source 原样保留（nil 表示「没有触发者」——dialog / details 的
+	// 所有路径都传 nil；popover 只有 invoker 触发的路径才传非 nil）。
 	ev := NewToggleEvent("toggle", false, false, ToggleStateOpen, ToggleStateClosed, nil)
 	if ev.Source() != nil {
 		t.Errorf("Source() = %v, want nil", ev.Source())
@@ -41,8 +41,9 @@ func TestToggleEventSource(t *testing.T) {
 	if ev4.Source() != nil {
 		t.Errorf("FromInit 未给 source 时 Source() = %v, want nil", ev4.Source())
 	}
-	// 缺省状态按 IDL 默认值为 "closed"。
-	if ev4.OldState() != ToggleStateClosed || ev4.NewState() != ToggleStateClosed {
-		t.Errorf("缺省状态 = %q/%q, want closed/closed", ev4.OldState(), ev4.NewState())
+	// 缺省状态按 IDL 声明为**空串**（`DOMString oldState = ""`）——字典保真
+	// 复制，浏览器里 `new ToggleEvent("toggle").oldState === ""`。
+	if ev4.OldState() != "" || ev4.NewState() != "" {
+		t.Errorf("缺省状态 = %q/%q, want 空串/空串（IDL 默认值）", ev4.OldState(), ev4.NewState())
 	}
 }

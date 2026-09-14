@@ -55,20 +55,18 @@ func NewToggleEvent(typ string, canBubble, cancelable bool, oldState, newState s
 }
 
 // NewToggleEventFromInit constructs a ToggleEvent from a ToggleEventInit
-// dictionary, mirroring ToggleEvent::create(type, init). An absent state
-// defaults to "closed", matching the IDL default.
+// dictionary, mirroring ToggleEvent::create(type, init).
+//
+// The dictionary members are copied verbatim: the IDL declares
+// `DOMString oldState = ""` / `DOMString newState = ""`, so a dictionary that
+// omits them yields the *empty string*, not "closed" — `new
+// ToggleEvent("toggle").oldState === ""` in a browser. Normalising here would
+// make script-constructed events disagree with the IDL default.
 func NewToggleEventFromInit(typ string, init ToggleEventInit) *ToggleEvent {
-	old, new := init.OldState, init.NewState
-	if old == "" {
-		old = ToggleStateClosed
-	}
-	if new == "" {
-		new = ToggleStateClosed
-	}
 	return &ToggleEvent{
 		baseEvent: newBaseEvent(typ, init.Bubbles, init.Cancelable, init.Composed, false),
-		oldState:  old,
-		newState:  new,
+		oldState:  init.OldState,
+		newState:  init.NewState,
 		source:    init.Source,
 	}
 }
@@ -94,8 +92,9 @@ func (e *ToggleEvent) NewState() string { return e.newState }
 //     have no caller modelling either.
 //   - <details>: the details toggle task initialises only oldState/newState.
 //   - popover: the invoker (popovertarget / command element) is the one case
-//     where source is non-null. This port has no Popover API yet (see
-//     docs/TECH_DEBT.md), so nothing produces a non-null source today; the
-//     field exists so that `e.source === null` (and MDN's
-//     `event.source === undefined` feature detection) behaves like a browser.
+//     where source is non-null — showPopover()/hidePopover()/togglePopover()
+//     called by script pass no source, while clicking a popover invoker does
+//     (see the popover package). For every other transition the field is null,
+//     so that `e.source === null` (and MDN's `event.source === undefined`
+//     feature detection) still behaves like a browser.
 func (e *ToggleEvent) Source() *Element { return e.source }

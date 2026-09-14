@@ -125,6 +125,8 @@ func TestSelector_LookupPseudoClass(t *testing.T) {
 		"open":          PseudoClassOpen,
 		"closed":        PseudoClassClosed,
 		"modal":         PseudoClassModal,
+		// popover 的可见状态（HTML §6.12）
+		"popover-open":  PseudoClassPopoverOpen,
 	}
 	for name, want := range cases {
 		if got := LookupPseudoClass(name); got != want {
@@ -193,6 +195,7 @@ func TestSelector_PseudoNameRoundTrip(t *testing.T) {
 		PseudoClassLang, PseudoClassDir, PseudoClassDefined,
 		PseudoClassHost, PseudoClassHostContext,
 		PseudoClassFullscreen, PseudoClassOpen, PseudoClassClosed, PseudoClassModal,
+		PseudoClassPopoverOpen,
 	}
 	for _, p := range pseudoClasses {
 		name := PseudoClassName(p)

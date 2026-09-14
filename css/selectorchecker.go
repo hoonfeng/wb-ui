@@ -521,11 +521,19 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 		return isOpenStateElement(el) && !el.HasAttribute("open")
 	case PseudoClassModal:
 		// HTML / Selectors-4：:modal 匹配「处于模态状态」的元素。本引擎的
-		// 模态来源只有 <dialog> 的 showModal()（html5.HTMLDialogElement），
-		// popover 未建模。判定与渲染层的 ::backdrop 盒生成共用
+		// 模态来源只有 <dialog> 的 showModal()（html5.HTMLDialogElement）：
+		// popover 显示时不进入模态状态（规范的 popover 只用 top layer，
+		// 「模态 popover」没有进入标准），因此不匹配 :modal。判定与渲染层的
+		// ::backdrop 盒生成共用
 		// dom.Element.IsModalDialog —— 注意规范语义：[open] 属性被移除并不会
 		// 退出模态状态（只有 close() / 移除步骤会），所以 :modal 继续匹配。
 		return el.IsModalDialog()
+	case PseudoClassPopoverOpen:
+		// HTML §6.12：:popover-open 只取决于元素的 popover visibility state
+		// （showing / hidden），与 popover 属性的状态无关——manual popover
+		// 同样匹配（它只是不做 light dismiss、不被其他 popover 关闭）。
+		// 状态由 wb-ui/popover 包的 show/hide 算法维护（见 dom/popoverstate.go）。
+		return el.IsPopoverOpen()
 	case PseudoClassHost:
 		// :host matches the shadow host itself; :host(sel) additionally requires
 		// the host to match the selector list.
