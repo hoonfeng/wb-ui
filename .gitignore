@@ -29,6 +29,8 @@ coverage.txt
 
 # Translation progress report
 translation-progress.txt
+# Windows reserved-name leftovers (cmd `2>nul` style redirections create these)
+nul
 # Generated test outputs 
 *.ppm 
 dump.txt 

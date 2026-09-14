@@ -63,22 +63,27 @@
 
 - Go 1.25+
 - CGO 工具链（Windows 用 MinGW-w64 GCC，如 MSYS2 mingw64 的 gcc）
-- Skia 原生库 `libSkiaSharp.dll`（由 goskia 提供），且其所在目录在 `PATH` 中
+- Skia 原生库（`libSkiaSharp.dll` / `.so` / `.dylib`），随 goskia 模块一起下载，
+  位于 `$(go env GOMODCACHE)/github.com/hoonfeng/goskia@<ver>/skia/lib/<goos>_<goarch>/`，
+  构建时其所在目录需在 `PATH` 中
 
 ```bat
-:: Windows：脚本内部已设 CGO_ENABLED=1 与 DLL 目录
+:: Windows：脚本自动定位 goskia 原生库并设好 CGO_ENABLED
 cgo_env.bat build
 
-:: 或手动
+:: 或手动（首次先 go mod download github.com/hoonfeng/goskia）
 set CGO_ENABLED=1
-set PATH=<goskia>\bin;%PATH%
+set PATH=<goskia>\skia\lib\windows_amd64;%PATH%
 go build ./...
 ```
 
 ```bash
 # Linux / macOS
-CGO_ENABLED=1 PATH=<goskia>/bin:$PATH go build ./...
+CGO_ENABLED=1 PATH=<goskia>/skia/lib/$(go env GOOS)_$(go env GOARCH):$PATH go build ./...
 ```
+
+`make build` 同样自动定位原生库；要指定别处的原生库，用
+`make build SKIA_DLL_DIR=<dir>`（`cgo_env.bat` 认环境变量 `SKIA_DLL_DIR`）。
 
 ## 测试
 
@@ -100,14 +105,18 @@ go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html
 go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout.html
 ```
 
+> 少数探针的默认路径指向开发机上的兄弟项目（goskia 源码、gou-ide 前端 bundle、
+> 主项目夹具）：`gobench`、`jssyntax`、`l2djscheck`、`vue_load_test` 等需按本机
+> 情况改用 `-flag` 或改常量，`calib` 可直接用 `-obscura <path>` 指定。
+
 ## 依赖
 
 - `github.com/hoonfeng/goskia` — Skia CGO 绑定 + `libSkiaSharp.dll`
 - `goja` — ECMAScript 引擎（已并入本仓库 `engine/js/goja/`，非独立模块）
 - 其余见 `go.mod`（glfw、regexp2、go-yaml、pprof、sourcemap、x/text、semver）
 
-本机开发时父目录的 `go.work` 会把 `goskia` 指向本地目录；要验证「克隆后能否构建」，
-请用 `GOWORK=off go build ./...`（只按 `go.mod` 解析依赖）。
+与 goskia 源码联动开发时，父目录的 `go.work` 会把 `goskia` 指向本地目录；
+要验证「克隆后能否构建」，请用 `GOWORK=off go build ./...`（只按 `go.mod` 解析依赖）。
 
 ## 文档
 

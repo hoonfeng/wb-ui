@@ -7,10 +7,23 @@ REM   cgo_env build        - go build ./...
 REM   cgo_env test         - go test ./...
 REM   cgo_env test -v      - go test -v ./...
 REM   cgo_env run <target> - go run <target>
+REM
+REM Skia native library directory resolution order:
+REM   1) SKIA_DLL_DIR if already set in the environment
+REM   2) <goskia module dir>\skia\lib\windows_amd64, located via `go list -m`
 REM ============================================================
 
 set CGO_ENABLED=1
-set SKIA_DLL_DIR=F:\syproject\goskia\bin
+
+if not defined SKIA_DLL_DIR (
+    for /f "delims=" %%d in ('go list -m -f "{{.Dir}}" github.com/hoonfeng/goskia 2^>nul') do set "SKIA_DLL_DIR=%%d\skia\lib\windows_amd64"
+)
+if not defined SKIA_DLL_DIR (
+    echo [WARN] goskia module not found - cannot locate libSkiaSharp.dll
+    echo        run: go mod download github.com/hoonfeng/goskia
+    echo        or set SKIA_DLL_DIR to the directory holding libSkiaSharp.dll
+    set "SKIA_DLL_DIR=."
+)
 set PATH=%SKIA_DLL_DIR%;%PATH%
 
 echo ========================================
