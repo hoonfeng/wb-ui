@@ -659,6 +659,14 @@ func buildFlexChildren(box *ElementBox, el *dom.Element, resolver *style.Resolve
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
 			if cs.Display == style.DisplayNone { return }
+			// 模态 <dialog> 的 ::backdrop 遮罩盒：与块级路径（buildChildren）
+			// 同样的插入点——flex 容器里的 dialog 也要有遮罩。backdrop 是
+			// position:fixed，flex 布局把它当 out-of-flow（deferredAbsolutes）
+			// 处理，不会占 flex item 槽位。渲染树侧 buildFlexChildren 有
+			// 完全相同的插入点，两棵树必须逐节点对应（linkLayoutBoxes）。
+			if bd := backdropBoxFor(v, resolver); bd != nil {
+				box.AddChild(bd)
+			}
 			child := newBoxForElement(v, cs)
 			buildChildren(child, v, resolver)
 			box.AddChild(child)

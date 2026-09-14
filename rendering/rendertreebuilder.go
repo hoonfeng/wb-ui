@@ -286,6 +286,12 @@ func (b *RenderTreeBuilder) buildFlexChildren(parent RenderObject, el *dom.Eleme
 			if cs.Display == style.DisplayNone {
 				return
 			}
+			// 模态 <dialog> 的 ::backdrop：flex/grid 容器里的 dialog 同样要有
+			// 遮罩对象（与 layout/box.go 的 buildFlexChildren 插入点一一对应，
+			// 否则 linkLayoutBoxes 会因结构错位而配错盒）。
+			if bd := b.createBackdropObject(v); bd != nil {
+				parent.AddChild(bd, nil)
+			}
 			var child RenderObject
 			if isReplacedElement(v.LocalName()) {
 				child = NewRenderBox(v, cs)
