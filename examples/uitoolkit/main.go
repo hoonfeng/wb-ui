@@ -19,6 +19,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"path/filepath"
 
 	"wb-ui/dom"
 	"wb-ui/ui"
@@ -39,7 +40,7 @@ button.wbtn{background:#3aa76d}
 
 func main() {
 	modeFlag := flag.String("mode", "toolkit", "运行模式：toolkit（UI 库，默认）| browser（嵌入浏览器）")
-	out := flag.String("out", "ui-toolkit-demo.png", "PNG 输出路径（空字符串 = 不写文件）")
+	out := flag.String("out", "_temp/ui-toolkit-demo.png", "PNG 输出路径（空字符串 = 不写文件）")
 	flag.Parse()
 
 	mode := webkit.ModeToolkit
@@ -126,6 +127,13 @@ func main() {
 		fatalf("Render: %v", err)
 	}
 	if *out != "" {
+		// 默认写到 _temp/（.gitignore 已忽略）：示例不该往仓库根丢产物。
+		if dir := filepath.Dir(*out); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "创建输出目录失败：%v\n", err)
+				os.Exit(1)
+			}
+		}
 		if err := writePNG(*out, wv.Width(), wv.Height(), pixels); err != nil {
 			fatalf("写 PNG: %v", err)
 		}

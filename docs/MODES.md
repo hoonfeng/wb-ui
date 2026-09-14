@@ -34,6 +34,7 @@ wb-ui 的渲染/布局/DOM/CSS/事件管线是同一套，但**装配阶段接�
 | `XMLHttpRequest` | ✅ | ❌ 不注册（全局不存在） |
 | `Worker` / `WebSocket` | ✅ | ❌ 全局置 undefined |
 | `<link rel=stylesheet href>` / `<script src>` 的 http(s)/file 加载 | ✅ | ❌ 只有 `data:` URL 与宿主 `ResourceResolver` |
+| 同上的**相对引用**（`href="a.css"` / `src="/js/x.js"`），以文档 URL 为基准 | ✅ | ❌（同上一格） |
 | `<iframe src>` 子文档装配 | ✅ | ❌ 不装配（`<iframe>` 元素仍参与布局/绘制） |
 | `LoadURL()` 导航 | ✅ | ❌ `ErrModeNotSupported` |
 | `<link>`/`@import`/`<script src>` 的 `data:` URL | ✅ | ✅ |
@@ -53,6 +54,23 @@ wv := webkit.NewWebView()          // == NewWebViewWithMode(webkit.ModeBrowser)
 wv.Resize(1024, 768)
 wv.LoadURL("http://localhost:9090/")
 ```
+
+`LoadURL` 取到内容后会把该 URL 写进文档（`document.URL` / `location.href`），
+并作为**文档基地址**：页面里所有相对引用都按浏览器语义解析——
+
+| 页面里的写法 | 解析结果 |
+|---|---|
+| `<link href="/style.css">` | `http://host/style.css`（根相对） |
+| `<script src="app.js">`（页面 `/dir/page.html`） | `http://host/dir/app.js`（文档相对） |
+| `fetch("/api/users")` / `xhr.open("GET", "items.json")` | 同上规则；桥路由仍先按**原样** URL 匹配（宿主按 `"/api/users"` 注册的路由不受影响） |
+| `<iframe src="child.html">` | 同文档相对规则（`resolveIframeSrc`） |
+
+解析器是 [dom.ResolveURL](dom/url.go)（`document.baseURI` 语义）：绝对引用与宿主
+自定义 scheme（`app://…`、`data:`、`file:`）原样返回，协议相对（`//cdn/x.css`）
+补上文档 scheme。导航到另一个 URL 后基准立即跟随（不再残留旧文档的基准）。
+
+`LoadHTML` 相反：内容**没有来源 URL**（等价 `about:blank`），没有基准可解析——
+需要真实网页语义时用 `LoadURL`，或由宿主自己把引用规范化成绝对 URL。
 
 ### 3.2 UI 库（宿主不写 HTML）
 
@@ -123,6 +141,10 @@ go run ./examples/uitoolkit
 
 # 嵌入浏览器模式（能力面差异直接打印出来）
 go run ./examples/uitoolkit -mode browser -out out.png
+
+# 真实 HTTP 端到端诊断（真起 httptest 服务器）：相对 CSS/脚本、fetch 相对
+# URL、document.URL/location、导航后基准跟随；并打印 <img>/@import 的事实
+go run ./dev/browser_http_probe
 ```
 
 输出会打印组件来源、点击回调次数、`typeof fetch/XMLHttpRequest/Worker/WebSocket`
@@ -131,6 +153,18 @@ go run ./examples/uitoolkit -mode browser -out out.png
 ## 6. 已知边界
 
 - **模式不可热切换**（见 §2）。多形态共存靠「每个 WebView 一个模式」。
+- **`<img src>` 不由引擎加载**：引擎没有图片的 URL 加载通道（渲染层只绘制
+  「已附加的解码图」`RenderBox.SetDecodedImage`）。图片资源由宿主负责解码后
+  注入——`dev/browser_http_probe` 会把这个事实打印出来（不触发请求）。
+- **CSS `@import` 目前不加载**：`style.Resolver.resolveImports` 依赖
+  `Resolver.StyleSheetLoader`，而该字段尚未接线（`LoadExternalResource` 只服务
+  `<link rel=stylesheet>` / `<script src>`）。要支持 `@import`，正确做法是以
+  **样式表自身的 URL** 为基准解析（不是文档 URL）：`<link href="/css/a.css">`
+  里的 `@import "b.css"` 应解析到 `/css/b.css`。
+- **HTTP 响应不按 Content-Type 拒绝**：`fetchHTTP` 只记录提示。真实服务器给
+  `text/css` / `application/javascript` / `application/json` 都是常态，而引擎的
+  取内容层不知道调用方用途（同一个响应可能是 `<link>`、`<script src>` 或
+  `fetch()`）；浏览器把 MIME 检查放在各用途的消费端，引擎尚未实现那一层。
 - **`"Worker" in window` 在 UI 库模式下仍为 `true`**：裁剪实现是把全局置为
   `undefined`（jsc 层未暴露属性删除），`typeof` 判定正确、`in` 判定不严谨。
   feature detect 请用 `typeof`。

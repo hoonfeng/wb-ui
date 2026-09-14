@@ -456,6 +456,23 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | 每次 LoadHTML 后样式重复全量重扫 | `page.Frame.SetDocument` 提取样式后未同步 `styleFP` → 紧随其后的首次 `RebuildRenderTree` 判定「指纹变化」→ 再全量重扫一次：`<style>` 重复解析、`<link>` 重复加载（宿主 `StyleSheetLoader` / `ResourceResolver` 被重复调用一次）。修复后整条加载路径上 resolver 只被请求 1 次（`ui.TestToolkitModeResourceResolver` 断言 `calls == 1`） |
 | `file://` 标准 URL 形式读不到文件 | 旧的 `strings.TrimPrefix(href, "file://")` 对 `file:///C:/dir/f.css` 留下前导斜杠 → `os.ReadFile` 必然失败（只有 `file://C:/dir/f.css` 这种非标准写法能读）。新增 `webkit.fileURLPath` 走 `net/url` 解析：盘符路径去前导斜杠、支持 `file:///home/u/f.css` 与 UNC `file://host/share/f` |
 
+### 真实 HTTP 路径修复（用 `dev/browser_http_probe` 发现）
+
+「嵌入浏览器」此前只用 `data:` URL 与内存替换验证过，没人用**真实服务器**跑过——
+补上真起 HTTP 服务器（`httptest`）的端到端探针后，一次暴露 4 个缺口（均为
+「能联网」这件事的必要条件）：
+
+| 项 | 根因 | 修复 |
+|----|------|------|
+| 相对 `<link>` / `<script src>` 加载失败 | `WebView.loadExternalResource` 把引用原样交给文件/网络分支——`<link href="/style.css">` 落到「相对当前工作目录读文件」 | 新增 `dom.ResolveURL(base, ref)`（`document.baseURI` 语义）+ 文档基地址接线：引用先按原样问 `ResourceResolver`，再按文档 URL 绝对化后问一次，仍未命中才走网络/文件 |
+| `fetch("/api.json")` 失败（`unsupported protocol scheme ""`） | fetch/XHR 把 URL 原样交给 `http.NewRequest`，没有文档基地址概念 | `page` 新增 per-interpreter 文档 URL 登记表（`SetDocumentBaseProvider` / `DocumentBase`，提供器而非快照→跟随导航）；fetch/XHR 请求前用 `dom.ResolveURL` 补全。**桥路由匹配顺序保持「原样 URL 优先」**，宿主按 `"/api/x"` 注册的路由不受影响，另补一次绝对 URL 匹配 |
+| 外部 CSS/JS 即便解析正确也不生效 | `fetchHTTP` 对非 HTML 兼容的 Content-Type（`text/css`、`application/javascript`）**返回 error 与空内容**——注释写的是 "warn but still return the content"，实现却返回了空串 | 降级为 `page.Logf` 提示、内容照常返回（取内容层不知道调用方用途；真实服务器对 .css/.js 不会回 `text/html`） |
+| `document.URL` / `location.href` 与文档不符 | `document.URL` 是注册时求值的静态快照（恒为空串）；`location` 是写死 `about:blank`/`file:` 的静态桩；`LoadURL` 也从未 `doc.SetURL` | `LoadURL` 把 URL 写进 `Document`（`LoadHTML` 视为 `about:blank`，内部拆出 `loadHTMLFrom(src, docURL)`）；`document.URL` 与 `location.href/protocol/host/hostname/port/pathname/search/hash/origin` 改为**动态 accessor**；`history.pushState/replaceState` 改为更新文档 URL（同源路径相对当前文档解析），不再直接写 location 字段 |
+| 重定向后的文档基地址是「请求 URL」而不是「最终 URL」 | `fetchHTTP` 只返回响应正文，`LoadURL` 只能拿入参 URL 当基准——`http://host` 被 301 到 `https://host/` 后，页面里的 `style.css` 会解析回 `http://host/style.css` | 新增 `fetchURLWithFinalURL`（内部用 `resp.Request.URL`）→ `LoadURL` 用**最终 URL** 作为文档基地址；`fetchURL` 保持原签名，其余调用点不受影响 |
+
+回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，同时打印 `<img>`/`@import` 的**事实**）。
+反向验证：隐去相对解析 → 3 条断言失败（含 `unsupported protocol scheme ""`）；恢复 Content-Type 返回 error → 「服务器收到了 /style.css 但样式不生效」；把 fetch 基地址去掉 → 相对 fetch 失败；把重定向基准改回请求 URL → 服务器日志显示 `/style.css`（而非 `/b/style.css`）。
+
 ### 有意保留的边界
 
 - **模式不可热切换**：装配阶段要按模式决定 5 处注入（fetch 版本 / XHR / 浏览器
@@ -474,6 +491,19 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 - **外部资源在 UI 库模式下随样式重扫重复请求 resolver**：引擎按 `<link>` 的 href
   指纹决定是否重扫样式，同一引用在多次重建中可能被重复请求；宿主 resolver 应
   自缓存（尤其是大文件）。
+- **`<img src>` 没有 URL 加载通道**：渲染层只绘制「已附加的解码图」
+  （`RenderBox.SetDecodedImage`），引擎不主动取图片字节 → 相对/绝对 `<img>` 都
+  不发请求（`dev/browser_http_probe` 打印该事实）。需要图片的宿主自行解码后注入；
+  若要补齐，正确位置是 `page.CachedResourceLoader`（已存在但**无任何调用方**，
+  它带 `documentURL` 字段与相对 URL 解析能力）。
+- **CSS `@import` 不加载**：`style.Resolver.resolveImports` 依赖
+  `Resolver.StyleSheetLoader`，而该字段从未被设置（`page.Frame.StyleSheetLoader`
+  是另一个字段，两者未打通）。补齐时应以**样式表 URL** 为基准解析
+  （`<link href="/css/a.css">` 内的 `@import "b.css"` → `/css/b.css`），
+  而不是文档 URL——`css.CSSStyleSheet.Href()` 已带该信息。
+- **`location.assign/replace/reload` 仍是 no-op 桩**：引擎没有导航调度器，导航
+  由宿主调 `LoadURL` 完成（重定向的最终 URL 已回写文档，但 `history` 栈不记录
+  跳转，`history.length`/`state` 只反映 `pushState` 系列）。
 - **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
   「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式
   响应式时走 web 方式（Vue 等在页面脚本里做）。

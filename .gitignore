@@ -32,6 +32,10 @@ translation-progress.txt
 # Generated test outputs 
 *.ppm 
 dump.txt 
+
+# 示例/诊断脚本的渲染产物（examples/uitoolkit、dev/*probe）
+_temp/
+ui-toolkit-demo.png
  
 # Consistency suite runtime reports
 dev/consistency/report/
