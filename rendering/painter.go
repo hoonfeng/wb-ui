@@ -891,6 +891,40 @@ func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, botto
 			}
 		}
 	}
+	// fillAbove / fillAboveRev are the complements of the two fillers above:
+	// they paint the triangle *above* the diagonal, i.e. the half of the corner
+	// rect that contains the outer edge of the top/bottom border. They are used
+	// by the bottom corners, where the top/bottom side has already claimed the
+	// whole corner rect (spanning spans are painted full width) and the
+	// vertical side must claim its half back.
+	fillAbove := func(cx, cy, cw, ch float64, col graphics.Color) {
+		if cw <= 0 || ch <= 0 || col.A == 0 {
+			return
+		}
+		col = ApplyOpacityToColor(col, op)
+		for dy := 0; dy < int(ch); dy++ {
+			for dx := 0; dx < int(cw); dx++ {
+				// above ⟺ dy < (dx/cw)*ch
+				if float64(dy) < float64(dx)*ch/cw {
+					canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+				}
+			}
+		}
+	}
+	fillAboveRev := func(cx, cy, cw, ch float64, col graphics.Color) {
+		if cw <= 0 || ch <= 0 || col.A == 0 {
+			return
+		}
+		col = ApplyOpacityToColor(col, op)
+		for dy := 0; dy < int(ch); dy++ {
+			for dx := 0; dx < int(cw); dx++ {
+				// above ⟺ dy < ch*(1-dx/cw)
+				if float64(dy) < ch*(1-float64(dx)/cw) {
+					canvas.FillRect(cx+float64(dx), cy+float64(dy), 1, 1, col)
+				}
+			}
+		}
+	}
 	topStyle, rightStyle := st.BorderTopStyle, st.BorderRightStyle
 	bottomStyle, leftStyle := st.BorderBottomStyle, st.BorderLeftStyle
 	// Top-left: diagonal outer (x,y) → inner (x+leftW, y+topW). Below = left color.
@@ -902,14 +936,21 @@ func paintBorderCorners(canvas *graphics.Canvas, x, y, w, h, topW, rightW, botto
 		fillBelowRev(x+w-rightW, y, rightW, topW, toGraphicsColor(brC))
 	}
 	// Bottom-left: diagonal outer (x,y+h) → inner (x+leftW, y+h-bottomW).
-	// Below (toward the left edge) = left color.
+	// The bottom border spans the corner rect full width (top/bottom spans are
+	// painted across the corners), so the *left* border must claim the half that
+	// contains its own outer edge — the upper-left triangle. Verified against
+	// Edge: bottom-left splits into left color above-left and bottom color
+	// below-right.
 	if bottomW > 0 && leftW > 0 && bottomStyle != "none" && leftStyle != "none" && !colorsEqual(bbC, blC) {
-		fillBelowRev(x, y+h-bottomW, leftW, bottomW, toGraphicsColor(blC))
+		fillAboveRev(x, y+h-bottomW, leftW, bottomW, toGraphicsColor(blC))
 	}
 	// Bottom-right: diagonal outer (x+w,y+h) → inner (x+w-rightW, y+h-bottomW).
-	// Below (toward the right edge) = right color.
+	// As above: the bottom border claimed the whole corner rect, so the right
+	// border takes the upper-right triangle (the half containing its own outer
+	// edge). Verified against Edge: the right color occupies the upper-right of
+	// the corner, the bottom color the lower-left.
 	if bottomW > 0 && rightW > 0 && bottomStyle != "none" && rightStyle != "none" && !colorsEqual(bbC, brC) {
-		fillBelow(x+w-rightW, y+h-bottomW, rightW, bottomW, toGraphicsColor(brC))
+		fillAbove(x+w-rightW, y+h-bottomW, rightW, bottomW, toGraphicsColor(brC))
 	}
 }
 
