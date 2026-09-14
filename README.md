@@ -115,10 +115,11 @@ go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout
 |---|---|
 | [docs/MODES.md](docs/MODES.md) | 运行模式（浏览器 / UI 工具包）与 UI 构建方式 |
 | [docs/CALIB.md](docs/CALIB.md) | 渲染校准与诊断工具（calib / tddiag / cssprobe / scriptsdiag） |
-| [docs/INCREMENTAL_DESIGN.md](docs/INCREMENTAL_DESIGN.md) | 增量布局架构改进方案 |
-| [docs/PERF_PLAN.md](docs/PERF_PLAN.md) | 性能优化调研与方案 |
-| [docs/MASK_P3_PLAN.md](docs/MASK_P3_PLAN.md) | mask-image P3 实施计划 |
-| [docs/TECH_DEBT.md](docs/TECH_DEBT.md) | 遗留问题处理指南 |
+| [docs/TECH_DEBT.md](docs/TECH_DEBT.md) | 遗留项取舍结论与有意保留的边界 |
+
+> 计划类文档（原 `MASK_P3_PLAN.md`、`INCREMENTAL_DESIGN.md`、`PERF_PLAN.md`）已随实现落地
+> 删除——诊断与方案在 git 历史里，实现要点在代码注释与测试里；未实现项的逐条取舍结论
+> 留在 `docs/TECH_DEBT.md`。
 
 ## 第三方素材
 

@@ -162,6 +162,11 @@ func applyMaskLayer(canvas *graphics.Canvas, st *style.ComputedStyle, rect graph
 
 	// Clip to the effective area and paint the image shader (repeat) there;
 	// the no-repeat axes are confined to the single tile by the clip.
+	//
+	// 为什么不用 TileModeDecal：Skia 的 raster 后端在「tile 矩形之外」的采样上
+	// 行为异常（no-repeat 期望的隐式空区域不生效，实测 2026-08）。因此 mask 的
+	// no-repeat 语义改为显式实现——clip 到 single tile + clearOutsideRect 把
+	// 有效区域之外清成 alpha=0。
 	canvas.Save()
 	canvas.Clip(effRect)
 	canvas.ApplyImageMaskTiled(img.SkiaImage(), effRect, tileRect, graphics.TileModeRepeat, graphics.TileModeRepeat, luminance)
