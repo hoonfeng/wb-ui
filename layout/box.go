@@ -573,6 +573,14 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		case *dom.Element:
 			cs := resolveStyleOrDefault(resolver, v)
 			if cs.Display == style.DisplayNone { return }
+			// 模态 <dialog> 的 ::backdrop 遮罩盒：作为 dialog 的**前一个兄弟**
+			// 加入同一父盒（绘制顺序在 dialog 之下、页面之上）。渲染树侧有
+			// 完全相同的插入点，两棵树必须逐节点对应（linkLayoutBoxes 按
+			// 匿名位置配对伪元素盒）。
+			if bd := backdropBoxFor(v, resolver); bd != nil {
+				flush()
+				box.AddChild(bd)
+			}
 			child := newBoxForElement(v, cs)
 			if cs.Float == "left" || cs.Float == "right" {
 				// in-flow 浮动子**不打断**父的行内内容（CSS2.1 §9.5：浮动盒
@@ -624,6 +632,21 @@ func appendPseudoAfter(box *ElementBox, el *dom.Element, resolver *style.Resolve
 	if cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementAfter); ok && cs.Display != style.DisplayNone {
 		box.AddChild(&ElementBox{nodeType: NodePseudoElement, style: cs})
 	}
+}
+
+// backdropBoxFor 返回模态 <dialog> 的 ::backdrop 伪元素盒（非模态 / 无
+// ::backdrop 规则时返回 nil）。盒无 DOM 节点，标记 NodePseudoElement。
+// 模态判定与 :modal 伪类、渲染树的 backdrop 对象共用
+// dom.Element.IsModalDialog。
+func backdropBoxFor(el *dom.Element, resolver *style.Resolver) *ElementBox {
+	if resolver == nil || !el.IsModalDialog() {
+		return nil
+	}
+	cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementBackdrop)
+	if !ok || cs.Display == style.DisplayNone {
+		return nil
+	}
+	return &ElementBox{nodeType: NodePseudoElement, style: cs}
 }
 
 func isFlexContainerDisplay(d style.DisplayType) bool {

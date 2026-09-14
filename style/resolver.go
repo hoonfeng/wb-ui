@@ -717,7 +717,10 @@ func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (
 	// every grid container place a stray first item (shifting all real items one
 	// column right and wrapping the last one to the next row) and left empty
 	// pseudo boxes in every flex/block container.
-	if !pseudoDeclaresContent(collected) {
+	// ::before/::after 需要 content 声明才生成盒（CSS 2.1 §12.1）；::backdrop 不是
+	// content 驱动的伪元素 —— 它由「元素进入全屏/模态状态」这一 UA 行为生成
+	// （Fullscreen spec §5 / HTML 渲染规范），只要有针对它的声明就生成。
+	if pe != css.PseudoElementBackdrop && !pseudoDeclaresContent(collected) {
 		return nil, "", false
 	}
 

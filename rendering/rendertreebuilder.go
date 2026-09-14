@@ -188,6 +188,13 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 			if cs.Display == style.DisplayNone {
 				return
 			}
+			// 模态 <dialog> 的 ::backdrop：作为 dialog 的前一个兄弟插入（绘制
+			// 顺序在 dialog 之下、页面之上）。与 layout/box.go 的插入点一一
+			// 对应，否则 linkLayoutBoxes 会错位。
+			if bd := b.createBackdropObject(v); bd != nil {
+				flush()
+				parent.AddChild(bd, nil)
+			}
 			child := b.createRenderObject(v, cs)
 			if child == nil {
 				return
@@ -249,6 +256,23 @@ func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Eleme
 		}
 		return block
 	}
+
+// createBackdropObject 为模态 <dialog> 的 ::backdrop 创建渲染对象（非模态 /
+// 无 ::backdrop 规则 / display:none 时返回 nil）。它没有 DOM 节点，样式由
+// style.Resolver.ResolvePseudoElement 解析（UA 规则给出 position:fixed +
+// inset:0 + 半透明背景），因此绘制时铺满视口。
+func (b *RenderTreeBuilder) createBackdropObject(el *dom.Element) RenderObject {
+	if b.resolver == nil || el == nil || !el.IsModalDialog() {
+		return nil
+	}
+	cs, _, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementBackdrop)
+	if !ok || cs.Display == style.DisplayNone {
+		return nil
+	}
+	obj := NewRenderBlockFlow(nil, cs)
+	obj.markAnonymous()
+	return obj
+}
 
 // buildFlexChildren populates a flex/grid container's children directly as flex
 // items, without anonymous-block wrappers. Inline-level children are blockified

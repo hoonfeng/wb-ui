@@ -287,6 +287,17 @@ dialog[open] {
 	z-index: 1000;
 }
 
+/* ::backdrop：模态 <dialog> 的遮罩层（HTML 渲染规范 / Fullscreen spec §5）。
+ * 本引擎没有 top layer，用 position:fixed + 高 z-index 近似：backdrop 由
+ * rendering 在 dialog 之前绘制（见 rendertreebuilder 的 backdrop 插入），
+ * z-index 略低于 dialog[open] 的 1000，高于普通内容。 */
+::backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.1);
+	z-index: 999;
+}
+
 /* ── General element defaults (mirrors WebCore/css/html.css headings/lists/
        text sections; only properties the engine resolves are listed) ── */
 
