@@ -65,7 +65,8 @@
 - 编译 + 单测：rendering/page/app/webkit 全绿。
 - `TestFrameApplyTextChange`（page）：LoadHTML → Layout → SetData → ApplyTextChange → NeedsLayout → Layout → `rt.Text()=="world"` + segments 非空（**不触发全量重建**，精确验证 C1 增量链路）。
 - `TestUpdaterTextChange` / `TestApplyTextChange`（rendering）。
-- `go run ./cmd/render_test`：69 用例全通过（渲染引擎无回归）。
+- 渲染引擎无回归：当时以 `cmd/render_test`（69 用例）核对，该工具未保留在仓库；现状等价
+  验证为 `go test ./engine/page/... ./engine/rendering/...` 与 `dev/suites/cssprobe`。
 - `ime_editor_probe`：IME 组合 + 普通字符打字，CM6 state 同步正确。
 
 ## 六、剩余工作（C2，后置）

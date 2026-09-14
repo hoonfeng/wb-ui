@@ -44,7 +44,7 @@ dev/suites/consistency/report/
 dev/output/
 
 # Temp debug scripts
-# 注意：gen_*.py 同时命中了 dev/suites/static_test/gen_*.py（夹具生成器，有意忽略）
+# gen_*.py = 临时的夹具/数据生成脚本（如从浏览器抓页面数据），不纳入版本控制
 gen_*.py
 # Python bytecode
 __pycache__/

@@ -2,7 +2,7 @@
 // inputs (style Display / Float and RenderBox.IsFloated) so a "why is this box
 // painted after that one" question can be answered without guessing.
 //
-// Usage: go run _temp/fxprobe/main.go <file.html>
+// Usage: go run ./dev/probes/fxprobe <file.html>
 package main
 
 import (

@@ -26,11 +26,10 @@
 
 | 套件 | 用途 | 运行 |
 |---|---|---|
-| `consistency` | 与 Edge headless 的**像素级参照对比**（逐 case 截图比对；本机无 Edge 时自动 skip）。报告写 `dev/suites/consistency/report/` | `go test ./dev/suites/consistency`<br>`go run ./dev/suites/consistency -case layout_basic` |
+| `consistency` | 与 Edge headless 的**像素级参照对比**（逐 case 截图比对；本机无 Edge 时自动 skip）。报告写 `dev/suites/consistency/report/` | `go test ./dev/suites/consistency`<br>`go run ./dev/suites/consistency -case layout_block` |
 | `cssprobe` | 确定性 CSS 夹具 + 几何断言：夹具在 `fixtures/`，期望值在 `fixtures/checks.json`（借自 obscura 参考实现）。`-v` 列明细、`-dump` 出 PNG、`-json` 出机读结果 | `go run ./dev/suites/cssprobe -v -filter table` |
 | `pixel_probe` | 整页渲染并读像素（PNG + 布局树）。子目录 `clicktest/` `domdump/` `hitdbg/` `postclick/` `simclick/` `sim_events/` 为交互与命中测试类探针 | `go run ./dev/suites/pixel_probe --html FILE --out dev/output/out.png`<br>`go run ./dev/suites/pixel_probe/clicktest` |
 | `static_probe` | 真实整页渲染（IDE 页面 / grid / desc）→ PNG（写 `dev/output/`）+ 几何 dump；同目录还有 `xseg_dump.go`、`vcenter_dump.go`、`gift_align_dump.go` 等夹具几何诊断（按文件运行） | `go run ./dev/suites/static_probe`<br>`go run dev/suites/static_probe/xseg_dump.go` |
-| `static_test` | wb-ui 与浏览器的坐标/像素对比（`compare_test.go` + playwright 抽取脚本，脚本产物写 `dev/output/`） | `go test ./dev/suites/static_test`<br>`python dev/suites/static_test/pixel_compare.py` |
 
 ## probes —— 单文件诊断工具
 
@@ -61,6 +60,7 @@
 
 | 夹具 | 说明 |
 |---|---|
+| `ide_static.html` | 真实 IDE 页面的静态快照（636KB，自 gou-ide 抓取），由 `suites/static_probe` 的 `main.go`（整页渲染基准）与 `dump.go`（几何 dump）读取 |
 | `xseg/` | flex 项内文本对齐/垂直居中诊断页（`xseg.html`、`xseg_real.html`），由 `suites/static_probe` 的 `xseg_dump.go` / `vcenter_dump.go` 读取 |
 | `vcenter/` | `.txt` 的 `align-items:center` CJK 垂直居中夹具（当前无探针引用，保留作参考） |
 

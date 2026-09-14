@@ -123,7 +123,7 @@ func renderPage(path string, w, h int, out string) error {
 func main() {
 	wd := "dev/output"
 	// 1. ide_static.html (real IDE layout, ~636KB)
-	if err := renderPage("dev/suites/static_test/ide_static.html", 1280, 800, filepath.Join(wd, "ide_now.png")); err != nil {
+	if err := renderPage("dev/fixtures/ide_static.html", 1280, 800, filepath.Join(wd, "ide_now.png")); err != nil {
 		fmt.Fprintln(os.Stderr, "ide_static:", err)
 	} else {
 		fmt.Println("ide_static OK")

@@ -7,7 +7,7 @@
 //     WeakPtrFactory::revokeAll) plus a best-effort GC finalizer safety net
 //   - a true GC-weak pointer in Go requires storing the target address as a uintptr
 //     (so it is not traced), but converting that uintptr back to *T is flagged by
-//     `go vet`'s unsafeptr analyzer; to keep `go vet ./wtf/...` clean this port
+//     `go vet`'s unsafeptr analyzer; to keep `go vet ./engine/wtf/...` clean this port
 //     avoids unsafe and uses explicit revocation as the primary mechanism
 //   - the "weak reference map" mentioned in the task is materialised as one shared
 //     weakImpl per target; multiple WeakPtrs to the same target share the impl

@@ -13,7 +13,7 @@
 //
 // Usage:
 //
-//	go run ./dev/suites/consistency -case layout_basic
+//	go run ./dev/suites/consistency -case layout_block
 //	go run ./dev/suites/consistency            (run all cases)
 //
 // Requires Edge (or Chrome) at a configurable path; see EdgePath.

@@ -58,7 +58,7 @@ func main() {
 		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
 	}
 
-	path := filepath.Join("dev", "suites", "static_test", "ide_static.html")
+	path := filepath.Join("dev", "fixtures", "ide_static.html")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "read:", err)

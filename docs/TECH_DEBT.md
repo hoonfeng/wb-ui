@@ -83,7 +83,7 @@ viewport 求值。只需 `parseCSSLength` 正确吐出 `Unit:"calc"` 即可，�
 ### 验证
 - 新增 `layout` 测试：`position:absolute; top:calc(50% - 20px); left:calc(50% - 30px)`
   的 box 几何 = 包含块中心偏移后的坐标。
-- `go test ./layout/...`（需 CGO + goskia PATH）。
+- `go test ./engine/layout/...`（需 CGO + goskia PATH）。
 
 ---
 
