@@ -276,9 +276,9 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 	// === "open"` 在一个处理器里区分「正在打开」和「正在关闭」——此前派发的是
 	// 普通 Event，两个字段恒 undefined。
 	//
-	// source（IDL 类型 Element?）：本端口的打开/关闭路径都传 null（规范如此，
-	// 非 null 只出现在 popover 的 invoker 场景——本端口尚无 Popover API），但
-	// 属性必须存在：MDN 的示例用 `event.source === undefined` 做特性检测，
+	// source（IDL 类型 Element?）：只有 popover 的 invoker（popovertarget /
+	// command 元素）触发的路径传非 null，其余全部是 null（规范如此）。无论哪种，
+	// 属性都必须存在：MDN 的示例用 `event.source === undefined` 做特性检测，
 	// 缺字段会被误判成「浏览器不支持」，而 `e.source === null` 的写法也会失真。
 	if te, ok := e.(*dom.ToggleEvent); ok {
 		obj.SetClassName("ToggleEvent")
@@ -342,7 +342,44 @@ func jsToEvent(v jsc.JSValue) dom.Event {
 		}
 		return dom.NewMouseEventFromInit(typ, init)
 	}
+	// ★ ToggleEvent（HTML §4.11.4）：页面自己 `new ToggleEvent(type, {oldState,
+	// newState, source})` 再用 dispatchEvent 派发时，下面这条兜底会把三个字段
+	// 全部丢掉——处理器里读到 undefined（而 `e.newState === "open"` 这种最常见的
+	// 写法直接失效）。判定看构造器名（`new ToggleEvent` 会写入
+	// constructor.name）或是否带了两个状态字段。
+	if isToggleEventObject(o) {
+		init := dom.ToggleEventInit{
+			EventInit: dom.EventInit{Bubbles: bubbles, Cancelable: cancelable, Composed: boolProp(o, "composed")},
+			OldState:  stringProp(o, "oldState"),
+			NewState:  stringProp(o, "newState"),
+		}
+		if sv, ok := o.GetByKey("source"); ok {
+			init.Source = jsElementValue(sv)
+		}
+		return dom.NewToggleEventFromInit(typ, init)
+	}
 	return dom.NewEvent(typ, bubbles, cancelable, false)
+}
+
+// isToggleEventObject 判断一个 JS 事件对象是否应还原成 dom.ToggleEvent：
+// 构造器名是 ToggleEvent（`new ToggleEvent(...)` 的产物），或对象自带
+// oldState / newState（页面手写的事件字面量）。
+func isToggleEventObject(o *jsc.JSObject) bool {
+	if o == nil {
+		return false
+	}
+	if ctor, ok := o.GetByKey("constructor"); ok && ctor.IsObject() {
+		if co := ctor.AsObject(); co != nil {
+			if nv, ok := co.GetByKey("name"); ok && nv.ToString() == "ToggleEvent" {
+				return true
+			}
+		}
+	}
+	if _, ok := o.GetByKey("oldState"); ok {
+		return true
+	}
+	_, ok := o.GetByKey("newState")
+	return ok
 }
 
 // --- property helpers on a JSObject ---

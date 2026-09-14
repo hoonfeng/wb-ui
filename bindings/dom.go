@@ -1267,6 +1267,48 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return ev
 		})))
 
+	// ToggleEvent 构造函数（HTML §4.11.4 / §6.12）：`new ToggleEvent(type,
+	// {oldState, newState, source})`。<details> / <dialog> / popover 的
+	// toggle 与 beforetoggle 都用它；页面除了用它自己派发 toggle，还普遍用
+	// `typeof ToggleEvent !== "undefined"` 做支持检测（缺构造器会被判成不支持）。
+	// 属性初值按 IDL：oldState/newState 是空串、source 是 null。
+	g.Set("ToggleEvent", jsc.FunctionValue(rt.NewConstructor("ToggleEvent",
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			ev := jsc.NewObject(in.ObjectPrototype())
+			ev.SetClassName("ToggleEvent")
+			ev.Set("type", jsc.StringValue(""))
+			ev.Set("oldState", jsc.StringValue(""))
+			ev.Set("newState", jsc.StringValue(""))
+			ev.Set("source", jsc.Null())
+			ev.Set("bubbles", jsc.BooleanValue(false))
+			ev.Set("cancelable", jsc.BooleanValue(false))
+			ev.Set("composed", jsc.BooleanValue(false))
+			ev.Set("defaultPrevented", jsc.BooleanValue(false))
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
+			if len(args) >= 2 && args[1].IsObject() {
+				if o := args[1].AsObject(); o != nil {
+					for _, k := range []string{"oldState", "newState", "source",
+						"bubbles", "cancelable", "composed"} {
+						if v, ok := o.GetByKey(k); ok {
+							ev.Set(k, v)
+						}
+					}
+				}
+			}
+			ev.Set("preventDefault", jsc.FunctionValue(jsc.NewNativeFunction("preventDefault",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					this.AsObject().Set("defaultPrevented", jsc.BooleanValue(true))
+					return jsc.Undefined()
+				}, 0)))
+			ev.Set("stopPropagation", jsc.FunctionValue(jsc.NewNativeFunction("stopPropagation",
+				func(interp *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					return jsc.Undefined()
+				}, 0)))
+			return ev
+		})))
+
 	// EventTarget 基类（可实例化的非 DOM 事件目标）。
 	// 浏览器标准 API：addEventListener / removeEventListener / dispatchEvent。
 	// 组件库或自定义事件源（如 WebSocket stub、状态总线）可能直接使用它。

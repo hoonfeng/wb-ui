@@ -69,6 +69,13 @@ var elemAccessorProps = map[string]bool{
 	// show/showModal/close 变化，缓存住就会读到过期值（:modal / :open 匹配
 	// 与事件回调里读 d.open 都会错）。
 	"open": true, "returnValue": true,
+	// Popover API（HTML §6.12）：popover 是元素自身的状态（显示/隐藏切换会
+	// 改变 `:popover-open` 与 UA 的 display 规则），invoker 的四个属性则实时
+	// 反射到属性值。不登记就会踩「第一次读是 null，之后 setAttribute 也读到
+	// 旧的 null」的缓存坑（popover 属性的 getter 返回值随属性变化）。
+	"popover": true,
+	"popoverTargetElement": true, "popoverTargetAction": true,
+	"command": true, "commandForElement": true,
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
@@ -247,6 +254,11 @@ var (
 		// 约束校验（constraint validation API，HTML §4.10.21.3）。
 		"validity", "willValidate", "validationMessage",
 		"checkValidity", "reportValidity", "setCustomValidity", "noValidate",
+		// Popover API（HTML §6.12）：popover 属性与三个方法，以及 invoker
+		// （popovertarget 系列与 button 的 command/commandForElement）。
+		"popover", "showPopover", "hidePopover", "togglePopover",
+		"popoverTargetElement", "popoverTargetAction",
+		"command", "commandForElement",
 	}
 )
 
@@ -268,6 +280,13 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 		if v, acc, ok := installMediaElementProperty(rt, el, key); ok {
 			return v, acc, true
 		}
+	}
+	// Popover API（HTML §6.12）：popover 属性与 showPopover/hidePopover/
+	// togglePopover，以及 invoker 的 popovertarget* / command* 属性集中在
+	// popover.go，这里做一次委派（同 <video>/<audio> 的做法），避免把十几个
+	// case 散进下面的大 switch。
+	if v, acc, ok := installPopoverProperty(rt, el, key); ok {
+		return v, acc, true
 	}
 	switch key {
 	case "constructor":
