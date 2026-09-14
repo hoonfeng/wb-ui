@@ -39,7 +39,7 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 
 | 夹具 | 差异 | 差异形态 |
 |------|------|----------|
-| logical-borders | **0.006%**（58px） | 仅方块1 右下角 (190,74)-(199,79)：**相邻边框拐角的处理**——wb-ui 按 CSS 标准做 45° 斜切，obscura 各边独立矩形。夹具那两项期望（右边框 10x79、底边框 198x6）就是「不斜切」的结果 |
+| logical-borders | **0.000%**（0px） | 逐像素一致。此前为 0.006%（58px），全部落在方块1 右下角 (190,74)-(199,79)：**相邻边框拐角的颜色归属方向写反了**——bottom 侧的两个角把「自家外边缘所在的三角」填到了对面，右边框色块因此被底边框整行切断。已按 Edge 实测基准修复，见下文「边框拐角的方向」 |
 | forced-line-breaks | 0.222% | (600,10)-(699,39)：flex column 里 `<br>` 产生的空行高度（wb-ui 给 0，参照按继承行高给一行） |
 | right-float-navigation | 0.267% | (64,0)-(143,29)：右侧 float 之后的第 2 个 inline-block 没有留在同一行 |
 | table-row-geometry | 0.255% | 行高/单元格内容的细节差（文本位置为主） |
@@ -51,21 +51,25 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 
 ## 结论
 
-1. 夹具期望可用 obscura 原样复现 → 期望值可信；但 `logical-borders` 的拐角期望
-   与标准 CSS 相左（参照不斜切）。以参照为准会牺牲标准化能力，**暂不改绘制**，
-   该夹具固定为 4/6。
+1. 夹具期望可用 obscura 原样复现 → 期望值可信。`logical-borders` 的拐角期望
+   曾被误判为「参照不斜切、与标准 CSS 相左」，实际是 **wb-ui 的底部两个角把
+   三角填到了对面**：用 Edge headless 实测同一页面（四角矩阵见「边框拐角的方向」），
+   Edge 与 obscura 的方向一致，wb-ui 相反。修复绘制后该夹具 6/6、与参照
+   **0.000%**（逐像素一致）。教训：参照与「标准」冲突时先查第三方实现（Edge），
+   不要凭对标准的记忆下结论。
 2. `tables` 的 3.96% 差异说明：**cssprobe 的色块检查通过 ≠ 视觉一致**（检查只覆盖
    若干色块位置/尺寸）。后续可把 `dev/calib` 的差异占比纳入回归基线，作为整体
    一致性的补充指标。
 3. 文本位置差 1-2px 属字体度量范畴（hinting/行高取整），非结构性布局错误。
-4. cssprobe 现状：**58/61 夹具、244/248 检查**（默认 `-scripts auto`，见下文
-   「探针的脚本执行模式」）；`-scripts off`（纯 CSS 管线）为 53/61、239/248，
-   保留为对照基线。剩余 3 个夹具 = 1 个参照差异（`logical-borders`：参照
-   「不斜切」与标准 CSS 相左，固定 4/6，58px）+ 2 个 Web 平台子系统缺失
-   （`media-text-track`、`modern-streams`，见「夹具限制」表）。
-5. 上一轮（aspect-ratio / flex 外盒尺寸 / 空 inline-block / `<video poster>`）
-   修复 4 项，本轮脚本模式再修复 5 项（落点见「脚本模式下修复的夹具」）；
-   一致性数字见上表 4 行。
+4. cssprobe 现状：**61/61 夹具、248/248 检查**（默认 `-scripts auto`，见下文
+   「探针的脚本执行模式」）；`-scripts off`（纯 CSS 管线）为 54/61、241/248，
+   保留为对照基线——两者之差就是「必须执行脚本才能满足契约」的夹具集合。
+   **没有剩余失败夹具**：此前的 3 项（`logical-borders` 拐角方向、
+   `media-text-track`、`modern-streams`）已分别通过修正边框绘制、补
+   TextTrack/WebVTT、补 Streams 实现解决。
+5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
+   探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
+   落点见「脚本模式下修复的夹具」与下文各节。
    - `aspect-ratio`：flex item 交叉轴由主轴推出（`resolveCrossSizes` +
      `ratioCrossSizeInRowFlex` 供容器 auto 高度估算）、absolute 盒 `height:auto`
      由宽度推高（`layoutAbsolute`）、BFC auto 高度分支同样按比例兜底。
@@ -78,14 +82,16 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
      object-fit / object-position 并裁剪到内容盒，absolute + width:auto 的替换
      元素取资源固有宽。
 
-## 夹具限制（探针能力边界，非引擎缺口）
+## 曾记为「探针边界」、现已补齐的 3 项
 
-判据：期望色是否由**页面脚本或媒体 API** 产生，且该能力是否落在 CSS 渲染引擎
-（探针与 wb-ui 的定位）之外。下列 3 项在本探针内不可达，失败原因是探针边界，
-**不记为渲染能力缺口**。判断「是探针边界还是真缺口」的方法：期望色是否由页面
-脚本/媒体 API 产生（`closest` 报出的实际像素恰好是夹具里另一条静态规则的
-颜色 ⇒ 脚本没跑），以及缺失的是否是 CSS 引擎职责（`dev/scriptsdiag` 逐项列出
-脚本可用的平台 API）。
+判别「探针边界 vs 真缺口」的方法（仍然有效）：看失败的实际像素是不是夹具里
+**另一条静态规则**的颜色（`closest` 会直接指出）⇒ 脚本没跑到那一步；再用
+`dev/scriptsdiag` 逐项列出脚本可见的平台 API，确认缺的是哪一类能力。
+
+复核后修正了一个判断错误：**缺失的 Web API 会让整段脚本抛 `ReferenceError`
+中断**，而不是只让那一行失效——因此「媒体/Streams 子系统的缺失」同样会表现为
+渲染失败，不能简单归为「不属 CSS 引擎范围」。这 3 项现已在引擎内实现，夹具
+全部通过：
 
 ## 探针的脚本执行模式（-scripts）
 
@@ -114,13 +120,13 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
   `right-float-navigation` 偏 4px、`table-row-geometry`/`table-track-geometry`
   偏 1-3px）。字体管理器没有回滚 API，故用排序把这种跨夹具状态污染限制在尾部。
 
-| 夹具 | 探针内不可达的原因 | 引擎侧覆盖方式 |
-|------|--------------------|----------------|
-| `media-text-track` | 需要 `<track>` → `HTMLTrackElement.track`（TextTrack + WebVTT 解析）与 `video.textTracks`，且 cues 就绪依赖 `data:` URL 的异步加载与 `load` 事件时序；探针没有媒体元素模型。`dev/scriptsdiag` 实测 `trackElement.track`、`video.textTracks` 均为 `undefined` | 未实现（媒体子系统，不属 CSS 引擎范围）。wb-ui 的 `<video>`/camera 挂件走帧注入（`vcam`），不经 DOM 媒体模型 |
-| `modern-streams` | 需要 `ReadableStream` + `TransformStream` + `TextEncoderStream`（`pipeThrough` / `getReader()` / Promise 微任务队列，Web Streams 标准）；实测三者均为 `undefined`（`TextDecoder` 已有：`jsc/webapi.go:RegisterWebAPIs`） | 未实现（Web Streams 子系统） |
-| `logical-borders` | 4/6：参照（obscura）对相邻边框拐角**不斜切**，wb-ui 按标准做 45° 斜接（差 58px @(190,74)-(199,79)）。曾试「右下角改填 bottom 色」与 FillPath 三角，bbox 更差 | 保持标准化不牺牲，固定 4/6（结论 1） |
+| 夹具 | 曾经的性质 | 实现落点 |
+|------|------------|----------|
+| `media-text-track` | `<track>`/TextTrack 模型缺失 | `bindings/media.go`（`HTMLTrackElement.track` 同元素同实例、`video.textTracks` live 列表、`TextTrack`/`TextTrackCueList`/`TextTrackList`/`VTTCue`、`load`/`error` 事件）+ `bindings/webvtt.go`（WebVTT 解析、`data:` URL 解码）；单测 `bindings/media_test.go`（含「track 元素与 video.textTracks[i] 是同一对象」的标识契约） |
+| `modern-streams` | ReadableStream/TransformStream/TextEncoderStream 缺失 | `jsc/streams.go`（ReadableStream + controller、`getReader().read()` 返回 Promise、`pipeThrough`/`pipeTo`、TransformStream + TextEncoderStream/TextDecoderStream）；单测 `jsc/streams_test.go`（形状即夹具脚本：分块 + flush + await 读回） |
+| `logical-borders` | 拐角颜色归属方向 | `rendering/painter.go:paintBorderCorners`（bottom 侧两角改填「含该边外边缘」的三角）；单测 `rendering/border_corner_direction_test.go`（四角方向 + 回归点）；基准见下节 |
 
-### 脚本模式下修复的夹具（本轮）
+### 脚本模式下修复的夹具
 
 | 夹具 | 缺口 | 落点 |
 |------|------|------|
@@ -129,6 +135,13 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 | `animation-fill-forwards` | 探针不推进动画时钟（`WebView.Render` 不应用动画） | 见上文「动画时钟」；`rendering/animation_test.go:TestAnimateVisibilityFillForwards`（`fill:forwards` 保持终帧 + visibility 离散插值） |
 | `viewport-consistency` | 页面脚本读 `visualViewport.width/height` 抛 `ReferenceError`，**整段脚本中断**（不是只有那一行失效） | 新增 `window.visualViewport`（CSSOM View §4.2）：宽高与 `innerWidth/innerHeight` 同源（按解释器分派）、`scale=1`、offset/page=0、事件方法 no-op（`bindings/dom.go`）。另：前两项媒体查询由 `RenderView.SetViewportSize`/`Frame.syncMediaQueryViewport` 修复，`rendering/mediaquery_viewport_sync_test.go:TestMediaQueryViewportSync` 覆盖 |
 | `modern-hydration-contracts` | React 19 水合契约：`document.currentScript`、`el.attributes instanceof NamedNodeMap` + **live 集合**、`removeAttributeNode`、`hasAttributes`、`scrollTo({left,top,behavior})`/`scrollBy` | `bindings/dom.go`（`NamedNodeMap` 构造器 + 同元素同实例的 live 集合缓存 `namedNodeMapFor`、`hasAttributes`/`removeAttributeNode`、`Element.prototype.scrollTo`/`scrollBy`）、`page/frame.go`（脚本执行期间设置 `bindings.CurrentScriptElement`，结束恢复）、`rendering/scrollbargeom.go` + `webkit`（新增 `ScrollRange`：可滚动性判定不再用滚动条几何——10×10 的 `overflow:scroll` 容器此前被静默丢弃 `scrollTop` 赋值） |
+
+### 同轮补齐的平台能力夹具（媒体轨道与流）
+
+| 夹具 | 缺口 | 落点 |
+|------|------|------|
+| `media-text-track` | `<track>` → `HTMLTrackElement.track`（WebVTT + `data:` URL 异步加载 + `load` 事件）与 `video.textTracks` 缺失，脚本读 `element.track` 得 `undefined` → 抛错中断 | `bindings/media.go`（同一 `<track>` 元素同一 TextTrack 实例；`video.textTracks` 为 live 列表，`textTracks[i]` 与 `<track>.track` 是**同一对象**）+ `bindings/webvtt.go`（WEBVTT 头 / cue 块 / 时间戳 / settings、percent 与 base64 的 `data:` 解码）。单测 `bindings/media_test.go`（6 项，含 live 列表、`load`/`error` 时序、VTTCue 构造） |
+| `modern-streams` | `ReadableStream` / `TransformStream` / `TextEncoderStream` 均为 `undefined` | `jsc/streams.go`：构造器 + 原型、`enqueue/close/error` 控制器、`getReader().read()` 返回 Promise（队列空时挂起）、`pipeThrough`/`pipeTo` 直接接线（无背压）、`TextEncoderStream`/`TextDecoderStream` 复用 Go 侧 `TextEncoder`/`TextDecoder`。单测 `jsc/streams_test.go`（3 项） |
 
 ### 尺寸媒体查询的视口同步（本轮）
 
@@ -144,3 +157,44 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
 已知取舍：视口尺寸变化**不会**主动标记渲染树重建（尺寸抖动会让 iframe 子文档
 每帧重建，滚动偏移与跨 frame 选区失效）。因此 resize 后的媒体查询分支要等
 下一次渲染树重建（DOM 变更/样式变更触发）才切换，而首帧加载与重建路径已正确。
+
+## 边框拐角的方向（Edge 实测基准）
+
+相邻两边颜色不同时，拐角矩形被「外角 → 内角」的对角线分成两半，**每条边的
+颜色占据含该边外边缘的那一半**。用 Edge headless 渲染一个四角隔离页（每个盒子
+只给两条相邻边框上不同颜色）实测得到（对角线上的像素是抗锯齿混合色，归属任意）：
+
+| 角 | 水平边（top/bottom）颜色所在 | 垂直边（left/right）颜色所在 |
+|----|------------------------------|------------------------------|
+| top-left | 右上三角 | 左下三角 |
+| top-right | 左上三角 | 右下三角 |
+| bottom-left | 右下三角 | 左上三角 |
+| bottom-right | 左下三角 | 右上三角 |
+
+wb-ui 此前 top 侧两角正确、**bottom 侧两角填到了对面**：`fillBelow`/`fillBelowRev`
+用在 bottom 角时把「含 left/right 外边缘」的三角判成了另一半，于是相邻边框颜色
+互换。修复后四角方向与 Edge 一致（残差只剩对角线 1px 阶梯的抗锯齿偏置），
+`logical-borders` 夹具 6/6、与 obscura **0.000%**（此前 0.006%，58px 集中在
+方块1 右下角）。
+
+复现与锁定：`dev/cssprobe -filter logical-borders`（夹具期望的右边框 10x79、
+底边框 198x6 正是该方向的结果）；`rendering/border_corner_direction_test.go`
+锁定四角方向与 6 个回归采样点（把填充改回旧写法即失败）。
+
+## 探针的帧循环（事件循环 + 重建 cooldown）
+
+脚本夹具断言的是**异步工作收敛后**的状态，而探针没有宿主帧循环，因此
+`renderFixtureWithScripts` 在取图前显式推进两件事：
+
+1. **JS 事件循环**（`eventLoopTurns`，默认 25 轮）：`EventLoop.ProcessTasks(0)` +
+   `Interpreter.RunJobs()`，直到 `PendingTasks()==0`。覆盖 Promise/await 水合链、
+   `setTimeout` 延迟写入、资源事件（`<track>` 的 `load`/`error`）。
+2. **帧轮次**（`frameTurns`，默认 8）：`WebView.EnsureLayout()` 直到
+   `NeedsLayout()` 与 `NeedsRenderTreeRebuild()` 同时为假。**这一步是必需的**：
+   DOM 变更触发的渲染树重建被 `Frame.rebuildCooldown`（逐帧递减的变更风暴降频
+   计数）推迟，而 `FrameView.Layout()` 在「重建仍挂起」时**直接 return、不做
+   布局**——只调一次 `EnsureLayout` 会停在「树未布局」状态（`html`/`body`/`div`
+   全是 0x0，画布全白）。宿主 `app.Host` 每帧都走一遍，所以线上不显现；探针必须
+   自己补上。
+
+两者都有轮数上限，避免「每帧变更 DOM」的页面或自续期定时器把探针挂住。

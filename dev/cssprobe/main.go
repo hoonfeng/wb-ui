@@ -67,6 +67,16 @@ const (
 	// loop, so it advances the clock past any finite animation instead of
 	// sampling the opening frame.
 	animationSettledTime = 10.0
+
+	// eventLoopTurns bounds how many event-loop turns the scripted path drains
+	// before reading back pixels (see renderFixtureWithScripts).
+	eventLoopTurns = 25
+
+	// frameTurns bounds how many frame turns the scripted path drives before
+	// reading back pixels. Rebuilds caused by DOM mutation are thinned by a
+	// per-frame cooldown, so one EnsureLayout is not always enough to reach a
+	// laid-out tree.
+	frameTurns = 8
 )
 
 // Check is one expected solid-color component (checks.json entry).
@@ -448,6 +458,23 @@ func renderFixtureWithScripts(htmlText string, tree io.Writer) (*image.RGBA, err
 	if err := wv.LoadHTML(htmlText); err != nil {
 		return nil, fmt.Errorf("webkit LoadHTML: %w", err)
 	}
+	// ★ Drive the JS event loop to completion before reading back pixels: the
+	// scripted fixtures assert state that only exists once asynchronous work
+	// has settled (Promise/await hydration pipelines, setTimeout-deferred DOM
+	// writes, resource load/error events such as <track> load). app.Host does
+	// exactly this every frame (EventLoop.ProcessTasks + Interpreter.RunJobs);
+	// the probe has no frame loop, so advance the queues synchronously here.
+	// The turn budget bounds self-renewing timers (an interval would otherwise
+	// keep the loop non-empty forever).
+	if interp := wv.JSInterpreter(); interp != nil {
+		if loop := interp.GetEventLoop(); loop != nil {
+			for i := 0; i < eventLoopTurns && loop.PendingTasks() > 0; i++ {
+				loop.ProcessTasks(0)
+				interp.RunJobs()
+			}
+		}
+		interp.RunJobs()
+	}
 	// Drive the animation clock and apply animations once so a finished forwards
 	// animation paints its final state. rendering.AnimationTime is the
 	// embedder-owned clock (app.Host advances it every frame) and WebView.Render
@@ -455,7 +482,21 @@ func renderFixtureWithScripts(htmlText string, tree io.Writer) (*image.RGBA, err
 	// an animation's *outcome* would sample its opening frame. EnsureLayout comes
 	// first so Render() below does not rebuild the render tree underneath the
 	// styles we just animated.
-	wv.EnsureLayout()
+	//
+	// ★ Frame turns, not a single EnsureLayout: render-tree rebuilds triggered
+	// by DOM mutations are thinned out by a per-frame cooldown
+	// (Frame.rebuildCooldown, a frame counter for mutation storms), and while it
+	// is pending FrameView.Layout() *defers* — leaving the tree unlaid-out (zero
+	// geometry, blank frame). app.Host converges because it lays out every
+	// frame; the probe must drive the same turns itself. Bounded so a page that
+	// mutates the DOM every frame cannot hang the probe.
+	for i := 0; i < frameTurns; i++ {
+		wv.EnsureLayout()
+		frame := wv.Page().MainFrame()
+		if !frame.NeedsLayout() && !frame.NeedsRenderTreeRebuild() {
+			break
+		}
+	}
 	if rv := wv.RenderView(); rv != nil {
 		rendering.AnimationTime = animationSettledTime
 		rendering.ApplyAnimations(rv)
