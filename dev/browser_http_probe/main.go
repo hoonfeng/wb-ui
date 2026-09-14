@@ -85,6 +85,20 @@ func (l *reqLog) count() int {
 	return len(l.seen)
 }
 
+// countPath 数某个路径被请求了几次：资源缓存与 MIME 断言的判据都是
+// 「同一个 URL 到底打扰了服务器几次」——比"收到过请求"更严格。
+func (l *reqLog) countPath(p string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, s := range l.seen {
+		if s == p {
+			n++
+		}
+	}
+	return n
+}
+
 func (l *reqLog) dump() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -213,6 +227,103 @@ func main() {
 		w.Header().Set("Content-Type", "text/css")
 		fmt.Fprint(w, "#box{width:444px}")
 	})
+	// <base href>：页面里所有引用都是相对路径，只有认了 <base href="/assets/">
+	// 才会请求 /assets/…；忽略它就落到 /base/…（服务器没有这些端点 → 外部
+	// 样式/脚本/图片全部失效）。这是真实站点把静态资源放子目录的常规手段。
+	mux.HandleFunc("/base/page.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><base href="/assets/">`+
+			`<link rel="stylesheet" href="theme.css">`+
+			`<script src="app.js"></script></head>`+
+			`<body><div id="box">x</div><img id="pic" src="pic.png" width="4" height="4"></body></html>`)
+	})
+	mux.HandleFunc("/assets/theme.css", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/css")
+		fmt.Fprint(w, "#box{width:246px}")
+	})
+	mux.HandleFunc("/assets/app.js", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "application/javascript")
+		fmt.Fprint(w, `window.__baseApp = "base-app-js-ran";`)
+	})
+	mux.HandleFunc("/assets/pic.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(redPNG)
+	})
+	// 资源缓存：同一个 URL 挂两个 <link>、同一张图挂两个 <img>——浏览器只向
+	// 服务器取一次（内存缓存），引擎此前每个引用都重新取。
+	//
+	// 这里特意用 /cached.* 这些**没被任何其他页面引用过**的 URL：图片的解码
+	// 结果是进程级缓存（rendering.backgroundImageCache），若复用 /pic.png 就会
+	// 命中前一个文档的解码图、连字节都不再取——那样测到的是跨文档缓存，
+	// 而不是本探针要测的「同一文档内重复引用只取一次」。
+	mux.HandleFunc("/cached.css", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/css")
+		fmt.Fprint(w, "#box{width:123px}")
+	})
+	mux.HandleFunc("/cached.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(redPNG)
+	})
+	mux.HandleFunc("/cache.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head>`+
+			`<link rel="stylesheet" href="/cached.css">`+
+			`<link rel="stylesheet" href="/cached.css"></head><body>`+
+			`<div id="box">x</div>`+
+			`<img id="pica" src="/cached.png" width="4" height="4">`+
+			`<img id="picb" src="/cached.png" width="4" height="4"></body></html>`)
+	})
+	// MIME 检查：/plain.css 回 text/plain 但无 nosniff → 浏览器宽松接受；
+	// /nosniff.css 回 text/plain **且**带 X-Content-Type-Options: nosniff →
+	// 浏览器拒绝把 text/plain 当样式表用（正是 nosniff 的用途）。
+	mux.HandleFunc("/plain.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><link rel="stylesheet" href="/plain.css"></head>`+
+			`<body><div id="box">x</div></body></html>`)
+	})
+	mux.HandleFunc("/plain.css", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "#box{width:321px}")
+	})
+	mux.HandleFunc("/nosniff.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><link rel="stylesheet" href="/nosniff.css"></head>`+
+			`<body><div id="box">x</div></body></html>`)
+	})
+	mux.HandleFunc("/nosniff.css", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		fmt.Fprint(w, "#box{width:180px}")
+	})
+	// 装配期脚本导航：页面脚本在装配中就 location.replace → 排队到装配结束
+	// 执行、最终文档是 /index.html。
+	mux.HandleFunc("/nav.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><title>NAV</title>`+
+			`<script>location.replace("/index.html")</script></head>`+
+			`<body><div id="who">NAV</div></body></html>`)
+	})
+	// html/body 背景传播：页面只写 body 背景、body 盒只有一行高，画布底部
+	// 仍应被染成该色（CSS-BACKGROUNDS-3 §2.11.2 的背景传播规则）。
+	mux.HandleFunc("/bg.html", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><style>`+
+			`body{background:rgb(18,52,86);margin:0}</style></head>`+
+			`<body><div id="who">BG</div></body></html>`)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -282,6 +393,98 @@ func main() {
 	check(math.Abs(w2-444) <= 1, "#box 宽度 = %.1f（嵌套 @import 生效，want 444）", w2)
 	imp2.Destroy()
 
+	// ── <base href>：相对引用的基准可被文档改写 ──────────────────
+	bw := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	bw.Resize(600, 400)
+	if err := bw.LoadURL(srv.URL + "/base/page.html"); err != nil {
+		check(false, "LoadURL(/base/page.html): %v", err)
+	}
+	check(evalStr(bw, "document.baseURI") == srv.URL+"/assets/",
+		"document.baseURI = %q（want %q）", evalStr(bw, "document.baseURI"), srv.URL+"/assets/")
+	check(logHas(log, "/assets/theme.css"),
+		"<base> 下的 <link href=\"theme.css\"> 请求 /assets/theme.css：%v", logHas(log, "/assets/theme.css"))
+	check(logHas(log, "/assets/app.js"),
+		"<base> 下的 <script src=\"app.js\"> 请求 /assets/app.js：%v", logHas(log, "/assets/app.js"))
+	check(!logHas(log, "/base/theme.css"),
+		"没有按文档 URL 误解析到 /base/theme.css：%v", !logHas(log, "/base/theme.css"))
+	check(evalStr(bw, "window.__baseApp") == "base-app-js-ran",
+		"<base> 下的外部脚本已执行：window.__baseApp = %q", evalStr(bw, "window.__baseApp"))
+	check(math.Abs(boxWidth(bw, "box")-246) <= 1,
+		"<base> 下的外部样式已生效：#box 宽度 = %.1f（want 246）", boxWidth(bw, "box"))
+	bimg := waitForImage(bw, "pic", 40)
+	check(logHas(log, "/assets/pic.png"),
+		"<base> 下的 <img src=\"pic.png\"> 请求 /assets/pic.png：%v", logHas(log, "/assets/pic.png"))
+	check(bimg.loaded && bimg.red, "<base> 下的图片已绘制：loaded=%v pixel=%s", bimg.loaded, bimg.pixel)
+	bw.Destroy()
+
+	// ── 资源缓存：同一 URL 只向服务器取一次 ──────────────────────
+	cssBefore, pngBefore := log.countPath("/cached.css"), log.countPath("/cached.png")
+	cw := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	cw.Resize(600, 400)
+	if err := cw.LoadURL(srv.URL + "/cache.html"); err != nil {
+		check(false, "LoadURL(/cache.html): %v", err)
+	}
+	cp1, cp2 := waitForImage(cw, "pica", 40), waitForImage(cw, "picb", 40)
+	check(cp1.red && cp2.red, "两个 <img> 都绘制出图片：pica=%s picb=%s", cp1.pixel, cp2.pixel)
+	check(log.countPath("/cached.css")-cssBefore == 1,
+		"两个 <link> 指向同一 URL → 服务器收到 /cached.css 请求 %d 次（期望 1，内存缓存）",
+		log.countPath("/cached.css")-cssBefore)
+	check(log.countPath("/cached.png")-pngBefore == 1,
+		"两个 <img> 指向同一 URL → 服务器收到 /cached.png 请求 %d 次（期望 1，内存缓存）",
+		log.countPath("/cached.png")-pngBefore)
+	check(math.Abs(boxWidth(cw, "box")-123) <= 1,
+		"缓存命中的样式表仍然生效：#box 宽度 = %.1f（want 123）", boxWidth(cw, "box"))
+	cw.Destroy()
+
+	// ── MIME 检查：nosniff 时按类型拒绝（无 nosniff 则宽松接受）────
+	pw := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	pw.Resize(600, 400)
+	if err := pw.LoadURL(srv.URL + "/plain.html"); err != nil {
+		check(false, "LoadURL(/plain.html): %v", err)
+	}
+	check(math.Abs(boxWidth(pw, "box")-321) <= 1,
+		"无 nosniff 的 text/plain 样式表被宽松接受：#box 宽度 = %.1f（want 321）", boxWidth(pw, "box"))
+	pw.Destroy()
+
+	ns := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	ns.Resize(600, 400)
+	if err := ns.LoadURL(srv.URL + "/nosniff.html"); err != nil {
+		check(false, "LoadURL(/nosniff.html): %v", err)
+	}
+	check(math.Abs(boxWidth(ns, "box")-180) > 1,
+		"带 nosniff 的 text/plain 样式表被拒绝：#box 宽度 = %.1f（容器宽 → 样式未生效）", boxWidth(ns, "box"))
+	ns.Destroy()
+
+	// ── location 导航（装配期脚本发起）与 html/body 背景传播 ──────
+	nv := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	nv.Resize(600, 400)
+	if err := nv.LoadURL(srv.URL + "/nav.html"); err != nil {
+		check(false, "LoadURL(/nav.html): %v", err)
+	}
+	check(evalStr(nv, "document.URL") == pageURL,
+		"装配期 location.replace(\"/index.html\") 已换文档：document.URL = %q（want %q）",
+		evalStr(nv, "document.URL"), pageURL)
+	check(evalStr(nv, "document.title") == "HTTP Probe",
+		"导航后文档是 index.html：title = %q", evalStr(nv, "document.title"))
+	check(evalStr(nv, "history.length") == "1",
+		"location.replace 替换当前条目：history.length = %q（want 1）", evalStr(nv, "history.length"))
+	nv.Destroy()
+
+	bgc := webkit.NewWebViewWithMode(webkit.ModeBrowser)
+	bgc.Resize(240, 160)
+	if err := bgc.LoadURL(srv.URL + "/bg.html"); err != nil {
+		check(false, "LoadURL(/bg.html): %v", err)
+	}
+	bpix, berr := bgc.Render()
+	bpr, bpg, bpb, bpa := pixelAt(bpix, 240, 120, 150)
+	if berr != nil {
+		check(false, "Render(/bg.html): %v", berr)
+	} else {
+		check(bpr == 18 && bpg == 52 && bpb == 86 && bpa == 255,
+			"body 背景传播到画布：画布底部像素 = rgba(%d,%d,%d,%d)（want 18,52,86,255）", bpr, bpg, bpb, bpa)
+	}
+	bgc.Destroy()
+
 	// ── 用途二：UI 框架（同样的动作不得产生网络）──────────────
 	fmt.Println("\n── ModeToolkit（UI 框架）──")
 	tk := webkit.NewWebViewWithMode(webkit.ModeToolkit)
@@ -307,6 +510,14 @@ func main() {
 	tkImg := waitForImage(tk, "remote", 10)
 	check(!tkImg.loaded, "UI 框架模式下 <img src=\"%s/pic.png\"> 未加载：%v（期望 true）", srv.URL, !tkImg.loaded)
 	check(log.count() == before, "UI 框架模式新增网络请求 = %d（期望 0）", log.count()-before)
+
+	// 能力面：UI 框架模式下 Worker 是**真删除**——`in` 与 typeof 同时为假，
+	// 靠 `"Worker" in window` 做 feature detect 的库不会误判；浏览器模式里
+	// 它必须存在（否则两边一样，这条断言就失去意义）。
+	check(evalStr(tk, `("Worker" in window)`) == "false",
+		"UI 框架模式：\"Worker\" in window = %v（期望 false）", evalStr(tk, `("Worker" in window)`))
+	check(evalStr(br, `("Worker" in window)`) == "true",
+		"浏览器模式：\"Worker\" in window = %v（期望 true）", evalStr(br, `("Worker" in window)`))
 
 	// browserHits 是「图片/@import 断言之前」的计数（用于对照探针输出），
 	// 结论行给出包含全部能力在内的最终计数。

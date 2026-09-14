@@ -506,18 +506,22 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   全局 / 子框架 / 外部资源通道），中途切换会留下「页面脚本已 feature-detect 过
   旧能力」的不一致状态 → 装配后 `SetMode` 只接受同值，否则 `ErrModeLocked`
   （要另一模式请新建 WebView；多形态共存靠「每个 WebView 一个模式」）。
-- **浏览器全局的裁剪用「置 undefined」**：`jsc` 层未暴露 goja 的属性删除，
-  因此 UI 库模式下 `"Worker" in window` 仍为 `true`（值为 undefined）。
-  `typeof Worker === "undefined"` 与浏览器一致——feature detect 请用 `typeof`。
-- **`<body>` 背景不传播到画布根**：浏览器会把 html/body 的背景当作画布背景绘制，
-  本引擎不传播（引擎既有差异，与模式无关）。给界面铺底色请用尺寸铺满的容器
-  元素。`ui.TestBodyBackgroundPropagationKnownGap` 只锁定「两种模式行为一致」，
-  避免模式接线引入渲染差异，不代表已对齐浏览器。
+- **浏览器全局的裁剪是「真删除」**：`jsc.JSObject.Delete` 已接出 goja 的属性
+  删除，UI 库模式下 `"Worker" in window` 与 `typeof Worker` 同时为假——靠 `in`
+  做 feature detect 的库不再误判（属性不可配置时才退回「置 undefined」）。
+- **html/body 背景传播到画布**（CSS-BACKGROUNDS-3 §2.11.2）：html 没有背景而
+  body 有时，body 的背景被提升为画布背景——整屏铺满、随视口固定（不随页面
+  滚动）。iframe 子文档按自身 viewport 铺满，不溢出到父文档画布。
+  `ui.TestBodyBackgroundPropagatesToCanvas` 正向锁定该行为。
 - **UI 库模式不提供安全策略**：它不加载外部资源（这是它最大的安全收益），但引擎
   本身没有 CSP / 同源检查层，模式切换不改变这一点。
-- **外部资源在 UI 库模式下随样式重扫重复请求 resolver**：引擎按 `<link>` 的 href
-  指纹决定是否重扫样式，同一引用在多次重建中可能被重复请求；宿主 resolver 应
-  自缓存（尤其是大文件）。
+- **外部资源带内存缓存，范围是「每 WebView」**：同一 URL 的外部资源只取一次
+  （`webkit/resource_cache.go`：上限 128 条 / 4 MB，超出按插入顺序淘汰最旧；
+  响应带 `Cache-Control: no-store` / `no-cache` 时不缓存；模式门禁在缓存查询
+  **之前**，否则别的 WebView 的缓存会穿透模式承诺）。缓存不跨 WebView 共享
+  ——宿主 `ResourceResolver` 的内容随宿主状态而变，换 resolver 时整体清空
+  （`WebView.ClearResourceCache`）。图片的**解码结果**另有一层进程级缓存
+  （见下条），因此重复引用同一图片常常连字节都不再取。
 - **图片是异步取回的（当帧不画）**：`<img>` 的字节在后台 goroutine 取回并解码，
   命中缓存后的**下一帧**才绘制（渲染线程不被网络阻塞）。宿主按帧渲染即可；
   `data:` URL 与宿主 `ResourceResolver` 提供的内容同步命中，无此延迟。
@@ -525,19 +529,45 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   绝对 URL** 索引（多 WebView 共享已解码图片，省内存但内容也共享）。模式门禁
   优先于缓存判定，因此 UI 库模式不会显示外部图片；但同一模式下的多个 WebView
   之间仍会共享同名资源的字节。
-- **`LoadHTML` 下图片没有文档基准**：相对路径按宿主进程工作目录读取（与
-  `<link>` 的既有行为一致）——需要浏览器语义（相对解析/网络）请用 `LoadURL`，
-  或让宿主 `ResourceResolver` 提供内容。
+- **`LoadHTML` 默认没有文档基准**：相对路径按宿主进程工作目录读取（与
+  `<link>` 的既有行为一致）。需要浏览器语义时三条路：`LoadURL`（引擎取内容）、
+  `LoadHTMLWithBaseURL(src, base)`（**只给基准、不取内容、不联网**，装配前就经
+  `page.Frame.SetPendingDocumentURL` 把 URL 写进文档——否则 `<link>`/`<script>`
+  在装配中途加载时还没有基准），或让宿主 `ResourceResolver` 提供内容。
 - **`page.CachedResourceLoader` 仍无调用方**：它带着 `documentURL` 与相对 URL
   解析能力，但整条链路（`LoadStylesheet` / `RequestResource` 的异步回调）没有
-  接到渲染/样式管线——当前图片与样式都走 `Frame` 的同步 loader 通道。要不要
-  收敛到 CachedResourceLoader（内存缓存 + 并发去重）属于后续架构题。
-- **图片不做 MIME 校验**：解码失败即视为加载失败（`NewDecodedImage` 返回 nil），
-  不像浏览器那样按 `Content-Type` 拒绝（引擎没有那一层，与 `fetchHTTP` 的
-  现状一致）。
-- **`location.assign/replace/reload` 仍是 no-op 桩**：引擎没有导航调度器，导航
-  由宿主调 `LoadURL` 完成（重定向的最终 URL 已回写文档，但 `history` 栈不记录
-  跳转，`history.length`/`state` 只反映 `pushState` 系列）。
+  接到渲染/样式管线——当前图片与样式都走 `Frame` 的同步 loader 通道。
+  `webkit/resource_cache.go` 现在按 WebView 提供「取一次 + 去重」的内存缓存，
+  但那是 webkit 层的资源字节缓存，与 `CachedResourceLoader` 的异步加载链路仍
+  是两套——收敛属后续架构题。
+- **MIME：图片不看，`<link>`/`<script src>` 按 nosniff 看**：取内容层
+  （`fetchHTTP`）现在带回 `Content-Type` / `X-Content-Type-Options` /
+  `Cache-Control`，按**用途在消费端**判定（这正是浏览器的位置）：图片解码成功
+  即采用（解码失败才算加载失败）；样式表要求 `text/css`、脚本要求 JS MIME
+  类型，且**仅在响应带 `X-Content-Type-Options: nosniff` 时**严格拒绝，无
+  nosniff 时宽松接受（与浏览器一致，仅控制台提示）。
+- **导航与历史已接通**（`webkit/navigation.go`）：`location.assign` / `replace` /
+  `reload` 与 `location.href` 赋值真的换文档（相对引用按文档基准解析），
+  `history.back/forward/go` 能跨文档遍历（遍历**不追加**条目）；装配期由页面
+  脚本发起的导航**排队到装配结束后执行**，不在装配中途重入换文档；宿主
+  `LoadURL` 与 location 导航都进历史栈（`history.length` 反映文档数）。UI 库
+  模式拒绝导航，宿主可用 `SetOnNavigationBlocked` 感知。
+- **外部样式表里 `url()` 的相对基准是文档 URL，不是样式表 URL**（已知差异 ·
+  未实现）：CSS 规范里 `url()` 以**样式表自身 URL** 为基准（与 `@import` 同一
+  规则）——`/css/theme.css` 里的 `background-image:url(bg.png)` 应当请求
+  `/css/bg.png`。本引擎拿不到「当前声明来自哪张样式表」：`collectedDecl` 不带
+  来源 base，图片解析只有文档基准（`webkit/image_resource.go` 的
+  `webViewImageLoader.ResolveURL` → `documentBaseURL()`；`style/resolver.go:330`
+  的 `dom.ResolveURL(base, href)` 同理）。影响面：绝对 URL 与 `data:` 不受
+  影响，只有「外部样式表里的相对 `url()`」这一类会请求错路径（真实站点用
+  `./images/x.png` 组织资源时很常见）。
+  **修法**：`collectedDecl` 加 `sheetBaseURL string`；6 个收集点
+  （`style/resolver.go:406/535/885/1136/1220/3780`）填来源样式表的 `BaseURL`
+  （内联 `style=""` 属性用文档 URL）；应用侧优先用 `decl.sheetBaseURL`、为空
+  回退文档 URL。成本主要是**跨函数签名传递**：`collectFromStyleRule` /
+  `collectDeclarations` / `collectScopedFromRules` / `collectSheetDeclarations` /
+  `collectPseudoDeclarations` / `collectScrollbarFromRule` 等上游都要多一个 base
+  参数。评估结论：本轮不做（收益面只覆盖一类引用），按需再投。
 - **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
   「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式
   响应式时走 web 方式（Vue 等在页面脚本里做）。
