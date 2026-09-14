@@ -133,6 +133,35 @@ func TestSetFocusedElementValue_Nil(t *testing.T) {
 	setFocusedElementValue(nil, "test")
 }
 
+// TestSetFocusedElementValue_FlipsUserValidity 覆盖 app 层的用户输入写入点
+// （IME/组合输入的字符提交都经 setFocusedElementValue）与 user validity 的
+// 联动：控件在焦点会话内被写入使有效性翻转的值 → 立即获得 user validity
+// （MDN :user-valid 第 3 条，见 html5/uservalidity.go）；没有焦点会话时
+// （程序化写值）不置位。
+func TestSetFocusedElementValue_FlipsUserValidity(t *testing.T) {
+	doc := dom.NewDocument()
+	el := doc.CreateElement("input")
+	el.SetAttribute("type", "text")
+	el.SetAttribute("required", "required")
+
+	// 未聚焦（无焦点会话）：脚本式写值不构成用户交互。
+	setFocusedElementValue(el, "ok")
+	if el.UserInteracted() {
+		t.Error("无焦点会话时写值不应置 user validity")
+	}
+
+	// 聚焦会话内：空 required（无效）→ 写入有效值 → 立即置位。
+	el.RemoveAttribute("value")
+	el.SetFocused(true)
+	if _, known := el.FocusValidity(); !known {
+		t.Fatal("聚焦后应建立焦点会话记忆")
+	}
+	setFocusedElementValue(el, "ok")
+	if !el.UserInteracted() {
+		t.Error("焦点会话内写值使无效变有效后应置 user validity（:user-valid 立即生效）")
+	}
+}
+
 func TestIsTextFormControl_InputHidden(t *testing.T) {
 	doc := dom.NewDocument()
 	el := doc.CreateElement("input")

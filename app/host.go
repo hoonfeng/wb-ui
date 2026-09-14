@@ -765,10 +765,14 @@ func setFocusedElementValue(el *dom.Element, text string) {
 	}
 	if el.LocalName() == "textarea" {
 		el.SetTextContent(text)
+		// 用户输入改了值 → user validity 的「焦点会话内有效性翻转即时生效」
+		// （MDN :user-valid 第 3 条；见 html5/uservalidity.go）。
+		html5.NoteUserInput(el)
 		return
 	}
 	if isTextFormControl(el) {
 		el.SetAttribute("value", text)
+		html5.NoteUserInput(el)
 		return
 	}
 	el.SetTextContent(text)
@@ -5178,6 +5182,9 @@ func (h *Host) setRangeValueFromX(el *dom.Element, rv *rendering.RenderView, css
 		return false
 	}
 	in.SetValue(s)
+	// range 的点击/拖动是用户对值的修改（同键盘输入）→ 走同一条 user
+	// validity 判定。
+	html5.NoteUserInput(el)
 	return true
 }
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"wb-ui/dom"
+	"wb-ui/html5"
 )
 
 func TestConstraintValidationElementIDL(t *testing.T) {
@@ -287,4 +288,102 @@ func TestMarkUserInteractedEnablesUserPseudoClasses(t *testing.T) {
 			}
 		}
 	`)
+}
+
+// TestFocusSessionFlipEnablesUserPseudoClasses 覆盖 MDN :user-valid 第 3 条的
+// 端到端链路（dom 焦点钩子 → html5 判定 → bindings 失效 → CSS 匹配）：控件
+// 获得焦点时无效，用户在焦点内改值使其有效 → :user-valid 立即匹配（不必等
+// 失焦）；镜像方向（聚焦时有效 → 改成无效）让 :user-invalid 立即匹配。
+// 聚焦本身不置位，失焦会结束焦点会话（此后写值不再算用户交互）。
+func TestFocusSessionFlipEnablesUserPseudoClasses(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	body := newHTMLBodyFixture(doc)
+	mk := func(id, value string) *dom.Element {
+		el := doc.CreateElement("input")
+		el.SetAttribute("type", "text")
+		el.SetAttribute("required", "required")
+		if value != "" {
+			el.SetAttribute("value", value)
+		}
+		el.SetId(id)
+		body.AppendChild(el)
+		return el
+	}
+	empty := mk("empty", "")     // 聚焦时无效
+	filled := mk("filled", "ok") // 聚焦时有效
+
+	var invalidated int
+	prev := OnClassChanged
+	OnClassChanged = func(el *dom.Element) {
+		if el == empty || el == filled {
+			invalidated++
+		}
+	}
+	defer func() { OnClassChanged = prev }()
+
+	mustRun(t, rt, `
+		{
+			for (const id of ['empty', 'filled']) {
+				const el = document.getElementById(id);
+				if (el.matches(':user-valid') || el.matches(':user-invalid')) {
+					throw new Error(id + '：未交互时两个 user 伪类都不应匹配');
+				}
+			}
+		}
+	`)
+
+	// 聚焦本身不是交互：记忆写入但两个伪类仍不匹配。
+	empty.SetFocused(true)
+	mustRun(t, rt, `
+		{
+			if (!document.getElementById('empty').matches(':invalid')) {
+				throw new Error('空 required 应匹配 :invalid');
+			}
+			if (document.getElementById('empty').matches(':user-invalid')) {
+				throw new Error('仅聚焦不应置 user validity');
+			}
+		}
+	`)
+
+	// 方向一：焦点内把无效值改成有效 → :user-valid 立即匹配。
+	empty.SetAttribute("value", "ok")
+	html5.NoteUserInput(empty)
+	mustRun(t, rt, `
+		{
+			const el = document.getElementById('empty');
+			if (!el.matches(':user-valid')) throw new Error('焦点内改有效后应匹配 :user-valid');
+			if (el.matches(':user-invalid')) throw new Error('有效时不应匹配 :user-invalid');
+		}
+	`)
+	if invalidated == 0 {
+		t.Error("user validity 翻转应触发样式失效")
+	}
+
+	// 方向二（镜像）：焦点内把有效值改成无效 → :user-invalid 立即匹配。
+	filled.SetFocused(true)
+	filled.RemoveAttribute("value")
+	html5.NoteUserInput(filled)
+	mustRun(t, rt, `
+		{
+			const el = document.getElementById('filled');
+			if (!el.matches(':user-invalid')) throw new Error('焦点内清空必填项后应匹配 :user-invalid');
+			if (el.matches(':user-valid')) throw new Error('无效时不应匹配 :user-valid');
+		}
+	`)
+
+	// 失焦结束焦点会话：此后写值不再算用户交互（记忆被清除）。
+	_, fresh, _ := newRuntimeWithDoc(t)
+	body2 := newHTMLBodyFixture(fresh)
+	el2 := fresh.CreateElement("input")
+	el2.SetAttribute("type", "text")
+	el2.SetAttribute("required", "required")
+	el2.SetId("b")
+	body2.AppendChild(el2)
+	el2.SetFocused(true)
+	el2.SetFocused(false)
+	el2.SetAttribute("value", "ok")
+	html5.NoteUserInput(el2)
+	if el2.UserInteracted() {
+		t.Error("失焦后（焦点会话结束）写值不应置 user validity")
+	}
 }

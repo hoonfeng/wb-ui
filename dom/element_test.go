@@ -210,3 +210,48 @@ func TestTextNode(t *testing.T) {
 		t.Errorf("after ReplaceData: %q, want %q", tx.NodeValue(), "bye!")
 	}
 }
+
+// TestSetFocusedFocusHookContract 覆盖 setter 的焦点钩子契约：SetFocused(true)
+// 只在「焦点状态真的从 false 变 true」时调用 OnElementFocused（html5 用它记录
+// 聚焦瞬间的约束校验结果），重复置 true 不再通知；失焦会清除「焦点会话」的
+// 约束校验记忆（SetFocusValidity/FocusValidity 协议）。
+func TestSetFocusedFocusHookContract(t *testing.T) {
+	d := NewDocument()
+
+	var seen []*Element
+	prev := OnElementFocused
+	OnElementFocused = func(el *Element) { seen = append(seen, el) }
+	defer func() { OnElementFocused = prev }()
+
+	el := d.CreateElement("input")
+	el.SetFocused(true)
+	if len(seen) != 1 || seen[0] != el {
+		t.Fatalf("SetFocused(true) 应通知钩子 1 次，实际 %d 次", len(seen))
+	}
+	// 重复置 true：状态未变 → 不重复通知（否则每次点击都会覆盖焦点会话记忆）。
+	el.SetFocused(true)
+	if len(seen) != 1 {
+		t.Errorf("重复 SetFocused(true) 不应重复通知，实际 %d 次", len(seen))
+	}
+	el.SetFocused(false)
+	el.SetFocused(true)
+	if len(seen) != 2 {
+		t.Errorf("失焦后再聚焦应重新通知，实际 %d 次", len(seen))
+	}
+
+	// 焦点会话记忆：写入后失焦即清除。
+	el.SetFocusValidity(false)
+	if valid, known := el.FocusValidity(); !known || valid {
+		t.Errorf("FocusValidity = (%v, %v), want (false, true)", valid, known)
+	}
+	el.SetFocused(false)
+	if _, known := el.FocusValidity(); known {
+		t.Error("失焦应清除焦点会话记忆")
+	}
+	// 钩子为 nil 时 SetFocused 不应 panic（未导入 html5 的宿主）。
+	OnElementFocused = nil
+	el.SetFocused(true)
+	if !el.IsFocused() {
+		t.Error("OnElementFocused 为 nil 时 SetFocused(true) 应仍然生效")
+	}
+}

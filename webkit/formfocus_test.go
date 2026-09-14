@@ -8,8 +8,49 @@ import (
 	"testing"
 	"time"
 
+	"wb-ui/html5"
 	"wb-ui/rendering"
 )
+
+// TestFormFocusCharInputFlipsValidityInFocusSession 覆盖引擎真实键入路径
+// （FormFocus.CharInput → applyValue）上的 user validity：聚焦时无效的
+// required 控件，用户键入使其有效 → 立即获得 user validity（:user-valid
+// 立即可匹配，不必等失焦）；聚焦本身不置位，失焦结束焦点会话。
+func TestFormFocusCharInputFlipsValidityInFocusSession(t *testing.T) {
+	_, f := formTestWebView(t, `<input id="i" required>`)
+	el := f.WebView().Document().GetElementById("i")
+	if el == nil {
+		t.Fatal("input #i not found")
+	}
+	in, ok := html5.ToInputElement(el)
+	if !ok {
+		t.Fatal("ToInputElement failed")
+	}
+	if in.Validity().Valid() {
+		t.Fatal("空 required 应为无效")
+	}
+	f.Focus(el)
+	if valid, known := el.FocusValidity(); !known || valid {
+		t.Fatalf("聚焦瞬间的焦点会话记忆 = (%v, %v), want (false, true)", valid, known)
+	}
+	if el.UserInteracted() {
+		t.Fatal("聚焦本身不应置 user validity")
+	}
+	if !f.CharInput('x') {
+		t.Fatal("CharInput('x') not consumed")
+	}
+	if !in.Validity().Valid() {
+		t.Fatal("键入后应为有效")
+	}
+	if !el.UserInteracted() {
+		t.Error("键入使无效变有效后应置 user validity（:user-valid 立即生效）")
+	}
+	// 失焦：焦点会话结束，记忆被清除。
+	f.Clear()
+	if _, known := el.FocusValidity(); known {
+		t.Error("失焦后应清除焦点会话记忆")
+	}
+}
 
 func formTestWebView(t *testing.T, src string) (*WebView, *FormFocus) {
 	t.Helper()

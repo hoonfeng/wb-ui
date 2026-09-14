@@ -567,6 +567,10 @@ func (f *FormFocus) applyValue(nv string, caret int) bool {
 		return false // 超过 maxlength：浏览器拒绝插入
 	}
 	setFormControlValue(el, nv)
+	// 用户击键/粘贴改变了值 → user validity 的「焦点会话内有效性翻转即时
+	// 生效」规则（MDN :user-valid 第 3 条；见 html5/uservalidity.go）。
+	// 放在写值之后：判定要用修改后的值。
+	html5.NoteUserInput(el)
 	f.setCaret(caret)
 	f.markDirty()
 	return true

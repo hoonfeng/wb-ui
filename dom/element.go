@@ -55,6 +55,16 @@ type Element struct {
 	// 不改变它。
 	userInteracted bool
 
+	// focusCheckKnown / focusCheckValid 记录「本次焦点会话开始时该控件的约束
+	// 校验结果」（known=false 表示没有正在进行的焦点会话记录）。HTML 的 user
+	// validity 规则之一（MDN :user-valid 第 3 条）：值在获得焦点时无效、而用户
+	// 在焦点仍在控件内时把它改成了有效 → :user-valid 立即生效（不必等失焦）；
+	// :user-invalid 是镜像规则（聚焦时有效 → 用户改成无效 → 立即生效）。记忆
+	// 只在焦点会话内有效：失焦即清除（见 SetFocused）。判定逻辑在 html5
+	// （html5.NoteFocusGained / NoteUserInput），dom 层只存这两个布尔。
+	focusCheckKnown bool
+	focusCheckValid bool
+
 	// attrVersion 随属性变更递增，样式解析器据此失效 per-element 缓存：
 	// class/type/checked 等影响 CSS 选择器匹配的属性变化后必须重算样式
 	// （浏览器 attribute 变化触发 style recalc）。此前 RebuildRenderTree 的
@@ -115,6 +125,31 @@ func (e *Element) IsIndeterminate() bool   { return e.indeterminate }
 // input paths (bindings.MarkUserInteracted).
 func (e *Element) SetUserInteracted(v bool) { e.userInteracted = v }
 func (e *Element) UserInteracted() bool     { return e.userInteracted }
+
+// SetFocusValidity / FocusValidity / ClearFocusValidity 管理「本次焦点会话开始
+// 时该控件的约束校验结果」记忆。dom 层只存这两个布尔——判定在 html5
+// （html5.NoteFocusGained 在元素获得焦点时写入，html5.NoteUserInput 在用户
+// 修改值时读取），dom 包因此不依赖 html5。
+func (e *Element) SetFocusValidity(valid bool) {
+	e.focusCheckKnown, e.focusCheckValid = true, valid
+}
+
+// FocusValidity 返回聚焦时的约束校验结果；known=false 表示当前没有焦点会话
+// 记忆（控件未获得焦点、或已失焦被清除）。
+func (e *Element) FocusValidity() (valid, known bool) {
+	return e.focusCheckValid, e.focusCheckKnown
+}
+
+// ClearFocusValidity 删除焦点会话记忆（失焦时由 SetFocused 调用）。
+func (e *Element) ClearFocusValidity() {
+	e.focusCheckKnown, e.focusCheckValid = false, false
+}
+
+// OnElementFocused 是「元素获得焦点」的回调（html5 在 init 里注册）：html5 用它
+// 记录聚焦瞬间的约束校验结果，供 user validity 的「焦点内改变即时生效」规则
+// 使用（见 html5.NoteFocusGained）。dom 包不能依赖 html5，故用注入方式——与
+// DynamicPseudoStateChanged 同一模式。
+var OnElementFocused func(el *Element)
 
 // IsModalDialog reports whether the element is a <dialog> in the modal state
 // (HTML §4.11.6). The modal state is set by showModal() and cleared by close()/
@@ -373,20 +408,32 @@ func (e *Element) IsFocused() bool { return e.focused }
 // SetFocused sets the focus state. The embedder calls this from focus/blur
 // event handlers.
 func (e *Element) SetFocused(f bool) {
-	if e.focused != f {
-		e.focused = f
-		// 维护 owner document 的 focused 元素缓存（document.hasFocus()/
-		// activeElement O(1) 查询）。
-		if doc := e.OwnerDocument(); doc != nil {
-			if f {
-				doc.SetFocusedElement(e)
-			} else if doc.FocusedElement() == e {
-				doc.SetFocusedElement(nil)
-			}
-		}
-		e.bumpDynamicPseudoVersion() // :focus/:focus-within 跨元素 → 全链失效
-		notifyDynamicPseudoChanged(e)
+	if e.focused == f {
+		return
 	}
+	e.focused = f
+	// 维护 owner document 的 focused 元素缓存（document.hasFocus()/
+	// activeElement O(1) 查询）。
+	if doc := e.OwnerDocument(); doc != nil {
+		if f {
+			doc.SetFocusedElement(e)
+		} else if doc.FocusedElement() == e {
+			doc.SetFocusedElement(nil)
+		}
+	}
+	if f {
+		// 聚焦瞬间记录「本次焦点会话开始时的约束校验结果」（html5 注册的
+		// 回调）：user validity 的「焦点内改成有效/无效立即生效」规则需要
+		// 知道控件刚获得焦点时是有效还是无效（MDN :user-valid 第 3 条）。
+		if OnElementFocused != nil {
+			OnElementFocused(e)
+		}
+	} else {
+		// 焦点会话结束：该记忆只在会话内有效，下次聚焦重新记录。
+		e.ClearFocusValidity()
+	}
+	e.bumpDynamicPseudoVersion() // :focus/:focus-within 跨元素 → 全链失效
+	notifyDynamicPseudoChanged(e)
 }
 
 // FocusByKeyboard reports whether the current focus was established by the
