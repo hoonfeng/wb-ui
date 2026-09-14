@@ -48,13 +48,13 @@ func TestSelector_ModalPseudoClass(t *testing.T) {
 		t.Fatal("模态打开的 dialog 应匹配 :modal")
 	}
 
-	// 关闭（移除 open 属性）：不再匹配，即使模态状态残留（页面直接
-	// removeAttribute("open") 时模态状态可能没被清）。
+	// 移除 open 属性**不**退出模态状态（HTML §4.11.6：模态状态由 close() 或
+	// 元素移除步骤清除，移除属性只让 dialog 不再显示）→ :modal 继续匹配。
 	dlg.RemoveAttribute("open")
-	if c.Match(modal, dlg) {
-		t.Fatal("open 属性移除后不应匹配 :modal")
+	if !c.Match(modal, dlg) {
+		t.Fatal("open 属性移除后仍处于模态状态，应继续匹配 :modal")
 	}
-	dlg.SetAttribute("open", "")
+	// 模态状态被清除（close() 的「set is modal to false」）：不再匹配。
 	dlg.SetModalState(false)
 	if c.Match(modal, dlg) {
 		t.Fatal("模态状态清除后不应匹配 :modal")

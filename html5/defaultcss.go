@@ -287,6 +287,13 @@ dialog[open] {
 	z-index: 1000;
 }
 
+/* 未打开的 <dialog> 不生成可见框（Chromium html.css 的同一规则）。
+ * 注意这与模态状态无关：由 showModal() 打开的 dialog 即使 open 属性被移除
+ * 仍是模态的（:modal 仍匹配、::backdrop 仍在），只是不再显示。 */
+dialog:not([open]) {
+	display: none;
+}
+
 /* ::backdrop：模态 <dialog> 的遮罩层（HTML 渲染规范 / Fullscreen spec §5）。
  * 本引擎没有 top layer，用 position:fixed + 高 z-index 近似：backdrop 由
  * rendering 在 dialog 之前绘制（见 rendertreebuilder 的 backdrop 插入），

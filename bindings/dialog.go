@@ -1,19 +1,24 @@
 // Package bindings — <dialog>（HTMLDialogElement）的 JS 接口。
 //
-// 状态模型：dialog 的打开状态就是 open 属性（反射属性），「模态状态」存在
-// dom.Element 上（dom.Element.SetModalState）——因为 CSS 选择器层要消费它
-// （:modal 伪类），而 css 不能依赖 html5。show() / showModal() / close() 与
-// open 属性设置器共用同一套状态迁移：
+// 状态模型（严格按 HTML §4.11.6 的算法）：dialog 的打开状态就是 open 属性，
+// 而「模态状态」是独立状态（is modal），存放在 dom.Element 上
+// （dom.Element.SetModalState）——因为 CSS 选择器层要消费它（:modal），而
+// css 不能依赖 html5。
 //
-//	打开 → 设置 open 属性（showModal 再置模态状态）→ 样式失效 → 异步 toggle
-//	关闭 → 移除 open 属性 + 清模态状态 → 样式失效 → 异步 toggle + close
+// 关键语义（规范如此，容易写错的地方都注明了）：
+//   - open 是**纯反射属性**：设置/移除属性本身不改变模态状态、不派发事件。
+//     移除 open 属性只让 dialog 隐藏（UA 规则 dialog:not([open]){display:none}），
+//     由 showModal() 打开的对话框仍处于模态（文档仍被阻塞、:modal 仍匹配、
+//     ::backdrop 仍在）——规范因此建议作者用 close() 而不是移除属性。
+//   - show()：已打开且**已是**非模态 → 静默返回；已打开且为模态 → 抛错。
+//     showModal()：已打开且已是模态 → 静默返回；已打开且为非模态 → 抛错。
+//   - 打开/关闭都先同步派发可取消的 beforetoggle，再排队异步 toggle；
+//     关闭时还额外排队 close 事件（同一批任务内 toggle 先、close 后）。
 //
-// 样式失效走 OnClassChanged 桥（webkit 侧清 resolver 缓存 + 重建渲染树），
-// 否则 dialog[open] 的 UA 定位与作者写的 :modal / :open 规则不会生效。
-//
-// 简化：toggle 事件不带 ToggleEvent 的 newState 字段（本引擎没有 ToggleEvent
-// 建模）；已打开时 show()/showModal() 按规范应抛 InvalidStateError，这里用
-// 原生 TypeError 兜底（与 canvas2d 的 IndexSizeError 处理一致，脚本可 catch）。
+// 简化：toggle / beforetoggle 用普通 Event 派发，不带 ToggleEvent 的
+// oldState / newState / source 字段（本引擎没有 ToggleEvent 建模）；
+// 已打开时的状态冲突按规范应抛 InvalidStateError，这里用原生 TypeError 兜底
+// （与 canvas2d 的 IndexSizeError 处理一致，脚本可 catch）。
 package bindings
 
 import (
@@ -25,7 +30,8 @@ import (
 func dialogIsOpen(el *dom.Element) bool { return el.HasAttribute("open") }
 
 // invalidateDialogStyle 让 dialog 的状态变化抵达样式/渲染：失效 computed
-// style 缓存并触发渲染树重建（:modal / :open / dialog[open] 都依赖状态）。
+// style 缓存并触发渲染树重建（:modal / :open / dialog[open] / ::backdrop 都
+// 依赖状态）。
 func invalidateDialogStyle(el *dom.Element) {
 	InvalidateComputedStyle(el)
 	if OnClassChanged != nil {
@@ -33,44 +39,71 @@ func invalidateDialogStyle(el *dom.Element) {
 	}
 }
 
-// queueDialogToggle 异步派发 toggle 事件（HTML §4.11.4：打开/关闭状态变化后
-// 排队派发）。
-func queueDialogToggle(in *jsc.Interpreter, el *dom.Element) {
-	mediaRunLater(in, func() {
-		el.DispatchEvent(dom.NewEvent("toggle", false, false, false))
-	})
+// fireBeforeToggle 同步派发 beforetoggle（cancelable），返回是否未被取消
+// （规范：打开/关闭算法在第一步就让它有机会否决）。
+func fireBeforeToggle(el *dom.Element) bool {
+	ev := dom.NewEvent("beforetoggle", false, true, false)
+	el.DispatchEvent(ev)
+	return !ev.DefaultPrevented()
 }
 
-// dialogShow 实现 dialog.show() / dialog.showModal()：已打开时抛 TypeError
-// （规范为 InvalidStateError），否则设置 open 属性与模态状态。
+// dialogShow 实现 dialog.show()（modal=false）与 dialog.showModal()（modal=true）。
 func dialogShow(in *jsc.Interpreter, el *dom.Element, method string, modal bool) {
-	if dialogIsOpen(el) {
-		panic(in.VM().NewTypeError("Failed to execute '" + method + "' on 'HTMLDialogElement': the dialog is already open."))
+	open := dialogIsOpen(el)
+	if open && el.ModalState() == modal {
+		return // 规范：已经是目标状态 → 静默返回（不抛错、不派发事件）
 	}
+	if open {
+		panic(in.VM().NewTypeError("Failed to execute '" + method +
+			"' on 'HTMLDialogElement': the dialog is already open with a different modality."))
+	}
+	if !fireBeforeToggle(el) {
+		return
+	}
+	if dialogIsOpen(el) {
+		return
+	}
+	queueDialogToggle(in, el)
 	el.SetAttribute("open", "")
 	el.SetModalState(modal)
 	invalidateDialogStyle(el)
-	queueDialogToggle(in, el)
 }
 
-// dialogClose 实现 dialog.close(returnValue?)：未打开时无操作；打开时清 open
-// 属性与模态状态、异步派发 close 与 toggle 事件。
+// dialogClose 实现 dialog.close(returnValue?)：未打开时无操作；否则按规范顺序
+// 派发 beforetoggle（可取消）→ 排队 toggle + close → 移除 open → 清模态状态。
+//
+// 注意「未打开时无操作」是规范第一步：若页面直接 removeAttribute("open") 造成
+// 模态状态残留（见文件头注释），close() 会因缺 open 属性而直接返回、清不掉残留
+// ——规范确实如此（残留只能靠元素移除步骤清理），所以 close() 里不做额外兜底。
 func dialogClose(in *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) {
 	if !dialogIsOpen(el) {
 		return
 	}
+	if !fireBeforeToggle(el) {
+		return
+	}
+	if !dialogIsOpen(el) {
+		return
+	}
+	// toggle 与 close 在同一批任务里按序派发（规范：先 toggle 再 close）。
+	// 分成两个定时器任务时顺序不受保证，实测会被颠倒。
+	mediaRunLater(in, func() {
+		el.DispatchEvent(dom.NewEvent("toggle", false, false, false))
+		el.DispatchEvent(dom.NewEvent("close", false, false, false))
+	})
+	el.RemoveAttribute("open")
+	el.SetModalState(false)
 	if len(args) > 0 {
 		if v := args[0]; !v.IsUndefined() && !v.IsNull() {
 			el.SetAttribute("data-returnvalue", v.ToString())
 		}
 	}
-	el.RemoveAttribute("open")
-	el.SetModalState(false)
 	invalidateDialogStyle(el)
-	// close 与 toggle 在同一批任务里按序派发（规范：先 close，再 toggle）：
-	// 分成两个定时器任务时顺序不受保证。
+}
+
+// queueDialogToggle 异步派发 toggle 事件（HTML §4.11.6：状态变化后排队派发）。
+func queueDialogToggle(in *jsc.Interpreter, el *dom.Element) {
 	mediaRunLater(in, func() {
-		el.DispatchEvent(dom.NewEvent("close", false, false, false))
 		el.DispatchEvent(dom.NewEvent("toggle", false, false, false))
 	})
 }

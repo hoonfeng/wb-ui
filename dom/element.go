@@ -85,13 +85,15 @@ func (e *Element) CanvasSurface() any     { return e.canvasSurface }
 func (e *Element) SetModalState(v bool) { e.modal = v }
 func (e *Element) ModalState() bool     { return e.modal }
 
-// IsModalDialog reports whether the element is a <dialog> that is in the modal
-// state (HTML §4.11.6): opened through showModal() and still open. This is the
-// single predicate behind the :modal pseudo-class (css/selectorchecker.go) and
-// the ::backdrop box generation (layout/rendering), so all three agree.
+// IsModalDialog reports whether the element is a <dialog> in the modal state
+// (HTML §4.11.6). The modal state is set by showModal() and cleared by close()/
+// the removals steps — NOT by removing the open attribute (the spec keeps such a
+// dialog modal, which is why it recommends close() over removing the attribute).
+// This is the single predicate behind the :modal pseudo-class
+// (css/selectorchecker.go) and the ::backdrop box generation (layout/rendering),
+// so all three agree.
 func (e *Element) IsModalDialog() bool {
-	return e != nil && strings.EqualFold(e.tag, "dialog") &&
-		e.HasAttribute("open") && e.modal
+	return e != nil && strings.EqualFold(e.tag, "dialog") && e.modal
 }
 
 // NewElement creates an Element owned by doc with the given (original-case) tag name.

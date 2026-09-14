@@ -1264,6 +1264,11 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 	case "open":
 		// open 属性（HTML 反射）：<details> 与 <dialog> 是仅有的两个以属性
 		// 表达打开状态的元素（<select> 的 open 是内部状态，不属于属性）。
+		// ★ 纯反射：设置/移除属性本身**不**改变 dialog 的模态状态、不派发
+		// 事件（规范如此：由 showModal() 打开的 dialog 即使 open 属性被移除
+		// 仍处于模态，:modal 与 ::backdrop 都保留）。样式仍需失效：[open]
+		// 决定 UA 规则 dialog:not([open]){display:none} 与定位，同时 :open /
+		// :closed 的匹配结果也变了。
 		if tag != "details" && tag != "dialog" {
 			return jsc.JSValue{}, nil, false
 		}
@@ -1277,11 +1282,14 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				if want {
 					el.SetAttribute("open", "")
 				} else {
-					// 关闭：清模态状态（否则 :modal 会残留匹配）。
 					el.RemoveAttribute("open")
-					el.SetModalState(false)
 				}
 				invalidateDialogStyle(el)
+				// <details> 的 open 状态变化要派发 toggle（HTML §4.11.4：
+				// 「当 open 属性被切换时排队 details toggle 事件任务」）。
+				if tag == "details" {
+					queueDialogToggle(rt, el)
+				}
 			}}, true
 	case "show", "showModal":
 		if tag != "dialog" {
