@@ -41,6 +41,7 @@ wb-ui 的渲染/布局/DOM/CSS/事件管线是同一套，但**装配阶段接�
 | `<iframe src>` 子文档装配 | ✅ | ❌ 不装配（`<iframe>` 元素仍参与布局/绘制） |
 | `<base href>` 改写文档内相对引用的基准 | ✅ | ✅（由文档本身决定，与「能否联网」无关） |
 | `location.assign/replace/reload` / `location.href` 赋值导航、`history.back/forward` | ✅ | ❌ 拒绝（`SetOnNavigationBlocked` 可感知） |
+| `location.hash = "#x"` 的**同文档**导航（改 fragment + 锚点滚动 + `hashchange`） | ✅ | ❌ 同样拒绝（相对 `location.href` 换文档而已，且不联网——拒绝保证宿主构建的 UI 树与事件绑定不悬空） |
 | 外部资源内存缓存（同一 URL 只取一次，范围每 WebView） | ✅ | ✅（宿主 resolver 的内容同样缓存） |
 | `<link>` / `<script src>` 的 nosniff MIME 检查 | ✅ | ✅（消费端判定，与浏览器同位置） |
 | `LoadURL()` 导航 | ✅ | ❌ `ErrModeNotSupported` |
@@ -76,6 +77,7 @@ wv.LoadURL("http://localhost:9090/")
 | `<iframe src="child.html">` | 同文档相对规则（`resolveIframeSrc`） |
 | `<base href="/assets/">` 之后的 `href="theme.css"` | `/assets/theme.css`——`<base>` 改写**整篇文档**的基准（`document.baseURI` 可见） |
 | `location.href = "/b.html"` / `location.assign("b.html")` | 换文档到该 URL（相对引用按当前基准解析）并进历史栈：`history.length` +1，`replace` 替换当前条目、`reload` 原地重取 |
+| `location.hash = "#x"` / `location.href = "#x"` | **同文档导航**（HTML §7.4.2 "navigate to a fragment"）：**不重新加载文档**，只做三件事——更新 URL 的 fragment、滚动到锚点（id 优先，其次 `<a name>`；无匹配则回文档顶部）、fragment 变化时派发 `hashchange`（事件带 `oldURL`/`newURL`）。历史条目照常产生（`history.length` +1），`history.back()` 回到上一个 fragment 时 `popstate` 与 `hashchange` 都派发（前者先）；URL 变化会让 `:target` 重新匹配（清样式缓存 + 重建渲染树），因此纯 CSS 的 hash 路由（`#tab1:target{display:block}`）可用 |
 
 解析器是 [dom.ResolveURL](dom/url.go)（`document.baseURI` 语义）：绝对引用与宿主
 自定义 scheme（`app://…`、`data:`、`file:`）原样返回，协议相对（`//cdn/x.css`）
@@ -219,3 +221,4 @@ go run ./dev/browser_http_probe
 | 顺带修复 | `page/frame.go` `SetDocument` 未同步 `styleFP` → 每次 LoadHTML 后首次重建会重复全量重扫样式（`<link>` 重复加载）；`file://` 的 URL 规范形式 `file:///C:/x` 之前读不到（前导斜杠） |
 | 浏览器行为对齐（本批七项） | `<base href>` 基准（`dom.Document.BaseHref` + `page.Frame.SetPendingDocumentURL` + `WebView.LoadHTMLWithBaseURL`）、html/body 背景传播（`rendering.Paint` 入口）、`location`/`history` 导航（`webkit/navigation.go`）、异步资源到位自动置脏（`rendering.AddBackgroundImageLoadedListener`）、外部资源内存缓存与 nosniff MIME（`webkit/resource_cache.go`）、UI 库模式全局真删除（`jsc.JSObject.Delete`）；回归：`webkit/{base_url,navigation,async_repaint,resource_cache}_test.go` + `dev/browser_http_probe` |
 | 资源通道收尾（紧跟其后） | 样式表内 `url()` 的基准（`style/resolver.go`：`collectedDecl.sheetBase` + 收集链传参 + `absolutizeCollectedURLs` 在 token 层绝对化，`@keyframes` 由 `addKeyframesFromSheet` 就地处理）、WebKit 前缀属性别名（`prefixedPropertyAliases` + `unprefixPropertyName`——`-webkit-mask-image` 等此前是无人消费的陌生属性）、多层 `background-image: url(a), url(b)` 取第一层（`rendering/backgroundimage.go` 的 `parseBackgroundURL` 用 `IndexByte` 而非 `LastIndex`）；回归：`style/url_base_test.go`、`rendering/backgroundurl_layers_test.go`、`webkit/browser_http_media_test.go`（+2）、`dev/browser_http_probe`（47 项断言） |
+| fragment 同文档导航 | `location.hash` 此前**只有 getter**（赋值静默丢弃）→ 靠 hash 做锚点跳转/单页路由的页面全失效。现在 `location.hash` / `location.href = "#x"` / `location.assign("#x")` 走「同文档导航」：`bindings/dom.go` 给 hash 补 setter 并按 `sameDocumentURL` 分流、`bindings/navigation.go` 新增 `FragmentNavigation` 出口 + `DispatchHashChange`（hashchange 监听器此前被误派成 `type="popstate"`）、`webkit/navigation.go` 的 `navigateToFragment`/`scrollToAnchor`（页面级滚动同时写 `rendering.RenderView` 与 `page.FrameView`；空 inline 锚点 `<a name>` 无渲染盒时退化为「文档序中其后第一个有盒子的节点」）+ `:target` 重新匹配；`history.back()` 在同 fragment 条目间遍历时 `popstate`、`hashchange` 都派发；回归：`webkit/fragment_nav_test.go`（3 项，含像素级滚动/`:target` 断言与 UI 库模式拒绝） |

@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"wb-ui/goja"
 	"wb-ui/css"
 	"wb-ui/dom"
+	"wb-ui/goja"
 	"wb-ui/jsc"
 	"wb-ui/layout"
 )
@@ -851,7 +851,13 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			return jsc.StringValue("#" + f)
 		}
 		return jsc.StringValue("")
-	}), nil)
+	}), func(in *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) {
+		// `location.hash = "#x"` / `= "x"`：**同文档**导航——不重新加载文档，
+		// 只改 URL 的 fragment + 滚动到锚点 + 派发 hashchange（浏览器语义；
+		// 同文档导航同样产生历史条目）。此前 hash 只有 getter，赋值被静默
+		// 丢弃，靠 hash 做锚点跳转/单页路由的页面全部失效。
+		requestFragmentNavigation(in, document, v.ToString())
+	})
 	loc.SetAccessor("origin", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		u := locURL()
 		switch u.Scheme {
@@ -913,20 +919,36 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	navState.hist = hist
 	navState.refresh = updateHistState
 	dispatchPopstate := func() {
-		if len(navState.popListeners) == 0 {
-			return
-		}
 		stateVal := jsc.Null()
 		if navState.index >= 0 && navState.index < len(navState.entries) && navState.entries[navState.index].state != nil {
 			stateVal = jsc.StringValue(fmt.Sprintf("%v", navState.entries[navState.index].state))
 		}
 		for _, l := range navState.popListeners {
+			if l.eventType != "" && l.eventType != "popstate" {
+				continue // hashchange 监听器：由 dispatchHashChange 派发
+			}
 			ev := jsc.NewObject(rt.ObjectPrototype())
 			ev.Set("type", jsc.StringValue("popstate"))
 			ev.Set("state", stateVal)
 			rt.Call(l.fn, jsc.Undefined(), []jsc.JSValue{jsc.ObjectValue(ev)})
 		}
 	}
+	// dispatchHashChange 派发同文档 fragment 导航的 hashchange（HTML 规范：
+	// 只在 fragment 真的变化时派发，事件带 oldURL/newURL）。宿主在完成 URL
+	// 更新与锚点滚动后调用（见 bindings.DispatchHashChange）。
+	dispatchHashChange := func(oldURL, newURL string) {
+		for _, l := range navState.popListeners {
+			if l.eventType != "hashchange" {
+				continue
+			}
+			ev := jsc.NewObject(rt.ObjectPrototype())
+			ev.Set("type", jsc.StringValue("hashchange"))
+			ev.Set("oldURL", jsc.StringValue(oldURL))
+			ev.Set("newURL", jsc.StringValue(newURL))
+			rt.Call(l.fn, jsc.Undefined(), []jsc.JSValue{jsc.ObjectValue(ev)})
+		}
+	}
+	navState.dispatchHash = dispatchHashChange
 
 	hist.Set("pushState", jsc.FunctionValue(jsc.NewNativeFunction("pushState",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
@@ -995,9 +1017,25 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}
 		e := navState.entries[target]
 		if e.hostNavigated && e.url != "" && e.url != document.URL() {
-			if NavigationRequest != nil {
-				NavigationRequest(rt, e.url, NavTraverse)
+			if !sameDocumentURL(e.url, document.URL()) {
+				// 跨文档遍历：请求宿主换文档；条目指针由宿主装配完成后的
+				// NoteDocumentNavigation(NavTraverse) 移动。
+				if NavigationRequest != nil {
+					NavigationRequest(rt, e.url, NavTraverse)
+				}
+				return
 			}
+			// 同文档遍历（条目与当前文档只差 fragment）：不换文档。按浏览器
+			// 顺序——先移动指针并派发 popstate，再让宿主更新 URL、滚动到锚点、
+			// 派发 hashchange（宿主用「当前 URL vs 目标 URL」判断 fragment 是否
+			// 真的变化，所以这两步必须在 updateLocation 之前）。
+			navState.index = target
+			updateHistState()
+			dispatchPopstate()
+			if FragmentNavigation != nil {
+				FragmentNavigation(rt, fragmentOf(e.url), NavTraverse)
+			}
+			updateLocation(e.url)
 			return
 		}
 		navState.index = target
@@ -1028,9 +1066,6 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}, 0)))
 	updateHistState()
 	g.Set("history", jsc.ObjectValue(hist))
-
-	// window.navigator 桩
-
 
 	// window.navigator 桩
 	nav := jsc.NewObject(rt.ObjectPrototype())
@@ -1963,10 +1998,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			// 仍由 navState 在 URL 变化时触发）
 			windowEventListeners[eventType] = append(windowEventListeners[eventType], args[1])
 			if eventType == "popstate" || eventType == "hashchange" {
-				navState.popListeners = append(navState.popListeners, struct {
-					fn      jsc.JSValue
-					capture bool
-				}{fn: args[1], capture: len(args) >= 3 && args[2].ToBoolean()})
+				navState.popListeners = append(navState.popListeners, navPopListener{
+					fn:        args[1],
+					capture:   len(args) >= 3 && args[2].ToBoolean(),
+					eventType: eventType,
+				})
 			}
 			return jsc.Undefined()
 		}, 2)))

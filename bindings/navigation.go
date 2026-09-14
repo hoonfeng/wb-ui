@@ -15,6 +15,8 @@ package bindings
 // （NoteDocumentNavigation）。
 
 import (
+	"net/url"
+	"strings"
 	"sync"
 
 	"wb-ui/dom"
@@ -48,6 +50,41 @@ var NavigationRequest func(in *jsc.Interpreter, url string, kind NavKind) bool
 // 的文档（LoadHTML 直出内容）宿主可用自己的内容源实现它。
 var ReloadRequest func(in *jsc.Interpreter) bool
 
+// FragmentNavigation 由宿主注册：**同文档**的 fragment 导航——`location.hash = …`、
+// `location.href = "#x"`、`location.assign("#x")`，以及历史遍历到一个只有
+// fragment 不同的条目。浏览器里这类导航**不重新加载文档**（HTML §7.4.2
+// "navigate to a fragment"），只做三件事：更新 URL 的 fragment、滚动到锚点、
+// 在 fragment 真的变化时派发 hashchange；历史条目仍按 kind 追加/替换
+// （同文档导航在浏览器里同样产生新条目）。
+//
+// 返回 true 表示宿主接受了这次同文档导航。
+var FragmentNavigation func(in *jsc.Interpreter, frag string, kind NavKind) bool
+
+// fragmentOf 返回 URL 的 fragment（不含 "#"）。
+func fragmentOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return ""
+	}
+	return u.Fragment
+}
+
+// sameDocumentURL 报告两个 URL 是否指向**同一个文档**（去掉 fragment 后相等）：
+// 这是「同文档导航」与「换文档导航」的判据。
+func sameDocumentURL(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua == nil {
+		return a == b
+	}
+	ub, err := url.Parse(b)
+	if err != nil || ub == nil {
+		return a == b
+	}
+	ua.Fragment, ub.Fragment = "", ""
+	ua.RawFragment, ub.RawFragment = "", ""
+	return ua.String() == ub.String()
+}
+
 // navEntry 是历史栈的一个条目。
 type navEntry struct {
 	state map[string]interface{}
@@ -66,6 +103,11 @@ type navEntry struct {
 type navPopListener struct {
 	fn      jsc.JSValue
 	capture bool
+	// eventType 区分 popstate 与 hashchange：两者共用一份监听器表（都只在
+	// 导航时派发），但派发时必须给事件正确的 type——此前一律派成 "popstate"，
+	// 于是 window.addEventListener("hashchange", f) 注册的 f 收到的是
+	// type="popstate" 的事件（`if (e.type === "hashchange")` 分支永远不成立）。
+	eventType string
 }
 
 // navState 是每个解释器（= 每个 window）的历史栈。
@@ -77,6 +119,9 @@ type navState struct {
 	// history.length / history.state（它们是 JS 对象上的属性，需要回写）。
 	hist    *jsc.JSObject
 	refresh func()
+	// dispatchHash 由 RegisterDOMBindings 装配：宿主完成同文档 fragment 导航后
+	// 派发 hashchange（包含 oldURL/newURL）。
+	dispatchHash func(oldURL, newURL string)
 }
 
 var (
@@ -160,6 +205,18 @@ func ResetNavigationStates(rt *jsc.Interpreter) {
 	navStatesMu.Unlock()
 }
 
+// DispatchHashChange 由宿主在**同文档 fragment 导航**真正改变了 fragment 之后
+// 调用：向 window 上注册的 hashchange 监听器派发事件（事件对象带 oldURL/newURL，
+// 与浏览器一致）。同文档历史遍历（history.back 回到不同的 fragment）浏览器同样
+// 派发 hashchange——宿主在 FragmentNavigation 里统一处理即可。
+func DispatchHashChange(rt *jsc.Interpreter, oldURL, newURL string) {
+	st := navStateIfAny(rt)
+	if st == nil || st.dispatchHash == nil {
+		return
+	}
+	st.dispatchHash(oldURL, newURL)
+}
+
 // requestNavigation 处理脚本发起的文档导航（location.assign/replace、
 // location.href 赋值）：按文档基准解析成绝对 URL，交给宿主。
 func requestNavigation(in *jsc.Interpreter, doc *dom.Document, raw string, kind NavKind) {
@@ -170,16 +227,31 @@ func requestNavigation(in *jsc.Interpreter, doc *dom.Document, raw string, kind 
 	if abs == "" {
 		return
 	}
-	if abs == doc.URL() {
-		// 与当前文档相同（含只有 fragment 变化的赋值）：浏览器不重新加载文档
-		// （只做锚点滚动）。引擎没有锚点滚动实现，这里保持 no-op，比「假装
-		// 导航」（URL 变了、内容没变）更接近预期。
+	if sameDocumentURL(abs, doc.URL()) {
+		// 只有 fragment 不同 → 同文档导航：不重新加载文档，交给宿主更新 URL、
+		// 滚动到锚点、派发 hashchange（见 FragmentNavigation）。fragment 与
+		// 当前完全相同时（`location.href = location.href`）宿主只重滚动、
+		// 不追加条目也不派发 hashchange——与浏览器一致。
+		if FragmentNavigation != nil {
+			FragmentNavigation(in, fragmentOf(abs), kind)
+		}
 		return
 	}
 	if NavigationRequest == nil {
 		return
 	}
 	NavigationRequest(in, abs, kind)
+}
+
+// requestFragmentNavigation 处理 `location.hash = …`（同文档导航）。
+// raw 是赋给 hash 的串：可能带前导 "#"（`location.hash = "#x"`），也可能是
+// 裸片段名（`location.hash = "x"` → 浏览器得到 "#x"）；空串清除 fragment。
+func requestFragmentNavigation(in *jsc.Interpreter, doc *dom.Document, raw string) {
+	if doc == nil || FragmentNavigation == nil {
+		return
+	}
+	frag := strings.TrimPrefix(raw, "#")
+	FragmentNavigation(in, frag, NavPush)
 }
 
 // requestReload 处理 location.reload()：交给宿主重新装配当前文档。
