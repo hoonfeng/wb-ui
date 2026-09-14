@@ -57,6 +57,25 @@ func mediaHTTPFixture(t *testing.T) (*httptest.Server, *httpRequestLog) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Write(redPNG4x4(t))
 	})
+	// 两个不同目录下的**同名**相对引用 logo.png（内容不同：红 / 蓝）：
+	// 用来锁定「图片 URL 必须先按文档基准规范化再进缓存」，否则第二个文档
+	// 会命中第一个文档留下的缓存（跨文档串味）。
+	imgPage := func() string {
+		return `<!DOCTYPE html><html><head><style>#pic{width:24px;height:24px}` +
+			`</style></head><body><img id="pic" src="logo.png"></body></html>`
+	}
+	serve("/x/page.html", "text/html; charset=utf-8", imgPage())
+	serve("/y/page.html", "text/html; charset=utf-8", imgPage())
+	mux.HandleFunc("/x/logo.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{R: 255, A: 255}))
+	})
+	mux.HandleFunc("/y/logo.png", func(w http.ResponseWriter, r *http.Request) {
+		log.add(r.URL.Path)
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(solidPNG4x4(t, color.RGBA{B: 255, A: 255}))
+	})
 	// background-image 通道：与 <img> 共用 loadBackgroundImage，但**不**附着
 	// 解码图到 RenderBox（断言看渲染像素）。
 	serve("/bg.html", "text/html; charset=utf-8",
@@ -76,6 +95,10 @@ func mediaHTTPFixture(t *testing.T) (*httptest.Server, *httpRequestLog) {
 	serve("/imp/css/main.css", "text/css", `@import "theme.css";#nested{width:666px}`)
 	serve("/imp/css/theme.css", "text/css", `@import "../shared/base.css";#box{width:444px}`)
 	serve("/imp/shared/base.css", "text/css", `#nested{width:555px}`)
+	// 故意在**文档**同级也放一份 theme.css：若相对 @import 被按文档 URL
+	// 解析，就会拿到这份（999px）——断言因此能明确指认「基准错了」，
+	// 而不是只看到 404 造成的「没生效」。
+	serve("/imp/page/theme.css", "text/css", `#box{width:999px}`)
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -85,10 +108,16 @@ func mediaHTTPFixture(t *testing.T) (*httptest.Server, *httpRequestLog) {
 // redPNG4x4 生成 4x4 纯红 PNG：像素断言用（不依赖硬编码 base64）。
 func redPNG4x4(t *testing.T) []byte {
 	t.Helper()
+	return solidPNG4x4(t, color.RGBA{R: 255, A: 255})
+}
+
+// solidPNG4x4 生成 4x4 纯色 PNG（像素断言用，不依赖硬编码 base64）。
+func solidPNG4x4(t *testing.T, c color.RGBA) []byte {
+	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {
 		for x := 0; x < 4; x++ {
-			img.Set(x, y, color.RGBA{R: 255, A: 255})
+			img.Set(x, y, c)
 		}
 	}
 	var buf bytes.Buffer
@@ -210,7 +239,8 @@ func TestBrowserModeCSSImportLoadsAndBaseIsStyleSheetURL(t *testing.T) {
 		}
 	}
 	if log.has("/imp/page/theme.css") {
-		t.Errorf("相对 @import 被按**文档** URL 解析：%v", log.paths())
+		t.Errorf("相对 @import 被按**文档** URL 解析（拿到了 /imp/page/theme.css 而非样式表同级的 /imp/css/theme.css）：%v",
+			log.paths())
 	}
 }
 
@@ -281,4 +311,60 @@ func TestBrowserModeHTTPBackgroundImage(t *testing.T) {
 	if !log.has("/logo.png") {
 		t.Errorf("服务器未收到 /logo.png（实际收到：%v）", log.paths())
 	}
+}
+
+// TestBrowserModeHTTPImageNoCrossDocumentCacheBleed：两个不同目录下的**同名**
+// 相对引用（/x/logo.png 红、/y/logo.png 蓝）必须各自加载自己的那份。
+//
+// 图片缓存（rendering.backgroundImageCache）是进程级全局的、按键索引：若
+// 页面写下的相对引用**不先按文档 URL 规范化**就进缓存，两个文档会共用
+// "logo.png" 这一个键——第二个文档显示第一个文档的图（跨文档串味）。
+// 这条是 imageLoader.ResolveURL 存在的实际理由，也是它的回归测试。
+func TestBrowserModeHTTPImageNoCrossDocumentCacheBleed(t *testing.T) {
+	srv, log := mediaHTTPFixture(t)
+	wv := modeWebView(t, ModeBrowser)
+
+	// 文档一：/x/page.html → /x/logo.png（红）
+	if err := wv.LoadURL(srv.URL + "/x/page.html"); err != nil {
+		t.Fatalf("LoadURL(/x/page.html): %v", err)
+	}
+	if waitBoxImage(t, wv, "pic", 80) == nil {
+		t.Fatalf("/x/logo.png 未加载（服务器收到：%v）", log.paths())
+	}
+	if r, g, b, a := renderBoxCenterPixel(t, wv, "pic"); !(r > 200 && g < 80 && b < 80 && a > 200) {
+		t.Errorf("/x/logo.png 像素 = rgba(%d,%d,%d,%d), want 红", r, g, b, a)
+	}
+
+	// 文档二：/y/page.html 里同样写 src="logo.png" → 必须是 /y/logo.png（蓝）
+	if err := wv.LoadURL(srv.URL + "/y/page.html"); err != nil {
+		t.Fatalf("LoadURL(/y/page.html): %v", err)
+	}
+	if waitBoxImage(t, wv, "pic", 80) == nil {
+		t.Fatalf("/y/logo.png 未加载（服务器收到：%v）", log.paths())
+	}
+	if r, g, b, a := renderBoxCenterPixel(t, wv, "pic"); !(b > 200 && r < 80 && g < 80 && a > 200) {
+		t.Errorf("/y/logo.png 像素 = rgba(%d,%d,%d,%d), want 蓝（疑似命中 /x 的缓存）", r, g, b, a)
+	}
+	if !log.has("/y/logo.png") {
+		t.Errorf("服务器未收到 /y/logo.png（实际收到：%v）", log.paths())
+	}
+}
+
+// renderBoxCenterPixel 渲染一帧并取 #id 盒中心像素（RGBA8888）。
+func renderBoxCenterPixel(t *testing.T, wv *WebView, id string) (r, g, b, a uint8) {
+	t.Helper()
+	doc := wv.Document()
+	if doc == nil {
+		t.Fatal("文档缺失")
+	}
+	box := findBox(wv, doc.GetElementById(id))
+	if box == nil {
+		t.Fatalf("#%s 渲染盒缺失", id)
+	}
+	pix, err := wv.Render()
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	cx, cy := box.Center()
+	return pixelAt(pix, wv.Width(), int(cx), int(cy))
 }
