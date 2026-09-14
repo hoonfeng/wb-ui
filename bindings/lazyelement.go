@@ -228,6 +228,9 @@ var (
 		"getBoundingClientRect", "getClientRects", "scrollIntoView",
 		"remove", "focus", "blur",
 		"value", "checked", "type", "disabled",
+		// indeterminate 是 input 的 IDL 状态（:indeterminate 读它），必须
+		// 登记，否则 `"indeterminate" in input` 为 false（Has 只看这张表）。
+		"indeterminate",
 		"selectionStart", "selectionEnd", "setSelectionRange",
 		"multiple", "selectedIndex", "options", "selectedOptions", "selected",
 		"tagName", "nodeName", "nodeType", "getRootNode", "attachShadow", "shadowRoot",
@@ -829,6 +832,25 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			set: func(v jsc.JSValue) {
 				el.SetAttribute("type", v.ToString())
 			}}, true
+	case "indeterminate":
+		// HTMLInputElement.indeterminate：**IDL 状态**而不是内容属性（HTML
+		// §4.16.3）——不写 DOM 属性，只存 dom.Element 上的标志（CSS
+		// :indeterminate 的 checkbox 分支读它）。规范中它对所有 input 类型都
+		// 存在（非 checkbox 无视觉效果），这里同样只要求 tag == "input"。
+		if tag != "input" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue { return jsc.BooleanValue(el.IsIndeterminate()) },
+			set: func(v jsc.JSValue) {
+				want := v.ToBoolean()
+				if want == el.IsIndeterminate() {
+					return
+				}
+				el.SetIndeterminate(want)
+				// 匹配结果变了（:indeterminate）→ 走样式失效链。
+				invalidateStateStyle(el)
+			}}, true
 	case "disabled":
 		if tag != "input" && tag != "select" && tag != "textarea" && tag != "button" {
 			return jsc.JSValue{}, nil, false
@@ -1284,7 +1306,7 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				} else {
 					el.RemoveAttribute("open")
 				}
-				invalidateDialogStyle(el)
+				invalidateStateStyle(el)
 				// <details> 的 open 状态变化要派发 toggle（HTML §4.11.4：
 				// 「当 open 属性被切换时排队 details toggle 事件任务」）。
 				if tag == "details" {

@@ -120,11 +120,20 @@ func TestSelector_LookupPseudoClass(t *testing.T) {
 		"nth-child":     PseudoClassNthChild,
 		"not":           PseudoClassNot,
 		"placeholder-shown": PseudoClassPlaceholderShown,
+		// HTML/Fullscreen 状态类（本轮新增，`:modal` 由 dom 的模态状态消费）
+		"fullscreen":    PseudoClassFullscreen,
+		"open":          PseudoClassOpen,
+		"closed":        PseudoClassClosed,
+		"modal":         PseudoClassModal,
 	}
 	for name, want := range cases {
 		if got := LookupPseudoClass(name); got != want {
 			t.Errorf("%q: got %v want %v", name, got, want)
 		}
+	}
+	// 名称大小写不敏感（解析路径先 ToLower，查询路径同样要容错）。
+	if got := LookupPseudoClass("MODAL"); got != PseudoClassModal {
+		t.Errorf("LookupPseudoClass(\"MODAL\") = %v want PseudoClassModal", got)
 	}
 	if got := LookupPseudoClass("nonexistent"); got != PseudoClassUnknown {
 		t.Fatalf("unknown pseudo-class got %v want PseudoClassUnknown", got)
@@ -138,11 +147,128 @@ func TestSelector_LookupPseudoElement(t *testing.T) {
 		"first-line":   PseudoElementFirstLine,
 		"first-letter": PseudoElementFirstLetter,
 		"selection":    PseudoElementSelection,
+		// 模态 dialog 的遮罩层（rendering 依赖它生成伪元素盒）
+		"backdrop":     PseudoElementBackdrop,
+		"marker":       PseudoElementMarker,
+		"placeholder":  PseudoElementPlaceholder,
+		"cue":          PseudoElementCue,
+		"slotted":      PseudoElementSlotted,
+		"part":         PseudoElementPart,
+		"highlight":    PseudoElementHighlight,
+		"-webkit-scrollbar":       PseudoElementWebkitScrollbar,
+		"-webkit-scrollbar-thumb": PseudoElementWebkitScrollbarThumb,
+		"-webkit-scrollbar-track": PseudoElementWebkitScrollbarTrack,
 	}
 	for name, want := range cases {
 		if got := LookupPseudoElement(name); got != want {
 			t.Errorf("%q: got %v want %v", name, got, want)
 		}
+	}
+	if got := LookupPseudoElement("nonexistent-pseudo"); got != PseudoElementUnknown {
+		t.Fatalf("unknown pseudo-element got %v want PseudoElementUnknown", got)
+	}
+}
+
+// TestSelector_PseudoNameRoundTrip 锁死三张表的一致性：枚举 ↔ PseudoClassName /
+// PseudoElementName ↔ LookupPseudoClass / LookupPseudoElement。
+//
+// 这个测试来自一次真实缺口：PseudoElementWebkitScrollbar{,-Thumb,-Track} 在
+// LookupPseudoElement 里有条目、但 PseudoElementName 漏了三项，于是
+// `::-webkit-scrollbar { ... }` 经 SimpleSelector.String() 序列化后变成裸 "::"
+// （调试输出、规则键、去重判断都会读到错的名字）。任何一侧新增枚举而漏另一侧，
+// 这里都会立刻失败。
+func TestSelector_PseudoNameRoundTrip(t *testing.T) {
+	pseudoClasses := []PseudoClass{
+		PseudoClassHover, PseudoClassFocus, PseudoClassFocusVisible, PseudoClassFocusWithin,
+		PseudoClassActive, PseudoClassVisited, PseudoClassLink, PseudoClassAnyLink,
+		PseudoClassTarget, PseudoClassEmpty, PseudoClassRoot, PseudoClassScope,
+		PseudoClassFirstChild, PseudoClassLastChild, PseudoClassOnlyChild,
+		PseudoClassFirstOfType, PseudoClassLastOfType, PseudoClassOnlyOfType,
+		PseudoClassChecked, PseudoClassDisabled, PseudoClassEnabled, PseudoClassPlaceholderShown,
+		PseudoClassReadOnly, PseudoClassReadWrite, PseudoClassRequired, PseudoClassOptional,
+		PseudoClassValid, PseudoClassInvalid, PseudoClassInRange, PseudoClassOutOfRange,
+		PseudoClassDefault, PseudoClassIndeterminate,
+		PseudoClassNthChild, PseudoClassNthLastChild, PseudoClassNthOfType, PseudoClassNthLastOfType,
+		PseudoClassNot, PseudoClassIs, PseudoClassWhere, PseudoClassHas,
+		PseudoClassLang, PseudoClassDir, PseudoClassDefined,
+		PseudoClassHost, PseudoClassHostContext,
+		PseudoClassFullscreen, PseudoClassOpen, PseudoClassClosed, PseudoClassModal,
+	}
+	for _, p := range pseudoClasses {
+		name := PseudoClassName(p)
+		if name == "" {
+			t.Errorf("PseudoClassName(%d) 为空：枚举新增后忘了补名称表", p)
+			continue
+		}
+		if got := LookupPseudoClass(name); got != p {
+			t.Errorf("往返不一致：%d → %q → %d", p, name, got)
+		}
+		// 序列化（含参数形式）不得丢掉名字。
+		sel := SimpleSelector{Match: MatchPseudoClass, PseudoClass: p}
+		want := ":" + name
+		if p == PseudoClassNthChild {
+			// :nth-child 必定输出参数括号；空参数（零值 AnB）序列化为 (0)
+			// （永不匹配，与浏览器把无效 :nth-child() 当无效选择器的效果一致）。
+			want += "(0)"
+		}
+		if got := sel.String(); got != want {
+			t.Errorf("序列化 %d = %q want %q", p, got, want)
+		}
+	}
+	if got := PseudoClassName(PseudoClassUnknown); got != "" {
+		t.Errorf("PseudoClassName(Unknown) = %q want 空串", got)
+	}
+
+	pseudoElements := []PseudoElement{
+		PseudoElementBefore, PseudoElementAfter, PseudoElementFirstLine, PseudoElementFirstLetter,
+		PseudoElementMarker, PseudoElementPlaceholder, PseudoElementSelection, PseudoElementBackdrop,
+		PseudoElementCue, PseudoElementSlotted, PseudoElementPart, PseudoElementHighlight,
+		PseudoElementViewTransition, PseudoElementViewTransitionGroup,
+		PseudoElementViewTransitionImagePair, PseudoElementViewTransitionOld,
+		PseudoElementViewTransitionNew,
+		PseudoElementWebkitScrollbar, PseudoElementWebkitScrollbarThumb, PseudoElementWebkitScrollbarTrack,
+	}
+	for _, p := range pseudoElements {
+		name := PseudoElementName(p)
+		if name == "" {
+			t.Errorf("PseudoElementName(%d) 为空：枚举新增后忘了补名称表", p)
+			continue
+		}
+		if got := LookupPseudoElement(name); got != p {
+			t.Errorf("往返不一致：%d → %q → %d", p, name, got)
+		}
+		sel := SimpleSelector{Match: MatchPseudoElement, PseudoElem: p}
+		if got, want := sel.String(), "::"+name; got != want {
+			t.Errorf("序列化 %d = %q want %q", p, got, want)
+		}
+	}
+	if got := PseudoElementName(PseudoElementUnknown); got != "" {
+		t.Errorf("PseudoElementName(Unknown) = %q want 空串", got)
+	}
+}
+
+// TestSelector_ParseModalAndBackdrop 解析路径：`:modal` 与 `::backdrop` 必须按
+// 冒号数量分流（单冒号 → 伪类，双冒号 → 伪元素），不能互相串。
+func TestSelector_ParseModalAndBackdrop(t *testing.T) {
+	m, pc, pe := ParsePseudoElementOrClass(1, "modal")
+	if m != MatchPseudoClass || pc != PseudoClassModal || pe != PseudoElementUnknown {
+		t.Fatalf(":modal → m=%v pc=%v pe=%v", m, pc, pe)
+	}
+	m, pc, pe = ParsePseudoElementOrClass(2, "backdrop")
+	if m != MatchPseudoElement || pc != PseudoClassUnknown || pe != PseudoElementBackdrop {
+		t.Fatalf("::backdrop → m=%v pc=%v pe=%v", m, pc, pe)
+	}
+	// 单冒号写 ::backdrop 的旧式写法（或误写）→ 伪元素表里没有同名伪类，
+	// 落到 PseudoClassUnknown（浏览器同样不承认 :-backdrop）。
+	m, pc, pe = ParsePseudoElementOrClass(1, "backdrop")
+	if m != MatchPseudoClass || pc != PseudoClassUnknown || pe != PseudoElementUnknown {
+		t.Fatalf(":backdrop（单冒号）→ m=%v pc=%v pe=%v", m, pc, pe)
+	}
+	// view-transition 系列已解析但永不匹配（无 view-transition 机制），
+	// 解析层仍要给出正确名字（供 UA 表/调试使用）。
+	sel := SimpleSelector{Match: MatchPseudoElement, PseudoElem: PseudoElementViewTransitionGroup}
+	if got := sel.String(); got != "::view-transition-group" {
+		t.Fatalf("::view-transition-group 序列化 = %q", got)
 	}
 }
 

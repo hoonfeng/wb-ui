@@ -41,6 +41,12 @@ type Element struct {
 	// 画在最上层。由宿主（html5/bindings）设置，dom 包本身不改变它。
 	modal bool
 
+	// indeterminate 是 <input type="checkbox"> 的「不确定状态」：由
+	// HTMLInputElement.indeterminate IDL 属性设置（**不是** HTML 内容属性，
+	// 因此不参与属性反射、不进属性序列化）。:indeterminate 伪类的 checkbox
+	// 分支读它。由宿主（bindings）设置，dom 包本身不改变它。
+	indeterminate bool
+
 	// attrVersion 随属性变更递增，样式解析器据此失效 per-element 缓存：
 	// class/type/checked 等影响 CSS 选择器匹配的属性变化后必须重算样式
 	// （浏览器 attribute 变化触发 style recalc）。此前 RebuildRenderTree 的
@@ -84,6 +90,14 @@ func (e *Element) CanvasSurface() any     { return e.canvasSurface }
 // selector engine reads it for the :modal pseudo-class.
 func (e *Element) SetModalState(v bool) { e.modal = v }
 func (e *Element) ModalState() bool     { return e.modal }
+
+// SetIndeterminate / IsIndeterminate store the <input type="checkbox"> IDL
+// "indeterminate" state (HTML §4.16.3). It is an in-memory state only — there is
+// no HTML content attribute for it — set by the bindings layer
+// (input.indeterminate = true) and read by the CSS selector engine for the
+// :indeterminate pseudo-class.
+func (e *Element) SetIndeterminate(v bool) { e.indeterminate = v }
+func (e *Element) IsIndeterminate() bool   { return e.indeterminate }
 
 // IsModalDialog reports whether the element is a <dialog> in the modal state
 // (HTML §4.11.6). The modal state is set by showModal() and cleared by close()/

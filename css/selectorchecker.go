@@ -414,9 +414,41 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 		return el.HasAttribute("required")
 	case PseudoClassOptional:
 		return !el.HasAttribute("required")
-	case PseudoClassValid, PseudoClassInvalid, PseudoClassInRange, PseudoClassOutOfRange,
-		PseudoClassDefault, PseudoClassIndeterminate:
+	case PseudoClassValid, PseudoClassInvalid, PseudoClassInRange, PseudoClassOutOfRange:
 		// Constraint-validation pseudo-classes are not modeled.
+		return false
+	case PseudoClassDefault:
+		// HTML §4.16.2：默认按钮、已勾选的 checkbox/radio、已选中的 option。
+		switch strings.ToLower(el.LocalName()) {
+		case "input":
+			switch formControlType(el) {
+			case "checkbox", "radio":
+				return el.HasAttribute("checked")
+			}
+		case "option":
+			// 简化：只看 selected 属性，不校验 select 的 multiple/size
+			// （规范要求 option 的 selectedness 为 true，属性即其初始值）。
+			return el.HasAttribute("selected")
+		}
+		if kind := defaultButtonKind(el); kind != "" {
+			return firstSubmitterOfKind(el, kind) == el
+		}
+		return false
+	case PseudoClassIndeterminate:
+		// HTML §4.16.3：checkbox 的 indeterminate IDL 状态；同组 radio 全部未
+		// 勾选；<progress> 没有 value（无进度可报告）。
+		switch strings.ToLower(el.LocalName()) {
+		case "input":
+			switch formControlType(el) {
+			case "checkbox":
+				return el.IsIndeterminate()
+			case "radio":
+				return !radioGroupHasChecked(el)
+			}
+			return false
+		case "progress":
+			return !el.HasAttribute("value")
+		}
 		return false
 	case PseudoClassDefined:
 		// In this port all elements are "defined".
@@ -796,4 +828,118 @@ func isFormControl(el *dom.Element) bool {
 		return true
 	}
 	return false
+}
+
+// formControlType returns an <input>/<button>/<select>/<textarea> type with the
+// browser's default applied (HTML §4.10): <input> defaults to "text", <button>
+// defaults to "submit" (its missing-type value), everything else to the raw
+// attribute lowercased. CSS only needs this for the :default / :indeterminate
+// form-state pseudo-classes.
+func formControlType(el *dom.Element) string {
+	t := strings.ToLower(el.GetAttribute("type"))
+	if t != "" {
+		return t
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "button":
+		return "submit" // button 的缺省 type 是 submit（区别于 input 的 text）
+	}
+	return "text"
+}
+
+// defaultButtonKind classifies a form control as a submit-type or reset-type
+// default-button candidate ("" when it is neither). <input type=image> counts as
+// a submit button, <button type=button|menu> as neither.
+func defaultButtonKind(el *dom.Element) string {
+	switch strings.ToLower(el.LocalName()) {
+	case "input", "button":
+	default:
+		return ""
+	}
+	switch formControlType(el) {
+	case "submit", "image":
+		return "submit"
+	case "reset":
+		return "reset"
+	}
+	return ""
+}
+
+// firstSubmitterOfKind returns the first control of the given default-button kind
+// in tree order inside el's form owner (HTML §4.16.2: ":default matches the first
+// submit button in tree order whose form owner is that form element"), or nil.
+//
+// Simplification: the form owner is the nearest <form> ancestor — the form=""
+// attribute association across the tree (and the "no owner" case) is not modeled,
+// which matches how the rest of this port treats form ownership.
+func firstSubmitterOfKind(el *dom.Element, kind string) *dom.Element {
+	form := ancestorForm(el)
+	if form == nil {
+		return nil
+	}
+	var first *dom.Element
+	var walk func(n dom.Node)
+	walk = func(n dom.Node) {
+		if first != nil {
+			return
+		}
+		if e, ok := n.(*dom.Element); ok && defaultButtonKind(e) == kind {
+			first = e
+			return
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+			if first != nil {
+				return
+			}
+		}
+	}
+	walk(form)
+	return first
+}
+
+// ancestorForm returns the nearest <form> ancestor of el (nil when absent).
+func ancestorForm(el *dom.Element) *dom.Element {
+	for n := el.ParentNode(); n != nil; {
+		e, ok := n.(*dom.Element)
+		if !ok {
+			return nil
+		}
+		if strings.EqualFold(e.LocalName(), "form") {
+			return e
+		}
+		n = e.ParentNode()
+	}
+	return nil
+}
+
+// radioGroupHasChecked reports whether el's radio button group contains a checked
+// button. A group is every <input type=radio> in the same document with the same
+// name (HTML §4.10.5.1.16); an empty name means the button is its own group.
+//
+// Simplification: the same-tree/same-form-owner part of the group rule is reduced
+// to "same document", and the group scan walks all <input> elements — :indeterminate
+// on radios is rare enough that the O(n) scan is preferable to keeping a
+// per-document radio-group index in sync with attribute mutations.
+func radioGroupHasChecked(el *dom.Element) bool {
+	name := el.GetAttribute("name")
+	if name == "" {
+		return el.HasAttribute("checked")
+	}
+	doc := el.OwnerDocument()
+	if doc == nil {
+		return el.HasAttribute("checked")
+	}
+	for _, in := range doc.GetElementsByTagName("input") {
+		if in == el {
+			continue
+		}
+		if formControlType(in) != "radio" || in.GetAttribute("name") != name {
+			continue
+		}
+		if in.HasAttribute("checked") {
+			return true
+		}
+	}
+	return el.HasAttribute("checked")
 }

@@ -29,10 +29,12 @@ import (
 // dialogIsOpen 报告 dialog 是否已打开（open 属性存在）。
 func dialogIsOpen(el *dom.Element) bool { return el.HasAttribute("open") }
 
-// invalidateDialogStyle 让 dialog 的状态变化抵达样式/渲染：失效 computed
-// style 缓存并触发渲染树重建（:modal / :open / dialog[open] / ::backdrop 都
-// 依赖状态）。
-func invalidateDialogStyle(el *dom.Element) {
+// invalidateStateStyle 让元素的状态变化抵达样式/渲染：失效 computed style
+// 缓存并触发渲染树重建。所有「属性没变但选择器匹配结果变了」的状态迁移都走
+// 这里（<dialog> 的模态/打开状态、<details> 的 open、input 的 indeterminate），
+// 否则 :modal / :open / :indeterminate / dialog[open] / ::backdrop 会停留在
+// 上一次的样式。
+func invalidateStateStyle(el *dom.Element) {
 	InvalidateComputedStyle(el)
 	if OnClassChanged != nil {
 		OnClassChanged(el)
@@ -66,7 +68,7 @@ func dialogShow(in *jsc.Interpreter, el *dom.Element, method string, modal bool)
 	queueDialogToggle(in, el)
 	el.SetAttribute("open", "")
 	el.SetModalState(modal)
-	invalidateDialogStyle(el)
+	invalidateStateStyle(el)
 }
 
 // dialogClose 实现 dialog.close(returnValue?)：未打开时无操作；否则按规范顺序
@@ -98,7 +100,7 @@ func dialogClose(in *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) {
 			el.SetAttribute("data-returnvalue", v.ToString())
 		}
 	}
-	invalidateDialogStyle(el)
+	invalidateStateStyle(el)
 }
 
 // queueDialogToggle 异步派发 toggle 事件（HTML §4.11.6：状态变化后排队派发）。

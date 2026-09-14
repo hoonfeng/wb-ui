@@ -499,6 +499,12 @@ func PseudoElementName(p PseudoElement) string {
 		return "view-transition-old"
 	case PseudoElementViewTransitionNew:
 		return "view-transition-new"
+	case PseudoElementWebkitScrollbar:
+		return "-webkit-scrollbar"
+	case PseudoElementWebkitScrollbarThumb:
+		return "-webkit-scrollbar-thumb"
+	case PseudoElementWebkitScrollbarTrack:
+		return "-webkit-scrollbar-track"
 	}
 	return ""
 }
