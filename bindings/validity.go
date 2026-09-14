@@ -117,6 +117,36 @@ func invalidateConstraintState(el *dom.Element) {
 	invalidateStateStyle(el)
 }
 
+// MarkUserInteracted 记录「用户已与该表单控件交互」——控件的 user validity
+// 置为 true（HTML §4.10.18.1）。引擎在真实用户输入路径上调用它：change 事件
+// 是「用户改变了值并提交了该改变」（例如失焦、点击 checkbox/radio、选择
+// option、拖动 range）的规范信号，:user-valid / :user-invalid 依赖这个状态。
+//
+// 脚本 dispatchEvent(new Event('change')) 不经过这里，与浏览器一致（脚本
+// 派发的事件不代表用户交互）。
+func MarkUserInteracted(el *dom.Element) {
+	if el == nil || el.UserInteracted() {
+		return
+	}
+	switch el.LocalName() {
+	case "input", "select", "textarea":
+	default:
+		return
+	}
+	el.SetUserInteracted(true)
+	// user validity 变化会改变 :user-valid/:user-invalid 的匹配，而属性没变
+	// → 走样式失效链。
+	invalidateStateStyle(el)
+}
+
+// init 把 html5 的「user validity 变化」通知接到样式失效链上（html5 层不依赖
+// bindings，所以用注入的方式）。
+func init() {
+	html5.OnUserValidityChanged = func(el *dom.Element) {
+		invalidateStateStyle(el)
+	}
+}
+
 // installFormValidationProperty 物化约束校验相关的属性/方法。key 不在本表内
 // 或元素类型不匹配时返回 ok=false。
 func installFormValidationProperty(rt *jsc.Interpreter, el *dom.Element, key string) (jsc.JSValue, *elemAccessor, bool) {

@@ -118,3 +118,62 @@ func TestSelector_InRangeOutOfRangePseudoClasses(t *testing.T) {
 		t.Error("barred 元素 :in-range/:out-of-range 都不应匹配")
 	}
 }
+
+// TestSelector_UserValidUserInvalidPseudoClasses 覆盖 :user-valid /
+// :user-invalid：与 :valid/:invalid 的唯一差别是要求 user validity（「用户
+// 交互过」）为 true——用户没交互过时两者都不匹配（否则页面一打开就把所有
+// 必填项标红）。
+func TestSelector_UserValidUserInvalidPseudoClasses(t *testing.T) {
+	doc, body := newFormStateDoc(t)
+	c := NewSelectorChecker()
+	uv := mustParseOneSelector(t, ":user-valid")
+	ui := mustParseOneSelector(t, ":user-invalid")
+
+	untouched := dom.NewElement(doc, "input")
+	body.AppendChild(untouched)
+	touchedValid := dom.NewElement(doc, "input")
+	body.AppendChild(touchedValid)
+	touchedInvalid := dom.NewElement(doc, "input")
+	body.AppendChild(touchedInvalid)
+	barred := dom.NewElement(doc, "input")
+	body.AppendChild(barred)
+
+	withFakeValidity(t, map[*dom.Element]FormValidity{
+		untouched:      {WillValidate: true, Valid: false, UserInteracted: false},
+		touchedValid:   {WillValidate: true, Valid: true, UserInteracted: true},
+		touchedInvalid: {WillValidate: true, Valid: false, UserInteracted: true},
+		barred:         {WillValidate: false, Valid: true, UserInteracted: true},
+	})
+
+	if c.Match(uv, untouched) || c.Match(ui, untouched) {
+		t.Error("未交互的元素 :user-valid/:user-invalid 都不应匹配")
+	}
+	if !c.Match(uv, touchedValid) || c.Match(ui, touchedValid) {
+		t.Error("交互过且有效的元素应匹配 :user-valid")
+	}
+	if c.Match(uv, touchedInvalid) || !c.Match(ui, touchedInvalid) {
+		t.Error("交互过且无效的元素应匹配 :user-invalid")
+	}
+	if c.Match(uv, barred) || c.Match(ui, barred) {
+		t.Error("barred 元素 :user-valid/:user-invalid 都不应匹配")
+	}
+}
+
+// TestPseudoClass_EnumNameRoundTrip 覆盖「枚举 ↔ 名称 ↔ 解析」三向一致性：
+// 每个枚举都必须有名称、名称能解析回原枚举（防止新增枚举时漏改名称表或解析
+// 表——上一批 PseudoElementName 漏掉 -webkit-scrollbar* 就是这类漂移）。
+func TestPseudoClass_EnumNameRoundTrip(t *testing.T) {
+	for pc := PseudoClassUnknown + 1; pc <= PseudoClassUserInvalid; pc++ {
+		name := PseudoClassName(pc)
+		if name == "" {
+			t.Errorf("PseudoClass(%d) 没有名称：PseudoClassName 漏了这个枚举", pc)
+			continue
+		}
+		if got := LookupPseudoClass(name); got != pc {
+			t.Errorf("LookupPseudoClass(%q) = %d, want %d", name, got, pc)
+		}
+	}
+	if name := PseudoClassName(PseudoClassUnknown); name != "" {
+		t.Errorf("PseudoClassName(Unknown) = %q, want \"\"", name)
+	}
+}

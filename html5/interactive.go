@@ -18,6 +18,24 @@ func fireInvalidEvent(el *dom.Element) {
 	el.DispatchEvent(dom.NewEvent("invalid", false, true, false))
 }
 
+// OnUserValidityChanged 在控件的 user validity 由 false 变 true 时调用。
+// :user-valid / :user-invalid 的匹配结果随之变化，且属性并没有变，因此宿主
+// 必须让样式重算（bindings 层在 init 里把它接到 invalidateStateStyle）。
+// 未注入时只记录状态、不触发重算。
+var OnUserValidityChanged func(el *dom.Element)
+
+// markUserInteracted 把控件的 user validity 置为 true（已置位则无操作），并在
+// 状态真的变化时通知宿主。
+func markUserInteracted(el *dom.Element) {
+	if el == nil || el.UserInteracted() {
+		return
+	}
+	el.SetUserInteracted(true)
+	if OnUserValidityChanged != nil {
+		OnUserValidityChanged(el)
+	}
+}
+
 // InteractiveValidity 对元素做交互校验：
 //   - (true, true)：元素参与约束校验且通过（或元素被 barred——barred 元素
 //     不参与校验，checkValidity 恒为 true）；
@@ -28,6 +46,10 @@ func InteractiveValidity(el *dom.Element) (valid bool, ok bool) {
 	if !isControl {
 		return true, false
 	}
+	// 交互校验本身意味着「用户/页面试图提交」→ 记录 user validity
+	// （HTML §4.10.18.1；MDN :user-valid：「the user has attempted to submit
+	// the form, even if no change was made to the control」）。
+	markUserInteracted(el)
 	if !st.WillValidate || st.Valid {
 		return true, true
 	}

@@ -62,7 +62,8 @@
     {"name": "number inside min/max matches :in-range", "color": "#1971c2", "x": 20, "y": 100, "width": 200, "height": 30},
     {"name": "number below min matches :out-of-range", "color": "#f08c00", "x": 20, "y": 140, "width": 200, "height": 30},
     {"name": "readonly is barred: neither :valid nor :invalid", "color": "#adb5bd", "x": 20, "y": 180, "width": 200, "height": 30},
-    {"name": "setCustomValidity re-matches :invalid with no attribute change", "color": "#7048e8", "x": 20, "y": 220, "width": 200, "height": 30}
+    {"name": "setCustomValidity re-matches :invalid with no attribute change", "color": "#7048e8", "x": 20, "y": 220, "width": 200, "height": 30},
+    {"name": ":user-invalid needs user interaction: untouched control stays default", "color": "#adb5bd", "x": 20, "y": 260, "width": 200, "height": 30}
   ],
   "display-contents-cascade": [
     {"name": "display contents overrides hidden responsive wrapper", "color": "#087f5b", "x": 0, "y": 0, "width": 200, "height": 80},

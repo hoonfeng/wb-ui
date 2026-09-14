@@ -21,6 +21,10 @@
     input[type="number"]:out-of-range { background: #f08c00; }
     /* 自定义错误（IDL 状态，属性没变）走特化规则以便单独断言 */
     #custom:invalid { background: #7048e8; }
+    /* 第 7 号控件只观察 :user-invalid：即使 :invalid 也保持默认底色，
+       只有 :user-invalid（需要用户交互过）才会变粉红。 */
+    #usertouched:invalid { background: #adb5bd; }
+    #usertouched:user-invalid { background: #e64980; }
   </style>
 </head>
 <body>
@@ -36,6 +40,8 @@
   <input id="barred" type="text" required readonly value="">
   <!-- 6) 脚本调用 setCustomValidity()：只有 IDL 状态变化 → 必须重新匹配样式 -->
   <input id="custom" type="text" value="ok">
+  <!-- 7) :user-invalid 要求用户交互过（user validity）：未交互时即使无效也不匹配，保持默认底色 -->
+  <input id="usertouched" type="text" required value="">
   <script>
     document.getElementById('valid').value = 'hello';
     document.getElementById('custom').setCustomValidity('this name is taken');

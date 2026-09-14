@@ -186,3 +186,43 @@ func TestValidateInteractively_ReturnsInvalidControls(t *testing.T) {
 		t.Errorf("readonly 控件 InteractiveValidity = (%v, %v), want (true, true)", valid, ok)
 	}
 }
+
+// TestInteractiveValidationSetsUserValidity 覆盖 user validity（HTML
+// §4.10.18.1）：交互校验（提交尝试）把控件的 user validity 置为 true，并通知
+// 宿主让样式重算；重复校验不再重复通知。
+func TestInteractiveValidationSetsUserValidity(t *testing.T) {
+	form, in, _, _ := formWithRequiredInput(t)
+	f, _ := ToFormElement(form)
+
+	if st, _ := ConstraintValidity(in); st.UserInteracted {
+		t.Fatal("初始 user validity 应为 false")
+	}
+
+	changes := 0
+	prev := OnUserValidityChanged
+	OnUserValidityChanged = func(el *dom.Element) {
+		if el == in {
+			changes++
+		}
+	}
+	defer func() { OnUserValidityChanged = prev }()
+
+	if f.RequestSubmit(nil) {
+		t.Fatal("空 required 时 RequestSubmit() 应为 false")
+	}
+	st, _ := ConstraintValidity(in)
+	if !st.UserInteracted {
+		t.Error("提交尝试后 user validity 应为 true")
+	}
+	if changes != 1 {
+		t.Errorf("user validity 变化应通知宿主 1 次，实际 %d 次", changes)
+	}
+
+	// 再次校验：状态无变化 → 不重复通知。
+	if f.RequestSubmit(nil) {
+		t.Fatal("仍然无效时 RequestSubmit() 应为 false")
+	}
+	if changes != 1 {
+		t.Errorf("重复校验不应重复通知，实际 %d 次", changes)
+	}
+}

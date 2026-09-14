@@ -218,3 +218,73 @@ func TestFormNoValidateIDL(t *testing.T) {
 		}
 	`)
 }
+
+// TestMarkUserInteractedEnablesUserPseudoClasses 覆盖引擎的用户交互路径：
+// MarkUserInteracted（引擎在真实 change 派发点调用：失焦提交、点击 checkbox/
+// radio、选择 option、拖动 range）之后 :user-valid / :user-invalid 才开始
+// 匹配，并触发样式失效；脚本派发的 change 不算用户交互（与浏览器一致）。
+func TestMarkUserInteractedEnablesUserPseudoClasses(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	body := newHTMLBodyFixture(doc)
+	mk := func(id string) *dom.Element {
+		el := doc.CreateElement("input")
+		el.SetAttribute("type", "text")
+		el.SetAttribute("required", "required")
+		el.SetId(id)
+		body.AppendChild(el)
+		return el
+	}
+	in := mk("x")
+	mk("y")
+
+	var invalidated int
+	prev := OnClassChanged
+	OnClassChanged = func(el *dom.Element) {
+		if el == in {
+			invalidated++
+		}
+	}
+	defer func() { OnClassChanged = prev }()
+
+	mustRun(t, rt, `
+		{
+			const el = document.getElementById('x');
+			if (el.matches(':user-valid') || el.matches(':user-invalid')) {
+				throw new Error("未交互时 :user-valid/:user-invalid 都不应匹配");
+			}
+		}
+	`)
+
+	MarkUserInteracted(in)
+	mustRun(t, rt, `
+		{
+			const el = document.getElementById('x');
+			if (!el.matches(':user-invalid')) throw new Error("交互后无效元素应匹配 :user-invalid");
+			if (el.matches(':user-valid')) throw new Error("无效元素不应匹配 :user-valid");
+			el.value = 'ok';
+			if (!el.matches(':user-valid')) throw new Error("填好后应匹配 :user-valid");
+			if (el.matches(':user-invalid')) throw new Error("填好后不应匹配 :user-invalid");
+		}
+	`)
+	if invalidated == 0 {
+		t.Error("MarkUserInteracted 应触发样式失效")
+	}
+
+	// 幂等：重复调用不重复失效。
+	before := invalidated
+	MarkUserInteracted(in)
+	if invalidated != before {
+		t.Errorf("重复 MarkUserInteracted 不应重复失效（%d → %d）", before, invalidated)
+	}
+
+	// 脚本派发 change 不代表用户交互。
+	mustRun(t, rt, `
+		{
+			const el = document.getElementById('y');
+			el.dispatchEvent(new Event('change'));
+			if (el.matches(':user-invalid') || el.matches(':user-valid')) {
+				throw new Error("脚本派发的 change 不应置 user validity");
+			}
+		}
+	`)
+}

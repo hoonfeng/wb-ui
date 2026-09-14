@@ -1174,6 +1174,9 @@ func (h *Host) Unfocus() {
 		// 冒泡 change（onchange 内容属性由 dom 层 InlineEventAttrRunner
 		// 钩子执行）。输入过程中只派 input 事件，change 收敛到这里。
 		if cur := focusedElementValue(blurEl); cur != h.imeFocusValue {
+			// user validity：用户改变了值并在失焦时提交该改变（MDN
+			// :user-valid 的第 1 条）→ :user-valid/:user-invalid 生效。
+			bindings.MarkUserInteracted(blurEl)
 			blurEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 		}
 		// ★ 派发 blur DOM 事件（不冒泡）：xterm 监听 textarea blur →
@@ -3774,6 +3777,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 									// 监听 change 更新组件状态。此前只 toggle 了
 									// DOM checked 属性而不派发事件，导致「组件不可
 									// 操作」——视觉上勾选但 Vue 状态未同步。
+									// 点击即用户交互 → user validity 置位。
+									bindings.MarkUserInteracted(activeEl)
 									activeEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 									if debugPaintLog {
 										log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
@@ -4175,6 +4180,7 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// End range thumb drag: dispatch change (the final value,
 				// after the drag), then clear the drag state.
 				if h.rangeDragEl != nil {
+					bindings.MarkUserInteracted(h.rangeDragEl)
 					h.rangeDragEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 					h.rangeDragEl = nil
 					h.rangeDragRV = nil
@@ -5367,6 +5373,7 @@ func (h *Host) selectPopupOptionClicked(el *dom.Element) {
 			selEl.SetValue(el.GetAttribute("data-value"))
 		}
 		// 派发 change（冒泡）→ Vue v-model 更新。
+		bindings.MarkUserInteracted(sel)
 		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
 		if debugPaintLog {
 			log.Printf("[dbg/click] select set value=%q", el.GetAttribute("data-value"))

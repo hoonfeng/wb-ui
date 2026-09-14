@@ -128,6 +128,9 @@ func (f *FormFocus) Submit() {
 	}
 	cur := formControlValue(el)
 	if cur != f.value {
+		// 用户改变了值并在失焦时提交该改变 → user validity 置位
+		// （:user-valid / :user-invalid 依赖它）。
+		bindings.MarkUserInteracted(el)
 		el.DispatchEvent(dom.NewEvent("change", true, false, false))
 	}
 	f.value = cur // 快照刷新：无变化也刷新（重复 Submit 幂等）

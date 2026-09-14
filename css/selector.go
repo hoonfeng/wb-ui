@@ -125,6 +125,8 @@ const (
 	PseudoClassOpen
 	PseudoClassClosed
 	PseudoClassModal
+	PseudoClassUserValid
+	PseudoClassUserInvalid
 )
 
 // PseudoElement enumerates the supported pseudo-elements, mirroring
@@ -462,6 +464,10 @@ func PseudoClassName(p PseudoClass) string {
 		return "closed"
 	case PseudoClassModal:
 		return "modal"
+	case PseudoClassUserValid:
+		return "user-valid"
+	case PseudoClassUserInvalid:
+		return "user-invalid"
 	}
 	return ""
 }
@@ -615,6 +621,10 @@ func LookupPseudoClass(name string) PseudoClass {
 		return PseudoClassClosed
 	case "modal":
 		return PseudoClassModal
+	case "user-valid":
+		return PseudoClassUserValid
+	case "user-invalid":
+		return PseudoClassUserInvalid
 	}
 	return PseudoClassUnknown
 }

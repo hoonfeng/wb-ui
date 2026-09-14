@@ -29,6 +29,11 @@ type FormValidity struct {
 
 	// OutOfRange = suffering from underflow/overflow（不含 step mismatch）。
 	OutOfRange bool
+
+	// UserInteracted = 控件的 user validity 为 true（用户交互过：提交过改变、
+	// 或表单被尝试提交）。:user-valid / :user-invalid 要求它为 true——这正是
+	// 它们与 :valid / :invalid 的唯一区别。
+	UserInteracted bool
 }
 
 // FormValidityResolver 计算任意元素的约束校验状态；ok=false 表示元素不参与

@@ -47,6 +47,14 @@ type Element struct {
 	// 分支读它。由宿主（bindings）设置，dom 包本身不改变它。
 	indeterminate bool
 
+	// userInteracted 是表单控件的「user validity」布尔（HTML §4.10.18.1：
+	// input/textarea/select 各有一个，初值 false）。用户与控件交互（改变值并
+	// 提交该改变，例如失焦）或尝试提交表单后置为 true。:user-valid /
+	// :user-invalid 要求它为 true——这是它们与 :valid / :invalid 的唯一区别
+	// （后者不管用户是否交互过）。由宿主（bindings/html5）设置，dom 包本身
+	// 不改变它。
+	userInteracted bool
+
 	// attrVersion 随属性变更递增，样式解析器据此失效 per-element 缓存：
 	// class/type/checked 等影响 CSS 选择器匹配的属性变化后必须重算样式
 	// （浏览器 attribute 变化触发 style recalc）。此前 RebuildRenderTree 的
@@ -98,6 +106,15 @@ func (e *Element) ModalState() bool     { return e.modal }
 // :indeterminate pseudo-class.
 func (e *Element) SetIndeterminate(v bool) { e.indeterminate = v }
 func (e *Element) IsIndeterminate() bool   { return e.indeterminate }
+
+// SetUserInteracted / UserInteracted store the form control's "user validity"
+// boolean (HTML §4.10.18.1). It starts false and is set to true once the user
+// has interacted with the control (committed a value change, or attempted to
+// submit the form). The CSS selector engine reads it for :user-valid /
+// :user-invalid (css/selectorchecker.go); the engine sets it from its real user
+// input paths (bindings.MarkUserInteracted).
+func (e *Element) SetUserInteracted(v bool) { e.userInteracted = v }
+func (e *Element) UserInteracted() bool     { return e.userInteracted }
 
 // IsModalDialog reports whether the element is a <dialog> in the modal state
 // (HTML §4.11.6). The modal state is set by showModal() and cleared by close()/

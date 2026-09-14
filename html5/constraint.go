@@ -23,10 +23,11 @@ func init() {
 			return css.FormValidity{}, false
 		}
 		return css.FormValidity{
-			WillValidate: st.WillValidate,
-			Valid:        st.Valid,
-			RangeLimited: st.RangeLimited,
-			OutOfRange:   st.OutOfRange,
+			WillValidate:   st.WillValidate,
+			Valid:          st.Valid,
+			RangeLimited:   st.RangeLimited,
+			OutOfRange:     st.OutOfRange,
+			UserInteracted: st.UserInteracted,
 		}, true
 	})
 }
@@ -78,6 +79,11 @@ type FormControlValidity struct {
 	// step mismatch 不计入（HTML 规范中 :out-of-range 只看 underflow 与
 	// overflow 两种违规，step mismatch 只影响 :invalid）。
 	OutOfRange bool
+
+	// UserInteracted 是控件的 user validity（HTML §4.10.18.1）：用户提交过值
+	// 的改变、或表单被尝试提交后为 true。:user-valid / :user-invalid 要求它
+	// 为 true。
+	UserInteracted bool
 }
 
 // ConstraintValidity 返回 el 的约束校验状态；ok=false 表示该元素不参与约束
@@ -93,7 +99,10 @@ func ConstraintValidity(el *dom.Element) (FormControlValidity, bool) {
 		if !ok {
 			return FormControlValidity{}, false
 		}
-		st := FormControlValidity{WillValidate: in.WillValidate()}
+		st := FormControlValidity{
+			WillValidate:   in.WillValidate(),
+			UserInteracted: el.UserInteracted(),
+		}
 		v := in.Validity()
 		st.Valid = v.Valid()
 		limited, under, over := inputRangeState(in)
@@ -105,7 +114,10 @@ func ConstraintValidity(el *dom.Element) (FormControlValidity, bool) {
 		if !ok {
 			return FormControlValidity{}, false
 		}
-		st := FormControlValidity{WillValidate: sel.WillValidate()}
+		st := FormControlValidity{
+			WillValidate:   sel.WillValidate(),
+			UserInteracted: el.UserInteracted(),
+		}
 		st.Valid = sel.Validity().Valid()
 		return st, true
 	case "textarea":
@@ -113,7 +125,10 @@ func ConstraintValidity(el *dom.Element) (FormControlValidity, bool) {
 		if !ok {
 			return FormControlValidity{}, false
 		}
-		st := FormControlValidity{WillValidate: ta.WillValidate()}
+		st := FormControlValidity{
+			WillValidate:   ta.WillValidate(),
+			UserInteracted: el.UserInteracted(),
+		}
 		st.Valid = ta.Validity().Valid()
 		return st, true
 	case "button":
@@ -121,7 +136,10 @@ func ConstraintValidity(el *dom.Element) (FormControlValidity, bool) {
 		if !ok {
 			return FormControlValidity{}, false
 		}
-		st := FormControlValidity{WillValidate: btn.WillValidate()}
+		st := FormControlValidity{
+			WillValidate:   btn.WillValidate(),
+			UserInteracted: el.UserInteracted(),
+		}
 		st.Valid = btn.Validity().Valid()
 		return st, true
 	}

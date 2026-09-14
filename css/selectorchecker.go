@@ -461,6 +461,18 @@ func (c *SelectorChecker) matchPseudoClass(s SimpleSelector, el *dom.Element) bo
 			return fv.OutOfRange
 		}
 		return !fv.OutOfRange
+	case PseudoClassUserValid, PseudoClassUserInvalid:
+		// :user-valid / :user-invalid 与 :valid / :invalid 的差别只有一条：
+		// 要求控件的 user validity（「用户交互过」）为 true。用户尚未交互时
+		// 两者都不匹配（避免页面一开始就把所有必填项标红）。
+		fv, ok := formValidityOf(el)
+		if !ok || !fv.WillValidate || !fv.UserInteracted {
+			return false
+		}
+		if s.PseudoClass == PseudoClassUserInvalid {
+			return !fv.Valid
+		}
+		return fv.Valid
 	case PseudoClassDefault:
 		// HTML §4.16.2：默认按钮、已勾选的 checkbox/radio、已选中的 option。
 		switch strings.ToLower(el.LocalName()) {

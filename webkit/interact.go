@@ -16,8 +16,9 @@
 // 由宿主换算（与既有 configwin 行为一致）。
 //
 // 事件顺序（对齐浏览器）：
-//   press:   mousedown
-//   release: mouseup → click（按下/释放同元素才触发）→ dblclick（400ms 内）
+//
+//	press:   mousedown
+//	release: mouseup → click（按下/释放同元素才触发）→ dblclick（400ms 内）
 package webkit
 
 import (
@@ -26,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"wb-ui/bindings"
 	"wb-ui/dom"
 	"wb-ui/html5"
 	"wb-ui/rendering"
@@ -586,6 +588,9 @@ func (i *Interaction) handleCheckboxRadio(activeEl *dom.Element) {
 		}
 		in.SetChecked(true)
 	}
+	// 点击切换 checkbox/radio = 用户交互 → user validity 置位
+	// （:user-valid / :user-invalid 依赖它）。
+	bindings.MarkUserInteracted(activeEl)
 	activeEl.DispatchEvent(dom.NewEvent("change", true, false, false))
 }
 
@@ -764,6 +769,8 @@ func (i *Interaction) selectPopupOptionClicked(el *dom.Element) {
 		// change 派发（onchange 属性处理器由 dom 层 InlineEventAttrRunner
 		// 钩子在派发路径统一执行——宿主 JS 面板的 onchange="apply('id',
 		// 'device',this.value)" 生效，此前依赖此处手动执行，现钩子接管）。
+		// 用户选择了 option → user validity 置位。
+		bindings.MarkUserInteracted(sel)
 		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
 	}
 }
