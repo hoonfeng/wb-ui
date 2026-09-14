@@ -13,7 +13,16 @@ import (
 )
 
 // RegisterFetch registers the global fetch() function on the JS interpreter.
+// RegisterFetch 注册 fetch（允许真实网络回退，即嵌入浏览器语义）。
 func RegisterFetch(rt *jsc.Interpreter) {
+	RegisterFetchWithPolicy(rt, true)
+}
+
+// RegisterFetchWithPolicy 注册 fetch。allowNetwork=false 时 fetch 只命中
+// 宿主注册的 bridge 路由（UI 取数据用），无匹配路由则 reject——绝不发起
+// 真实网络请求。适配 UI 库模式：无隐式外部输入，且引擎的 fetch 是同步
+// 实现（阻塞 UI 线程），对 UI 宿主是危险操作。
+func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 	fetchFn := jsc.NewNativeFunction("fetch", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) < 1 {
 			return rejectPromise(in, fmt.Errorf("fetch: missing url argument"))
@@ -41,6 +50,9 @@ func RegisterFetch(rt *jsc.Interpreter) {
 		}
 		if route != nil {
 			return bridgeFetch(in, args, url, route)
+		}
+		if !allowNetwork {
+			return rejectPromise(in, fmt.Errorf("fetch(%s): 网络请求在 UI 库模式下被禁用（只有宿主注册的桥路由可用）", url))
 		}
 
 		method := "GET"

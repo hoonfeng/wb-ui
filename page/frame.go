@@ -188,6 +188,11 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	}
 
 	f.extractAndAddStyles()
+	// ★ 指纹同步：SetDocument 已按当前文档提取过样式，这里记下指纹，
+	//   否则紧随其后的首次 RebuildRenderTree 会判定「指纹变化」（styleFP
+	//   初始为空）而**再全量重扫一次**——<style> 重复解析、<link> 重复
+	//   加载（宿主 StyleSheetLoader / ResourceResolver 被重复调用）。
+	f.styleFP = f.styleFingerprint()
 	f.syncMediaQueryViewport()
 	builder := rendering.NewRenderTreeBuilder(f.resolver)
 	f.renderView = builder.Build(doc)

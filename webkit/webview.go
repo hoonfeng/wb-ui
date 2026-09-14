@@ -372,6 +372,17 @@ type WebView struct {
 	// 编辑/blur-Enter 提交 onchange。裸 WebView 宿主（configwin）此前
 	// 自建 NewFormFocus — 统一走引擎入口。
 	formFocus *FormFocus
+
+	// mode 是运行模式（见 mode.go）：决定装配阶段接入哪些浏览器专属
+	// 能力（外部网络/子框架/并发脚本/导航/外部资源）。零值 = ModeBrowser，
+	// 即历史行为。
+	mode Mode
+	// modeLocked 在首次装配（LoadHTML 的注入阶段）后置位：此后只允许
+	// 同值 SetMode（切换返回 ErrModeLocked）。
+	modeLocked bool
+	// resourceResolver 是宿主资源解析器（可选）：两种模式都先经它，
+	// UI 库模式下是外部资源引用的唯一通道。
+	resourceResolver ResourceResolver
 }
 
 // FormFocus 返回引擎表单交互服务（首次调用创建；Destroy 后返回 nil）。
@@ -490,37 +501,37 @@ func ensureFonts() {
 	}
 }
 
+// NewWebView 创建一个 WebView，模式为 ModeBrowser（嵌入浏览器，历史默认）。
 func NewWebView() *WebView {
+	return NewWebViewWithMode(ModeBrowser)
+}
+
+// NewWebViewWithMode 按指定模式创建 WebView（模式语义见 mode.go / docs/MODES.md）：
+//   - ModeBrowser：嵌入浏览器，完整浏览器语义（外部资源/子框架/网络/导航）
+//   - ModeToolkit：UI 库，保留渲染/布局/DOM/CSS/事件/宿主桥，裁剪浏览器专属
+//     的外部输入（无真实网络、无 XHR/Worker/WebSocket、不装配 iframe 子文档、
+//     不允许 LoadURL；外部样式/脚本只经 SetResourceResolver 或 data: URL）
+//
+// 模式在首次 LoadHTML 装配时锁定（此后 SetMode 只接受同值）。
+func NewWebViewWithMode(mode Mode) *WebView {
 	ensureFonts()
 	settings := page.NewSettings()
 	p := page.NewPage(settings)
 	wv := &WebView{
 		page: p, settings: settings,
 		width: DefaultWebViewWidth, height: DefaultWebViewHeight,
+		mode: mode,
 	}
 	registerWebView(wv)
 	wv.mainFrame = NewWebFrame(wv, p.MainFrame())
 	if mf := p.MainFrame(); mf != nil {
-		mf.StyleSheetLoader = func(href string) (string, error) {
-			// Support http(s), file, and data URLs
-			if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "data:") {
-				return fetchURL(href)
-			}
-			fp := strings.TrimPrefix(href, "file://")
-			d, e := os.ReadFile(fp)
-			if e != nil { return "", fmt.Errorf("load stylesheet %q: %w", href, e) }
-			return string(d), nil
-		}
-		mf.ScriptLoader = func(src string) (string, error) {
-			// Support http(s), file, and data URLs
-			if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "data:") {
-				return fetchURL(src)
-			}
-			fp := strings.TrimPrefix(src, "file://")
-			d, e := os.ReadFile(fp)
-			if e != nil { return "", fmt.Errorf("load script %q: %w", src, e) }
-			return string(d), nil
-		}
+		// ★ 模式接线（外部资源统一入口）：<link rel=stylesheet> 与
+		//   <script src> 都走 wv.loadExternalResource —— 宿主
+		//   ResourceResolver（两种模式一致）→ data: URL → 仅 Browser
+		//   模式下才允许 http(s)/file（UI 库模式返回
+		//   ErrExternalResourceBlocked，不做隐式外部访问）。
+		mf.StyleSheetLoader = func(href string) (string, error) { return wv.loadExternalResource(href) }
+		mf.ScriptLoader = func(src string) (string, error) { return wv.loadExternalResource(src) }
 	}
 	// ★ iframe 子文档：渲染侧（paint/hit-test）经 IFrameLookup 取回
 	// iframe 元素的子 Frame 渲染视图（避免 rendering→page 包循环依赖）。
@@ -564,6 +575,12 @@ func (wv *WebView) handleIFrameSrcChanged(el *dom.Element, src string) {
 	if old := page.IFrameFrame(el); old != nil {
 		page.UnregisterIFrame(el)
 		delete(wv.subframeJS, old)
+	}
+	// ★ 模式：UI 库模式不装配 iframe 子文档（卸载旧子文档后即返回，
+	//   <iframe> 元素仍参与布局/绘制，只是没有子文档内容）。
+	if !wv.mode.allowsSubframes() {
+		page.Logf("IFrame", "src change: subframes disabled in %s mode", wv.mode)
+		return
 	}
 	if abs == "" {
 		page.Logf("IFrame", "src change: unresolvable %q, unloaded", src)
@@ -640,6 +657,8 @@ var BeforePageScripts func(rt *jsc.Interpreter)
 
 func (wv *WebView) LoadHTML(src string) error {
 	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
+	// 模式在此刻生效并锁定（注入阶段按模式接线，见 mode.go）。
+	wv.modeLocked = true
 	if wv.mainFrame != nil {
 		fn := func(code string) error {
 			_, err := wv.EvalJS(code)
@@ -654,8 +673,13 @@ func (wv *WebView) LoadHTML(src string) error {
 	// page scripts execute. This makes Go-registered API routes available
 	// as fetch() intercepts in GUI mode.
 	wv.ensureJSRuntime()
-	page.RegisterFetch(wv.jsInterpreter)
-	page.RegisterXMLHttpRequest(wv.jsInterpreter)
+	// ★ 模式接线（1/4）：fetch 在两种模式都注册（UI 库也要用宿主桥路由
+	//   取数据），但 UI 库模式关闭「无匹配路由 → 真实网络请求」的回退；
+	//   XMLHttpRequest 是浏览器专属 API，UI 库模式不注册。
+	page.RegisterFetchWithPolicy(wv.jsInterpreter, wv.mode.allowsNetwork())
+	if wv.mode.allowsNetwork() {
+		page.RegisterXMLHttpRequest(wv.jsInterpreter)
+	}
 	bridge.InjectAll(wv.jsInterpreter)
 
 	// Inject the bridge SDK script as inline JS before any page scripts.
@@ -697,6 +721,18 @@ func (wv *WebView) LoadHTML(src string) error {
 			}
 		}
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
+		// ★ 模式接线（2/4）：Worker/WebSocket 是浏览器并发/长连接能力，
+		//   UI 库模式下从全局隐藏（typeof Worker === "undefined" / 
+		//   typeof WebSocket === "undefined"），库的 feature detect 才能
+		//   得到正确结论（引擎不内置真实 WebSocket 传输，Worker 是真实
+		//   线程——UI 库模式下宿主不需要页面自己起线程）。
+		if wv.mode.hidesThreadGlobals() {
+			bindings.HideBrowserThreadGlobals(wv.jsInterpreter)
+			// XMLHttpRequest 在 UI 库模式的注入阶段本就不注册（见上），
+			// 这里防御性隐藏：同一解释器若曾按浏览器语义装配过，残留的
+			// XHR 也被摘掉。
+			bindings.HideGlobal(wv.jsInterpreter, "XMLHttpRequest")
+		}
 		// ★ 渲染树几何桥：Element.scrollTop/scrollHeight/clientHeight/offsetHeight/
 		//   getBoundingClientRect 等 CSSOM 属性需要真实布局几何。此前只在 EvalJS
 		//   中注入——cmd/desktop 与页面脚本（Vue）均走 JSInterpreter().RunJS 执行，
@@ -803,7 +839,11 @@ func (wv *WebView) LoadHTML(src string) error {
 	// 并加载（WebKit: FrameLoader 在解析到 iframe 元素时创建子 Frame）。
 	// 子 Frame 拥有独立 ScriptEngine（独立 JS 全局环境），子文档脚本
 	// 可执行；布局与绘制见 syncIFrameSizes / PaintIFrame。
-	wv.loadIFrameDocuments()
+	// ★ 模式接线（3/4）：iframe 子文档是浏览器导航能力，UI 库模式不装配
+	//   （<iframe> 元素本身仍参与布局/绘制，只是没有子文档）。
+	if wv.mode.allowsSubframes() {
+		wv.loadIFrameDocuments()
+	}
 	return nil
 }
 
@@ -858,30 +898,15 @@ func (wv *WebView) loadSubframe(el *dom.Element, absSrc string) {
 		if abs == "" {
 			abs = src
 		}
-		if strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://") || strings.HasPrefix(abs, "data:") {
-			return fetchURL(abs)
-		}
-		fp := strings.TrimPrefix(abs, "file://")
-		d, e := os.ReadFile(fp)
-		if e != nil {
-			return "", fmt.Errorf("load subframe script %q: %w", abs, e)
-		}
-		return string(d), nil
+		// 子框架资源与主文档同策略（含宿主 ResourceResolver）。
+		return wv.loadExternalResource(abs)
 	}
 	f.StyleSheetLoader = func(href string) (string, error) {
 		abs := resolveIframeSrc(href, absSrc)
 		if abs == "" {
 			abs = href
 		}
-		if strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://") || strings.HasPrefix(abs, "data:") {
-			return fetchURL(abs)
-		}
-		fp := strings.TrimPrefix(abs, "file://")
-		d, e := os.ReadFile(fp)
-		if e != nil {
-			return "", fmt.Errorf("load subframe stylesheet %q: %w", abs, e)
-		}
-		return string(d), nil
+		return wv.loadExternalResource(abs)
 	}
 	if ferr := f.LoadHTML(data); ferr != nil {
 		page.Logf("IFrame", "LoadHTML %q: %v", absSrc, ferr)
@@ -968,6 +993,12 @@ func resolveIframeSrc(src, baseURL string) string {
 }
 
 func (wv *WebView) LoadURL(url string) error {
+	// ★ 模式接线（4/4）：导航是浏览器能力。UI 库模式拒绝换源——宿主用
+	//   LoadHTML 给出初始文档，之后不再导航（避免页面被替换后 Go 侧
+	//   构建的 UI 树与事件绑定悬空）。
+	if !wv.mode.allowsNavigation() {
+		return fmt.Errorf("%w: LoadURL(%q) in %s mode", ErrModeNotSupported, url, wv.mode)
+	}
 	wv.currentURL = url
 	src, err := fetchURL(url)
 	if err != nil {
