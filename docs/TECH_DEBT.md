@@ -362,3 +362,28 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 ### 剩余可优化项（非阻塞，按需）
 - `::part` 多 part-name 线性扫描 → 哈希集合（CSS Scoping L1 性能优化，收益 <1%）。
 - 布局增量（阶段 B/C）：脏子树/尺寸依赖图，高风险，业务驱动时再立项。
+
+---
+
+## 已闭环的 DOM/渲染能力缺口（2026-09 批次）
+
+这些是「注释里记着的未实现项」而不是文档里的 P0-P3 大项，逐项闭环后留档，
+避免后续再被当成遗留重复调研：
+
+| 能力 | 落地内容 | 提交 |
+|------|----------|------|
+| CSS 伪类缺口 | `:fullscreen` / `:open` / `:closed` / `:modal` 的枚举、名称解析与匹配（`:modal` 判定与渲染层共用 `dom.Element.IsModalDialog`） | `667c7ae`、`fb39d5f` |
+| Fullscreen API | `Element.requestFullscreen()` / `document.exitFullscreen()` / `fullscreenElement` / `fullscreenEnabled`；事件异步派发（元素先于 document）、重复请求不派发、未连接元素派发 `fullscreenerror` 并 reject；UA 表加 `:fullscreen:not(:root)` 铺满规则；宿主钩子 `OnFullscreenChanged` | `4fd6d1b` |
+| `<dialog>` JS 接口 | `open` 属性反射（`<details>` 共用）、`show()` / `showModal()` / `close()`、`returnValue`；已打开时按规范抛错（用 TypeError 兜底），`toggle` / `close` 异步派发；状态迁移走样式失效链 | `fb39d5f` |
+| `::backdrop` 遮罩 | 解析（css 层已有）+ 生成（layout/rendering 在模态 dialog 之前插入伪元素盒/对象）+ 绘制（UA 规则 `position:fixed; inset:0; rgba(0,0,0,.1)`）；`ResolvePseudoElement` 不再要求 `::backdrop` 声明 `content` | `3583e6b` |
+
+### 仍未建模（有意保留）
+- **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
+  属性/状态机一整套，未立项。
+- `:autofill` / `:picture-in-picture` / `:user-valid` 等：本引擎没有对应的
+  表单自动填充、画中画或约束校验模型，无判定依据，故作永不匹配。
+- view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
+- `ToggleEvent.newState`：`toggle` 事件已派发，但不带 `newState` 字段（没有
+  ToggleEvent 建模）。
+- 模态 `<dialog>` 作为 **flex/grid item** 时不生成 `::backdrop`（layout 与
+  rendering 的 flex 分支都未插入，两侧保持一致；块级父容器下正常）。

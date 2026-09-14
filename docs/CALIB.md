@@ -67,6 +67,15 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    **没有剩余失败夹具**：此前的 3 项（`logical-borders` 拐角方向、
    `media-text-track`、`modern-streams`）已分别通过修正边框绘制、补
    TextTrack/WebVTT、补 Streams 实现解决。
+
+   复核记录（2026-09 批次）：新增 Fullscreen API、`:modal` / `:open` /
+   `:closed` 伪类、`<dialog>` JS 接口与 `::backdrop` 遮罩后，cssprobe 复测仍为
+   **61/61 夹具、248/248 检查**，无回归。这批改动的验收落在单元测试上：
+   `bindings/fullscreen_test.go`、`bindings/dialog_test.go`、
+   `css/fullscreen_selector_test.go`、`css/modal_selector_test.go`、
+   `css/openstate_selector_test.go`、`html5/fullscreen_ua_test.go`、
+   `rendering/dialog_backdrop_test.go`（结构中无 DOM 节点的 `::backdrop` 盒 +
+   像素级的 10% 黑遮罩压暗）。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。
