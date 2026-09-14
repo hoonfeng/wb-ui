@@ -49,7 +49,8 @@ view-transition 伪元素、模式不可热切换、`ui` 包不做声明式响�
 
 ## 附：WebSocket —— 已完善（非遗留问题）
 
-`engine/js/bindings/dom.go:1065-1190` 的 WebSocket 已是**完整 stub**：提供 readyState 常量、
+`engine/js/bindings/dom.go` 的 WebSocket 构造器（`wsCtor`，`g.Set("WebSocket", …)`）已是
+**完整 stub**：提供 readyState 常量、
 `onopen/onmessage/onerror/onclose`、`send/close/addEventListener/removeEventListener`，
 并通过 `globalThis.__desktopWS.dispatchMessage/dispatchStatus` 供宿主注入事件。这是
 桌面端「无真实网络」场景的**有意设计**（不建连接、不崩溃、事件由宿主推入），
