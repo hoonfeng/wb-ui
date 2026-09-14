@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #0d1117; }
+#app {
+  display: flex; flex-direction: column; width: 100%; height: 100%;
+}
+.titlebar {
+  height: 32px; background: #161b22; border-bottom: 1px solid #30363d;
+}
+.content {
+  display: flex; flex-direction: row; flex: 1; overflow: hidden;
+}
+.activity-bar {
+  width: 48px; background: #0d1117; border-right: 1px solid #30363d;
+}
+.sidebar {
+  width: 260px; background: #161b22; border-right: 1px solid #30363d;
+}
+.editor {
+  flex: 1; background: #0d1117;
+}
+.statusbar {
+  height: 22px; background: #161b22; border-top: 1px solid #30363d;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="titlebar"></div>
+  <div class="content">
+    <div class="activity-bar"></div>
+    <div class="sidebar"></div>
+    <div class="editor"></div>
+  </div>
+  <div class="statusbar"></div>
+</div>
+</body>
+</html>

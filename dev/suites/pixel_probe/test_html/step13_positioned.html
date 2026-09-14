@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+/* ── Static (default) ── */
+.static-box { width: 100px; height: 40px; background: #21262d; border: 1px solid #30363d; display: inline-block; text-align: center; line-height: 40px; }
+
+/* ── Relative ── */
+.relative-container { position: relative; height: 60px; background: #21262d; padding: 4px; }
+.relative-box { width: 100px; height: 40px; background: #1f6feb; display: inline-block; text-align: center; line-height: 40px; }
+.relative-offset { position: relative; top: 10px; left: 20px; width: 100px; height: 40px; background: #d29922; display: inline-block; text-align: center; line-height: 40px; }
+
+/* ── Absolute ── */
+.abs-container { position: relative; height: 120px; background: #21262d; }
+.abs-natural { width: 100px; height: 40px; background: #21262d; border: 1px solid #30363d; display: inline-block; text-align: center; line-height: 40px; }
+.abs-box { position: absolute; top: 10px; left: 10px; width: 120px; height: 40px; background: #3fb950; text-align: center; line-height: 40px; }
+.abs-box-2 { position: absolute; bottom: 10px; right: 10px; width: 140px; height: 40px; background: #f85149; text-align: center; line-height: 40px; }
+
+/* ── Fixed (relative to viewport) ── */
+.fixed-box { position: fixed; bottom: 20px; right: 20px; width: 180px; height: 36px; background: #a371f7; text-align: center; line-height: 36px; border-radius: 6px; z-index: 100; }
+
+/* ── z-index stacking ── */
+.z-container { position: relative; height: 100px; background: #21262d; }
+.z-box1 { position: absolute; top: 10px; left: 10px; width: 100px; height: 60px; background: #1f6feb; z-index: 1; text-align: center; line-height: 60px; }
+.z-box2 { position: absolute; top: 30px; left: 30px; width: 100px; height: 60px; background: #d29922; z-index: 2; text-align: center; line-height: 60px; }
+.z-box3 { position: absolute; top: 50px; left: 50px; width: 100px; height: 60px; background: #f85149; z-index: 3; text-align: center; line-height: 60px; }
+
+.label { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h2>step13 — Positioned Layout</h2>
+
+  <div class="section">
+    <div class="label">Static (default flow)</div>
+    <div class="static-box">A</div>
+    <div class="static-box">B</div>
+    <div class="static-box">C</div>
+  </div>
+
+  <div class="section" style="position:relative">
+    <div class="label">Relative — offset from normal position</div>
+    <div class="relative-container">
+      <div class="relative-box">normal</div>
+      <div class="relative-offset">offset</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Absolute — positioned within container</div>
+    <div class="abs-container">
+      <div class="abs-natural">normal</div>
+      <div class="abs-box">absolute TL</div>
+      <div class="abs-box-2">absolute BR</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">z-index stacking</div>
+    <div class="z-container">
+      <div class="z-box1">z=1</div>
+      <div class="z-box2">z=2</div>
+      <div class="z-box3">z=3</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Fixed (bottom-right corner)</div>
+    <div class="fixed-box">fixed position</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #0d1117; }
+#app {
+  display: grid;
+  grid-template-columns: 48px auto 1fr auto;
+  grid-template-rows: 30px 1fr 22px;
+  width: 100%; height: 100%;
+}
+.titlebar { grid-column: 1 / -1; grid-row: 1; background: #161b22; }
+.activity-bar { grid-column: 1; grid-row: 2; background: #0d1117; }
+.sidebar { grid-column: 2; grid-row: 2; background: #161b22; }
+.main-area { grid-column: 3; grid-row: 2; background: #0d1117; }
+.right-panel { grid-column: 4; grid-row: 2; background: #161b22; }
+.statusbar { grid-column: 1 / -1; grid-row: 3; background: #161b22; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="titlebar"></div>
+  <div class="activity-bar"></div>
+  <div class="sidebar"></div>
+  <div class="main-area"></div>
+  <div class="right-panel"></div>
+  <div class="statusbar"></div>
+</div>
+</body>
+</html>

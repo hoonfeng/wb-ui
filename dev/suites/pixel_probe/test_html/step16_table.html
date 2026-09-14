@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+/* ── Native table elements ── */
+table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+th, td { border: 1px solid #30363d; padding: 8px 12px; text-align: left; }
+th { background: #21262d; color: #58a6ff; }
+td { color: #e6edf3; }
+
+/* ── CSS table display ── */
+.css-table { display: table; width: 100%; margin-bottom: 16px; }
+.css-tr { display: table-row; }
+.css-th { display: table-cell; border: 1px solid #30363d; padding: 8px 12px; background: #21262d; color: #58a6ff; font-weight: bold; }
+.css-td { display: table-cell; border: 1px solid #30363d; padding: 8px 12px; color: #e6edf3; }
+
+/* ── Data table ── */
+.data-table th { background: #1f6feb; }
+.data-table td { background: #161b22; }
+.data-table tr:nth-child(even) td { background: #21262d; }
+
+/* ── Simple layout table ── */
+.layout-table { display: table; width: 100%; }
+.layout-row { display: table-row; }
+.layout-cell { display: table-cell; padding: 12px; border: 1px solid #30363d; }
+.layout-cell.sidebar { width: 200px; background: #21262d; }
+.layout-cell.main { background: #161b22; }
+.layout-cell.header { background: #1f6feb; text-align: center; font-weight: bold; }
+
+.label { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h2>step16 — Table Layout</h2>
+
+  <div class="section">
+    <div class="label">Native HTML table</div>
+    <table>
+      <tr><th>Name</th><th>Type</th><th>Size</th></tr>
+      <tr><td>main.go</td><td>Go source</td><td>2.4 KB</td></tr>
+      <tr><td>app.go</td><td>Go source</td><td>1.8 KB</td></tr>
+      <tr><td>style.css</td><td>Stylesheet</td><td>12 KB</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="label">CSS display: table (non-native)</div>
+    <div class="css-table">
+      <div class="css-tr">
+        <div class="css-th">File</div>
+        <div class="css-th">Status</div>
+        <div class="css-th">Modified</div>
+      </div>
+      <div class="css-tr">
+        <div class="css-td">README.md</div>
+        <div class="css-td">modified</div>
+        <div class="css-td">2m ago</div>
+      </div>
+      <div class="css-tr">
+        <div class="css-td">index.html</div>
+        <div class="css-td">untracked</div>
+        <div class="css-td">5m ago</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Layout table with header + sidebar</div>
+    <div class="layout-table">
+      <div class="layout-row">
+        <div class="layout-cell header" style="display:table-cell">Header spanning full width</div>
+      </div>
+      <div class="layout-row">
+        <div class="layout-cell sidebar">Sidebar (200px)</div>
+        <div class="layout-cell main">Main content area that fills remaining space. This demonstrates how CSS tables can be used for page layout with fixed-width sidebar.</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

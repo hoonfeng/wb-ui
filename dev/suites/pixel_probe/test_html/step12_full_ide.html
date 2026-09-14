@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html class="theme-dark">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+:root, .theme-dark {
+  --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+  --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+  --border-color: #30363d; --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+  --font-size: 13px;
+}
+body { font-family: 'Inter', system-ui, sans-serif; font-size: var(--font-size); color: var(--text-primary); background: var(--bg-primary); }
+
+#app {
+  display: grid;
+  grid-template-columns: 48px 280px 1fr;
+  grid-template-rows: 30px 1fr 180px 22px;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+/* ═══ Titlebar ═══ */
+.titlebar {
+  grid-column: 1 / -1; grid-row: 1;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+}
+.titlebar-title { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+/* ═══ Activity Bar ═══ */
+.activity-bar {
+  grid-column: 1; grid-row: 2 / 4;
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--bg-primary); padding-top: 8px; gap: 4px;
+}
+.activity-btn { width: 40px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-muted); }
+.activity-btn.active { color: var(--accent); }
+
+/* ═══ Sidebar ═══ */
+.sidebar {
+  grid-column: 2; grid-row: 2 / 4;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px; font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; border-bottom: 1px solid var(--border-color);
+}
+.file-tree { flex: 1; overflow: auto; padding: 4px 0; }
+.tree-item {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 12px; font-size: 13px; color: var(--text-secondary);
+  height: 24px;
+}
+.tree-item.active { color: var(--text-primary); background: var(--bg-tertiary); }
+.tree-depth-1 { padding-left: 28px; }
+.tree-depth-2 { padding-left: 44px; }
+.tree-arrow { width: 16px; text-align: center; font-size: 10px; color: var(--text-muted); }
+.tree-icon { width: 16px; text-align: center; font-size: 12px; }
+.tree-icon.go { color: var(--accent); }
+.tree-icon.dir { color: #d29922; }
+
+/* ═══ Main Area (Editor + Terminal) ═══ */
+.main-area {
+  grid-column: 3; grid-row: 2;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-primary);
+}
+
+/* Editor tabs */
+.editor-tabs {
+  display: flex; align-items: stretch;
+  height: 35px; background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+.editor-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 14px; font-size: 12px; color: var(--text-muted);
+  border-right: 1px solid var(--border-color);
+}
+.editor-tab.active { color: var(--text-primary); background: var(--bg-primary); }
+
+/* Editor content */
+.editor-content {
+  flex: 1; display: flex; min-height: 0;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
+}
+.line-numbers {
+  width: 48px; flex-shrink: 0; padding: 8px 8px; text-align: right;
+  color: var(--text-muted); background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+.line-numbers .ln { height: 19.5px; font-size: 12px; }
+.code-lines {
+  flex: 1; padding: 8px 16px; overflow: auto;
+}
+.code-lines .cl { height: 19.5px; white-space: pre; }
+.kw { color: #ff7b72; }
+.str { color: #a5d6ff; }
+.cm { color: #8b949e; font-style: italic; }
+.fn { color: #d2a8ff; }
+.num { color: #79c0ff; }
+
+/* ═══ Terminal Panel ═══ */
+.terminal-panel {
+  grid-column: 3; grid-row: 3;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+}
+.terminal-header {
+  display: flex; align-items: center;
+  padding: 3px 12px; font-size: 12px; color: var(--text-secondary);
+  background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color);
+}
+.terminal-tabs { display: flex; gap: 2px; }
+.terminal-tab { padding: 2px 10px; }
+.terminal-tab.active { background: var(--bg-primary); }
+.terminal-body {
+  flex: 1; font-family: var(--font-mono); font-size: 13px; line-height: 1.4;
+  padding: 4px 12px; overflow: auto; color: var(--text-secondary);
+}
+.terminal-body .green { color: var(--green); }
+.terminal-body .red { color: var(--red); }
+.terminal-body .info { color: var(--accent); }
+
+/* ═══ Status Bar ═══ */
+.statusbar {
+  grid-column: 1 / -1; grid-row: 4;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  padding: 0 8px; font-size: 12px; color: var(--text-secondary);
+}
+.sb-group { display: flex; align-items: center; gap: 12px; }
+.sb-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.sb-item { display: flex; align-items: center; gap: 4px; }
+.sb-divider { width: 1px; height: 14px; background: var(--border-color); }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ═══ Titlebar ═══ -->
+  <div class="titlebar">
+    <span class="titlebar-title">PairCode IDE — wb-ui WebKit</span>
+  </div>
+
+  <!-- ═══ Activity Bar ═══ -->
+  <div class="activity-bar">
+    <div class="activity-btn active">[F]</div>
+    <div class="activity-btn">[S]</div>
+    <div class="activity-btn">[G]</div>
+    <div class="activity-btn">[R]</div>
+  </div>
+
+  <!-- ═══ Sidebar ═══ -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Explorer</span>
+      <span>...</span>
+    </div>
+    <div class="file-tree">
+      <div class="tree-item">
+        <span class="tree-arrow">&#9660;</span>
+        <span class="tree-icon dir">F</span>
+        <span style="color:var(--text-primary)">src</span>
+      </div>
+      <div class="tree-item tree-depth-1 active">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon go">G</span>
+        <span>main.go</span>
+      </div>
+      <div class="tree-item tree-depth-1">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon go">G</span>
+        <span>app.go</span>
+      </div>
+      <div class="tree-item">
+        <span class="tree-arrow">&#9654;</span>
+        <span class="tree-icon dir">F</span>
+        <span style="color:var(--text-primary)">components</span>
+      </div>
+      <div class="tree-item">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon go" style="color:#f1e05a">J</span>
+        <span>package.json</span>
+      </div>
+      <div class="tree-item">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon" style="color:#563d7c">#</span>
+        <span>README.md</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Main Area ═══ -->
+  <div class="main-area">
+    <div class="editor-tabs">
+      <div class="editor-tab active">main.go</div>
+      <div class="editor-tab">app.go</div>
+    </div>
+    <div class="editor-content">
+      <div class="line-numbers">
+        <div class="ln">1</div><div class="ln">2</div><div class="ln">3</div>
+        <div class="ln">4</div><div class="ln">5</div><div class="ln">6</div>
+        <div class="ln">7</div><div class="ln">8</div><div class="ln">9</div>
+      </div>
+      <div class="code-lines">
+        <div class="cl"><span class="kw">package</span> main</div>
+        <div class="cl"></div>
+        <div class="cl"><span class="kw">import</span> (</div>
+        <div class="cl">  <span class="str">"fmt"</span></div>
+        <div class="cl">  <span class="str">"net/http"</span></div>
+        <div class="cl">)</div>
+        <div class="cl"></div>
+        <div class="cl"><span class="kw">func</span> <span class="fn">main</span>() {</div>
+        <div class="cl">  fmt.Println(<span class="str">"wb-ui OK"</span>)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Terminal Panel ═══ -->
+  <div class="terminal-panel">
+    <div class="terminal-header">
+      <div class="terminal-tabs">
+        <div class="terminal-tab active">TERMINAL</div>
+      </div>
+    </div>
+    <div class="terminal-body">
+      <div>$ <span class="info">go build ./...</span></div>
+      <div><span class="green">✓</span> build complete</div>
+      <div>$ go run .</div>
+      <div>Server started on :9090</div>
+    </div>
+  </div>
+
+  <!-- ═══ Status Bar ═══ -->
+  <div class="statusbar">
+    <div class="sb-group">
+      <div class="sb-item">main.go</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item">Go</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item"><span class="green">&#9679;</span> main</div>
+    </div>
+    <div class="sb-right">
+      <div class="sb-item">Ln 1, Col 1</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item">Spaces: 2</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item">UTF-8</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item">Go 1.26</div>
+      <div class="sb-divider"></div>
+      <div class="sb-item">Prettier</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

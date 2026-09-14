@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html class="theme-dark">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { width: 100%; height: 100%; overflow: hidden; }
+
+:root, .theme-dark {
+  --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+  --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+  --border-color: #30363d; --accent: #58a6ff;
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-size: 13px;
+}
+body { font-family: var(--font-ui); font-size: var(--font-size); color: var(--text-primary); background: var(--bg-primary); }
+
+/* ═══ Grid Layout ═══ */
+#app {
+  display: grid;
+  grid-template-columns: 48px 260px 1fr;
+  grid-template-rows: 30px 1fr 22px;
+  background: var(--bg-primary);
+}
+
+/* ═══ Titlebar (span all columns) ═══ */
+.titlebar {
+  grid-column: 1 / -1; grid-row: 1;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+}
+.app-logo {
+  width: 24px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); font-weight: bold; font-size: 14px;
+}
+.menu-items {
+  display: flex; margin-left: 12px; gap: 2px;
+  align-items: center;
+}
+.menu-item {
+  padding: 2px 8px; font-size: 12px; color: var(--text-secondary);
+  display: flex; align-items: center;
+}
+.menu-item.active { color: var(--text-primary); }
+.titlebar-title {
+  margin-left: auto; font-size: 12px; color: var(--text-muted);
+}
+
+/* ═══ Activity Bar ═══ */
+.activity-bar {
+  grid-column: 1; grid-row: 2;
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--bg-primary);
+  padding-top: 8px; gap: 4px;
+}
+.activity-btn {
+  width: 40px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--text-muted);
+  border-radius: 4px;
+}
+.activity-btn.active {
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 0;
+}
+
+/* ═══ Sidebar ═══ */
+.sidebar {
+  grid-column: 2; grid-row: 2;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  padding: 8px 0; min-width: 0;
+  overflow: hidden;
+}
+.sidebar-header {
+  padding: 4px 16px; font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.sidebar-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 16px; font-size: 13px; color: var(--text-secondary);
+}
+.sidebar-item .icon { color: var(--accent); font-size: 11px; }
+.sidebar-item .icon-dir { color: #d29922; font-size: 11px; }
+.sidebar-indent { padding-left: 28px; }
+
+/* ═══ Main Area ═══ */
+.main-area {
+  grid-column: 3; grid-row: 2;
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--bg-primary);
+}
+
+/* Editor tabs */
+.editor-tabs {
+  display: flex; align-items: stretch;
+  height: 35px; background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+.editor-tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px; font-size: 12px; color: var(--text-muted);
+  border-right: 1px solid var(--border-color);
+  min-width: 0;
+}
+.editor-tab.active { color: var(--text-primary); background: var(--bg-primary); }
+.editor-tab .close { font-size: 10px; color: var(--text-muted); }
+
+/* Code area */
+.editor-content {
+  flex: 1; display: flex; min-height: 0;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px; line-height: 1.5;
+}
+.line-numbers {
+  width: 48px; padding: 8px 8px; text-align: right;
+  color: var(--text-muted); background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  user-select: none;
+}
+.line-numbers div { height: 19.5px; }
+.code-lines {
+  flex: 1; padding: 8px 16px; color: var(--text-primary);
+  overflow: hidden;
+}
+.code-lines div { height: 19.5px; white-space: pre; }
+.code-keyword { color: #ff7b72; }
+.code-string { color: #a5d6ff; }
+.code-comment { color: #8b949e; font-style: italic; }
+.code-func { color: #d2a8ff; }
+.code-number { color: #79c0ff; }
+
+/* ═══ Status Bar ═══ */
+.statusbar {
+  grid-column: 1 / -1; grid-row: 3;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  padding: 0 8px; font-size: 12px; color: var(--text-secondary);
+}
+.statusbar-left { display: flex; align-items: center; gap: 12px; }
+.statusbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.statusbar-item { display: flex; align-items: center; gap: 4px; overflow: hidden; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ═══ Titlebar ═══ -->
+  <div class="titlebar">
+    <div class="app-logo">P</div>
+    <div class="menu-items">
+      <div class="menu-item">File</div>
+      <div class="menu-item">Edit</div>
+      <div class="menu-item">Selection</div>
+      <div class="menu-item">View</div>
+      <div class="menu-item active">Help</div>
+    </div>
+    <div class="titlebar-title">PairCode IDE</div>
+  </div>
+
+  <!-- ═══ Activity Bar ═══ -->
+  <div class="activity-bar">
+    <div class="activity-btn active">[F]</div>
+    <div class="activity-btn">[S]</div>
+    <div class="activity-btn">[G]</div>
+    <div class="activity-btn">[R]</div>
+    <div class="activity-btn">[C]</div>
+  </div>
+
+  <!-- ═══ Sidebar ═══ -->
+  <div class="sidebar">
+    <div class="sidebar-header">Explorer</div>
+    <div class="sidebar-item">
+      <span class="icon-dir">&#9660;</span>
+      <span>src</span>
+    </div>
+    <div class="sidebar-item sidebar-indent">
+      <span class="icon">&#128196;</span>
+      <span>main.go</span>
+    </div>
+    <div class="sidebar-item sidebar-indent">
+      <span class="icon">&#128196;</span>
+      <span>app.go</span>
+    </div>
+    <div class="sidebar-item sidebar-indent">
+      <span class="icon-dir">&#9654;</span>
+      <span>components</span>
+    </div>
+    <div class="sidebar-item">
+      <span class="icon">&#128196;</span>
+      <span>README.md</span>
+    </div>
+  </div>
+
+  <!-- ═══ Main Area ═══ -->
+  <div class="main-area">
+    <div class="editor-tabs">
+      <div class="editor-tab active">
+        <span>main.go</span>
+        <span class="close">x</span>
+      </div>
+      <div class="editor-tab">
+        <span>app.go</span>
+        <span class="close">x</span>
+      </div>
+    </div>
+    <div class="editor-content">
+      <div class="line-numbers">
+        <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div>
+        <div>6</div><div>7</div><div>8</div><div>9</div><div>10</div>
+        <div>11</div><div>12</div>
+      </div>
+      <div class="code-lines">
+        <div><span class="code-keyword">package</span> main</div>
+        <div></div>
+        <div><span class="code-keyword">import</span> (</div>
+        <div>  <span class="code-string">"fmt"</span></div>
+        <div>)</div>
+        <div></div>
+        <div><span class="code-keyword">func</span> <span class="code-func">main</span>() {</div>
+        <div>  fmt.Println(<span class="code-string">"Hello"</span>)</div>
+        <div>}</div>
+        <div></div>
+        <div><span class="code-comment">// TODO: add logic</span></div>
+        <div><span class="code-keyword">func</span> <span class="code-func">run</span>() <span class="code-keyword">error</span> {</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Status Bar ═══ -->
+  <div class="statusbar">
+    <div class="statusbar-left">
+      <div class="statusbar-item">main</div>
+      <div class="statusbar-item">0 problems</div>
+    </div>
+    <div class="statusbar-right">
+      <div class="statusbar-item">UTF-8</div>
+      <div class="statusbar-item">Ln 1, Col 1</div>
+      <div class="statusbar-item">Go</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

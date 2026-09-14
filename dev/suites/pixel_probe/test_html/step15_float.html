@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+.float-box { width: 100px; height: 60px; line-height: 60px; text-align: center; }
+
+.float-left { float: left; background: #1f6feb; margin: 4px; }
+.float-right { float: right; background: #d29922; margin: 4px; }
+.float-clear { clear: both; background: #21262d; border: 1px solid #30363d; padding: 8px; margin-top: 8px; }
+
+.float-wrap-container { width: 400px; background: #21262d; border: 1px solid #30363d; padding: 8px; }
+.float-img { float: left; width: 80px; height: 80px; background: #3fb950; margin-right: 12px; text-align: center; line-height: 80px; }
+.float-text { color: #8b949e; font-size: 12px; line-height: 1.6; }
+
+/* ── Multi float layout ── */
+.multi-float { background: #21262d; border: 1px solid #30363d; padding: 8px; min-height: 100px; }
+.mf-item { float: left; width: 60px; height: 40px; line-height: 40px; text-align: center; margin: 4px; background: #1f6feb; }
+.mf-item:nth-child(3n) { background: #d29922; }
+.mf-item:nth-child(4n) { background: #f85149; }
+
+/* ── Clearfix ── */
+.clearfix::after { content: ""; display: table; clear: both; }
+
+/* ── 2-column float layout ── */
+.two-col { background: #21262d; border: 1px solid #30363d; }
+.col-left { float: left; width: 40%; height: 80px; background: #a371f7; text-align: center; line-height: 80px; }
+.col-right { float: right; width: 55%; height: 80px; background: #1f6feb; text-align: center; line-height: 80px; }
+
+.label { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h2>step15 — Float & Text Wrapping</h2>
+
+  <div class="section">
+    <div class="label">Simple float left / right / clear</div>
+    <div class="float-wrap-container">
+      <div class="float-box float-left">left</div>
+      <div class="float-box float-right">right</div>
+      <div class="float-clear">clear: both — this box clears all floats</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Text wrapping around floated element</div>
+    <div class="float-wrap-container">
+      <div class="float-img">image</div>
+      <div class="float-text">
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Multiple floats — gallery layout</div>
+    <div class="multi-float clearfix">
+      <div class="mf-item">1</div>
+      <div class="mf-item">2</div>
+      <div class="mf-item">3</div>
+      <div class="mf-item">4</div>
+      <div class="mf-item">5</div>
+      <div class="mf-item">6</div>
+      <div class="mf-item">7</div>
+      <div class="mf-item">8</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">2-column float layout</div>
+    <div class="two-col clearfix">
+      <div class="col-left">sidebar 40%</div>
+      <div class="col-right">content 55%</div>
+    </div>
+  </div>
+</body>
+</html>

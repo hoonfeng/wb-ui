@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+/* ── Flex container nesting ── */
+.flex-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.flex-col { display: flex; flex-direction: column; gap: 4px; }
+.flex-item { padding: 8px 12px; background: #21262d; border: 1px solid #30363d; text-align: center; }
+.flex-item.blue { background: #1f6feb; }
+.flex-item.green { background: #3fb950; }
+.flex-item.purple { background: #a371f7; }
+.flex-item.orange { background: #d29922; }
+
+/* ── Grid container nesting ── */
+.grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.grid-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.grid-item { padding: 12px; background: #21262d; border: 1px solid #30363d; text-align: center; }
+
+/* ── Flex-in-Grid ── */
+.flex-in-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; background: #0d1117; padding: 8px; border: 1px solid #30363d; margin-bottom: 8px; }
+.fig-sidebar { display: flex; flex-direction: column; gap: 4px; background: #21262d; padding: 8px; }
+.fig-content { display: flex; flex-wrap: wrap; gap: 4px; background: #21262d; padding: 8px; }
+.fig-btn { padding: 6px 10px; background: #1f6feb; text-align: center; }
+
+/* ── Grid-in-Flex ── */
+.grid-in-flex { display: flex; gap: 8px; background: #0d1117; padding: 8px; border: 1px solid #30363d; margin-bottom: 8px; }
+.gif-card { display: grid; grid-template-columns: 1fr; gap: 4px; background: #21262d; padding: 8px; border: 1px solid #30363d; flex: 1; }
+.gif-header { background: #1f6feb; padding: 6px; text-align: center; }
+.gif-body { padding: 6px; text-align: center; color: #8b949e; }
+.gif-footer { background: #21262d; padding: 4px; text-align: center; border-top: 1px solid #30363d; }
+
+/* ── Percentage sizing ── */
+.pct-container { width: 100%; background: #0d1117; border: 1px solid #30363d; padding: 8px; }
+.pct-50 { width: 50%; height: 30px; background: #1f6feb; text-align: center; line-height: 30px; margin-bottom: 4px; }
+.pct-75 { width: 75%; height: 30px; background: #d29922; text-align: center; line-height: 30px; margin-bottom: 4px; }
+.pct-25 { width: 25%; height: 30px; background: #3fb950; text-align: center; line-height: 30px; }
+
+/* ── Nested padding/margin ── */
+.nest-outer { padding: 16px; background: #21262d; border: 1px solid #30363d; margin: 8px 0; }
+.nest-mid { padding: 12px; background: #0d1117; border: 1px solid #30363d; }
+.nest-inner { padding: 8px; background: #1f6feb; text-align: center; }
+
+/* ── Mixed inline/block ── */
+.mixed-container { font-size: 13px; line-height: 1.6; }
+.mixed-container span { color: #d29922; }
+.mixed-container .highlight { background: #1f6feb22; padding: 2px 4px; border-radius: 2px; }
+.inline-block-demo { display: inline-block; width: 80px; height: 40px; background: #a371f7; text-align: center; line-height: 40px; margin: 2px; }
+
+.label { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h2>step18 — Complex Nested Layouts</h2>
+
+  <div class="section">
+    <div class="label">Nested Flex (row + column)</div>
+    <div class="flex-row">
+      <div class="flex-item blue">A</div>
+      <div class="flex-col">
+        <div class="flex-item green">B1</div>
+        <div class="flex-item green">B2</div>
+      </div>
+      <div class="flex-item purple">C</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Nested Grid (2-col + 3-col)</div>
+    <div class="grid-2col">
+      <div class="grid-item blue">Left</div>
+      <div class="grid-3col">
+        <div class="grid-item">A</div>
+        <div class="grid-item">B</div>
+        <div class="grid-item">C</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Flex in Grid</div>
+    <div class="flex-in-grid">
+      <div class="fig-sidebar">
+        <div class="fig-btn">Home</div>
+        <div class="fig-btn">About</div>
+        <div class="fig-btn">Contact</div>
+      </div>
+      <div class="fig-content">
+        <div class="fig-btn" style="background:#3fb950">Card 1</div>
+        <div class="fig-btn" style="background:#d29922">Card 2</div>
+        <div class="fig-btn" style="background:#f85149">Card 3</div>
+        <div class="fig-btn" style="background:#a371f7">Card 4</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Grid in Flex (card layout)</div>
+    <div class="grid-in-flex">
+      <div class="gif-card">
+        <div class="gif-header">Card 1</div>
+        <div class="gif-body">Content for card one with some description text.</div>
+        <div class="gif-footer">footer</div>
+      </div>
+      <div class="gif-card">
+        <div class="gif-header">Card 2</div>
+        <div class="gif-body">Content for card two with longer description.</div>
+        <div class="gif-footer">footer</div>
+      </div>
+      <div class="gif-card">
+        <div class="gif-header">Card 3</div>
+        <div class="gif-body">Card three content.</div>
+        <div class="gif-footer">footer</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Percentage-based sizing</div>
+    <div class="pct-container">
+      <div class="pct-50">50% width</div>
+      <div class="pct-75">75% width</div>
+      <div class="pct-25">25% width</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Nested padding & margin</div>
+    <div class="nest-outer">
+      Outer box (padding: 16px)
+      <div class="nest-mid">
+        Middle box (padding: 12px)
+        <div class="nest-inner">Inner box (padding: 8px)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Mixed inline/block and inline-block</div>
+    <div class="mixed-container">
+      This is <span>inline text</span> with a <span class="highlight">highlighted span</span>.
+      <div class="inline-block-demo">IB 1</div>
+      <div class="inline-block-demo">IB 2</div>
+      <div class="inline-block-demo">IB 3</div>
+    </div>
+  </div>
+</body>
+</html>

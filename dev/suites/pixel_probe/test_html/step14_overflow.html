@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+.box { width: 120px; height: 60px; display: inline-block; margin-right: 20px; vertical-align: top; }
+
+.overflow-visible { overflow: visible; background: #21262d; border: 1px solid #30363d; }
+.overflow-visible .inner { width: 160px; height: 40px; background: #1f6feb; }
+
+.overflow-hidden { overflow: hidden; background: #21262d; border: 1px solid #30363d; }
+.overflow-hidden .inner { width: 160px; height: 40px; background: #d29922; }
+
+.overflow-scroll { overflow: scroll; background: #21262d; border: 1px solid #30363d; }
+.overflow-scroll .inner { width: 200px; height: 80px; background: #3fb950; }
+
+.overflow-auto { overflow: auto; background: #21262d; border: 1px solid #30363d; }
+.overflow-auto .inner { width: 160px; height: 40px; background: #a371f7; }
+
+.long-text { overflow: hidden; background: #21262d; border: 1px solid #30363d; width: 200px; height: 40px; margin-bottom: 8px; }
+.long-text-hidden { overflow: hidden; background: #21262d; border: 1px solid #30363d; width: 200px; }
+
+/* ── Scrollable content ── */
+.scroll-container { overflow: auto; width: 200px; height: 100px; background: #21262d; border: 1px solid #30363d; }
+.scroll-item { height: 30px; line-height: 30px; padding: 0 8px; border-bottom: 1px solid #30363d; }
+
+/* ── text-overflow ── */
+.text-overflow { width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #21262d; border: 1px solid #30363d; padding: 8px; }
+
+.label { font-size: 11px; color: #8b949e; margin-bottom: 6px; }
+.info { font-size: 11px; color: #8b949e; text-align: center; }
+</style>
+</head>
+<body>
+  <h2>step14 — Overflow & Clipping</h2>
+
+  <div class="section">
+    <div class="label">overflow: visible (content overflows)</div>
+    <div class="box overflow-visible">
+      <div class="inner">overflow visible</div>
+    </div>
+
+    <div class="label" style="margin-top:50px">overflow: hidden (clipped)</div>
+    <div class="box overflow-hidden">
+      <div class="inner">overflow hidden</div>
+    </div>
+
+    <div class="label" style="margin-top:70px">overflow: scroll (scrollable)</div>
+    <div class="box overflow-scroll">
+      <div class="inner">overflow scroll</div>
+    </div>
+
+    <div class="label" style="margin-top:50px">overflow: auto (auto scroll)</div>
+    <div class="box overflow-auto">
+      <div class="inner">overflow auto</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Text overflow: hidden with ellipsis</div>
+    <div class="text-overflow">This is a very long text that should be truncated with ellipsis</div>
+  </div>
+
+  <div class="section">
+    <div class="label">Scrollable container with items</div>
+    <div class="scroll-container">
+      <div class="scroll-item">Item 1 — alpha</div>
+      <div class="scroll-item">Item 2 — beta</div>
+      <div class="scroll-item">Item 3 — gamma</div>
+      <div class="scroll-item">Item 4 — delta</div>
+      <div class="scroll-item">Item 5 — epsilon</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html class="theme-dark">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+:root, .theme-dark {
+  --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+  --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+  --border-color: #30363d; --accent: #58a6ff;
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-size: 13px;
+}
+body { font-family: var(--font-ui); font-size: var(--font-size); color: var(--text-primary); background: var(--bg-primary); }
+
+#app {
+  display: grid;
+  grid-template-columns: 48px 280px 1fr;
+  grid-template-rows: 30px 1fr 22px;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.titlebar {
+  grid-column: 1 / -1; grid-row: 1;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 8px;
+}
+.titlebar-title { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+.activity-bar {
+  grid-column: 1; grid-row: 2;
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--bg-primary); padding-top: 8px;
+}
+
+/* ═══ SIDEBAR — File Tree ═══ */
+.sidebar {
+  grid-column: 2; grid-row: 2;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+/* Sidebar header with toolbar */
+.sidebar-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 16px; font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 1px;
+  border-bottom: 1px solid var(--border-color);
+}
+.sidebar-actions { display: flex; gap: 8px; font-size: 14px; color: var(--text-muted); }
+
+/* File tree items */
+.file-tree {
+  flex: 1; overflow: auto; padding: 4px 0;
+}
+.tree-item {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 12px; font-size: 13px; color: var(--text-secondary);
+  height: 24px; cursor: default;
+}
+.tree-item.active {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+.tree-item:hover { background: rgba(255,255,255,0.04); }
+
+.tree-arrow {
+  width: 16px; text-align: center; font-size: 10px; color: var(--text-muted);
+  flex-shrink: 0;
+}
+.tree-icon {
+  width: 16px; text-align: center; font-size: 12px; flex-shrink: 0;
+}
+.tree-icon.folder { color: #d29922; }
+.tree-icon.file-go { color: var(--accent); }
+.tree-icon.file-js { color: #f1e05a; }
+.tree-icon.file-css { color: #563d7c; }
+.tree-icon.file-md { color: var(--text-secondary); }
+.tree-icon.file-json { color: var(--text-muted); }
+.tree-icon.file-img { color: #a371f7; }
+.tree-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tree-badge {
+  margin-left: auto; font-size: 10px; padding: 0 6px;
+  border-radius: 8px; background: var(--bg-tertiary); color: var(--text-muted);
+}
+
+/* Indentation levels */
+.tree-depth-1 { padding-left: 28px; }
+.tree-depth-2 { padding-left: 44px; }
+.tree-depth-3 { padding-left: 60px; }
+
+/* ═══ Main Area ═══ */
+.main-area {
+  grid-column: 3; grid-row: 2;
+  display: flex; flex-direction: column;
+  background: var(--bg-primary);
+}
+.main-placeholder {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 14px;
+}
+
+/* ═══ Status Bar ═══ */
+.statusbar {
+  grid-column: 1 / -1; grid-row: 3;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  padding: 0 8px; font-size: 12px; color: var(--text-secondary);
+}
+.statusbar-left { display: flex; gap: 16px; }
+.statusbar-right { margin-left: auto; display: flex; gap: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="titlebar">
+    <span class="titlebar-title">PairCode IDE</span>
+  </div>
+
+  <div class="activity-bar">
+    <div style="color:var(--accent);font-weight:bold;font-size:11px;margin-top:12px">[F]</div>
+    <div style="font-size:11px;margin-top:8px;color:var(--text-muted)">[S]</div>
+    <div style="font-size:11px;margin-top:8px;color:var(--text-muted)">[G]</div>
+    <div style="font-size:11px;margin-top:8px;color:var(--text-muted)">[R]</div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Explorer</span>
+      <div class="sidebar-actions">
+        <span>+</span>
+        <span>...</span>
+      </div>
+    </div>
+
+    <div class="file-tree">
+      <!-- Root project folder (collapsed) -->
+      <div class="tree-item">
+        <span class="tree-arrow">&#9654;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">wb-ui</span>
+      </div>
+
+      <!-- Expanded src folder with files -->
+      <div class="tree-item tree-depth-1">
+        <span class="tree-arrow">&#9660;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">src</span>
+      </div>
+      <div class="tree-item tree-depth-2 active">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-go">G</span>
+        <span class="tree-label">main.go</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-go">G</span>
+        <span class="tree-label">app.go</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-go">G</span>
+        <span class="tree-label">utils.go</span>
+      </div>
+
+      <!-- Nested components folder -->
+      <div class="tree-item tree-depth-1">
+        <span class="tree-arrow">&#9654;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">components</span>
+      </div>
+
+      <!-- Expanded styles folder with multiple file types -->
+      <div class="tree-item tree-depth-1">
+        <span class="tree-arrow">&#9660;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">styles</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-css">#</span>
+        <span class="tree-label">app.css</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-css">#</span>
+        <span class="tree-label">theme.css</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-js">J</span>
+        <span class="tree-label">bundle.js</span>
+      </div>
+
+      <!-- Root level files -->
+      <div class="tree-item">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-json">{</span>
+        <span class="tree-label">package.json</span>
+      </div>
+      <div class="tree-item">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-md">M</span>
+        <span class="tree-label">README.md</span>
+        <span class="tree-badge">2</span>
+      </div>
+      <div class="tree-item">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-img">I</span>
+        <span class="tree-label">logo.png</span>
+      </div>
+
+      <!-- Deeply nested (depth 3) -->
+      <div class="tree-item tree-depth-1">
+        <span class="tree-arrow">&#9660;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">deep</span>
+      </div>
+      <div class="tree-item tree-depth-2">
+        <span class="tree-arrow">&#9660;</span>
+        <span class="tree-icon folder">&#128193;</span>
+        <span class="tree-label">nested</span>
+      </div>
+      <div class="tree-item tree-depth-3">
+        <span class="tree-arrow"></span>
+        <span class="tree-icon file-go">G</span>
+        <span class="tree-label">deep_file.go</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-area">
+    <div class="main-placeholder">main.go</div>
+  </div>
+
+  <div class="statusbar">
+    <div class="statusbar-left">
+      <span>main.go</span>
+      <span>Go</span>
+    </div>
+    <div class="statusbar-right">
+      <span>Ln 1, Col 1</span>
+      <span>UTF-8</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

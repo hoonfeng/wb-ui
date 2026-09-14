@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Consolas', monospace; font-size: 14px; color: #e6edf3; background: #0d1117; padding: 20px; }
+
+h2 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; }
+.section { margin-bottom: 30px; border: 1px solid #30363d; padding: 16px; background: #161b22; }
+
+/* ── Form styling ── */
+label { display: block; margin-bottom: 4px; font-size: 12px; color: #8b949e; }
+
+input[type="text"], input[type="password"], input[type="email"], textarea {
+  width: 100%; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d;
+  color: #e6edf3; font-family: 'Consolas', monospace; font-size: 13px; border-radius: 4px; margin-bottom: 12px;
+}
+
+input[type="text"]:focus, input[type="password"]:focus { border-color: #58a6ff; outline: none; }
+
+button, input[type="submit"], input[type="reset"] {
+  padding: 8px 16px; background: #21262d; border: 1px solid #30363d;
+  color: #e6edf3; font-family: 'Consolas', monospace; font-size: 13px;
+  cursor: pointer; border-radius: 4px; margin-right: 8px;
+}
+button:hover, input[type="submit"]:hover { background: #30363d; }
+button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+
+.checkbox-group { margin: 8px 0; }
+.checkbox-group label { display: inline; font-size: 13px; color: #e6edf3; }
+input[type="checkbox"], input[type="radio"] { margin-right: 6px; }
+
+select {
+  padding: 6px 10px; background: #0d1117; border: 1px solid #30363d;
+  color: #e6edf3; font-family: 'Consolas', monospace; font-size: 13px;
+  border-radius: 4px; margin-bottom: 12px; width: 200px;
+}
+
+.field-row { display: flex; gap: 12px; align-items: flex-start; }
+.field-half { flex: 1; }
+
+textarea { height: 60px; resize: vertical; }
+
+.input-group { margin-bottom: 8px; }
+.input-group label { display: block; margin-bottom: 2px; font-size: 12px; color: #8b949e; }
+
+/* ── Progress bar ── */
+progress { width: 100%; height: 20px; margin: 8px 0; border-radius: 4px; }
+
+/* ── Range slider ── */
+input[type="range"] { width: 100%; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h2>step17 — Form Controls</h2>
+
+  <div class="section">
+    <div class="label">Text inputs</div>
+    <div class="input-group">
+      <label>Username</label>
+      <input type="text" value="admin" placeholder="Enter username">
+    </div>
+    <div class="input-group">
+      <label>Password</label>
+      <input type="password" value="password123" placeholder="Enter password">
+    </div>
+    <div class="input-group">
+      <label>Email</label>
+      <input type="email" value="user@example.com" placeholder="Enter email">
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Textarea</div>
+    <textarea>This is a textarea with some initial text content for testing rendering.</textarea>
+  </div>
+
+  <div class="section">
+    <div class="label">Buttons</div>
+    <button class="primary">Primary</button>
+    <button>Default</button>
+    <button>Cancel</button>
+    <input type="submit" value="Submit">
+    <input type="reset" value="Reset">
+  </div>
+
+  <div class="section">
+    <div class="label">Checkboxes</div>
+    <div class="checkbox-group">
+      <input type="checkbox" checked> <label>Option A (checked)</label>
+    </div>
+    <div class="checkbox-group">
+      <input type="checkbox"> <label>Option B (unchecked)</label>
+    </div>
+    <div class="checkbox-group">
+      <input type="checkbox" checked> <label>Option C (checked)</label>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Radio buttons</div>
+    <div class="checkbox-group">
+      <input type="radio" name="radio-group" checked> <label>Radio 1 (selected)</label>
+    </div>
+    <div class="checkbox-group">
+      <input type="radio" name="radio-group"> <label>Radio 2</label>
+    </div>
+    <div class="checkbox-group">
+      <input type="radio" name="radio-group"> <label>Radio 3</label>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">Select / Dropdown</div>
+    <select>
+      <option>Option 1 — development</option>
+      <option selected>Option 2 — staging</option>
+      <option>Option 3 — production</option>
+      <option>Option 4 — testing</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <div class="label">Progress bar</div>
+    <progress value="60" max="100">60%</progress>
+  </div>
+
+  <div class="section">
+    <div class="label">Range slider</div>
+    <input type="range" min="0" max="100" value="40">
+  </div>
+</body>
+</html>

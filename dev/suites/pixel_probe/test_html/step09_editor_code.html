@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html class="theme-dark">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+:root, .theme-dark {
+  --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+  --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+  --border-color: #30363d; --accent: #58a6ff;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+  --font-size: 13px;
+}
+body { font-family: 'Inter', system-ui, sans-serif; font-size: var(--font-size); color: var(--text-primary); background: var(--bg-primary); }
+
+#app {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 35px 32px 1fr 22px;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+/* ═══ Tab Bar ═══ */
+.tab-bar {
+  grid-row: 1;
+  display: flex; align-items: stretch;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px; min-width: 0;
+  font-size: 12px; color: var(--text-muted);
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  cursor: default;
+}
+.tab.active {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--bg-primary);
+  margin-bottom: -1px;
+}
+.tab-icon { font-size: 11px; }
+.tab-icon.go { color: var(--accent); }
+.tab-icon.js { color: #f1e05a; }
+.tab-icon.css { color: #563d7c; }
+.tab-icon.md { color: var(--text-secondary); }
+.tab-close { font-size: 10px; color: var(--text-muted); }
+.tab.modified .tab-close { color: #d29922; }
+.tab .tab-modified-dot { width: 8px; height: 8px; border-radius: 50%; background: #d29922; }
+
+/* ═══ Breadcrumb Bar ═══ */
+.breadcrumb-bar {
+  grid-row: 2;
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 4px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px; color: var(--text-secondary);
+}
+.breadcrumb-sep { color: var(--text-muted); margin: 0 2px; }
+
+/* ═══ Editor Area ═══ */
+.editor-area {
+  grid-row: 3;
+  display: flex; min-height: 0;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.5;
+  background: var(--bg-primary);
+}
+
+/* Line numbers */
+.line-numbers {
+  width: 52px; flex-shrink: 0;
+  padding: 8px 0; text-align: right;
+  color: var(--text-muted); background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  user-select: none; overflow: hidden;
+}
+.line-numbers .ln { height: 19.5px; padding-right: 8px; font-size: 12px; }
+.line-numbers .ln.active { color: var(--text-primary); }
+
+/* Code content */
+.code-content {
+  flex: 1; padding: 8px 0; overflow: auto;
+}
+.code-line {
+  display: block;
+  height: 19.5px; white-space: pre;
+  padding: 0 16px;
+}
+
+/* Syntax highlighting colors */
+.kw  { color: #ff7b72; }  /* keyword: package, import, func, return, if, for */
+.str { color: #a5d6ff; }  /* string */
+.cm  { color: #8b949e; font-style: italic; }  /* comment */
+.fn  { color: #d2a8ff; }  /* function name */
+.num { color: #79c0ff; }  /* number */
+.type { color: #ffa657; } /* type name */
+.op  { color: #e6edf3; }  /* operator */
+.var { color: #ffa657; }  /* variable */
+.builtin { color: #d2a8ff; } /* builtin */
+.directive { color: #8b949e; } /* preprocessor */
+
+/* Scrollbar hint */
+.scroll-hint {
+  position: fixed; bottom: 30px; right: 20px;
+  color: var(--text-muted); font-size: 11px;
+  background: var(--bg-tertiary); padding: 4px 10px;
+  border-radius: 4px; border: 1px solid var(--border-color);
+}
+
+/* ═══ Status Bar ═══ */
+.statusbar {
+  grid-row: 4;
+  display: flex; align-items: center;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  padding: 0 12px; font-size: 12px; color: var(--text-secondary);
+}
+.statusbar-left { display: flex; align-items: center; gap: 12px; }
+.statusbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ═══ Tab Bar ═══ -->
+  <div class="tab-bar">
+    <div class="tab active">
+      <span class="tab-icon go">G</span>
+      <span>main.go</span>
+      <span class="tab-close">x</span>
+    </div>
+    <div class="tab modified">
+      <span class="tab-icon js">J</span>
+      <span>app.js</span>
+      <span class="tab-modified-dot"></span>
+    </div>
+    <div class="tab">
+      <span class="tab-icon css">#</span>
+      <span>styles.css</span>
+      <span class="tab-close">x</span>
+    </div>
+    <div class="tab">
+      <span class="tab-icon md">M</span>
+      <span>README.md</span>
+      <span class="tab-close">x</span>
+    </div>
+  </div>
+
+  <!-- ═══ Breadcrumb ═══ -->
+  <div class="breadcrumb-bar">
+    <span>src</span>
+    <span class="breadcrumb-sep">/</span>
+    <span>main.go</span>
+  </div>
+
+  <!-- ═══ Editor ═══ -->
+  <div class="editor-area">
+    <div class="line-numbers">
+      <div class="ln active">1</div><div class="ln">2</div><div class="ln">3</div>
+      <div class="ln">4</div><div class="ln">5</div><div class="ln">6</div>
+      <div class="ln">7</div><div class="ln">8</div><div class="ln">9</div>
+      <div class="ln">10</div><div class="ln">11</div><div class="ln">12</div>
+      <div class="ln">13</div><div class="ln">14</div><div class="ln">15</div>
+      <div class="ln">16</div><div class="ln">17</div><div class="ln">18</div>
+    </div>
+    <div class="code-content">
+      <div class="code-line"><span class="kw">package</span> main</div>
+      <div class="code-line"></div>
+      <div class="code-line"><span class="kw">import</span> (</div>
+      <div class="code-line">  <span class="str">"fmt"</span></div>
+      <div class="code-line">  <span class="str">"net/http"</span></div>
+      <div class="code-line">  <span class="str">"os"</span></div>
+      <div class="code-line">)</div>
+      <div class="code-line"></div>
+      <div class="code-line"><span class="kw">const</span> <span class="var">port</span> = <span class="num">8080</span></div>
+      <div class="code-line"></div>
+      <div class="code-line"><span class="kw">func</span> <span class="fn">main</span>() {</div>
+      <div class="code-line">  <span class="kw">if</span> <span class="builtin">len</span>(os.Args) &gt; <span class="num">1</span> {</div>
+      <div class="code-line">    fmt.Println(<span class="str">"Hello, World!"</span>)</div>
+      <div class="code-line">  }</div>
+      <div class="code-line"></div>
+      <div class="code-line">  http.HandleFunc(<span class="str">"/"</span>, <span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {</div>
+      <div class="code-line">    w.Write([]<span class="type">byte</span>(<span class="str">"&lt;h1&gt;wb-ui WebKit&lt;/h1&gt;"</span>))</div>
+      <div class="code-line">  })</div>
+      <div class="code-line">  log.Fatal(http.ListenAndServe(<span class="str">":8080"</span>, <span class="kw">nil</span>))</div>
+      <div class="code-line"><span class="cm">//  log.Println("Server started")</span></div>
+      <div class="code-line">}</div>
+    </div>
+  </div>
+
+  <!-- ═══ Status Bar ═══ -->
+  <div class="statusbar">
+    <div class="statusbar-left">
+      <span>Go</span>
+      <span>&#9679; main</span>
+    </div>
+    <div class="statusbar-right">
+      <span>Ln 9, Col 16</span>
+      <span>Spaces: 2</span>
+      <span>UTF-8</span>
+      <span>Go 1.26</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

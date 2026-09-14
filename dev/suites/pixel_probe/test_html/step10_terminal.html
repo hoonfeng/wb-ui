@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html class="theme-dark">
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+:root, .theme-dark {
+  --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-tertiary: #21262d;
+  --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
+  --border-color: #30363d; --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+  --font-size: 13px;
+}
+body { font-family: 'Inter', system-ui, sans-serif; font-size: var(--font-size); color: var(--text-primary); background: var(--bg-primary); }
+
+#app {
+  display: flex; flex-direction: column;
+  height: 100%; background: var(--bg-primary);
+}
+
+/* ═══ Terminal Panel Header ═══ */
+.terminal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 12px; font-size: 12px; color: var(--text-secondary);
+  background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color);
+}
+.terminal-tabs { display: flex; gap: 2px; }
+.terminal-tab {
+  padding: 2px 10px; border-radius: 3px; cursor: default;
+}
+.terminal-tab.active { background: var(--bg-primary); color: var(--text-primary); }
+.terminal-actions { display: flex; gap: 8px; color: var(--text-muted); }
+
+/* ═══ Terminal Content ═══ */
+.terminal-content {
+  flex: 1; display: flex; flex-direction: column;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.4;
+  background: var(--bg-primary); padding: 8px 0;
+  overflow: auto; min-height: 0;
+}
+.terminal-line {
+  display: flex; align-items: center;
+  min-height: 18.2px; padding: 0 12px;
+  white-space: pre; font-size: 13px;
+}
+.terminal-line .prompt { color: var(--green); margin-right: 8px; }
+.terminal-line .cmd { color: var(--text-primary); }
+.terminal-line .output { color: var(--text-secondary); }
+.terminal-line .error { color: var(--red); }
+.terminal-line .info { color: var(--accent); }
+.terminal-line .warn { color: #d29922; }
+.terminal-line .dim { color: var(--text-muted); }
+.terminal-line .path { color: var(--accent); }
+
+/* ═══ Input line ═══ */
+.terminal-input-line {
+  display: flex; align-items: center;
+  padding: 2px 12px; min-height: 18.2px;
+  font-family: var(--font-mono); font-size: 13px;
+}
+.terminal-input-line .prompt { color: var(--green); margin-right: 8px; }
+.terminal-input-line .input { color: var(--text-primary); }
+.terminal-cursor {
+  display: inline-block; width: 8px; height: 14px;
+  background: var(--accent); margin-left: 1px;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ═══ Table-like output ═══ */
+.terminal-table { padding: 0 12px; }
+.terminal-table .row { display: flex; gap: 16px; font-size: 12px; }
+.terminal-table .col { color: var(--text-secondary); }
+.terminal-table .col:first-child { color: var(--text-primary); min-width: 80px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ═══ Terminal Header ═══ -->
+  <div class="terminal-header">
+    <div class="terminal-tabs">
+      <div class="terminal-tab active">PROBLEMS</div>
+      <div class="terminal-tab">OUTPUT</div>
+      <div class="terminal-tab active">TERMINAL</div>
+      <div class="terminal-tab">PORTS</div>
+    </div>
+    <div class="terminal-actions">
+      <span>+</span>
+      <span>_</span>
+      <span>X</span>
+    </div>
+  </div>
+
+  <!-- ═══ Terminal Output ═══ -->
+  <div class="terminal-content">
+    <div class="terminal-line">
+      <span class="dim">The terminal process terminated with exit code: 0</span>
+    </div>
+    <div class="terminal-line">
+      <span class="dim">Starting new terminal...</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="path">C:\work\wb-ui</span> <span class="dim">(main)</span>
+    </div>
+    <div class="terminal-line">
+      <span class="output">$ go build ./...</span>
+    </div>
+    <div class="terminal-line">
+      <span class="info">go: downloading github.com/hoonfeng/goskia v0.4.0</span>
+    </div>
+    <div class="terminal-line">
+      <span class="info">go: downloading github.com/dop251/goja v0.0.0-202503</span>
+    </div>
+    <div class="terminal-line">
+      <span class="output"># wb-ui/layout</span>
+    </div>
+    <div class="terminal-line">
+      <span class="output"># wb-ui/rendering</span>
+    </div>
+    <div class="terminal-line">
+      <span class="green">✓</span> <span class="output">Build complete (12 packages)</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="output">$ go test ./layout/...</span>
+    </div>
+    <div class="terminal-line">
+      <span class="green">✓</span> <span class="output">ok  wb-ui/layout  0.423s</span>
+    </div>
+    <div class="terminal-line">
+      <span class="output">$ go test ./rendering/...</span>
+    </div>
+    <div class="terminal-line">
+      <span class="green">✓</span> <span class="output">ok  wb-ui/rendering  0.512s</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="output">$ go vet ./...</span>
+    </div>
+    <div class="terminal-line">
+      <span class="warn">wb-ui/style/resolver.go:142:2</span>
+      <span class="output">  ineffectual assignment to field</span>
+    </div>
+    <div class="terminal-line">
+      <span class="warn">wb-ui/layout/flex.go:89:6</span>
+      <span class="output">  unused parameter</span>
+    </div>
+    <div class="terminal-line">
+      <span class="red">FAIL</span> <span class="output">go vet found 2 warnings</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="output">$ <span class="warn">npm</span> run build</span>
+    </div>
+    <div class="terminal-line">
+      <span class="info">&gt; wb-ui@1.0.0 build</span>
+    </div>
+    <div class="terminal-line">
+      <span class="info">&gt; vite build</span>
+    </div>
+    <div class="terminal-line">
+      <span class="green">✓</span> <span class="output">built in 2.3s</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="dim">[Info] 2026-07-24 09:15:22 Server started on port 9090</span>
+    </div>
+    <div class="terminal-line">
+      <span class="dim">[Info] 2026-07-24 09:15:23 Connected client #1</span>
+    </div>
+    <div class="terminal-line">
+      <span class="error">[Error] 2026-07-24 09:15:25 Failed to load: /api/config</span>
+    </div>
+    <div class="terminal-line">
+      <span class="warn">[Warn]  2026-07-24 09:15:30 Retry attempt 2/3</span>
+    </div>
+    <div class="terminal-line"></div>
+    <div class="terminal-line">
+      <span class="dim">Process returned exit code: 0</span>
+    </div>
+
+    <!-- ═══ Input Line ═══ -->
+    <div class="terminal-input-line">
+      <span class="prompt">$</span>
+      <span class="input">go run ./cmd/server</span>
+      <span class="terminal-cursor"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

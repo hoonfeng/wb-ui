@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:1280px; height:800px; font-family:Inter,system-ui,-apple-system,sans-serif; font-size:13px; color:#e6edf3; background:#0d1117; }
+.flex-row { display:flex; flex-direction:row; }
+.flex-col { display:flex; flex-direction:column; }
+</style>
+</head>
+<body style="display:flex;flex-direction:row;width:1280px;height:800px;overflow:hidden;">
+
+<!-- 活动栏 x=0 w=48 h=800 -->
+<div id="actbar" style="display:flex;flex-direction:column;width:48px;height:800px;background:#161b22;align-items:center;padding-top:8px;gap:0px;">
+  <div style="display:flex;flex-direction:column;width:48px;height:48px;align-items:center;justify-content:center;">
+    <span style="color:#e6edf3;font-size:16px;">A</span>
+  </div>
+  <div style="display:flex;flex-direction:column;width:48px;height:48px;align-items:center;justify-content:center;">
+    <span style="color:#7d8590;font-size:16px;">B</span>
+  </div>
+  <div style="display:flex;flex-direction:column;width:48px;height:48px;align-items:center;justify-content:center;">
+    <span style="color:#7d8590;font-size:16px;">C</span>
+  </div>
+</div>
+
+<!-- 主区域 flex-row x=48 w=1232 -->
+<div style="display:flex;flex-direction:row;width:1232px;height:800px;">
+
+  <!-- 侧边栏 x=48 w=280 -->
+  <div id="sidebar" style="display:flex;flex-direction:column;width:280px;height:800px;background:#161b22;border-right:1px solid #21262d;overflow-y:auto;">
+    <!-- 标题区域 -->
+    <div style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:8px 12px;height:31px;font-size:11px;font-weight:600;color:#7d8590;letter-spacing:0.5px;">
+      <span>EXPLORER</span>
+    </div>
+    <!-- "Files" 激活项 -->
+    <div style="display:flex;flex-direction:row;align-items:center;padding:6px 12px;height:37px;background:#1f6feb;color:#ffffff;font-size:13px;">
+      <span>Files</span>
+    </div>
+    <!-- "Search" -->
+    <div style="display:flex;flex-direction:row;align-items:center;padding:6px 12px;height:37px;color:#e6edf3;font-size:13px;">
+      <span>Search</span>
+    </div>
+    <!-- "Git" -->
+    <div style="display:flex;flex-direction:row;align-items:center;padding:6px 12px;height:37px;color:#e6edf3;font-size:13px;">
+      <span>Git</span>
+    </div>
+    <!-- 文件树 -->
+    <div style="display:flex;flex-direction:column;padding:4px 0;">
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:16px;"></span><span style="font-size:13px;">gou-ide</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">.git</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">cmd</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">companion.exe</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">go.mod</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">go.sum</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">internal</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">screenshots</span></div>
+      <div style="display:flex;flex-direction:row;align-items:center;padding:2px 8px;height:22px;"><span style="width:32px;"></span><span style="font-size:13px;">scripts</span></div>
+    </div>
+  </div>
+
+  <!-- 分隔条 x=328 w=3 (browser: sidebar 280 + separator) -->
+  <div style="width:3px;height:800px;background:#21262d;cursor:col-resize;"></div>
+
+  <!-- 右侧区域 x=331 w=949 -->
+  <div id="right" style="display:flex;flex-direction:column;width:949px;height:800px;background:#0d1117;">
+
+    <!-- 菜单栏 h=30 -->
+    <div id="menubar" style="display:flex;flex-direction:row;align-items:center;height:30px;padding:0 12px;background:#161b22;border-bottom:1px solid #21262d;font-size:13px;gap:4px;">
+      <span style="padding:4px 8px;border-radius:4px;">File</span>
+      <span style="padding:4px 8px;border-radius:4px;">Edit</span>
+      <span style="padding:4px 8px;border-radius:4px;">View</span>
+      <span style="padding:4px 8px;border-radius:4px;">帮助</span>
+    </div>
+
+    <!-- 标签栏 h=36 -->
+    <div id="tabs" style="display:flex;flex-direction:row;align-items:center;height:36px;background:#0d1117;border-bottom:1px solid #21262d;padding:0;">
+      <div style="display:flex;flex-direction:row;align-items:center;height:35px;padding:0 12px;background:#0d1117;border-right:1px solid #21262d;border-bottom:1px solid #f78166;color:#e6edf3;font-size:13px;">
+        <span>main.go</span>
+      </div>
+      <div style="display:flex;flex-direction:row;align-items:center;height:35px;padding:0 12px;background:#161b22;border-right:1px solid #21262d;color:#7d8590;font-size:13px;">
+        <span>config.json</span>
+      </div>
+    </div>
+
+    <!-- 编辑区域 flex-col h=剩余 -->
+    <div id="editor" style="display:flex;flex-direction:column;flex:1;background:#0d1117;font-family:'Cascadia Code',Consolas,monospace;font-size:13px;line-height:21px;">
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">1</span>
+        <span style="color:#ff7b72;">package</span><span style="color:#e6edf3;"> main</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">2</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">3</span>
+        <span style="color:#ff7b72;">import</span><span style="color:#a5d6ff;"> "fmt"</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">4</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">5</span>
+        <span style="color:#ff7b72;">func</span><span style="color:#d2a8ff;"> main</span><span style="color:#e6edf3;">() {</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">6</span>
+        <span style="color:#e6edf3;">  fmt.</span><span style="color:#d2a8ff;">Println</span><span style="color:#e6edf3;">(</span><span style="color:#a5d6ff;">"Hello World"</span><span style="color:#e6edf3;">)</span>
+      </div>
+      <div style="display:flex;flex-direction:row;height:21px;">
+        <span style="width:50px;text-align:right;padding-right:12px;color:#484f58;">7</span>
+        <span style="color:#e6edf3;">}</span>
+      </div>
+    </div>
+
+    <!-- 状态栏 h=24 -->
+    <div id="statusbar" style="display:flex;flex-direction:row;align-items:center;height:24px;padding:0 12px;background:#161b22;border-top:1px solid #21262d;font-size:12px;color:#7d8590;gap:12px;">
+      <span>Go 1.26</span>
+      <span>LF</span>
+      <span>UTF-8</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
