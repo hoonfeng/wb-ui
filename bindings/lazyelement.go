@@ -232,6 +232,7 @@ var (
 		"attributes", "innerHTML", "outerHTML", "textContent", "content",
 		"getContext", "width", "height", "toDataURL",
 		"track", "textTracks",
+		"requestFullscreen", "exitFullscreen", "fullscreenElement", "fullscreenEnabled",
 	}
 )
 
@@ -1197,6 +1198,14 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			}
 			return jsc.Undefined()
 		}}, true
+	case "requestFullscreen":
+		// HTML §4.11.6：进入全屏（document.fullscreenElement 指向该元素、
+		// CSS :fullscreen 生效、异步派发 fullscreenchange）。真实窗口全屏由
+		// 宿主经 bindings.OnFullscreenChanged 决定。
+		return funcVal(rt.NewNativeFunction("requestFullscreen",
+			func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				return requestFullscreenFor(in, el)
+			}, 0)), nil, true
 	case "innerHTML":
 		return jsc.JSValue{}, &elemAccessor{
 			get: func() jsc.JSValue { return jsc.StringValue(el.GetInnerHTML()) },

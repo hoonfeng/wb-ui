@@ -478,6 +478,21 @@ center {
 	   center，legacy-center 夹具的 .block-box 期望 x=150 实测 x=0。 */
 	text-align: -webkit-center;
 }
+
+/* --- Fullscreen (HTML §4.11.6 + Fullscreen spec §5) ---
+ * The fullscreen element is promoted to the viewport by the UA: Chromium's
+ * html.css pins :fullscreen:not(:root) with position fixed and inset 0.
+ * The :root case is excluded here because a fullscreened root element is
+ * already viewport-sized and pinning it would break document scrolling. */
+:fullscreen:not(:root) {
+	position: fixed;
+	inset: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+}
 `
 
 // NewUAStyleSheet parses the UA default CSS and returns a CSSStyleSheet

@@ -53,6 +53,13 @@ var OnInlineStyleChanged func(node dom.Node)
 // 否则后代 ResolveElement 命中旧缓存（光标 display:none 不可见）。
 var OnClassChanged func(el *dom.Element)
 
+// OnFullscreenChanged is an optional callback invoked when the document's
+// fullscreen element changes (HTML §4.11.6). Style recalculation does not need
+// it: the implementation also fires OnClassChanged, which is the existing
+// "computed style invalid + render tree dirty" path. Embedders use this hook
+// when they want to do something host-specific (e.g. toggle a real window).
+var OnFullscreenChanged func(el *dom.Element)
+
 // OnImageSrcChanged is an optional callback invoked when an <img>/<video>
 // element's src attribute changes (el.src = ...). The embedder clears the
 // render box's decoded-image cache and marks the render tree dirty so the
@@ -2715,6 +2722,22 @@ obj.SetInternal(doc)
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(doc.Title()) }),
 		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { doc.SetTitle(v.ToString()) })
 	obj.SetAccessor("URL", strAcc(doc.URL()), nil)
+	// 全屏 API（HTML §4.11.6）：状态由 Element.requestFullscreen / 本方法维护，
+	// CSS 的 :fullscreen 与 fullscreenchange 事件消费它。是否把宿主窗口真的切到
+	// 全屏由宿主决定（见 bindings.OnFullscreenChanged）。
+	obj.SetAccessor("fullscreenElement", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if fe := doc.FullscreenElement(); fe != nil {
+			return jsc.ObjectValue(wrapElement(in, fe))
+		}
+		return jsc.Null()
+	}), nil)
+	obj.SetAccessor("fullscreenEnabled", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.BooleanValue(true)
+	}), nil)
+	obj.Set("exitFullscreen", jsc.FunctionValue(jsc.NewNativeFunction("exitFullscreen",
+		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return exitFullscreenFor(in, doc)
+		}, 0)))
 	obj.SetAccessor("cookie", strAcc(""), nil)
 	obj.SetAccessor("compatMode", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		if doc.Quirks() {
