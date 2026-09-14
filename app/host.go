@@ -37,6 +37,7 @@ import (
 	"wb-ui/platform/graphics"
 	"wb-ui/platform/ime"
 	"wb-ui/platform/window"
+	"wb-ui/popover"
 	"wb-ui/rendering"
 	"wb-ui/style"
 	"wb-ui/webkit"
@@ -3697,6 +3698,10 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				// ── Active state ──
 				if rv != nil {
 					activeEl := rendering.HitTest(rv, cssX, cssY, "")
+					// popover light dismiss（pointerdown 阶段，HTML §6.12.2）：
+					// 必须在点击的默认行为之前记录；nil 命中（点在空白处）也要
+					// 记（规范同样记为 null，抬起时才会关闭）。
+					popover.LightDismissPointerDown(h.wv.Document(), activeEl)
 					if activeEl != nil {
 						if debugPaintLog {
 							log.Printf("[dbg/click] hit=%s class=%q type=%q", activeEl.LocalName(), activeEl.ClassName(), activeEl.GetAttribute("type"))
@@ -4142,6 +4147,12 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 					}
 					break
 				}
+				// ── popover light dismiss（pointerup 阶段，HTML §6.12.2）──
+				// 与 pointerdown 记录的目标一致才关闭：在 popover 内部按住、
+				// 拖到外面松开（选文本）不该误关。命中用抬起位置重新计算。
+				if rv != nil {
+					popover.LightDismissPointerUp(h.wv.Document(), rendering.HitTest(rv, ev.X/csX, ev.Y/csY, ""))
+				}
 				// ── Clear active state ──
 				if h.activeEl != nil {
 					h.activeEl.SetActive(false)
@@ -4319,6 +4330,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 				}
 				if prevented {
 					break // JS preventDefault：引擎不做默认编辑/滚动
+				}
+			}
+			// close request（HTML 的 close watcher 语义）：Esc 未被页面
+			// preventDefault 时关闭最上层的 auto/hint popover。没有可关闭的
+			// popover 时 CloseRequest 返回 false，按键继续走下面的默认行为
+			// （编辑/滚动）。
+			if ev.Key == int(glfw.KeyEscape) &&
+				(ev.Action == int(glfw.Press) || ev.Action == int(glfw.Repeat)) {
+				if h.wv.CloseRequest() {
+					break
 				}
 			}
 			// ★ Text editing keys (backspace/delete/arrows/home/end) take
@@ -4920,12 +4941,13 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// Dispatch a bubbling DOM click so JS listeners (Vue @click,
 		// addEventListener) fire — previously they never ran, so every
 		// button/icon/switch click did nothing.
+		clickPrevented := false
 		if deepest != nil {
 			// ★ click 必须携带 clientX/clientY（浏览器标准：click 坐标 = 触发
 			// 它的 mousedown/mouseup 坐标）。此前用 NewMouseEvent（clientX/Y=0）
 			// 派发 → CM6 等用 event.clientY 计算点击行的库全部错位（行号差
 			// 一行/恒 0）。
-			deepest.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+			clickPrevented = !deepest.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
 				EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
 				ClientX:   clickCSSX,
 				ClientY:   clickCSSY,
@@ -4940,6 +4962,13 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		if deepest != nil {
 			handleFormSubmitClick(deepest)
 			handleLabelToggle(deepest)
+			// Popover invoker 的激活行为（HTML §6.12.1 的 popovertarget 与 button
+			// 的 commandfor/command 命令）：它属于 click 的默认行为，因此页面
+			// preventDefault 时不做。source 是该 invoker —— ToggleEvent.source
+			// 唯一非 null 的场景。
+			if !clickPrevented {
+				popover.RunActivation(deepest, deepest)
+			}
 			if deepest.LocalName() == "a" {
 				h.handleAnchorClick(deepest)
 			}
@@ -5012,7 +5041,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	}
 	onclickVal := el.GetAttribute("onclick")
 	if onclickVal == "" {
-		el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+		clickPrevented := !el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
 			EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
 			ClientX:   clickCSSX,
 			ClientY:   clickCSSY,
@@ -5025,6 +5054,10 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		}
 		handleFormSubmitClick(el)
 		handleLabelToggle(el)
+		// Popover invoker 的激活行为（click 的默认行为；preventDefault 时不做）。
+		if !clickPrevented {
+			popover.RunActivation(el, el)
+		}
 		if el.LocalName() == "a" {
 			h.handleAnchorClick(el)
 		}
@@ -5105,7 +5138,7 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		h.wv.RebuildRenderTree()
 		return
 	}
-	el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+	clickPrevented := !el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
 		EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
 		ClientX:   clickCSSX,
 		ClientY:   clickCSSY,
@@ -5115,6 +5148,12 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	}))
 	if h.clickHandler != nil {
 		h.clickHandler(el, onclickVal, clickCSSX, clickCSSY)
+	}
+	// Popover invoker 的激活行为（HTML §6.12.1）：click 的默认行为，页面
+	// preventDefault 时不做——与上面另外两条 click 路径保持一致（否则带
+	// 旧式 onclick 属性的 invoker 点了没反应）。
+	if !clickPrevented {
+		popover.RunActivation(el, el)
 	}
 	h.processEventLoop()
 	h.wv.RebuildRenderTree()

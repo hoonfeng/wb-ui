@@ -30,6 +30,7 @@ import (
 	"wb-ui/bindings"
 	"wb-ui/dom"
 	"wb-ui/html5"
+	"wb-ui/popover"
 	"wb-ui/rendering"
 )
 
@@ -219,6 +220,13 @@ func (i *Interaction) MouseButton(x, y float64, button, action int) {
 		i.handleSelectPopup(rv, activeEl, x, y)
 		// ── checkbox / radio 点击切换（浏览器标准）──
 		i.handleCheckboxRadio(activeEl)
+		// ── popover light dismiss（HTML §6.12.2）──
+		// 规范把 light dismiss 挂在 pointerdown / pointerup 两个阶段：按下时
+		// 记下「最上层的被点击 popover」，抬起时只有命中同一个才真正关闭——
+		// 于是「在 popover 内部按住、拖到外面松开」（选文本）不会误关。
+		// pointerdown 必须发生在点击的默认行为（打开 popover 的 invoker）之前，
+		// 因此放在这里而不是 handleClick 里。
+		popover.LightDismissPointerDown(i.wv.Document(), activeEl)
 		i.markDirty()
 		return
 	}
@@ -237,6 +245,15 @@ func (i *Interaction) MouseButton(x, y float64, button, action int) {
 		return
 	}
 	i.pressed = false
+	// ── popover light dismiss（抬起阶段）──
+	// 命中元素用抬起位置重新做一次（可能已跨出 popover），由 light dismiss
+	// 自己比对与 pointerdown 是否同一目标。位置在 active 状态清除之前，与
+	// 下面的 click 目标判定使用同一套命中结果。
+	if popover.LightDismissPointerUp(i.wv.Document(), rendering.HitTest(rv, x, y, "")) {
+		// 关闭了 popover：后面的 click 仍按浏览器语义派发（作者可能同时
+		// 绑定了点击），只是命中结果可能因 popover 消失而变化。
+		i.markDirty()
+	}
 	// ★ 释放结束拖选（选区保留高亮，供输入替换/Ctrl+C）。
 	if ff := i.wv.FormFocus(); ff != nil {
 		ff.EndMouseSelect()
@@ -483,14 +500,21 @@ func (i *Interaction) handleClick(rv *rendering.RenderView, el *dom.Element, x, 
 			return
 		}
 	}
-	el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+	clickEv := dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
 		EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
 		ClientX:   x,
 		ClientY:   y,
 		Button:    dom.MouseButtonLeft,
 		Buttons:   1,
 		Detail:    1,
-	}))
+	})
+	prevented := !el.DispatchEvent(clickEv)
+	// Popover invoker 的激活行为（HTML §6.12.1 与 form-elements 里 button 的
+	// 激活行为）：popovertarget / commandfor 指向 popover 时切换/显示/隐藏它。
+	// 规范里这是 click 的默认行为，因此被 preventDefault 时不做。
+	if !prevented {
+		popover.RunActivation(el, el)
+	}
 	handleLabelToggle(el)
 }
 

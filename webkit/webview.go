@@ -23,6 +23,7 @@ import (
 	"wb-ui/layout"
 	"wb-ui/page"
 	"wb-ui/platform/graphics"
+	"wb-ui/popover"
 	"wb-ui/rendering"
 	"wb-ui/style"
 )
@@ -296,6 +297,30 @@ func installBridgeDispatch() {
 			}
 			return float64(wv.width), float64(wv.height), true
 		}
+		// popover（HTML §6.12）的异步任务队列：toggle 事件必须异步派发
+		// （规范 queue an element task），这里按元素找到所属 WebView 的 JS
+		// 事件循环。bindings 侧无法提供它——那里没有「元素 → 解释器」的映射，
+		// 而字体/样式等钩子只需要元素。无解释器（纯布局宿主/未初始化）时
+		// 退化为同步派发，保证状态机仍然推进。
+		popover.QueueTask = func(el *dom.Element, fn func()) {
+			wv := webViewForNode(el)
+			if wv == nil || wv.jsInterpreter == nil {
+				fn()
+				return
+			}
+			in := wv.jsInterpreter
+			loop := in.EnsureEventLoop()
+			if loop == nil {
+				fn()
+				return
+			}
+			cb := in.NewNativeFunction("popover_toggle_task",
+				func(*jsc.Interpreter, jsc.JSValue, []jsc.JSValue) jsc.JSValue {
+					fn()
+					return jsc.Undefined()
+				}, 0)
+			_ = loop.SetTimeout(jsc.FunctionValue(cb), 0)
+		}
 	})
 }
 
@@ -386,6 +411,33 @@ func (wv *WebView) HandleMouseMove(x, y float64) {
 	if it := wv.Interaction(); it != nil && !wv.destroyed {
 		it.MouseMove(x, y)
 	}
+}
+
+// CloseRequest 处理 close request（HTML 的 close watcher / 「关闭请求」语义）：
+// 关闭最上层的 auto/hint popover（HTML §6.12：manual popover 不响应）。
+//
+// 宿主在用户按下 Esc、且页面没有 preventDefault 掉 keydown 时调用它；返回
+// 是否消费了该请求（false = 当前没有可关闭的 popover，宿主可继续自己的 Esc
+// 逻辑，例如退出全屏或关闭自己的窗口）。
+//
+// 已知边界：<dialog> 的 Esc 关闭（dialog 的 close watcher）未实现，本端口只
+// 有 popover 参与 close request。
+func (wv *WebView) CloseRequest() bool {
+	if wv == nil || wv.destroyed {
+		return false
+	}
+	doc := wv.Document()
+	if doc == nil {
+		return false
+	}
+	if !popover.CloseRequest(doc) {
+		return false
+	}
+	// 关闭改变了 :popover-open 与 UA 的 display 规则 → 同步渲染树与布局，
+	// 否则宿主在同一帧内还会画出旧内容（与点击路径的同步策略一致）。
+	wv.RebuildRenderTree()
+	wv.EnsureLayout()
+	return true
 }
 
 // HandleMouseLeave 鼠标离开窗口（清除 :hover 残留）。

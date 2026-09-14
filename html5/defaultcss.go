@@ -305,6 +305,51 @@ dialog:not([open]) {
 	z-index: 999;
 }
 
+/* Popover（HTML §6.12 的 UA 样式）。
+ *
+ * 规范里显示中的 popover 进入 top layer（绘制在文档内容与其它 top layer 元素
+ * 之上）；本引擎没有 top layer（同上），用 position:fixed + z-index 近似：
+ * z-index 1100 高于普通内容与 dialog[open]（1000），低于应用层的 toast 层
+ * （1200）。popover stack 内部的先后顺序由作者样式/文档顺序决定，本引擎不做
+ * 「后显示的必然在上」——这是本端口已知的 top layer 近似差异。
+ *
+ * 规范 UA 的居中写法是 inset:0 + width/height:fit-content + margin:auto，
+ * 本引擎尚不支持 width/height 的 fit-content 关键字（宽度会退化
+ * 成拉伸填满视口），因此沿用 dialog[open] 的等价近似：top/left 50% + transform
+ * 反向平移，尺寸按 fixed 定位的 shrink-to-fit 求值。
+ *
+ * 未显示的 popover 不生成盒（规范规则的逐字翻译；dialog[open] 例外：同时带
+ * popover 属性的 <dialog> 以 dialog 方式打开时仍要显示）。 */
+[popover]:not(:popover-open):not(dialog[open]) {
+	display: none;
+}
+dialog:popover-open {
+	display: block;
+}
+[popover] {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 1100;
+	border: 1px solid rgba(0, 0, 0, 0.3);
+	padding: 0.25em;
+	overflow: auto;
+	background: #fff;
+	color: #000;
+}
+
+/* popover 的 ::backdrop：规范里它是「铺满视口 + 透明 + 不吃指针事件」——默认
+ * 透明意味着 popover 不会自动把页面变暗（作者可自行给 ::backdrop 上色）。它
+ * 比通用 ::backdrop 规则更具体（多一个 :popover-open），因此覆盖掉模态 dialog
+ * 的半透明黑底；z-index 沿用 999（在 popover 之下、普通内容之上）。 */
+:popover-open::backdrop {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	background: transparent;
+}
+
 /* ── General element defaults (mirrors WebCore/css/html.css headings/lists/
        text sections; only properties the engine resolves are listed) ── */
 

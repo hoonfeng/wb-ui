@@ -482,6 +482,12 @@ func (f *FormFocus) CharInput(ch rune) bool {
 //
 // Enter：textarea 插入换行；input 返回 false（宿主提交语义）。
 func (f *FormFocus) KeyInput(name string) bool {
+	// close request（HTML §6.12：popover 响应 Esc 关闭）——放在最前面，因为它
+	// 不依赖焦点控件（焦点可能已经在 popover 内部元素或页面上）。返回 true 表示
+	// 这次 Esc 被 popover 消费，宿主不应再把它当别的按键处理。
+	if name == "Escape" && f.wv != nil && f.wv.CloseRequest() {
+		return true
+	}
 	el := f.el
 	if el == nil || !isFormTextControl(el) {
 		return false
