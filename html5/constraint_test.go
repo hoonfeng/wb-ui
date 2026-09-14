@@ -263,3 +263,32 @@ func TestInput_DateRangeValidityState(t *testing.T) {
 		t.Error("date 值晚于 min：CheckValidity() = false, want true")
 	}
 }
+
+// TestCompilePatternCache 覆盖 pattern 校验的正则缓存：同一 pattern 反复校验
+// 结果稳定（缓存命中与首次编译一致），非法 pattern 被忽略而不是报错。
+func TestCompilePatternCache(t *testing.T) {
+	in, _ := ToInputElement(createElement("input", map[string]string{
+		"type": "text", "pattern": `[a-z]{3}`, "value": "ab",
+	}))
+	for i := 0; i < 3; i++ {
+		if !in.Validity().PatternMismatch {
+			t.Fatalf("第 %d 次：不匹配的值应报 PatternMismatch", i+1)
+		}
+	}
+	in.SetValue("abc")
+	for i := 0; i < 3; i++ {
+		if in.Validity().PatternMismatch {
+			t.Fatalf("第 %d 次：匹配的值不应报 PatternMismatch", i+1)
+		}
+	}
+	// 非法正则：HTML 规定该 pattern 被忽略（不是让控件无效，也不该 panic）。
+	bad, _ := ToInputElement(createElement("input", map[string]string{
+		"type": "text", "pattern": `[`, "value": "abc",
+	}))
+	if bad.Validity().PatternMismatch {
+		t.Error("非法 pattern 应被忽略，不应报 PatternMismatch")
+	}
+	if !bad.CheckValidity() {
+		t.Error("非法 pattern 不应使控件无效")
+	}
+}

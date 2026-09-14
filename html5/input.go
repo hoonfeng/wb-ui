@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"wb-ui/dom"
 )
@@ -458,9 +459,36 @@ func validateColor(val string) bool {
 	return true
 }
 
-// compilePattern wraps regexp.Compile for the pattern validation.
+// patternCache 缓存已编译的 pattern 正则。
+//
+// 为什么要缓存：pattern 校验现在会被样式层按元素反复调用（css 的 :valid /
+// :invalid / :user-invalid 通过注入的 FormValidityResolver 查询约束状态），
+// 而 regexp.Compile 每次都要重新解析并建 NFA——样式重算频繁时这明显偏高。
+// 页面里的 pattern 数量是个位数，缓存无内存压力；同时缓存编译错误（同一个
+// 非法 pattern 也会被反复问），避免每次重复解析失败路径。
+var (
+	patternCacheMu sync.Mutex
+	patternCache   = map[string]patternEntry{}
+)
+
+type patternEntry struct {
+	re  *regexp.Regexp
+	err error
+}
+
+// compilePattern wraps regexp.Compile for the pattern validation, with a cache.
 func compilePattern(pat string) (*regexp.Regexp, error) {
-	return regexp.Compile(pat)
+	patternCacheMu.Lock()
+	entry, ok := patternCache[pat]
+	patternCacheMu.Unlock()
+	if ok {
+		return entry.re, entry.err
+	}
+	re, err := regexp.Compile(pat)
+	patternCacheMu.Lock()
+	patternCache[pat] = patternEntry{re: re, err: err}
+	patternCacheMu.Unlock()
+	return re, err
 }
 
 // FindFormAncestor returns the nearest <form> ancestor of el, or nil.

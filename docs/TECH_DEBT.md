@@ -382,17 +382,25 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | flex/grid 容器里的 `::backdrop` | 模态 `<dialog>` 作为 flex/grid item 时也生成遮罩：`buildFlexChildren` 两侧（layout + rendering）与块级路径同位置插入（fixed 定位子项不占 flex item 槽位） | `e8d2108` |
 | `:target` 语义 | 此前只判「URL 非空 且有 id」→ 任意带 id 的元素在任意非空 URL 下都匹配；改为 URL fragment（百分号解码）与元素 id 相等，`#top` 无 `id="top"` 元素时回退根元素 | `f307666` |
 | `ToggleEvent.oldState/newState` | dom 新增 `ToggleEvent`（`beforetoggle` 可取消）；`eventToJS` 暴露两个字段；`<dialog>` 与 `<details>` 的 `toggle`/`beforetoggle` 都带上迁移方向 | `db8d9b8` |
+| 约束校验伪类 | `:valid` / `:invalid` / `:in-range` / `:out-of-range` 从硬编码 false 改为查「注入的约束校验状态」：`css/validity.go` 定义纯数据 `FormValidity` + 注入点（css 不能 import html5——html5 为 UA 表已 import css），`html5` 在 init 里注入实现。barred 元素（disabled/readonly/datalist 后代/type=hidden,reset,button 等）两者都不匹配；`:in-range` 只匹配「有范围限制」（min/max 存在且能按类型解析）的元素；日期类类型的 min/max 也进入 `ValidityState`（此前只有 number/range） | `46963a2` |
+| 约束校验 IDL | 元素级 `validity`（11 个只读布尔属性）/ `validationMessage` / `willValidate` / `checkValidity()` / `reportValidity()` / `setCustomValidity()`；表单级 `checkValidity()` / `reportValidity()` / `noValidate`。判定逻辑复用 html5 的 ValidityState；`setCustomValidity` 走样式失效链。顺带修 `<input>` 的 `Validity()` 漏检 customError（`setCustomValidity` 后 `checkValidity()` 仍返回 true） | `83377cc` |
+| 提交时交互校验 | 新增 `html5/interactive.go`：对每个无效控件派发 `invalid` 事件（不冒泡）、返回列表供宿主聚焦第一个；`requestSubmit`/提交按钮点击在未声明 `novalidate`/`formnovalidate` 时先校验，失败即中止（连 `submit` 事件都不派发）。顺带修 `form.submit()` 语义：规范里它**不**校验、也**不**派发 submit 事件（此前等价于 requestSubmit） | `83377cc` |
+| `:user-valid` / `:user-invalid` | dom 新增 user validity 状态；css 新增枚举 + 名称 + 解析（含枚举三向往返测试）；匹配要求「candidate 且 user validity 为 true」。引擎在 change 事件路径（失焦提交/点击 checkbox-radio/选择 option/拖动 range）与控制点（交互校验=提交尝试）置位，并经注入钩子重算样式；脚本 `dispatchEvent(new Event('change'))` 不置位（与浏览器一致） | `54d2888` |
+| 约束校验的像素级夹具 | `dev/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
 
 ### 仍未建模（有意保留）
 - **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
   属性/状态机一整套，未立项。
-- `:autofill` / `:picture-in-picture` / `:user-valid` 等：本引擎没有对应的
-  表单自动填充、画中画或约束校验模型，无判定依据，故作永不匹配。
+- `:autofill` / `:picture-in-picture`：本引擎没有表单自动填充或画中画模型，
+  无判定依据，故作永不匹配。
 - view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
 - `ToggleEvent.source`：`oldState` / `newState` 已闭环（见上表），但规范里的
   `source`（谁触发了状态切换：调用者元素或 null）没有对应的调用者建模。
-- 约束校验伪类（`:valid` / `:invalid` / `:in-range` / `:out-of-range`）：与上面
-  的 `:autofill` / `:user-valid` 同因——本端口没有表单约束校验模型
-  （`checkValidity()` / constraint validation API 未实现），没有判定依据，故
-  返回 false。注意 `:default` / `:indeterminate` 不属于这一类（它们的状态本端口
-  全都拿得到），已在上面闭环。
+- 日期类输入的 step mismatch：`number` / `range` 已按 step 校验；
+  `date` / `month` / `week` / `time` / `datetime-local` 的 step 单位换算
+  （天 / 周 / 秒 / 月，含 step base）未实现，因而这些类型上的 `step` 属性被忽略
+  （min/max 已按类型解析并进入 `ValidityState`）。
+- `:user-valid` / `:user-invalid` 的「获得焦点时无效 → 之后每次击键立即重算」
+  规则（MDN 列出的第 3 条）未实现：需要在控件获得焦点的时刻记录「当时是否
+  无效」，再在 input 事件路径按该记忆置位。当前表现为「需要失焦或提交过之后
+  `:user-invalid` 才出现」——保守取值（不会提前误报），但比浏览器迟缓。

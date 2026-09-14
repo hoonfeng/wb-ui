@@ -91,6 +91,30 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    **61/61 夹具、248/248 检查**（`:target` 此前会误匹配所有带 id 的元素，UA 表
    没有 `:target` 规则，故不影响夹具）。单测：`css/selector_test.go` 的
    `TestSelector_TargetPseudoClass`、`bindings/toggleevent_test.go`。
+
+   复核记录（2026-09 批次·续 3，约束校验）：新增夹具 `constraint-validation`
+   后为 **62/62 夹具、255/255 检查**。该夹具是本轮唯一新增的像素资产：
+
+   - 6 个色块断言，每块对应一条约束校验判定（`:valid` / `:invalid` /
+     `:in-range` / `:out-of-range` / readonly 被排除在约束校验之外 /
+     `setCustomValidity` 后重新匹配），位置尺寸按 ±1px 断言、颜色精确匹配。
+   - 第 7 块断言「未交互的无效控件不匹配 `:user-invalid`」——它用特化规则
+     （`#id:invalid` 保持默认底色、`#id:user-invalid` 才变粉红）把「`:invalid`
+     与 `:user-invalid` 的差别」变成可断言的像素差。
+   - **反向验证**：把这批新代码里 html5 的 `css.SetFormValidityResolver` 注入
+     临时注释掉再跑，6 项检查中 5 项立即失败（唯一仍通过的「readonly 保持默认
+     底色」本就不依赖伪类命中），确认夹具真正盯着注入链路，而不是颜色巧合。
+     恢复后重新通过。
+
+   ⚠️ 本机 `msedge.exe --headless --dump-dom/--screenshot` 在本轮全程无输出
+   （进程 exit 0 但 stdout/stderr/截图全空，`--user-data-dir` 与 `--headless=new`
+   都不行），因此这批约束校验的行为依据是规范与 MDN（HTML §4.10.21、
+   MDN `:in-range` / `:user-valid` / `readonly` / `willValidate`），**没有**做
+   Edge 对照。两处需要留意的判断：空值不越界但匹配 `:in-range`（规范 `:in-range`
+   定义只要求「有范围限制且不 underflow/overflow」）、barred 清单（disabled、
+   input/textarea 的 readonly（仅支持 readonly 的类型）、input type=hidden/
+   reset/button、button type=reset/button、datalist 后代）。待 Edge 恢复后应补
+   真值表对照。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。
