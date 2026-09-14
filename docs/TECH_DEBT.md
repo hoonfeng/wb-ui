@@ -12,17 +12,17 @@
 
 | # | 原遗留项 | 类型 | 结果 |
 |---|---------|------|------|
-| 1 | positioned `top/left` 不解析 `calc()` | 真实 bug | ✅ `0a042d3` |
-| 2 | `min()` / `max()` / `clamp()` 未实现 | 功能缺失 | ✅ `a9c69d3` |
-| 3 | 布局三次全树遍历（无增量） | 性能 | 🔍 阶段 A 收益 <1% 不投入；**B** `421f7f5`、**C1** `ae5d64f` 已实现；C2 见下节 |
-| 4 | Shadow DOM selector（`:host` / `::slotted` / `::part`） | 功能缺失 | ✅ `1dff19a`→`2bcf5cc` |
+| 1 | positioned `top/left` 不解析 `calc()` | 真实 bug | ✅ `f2f0a17` |
+| 2 | `min()` / `max()` / `clamp()` 未实现 | 功能缺失 | ✅ `3ccdcd5` |
+| 3 | 布局三次全树遍历（无增量） | 性能 | 🔍 阶段 A 收益 <1% 不投入；**B** `1ab27fe`、**C1** `d9084a8` 已实现；C2 见下节 |
+| 4 | Shadow DOM selector（`:host` / `::slotted` / `::part`） | 功能缺失 | ✅ `11c7fbb`→`4b5aef4` |
 | 5 | `mask-image` 仅存属性不绘制 | 功能缺失 | ✅ 子树遮罩 + `size` / `repeat` / `position` / `mode` + SVG `<mask>` + 同文档 `url(#id)` |
 | — | WebSocket | ~~非问题~~ | 有意 stub（宿主注入事件），见「附」 |
 
 2026-09 批次另闭环了一批「注释里记着的未实现项」：Fullscreen API、`<dialog>` 状态算法重写与
 `::backdrop`、`ToggleEvent.oldState/newState/source`、表单约束校验伪类与 IDL（`:valid` /
 `:invalid` / `:in-range` / `:out-of-range` / `:user-valid` / `:user-invalid`）、`:target` 语义、
-伪元素名称表一致性、worker 脚本加载接线等——提交范围 `667c7ae`…`54d2888`。这些能力的清单以
+伪元素名称表一致性、worker 脚本加载接线等——提交范围 `8cbc020`…`f00d306`。这些能力的清单以
 **代码与测试**为准（`engine/css/selectorchecker.go`、`engine/js/bindings/`、`engine/html5/`、
 `engine/style/validity.go`，测试名即清单），不在文档里维护第二份。
 
@@ -33,7 +33,7 @@
 
 | 项 | 结论与依据 |
 |----|-----------|
-| 布局增量 **C2**（IFC 行级增量重排） | **不做**。C1（`ae5d64f`）已覆盖打字主热路径（text 变更 → 只重排 dirty block）；C2 只再省「block 内一次 IFC 重排」，收益更小，而风险高（等价于移植 WebKit LineLayout 增量）。当前**没有 profile 数据显示「整 block 重排」是瓶颈**——出现该数据再立项。 |
+| 布局增量 **C2**（IFC 行级增量重排） | **不做**。C1（`d9084a8`）已覆盖打字主热路径（text 变更 → 只重排 dirty block）；C2 只再省「block 内一次 IFC 重排」，收益更小，而风险高（等价于移植 WebKit LineLayout 增量）。当前**没有 profile 数据显示「整 block 重排」是瓶颈**——出现该数据再立项。 |
 | `::part` 多 part-name 匹配改哈希集合 | **不做**。原调研结论为收益 <1%，却要新增一套索引与失效维护。 |
 | canvas 补丁脚本预编译（`RunJS` → `Compile` + `RunProgram`） | **不做**。`applyCanvas2DPatch` 每次只跑一段 2KB 脚本且脚本内有 `__canvasPatched` 守卫；未采样证明其占比，不值得为它动 `EvalJS` 路径。 |
 | canvas `getContext('2d')` 包装改 Go 原生回调 | **不做**。同上，且要改 `wrapDocument` 的 tag 分派，影响面大于收益。 |
@@ -41,7 +41,7 @@
 | host-selector 前缀跨 shadow boundary 前向匹配 | **已实现**，无需立项。`selectorchecker.go` 里 compound 结尾是 `::part` / `::slotted` 时，前缀按 CSS Scoping L1 走宿主组合祖先（该文件注释有说明）。 |
 | 多层 `background-image` 叠加 | **不做**。引擎只绘制第一层（`engine/rendering/backgroundimage.go` 注释已载明）；「第一层的解析必须正确」已修复并锁测试（`backgroundurl_layers_test.go`）。 |
 | `<input>` / `<textarea>` 引入 dirty value flag | **不立项**。影响面大（牵动渲染取值、表单提交、配置面板三条取值路径），收益只在「无 `min` 的控件 + 用户输入 + step 校验」组合下显形，而规范推荐的写法（带 `min`）不受影响。 |
-| bundle 缩小（code splitting / manualChunks / 依赖裁剪） | **非本仓库职责**。bundle 由宿主前端（gou-ide 的 web-ui 构建）产出。编译缓存（`307da7b`）已消掉「重复导航」的 ~600ms 编译开销，首次加载成本归前端工程。 |
+| bundle 缩小（code splitting / manualChunks / 依赖裁剪） | **非本仓库职责**。bundle 由宿主前端（gou-ide 的 web-ui 构建）产出。编译缓存（`0316ef4`）已消掉「重复导航」的 ~600ms 编译开销，首次加载成本归前端工程。 |
 
 **保留为已知边界**（有意不做，逐项见下文各节）：Worker 的 module / SharedWorker / Blob URL /
 真实网络、popover 的 top layer / close watcher / 键盘激活 / `CommandEvent`、`:autofill` /

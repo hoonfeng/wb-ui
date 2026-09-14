@@ -146,7 +146,7 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
    `engine/html5/week_test.go`。
 
    复核记录（2026-09 批次·续 5，popover）：新增夹具 `popover` / `popover-backdrop`
-   后为 **64/64 夹具、264/264 检查**（`1b2aa8c`）——这是本页记录链上
+   后为 **64/64 夹具、264/264 检查**（`852081a`）——这是本页记录链上
    「62 → 64」的那一步。两个夹具与 Fullscreen / `<dialog>` 的 `::backdrop` 同属
    「顶层 UI 遮罩」路径：普通页面零新增节点，只在 popover / 模态 dialog 存在时
    多一个渲染对象与布局盒。两者都**依赖脚本**调用 `showPopover()`，因此在
