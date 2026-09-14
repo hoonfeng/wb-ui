@@ -142,3 +142,58 @@ func TestDetailsToggleEventStates(t *testing.T) {
 		}
 	`)
 }
+
+// TestToggleEventSourceIsNull 覆盖 ToggleEvent.source（IDL 类型 Element?，HTML
+// §4.11.4 / §4.11.6）：<dialog> 与 <details> 的 toggle / beforetoggle 都把
+// source 初始化为 null——规范的每一条打开/关闭路径都传 null（close()、
+// requestClose()、form method=dialog 提交、close watcher 读的 request close
+// source element 槽只被 requestClose() 写过且写 null、details toggle 任务只
+// 初始化 oldState/newState）。脚本必须看到 `e.source === null`（不是
+// undefined）：MDN 用 `event.source === undefined` 做特性检测，缺字段会被误判成
+// 「浏览器不支持」。非 null 的 source 只出现在 popover 的 invoker 场景，本端口
+// 尚无 Popover API（见 docs/TECH_DEBT.md）。
+func TestToggleEventSourceIsNull(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	body := newHTMLBodyFixture(doc)
+	dlg := doc.CreateElement("dialog")
+	dlg.SetId("dlg")
+	body.AppendChild(dlg)
+	det := doc.CreateElement("details")
+	det.SetId("det")
+	body.AppendChild(det)
+
+	mustRun(t, rt, `
+		{
+			window.__src = [];
+			const probe = (e) => e.source === null ? "null"
+				: (e.source === undefined ? "undefined" : "element");
+			const d = document.getElementById("dlg");
+			d.addEventListener("beforetoggle", (e) => { window.__src.push("beforetoggle:" + probe(e)); });
+			d.addEventListener("toggle", (e) => { window.__src.push("toggle:" + probe(e)); });
+			const t = document.getElementById("det");
+			t.addEventListener("toggle", (e) => { window.__src.push("details:" + probe(e)); });
+			d.showModal();
+		}
+	`)
+	mustRun(t, rt, `
+		{
+			if (window.__src.join(",") !== "beforetoggle:null") {
+				throw new Error("dialog beforetoggle 的 source 应为 null: " + window.__src.join(","));
+			}
+		}
+	`)
+	drainEventLoop(rt)
+
+	mustRun(t, rt, `{ document.getElementById("dlg").close(); }`)
+	drainEventLoop(rt)
+	mustRun(t, rt, `{ document.getElementById("det").open = true; }`)
+	drainEventLoop(rt)
+	mustRun(t, rt, `
+		{
+			const want = "beforetoggle:null,toggle:null,beforetoggle:null,toggle:null,details:null";
+			if (window.__src.join(",") !== want) {
+				throw new Error("source 应为 null 的事件序列: " + window.__src.join(","));
+			}
+		}
+	`)
+}

@@ -275,10 +275,20 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 	// toggle / beforetoggle 事件带 oldState / newState，页面常用 `e.newState
 	// === "open"` 在一个处理器里区分「正在打开」和「正在关闭」——此前派发的是
 	// 普通 Event，两个字段恒 undefined。
+	//
+	// source（IDL 类型 Element?）：本端口的打开/关闭路径都传 null（规范如此，
+	// 非 null 只出现在 popover 的 invoker 场景——本端口尚无 Popover API），但
+	// 属性必须存在：MDN 的示例用 `event.source === undefined` 做特性检测，
+	// 缺字段会被误判成「浏览器不支持」，而 `e.source === null` 的写法也会失真。
 	if te, ok := e.(*dom.ToggleEvent); ok {
 		obj.SetClassName("ToggleEvent")
 		obj.Set("oldState", jsc.StringValue(te.OldState()))
 		obj.Set("newState", jsc.StringValue(te.NewState()))
+		if src := te.Source(); src != nil {
+			obj.Set("source", nodeToJS(in, src))
+		} else {
+			obj.Set("source", jsc.Null())
+		}
 	}
 	return jsc.ObjectValue(obj)
 }

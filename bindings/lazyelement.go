@@ -1323,11 +1323,13 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				invalidateStateStyle(el)
 				// <details> 的 open 状态变化要派发 toggle（HTML §4.11.4：
 				// 「当 open 属性被切换时排队 details toggle 事件任务」）。
+				// source 为 nil：details 的 toggle 任务只初始化 oldState/newState
+				// （见 dom.ToggleEvent.Source 的注释）。
 				if tag == "details" {
 					if want {
-						queueDialogToggle(rt, el, dom.ToggleStateClosed, dom.ToggleStateOpen)
+						queueDialogToggle(rt, el, dom.ToggleStateClosed, dom.ToggleStateOpen, nil)
 					} else {
-						queueDialogToggle(rt, el, dom.ToggleStateOpen, dom.ToggleStateClosed)
+						queueDialogToggle(rt, el, dom.ToggleStateOpen, dom.ToggleStateClosed, nil)
 					}
 				}
 			}}, true

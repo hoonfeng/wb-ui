@@ -15,12 +15,22 @@
 //   - 打开/关闭都先同步派发可取消的 beforetoggle，再排队异步 toggle；
 //     关闭时还额外排队 close 事件（同一批任务内 toggle 先、close 后）。
 //
-// toggle / beforetoggle 用 ToggleEvent 派发（带 oldState / newState）——
+// toggle / beforetoggle 用 ToggleEvent 派发（带 oldState / newState / source）——
 // 页面常在一个处理器里按 `e.newState` 区分「正在打开」与「正在关闭」。
 //
-// 简化：ToggleEvent 不带 `source` 字段（规范里用于说明是谁触发了切换，本端口
-// 没有对应的调用者建模）；已打开时的状态冲突按规范应抛 InvalidStateError，
-// 这里用原生 TypeError 兜底（与 canvas2d 的 IndexSizeError 处理一致，脚本可 catch）。
+// source（谁触发了切换）在本端口恒为 null，这是规范行为而非简化：dialog 的
+// 每一条打开/关闭路径都传 null——close() / requestClose() 调「close the dialog
+// with <result> and null」（HTML §4.11.6），form method=dialog 提交调「close the
+// dialog subject with <result> and null」（form submission algorithm），close
+// watcher 读 dialog 的 request close source element 槽（只有 requestClose()
+// 写过它，写的也是 null），show()/showModal() 没有调用者建模；<details> 的
+// details toggle 任务只初始化 oldState/newState。规范里 source 非 null 的场景
+// 是 popover 的 invoker（popovertarget / command 元素）——本端口尚无 Popover API
+// （见 docs/TECH_DEBT.md）。字段仍然实现，是为了 `e.source === null` 与 MDN 的
+// `event.source === undefined` 特性检测表现得和浏览器一致。
+//
+// 其余简化：已打开时的状态冲突按规范应抛 InvalidStateError，这里用原生
+// TypeError 兜底（与 canvas2d 的 IndexSizeError 处理一致，脚本可 catch）。
 package bindings
 
 import (
@@ -45,8 +55,8 @@ func invalidateStateStyle(el *dom.Element) {
 
 // fireBeforeToggle 同步派发 beforetoggle（cancelable，带状态），返回是否未被
 // 取消（规范：打开/关闭算法在第一步就让它有机会否决）。
-func fireBeforeToggle(el *dom.Element, oldState, newState string) bool {
-	ev := dom.NewToggleEvent("beforetoggle", false, true, oldState, newState)
+func fireBeforeToggle(el *dom.Element, oldState, newState string, source *dom.Element) bool {
+	ev := dom.NewToggleEvent("beforetoggle", false, true, oldState, newState, source)
 	el.DispatchEvent(ev)
 	return !ev.DefaultPrevented()
 }
@@ -61,13 +71,13 @@ func dialogShow(in *jsc.Interpreter, el *dom.Element, method string, modal bool)
 		panic(in.VM().NewTypeError("Failed to execute '" + method +
 			"' on 'HTMLDialogElement': the dialog is already open with a different modality."))
 	}
-	if !fireBeforeToggle(el, dom.ToggleStateClosed, dom.ToggleStateOpen) {
+	if !fireBeforeToggle(el, dom.ToggleStateClosed, dom.ToggleStateOpen, nil) {
 		return
 	}
 	if dialogIsOpen(el) {
 		return
 	}
-	queueDialogToggle(in, el, dom.ToggleStateClosed, dom.ToggleStateOpen)
+	queueDialogToggle(in, el, dom.ToggleStateClosed, dom.ToggleStateOpen, nil)
 	el.SetAttribute("open", "")
 	el.SetModalState(modal)
 	invalidateStateStyle(el)
@@ -83,7 +93,7 @@ func dialogClose(in *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) {
 	if !dialogIsOpen(el) {
 		return
 	}
-	if !fireBeforeToggle(el, dom.ToggleStateOpen, dom.ToggleStateClosed) {
+	if !fireBeforeToggle(el, dom.ToggleStateOpen, dom.ToggleStateClosed, nil) {
 		return
 	}
 	if !dialogIsOpen(el) {
@@ -93,7 +103,7 @@ func dialogClose(in *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) {
 	// 分成两个定时器任务时顺序不受保证，实测会被颠倒。
 	mediaRunLater(in, func() {
 		el.DispatchEvent(dom.NewToggleEvent("toggle", false, false,
-			dom.ToggleStateOpen, dom.ToggleStateClosed))
+			dom.ToggleStateOpen, dom.ToggleStateClosed, nil))
 		el.DispatchEvent(dom.NewEvent("close", false, false, false))
 	})
 	el.RemoveAttribute("open")
@@ -107,9 +117,10 @@ func dialogClose(in *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) {
 }
 
 // queueDialogToggle 异步派发 toggle 事件（HTML §4.11.6 / §4.11.4：状态变化后
-// 排队派发）。oldState / newState 描述这次迁移的方向。
-func queueDialogToggle(in *jsc.Interpreter, el *dom.Element, oldState, newState string) {
+// 排队派发）。oldState / newState 描述这次迁移的方向；source 见文件头注释
+// （本端口的所有调用点都传 nil）。
+func queueDialogToggle(in *jsc.Interpreter, el *dom.Element, oldState, newState string, source *dom.Element) {
 	mediaRunLater(in, func() {
-		el.DispatchEvent(dom.NewToggleEvent("toggle", false, false, oldState, newState))
+		el.DispatchEvent(dom.NewToggleEvent("toggle", false, false, oldState, newState, source))
 	})
 }
