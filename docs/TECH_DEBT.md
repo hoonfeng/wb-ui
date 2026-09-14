@@ -393,6 +393,20 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `<input type=week>` 的 ISO 周解析 | 修 `parseWeek`：Go 的时间布局里 `2006-W02` 的 `02` 是「月中的第几天」，早期实现用它解析周值，于是 `1970-W03` 被读成 1970-01-03、`1970-W01…W04` 全部落进同一周（week 的 min/max 与 step 相位因此失真）。改为自行解析「四位以上年 + `-W` + 两位周号」、按 ISO 规则（含 1 月 4 日的那一周是 W01）求周一，并校验第 53 周只在该年真的存在时才合法 | `0673d69` |
 | Popover API | HTML §6.12 整套落地：dom 的 popover visibility state + top layer 近似栈（`dom/popoverstate.go`）；新 `popover` 包实现 show/hide/toggle 三个算法、check popover validity、auto/hint 互斥与 topmost popover ancestor、light dismiss 的 pointerdown/pointerup 两阶段、close request（Esc）、invoker 的激活行为（`popovertarget*` 与 `commandfor`/`command`）；JS 层 `HTMLElement.popover`（枚举属性反射）+ 三个方法 + 四个 invoker 属性 + `ToggleEvent` 构造器；`:popover-open` 伪类与 UA 样式（未显示不生成盒、显示中的 fixed + `z-index:1100` 近似 top layer、`::backdrop` 默认透明不吃指针事件，backdrop 盒的判定泛化为 `dom.Element.NeedsBackdrop`）；宿主两条路径（`webkit.Interaction`、`app.Host`）都接 light dismiss / Esc / invoker。已知差异见下 | `634f4b0`、`3422a1a`、`3d56853`、`1b2aa8c` |
 | Popover API 的像素夹具 | `dev/cssprobe` 新增 `popover`（7 条：hidePopover 后回到不生成盒、`:popover-open` 上色、后打开的 auto 关掉先前的、嵌套 auto 保留 popover 祖先、manual 与 auto 互不影响、UA 定位居中）与 `popover-backdrop`（2 条：作者上色的 backdrop 铺满视口、popover 画在自己 backdrop 之上）。反向验证：`:popover-open` 恒 false → 5 条失败；去掉 UA 的 `display:none` → 2 条失败；backdrop 改成不透明 → 3 条失败 | `1b2aa8c` |
+| Worker（并发脚本执行） | 新增 `worker` 包（每个 Worker 一个**独立 goja 运行时 + 独立 goroutine + 独立事件循环**，两个运行时之间只传 JSON 文本）与 `bindings/worker.go`（`Worker` 的 postMessage/onmessage/onerror/addEventListener/terminate + `MessageEvent`；worker → 主线程的消息由主事件循环的宏任务派发，主运行时的 JS 只在主线程 tick 里执行）。脚本来源：`data:` URL 或宿主注入的 `bindings.SetWorkerScriptFetcher`；worker 全局提供 self/name/close/importScripts/setTimeout 家族/console。单测 `worker/worker_test.go`（6 项）+ `bindings/worker_test.go`（12 项，含「worker 忙等 400ms 时主线程定时器照常推进」的并发本质断言） | `5a4a75c`、`ff965d5` |
+
+### Worker 的已知差异（有意保留）
+
+- **消息是 JSON 克隆，不是结构化克隆**：`Date` 变 ISO 字符串、`Map`/`Set`/`RegExp`/`TypedArray` 变 `{}`、值为 `undefined` 的成员被丢弃、`NaN`/`Infinity` 变 `null`。函数、Symbol 与循环引用抛 `DataCloneError`（这点与浏览器一致；算法即 `JSON.stringify`/`JSON.parse`）。
+- **无 transferable / SharedArrayBuffer**：`postMessage(msg, [buf])` 的第二个参数被忽略——既不做所有权转移，也不报错。
+- **无 MessageChannel / MessagePort / BroadcastChannel**：`MessageEvent.ports` 恒为空数组。
+- **无 module worker**：`new Worker(url, {type:"module"})` 按 classic 处理（`{name}` 生效）。
+- **无 SharedWorker / ServiceWorker / worklet**。
+- **无 Blob URL 脚本**：引擎没有 `Blob` 与 `URL.createObjectURL`，因此不支持 `blob:` worker。
+- **worker 全局刻意保持最小**：只有 `self`/`name`/`console`/定时器/`postMessage`/`onmessage`/`importScripts`/`close`。没有 `location`、`navigator`、`fetch`、`XMLHttpRequest`（引擎的 fetch/XHR 在 bindings 的主线程层）。
+- **无同源与 CSP 检查**：脚本 URL 完全交给宿主 Fetcher；引擎自身不联网（只认识 `data:` URL），未注入 Fetcher 时非 `data:` URL 派发 error 事件（`Failed to ... no fetcher registered`）。
+- **脚本加载/编译失败派发 `error` 事件**（ErrorEvent 形状的 `message`/`filename`/`lineno`/`colno`/`error`），worker 仍然存活但不处理消息（与浏览器行为一致）。
+- **宿主需要一行接线才能加载非 `data:` 脚本**：`bindings.SetWorkerScriptFetcher(func(url string) (string, error))`；引擎不替宿主决定联网策略（与 WebSocket 采用「宿主注入传输」同一取舍）。
 
 ### popover 的已知差异（有意保留）
 
