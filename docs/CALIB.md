@@ -86,6 +86,11 @@ go run ./dev/cssprobe -v -filter 'table-row-geometry'
    `css/formstate_selector_test.go`、`bindings/formstate_test.go`、
    `layout/box_backdrop_test.go`（flex/inline-flex/grid/inline-grid 四种容器）、
    `rendering/dialog_backdrop_test.go`（flex 场景 + `LayoutBox()` 链接断言 + 像素）。
+   复核记录（2026-09 批次·续 2）：再补 `:target` 语义修正与 `ToggleEvent`
+   （`toggle`/`beforetoggle` 带 `oldState`/`newState`）两批后，cssprobe 仍为
+   **61/61 夹具、248/248 检查**（`:target` 此前会误匹配所有带 id 的元素，UA 表
+   没有 `:target` 规则，故不影响夹具）。单测：`css/selector_test.go` 的
+   `TestSelector_TargetPseudoClass`、`bindings/toggleevent_test.go`。
 5. 修复脉络：`aspect-ratio`/flex 外盒/空 inline-block/`<video poster>`（4 项）→
    探针脚本执行模式 + 5 项 DOM/API 缺口 → 本轮 3 项（顶角修复、媒体轨道、流）。
    落点见「脚本模式下修复的夹具」与下文各节。

@@ -380,6 +380,8 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | CSS 表单状态伪类 | `:default`（表单首个 submit/reset 默认按钮、已勾选 checkbox/radio、已选中 option）与 `:indeterminate`（checkbox 的 IDL 状态、radio 组无勾选、`<progress>` 无 value）；`input.indeterminate` IDL 属性（不写内容属性） | `9a1794f` |
 | 伪元素名称表一致性 | `PseudoElementName` 漏了 `-webkit-scrollbar{,-thumb,-track}`（查询表有、名称表无 → 序列化出裸 `::`）；新增「枚举 ↔ 名称表 ↔ 查询表」三向往返测试与序列化断言锁死这类漂移 | `9a1794f` |
 | flex/grid 容器里的 `::backdrop` | 模态 `<dialog>` 作为 flex/grid item 时也生成遮罩：`buildFlexChildren` 两侧（layout + rendering）与块级路径同位置插入（fixed 定位子项不占 flex item 槽位） | `e8d2108` |
+| `:target` 语义 | 此前只判「URL 非空 且有 id」→ 任意带 id 的元素在任意非空 URL 下都匹配；改为 URL fragment（百分号解码）与元素 id 相等，`#top` 无 `id="top"` 元素时回退根元素 | `f307666` |
+| `ToggleEvent.oldState/newState` | dom 新增 `ToggleEvent`（`beforetoggle` 可取消）；`eventToJS` 暴露两个字段；`<dialog>` 与 `<details>` 的 `toggle`/`beforetoggle` 都带上迁移方向 | `db8d9b8` |
 
 ### 仍未建模（有意保留）
 - **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
@@ -387,8 +389,8 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 - `:autofill` / `:picture-in-picture` / `:user-valid` 等：本引擎没有对应的
   表单自动填充、画中画或约束校验模型，无判定依据，故作永不匹配。
 - view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
-- `ToggleEvent.newState`：`toggle` 事件已派发，但不带 `newState` 字段（没有
-  ToggleEvent 建模）。
+- `ToggleEvent.source`：`oldState` / `newState` 已闭环（见上表），但规范里的
+  `source`（谁触发了状态切换：调用者元素或 null）没有对应的调用者建模。
 - 约束校验伪类（`:valid` / `:invalid` / `:in-range` / `:out-of-range`）：与上面
   的 `:autofill` / `:user-valid` 同因——本端口没有表单约束校验模型
   （`checkValidity()` / constraint validation API 未实现），没有判定依据，故
