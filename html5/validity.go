@@ -230,14 +230,44 @@ func parseMonth(s string) (year, month int, ok bool) {
 	return t.Year(), int(t.Month()), true
 }
 
-// parseWeek parses a yyyy-Www string (ISO week).
+// parseWeek parses a yyyy-Www string (ISO 8601 week, HTML 的 valid week string）。
+//
+// ⚠️ 不能用 time.Parse("2006-W02", s) 解析：Go 的时间布局里 "02" 是「月中的
+// 第几天」，布局 "2006-W02" 中的 W 只是字面量，没有「ISO 周年 + 周号」的解析
+// 支持。用它会把 "1970-W03" 解析成 1970-01-03（1 月的第 3 天），因此
+// 1970-W01…W04 会全部落到同一周、任意年的第 N 周都被算成第 N 天——min/max
+// 与 step 的周比较因此失真（此处修复；周号必须自己按 ISO 规则校验与换算）。
 func parseWeek(s string) (year, week int, ok bool) {
-	t, err := time.Parse("2006-W02", s)
-	if err != nil {
+	// 规范：value 必须匹配「四位以上的年 + "-W" + 两位周号」。
+	parts := strings.SplitN(s, "-W", 2)
+	if len(parts) != 2 || len(parts[0]) < 4 || len(parts[1]) != 2 {
 		return 0, 0, false
 	}
-	_, week = t.ISOWeek()
-	return t.Year(), week, true
+	y, errY := strconv.Atoi(parts[0])
+	w, errW := strconv.Atoi(parts[1])
+	if errY != nil || errW != nil || y < 1 || w < 1 || w > 53 {
+		return 0, 0, false
+	}
+	// 第 53 周不是每年都有（ISO：该年含 53 周 ⟺ 1 月 1 日是周四，或闰年的
+	// 1 月 1 日是周三）——不校验会让 "2026-W53" 之类的值被当成合法输入。
+	if weeksInISOYear(y) < w {
+		return 0, 0, false
+	}
+	return y, w, true
+}
+
+// weeksInISOYear 返回 ISO 周年 y 包含的周数（52 或 53）。
+func weeksInISOYear(y int) int {
+	jan1 := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC)
+	wd := int(jan1.Weekday()) // Sunday=0
+	if wd == 0 {
+		wd = 7
+	}
+	leap := y%4 == 0 && (y%100 != 0 || y%400 == 0)
+	if wd == 4 || (wd == 3 && leap) {
+		return 53
+	}
+	return 52
 }
 
 // parseDateTimeLocal parses a yyyy-mm-ddThh:mm or yyyy-mm-ddThh:mm:ss string.

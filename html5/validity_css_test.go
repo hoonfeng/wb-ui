@@ -121,13 +121,20 @@ func TestValidityPseudoClasses_EndToEnd(t *testing.T) {
 		t.Fatal("空值不越界：应匹配 :in-range 且不匹配 :out-of-range")
 	}
 
-	// step mismatch 属于 :invalid，但不算 :out-of-range。
-	step := newInput(map[string]string{"type": "number", "step": "2", "value": "3"})
+	// step mismatch 属于 :invalid，但不算 :out-of-range。注意 step base 的优先
+	// 次序是 min → value 内容属性 → 0（HTML §4.10.5.3.8 / MDN step）：有 min
+	// 时 3 相对 base 0 不是 2 的整数倍 → mismatch。
+	step := newInput(map[string]string{"type": "number", "min": "0", "step": "2", "value": "3"})
 	if !c.Match(invalid, step) {
 		t.Fatal("step mismatch：应匹配 :invalid")
 	}
 	if c.Match(outOfRange, step) {
 		t.Fatal("step mismatch 不是 underflow/overflow：不应匹配 :out-of-range")
+	}
+	// 没有 min 时 step base 就是 value 内容属性本身（13 与自身同余）→ 不 mismatch。
+	stepOnValueBase := newInput(map[string]string{"type": "number", "step": "2", "value": "13"})
+	if c.Match(invalid, stepOnValueBase) {
+		t.Fatal("step base 取 value 属性时 13 是 2 的整数倍相位：不应匹配 :invalid")
 	}
 
 	// select / textarea 也参与（required）。

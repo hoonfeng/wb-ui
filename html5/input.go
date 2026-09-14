@@ -319,30 +319,12 @@ func (i HTMLInputElement) Validity() ValidityState {
 		v.RangeOverflow = true
 	}
 
-	// step mismatch：只对 number/range 检查。日期类类型的 step 单位换算
-	// （date=天、week=周、time=秒、month=月）是本端口的已知缺口，见
-	// docs/TECH_DEBT.md。
-	if t == InputNumber || t == InputRange {
-		if val != "" {
-			num, err := parseFloat(val)
-			if err == nil {
-				if i.Step() != "" && i.Step() != "any" {
-					if step, err := parseFloat(i.Step()); err == nil && step > 0 {
-						var base float64
-						if i.Min() != "" {
-							base, _ = parseFloat(i.Min())
-						}
-						remainder := num - base
-						if remainder < 0 {
-							remainder = -remainder
-						}
-						if remainder/step != float64(int64(remainder/step)) {
-							v.StepMismatch = true
-						}
-					}
-				}
-			}
-		}
+	// step mismatch：所有支持 step 的类型都校验（number / range 与
+	// date / month / week / time / datetime-local），日期类类型需要按类型换算
+	// 单位与 step base——见 step.go（含「step 缺失时用 default step」这条
+	// 常被忽略的规范行为：time 默认只允许整分钟、number 默认只允许整数）。
+	if StepMismatch(i) {
+		v.StepMismatch = true
 	}
 
 	// 自定义错误消息（setCustomValidity 的非空消息）：与 select/textarea 的
