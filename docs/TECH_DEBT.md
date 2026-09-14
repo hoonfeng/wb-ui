@@ -470,8 +470,35 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `document.URL` / `location.href` 与文档不符 | `document.URL` 是注册时求值的静态快照（恒为空串）；`location` 是写死 `about:blank`/`file:` 的静态桩；`LoadURL` 也从未 `doc.SetURL` | `LoadURL` 把 URL 写进 `Document`（`LoadHTML` 视为 `about:blank`，内部拆出 `loadHTMLFrom(src, docURL)`）；`document.URL` 与 `location.href/protocol/host/hostname/port/pathname/search/hash/origin` 改为**动态 accessor**；`history.pushState/replaceState` 改为更新文档 URL（同源路径相对当前文档解析），不再直接写 location 字段 |
 | 重定向后的文档基地址是「请求 URL」而不是「最终 URL」 | `fetchHTTP` 只返回响应正文，`LoadURL` 只能拿入参 URL 当基准——`http://host` 被 301 到 `https://host/` 后，页面里的 `style.css` 会解析回 `http://host/style.css` | 新增 `fetchURLWithFinalURL`（内部用 `resp.Request.URL`）→ `LoadURL` 用**最终 URL** 作为文档基地址；`fetchURL` 保持原签名，其余调用点不受影响 |
 
-回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，同时打印 `<img>`/`@import` 的**事实**）。
+回归资产：`webkit/browser_http_test.go`（4 项，真起 `httptest`：相对引用/文档 URL/导航后基准跟随/重定向后基准/UI 库模式零网络）、`dom/url_test.go`（12 例解析表）、`dev/browser_http_probe`（诊断脚本，23 项断言全 PASS）。
 反向验证：隐去相对解析 → 3 条断言失败（含 `unsupported protocol scheme ""`）；恢复 Content-Type 返回 error → 「服务器收到了 /style.css 但样式不生效」；把 fetch 基地址去掉 → 相对 fetch 失败；把重定向基准改回请求 URL → 服务器日志显示 `/style.css`（而非 `/b/style.css`）。
+
+### 图片（`<img src>`）与 CSS `@import` 接通外部资源通道
+
+上面那批修完之后，探针把 `<img src>` 与 `@import` 作为「事实项」打印出来——
+两条都**没有 URL 加载通道**：
+
+| 项 | 根因 | 修复 |
+|----|------|------|
+| `<img src>`（及 `background-image`/`mask-image`/SVG `<image href>`）不走外部资源通道 | 图片由渲染层自己取字节（`rendering.backgroundimage.go` 内置 `httpGet`）：**绕开宿主 `ResourceResolver`、不看运行模式**（UI 库模式下 `<img src="http://…">` 会真的发请求）；相对引用被当成宿主进程工作目录里的文件（真实页面的 `<img src="logo.png">` 必然失败） | 新增 `rendering.ImageResourceLoader` 接线（`ResolveURL` 文档基准解析 / `AllowsExternal` 模式门禁 / `Load` 取字节）。载体链：`Frame.ImageLoader` → `RenderTreeBuilder` → `RenderView.imageLoader` → `Paint` 入口提升为「当前 loader」（save/restore，嵌套 Paint 即 iframe 子文档绘制安全）→ `loadBackgroundImageWith`。取字节统一复用 `webkit.loadExternalResource`，因此 `<img>` 与 `<link>`/`<script>` 的拒绝面完全一致；iframe 子文档的图片按**子文档 URL** 解析 |
+| CSS `@import` 全部静默跳过 | `style.Resolver.resolveImports` 依赖 `Resolver.StyleSheetLoader`，而该字段**从未被设置**（`page.Frame.StyleSheetLoader` 是另一个字段，两者没打通）→ 第一行就 return。真实站点普遍用 `@import` 拆分样式 | `page.Frame` 在 `SetDocument` 时把 resolver 接到 `Frame.StyleSheetLoader`（与 `<link>` 同通道）；相对 @import 按 CSS 规范以**样式表 URL**（`sheet.BaseURL`）为基准解析（`resolveImportURL`：绝对 URL 走 URL 语义、相对 base 走目录拼接、带 scheme/协议相对原样）；递归加深度上限 8 挡循环导入；导入表带解析后的 URL（嵌套逐级正确）。@import 规则的源序仍在本表之前（CSS-CASCADE-5 §3） |
+
+顺带修掉一处**模式门禁旁路**：图片缓存（`rendering.backgroundImageCache`）是
+进程级全局的，只看缓存会让另一个（浏览器模式）WebView 取回的同名 URL 在 UI 库
+模式里照样显示出来。为此 `AllowsExternal` 在**缓存查询之前**判定——探针实测到
+过这个现象，`TestToolkitModeRejectsImageURLsEvenWhenCached` 锁定它。
+
+回归资产：`webkit/browser_http_media_test.go`（5 项，真起 `httptest`：图片
+请求+固有尺寸+**绘制像素**、background-image 同通道、`@import` 生效与
+「样式表 URL 基准」（文档 `/imp/page/`、样式表 `/imp/css/`，误按文档 URL 会拿到
+故意放在同级的 999px 那份）、@import 源序、UI 库模式拒绝（含缓存旁路））。
+反向验证 4 项：`ResolveURL` 返回空 → `/y/page.html` 显示 `/x` 的红图（跨文档
+串味，证明规范化缓存键的必要性）；`AllowsExternal` 恒 true → UI 库模式显示
+浏览器模式缓存里的图；断开 `@import` 接线 → 两个导入表都不加载；`resolveImportURL`
+原样返回 → 服务器收到 `/imp/page/theme.css`（#box = 999px）而不是 `/imp/css/theme.css`。
+**注意第一项的价值**：它证明「只测最终像素」不够——`loadExternalResource` 取字节时
+也会解析相对 URL，所以禁掉图片侧的解析后「图片能加载」的断言照样通过；真正被
+约束的是**缓存键必须是规范化后的绝对 URL**，为此补了跨文档串味测试。
 
 ### 有意保留的边界
 
@@ -491,16 +518,23 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 - **外部资源在 UI 库模式下随样式重扫重复请求 resolver**：引擎按 `<link>` 的 href
   指纹决定是否重扫样式，同一引用在多次重建中可能被重复请求；宿主 resolver 应
   自缓存（尤其是大文件）。
-- **`<img src>` 没有 URL 加载通道**：渲染层只绘制「已附加的解码图」
-  （`RenderBox.SetDecodedImage`），引擎不主动取图片字节 → 相对/绝对 `<img>` 都
-  不发请求（`dev/browser_http_probe` 打印该事实）。需要图片的宿主自行解码后注入；
-  若要补齐，正确位置是 `page.CachedResourceLoader`（已存在但**无任何调用方**，
-  它带 `documentURL` 字段与相对 URL 解析能力）。
-- **CSS `@import` 不加载**：`style.Resolver.resolveImports` 依赖
-  `Resolver.StyleSheetLoader`，而该字段从未被设置（`page.Frame.StyleSheetLoader`
-  是另一个字段，两者未打通）。补齐时应以**样式表 URL** 为基准解析
-  （`<link href="/css/a.css">` 内的 `@import "b.css"` → `/css/b.css`），
-  而不是文档 URL——`css.CSSStyleSheet.Href()` 已带该信息。
+- **图片是异步取回的（当帧不画）**：`<img>` 的字节在后台 goroutine 取回并解码，
+  命中缓存后的**下一帧**才绘制（渲染线程不被网络阻塞）。宿主按帧渲染即可；
+  `data:` URL 与宿主 `ResourceResolver` 提供的内容同步命中，无此延迟。
+- **图片缓存是进程级全局的**：`rendering.backgroundImageCache` 按**规范化后的
+  绝对 URL** 索引（多 WebView 共享已解码图片，省内存但内容也共享）。模式门禁
+  优先于缓存判定，因此 UI 库模式不会显示外部图片；但同一模式下的多个 WebView
+  之间仍会共享同名资源的字节。
+- **`LoadHTML` 下图片没有文档基准**：相对路径按宿主进程工作目录读取（与
+  `<link>` 的既有行为一致）——需要浏览器语义（相对解析/网络）请用 `LoadURL`，
+  或让宿主 `ResourceResolver` 提供内容。
+- **`page.CachedResourceLoader` 仍无调用方**：它带着 `documentURL` 与相对 URL
+  解析能力，但整条链路（`LoadStylesheet` / `RequestResource` 的异步回调）没有
+  接到渲染/样式管线——当前图片与样式都走 `Frame` 的同步 loader 通道。要不要
+  收敛到 CachedResourceLoader（内存缓存 + 并发去重）属于后续架构题。
+- **图片不做 MIME 校验**：解码失败即视为加载失败（`NewDecodedImage` 返回 nil），
+  不像浏览器那样按 `Content-Type` 拒绝（引擎没有那一层，与 `fetchHTTP` 的
+  现状一致）。
 - **`location.assign/replace/reload` 仍是 no-op 桩**：引擎没有导航调度器，导航
   由宿主调 `LoadURL` 完成（重定向的最终 URL 已回写文档，但 `history` 栈不记录
   跳转，`history.length`/`state` 只反映 `pushState` 系列）。

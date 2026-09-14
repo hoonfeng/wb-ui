@@ -35,6 +35,8 @@ wb-ui 的渲染/布局/DOM/CSS/事件管线是同一套，但**装配阶段接�
 | `Worker` / `WebSocket` | ✅ | ❌ 全局置 undefined |
 | `<link rel=stylesheet href>` / `<script src>` 的 http(s)/file 加载 | ✅ | ❌ 只有 `data:` URL 与宿主 `ResourceResolver` |
 | 同上的**相对引用**（`href="a.css"` / `src="/js/x.js"`），以文档 URL 为基准 | ✅ | ❌（同上一格） |
+| `<img src>` / `background-image` / `mask-image` / SVG `<image href>` 的图片加载（含相对引用） | ✅ | ❌ 只有 `data:` URL 与宿主 `ResourceResolver` |
+| CSS `@import`（相对引用以**样式表 URL** 为基准，含嵌套链） | ✅ | ❌（同外部样式表格） |
 | `<iframe src>` 子文档装配 | ✅ | ❌ 不装配（`<iframe>` 元素仍参与布局/绘制） |
 | `LoadURL()` 导航 | ✅ | ❌ `ErrModeNotSupported` |
 | `<link>`/`@import`/`<script src>` 的 `data:` URL | ✅ | ✅ |
@@ -62,6 +64,8 @@ wv.LoadURL("http://localhost:9090/")
 |---|---|
 | `<link href="/style.css">` | `http://host/style.css`（根相对） |
 | `<script src="app.js">`（页面 `/dir/page.html`） | `http://host/dir/app.js`（文档相对） |
+| `<img src="logo.png">` / `background-image:url(bg.png)` | 同上规则；图片**异步**取回，下一帧绘制出来 |
+| `<link href="/css/a.css">` 里的 `@import "b.css"` | `/css/b.css`——**以样式表 URL 为基准**（不是文档 URL） |
 | `fetch("/api/users")` / `xhr.open("GET", "items.json")` | 同上规则；桥路由仍先按**原样** URL 匹配（宿主按 `"/api/users"` 注册的路由不受影响） |
 | `<iframe src="child.html">` | 同文档相对规则（`resolveIframeSrc`） |
 
@@ -142,8 +146,9 @@ go run ./examples/uitoolkit
 # 嵌入浏览器模式（能力面差异直接打印出来）
 go run ./examples/uitoolkit -mode browser -out out.png
 
-# 真实 HTTP 端到端诊断（真起 httptest 服务器）：相对 CSS/脚本、fetch 相对
-# URL、document.URL/location、导航后基准跟随；并打印 <img>/@import 的事实
+# 真实 HTTP 端到端诊断（真起 httptest 服务器）：相对 CSS/脚本/图片、fetch
+# 相对 URL、document.URL/location、导航与重定向后的基准跟随、CSS @import
+# （含「以样式表 URL 为基准」的子目录场景）；再用 UI 库模式复验同一组动作 0 网络
 go run ./dev/browser_http_probe
 ```
 
@@ -153,14 +158,15 @@ go run ./dev/browser_http_probe
 ## 6. 已知边界
 
 - **模式不可热切换**（见 §2）。多形态共存靠「每个 WebView 一个模式」。
-- **`<img src>` 不由引擎加载**：引擎没有图片的 URL 加载通道（渲染层只绘制
-  「已附加的解码图」`RenderBox.SetDecodedImage`）。图片资源由宿主负责解码后
-  注入——`dev/browser_http_probe` 会把这个事实打印出来（不触发请求）。
-- **CSS `@import` 目前不加载**：`style.Resolver.resolveImports` 依赖
-  `Resolver.StyleSheetLoader`，而该字段尚未接线（`LoadExternalResource` 只服务
-  `<link rel=stylesheet>` / `<script src>`）。要支持 `@import`，正确做法是以
-  **样式表自身的 URL** 为基准解析（不是文档 URL）：`<link href="/css/a.css">`
-  里的 `@import "b.css"` 应解析到 `/css/b.css`。
+- **图片是异步取回的**：`<img>` 的字节在后台 goroutine 取回并解码，**当帧不画**
+  （不阻塞渲染线程）——下一帧命中缓存才出现。宿主按帧渲染（`WebView.Render`）
+  即可；点击/布局不受影响。本地 `data:` 与宿主已缓存的内容则同步命中。
+- **图片缓存是进程级的**（`rendering.backgroundImageCache`，按**规范化后的
+  绝对 URL** 索引）：多 WebView 共享同一份已解码图片（省内存，但内容也共享）。
+  模式门禁优先于缓存判定，因此 UI 库模式绝不会显示外部图片——即使浏览器
+  模式的另一个 WebView 已经把它取回。
+- **`LoadHTML` 下图片引用没有文档基准**：相对路径按宿主进程工作目录读取
+  （与 `<link>` 的既有行为一致）；需要浏览器语义时用 `LoadURL`。
 - **HTTP 响应不按 Content-Type 拒绝**：`fetchHTTP` 只记录提示。真实服务器给
   `text/css` / `application/javascript` / `application/json` 都是常态，而引擎的
   取内容层不知道调用方用途（同一个响应可能是 `<link>`、`<script src>` 或
