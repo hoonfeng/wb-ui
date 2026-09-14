@@ -35,6 +35,8 @@ type textTrackState struct {
 	loaded  bool
 	loading bool
 	failed  bool
+	// regions 是该轨道 <track> 资源里 REGION 块解析出的区域（cue.region 绑定用）。
+	regions []vttRegion
 
 	kind     string
 	label    string
@@ -58,6 +60,7 @@ type mediaProtoset struct {
 	cue       *jsc.JSObject
 	cueList   *jsc.JSObject
 	trackList *jsc.JSObject
+	region    *jsc.JSObject
 }
 
 var (
@@ -125,10 +128,48 @@ func registerMediaTypes(rt *jsc.Interpreter, g *jsc.JSObject) {
 		if len(args) > 2 {
 			cue.Text = args[2].ToString()
 		}
-		return newVTTCueObject(in, set, cue)
+		return newVTTCueObject(in, set, cue, nil)
 	})
 	set.cue = jsc.FunctionValue(cueCtor).AsObject().GetStr("prototype").AsObject()
 	g.Set("VTTCue", jsc.FunctionValue(cueCtor))
+	// VTTCue.prototype.getCueAsHTML()：按 WebVTT §6.4 把 cue 正文（含内嵌标记）
+	// 解析为 DocumentFragment。+ toString() 返回原始 cue 文本（规范）。
+	set.cue.Set("getCueAsHTML", jsc.FunctionValue(jsc.NewNativeFunction("getCueAsHTML",
+		func(in *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			o := this.AsObject()
+			if o == nil {
+				return jsc.Undefined()
+			}
+			text := ""
+			if v, ok := o.GetByKey("text"); ok {
+				text = v.ToString()
+			}
+			doc := documentOfInterpreter(in)
+			if doc == nil {
+				return jsc.Undefined()
+			}
+			return jsc.ObjectValue(wrapDocFrag(in, buildCueFragment(doc, parseVTTCueMarkup(text))))
+		}, 0)))
+	set.cue.Set("toString", jsc.FunctionValue(jsc.NewNativeFunction("toString",
+		func(_ *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			o := this.AsObject()
+			if o == nil {
+				return jsc.StringValue("")
+			}
+			if v, ok := o.GetByKey("text"); ok {
+				return jsc.StringValue(v.ToString())
+			}
+			return jsc.StringValue("")
+		}, 0)))
+
+	// ── VTTRegion（WebVTT §4.4）──
+	regionCtor := rt.NewConstructor("VTTRegion", func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
+		return newVTTRegionObject(in, set, vttRegion{
+			Width: 100, Lines: 3, RegionAnchorY: 100, ViewportAnchorY: 100,
+		})
+	})
+	set.region = jsc.FunctionValue(regionCtor).AsObject().GetStr("prototype").AsObject()
+	g.Set("VTTRegion", jsc.FunctionValue(regionCtor))
 
 	// ── TextTrackCueList（不可 new，仅用于原型链与 instanceof）──
 	cueListCtor := rt.NewConstructor("TextTrackCueList", func(_ *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
@@ -227,7 +268,9 @@ func registerMediaTypes(rt *jsc.Interpreter, g *jsc.JSObject) {
 // ─── 构造对象 ────────────────────────────────────────────
 
 // newVTTCueObject 构造一条 VTTCue：规范默认值 + WebVTT settings 覆盖。
-func newVTTCueObject(in *jsc.Interpreter, set *mediaProtoset, cue vttCue) *jsc.JSObject {
+// regions 是该轨道解析出的 REGION 块（settings 里的 region:<id> 会绑定到对应
+// 的 VTTRegion 对象；id 未声明时按规范保留为 null）。
+func newVTTCueObject(in *jsc.Interpreter, set *mediaProtoset, cue vttCue, regions []vttRegion) *jsc.JSObject {
 	var proto *jsc.JSObject
 	if set != nil {
 		proto = set.cue
@@ -250,7 +293,81 @@ func newVTTCueObject(in *jsc.Interpreter, set *mediaProtoset, cue vttCue) *jsc.J
 	obj.Set("text", jsc.StringValue(cue.Text))
 	obj.SetClassName("VTTCue")
 	applyVTTSettings(obj, cue.Settings)
+	if id, ok := cue.Settings["region"]; ok && id != "" {
+		var regionObj *jsc.JSObject
+		for i := range regions {
+			if regions[i].ID == id {
+				regionObj = newVTTRegionObject(in, set, regions[i])
+				break
+			}
+		}
+		if regionObj != nil {
+			obj.Set("region", jsc.ObjectValue(regionObj))
+		}
+	}
 	return obj
+}
+
+// newVTTRegionObject 构造一个 VTTRegion 对象（属性按 WebVTT §4.4 命名）。
+func newVTTRegionObject(in *jsc.Interpreter, set *mediaProtoset, r vttRegion) *jsc.JSObject {
+	var proto *jsc.JSObject
+	if set != nil {
+		proto = set.region
+	}
+	obj := jsc.NewObject(proto)
+	obj.SetClassName("VTTRegion")
+	obj.Set("id", jsc.StringValue(r.ID))
+	obj.Set("width", jsc.NumberValue(r.Width))
+	obj.Set("lines", jsc.NumberValue(r.Lines))
+	obj.Set("regionAnchorX", jsc.NumberValue(r.RegionAnchorX))
+	obj.Set("regionAnchorY", jsc.NumberValue(r.RegionAnchorY))
+	obj.Set("viewportAnchorX", jsc.NumberValue(r.ViewportAnchorX))
+	obj.Set("viewportAnchorY", jsc.NumberValue(r.ViewportAnchorY))
+	obj.Set("scroll", jsc.StringValue(r.Scroll))
+	return obj
+}
+
+// buildCueFragment 把 cue 正文节点树构造成 DocumentFragment：文本节点直挂，
+// 标签节点按映射树创建元素（span 带 class/title/lang）。
+func buildCueFragment(doc *dom.Document, nodes []*vttNode) *dom.DocumentFragment {
+	frag := doc.CreateDocumentFragment()
+	var add func(parent dom.Node, list []*vttNode)
+	add = func(parent dom.Node, list []*vttNode) {
+		for _, n := range list {
+			if n.Name == "" {
+				parent.AppendChild(doc.CreateTextNode(n.Text))
+				continue
+			}
+			el := doc.CreateElement(n.Tag)
+			for k, v := range n.Attrs {
+				el.SetAttribute(k, v)
+			}
+			parent.AppendChild(el)
+			add(el, n.Children)
+		}
+	}
+	add(frag, nodes)
+	return frag
+}
+
+// documentOfInterpreter 取解释器全局的 document（getCueAsHTML 需要建 DOM）。
+func documentOfInterpreter(in *jsc.Interpreter) *dom.Document {
+	if in == nil {
+		return nil
+	}
+	g := in.GlobalObject()
+	if g == nil {
+		return nil
+	}
+	docVal := g.GetStr("document")
+	if docVal.IsUndefined() {
+		return nil
+	}
+	n := unwrapNode(docVal)
+	if d, ok := n.(*dom.Document); ok {
+		return d
+	}
+	return nil
 }
 
 // applyVTTSettings 把时间行的 settings 写进 cue 对象（数值类尽量转数字，
@@ -287,9 +404,7 @@ func applyVTTSettings(obj *jsc.JSObject, settings map[string]string) {
 	if v, ok := settings["positionAlign"]; ok {
 		obj.Set("positionAlign", jsc.StringValue(v))
 	}
-	if v, ok := settings["region"]; ok {
-		obj.Set("region", jsc.StringValue(v))
-	}
+	// region 的处理见 newVTTCueObject：要绑定到声明过的 VTTRegion 对象（规范）。
 }
 
 // buildObjects 创建 TextTrack 与其 TextTrackCueList 的对外对象，并挂上属性
@@ -385,8 +500,10 @@ func (st *textTrackState) ensureLoaded() {
 		return
 	}
 	set := protosetFor(st.interp)
-	for _, cue := range parseWebVTT(body) {
-		st.cues = append(st.cues, newVTTCueObject(st.interp, set, cue))
+	trackDoc := parseWebVTTDocument(body)
+	st.regions = trackDoc.Regions
+	for _, cue := range trackDoc.Cues {
+		st.cues = append(st.cues, newVTTCueObject(st.interp, set, cue, st.regions))
 	}
 	st.refreshCueList()
 	st.loading = false
