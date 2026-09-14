@@ -61,6 +61,7 @@ var elemAccessorProps = map[string]bool{
 	"id": true, "className": true, "title": true, "src": true,
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
 	"onclick": true,
+	"track":   true, "textTracks": true,
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
@@ -218,6 +219,7 @@ var (
 		"id", "className", "title", "src",
 		"attributes", "innerHTML", "outerHTML", "textContent", "content",
 		"getContext", "width", "height", "toDataURL",
+		"track", "textTracks",
 	}
 )
 
@@ -1148,6 +1150,32 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			return getter(func(in *jsc.Interpreter) jsc.JSValue {
 				return jsc.ObjectValue(namedNodeMapFor(in, el))
 			})(rt, jsc.JSValue{})
+		}}, true
+	case "track":
+		// HTMLTrackElement.track（HTML §4.8.11.1）：<track> 元素暴露唯一的
+		// TextTrack 对象（同一元素始终同一实例），首次访问时按 src 加载
+		// WebVTT 并异步派发 load/error。
+		if tag != "track" {
+			return jsc.Undefined(), nil, true
+		}
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			if obj := textTrackForElement(rt, el); obj != nil {
+				return jsc.ObjectValue(obj)
+			}
+			return jsc.Undefined()
+		}}, true
+	case "textTracks":
+		// HTMLMediaElement.textTracks（HTML §4.8.11.2）：live 集合，每次读取
+		// 按当前子 <track> 元素刷新索引。video.textTracks[i] 与对应 <track>
+		// 元素的 .track 是同一对象（框架按对象标识关联视频与字幕）。
+		if tag != "video" && tag != "audio" {
+			return jsc.Undefined(), nil, true
+		}
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			if obj := textTracksForMediaElement(rt, el); obj != nil {
+				return jsc.ObjectValue(obj)
+			}
+			return jsc.Undefined()
 		}}, true
 	case "innerHTML":
 		return jsc.JSValue{}, &elemAccessor{

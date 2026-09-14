@@ -568,6 +568,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	})
 	g.Set("Image", jsc.FunctionValue(imgCtor))
 
+	// ── 媒体文本轨道（<track>/TextTrack 家族，HTML §4.8.11）──
+	// HTMLTrackElement.track / HTMLMediaElement.textTracks 的载体类型：
+	// TextTrack、TextTrackCueList、TextTrackList、VTTCue。
+	registerMediaTypes(rt, g)
+
 	// Extract .prototype objects
 	nodeProto = jsc.FunctionValue(nodeCtor).AsObject().GetStr("prototype").AsObject()
 	elementProto = jsc.FunctionValue(eltCtor).AsObject().GetStr("prototype").AsObject()
@@ -3040,6 +3045,9 @@ func ClearPageBindingsFor(interp *jsc.Interpreter, doc *dom.Document) {
 			}
 		}
 	}
+	// 媒体文本轨道缓存（<track> → TextTrack / <video> → TextTrackList）与
+	// per-interpreter 原型集合：同样持有旧文档节点与解释器引用。
+	clearMediaCachesFor(interp, doc)
 	dom.ClearObserverRegistryFor(doc)
 }
 
