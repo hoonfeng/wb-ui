@@ -388,15 +388,35 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
 | `:user-valid` / `:user-invalid` | dom 新增 user validity 状态；css 新增枚举 + 名称 + 解析（含枚举三向往返测试）；匹配要求「candidate 且 user validity 为 true」。引擎在 change 事件路径（失焦提交/点击 checkbox-radio/选择 option/拖动 range）与控制点（交互校验=提交尝试）置位，并经注入钩子重算样式；脚本 `dispatchEvent(new Event('change'))` 不置位（与浏览器一致） | `54d2888` |
 | 约束校验的像素级夹具 | `dev/cssprobe` 新增 `constraint-validation` 夹具：6 个色块断言 `:valid`/`:invalid`/`:in-range`/`:out-of-range`/barred/`setCustomValidity` 的真实渲染，1 个断言「未交互的无效控件不匹配 `:user-invalid`」。反向验证：注释掉注入后 6 项检查中的 5 项立刻失败，确认夹具盯着注入链路 | `15f8b5a`、`54d2888` |
 | `:user-valid` / `:user-invalid` 的焦点会话规则 | 补上 MDN 列出的第 3 条：值在控件获得焦点时无效、而用户在焦点仍在控件内时把它改成了有效（`:user-invalid` 是镜像方向）→ 立即获得 user validity。dom 增加焦点会话记忆（`SetFocusValidity`/`FocusValidity`，失焦清除）与 `OnElementFocused` 注入钩子（dom 不依赖 html5）；`html5.NoteFocusGained` / `NoteUserInput` 做判定（未翻转不置位、无焦点会话不置位）；三条真实值写入路径全部接线——`app.Host.setFocusedElementValue`（IME/组合输入）、`webkit.FormFocus.applyValue`（键入/退格/粘贴）、`app.Host.setRangeValueFromX`（range 点击与拖动），漏一条这条规则就静默失效 | `93c3032` |
-| `ToggleEvent.source` | 把 IDL 里的 `source`（`Element?`）落地：dom 增加字段 + `ToggleEventInit.Source` + 构造参数 + `Source()`；bindings 暴露为 `null` 或对应元素对象。本端口恒为 `null`，而且这是规范行为：dialog 的 `close()`/`requestClose()` 传 null、`form method=dialog` 提交传 null、close watcher 读的 request close source element 槽只被 `requestClose()` 写过（写的也是 null）、details 的 toggle 任务只初始化 oldState/newState；非 null 只出现在 popover 的 invoker 场景（Popover API 未立项）。字段存在的意义是让 `e.source === null` 与 MDN 的 `event.source === undefined` 特性检测得到和浏览器一样的结果 | `8487f72` |
+| `ToggleEvent.source` | 把 IDL 里的 `source`（`Element?`）落地：dom 增加字段 + `ToggleEventInit.Source` + 构造参数 + `Source()`；bindings 暴露为 `null` 或对应元素对象。非 null 只出现在 popover 的 invoker 场景（已随 Popover API 落地，见下表），其余路径按规范恒为 `null`：dialog 的 `close()`/`requestClose()` 传 null、`form method=dialog` 提交传 null、close watcher 读的 request close source element 槽只被 `requestClose()` 写过（写的也是 null）、details 的 toggle 任务只初始化 oldState/newState。字段存在的意义是让 `e.source === null` 与 MDN 的 `event.source === undefined` 特性检测得到和浏览器一样的结果 | `8487f72` |
 | 日期类输入的 step mismatch | 新增 `html5/step.go`：date 以天、month 以月（月长不等，不能换算成毫秒）、week 以周、time 与 datetime-local 以秒换算，default step 分别为 1 天/1 月/1 周/60 秒/60 秒；step base 按 min → value 内容属性 → default step base（只有 week 定义了它：−259,200,000 ms）→ 0；step 缺失/解析失败/≤0 时退回 default step 而不是跳过（只有 `step="any"` 跳过）；整数轴（毫秒/月，< 2^53）用整数取模精确判定，number/range 的容差路径顺带修掉 `0.3`（step=0.1）被浮点误差误判成 mismatch 的问题 | `0673d69` |
 | `<input type=week>` 的 ISO 周解析 | 修 `parseWeek`：Go 的时间布局里 `2006-W02` 的 `02` 是「月中的第几天」，早期实现用它解析周值，于是 `1970-W03` 被读成 1970-01-03、`1970-W01…W04` 全部落进同一周（week 的 min/max 与 step 相位因此失真）。改为自行解析「四位以上年 + `-W` + 两位周号」、按 ISO 规则（含 1 月 4 日的那一周是 W01）求周一，并校验第 53 周只在该年真的存在时才合法 | `0673d69` |
+| Popover API | HTML §6.12 整套落地：dom 的 popover visibility state + top layer 近似栈（`dom/popoverstate.go`）；新 `popover` 包实现 show/hide/toggle 三个算法、check popover validity、auto/hint 互斥与 topmost popover ancestor、light dismiss 的 pointerdown/pointerup 两阶段、close request（Esc）、invoker 的激活行为（`popovertarget*` 与 `commandfor`/`command`）；JS 层 `HTMLElement.popover`（枚举属性反射）+ 三个方法 + 四个 invoker 属性 + `ToggleEvent` 构造器；`:popover-open` 伪类与 UA 样式（未显示不生成盒、显示中的 fixed + `z-index:1100` 近似 top layer、`::backdrop` 默认透明不吃指针事件，backdrop 盒的判定泛化为 `dom.Element.NeedsBackdrop`）；宿主两条路径（`webkit.Interaction`、`app.Host`）都接 light dismiss / Esc / invoker。已知差异见下 | `634f4b0`、`3422a1a`、`3d56853`、`1b2aa8c` |
+| Popover API 的像素夹具 | `dev/cssprobe` 新增 `popover`（7 条：hidePopover 后回到不生成盒、`:popover-open` 上色、后打开的 auto 关掉先前的、嵌套 auto 保留 popover 祖先、manual 与 auto 互不影响、UA 定位居中）与 `popover-backdrop`（2 条：作者上色的 backdrop 铺满视口、popover 画在自己 backdrop 之上）。反向验证：`:popover-open` 恒 false → 5 条失败；去掉 UA 的 `display:none` → 2 条失败；backdrop 改成不透明 → 3 条失败 | `1b2aa8c` |
+
+### popover 的已知差异（有意保留）
+
+- **没有真正的 top layer**：显示中的 popover 用 `position:fixed` + `z-index:1100`
+  近似（高于普通内容与 `dialog[open]` 的 1000）。因此「后显示的 popover 一定在
+  其它所有内容之上」只在 z-index 层面近似成立，popover 之间的先后顺序靠文档顺序
+  / 作者样式。UA 的居中定位也不支持 `width:fit-content`，改用
+  `top/left:50% + translate(-50%,-50%)`（与 `dialog[open]` 同一近似）。
+- **没有 close watcher**：Esc（close request）由宿主直接调用
+  `popover.CloseRequest`，只作用在最上层的 auto/hint popover（manual 不响应，与
+  规范一致）。`<dialog>` 的 Esc 关闭仍未实现。
+- **没有 implicit anchor element / CSS anchor positioning**：invoker 与 popover
+  的锚点关联只记录到 `popover trigger`（供 `ToggleEvent.source` 用），不参与定位。
+- **removal steps 未实现**：popover 元素从文档移除时不清理栈，改为在构建列表时
+  过滤已断开的元素（与 `<dialog>` 的模态状态同一取舍）。
+- **`command` 事件（CommandEvent）未派发**：本引擎还没有 CommandEvent 接口，派发
+  一个无 `command`/`source` 字段的同名事件比不派发更容易误导作者。
+- **键盘激活未实现**：本引擎没有「按钮上 Space/Enter 派发 click」的路径，因此
+  invoker 的键盘激活不生效（鼠标点击路径完整）。
+- **属性 setter 一贯宽松**：`popoverTargetElement = <无 id 的元素>` / `= <非元素>`
+  在浏览器抛 InvalidStateError / TypeError，本端口静默忽略（与其它反射 ID 的
+  属性一致）。
 
 ### 仍未建模（有意保留）
-- **Popover API**（`showPopover` / `:popover-open`）：需要 top layer + 光去掉除 +
-  属性/状态机一整套，未立项。`ToggleEvent.source` 字段本身已实现（恒为 null，见上表），
-  但「source 非 null」的那条路径（popover 的 invoker：`popovertarget` / `command`
-  元素）要等这条立项。
 - `:autofill` / `:picture-in-picture`：本引擎没有表单自动填充或画中画模型，
   无判定依据，故作永不匹配。
 - view-transition 伪元素：已解析但永不匹配（无 view-transition 机制）。
