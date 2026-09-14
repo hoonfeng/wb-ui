@@ -56,6 +56,14 @@
     {"name": "max padding uses actual viewport", "color": "#c2255c", "x": 60, "y": 240, "width": 20, "height": 40},
     {"name": "round quantizes nested custom property math", "color": "#2f9e44", "x": 0, "y": 300, "width": 250, "height": 40}
   ],
+  "constraint-validation": [
+    {"name": "required with a value matches :valid", "color": "#2f9e44", "x": 20, "y": 20, "width": 200, "height": 30},
+    {"name": "required and empty matches :invalid", "color": "#c92a2a", "x": 20, "y": 60, "width": 200, "height": 30},
+    {"name": "number inside min/max matches :in-range", "color": "#1971c2", "x": 20, "y": 100, "width": 200, "height": 30},
+    {"name": "number below min matches :out-of-range", "color": "#f08c00", "x": 20, "y": 140, "width": 200, "height": 30},
+    {"name": "readonly is barred: neither :valid nor :invalid", "color": "#adb5bd", "x": 20, "y": 180, "width": 200, "height": 30},
+    {"name": "setCustomValidity re-matches :invalid with no attribute change", "color": "#7048e8", "x": 20, "y": 220, "width": 200, "height": 30}
+  ],
   "display-contents-cascade": [
     {"name": "display contents overrides hidden responsive wrapper", "color": "#087f5b", "x": 0, "y": 0, "width": 200, "height": 80},
     {"name": "flattened sibling remains in parent flex flow", "color": "#1971c2", "x": 200, "y": 0, "width": 200, "height": 80}

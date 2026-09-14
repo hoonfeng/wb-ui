@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Constraint validation pseudo-classes</title>
+  <style>
+    body { margin: 0; padding: 20px; font: 16px Arial, sans-serif; }
+    input {
+      display: block;
+      width: 200px;
+      height: 30px;
+      margin: 0 0 10px 0;
+      border: 0;
+      padding: 0;
+      background: #adb5bd; /* 无伪类命中时的默认底色 */
+    }
+    input:valid { background: #2f9e44; }
+    input:invalid { background: #c92a2a; }
+    /* 范围伪类的特异性高于 :valid/:invalid，因此同时命中时以它为准 */
+    input[type="number"]:in-range { background: #1971c2; }
+    input[type="number"]:out-of-range { background: #f08c00; }
+    /* 自定义错误（IDL 状态，属性没变）走特化规则以便单独断言 */
+    #custom:invalid { background: #7048e8; }
+  </style>
+</head>
+<body>
+  <!-- 1) required 且有值 → :valid（值由脚本设置，顺带验证「值变化后重新匹配」） -->
+  <input id="valid" type="text" required value="">
+  <!-- 2) required 且为空 → :invalid -->
+  <input id="invalid" type="text" required value="">
+  <!-- 3) number 在 min/max 之间 → :in-range -->
+  <input id="inrange" type="number" min="5" max="10" value="7">
+  <!-- 4) number 低于 min → :out-of-range -->
+  <input id="outofrange" type="number" min="5" max="10" value="3">
+  <!-- 5) readonly + required 为空：被排除在约束校验之外 → :valid/:invalid 都不匹配，保持默认底色 -->
+  <input id="barred" type="text" required readonly value="">
+  <!-- 6) 脚本调用 setCustomValidity()：只有 IDL 状态变化 → 必须重新匹配样式 -->
+  <input id="custom" type="text" value="ok">
+  <script>
+    document.getElementById('valid').value = 'hello';
+    document.getElementById('custom').setCustomValidity('this name is taken');
+  </script>
+</body>
+</html>
