@@ -125,5 +125,5 @@ body { margin: 0; font-family: sans-serif; font-size: 12px; }
 	canvas := graphics.NewCanvas(1280, 800)
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 1280, Height: 800})
-	savePNG(canvas, "F:\\syproject\\gou-ide\\screenshots\\wbui_folded_desc_repro.png")
+	savePNG(canvas, "wbui_folded_desc_repro.png")
 }

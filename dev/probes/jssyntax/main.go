@@ -12,7 +12,15 @@ import (
 )
 
 func main() {
-	b, _ := os.ReadFile("F:/syproject/直播挂件助手/internal/dev/cfgdump/config_dump.html")
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: jssyntax <page.html>   # 检查页面内联 <script> 的 goja 语法")
+		os.Exit(2)
+	}
+	b, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read error:", err)
+		os.Exit(1)
+	}
 	html := string(b)
 	re := regexp.MustCompile(`<script>([\s\S]*?)</script>`)
 	matches := re.FindAllStringSubmatch(html, -1)

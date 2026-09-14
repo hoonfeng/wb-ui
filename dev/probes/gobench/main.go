@@ -13,9 +13,14 @@ import (
 )
 
 func main() {
-	path := "F:/syproject/gou-ide/cmd/companion/web-ui/dist/assets/index-C1woFWdd.js"
+	path := ""
 	if len(os.Args) > 1 {
 		path = os.Args[1]
+	}
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "usage: gobench <bundle.js>")
+		fmt.Fprintln(os.Stderr, "  env: GC_PERCENT=<n>  GOMAXPROCS=<n>")
+		os.Exit(2)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

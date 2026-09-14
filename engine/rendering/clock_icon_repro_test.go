@@ -65,6 +65,6 @@ body { background:#1c2438; }
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 60, Height: 60})
 
-	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\clock_icon_repro.png")
+	savePNG(canvas, "clock_icon_repro.png")
 	t.Log("saved clock_icon_repro.png")
 }

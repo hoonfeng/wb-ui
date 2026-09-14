@@ -36,16 +36,16 @@
 | 探针 | 用途 | 运行 |
 |---|---|---|
 | `browser_http_probe` | 「嵌入式浏览器」的真实网络端到端：起 HTTP 服务 → `LoadURL` 加载真实页面（HTML / 外部样式 / 脚本） | `go run ./dev/probes/browser_http_probe` |
-| `calib` | 同一夹具分别用 wb-ui 与 obscura 渲染，量化像素差异占比与差异区域 | `go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -top 6 -out dev/output/diff.png` |
+| `calib` | 同一夹具分别用 wb-ui 与 obscura 渲染，量化像素差异占比与差异区域 | `go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -obscura <path/to/paint_file> -top 6 -out dev/output/diff.png` |
 | `canvas_probe` | WebView 级 canvas 2D 端到端冒烟（JS 绘制 → 像素断言） | `go run ./dev/probes/canvas_probe` |
 | `cssoracle` | 用**真实浏览器**渲染 cssprobe 的同一批夹具，把「期望错了」与「wb-ui 渲染错了」分开 | `go run ./dev/probes/cssoracle -filter legacy -v` |
 | `flexdbg` | flex 布局调试打印（盒子树 + flex 参数） | `go run ./dev/probes/flexdbg` |
 | `fontmetric` | 打印注入布局引擎的字体度量（ascent/descent/lineGap）与其行高，与浏览器 grid-fit 对照 | `go run ./dev/probes/fontmetric Arial 12` |
 | `fontprobe` | 逐条字体解析路径的 CJK 渲染验证（OS 字型 vs 注册的原始数据字型） | `go run ./dev/probes/fontprobe` |
 | `fxprobe` | dump 渲染树 + 绘制顺序输入（Display / Float / IsFloated），回答「这个盒子为什么后画」 | `go run ./dev/probes/fxprobe <file.html>` |
-| `gobench` | goja 编译大 bundle 的耗时剖析（`GC_PERCENT` 可调 GC 频率） | `go run ./dev/probes/gobench` |
-| `jssyntax` | 用主项目（直播挂件助手）的模板 HTML 做 goja 语法检查（`//go:build ignore`） | `go run dev/probes/jssyntax/main.go` |
-| `l2djscheck` | Live2D 模板脚本的语法检查（读主项目生成的脚本；`//go:build ignore`） | `go run dev/probes/l2djscheck/main.go` |
+| `gobench` | goja 编译大 bundle 的耗时剖析（`GC_PERCENT` 可调 GC 频率） | `go run ./dev/probes/gobench <bundle.js>` |
+| `jssyntax` | 检查页面内联 `<script>` 的 goja 语法（`//go:build ignore`） | `go run dev/probes/jssyntax/main.go <page.html>` |
+| `l2djscheck` | Live2D 模板脚本的语法检查（`//go:build ignore`） | `go run dev/probes/l2djscheck/main.go <dir>` |
 | `leakprobe` | WebView 创建 → LoadHTML → Render → Destroy 多轮，验证 DOM/渲染树/JS 解释器整棵树可回收（挂件重建泄漏回归；`//go:build ignore`） | `go run dev/probes/leakprobe/main.go` |
 | `mem_probe` | 循环 LoadHTML / Render 测堆增长，定位泄漏与高频分配 | `go run ./dev/probes/mem_probe` |
 | `pipeline_trace` | 解析渲染树日志（配合 `cmd/pipeline_diag` 分析；JSON + 文本报告写在日志同目录，惯例放 `dev/output/`） | `go run ./dev/probes/pipeline_trace <desktop_diag.log>` |

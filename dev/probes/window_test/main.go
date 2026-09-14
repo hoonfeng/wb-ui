@@ -230,7 +230,6 @@ func locateFontDir() string {
 	candidates = append(candidates,
 		filepath.Join("resources", "fonts"),
 		filepath.Join("..", "..", "resources", "fonts"),
-		`f:\syproject\wb-ui\resources\fonts`,
 	)
 	for _, c := range candidates {
 		if st, err := os.Stat(c); err == nil && st.IsDir() {

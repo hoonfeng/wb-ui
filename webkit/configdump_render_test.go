@@ -17,18 +17,34 @@ func pixToImage(pix []byte, w, h int) *image.NRGBA {
 	return img
 }
 
-// TestRenderConfigDump 渲染真实配置器 HTML（由主项目 TestDumpConfigHTML
-// 生成），保存截图用于检查欢迎语换行 / 按钮文字居中。
+// configDumpDir 返回外部配置器夹具（config_dump.html）所在目录：由环境变量
+// WBUI_CONFIG_DUMP_DIR 指定；未设置则跳过——该 HTML 由宿主项目生成，不在本仓库内。
+func configDumpDir(t *testing.T) string {
+	t.Helper()
+	dir := os.Getenv("WBUI_CONFIG_DUMP_DIR")
+	if dir == "" {
+		t.Skip("WBUI_CONFIG_DUMP_DIR not set (dir holding config_dump.html)")
+	}
+	return dir
+}
+
+// testOutputDir 返回测试产物目录：WBUI_TEST_OUT，缺省系统临时目录。
+func testOutputDir() string {
+	if dir := os.Getenv("WBUI_TEST_OUT"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
+
+// TestRenderConfigDump 渲染真实配置器 HTML（由宿主项目生成），
+// 保存截图用于检查欢迎语换行 / 按钮文字居中。
 func TestRenderConfigDump(t *testing.T) {
 	wd, _ := os.Getwd()
 	t.Logf("cwd = %s", wd)
-	htmlPath := filepath.Join("..", "..", "直播挂件助手", "dev", "cfgdump", "config_dump.html")
-	if abs, err := filepath.Abs(htmlPath); err == nil {
-		t.Logf("trying: %s", abs)
-	}
+	htmlPath := filepath.Join(configDumpDir(t), "config_dump.html")
 	data, err := os.ReadFile(htmlPath)
 	if err != nil {
-		t.Skipf("config_dump.html not generated: %v", err)
+		t.Skipf("config_dump.html not readable: %v", err)
 	}
 	wv := NewWebView()
 	wv.Resize(900, 640)
@@ -46,7 +62,7 @@ func TestRenderConfigDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	out := filepath.Join("..", "..", "直播挂件助手", "dev", "cfgdump", "config_wbui.png")
+	out := filepath.Join(testOutputDir(), "config_wbui.png")
 	f, err := os.Create(out)
 	if err != nil {
 		t.Fatal(err)
@@ -62,10 +78,10 @@ func TestRenderConfigDump(t *testing.T) {
 // TestRenderConfigDumpProp 渲染配置器并打开 text 挂件属性面板（openProp），
 // 检查欢迎语内容预览（.txt-view）是否单行、按钮文字是否居中。
 func TestRenderConfigDumpProp(t *testing.T) {
-	htmlPath := filepath.Join("..", "..", "直播挂件助手", "dev", "cfgdump", "config_dump.html")
+	htmlPath := filepath.Join(configDumpDir(t), "config_dump.html")
 	data, err := os.ReadFile(htmlPath)
 	if err != nil {
-		t.Skipf("config_dump.html not generated: %v", err)
+		t.Skipf("config_dump.html not readable: %v", err)
 	}
 	wv := NewWebView()
 	wv.Resize(900, 640)
@@ -108,7 +124,7 @@ func TestRenderConfigDumpProp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	out := filepath.Join("..", "..", "直播挂件助手", "dev", "cfgdump", "config_prop_wbui.png")
+	out := filepath.Join(testOutputDir(), "config_prop_wbui.png")
 	f, err := os.Create(out)
 	if err != nil {
 		t.Fatal(err)

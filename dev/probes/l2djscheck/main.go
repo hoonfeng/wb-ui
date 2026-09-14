@@ -1,4 +1,3 @@
-
 //go:build ignore
 
 package main
@@ -6,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,8 +13,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: l2djscheck <dir>")
+		fmt.Fprintln(os.Stderr, "  依次编译 <dir>/l2d_tmpl_script_<n>.js（n 从 0 递增，缺号即止）")
+		os.Exit(2)
+	}
+	dir := os.Args[1]
 	for i := 0; ; i++ {
-		p := fmt.Sprintf("F:/syproject/直播挂件助手/dev/l2d_tmpl_script_%d.js", i)
+		p := filepath.Join(dir, fmt.Sprintf("l2d_tmpl_script_%d.js", i))
 		b, err := os.ReadFile(p)
 		if err != nil {
 			break

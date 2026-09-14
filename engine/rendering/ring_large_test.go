@@ -56,6 +56,6 @@ body { background:#1c2438; }
 		{X: 10, Y: 55}, {X: 70, Y: 55}, {X: 70, Y: 75}, {X: 10, Y: 75}, {X: 10, Y: 55},
 	}, 2, blue, "butt", "round")
 
-	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\ring_large.png")
+	savePNG(canvas, "ring_large.png")
 	t.Log("saved ring_large.png")
 }

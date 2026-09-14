@@ -1,7 +1,8 @@
 //go:build ignore
 
-// Command jscheck_ui 提取主项目 internal/configwin/ui.go 的 <script> 块，
-// 用 goja Compile 做语法检查（面板 JS 出错的表现=树/面板/部件卡片空白）。
+// Command jscheck_ui 提取 Go 源码里内联的 <script> 块做 goja 语法检查
+// （raw string 模板里的面板 JS 一旦语法错，整页脚本全挂——表现为树/面板/卡片全空白）。
+// Usage: go run jscheck_ui.go <file.go>
 package main
 
 import (
@@ -14,7 +15,11 @@ import (
 )
 
 func main() {
-	b, err := os.ReadFile("F:/syproject/直播挂件助手/internal/configwin/ui.go")
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: jscheck_ui <file.go>")
+		os.Exit(2)
+	}
+	b, err := os.ReadFile(os.Args[1])
 	if err != nil {
 		fmt.Println("read:", err)
 		os.Exit(1)

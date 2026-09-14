@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"wb-ui/engine/css"
@@ -75,9 +76,7 @@ body {
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 1280, Height: 800})
 
-	outPath := "F:\\syproject\\gou-ide\\screenshots\\wbui_headless.png"
-	savePNG(canvas, outPath)
-	t.Logf("Saved to: %s", outPath)
+	t.Logf("Saved to: %s", savePNG(canvas, "wbui_headless.png"))
 
 	// -- RENDER TREE DUMP --
 	t.Log("")
@@ -261,18 +260,27 @@ func dumpRenderTree(ro RenderObject, depth int, t *testing.T) {
 	}
 }
 
-func savePNG(canvas *graphics.Canvas, path string) {
+// savePNG 把画布写成 PNG 并返回实际写入路径。
+// 输出目录取环境变量 WBUI_TEST_OUT，缺省为系统临时目录——测试因此既不依赖
+// 开发机上的绝对路径，又能在需要看图时把产物固定到指定目录。
+func savePNG(canvas *graphics.Canvas, name string) string {
 	pixels := canvas.Pixels()
 	w, h := canvas.Width(), canvas.Height()
 	if len(pixels) < w*h*4 {
-		return
+		return ""
 	}
+	dir := os.Getenv("WBUI_TEST_OUT")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	path := filepath.Join(dir, filepath.Base(name))
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	copy(img.Pix, pixels[:w*h*4])
 	f, err := os.Create(path)
 	if err != nil {
-		return
+		return ""
 	}
 	defer f.Close()
 	png.Encode(f, img)
+	return path
 }

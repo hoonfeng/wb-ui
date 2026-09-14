@@ -32,11 +32,9 @@ import (
 	"wb-ui/engine/style"
 )
 
-const defaultObscura = `F:\syproject\ref\obscura\target\release\paint_file.exe`
-
 func main() {
 	fixture := flag.String("fixture", "", "HTML fixture to render with both engines")
-	obscura := flag.String("obscura", defaultObscura, "obscura paint_file executable")
+	obscura := flag.String("obscura", "", "obscura paint_file executable (the reference renderer)")
 	w := flag.Int("w", 900, "viewport width")
 	h := flag.Int("h", 1000, "viewport height")
 	out := flag.String("out", "", "write a diff PNG (differing pixels in red) here")
@@ -45,6 +43,10 @@ func main() {
 	flag.Parse()
 	if *fixture == "" {
 		fmt.Fprintln(os.Stderr, "calib: -fixture is required")
+		os.Exit(2)
+	}
+	if *obscura == "" {
+		fmt.Fprintln(os.Stderr, "calib: -obscura is required (path to obscura's paint_file binary)")
 		os.Exit(2)
 	}
 	htmlText, err := os.ReadFile(*fixture)

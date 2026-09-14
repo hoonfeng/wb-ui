@@ -56,7 +56,7 @@ body { background:#1c2438; }
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 48, Height: 48})
 
-	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\shape_icon_rotate_test.png")
+	savePNG(canvas, "shape_icon_rotate_test.png")
 
 	blue := func(x, y int) bool {
 		c := canvas.PixelAt(x, y)

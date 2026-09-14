@@ -15,7 +15,7 @@ CSS 矛盾、或想量化「通过检查」与「视觉一致」的差距时，�
 用法：
 
 ```bash
-go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -top 6 -out /tmp/diff.png
+go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -obscura <path/to/paint_file> -top 6 -out /tmp/diff.png
 go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout.html -depth 7
 go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
 ```
@@ -30,11 +30,11 @@ go run ./dev/suites/cssprobe -v -filter 'table-row-geometry'
 - **渲染侧不依赖 v8**，离线绘制入口可直接使用（已构建）：
 
   ```bash
-  F:\syproject\ref\obscura\target\release\paint_file.exe <in.html> <out.png> [width] [height] [base_url]
+  <obscura>/target/release/paint_file.exe <in.html> <out.png> [width] [height] [base_url]
   ```
 
-  obscura 是工作区里的**兄弟项目**（`F:\syproject\ref\obscura`），不在本仓库内；
-  `dev/probes/calib` 的 `defaultObscura` 就是该绝对路径（`-obscura` 可换路径）。
+  obscura 是**外部参考实现**（Rust），不属于本仓库；`dev/probes/calib` 用
+  `-obscura <该二进制路径>` 指定它（必填参数）。
 
 ## 一致性基线（900x1000 视口，差异像素占全图比例）
 

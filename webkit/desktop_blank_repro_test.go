@@ -1,9 +1,9 @@
 package webkit
 
-// 复现 desktop（gou-ide）加载全空白：加载与桌面版同一份前端
-// F:\syproject\gou-ide\cmd\companion\web-ui\dist，捕获 console/JS 错误，
-// dump DOM 状态。跳过桥接（desktopbridge 在 gou-ide 仓，wb-ui 无法引用）。
-// 运行：go test ./webkit/ -run TestDesktopDistLoads -v
+// 复现「宿主前端加载后整页空白」：加载外部宿主构建出的同一份前端产物
+// （目录由环境变量 WBUI_DESKTOP_DIST 指定），捕获 console/JS 错误并 dump DOM 状态。
+// 跳过桥接——宿主侧桥接代码不在本仓库内，无法引用。
+// 运行：WBUI_DESKTOP_DIST=<dist-dir> go test ./webkit/ -run TestDesktopDistLoads -v
 import (
 	"os"
 	"path/filepath"
@@ -14,13 +14,17 @@ import (
 	"wb-ui/engine/js/jsc"
 )
 
-const desktopDistDir = `F:\syproject\gou-ide\cmd\companion\web-ui\dist`
+// desktopDistDir 由环境变量指定；未设置则跳过本测试。
+var desktopDistDir = os.Getenv("WBUI_DESKTOP_DIST")
 
 func TestDesktopDistLoads(t *testing.T) {
+	if desktopDistDir == "" {
+		t.Skip("WBUI_DESKTOP_DIST not set (path to the host's built frontend dist)")
+	}
 	indexPath := filepath.Join(desktopDistDir, "index.html")
 	htmlData, err := os.ReadFile(indexPath)
 	if err != nil {
-		t.Skipf("gou-ide dist not available: %v", err)
+		t.Skipf("desktop dist not available: %v", err)
 	}
 	wv := NewWebView()
 	wv.Resize(1280, 800)

@@ -101,7 +101,7 @@ go test $(go list ./... | grep -v dev/suites/consistency)    # 跳过像素对�
 ```bash
 go run ./dev/suites/cssprobe        # CSS 夹具几何断言（-v 看明细，-dump 出 PNG）
 go run ./dev/suites/consistency     # 与 Edge 的像素级参照对比（需 Edge）
-go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html
+go run ./dev/probes/calib -fixture dev/suites/cssprobe/fixtures/tables.html -obscura <path/to/paint_file>
 go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout.html
 ```
 

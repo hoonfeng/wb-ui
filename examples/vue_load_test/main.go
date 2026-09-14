@@ -1,16 +1,25 @@
 // Command vue_load_test loads a Vue 3 app bundle and runs it.
+// Usage: go run ./examples/vue_load_test -bundle <app.js>
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
-	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/dom"
+	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/js/jsc"
 )
 
 func main() {
+	bundle := flag.String("bundle", "", "Vue bundle (.js) to load and execute")
+	flag.Parse()
+	if *bundle == "" {
+		fmt.Fprintln(os.Stderr, "usage: vue_load_test -bundle <app.js>")
+		os.Exit(2)
+	}
+
 	// 1. Create JS interpreter
 	rt := jsc.NewInterpreter()
 	log := &jsc.BufferLogger{}
@@ -86,8 +95,7 @@ func main() {
 	}
 
 	// 4. Load full Vue bundle
-	bundlePath := `F:\syproject\gou-ide\cmd\desktop\web-ui-minimal\dist\assets\app-CpekGwAS.js`
-	data, err := os.ReadFile(bundlePath)
+	data, err := os.ReadFile(*bundle)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read bundle: %v\n", err)
 		os.Exit(1)

@@ -51,7 +51,7 @@ body { background:#1c2438; }
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 90, Height: 90})
 
-	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\transform_origin_test.png")
+	savePNG(canvas, "transform_origin_test.png")
 
 	red := func(x, y int) bool {
 		c := canvas.PixelAt(x, y)

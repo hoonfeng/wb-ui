@@ -73,7 +73,7 @@ body { background:#1c2438; }
 	defer canvas.Release()
 	Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 170, Height: 40})
 
-	savePNG(canvas, "F:\\syproject\\直播挂件助手\\screenshots\\icons_center_test.png")
+	savePNG(canvas, "icons_center_test.png")
 
 	blue := func(x, y int) bool {
 		c := canvas.PixelAt(x, y)

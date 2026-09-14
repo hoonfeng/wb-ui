@@ -107,7 +107,7 @@ body { color: var(--text-primary); background-color: var(--bg-primary); }
 		canvas := graphics.NewCanvas(1280, 800)
 		defer canvas.Release()
 		Paint(rv, canvas, Rect{X: 0, Y: 0, Width: 1280, Height: 800})
-		savePNG(canvas, "F:\\syproject\\gou-ide\\screenshots\\wbui_flex_fix.png")
+		savePNG(canvas, "wbui_flex_fix.png")
 
 		t.Log("")
 		t.Log("=== ALL BOXES ===")
