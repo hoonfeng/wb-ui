@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"wb-ui/bindings"
 	"wb-ui/css"
 	"wb-ui/debugenv"
 	"wb-ui/dom"
@@ -658,7 +659,7 @@ func (f *Frame) executeInlineScripts() {
 				}
 				Logf("ScriptLoad", "[%d] exec: src=%q len=%d", i, src, len(code))
 				// Execute directly — no try/catch wrapper.
-				if err := f.ScriptEngine(code); err != nil {
+				if err := f.runScriptForElement(el, code); err != nil {
 					Logf("ScriptLoad", "[%d] EXEC FAIL: %v", i, err)
 				} else {
 					Logf("ScriptLoad", "[%d] OK", i)
@@ -676,13 +677,31 @@ func (f *Frame) executeInlineScripts() {
 			continue
 		}
 		Logf("ScriptLoad", "[%d] inline: len=%d", i, len(code))
-		if err := f.ScriptEngine(code); err != nil {
+		if err := f.runScriptForElement(el, code); err != nil {
 			Logf("ScriptLoad", "[%d] INLINE FAIL: %v", i, err)
 		} else {
 			Logf("ScriptLoad", "[%d] inline OK", i)
 		}
 	}
 	Logf("ScriptLoad", "done")
+}
+
+// runScriptForElement 执行一个 <script> 的代码，并在执行期间把
+// document.currentScript 指向该元素（HTML §4.12.1：脚本执行期间
+// currentScript 指向该元素，执行结束后恢复）。React 19 的水合流程据此定位
+// 正在执行的宿主脚本——读到 undefined 时 `head.appendChild(undefined)`
+// 抛错，整个脚本中断（页面上看不到任何错误，只是后续语句不再执行）。
+//
+// 嵌套调用（脚本内动态插入并执行脚本）时恢复上一层元素而非直接清空。
+func (f *Frame) runScriptForElement(el *dom.Element, code string) error {
+	if f.ScriptEngine == nil {
+		return nil
+	}
+	prev := bindings.CurrentScriptElement
+	bindings.CurrentScriptElement = el
+	err := f.ScriptEngine(code)
+	bindings.CurrentScriptElement = prev
+	return err
 }
 
 // frameScriptClient implements CachedResourceClient for async script loading.

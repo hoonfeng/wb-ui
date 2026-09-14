@@ -265,6 +265,40 @@ var (
 	domTextProto    *jsc.JSObject // Text.prototype
 	domCommentProto *jsc.JSObject // Comment.prototype
 	domDocFragProto *jsc.JSObject // DocumentFragment.prototype
+	domAttrProto    *jsc.JSObject // Attr.prototype（NamedNodeMap 的条目）
+
+	// domNamedNodeMapProto 是 NamedNodeMap.prototype：el.attributes 返回的
+	// 集合以此为原型，`el.attributes instanceof NamedNodeMap` 经原型链成立
+	// （React 19 的水合契约据此判断 attributes 是否为真实集合对象）。
+	domNamedNodeMapProto *jsc.JSObject
+)
+
+// CurrentScriptElement 是 document.currentScript 的取值来源：page.Frame 在
+// 执行某个 <script> 期间把它设为该元素，执行结束清空（其余时刻为 null，
+// 同 HTML §4.12.1 currentScript 语义）。React 19 用它定位正在执行的宿主
+// 脚本；缺失时读到 undefined，`head.appendChild(undefined)` 抛错并使整个
+// 水合脚本中断。
+var CurrentScriptElement *dom.Element
+
+// namedNodeMapCache 缓存每个元素的 attributes 集合对象：DOM 规定
+// `el.attributes === el.attributes`（同一 NamedNodeMap 实例），因此不能每次
+// 访问都新建对象。集合内容保持 live —— 每次属性读/写后由 refreshNamedNodeMap
+// 同步 length 与数字索引。生命周期与 nodeWrapperCache 一致（clearNodeCache
+// 时一并清空，避免持有旧文档节点的强引用）。
+// namedNodeMapEntry 保存一个元素的 attributes 集合对象，并记住它的
+// interpreter（刷新 Attr 条目时以其 ObjectPrototype 兜底，避免 nil 原型）。
+type namedNodeMapEntry struct {
+	obj    *jsc.JSObject
+	interp *jsc.Interpreter
+}
+
+var (
+	namedNodeMapMu    sync.Mutex
+	namedNodeMapCache = map[*dom.Element]*namedNodeMapEntry{}
+
+	// namedNodeMapLenKey 是缓存对象上记录"上次刷新时属性数"的隐藏键，用于
+	// 属性减少时清除残留索引（attributes[2] 不应读到已删除的属性）。
+	namedNodeMapLenKey = "\x00__wbui_nnm_len"
 )
 
 // domBindingsMarker 是挂在 interpreter 全局对象上的隐藏标记，用于幂等判断：
@@ -362,6 +396,48 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}
 		return jsc.NumberValue(ViewportHeight)
 	}), nil)
+
+	// ★ window.visualViewport（CSSOM View §4.2 VisualViewport）：视觉视口
+	// 对象。前端库用它做视口探测 / 虚拟键盘补偿，一致性夹具直接读
+	// visualViewport.width/height——**缺该标识符时属性读取抛
+	// ReferenceError，整段脚本中断**（脚本后续语句全部不执行，页面停在
+	// 初始状态，表现为"元素没变色"，而不是只有读视口那一行失效）。
+	// 无缩放（scale=1）且视觉视口未滚动时，宽高 === innerWidth/innerHeight、
+	// offset/page 偏移为 0（CSSOM View §4.2.1），因此与 innerWidth 共用同一
+	// 分派（ViewportSizeForInterpreter 优先，多 WebView 各读自己尺寸）。
+	// 事件方法按 EventTarget 语义注册为 no-op：wb-ui 尚未合成视觉视口的
+	// scroll/resize/zoom 事件，但注册动作本身不应抛异常。
+	vv := jsc.NewObject(rt.ObjectPrototype())
+	vv.SetAccessor("width", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if ViewportSizeForInterpreter != nil {
+			if w, _, ok := ViewportSizeForInterpreter(in); ok {
+				return jsc.NumberValue(w)
+			}
+		}
+		return jsc.NumberValue(ViewportWidth)
+	}), nil)
+	vv.SetAccessor("height", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if ViewportSizeForInterpreter != nil {
+			if _, h, ok := ViewportSizeForInterpreter(in); ok {
+				return jsc.NumberValue(h)
+			}
+		}
+		return jsc.NumberValue(ViewportHeight)
+	}), nil)
+	vv.Set("scale", jsc.NumberValue(1))
+	for _, name := range []string{"offsetLeft", "offsetTop", "pageLeft", "pageTop"} {
+		vv.Set(name, jsc.NumberValue(0))
+	}
+	vvNoop := func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.Undefined()
+	}
+	vv.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener", vvNoop, 2)))
+	vv.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener", vvNoop, 2)))
+	vv.Set("dispatchEvent", jsc.FunctionValue(jsc.NewNativeFunction("dispatchEvent",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.BooleanValue(true) // 无监听者，取消未发生
+		}, 1)))
+	g.Set("visualViewport", jsc.ObjectValue(vv))
 
 	// ★ Window 构造器（浏览器标准：window 的构造函数，window instanceof
 	// Window === true）。CodeMirror 6 的 isScrolledToBottom 用
@@ -479,6 +555,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	attrCtor := rt.NewConstructor("Attr", emptyCtor)
 	g.Set("Attr", jsc.FunctionValue(attrCtor))
 
+	// NamedNodeMap 构造器：只用于原型链与 instanceof（DOM §4.9.3；调用方
+	// 不应 new 它——浏览器同样不保证可构造，此处退化为返回 this）。
+	nnmCtor := rt.NewConstructor("NamedNodeMap", emptyCtor)
+	g.Set("NamedNodeMap", jsc.FunctionValue(nnmCtor))
+
 	// Image 构造器（new Image() → <img> 元素；canvas 2D drawImage 的
 	// 图片源、live2d 纹理加载依赖）。
 	imgCtor := rt.NewConstructor("Image", func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
@@ -511,6 +592,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	domTextProto = textProto
 	domCommentProto = commentProto
 	domDocFragProto = docFragProto
+	domAttrProto = attrProto
+	domNamedNodeMapProto = jsc.FunctionValue(nnmCtor).AsObject().GetStr("prototype").AsObject()
 
 	// ── Element.prototype: attribute 方法（标准 DOM 设计）──
 	// 属性方法定义在 prototype 上而非每个包装实例上：
@@ -547,6 +630,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		el.SetAttribute(name, args[1].ToString())
 		// ★ computed style 缓存失效（class/style 等属性影响样式匹配）
 		InvalidateComputedStyle(el)
+		invalidateNamedNodeMap(el)
 		// ★ class 属性变化（CM6/Vue 用 setAttribute('class') 加 cm-focused）
 		// 影响后代选择器匹配——触发 OnClassChanged（清 resolver 缓存 +
 		// 重建渲染树）。
@@ -576,6 +660,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		name := args[0].ToString()
 		el.RemoveAttribute(name)
 		InvalidateComputedStyle(el)
+		invalidateNamedNodeMap(el)
 		if name == "class" {
 			if OnClassChanged != nil {
 				OnClassChanged(el)
@@ -590,10 +675,97 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		name := args[0].ToString()
 		if el.HasAttribute(name) {
 			el.RemoveAttribute(name)
+			invalidateNamedNodeMap(el)
 			return jsc.BooleanValue(false)
 		}
 		el.SetAttribute(name, "")
+		invalidateNamedNodeMap(el)
 		return jsc.BooleanValue(true)
+	})
+
+	// ── Element.prototype.hasAttributes / removeAttributeNode ──
+	// removeAttributeNode 是 React 19 清空属性的路径：它持有一次
+	// el.attributes 引用，循环里反复 removeAttributeNode(map[0])，依赖集合
+	// 的 live 语义（length 与索引随删除推进），缺失该方法时直接抛
+	// TypeError。
+	protoAttr("hasAttributes", 0, func(el *dom.Element, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.BooleanValue(el.HasAttributes())
+	})
+	protoAttr("removeAttributeNode", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 || !args[0].IsObject() {
+			return jsc.Null()
+		}
+		ao := args[0].AsObject()
+		if ao == nil {
+			return jsc.Null()
+		}
+		name := ""
+		if v, ok := ao.GetByKey("name"); ok {
+			name = v.ToString()
+		}
+		// 浏览器在属性不存在时抛 NotFoundError；此处返回 null（调用方按
+		// "移除失败"处理即可，不中断脚本）。
+		if name == "" || !el.RemoveAttribute(name) {
+			return jsc.Null()
+		}
+		InvalidateComputedStyle(el)
+		invalidateNamedNodeMap(el)
+		if name == "class" && OnClassChanged != nil {
+			OnClassChanged(el)
+		}
+		return args[0]
+	})
+
+	// ── Element.prototype.scrollTo / scrollBy（CSSOM View）──
+	// 支持对象参数（{left, top, behavior}）与位置参数（scrollTo(x, y)）。
+	// 现代框架的 ref 回调用 scrollTo({left, top, behavior: "auto"}) 恢复
+	// 滚动位置，缺失方法时抛 TypeError 中断整个水合脚本。behavior 为滚动
+	// 动画提示（"smooth"），wb-ui 立即到位（无合成器动画）——位置语义一致。
+	scrollWithElement := func(el *dom.Element, args []jsc.JSValue, relative bool) {
+		dx, dy := 0.0, 0.0
+		if len(args) > 0 && args[0].IsObject() {
+			if o := args[0].AsObject(); o != nil {
+				if v, ok := o.GetByKey("left"); ok {
+					dx = v.ToNumber()
+				}
+				if v, ok := o.GetByKey("top"); ok {
+					dy = v.ToNumber()
+				}
+			}
+		} else {
+			if len(args) > 0 {
+				dx = args[0].ToNumber()
+			}
+			if len(args) > 1 {
+				dy = args[1].ToNumber()
+			}
+		}
+		if math.IsNaN(dx) {
+			dx = 0
+		}
+		if math.IsNaN(dy) {
+			dy = 0
+		}
+		if SetElementScrollOffset == nil {
+			return
+		}
+		cx, cy := 0.0, 0.0
+		if GetElementScrollOffset != nil {
+			cx, cy = GetElementScrollOffset(el)
+		}
+		if relative {
+			dx, dy = cx+dx, cy+dy
+		}
+		// 越界/非滚动容器由实现方钳制（与 scrollTop 赋值同一语义）。
+		SetElementScrollOffset(el, dx, dy)
+	}
+	protoAttr("scrollTo", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		scrollWithElement(el, args, false)
+		return jsc.Undefined()
+	})
+	protoAttr("scrollBy", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		scrollWithElement(el, args, true)
+		return jsc.Undefined()
 	})
 
 	// location 桩
@@ -2396,6 +2568,15 @@ obj.SetInternal(doc)
 		}
 		return jsc.Null()
 	})))
+	// document.currentScript：正在执行的 <script> 元素（HTML §4.12.1），
+	// 其余时刻为 null。page.Frame 在每个脚本执行前后设置/清空
+	// bindings.CurrentScriptElement。
+	obj.SetAccessor("currentScript", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if CurrentScriptElement == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(wrapElement(in, CurrentScriptElement))
+	}), nil)
 	// elementFromPoint（CSSOM-View 标准 API）：层叠感知命中（遮罩/弹窗
 	// 按 z 序，顶层的先命中）。webkit 分派器按解释器归属路由。
 	obj.Set("elementFromPoint", jsc.FunctionValue(jsc.NewNativeFunction("elementFromPoint",
@@ -2750,6 +2931,76 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 
 func clearNodeCache() {
 	nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
+	namedNodeMapMu.Lock()
+	namedNodeMapCache = map[*dom.Element]*namedNodeMapEntry{}
+	namedNodeMapMu.Unlock()
+}
+
+// namedNodeMapFor 返回元素 attributes 的 NamedNodeMap 包装对象（同元素同
+// 实例，满足 `el.attributes === el.attributes`），并在返回前同步为当前属性。
+//
+// NamedNodeMap 是 live 集合（DOM §4.9.3）：length 与数字索引随属性增删变化。
+// React 19 用 `while (map.length) el.removeAttributeNode(map[0])` 清空属性，
+// 循环条件与取出的条目都必须反映每次删除后的状态。
+func namedNodeMapFor(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
+	namedNodeMapMu.Lock()
+	entry, ok := namedNodeMapCache[el]
+	namedNodeMapMu.Unlock()
+	if !ok || entry == nil || entry.obj == nil {
+		proto := rt.ObjectPrototype()
+		if domNamedNodeMapProto != nil {
+			proto = domNamedNodeMapProto
+		}
+		entry = &namedNodeMapEntry{obj: jsc.NewObject(proto), interp: rt}
+		namedNodeMapMu.Lock()
+		namedNodeMapCache[el] = entry
+		namedNodeMapMu.Unlock()
+	}
+	refreshNamedNodeMap(entry, el)
+	return entry.obj
+}
+
+// invalidateNamedNodeMap 在元素属性增删后把缓存的 NamedNodeMap 同步到新状态
+// （仅当该元素已暴露过 attributes 时才需要——否则下次访问自然会同步）。
+func invalidateNamedNodeMap(el *dom.Element) {
+	if el == nil {
+		return
+	}
+	namedNodeMapMu.Lock()
+	entry, ok := namedNodeMapCache[el]
+	namedNodeMapMu.Unlock()
+	if ok && entry != nil {
+		refreshNamedNodeMap(entry, el)
+	}
+}
+
+// refreshNamedNodeMap 把元素的属性列表同步到 NamedNodeMap 包装对象：length、
+// 每个数字索引对应的 Attr 对象，并清除属性减少后残留的索引。
+func refreshNamedNodeMap(entry *namedNodeMapEntry, el *dom.Element) {
+	if entry == nil || entry.obj == nil || el == nil {
+		return
+	}
+	obj := entry.obj
+	prev := 0
+	if v, ok := obj.GetByKey(namedNodeMapLenKey); ok {
+		prev = int(v.ToNumber())
+	}
+	proto := domAttrProto
+	if proto == nil && entry.interp != nil {
+		proto = entry.interp.ObjectPrototype()
+	}
+	names := el.AttributeNames()
+	for i, name := range names {
+		attr := jsc.NewObject(proto)
+		attr.Set("name", jsc.StringValue(name))
+		attr.Set("value", jsc.StringValue(el.GetAttribute(name)))
+		obj.Set(strconv.Itoa(i), jsc.ObjectValue(attr))
+	}
+	for i := len(names); i < prev; i++ {
+		obj.Set(strconv.Itoa(i), jsc.Undefined())
+	}
+	obj.Set(namedNodeMapLenKey, jsc.NumberValue(float64(len(names))))
+	obj.Set("length", jsc.NumberValue(float64(len(names))))
 }
 
 // ClearPageBindingsFor 清除与指定解释器/文档相关的全局 DOM 绑定缓存。

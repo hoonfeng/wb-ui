@@ -1315,27 +1315,30 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return
 		}
 		// 浏览器语义：非滚动容器上 scrollTop/scrollLeft 赋值无效（忽略）。
-		vm := rendering.VerticalScrollbarMetrics(rv, box)
-		hm := rendering.HorizontalScrollbarMetrics(rv, box)
-		if !vm.OK && !hm.OK {
+		// ★ 判定用滚动范围而不是滚动条几何：VerticalScrollbarMetrics.OK 表示
+		// "滚动条该不该绘制"，容器小到放不下箭头按钮时会为 false（不画滚动条），
+		// 但元素仍然可滚动——用 OK 当"可否滚动"会让小尺寸滚动容器上的赋值被
+		// 静默丢弃（10×10 的 overflow:scroll 容器在浏览器里可以 scrollTop=15）。
+		maxX, maxY, canX, canY := rendering.ScrollRange(rv, box)
+		if !canX && !canY {
 			return
 		}
-		if vm.OK {
+		if canY {
 			if y < 0 {
 				y = 0
 			}
-			if y > vm.MaxScroll {
-				y = vm.MaxScroll
+			if y > maxY {
+				y = maxY
 			}
 		} else {
 			y = 0
 		}
-		if hm.OK {
+		if canX {
 			if x < 0 {
 				x = 0
 			}
-			if x > hm.MaxScroll {
-				x = hm.MaxScroll
+			if x > maxX {
+				x = maxX
 			}
 		} else {
 			x = 0

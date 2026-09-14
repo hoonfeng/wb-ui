@@ -1141,15 +1141,12 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				}
 			}}, true
 	case "attributes":
+		// NamedNodeMap（live 集合，DOM §4.9.3）：同一元素返回同一实例
+		// （el.attributes === el.attributes），length 与数字索引随属性增删
+		// 变化。React 19 的水合契约按 NamedNodeMap 语义遍历并清空属性。
 		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
 			return getter(func(in *jsc.Interpreter) jsc.JSValue {
-				names := el.AttributeNames()
-				return arrayValue(in, len(names), func(i int) jsc.JSValue {
-					attr := jsc.NewObject(in.ObjectPrototype())
-					attr.Set("name", jsc.StringValue(names[i]))
-					attr.Set("value", jsc.StringValue(el.GetAttribute(names[i])))
-					return jsc.ObjectValue(attr)
-				})
+				return jsc.ObjectValue(namedNodeMapFor(in, el))
 			})(rt, jsc.JSValue{})
 		}}, true
 	case "innerHTML":

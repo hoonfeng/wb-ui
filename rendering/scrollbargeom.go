@@ -104,6 +104,39 @@ func needsScrollbars(st *style.ComputedStyle, totalW, totalH, viewW, viewH float
 	return
 }
 
+// ScrollRange 返回元素作为滚动容器时允许的滚动范围：max* 为内容总长与可视
+// 长之差（CSSOM View 的滚动上限），horizontal/vertical 表示该轴是否可滚动。
+//
+// ★ 与 VerticalScrollbarMetrics 的 OK 字段不是同一件事：后者回答"滚动条该
+// 怎么画"，容器小到放不下箭头按钮时（vh <= 2*arrow+2*gap）它返回 OK=false
+// （不绘制滚动条），但**元素依然可滚动**。浏览器里 10×10 的
+// overflow:scroll 容器照样 scrollTop = 15（滚动条画不下就不画）。因此
+// scrollTop/scrollLeft 赋值与 scrollTo/scrollBy 的判定必须走本函数，否则
+// 小尺寸滚动容器上的程序化滚动会被静默丢弃（React 19 水合契约里的
+// scroller.scrollTo(...) 正是这种容器：10×10 + 100×100 内容）。
+func ScrollRange(rv *RenderView, box *RenderBox) (maxX, maxY float64, horizontal, vertical bool) {
+	if rv == nil || box == nil {
+		return 0, 0, false, false
+	}
+	viewW, viewH, totalW, totalH := boxViewAndContent(rv, box)
+	needV, needH := needsScrollbars(box.Style(), totalW, totalH, viewW, viewH)
+	if needV {
+		maxY = totalH - viewH
+		if maxY < 0 {
+			maxY = 0
+		}
+		vertical = true
+	}
+	if needH {
+		maxX = totalW - viewW
+		if maxX < 0 {
+			maxX = 0
+		}
+		horizontal = true
+	}
+	return
+}
+
 // VerticalScrollbarMetrics computes the vertical scrollbar geometry for a
 // box, using exactly the same viewport/extent/arrow constants as the
 // painter. Returns OK=false when no vertical scrollbar should be drawn.
