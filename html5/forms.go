@@ -105,16 +105,23 @@ func (f HTMLFormElement) CheckValidity() bool {
 	return true
 }
 
-// ReportValidity is the interactive counterpart of CheckValidity.
+// ReportValidity is the interactive counterpart of CheckValidity: on failure it
+// fires an invalid event on every invalid control (tree order) before returning
+// false. Focusing the first invalid control is the host's job (see
+// ValidateInteractively).
 func (f HTMLFormElement) ReportValidity() bool {
-	return f.CheckValidity()
+	if f.CheckValidity() {
+		return true
+	}
+	f.ValidateInteractively()
+	return false
 }
 
-// Submit dispatches a "submit" event on the form. If preventDefault is not
-// called, the form data is serialized and submission proceeds. Mirrors
-// HTMLFormElement::submit().
-func (f HTMLFormElement) Submit() bool {
-	return f.RequestSubmit(nil)
+// Submit submits the form without any questions asked: no interactive
+// constraint validation, no "submit" event. That difference is exactly why
+// requestSubmit() exists (HTMLFormElement::submit()).
+func (f HTMLFormElement) Submit() {
+	f.doSubmit(nil)
 }
 
 // RequestSubmit dispatches a "submit" event with the given submitter element
@@ -122,6 +129,14 @@ func (f HTMLFormElement) Submit() bool {
 // preventDefault is not called, the form data is serialized and submission
 // proceeds. Mirrors HTMLFormElement::requestSubmit().
 func (f HTMLFormElement) RequestSubmit(submitter *dom.Element) bool {
+	// 交互校验（HTML §4.10.21.2）：除非表单声明 novalidate 或提交者声明
+	// formnovalidate，否则先校验；有无效控件时派发 invalid 事件并中止提交
+	// （submit 事件都不派发）。
+	if !f.NoValidate() && !submitterSkipsValidation(submitter) {
+		if len(f.ValidateInteractively()) > 0 {
+			return false
+		}
+	}
 	ev := dom.NewSubmitEvent(submitter)
 	if ev == nil {
 		return false

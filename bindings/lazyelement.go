@@ -55,6 +55,9 @@ var elemAccessorProps = map[string]bool{
 	"clientHeight": true, "clientWidth": true, "offsetHeight": true, "offsetWidth": true,
 	"offsetTop": true, "offsetLeft": true,
 	"value": true, "checked": true, "type": true, "disabled": true,
+	// 约束校验状态（HTML §4.10.21）：required/pattern/min/max/disabled/
+	// readonly 或值的任何变化都会改变结果，缓存住就会读到过期值。
+	"validity": true, "willValidate": true, "validationMessage": true, "noValidate": true,
 	"selectionStart": true, "selectionEnd": true,
 	"multiple": true, "selectedIndex": true, "options": true, "selectedOptions": true, "selected": true,
 	"tagName": true, "nodeName": true, "nodeType": true, "shadowRoot": true, "nodeValue": true,
@@ -241,6 +244,9 @@ var (
 		"track", "textTracks",
 		"requestFullscreen", "exitFullscreen", "fullscreenElement", "fullscreenEnabled",
 		"open", "show", "showModal", "close", "returnValue",
+		// 约束校验（constraint validation API，HTML §4.10.21.3）。
+		"validity", "willValidate", "validationMessage",
+		"checkValidity", "reportValidity", "setCustomValidity", "noValidate",
 	}
 )
 
@@ -707,10 +713,7 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 	case "focus":
 		return jsc.FunctionValue(jsc.NewNativeFunction("focus",
 			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-				el.SetFocused(true)
-				if FocusBridge != nil {
-					FocusBridge(el, true)
-				}
+				focusElement(el)
 				return jsc.Undefined()
 			}, 0)), nil, true
 	case "blur":
@@ -866,6 +869,17 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 					el.RemoveAttribute("disabled")
 				}
 			}}, true
+
+	// ── 约束校验 API（constraint validation，HTML §4.10.21.3）──
+	// validity / validationMessage / willValidate / checkValidity() /
+	// reportValidity() / setCustomValidity()；<form> 侧为 checkValidity() /
+	// reportValidity() / noValidate。判定逻辑在 html5 包，见 validity.go。
+	case "validity", "willValidate", "validationMessage",
+		"checkValidity", "reportValidity", "setCustomValidity", "noValidate":
+		if v, acc, ok := installFormValidationProperty(rt, el, key); ok {
+			return v, acc, true
+		}
+		return jsc.JSValue{}, nil, false
 
 	// ── Editable control selection (input/textarea) ──
 	case "selectionStart", "selectionEnd", "setSelectionRange":
