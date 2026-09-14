@@ -441,3 +441,39 @@ WebKit 架构参考（`ref/WebKit` 已在本工作区）：
   再也不可能出现 step mismatch（浏览器里用户输入不改属性，base 保持稳定）。有 min
   的元素不受影响（base 取 min），而那正是规范推荐的写法。彻底对齐需要引入 dirty
   value flag，会牵动渲染取值、表单提交与配置面板的取值路径，未立项。
+
+---
+
+## 运行模式与 UI 库层（2026-09 批次）
+
+`webkit.Mode`（嵌入浏览器 / UI 库）与 `ui` 包（Go 构建界面 + web 片段混入）落地
+后留档以下内容。模式语义表与用法见 `docs/MODES.md`。
+
+### 顺带修复
+
+| 项 | 内容 |
+|----|------|
+| 每次 LoadHTML 后样式重复全量重扫 | `page.Frame.SetDocument` 提取样式后未同步 `styleFP` → 紧随其后的首次 `RebuildRenderTree` 判定「指纹变化」→ 再全量重扫一次：`<style>` 重复解析、`<link>` 重复加载（宿主 `StyleSheetLoader` / `ResourceResolver` 被重复调用一次）。修复后整条加载路径上 resolver 只被请求 1 次（`ui.TestToolkitModeResourceResolver` 断言 `calls == 1`） |
+| `file://` 标准 URL 形式读不到文件 | 旧的 `strings.TrimPrefix(href, "file://")` 对 `file:///C:/dir/f.css` 留下前导斜杠 → `os.ReadFile` 必然失败（只有 `file://C:/dir/f.css` 这种非标准写法能读）。新增 `webkit.fileURLPath` 走 `net/url` 解析：盘符路径去前导斜杠、支持 `file:///home/u/f.css` 与 UNC `file://host/share/f` |
+
+### 有意保留的边界
+
+- **模式不可热切换**：装配阶段要按模式决定 5 处注入（fetch 版本 / XHR / 浏览器
+  全局 / 子框架 / 外部资源通道），中途切换会留下「页面脚本已 feature-detect 过
+  旧能力」的不一致状态 → 装配后 `SetMode` 只接受同值，否则 `ErrModeLocked`
+  （要另一模式请新建 WebView；多形态共存靠「每个 WebView 一个模式」）。
+- **浏览器全局的裁剪用「置 undefined」**：`jsc` 层未暴露 goja 的属性删除，
+  因此 UI 库模式下 `"Worker" in window` 仍为 `true`（值为 undefined）。
+  `typeof Worker === "undefined"` 与浏览器一致——feature detect 请用 `typeof`。
+- **`<body>` 背景不传播到画布根**：浏览器会把 html/body 的背景当作画布背景绘制，
+  本引擎不传播（引擎既有差异，与模式无关）。给界面铺底色请用尺寸铺满的容器
+  元素。`ui.TestBodyBackgroundPropagationKnownGap` 只锁定「两种模式行为一致」，
+  避免模式接线引入渲染差异，不代表已对齐浏览器。
+- **UI 库模式不提供安全策略**：它不加载外部资源（这是它最大的安全收益），但引擎
+  本身没有 CSP / 同源检查层，模式切换不改变这一点。
+- **外部资源在 UI 库模式下随样式重扫重复请求 resolver**：引擎按 `<link>` 的 href
+  指纹决定是否重扫样式，同一引用在多次重建中可能被重复请求；宿主 resolver 应
+  自缓存（尤其是大文件）。
+- **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
+  「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式
+  响应式时走 web 方式（Vue 等在页面脚本里做）。
