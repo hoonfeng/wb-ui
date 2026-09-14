@@ -210,11 +210,23 @@ const (
 )
 
 // Type returns the button's type attribute, defaulting to "submit".
+//
+// ★ type 属性缺省/无效时按钮处于 Auto 状态，而规范（form-elements §button）
+// 只在「command 与 commandfor 都不存在、且父节点不是 <select>」时才算它是
+// submit button。带命令属性的按钮 `<button commandfor=… command="show-popover">`
+// 因此是普通按钮：它不该提交表单（此前一律返回 submit，宿主会把这类 popover
+// invoker 的点击当成表单提交）。<select> 里的按钮是占位按钮，同样不是提交按钮。
 func (b HTMLButtonElement) Type() ButtonType {
-	t := strings.ToLower(b.El.GetAttribute("type"))
+	t := strings.ToLower(strings.TrimSpace(b.El.GetAttribute("type")))
 	switch ButtonType(t) {
 	case ButtonSubmit, ButtonReset, ButtonButton:
 		return ButtonType(t)
+	}
+	if b.El.HasAttribute("command") || b.El.HasAttribute("commandfor") {
+		return ButtonButton
+	}
+	if p := b.El.ParentElement(); p != nil && p.LocalName() == "select" {
+		return ButtonButton
 	}
 	return ButtonSubmit
 }

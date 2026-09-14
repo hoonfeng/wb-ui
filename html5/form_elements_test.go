@@ -185,6 +185,32 @@ func TestButton_TypeKnown(t *testing.T) {
 	}
 }
 
+// TestButton_AutoStateWithCommandIsNotSubmit 锁死 Auto 状态下的提交按钮判定
+// （form-elements §button）：type 缺省/无效时，只有「command 与 commandfor 都
+// 不存在、且父节点不是 <select>」才是 submit button。popover 的 invoker 常写成
+// <button commandfor=… command="show-popover">，它绝不能触发表单提交。
+func TestButton_AutoStateWithCommandIsNotSubmit(t *testing.T) {
+	cmd := createElement("button", map[string]string{"command": "show-popover", "commandfor": "p"})
+	b, _ := ToButtonElement(cmd)
+	if got := b.Type(); got != ButtonButton {
+		t.Errorf("带 command/commandfor 的按钮 Type() = %q, want button", got)
+	}
+	// 显式 type=submit 时仍是提交按钮（命令属性不改变显式声明）。
+	explicit := createElement("button", map[string]string{"type": "submit", "command": "show-popover"})
+	b2, _ := ToButtonElement(explicit)
+	if got := b2.Type(); got != ButtonSubmit {
+		t.Errorf("显式 type=submit 的按钮 Type() = %q, want submit", got)
+	}
+	// <select> 里的按钮是占位按钮，不提交表单。
+	sel := createElement("select", nil)
+	opt := createElement("button", nil)
+	sel.AppendChild(opt)
+	b3, _ := ToButtonElement(opt)
+	if got := b3.Type(); got != ButtonButton {
+		t.Errorf("<select> 内的按钮 Type() = %q, want button", got)
+	}
+}
+
 func TestButton_ValueNameDisabled(t *testing.T) {
 	b, _ := ToButtonElement(createElement("button", map[string]string{
 		"value":    "save",
