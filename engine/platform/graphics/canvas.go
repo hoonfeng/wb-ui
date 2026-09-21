@@ -414,11 +414,33 @@ func (c *Canvas) Rotate(degrees float64) {
 }
 
 // Skew composes a skew transform into the current matrix, mirroring the
-// CSS skew() transform function. sx is the X skew angle in degrees;
-// sy is the Y skew angle in degrees.
-func (c *Canvas) Skew(sx, sy float64) {
-	c.canvas.Skew(float32(sx), float32(sy))
+// CSS skew() transform function — which, like GraphicsContext::skew(), takes
+// ANGLES in degrees.
+//
+// ★ skia.Canvas.Skew / SkCanvas::skew take the skew FACTORS (tangents), NOT
+// angles. Passing 45 straight through for "skewX(45deg)" produced a tangent of
+// 45 (~88.7° shear) instead of 1 — for a 40px-tall box the shear pushed content
+// ~1800px sideways, i.e. entirely off-screen. Convert here so this layer keeps
+// WebKit's angle-based signature and rendering callers can stay in degrees.
+func (c *Canvas) Skew(sxDeg, syDeg float64) {
+	c.canvas.Skew(skewDegToFactor(sxDeg), skewDegToFactor(syDeg))
 	c.invalidatePixels()
+}
+
+// skewDegToFactor converts a skew angle in degrees to the tangent factor
+// expected by Skia. ±90° is the tan() asymptote (an infinitely sheared,
+// degenerate box), so clamp just short of it instead of producing ±Inf.
+func skewDegToFactor(deg float64) float32 {
+	if deg == 0 {
+		return 0
+	}
+	const limit = 89.9
+	if deg > limit {
+		deg = limit
+	} else if deg < -limit {
+		deg = -limit
+	}
+	return float32(math.Tan(deg * math.Pi / 180))
 }
 
 // Concat post-multiplies the current transform by the given matrix,
@@ -439,6 +461,34 @@ func (c *Canvas) SetMatrix(m skia.Matrix) {
 // mirroring GraphicsContext::getCTM().
 func (c *Canvas) GetMatrix() skia.Matrix {
 	return c.canvas.GetMatrix()
+}
+
+// PushMatrix saves the current CTM (both the Skia matrix and the axis-aligned
+// scale/translate mirror kept in canvasState) and returns a restore func that
+// puts it back WITHOUT touching the clip stack.
+//
+// Why this exists: Skia bakes a clip into device space at the moment it is set,
+// using the CTM in force at that time — a later matrix change does not move an
+// already-set clip. That makes it possible to express a NON-axis-aligned clip
+// (rotation / scale / skew) without ClipPath: compose the transform, set the
+// clip in the transformed space, then restore the matrix so the rest of the
+// subtree keeps painting in the original coordinate system.
+//
+// Save/Restore cannot be used for this: Restore pops the clip along with the
+// matrix, so the clip would be lost.
+//
+// ★ Used by the renderer to keep an element's own overflow clip in sync with
+// its CSS transform (see rendering.paintLayerContents).
+func (c *Canvas) PushMatrix() (restore func()) {
+	saved := c.canvas.GetMatrix()
+	sx, sy := c.state.scaleX, c.state.scaleY
+	tx, ty := c.state.translateX, c.state.translateY
+	return func() {
+		c.canvas.SetMatrix(saved)
+		c.state.scaleX, c.state.scaleY = sx, sy
+		c.state.translateX, c.state.translateY = tx, ty
+		c.invalidatePixels()
+	}
 }
 
 // ResetMatrix sets the current transform to the identity matrix,

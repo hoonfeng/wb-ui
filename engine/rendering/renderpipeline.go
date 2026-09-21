@@ -481,7 +481,8 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// 的原点：fixture transform-containing-block 的 `.fixed-transformed`
 	// 落在 (305,215) 而非 (335,235)），见 isViewportFixed。
 	isFixedLayer := isViewportFixed(layer.Owner())
-	layerRect, clip, clipSpecified := layer.CalculateRects()
+	rects := layer.CalculateRectsFull()
+	layerRect, clip, clipSpecified := rects.LayerRect, rects.ClipRect, rects.ClipSpecified
 	hasClip := clip.Width > 0 && clip.Height > 0
 	_ = layerRect
 	if debugenv.Enabled("WB_GUTTER_DEBUG") {
@@ -651,6 +652,18 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		info.layerClipActive = true
 		info.layerClip = Rect{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height}
 		info.layerClipRadius = radius
+		// ★ 分量传递（见 LayerRects / paintLayerContents）：祖先 overflow
+		// 裁剪在未变换空间应用，自身 overflow 裁剪在本层 transform 空间应用。
+		info.layerAncestorClipActive = rects.AncestorSpecified
+		info.layerAncestorClip = Rect{
+			X: rects.AncestorClip.X, Y: rects.AncestorClip.Y,
+			Width: rects.AncestorClip.Width, Height: rects.AncestorClip.Height,
+		}
+		info.layerOwnClipActive = rects.OwnClip
+		info.layerOwnClip = Rect{
+			X: rects.OwnRect.X, Y: rects.OwnRect.Y,
+			Width: rects.OwnRect.Width, Height: rects.OwnRect.Height,
+		}
 	}
 	// ★ opacity∈[0.98,1) 直接 alpha 绘制（省 offscreen 合成，见 fixed 分支）。
 	// ★ bounds 限制：SaveLayer 只分配元素区域，raster 合成 ~0.7ms→µs。
@@ -664,6 +677,52 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// 无外层 Save 需配对（裁剪 Save/Restore 在 paintLayerContents 内完成）
 }
 
+// applyOwnOverflowClip 应用「本层自身 overflow」裁剪，并让它跟随本层的
+// CSS transform。
+//
+// transform 的净效果是 T(origin)·ops·T(-origin)，而 painter 按布局绝对坐标
+// 绘制、canvas 变换要到 walkSubtreeExcluded/子层绘制时才施加 → 若在此按布局
+// 矩形设 clip，被平移/旋转的元素会被裁回布局位置（配置器弹窗 456×460 只画出
+// 227×229、左半边整片缺失即此）。
+//
+// 解法：用 Canvas.PushMatrix 复现绘制端【同一个】变换（与
+// walkSubtreeExcluded 共用 applyTransformOpsSized / resolveTransformOrigin，
+// 绝不漂移），在这个变换后的空间里设置裁剪，然后还原 CTM（不能用
+// Save/Restore：Restore 会把裁剪一起弹掉）。Skia 在设置 clip 时就按当时的
+// CTM 把它烘焙到设备空间，后续改矩阵不影响已设的裁剪 → 旋转/缩放/斜切的
+// 裁剪区是精确的变换后形状（矩形四边跟着转，不再是轴对齐外接），圆角同理。
+//
+// ★ 只用于【自身】overflow 裁剪：祖先裁剪属于祖先坐标系、不随本层 transform
+// 移动，必须由调用方在未变换空间单独应用（见 LayerRects）。
+func applyOwnOverflowClip(canvas *graphics.Canvas, layer *RenderLayer, r Rect, radius float64) {
+	var restoreMatrix func()
+	if layer != nil && layer.Owner() != nil {
+		if rb := asRenderBox(layer.Owner()); rb != nil {
+			if st := rb.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
+				originX, originY := rb.X(), rb.Y()
+				if ox := resolveTransformOrigin(st.TransformOriginX, rb.Width()); ox >= 0 {
+					originX += ox
+				}
+				if oy := resolveTransformOrigin(st.TransformOriginY, rb.Height()); oy >= 0 {
+					originY += oy
+				}
+				restoreMatrix = canvas.PushMatrix()
+				canvas.Translate(originX, originY)
+				applyTransformOpsSized(canvas, st.Transform, rb.Width(), rb.Height())
+				canvas.Translate(-originX, -originY)
+			}
+		}
+	}
+	if radius > 0 {
+		canvas.ClipRoundRect(r.X, r.Y, r.Width, r.Height, radius)
+	} else {
+		canvas.Clip(graphics.Rect{X: r.X, Y: r.Y, Width: r.Width, Height: r.Height})
+	}
+	if restoreMatrix != nil {
+		restoreMatrix()
+	}
+}
+
 // paintLayerContents paints the layer owner's subtree (excluding child layer
 // owners) then recurses into child layers in CSS stacking order. Shared by the
 // fixed-layer branch (clip-free viewport state) and the normal branch.
@@ -674,14 +733,32 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	// 裁剪被移除。裁剪实为 CalculateRects 累计值（已含祖先裁剪交），
 	// 每个子层再自应用其累计裁剪即可，无需父层 canvas clip 兜底。
 	layerClipAnchor := -1
-	clipRect, clipRadius, clipActive := info.layerClip, info.layerClipRadius, info.layerClipActive
+	clipRadius, clipActive := info.layerClipRadius, info.layerClipActive
+	ancestorClip, ancestorClipActive := info.layerAncestorClip, info.layerAncestorClipActive
+	ownClip, ownClipActive := info.layerOwnClip, info.layerOwnClipActive
 	info.layerClipActive = false
+	info.layerAncestorClipActive = false
+	info.layerOwnClipActive = false
 	if clipActive && info != nil && info.canvas != nil {
+		// ★★ 两级裁剪分开应用（理由见 LayerRects）：
+		//   ① 祖先 overflow 裁剪：祖先坐标系，不随本层 transform 移动
+		//      → 在【未变换】空间直接设置；
+		//   ② 本层自身 overflow 裁剪：跟随本层 transform
+		//      → applyOwnOverflowClip（变换空间设置后还原 CTM）。
+		// 两者交集即原累计裁剪 ClipRect，语义等价；但若把交集值整体按本层
+		// transform 变换，祖先裁剪会被一起平移（carousel 场景 track 的
+		// clip 被平移 -300px 后与 viewport 求交缩成 2px → 内容全空）。
 		info.canvas.Save()
-		if clipRadius > 0 {
-			info.canvas.ClipRoundRect(clipRect.X, clipRect.Y, clipRect.Width, clipRect.Height, clipRadius)
-		} else {
-			info.canvas.Clip(graphics.Rect{X: clipRect.X, Y: clipRect.Y, Width: clipRect.Width, Height: clipRect.Height})
+		if ancestorClipActive && ancestorClip.Width > 0 && ancestorClip.Height > 0 {
+			info.canvas.Clip(graphics.Rect{
+				X: ancestorClip.X, Y: ancestorClip.Y,
+				Width: ancestorClip.Width, Height: ancestorClip.Height,
+			})
+		}
+		if ownClipActive {
+			// 自身裁剪用 border box（不 inset 到 padding box）：元素自身
+			// 边框必须完整绘制，子内容由 walkSubtreeExcluded 精确裁。
+			applyOwnOverflowClip(info.canvas, layer, ownClip, clipRadius)
 		}
 		layerClipAnchor = info.canvas.SaveCount()
 	}
@@ -794,10 +871,14 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 			info.scrollTranslateX, info.scrollTranslateY = savedSTX, savedSTY
 			// 重放本层裁剪 + scroll + transform（与入口 Save 顺序一致）
 			info.canvas.Save()
-			if clipRadius > 0 {
-				info.canvas.ClipRoundRect(clipRect.X, clipRect.Y, clipRect.Width, clipRect.Height, clipRadius)
-			} else {
-				info.canvas.Clip(graphics.Rect{X: clipRect.X, Y: clipRect.Y, Width: clipRect.Width, Height: clipRect.Height})
+			if ancestorClipActive && ancestorClip.Width > 0 && ancestorClip.Height > 0 {
+				info.canvas.Clip(graphics.Rect{
+					X: ancestorClip.X, Y: ancestorClip.Y,
+					Width: ancestorClip.Width, Height: ancestorClip.Height,
+				})
+			}
+			if ownClipActive {
+				applyOwnOverflowClip(info.canvas, layer, ownClip, clipRadius)
 			}
 			if scrollRestore {
 				info.canvas.Save()

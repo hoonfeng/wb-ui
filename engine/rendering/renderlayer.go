@@ -167,14 +167,50 @@ func RequiresLayer(owner RenderObject) bool {
 // port the layer rect is the owner's border-box rect (for boxes) or a zero rect (for
 // non-box objects), and the clip rect is the intersection of the ancestor overflow clip
 // chain.
+// LayerRects 是 calculateRects 的完整结果，把「祖先 overflow 裁剪」与
+// 「本层自身 overflow 裁剪」拆成两个分量返回。
+//
+// ★ 为什么必须拆：ClipRect 是两者的交集（保留原 CalculateRects 语义），但
+// 两者对 CSS transform 的反应【不同】——
+//   - 祖先 overflow 裁剪属于【祖先】的坐标系：子元素被 transform 平移，
+//     祖先的裁剪区不动（carousel: `.viewport{overflow:hidden}` 下的
+//     `.track{transform:translate(-300px,0)}`，slide 绘制在平移后的位置，
+//     但仍被【固定】的 viewport 矩形裁剪）；
+//   - 本层自身的 overflow 裁剪跟随自身 transform（弹窗自身 overflow:hidden
+//     + transform 平移时，裁剪区必须跟着走，否则内容被裁回布局位置）。
+//
+// 把交集值整体按本层 transform 变换，等于把祖先裁剪也一起平移了：carousel
+// 场景下交集平移 -300px 后与真正的祖先裁剪求交缩成 2px 宽 → 整个 track
+// （含应该在视口正中的绿色 slide）被裁成空白。见 paintLayerContents。
+type LayerRects struct {
+	LayerRect layout.LayoutRect // owner border box（布局坐标）
+	// ClipRect 是累计裁剪（祖先 overflow 链 ∩ 自身 overflow），保持旧语义，
+	// 供 cull / dirty-rect 判断使用。
+	ClipRect      layout.LayoutRect
+	ClipSpecified bool
+	// OwnRect 是自身 device 坐标的 border box（含滚动补偿）。
+	OwnRect layout.LayoutRect
+	// OwnClip 表示本层自身 overflow 非 visible（自身裁剪生效）。
+	OwnClip bool
+	// AncestorClip 是「仅祖先链」的 overflow 交集（device 坐标），不含自身。
+	AncestorClip      layout.LayoutRect
+	AncestorSpecified bool
+}
+
+// CalculateRects 保留旧签名：累计裁剪 rect + layer rect + 是否必须应用裁剪。
 func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, clipSpecified bool) {
+	r := l.CalculateRectsFull()
+	return r.LayerRect, r.ClipRect, r.ClipSpecified
+}
+
+// CalculateRectsFull 返回完整的分量结果（见 LayerRects）。
+func (l *RenderLayer) CalculateRectsFull() LayerRects {
+	var r LayerRects
 	if l.owner == nil {
-		return
+		return r
 	}
 	if box := asRenderBox(l.owner); box != nil {
-		layerRect = box.BorderBoxRect()
-	} else {
-		layerRect = layout.LayoutRect{}
+		r.LayerRect = box.BorderBoxRect()
 	}
 	// A layer only clips its subtree when overflow is not visible. Start
 	// from zero (= no clip): with overflow:visible the layer's own
@@ -261,16 +297,18 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 			}
 		}
 	}
-	ownRect := layerRect
+	ownRect := r.LayerRect
 	ownRect.X -= totalSX
 	ownRect.Y -= totalSY
+	r.OwnRect = ownRect
 
-	clipRect = layout.LayoutRect{}
+	r.ClipRect = layout.LayoutRect{}
 	hasClip := false
 	cs := l.owner.Style()
 	if cs != nil && (cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible) {
-		clipRect = ownRect
+		r.ClipRect = ownRect
 		hasClip = true
+		r.OwnClip = true
 	}
 	// Walk the ancestor layer chain intersecting with each ancestor's overflow clip.
 	innerSX, innerSY := 0.0, 0.0
@@ -303,10 +341,18 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 			innerSX += sx
 			innerSY += sy
 			if !hasClip {
-				clipRect = ancestorRect
+				r.ClipRect = ancestorRect
 				hasClip = true
 			} else {
-				clipRect = intersectRects(clipRect, ancestorRect)
+				r.ClipRect = intersectRects(r.ClipRect, ancestorRect)
+			}
+			// ★ 单独累积「仅祖先」交集：它不随本层 transform 移动，由
+			// paintLayerContents 在【未变换】空间单独应用（见 LayerRects）。
+			if !r.AncestorSpecified {
+				r.AncestorClip = ancestorRect
+				r.AncestorSpecified = true
+			} else {
+				r.AncestorClip = intersectRects(r.AncestorClip, ancestorRect)
 			}
 		}
 		// A fixed-position ancestor establishes a viewport containing
@@ -331,7 +377,8 @@ func (l *RenderLayer) CalculateRects() (layerRect, clipRect layout.LayoutRect, c
 	// hasClip，零 rect 被当成「无 clip」→ 层内容零裁剪平铺到容器外
 	// （overflow-y:auto 的 <select> popup 第 9/10 个 option 行溢出容器
 	// ——「窗口捕获窗口选择下拉渲染溢出」根因）。
-	return layerRect, clipRect, hasClip
+	r.ClipSpecified = hasClip
+	return r
 }
 
 // cbStrictlyAbove reports whether cb is a strict ancestor of a (a lies inside

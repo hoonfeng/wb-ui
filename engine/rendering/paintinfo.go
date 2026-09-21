@@ -133,6 +133,15 @@ type PaintInfo struct {
 	layerClipActive bool
 	layerClip       Rect
 	layerClipRadius float64
+	// ★ layerAncestorClip* / layerOwnClip*：把 layerClip 拆成两个分量，
+	// 因为两者对【本层自身的 CSS transform】反应不同（见 LayerRects）——
+	// 祖先 overflow 裁剪属于祖先坐标系，不随本层 transform 移动；自身
+	// overflow 裁剪必须跟随本层 transform。layerClip 仍是两者交集
+	// （cull / 重放兜底用）。
+	layerAncestorClipActive bool
+	layerAncestorClip       Rect
+	layerOwnClipActive      bool
+	layerOwnClip            Rect
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty

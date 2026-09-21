@@ -1,5 +1,12 @@
 //go:build windows
 
+// ★ go vet baseline: the uintptr → unsafe.Pointer conversions in this file
+// (lines ~372/391/398, vet: "possible misuse of unsafe.Pointer") are the
+// inherent Win32 window-procedure idiom — `lParam` carries a raw address
+// supplied by the OS for IME composition structs. The target memory is NOT on
+// the Go heap (it belongs to the system / the message sender), so the GC never
+// moves it, and Go offers no type-safe substitute. Assessed as safe.
+//
 // Translation of: Source/WebKit/WebKitLegacy/win/WebView.cpp  (IME message handling)
 //                  Source/WebKit/UIProcess/win/WebView.cpp    (IME composition)
 //                  GWui/app/ime_windows.go                     (Win32 subclassing reference)

@@ -403,3 +403,107 @@ func TestCanvasConcatScale(t *testing.T) {
 		t.Fatalf("pixel outside scaled rect = %+v, want transparent", got)
 	}
 }
+
+// TestCanvasSkewTakesDegrees 回归 Skew 的单位：参数是【角度】（WebKit
+// GraphicsContext::skew 与 CSS skew()/skewX() 一致），必须内部转成 Skia 要的
+// 切线因子。曾经的实现把 45 原样传给 SkCanvas::skew，得到 tan=45 而不是
+// tan(45°)=1 → 元素被斜切到画布外，画面上什么都没有。
+func TestCanvasSkewTakesDegrees(t *testing.T) {
+	c := NewCanvas(120, 60)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	// skewX(45deg) 且 transform-origin 在 (0,0)：x' = x + tan(45°)·y = x + y。
+	// 45×45 的方块 (0,0)-(45,45) 因此变成平行四边形：上边 x∈[0,45]、
+	// 下边 x∈[45,90]。
+	c.Skew(45, 0)
+	c.FillRect(0, 0, 45, 45, red)
+
+	// 逆变换 (75,44) → (75-44, 44) = (31,44)，在方块内 → 必须可见。
+	if got := c.PixelAt(75, 44); got != red {
+		t.Errorf("(75,44) = %+v, want red —— Skew 未按角度解析（tan(45°)=1）", got)
+	}
+	// 逆变换 (5,40) → (-35,40)，在方块左侧之外 → 必须透明。
+	if got := c.PixelAt(5, 40); got != (Color{}) {
+		t.Errorf("(5,40) = %+v, want transparent —— 斜切量过大", got)
+	}
+	// skewDegToFactor 的边界：0 度不斜切，±90 度钳制（不产生 Inf）。
+	if got := skewDegToFactor(0); got != 0 {
+		t.Errorf("skewDegToFactor(0) = %v, want 0", got)
+	}
+	if got := skewDegToFactor(45); got < 0.99 || got > 1.01 {
+		t.Errorf("skewDegToFactor(45) = %v, want ~1 (tan 45°)", got)
+	}
+	if v := skewDegToFactor(90); v <= 0 || v > 1e6 {
+		t.Errorf("skewDegToFactor(90) = %v, want clamped positive finite", v)
+	}
+}
+
+// TestCanvasPushMatrixKeepsClip 回归 PushMatrix 的核心契约：
+//   ① 变换被还原（后续绘制回到原坐标系）；
+//   ② 期间设置的裁剪**保留**（Skia 设置 clip 时就把它烘焙在当时的 CTM 下）。
+// 渲染器用它把元素自身的 overflow 裁剪放进元素自身的变换空间，
+// 从而支持旋转/缩放/斜切的非轴对齐裁剪。
+func TestCanvasPushMatrixKeepsClip(t *testing.T) {
+	c := NewCanvas(60, 60)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	c.Save()
+	restore := c.PushMatrix()
+	// 在「平移 30px」的变换空间里裁剪 (0,0)-(10,10) → 设备空间 30..40。
+	c.Translate(30, 0)
+	c.Clip(Rect{X: 0, Y: 0, Width: 10, Height: 10})
+	restore() // ★ 矩阵还原，裁剪必须仍在 30..40
+
+	// CTM 必须已回到原位：铺满整块画布。
+	c.FillRect(0, 0, 60, 60, red)
+	c.Restore()
+
+	// 裁剪区内 → 红。
+	if got := c.PixelAt(35, 5); got != red {
+		t.Errorf("(35,5) = %+v, want red —— PushMatrix 后设置的裁剪丢失了", got)
+	}
+	// 裁剪区外 → 透明（说明裁剪确实生效且没有被放大成整块画布）。
+	if got := c.PixelAt(5, 5); got != (Color{}) {
+		t.Errorf("(5,5) = %+v, want transparent —— 裁剪未生效", got)
+	}
+	// ★ 同时验证变换确实被还原了：若 Translate 没还原，整块画布会被平移到
+	// (30,0) 之后，右侧 20px 就画不到。
+	if got := c.PixelAt(35, 55); got != (Color{}) {
+		t.Errorf("(35,55) = %+v, want transparent —— 裁剪区超出了设定范围（被放大）", got)
+	}
+}
+
+// TestCanvasPushMatrixRestoresTransform：restore() 之后 CTM 必须与调用前完全
+// 一致（含 canvasState 里那份 scale/translate 镜像 —— 它喂给 Clip()/DeviceRect
+// 的坐标换算，漂移会让后续裁剪算错）。
+func TestCanvasPushMatrixRestoresTransform(t *testing.T) {
+	c := NewCanvas(80, 20)
+	defer c.Release()
+	red := Color{R: 0xFF, A: 0xFF}
+
+	c.Save()
+	restore := c.PushMatrix()
+	c.Translate(40, 0)
+	c.Scale(2, 1)
+	c.Rotate(30)
+	restore()
+
+	// CTM 已还原 → 1×1 的世界坐标矩形精确落在设备 (5,5)。
+	c.FillRect(5, 5, 1, 1, red)
+	c.Restore()
+
+	if got := c.PixelAt(5, 5); got != red {
+		t.Errorf("(5,5) = %+v, want red —— PushMatrix 未还原 CTM（Skia 矩阵）", got)
+	}
+	if got := c.PixelAt(60, 5); got != (Color{}) {
+		t.Errorf("(60,5) = %+v, want transparent —— CTM 残留平移", got)
+	}
+
+	// canvasState 镜像（scale/translate）也必须回到 1/0，否则 Clip() 的世界→
+	// 设备换算会带上残留缩放。
+	if dr := c.DeviceRect(Rect{X: 5, Y: 5, Width: 1, Height: 1}); dr != (Rect{X: 5, Y: 5, Width: 1, Height: 1}) {
+		t.Errorf("DeviceRect after PushMatrix restore = %+v, want (5,5,1,1) —— canvasState 的 scale/translate 未还原", dr)
+	}
+}

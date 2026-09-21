@@ -344,6 +344,9 @@ func parseTransformLen(s string, ref float64) float64 {
 	return num
 }
 
+// （原 transformTranslateDelta 已删除：overflow 裁剪不再靠「纯平移时平移
+// clip 矩形」的近似法，改为在 paintLayerContents 里用 Canvas.PushMatrix
+// 复现元素自身的完整变换后再设置裁剪，平移/旋转/缩放/斜切统一正确处理。）
 // parseScaleValue parses a scale value like "2", "1.5", "-1".
 func parseScaleValue(s string) float64 {
 	s = strings.TrimSpace(s)
