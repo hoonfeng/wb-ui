@@ -156,9 +156,13 @@ func compareSnapshots(e, w ElementSnapshot) []FieldDiff {
 		if !near(e.W, w.W, widthToleranceFor(e.Tag, w.Tag)) {
 			add("w", fnum(e.W), fnum(w.W))
 		}
-		// Text-block heights accumulate line-height drift across lines.
+		// 高度容差：只有【多行文本块】才需要 40px（逐行累积的行高漂移）。
+		// 块容器（div / table / tbody / tr / form / ul…）的高度由子盒几何决定，
+		// 一律按 HeightTolerance（12px）判——此前它们和文本块共用 40px，掩盖了
+		// 「form 容器比 Edge 高 28px」这一真实布局错误（基线对齐把跨行累积的
+		// lineHeight 当成了最后一行高度，见 IFC 的 lineInfo.lineH）。
 		hTol := HeightTolerance
-		if isTextBlock(e.Tag) || isTextBlock(w.Tag) {
+		if isMultiLineTextBlock(e.Tag) || isMultiLineTextBlock(w.Tag) {
 			hTol = TextBlockHeightTolerance
 		}
 		if !near(e.H, w.H, hTol) {
@@ -270,6 +274,22 @@ func isTextBlock(tag string) bool {
 	return false
 }
 
+// isMultiLineTextBlock reports whether the tag holds *flowing text* whose box
+// height accumulates per-line line-height drift（字体度量差异是真实的，
+// 但只对多行文本成立）。
+//
+// 与 isTextBlock 的区别：isTextBlock 还包含 div / table / tbody / tr / form /
+// fieldset 这类【块容器】——它们的高度由子盒几何决定，跟字体无关，跟着享受
+// 40px 容差会把「容器高度算错」长期判成 OK（form 容器 88 vs Edge 60 就是被
+// 这一条掩盖的，见 IFC 的 lineInfo.lineH 修复）。
+func isMultiLineTextBlock(tag string) bool {
+	switch tag {
+	case "li", "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "td", "th":
+		return true
+	}
+	return false
+}
+
 // sameFontSize normalizes "2em"/"1.5em"/"32px" to px (em relative to the 16px
 // root default, matching how both engines resolve relative font sizes at the
 // html root) before comparing.
@@ -374,7 +394,7 @@ func writeReport(r CaseResult) {
 		GeoTolerance, FormControlYTolerance, TextBlockYTolerance)
 	fmt.Fprintf(f, "  w  : %g  (form control %g)\n",
 		GeoTolerance, FormControlWidthTolerance)
-	fmt.Fprintf(f, "  h  : %g  (text block %g)  — font-metric line-height drift\n",
+	fmt.Fprintf(f, "  h  : %g  (multi-line text block %g)  — 块容器/表单容器用默认值\n",
 		HeightTolerance, TextBlockHeightTolerance)
 	fmt.Fprintf(f, "  display / color / bg / font-size / text / value / checked: exact\n")
 	fmt.Fprintf(f, "  inline 元素跳过几何比较（无盒几何）\n\n")

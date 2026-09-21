@@ -63,7 +63,7 @@ HTML ──┬──▶ Edge headless（参照物）
 | x | ±2 | ±14（控件 UA 私有 padding/border 计入宽度） | ±6（缩进累积） |
 | y | ±2 | **±6**（行内基线对齐已实现，实测偏差 ≤3px；**曾是 30**，那是掩盖 vertical-align 未实现） | ±40（行高漂移） |
 | w | ±2 | ±10（默认宽度依赖 UA 字符宽常量，见残差量化） | ±2 |
-| h | ±12（字体度量漂移） | ±12 | ±40 |
+| h | ±12（块容器：div/table/tr/form… 高度由子盒几何决定） | ±12 | ±40（**仅多行文本块** p/li/h*/td/pre… 的逐行行高漂移） |
 | display / color / bg / font-size / text / value / checked | 精确比较 | — | — |
 
 - 文本块的 y 还会按「双方高度差」进一步放大（多行文本逐行累积的行高漂移）
@@ -133,6 +133,31 @@ wb-ui 用常量 `formControlAvgCharWidth=8.0px`（该值让 `input size=20` 的 
 与 Edge **逐像素一致**），而 Edge 的 textarea 实测字符步进为 153/20 = **7.65px/char**；
 两个控件在 Chromium 里走不同的度量来源，同一常量无法同时精确命中。7px 落在
 width 容差 10px 内，故判 PASS；range 的 x 随之为 513 vs 506（差 7 ≤ x 容差 14）。
+
+### ③ 容器高度回归（基线对齐的副作用，本轮修复）
+
+| 版本 | form 容器高（Edge=60） | 判定 |
+|---|---|---|
+| 父提交 0b8e912 | 76（差 16） | hTol=40 判 OK |
+| daaa7b7（基线对齐后） | **88（差 28）** | hTol=40 仍判 OK ← **被容差掩盖的真实回归** |
+| 本轮修复后 | **62（差 2）** | hTol=12 判 OK（不再依赖大容差） |
+
+根因：`inlineformattingcontext.go` 的
+`totalHeight = (lastLine.y - contentY) + lineHeight` 用的是**跨行累积的全局
+lineHeight**，而基线对齐把某一行的行盒顶到 44px 后这个全局值也变成 44，
+于是最后一行（progress，实际约 16 高）被当成 44 高——容器底部多出 ~28px 死空间，
+且其后的兄弟元素会被整体下推。
+
+修复：行盒新增 `lineInfo.lineH`（**每行自身的行盒高度**，从基准行高
+`baseLineHeight` 起步，只被本行更高的子盒/基线顶高）；换行推进
+（5 处 `newY := currentLine.y + …`）、容器总高（`lastLine.lineH`）、
+文本段的 `LineHeight`、`vertical-align:middle` 分支的行盒高全部改用该行自身值。
+验证：form 高差 28 → **2px**，且 9 个控件 y 偏差仍全部 ≤3px（progress 仍在 52，
+Edge 51）——推进量没跑偏。
+
+同时把**块容器**（div/table/tbody/tr/form/fieldset/ul…）从「文本块 40px 容差」
+里分出来（新增 `isMultiLineTextBlock`），一律按 12px 判——这类容器高度由子盒
+几何决定，与字体无关，正是它让 form 的 28px 误差长期判 OK。
 
 ## 关键经验
 

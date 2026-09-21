@@ -98,6 +98,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if cssLH > 0 {
 		lineHeight = cssLH
 	}
+	// baseLineHeight 是本 IFC 的【基准行高】（字体度量或 CSS line-height），
+	// 用来初始化每一行自己的行盒高度。lineHeight 这个变量历史上被当作
+	// 「跨行累积的最大值」使用（本行出现更高的 inline 子盒、或基线对齐抬高
+	// 行盒时一起变大），于是后续行的推进与容器总高都跟着膨胀——form 容器因此
+	// 比 Edge 高 28px（88 vs 60，底部整片死空间）。现在每行高度由 lineInfo.lineH
+	// 独立记录，lineHeight 只作新行的基准初值。
+	baseLineHeight := lineHeight
 	// 行高诊断（WBUI_IFC_DEBUG=1）：字体度量与 CSS line-height 的最终取值，
 	// 用于定位"行高与真实浏览器不一致"的夹具（font-metric-line-height）。
 	if debugenv.Enabled("WBUI_IFC_DEBUG") {
@@ -261,6 +268,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		// 高度必须是 maxBaseline + maxDescent，而不是「max(border-box 高)」——
 		// 后者会让下一行起点偏高（form_controls 的 progress 因此差 5px）。
 		maxDescent float64
+		// lineH 是【本行自身】的行盒高度：从基准行高 baseLineHeight 起步，
+		// 仅当【本行】出现更高的 inline 子盒、或基线对齐把本行行盒顶高时抬高。
+		// 换行推进与容器总高都必须用它，不能用跨行累积的全局值。
+		lineH float64
 	}
 
 	// Initialize first line with float-aware available width.
@@ -268,7 +279,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	var lines []lineInfo
 	var pending []pendingSeg
 
-	currentLine := lineInfo{y: contentY, contentX: lineCx, segStart: 0, widthUsed: 0, availWidth: lineCw}
+	currentLine := lineInfo{y: contentY, contentX: lineCx, segStart: 0, widthUsed: 0, availWidth: lineCw, lineH: baseLineHeight}
 
 	// lineTextOffset 返回本行文本段相对行盒顶的 Y 偏移。
 	// 无控件参与时就是 half-leading 居中（原行为，零变化）；本行被表单控件的
@@ -351,14 +362,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				// 显式换行符结束当前行，新行从 contentX 开始）。
 				if preserveNL && runes[cursor] == '\n' {
 					lines = append(lines, currentLine)
-					newY := currentLine.y + lineHeight
+					newY := currentLine.y + currentLine.lineH
 					newCx, newCw := availableLineWidth(newY)
 					currentLine = lineInfo{
 						y:          newY,
 						contentX:   newCx,
 						segStart:   len(pending),
 						widthUsed:  0,
-						availWidth: newCw,
+						availWidth: newCw, lineH: baseLineHeight,
 					}
 					firstWord = true
 					sepPending = false
@@ -379,7 +390,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 							Start: cursor, Len: 1,
 							X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + lineTextOffset(),
 							Width: spW, Height: textHeight,
-							LineY: currentLine.y, LineHeight: lineHeight,
+							LineY: currentLine.y, LineHeight: currentLine.lineH,
 						},
 						lineIdx: len(lines),
 					})
@@ -437,14 +448,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if nextX+wordWidth > currentLine.availWidth+0.001 && currentLine.widthUsed > 0 && softWrap {
 						// Line wrap: record line, start new line with float-aware width.
 						lines = append(lines, currentLine)
-						newY := currentLine.y + lineHeight
+						newY := currentLine.y + currentLine.lineH
 						newCx, newCw := availableLineWidth(newY)
 						currentLine = lineInfo{
 							y:          newY,
 							contentX:   newCx,
 							segStart:   len(pending),
 							widthUsed:  0,
-							availWidth: newCw,
+							availWidth: newCw, lineH: baseLineHeight,
 						}
 						firstWord = true
 						sepPending = false
@@ -467,14 +478,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 								chW := measureText(box, chStr)
 								if currentLine.widthUsed > 0 && currentLine.widthUsed+chW > currentLine.availWidth+0.001 {
 									lines = append(lines, currentLine)
-									newY := currentLine.y + lineHeight
+									newY := currentLine.y + currentLine.lineH
 									newCx, newCw := availableLineWidth(newY)
 									currentLine = lineInfo{
 										y:          newY,
 										contentX:   newCx,
 										segStart:   len(pending),
 										widthUsed:  0,
-										availWidth: newCw,
+										availWidth: newCw, lineH: baseLineHeight,
 									}
 									firstWord = true
 									sepPending = false
@@ -485,7 +496,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 										Start: sub.start + i, Len: 1,
 										X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + lineTextOffset(),
 										Width: chW, Height: textHeight,
-										LineY: currentLine.y, LineHeight: lineHeight,
+										LineY: currentLine.y, LineHeight: currentLine.lineH,
 									},
 									lineIdx: len(lines),
 								})
@@ -501,7 +512,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 							Start: sub.start, Len: len([]rune(word)),
 							X: currentLine.contentX + nextX, Y: currentLine.y + lineTextOffset(),
 							Width: wordWidth, Height: textHeight,
-							LineY: currentLine.y, LineHeight: lineHeight,
+							LineY: currentLine.y, LineHeight: currentLine.lineH,
 						},
 						lineIdx: len(lines), // current (in-progress) line
 					})
@@ -688,16 +699,16 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					contentX:   currentLine.contentX,
 					segStart:   len(pending),
 					widthUsed:  0,
-					availWidth: currentLine.availWidth,
+					availWidth: currentLine.availWidth, lineH: currentLine.lineH,
 				})
-				newY := currentLine.y + lineHeight
+				newY := currentLine.y + currentLine.lineH
 				newCx, newCw := availableLineWidth(newY)
 				currentLine = lineInfo{
 					y:          newY,
 					contentX:   newCx,
 					segStart:   len(pending),
 					widthUsed:  0,
-					availWidth: newCw,
+					availWidth: newCw, lineH: baseLineHeight,
 				}
 				continue
 			}
@@ -900,7 +911,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// box: line box height = child border-box + margins.
 					childBH := cldG.BorderBoxHeight()
 					childH := childBH + margin.Top + margin.Bottom
-					lineH := lineHeight
+					lineH := currentLine.lineH
 					if childH > lineH {
 						lineH = childH
 					}
@@ -953,8 +964,10 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// margin:6px} 三个红框因此粘连成一个连通色块（父高 124 而应为
 			// 136），每个独立边框都量不出来。水平方向本已计入（见下面的
 			// cldW），垂直方向是对称补齐。
-			if cldBH := cldG.BorderBoxHeight() + margin.Vertical(); cldBH > lineHeight {
-				lineHeight = cldBH
+			// ★ 只记到【本行】的高度。原先写全局 lineHeight（跨行累积），会让
+			// 后续每一行都继承本行的最高子盒——容器高度被放大的来源之一。
+			if cldBH := cldG.BorderBoxHeight() + margin.Vertical(); cldBH > currentLine.lineH {
+				currentLine.lineH = cldBH
 			}
 			cldW := cldG.BorderBoxWidth() + margin.Horizontal()
 			// ★ 空 inline span（xterm DOM renderer 的空格列 span——子节点
@@ -969,14 +982,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 			if currentLine.widthUsed+cldW > currentLine.availWidth && currentLine.widthUsed > 0 && allowSoftWrap(cs.WhiteSpace) {
 				lines = append(lines, currentLine)
-				newY := currentLine.y + lineHeight
+				newY := currentLine.y + currentLine.lineH
 				newCx, newCw := availableLineWidth(newY)
 				currentLine = lineInfo{
 					y:          newY,
 					contentX:   newCx,
 					segStart:   len(pending),
 					widthUsed:  0,
-					availWidth: newCw,
+					availWidth: newCw, lineH: baseLineHeight,
 				}
 				// 与初始放置同一规则：纯 inline 顶贴行框顶。
 				topOffset := centeringOffset
@@ -1030,8 +1043,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if d := (cldG.BorderBoxHeight() - off) + margin.Bottom; d > currentLine.maxDescent {
 						currentLine.maxDescent = d
 					}
-					if h := currentLine.maxBaseline + currentLine.maxDescent; h > lineHeight {
-						lineHeight = h
+					if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
+						currentLine.lineH = h
 					}
 				}
 			}
@@ -1062,7 +1075,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	totalHeight := 0.0
 	if len(lines) > 0 {
 		lastLine := lines[len(lines)-1]
-		totalHeight = (lastLine.y - contentY) + lineHeight
+		// ★ 用【最后一行自身】的高度，而不是跨行累积的全局 lineHeight：
+		// 基线对齐会把含最高控件的那一行顶到 44px，拿它当最后一行高度会让
+		// 容器底部多出 ~28px 死空间（form 88 vs Edge 60，其后的兄弟元素还会
+		// 被整体下推）。
+		totalHeight = (lastLine.y - contentY) + lastLine.lineH
 	}
 
 	// Update content width to match the actual text content width. This
