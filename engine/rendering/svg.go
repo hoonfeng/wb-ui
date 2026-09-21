@@ -121,14 +121,21 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	if s.clipID != "" {
 		if clipShapes, ok := ctx.clips[s.clipID]; ok && len(clipShapes) > 0 {
-			// Apply the clip path, paint the shape, restore.
+			// ★ Transform FIRST, then clip — with clipPathUnits="userSpaceOnUse"
+			// (the default) the clipPath resolves in the user coordinate system
+			// of the element referencing it, so the clip has to follow that
+			// element's own transform. Setting the clip before the transform
+			// baked it into the UNtransformed space, which shifted the visible
+			// region back to the element's layout position (and could clip the
+			// element away completely). Same failure mode as the layer overflow
+			// clip fixed in paintLayerContents.
 			canvas.Save()
+			if s.transform != "" {
+				applyTransformOps(canvas, s.transform)
+			}
 			if clipPath := clipShapesToPath(clipShapes); clipPath != nil {
 				canvas.ClipPath(clipPath)
 				clipPath.Release()
-				if s.transform != "" {
-					applyTransformOps(canvas, s.transform)
-				}
 				s.shape.paint(canvas, &c2)
 			}
 			canvas.Restore()
@@ -146,7 +153,14 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 }
 
 // clipShapesToPath converts SVG clip shapes into a single skia path. Supports
-// rect, circle, ellipse and polygon; unsupported shapes contribute nothing.
+// rect, circle, ellipse, polygon/polyline and path. Shapes with no fill area
+// (line) are skipped — in the browser they contribute an empty region too.
+//
+// ★ path 支持：此前 *svgPath 落入 default 分支被静默忽略，于是
+// `<clipPath><path d="…"/></clipPath>`（Lucide/Feather 风格的遮罩写法很常见）
+// 得到的是一个【空】Skia path，ClipPath(空) 把引用元素整块裁没——元素凭空
+// 消失，比「裁剪区不对」严重得多。这里把 sampleSegments 的每段子路径折算线
+// 并入同一 path：M…zM…z 的多子路径保持独立，不会连出幻觉斜线。
 func clipShapesToPath(shapes []svgShape) *skia.Path {
 	if len(shapes) == 0 {
 		return nil
@@ -196,6 +210,19 @@ func clipShapesToPath(shapes []svgShape) *skia.Path {
 				path.LineTo(float32(s.points[i].X), float32(s.points[i].Y))
 			}
 			path.Close()
+		case *svgPath:
+			for _, sg := range s.sampleSegments() {
+				if len(sg) < 2 {
+					continue // 单点无面积
+				}
+				path.MoveTo(float32(sg[0].X), float32(sg[0].Y))
+				for i := 1; i < len(sg); i++ {
+					path.LineTo(float32(sg[i].X), float32(sg[i].Y))
+				}
+				// clip 区域是【填充】区域：子路径隐式闭合（与 rect/circle
+				// 分支一致），否则斜边处会留下未闭合的缺口。
+				path.Close()
+			}
 		}
 	}
 	return path
@@ -574,29 +601,47 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		return
 	}
 	fill := ctx.fill
-	pts := s.samplePoints()
+	segs := s.sampleSegments()
+	pts := flattenSegments(segs)
 	// Fill via a native Skia path so concave / self-intersecting paths (and
 	// fill-rule="evenodd" stars etc.) rasterize like the browser — the old
 	// triangle fan painted the wrong interior for concave shapes.
+	// ★ The path is built from the sampled SUBPATHS (segmentsToPath), so a
+	// multi-subpath "d" (M…zM…z) keeps its holes and gaps instead of being
+	// filled as one connected polygon.
 	if fill.A > 0 && len(pts) >= 3 {
 		if debugenv.Enabled("WB_SVG_DEBUG") {
-			log.Printf("[svg] path fill: pts=%d fill=#%02x%02x%02x rule=%s", len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
+			log.Printf("[svg] path fill: segs=%d pts=%d fill=#%02x%02x%02x rule=%s", len(segs), len(pts), fill.R, fill.G, fill.B, ctx.fillRule)
 		}
-		canvas.FillPath(pts, fill, ctx.fillRule == "evenodd")
+		if path := segmentsToPath(segs); path != nil {
+			if ctx.fillRule == "evenodd" {
+				path.SetFillType(skia.FillTypeEvenOdd)
+			}
+			canvas.FillPathFull(path, fill, 1.0, skia.BlendModeSrcOver)
+			path.Release()
+		}
 	}
 	// Stroke. With a dash pattern we still walk segments (dashLine handles
 	// the on/off phases); solid strokes use the native path stroke so
-	// stroke-linecap / stroke-linejoin match the browser exactly. Gradient
-	// strokes (stroke="url(#gradient)") use the shader-based path stroke.
+	// stroke-linecap / stroke-linejoin match the browser exactly, and subpaths
+	// stay separate. Gradient strokes (stroke="url(#gradient)") use the
+	// shader-based path stroke, which still works on the flattened polyline
+	// (gradients + multi-subpath strokes are rare; axis math needs the bbox).
 	if ctx.strokeWidth > 0 && len(pts) >= 2 && (ctx.stroke.A > 0 || ctx.strokeGradient != nil) {
 		if ctx.strokeGradient != nil {
 			ax, ay, bx, by, colors, pos := gradientParamsForPts(ctx.strokeGradient, pts)
 			canvas.StrokePathGradient(pts, ctx.strokeWidth, ax, ay, bx, by, colors, pos, ctx.lineCap, ctx.lineJoin)
 		} else if len(ctx.dashArray) == 0 {
-			canvas.StrokePath(pts, ctx.strokeWidth, ctx.stroke, ctx.lineCap, ctx.lineJoin)
+			if path := segmentsToPath(segs); path != nil {
+				canvas.StrokePathFull(path, ctx.strokeWidth, ctx.stroke, 1.0, ctx.lineCap, ctx.lineJoin, skia.BlendModeSrcOver)
+				path.Release()
+			}
 		} else {
-			for i := 0; i < len(pts)-1; i++ {
-				dashLine(canvas, pts[i].X, pts[i].Y, pts[i+1].X, pts[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
+			// Walk each subpath separately so the dash never bridges subpaths.
+			for _, sg := range segs {
+				for i := 0; i < len(sg)-1; i++ {
+					dashLine(canvas, sg[i].X, sg[i].Y, sg[i+1].X, sg[i+1].Y, ctx.strokeWidth, ctx.stroke, ctx.dashArray, ctx.dashOffset, ctx.lineCap)
+				}
 			}
 		}
 	} else if debugenv.Enabled("WB_SVG_DEBUG") && len(pts) >= 2 {
@@ -625,13 +670,23 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 }
 
-// samplePoints evaluates the path commands into a polyline point list,
-// sampling beziers (C/S/Q/T) and arcs (A) exactly like paint used to inline,
-// so gradient fill/stroke can reuse the same geometry.
-func (s *svgPath) samplePoints() []graphics.Point {
-	var pts []graphics.Point
-	var firstPoint graphics.Point
-	hasFirst := false
+// sampleSegments evaluates the path commands into ONE polyline point list PER
+// SUBPATH: every M/m starts a new segment. Subpath boundaries must be kept —
+// SVG paths routinely pack several shapes into a single "d" (M…zM…z, which is
+// the norm for Lucide/Feather icons). Flattening them into one list used to
+// make the renderer connect the shapes with phantom diagonal lines, because
+// both FillPath and StrokePath emit MoveTo(first) + LineTo(everything).
+// Beziers (C/S/Q/T) and arcs (A) are sampled into polylines, exactly as before.
+func (s *svgPath) sampleSegments() [][]graphics.Point {
+	var segs [][]graphics.Point
+	var cur []graphics.Point
+	var start graphics.Point // start of the subpath currently being emitted
+	flush := func() {
+		if len(cur) > 0 {
+			segs = append(segs, cur)
+			cur = nil
+		}
+	}
 	curX, curY := 0.0, 0.0
 	// lastCtrl / lastCtrlKind track the previous bezier control point so the
 	// smooth variants S/s (cubic) and T/t (quadratic) can reflect it.
@@ -648,13 +703,11 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
+				flush()
 				p := graphics.Point{X: x, Y: y}
-				pts = append(pts, p)
+				cur = append(cur, p)
+				start = p
 				curX, curY = x, y
-				if !hasFirst {
-					firstPoint = p
-					hasFirst = true
-				}
 			}
 		case 'L', 'l':
 			if len(args) >= 2 {
@@ -663,7 +716,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, graphics.Point{X: x, Y: y})
+				cur = append(cur, graphics.Point{X: x, Y: y})
 				curX, curY = x, y
 			}
 		case 'H', 'h': // horizontal line (absolute / relative)
@@ -672,7 +725,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 				if cmd.kind == 'h' {
 					x += curX
 				}
-				pts = append(pts, graphics.Point{X: x, Y: curY})
+				cur = append(cur, graphics.Point{X: x, Y: curY})
 				curX = x
 			}
 		case 'V', 'v': // vertical line (absolute / relative)
@@ -681,7 +734,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 				if cmd.kind == 'v' {
 					y += curY
 				}
-				pts = append(pts, graphics.Point{X: curX, Y: y})
+				cur = append(cur, graphics.Point{X: curX, Y: y})
 				curY = y
 			}
 		case 'C', 'c': // cubic bezier: x1 y1 x2 y2 x y
@@ -695,7 +748,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
+				cur = append(cur, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
 				curX, curY = x, y
 				lastCtrl = graphics.Point{X: x2, Y: y2}
 				lastCtrlKind = 'c'
@@ -714,7 +767,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
+				cur = append(cur, sampleCubicBezier(curX, curY, x1, y1, x2, y2, x, y)...)
 				curX, curY = x, y
 				lastCtrl = graphics.Point{X: x2, Y: y2}
 				lastCtrlKind = 's'
@@ -728,7 +781,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
+				cur = append(cur, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
 				curX, curY = x, y
 				lastCtrl = graphics.Point{X: x1, Y: y1}
 				lastCtrlKind = 'q'
@@ -745,7 +798,7 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
+				cur = append(cur, sampleQuadraticBezier(curX, curY, x1, y1, x, y)...)
 				curX, curY = x, y
 				lastCtrl = graphics.Point{X: x1, Y: y1}
 				lastCtrlKind = 't'
@@ -760,17 +813,67 @@ func (s *svgPath) samplePoints() []graphics.Point {
 					x += curX
 					y += curY
 				}
-				pts = append(pts, arcToPolyline(curX, curY, rx, ry, phi, laf, sf, x, y)...)
+				cur = append(cur, arcToPolyline(curX, curY, rx, ry, phi, laf, sf, x, y)...)
 				curX, curY = x, y
 			}
 		case 'Z', 'z':
-			if hasFirst {
-				pts = append(pts, firstPoint)
-				curX, curY = firstPoint.X, firstPoint.Y
+			// Close the CURRENT subpath: its own start point, not the first
+			// point of the whole path (that mismatch drew extra diagonals).
+			if len(cur) > 0 {
+				cur = append(cur, start)
+				curX, curY = start.X, start.Y
 			}
 		}
 	}
-	return pts
+	flush()
+	return segs
+}
+
+// flattenSegments concatenates sampled subpaths into one list. Only for
+// callers that need raw geometry (gradient axis, marker direction, length
+// checks) — never paint with it, or subpaths get connected by phantom lines.
+func flattenSegments(segs [][]graphics.Point) []graphics.Point {
+	switch len(segs) {
+	case 0:
+		return nil
+	case 1:
+		return segs[0]
+	}
+	n := 0
+	for _, sg := range segs {
+		n += len(sg)
+	}
+	out := make([]graphics.Point, 0, n)
+	for _, sg := range segs {
+		out = append(out, sg...)
+	}
+	return out
+}
+
+// samplePoints flattens the sampled subpaths (see flattenSegments).
+func (s *svgPath) samplePoints() []graphics.Point {
+	return flattenSegments(s.sampleSegments())
+}
+
+// segmentsToPath builds a native Skia path from sampled subpaths: each segment
+// begins with its own MoveTo, so subpaths stay separate (no phantom connecting
+// lines) and fill rules (nonzero/evenodd) see the real subpath structure.
+// The returned path is owned by the caller (Release it).
+func segmentsToPath(segs [][]graphics.Point) *skia.Path {
+	if len(segs) == 0 {
+		return nil
+	}
+	path := skia.NewPath()
+	for _, sg := range segs {
+		if len(sg) == 0 {
+			continue
+		}
+		path.MoveTo(float32(sg[0].X), float32(sg[0].Y))
+		for i := 1; i < len(sg); i++ {
+			path.LineTo(float32(sg[i].X), float32(sg[i].Y))
+		}
+	}
+	return path
 }
 
 // paintSVGMarker paints a <marker> template at a path vertex: translate to
@@ -1200,19 +1303,43 @@ func parseSVGPoints(s string) []graphics.Point {
 func tokenizeSVGPath(s string) []string {
 	var tokens []string
 	var cur strings.Builder
+	// ★ arc 的标志位（large-arc-flag / sweep-flag）是**单个字符** 0/1，前后可以
+	// 没有分隔符：`a8 8 0 100-16` = rx8 ry8 rot0 largeArc1 sweep0 dx0 dy-16。
+	// 纯词法切分会得到 `100` / `-16`，把两个标志位吃进数字里 → 圆弧参数错位，
+	// 圆的图标只画出一段弧（时钟只剩弧线）、user 头像消失只剩两条肩线（像 #）。
+	// 所以这里跟踪「当前命令 + 已完成的参数个数」，对 arc 的第 4、5 个参数只取
+	// 1 个字符（参数序 rx ry rot largeArc sweep x y，7 个一组）。
+	cmd := byte(0)
+	nargs := 0
 	flush := func() {
 		if cur.Len() > 0 {
 			tokens = append(tokens, cur.String())
 			cur.Reset()
+			nargs++
 		}
 	}
 	isDigit := func(c byte) bool { return c >= '0' && c <= '9' }
+	arcFlagPos := func() bool {
+		if cmd != 'A' && cmd != 'a' {
+			return false
+		}
+		switch nargs % 7 {
+		case 3, 4:
+			return true
+		}
+		return false
+	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r':
 			flush()
 		case isDigit(c):
+			if arcFlagPos() {
+				cur.WriteByte(c)
+				flush()
+				continue
+			}
 			cur.WriteByte(c)
 		case c == '.':
 			// A second '.' starts a new number (`1.82.33` → `1.82`, `.33`).
@@ -1245,13 +1372,16 @@ func tokenizeSVGPath(s string) []string {
 				} else {
 					flush()
 					tokens = append(tokens, string(c))
+					cmd, nargs = c, 0
 				}
 			} else {
 				tokens = append(tokens, string(c))
+				cmd, nargs = c, 0
 			}
 		default: // any other letter is a command
 			flush()
 			tokens = append(tokens, string(c))
+			cmd, nargs = c, 0
 		}
 	}
 	flush()
@@ -2095,6 +2225,11 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			stroke:      ctx.stroke,
 			strokeWidth: ctx.strokeWidth,
 			opacity:     ctx.opacity,
+			lineCap:     ctx.lineCap,
+			lineJoin:    ctx.lineJoin,
+			fillRule:    ctx.fillRule,
+			dashArray:   ctx.dashArray,
+			dashOffset:  ctx.dashOffset,
 			gradients:   ctx.gradients,
 			clips:       ctx.clips,
 			patterns:    ctx.patterns,
@@ -2135,9 +2270,30 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			}
 			return childEl.GetAttribute(name)
 		}
-		elCtx.lineCap = attrOrStyle("stroke-linecap")
-		elCtx.lineJoin = attrOrStyle("stroke-linejoin")
-		elCtx.fillRule = attrOrStyle("fill-rule")
+		// Presentation attributes inherit: a value declared on an ancestor
+		// (typically stroke-linejoin on the root <svg> of an icon sprite) must
+		// reach the <path>. Only an explicit value on this element overrides
+		// the inherited one — assigning unconditionally wiped it out and
+		// silently fell back to miter.
+		if v := attrOrStyle("stroke-linecap"); v != "" {
+			elCtx.lineCap = v
+		}
+		if v := attrOrStyle("stroke-linejoin"); v != "" {
+			elCtx.lineJoin = v
+		}
+		if v := attrOrStyle("fill-rule"); v != "" {
+			elCtx.fillRule = v
+		}
+		// stroke-dasharray / stroke-dashoffset inherit the same way: resolve the
+		// element's own value when present, otherwise elCtx keeps the inherited
+		// one (elCtx.dashArray starts as ctx.dashArray, and this value is what
+		// descendants receive).
+		if v := attrOrStyle("stroke-dasharray"); v != "" {
+			elCtx.dashArray = parseDashArray(v)
+		}
+		if v := attrOrStyle("stroke-dashoffset"); v != "" {
+			elCtx.dashOffset = parseSVGCoord(v)
+		}
 		// opacity / fill-opacity / stroke-opacity multiply the alpha.
 		if opStr := attrOrStyle("opacity"); opStr != "" {
 			if op, err := strconv.ParseFloat(opStr, 64); err == nil {
@@ -2301,9 +2457,10 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 				wrapper.clipID = clipID
 			}
 			wrapper.transform = childEl.GetAttribute("transform")
-			if dashStr := childEl.GetAttribute("stroke-dasharray"); dashStr != "" {
-				wrapper.dashArray = parseDashArray(dashStr)
-			}
+			// stroke-dasharray / dashoffset are inheritable: elCtx already holds
+			// the effective value (own attribute, or the inherited one).
+			wrapper.dashArray = elCtx.dashArray
+			wrapper.dashOffset = elCtx.dashOffset
 			doc.shapes = append(doc.shapes, wrapper)
 		}
 
