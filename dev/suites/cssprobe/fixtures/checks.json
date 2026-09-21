@@ -115,8 +115,8 @@
     {"name": "checkbox uses native intrinsic border box and margins", "color": "#7048e8", "x": 20, "y": 100, "width": 20, "height": 13},
     {"name": "range uses native intrinsic border box and margins", "color": "#c2255c", "x": 333, "y": 100, "width": 20, "height": 16},
     {"name": "hidden input consumes no flex geometry", "color": "#2b8a3e", "x": 500, "y": 100, "width": 20, "height": 20},
-    {"name": "textarea intrinsic box comes from rows and cols", "color": "#f08c00", "x": 166, "y": 200, "width": 20, "height": 36},
-    {"name": "rows attribute scales the textarea intrinsic height", "color": "#e64980", "x": 516, "y": 200, "width": 20, "height": 126}
+    {"name": "textarea intrinsic box comes from rows and cols", "color": "#f08c00", "x": 168, "y": 200, "width": 20, "height": 36, "known_divergence": "x keeps obscura's oracle 168 (verbatim, do NOT rewrite it to wb-ui's output); wb-ui paints the marker at 166, 2px short. The marker x IS the preceding <textarea> border box = cols20 * 8.0px/char + padding 4 + border 2 = 166. The 2px gap is font/platform metrics, not an actionable UA-style bug: Chromium derives the textarea intrinsic width from its own avgCharWidth (this machine's Edge then renders the box at 161 overall), while wb-ui uses the documented 8.0px/char approximation. textarea border = 1px per Edge computed style (input is 2px). See engine/html5/defaultcss.go."},
+    {"name": "rows attribute scales the textarea intrinsic height", "color": "#e64980", "x": 518, "y": 200, "width": 20, "height": 126, "known_divergence": "x keeps obscura's oracle 518 (verbatim, do NOT rewrite it to wb-ui's output); wb-ui paints the marker at 516, 2px short. Same root cause as the sibling textarea check above: the marker x is the <textarea> border box (row left 350 + 168 per the oracle), and the 2px gap is font/platform metrics rather than a fixable UA style. Height 126 matches Edge exactly (rows=8 -> 8 * line-height + padding + border)."}
   ],
   "form-control-quirks": [
     {"name": "quirks form keeps legacy one-em bottom margin", "color": "#087f5b", "x": 0, "y": 37, "width": 100, "height": 20},

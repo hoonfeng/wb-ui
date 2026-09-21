@@ -120,13 +120,26 @@ input[type="radio"] {
    range 的 bg 差异（edge=白 / wbui=透明）。 */
 input[type="range"] {
 	display: inline-block;
-	/* Chromium: 129×16 (the width no longer scales with the control font, so
-	   it stays 129px whatever font-size the page sets). */
+	/* Chromium: 129×16 —— 宽高都不随控件字体缩放。 */
 	width: 129px;
-	/* 高度对齐浏览器：Edge(Chromium) 实测 range 约 21px（1.6em @ 13px）。
-	   此前 1.2em(≈16px) 导致温度行 row 高 24 vs 浏览器 30，modal 总高
-	   少 5px（用户反馈「设置UI高度不对」）。 */
-	height: 1.6em;
+	/* ★ 高度是固定 16px。曾写 1.6em（≈21px @13.3333）并注释「Edge 实测约
+	   21px」——那是错的，还与上面 width 那行的「129×16」自相矛盾，导致
+	   form_controls 的 range 长期报 129x21 vs Edge 129x16（5px 偏差被套件
+	   容差吞掉）。三处独立证据都是 16：
+	     1. 实测：msedge --headless --dump-dom 注入 JS 读
+	        getBoundingClientRect/getComputedStyle →
+	        得到 rect=129x16、cssH=16px；且作者显式 height:40px 时确实生效为 40px
+	        （所以 16px 是 UA 默认值，并非不可覆盖的固有值）；
+	     2. 外部 oracle：ref/obscura/render-repros/checks.json 的
+	        form-control-geometry 里 range marker 高度 = 16（夹具作者按浏览器的
+	        16 定的）；
+	     3. 引擎布局层常量 formControlRangeHeight = 16.0
+	        （engine/layout/formcontrol.go）——布局层本就按 16 设计，是本条 UA
+	        的 1.6em 把它覆盖成了 21px。
+	   历史备注「1.2em(≈16px) 导致温度行 row 高 24 vs 浏览器 30、modal 少 5px」
+	   在本仓找不到对应夹具或断言（app/host.go 里没有该场景），属无法复现的旧
+	   反馈；以实测为准。 */
+	height: 16px;
 	padding: 0;
 	border: none;
 	margin: 2px;

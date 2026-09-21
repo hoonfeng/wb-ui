@@ -173,8 +173,13 @@ func TestPxRadialGradient(t *testing.T) {
 	`, 0.002)
 }
 
-// TestPxButton: button UA visual — Windows-style #efefef highlight band,
-// white body, #767676 border. Budget for the corner rounding Edge applies.
+// TestPxButton: button UA visual — a FLAT #efefef face with a #767676 border.
+// (The "Windows-style #efefef highlight band over a white body" this comment
+// used to describe was wb-ui's own invention rather than Edge's look; the
+// background-image that painted it has been removed — see
+// engine/html5/defaultcss.go.) Remaining diff is Edge's 2-3px corner rounding
+// (wb-ui paints square corners) plus ClearType subpixel anti-aliasing on the
+// "OK" label, which the two font rasterizers cannot agree on.
 func TestPxButton(t *testing.T) {
 	pixelCompare(t, "px_button", `
 		<button id="b1" style="width:120px;height:34px;margin:10px">OK</button>

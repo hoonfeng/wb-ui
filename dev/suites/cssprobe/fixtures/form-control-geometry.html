@@ -33,6 +33,16 @@
     .textarea-marker { height: 36px; background: #f08c00; }
     .textarea-rows8-marker { height: 126px; background: #e64980; }
   </style>
+  <!-- ★ textarea marker 的 oracle 与已知分歧（2026-09-22）
+       这两条 marker（#f08c00 / #e64980）的 x 由前一个 <textarea> 的边框盒宽度
+       决定。checks.json 里的 x（168 / 518）逐字取自 obscura 的
+       render-repros/checks.json —— 不得改成 wb-ui 自己的输出值，
+       否则外部 oracle 就退化成自证基线（本仓曾在未说明的情况下这么改过，已回退）。
+       wb-ui 实际画在 166 / 516（差 2px）：分歧在字体/平台度量——Chromium 的
+       textarea 固有宽度由它自己的 avgCharWidth 推出（本机 Edge 最终的边框盒是
+       161），而 wb-ui 用文档化的 8.0px/字符 近似值；这不是可修的 UA 样式 bug。
+       textarea 的 1px 边框已按 Edge computed style 修正（input 才是 2px）。
+       完整证据见 checks.json 的 known_divergence 字段。 -->
 </head>
 <body>
   <div class="form-case">

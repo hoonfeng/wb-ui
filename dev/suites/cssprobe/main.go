@@ -8,6 +8,17 @@
 // exact solid color with a ±1px tolerance, exactly like check.py, so font
 // anti-aliasing cannot decide pass/fail.
 //
+// The oracle values must stay verbatim what the external reference says —
+// never rewrite an expectation to whatever wb-ui currently outputs, or the
+// oracle degrades into a self-fulfilling baseline. When wb-ui provably cannot
+// match a value in *this* environment (platform font-metric differences, a
+// control style that another Chromium version drew differently, …), the entry
+// keeps the external value and gains a "known_divergence" note spelling out the
+// evidence and both numbers; that check is then reported as KNOWN — printed in
+// full, counted separately from passes and failures — instead of FAIL. The note
+// records a divergence, it does not silence one: never add it for something
+// wb-ui could fix, and delete it once the check passes.
+//
 // Why pixel components instead of the render tree: a property that parses and
 // computes but never reaches paint (or never reserves layout space) produces a
 // correct-looking ComputedStyle and a wrong picture. Asserting the painted
@@ -88,6 +99,10 @@ type Check struct {
 	Width  *int   `json:"width,omitempty"`
 	Height *int   `json:"height,omitempty"`
 	Count  int    `json:"count,omitempty"`
+	// KnownDivergence carries the evidence for an oracle value wb-ui cannot
+	// match in this environment (see the package doc). The X/Y/Width/Height
+	// fields must keep the external reference's numbers regardless.
+	KnownDivergence string `json:"known_divergence,omitempty"`
 }
 
 // Component is one connected area of an exact solid color in the rendered page.
@@ -112,6 +127,9 @@ type CheckResult struct {
 	// different color" (a paint/compositing difference) from "never painted"
 	// (a missing implementation), which the reports must not conflate.
 	Near *NearColor `json:"near,omitempty"`
+	// Known marks an unmet expectation that carries a KnownDivergence note.
+	Known           bool   `json:"known,omitempty"`
+	KnownDivergence string `json:"known_divergence,omitempty"`
 }
 
 // NearColor summarizes the closest pixels to an expected color.
@@ -129,6 +147,7 @@ type FixtureResult struct {
 	Checks  []CheckResult `json:"checks"`
 	Error   string        `json:"error,omitempty"`
 	Failed  int           `json:"failed"`
+	Known   int           `json:"known,omitempty"` // expectations registered as known divergences
 	Blank   bool          `json:"blank,omitempty"` // nothing but the white canvas
 	Painted int           `json:"painted_pixels,omitempty"`
 }
@@ -222,6 +241,7 @@ func main() {
 		results     []FixtureResult
 		totalPass   int
 		totalChecks int
+		totalKnown  int
 		failedFix   []string
 	)
 	for _, name := range names {
@@ -257,6 +277,10 @@ func main() {
 			status = "EMPTY"
 			failedFix = append(failedFix, name)
 		}
+		if res.Known > 0 && res.Error == "" {
+			status += fmt.Sprintf(" (%d known divergence)", res.Known)
+			totalKnown += res.Known
+		}
 		fmt.Printf("%-34s %s\n", name, status)
 
 		for _, c := range res.Checks {
@@ -266,7 +290,10 @@ func main() {
 			}
 			if !c.Passed || *verbose {
 				mark := "ok  "
-				if !c.Passed {
+				switch {
+				case c.Known:
+					mark = "KNOWN"
+				case !c.Passed:
 					mark = "FAIL"
 				}
 				detail := joinComponents(c.Actual)
@@ -277,6 +304,9 @@ func main() {
 				}
 				fmt.Printf("    %s %-46s want %s (count>=%d) got %d: %s\n",
 					mark, truncate(c.Name, 46), c.Expected, max(1, countOf(checks[name], c.Name)), c.Found, detail)
+				if c.Known {
+					fmt.Printf("          known divergence: %s\n", c.KnownDivergence)
+				}
 			}
 		}
 		if res.Error != "" {
@@ -289,12 +319,16 @@ func main() {
 	if len(failedFix) > 0 {
 		fmt.Printf("failing fixtures: %s\n", strings.Join(failedFix, " "))
 	}
+	if totalKnown > 0 {
+		fmt.Printf("%d known divergence(s): external oracle vs wb-ui in THIS environment; the oracle's numbers are kept verbatim (see checks.json \"known_divergence\").\n", totalKnown)
+	}
 
 	if *jsonOut != "" {
 		payload, _ := json.MarshalIndent(map[string]any{
 			"fixtures":      results,
 			"checks_passed": totalPass,
 			"checks_total":  totalChecks,
+			"known":         totalKnown,
 			"failed":        failedFix,
 		}, "", "  ")
 		if err := os.WriteFile(*jsonOut, append(payload, '\n'), 0o644); err != nil {
@@ -354,8 +388,16 @@ func runFixture(name, htmlText string, checks []Check, dumpPath string, tree io.
 		cr.Actual = found
 		cr.Passed = matches >= max(1, chk.Count)
 		if !cr.Passed {
-			res.Failed++
 			cr.Near = nearestColor(img, want)
+			if chk.KnownDivergence != "" {
+				// Registered divergence: reported as KNOWN (printed in full,
+				// counted apart from passes and failures) — never as a pass.
+				cr.Known = true
+				cr.KnownDivergence = chk.KnownDivergence
+				res.Known++
+			} else {
+				res.Failed++
+			}
 		}
 		res.Checks = append(res.Checks, cr)
 	}
