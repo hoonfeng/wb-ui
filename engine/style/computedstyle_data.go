@@ -90,6 +90,14 @@ type InheritedData struct {
 }
 
 // DefaultInheritedData returns InheritedData with spec-mandated initial values.
+//
+// ★ 实测记录（2026-09）：曾试图把这里的返回值改成「共享只读包级变量」以省掉
+// 每次构造的分配，benchmark（webkit BenchmarkRebuildRenderTree）显示
+// ns/op、B/op、allocs/op **完全没有变化**——Go 编译器对「取地址的结构体字面量
+// 只被立即解引用复制」的场景本就能做栈分配，不产生堆分配。真正的成本是
+// ComputedStyle 自身（两个大 struct 内嵌 + 4 个 map）每次重建都要新分配，
+// 想再降分配需要的是「样式复用/缓存」而不是这里。故保持原写法（每次返回新值，
+// 语义最清晰，无隐式共享可变状态）。
 func DefaultInheritedData() *InheritedData {
 	return &InheritedData{
 		Color:               Color{R: 0, G: 0, B: 0, A: 0xFF},
@@ -105,7 +113,7 @@ func DefaultInheritedData() *InheritedData {
 		LineHeight:          Length{Value: 0, Unit: "normal"},
 		TextAlign:           TextAlignStart,
 		WhiteSpace:          WhiteSpaceNormal,
-	TextOverflow:        TextOverflowClip,
+		TextOverflow:        TextOverflowClip,
 		Direction:           "ltr",
 		Visibility:          "visible",
 		StaticVisibility:    "visible",
@@ -281,7 +289,8 @@ type NonInheritedData struct {
 	DisplaySet bool
 }
 
-// DefaultNonInheritedData returns NonInheritedData with spec-mandated initial values.
+// DefaultNonInheritedData returns NonInheritedData with spec-mandated initial
+// values.（性能记录见 DefaultInheritedData：共享默认值实测无收益。）
 func DefaultNonInheritedData() *NonInheritedData {
 	return &NonInheritedData{
 		Display:            DisplayInline,

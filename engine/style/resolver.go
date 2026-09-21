@@ -52,7 +52,15 @@ type indexedRule struct {
 // of scanning every rule of every sheet (O(element × rules) → O(candidates)).
 type ruleBucket struct {
 	universal []indexedRule // rules with no indexable key (must always match)
-	byKey     map[string][]indexedRule
+	// ★ 三张独立索引表（tag / #id / .class），而不是一张带前缀的 byKey：
+	// candidates 在样式解析热路径上被每个元素、每个伪元素反复调用，用
+	// "#"+id / "."+class 构造 key 会为每个 class 分配一个新字符串（profile:
+	// candidates 占 alloc_objects 19%，其中 strings.Fields 17.6%）。分开建表后
+	// 可以直接拿元素上的原字符串（LocalName / id 属性 / class 子串）查表，
+	// 零拼接、零分配。键值语义与原来的带前缀形式一一对应。
+	byTag   map[string][]indexedRule
+	byID    map[string][]indexedRule
+	byClass map[string][]indexedRule
 }
 
 // Resolver is the Go translation of WebCore::Style::Resolver. It holds the set of
@@ -1106,7 +1114,11 @@ func selectorListKeys(list *css.SelectorList) []string {
 // recursion) but still consume stream positions. Rules whose selector list
 // contains any keyless selector go to the universal bucket.
 func buildRuleBucket(sheet *css.CSSStyleSheet) *ruleBucket {
-	b := &ruleBucket{byKey: map[string][]indexedRule{}}
+	b := &ruleBucket{
+		byTag:   map[string][]indexedRule{},
+		byID:    map[string][]indexedRule{},
+		byClass: map[string][]indexedRule{},
+	}
 	declCount := 0
 	var countDecls func(rules []css.Rule)
 	countDecls = func(rules []css.Rule) {
@@ -1130,7 +1142,16 @@ func buildRuleBucket(sheet *css.CSSStyleSheet) *ruleBucket {
 			continue
 		}
 		for _, k := range keys {
-			b.byKey[k] = append(b.byKey[k], ir)
+			// 前缀形式（"#id" / ".class" / tag）来自 complexSelectorKeys，
+			// 这里按前缀落到对应的表里（建表只在样式表变更时发生，非热路径）。
+			switch {
+			case strings.HasPrefix(k, "#"):
+				b.byID[k[1:]] = append(b.byID[k[1:]], ir)
+			case strings.HasPrefix(k, "."):
+				b.byClass[k[1:]] = append(b.byClass[k[1:]], ir)
+			default:
+				b.byTag[k] = append(b.byTag[k], ir)
+			}
 		}
 	}
 	return b
@@ -1153,18 +1174,63 @@ func (b *ruleBucket) candidates(el *dom.Element) []indexedRule {
 	add(b.universal)
 	if el != nil {
 		if t := el.LocalName(); t != "" {
-			add(b.byKey[t])
+			add(b.byTag[t])
 		}
 		if id := el.GetAttribute("id"); id != "" {
-			add(b.byKey["#"+id])
+			add(b.byID[id])
 		}
 		if cn := el.ClassName(); cn != "" {
-			for _, c := range strings.Fields(cn) {
-				add(b.byKey["."+c])
-			}
+			forEachClass(cn, func(c string) { add(b.byClass[c]) })
 		}
 	}
 	return out
+}
+
+// forEachClass calls fn for every whitespace-separated class name in a class
+// attribute value, without allocating.
+//
+// ★ 为什么不用 strings.Fields：它在【每次】调用都分配一个 []string（及其底层
+// 数组）。candidates 在样式解析热路径上被每个元素、每个伪元素反复调用，
+// profile 里 strings.Fields 占 alloc_objects 17.57%，且 100% 来自这里。
+//
+// 语义与 strings.Fields 对齐：按 unicode 空白切分、跳过空段。含非 ASCII 字节的
+// className 走回退分支（用 strings.Fields 本身），保证切分结果与优化前完全
+// 一致——不因为省分配而改变行为（例如 U+00A0 不换行空格）。
+func forEachClass(className string, fn func(string)) {
+	for i := 0; i < len(className); i++ {
+		if className[i] >= 0x80 {
+			for _, c := range strings.Fields(className) {
+				fn(c)
+			}
+			return
+		}
+	}
+	start := -1
+	for i := 0; i < len(className); i++ {
+		if isCSSWhitespaceByte(className[i]) {
+			if start >= 0 {
+				fn(className[start:i])
+				start = -1
+			}
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+	}
+	if start >= 0 {
+		fn(className[start:])
+	}
+}
+
+// isCSSWhitespaceByte reports whether b is ASCII whitespace as split by
+// strings.Fields (space, \t, \n, \v, \f, \r).
+func isCSSWhitespaceByte(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\v', '\f', '\r':
+		return true
+	}
+	return false
 }
 
 // collectSheetDeclarations collects cascade declarations for el from one sheet

@@ -176,14 +176,20 @@ type ComputedStyle struct {
 	ImportantProperties map[string]bool
 	CalcValues          map[string][]css.Token
 
-	// ── Internal DataRef for COW optimization ──
-	inheritedRef    DataRef[InheritedData]
-	nonInheritedRef DataRef[NonInheritedData]
+	// ★ 原「Internal DataRef for COW optimization」两个槽位
+	//（inheritedRef / nonInheritedRef）已移除：syncRefs 在【每次】
+	// NewComputedStyle / InheritFrom 时把 InheritedData（78 字段）与
+	// NonInheritedData（162 字段）各复制一份到堆（每次构造约 2KB×2），
+	// 但全仓没有任何读取点（grep：字段只在赋值处出现）——是纯粹的白白
+	// 复制，还把大对象塞进堆让 GC 扫描变慢（rebuild profile：
+	// syncRefs 占总分配 42.85%、gcDrain 占 52% CPU）。
+	// DataRef 类型本身保留在 dataref.go：将来需要真正的 COW 时再按需接入，
+	// 而不是在每个元素构造时无条件付复制成本。
 }
 
 // NewComputedStyle returns a ComputedStyle with spec-default values.
 func NewComputedStyle() *ComputedStyle {
-	cs := &ComputedStyle{
+	return &ComputedStyle{
 		InheritedData:    *DefaultInheritedData(),
 		NonInheritedData: *DefaultNonInheritedData(),
 		CustomProperties:    map[string][]css.Token{},
@@ -191,16 +197,6 @@ func NewComputedStyle() *ComputedStyle {
 		ImportantProperties: map[string]bool{},
 		CalcValues:          map[string][]css.Token{},
 	}
-	cs.syncRefs()
-	return cs
-}
-
-// syncRefs creates DataRefs pointing to the current field data.
-func (c *ComputedStyle) syncRefs() {
-	data := c.InheritedData
-	c.inheritedRef = NewDataRef(&data)
-	ndata := c.NonInheritedData
-	c.nonInheritedRef = NewDataRef(&ndata)
 }
 
 // Clone returns a deep copy, sharing inherited data where possible.
@@ -266,7 +262,6 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	for k, v := range parent.CustomProperties {
 		c.SetCustomProperty(k, v)
 	}
-	c.syncRefs()
 }
 
 // BorderColor returns the effective border color for a side, implementing the
