@@ -929,6 +929,35 @@ func (c *Canvas) FillPathGradient(pts []Point, gx1, gy1, gx2, gy2 float64, color
 	c.invalidatePixels()
 }
 
+// FillPathGradientPath fills a caller-built skia path with a linear gradient.
+//
+// ★ 为什么需要它：FillPathGradient 只接受**扁平点序列**，内部按
+// MoveTo(首点) + LineTo(其余全部) 构造路径——SVG 里 M…zM…z 的多子路径
+// （Lucide/Feather 图标、复合图形）会被连成一条多边形，渐变填充于是既出现
+// 「幻觉斜线」又填错区域。这里改由调用方用分段构造器（rendering 包的
+// segmentsToPath）建好路径，子路径保持独立；本方法只负责按渐变轴造 shader
+// 并 DrawPath。
+func (c *Canvas) FillPathGradientPath(path *skia.Path, gx1, gy1, gx2, gy2 float64, colors []Color, positions []float32) {
+	if path == nil || len(colors) < 2 {
+		return
+	}
+	start := skia.Point{X: float32(gx1), Y: float32(gy1)}
+	end := skia.Point{X: float32(gx2), Y: float32(gy2)}
+	sk := make([]skia.Color, len(colors))
+	for i, col := range colors {
+		sk[i] = colorToSkia(col)
+	}
+	shader := skia.NewLinearGradient(start, end, sk, positions, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	c.canvas.DrawPath(path, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.invalidatePixels()
+}
+
 // StrokePathGradient strokes a polyline with a linear gradient running from
 // (gx1,gy1) to (gx2,gy2) in world space, honoring SVG stroke-linecap /
 // stroke-linejoin. Used for SVG stroke="url(#gradient)" (e.g. the IDE logo's

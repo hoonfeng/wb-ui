@@ -120,7 +120,7 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 		c2.dashOffset = s.dashOffset
 	}
 	if s.clipID != "" {
-		if clipShapes, ok := ctx.clips[s.clipID]; ok && len(clipShapes) > 0 {
+		if cp, ok := ctx.clips[s.clipID]; ok && cp != nil && len(cp.shapes) > 0 {
 			// ★ Transform FIRST, then clip — with clipPathUnits="userSpaceOnUse"
 			// (the default) the clipPath resolves in the user coordinate system
 			// of the element referencing it, so the clip has to follow that
@@ -133,7 +133,9 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 			if s.transform != "" {
 				applyTransformOps(canvas, s.transform)
 			}
-			if clipPath := clipShapesToPath(clipShapes); clipPath != nil {
+			// 引用元素的 bbox：clipPathUnits="objectBoundingBox" 需要它。
+			bx, by, bw, bh := shapeBBox(s.shape)
+			if clipPath := clipPathToPath(cp, bx, by, bw, bh); clipPath != nil {
 				canvas.ClipPath(clipPath)
 				clipPath.Release()
 				s.shape.paint(canvas, &c2)
@@ -152,81 +154,231 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	s.shape.paint(canvas, &c2)
 }
 
-// clipShapesToPath converts SVG clip shapes into a single skia path. Supports
-// rect, circle, ellipse, polygon/polyline and path. Shapes with no fill area
-// (line) are skipped — in the browser they contribute an empty region too.
+// ── clipPath 的坐标语义 ────────────────────────────────────────────────
 //
-// ★ path 支持：此前 *svgPath 落入 default 分支被静默忽略，于是
-// `<clipPath><path d="…"/></clipPath>`（Lucide/Feather 风格的遮罩写法很常见）
-// 得到的是一个【空】Skia path，ClipPath(空) 把引用元素整块裁没——元素凭空
-// 消失，比「裁剪区不对」严重得多。这里把 sampleSegments 的每段子路径折算线
-// 并入同一 path：M…zM…z 的多子路径保持独立，不会连出幻觉斜线。
-func clipShapesToPath(shapes []svgShape) *skia.Path {
-	if len(shapes) == 0 {
+// <clipPath> 有两个容易漏掉的语义，都会让裁剪区与浏览器不一致：
+//  1. 子元素自身的 transform 属性参与裁剪区形状；
+//  2. clipPathUnits="objectBoundingBox" 时，子元素坐标是引用元素 bbox 的
+//     0..1 比例（默认 userSpaceOnUse 才是用户坐标系）。
+// 两者都必须在【几何层】完成（对形状的点做仿射变换）：clipPath 的多个子元素
+// 是**并集**，靠 canvas 变换逐个 ClipPath 叠加会变成交集。
+
+// affine2D 是 2×3 仿射矩阵（与 SVG/CSS matrix(a b c d e f) 同序）。
+type affine2D struct{ a, b, c, d, e, f float64 }
+
+func unitAffine2D() affine2D { return affine2D{a: 1, d: 1} }
+
+// apply 把矩阵作用到点上。
+func (m affine2D) apply(p graphics.Point) graphics.Point {
+	return graphics.Point{X: m.a*p.X + m.c*p.Y + m.e, Y: m.b*p.X + m.d*p.Y + m.f}
+}
+
+// then 返回「先 m 后 n」的组合矩阵。
+func (m affine2D) then(n affine2D) affine2D {
+	return affine2D{
+		a: m.a*n.a + m.b*n.c, b: m.a*n.b + m.b*n.d,
+		c: m.c*n.a + m.d*n.c, d: m.c*n.b + m.d*n.d,
+		e: m.e*n.a + m.f*n.c + n.e, f: m.e*n.b + m.f*n.d + n.f,
+	}
+}
+
+// parseAngleDeg 解析 SVG/CSS 的角度值（"45" 或 "45deg"）。
+func parseAngleDeg(raw string) float64 {
+	t := strings.TrimSpace(strings.ToLower(raw))
+	t = strings.TrimSuffix(t, "deg")
+	v, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// parseAffineTransform 把 transform 字符串解析成一个仿射矩阵（SVG 1.1 §7.6
+// 的全集：translate/scale/rotate/skewX/skewY/matrix），复用 transform.go 的
+// tokenizer 与长度解析（百分比按 refW/refH 解析）。
+func parseAffineTransform(spec string, refW, refH float64) (affine2D, bool) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" || spec == "none" {
+		return unitAffine2D(), false
+	}
+	m := unitAffine2D()
+	applied := false
+	for _, tok := range tokenizeTransform(spec) {
+		tok = strings.TrimSpace(tok)
+		paren := strings.IndexByte(tok, '(')
+		if paren < 0 || !strings.HasSuffix(tok, ")") {
+			continue
+		}
+		name := strings.ToLower(tok[:paren])
+		args := tok[paren+1 : len(tok)-1]
+		vals := splitSpaceComma(args)
+		switch name {
+		case "translate":
+			if len(vals) >= 1 {
+				tx := parseTransformLen(vals[0], refW)
+				ty := 0.0
+				if len(vals) >= 2 {
+					ty = parseTransformLen(vals[1], refH)
+				}
+				m = m.then(affine2D{a: 1, d: 1, e: tx, f: ty})
+				applied = true
+			}
+		case "translatex":
+			m = m.then(affine2D{a: 1, d: 1, e: parseTransformLen(args, refW)})
+			applied = true
+		case "translatey":
+			m = m.then(affine2D{a: 1, d: 1, f: parseTransformLen(args, refH)})
+			applied = true
+		case "scale":
+			if len(vals) >= 1 {
+				sx := parseScaleValue(vals[0])
+				sy := sx
+				if len(vals) >= 2 {
+					sy = parseScaleValue(vals[1])
+				}
+				m = m.then(affine2D{a: sx, d: sy})
+				applied = true
+			}
+		case "scalex":
+			m = m.then(affine2D{a: parseScaleValue(args), d: 1})
+			applied = true
+		case "scaley":
+			m = m.then(affine2D{a: 1, d: parseScaleValue(args)})
+			applied = true
+		case "rotate":
+			if len(vals) >= 1 {
+				rad := parseAngleDeg(vals[0]) * math.Pi / 180
+				cos, sin := math.Cos(rad), math.Sin(rad)
+				rot := affine2D{a: cos, b: sin, c: -sin, d: cos}
+				if len(vals) >= 3 {
+					// rotate(a cx cy) = T(cx,cy)·R(a)·T(-cx,-cy)
+					cx := parseTransformLen(vals[1], refW)
+					cy := parseTransformLen(vals[2], refH)
+					rot = unitAffine2D().
+						then(affine2D{a: 1, d: 1, e: cx, f: cy}).
+						then(rot).
+						then(affine2D{a: 1, d: 1, e: -cx, f: -cy})
+				}
+				m = m.then(rot)
+				applied = true
+			}
+		case "skewx":
+			m = m.then(affine2D{a: 1, d: 1, c: math.Tan(parseAngleDeg(args) * math.Pi / 180)})
+			applied = true
+		case "skewy":
+			m = m.then(affine2D{a: 1, d: 1, b: math.Tan(parseAngleDeg(args) * math.Pi / 180)})
+			applied = true
+		case "matrix":
+			if len(vals) >= 6 {
+				n6 := make([]float64, 6)
+				for i := 0; i < 6; i++ {
+					n6[i] = parseScaleValue(vals[i])
+				}
+				m = m.then(affine2D{a: n6[0], b: n6[1], c: n6[2], d: n6[3], e: n6[4], f: n6[5]})
+				applied = true
+			}
+		}
+	}
+	return m, applied
+}
+
+// clipShapeSegments 把一个 clip 子形状折算成点段（每段是一条子路径）。
+// 空切片表示该形状没有填充面积（line 等）。
+func clipShapeSegments(sh svgShape) [][]graphics.Point {
+	switch s := sh.(type) {
+	case *svgRect:
+		return [][]graphics.Point{{
+			{X: s.x, Y: s.y},
+			{X: s.x + s.w, Y: s.y},
+			{X: s.x + s.w, Y: s.y + s.h},
+			{X: s.x, Y: s.y + s.h},
+		}}
+	case *svgCircle:
+		const steps = 16
+		if s.r <= 0 {
+			return nil
+		}
+		pts := make([]graphics.Point, 0, steps)
+		for i := 0; i < steps; i++ {
+			a := 2 * math.Pi * float64(i) / steps
+			pts = append(pts, graphics.Point{X: s.cx + s.r*math.Cos(a), Y: s.cy + s.r*math.Sin(a)})
+		}
+		return [][]graphics.Point{pts}
+	case *svgEllipse:
+		const steps = 24
+		if s.rx <= 0 || s.ry <= 0 {
+			return nil
+		}
+		pts := make([]graphics.Point, 0, steps)
+		for i := 0; i < steps; i++ {
+			a := 2 * math.Pi * float64(i) / steps
+			pts = append(pts, graphics.Point{X: s.cx + s.rx*math.Cos(a), Y: s.cy + s.ry*math.Sin(a)})
+		}
+		return [][]graphics.Point{pts}
+	case *svgPolygon:
+		if len(s.points) < 3 {
+			return nil
+		}
+		return [][]graphics.Point{s.points}
+	case *svgPath:
+		// 多子路径保持独立（M…zM…z 不连线）。
+		return s.sampleSegments()
+	}
+	return nil
+}
+
+// svgClipPath 是一个解析后的 <clipPath>：子形状 + 各自的 transform 属性 +
+// 坐标单位（clipPathUnits）。
+type svgClipPath struct {
+	shapes     []svgShape
+	transforms []string // 与 shapes 平行（对应子元素的 transform 属性）
+	objectBBox bool     // clipPathUnits="objectBoundingBox"
+}
+
+// clipPathToPath 把 <clipPath> 折算成一个 skia path。
+//
+// bbox 是【引用元素】的边界盒，仅在 objectBoundingBox 模式下参与（子元素坐标
+// 0..1 → bbox 内的实际坐标）；userSpaceOnUse（默认）下忽略。
+//
+// 变换顺序：先应用子元素自身的 transform，再映射到 bbox 坐标系——SVG 规范里
+// clipPathUnits=objectBoundingBox 时子元素的 transform 同样工作在 0..1 坐标系。
+//
+// 支持的形状：rect / circle / ellipse / polygon(polyline) / path；无填充面积的
+// 形状（line）跳过——浏览器里它们同样贡献空区域。path 走 sampleSegments，多子
+// 路径保持独立（M…zM…z 不连线），且 clipPath 支持 path 型子元素（此前被静默
+// 忽略会得到空 path，ClipPath(空) 把引用元素整块裁没）。
+func clipPathToPath(cp *svgClipPath, bx, by, bw, bh float64) *skia.Path {
+	if cp == nil || len(cp.shapes) == 0 {
 		return nil
 	}
 	path := skia.NewPath()
-	for _, sh := range shapes {
-		switch s := sh.(type) {
-		case *svgRect:
-			path.MoveTo(float32(s.x), float32(s.y))
-			path.LineTo(float32(s.x+s.w), float32(s.y))
-			path.LineTo(float32(s.x+s.w), float32(s.y+s.h))
-			path.LineTo(float32(s.x), float32(s.y+s.h))
-			path.Close()
-		case *svgCircle:
-			// Approximate the circle with a polygon (enough for clips).
-			const steps = 16
-			for i := 0; i < steps; i++ {
-				a := 2 * math.Pi * float64(i) / steps
-				x := s.cx + s.r*math.Cos(a)
-				y := s.cy + s.r*math.Sin(a)
-				if i == 0 {
-					path.MoveTo(float32(x), float32(y))
-				} else {
-					path.LineTo(float32(x), float32(y))
-				}
+	for i, sh := range cp.shapes {
+		m := unitAffine2D()
+		if i < len(cp.transforms) && cp.transforms[i] != "" {
+			if tm, ok := parseAffineTransform(cp.transforms[i], bw, bh); ok {
+				m = tm
 			}
-			path.Close()
-		case *svgEllipse:
-			const esteps = 24
-			for i := 0; i < esteps; i++ {
-				a := 2 * math.Pi * float64(i) / esteps
-				x := s.cx + s.rx*math.Cos(a)
-				y := s.cy + s.ry*math.Sin(a)
-				if i == 0 {
-					path.MoveTo(float32(x), float32(y))
-				} else {
-					path.LineTo(float32(x), float32(y))
-				}
-			}
-			path.Close()
-		case *svgPolygon:
-			if len(s.points) < 3 {
+		}
+		if cp.objectBBox {
+			m = m.then(affine2D{a: bw, d: bh, e: bx, f: by})
+		}
+		for _, sg := range clipShapeSegments(sh) {
+			if len(sg) < 2 {
 				continue
 			}
-			path.MoveTo(float32(s.points[0].X), float32(s.points[0].Y))
-			for i := 1; i < len(s.points); i++ {
-				path.LineTo(float32(s.points[i].X), float32(s.points[i].Y))
+			p0 := m.apply(sg[0])
+			path.MoveTo(float32(p0.X), float32(p0.Y))
+			for k := 1; k < len(sg); k++ {
+				pk := m.apply(sg[k])
+				path.LineTo(float32(pk.X), float32(pk.Y))
 			}
+			// clip 区域是【填充】区域：子路径隐式闭合。
 			path.Close()
-		case *svgPath:
-			for _, sg := range s.sampleSegments() {
-				if len(sg) < 2 {
-					continue // 单点无面积
-				}
-				path.MoveTo(float32(sg[0].X), float32(sg[0].Y))
-				for i := 1; i < len(sg); i++ {
-					path.LineTo(float32(sg[i].X), float32(sg[i].Y))
-				}
-				// clip 区域是【填充】区域：子路径隐式闭合（与 rect/circle
-				// 分支一致），否则斜边处会留下未闭合的缺口。
-				path.Close()
-			}
 		}
 	}
 	return path
 }
+
 
 // paintShapeGradient fills a basic shape with a defs gradient (delegates
 // direction/radius math to paintGradientOnShape). Unsupported shape types
@@ -243,10 +395,14 @@ func paintShapeGradient(canvas *graphics.Canvas, shape svgShape, g *svgGradient)
 	case *svgEllipse:
 		paintGradientOnShape(canvas, g, s.cx-s.rx, s.cy-s.ry, s.rx*2, s.ry*2)
 	case *svgPath:
-		pts := s.samplePoints()
-		if len(pts) >= 3 {
-			ax, ay, bx, by, colors, pos := gradientParamsForPts(g, pts)
-			canvas.FillPathGradient(pts, ax, ay, bx, by, colors, pos, true)
+		// ★ 用【分段】路径做渐变填充：samplePoints() 是扁平点序列，只可用于
+		// 渐变轴向计算（见其注释）；直接交给 FillPathGradient 会把 M…zM…z 的
+		// 多子路径连成一条连通多边形——渐变填充出现「幻觉斜线」且区域填错。
+		segs := s.sampleSegments()
+		if path := segmentsToPath(segs); path != nil {
+			ax, ay, bx, by, colors, pos := gradientParamsForPts(g, flattenSegments(segs))
+			canvas.FillPathGradientPath(path, ax, ay, bx, by, colors, pos)
+			path.Release()
 		}
 	case *svgPolygon:
 		pts := s.points
@@ -313,7 +469,7 @@ type svgPaintContext struct {
 	strokeGradient *svgGradient // stroke="url(#gradient)" — gradient stroke
 	opacity     float64
 	gradients   map[string]*svgGradient // gradients defined in <defs>
-	clips       map[string][]svgShape   // clip paths defined in <defs>
+	clips       map[string]*svgClipPath  // clip paths defined in <defs>
 	dashArray   []float64               // stroke-dasharray pattern
 	patterns    map[string]*svgPattern  // patterns defined in <defs>
 	markers     map[string]*svgMarker   // markers defined in <defs>
@@ -330,7 +486,7 @@ func defaultSVGContext() *svgPaintContext {
 		strokeWidth: 0,
 		opacity:     1.0,
 		gradients:   make(map[string]*svgGradient),
-		clips:       make(map[string][]svgShape),
+		clips:       make(map[string]*svgClipPath),
 		patterns:    make(map[string]*svgPattern),
 		markers:     make(map[string]*svgMarker),
 		masks:       make(map[string]*svgMask),
@@ -1113,7 +1269,7 @@ type svgDocument struct {
 	// is fresh per paintSVG call, so the defs parsed during build must be
 	// stored here for shape gradient/clip resolution).
 	gradients map[string]*svgGradient
-	clips     map[string][]svgShape
+	clips     map[string]*svgClipPath
 	patterns  map[string]*svgPattern
 	// styleRules carry <style> sheet rules (class/type selectors resolved to
 	// fill/stroke) so shapes without inline presentation attributes can pick
@@ -1991,16 +2147,22 @@ func parseDashArray(s string) []float64 {
 
 // --- ClipPath parsing ---
 
-func parseClipPathElement(el *dom.Element) []svgShape {
-	var shapes []svgShape
+// parseClipPathElement 解析 <clipPath>：子形状 + 各自的 transform 属性 +
+// clipPathUnits（objectBoundingBox 时子元素坐标是引用元素 bbox 的 0..1 比例）。
+func parseClipPathElement(el *dom.Element) *svgClipPath {
+	cp := &svgClipPath{}
+	cp.objectBBox = strings.EqualFold(strings.TrimSpace(el.GetAttribute("clipPathUnits")), "objectBoundingBox")
 	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
-		if childEl, ok := c.(*dom.Element); ok {
-			if shape := parseSVGElement(childEl); shape != nil {
-				shapes = append(shapes, shape)
-			}
+		childEl, ok := c.(*dom.Element)
+		if !ok {
+			continue
+		}
+		if shape := parseSVGElement(childEl); shape != nil {
+			cp.shapes = append(cp.shapes, shape)
+			cp.transforms = append(cp.transforms, childEl.GetAttribute("transform"))
 		}
 	}
-	return shapes
+	return cp
 }
 
 // --- Document builder ---
@@ -2322,12 +2484,12 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 			clipStr = styleMap["clip-path"]
 		}
 		if clipID := parseURLReference(clipStr); clipID != "" {
-			if clipShapes, ok := ctx.clips[clipID]; ok && len(clipShapes) > 0 {
+			if cp, ok := ctx.clips[clipID]; ok && cp != nil && len(cp.shapes) > 0 {
 				// For simple clips, we apply a clip to the canvas
 				canvas := &graphics.Canvas{}
 				_ = canvas
 				// Clip path shapes will be applied during paint
-				_ = clipShapes
+				_ = cp
 			}
 		}
 
