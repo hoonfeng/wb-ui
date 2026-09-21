@@ -42,6 +42,45 @@ const (
 	formControlRangeHeight  = 16.0
 )
 
+// formControlBaselineFromBorderTop 返回表单控件盒 border-box top 到其基线的
+// 距离（CSS 2.1 §10.8 / CSS Inline Layout），供行内基线对齐使用。
+//
+// 规则（依据 Edge 实测，见 dev/suites/consistency 的 form_controls）：
+//   - checkbox / radio / range / progress / meter 与 <textarea>（overflow:auto）：
+//     基线 = 盒子的底边框边 → 偏移 = border-box 高度；
+//   - 文本类 <input> / <button> / <select>：基线 = 内部文本基线
+//     → 偏移 = border-top + padding-top + 字体 ascent。
+//
+// Edge 实测（第一行共同基线 y=44，括号内为 border-box 高度→偏移）：
+// textarea(36→36)、input[text](21→15)、checkbox(13→13)、range(16→16)、
+// select(19→14)、button(21→15)——六个控件全部落在同一条基线上，而各控件
+// 的 y 差别（28/29/30/31）正是「基线 + 高度」反推出来的。
+//
+// ok=false 表示不是表单控件，调用方保持原有 vertical-align 逻辑。
+func formControlBaselineFromBorderTop(el *dom.Element, borderTop, paddingTop, borderBoxH, ascent float64) (float64, bool) {
+	if el == nil {
+		return 0, false
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "input":
+		switch strings.ToLower(el.GetAttribute("type")) {
+		case "checkbox", "radio", "range":
+			return borderBoxH, true
+		case "hidden":
+			return 0, false // 不生成盒子
+		}
+		return borderTop + paddingTop + ascent, true
+	case "textarea":
+		// 内部是滚动容器（UA overflow:auto）→ 基线取盒底边。
+		return borderBoxH, true
+	case "button", "select", "output":
+		return borderTop + paddingTop + ascent, true
+	case "progress", "meter":
+		return borderBoxH, true
+	}
+	return 0, false
+}
+
 // formControlContentSize returns the UA intrinsic CONTENT-box size of a form
 // control box. ok is false for elements whose width is not intrinsic (a
 // <select> is as wide as its widest option) and for hidden inputs, so callers

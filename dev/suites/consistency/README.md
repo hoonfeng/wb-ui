@@ -54,17 +54,61 @@ HTML ──┬──▶ Edge headless（参照物）
 
 ## 容差
 
-- 几何 x/y/w：±2px
-- 高度 h：±12px（字体度量差异：wb-ui 用系统字体，浏览器用内置字体）
+报告头（`report/*.txt`）会**按字段打印这套真实容差**——此前只印
+`Tolerance: ±2 px (geometry)`，而比较实际用的是下面这张 per-field 表，
+属报告误导（按报告头去读会误判哪些偏差算通过）。
+
+| 字段 | 默认 | 表单控件 | 文本块 |
+|---|---|---|---|
+| x | ±2 | ±14（控件 UA 私有 padding/border 计入宽度） | ±6（缩进累积） |
+| y | ±2 | **±6**（行内基线对齐已实现，实测偏差 ≤3px；**曾是 30**，那是掩盖 vertical-align 未实现） | ±40（行高漂移） |
+| w | ±2 | ±10（默认宽度依赖 UA 字符宽常量，见残差量化） | ±2 |
+| h | ±12（字体度量漂移） | ±12 | ±40 |
+| display / color / bg / font-size / text / value / checked | 精确比较 | — | — |
+
+- 文本块的 y 还会按「双方高度差」进一步放大（多行文本逐行累积的行高漂移）
 - inline 元素跳过几何比较（无盒几何，用文本段近似）
 
 ## 已知差异（引擎待办）
 
-1. **vertical-align**：表单控件行内对齐（wb-ui 顶部对齐，浏览器基线对齐）
+1. **普通 inline-block / replaced 的 vertical-align**：只有表单控件实现了真正的
+   行内基线对齐（同行共享一条基线、行盒高 = maxAscent + maxDescent）；普通
+   inline-block（span/div）与 `<img>` 仍走 `vertical-align:middle` 的「自高中
+   居中」近似，同行存在更高元素时会整体偏高。
 2. **heading margin 折叠**：h1-h6 在 body 首子的 margin 折叠
 3. **字体度量**：行高取决于系统字体（非引擎 bug）
+4. **表单控件默认宽度残差**：textarea 168 vs Edge 161（差 7px，量化见下）
 
 ## 已修复（2026-09-22）
+
+### ① 表单控件行内基线对齐（vertical-align:baseline）
+
+`-dump` 实测 9 个控件的 y 偏差：**20/20/20/12/21/21/5px → 全部 ≤3px**
+（btn 3 / chk 2 / rad 2 / range 3 / txt 2 / sel 2 / progress 1 / ta 0 / form 0）。
+
+根因：`vertical-align:middle` 分支只按**自身**高度居中
+（`lineH = max(lineHeight, childH)`，childH 就是自己的高度），完全不含同行更高的
+元素，于是每个控件都贴行盒顶；而 `vertical-align:baseline` 根本没有实现。
+Edge 第一行基线一致落在 y=44——textarea（高 36、基线取盒底边）的偏移最大，
+其余控件按 `maxBaseline - 自身偏移` 下移。
+
+修复（`engine/layout/formcontrol.go` + `engine/layout/inlineformattingcontext.go`）：
+
+- `formControlBaselineFromBorderTop`：控件 border-box top → 基线的偏移
+  （checkbox/radio/range/progress/textarea = border-box 高；input[text]/button/select
+  = border-top + padding-top + font ascent）。
+- IFC 行盒新增 `maxBaseline` / `maxDescent` / `baselineBoxes`：控件按
+  `border-box top = 行盒顶 + maxBaseline - 自身偏移` 定位；后续出现更大的
+  maxBaseline 时，把本行已放置的控件与已生成的文本段整体下移（行盒顶不变、
+  基线随最高者下移）——这就是浏览器「同行共享一条基线」的语义。
+- 行盒高改为 **maxAscent + maxDescent**：基线对齐后元素底边可以超过最高的盒子
+  （textarea 高 38 但基线在其底边，而 input 的底边更低），沿用「max(border-box 高)」
+  会让下一行起点偏高（progress 差 5px 的根因）。
+- 文本段 Y 改为基线感知（`lineTextOffset()`）：本行被控件顶高时文本随基线下移，
+  无控件参与时与原行为逐像素等价（零回归）。
+- 容差由 30px **收紧到 6px** 后重跑：`=== 13/13 passed in 21.495s ===`。
+
+### ② 表单控件默认宽度与背景色
 
 `form_controls` 由 **5/9 差异 → 0/9（13/13 用例全通过）**。并排 dump 显示 5 处差异
 其实只有 2 个根因：

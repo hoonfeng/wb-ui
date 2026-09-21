@@ -21,6 +21,27 @@ const GeoTolerance = 2.0
 // the browser's bundled fonts even when the layout algorithm is correct.
 const HeightTolerance = 12.0
 
+// Per-field tolerances. 这些常量是报告里打印的真实容差——报告头曾只写
+// "±2 px (geometry)"，而实际比较用了几套不同的容差（form 控件 x 14 / w 10 /
+// y 6，文本块 y 40、h 40），属于报告误导：按报告头去读会以为 5px 的偏差是
+// 失败，或以为 20px 的偏差被判定为 OK 是「引擎精确」（见 README 容差节）。
+const (
+	// FormControlXTolerance：控件带 UA 私有 padding/border，宽度含在内。
+	FormControlXTolerance = 14.0
+	// FormControlYTolerance：行内基线对齐已实现（IFC maxBaseline/maxDescent），
+	// 实测 form_controls 的 9 个控件 y 偏差 ≤3px；曾是 30px（掩盖未实现的
+	// vertical-align:baseline），2026-09-22 收紧到 6px。
+	FormControlYTolerance = 6.0
+	// FormControlWidthTolerance：控件默认宽度依赖 UA 常量字符宽度
+	// （wb-ui 用固定 8px/char，浏览器按字体度量），见 README 的量化残差。
+	FormControlWidthTolerance = 10.0
+	// TextBlockXTolerance / TextBlockYTolerance / TextBlockHeightTolerance：
+	// 多行文本块的 x 缩进、行高漂移（字体度量差异，非布局错误）。
+	TextBlockXTolerance      = 6.0
+	TextBlockYTolerance      = 40.0
+	TextBlockHeightTolerance = 40.0
+)
+
 // runCase executes one case end-to-end.
 func runCase(c TestCase) CaseResult {
 	res := CaseResult{Case: c}
@@ -122,18 +143,13 @@ func compareSnapshots(e, w ElementSnapshot) []FieldDiff {
 	// per-line line-height differences between the platform font metrics
 	// (wb-ui) and the browser's bundled fonts. Allow a proportional
 	// tolerance so correct layouts with different fonts are not flagged.
-	// Form controls (input/button/select/textarea) additionally depend on
-	// WebKit's inline-block baseline alignment model; their Y position can
-	// differ by a line box without being a layout error.
-	yTol := GeoTolerance
-	switch {
-	case isFormControl(e.Tag) || isFormControl(w.Tag):
-		yTol = 30
-	case isTextBlock(e.Tag) || isTextBlock(w.Tag):
-		yTol = 40 // multi-line text blocks: font line-height drift
-	case textHeightDiff > 0:
-		yTol = GeoTolerance + textHeightDiff
-	}
+	// ★ 表单控件曾用 30px 的 y 容差：那时行内 vertical-align:baseline 未实现，
+	// 每个控件各自贴行盒顶，form_controls 实测系统性偏 20/20/12/5px，全靠这个
+	// 大容差"判 OK"。2026-09-22 实现了行内基线对齐（IFC 的 maxBaseline /
+	// maxDescent：同行控件共享一条基线、行盒高 = maxAscent + maxDescent），
+	// 9 个控件的 y 偏差降到 ≤3px。容差因此收紧到 6px——再出现 >6px 的偏差
+	// 就是真实的基线回归，不得用大容差掩盖。
+	yTol := yToleranceFor(e, w, textHeightDiff)
 	if !near(e.Y, w.Y, yTol) {
 		add("y", fnum(e.Y), fnum(w.Y))
 	}
@@ -143,7 +159,7 @@ func compareSnapshots(e, w ElementSnapshot) []FieldDiff {
 		// Text-block heights accumulate line-height drift across lines.
 		hTol := HeightTolerance
 		if isTextBlock(e.Tag) || isTextBlock(w.Tag) {
-			hTol = 40
+			hTol = TextBlockHeightTolerance
 		}
 		if !near(e.H, w.H, hTol) {
 			add("h", fnum(e.H), fnum(w.H))
@@ -202,10 +218,10 @@ func collapseWS(s string) string {
 // accumulate line-height drift.
 func xToleranceFor(et, wt string) float64 {
 	if isFormControl(et) || isFormControl(wt) {
-		return 14
+		return FormControlXTolerance
 	}
 	if isTextBlock(et) || isTextBlock(wt) {
-		return 6
+		return TextBlockXTolerance
 	}
 	return GeoTolerance
 }
@@ -214,7 +230,22 @@ func xToleranceFor(et, wt string) float64 {
 // control default widths depend on the browser's widget internals.
 func widthToleranceFor(et, wt string) float64 {
 	if isFormControl(et) || isFormControl(wt) {
-		return 10
+		return FormControlWidthTolerance
+	}
+	return GeoTolerance
+}
+
+// yToleranceFor returns the Y-position tolerance for a pair of snapshots.
+// 文本块按行高漂移放大（字体度量差异），其余按常量表——报告头会把这套规则
+// 如实打印出来（此前只印 "±2 px (geometry)"，与实际比较用值不符）。
+func yToleranceFor(e, w ElementSnapshot, textHeightDiff float64) float64 {
+	switch {
+	case isFormControl(e.Tag) || isFormControl(w.Tag):
+		return FormControlYTolerance
+	case isTextBlock(e.Tag) || isTextBlock(w.Tag):
+		return TextBlockYTolerance
+	case textHeightDiff > 0:
+		return GeoTolerance + textHeightDiff
 	}
 	return GeoTolerance
 }
@@ -333,7 +364,20 @@ func writeReport(r CaseResult) {
 	fmt.Fprintf(f, "=== CONSISTENCY REPORT: %s ===\n", r.Case.Name)
 	fmt.Fprintf(f, "%s\n", r.Case.Desc)
 	fmt.Fprintf(f, "Viewport: %dx%d\n", r.Case.ViewportW, r.Case.ViewportH)
-	fmt.Fprintf(f, "Tolerance: ±%g px (geometry)\n\n", GeoTolerance)
+	// 按字段打印真实容差。此前只印 "±2 px (geometry)"，而比较实际用的是
+	// 一套 per-field 容差（form 控件 x14/w10/y6；文本块 x6/y40/h40），
+	// 报告头与判定口径不符会让读者误判「哪些偏差算通过」。
+	fmt.Fprintf(f, "Tolerance (per field, px):\n")
+	fmt.Fprintf(f, "  x  : %g  (form control %g, text block %g)\n",
+		GeoTolerance, FormControlXTolerance, TextBlockXTolerance)
+	fmt.Fprintf(f, "  y  : %g  (form control %g, text block %g, +text-height-delta when taller)\n",
+		GeoTolerance, FormControlYTolerance, TextBlockYTolerance)
+	fmt.Fprintf(f, "  w  : %g  (form control %g)\n",
+		GeoTolerance, FormControlWidthTolerance)
+	fmt.Fprintf(f, "  h  : %g  (text block %g)  — font-metric line-height drift\n",
+		HeightTolerance, TextBlockHeightTolerance)
+	fmt.Fprintf(f, "  display / color / bg / font-size / text / value / checked: exact\n")
+	fmt.Fprintf(f, "  inline 元素跳过几何比较（无盒几何）\n\n")
 
 	if r.Err != nil {
 		fmt.Fprintf(f, "ERROR: %v\n", r.Err)

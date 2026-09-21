@@ -138,6 +138,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if !isPlainInline && cssLH > 0 {
 		centeringOffset = (cssLH - textHeight) / 2
 	}
+	// 本行文本段的字体 ascent：基线对齐时文本段的 Y = 行盒基线 - ascent
+	// （见下面的 lineTextOffset / 表单控件基线定位）。
+	textAscent, _ := fontAscentDescent(box)
 
 	// When contentWidth is auto (derived from intrinsic text width), widen it
 	// slightly to prevent floating-point discrepancies from triggering unwanted
@@ -244,6 +247,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		// 会把该行丢掉，容器高度塌成 0（inline-replaced-flow 的
 		// "atomic inline run retains its line-height strut"）。
 		boxCount int
+		// ★ 行内基线对齐（CSS 2.1 §10.8）：maxBaseline 是本行已放置的表单
+		// 控件要求的最大「margin-box top → 基线」距离，baselineBoxes 记录已按
+		// 该基线定位的控件——后续出现更大的 maxBaseline 时把它们的整体下移
+		// （行盒顶不变，基线随最高者下移），这正是浏览器「同一行所有控件共享
+		// 一条基线」的语义。此前没有这一层：每个控件各自贴行盒顶，
+		// form_controls 实测 y 偏 20/20/12/5px。
+		maxBaseline   float64
+		baselineBoxes []*ElementBox
+		// maxDescent 是本行「基线以下」的最大深度（元素底边 + margin-bottom
+		// 到基线的距离）。基线对齐后元素的底边可以超出最高的盒子（form 里
+		// textarea 高 38、基线在其底边，而 input 的底边比它更低），所以行盒
+		// 高度必须是 maxBaseline + maxDescent，而不是「max(border-box 高)」——
+		// 后者会让下一行起点偏高（form_controls 的 progress 因此差 5px）。
+		maxDescent float64
 	}
 
 	// Initialize first line with float-aware available width.
@@ -252,6 +269,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	var pending []pendingSeg
 
 	currentLine := lineInfo{y: contentY, contentX: lineCx, segStart: 0, widthUsed: 0, availWidth: lineCw}
+
+	// lineTextOffset 返回本行文本段相对行盒顶的 Y 偏移。
+	// 无控件参与时就是 half-leading 居中（原行为，零变化）；本行被表单控件的
+	// 基线顶高时（maxBaseline > 文本自身基线位置），文本随基线下移——
+	// 浏览器语义：行盒因更高的 atomic inline 变高后，同行文本仍坐在基线上。
+	lineTextOffset := func() float64 {
+		off := centeringOffset
+		if currentLine.maxBaseline > 0 {
+			if d := currentLine.maxBaseline - (centeringOffset + textAscent); d > 0 {
+				off += d
+			}
+		}
+		return off
+	}
 
 	// Out-of-flow (absolute/fixed) children of an inline container must be
 	// laid out against their containing block, not as inline content.
@@ -346,7 +377,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						textBox: cld,
 						seg: TextSegment{
 							Start: cursor, Len: 1,
-							X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
+							X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + lineTextOffset(),
 							Width: spW, Height: textHeight,
 							LineY: currentLine.y, LineHeight: lineHeight,
 						},
@@ -452,7 +483,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 									textBox: cld,
 									seg: TextSegment{
 										Start: sub.start + i, Len: 1,
-										X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + centeringOffset,
+										X: currentLine.contentX + currentLine.widthUsed, Y: currentLine.y + lineTextOffset(),
 										Width: chW, Height: textHeight,
 										LineY: currentLine.y, LineHeight: lineHeight,
 									},
@@ -468,7 +499,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						textBox: cld,
 						seg: TextSegment{
 							Start: sub.start, Len: len([]rune(word)),
-							X: currentLine.contentX + nextX, Y: currentLine.y + centeringOffset,
+							X: currentLine.contentX + nextX, Y: currentLine.y + lineTextOffset(),
 							Width: wordWidth, Height: textHeight,
 							LineY: currentLine.y, LineHeight: lineHeight,
 						},
@@ -961,6 +992,47 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				// 几何基于新位置（幂等：布局只依赖 box 自身位置）。
 				if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
 					childCtx.Layout(cld, state)
+				}
+			}
+			// ★ 表单控件的行内基线对齐（CSS 2.1 §10.8）：同行所有 inline 级
+			// 控件共享一条基线。maxBaseline 是本行目前为止最大的「margin-box
+			// top → 基线」距离，控件按
+			//     border-box top = 行盒顶 + maxBaseline - 自身基线偏移
+			// 定位。后续控件带来更大的 maxBaseline 时，先把本行已放置的控件
+			// 整体下移 delta（行盒顶不变、基线随最高者下移），并把本行已生成
+			// 的文本段一起下移，使文本仍坐在新基线上。
+			//
+			// 此前没有这一层：控件各自按 vertical-align:middle 的「自高中居中」
+			// 摆放（只按自身高度算，不含同行更高的元素），于是 form 里每个控件
+			// 都贴行盒顶——consistency 的 form_controls 实测 y 偏 20/20/12/5px，
+			// 只能靠 30px 的宽松容差掩盖。
+			if el := cld.Element(); el != nil {
+				ba, _ := fontAscentDescent(cld)
+				if off, ok := formControlBaselineFromBorderTop(el, cldG.BorderTop(), cldG.PaddingTop(), cldG.BorderBoxHeight(), ba); ok {
+					align := margin.Top + off
+					if align > currentLine.maxBaseline {
+						delta := align - currentLine.maxBaseline
+						currentLine.maxBaseline = align
+						for _, b := range currentLine.baselineBoxes {
+							bg := state.GeometryForBox(b)
+							bg.SetTopLeft(bg.Top()+delta, bg.Left())
+						}
+						for i := currentLine.segStart; i < len(pending); i++ {
+							pending[i].seg.Y += delta
+						}
+					}
+					cldG.SetTopLeft(currentLine.y+currentLine.maxBaseline-off, cldG.Left())
+					currentLine.baselineBoxes = append(currentLine.baselineBoxes, cld)
+					// 行盒高度 = maxAscent(基线) + maxDescent（基线以下最深者）。
+					// 基线对齐后元素底边可能超过最高的盒子，所以不能再用
+					// 「max(border-box 高 + 垂直 margin)」那一套（本文件后面
+					// 对非控件仍保留它作为兜底）。
+					if d := (cldG.BorderBoxHeight() - off) + margin.Bottom; d > currentLine.maxDescent {
+						currentLine.maxDescent = d
+					}
+					if h := currentLine.maxBaseline + currentLine.maxDescent; h > lineHeight {
+						lineHeight = h
+					}
 				}
 			}
 			// Apply relative offset to inline-level elements that are
