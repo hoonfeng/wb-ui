@@ -87,13 +87,18 @@ input[type="color"] {
 
 /* Checkbox and radio are fixed 13×13 UA boxes carrying Chromium's margins
    (checkbox 3px 3px 3px 4px, radio 3px 3px 0 5px) and no border/padding of
-   their own — the generic input rule above must not box them in. */
+   their own — the generic input rule above must not box them in.
+   ★ background-color 必须显式透明，不能沿用上面 input 的 #ffffff：
+   Chromium/Edge 对 appearance 型控件给**透明**背景（实底由主题控件自己绘制）。
+   实测（一致性套件 form_controls）：Edge 的 input#chk / input#rad 计算值
+   = rgba(0,0,0,0)，而 wb-ui 曾输出 rgb(255,255,255)。 */
 input[type="checkbox"], input[type="radio"] {
 	display: inline-block;
 	width: 13px;
 	height: 13px;
 	padding: 0;
 	border: none;
+	background-color: transparent;
 	margin: 3px 3px 3px 4px;
 	vertical-align: baseline;
 }
@@ -102,10 +107,11 @@ input[type="radio"] {
 	margin: 3px 3px 0 5px;
 }
 
-/* Range input renders as a slider. The background stays TRANSPARENT —
-   browsers give appearance-based controls (range/checkbox/radio) a
-   transparent background (the track/thumb are drawn by the theme, and a
-   background-color would paint an opaque bar behind the slider). */
+/* Range input renders as a slider.
+   ★ background-color 实测为**白色**（与 checkbox/radio 相反）：Chromium/Edge
+   的 range 计算样式里 background-color = rgb(255,255,255)（滑轨与滑块由主题
+   绘制在其上）。此前这里写成 transparent，一致性套件 form_controls 报出
+   range 的 bg 差异（edge=白 / wbui=透明）。 */
 input[type="range"] {
 	display: inline-block;
 	/* Chromium: 129×16 (the width no longer scales with the control font, so
@@ -118,7 +124,7 @@ input[type="range"] {
 	padding: 0;
 	border: none;
 	margin: 2px;
-	background-color: transparent;
+	background-color: #ffffff;
 	color: #101010;
 	overflow: hidden;
 }

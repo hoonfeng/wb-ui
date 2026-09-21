@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -48,6 +49,7 @@ var ReportDir = func() string {
 func main() {
 	caseName := flag.String("case", "", "run a single case by name")
 	edge := flag.String("edge", envOr("WBUI_EDGE", EdgePath), "Chromium binary path")
+	dump := flag.Bool("dump", false, "print both sides' full element snapshots (debugging a failing field)")
 	flag.Parse()
 	EdgePath = *edge
 
@@ -84,6 +86,9 @@ func main() {
 		fmt.Printf("── %-24s %s\n", c.Name, c.Desc)
 		r := runCase(c)
 		fmt.Printf("    %s\n", r.Summary())
+		if *dump {
+			dumpSnapshots(r)
+		}
 		if !r.Passed() {
 			failures++
 		}
@@ -99,6 +104,52 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// dumpSnapshots prints both sides' element snapshots side by side (union of
+// keys, sorted) so a failing field can be traced back to the exact values each
+// renderer produced — the report only lists fields that DIFFER, which is not
+// enough to tell e.g. "which earlier element's width shifted this X".
+func dumpSnapshots(r CaseResult) {
+	key := func(s ElementSnapshot) string {
+		if s.ID != "" {
+			return s.Tag + "#" + s.ID
+		}
+		return fmt.Sprintf("%s?%s", s.Tag, s.Class)
+	}
+	edge := map[string]ElementSnapshot{}
+	for _, s := range r.Edge {
+		edge[key(s)] = s
+	}
+	wb := map[string]ElementSnapshot{}
+	for _, s := range r.WBUi {
+		wb[key(s)] = s
+	}
+	keys := map[string]bool{}
+	for k := range edge {
+		keys[k] = true
+	}
+	for k := range wb {
+		keys[k] = true
+	}
+	var list []string
+	for k := range keys {
+		list = append(list, k)
+	}
+	sort.Strings(list)
+	fmt.Printf("    %-22s | %-30s | %s\n", "KEY", "EDGE  x,y wxh  bg", "WBUI  x,y wxh  bg")
+	for _, k := range list {
+		e, we := edge[k]
+		w, ww := wb[k]
+		es, ws := "(absent)", "(absent)"
+		if we {
+			es = fmt.Sprintf("%6.0f,%-4.0f %3.0fx%-3.0f %s", e.X, e.Y, e.W, e.H, e.BG)
+		}
+		if ww {
+			ws = fmt.Sprintf("%6.0f,%-4.0f %3.0fx%-3.0f %s", w.X, w.Y, w.W, w.H, w.BG)
+		}
+		fmt.Printf("    %-22s | %-30s | %s\n", k, es, ws)
+	}
 }
 
 func caseNames(cases []TestCase) string {

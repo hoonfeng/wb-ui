@@ -684,7 +684,17 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// 根因。
 			if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
 				hasExplicitIB := csc.Width.Unit != "" && csc.Width.Unit != "auto"
-				if !hasExplicitIB {
+				// ★ 表单控件的宽度**不由内容决定**：<textarea> 的 auto 宽度取 UA
+				// 固有宽度（cols × 字符宽，见 formControlContentSize），内容在控件
+				// 内部滚动，不参与 shrink-to-fit。此前 textarea 的子文本节点让
+				// shrink-to-fit 把内容宽写进 ContentWidth（"line1" ≈ 28px → 边框盒
+				// 36px），下面 754 行的 formControlContentSize 分支因
+				// `ContentWidth() <= 0` 守卫随即跳过 → 宽度只剩 36px（Edge 161px），
+				// 并把同行后续的 range / progress 整体左移 125px——一致性套件
+				// form_controls 的 textarea w / range x / progress x,y 四处差异
+				// 是同一个根因。
+				_, _, attrSized := formControlContentSize(cld)
+				if !hasExplicitIB && !attrSized {
 					if txt := inlineBoxTextContent(cld); txt != "" {
 						if tw := measureText(cld, txt); tw > 0 {
 							if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && tw > mw {
