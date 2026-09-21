@@ -111,17 +111,25 @@ func wbuiRenderPNG(c TestCase, w, h int) (*image.RGBA, error) {
 			img.SetRGBA(x, y, color.RGBA{R: p.R, G: p.G, B: p.B, A: p.A})
 		}
 	}
-	// Composite onto white: RGBA pixels with A<255 must blend over white,
-	// since the PNG has no alpha channel after decoding the Edge shot.
+	// Composite onto white: the Edge screenshot carries no alpha channel.
+	//
+	// ★ PixelAt hands back PREMULTIPLIED bytes (the Skia surface is N32Premul
+	// and is read raw: a 50%-alpha red reads back #80000080, not #ff000080 —
+	// engine/js/bindings/canvas2d.go unpremultiplies for getImageData for the
+	// same reason). Fusing a premultiplied value onto an opaque backdrop is
+	// just `premul + backdrop*(1-a)`; multiplying by `a` a second time darkens
+	// every anti-aliased edge to `a²·src + (1-a)·255` — exactly the
+	// TestPxTransformCompose mismatch (got #bf7777 vs exp #ff7777).
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			px := img.RGBAAt(x, y)
 			if px.A < 255 {
 				a := float64(px.A) / 255
+				bg := 255 * (1 - a)
 				img.SetRGBA(x, y, color.RGBA{
-					R: uint8(float64(px.R)*a + 255*(1-a)),
-					G: uint8(float64(px.G)*a + 255*(1-a)),
-					B: uint8(float64(px.B)*a + 255*(1-a)),
+					R: clamp8(float64(px.R) + bg),
+					G: clamp8(float64(px.G) + bg),
+					B: clamp8(float64(px.B) + bg),
 					A: 255,
 				})
 			}
@@ -196,6 +204,19 @@ func max3(a, b, c int) int {
 		m = c
 	}
 	return m
+}
+
+// clamp8 rounds a float in [0,255] to a byte, clamping at both ends —
+// compositing a premultiplied value over a backdrop can land a hair
+// outside the range once the stored premul byte has been rounded.
+func clamp8(v float64) uint8 {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return uint8(v + 0.5)
 }
 
 // loadPNG reads a PNG file into an RGBA image.

@@ -69,7 +69,13 @@ input {
 
 textarea {
 	padding: 2px;
-	border: 2px solid #767676;
+	/* ★ textarea 的 UA 边框是 1px，不是 input 的 2px（两者不同！）：
+	   实测（TestPxTextarea，Edge 参考）该用例的外盒 = content 150×50 +
+	   padding 2px×2 + border 1px×2 = 156×56，Edge 的上下边框各只占 1 行
+	   （y=16 与 y=71）、左右各 1 列；wb-ui 曾用 2px 占 2 行 2 列
+	   （y=16..17 / y=72..73），整体宽高各多 2px，整行整列共 1015 个差异
+	   像素。input 保持 2px（见上，108px 边框盒的实测结论）。 */
+	border: 1px solid #767676;
 	background-color: #ffffff;
 	resize: both;
 	overflow: auto;
@@ -144,16 +150,23 @@ input[type="image"] {
 	display: inline-block;
 }
 
-/* Submit/reset/button inputs and <button> share button styling. The
-   background mirrors Edge's Windows-style button: white body with a
-   #efefef highlight band across the top ~25%, and a #767676 border. */
+/* Submit/reset/button inputs and <button> share button styling: a FLAT face
+   with a #767676 border.
+   ★ 曾经这里是「白 body + 顶部 28% #efefef 高光带」（靠 background-image
+   linear-gradient 实现），但那是想当然 —— Edge 的按钮面没有渐变分界。
+   实测（TestPxButton 逐列剖面，Edge 参考）x=70 列 y=19..50 全为 #efefef，
+   而 wb-ui 只有 y=19..27（恰为 28% 高光带）是 #efefef、y=28..50 是
+   #ffffff —— 2736 个差异像素的主体即此，故删掉 background-image。
+   ★ 但 background-color 必须保持 #f0f0f0：一致性套件的 form_controls 比对
+   computed 值，Edge = rgb(240,240,240)；而 Edge 实际绘制出的按钮面像素是
+   #efefef(239)，与 #f0f0f0(240) 只差 1，在像素容差 3 内 —— 不要为了那 1
+   个单位把计算值改掉（套件会 FAIL）。 */
 input[type="submit"], input[type="reset"], input[type="button"],
 button {
 	display: inline-block;
 	padding: 1px 6px;
 	border: 1px solid #767676;
 	background-color: #f0f0f0;
-	background-image: linear-gradient(to bottom, #efefef 0%, #efefef 28%, #ffffff 28%);
 	color: #000000;
 	text-align: center;
 	cursor: default;

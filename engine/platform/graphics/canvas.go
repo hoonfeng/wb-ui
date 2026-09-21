@@ -199,6 +199,8 @@ func (c *Canvas) ensurePixels() []byte {
 // Pixels returns the RGBA backing buffer, mirroring ImageBuffer::getImageData(). The
 // returned slice is a snapshot of the current surface contents; callers should not
 // retain it across mutations.
+//
+// ★ The bytes are PREMULTIPLIED (N32Premul surface read raw) — see PixelAt.
 func (c *Canvas) Pixels() []byte {
 	return c.ensurePixels()
 }
@@ -1625,8 +1627,13 @@ func containsNonASCII(text string) bool {
 	}
 	return false
 }
-// ImageBuffer::getImageData() for a single pixel. Out-of-range reads return transparent
-// black.
+// PixelAt returns a single pixel, mirroring ImageBuffer::getImageData()'s pixel
+// access — with one crucial difference: the bytes are **premultiplied** (the
+// backing surface is N32Premul and ensurePixels reads it raw, so a 50%-alpha red
+// reads back #80000080, not #ff000080). Callers needing browser semantics must
+// divide the alpha out themselves — engine/js/bindings/canvas2d.go's getImageData
+// does exactly that. Guarded by TestPixelAtReturnsPremultiplied.
+// Out-of-range reads return transparent black.
 func (c *Canvas) PixelAt(px, py int) Color {
 	if px < 0 || py < 0 || px >= c.width || py >= c.height {
 		return Color{}
