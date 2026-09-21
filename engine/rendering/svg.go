@@ -780,13 +780,18 @@ func (s *svgPath) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	// Stroke. With a dash pattern we still walk segments (dashLine handles
 	// the on/off phases); solid strokes use the native path stroke so
 	// stroke-linecap / stroke-linejoin match the browser exactly, and subpaths
-	// stay separate. Gradient strokes (stroke="url(#gradient)") use the
-	// shader-based path stroke, which still works on the flattened polyline
-	// (gradients + multi-subpath strokes are rare; axis math needs the bbox).
+	// stay separate. Gradient strokes (stroke="url(#gradient)") likewise use a
+	// shader-based **path** stroke: handing the flattened polyline (pts) to
+	// StrokePathGradient connected M…z M…z subpaths with phantom diagonals.
+	// The flat list stays in use for the gradient axis/bbox only.
 	if ctx.strokeWidth > 0 && len(pts) >= 2 && (ctx.stroke.A > 0 || ctx.strokeGradient != nil) {
 		if ctx.strokeGradient != nil {
+			// 轴向用扁平点算 bbox；绘制必须走分段路径（子路径保持独立）。
 			ax, ay, bx, by, colors, pos := gradientParamsForPts(ctx.strokeGradient, pts)
-			canvas.StrokePathGradient(pts, ctx.strokeWidth, ax, ay, bx, by, colors, pos, ctx.lineCap, ctx.lineJoin)
+			if path := segmentsToPath(segs); path != nil {
+				canvas.StrokePathGradientPath(path, ctx.strokeWidth, ax, ay, bx, by, colors, pos, ctx.lineCap, ctx.lineJoin)
+				path.Release()
+			}
 		} else if len(ctx.dashArray) == 0 {
 			if path := segmentsToPath(segs); path != nil {
 				canvas.StrokePathFull(path, ctx.strokeWidth, ctx.stroke, 1.0, ctx.lineCap, ctx.lineJoin, skia.BlendModeSrcOver)
@@ -1027,6 +1032,15 @@ func segmentsToPath(segs [][]graphics.Point) *skia.Path {
 		path.MoveTo(float32(sg[0].X), float32(sg[0].Y))
 		for i := 1; i < len(sg); i++ {
 			path.LineTo(float32(sg[i].X), float32(sg[i].Y))
+		}
+		// ★ 闭合子路径必须显式 Close。sampleSegments 把 `Z` 展开成「回到本子
+		// 路径起点」的最后一点，几何上已闭合，但 Skia 视角里它仍是一条**开放**
+		// 折线：起点与终点各是一个 butt cap，斜接角（miter join）的外角延伸因而
+		// 缺失——方角描边在角外少 1~3px 的尖角（TestPxSVGGradientStrokeMultiSubpath
+		// 的 12 个差异像素全部落在 (15,15)~(17,16) 这块外角区）。末点==首点时
+		// Close() 不新增线段，只把子路径标记为闭合，角上便改用 join 渲染。
+		if len(sg) >= 2 && sg[len(sg)-1] == sg[0] {
+			path.Close()
 		}
 	}
 	return path

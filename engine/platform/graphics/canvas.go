@@ -1008,6 +1008,57 @@ func (c *Canvas) StrokePathGradient(pts []Point, strokeWidth float64, gx1, gy1, 
 	c.invalidatePixels()
 }
 
+// StrokePathGradientPath strokes a caller-built skia path with a linear gradient.
+//
+// ★ 为什么需要它：StrokePathGradient 只接受**扁平点序列**，内部按
+// MoveTo(首点) + LineTo(其余全部) 构造路径——`<path d="M…z M…z" fill="none"
+// stroke="url(#g)">` 的多个子路径会被连成一条折线，描边因此出现「幻觉斜线」
+// 并跨子路径连到不该连的位置。这里由调用方用分段构造器（rendering 包的
+// segmentsToPath）建好路径，子路径保持独立；本方法只负责造 stroke shader
+// 并按 cap/join 描边。渐变轴仍由调用方给（可用扁平点算 bbox 得到）。
+//
+// 与 FillPathGradientPath 对称；旧的 StrokePathGradient 保持不动（兼容单段
+// 折线调用方）。
+func (c *Canvas) StrokePathGradientPath(path *skia.Path, strokeWidth, gx1, gy1, gx2, gy2 float64, colors []Color, positions []float32, cap, join string) {
+	if path == nil || strokeWidth <= 0 || len(colors) < 2 {
+		return
+	}
+	start := skia.Point{X: float32(gx1), Y: float32(gy1)}
+	end := skia.Point{X: float32(gx2), Y: float32(gy2)}
+	sk := make([]skia.Color, len(colors))
+	for i, col := range colors {
+		sk[i] = colorToSkia(col)
+	}
+	shader := skia.NewLinearGradient(start, end, sk, positions, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	c.gradientPaint.SetStyle(skia.PaintStyleStroke)
+	c.gradientPaint.SetStrokeWidth(float32(strokeWidth))
+	switch cap {
+	case "round":
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapRound)
+	case "square":
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapSquare)
+	default:
+		c.gradientPaint.SetStrokeCap(skia.StrokeCapButt)
+	}
+	switch join {
+	case "round":
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinRound)
+	case "bevel":
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinBevel)
+	default:
+		c.gradientPaint.SetStrokeJoin(skia.StrokeJoinMiter)
+	}
+	c.canvas.DrawPath(path, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.gradientPaint.SetStyle(skia.PaintStyleFill)
+	c.invalidatePixels()
+}
+
 // FillTriangle fills the triangle defined by three points with the supplied color.
 // Used by the select dropdown arrow painter. The triangle is built as a Skia path
 // (MoveTo + 2x LineTo + Close) and filled.
