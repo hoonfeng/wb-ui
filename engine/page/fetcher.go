@@ -2,10 +2,13 @@ package page
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"wb-ui/bridge"
 	"wb-ui/engine/dom"
@@ -82,19 +85,19 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 						body = strings.NewReader(jscToString(b))
 					}
 					if h, ok := o.GetByKey("headers"); ok && h.IsObject() {
-					// ★ AbortSignal 支持（AbortController.signal）：引擎 fetch 是同步实现，
-					//   无法中途取消，但**已中止**的信号必须立即拒绝（调用方 opts.signal
-					//   级联取消 / AbortSignal.abort() 场景），否则请求照发、语义错。
-					if sg, ok := o.GetByKey("signal"); ok && sg.IsObject() {
-						if so := sg.AsObject(); so != nil {
-							if ab, ok2 := so.GetByKey("aborted"); ok2 && ab.ToBoolean() {
-								return rejectPromise(in, fmt.Errorf("fetch: request aborted"))
+						// ★ AbortSignal 支持（AbortController.signal）：引擎 fetch 是同步实现，
+						//   无法中途取消，但**已中止**的信号必须立即拒绝（调用方 opts.signal
+						//   级联取消 / AbortSignal.abort() 场景），否则请求照发、语义错。
+						if sg, ok := o.GetByKey("signal"); ok && sg.IsObject() {
+							if so := sg.AsObject(); so != nil {
+								if ab, ok2 := so.GetByKey("aborted"); ok2 && ab.ToBoolean() {
+									return rejectPromise(in, fmt.Errorf("fetch: request aborted"))
+								}
 							}
 						}
-					}
 						hObj := h.AsObject()
 						if hObj != nil {
-						for _, key := range hObj.Keys() {
+							for _, key := range hObj.Keys() {
 								if val, ok2 := hObj.GetByKey(key); ok2 {
 									headers.Set(key, jscToString(val))
 								}
@@ -172,6 +175,30 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 	proto.Set("LOADING", jsc.NumberValue(3))
 	proto.Set("DONE", jsc.NumberValue(4))
 
+	// ─── 事件监听（2026-09-27 补齐）─────────────────────────────────
+	// 浏览器里 `onload` 属性与 `addEventListener("load")` 两条通路**互不替代**，
+	// 都要触发。此前 wb-ui 只认 onreadystatechange，前端最标准的
+	// `xhr.onload = function(){ resolve(...) }` 写法因此永远停在 pending。
+	addEventListenerFn := jsc.NewNativeFunction("addEventListener", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if this.IsObject() && len(args) >= 2 {
+			if o := this.AsObject(); o != nil {
+				xhrListenersAdd(o, jscToString(args[0]), args[1])
+			}
+		}
+		return jsc.Undefined()
+	}, 2)
+	proto.Set("addEventListener", jsc.FunctionValue(addEventListenerFn))
+
+	removeEventListenerFn := jsc.NewNativeFunction("removeEventListener", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+		if this.IsObject() && len(args) >= 2 {
+			if o := this.AsObject(); o != nil {
+				xhrListenersRemove(o, jscToString(args[0]), args[1])
+			}
+		}
+		return jsc.Undefined()
+	}, 2)
+	proto.Set("removeEventListener", jsc.FunctionValue(removeEventListenerFn))
+
 	openFn := jsc.NewNativeFunction("open", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if !this.IsObject() {
 			return jsc.Undefined()
@@ -201,7 +228,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			return jsc.Undefined()
 		}
 		obj := this.AsObject()
-	hv, ok := obj.GetByKey("_requestHeaders")
+		hv, ok := obj.GetByKey("_requestHeaders")
 		if ok && hv.IsObject() {
 			hObj := hv.AsObject()
 			name := jscToString(args[0])
@@ -219,52 +246,78 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		obj := this.AsObject()
 		method := jscToString2(obj, "_method")
 		// ★ 相对 URL 以文档 URL 为基准解析（与 fetch 同一规则）。
-		url := dom.ResolveURL(DocumentBase(in), jscToString2(obj, "_url"))
+		rawURL := jscToString2(obj, "_url")
+		url := dom.ResolveURL(DocumentBase(in), rawURL)
 		if method == "" {
 			method = "GET"
 		}
-		var body io.Reader
+		var bodyStr string
 		if len(args) >= 1 && !args[0].IsUndefined() && !args[0].IsNull() {
-			body = strings.NewReader(jscToString(args[0]))
+			bodyStr = jscToString(args[0])
+		}
+		var body io.Reader
+		if bodyStr != "" {
+			body = strings.NewReader(bodyStr)
 		}
 		headers := http.Header{}
-	hv, ok := obj.GetByKey("_requestHeaders")
+		hv, ok := obj.GetByKey("_requestHeaders")
 		if ok && hv.IsObject() {
 			hObj := hv.AsObject()
-		for _, key := range hObj.Keys() {
-			if val, ok2 := hObj.GetByKey(key); ok2 {
+			for _, key := range hObj.Keys() {
+				if val, ok2 := hObj.GetByKey(key); ok2 {
 					headers.Set(key, jscToString(val))
 				}
 			}
 		}
+		// ★ bridge 路由拦截（2026-09-27）：与 fetch 完全同规则。桌面壳里宿主
+		//   API 全部由 bridge 提供（没有本地 HTTP 服务），此前 XHR 直接发真实
+		//   请求 → 必然失败，且失败也不触发 onerror → 调用方永远 pending。
+		obj.Set("_sent", jsc.BooleanValue(true))
+		matchRoute := func(u string) *bridge.Route {
+			if r := bridge.MatchMethod("", u); r != nil {
+				return r
+			}
+			return bridge.MatchMethod(method, u)
+		}
+		route := matchRoute(rawURL)
+		if route == nil && url != rawURL {
+			route = matchRoute(url)
+		}
+		if route != nil {
+			status, bodyText := xhrBridgeCall(in, route, rawURL, method, bodyStr, headers)
+			obj.Set("readyState", jsc.NumberValue(2))
+			xhrFireReadyStateChange(in, obj)
+			obj.Set("readyState", jsc.NumberValue(3))
+			xhrFireReadyStateChange(in, obj)
+			xhrSetResponse(in, obj, status, bodyText)
+			obj.Set("readyState", jsc.NumberValue(4))
+			xhrFireReadyStateChange(in, obj)
+			xhrDispatch(in, obj, "load")
+			xhrDispatch(in, obj, "loadend")
+			return jsc.Undefined()
+		}
+
 		obj.Set("readyState", jsc.NumberValue(3))
 		xhrFireReadyStateChange(in, obj)
 		req, err := http.NewRequest(method, url, body)
 		if err != nil {
-			obj.Set("status", jsc.NumberValue(0))
-			obj.Set("statusText", jsc.StringValue(err.Error()))
-			obj.Set("readyState", jsc.NumberValue(4))
-			xhrFireReadyStateChange(in, obj)
-			return jsc.Undefined()
+			return xhrFail(in, obj, err)
 		}
 		req.Header = headers
+		// ★ timeout 属性真正生效（2026-09-27）：此前是死属性——前端写
+		//   `xhr.timeout = 8000` 期待 ontimeout，实际会无限等下去。
 		client := &http.Client{}
+		if tmo := xhrNumber2(obj, "timeout"); tmo > 0 {
+			client.Timeout = time.Duration(tmo) * time.Millisecond
+		}
 		resp, err := client.Do(req)
 		if err != nil {
-			obj.Set("status", jsc.NumberValue(0))
-			obj.Set("statusText", jsc.StringValue(err.Error()))
-			obj.Set("readyState", jsc.NumberValue(4))
-			xhrFireReadyStateChange(in, obj)
-			return jsc.Undefined()
+			return xhrFail(in, obj, err)
 		}
 		defer resp.Body.Close()
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
-			obj.Set("status", jsc.NumberValue(0))
-			obj.Set("statusText", jsc.StringValue(err.Error()))
-			obj.Set("readyState", jsc.NumberValue(4))
-			xhrFireReadyStateChange(in, obj)
-			return jsc.Undefined()
+			return xhrFail(in, obj, err)
 		}
 		obj.Set("status", jsc.NumberValue(float64(resp.StatusCode)))
 		var hdrLines []string
@@ -273,7 +326,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		}
 		obj.Set("_responseHeaders", jsc.StringValue(strings.Join(hdrLines, "\r\n")))
 		getAllRespHeadersFn := jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		if v, ok := obj.GetByKey("_responseHeaders"); ok {
+			if v, ok := obj.GetByKey("_responseHeaders"); ok {
 				return v
 			}
 			return jsc.StringValue("")
@@ -283,6 +336,8 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		obj.Set("response", jsc.StringValue(string(respBody)))
 		obj.Set("readyState", jsc.NumberValue(4))
 		xhrFireReadyStateChange(in, obj)
+		xhrDispatch(in, obj, "load")
+		xhrDispatch(in, obj, "loadend")
 		return jsc.Undefined()
 	}, 1)
 	proto.Set("send", jsc.FunctionValue(sendFn))
@@ -292,8 +347,20 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			return jsc.Undefined()
 		}
 		obj := this.AsObject()
+		// 浏览器语义：已发出的请求被中止 → readystatechange(4) + abort + loadend，
+		// 随后 readyState 归 UNSENT(0)；未 send 过则只归零、不发事件。
+		wasSent := false
+		if v, ok := obj.GetByKey("_sent"); ok && v.ToBoolean() {
+			wasSent = true
+		}
+		if wasSent {
+			obj.Set("readyState", jsc.NumberValue(4))
+			xhrFireReadyStateChange(in, obj)
+			xhrDispatch(in, obj, "abort")
+			xhrDispatch(in, obj, "loadend")
+		}
+		obj.Set("_sent", jsc.BooleanValue(false))
 		obj.Set("readyState", jsc.NumberValue(0))
-		xhrFireReadyStateChange(in, obj)
 		return jsc.Undefined()
 	}, 0)
 	proto.Set("abort", jsc.FunctionValue(abortFn))
@@ -335,8 +402,6 @@ func jscToString2(obj *jsc.JSObject, key string) string {
 	return ""
 }
 
-
-
 func resolvePromise(in *jsc.Interpreter, val jsc.JSValue) jsc.JSValue {
 	return in.ResolvePromise(val)
 }
@@ -346,11 +411,173 @@ func rejectPromise(in *jsc.Interpreter, err error) jsc.JSValue {
 }
 
 func xhrFireReadyStateChange(in *jsc.Interpreter, obj *jsc.JSObject) {
-		hVal, ok := obj.GetByKey("onreadystatechange")
-	if !ok || hVal.IsUndefined() || hVal.IsNull() {
+	xhrDispatch(in, obj, "readystatechange")
+}
+
+// ─── XHR 事件系统（2026-09-27 补齐）──────────────────────────────────
+//
+// 浏览器语义：每次 readyState 变化触发 readystatechange；请求终结时按结果再触发
+// load / error / timeout / abort，最后统一 loadend。`on<type>` 属性处理器与
+// addEventListener 注册的监听器**都会被调用**。
+//
+// 此前 wb-ui 只实现了 onreadystatechange 一项，于是「xhr.onload = () => resolve()」
+// 这类最标准的前端写法永远停在 pending（宿主 PairCode 的插件面板卡在
+// 「加载插件…」即此因）。
+
+// xhrListenerStore 挂在 XHR 对象的 Internal 上（随对象回收，无全局泄漏）。
+type xhrListenerStore struct {
+	byType map[string][]jsc.JSValue
+}
+
+func xhrListenersAdd(obj *jsc.JSObject, eventType string, fn jsc.JSValue) {
+	if obj == nil || eventType == "" || fn.IsUndefined() || fn.IsNull() {
 		return
 	}
-	in.Call(hVal, jsc.ObjectValue(obj), nil)
+	store, _ := obj.Internal().(*xhrListenerStore)
+	if store == nil {
+		store = &xhrListenerStore{byType: map[string][]jsc.JSValue{}}
+		obj.SetInternal(store)
+	}
+	store.byType[eventType] = append(store.byType[eventType], fn)
+}
+
+func xhrListenersRemove(obj *jsc.JSObject, eventType string, fn jsc.JSValue) {
+	if obj == nil {
+		return
+	}
+	store, _ := obj.Internal().(*xhrListenerStore)
+	if store == nil {
+		return
+	}
+	list := store.byType[eventType]
+	kept := make([]jsc.JSValue, 0, len(list))
+	removed := false
+	for _, l := range list {
+		// 按引用相等移除**第一个**匹配项（浏览器 removeEventListener 语义）。
+		if !removed && l.SameAs(fn) {
+			removed = true
+			continue
+		}
+		kept = append(kept, l)
+	}
+	store.byType[eventType] = kept
+}
+
+// xhrMakeEvent 构造最小事件对象（type/target/currentTarget + 常用只读字段）。
+func xhrMakeEvent(in *jsc.Interpreter, eventType string, target *jsc.JSObject) jsc.JSValue {
+	ev := jsc.NewObject(in.ObjectPrototype())
+	ev.Set("type", jsc.StringValue(eventType))
+	ev.Set("target", jsc.ObjectValue(target))
+	ev.Set("currentTarget", jsc.ObjectValue(target))
+	ev.Set("bubbles", jsc.BooleanValue(false))
+	ev.Set("cancelable", jsc.BooleanValue(false))
+	ev.Set("defaultPrevented", jsc.BooleanValue(false))
+	ev.Set("timeStamp", jsc.NumberValue(float64(time.Now().UnixMilli())))
+	return jsc.ObjectValue(ev)
+}
+
+// xhrDispatch 分发一个 XHR 事件：先 on<type> 属性处理器，再按注册顺序调用
+// addEventListener 的监听器。
+func xhrDispatch(in *jsc.Interpreter, obj *jsc.JSObject, eventType string) {
+	if obj == nil {
+		return
+	}
+	ev := xhrMakeEvent(in, eventType, obj)
+	if h, ok := obj.GetByKey("on" + eventType); ok && !h.IsUndefined() && !h.IsNull() {
+		in.Call(h, jsc.ObjectValue(obj), []jsc.JSValue{ev})
+	}
+	store, _ := obj.Internal().(*xhrListenerStore)
+	if store == nil {
+		return
+	}
+	for _, l := range store.byType[eventType] {
+		in.Call(l, jsc.ObjectValue(obj), []jsc.JSValue{ev})
+	}
+}
+
+// xhrFail 把 XHR 置为失败终态：超时 → timeout 事件，其余网络错误 → error 事件，
+// 最后统一 loadend（浏览器语义）。status 归 0（无响应）。
+func xhrFail(in *jsc.Interpreter, obj *jsc.JSObject, err error) jsc.JSValue {
+	obj.Set("status", jsc.NumberValue(0))
+	obj.Set("statusText", jsc.StringValue(err.Error()))
+	obj.Set("readyState", jsc.NumberValue(4))
+	xhrFireReadyStateChange(in, obj)
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		xhrDispatch(in, obj, "timeout")
+	} else {
+		xhrDispatch(in, obj, "error")
+	}
+	xhrDispatch(in, obj, "loadend")
+	return jsc.Undefined()
+}
+
+// xhrSetResponse 填终态响应字段（status/statusText/responseText/response 与
+// getAllResponseHeaders），供 bridge 路径使用，保证与真实 HTTP 路径语义一致。
+func xhrSetResponse(in *jsc.Interpreter, obj *jsc.JSObject, status int, bodyText string) {
+	obj.Set("status", jsc.NumberValue(float64(status)))
+	obj.Set("statusText", jsc.StringValue(http.StatusText(status)))
+	obj.Set("responseText", jsc.StringValue(bodyText))
+	obj.Set("response", jsc.StringValue(bodyText))
+	obj.Set("_responseHeaders", jsc.StringValue(""))
+	obj.Set("getAllResponseHeaders", jsc.FunctionValue(jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+		if v, ok := obj.GetByKey("_responseHeaders"); ok {
+			return v
+		}
+		return jsc.StringValue("")
+	}, 0)))
+}
+
+// xhrBridgeCall 调用命中的 bridge 路由，返回 (status, body)。与 fetch 的
+// bridgeFetch 共用 Route.Handler 契约：args = [url, options]，返回
+// {"status": N, "body": "..."}（见 bridge.dispatchHTTP）。
+func xhrBridgeCall(in *jsc.Interpreter, route *bridge.Route, rawURL, method, bodyStr string, headers http.Header) (int, string) {
+	opts := jsc.NewObject(in.ObjectPrototype())
+	opts.Set("method", jsc.StringValue(method))
+	if bodyStr != "" {
+		opts.Set("body", jsc.StringValue(bodyStr))
+	}
+	if len(headers) > 0 {
+		hObj := jsc.NewObject(in.ObjectPrototype())
+		for k, vs := range headers {
+			if len(vs) > 0 {
+				hObj.Set(k, jsc.StringValue(vs[0]))
+			}
+		}
+		opts.Set("headers", jsc.ObjectValue(hObj))
+	}
+
+	result, err := route.Handler([]jsc.JSValue{jsc.StringValue(rawURL), jsc.ObjectValue(opts)})
+	if err != nil {
+		return 500, fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	status := 200
+	bodyText := "null"
+	if result.IsObject() {
+		if o := result.AsObject(); o != nil {
+			if st, ok := o.GetByKey("status"); ok && st.IsNumber() {
+				status = int(st.ToNumber())
+			}
+			if b, ok := o.GetByKey("body"); ok {
+				if b.IsString() {
+					bodyText = b.ToString()
+				} else if !b.IsUndefined() && !b.IsNull() {
+					bodyText = fmt.Sprintf("%v", b.Export())
+				}
+			}
+		}
+	} else if result.IsString() {
+		bodyText = result.ToString()
+	}
+	return status, bodyText
+}
+
+// xhrNumber2 读取 XHR 对象上的数值属性（属性缺失/非数字 → 0）。
+func xhrNumber2(obj *jsc.JSObject, key string) float64 {
+	if v, ok := obj.GetByKey(key); ok && v.IsNumber() {
+		return v.ToNumber()
+	}
+	return 0
 }
 
 // bridgeFetch handles a fetch() call that matched a registered bridge route.
