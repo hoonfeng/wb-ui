@@ -64,7 +64,13 @@ view-transition 伪元素、模式不可热切换、`ui` 包不做声明式响�
 
 - **消息是 JSON 克隆，不是结构化克隆**：`Date` 变 ISO 字符串、`Map`/`Set`/`RegExp`/`TypedArray` 变 `{}`、值为 `undefined` 的成员被丢弃、`NaN`/`Infinity` 变 `null`。函数、Symbol 与循环引用抛 `DataCloneError`（这点与浏览器一致；算法即 `JSON.stringify`/`JSON.parse`）。
 - **无 transferable / SharedArrayBuffer**：`postMessage(msg, [buf])` 的第二个参数被忽略——既不做所有权转移，也不报错。
-- **无 MessageChannel / MessagePort / BroadcastChannel**：`MessageEvent.ports` 恒为空数组。
+- **无 BroadcastChannel**；`MessageEvent.ports` 恒为空数组。
+- **MessageChannel / MessagePort 已实现**（2026-09，`engine/js/bindings/message_port.go`）：
+  `new MessageChannel()` 返回互联的 `port1`/`port2`；`postMessage` 经事件循环的 immediate
+  队列**异步**投递（宏任务语义，先于 `setTimeout(cb,0)`）；端口支持 `onmessage` /
+  `addEventListener('message')` / `removeEventListener` / `start()` / `close()`，
+  未启动端口收到的消息先排队、启动（或挂上 handler）后补发。**仍未实现**：`transferable`
+  列表、向对端派发 `close` 事件、`MessageEvent.ports` 携带端口对象。
 - **无 module worker**：`new Worker(url, {type:"module"})` 按 classic 处理（`{name}` 生效）。
 - **无 SharedWorker / ServiceWorker / worklet**。
 - **无 Blob URL 脚本**：引擎没有 `Blob` 与 `URL.createObjectURL`，因此不支持 `blob:` worker。
@@ -108,6 +114,59 @@ view-transition 伪元素、模式不可热切换、`ui` 包不做声明式响�
   value flag，会牵动渲染取值、表单提交与配置面板的取值路径，未立项。
 
 ---
+
+### vendored goja：动态对象描述符语义放宽（strFlags）（2026-09）
+
+**上游原文（被放宽的行为）**——`engine/js/goja/object_dynamic.go` 的
+`checkDynamicObjectPropertyDescr` 对 dynamic object（DOM 元素包装器）一律拒绝受限描述符：
+
+    Dynamic object field %q cannot be made non-enumerable
+    Dynamic object field %q cannot be made read-only
+    Dynamic object field %q cannot be made non-configurable
+    Dynamic objects do not support accessor properties
+
+**放宽内容**：仅对「host handler 不拥有」的键（`o.d.Has(name) == false`）允许完整**数据**
+描述符（non-enumerable / read-only / non-configurable）；标志位由新增的 `strFlags` 记录，
+**值仍由 host 的 expando 存储**（唯一副本，见 `bindings.lazyElemProps.expando`），避免两份值。
+host 拥有的键（id / class / style / value …）保持原有约束（全 true，且仍拒绝 accessor）；
+expando 路径同样拒绝 accessor（Vue 不需要，保持显式报错）。
+
+**为什么必须放宽**：Vue 3.5 在 `mountElement` 里对**每个元素**执行
+`def(el, '__vnode', vnode, false)`（`def()` = `Object.defineProperty` + `enumerable: false`）。
+上游语义下抛 TypeError，而该异常被宿主异步吞掉 → **控制台零报错**、`createApp().mount()`
+静默失败、页面空白（实测 `#app` innerHTML=0、DOM 仅 9 个元素）。放宽后 Vue 3.5.39 完整挂载；
+gouide 真实产物 7 个区域槽位全部渲染（证据：`out/gouide-real-e2e.json`）。
+
+**影响面**：
+
+- 只影响「host 不拥有的键 + `Object.defineProperty`」这一条路径；host 字段语义不变。
+- 非枚举 expando 不进 `for-in` / `Object.keys`（`dynamicObjectPropIter`、`stringKeys` 已过滤）；
+  `Object.getOwnPropertyDescriptor` 返回真实标志位（`getOwnPropStr` 包装成 valueProperty）。
+- 同族前序放宽：`symValues`（Vue 的 `el[Symbol('_vei')] = {}`，上游原先直接拒绝 symbol 赋值）。
+- 测试契约同步更新：`object_dynamic_test.go` 的 `TestDynamicObject` 由「必须抛 TypeError」改为
+  「定义成功 + 标志位正确 + 只读拒绝赋值 + 非枚举不出现在 for-in」。
+- **升级上游 goja 时必须保留本补丁**：`strFlags` 字段、`defineExpandoStr`、`getOwnPropStr` /
+  `getOwnPropIdx` 的 valueProperty 包装、`setOwnStr` 的只读检查、`_delete` 的不可配置检查，
+  以及 `dynamicObjectPropIter.next` / `stringKeys` 两处枚举过滤。
+
+### color-mix()（CSS Color 5）支持范围（2026-09）
+
+**为什么需要**：PairCode 前端用 `color-mix()` 定义**全部主要面板底色**与大量边框色
+（`plugins-src/ui-app/index.html` 的 `--bg-primary` / `--sidebar-bg` / `--panel-bg` /
+`--activity-bar-bg`，以及 RightPanel.vue / PluginPanel.vue / StatusBar.vue 的 border/background）。
+引擎不支持该函数时这些变量整体失效 → 视为透明 → 界面只剩文字，大面积面板背景与边框不绘制。
+
+**已支持**：`color-mix( [in <color-space>]? , <color> [<percentage>]? , <color> [<percentage>]? )`
+—— 两个颜色分量 + 可选百分比（缺省各 50%，按合计归一），插值按默认 **premultiplied sRGB**
+（与 Chromium 实测一致；每条期望值取自 Chromium `getComputedStyle`，见
+`engine/style/color_mix_test.go`）。实现入口 `parseColorMix`（`engine/style/resolver.go`）。
+
+**已知边界**：
+
+- 只作为**计算颜色**解析（并入 `parseColor` 路径），不做延迟求值/动画插值；
+- 非法输入**不伪装成有效颜色**（回退「不绘制」而非画成黑色，否则界面会留下错误色块），
+  由 `TestColorMixInvalid` 钉死；
+- 既有颜色语法不受影响（`TestColorMixDoesNotBreakExisting`）。
 
 ## 运行模式与 UI 库层（2026-09 批次）
 
