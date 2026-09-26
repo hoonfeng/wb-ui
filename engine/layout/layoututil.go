@@ -462,6 +462,21 @@ func recordFontContext(box *ElementBox, size float64) {
 	}
 }
 
+// parentFontSizeOf 返回 box 父级的计算字号（无父时返回初始字号）。
+//
+// 只被**相对单位**（%/em）的字号解析使用 —— 绝对单位（px 等）与父级字号
+// 无关，无需沿父链递归。见 resolveFontSizeOf 的说明。
+func parentFontSizeOf(box *ElementBox) float64 {
+	if box.Parent() != nil {
+		return resolveFontSizeOf(box.Parent())
+	}
+	// 根元素（无父）：百分比与 em 相对**初始**字号解析（CSS 2.1 §15.7），
+	// 否则 reference<=0 让 resolveLength 返回 !Definite，font-size:62.5%
+	// 落回 16px——根字号错误又会让全文档的 rem 都按 16 解析
+	// （contextual-grid-gap 的 gap:4rem 得到 64px 而非 40px）。
+	return defaultFontSize
+}
+
 func resolveFontSizeOf(box *ElementBox) float64 {
 	cs := box.Style()
 	if cs == nil {
@@ -478,16 +493,10 @@ func resolveFontSizeOf(box *ElementBox) float64 {
 	if box.Element() == nil && box.Parent() != nil && cs.FontSize.Unit != "" && cs.FontSize.Unit != "px" {
 		return resolveFontSizeOf(box.Parent())
 	}
-	parentSize := 0.0
-	if box.Parent() != nil {
-		parentSize = resolveFontSizeOf(box.Parent())
-	} else {
-		// 根元素（无父）：百分比与 em 相对**初始**字号解析（CSS 2.1 §15.7），
-		// 否则 reference<=0 让 resolveLength 返回 !Definite，font-size:62.5%
-		// 落回 16px——根字号错误又会让全文档的 rem 都按 16 解析
-		// （contextual-grid-gap 的 gap:4rem 得到 64px 而非 40px）。
-		parentSize = defaultFontSize
-	}
+	// ★ 只有相对单位（%/em）才需要父字号。此前**无条件**递归到根求
+	// parentSize（即使 font-size 是绝对 px），使每个 box 的字号解析成本
+	// 变成 O(树深)；4 万节点页面上本函数在布局热路径被反复调用
+	//（CPU profile：flat 1.89s / 4.5%，纯 Go 函数中排第二）。
 	// em/rem/% font-sizes resolve against the parent's font-size:
 	//   - em  → value × parent font-size
 	//   - %   → value% of parent font-size
@@ -495,9 +504,9 @@ func resolveFontSizeOf(box *ElementBox) float64 {
 	var r lengthResult
 	switch cs.FontSize.Unit {
 	case "%":
-		r = resolveLength(cs.FontSize, parentSize, 0)
+		r = resolveLength(cs.FontSize, parentFontSizeOf(box), 0)
 	case "em":
-		r = resolveLength(cs.FontSize, 0, parentSize)
+		r = resolveLength(cs.FontSize, 0, parentFontSizeOf(box))
 	case "rem":
 		r = resolveLength(cs.FontSize, 0, defaultFontSize)
 	default:

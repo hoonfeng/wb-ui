@@ -262,6 +262,31 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	for k, v := range parent.CustomProperties {
 		c.SetCustomProperty(k, v)
 	}
+	// ★ 可继承、但存放在 Properties map 里的属性必须在这里显式下发。
+	//
+	// 背景（2026-09-26 gou-ide「插件面板滚动条样式与浏览器不一致」根因）：
+	// CSS Scrollbars Styling §2.2/§3.1 规定 `scrollbar-color` 与
+	// `scrollbar-width` 都是 **inherited: yes**；gou-ide 的 index.html 给 html
+	// 设了 `scrollbar-color: var(--scrollbar-thumb, #6e7681) transparent`，Chromium
+	// 会把该值下发到**所有**后代滚动容器。而该值非 auto 时 Chromium 会**忽略**
+	// 元素上的 ::-webkit-scrollbar 自定义规则，滚动条回退平台经典样式
+	// （实测 17px + 上下 17×17 箭头按钮 + thumb 宽 14 居中无圆角）。
+	//
+	// wb-ui 此前只继承 InheritedData 结构体字段（这两个属性不在其中），于是
+	// `.pp-list` 读到空的 scrollbar-color → 既拿不到 thumb 色、也压不住
+	// ::-webkit-scrollbar{width:9px}，滚动条被画成 9px 细条无箭头，与浏览器不符。
+	//
+	// 调用顺序安全：ResolveElement 在应用元素**自身声明之前**调用本函数
+	// （resolver.go 的 `cs.InheritFrom(parentCS)`），因此这里下发的值会被
+	// 元素自己的声明正确覆盖。
+	for _, name := range []string{"scrollbar-color", "scrollbar-width"} {
+		if _, ok := c.Properties[name]; ok {
+			continue
+		}
+		if v := parent.GetProperty(name); v != "" {
+			c.SetProperty(name, v)
+		}
+	}
 }
 
 // BorderColor returns the effective border color for a side, implementing the
@@ -488,6 +513,22 @@ func (c *ComputedStyle) GetCustomProperty(name string) []css.Token {
 		return nil
 	}
 	return c.CustomProperties[name]
+}
+
+// CustomPropertyValue returns a CSS variable's value as a plain CSS string
+// (var() references inside it are already substituted by the resolver), or ""
+// when the variable is not defined.
+//
+// ★ 用途：SVG 呈现属性（fill="var(--accent)"）按规范映射到 CSS 声明，其中的
+// var() 必须与样式表一致地解析。渲染层（engine/rendering/svg.go）拿到的是
+// 属性字符串而非声明，只能借用元素计算样式里的自定义属性做替换——本方法
+// 就是那条取值通道（GetCustomProperty 返回 token 切片，调用方无法直接当
+// CSS 值使用）。
+func (c *ComputedStyle) CustomPropertyValue(name string) string {
+	if c == nil {
+		return ""
+	}
+	return tokensToString(c.GetCustomProperty(name))
 }
 
 // String renders important style properties for debugging.

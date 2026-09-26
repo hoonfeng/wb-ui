@@ -493,6 +493,9 @@ func (b *nodeBase) adoptSubtree(node Node, doc *Document) {
 // TextContent returns the concatenation of all descendant text, mirroring
 // Node::textContent(). For character-data nodes (Text/Comment/...) it returns the
 // node's data; for containers it walks the subtree in document order.
+// ★ 容器只拼接 Text 节点后代：注释/PI 不参与父容器拼接（DOM 规范 Node.textContent）。
+//   否则 paintButtonText（renderformcontrol.go）会把图标 <svg><!-- Folder -->…</svg>
+//   的注释原文当按钮文字绘制，界面出现图标名文字污染。
 func (b *nodeBase) TextContent() string {
 	switch b.nodeType {
 	case NodeText, NodeComment, NodeCDATASection, NodeProcessingInstruction:
@@ -500,6 +503,10 @@ func (b *nodeBase) TextContent() string {
 	default:
 		var sb strings.Builder
 		for c := b.firstChild; c != nil; c = nodeBaseOf(c).nextSibling {
+			switch nodeBaseOf(c).nodeType {
+			case NodeComment, NodeProcessingInstruction:
+				continue // 注释/PI 不参与父容器拼接（DOM 规范）
+			}
 			sb.WriteString(c.TextContent())
 		}
 		return sb.String()

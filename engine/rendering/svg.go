@@ -1324,9 +1324,13 @@ type svgMask struct {
 // Extracted from buildSVGDocument so same-document mask-image: url(#id)
 // references can reuse it directly against a mask element found by
 // GetElementById (inline <svg><mask> in the same document).
-func parseMaskElement(defEl *dom.Element) *svgMask {
+func parseMaskElement(defEl *dom.Element, varLookups ...svgVarLookup) *svgMask {
 	if defEl == nil {
 		return nil
+	}
+	varLookup := firstSVGVarLookup(varLookups)
+	colorOf := func(s string) graphics.Color {
+		return parseColorAttribute(expandSVGVars(s, varLookup))
 	}
 	maskID := defEl.GetAttribute("id")
 	if maskID == "" {
@@ -1348,14 +1352,14 @@ func parseMaskElement(defEl *dom.Element) *svgMask {
 				fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 255, G: 255, B: 255, A: 255}}
 				pm := parseStyleAttribute(mEl.GetAttribute("style"))
 				if f := pm["fill"]; f != "" {
-					fs.fill = parseColorAttribute(f)
+					fs.fill = colorOf(f)
 				} else if f := mEl.GetAttribute("fill"); f != "" {
-					fs.fill = parseColorAttribute(f)
+					fs.fill = colorOf(f)
 				}
 				if st := pm["stroke"]; st != "" {
-					fs.stroke = parseColorAttribute(st)
+					fs.stroke = colorOf(st)
 				} else if st := mEl.GetAttribute("stroke"); st != "" {
-					fs.stroke = parseColorAttribute(st)
+					fs.stroke = colorOf(st)
 				}
 				fs.strokeWidth = parseSVGCoord(mEl.GetAttribute("stroke-width"))
 				mk.shapes = append(mk.shapes, fs)
@@ -1669,6 +1673,77 @@ func parseColorAttribute(s string) graphics.Color {
 	return graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}
 }
 
+// expandSVGVars 展开 CSS 值里的 var(--name[, fallback]) 引用（支持嵌套与
+// 同值内多处引用）。lookup 为 nil、或值里没有 var( 时原样返回。
+//
+// ★ 只做「取值替换」，绝不写回 DOM：SVG 呈现属性被记住的是**引用**
+// （var(--accent)），改写属性会在主题切换后把颜色钉死，也会污染
+// getAttribute 的返回值。替换结果仅供本帧的颜色解析使用。
+func expandSVGVars(s string, lookup svgVarLookup) string {
+	if lookup == nil || s == "" || !strings.Contains(s, "var(") {
+		return s
+	}
+	out := s
+	for pass := 0; pass < 8; pass++ {
+		i := strings.Index(out, "var(")
+		if i < 0 {
+			break
+		}
+		// 找与 var( 配对的右括号（值内允许嵌套括号：var(--x, rgb(1,2,3))）。
+		depth, end := 0, -1
+		for j := i + 3; j < len(out); j++ {
+			if out[j] == '(' {
+				depth++
+			} else if out[j] == ')' {
+				depth--
+				if depth == 0 {
+					end = j
+					break
+				}
+			}
+		}
+		if end < 0 {
+			break
+		}
+		inner := out[i+4 : end]
+		name, fallback := inner, ""
+		if k := svgVarsTopComma(inner); k >= 0 {
+			name, fallback = inner[:k], inner[k+1:]
+		}
+		val := strings.TrimSpace(lookup(strings.TrimSpace(name)))
+		if val == "" {
+			val = strings.TrimSpace(fallback)
+		}
+		if val == "" {
+			// 变量未定义且无回退：保留原文，交给颜色解析器按无效值处理。
+			break
+		}
+		out = out[:i] + val + out[end+1:]
+	}
+	return out
+}
+
+// svgVarsTopComma 返回 s 中第一个不在括号内的逗号下标（var() 实参分隔），
+// 没有则返回 -1。
+func svgVarsTopComma(s string) int {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // parseURLReference extracts the id from a url(#id) reference.
 func parseURLReference(s string) string {
 	s = strings.TrimSpace(s)
@@ -1845,10 +1920,14 @@ func parseSVGElement(el *dom.Element) svgShape {
 
 // --- Gradient parsing ---
 
-func parseGradientElement(el *dom.Element) *svgGradient {
+func parseGradientElement(el *dom.Element, varLookups ...svgVarLookup) *svgGradient {
 	tag := strings.ToLower(el.LocalName())
 	if tag != "lineargradient" && tag != "radialgradient" {
 		return nil
+	}
+	varLookup := firstSVGVarLookup(varLookups)
+	colorOf := func(s string) graphics.Color {
+		return parseColorAttribute(expandSVGVars(s, varLookup))
 	}
 	g := &svgGradient{
 		id: el.GetAttribute("id"),
@@ -1894,7 +1973,12 @@ func parseGradientElement(el *dom.Element) *svgGradient {
 			} else {
 				offset = parseSVGCoord(offsetStr)
 			}
-			stopColor := parseColorAttribute(stopEl.GetAttribute("stop-color"))
+			// stop-color 同样可能是 var(--x)（主题色渐变），必须走变量的展开。
+			stopColorAttr := stopEl.GetAttribute("stop-color")
+			if stopColorAttr == "" {
+				stopColorAttr = parseStyleAttribute(stopEl.GetAttribute("style"))["stop-color"]
+			}
+			stopColor := colorOf(stopColorAttr)
 			if stopColor.A == 0 {
 				stopColor = graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}
 			}
@@ -2182,6 +2266,33 @@ func parseClipPathElement(el *dom.Element) *svgClipPath {
 // --- Document builder ---
 
 func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocument {
+	return buildSVGDocumentWithVars(el, nil, currentColors...)
+}
+
+// svgVarLookup 查 CSS 自定义属性（var(--x) 的取值）；nil = 无变量上下文
+// （background-image / 独立渲染等没有元素样式可用的场合）。
+type svgVarLookup func(name string) string
+
+// firstSVGVarLookup 取可选参数里的第一个非 nil 查找器（辅助函数用
+// variadic 可选参数保持既有调用点不变）。
+func firstSVGVarLookup(ls []svgVarLookup) svgVarLookup {
+	for _, l := range ls {
+		if l != nil {
+			return l
+		}
+	}
+	return nil
+}
+
+// buildSVGDocumentWithVars 同 buildSVGDocument，但带 CSS 自定义属性上下文。
+//
+// ★ 为什么需要它：SVG 呈现属性（fill/stroke/stop-color）按规范是 CSS 声明的
+// 简写形式，其中的 var(--x) 必须与样式表里的 var() 一致地解析。此前这些值
+// 直接被 parseColorAttribute 处理，parseColorSimple 失败后**回退黑色**——
+// Token 统计卡的环形图（stroke="var(--border-color)" 底圈 +
+// stroke="var(--accent)" 命中弧）整圈画成纯黑，缓存命中的颜色填充完全不可见。
+// 变量表来自根 svg 元素的计算样式（自定义属性按继承传递，:root 令牌可见）。
+func buildSVGDocumentWithVars(el *dom.Element, varLookup svgVarLookup, currentColors ...graphics.Color) *svgDocument {
 	doc := &svgDocument{
 		width:       parseSVGCoord(el.GetAttribute("width")),
 		height:      parseSVGCoord(el.GetAttribute("height")),
@@ -2223,6 +2334,12 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 	}
 	collectIDs(el)
 
+	// colorOf 解析 SVG 颜色值：先展开 var(--x)（CSS 自定义属性），再走
+	// 标准颜色解析。所有属性/内联样式的 fill/stroke 解析都必须经它。
+	colorOf := func(s string) graphics.Color {
+		return parseColorAttribute(expandSVGVars(s, varLookup))
+	}
+
 	var walk func(dom.Node, *svgPaintContext, float64, float64)
 	walk = func(n dom.Node, ctx *svgPaintContext, offX, offY float64) {
 		if n == nil {
@@ -2250,7 +2367,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 				if defEl, ok := c.(*dom.Element); ok {
 					switch strings.ToLower(defEl.LocalName()) {
 					case "lineargradient", "radialgradient":
-						if g := parseGradientElement(defEl); g != nil && g.id != "" {
+						if g := parseGradientElement(defEl, varLookup); g != nil && g.id != "" {
 							ctx.gradients[g.id] = g
 						}
 					case "clippath":
@@ -2273,9 +2390,9 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}}
 										pm := parseStyleAttribute(pEl.GetAttribute("style"))
 										if f, ok2 := pm["fill"]; ok2 {
-											fs.fill = parseColorAttribute(f)
+											fs.fill = colorOf(f)
 										} else if f := pEl.GetAttribute("fill"); f != "" {
-											fs.fill = parseColorAttribute(f)
+											fs.fill = colorOf(f)
 										}
 										if sw := pm["stroke-width"]; sw != "" {
 											fs.strokeWidth = parseSVGCoord(sw)
@@ -2283,9 +2400,9 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 											fs.strokeWidth = parseSVGCoord(pEl.GetAttribute("stroke-width"))
 										}
 										if st := pm["stroke"]; st != "" {
-											fs.stroke = parseColorAttribute(st)
+											fs.stroke = colorOf(st)
 										} else if st := pEl.GetAttribute("stroke"); st != "" {
-											fs.stroke = parseColorAttribute(st)
+											fs.stroke = colorOf(st)
 										}
 										if d := pEl.GetAttribute("stroke-dasharray"); d != "" {
 											fs.dashArray = parseDashArray(d)
@@ -2311,9 +2428,9 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 									if shape := parseSVGElement(mEl); shape != nil {
 										fs := &svgFilledShape{shape: shape, fill: graphics.Color{R: 0, G: 0, B: 0, A: 0xFF}}
 										if f := mEl.GetAttribute("fill"); f != "" {
-											fs.fill = parseColorAttribute(f)
+											fs.fill = colorOf(f)
 										} else if pm := parseStyleAttribute(mEl.GetAttribute("style")); pm["fill"] != "" {
-											fs.fill = parseColorAttribute(pm["fill"])
+											fs.fill = colorOf(pm["fill"])
 										}
 										m.shapes = append(m.shapes, fs)
 									}
@@ -2322,7 +2439,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 							ctx.markers[mid] = m
 						}
 					case "mask":
-						if mk := parseMaskElement(defEl); mk != nil {
+						if mk := parseMaskElement(defEl, varLookup); mk != nil {
 							ctx.masks[mk.id] = mk
 						}
 					}
@@ -2423,7 +2540,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 		} else if fillStr == "currentColor" {
 			elCtx.fill = doc.currentColor
 		} else if fillStr != "" {
-			elCtx.fill = parseColorAttribute(fillStr)
+			elCtx.fill = colorOf(fillStr)
 		}
 
 		if strokeGradID := parseURLReference(strokeStr); strokeGradID != "" {
@@ -2433,7 +2550,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 		} else if strokeStr == "currentColor" {
 			elCtx.stroke = doc.currentColor
 		} else if strokeStr != "" {
-			elCtx.stroke = parseColorAttribute(strokeStr)
+			elCtx.stroke = colorOf(strokeStr)
 		}
 		if swStr != "" {
 			elCtx.strokeWidth = parseSVGCoord(swStr)
@@ -2563,7 +2680,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 								continue
 							}
 							if f := subEl.GetAttribute("fill"); f != "" {
-								if col := parseColorAttribute(f); col.A > 0 {
+								if col := colorOf(f); col.A > 0 {
 									shape = &svgFilledShape{shape: shape, fill: col}
 								}
 							}
@@ -2581,7 +2698,7 @@ func buildSVGDocument(el *dom.Element, currentColors ...graphics.Color) *svgDocu
 					// own fill so it is visible (the paint context's
 					// default fill is transparent).
 					if refFillStr := refEl.GetAttribute("fill"); refFillStr != "" {
-						if refFill := parseColorAttribute(refFillStr); refFill.A > 0 {
+						if refFill := colorOf(refFillStr); refFill.A > 0 {
 							refShape = &svgFilledShape{shape: refShape, fill: refFill}
 						}
 					}

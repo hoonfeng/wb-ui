@@ -167,6 +167,77 @@ func (v *RenderView) SetBoxScrollOffset(box *RenderBox, x, y float64) {
 	}
 }
 
+// ClampBoxScrollOffsets 把每个滚动容器的偏移裁进当前合法范围
+// [0, max]（CSSOM View 的滚动上限）。必须在**布局完成之后、绘制之前**
+// 调用：容器（viewport）与内容的尺寸随时可能变化——折叠侧栏、展开面板、
+// 消息增删——而 scrollTop 是按**旧几何**写入并存放的，不重新裁剪就会
+// 停在旧位置。
+//
+// ★ 实测根因（自主模式「监督者收缩后下一步推荐不跟随下移」）：消息区
+//   滚动容器可视高 443→801（监督者面板 320→34 折叠），内容高不变 →
+//   maxScroll 变小；scrollTop 仍是旧值 → 内容被多 translate 约 300px，
+//   引导卡停在 y312..443 不动，而容器底已经到 y801。浏览器在每次 layout
+//   后对每个 scrollable 容器做同样的事（Blink 的
+//   ScrollableArea::clampScrollPositionAfterLayout / SetScrollOffset 上限
+//   裁剪），这也是「容器变大后底部内容自动跟上来」的来源。
+//
+// 轴判定复用 ScrollRange（与 scrollTop 赋值、滚动条几何同一口径）。
+// ★ 只在**该轴确实可滚**（can* = true）时裁剪上下界；不可滚的轴保持原值
+//   ——内容尺寸/可滚性判定并不覆盖所有容器（表单控件的内部文本滚动、
+//   overflow 判定瞬态），一律归零会把用户/JS 设定的滚动位置清零
+//   （vscroll_test「textarea 滚动 3 行后 Paint 不得清掉偏移」即此情形）。
+//   本函数只做「容器几何变化后把越界偏移拉回合法范围」这一件事，
+//   不改变引擎原本「不裁剪」的行为边界。
+func (v *RenderView) ClampBoxScrollOffsets() {
+	if v == nil || len(v.boxScrollOffsets) == 0 {
+		return
+	}
+	changed := false
+	for node, p := range v.boxScrollOffsets {
+		box := v.FindRenderBoxForNode(node)
+		if box == nil {
+			// 盒子当前不在渲染树（display:none、树已重建）：保留偏移。
+			continue
+		}
+		if _, _, tw, th := boxViewAndContent(v, box); tw == 0 && th == 0 {
+			// 内容尺寸测不到（子树未布局/空内容几何瞬态）：不裁剪。
+			continue
+		}
+		maxX, maxY, canX, canY := ScrollRange(v, box)
+		nx, ny := float64(p.X), float64(p.Y)
+		if canX {
+			if nx < 0 {
+				nx = 0
+			}
+			if nx > maxX {
+				nx = maxX
+			}
+		}
+		if canY {
+			if ny < 0 {
+				ny = 0
+			}
+			if ny > maxY {
+				ny = maxY
+			}
+		}
+		if nx == p.X && ny == p.Y {
+			continue
+		}
+		v.boxScrollOffsets[node] = graphics.Point{X: nx, Y: ny}
+		changed = true
+		if debugenv.Enabled("WB_SCROLL_DEBUG") {
+			log.Printf("[scroll/clamp] %T (%.1f,%.1f) → (%.1f,%.1f) max=(%.1f,%.1f) can=(%v,%v)",
+				node, float64(p.X), float64(p.Y), nx, ny, maxX, maxY, canX, canY)
+		}
+	}
+	if changed && v.viewWidth > 0 && v.viewHeight > 0 {
+		// 偏移变化必须全脏重绘（同 SetBoxScrollOffset 的理由：dirty 判定
+		// 用未 translate 的绝对坐标，clamp 会移动内容位置）。
+		v.MarkAllDirty()
+	}
+}
+
 // RestoreScrollOffsetsFrom carries per-box scroll offsets from a previous
 // incarnation of the render tree into this one, mapping boxes through their
 // DOM nodes. RebuildRenderTree() builds a brand-new tree (new RenderBox
@@ -436,6 +507,29 @@ func syncInlineTextBoxText(lb *layout.ElementBox, node dom.Node, newText string)
 // the FrameView (page maxY=0) and every single-axis scroll container
 // becomes unscrollable.
 func (v *RenderView) FindScrollContainerForNode(n dom.Node) *RenderBox {
+	// ★ WB_SCROLL_DEBUG=1：定点诊断（纯只读，不改变判定逻辑）——打印命中点祖先链上
+	//   每个 RenderBox 的 frame / overflow / BoxContentSize / ScrollRange，用于回答
+	//   「为什么该容器被判为不可滚」：是「渲染盒高被压成父高」还是「盒未参与内容测量」。
+	if debugenv.Enabled("WB_SCROLL_DEBUG") {
+		log.Printf("[scroll-dump] --- chain for hit node %s ---", nodeLabel(n))
+		for cur := n; cur != nil; cur = cur.ParentNode() {
+			box := v.FindRenderBoxForNode(cur)
+			if box == nil {
+				log.Printf("[scroll-dump]   %s -> NO RenderBox", nodeLabel(cur))
+				continue
+			}
+			cw, ch := v.BoxContentSize(box)
+			mx, my, _, _ := ScrollRange(v, box)
+			// 注：OverflowX/Y 是 style.OverflowType（int 枚举）→ 用 %v 打印。
+			ox, oy := "?", "?"
+			if st := box.Style(); st != nil {
+				ox = fmt.Sprintf("%v", st.OverflowX)
+				oy = fmt.Sprintf("%v", st.OverflowY)
+			}
+			log.Printf("[scroll-dump]   %-42s frame=(%.0f,%.0f %.0fx%.0f) overflow=(%s,%s) content=(%.0f,%.0f) maxScroll=(%.0f,%.0f)",
+				nodeLabel(cur), box.frame.X, box.frame.Y, box.frame.Width, box.frame.Height, ox, oy, cw, ch, mx, my)
+		}
+	}
 	for cur := n; cur != nil; cur = cur.ParentNode() {
 		box := v.FindRenderBoxForNode(cur)
 		if box == nil {
@@ -450,10 +544,35 @@ func (v *RenderView) FindScrollContainerForNode(n dom.Node) *RenderBox {
 			st.OverflowY == style.OverflowScroll ||
 			st.OverflowY == style.OverflowAuto
 		if isScroll {
-			return box
+			// ★ 浏览器 scroll chaining：只有**真正可滚**（内容在该轴超出）的容器才是
+			//   滚动目标；仅声明 overflow:auto/scroll 而内容未超出的盒子跳过、继续
+			//   向上找可滚祖先（如滚轮落在 .settings-content 而真正可滚的是祖先
+			//   .modal-content）。
+			//   判定统一走 ScrollRange（与滚动条绘制、scrollTop 赋值同一口径）；
+			//   它依赖的 BoxContentSize 已修正「无差别跳过 overflow 子盒子树」的
+			//   过度剪裁，因此结论与 DOM 的 scrollHeight/clientHeight 语义一致。
+			maxX, maxY, _, _ := ScrollRange(v, box)
+			if maxY > 0.5 || maxX > 0.5 {
+				return box
+			}
+			continue
 		}
 	}
 	return nil
+}
+
+// nodeLabel 诊断用短标签：元素 → tag.class（首类），其它节点 → NodeName。
+func nodeLabel(n dom.Node) string {
+	if n == nil {
+		return "(nil)"
+	}
+	if el, ok := n.(*dom.Element); ok {
+		if cls := el.ClassName(); cls != "" {
+			return el.LocalName() + "." + strings.SplitN(cls, " ", 2)[0]
+		}
+		return el.LocalName()
+	}
+	return n.NodeName()
 }
 
 // HitTestScrollContainer hit-tests the render tree at (x, y) and walks up
@@ -548,7 +667,18 @@ func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
 			}
 			found = true
 			if st := cb.Style(); st != nil && overflowClipsContentStyle(st) {
-				return // content clipped: do not recurse into this subtree
+				// ★ 只有当**该子盒自身真的可滚**（内容超出它自己的可视区）时，
+				//   它的子树才不贡献给外层的滚动区域（CSSOM View：内层滚动容器
+				//   自己滚动其溢出内容）。若内层只是声明了 overflow:auto 而内容
+				//   并不超出它自己（或它的高由内容撑开），这些溢出内容属于
+				//   **外层**滚动区域，必须继续递归 —— 否则外层容器的内容尺寸会
+				//   塌成可视高：gou-ide 设置面板 .modal-content（子盒
+				//   .settings-content 声明 overflow:auto）实测 DOM 侧
+				//   scrollHeight−clientHeight = 422（内容明确超出），而渲染层
+				//   ScrollRange 返回 0 → 既不滚动、也不绘滚动条（两套口径不一致）。
+				if iw, ih := v.BoxContentSize(cb); iw > cb.frame.Width+0.5 || ih > cb.frame.Height+0.5 {
+					return // 内层自身可滚：其溢出内容不计入外层的滚动区域
+				}
 			}
 		}
 		if rt, ok := o.(*RenderText); ok {
@@ -1107,7 +1237,63 @@ func (v *RenderView) Layout(state *layout.LayoutState) {
 	}
 	v.RenderBlockFlow.Layout(state)
 	v.syncGeometry()
+	// ★ 常驻滚动条预留的收敛 pass（见 engine/layout/scrollbarreserve.go）：
+	//   为什么不在布局（BFC）内判定：.pp-list{flex:1} 这类滚动容器的高度由
+	//   父 flex 容器分配，而它的 BFC 收尾时读到的高度还是「内容撑开」的值
+	//   （实测 contentH=1287 / viewportH=1295 → 恒判不溢出），flex 压到
+	//   638px 发生在 BFC 返回之后。因此判定必须放在这里：几何全部就位后，
+	//   用与**滚动条绘制完全相同**的口径（boxViewAndContent + needsScrollbars）
+	//   判定，结论写回布局盒的粘性标记；一旦有标记翻转，本轮已算出的子元素
+	//   几何即作废，必须立刻按新宽度重排——不能等「下一次布局」：静态页面
+	//   布局一次后不会再有下一次，预留将永远不生效。
+	//   收敛性：预留只会让内容更窄更高，不会来回翻转，通常一轮即收敛
+	//   （上限 3 轮兜底防病态震荡）。
+	for pass := 0; pass < 3; pass++ {
+		if !v.syncScrollbarReserve() {
+			break
+		}
+		v.RenderBlockFlow.Layout(state)
+		v.syncGeometry()
+	}
 	if v.compositor != nil { v.compositor.UpdateCompositingLayers() }
+}
+
+// syncScrollbarReserve 用「滚动条绘制同口径」判定渲染树里每个滚动容器是否
+// 需要垂直滚动条，把结论写入布局盒的常驻预留标记（见 engine/layout/
+// scrollbarreserve.go）。返回是否有任一标记发生变化（= 需要补跑一轮布局）。
+//
+// 只处理 overflow-y 为 auto/scroll 的盒（其余盒永远不会为滚动条预留），
+// 因此遍历代价集中在真正可能滚动的容器上。
+func (v *RenderView) syncScrollbarReserve() bool {
+	if v == nil {
+		return false
+	}
+	changed := false
+	var walk func(ro RenderObject)
+	walk = func(ro RenderObject) {
+		if ro == nil {
+			return
+		}
+		if st := ro.Style(); st != nil &&
+			(st.OverflowY == style.OverflowAuto || st.OverflowY == style.OverflowScroll) {
+			if lb := ro.LayoutBox(); lb != nil {
+				if box := asRenderBox(ro); box != nil {
+					viewW, viewH, totalW, totalH := boxViewAndContent(v, box)
+					needV, _ := needsScrollbars(st, totalW, totalH, viewW, viewH)
+					if lb.SetVerticalScrollbarReserved(needV) {
+						changed = true
+					}
+				}
+			}
+		}
+		for c := ro.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	for rc := v.FirstChild(); rc != nil; rc = rc.NextSibling() {
+		walk(rc)
+	}
+	return changed
 }
 
 func (v *RenderView) LayoutState() *layout.LayoutState { return v.layoutState }

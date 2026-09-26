@@ -126,8 +126,13 @@ var FocusedFormControlSel *FormControlSelection
 // for box-bearing replaced elements that are form controls. Returns true if the element
 // was handled (so the caller can skip the default text-paint path), false otherwise.
 //
-// debugPaintLog enables verbose paint diagnostics. Set to true to trace form-control paint calls.
-var debugPaintLog = false
+// debugPaintLog enables verbose paint diagnostics for form controls.
+//
+// 开关：WB_FORM_DEBUG=1（进程启动前设置；debugenv 快照，热路径零分配）。
+// 打开后每个控件的 paint 调用都会打印几何/字体/内边距，用于判定
+// 「CSS 规则是否真的作用到了 form control 上」（例如 .sp-select 的
+// font-size:12px / padding:5px 26px 5px 10px 是否进入 ComputedStyle）。
+var debugPaintLog = debugenv.Enabled("WB_FORM_DEBUG")
 
 func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 	if box == nil || info == nil || info.canvas == nil {
@@ -168,7 +173,20 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		// UA text-align:center — and vertically inside the padding box);
 		// the IFC-placed RenderText would otherwise sit top-left of the
 		// content box. paintButtonText computes its own centered coords.
-		paintButtonText(info, el, st, x, y, w, h, op)
+		//
+		// ★ 2026-09-26：flex/grid **容器**的 <button> 不走这条特判 —— 这类按钮
+		// 的内容（图标 + 文本 + caret）由 flex/grid 布局排列，引擎已把 RenderText
+		// 摆到正确位置（图标之后、按 gap 间隔），与浏览器一致；再居中画一次
+		// "纯文本 label" 会与布局位置错位（agent-teams「团队」按钮即如此：
+		// display:inline-flex，文字被画在按整段 label 宽度算出的按钮中心，
+		// 而不是图标之后）。交回常规路径：背景/边框仍由 PhaseBackground 画，
+		// 文本由子树 RenderText（IFC/flex 排版位置）画 —— 与 renderpipeline
+		// 的 insideCenteredLabelButton 跳过判定必须成对（那里对 flex 容器
+		// 按钮不跳过），否则按钮会彻底无字。
+		if isFlexOrGridContainerDisplay(st.Display) {
+			return false
+		}
+		paintButtonText(info, box, el, st, x, y, w, h, op)
 		return true
 	case "textarea":
 		_, sy := float64(0), float64(0)
@@ -184,6 +202,10 @@ func PaintFormControl(box *RenderBox, info *PaintInfo) bool {
 		paintMeterBar(info, st, x, y, w, h, el, op)
 		return true
 	case "select":
+		if debugPaintLog {
+			log.Printf("[dbg/form] <select> xy=(%.1f,%.1f) wh=(%.1fx%.1f) fontSize=%.2f padL=%.2f padR=%.2f display=%v",
+				x, y, w, h, st.FontSize.Value, lengthValue(st.PaddingLeft), lengthValue(st.PaddingRight), st.Display)
+		}
 		paintSelectText(info, el, st, x, y, w, h, op)
 		paintSelectArrow(info, st, x, y, w, h, op)
 		return true // select is a replaced element — no child text to paint
@@ -1296,13 +1318,74 @@ func paintButtonBox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64
 	c.StrokeRoundRect(x+0.5, y+0.5, w-1, h-1, radius, 1, borderCol)
 }
 
-// paintButtonText draws the text content of a <button> element centered.
-func paintButtonText(info *PaintInfo, el *dom.Element, st *style.ComputedStyle, x, y, w, h float64, op float64) {
+// isFlexOrGridContainerDisplay reports whether d makes the element a flex or
+// grid container — its children are laid out by the flexbox/grid algorithm
+// rather than by the inline formatting context.
+func isFlexOrGridContainerDisplay(d style.DisplayType) bool {
+	switch d {
+	case style.DisplayFlex, style.DisplayInlineFlex, style.DisplayGrid, style.DisplayInlineGrid:
+		return true
+	}
+	return false
+}
+
+// buttonLabelText returns the label to paint for a non-flex <button>: the
+// concatenation of the button's **visible** render-tree texts, trimmed.
+//
+// ★ 2026-09-26：这里不能用 el.TextContent() 拼 label —— 那是 DOM 全量文本，
+// 会把 display:none 子孙的文本也算进 label 并画出去。agent-teams「团队」按钮
+// 的结构是 <button><svg/><span>团队</span><span style="display:none">0</span>
+// <svg/></button>：旧实现画出「团队0」，浏览器只画「团队」。display:none 的
+// 子孙在渲染树里没有对象，visibility:hidden/collapse 的文本 PaintText 也不画，
+// 故按渲染树取文本与浏览器语义一致。
+//
+// 仅当渲染子树**完全为空**（如布局尚未建立）时才回退到 textContent 兜底，
+// 避免按钮彻底无字；该退化场景下若含隐藏文本仍可能被画出。
+func buttonLabelText(box RenderObject, el *dom.Element) string {
+	var sb strings.Builder
+	var walk func(RenderObject)
+	walk = func(o RenderObject) {
+		if o == nil {
+			return
+		}
+		if rt, ok := o.(*RenderText); ok {
+			if st := rt.Style(); st != nil && (st.Visibility == "hidden" || st.Visibility == "collapse") {
+				return
+			}
+			sb.WriteString(rt.OriginalText())
+			return
+		}
+		for ch := o.FirstChild(); ch != nil; ch = ch.NextSibling() {
+			walk(ch)
+		}
+	}
+	if box != nil {
+		for ch := box.FirstChild(); ch != nil; ch = ch.NextSibling() {
+			walk(ch)
+		}
+	}
+	if t := strings.TrimSpace(sb.String()); t != "" {
+		return t
+	}
+	// 有渲染子树却没有可见文本 → label 就是空的（浏览器语义：隐藏子孙不
+	// 参与 label），不兜底。
+	if box != nil && box.FirstChild() != nil {
+		return ""
+	}
+	if el == nil {
+		return ""
+	}
+	return strings.TrimSpace(el.TextContent())
+}
+
+// paintButtonText draws the label of a non-flex <button> element centered.
+// The label is the button's visible text (see buttonLabelText); box may be nil.
+func paintButtonText(info *PaintInfo, box RenderObject, el *dom.Element, st *style.ComputedStyle, x, y, w, h float64, op float64) {
 	if info == nil || info.canvas == nil {
 		return
 	}
 	c := info.canvas
-	text := strings.TrimSpace(el.TextContent())
+	text := buttonLabelText(box, el)
 	if text == "" {
 		return
 	}
@@ -1609,6 +1692,13 @@ func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 	if info == nil || info.canvas == nil {
 		return
 	}
+	// ★ appearance:none（含 -webkit-/-moz-appearance）时不绘制 UA 原生箭头：
+	// 浏览器语义是「关闭原生外观，由作者自绘」（CSS UI §4）。gou-ide 的「选择工具集」
+	// 下拉用 SvgIcon 画蓝色下三角并设 appearance:none，UA 灰箭头无条件叠加会渲染出
+	// **两个下三角**（实测：引擎多出 18 个灰白像素、箭头宽 13 列 vs 浏览器 6 列）。
+	if isAppearanceNone(st) {
+		return
+	}
 	c := info.canvas
 	// Chromium kHTMLSelectArrow（12x12 viewBox: M3 4.5 L6 7.5 L9 4.5）。Edge 像素级
 	// 反推（arrow_scan 扫描验证 score=0）：V 路径臂端 cy-1、尖端 cy+2（高 3px 不对称）、
@@ -1640,6 +1730,22 @@ func paintSelectArrow(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 }
 
 // --- helpers ---
+
+// isAppearanceNone 报告元素是否显式关闭原生外观
+// （appearance / -webkit-appearance / -moz-appearance: none）。
+// 这些声明未在 style 层建模，但 applyDeclaration 会把未知属性原样存入
+// ComputedStyle.Properties，故此处可直接查询。
+func isAppearanceNone(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	for _, name := range []string{"appearance", "-webkit-appearance", "-moz-appearance"} {
+		if strings.TrimSpace(strings.ToLower(st.GetProperty(name))) == "none" {
+			return true
+		}
+	}
+	return false
+}
 
 // applyOpacity is a local alias for ApplyOpacityToColor (defined in animation.go) so the
 // form-control painters read concisely. It multiplies a color's alpha by the given

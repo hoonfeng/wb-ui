@@ -77,6 +77,21 @@ type Resolver struct {
 	cache map[*dom.Element]cachedStyle
 	// sheetIndex holds the per-sheet rule index (nil until first use / rebuild).
 	sheetIndex map[*css.CSSStyleSheet]*ruleBucket
+	// pseudoProbe lazily records which pseudo-elements (::before / ::after /
+	// ::backdrop / …) actually have rules in the current sheet set. Layout
+	// (layout/box.go) and render-tree building (rendering/rendertreebuilder.go)
+	// ask for 3 pseudo-elements **per element**; with no matching rule the sweep
+	// over every sheet is pure waste (profile: ResolvePseudoElement cum 9.2%,
+	// flat 1.39s spent inside candidates/collectPseudoDeclarationsFromRule).
+	// nil = not probed yet; reset on any sheet mutation.
+	pseudoProbe map[css.PseudoElement]bool
+	// selectionCached memoises SelectionColors() — its inner hasSelectionSelector
+	// sweeps every rule of every sheet, and the result only depends on the sheet
+	// set (profile: 2.83% flat in the React scene). Reset on sheet mutation.
+	selectionCached bool
+	selectionBg     Color
+	selectionFg     Color
+	selectionOK     bool
 	// keyframes stores @keyframes rules by name, for animation resolution.
 	keyframes map[string]*css.KeyframesRule
 	// mediaQueryCtx holds the current viewport/device context for media query
@@ -102,6 +117,9 @@ type cachedStyle struct {
 // used by PaintSelection; the foreground by text painting of selected runs.
 // Colors are style.Color (the resolver's own type); the renderer converts.
 func (r *Resolver) SelectionColors() (bg, fg Color, ok bool) {
+	if r.selectionCached {
+		return r.selectionBg, r.selectionFg, r.selectionOK
+	}
 	var walk func(rules []css.Rule)
 	walk = func(rules []css.Rule) {
 		for _, rule := range rules {
@@ -132,7 +150,10 @@ func (r *Resolver) SelectionColors() (bg, fg Color, ok bool) {
 	for _, sheet := range r.sheets {
 		walk(sheet.Rules())
 	}
-	return bg, fg, bg.A != 0 || fg.A != 0
+	r.selectionBg, r.selectionFg = bg, fg
+	r.selectionOK = bg.A != 0 || fg.A != 0
+	r.selectionCached = true
+	return bg, fg, r.selectionOK
 }
 
 // hasSelectionSelector reports whether any complex selector in the list ends
@@ -226,7 +247,10 @@ func (r *Resolver) AddStyleSheet(sheet *css.CSSStyleSheet) {
 	r.resolveImports(sheet)
 	r.sheets = append(r.sheets, sheet)
 	r.addKeyframesFromSheet(sheet)
+	r.pseudoProbe = nil // 样式表变更 → 伪元素规则探测结果作废
+	r.selectionCached = false
 }
+
 // After removal the cache is cleared so the next ResolveElement call
 // recomputes styles without the removed sheet's rules.
 func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
@@ -244,6 +268,8 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 // the stylesheets or DOM so subsequent calls compute fresh values.
 func (r *Resolver) ClearCache() {
 	r.cache = map[*dom.Element]cachedStyle{}
+	r.pseudoProbe = nil
+	r.selectionCached = false
 }
 
 // Invalidate drops the cached ComputedStyle for a single element so the next
@@ -832,7 +858,60 @@ func declContainsVar(value []css.Token) bool {
 // pseudo-element (no box should be generated). The style inherits from the
 // host element's computed style first, then applies matching declarations
 // (e.g. `.switch .track::after { width:12px; ... }`).
+// hasPseudoRules 报告当前样式表集中是否存在匹配 pe 的伪元素规则。结果惰性探测并
+// 缓存；样式表变更（AddStyleSheet/RemoveStyleSheet/ClearCache）后重新探测。
+func (r *Resolver) hasPseudoRules(pe css.PseudoElement) bool {
+	if r.pseudoProbe == nil {
+		r.pseudoProbe = r.probePseudoRules()
+	}
+	return r.pseudoProbe[pe]
+}
+
+// probePseudoRules 扫描全部样式表（含 @media/@supports 体与 CSS Nesting 子规则），
+// 记录其中出现过哪些伪元素。
+func (r *Resolver) probePseudoRules() map[css.PseudoElement]bool {
+	out := make(map[css.PseudoElement]bool, 4)
+	var walk func(rules []css.Rule)
+	walk = func(rules []css.Rule) {
+		for _, rule := range rules {
+			switch v := rule.(type) {
+			case *css.StyleRule:
+				if v.Selectors != nil {
+					for i := range v.Selectors.Selectors {
+						cs := &v.Selectors.Selectors[i]
+						for j := range cs.Compounds {
+							comp := &cs.Compounds[j]
+							for k := range comp.Selectors {
+								if comp.Selectors[k].Match == css.MatchPseudoElement {
+									out[comp.Selectors[k].PseudoElem] = true
+								}
+							}
+						}
+					}
+				}
+				if len(v.NestedRules) > 0 {
+					walk(v.NestedRules)
+				}
+			case *css.MediaRule:
+				walk(v.Rules)
+			case *css.SupportsRule:
+				walk(v.Rules)
+			}
+		}
+	}
+	for _, sheet := range r.sheets {
+		walk(sheet.Rules())
+	}
+	return out
+}
+
 func (r *Resolver) ResolvePseudoElement(el *dom.Element, pe css.PseudoElement) (*ComputedStyle, string, bool) {
+	// 快速路径：样式表集中没有该伪元素的规则 → 直接判定「无」，跳过全表遍历。
+	// 布局与渲染树构建对每个元素分别查询 ::before/::after/::backdrop，此路径把
+	// 「无规则」场景从 O(元素数 × 伪元素种类 × 规则数) 降为一次查表。
+	if !r.hasPseudoRules(pe) {
+		return nil, "", false
+	}
 	var collected []collectedDecl
 	found := false
 	for _, sheet := range r.sheets {
@@ -2771,6 +2850,17 @@ func parseColor(s string) (Color, bool) {
 		// The caller should handle inheritance; we treat these as "no value".
 		return Color{}, false
 	}
+	// color-mix()（CSS Color 5）：PairCode 前端用它定义**全部主要面板底色
+	// 与大量边框色**（--bg-primary/--sidebar-bg/--panel-bg/--activity-bar-bg
+	// 等，见 plugins-src/ui-app/index.html 与各 .vue）。引擎此前不支持该
+	// 函数 → 这些变量整体解析失败 → 视为透明 → 界面只剩文字，大面积面板
+	// 背景/边框不绘制（桌面端窗口露出 Clear() 清屏色）。
+	if len(s) >= 11 && strings.EqualFold(s[:10], "color-mix(") && s[len(s)-1] == ')' {
+		if c, ok := parseColorMix(s); ok {
+			return c, true
+		}
+		return Color{}, false
+	}
 	if s[0] == '#' {
 		return parseHexColor(s)
 	}
@@ -2790,6 +2880,172 @@ func parseColor(s string) (Color, bool) {
 		return c, true
 	}
 	return Color{}, false
+}
+
+// colorMixPercentRe 匹配 color-mix 百分比表达式里的 "<number>%"。
+var colorMixPercentRe = regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
+
+// splitTopLevelCommas splits s on commas that are NOT nested inside
+// parentheses, so function arguments (rgb(...), calc(...)) stay intact.
+func splitTopLevelCommas(s string) []string {
+	var parts []string
+	depth := 0
+	cur := strings.Builder{}
+	for _, r := range s {
+		switch r {
+		case '(':
+			depth++
+			cur.WriteRune(r)
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteRune(r)
+		case ',':
+			if depth > 0 {
+				cur.WriteRune(r)
+			} else {
+				parts = append(parts, strings.TrimSpace(cur.String()))
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	parts = append(parts, strings.TrimSpace(cur.String()))
+	return parts
+}
+
+// parseColorMixPercentage parses a color-mix percentage component and returns
+// it as a fraction in [0,1]. Accepts "40%" and calc() expressions such as
+// "calc(var(--a) * 100%)" (var() already substituted by this point).
+//
+// color-mix percentages are self-contained (independent of the containing
+// block), so "%" is folded to "/100" and evaluated with an empty CalcContext —
+// otherwise EvalCalcString would treat % as a length relative to a missing
+// context and produce a wrong number.
+func parseColorMixPercentage(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	if strings.HasSuffix(s, "%") {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(s[:len(s)-1]), 64); err == nil {
+			return v / 100, true
+		}
+		return 0, false
+	}
+	if _, _, ok := mathFuncInfoS(s); ok {
+		expr := extractCalcArgS(s)
+		if expr == "" {
+			return 0, false
+		}
+		expr = colorMixPercentRe.ReplaceAllString(expr, "($1/100)")
+		if v, err := css.EvalCalcString(expr, css.CalcContext{}); err == nil {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// parseColorMixComponent parses one "<color> [<percentage>]?" argument of
+// color-mix(). Returns the color, the percentage as a fraction, whether a
+// percentage was present, and whether the color itself parsed.
+func parseColorMixComponent(part string) (Color, float64, bool, bool) {
+	fields := splitShorthandValue(strings.TrimSpace(part))
+	if len(fields) == 0 {
+		return Color{}, 0, false, false
+	}
+	pct, hasPct := 0.0, false
+	if len(fields) >= 2 {
+		p, ok := parseColorMixPercentage(fields[len(fields)-1])
+		if !ok {
+			return Color{}, 0, false, false
+		}
+		pct, hasPct = p, true
+	}
+	c, ok := parseColor(fields[0])
+	if !ok {
+		return Color{}, 0, false, false
+	}
+	return c, pct, hasPct, true
+}
+
+// parseColorMix implements CSS Color 5 color-mix():
+//
+//	color-mix( [in <space>]? , <color> [<percentage>]? , <color> [<percentage>]? )
+//
+// Interpolation is done in premultiplied sRGB (the default colour space);
+// non-sRGB spaces are approximated by sRGB since the app only uses "in srgb".
+func parseColorMix(s string) (Color, bool) {
+	inner := strings.TrimSpace(s[len("color-mix(") : len(s)-1])
+	parts := splitTopLevelCommas(inner)
+	if len(parts) < 2 {
+		return Color{}, false
+	}
+	// Optional leading colour-space / interpolation method ("in srgb", ...).
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(parts[0])), "in ") {
+		parts = parts[1:]
+	} else if strings.EqualFold(strings.TrimSpace(parts[0]), "in") {
+		parts = parts[1:]
+	}
+	if len(parts) != 2 {
+		return Color{}, false
+	}
+	c1, p1, h1, ok1 := parseColorMixComponent(parts[0])
+	c2, p2, h2, ok2 := parseColorMixComponent(parts[1])
+	if !ok1 || !ok2 {
+		return Color{}, false
+	}
+	// Percentage normalisation (CSS Color 5 §3.2). A single specified
+	// percentage implies the complement for the other colour.
+	var w1, w2, alphaScale float64
+	switch {
+	case h1 && h2:
+		sum := p1 + p2
+		if sum <= 0 {
+			return Color{}, false
+		}
+		if sum > 1 {
+			w1, w2, alphaScale = p1/sum, p2/sum, 1
+		} else {
+			w1, w2, alphaScale = p1, p2, sum
+		}
+	case h1:
+		w1, w2, alphaScale = p1, 1-p1, 1
+	case h2:
+		w1, w2, alphaScale = 1-p2, p2, 1
+	default:
+		w1, w2, alphaScale = 0.5, 0.5, 1
+	}
+	// Premultiplied interpolation: weight each colour by its own alpha.
+	a1 := float64(c1.A) / 255 * w1
+	a2 := float64(c2.A) / 255 * w2
+	a := a1 + a2
+	if a <= 0 {
+		return Color{A: 0}, true
+	}
+	mixCh := func(x1, x2 uint8) uint8 {
+		v := (float64(x1)/255*a1 + float64(x2)/255*a2) / a
+		if v < 0 {
+			v = 0
+		} else if v > 1 {
+			v = 1
+		}
+		return uint8(v*255 + 0.5)
+	}
+	aOut := a * alphaScale
+	if aOut < 0 {
+		aOut = 0
+	} else if aOut > 1 {
+		aOut = 1
+	}
+	return Color{
+		R: mixCh(c1.R, c2.R),
+		G: mixCh(c1.G, c2.G),
+		B: mixCh(c1.B, c2.B),
+		A: uint8(aOut*255 + 0.5),
+	}, true
 }
 
 // parseHexColor parses #rgb / #rgba / #rrggbb / #rrggbbaa.
@@ -3005,7 +3261,8 @@ func parseFontShorthand(s string) (style, variant, weight, size, lineHeight, fam
 // parseEdgeShorthand parses a 1-to-4 value edge shorthand like "padding: 10px 20px"
 // or "margin: 1 2 3 4" and returns (top, right, bottom, left). Mirrors the CSS
 // "Edge value shorthand" expansion rules.
-func parseEdgeShorthand(s string) (top, right, bottom, left Length) {	parts := strings.Fields(s)
+func parseEdgeShorthand(s string) (top, right, bottom, left Length) {
+	parts := strings.Fields(s)
 	if len(parts) == 0 {
 		return
 	}
@@ -3709,7 +3966,8 @@ func (r *Resolver) resolveVarInProperties(cs *ComputedStyle) {
 			for _, p := range splitShorthandValue(resolvedStr) {
 				if strings.HasPrefix(p, "linear-gradient(") || strings.HasPrefix(p, "radial-gradient(") || strings.HasPrefix(p, "url(") {
 					grads = append(grads, p)
-					continue				}
+					continue
+				}
 				if c, ok := parseColor(p); ok {
 					cs.BackgroundColor = c
 					break
@@ -4122,7 +4380,6 @@ func applyScrollbarDeclarations(cs *ComputedStyle, decls []collectedDecl) {
 // webkitScrollbarPseudoFromSelector is retained for compatibility (not used by
 // the cascade path, which records sbKind at collection time).
 
-
 // but pseudo-element simple selectors (e.g. ::selection, ::-webkit-scrollbar-thumb).
 // Such selectors should NOT apply their declarations to the base element — they
 // only apply when the resolver resolves the element FOR the pseudo-element.
@@ -4377,7 +4634,8 @@ func parseTransformOrigin(s string) (x, y Length) {
 	return
 }
 
-func parseTransitionShorthand(s string) (prop string, duration float64, timing string, delay float64) {	if s == "" || s == "none" {
+func parseTransitionShorthand(s string) (prop string, duration float64, timing string, delay float64) {
+	if s == "" || s == "none" {
 		return "all", 0, "ease", 0
 	}
 	// Defaults
@@ -4471,6 +4729,19 @@ var uaControlBorderColor = Color{R: 0x76, G: 0x76, B: 0x76, A: 0xff}
 func applyFormControlUserAgentDefaults(cs *ComputedStyle, el *dom.Element) {
 	if el == nil {
 		return
+	}
+	// ★ hidden 属性（HTML §4.12.2，UA 规则 `[hidden] { display: none }`）：
+	//   引擎此前**未实现**该 UA 规则 → 用 `el.hidden = true` 隐藏的元素仍参与布局。
+	//   实测（真实页面 + p1-win）某组件标题栏的两个被隐藏 span：
+	//   插件用 `count.hidden = rounds.length === 0` / `verdict.hidden = !vLabel`
+	//   隐藏两个 span，但它们仍各占一个 flex gap（各 5px）：
+	//     引擎 16(pad) + 2(border) + 6(dot) + 5 + 44(label) + 5 + 0 + 5 + 0 = **83**
+	//     浏览器 16 + 2 + 6 + 5 + 44 = **73**
+	//   差 10px 与两个多余 gap 逐像素吻合 ⇒ 该块整体偏宽、右段容器被撑到 259
+	//   （浏览器 248）。本规则让 hidden 元素 display:none（不参与布局、不占 gap）。
+	if el.HasAttribute("hidden") {
+		cs.Display = DisplayNone
+		cs.DisplaySet = true
 	}
 	px := func(v float64) Length { return Length{Value: v, Unit: "px"} }
 	setPadding := func(t, r, b, l float64) {

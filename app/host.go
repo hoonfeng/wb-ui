@@ -159,6 +159,10 @@ type Host struct {
 	menuFn func(x, y int, canCut, canCopy, canPaste, canSelectAll bool) int
 	wv  *webkit.WebView
 
+	// ftMark 是 WB_FRAMETIME 诊断用的中间时间点（rendering.Paint 调用前），
+	// 用于把「paint 段」再拆成「Paint 前的宿主逻辑」与「Paint+Present 本身」。
+	ftMark time.Time
+
 	// clickHandler dispatches non-js: onclick values to embedder code.
 	clickHandler ClickHandler
 	// imeHandler receives IME events for the focused element.
@@ -402,7 +406,8 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	}
 	layout.FontMetricsFunc = func(family string, size float64, weight int, style string) (float64, float64, float64) {
 		f := graphics.Font{Family: family, Size: size, Weight: weight, Style: style}
-		return graphics.GlobalFontAscent(f), graphics.GlobalFontDescent(f), graphics.GlobalFontLineGap(f)
+		ascent, descent, _, lineGap := graphics.GlobalFontMetrics(f)
+		return ascent, descent, lineGap
 	}
 	// ex 单位（padding/margin/width 等）解析为字体真实 x-height。
 	layout.XHeightFunc = func(family string, size float64, weight int, style string) float64 {
@@ -889,11 +894,10 @@ func (h *Host) calcTextControlOffset(el *dom.Element, cssX, cssY float64) int {
 		}
 	}
 	font := graphics.Font{Family: family, Size: fontSize, Weight: weight}
-	ascent := graphics.GlobalFontAscent(font)
+	ascent, descent, _, _ := graphics.GlobalFontMetrics(font)
 	if ascent <= 0 {
 		ascent = fontSize * 0.8
 	}
-	descent := graphics.GlobalFontDescent(font)
 	if descent < 0 {
 		descent = 0
 	}
@@ -1066,11 +1070,10 @@ func (h *Host) ensureFocusedCaretVisible() {
 	}
 	font := graphics.Font{Family: family, Size: fontSize, Weight: weight}
 
-	ascent := graphics.GlobalFontAscent(font)
+	ascent, descent, _, _ := graphics.GlobalFontMetrics(font)
 	if ascent <= 0 {
 		ascent = fontSize * 0.8
 	}
-	descent := graphics.GlobalFontDescent(font)
 	if descent < 0 {
 		descent = 0
 	}
@@ -1178,11 +1181,18 @@ func (h *Host) Unfocus() {
 		// ★ blur 提交（浏览器语义）：失焦时值相对聚焦快照变化 → 派发
 		// 冒泡 change（onchange 内容属性由 dom 层 InlineEventAttrRunner
 		// 钩子执行）。输入过程中只派 input 事件，change 收敛到这里。
-		if cur := focusedElementValue(blurEl); cur != h.imeFocusValue {
-			// user validity：用户改变了值并在失焦时提交该改变（MDN
-			// :user-valid 的第 1 条）→ :user-valid/:user-invalid 生效。
-			bindings.MarkUserInteracted(blurEl)
-			blurEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+		// ★ <select> 例外：它的 change 已在用户点选 option 时派发
+		// （selectPopupOptionClicked），浏览器也只在「做出选择」那一刻
+		// 派发一次。若不排除，select 的 textContent（= 全部 option 文本）
+		// 会因前端重渲染 option 而变化，这里误判「值变了」再派一次
+		// change → 前端收到两次 change → 两次 PUT、两条 toast。
+		if blurEl.LocalName() != "select" {
+			if cur := focusedElementValue(blurEl); cur != h.imeFocusValue {
+				// user validity：用户改变了值并在失焦时提交该改变（MDN
+				// :user-valid 的第 1 条）→ :user-valid/:user-invalid 生效。
+				bindings.MarkUserInteracted(blurEl)
+				blurEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+			}
 		}
 		// ★ 派发 blur DOM 事件（不冒泡）：xterm 监听 textarea blur →
 		// isFocused=false → 隐藏光标。对称于 FocusElementByKeyboard 的
@@ -1281,9 +1291,10 @@ func (h *Host) Run() {
 		// WB_FRAMETIME=1：逐帧测量 layout/paint/events 耗时（拖拽跟手
 		// 性能验证；autodrag 激活时强制开启）。
 		ftMode := h.autodragOn || os.Getenv("WB_FRAMETIME") != ""
-		var ftFrameStart, ftLayoutEnd, ftPaintEnd time.Time
+		var ftFrameStart, ftEvEnd, ftFlushEnd, ftLayoutEnd, ftPaintDone, ftPaintEnd time.Time
 		if ftMode {
 			ftFrameStart = time.Now()
+			h.ftMark = time.Time{}
 		}
 		// Fetch the GPU surface fresh each frame: resize callbacks release
 		// and recreate the surface, so the cached pointer would be dangling.
@@ -1306,6 +1317,17 @@ func (h *Host) Run() {
 		// + Paint 反映新宽度（0 帧延迟）。rv 用上一帧布局后的渲染树
 		// （hover/滚动条几何 1 帧滞后可接受，mousemove 派发不依赖几何）。
 		h.processEvents(h.wv.RenderView())
+		if ftMode {
+			ftEvEnd = time.Now()
+		}
+
+		// ★ 帧边界：drain 排队的动态 <script src>/<link rel=stylesheet>。
+		//   窗口渲染循环不经 WebView.Render()，若不在此执行，运行时插入的
+		//   插件 client 半永不运行（界面显示「标题栏未装配(ui-titlebar)」占位符）。
+		h.wv.FlushFrameBoundaryResources()
+		if ftMode {
+			ftFlushEnd = time.Now()
+		}
 
 		h.wv.EnsureLayout()
 		if ftMode {
@@ -1635,8 +1657,14 @@ func (h *Host) Run() {
 					log.Printf("[ctm] PRE-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f saveCount=%d",
 						mPre.ScaleX, mPre.ScaleY, mPre.TransX, mPre.TransY, gpuCanvas.SaveCount())
 				}
+				if ftMode {
+					h.ftMark = time.Now()
+				}
 				rendering.Paint(rv, gpuCanvas, dirtyRect)
 				gpuCanvas.Restore()
+				if ftMode {
+					ftPaintDone = time.Now()
+				}
 				if os.Getenv("WB_CTM_DEBUG") != "" {
 					mPost := gpuCanvas.GetMatrix()
 					log.Printf("[ctm] POST-Paint scaleX=%.3f scaleY=%.3f tx=%.1f ty=%.1f saveCount=%d",
@@ -1867,8 +1895,27 @@ func (h *Host) Run() {
 			// 只记录有实际绘制的帧（空闲帧跳过 Paint 无意义；拖拽帧
 			// needPaint=true 每帧记录，autodragSamples 汇总）。
 			if needPaint {
+				// pre = 布局完成 → Paint 入口之间的宿主逻辑耗时
+				// （选择更新/IME 定位/清屏/矩阵设置）；core = Paint+Present。
+				preMS := 0.0
+				if !h.ftMark.IsZero() {
+					preMS = float64(h.ftMark.Sub(ftLayoutEnd).Nanoseconds()) / 1e6
+				}
 				log.Printf("[ft] total=%7.2fms layout=%6.2f paint=%6.2f events=%6.2f needPaint=%v drag=%v",
 					total, layoutMS, paintMS, eventsMS, needPaint, h.autodragOn)
+				dur := func(from, to time.Time) float64 {
+					if from.IsZero() || to.IsZero() {
+						return 0
+					}
+					return float64(to.Sub(from).Nanoseconds()) / 1e6
+				}
+				// 帧内阶段细分：events（JS/事件派发）→ flush（动态资源）
+				// → layoutPipe（重建树+布局）→ hostPre（选择/IME/清屏）
+				// → Paint（Skia 光栅）→ Present（提交）。
+				log.Printf("[ft-split] events=%7.2f flush=%6.2f layoutPipe=%7.2f hostPre=%6.2f Paint=%7.2f Present=%7.2f",
+					dur(ftFrameStart, ftEvEnd), dur(ftEvEnd, ftFlushEnd),
+					dur(ftFlushEnd, ftLayoutEnd), preMS,
+					dur(h.ftMark, ftPaintDone), dur(ftPaintDone, ftPaintEnd))
 				if h.autodragOn {
 					h.autodragSamples = append(h.autodragSamples, total)
 				}
@@ -3113,15 +3160,29 @@ func (h *Host) handleCharInput(ev window.Event) {
 		// contenteditable（CodeMirror 6 输入区）：光标处插入文本节点，
 		// 派发 input → CM6 的 DOMObserver readDOMChange 同步 state。
 		// 不能用 value/textContent 全文替换（会抹掉结构化 DOM）。
-		ok := bindings.InsertTextAtSelection(char)
+		// ★ selection 必须**位于该 contenteditable 内**才算有效：sstate.ranges 是
+		//   全局单例，可能残留其它元素（终端 textarea / 上次 CM6 光标）的旧
+		//   selection —— 此时 InsertTextAtSelection 会把字符插到**别处**并返回
+		//   true，目标输入框仍为空（实测 evidence：ev:input 触发 5 次而
+		//   .chat-input 的 inputDetail len=0/htmlLen=0/kids=0）。
+		ok := bindings.SelectionInsideElement(h.imeFocusedEl) && bindings.InsertTextAtSelection(char)
+		if !ok {
+			// ★ 兜底：手写 contenteditable（gou-ide 对话输入框 .chat-input，只监听
+			//   input/keydown、从不调用 selection API）聚焦后 sstate.ranges 恒空 →
+			//   InsertTextAtSelection 失败并**丢弃字符**（实测 evidence：ev:input
+			//   触发 5 次而 DOM 文本长度 0 → 用户「点击输入框后打字无反应」）。
+			//   浏览器语义：contenteditable 聚焦后字符必须进入文档，无 caret 时
+			//   追加到内容末尾。详见 bindings.AppendTextToContentEditable。
+			ok = bindings.AppendTextToContentEditable(h.imeFocusedEl, char)
+		}
 		if mf := h.wv.MainFrame(); mf != nil {
 			if fr := mf.Frame(); fr != nil {
 				fr.MarkRenderTreeDirty()
 			}
 		}
 		if !ok {
-			// 无有效 DOM Selection：仅派发 input，让 CM6 的 input
-			// handler 有机会走 state 更新路径（回退语义）。
+			// 仍失败（无 contenteditable 根/无文档）：仅派发 input，让页面的
+			// input handler 有机会自处理（回退语义）。
 		}
 		h.imeFocusedEl.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 	}
@@ -5766,6 +5827,23 @@ func (h *Host) deleteFocusedChar(forward bool) {
 	if el == nil {
 		return
 	}
+	// ★ contenteditable 专用路径（与字符输入的 AppendTextToContentEditable 对称）：
+	//   手写 contenteditable（只监听 input/keydown、从不调用 selection API）的
+	//   sstate.ranges 恒为空 → 选区删除无效；而 setFocusedElementValue 对
+	//   contenteditable 直接 return（保护 CodeMirror 6 结构化 DOM，正确）→
+	//   退格完全无效（实测：键入 "hello" 后退格 3 次 textContent 仍为 "hello"）。
+	if strings.EqualFold(el.GetAttribute("contenteditable"), "true") &&
+		!bindings.SelectionInsideElement(el) {
+		it := "deleteContentForward"
+		if !forward {
+			it = "deleteContentBackward"
+		}
+		if bindings.DeleteCharFromContentEditable(el, forward) {
+			el.DispatchEvent(dom.NewInputEvent(it, "", false))
+			h.wv.RebuildRenderTree()
+			return
+		}
+	}
 	val := focusedElementValue(el)
 	runes := []rune(val)
 	start, end := len(runes), len(runes)
@@ -6071,7 +6149,16 @@ func (h *Host) applyContentEditableCompositionUpdate(ev ime.Event) {
 		if from, ok := bindings.TextOffsetOfSelection(el); ok {
 			h.imeCompFrom = from
 		} else {
-			h.imeCompRoot = nil // 无有效选择：只派发事件，不写 DOM（回退语义）
+			// ★ 无 DOM Selection 时不能放弃写 DOM：手写 contenteditable（gou-ide
+			//   对话输入框 .chat-input 只监听 @input/@keydown、从不调用 selection
+			//   API）恒无选择，此前把 imeCompRoot 置 nil → 组合文本**永不写入
+			//   DOM**（实测 IME 日志 ce-compose update="hello" from=0 len=0，
+			//   而 .chat-input 的 inputDetail len=0/htmlLen=0/kids=0 —— 桌面端
+			//   「点击输入框后打字无反应」的根因）。
+			//   改为以「内容末尾」为组合起点：imeCompFrom = 当前文本 rune 长度、
+			//   imeCompLen = 0 → 首次 update 在末尾插入，后续 update 替换同一
+			//   范围（不会重复累积，与有 selection 时行为一致）。
+			h.imeCompFrom = len([]rune(el.TextContent()))
 		}
 	}
 	newText := ev.Composition
@@ -6110,10 +6197,14 @@ func (h *Host) applyContentEditableCharInput(ev ime.Event) {
 		// 组合提交：用最终字符替换 DOM 中的组合预览。
 		if h.imeCompRoot != nil {
 			if _, ok := bindings.ReplaceTextRange(h.imeCompRoot, h.imeCompFrom, h.imeCompLen, char); !ok {
-				bindings.InsertTextAtSelection(char)
+				if !bindings.InsertTextAtSelection(char) {
+					bindings.AppendTextToContentEditable(el, char)
+				}
 			}
 		} else {
-			bindings.InsertTextAtSelection(char)
+			if !bindings.InsertTextAtSelection(char) {
+				bindings.AppendTextToContentEditable(el, char)
+			}
 		}
 		h.imeComposing = false
 		h.imeCompEndFired = true
@@ -6126,8 +6217,26 @@ func (h *Host) applyContentEditableCharInput(ev ime.Event) {
 		el.DispatchEvent(dom.NewInputEvent("insertCompositionText", char, false))
 	} else {
 		// 普通字符（组合已由 CharInput 提交后的连续字符，或直接输入）。
-		if !bindings.InsertTextAtSelection(char) {
-			return // 无有效 selection：跳过 DOM 修改（保住现有结构）
+		// ★ 守卫：selection 必须位于**该 contenteditable 内**才算有效 ——
+		//   sstate.ranges 是全局单例，常残留 xterm textarea / 上一次 CM6 光标
+		//   等**别处**的 selection；此时 InsertTextAtSelection 会把字符插到别处
+		//   并返回 true，目标输入框仍为空（实测 evidence：ev:input 触发 5 次而
+		//   .chat-input 的 inputDetail len=0/htmlLen=0/kids=0 —— 用户「点击输入框
+		//   后打字无反应」的根因）。
+		// ★ 兜底：selection 无效时把字符追加到该 contenteditable 末尾（浏览器
+		//   语义：contenteditable 聚焦后字符必须进入文档，无 caret 时追加到末尾）。
+		//   此前直接 `return` 丢弃字符且连 input 都不派发。
+		if !bindings.SelectionInsideElement(el) || !bindings.InsertTextAtSelection(char) {
+			if !bindings.AppendTextToContentEditable(el, char) {
+				if os.Getenv("WB_IME_DEBUG") != "" {
+					log.Printf("[ime] ce-char DROPPED char=%q (no valid target)", char)
+				}
+				return // 真无法插入（无 contenteditable 根/无文档）：保持既有结构
+			}
+		}
+		if os.Getenv("WB_IME_DEBUG") != "" {
+			log.Printf("[ime] ce-char char=%q inside=%v txtLen=%d", char,
+				bindings.SelectionInsideElement(el), len([]rune(el.TextContent())))
 		}
 		el.DispatchEvent(dom.NewInputEvent("insertText", char, false))
 	}
@@ -6240,5 +6349,3 @@ func findRenderObjectForNode(ro rendering.RenderObject, target dom.Node) renderi
 	}
 	return nil
 }
-
-// owner carries the given CSS class (used by the [skia] dialog probe).

@@ -12,9 +12,52 @@ import (
 )
 
 const (
-	sbArrowSize = 12.0 // 箭头按钮边长
-	sbArrowGap  = 5.0  // 箭头与轨道间的间隙
+	// sbThumbInset 是滚动条滑块（thumb）与轨道四周的间隙（CSS px）。
+	//
+	// ★ 实测（2026-09-26，真实有头 Edge 153，dpr=1.25，逐像素扫描 .pp-list）：
+	// 轨道 15px，thumb **纯色**列宽 11 物理像素；轨道顶端到 thumb 顶端 18.4px。
+	// 取 3.0 而非几何上的 3.1，是为了让 15-2×3 = 9 CSS px = 11.25 物理像素
+	// 完整覆盖 11 列（取 3.1 时几何宽 8.8px，末列只覆盖 0.875，纯色只剩 10 列，
+	// 实测就是这样少了一列——wb-ui 侧像素复验确认）。
+	//
+	// ⚠️ 上一版按无头 Chromium 的「经典滚动条」实现（thumb 宽 = 轨道宽-3、直角），
+	// 比真实浏览器明显更宽、更方——这正是用户反馈「样式不一样」的直接原因。
+	sbThumbInset = 3.0
+
+	// sbArrowGap 是箭头按钮与 thumb 可移动轨道之间的间隙（CSS px）。
+	//
+	// 浏览器里箭头按钮与 thumb 之间没有额外留白，thumb 顶端距轨道顶端就是
+	// 「箭头按钮高 + thumb 自身 inset」= 15 + 3.1（实测 18.4，误差 0.3px）。
+	sbArrowGap = sbThumbInset
 )
+
+// sbArrowSize 返回箭头按钮的边长：平台经典滚动条的箭头按钮是**正方形**，
+// 边长等于滚动条宽度（有头 Edge 实测 15px 轨道 → 15×15 按钮）。
+//
+// 像素核对（.pp-list，dpr=1.25）：上箭头三角中心在轨道顶端下方 8.8px，
+// 与 15px 按钮的中心 7.5px 接近（差 1.3px，三角绘制本身的取整偏差）。
+func sbArrowSize(scrollW float64) float64 {
+	return scrollW
+}
+
+// sbThumbWidth 返回自绘滚动条（元素继承到非 auto scrollbar-color 时）的 thumb
+// 宽度：轨道宽两侧各留 sbThumbInset。
+//
+// ★ 实测（有头 Edge 153，dpr=1.25，.pp-list）：轨道 15px、thumb 纯色列 11 物理
+// 像素（≈ 9 CSS px），即 15 - 2×3。轨道过窄时退化为整宽，避免负宽度。
+func sbThumbWidth(scrollW float64) float64 {
+	w := scrollW - 2*sbThumbInset
+	if w < 3 {
+		return scrollW
+	}
+	return w
+}
+
+// sbThumbRadius 返回自绘滚动条 thumb 的圆角半径：实测为胶囊形，即宽度的一半
+// （dpr=1.25 下 thumb 顶端 4 行由窄到宽，与半径=半宽的圆弧吻合）。
+func sbThumbRadius(scrollW float64) float64 {
+	return sbThumbWidth(scrollW) / 2
+}
 
 // ScrollbarMetrics 描述一条滚动条（垂直或水平）的几何。
 // 绘制端据此画 thumb；宿主拖动/滚轮据此把指针位移映射为滚动偏移，
@@ -32,22 +75,12 @@ type ScrollbarMetrics struct {
 // painter: 12px default, 8px thin, 0 none (still scrollable). It also honors
 // ::-webkit-scrollbar { width: Npx } (Blink/WebKit custom width — wins over
 // the standard property, matching Chrome).
+//
+// ★ 2026-09-26：实现下沉到 style.ScrollbarWidth —— 布局侧的「常驻滚动条
+// 预留宽度」（engine/layout/scrollbarreserve.go）必须与绘制用同一个值，
+// 否则会出现「布局按 12px 预留、绘制画 8px」的错位。
 func scrollbarWidthFor(st *style.ComputedStyle) float64 {
-	if st == nil {
-		return 12
-	}
-	switch st.GetProperty("scrollbar-width") {
-	case "thin":
-		return 8
-	case "none":
-		return 0
-	}
-	if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
-		if l, ok := parseLengthAny(wv); ok && l > 0 {
-			return l
-		}
-	}
-	return 12
+	return style.ScrollbarWidth(st)
 }
 
 // webkitCustomScrollbar reports whether the element has Blink/WebKit custom
@@ -57,6 +90,14 @@ func scrollbarWidthFor(st *style.ComputedStyle) float64 {
 // unlike the default flat style (12px + arrow buttons).
 func webkitCustomScrollbar(st *style.ComputedStyle) bool {
 	if st == nil {
+		return false
+	}
+	// ★ Chromium 语义（2026-09-26 实测）：元素继承到非 auto 的 scrollbar-color
+	// 时，::-webkit-scrollbar 自定义规则被**整体忽略**，滚动条回退平台经典样式
+	// （17px、带箭头、thumb 无圆角）。gou-ide 全页继承 html 的 scrollbar-color，
+	// 因此这条分支把它挡回经典样式——只有显式 scrollbar-color:auto 的组件才走
+	// ::-webkit-scrollbar 细滚动条。
+	if style.HasCustomScrollbarColor(st) {
 		return false
 	}
 	return st.GetProperty("-webkit-scrollbar-width") != "" ||
@@ -155,12 +196,16 @@ func VerticalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics {
 		vh -= scrollbarWidthFor(box.Style())
 	}
 	webkit := webkitCustomScrollbar(box.Style())
-	if !webkit && vh <= sbArrowSize*2+sbArrowGap*2 {
+	arrow := 0.0
+	if !webkit {
+		arrow = sbArrowSize(scrollbarWidthFor(box.Style()))
+	}
+	if !webkit && vh <= arrow*2+sbArrowGap*2 {
 		return ScrollbarMetrics{}
 	}
 	trackLen := vh
 	if !webkit {
-		trackLen = vh - sbArrowSize*2 - sbArrowGap*2
+		trackLen = vh - arrow*2 - sbArrowGap*2
 	}
 	thumbLen := trackLen * viewH / totalH
 	if thumbLen < 18 {
@@ -193,12 +238,16 @@ func HorizontalScrollbarMetrics(rv *RenderView, box *RenderBox) ScrollbarMetrics
 		hw -= scrollbarWidthFor(box.Style())
 	}
 	webkit := webkitCustomScrollbar(box.Style())
-	if !webkit && hw <= sbArrowSize*2+sbArrowGap*2 {
+	arrow := 0.0
+	if !webkit {
+		arrow = sbArrowSize(scrollbarWidthFor(box.Style()))
+	}
+	if !webkit && hw <= arrow*2+sbArrowGap*2 {
 		return ScrollbarMetrics{}
 	}
 	trackLen := hw
 	if !webkit {
-		trackLen = hw - sbArrowSize*2 - sbArrowGap*2
+		trackLen = hw - arrow*2 - sbArrowGap*2
 	}
 	thumbLen := trackLen * viewW / totalW
 	if thumbLen < 18 {

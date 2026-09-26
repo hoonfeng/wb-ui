@@ -58,10 +58,41 @@ type flexItem struct {
 	baselineOffset float64
 }
 
+// forceRelayout 把该盒自身标记为「未布局」，但**不向上传播**脏标记。
+//
+// 用途：flex 在布局过程中修正 item 的交叉轴尺寸（column flex 的宽度）后，
+// 必须让该 item 的内容重新排版。若 item 在更早一次（尺寸错误的）布局中已被
+// MarkCleanWithGeom，其子树（尤其文本行盒）会保持旧排版，而
+// BlockFormattingContext.Layout 开头的 CanSkipLayout 剪枝会直接跳过它。
+// 不能用 ElementBox.MarkDirty：那会把父链一路标脏（含此刻正在布局的 flex
+// 容器），在布局进行中重新引入脏状态；这里只需让本人这一层重排。
+//
+// ★ 实测背景（2026-09-26，gou-ide .toast-container 竖排）：空容器初始布局
+// 为 0×0，Vue 插入 .toast-item 后容器 shrink-to-fit 得 282.8、resolveCrossSizes
+// 把 item 的 ContentWidth 正确设为 250.8，但 item 的高仍是 341（19 字 ×18px，
+// 每字一行），浏览器 34.4 —— 正是「宽度改了但没重排」。
+func forceRelayout(b *ElementBox) {
+	if b == nil {
+		return
+	}
+	b.layoutCache.laidOut = false
+}
+
 func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	defer profileLayout("ffc")()
 	cs := box.Style()
 	if cs == nil { return }
+	// ★ flex item 是独立格式化上下文（CSS Flexbox §4：flex item 建立新的 FC，
+	// 外部浮动不得影响其内部文本换行）。此处把浮动上下文隔离为 nil —— 否则
+	// 继承来的父 FC 的 originX/contentWidth 属于**别的盒**，item 内部 IFC 调用
+	// contentEdgesAt 时坐标系不符：fcY 落进该 FC 的浮动区间 → 返回宽度 0 →
+	// CJK 文本每字一行。
+	// 实测（gou-ide .toast-item，2026-09）：
+	//   [toast-line] cx=17.00 cw=0.000 fc=true contentX=17.00 contentWidth=250.85
+	//   即入参宽 250.85 正确、行宽却被浮动上下文算成 0，item 高 341（浏览器 34.4）。
+	// flex 容器自身也会忽略浮动子元素（float 在 flex item 上无效），故置 nil 安全。
+	prevFC := state.setFloatContext(nil)
+	defer state.restoreFloatContext(prevFC)
 	isRow := cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
 	isReverse := cs.FlexDirection == "row-reverse" || cs.FlexDirection == "column-reverse"
 	// ★ RTL：row 的主轴是 inline 轴，main-start 与内容盒的 inline-start 一致
@@ -142,6 +173,31 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 
 	for _, it := range items {
+		// ★ 2026-09-26：column flex 的 item，若进入布局时 ContentWidth 仍为 0
+		// （增量布局下「容器已存在且曾以 0×0 布局过、item 后插入」的典型状态），
+		// 必须先补上 cross 尺寸再让 item 内部排版 —— 否则块级文本按 0 宽换行，
+		// CJK 会一个字符一行。
+		//
+		// 实测（gou-ide .toast-container/.toast-item）：空容器初始 0×0，Vue 插入
+		// item 后容器 shrink-to-fit 得 282.8，resolveCrossSizes 也把 item 的
+		// ContentWidth 正确设为 250.8，但文本已按 0 宽排完 —— item 高 341
+		// （19 字 × 18px），浏览器 34.4；且显式 width:250px 也无法纠正（说明
+		// 排版发生在宽度确定之前，事后设宽不重排）。
+		//
+		// 下方「冻结项（flex-grow/shrink ≤ 0 + basis:auto）」分支早已针对
+		// .resume-text 的同一现象做过这件事，但普通 item（flex:0 1 auto，
+		// shrink=1，如 .toast-item）不在其内，故此处统一兜底。
+		// 用容器内容宽作初值（与冻结项分支一致）；align-items 非 stretch 时
+		// 后续 resolveCrossSizes 会修正为精确值，并按差值触发重排。
+		if !isRow {
+			ig0 := state.GeometryForBox(it.box)
+			if ig0.ContentWidth() <= 0 {
+				ig0.SetContentWidth(cw)
+				forceRelayout(it.box)
+				ctx0 := contextFor(it.box, state)
+				ctx0.Layout(it.box, state)
+			}
+		}
 		it.baseSize = it.resolveBaseSize(mainSize, isRow)
 		if wbFlexDebug {
 			fmt.Fprintf(os.Stderr, "[flex/base] %s: fb=%.1f basisExplicit=%v grow=%.1f shrink=%.1f → base=%.1f minH=%.1f\n",
@@ -628,6 +684,16 @@ func (it *flexItem) resolveBaseSize(containerMainSize float64, isRow bool) float
 // exceeds whole" discrepancy that causes unwanted line wraps.
 func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	cs := box.Style()
+	// ★ WB_FLEX_DEBUG=1：诊断 .menu-btn 子树的内在宽度构成（三层：按钮 / caret 包装 /
+	//   chevron svg）。用于判定「svg 尺寸来自 CSS 而本函数只读 width 属性」还是
+	//   「inline-flex 包装层漏累加」——gou-ide 帮助菜单按钮实测引擎 40 vs 浏览器 55，
+	//   差 15 = gap 4 + chevron 11（图标实测已越过按钮右边界）。
+	if wbFlexDebug && cs != nil {
+		if el := box.Element(); el != nil && strings.Contains(el.ClassName(), "menu-btn") {
+			log.Printf("[intrinsic] ENTER %s display=%v width=%v/%v children=%d",
+				el.LocalName()+"."+el.ClassName(), cs.Display, cs.Width.Value, cs.Width.Unit, len(box.Children()))
+		}
+	}
 	// An explicit CSS width is authoritative for the box's own contribution —
 	// otherwise flex items with a fixed width (e.g. a 40px-wide activity-bar
 	// button whose only child is an 18px icon) would shrink to their content
@@ -664,6 +730,13 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 		// 多算会污染 flex 容器的 max-content（text-row 量成 161 而非 153）。
 		return w
 	}
+	// ★ <select>：内在内容宽 = 最宽 <option> 的文本宽（CSS-SIZING-3 §5.1）。
+	//   formControlContentSize 有意跳过 select（IFC 侧另有 45px 的 UA 兜底），
+	//   但 flex 上下文（flex item 的 base size 正走这里）没有那把兜底 → 内容宽
+	//   被算成 0，select 只剩 padding+border。详见 selectContentWidth 文档。
+	if w, ok := selectContentWidth(box); ok {
+		return w
+	}
 
 	isFlexRow := cs != nil && box.EstablishesFlexFormattingContext() &&
 		cs.FlexDirection != "column" && cs.FlexDirection != "column-reverse"
@@ -695,6 +768,27 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				if w > maxW { maxW = w }
 		case *ElementBox:
 			cw := intrinsicContentWidth(c, isRow)
+			if wbFlexDebug {
+				if bel := box.Element(); bel != nil && strings.Contains(bel.ClassName(), "menu-btn") {
+					if cel := c.Element(); cel != nil {
+						attrW, attrH := cel.GetAttribute("width"), cel.GetAttribute("height")
+						disp := "?"
+						if cst := c.Style(); cst != nil {
+							disp = fmt.Sprintf("%v", cst.Display)
+						}
+						log.Printf("[intrinsic]   CHILD %s cw=%.1f attrW=%q attrH=%q display=%s inline=%v",
+							cel.LocalName()+"."+cel.ClassName(), cw, attrW, attrH, disp, c.IsInlineLevel())
+						branch := "blockMax"
+						if c.IsInlineLevel() || !c.IsBlockLevel() {
+							branch = "inlineSum"
+						}
+						log.Printf("[intrinsic]   BRANCH %s inlineLvl=%v blockLvl=%v -> %s",
+							cel.LocalName()+"."+cel.ClassName(), c.IsInlineLevel(), c.IsBlockLevel(), branch)
+					} else {
+						log.Printf("[intrinsic]   CHILD(no el) cw=%.1f", cw)
+					}
+				}
+			}
 			// max-content 包含子项的 margin（CSS-SIZING-3 §5）：绝对定位的
 			// flex 容器 shrink-to-fit 时，控件的 UA margin（checkbox 4+3px、
 			// range 2+2px）必须计入——否则容器被量窄，控件紧接着被
@@ -714,7 +808,28 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 				}
 			}
 			if isFlexRow { total += cw }
-			if c.IsInlineLevel() {
+			// ★ inline-flex / inline-block 包装层也必须计入**行内求和**：
+			//   `IsBlockLevel()`（box.go）的 case 列表不含这两个 display，而
+			//   `IsInlineLevel()` 对 flex item 会按 CSS-DISPLAY-3 §2.7 blockify
+			//   返回 false → 两者都不成立，于是落进下面的「块级取 max」分支。
+			//   实测（WB_FLEX_DEBUG 三层 dump）：gou-ide 帮助菜单按钮
+			//   `.menu-btn`（display:inline-flex）的两个子级
+			//   [`.menu-btn-label` 22px, `.menu-btn-caret`（内含 chevron svg 11px）]
+			//   只取 max=22 → 按钮内在宽 40（= padding 18 + 22），
+			//   而浏览器为 55（= 18 + 22 + gap 4 + chevron 11）→ chevron 越过
+			//   按钮右边界（引擎 145 < 图标右界 152）。
+			//
+			//   ★ 2026-09-26 更正：上面的 inlineSum 求和**并没有**修好该现象——
+			//   本函数返回的 max-content 是正确的（.qexec-btn 实测 91 = 浏览器
+			//   90.6），但 inline-flex 元素的**实际宽度**不由本函数决定，而是被
+			//   inlineformattingcontext.go 的宽度回填覆盖：那里调用
+			//   computeInlineContentWidth，它只按文本段取最右端，漏掉替换元素
+			//   （svg/chevron/caret）的占位宽 → .menu-btn 仍为 40、.qexec-btn
+			//   仍为 77，图标越界如故。真正的修复在 computeInlineContentWidth
+			//   （计入替换元素几何）与 replaced 子项的 vertical-align:baseline
+			//   对齐两处。以后遇到「inline-flex 里末尾图标越出右边界」，请查那
+			//   两处，不要在本函数的求和分支上继续调（会被布局回填覆盖掉）。
+			if c.IsInlineLevel() || !c.IsBlockLevel() {
 				inlineSum += cw
 			} else {
 				// 块级子级纵向堆叠：max-content 取最宽一块。
@@ -752,6 +867,12 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	if cs != nil {
 		fs := fontSizeOf(box)
 		_, p, b := computeBoxModel(box, maxW, fs)
+		if wbFlexDebug {
+			if el := box.Element(); el != nil && strings.Contains(el.ClassName(), "menu-btn") {
+				log.Printf("[intrinsic] RESULT %s isFlexRow=%v total=%.1f inlineSum=%.1f blockMax=%.1f hasBlock=%v contentPart=%.1f padBord=%.1f return=%.1f",
+					el.ClassName(), isFlexRow, total, inlineSum, blockMax, hasBlock, maxW, p.Left+p.Right+b.Left+b.Right, maxW+p.Left+p.Right+b.Left+b.Right)
+			}
+		}
 		maxW += p.Left + p.Right + b.Left + b.Right
 	}
 	return maxW
@@ -848,19 +969,53 @@ func minContentWidth(box *ElementBox) float64 {
 		}
 		return longest
 	}
+	// 行 flex 容器的 min-content 主轴 = 子项 min-content 之和（+gap），而非取
+	// max（CSS-SIZING-3 §5：单行 flex 不换行）。此前取 max 使 flex item 的
+	// min-width:auto(=min-content) 被算小 → 被 flex-shrink 压窄：.menu-btn
+	// （inline-flex：label 22 + caret/chevron 11 + gap 4）min-content 取 max=22，
+	// 加自身 padding 18 得 40，而浏览器为 55 → chevron 右界 152 越出按钮右界 145。
+	isFlexRowBox := false
+	if st := box.Style(); st != nil && box.EstablishesFlexFormattingContext() &&
+		st.FlexDirection != "column" && st.FlexDirection != "column-reverse" {
+		isFlexRowBox = true
+	}
+	flexSum, flexCount := 0.0, 0
 	for _, child := range box.Children() {
 		if !child.IsInFlow() {
 			continue
 		}
+		cw := 0.0
 		switch c := child.(type) {
 		case *InlineTextBox:
-			if w := wordW(c.text); w > mw {
-				mw = w
-			}
+			cw = wordW(c.text)
 		case *ElementBox:
-			if w := minContentWidth(c); w > mw {
-				mw = w
+			cw = minContentWidth(c)
+		}
+		if isFlexRowBox {
+			flexSum += cw
+			flexCount++
+			continue
+		}
+		if cw > mw {
+			mw = cw
+		}
+	}
+	if isFlexRowBox {
+		if flexCount > 1 {
+			if st := box.Style(); st != nil {
+				gap := 0.0
+				if st.Gap.Value > 0 {
+					gap = st.Gap.Value
+				} else if st.ColumnGap.Value > 0 {
+					gap = st.ColumnGap.Value
+				}
+				if gap > 0 {
+					flexSum += gap * float64(flexCount-1)
+				}
 			}
+		}
+		if flexSum > mw {
+			mw = flexSum
 		}
 	}
 	if mw <= 0 {
@@ -1409,6 +1564,7 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 			}
 		} else {
 
+			beforeW := g.ContentWidth()
 			r := resolveLengthAuto(cs.Width, cbWidth, fontSizeOf(it.box))
 			if !r.Auto && r.Definite {
 				w := r.Value
@@ -1444,6 +1600,22 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				if iw < fit { fit = iw }
 				if fit < 0 { fit = 0 }
 				g.SetContentWidth(fit)
+			}
+			// ★ 2026-09-26：column 容器的交叉轴（宽度）一旦改变，必须**重新布局
+			// item 内部** —— 否则块级内容（文本换行）仍按改尺寸之前的宽度排版。
+			//
+			// 实测（gou-ide 的 .toast-container 场景，GB/T 用例见 dev/output/toast_*.js）：
+			// 空 .toast-container 首次布局为 0×0；Vue v-for 插入 .toast-item 后
+			// 容器 shrink-to-fit 得 282.8，此处把 item 的 ContentWidth 正确设为
+			// 250.8（= 282.8 − padding 28 − border 2，与 Chromium 一致），但 item 的
+			// 内部文本此时已按「0 宽」排完（word-break:break-word → 每字一行），
+			// 结果 item 高 341（19 字 × 18px 行高），而浏览器为 34.4。
+			// 外部几何（rect 宽 282.8）与内部排版宽度不一致，是「文字竖排」的根因。
+			// row 分支（上面 min/max-height clamp 处）已有同款重排；列向此前缺失。
+			if g.ContentWidth() != beforeW {
+				forceRelayout(it.box)
+				ctx := contextFor(it.box, state)
+				ctx.Layout(it.box, state)
 			}
 		}
 	}
@@ -1504,8 +1676,35 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		gap = flexGap(containerCS, isRow, fontSizeOf(container), ref)
 	}
 
+	// ★ 主轴存在 auto margin 时，justify-content **不参与**剩余空间分配
+	//   （CSS Flexbox §9.5：剩余空间先由 auto margin 吸收，justify-content
+	//   只消费吸完之后的剩余——通常为 0，gap 保持样式声明值）。
+	//   此前实现顺序相反：先按 justify 把剩余空间摊进 gap（space-between
+	//   把 8px 的 gap 涨到 71.75px），再让 auto margin 去吸收"扣除这些放大
+	//   gap 之后"的剩余 → rem 恰为 0，auto margin 彻底失效。
+	//   实测（.input-bottom-bar，justify-content:space-between）：
+	//   「Enter 发送 · Shift+Enter 换行」(margin-left:auto) 停在 space-between
+	//   算出的中间位置，与发送按钮相距 71.8px；Chromium 为 8.0px（= 一个 gap）。
+	//   剩余空间为负（溢出）时 auto margin 视为 0，此处的跳过与规范一致。
+	autoMainMargin := false
+	for _, it := range items {
+		cs := it.box.Style()
+		if cs == nil {
+			continue
+		}
+		if isRow {
+			if cs.MarginLeft.Unit == "auto" || cs.MarginRight.Unit == "auto" {
+				autoMainMargin = true
+				break
+			}
+		} else if cs.MarginTop.Unit == "auto" || cs.MarginBottom.Unit == "auto" {
+			autoMainMargin = true
+			break
+		}
+	}
+
 	if isRow {
-		if totalMain < cw && justify != "flex-start" {
+		if totalMain < cw && justify != "flex-start" && !autoMainMargin {
 			switch justify {
 			case "center", "flex-end":
 				// Deduct the explicit inter-item gaps so center/flex-end align
@@ -1540,7 +1739,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			}
 		}
 	} else {
-		if totalMain < ch && justify != "flex-start" {
+		if totalMain < ch && justify != "flex-start" && !autoMainMargin {
 			switch justify {
 			case "center", "flex-end":
 				freeGap := ch - totalMain - gap*float64(len(items)-1)
@@ -1580,7 +1779,7 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 		}
 	}
 
-	for _, it := range items {
+	for i, it := range items {
 		g := state.GeometryForBox(it.box)
 		// ★ flex 默认不分配固定 cross 高度（非 stretch item 自己 auto 计算）；
 		// 每次布局重置，避免上一帧 stretch 值残留（align-items 从 stretch 变 flex-start）。
@@ -1595,19 +1794,49 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				mainPos += resolveOrZero(cs.MarginTop, cw, fs)
 			}
 		}
+		// ★ auto margin 只能吸收**真实剩余空间**：必须扣除后续兄弟在主轴上的
+		//   占位（外盒 + 间距），否则会把它们挤出容器——状态栏右段
+		//   「已连接 · 本地 / UTF-8 / 上下文 0 / Midnight」被推到视口外
+		//   x=2219（浏览器 1283 视口下为 x=1033 右对齐可见）的根因。
+		//   auto margin 项位于末尾时 restMain=0，与原有行为一致。
+		restMain := 0.0
+		for j := i + 1; j < len(items); j++ {
+			restMain += items[j].marginMain + items[j].finalMainSize + gap
+		}
+
 		// Auto main-axis margin: absorb remaining free space (CSS-FLEXBOX §9.5).
 		// The remaining space is the container main size minus what earlier
 		// siblings already occupied (mainPos-cx, which includes gaps) minus
 		// this item's own main size — using `cw-totalMain` double-counted the
 		// gaps and pushed margin-left:auto items past the content edge
 		// (conv-stats-total right=1284 > sidebar edge 1280, clipping text).
+		// ★ 两端都是 auto（`margin: 0 auto`）：剩余空间**均分**——这是浏览器里
+		//   弹性项在容器内水平居中的来源。此前把全部剩余都塞给 margin-left，
+		//   测试 `justify-content:space-between` + `margin:0 auto` 之所以"看起来
+		//   居中"，只是因为 space-between 恰好把 gap 撑成剩余的一半
+		//   （flex_spacebetween_test 钉的是浏览器对照值 727/1353）。
+		//   右半必须记账到项后的主轴推进（autoEndMargin），否则后续兄弟会插进
+		//   项中间——mid 居中时 right 落到 726 而不是右内边缘 1353。
+		autoEndMargin := 0.0
 		if cs != nil && isRow && cs.MarginLeft.Unit == "auto" {
-			if rem := cw - (mainPos - cx) - it.finalMainSize; rem > 0 {
-				mainPos += rem
+			rem := cw - (mainPos - cx) - it.finalMainSize - restMain
+			if rem > 0 {
+				if cs.MarginRight.Unit == "auto" {
+					mainPos += rem / 2
+					autoEndMargin = rem / 2
+				} else {
+					mainPos += rem
+				}
 			}
 		} else if cs != nil && !isRow && cs.MarginTop.Unit == "auto" {
-			if rem := ch - (mainPos - cy) - it.finalMainSize; rem > 0 {
-				mainPos += rem
+			rem := ch - (mainPos - cy) - it.finalMainSize - restMain
+			if rem > 0 {
+				if cs.MarginBottom.Unit == "auto" {
+					mainPos += rem / 2
+					autoEndMargin = rem / 2
+				} else {
+					mainPos += rem
+				}
 			}
 		}
 
@@ -1699,7 +1928,16 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				fmt.Fprintf(os.Stderr, "[flex/pos] %s row: bh=%.1f ch=%.1f cs.H=%v\n", flexName(it.box), bh, ch, cs.Height)
 			}
 			align := alignOf(it.box, containerCS)
-			crossAdjusted := crossPos
+			// ★ 交叉轴 margin（CSS-FLEXBOX §9.4）：align-items 在 item 的
+			// **margin box** 上对齐——起始位置必须加 margin-start，居中 /
+			// flex-end 的可用空间必须扣掉两端 margin。此前完全忽略交叉轴
+			// margin：column flex 的子项丢 margin-left、row flex 的子项丢
+			// margin-top（gou-ide 左栏底部胶囊 .conv-footer-pill 在 column
+			// 容器里 x=49 而非浏览器 57——宽度 247 已正确扣掉左右 margin，
+			// 只有位置没扣）。
+			mt := resolveOrZero(cs.MarginTop, cw, fs)
+			mb := resolveOrZero(cs.MarginBottom, cw, fs)
+			crossAdjusted := crossPos + mt
 			// When container auto-height (ch=0), defer centering/flex-end
 			// until after child layout so we can use the actual child height.
 			if ch > 0 {
@@ -1709,21 +1947,23 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				// body): a negative (ch-bh)/2 offset lifted the cache-ring
 				// above its title. Clamp the reference to the child size.
 				refH := ch
-				if refH < bh {
-					refH = bh
+				if refH < bh+mt+mb {
+					refH = bh + mt + mb
 				}
 				switch align {
 				case "center":
-					crossAdjusted = crossPos + (refH-bh)/2
+					crossAdjusted = crossPos + mt + (refH-bh-mt-mb)/2
 				case "baseline":
-					crossAdjusted = crossPos + (maxBO - it.baselineOffset)
+					crossAdjusted = crossPos + mt + (maxBO - it.baselineOffset)
 				case "flex-end":
-					crossAdjusted = crossPos + refH - bh
+					crossAdjusted = crossPos + refH - mb - bh
 				}
 			}
 			g.SetTopLeft(crossAdjusted, mainPos)
 			bw := g.BorderBoxWidth()
-			if !isReverse { mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + gap }
+			if !isReverse {
+				mainPos += g.BorderBoxWidth() + resolveOrZero(cs.MarginRight, cw, fs) + autoEndMargin + gap
+			}
 
 			// ★ stretch 分配的 cross 高度（crossResolved）必须同步到
 			// parentSetHeight，否则子项（如 chat-area）的 auto-height 计算
@@ -1798,27 +2038,29 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			if heightIsAutoForBox(it.box) {
 				oldTop := g.Top()
 				bh2 := g.BorderBoxHeight()
-				newCross := crossPos
+				// ★ 交叉轴 margin 一致性：post-layout 重算的位置必须与主路径
+				// 同公式（align 作用于 margin box），否则 delta 会把位置拉回。
+				newCross := crossPos + mt
 				if ch > 0 {
 					refH := ch
-					if refH < bh2 {
-						refH = bh2
+					if refH < bh2+mt+mb {
+						refH = bh2 + mt + mb
 					}
 					switch align {
 					case "center":
-						newCross = crossPos + (refH-bh2)/2
+						newCross = crossPos + mt + (refH-bh2-mt-mb)/2
 					case "baseline":
-						newCross = crossPos + (maxBO - it.baselineOffset)
+						newCross = crossPos + mt + (maxBO - it.baselineOffset)
 					case "flex-end":
-						newCross = crossPos + refH - bh2
+						newCross = crossPos + refH - mb - bh2
 					}
 				} else {
 					// Container auto-height: center within actual child height.
 					switch align {
 					case "center":
-						newCross = crossPos
+						newCross = crossPos + mt
 					case "baseline":
-						newCross = crossPos + (maxBO - it.baselineOffset)
+						newCross = crossPos + mt + (maxBO - it.baselineOffset)
 					case "flex-end":
 						newCross = crossPos
 					}
@@ -1835,14 +2077,17 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// Set position FIRST.
 			bw := g.BorderBoxWidth()
 			align := alignOf(it.box, containerCS)
-			crossAdjusted := crossPos
+			// ★ 交叉轴 margin（column 的交叉轴 = 水平）：见上方 row 分支同处注释。
+			ml := resolveOrZero(cs.MarginLeft, cw, fs)
+			mr := resolveOrZero(cs.MarginRight, cw, fs)
+			crossAdjusted := crossPos + ml
 			switch align {
 			case "center":
-				crossAdjusted = crossPos + (cw-bw)/2
+				crossAdjusted = crossPos + ml + (cw-ml-mr-bw)/2
 			case "baseline":
-				crossAdjusted = crossPos + (maxBO - it.baselineOffset)
+				crossAdjusted = crossPos + ml + (maxBO - it.baselineOffset)
 			case "flex-end":
-				crossAdjusted = crossPos + cw - bw
+				crossAdjusted = crossPos + cw - mr - bw
 			}
 			if wbFlexDebug && (flexName(it.box) == "div.welcome-logo" || flexName(it.box) == "div.welcome-text" || flexName(it.box) == "div.welcome-sub") {
 				fmt.Fprintf(os.Stderr, "[flex/pos] %s col: bw=%.1f cw=%.1f align=%q crossPos=%.1f → crossAdjusted=%.1f\n",
@@ -1949,7 +2194,9 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 				g.SetContentHeight(ms)
 			}
 
-			if !isReverse { mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + gap }
+			if !isReverse {
+				mainPos += g.BorderBoxHeight() + resolveOrZero(cs.MarginBottom, cw, fs) + autoEndMargin + gap
+			}
 			if wbFlexDebug && flexName(it.box) == "div.chat-messages" {
 				fmt.Fprintf(os.Stderr, "[flex/pos] chat-messages final: ms=%.1f top=%.1f h=%.1f bh=%.1f\n",
 					it.finalMainSize, g.Top(), g.ContentHeight(), g.BorderBoxHeight())
@@ -1958,7 +2205,8 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// Propagate auto cross-size (width) from children.
 			oldLeft := g.Left()
 			bw2 := g.BorderBoxWidth()
-			newCross := crossPos
+			// ★ 交叉轴 margin 一致性：与 column 主路径同公式（align 作用于 margin box）。
+			newCross := crossPos + ml
 			// Width centering uses the CONTAINER width cw — do NOT clamp the
 			// reference to the item width (that collapses (cw-bw2)/2 to 0 when
 			// the item is wider than the container, undoing the centering:
@@ -1968,11 +2216,11 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 			// container top; width has no such constraint.
 			switch align {
 			case "center":
-				newCross = crossPos + (cw-bw2)/2
+				newCross = crossPos + ml + (cw-ml-mr-bw2)/2
 			case "baseline":
-				newCross = crossPos + (maxBO - it.baselineOffset)
+				newCross = crossPos + ml + (maxBO - it.baselineOffset)
 			case "flex-end":
-				newCross = crossPos + cw - bw2
+				newCross = crossPos + cw - mr - bw2
 			}
 			delta := newCross - oldLeft
 			if delta != 0 {

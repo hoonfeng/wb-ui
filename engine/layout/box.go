@@ -96,6 +96,10 @@ type ElementBox struct {
 	// a display:list-item and its formatting context computed a marker. Empty
 	// for non-list items.
 	MarkerText string
+	// sbReserved 是该盒上一轮布局的「是否需要为常驻垂直滚动条预留宽度」
+	// 结论（粘性标记）。布局阶段用它决定给子元素的可用宽度是否扣减滚动条
+	// 宽度，布局末尾按实测内容高回写——详见 scrollbarreserve.go。
+	sbReserved bool
 }
 
 // ─── ElementBox implements Box ───────────────────────────────

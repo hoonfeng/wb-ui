@@ -67,6 +67,15 @@ func insideFlexItem(box *ElementBox) bool {
 	return false
 }
 
+// toastMeasurePrinted 限制 [toast-measure] 诊断行数（WB_TOAST_IFC=1 时生效）。
+var toastMeasurePrinted int
+
+// toastWantLineDetail 置位后，下一次 availableLineWidth 结果会随 [toast-line] 输出。
+var toastWantLineDetail bool
+
+// toastLinesPrinted 限制 [toast-lines] 输出次数。
+var toastLinesPrinted int
+
 func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	defer profileLayout("ifc")()
 	cs := box.Style()
@@ -74,11 +83,43 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		return
 	}
 	g := state.GeometryForBox(box)
+	isToastBox := false // 本次调用是否为目标文本所在盒（入口诊断置位，收尾使用）
 
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
 	boxHeight := g.ContentHeight()
 	contentWidth := g.ContentWidth()
+	// ★ 诊断（WB_TOAST_IFC=1）：IFC 实际接收的内容宽度与首段文本。
+	// 用于定位「flex column item 的文本逐字换行（竖排）」：判定 IFC 收到的
+	// 可用宽度是修正后的 250.8，还是仍是测量阶段的 0。
+	if debugenv.Enabled("WB_TOAST_IFC") {
+		name, class, txt := "<anon>", "", ""
+		if el := box.Element(); el != nil {
+			name, class = el.NodeName(), el.GetAttribute("class")
+		}
+		for _, ch := range box.Children() {
+			if t, ok := ch.(*InlineTextBox); ok {
+				txt += t.Text()
+				if len(txt) > 30 {
+					break
+				}
+			}
+		}
+		fmt.Printf("[toast-ifc] %s.%s cw=%.2f ch=%.2f kids=%d text=%q\n", name, class, contentWidth, boxHeight, len(box.Children()), txt)
+		// ★ 字节级测量实证：单字宽 / 整段宽 / 字体族。若单字宽异常大（≈availWidth），
+		// 则「每字一行」源于字体度量而非换行逻辑。
+		if rr := []rune(txt); len(rr) >= 4 && string(rr[:4]) == "已选择工" && toastMeasurePrinted < 10 {
+			toastMeasurePrinted++
+			fmt.Printf("[toast-measure] set=%d fs=%.1f fam=%q whole=%.3f one=%q:%.3f two=%q:%.3f cw=%.2f\n",
+				toastMeasurePrinted, fontSizeOf(box), fontFamilyOf(box), measureText(box, txt),
+				string(rr[0]), measureText(box, string(rr[0])),
+				string(rr[:2]), measureText(box, string(rr[:2])),
+				contentWidth)
+		}
+		// 标记：下一次 availableLineWidth 求值（首行行宽）需要详报。
+		toastWantLineDetail = true
+		isToastBox = true
+	}
 	if debugenv.Enabled("WB_LAYOUT_DEBUG") && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
 		fmt.Printf("[ifc] dialog-box: contentWidth=%.1f padL=%.1f parent=%v\n", contentWidth, g.PaddingLeft(), box.Parent())
 	}
@@ -148,6 +189,25 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 本行文本段的字体 ascent：基线对齐时文本段的 Y = 行盒基线 - ascent
 	// （见下面的 lineTextOffset / 表单控件基线定位）。
 	textAscent, _ := fontAscentDescent(box)
+	// halfLeading：行盒高与字体度量高之差的一半（字体在行盒内的上下留白）。
+	// 行盒高取 CSS line-height（已解析为 px）或字体度量行高（line-height:normal
+	// 与未声明时）。cssLineHeight 对 normal 返回 0（见其文档），故此处按
+	// fontLineGap 兜底 —— 否则 line-height:normal 的元素 halfLeading 被算成
+	// 「整行高的一半」，替换元素的基线对齐全错。
+	// 用途：inline-block/replaced 的基线对齐（CSS 2.1 §10.8）——
+	//   行盒基线（相对行盒顶）= halfLeading + ascent
+	//   子盒 border-box 顶 = 行盒顶 + halfLeading + ascent - 子盒高
+	halfLeading := 0.0
+	{
+		asc, desc := fontAscentDescent(box)
+		lineBoxH := textHeight
+		if cssLH > 0 {
+			lineBoxH = cssLH
+		}
+		if lineBoxH > asc+desc {
+			halfLeading = (lineBoxH - (asc + desc)) / 2
+		}
+	}
 
 	// When contentWidth is auto (derived from intrinsic text width), widen it
 	// slightly to prevent floating-point discrepancies from triggering unwanted
@@ -276,6 +336,11 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 
 	// Initialize first line with float-aware available width.
 	lineCx, lineCw := availableLineWidth(contentY)
+	if toastWantLineDetail {
+		toastWantLineDetail = false
+		fmt.Printf("[toast-line] cx=%.2f cw=%.3f fc=%v contentX=%.2f contentWidth=%.2f fs=%.1f contentY=%.1f\n",
+			lineCx, lineCw, fc != nil, contentX, contentWidth, fs, contentY)
+	}
 	var lines []lineInfo
 	var pending []pendingSeg
 
@@ -923,6 +988,23 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						targetTop := lineTop + (lineH-childH)/2 + margin.Top
 						cldG.SetTopLeft(targetTop, cldG.Left())
 					}
+				} else if (va == "" || va == "baseline") && cld.IsReplaced() && textAscent > 0 {
+					// ★ vertical-align:baseline（默认）——替换元素（svg/img/…）
+					// 的基线 = 其下外边距边缘（CSS 2.1 §10.8.1：替换元素无内联
+					// 内容，基线取 margin box 底边），必须坐在父行盒的基线上：
+					//     border-box top = 行盒顶 + halfLeading + ascent - 高 - marginBottom
+					//
+					// 此前只按 centeringOffset 偏移（= (line-height - 字体行高)/2），
+					// 缺 ascent 项；且 line-height:normal 时 cssLH=0 → 偏移整体为 0
+					// → 图标贴行盒顶。实测（1280x800，.qexec-btn 的 .qexec-caret）：
+					// 引擎 svg 顶 12.0 vs 浏览器 16.0，偏差 4px（该 span 内只有 svg、
+					// 无文本，行盒基线无从谈起，偏移恒为 0 暴露得最彻底）；
+					// 按基线公式算 12 + (15-14.52)/2 + 11.64 - 8 = 15.88 ≈ 浏览器 16.0。
+					childBH := cldG.BorderBoxHeight()
+					if childBH > 0 {
+						baseLine := currentLine.y + halfLeading + textAscent
+						cldG.SetTopLeft(baseLine-childBH-margin.Bottom, cldG.Left())
+					}
 				}
 			}
 
@@ -1080,6 +1162,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		// 容器底部多出 ~28px 死空间（form 88 vs Edge 60，其后的兄弟元素还会
 		// 被整体下推）。
 		totalHeight = (lastLine.y - contentY) + lastLine.lineH
+	}
+	if isToastBox {
+		if toastLinesPrinted < 3 {
+			toastLinesPrinted++
+			fmt.Printf("[toast-lines] call=%d n=%d totalH=%.1f contentY=%.1f contentWidth=%.2f\n",
+				toastLinesPrinted, len(lines), totalHeight, contentY, contentWidth)
+			for i, ln := range lines {
+				if i > 8 {
+					break
+				}
+				fmt.Printf("[toast-lines]   [%d] y=%.1f cx=%.2f used=%.2f avail=%.2f h=%.2f seg=%d\n",
+					i, ln.y, ln.contentX, ln.widthUsed, ln.availWidth, ln.lineH, ln.segStart)
+			}
+		}
 	}
 
 	// Update content width to match the actual text content width. This
@@ -1305,25 +1401,44 @@ func isCJKChar(r rune) bool {
 }
 
 // computeInlineContentWidth computes the inline content width of an ElementBox
-// from its text segments. InlineFormattingContext.Layout sets ContentHeight but
-// not ContentWidth, so inline ElementBox children would get zero width causing
-// subsequent text to overlap.
+// from its inline-level content. InlineFormattingContext.Layout sets
+// ContentHeight but not ContentWidth, so inline ElementBox children would get
+// zero width causing subsequent text to overlap.
+//
+// ★ 2026-09-26：替换元素（svg/img/canvas/...）**不产生 TextSegment**，其占位
+// 宽度只能从自身的布局几何取得。此前只统计文本段，含 svg 的 inline 盒会被
+// 量窄：顶栏「快速执行」按钮（display:inline-flex，内容 = bolt svg + 文本 +
+// caret svg）的内容宽被算成 59（= 文本 44 + ？），而内部 flex 布局按自然宽
+// 73 摆放子项 → 末尾 caret svg 越过按钮右边界 14px（= svg 8 + gap 4 +
+// margin 2，实测引擎 caret 右缘 1583 vs 按钮右边界 1578）。帮助菜单
+// `.menu-btn` 的 chevron 同源（引擎按钮宽 40 vs 浏览器 55，图标越界 7px）——
+// 该缺陷此前被误判为「flex 固有宽度问题」，修复打在了 intrinsicContentWidth
+// （flexformattingcontext.go）上，而真正生效的宽度回填走的是本函数。
+//
+// walk 递归进非替换子盒以收集其内部文本段与替换元素：替换元素无子盒
+// （box.go 的 buildChildren 对替换元素直接 return），故其右缘直接取几何。
 func computeInlineContentWidth(box *ElementBox, state *LayoutState) float64 {
 	g := state.GeometryForBox(box)
 	base := g.ContentBoxLeft()
 	maxRight := 0.0
+	bump := func(r float64) {
+		if r > maxRight {
+			maxRight = r
+		}
+	}
 	var walk func(b *ElementBox)
 	walk = func(b *ElementBox) {
 		for _, c := range b.Children() {
 			if itb, ok := c.(*InlineTextBox); ok {
 				for _, seg := range itb.TextSegments {
-					r := seg.X + seg.Width
-					if r > maxRight {
-						maxRight = r
-					}
+					bump(seg.X + seg.Width)
 				}
 			}
 			if eb, ok := c.(*ElementBox); ok {
+				if eb.IsReplaced() {
+					rg := state.GeometryForBox(eb)
+					bump(rg.Left() + rg.BorderBoxWidth())
+				}
 				walk(eb)
 			}
 		}

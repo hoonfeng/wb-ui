@@ -303,15 +303,24 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 			x = staticX + margin.Left
 		}
 		// Static position of an absolutely-positioned child of a flex
-		// container follows the flex alignment (CSS-FLEXBOX §5.1): the
-		// cross axis uses align-items, the main axis uses justify-content.
+		// container follows the flex alignment (CSS-FLEXBOX §5.1): 主轴方向的
+		// 位置由 justify-content 决定、交叉轴由 align-items 决定。
+		// ★ 2026-09-25 修复：两轴的属性映射此前**互换**（X 轴误用 align-items、
+		// Y 轴误用 justify-content）。row/column 两种方向的默认值都是
+		// flex-start，因此只有「单轴设 center」的场景暴露：gou-ide 顶栏
+		// .tb-nav（position:absolute + left:50% + 无 top，父 .titlebar 是
+		// display:flex;align-items:center）应垂直居中 y=(40-24)/2=8，wb-ui
+		// 给出 y=0（贴包含块 padding box 顶，子元素几何/绘制整体上移 8px）；
+		// 而已有的 TestFlexAbsoluteChild 恰好同时设了 AlignItems 与
+		// JustifyContent 双 center → 映射互换后两轴都命中 center，侥幸通过。
+		// X 轴（水平）：row 时是主轴 → justify-content；column 时是交叉轴 → align-items。
 		if cbIsFlex {
-			align := cb.Style().AlignItems
+			mainOfX := cb.Style().JustifyContent
 			if !cbRow {
-				align = cb.Style().JustifyContent
+				mainOfX = cb.Style().AlignItems
 			}
 			bw := g.BorderBoxWidth()
-			switch align {
+			switch mainOfX {
 			case "center":
 				x += (cbWidth - bw - margin.Horizontal()) / 2
 			case "flex-end", "end", "right":
@@ -350,13 +359,14 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		if hasStatic {
 			y = staticY + margin.Top
 		}
+		// Y 轴（垂直）：row 时是交叉轴 → align-items；column 时是主轴 → justify-content。
 		if cbIsFlex {
-			justify := cb.Style().JustifyContent
+			mainOfY := cb.Style().AlignItems
 			if !cbRow {
-				justify = cb.Style().AlignItems
+				mainOfY = cb.Style().JustifyContent
 			}
 			bh := g.BorderBoxHeight()
-			switch justify {
+			switch mainOfY {
 			case "center":
 				y += (cbHeight - bh - margin.Vertical()) / 2
 			case "flex-end", "end", "bottom":

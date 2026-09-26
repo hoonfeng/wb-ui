@@ -72,6 +72,13 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	// ★ 帧开始：快照滚动偏移（该帧视觉将按 boxScrollOffsets 绘制）。
 	// 命中测试读快照 → 与用户所见一致（渲染节流下滚动后未渲染帧内
 	// 点击不会按新偏移解析——「滚动后点击生效位置偏移」根因）。
+	// ★ 快照**之前**先把偏移裁进当前合法范围：本帧几何（容器可视高/
+	// 内容高）已经定下，偏移是上一帧几何下写入的。折叠面板后容器变高，
+	// maxScroll 变小而 scrollTop 未动 → 内容被多 translate → 底部内容
+	// （如「下一步推荐」引导卡）停在原地不跟随下移。浏览器在 layout 后
+	// 做同样的 clamp；放在快照前才能让快照/命中测试与「裁剪后的视觉」
+	// 保持一致（否则快照仍是越界旧值，命中测试按错位坐标解析）。
+	view.ClampBoxScrollOffsets()
 	view.SnapshotScrollOffsets()
 	if debugenv.Enabled("WB_GUTTER_DEBUG") {
 		log.Printf("[paint-call] rect=%.0f,%.0f %.0fx%.0f dirty=%v", rect.X, rect.Y, rect.Width, rect.Height, view.IsDirty())
@@ -1395,15 +1402,17 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 					pb.X += sx0
 					pb.Y += sy0
 				}
-				// Modern flat scrollbar: 12px wide, subtle arrow buttons, rounded rect thumb.
-				scrollW := 12.0 // total scrollbar width
-				const arrowSize = 12.0 // arrow button height/width
-				const arrowGap = 5.0   // gap between arrow buttons and thumb track
+				// 自绘滚动条（元素继承到非 auto 的 scrollbar-color 时 Chromium 走这条
+				// 路径，有头 Edge 实测）：轨道宽 **15px**，上下各一个 15px 高的箭头
+				// 按钮，thumb 宽 **8.8**（左右各留 sbThumbInset）且为**胶囊圆角**。
+				scrollW := 15.0 // total scrollbar width
 
-				// CSS scrollbar-width: thin (8px) / none (hidden, still scrollable).
+				// CSS scrollbar-width: thin (10px) / none (hidden, still scrollable).
+				// ★ 实测（2026-09-26，有头 Edge）：thin = 10px（auto 与非 auto 的
+				// scrollbar-color 下均如此）。
 				switch sw := st.GetProperty("scrollbar-width"); sw {
 				case "thin":
-					scrollW = 8
+					scrollW = 10
 				case "none":
 					scrollW = 0
 				}
@@ -1411,15 +1420,26 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				// (GitPanel uses 4px). Overrides the default (and scrollbar-width
 				// thin above when both present, mirroring Chrome where
 				// ::-webkit-scrollbar wins over the standard property).
-				if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
-					if l, ok := parseLengthAny(wv); ok && l > 0 {
-						scrollW = l
+				// ★ 但只在元素**没有**非 auto 的 scrollbar-color 时才生效：Chromium
+				// 实测，继承到 scrollbar-color 它会整体忽略 ::-webkit-scrollbar，改用
+				// 自己的 15px 自绘滚动条——gou-ide 全页继承 html 的 scrollbar-color，
+				// 走的正是这条路径。
+				if !style.HasCustomScrollbarColor(st) {
+					if wv := st.GetProperty("-webkit-scrollbar-width"); wv != "" {
+						if l, ok := parseLengthAny(wv); ok && l > 0 {
+							scrollW = l
+						}
 					}
 				}
 				// WebKit/Blink custom scrollbars have NO arrow buttons and the
 				// thumb fills the full scrollbar width (only the default flat
 				// 12px style keeps arrows + inset thumb).
 				webkitSB := webkitCustomScrollbar(st)
+
+				// 箭头按钮高 = 滚动条宽（有头 Edge 实测 15px）；按钮与 thumb 轨道之间
+				// 再留 sbArrowGap（= thumb 自身 inset），实测轨道顶端到 thumb 顶端 18.4px。
+				arrowSize := scrollW
+				const arrowGap = sbArrowGap
 
 				if style.DiagEnabled("scrollbar") {
 					cn := ""
@@ -1488,8 +1508,6 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							thumbCol := graphics.Color{R: 160, G: 160, B: 160, A: 255}   // #A0A0A0 thumb (was #C0C0C0)
 							thumbHoverCol := graphics.Color{R: 128, G: 128, B: 128, A: 255} // #808080 hover (was #A0A0A0)
 
-							arrowCol := graphics.Color{R: 96, G: 96, B: 96, A: 255}     // #606060 arrow (was #808080)
-
 							// CSS scrollbar-color: "thumb track" overrides the
 							// default palette (thumb hover uses the thumb color).
 							if sc := st.GetProperty("scrollbar-color"); sc != "" && sc != "auto" {
@@ -1528,6 +1546,11 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									thumbRadius = l
 								}
 							}
+							// 箭头三角颜色跟随 thumb 色。★ 实测（2026-09-26，Chromium
+							// 9090 像素采样 #414B64）：scrollbar-color 生效时，平台经典
+							// 滚动条的上下/左右箭头三角用的就是 thumb 色，而非固定灰
+							// （旧值 #606060 在深色主题下明显比 thumb 深一档）。
+							arrowCol := thumbCol
 
 						sx, sy := float64(0), float64(0)
 						cursorX, cursorY := float64(0), float64(0)
@@ -1574,16 +1597,22 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							}
 
 							if !webkitSB {
-								// Up arrow: rounded triangle matching horizontal arrow proportions.
+								// 上下箭头三角：宽 6.4、高 5.6，在 15×15 按钮内居中。
+								// ★ 实测（有头 Edge，dpr=1.25，.pp-list 逐行像素扫描）：
+								// 三角占 8 物理像素宽 × 7 物理像素高 = 6.4 × 5.6 CSS；
+								// 颜色 = thumb 色。
+								// 三角在「箭头按钮 + gap」区间内居中：有头 Edge 实测三角中心距
+								// 轨道顶端 8.8px，正合 (15+3)/2 = 9（差 0.2px），而不是仅在
+								// 15px 按钮内居中的 7.5px。radius 必须传 0 —— 传 0.8 会把尖角
+								// 磨掉，实测三角高度从 7 物理像素缩到 5，肉眼可见地偏小。
 								upBtnY := vy
 								acx := vx + scrollW/2
-								acy := upBtnY + arrowSize/2
-								info.canvas.FillRoundedTriangle(acx, acy-2, acx-4, acy+3, acx+4, acy+3, 0.8, arrowCol)
+								acy := upBtnY + (arrowSize+arrowGap)/2
+								info.canvas.FillRoundedTriangle(acx, acy-2.8, acx-3.2, acy+2.8, acx+3.2, acy+2.8, 0, arrowCol)
 
 								// Down arrow.
-								dnBtnY := vy + vh - arrowSize
-								dcy := dnBtnY + arrowSize/2
-								info.canvas.FillRoundedTriangle(acx, dcy+2, acx-4, dcy-3, acx+4, dcy-3, 0.8, arrowCol)
+								dcy := vy + vh - (arrowSize+arrowGap)/2
+								info.canvas.FillRoundedTriangle(acx, dcy+2.8, acx-3.2, dcy-2.8, acx+3.2, dcy-2.8, 0, arrowCol)
 							}
 
 							// Thumb (rounded rect, pill shape) — geometry from the shared
@@ -1607,6 +1636,12 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									rad = thumbRadius
 								}
+								// 自绘滚动条的 thumb 是**胶囊**（实测圆角 = 宽度一半）；
+								// 自定义 webkit 滚动条保持 5px 圆角（index.html 的
+								// `::-webkit-scrollbar-thumb{border-radius:5px}`）。
+								if !webkitSB {
+									rad = sbThumbRadius(scrollW)
+								}
 							if style.DiagEnabled("scrollbar") {
 								cn := ""
 								if el, ok := box.Node().(*dom.Element); ok {
@@ -1620,12 +1655,12 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							}
 								if webkitSB {
 									// Custom webkit scrollbar: thumb fills the FULL
-									// scrollbar width like the browser (Edge headless
-									// measures 8px for ::-webkit-scrollbar { width:8px }),
-									// no breathing room, no arrow offset.
+									// scrollbar width like the browser, no breathing room.
 									info.canvas.FillRoundRect(vx, thumbY, scrollW, vm.ThumbLen, rad, tCol)
 								} else {
-									info.canvas.FillRoundRect(vx+2, thumbY, scrollW-4, vm.ThumbLen, rad, tCol)
+									// 自绘滚动条：thumb 在轨道内左右各留 sbThumbInset。
+									// ★ 实测（有头 Edge，15px 轨道）：thumb 宽 8.8px、居中。
+									info.canvas.FillRoundRect(vx+sbThumbInset, thumbY, sbThumbWidth(scrollW), vm.ThumbLen, rad, tCol)
 								}
 							}
 						}
@@ -1649,14 +1684,15 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							}
 
 							if !webkitSB {
-								// Left arrow.
-								ltBtnX := hx
-								aCy := hy + scrollW/2
-								info.canvas.FillRoundedTriangle(ltBtnX+4, aCy, ltBtnX+arrowSize-3, aCy-4, ltBtnX+arrowSize-3, aCy+4, 0.8, arrowCol)
+								// 左右箭头：与上下箭头同尺寸（宽 5.6、高 6.4，即旋转 90°），
+								// 在 15×15 按钮内居中。
+								aCy := hy + (scrollW+arrowGap)/2
+								lCx := hx + (arrowSize+arrowGap)/2
+								info.canvas.FillRoundedTriangle(lCx-2.8, aCy, lCx+2.8, aCy-3.2, lCx+2.8, aCy+3.2, 0, arrowCol)
 
 								// Right arrow.
-								rtBtnX := hx + hw - arrowSize
-								info.canvas.FillRoundedTriangle(rtBtnX+arrowSize-4, aCy, rtBtnX+3, aCy-4, rtBtnX+3, aCy+4, 0.8, arrowCol)
+								rCx := hx + hw - (arrowSize+arrowGap)/2
+								info.canvas.FillRoundedTriangle(rCx+2.8, aCy, rCx-2.8, aCy-3.2, rCx-2.8, aCy+3.2, 0, arrowCol)
 							}
 
 								// Thumb — geometry from the shared ScrollbarMetrics so
@@ -1680,10 +1716,13 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 								if thumbRadius > 0 {
 									radH = thumbRadius
 								}
+								if !webkitSB {
+									radH = sbThumbRadius(scrollW) // 胶囊（同竖直方向）
+								}
 								if webkitSB {
 									info.canvas.FillRoundRect(thumbX, hy, hm.ThumbLen, scrollW, radH, tCol)
 								} else {
-									info.canvas.FillRoundRect(thumbX, hy+2, hm.ThumbLen, scrollW-4, radH, tCol)
+									info.canvas.FillRoundRect(thumbX, hy+sbThumbInset, hm.ThumbLen, sbThumbWidth(scrollW), radH, tCol)
 								}
 								}
 							}
@@ -2019,16 +2058,28 @@ func parseBlendMode(s string) *skia.BlendMode {
 	}
 	return &m
 }
-// insideButton reports whether o is a descendant of a <button> element.
-// Button labels are painted centered by PaintFormControl→paintButtonText,
-// so the IFC-placed RenderText must be skipped to avoid double painting.
-func insideButton(o RenderObject) bool {
+// insideCenteredLabelButton reports whether o is a descendant of a <button>
+// whose label is painted CENTERED by PaintFormControl→paintButtonText; the
+// IFC-placed RenderText must then be skipped to avoid double painting.
+//
+// ★ 2026-09-26：flex/grid 容器的 <button> 不走「居中 label」特判（其内容由
+// flex/grid 布局排列，见 PaintFormControl 的 button 分支），这类按钮里的文本
+// 必须交给常规 IFC 绘制 —— 故此处返回 false（不跳过）。判定与
+// renderformcontrol.go 的 isFlexOrGridContainerDisplay 成对。
+func insideCenteredLabelButton(o RenderObject) bool {
 	for cur := o.Parent(); cur != nil; cur = cur.Parent() {
-		if box := asRenderBox(cur); box != nil {
-			if el, ok := box.Node().(*dom.Element); ok && el.LocalName() == "button" {
-				return true
-			}
+		box := asRenderBox(cur)
+		if box == nil {
+			continue
 		}
+		el, ok := box.Node().(*dom.Element)
+		if !ok || el.LocalName() != "button" {
+			continue
+		}
+		if st := box.Style(); st != nil && isFlexOrGridContainerDisplay(st.Display) {
+			return false
+		}
+		return true
 	}
 	return false
 }
@@ -2038,10 +2089,12 @@ func insideButton(o RenderObject) bool {
 // PaintFormControl mirroring RenderTheme::paint().
 func paintObjectForeground(o RenderObject, info *PaintInfo) {
 	if text, ok := o.(*RenderText); ok {
-		// ★ <button> 内的文本由 PaintFormControl→paintButtonText 以
-		// 居中坐标绘制；此处 IFC 排版的 RenderText（内容盒左上/右下）
-		// 必须跳过，否则与居中文字重复绘制（− 出现两个）。
-		if insideButton(o) {
+		// ★ 走「居中 label」特判的 <button> 内文本由
+		// PaintFormControl→paintButtonText 以居中坐标绘制；此处 IFC 排版的
+		// RenderText（内容盒左上/右下）必须跳过，否则与居中文字重复绘制
+		// （− 出现两个）。flex/grid 容器的按钮不由该特判绘制，其文本
+		// 照常在此绘制。
+		if insideCenteredLabelButton(o) {
 			return
 		}
 		PaintText(text, info)
@@ -2062,10 +2115,16 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 		// (e.g. white send-btn icon, muted icon color). Must be passed into
 		// buildSVGDocument BEFORE walk parses currentColor references.
 		var cc graphics.Color
+		var varLookup svgVarLookup
 		if st := box.Style(); st != nil {
 			cc = toGraphicsColor(st.Color)
+			// ★ 元素计算样式里的自定义属性表：SVG 呈现属性里的 var(--x)
+			//   （如 Token 统计环形图 stroke="var(--accent)" /
+			//   var(--border-color)）必须借此解析——纯属性路径遇到 var()
+			//   解析失败会回退**黑色**，环整圈画成纯黑、缓存命中填充不可见。
+			varLookup = func(name string) string { return st.CustomPropertyValue(name) }
 		}
-		doc := buildSVGDocument(el, cc)
+		doc := buildSVGDocumentWithVars(el, varLookup, cc)
 		if debugenv.Enabled("WB_SVG_DEBUG") {
 			log.Printf("[svg] paintObjectForeground svg class=%q xy=(%.0f,%.0f) wh=(%.0f,%.0f) viewBox=%v shapes=%d currentColor=#%02x%02x%02x",
 				el.GetAttribute("class"), box.X(), box.Y(), box.Width(), box.Height(),

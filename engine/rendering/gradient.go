@@ -380,54 +380,29 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 	if gradLen <= 0 {
 		return
 	}
-	iw, ih := int(w), int(h)
-	if math.Abs(gx) < 0.001 {
-		for py := 0; py < ih; py++ {
-			pos := y + float64(py) + 0.5
-			t := ((pos-cy)*gy - minP) / gradLen
-			if t > 1 {
-				t = 1
-			}
-			if t < 0 {
-				t = 0
-			}
-			canvas.FillRectNoAA(x, y+float64(py), w, 1, interpolateColor(lg.Stops, t))
-		}
-		return
-	}
-	if math.Abs(gy) < 0.001 {
-		for px := 0; px < iw; px++ {
-			pos := x + float64(px) + 0.5
-			t := ((pos-cx)*gx - minP) / gradLen
-			if t > 1 {
-				t = 1
-			}
-			if t < 0 {
-				t = 0
-			}
-			canvas.FillRectNoAA(x+float64(px), y, 1, h, interpolateColor(lg.Stops, t))
-		}
-		return
-	}
-	// 非轴对齐（45/135deg 等）：逐像素按真实投影插值。
-	// ★ 旧实现只取首尾色 + 纵向近似：135deg 七色渐变（首尾同色，
-	// 如调色板彩虹按钮 linear-gradient(135deg,#ff0000,...,#ff0000)）
-	// 渲染成整块纯色——「调色板按钮不显示」的根因。interpolateColor
-	// 走完整 stops；逐像素投影保证对角线方向正确。
-	for py := 0; py < ih; py++ {
-		posy := y + float64(py) + 0.5
-		for px := 0; px < iw; px++ {
-			posx := x + float64(px) + 0.5
-			t := ((posx-cx)*gx + (posy-cy)*gy - minP) / gradLen
-			if t > 1 {
-				t = 1
-			}
-			if t < 0 {
-				t = 0
-			}
-			canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(lg.Stops, t))
+	// ★ 一次性交给 Skia 渐变 shader（此前是逐像素 FillRectNoAA(1x1)：
+	// 对角线渐变每个像素一次 Skia 调用，真实页面上是每帧数百毫秒的
+	// 头号热点）。两者数值等价：Skia 的渐变参数
+	//   t' = ((p-start)·(end-start)) / |end-start|²
+	// 取 start = c + d·minP、end = c + d·maxP（d 为单位方向向量），则
+	//   end-start = d·gradLen，|end-start|² = gradLen²，t' = ((p-c)·d - minP)/gradLen
+	// 正是逐像素版的 t（且投影越界时两边都 clamp 到 [0,1]，Skia 侧由
+	// TileModeClamp 保证）。多色标按 CSS 语义整段插值——旧版本对角分支
+	// 曾用「首尾色 + 纵向近似」把 135deg 七色渐变画成纯色，这条路径不再
+	// 存在（方向正确性由 shader 的轴端点天然保证）。
+	colors := make([]graphics.Color, len(lg.Stops))
+	positions := make([]float32, len(lg.Stops))
+	for i, s := range lg.Stops {
+		colors[i] = s.Color
+		positions[i] = float32(s.Position)
+		// Skia 要求色标位置非递减；CSS 里手写越界/逆序的 stop 在此钳平，
+		// 避免 shader 行为未定义。
+		if i > 0 && positions[i] < positions[i-1] {
+			positions[i] = positions[i-1]
 		}
 	}
+	canvas.FillRectLinearGradientStops(x, y, w, h,
+		cx+gx*minP, cy+gy*minP, cx+gx*maxP, cy+gy*maxP, colors, positions)
 }
 
 func interpolateColor(stops []ColorStop, t float64) graphics.Color {

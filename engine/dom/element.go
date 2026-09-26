@@ -23,7 +23,11 @@ import (
 // by fragment parsing.
 type Element struct {
 	nodeBase
-	tag       string
+	tag string
+	// localName 缓存 LocalName() 的小写结果。tag 只在构造时赋值（不可变），
+	// 故缓存永久有效。profile：元素每帧被多次询问 LocalName，此前每次都做
+	// strings.ToLower（Vue 场景 2.18% flat、React 场景 0.72% flat）。
+	localName string
 	attrOrder []string
 	attrs     map[string]string
 
@@ -208,7 +212,12 @@ func (e *Element) NodeName() string { return strings.ToUpper(e.tag) }
 func (e *Element) TagName() string { return e.NodeName() }
 
 // LocalName returns the lowercased local name, mirroring Element::localName().
-func (e *Element) LocalName() string { return strings.ToLower(e.tag) }
+func (e *Element) LocalName() string {
+	if e.localName == "" {
+		e.localName = strings.ToLower(e.tag)
+	}
+	return e.localName
+}
 
 // NodeValue for an Element is always the empty string, mirroring Node::nodeValue().
 func (e *Element) NodeValue() string { return "" }
@@ -499,7 +508,7 @@ func (e *Element) SetActive(a bool) {
 // id and class attributes, mirroring Element::id()/className().
 func (e *Element) GetId() string         { return e.GetAttribute("id") }
 func (e *Element) SetId(id string)       { e.SetAttribute("id", id) }
-func (e *Element) GetClassName() string   { return e.GetAttribute("class") }
+func (e *Element) GetClassName() string  { return e.GetAttribute("class") }
 func (e *Element) SetClassName(c string) { e.SetAttribute("class", c) }
 
 // ClassName returns the class attribute, mirroring Element::className().
@@ -770,5 +779,3 @@ func escapeAttrValue(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;", ">", "&gt;")
 	return r.Replace(s)
 }
-
-

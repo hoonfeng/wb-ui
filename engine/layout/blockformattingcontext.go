@@ -77,6 +77,18 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	contentX := g.ContentBoxLeft()
 	contentY := g.ContentBoxTop()
 	contentWidth := g.ContentWidth()
+	// ★ 常驻滚动条占位（2026-09-26，见 scrollbarreserve.go）：滚动容器提供给
+	//   子元素的可用宽度必须扣掉滚动条占的那一条，否则 width:auto（块级）/
+	//   width:100% 的子元素连同其 border-bottom 会铺到滚动条上把它切成几段。
+	//   Chrome 的子元素可用宽度就是 clientWidth（= padding box 宽 - 滚动条），
+	//   实测 .sidebar-content offsetWidth/clientWidth = 263/246、
+	//   .chat-messages = 656/639（均差 17px，即便 scrollbar-gutter:auto 也占位）。
+	if reserve := box.verticalScrollbarReserve(); reserve > 0 {
+		contentWidth -= reserve
+		if contentWidth < 0 {
+			contentWidth = 0
+		}
+	}
 	if debugenv.Enabled("WB_LAYOUT_DEBUG") && box.Element() != nil && box.Element().NodeName() == "DIV" && box.Element().GetAttribute("class") == "dialog-box" {
 		fmt.Printf("[bfc] dialog-box: contentWidth=%.1f parent=%v children=%d\n", contentWidth, box.Parent(), len(box.Children()))
 	}
@@ -108,7 +120,16 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		fc = state.currentFloatContext()
 		if fc == nil {
 			fc = newFloatContext(contentX, contentY, contentWidth)
-			state.setFloatContext(fc)
+			// ★ 修复（2026-09，gou-ide「toast 文字竖排」根因）：这里建立的新 FC
+			// 必须限定在本盒子树内 —— 原实现只 set 不 restore，令该 FC 泄漏到
+			// 之后的**无关盒**（兄弟/后续兄弟）上。泄漏的 FC 的 originX /
+			// contentWidth 属于建立者，而后来的盒在自己的坐标系里调用
+			// contentEdgesAt，fcY 落在泄漏 FC 的浮动区间内 → 返回宽度 0 →
+			// CJK 文本每个字都放不进一行（每字一行、容器高 341px；
+			// 浏览器 34.4px）。实测：.toast-item 匿名盒 cw=250.85 而入参
+			// availWidth=0（[toast-line] fc=true cw=0.000）。
+			prev := state.setFloatContext(fc)
+			defer state.restoreFloatContext(prev)
 		}
 	}
 
@@ -455,6 +476,17 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	} else if box.Parent() != nil {
 		fs := fontSizeOf(box)
 		cbHeight := state.GeometryForBox(box.Parent()).ContentHeight()
+		// ★ 百分比高度的参照优先取「父布局上下文分配的确定高度」
+		//   （ParentSetHeight —— grid area / flex cross-axis stretch 的确定值），
+		//   它才是该 box 真实的包含块高度。此前一律用父盒 ContentHeight：
+		//   grid item 的 `height:100%` 被按 **grid 容器高** 解析（gou-ide 的五个
+		//   `.plugin-slot-host{height:100%}` 全部量成容器高——状态栏槽位
+		//   28 → 800、侧栏/活动栏/右栏槽位 732 → 800），而 grid 侧已按轨道
+		//   算出正确值（SetParentSetHeight(contentH)）并被这里覆盖。
+		//   内层组件自身 28px 生效，使状态栏视觉正常、掩盖了该缺陷。
+		if ps := box.ParentSetHeight(); ps > 0 {
+			cbHeight = ps
+		}
 		hv, ok := definiteHeight(boxCS.Height, cbHeight, fs)
 		if ok {
 			if isBorderBoxForBox(box) {
@@ -519,6 +551,11 @@ func (c *BlockFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	// ★ 布局完成，记录最终几何快照供下次剪枝判断（含 auto 高度自行计算的结果）。
 	box.MarkCleanWithGeom(g.Left(), g.Top(), g.ContentWidth(), g.ContentHeight())
+	// ★ 常驻滚动条占位的判定**不在此处**（见 scrollbarreserve.go 文件头）：
+	//   本阶段滚动视口高可能尚未确定（flex 容器的 item 高度在父 flex 布局里
+	//   才被压到分配值），用这里的 g.PaddingBoxHeight() 判定会恒为「不溢出」。
+	//   判定统一由渲染树收尾 pass（rendering.syncScrollbarReserve）在几何
+	//   全部就位后用绘制同口径完成，再补跑一轮布局使预留生效。
 }
 
 // computeBlockChildBorderBoxWidth resolves border-box width of a block child.
@@ -654,7 +691,19 @@ func heightIsAutoForBox(box *ElementBox) bool {
 		// html 根元素的包含块是初始包含块（视口尺寸确定），所以
 		// parentBox==nil 时不按 auto 处理，`html,body{height:100%}` 链条不受影响。
 		if heightPercentDependent(cs.Height) {
-			if pb := box.parentBox; pb != nil && heightIsAutoForBox(pb) {
+			// ★ 父盒虽 CSS `height:auto`，但被**外层布局算法分配**了确定高度时
+			// （flex 主尺寸 / 交叉轴 stretch、grid 行高、父 BFC 的 definite
+			// height —— 即 SetParentSetHeight 的各个调用点），它同样是「高度
+			// 确定」的包含块（CSS 2.1 §10.5），子元素的百分比高度必须解析，
+			// 不能退化成 auto。
+			//
+			// 实测（gou-ide 侧栏插件面板，2026-09-26）：`.sidebar-content`
+			// `{flex:1;overflow:auto}` 的 CSS height 是 auto → 其子
+			// `.plugin-panel{height:100%}` 被判为 auto，高度由内容撑成 1363
+			// （父内容区仅 768）→ 内部的 `.pp-list{flex:1}` 同步失控（1332 而非
+			// 736）→ 插件面板出现**两层**竖直滚动条（Chromium 只有一层：列表
+			// 自身滚动、侧栏不滚动）。
+			if pb := box.parentBox; pb != nil && heightIsAutoForBox(pb) && pb.ParentSetHeight() <= 0 {
 				return true
 			}
 		}
@@ -820,7 +869,26 @@ func elementName(box *ElementBox) string {
 	if box == nil { return "nil" }
 	el := box.Element()
 	if el == nil { return "anonymous" }
-	return fmt.Sprintf("%v", el)
+	// ★ 不再用 fmt.Sprintf("%v", el)：对 *dom.Element 做反射格式化会遍历
+	// 整个结构体（含 map/slice 字段，触发 fmtsort.Sort + getField 反射），
+	// 而本函数在块布局热路径上被诊断日志**无条件**调用（Go 的可变参数在
+	// 调用前求值，diagf 即使不输出也会执行到这里）。
+	// CPU profile（4 万节点 IDE 页面重排阶段）：fmt.Sprintf 1.84s / 4.36%，
+	// 全部来自本函数。诊断只需可辨识的元素标识。
+	var sb strings.Builder
+	sb.Grow(24)
+	sb.WriteByte('<')
+	sb.WriteString(el.LocalName())
+	if id := el.GetAttribute("id"); id != "" {
+		sb.WriteByte('#')
+		sb.WriteString(id)
+	}
+	if cls := el.GetAttribute("class"); cls != "" {
+		sb.WriteByte('.')
+		sb.WriteString(cls)
+	}
+	sb.WriteByte('>')
+	return sb.String()
 }
 
 func elementNameOf(box Box) string {

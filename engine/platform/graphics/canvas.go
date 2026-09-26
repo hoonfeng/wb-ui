@@ -771,6 +771,45 @@ func (c *Canvas) FillLinearGradient(x, y, w, h float64, startColor, endColor Col
 	c.invalidatePixels()
 }
 
+// FillRectLinearGradientStops 用 Skia 原生线性渐变 shader 一次填充矩形，
+// 支持任意角度与任意多色标。
+//
+// ★ 为什么必需：rendering 层的 paintLinearGradient 原先是「逐像素
+// FillRectNoAA(1x1)」实现——对角渐变（45/135deg）在 100x100 的盒子上要发
+// 10000 次 Skia 调用，真实 IDE 页面上任何一个渐变元素都会让每帧耗时冲到
+// 数百毫秒（CPU profile：paintLinearGradient→FillRectNoAA 占 33%）。这里
+// 交给 Skia 的渐变 shader，一次 DrawRect 完成，视觉等价（两者都是沿渐变
+// 轴的线性插值；t 的换算见 rendering.paintLinearGradient 的注释）。
+//
+// 渐变轴由世界坐标端点 (gx1,gy1)→(gx2,gy2) 给出，colors/positions 语义同
+// skia.NewLinearGradient（positions 为 0..1，nil 表示等距）。
+func (c *Canvas) FillRectLinearGradientStops(x, y, w, h, gx1, gy1, gx2, gy2 float64, colors []Color, positions []float32) {
+	if w <= 0 || h <= 0 || len(colors) < 2 {
+		return
+	}
+	start := skia.Point{X: float32(gx1), Y: float32(gy1)}
+	end := skia.Point{X: float32(gx2), Y: float32(gy2)}
+	if start == end {
+		// 退化轴（零长度）：Skia 会画出空内容，退回首色填充。
+		c.FillRectNoAA(x, y, w, h, colors[0])
+		return
+	}
+	sk := make([]skia.Color, len(colors))
+	for i, col := range colors {
+		sk[i] = colorToSkia(col)
+	}
+	shader := skia.NewLinearGradient(start, end, sk, positions, skia.TileModeClamp)
+	if shader == nil {
+		return
+	}
+	defer shader.Release()
+	c.gradientPaint.SetShader(shader)
+	r := skia.RectXYWH(float32(x), float32(y), float32(w), float32(h))
+	c.canvas.DrawRect(r, c.gradientPaint)
+	c.gradientPaint.SetShader(nil)
+	c.invalidatePixels()
+}
+
 // FillRadialGradient fills a circle centered at (cx, cy) with a radial gradient
 // from centerColor at the center to edgeColor at the edge. This mirrors the CSS
 // radial-gradient(circle, centerColor, edgeColor) shorthand.
@@ -2411,6 +2450,18 @@ func MeasureText(font Font, text string) float64 {
 	return w
 }
 
+// WidthCacheStats 返回全局文本宽度缓存的 (命中数, 未命中数, 当前条目数)。
+//
+// 供性能探针判断缓存是否被「反复填满 → 全清重建」：页面文本工作集
+// （4 万节点 IDE 页面约 10 万 token）远超 globalWidthCacheMax 时，缓存
+// 会周期性整体重建，文本测量反复回落 Skia 光栅器（profile 中
+// runtime.cgocall 占 23.7% 的主因）。
+func WidthCacheStats() (hits, misses int64, size int) {
+	globalWidthCacheMu.Lock()
+	defer globalWidthCacheMu.Unlock()
+	return globalWidthCacheHits, globalWidthCacheMisses, len(globalWidthCache)
+}
+
 func measureTextUncached(font Font, text string) float64 {
 	skFont := globalSkiaFont(font)
 	if skFont == nil {
@@ -2591,31 +2642,113 @@ func firstConcreteFamily(list string) string {
 	return list
 }
 
+// ── 字体度量缓存 ─────────────────────────────────────────────────────
+//
+// 字体度量（ascent/descent/xheight/linegap）只取决于**字体描述符**
+// （family/size/weight/style），与文本内容无关。但行内格式化上下文对
+// **每一行**都要查询度量（normal 行高 = ascent + descent + lineGap、
+// 首行 baseline、`ex` 单位解析），每次查询都走 Skia cgo
+//（sk_font_get_metrics）。
+//
+// 实测（dev/probes/idepage_wbui + CPU profile；4 万节点 IDE 页面重排阶段，
+// 30 次强制同步重排采样 42.19s）：runtime.cgocall 占 24% CPU，其中
+// **68% 是 sk_font_get_metrics（7.72s）**，而真正的文本测量
+// sk_font_measure_text 只占 0.01s（宽度缓存命中率 99.85%）。
+// 即：宽度缓存解决了「测量文本」，但「查询字体度量」每次布局都在重复做。
+
+type fontMetricsEntry struct {
+	ascent   float64
+	descent  float64
+	xHeight  float64
+	lineGap  float64
+	resolved bool // false = Skia 字体无法解析（值为 fallback）
+}
+
+var (
+	fontMetricsMu                      sync.Mutex
+	fontMetricsCache                   = map[fontKey]fontMetricsEntry{}
+	fontMetricsHits, fontMetricsMisses int64
+)
+
+// fontMetricsCacheMax 上限：实践中的字体组合数很小（几十种），设上限只为
+// 挡住病态场景（脚本用递增 font-size 制造无限新 key）。
+const fontMetricsCacheMax = 4096
+
+// fontMetricsFor 返回（并缓存）指定字体的度量。
+//
+// 未命中才走 cgo。key 用规范化字号（size<=0 → 16），与原有
+// GlobalFontAscent 的 fallback 语义保持一致。
+func fontMetricsFor(font Font) fontMetricsEntry {
+	size := font.Size
+	if size <= 0 {
+		size = 16
+	}
+	key := fontKey{family: font.Family, size: float32(size), weight: font.Weight, style: font.Style}
+	fontMetricsMu.Lock()
+	if e, hit := fontMetricsCache[key]; hit {
+		fontMetricsHits++
+		fontMetricsMu.Unlock()
+		return e
+	}
+	fontMetricsMisses++
+	fontMetricsMu.Unlock()
+
+	e := fontMetricsEntry{ascent: size * 0.8}
+	if skFont := globalSkiaFont(font); skFont != nil {
+		m, _ := skFont.Metrics()
+		e.ascent = float64(-m.Ascent)
+		e.descent = float64(m.Descent)
+		if m.XHeight > 0 {
+			e.xHeight = float64(m.XHeight)
+		}
+		e.lineGap = float64(m.Leading)
+		e.resolved = true
+	}
+
+	fontMetricsMu.Lock()
+	if len(fontMetricsCache) >= fontMetricsCacheMax {
+		fontMetricsCache = map[fontKey]fontMetricsEntry{}
+	}
+	fontMetricsCache[key] = e
+	fontMetricsMu.Unlock()
+	return e
+}
+
+// ClearFontMetricsCache 丢弃字体度量缓存。字体注册表在运行中变化时
+//（动态加载 web font / 字体回退链变化）必须调用，否则度量停留在旧字体。
+func ClearFontMetricsCache() {
+	fontMetricsMu.Lock()
+	fontMetricsCache = map[fontKey]fontMetricsEntry{}
+	fontMetricsMu.Unlock()
+}
+
+// FontMetricsCacheStats 返回 (条目数, 命中数, 未命中数)，供性能探针观测。
+func FontMetricsCacheStats() (size int, hits, misses int64) {
+	fontMetricsMu.Lock()
+	defer fontMetricsMu.Unlock()
+	return len(fontMetricsCache), fontMetricsHits, fontMetricsMisses
+}
+
+// GlobalFontMetrics 一次返回四种字体度量（ascent / descent / xHeight / lineGap）。
+// 布局热路径（host 的 FontMetricsFunc）本就需要其中 3 项，逐个调用
+// GlobalFontAscent/Descent/LineGap 会对同一个 key 加锁并查表 3 次
+//（profile：fontMetricsFor cum 6.7%，其中 Mutex.Lock/Unlock 合计约 1.9%）。
+func GlobalFontMetrics(font Font) (ascent, descent, xHeight, lineGap float64) {
+	e := fontMetricsFor(font)
+	return e.ascent, e.descent, e.xHeight, e.lineGap
+}
+
 // GlobalFontAscent returns the ascent (positive distance from baseline to the
 // font's recommended top) for the given font. Mirrors Canvas.FontAscent but
 // usable without a Canvas instance. Falls back to size * 0.8 on failure.
 func GlobalFontAscent(font Font) float64 {
-	skFont := globalSkiaFont(font)
-	if skFont == nil {
-		size := font.Size
-		if size <= 0 {
-			size = 16
-		}
-		return size * 0.8
-	}
-	m, _ := skFont.Metrics()
-	return float64(-m.Ascent)
+	return fontMetricsFor(font).ascent
 }
 
 // GlobalFontDescent returns the descent (positive distance from baseline to the
 // font's recommended bottom) for the given font. Returns 0 on failure.
 func GlobalFontDescent(font Font) float64 {
-	skFont := globalSkiaFont(font)
-	if skFont == nil {
-		return 0
-	}
-	m, _ := skFont.Metrics()
-	return float64(m.Descent)
+	return fontMetricsFor(font).descent
 }
 
 // GlobalFontXHeight returns the font's x-height in px — the height of the
@@ -2624,15 +2757,7 @@ func GlobalFontDescent(font Font) float64 {
 // the font cannot be resolved or the metric is unavailable; the layout engine
 // then falls back to the spec-permitted 0.5em approximation.
 func GlobalFontXHeight(font Font) float64 {
-	skFont := globalSkiaFont(font)
-	if skFont == nil {
-		return 0
-	}
-	m, _ := skFont.Metrics()
-	if m.XHeight <= 0 {
-		return 0
-	}
-	return float64(m.XHeight)
+	return fontMetricsFor(font).xHeight
 }
 
 // GlobalFontLineGap returns the line gap (leading) for the given font,
@@ -2641,10 +2766,5 @@ func GlobalFontXHeight(font Font) float64 {
 // matching how browsers compute the default line box height from the font's
 // hhea/sTypo lineGap value. Returns 0 on failure.
 func GlobalFontLineGap(font Font) float64 {
-	skFont := globalSkiaFont(font)
-	if skFont == nil {
-		return 0
-	}
-	m, _ := skFont.Metrics()
-	return float64(m.Leading)
+	return fontMetricsFor(font).lineGap
 }

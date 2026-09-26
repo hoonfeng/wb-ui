@@ -117,6 +117,75 @@ func formControlContentSize(box *ElementBox) (w, h float64, ok bool) {
 	return 0, 0, false
 }
 
+// selectContentWidth 返回 <select> 的内在**内容**宽度：最宽 <option> 的文本宽
+// （CSS-SIZING-3 §5.1：select 的 max-content 由最宽选项决定；<optgroup> 内的
+// 选项同样参与）。
+//
+// 为什么单独需要：formControlContentSize **有意**不为 select 给出固有宽度
+// （见其文档注释 "a <select> is as wide as its widest option"），IFC 侧另有
+// 45px 的 UA 兜底，但 flex 上下文没有那把兜底——flex item 的 base size 走
+// intrinsicContentWidth，于是 select 的内容宽被算成 0，只剩 padding+border：
+// gou-ide 输入卡模型选择器（.ibb-btns > .sp-wrap > select.sp-select）在 wb-ui
+// 里宽 38px（浏览器 240px，命中 max-width 上限），option 文本全部截断，并把
+// 兄弟项（margin-left:auto 的 "Enter 发送 · Shift+Enter 换行"）带偏 105px。
+func selectContentWidth(box *ElementBox) (float64, bool) {
+	el := box.Element()
+	if el == nil || !strings.EqualFold(el.LocalName(), "select") {
+		return 0, false
+	}
+	best := 0.0
+	var scan func(dom.Node)
+	scan = func(n dom.Node) {
+		for _, child := range n.ChildNodes() {
+			ce, ok := child.(*dom.Element)
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(ce.LocalName()) {
+			case "option":
+				if t := strings.TrimSpace(ce.TextContent()); t != "" {
+					if w := measureText(box, t); w > best {
+						best = w
+					}
+				}
+			case "optgroup":
+				scan(ce)
+			}
+		}
+	}
+	scan(el)
+	if best <= 0 {
+		return 0, false
+	}
+	// ★ max-width 钳制：select 的内容宽同样受自身 max-width 约束。gou-ide 的
+	//   .sp-select 声明 max-width:240px，最宽 option 需要 ≈259px 内容宽——浏览器
+	//   给 240px 边框盒；不钳制时 intrinsicContentWidth 会把 297px 外盒宽上传给
+	//   inline-flex 容器 .sp-wrap 的 max-content（容器自身没有 max-width，钳不住），
+	//   于是 .ibb-btns 超出输入卡可用宽度，把三个按钮挤到第二行。
+	if cs := box.Style(); cs != nil {
+		if maxW, ok := definiteWidth(cs.MaxWidth, 0, fontSizeOf(box)); ok && maxW > 0 {
+			if isBorderBox(box) {
+				// max-width 是**边框盒**上限（box-sizing:border-box）→ 换算成内容宽上限。
+				_, pb, bd := computeBoxModel(box, 0, fontSizeOf(box))
+				if lim := maxW - pb.Horizontal() - bd.Horizontal(); lim > 0 && best > lim {
+					best = lim
+				}
+			} else if best > maxW {
+				best = maxW
+			}
+		}
+		// ★ 返回**外盒**宽：intrinsicContentWidth 末尾对走到结尾的路径统一加
+		//   自身 padding+border，但提前 return 的分支不会被加（既有的
+		//   formControlContentSize 路径返回内容宽，由 flex 的 paddingMain
+		//   机制承担差值）。本分支的消费方是 flex 的 base size 与 inline-flex
+		//   容器的 max-content 递归——两处都按**外盒**语义使用，漏加会让
+		//   select 的边框盒比浏览器少 38px（实测 202 vs 240）。
+		_, p, b := computeBoxModel(box, 0, fontSizeOf(box))
+		best += p.Left + p.Right + b.Left + b.Right
+	}
+	return best, true
+}
+
 // formControlAttrFloat parses a positive integer attribute (size/cols), falling
 // back to def when it is absent, empty or not a positive integer.
 func formControlAttrFloat(el *dom.Element, name string, def float64) float64 {

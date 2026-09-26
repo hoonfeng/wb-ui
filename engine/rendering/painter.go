@@ -1360,12 +1360,27 @@ func PaintText(text *RenderText, info *PaintInfo) {
 					drawDescent = vBottom
 				}
 			} else {
-				drawAscent = baselineH
+				// ★ 拉丁文本：按浏览器 half-leading 公式定位 baseline
+				//   （baseline = 行盒中心 + (ascent-descent)/2，等价于
+				//   行盒顶 + (lineHeight-(ascent+descent))/2 + ascent）。
+				//   此前用 capHeight 近似字形盒（capHeight+descent），丢掉升部
+				//   （b/d/h/l）与降部（g/p/q/y）→ 字形整体偏高 ~2px，且偏差
+				//   随字体浮动（实测 Arial +1px、YaHei +2.5px、Segoe UI +3px）。
+				//   这是「选择工具集」下拉 model pill「deepseek-flash」文字不
+				//   垂直居中的根因（浏览器对照完全居中）。
+				drawAscent = ascent
 				drawDescent = graphics.GlobalFontDescent(font)
 			}
 			fontH := drawAscent + drawDescent
 			if fontH > 0 {
-				boxCenter := seg0.LineY + seg0.LineHeight/2
+				// ★ 用 seg0.Y（文本段顶）而非 LineY：inline-flex 容器（如
+				//   .ir-pill）内文本的行框 LineY 与文本段 Y 会错开 ~2px
+				//   （真实页面实测 LineY=735.5 vs Y=737.5），而 flex 布局
+				//   已把**文本段**居中（Y 才是正确盒顶）。用 LineY 会让
+				//   baseline 偏高 2px（选择工具集下拉 model pill 字形比
+				//   Chromium 高 3px 的最后一个 2px 来源）。行框错位分支
+				//   （lineBoxValid=false）本就用 seg0.Y，此处与之一致。
+				boxCenter := seg0.Y + seg0.LineHeight/2
 				flexBaseline := boxCenter + drawAscent - fontH/2
 				flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
 			}
@@ -1424,7 +1439,19 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			}
 			fontH := drawAscent + drawDescent
 			if fontH > 0 {
-				boxCenter := seg0.Y + seg0.LineHeight/2
+				// ★ 段高优先：seg0.Height 是布局真正给这段文字分配的盒高，
+				//   LineHeight（来自 line-height:1 → 11px）可以小于它——
+				//   实测顶栏「自主模式」徽标 seg.Height=15 / LineHeight=11，
+				//   行框（LineY=16..27）也与段盒（Y=12..27）错位。用
+				//   LineHeight 算中心比段盒中心高 (15-11)/2 = 2px，字形随
+				//   之上移：墨迹 above/below = 3.5/6.5，Chromium 为 5.4/4.6
+				//   （用户报告「自主模式右上监督入口文字居中偏上」的根因）。
+				//   seg.Height <= 0 时退化为 LineHeight，与旧行为一致。
+				segH := seg0.Height
+				if segH <= 0 {
+					segH = seg0.LineHeight
+				}
+				boxCenter := seg0.Y + segH/2
 				flexBaseline := boxCenter + drawAscent - fontH/2
 				flexHalfLeading = flexBaseline - (seg0.Y + baselineH)
 			}
@@ -1449,12 +1476,19 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	// ★ 文字几何跟踪（WB_TEXT_TRACE=1，短文本逐条）：输出 seg0 布局几何与
 	// 分支判定（abs/flex/boxValid），定位「inline-flex 卡片内字形偏下、
 	// 图标+文字不齐」的垂直对位问题（礼物栏 .gitem 卡片内 .gd 文本）。
-	if debugenv.Enabled("WB_TEXT_TRACE") && len(content) > 0 && len(content) <= 12 && len(segments) > 0 {
+	// 长度上限 24：诊断标签类短文本（如 "deepseek-flash" 14 字符）此前被 12
+	// 的上限滤掉，无法定位 pill/标签的垂直对位问题。
+	if debugenv.Enabled("WB_TEXT_TRACE") && len(segments) > 0 {
 		s0 := segments[0]
-		log.Printf("[text-trace] %q seg0=(X%.1f Y%.1f H%.1f LineY%.1f LH%.2f) abs=%v flex=%v boxValid=%v baseH=%.1f flexHL=%.2f absBaseH=%.2f absBase=%.1f",
-			content, s0.X, s0.Y, s0.Height, s0.LineY, s0.LineHeight,
-			textInAbsPos(text), textInFlexCentered(text), lineBoxValid, baselineH, flexHalfLeading,
-			absBaselineH, s0.Y+absBaselineH)
+		// 诊断分区：底部输入区（composer）文本即使超过长度上限也打印，
+		// 因为 pill（如 "deepseek-flash"）在真实页面里可能被拆段/带空白。
+		inZone := s0.X > 300 && s0.X < 480 && s0.Y > 660 && s0.Y < 800
+		if (len(content) > 0 && len(content) <= 24) || inZone {
+			log.Printf("[text-trace] %q seg0=(X%.1f Y%.1f H%.1f LineY%.1f LH%.2f) abs=%v flex=%v boxValid=%v sz=%.1f fam=%q baseH=%.1f flexHL=%.2f base=%.1f",
+				content, s0.X, s0.Y, s0.Height, s0.LineY, s0.LineHeight,
+				textInAbsPos(text), textInFlexCentered(text), lineBoxValid, font.Size, font.Family,
+				baselineH, flexHalfLeading, s0.Y+baselineH+flexHalfLeading)
+		}
 	}
 
 	if len(segments) == 0 {

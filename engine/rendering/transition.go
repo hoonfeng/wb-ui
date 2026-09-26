@@ -71,40 +71,33 @@ type transitionKey struct {
 
 var transitionRegistry = map[transitionKey]map[string]*transitionAnim{}
 
-// applyTransitions walks the render tree and drives CSS transitions for every
-// element with a non-zero transition-duration. time is the global animation
-// clock in seconds (AnimationTime). It returns true if any transition is
-// still in flight (the host should re-layout this frame).
-func applyTransitions(rv *RenderView, time float64) bool {
-	if rv == nil {
+// applyTransitionNode drives CSS transitions for one render object (its owning
+// element, or the nearest DOM ancestor for pseudo/anonymous boxes). time is the
+// global animation clock in seconds (AnimationTime). It returns true while a
+// transition is in flight (the host should re-layout + re-paint this frame).
+//
+// ★ 性能：旧实现 applyTransitions 每帧对整棵渲染树做一次独立 walk，而
+// ApplyAnimations 在此之前已经做过一次 keyframes walk —— 同一棵树每帧被
+// 遍历两遍（2000+ 节点页面 profile 里 applyTransitions 占 42% CPU）。
+// 现在改为由 ApplyAnimations 在单次遍历中逐节点调用本函数。
+func applyTransitionNode(o RenderObject, st *style.ComputedStyle, time float64) bool {
+	if o == nil || st == nil || st.TransitionDuration <= 0 {
 		return false
 	}
-	anyActive := false
-	var walk func(o RenderObject)
-	walk = func(o RenderObject) {
-		if o == nil {
-			return
-		}
-		if st := o.Style(); st != nil && st.TransitionDuration > 0 {
-			// 宿主元素：普通 box 用自身 Node()；伪元素/匿名 box（Node()==nil）
-			// 向上找最近的 DOM 宿主（如 .track 的 ::after 滑块）。
-			if el, isPseudo := transitionOwnerElement(o); el != nil {
-				if applyElementTransitions(el, isPseudo, st, time) {
-					// ★ 把渲染树 style 中的插值同步到布局树对应 box 的
-					// style：布局引擎用「布局树」的 style 计算几何（absolute
-					// 伪元素圆点的 left/top），渲染树的插值不同步过去则
-					// 圆点位置永远不动（"开关只有背景过渡"的根因）。
-					syncTransitionStyleToLayout(o, st)
-					anyActive = true
-				}
-			}
-		}
-		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c)
-		}
+	// 宿主元素：普通 box 用自身 Node()；伪元素/匿名 box（Node()==nil）
+	// 向上找最近的 DOM 宿主（如 .track 的 ::after 滑块）。
+	el, isPseudo := transitionOwnerElement(o)
+	if el == nil {
+		return false
 	}
-	walk(RenderObject(rv))
-	return anyActive
+	if !applyElementTransitions(el, isPseudo, st, time) {
+		return false
+	}
+	// ★ 把渲染树 style 中的插值同步到布局树对应 box 的 style：布局引擎用
+	// 「布局树」的 style 计算几何（absolute 伪元素圆点的 left/top），渲染
+	// 树的插值不同步过去则圆点位置永远不动（"开关只有背景过渡"的根因）。
+	syncTransitionStyleToLayout(o, st)
+	return true
 }
 
 // syncTransitionStyleToLayout copies the transition-interpolated values from a

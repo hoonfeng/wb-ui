@@ -64,15 +64,21 @@ func ApplyAnimations(rv *RenderView) bool {
 	if rv == nil {
 		return false
 	}
+	kfLookup := keyframesFor(rv)
 	active := false
-	if kfLookup := keyframesFor(rv); kfLookup != nil {
-		var walk func(o RenderObject)
-		walk = func(o RenderObject) {
-			if o == nil {
-				return
-			}
-			st := o.Style()
-			if st != nil && st.AnimationName != "" {
+	// ★ 性能：单次全树遍历同时驱动 @keyframes 动画与 CSS 过渡。旧实现是
+	// 两次独立的整树 walk（本函数的 keyframes walk + transition.go 的
+	// transition walk），复杂页面（2000+ 节点）每帧把同一棵树走两遍 ——
+	// shell CPU profile 里两者合计约 65%。合并后语义不变：同一元素仍是
+	// 先应用 animation 再驱动 transition。
+	var walk func(o RenderObject)
+	walk = func(o RenderObject) {
+		if o == nil {
+			return
+		}
+		st := o.Style()
+		if st != nil {
+			if kfLookup != nil && st.AnimationName != "" {
 				if debugenv.Enabled("WB_ANIM_DEBUG") {
 					kf := kfLookup(st.AnimationName)
 					log.Printf("[anim] name=%q kf=%v", st.AnimationName, kf != nil)
@@ -87,15 +93,15 @@ func ApplyAnimations(rv *RenderView) bool {
 					}
 				}
 			}
-			for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-				walk(c)
+			if applyTransitionNode(o, st, AnimationTime) {
+				active = true
 			}
 		}
-		walk(RenderObject(rv))
+		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
 	}
-	if applyTransitions(rv, AnimationTime) {
-		active = true
-	}
+	walk(RenderObject(rv))
 	return active
 }
 

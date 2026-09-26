@@ -221,7 +221,27 @@ var backgroundImageCache = struct {
 	mu      sync.Mutex
 	imgs    map[string]*DecodedImage
 	loading map[string]bool // http(s) URLs currently being fetched
-}{imgs: map[string]*DecodedImage{}, loading: map[string]bool{}}
+	// retryAt：加载失败后的重试退避截止时刻。★ 没有它时，一个必然失败的
+	// URL（被宿主 loader 拒绝、404、返回空数据）会让**每一次 paint** 都
+	// 重新发起异步加载、每次失败都触发"已加载"通知 → 宿主
+	// MarkRenderTreeDirty() → 下一帧全量重建渲染树。实测真实 IDE 页面上
+	// 形成逐帧循环：每帧重建树 38.3MB / 76822 allocs（≈80ms），是
+	// 「帧耗时 300ms+、GC 占 35%」的最大单一来源
+	// （见 webkit/diag_frame_rebuild_test.go 的调用栈证据）。
+	retryAt map[string]time.Time
+}{imgs: map[string]*DecodedImage{}, loading: map[string]bool{}, retryAt: map[string]time.Time{}}
+
+// bgImageRetryBackoff 是背景图加载失败后的重试退避时长。既保留"下次绘制
+// 会重试"的既有语义（临时故障最终能自愈），又把重试频率从每帧降到每秒
+// 一次，避免"每帧失败 → 每帧标脏 → 每帧全量重建树"的逐帧风暴。
+const bgImageRetryBackoff = time.Second
+
+// bgImageBackingOff 报告 url 是否处于失败退避窗口内。调用方须持有
+// backgroundImageCache.mu。
+func bgImageBackingOff(url string) bool {
+	t, bad := backgroundImageCache.retryAt[url]
+	return bad && time.Now().Before(t)
+}
 
 // bgImageLoadedCallback, when set, is invoked after an async http(s)
 // background image finishes loading (success or failure). Hosts use it to
@@ -352,7 +372,7 @@ func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *D
 		// 宿主接线：data: 之外的引用（http(s)/file/相对）交给宿主。首次
 		// 调用异步启动并返回 nil，goroutine 填充缓存 + 触发已加载回调，
 		// 之后的 paint 命中缓存即画出。
-		if !backgroundImageCache.loading[url] {
+		if !backgroundImageCache.loading[url] && !bgImageBackingOff(url) {
 			backgroundImageCache.loading[url] = true
 			go fetchImageViaLoaderAsync(url, loader)
 		}
@@ -360,7 +380,7 @@ func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *D
 	} else if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
 		// Remote image: async fetch once per URL. Return nil now; the
 		// goroutine fills the cache and fires the loaded callback.
-		if !backgroundImageCache.loading[url] {
+		if !backgroundImageCache.loading[url] && !bgImageBackingOff(url) {
 			backgroundImageCache.loading[url] = true
 			go fetchBackgroundImageAsync(url)
 		}
@@ -401,10 +421,20 @@ func fetchImageViaLoaderAsync(url string, loader ImageResourceLoader) {
 	data, err := loader.Load(url)
 	backgroundImageCache.mu.Lock()
 	delete(backgroundImageCache.loading, url)
+	loaded := false
 	if err == nil && len(data) > 0 {
 		if img := NewDecodedImage(data); img != nil {
 			backgroundImageCache.imgs[url] = img
+			loaded = true
 		}
+	}
+	if loaded {
+		delete(backgroundImageCache.retryAt, url)
+	} else {
+		// ★ 失败：退避一段时间再重试。否则下一次 paint 立刻重新发起 →
+		// 再次失败 → 再次通知 → 宿主每帧 MarkRenderTreeDirty（见 retryAt
+		// 字段注释）。
+		backgroundImageCache.retryAt[url] = time.Now().Add(bgImageRetryBackoff)
 	}
 	backgroundImageCache.mu.Unlock()
 	notifyBackgroundImageLoaded(url)
@@ -416,10 +446,17 @@ func fetchBackgroundImageAsync(url string) {
 	data, err := httpGet(url)
 	backgroundImageCache.mu.Lock()
 	delete(backgroundImageCache.loading, url)
+	loaded := false
 	if err == nil && len(data) > 0 {
 		if img := NewDecodedImage(data); img != nil {
 			backgroundImageCache.imgs[url] = img
+			loaded = true
 		}
+	}
+	if loaded {
+		delete(backgroundImageCache.retryAt, url)
+	} else {
+		backgroundImageCache.retryAt[url] = time.Now().Add(bgImageRetryBackoff)
 	}
 	backgroundImageCache.mu.Unlock()
 	notifyBackgroundImageLoaded(url)

@@ -70,7 +70,9 @@ func helperOverflowTextarea(t *testing.T) (*RenderView, *RenderBox) {
 func TestScrollbarHitMatchesPaint(t *testing.T) {
 	rv, taBox := helperOverflowTextarea(t)
 	pb := taBox.PaddingBoxRect()
-	vx := pb.X + pb.Width - 12 // scrollW
+	// scrollW = 平台经典滚动条宽 17px（Chromium/Windows 实测）；箭头按钮
+	// 17×17 且与轨道无间隙 → thumb 轨道从 vy+17 开始。
+	vx := pb.X + pb.Width - 17
 	vy := pb.Y
 	for _, sy := range []float64{0, 20, 50, 80} {
 		rv.SetBoxScrollOffset(taBox, 0, sy)
@@ -82,11 +84,11 @@ func TestScrollbarHitMatchesPaint(t *testing.T) {
 		if syRatio > 1 {
 			syRatio = 1
 		}
-		thumbY := vy + 12 + 5 + syRatio*(m.TrackLen-m.ThumbLen)
+		thumbY := vy + 17 + syRatio*(m.TrackLen-m.ThumbLen)
 		cy := thumbY + m.ThumbLen/2
-		hit := HitTestScrollbar(rv, vx+6, cy)
+		hit := HitTestScrollbar(rv, vx+8, cy)
 		if hit == nil || !hit.IsVThumb {
-			t.Fatalf("sy=%v thumb center (%.0f,%.0f) not hit as thumb (got %+v) — hit-test must match paint", sy, vx+6, cy, hit)
+			t.Fatalf("sy=%v thumb center (%.0f,%.0f) not hit as thumb (got %+v) — hit-test must match paint", sy, vx+8, cy, hit)
 		}
 	}
 }
@@ -110,7 +112,7 @@ func TestScrollbarDragMapsThumbToCursor(t *testing.T) {
 			sy = 0
 		}
 		ratio := sy / m.MaxScroll
-		return vy + 12 + 5 + ratio*travel + m.ThumbLen/2
+		return vy + 17 + ratio*travel + m.ThumbLen/2
 	}
 	// Drag from sy=10 down by 30px: newSy follows the cursor 1:1.
 	start := 10.0

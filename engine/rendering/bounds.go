@@ -79,7 +79,12 @@ func TransformRect(transform string, refW, refH, x, y, w, h float64) (float64, f
 			vals := splitSpaceComma(args)
 			if len(vals) >= 1 {
 				tx := parseTransformLen(vals[0], refW)
-				ty := tx
+				// ★ CSS Transforms L1 §2：单值 translate(tx) 的第二轴默认为 **0**
+				//（只有 scale() 是「缺省 = 第一个值」）。此处是**几何**路径
+				//（getBoundingClientRect / offsetTop 的变换后边界），写错会让
+				// 水平居中元素同时上移自身宽度的一半——实测 gou-ide 顶栏
+				// .tb-nav（translate(-50%)，宽 508）offsetTop=-254。
+				ty := 0.0
 				if len(vals) >= 2 {
 					ty = parseTransformLen(vals[1], refH)
 				}

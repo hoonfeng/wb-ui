@@ -763,11 +763,17 @@ func gridSizeTracks(states []gridTrackState, items []*gridItem, isCol bool, gap,
 			// remain at their flex base (0) even when no other track can
 			// grow, otherwise a 1fr column balloons to its text width and
 			// overflows the grid.
+			// ★ 固定 px 轨道同样不得被内容撑大（CSS Grid §11.5：固定尺寸轨道与
+			//   内容无关，item 超出轨道时应**溢出**而不是把轨道顶大）。此前只
+			//   排除 fr：`grid-template-rows:30px 1fr 22px` 里的 22px 行被 item
+			//   的显式 height:28px 顶成 28 → 1fr 少算 6px、row3 起点由 278 变
+			//   272（gou-ide 的 .app-root 行布局同源）。
 			share := extra / float64(sp.count)
 			for i := sp.start; i < sp.end; i++ {
-				if states[i].spec.typ != gridTrackFlex {
-					states[i].size += share
+				if states[i].spec.typ == gridTrackFlex || states[i].spec.typ == gridTrackFixed {
+					continue
 				}
+				states[i].size += share
 			}
 		} else {
 			share := extra / float64(len(grow))

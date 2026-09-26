@@ -111,7 +111,12 @@ func applyTransformOpsSized(canvas *graphics.Canvas, transform string, refW, ref
 			vals := splitSpaceComma(args)
 			if len(vals) >= 1 {
 				tx := parseTransformLen(vals[0], refW)
-				ty := tx // default: same as tx
+				// ★ CSS Transforms L1 §2：translate(tx) 的第二轴默认为 **0**
+				//（只有 scale()/scale3d 才是「缺省 = 第一个值」）。此前写成
+				// ty := tx，把水平位移串到了垂直方向：gou-ide 顶栏导航
+				// .tb-nav（translate(-50%) 居中，宽 508）因此被上移 254px
+				// 整组跑到视口外——实测 offsetTop=-254，与 508/2 完全吻合。
+				ty := 0.0 // default: 0（CSS Transforms L1）
 				if len(vals) >= 2 {
 					ty = parseTransformLen(vals[1], refH)
 				}
@@ -471,7 +476,9 @@ func hitInverseTransform(transform string, refW, refH, x, y float64) (float64, f
 			vals := splitSpaceComma(args)
 			if len(vals) >= 1 {
 				tx := parseTransformLen(vals[0], refW)
-				ty := tx
+				// ★ CSS Transforms L1 §2：单值 translate(tx) 的第二轴默认为 0
+				//（同 bounds.go 的同源缺陷，二者必须一致）。
+				ty := 0.0
 				if len(vals) >= 2 {
 					ty = parseTransformLen(vals[1], refH)
 				}

@@ -73,7 +73,7 @@ func TestScrollbarResidentNoHover(t *testing.T) {
 		t.Fatalf("scroll box not found")
 	}
 	pb := sbox.PaddingBoxRect()
-	hy := pb.Y + pb.Height - 12
+	hy := pb.Y + pb.Height - 17 // 平台经典滚动条宽 17px（Chromium/Windows 实测）
 	if hy < 1 {
 		hy = 1
 	}
@@ -92,6 +92,14 @@ func TestScrollbarResidentNoHover(t *testing.T) {
 
 // TestScrollbarThumbNotCoverRightArrow: at maximum scroll the thumb's right
 // edge stays left of the right-arrow button, so the arrow remains visible.
+//
+// ★ 2026-09-26 改写：自绘滚动条（15px）的箭头三角与 thumb **同色**
+// （有头 Edge 实测 #414B64 —— 箭头跟随 scrollbar-color 的 thumb 色），原先
+// 「thumb 是 #A0A0A0、箭头是 #606060，用颜色区分」的像素断言已失去意义。
+// 改为两层断言：
+//  1. 几何：滚到底时 thumb 右缘恰好贴住右箭头按钮左缘（不越界）；
+//  2. 像素：右箭头按钮中心列在按钮中心行与按钮顶行的像素不同 ——
+//     即三角确实被画出来（顶行是纯轨道色，中心行有三角）。
 func TestScrollbarThumbNotCoverRightArrow(t *testing.T) {
 	canvas, sbox, _ := helperRenderHSTextarea(t, "auto", strings.Repeat("ab", 60), 60, 60)
 	defer canvas.Release()
@@ -106,20 +114,35 @@ func TestScrollbarThumbNotCoverRightArrow(t *testing.T) {
 	} else {
 		t.Fatalf("scroll box has no element")
 	}
+	rv := sbox.View()
+	scrollW := style.ScrollbarWidth(sbox.Style())
 
+	// ── 1) 几何：滚到底时 thumb 右缘 = 右箭头按钮左缘 ──
+	m := HorizontalScrollbarMetrics(rv, sbox)
+	if !m.OK {
+		t.Fatalf("expected horizontal scrollbar metrics for overflowing textarea")
+	}
+	thumbRight := pb.X + scrollW + (m.TrackLen - m.ThumbLen) + m.ThumbLen
+	arrowLeft := pb.X + pb.Width - scrollW
+	if thumbRight > arrowLeft+0.5 {
+		t.Fatalf("滚到底时 thumb 右缘 %.1f 覆盖右箭头按钮（按钮左缘 %.1f）", thumbRight, arrowLeft)
+	}
+
+	// ── 2) 像素：右箭头按钮内确实画出了三角 ──
 	canvas2 := graphics.NewCanvas(260, 160)
-	Paint(sbox.View(), canvas2, Rect{X: 0, Y: 0, Width: 260, Height: 160})
+	Paint(rv, canvas2, Rect{X: 0, Y: 0, Width: 260, Height: 160})
 	defer canvas2.Release()
-
-	// Right-arrow zone: last 12px of the track. Track y = pb bottom - 12.
-	hy := int(pb.Y + pb.Height - 12)
-	// Thumb grey is #A0A0A0 (R=160); the arrow triangle is #606060 (R=96)
-	// and the track is white. A thumb covering the arrow shows R≈160.
-	for x := int(pb.X+pb.Width-12) - 6; x < int(pb.X+pb.Width)-1; x++ {
-		px := canvas2.PixelAt(x, hy+3)
-		if px.R >= 140 && px.R <= 185 && px.G >= 140 && px.G <= 185 {
-			t.Fatalf("thumb pixel (%d,%d) = %+v — thumb covers the right arrow", x, hy+3, px)
-		}
+	hy := int(pb.Y + pb.Height - scrollW)
+	// 三角中心 = 「箭头按钮 + gap」区间中点（有头 Edge 实测距轨道端 8.8px，
+	// 即 (15+3)/2 = 9，而不是按钮内居中的 7.5）。
+	const sbGap = 3.0
+	mid := int((scrollW + sbGap) / 2)
+	btnCenterX := int(pb.X+pb.Width) - mid
+	centerRow := canvas2.PixelAt(btnCenterX, hy+mid)
+	topRow := canvas2.PixelAt(btnCenterX, hy+1)
+	if centerRow == topRow {
+		t.Fatalf("右箭头按钮中心列 x=%d：中心行像素 %+v 与顶行 %+v 相同 —— 箭头三角未画出（或按钮几何错位）",
+			btnCenterX, centerRow, topRow)
 	}
 }
 
