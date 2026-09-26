@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -372,6 +374,11 @@ func (f *Frame) MarkRenderTreeDirty() {
 	if f.needsRenderTreeRebuild {
 		return
 	}
+	// ★ WB_TREE_DIRTY_TRACE=1：打印调用栈，定位「谁在每帧把渲染树置脏」。
+	// 用 0 alloc 的判定守住热路径（正常路径只多一次 getenv 命中缓存的分支）。
+	if os.Getenv("WB_TREE_DIRTY_TRACE") != "" {
+		log.Printf("[tree-dirty] 树脏被置位，调用栈：\n%s", debug.Stack())
+	}
 	f.needsRenderTreeRebuild = true
 	// 距上次 dirty 超过 burst 窗口 = 低频变更（交互/定时更新）：立即重建
 	//（cooldown=0）；窗口内 = 变更风暴（xterm 输出）→ 降频稀释。
@@ -654,6 +661,29 @@ func (f *Frame) extractAndAddStyles() {
 		}
 	}
 	Logf("extractAndAddStyles", "done: totalStyleSheets=%d linkCount=%d", len(f.styleSheets), linkCount)
+}
+
+// AddStyleSheetFromText 解析并接入一张外部样式表（运行时动态插入的
+// <link rel=stylesheet>）：宿主取回 CSS 文本后调用，语义与装配期 <link>
+// 完全一致（owner/href 都记进样式表，供 CSSOM 与 @import 基准使用）。
+//
+// 浏览器语义：样式表接入后必须重新匹配样式并重排——这里同时置渲染树与
+// 布局为脏，宿主下一帧即可看到新样式生效。
+func (f *Frame) AddStyleSheetFromText(owner dom.Node, href, cssText string) {
+	if f == nil || strings.TrimSpace(cssText) == "" {
+		return
+	}
+	sheet := css.NewCSSStyleSheetWithOwner(owner, href)
+	p := css.NewParser(cssText)
+	p.ParseStyleSheetInto(sheet)
+	f.resolver.AddStyleSheet(sheet)
+	f.styleSheets = append(f.styleSheets, sheet)
+	if f.renderView != nil {
+		f.renderView.MarkAllDirty()
+	}
+	if f.view != nil {
+		f.view.SetNeedsLayout(true)
+	}
 }
 
 // frameStyleSheetClient implements CachedResourceClient to handle the

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"wb-ui/engine/js/bindings"
 	"wb-ui/bridge"
 	"wb-ui/engine/dom"
 	"wb-ui/engine/js/jsc"
@@ -83,6 +82,16 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 						body = strings.NewReader(jscToString(b))
 					}
 					if h, ok := o.GetByKey("headers"); ok && h.IsObject() {
+					// ★ AbortSignal 支持（AbortController.signal）：引擎 fetch 是同步实现，
+					//   无法中途取消，但**已中止**的信号必须立即拒绝（调用方 opts.signal
+					//   级联取消 / AbortSignal.abort() 场景），否则请求照发、语义错。
+					if sg, ok := o.GetByKey("signal"); ok && sg.IsObject() {
+						if so := sg.AsObject(); so != nil {
+							if ab, ok2 := so.GetByKey("aborted"); ok2 && ab.ToBoolean() {
+								return rejectPromise(in, fmt.Errorf("fetch: request aborted"))
+							}
+						}
+					}
 						hObj := h.AsObject()
 						if hObj != nil {
 						for _, key := range hObj.Keys() {
@@ -122,11 +131,25 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		}, 0)
 		respObj.Set("text", jsc.FunctionValue(textFn))
 		jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			val, err := in2.Run(bodyText)
-			if err != nil {
+			// ★ 与 bridgeFetch 同一实现：Go 侧 encoding/json 解析 → ToJSValue
+			//   直转 JS 对象/数组。绝不能用 Run/RunJS 把响应体当 JS 代码执行：
+			//   JSON 文本 {"rev":…} 处于语句位置会被读成「块 + 标签语句」→
+			//   SyntaxError: Unexpected token :（实测 /api/ui-boot 即死于此）；
+			//   即便写成表达式（[…]），旧代码还会用 fmt.Sprintf("%v") 把结果
+			//   转成**字符串**返回 —— 调用方 `await res.json()` 拿到字符串而非
+			//   对象/数组，前端装配链路（gou-ide：/api/ui-boot → 区域包 client
+			//   半装载）整条断掉，槽位全部空态占位。
+			var parsed any
+			if err := json.Unmarshal([]byte(bodyText), &parsed); err != nil {
 				return rejectPromise(in2, fmt.Errorf("fetch: json parse failed: %w", err))
 			}
-			return resolvePromise(in2, jsc.StringValue(fmt.Sprintf("%v", val)))
+			// ★ 必须在**当前解释器**里构造：bindings.ToJSValue 内部走
+			//   jsc.NewObject(nil)，proto 为 nil 时会新建一个独立 goja runtime，
+			//   返回的对象属于另一个 runtime → goja 抛
+			//   "Illegal runtime transition of an Object"。解释器自带的 ValueOf
+			//   用本 runtime 的 vm.NewObject/NewArray 构造，且覆盖 json.Unmarshal
+			//   的全部产出类型（nil/bool/float64/string/[]any/map[string]any）。
+			return resolvePromise(in2, in2.ValueOf(parsed))
 		}, 0)
 		respObj.Set("json", jsc.FunctionValue(jsonFn))
 		headersObj := jsc.NewObject(in.ObjectPrototype())
@@ -402,7 +425,10 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 		if err := json.Unmarshal([]byte(bodyText), &parsed); err != nil {
 			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
 		}
-		return resolvePromise(in2, bindings.ToJSValue(parsed))
+		// ★ 用当前解释器的 ValueOf，不要 bindings.ToJSValue：后者经
+		//   jsc.NewObject(nil) 会新建独立 runtime，对象跨 runtime 使用即抛
+		//   "Illegal runtime transition of an Object"（与真实 HTTP 分支同因）。
+		return resolvePromise(in2, in2.ValueOf(parsed))
 	}, 0)
 	respObj.Set("json", jsc.FunctionValue(jsonFn))
 

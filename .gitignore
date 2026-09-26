@@ -62,3 +62,14 @@ __pycache__/
 
 # 依赖与构建产物（探针/夹具的 npm 依赖）
 **/node_modules/
+
+# 探针运行产物与依赖锁文件
+/dev/**/out/
+/dev/output/
+**/package-lock.json
+**/Cargo.lock
+
+# 探针构建产物
+/dev/probes/**/dist/
+/dev/probes/**/target/
+*.log
