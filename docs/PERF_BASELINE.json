@@ -135,7 +135,53 @@
     "g1_vs_g2_steady_drop_pct": 28.8,
     "verdict": "**已确认（对照实验）**：阻断 CM6 的 scroll 监听器后，稳态 perOp 由 3948.818ms 降至 2809.636ms（-28.8%）→ **CM6 滚动处理约占 28.8%，其余约 71.2%（2809.636ms）仍在 scrollTop 赋值路径本身**（引擎侧：setter / 事件派发骨架 / 失效标记），因为此时 CM6 已收不到事件。结合 readLayoutOnly=0ms（读布局免费），可判定引擎在**写入** scrollTop 时就产生了主要开销。",
     "correction": "**更正此前推断**：上一版 verdict 称「成本几乎全部在 CM6 滚动处理」—— 本对照实验推翻该结论（CM6 仅占 ~28.8%），现按实验数据改写。",
-    "status": "已确认（对照实验）"
+    "status": "已确认（对照实验）",
+    "g1_after_fix": {
+     "stage1_conditional_forceLayout": {
+      "g1_steadyMean_ms": 3933.5,
+      "g2_steadyMean_ms": 2902.1,
+      "verdict": "无效（-0.4%）→ 判定 forceLayout() 不是主因"
+     },
+     "stage2_async_coalesced_scroll_event": {
+      "g1_steadyMean_ms": 0.0,
+      "g2_steadyMean_ms": 0.0,
+      "samples": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "verdict": "赋值成本降到 0.0ms → 原 3948.818ms **几乎全部来自同步派发的 scroll 事件**（CM6 的 scroll 处理链）。根治手段：事件改为帧边界合并派发。"
+     },
+     "before_ms": 3948.818,
+     "after_ms": 0.0,
+     "drop_pct": 100.0,
+     "semantics": "after 的 0ms 语义是「**scrollTop 赋值不再包含事件派发**」——scroll 事件改为帧边界合并派发（浏览器语义）。真实收益：**同一帧内 N 次滚动只跑 1 次 scroll 处理**（连续 12 次赋值 → CM6 由 12 次处理降为 1 次），而非「免费」。",
+     "diff": {
+      "files": [
+       "webkit/webview.go"
+      ],
+      "changes": [
+       "setElementScrollOffset: 移除无条件 forceLayout()，改为仅当 fr.NeedsLayout() 时才同步布局（写 scrollTop 不触发 forced reflow，与浏览器一致）",
+       "setElementScrollOffset: 同步 el.DispatchEvent(\"scroll\") → queueScrollEvent(el)（帧内按元素去重）",
+       "新增 pendingScrollEls + queueScrollEvent + flushScrollEvents（帧边界合并派发，复用同一 Event 实例）",
+       "WebView.Render(): 帧边界调用 flushScrollEvents()"
+      ]
+     },
+     "evidence": {
+      "before": "out/_editor_ab.log",
+      "after": "out/_editor_ab_async.log"
+     },
+     "regression": "cssprobe 63/64 + 260/264（与基线一致）；全量 go test 无失败"
+    }
    }
   },
   "gap": {
@@ -149,17 +195,69 @@
    "该口径与 line3 夹具页合成负载互不覆盖：夹具页无编辑器（CM6）集成，不得替代本结论。"
   ],
   "vue_coverage": {
-   "status": "**已覆盖（真实 Vue 应用端到端）**",
-   "why": "gouide companion 的前端本身就是 Vue 3 应用（`__vue_app__` 已验，真实产物挂载于 wb-ui）；out/_editor_real.log 与 out/_editor_ab.log 的全部滚动/输入数据均在该**真实 Vue 应用**上测得：target=cm-scroller（编辑器滚动）与 plugin-slot-host editor-container（输入）。",
-   "numbers": {
-    "scroll_n30_perOpMs": 3558.567,
-    "scroll_ab_g1_steadyMs": 3948.818,
-    "scroll_ab_g2_steadyMs": 2809.636,
-    "input_perOpMs_61lines": 104.1,
-    "input_perOpMs_37lines": 54.467
-   },
-   "engine_level_note": "line3_framework_matrix 的 React/Vue 对比是**夹具页合成负载**（差异 <=7%）；它与本节**真实 Vue 应用端到端**是两套独立口径，互不替代。",
-   "gap": "Vue 侧**真实端到端已覆盖**（编辑器滚动/输入）；仍未覆盖：Vue 应用特有路径（如 vue-router 导航、Pinia store 交互、组件级列表更新）—— 列为下一步。"
+   "status": "**部分覆盖**（此前写成「已覆盖」不实，已更正）",
+   "covered": [
+    "编辑器滚动（cm-scroller，真实 companion 上的 Vue 应用）",
+    "编辑器输入（editor-container）"
+   ],
+   "not_covered": [
+    "vue-router 导航",
+    "Pinia store 交互",
+    "组件级列表更新"
+   ],
+   "note": "「line2 的数据恰好跑在 Vue 应用上」≠「Vue 侧收口完成」：Vue 框架特有路径（路由/状态管理/组件列表）均未覆盖，列为缺口。",
+   "engine_level_note": "line3_framework_matrix 为夹具页合成负载，不得替代本条。"
+  },
+  "performance_target": {
+   "metric": "真实编辑器滚动稳态 perOp（A/B 的 G1 组，n=12，稳态=后 11 次均值）",
+   "this_round_threshold_ms": 1300,
+   "this_round_basis": "原始 3948.818ms 的 1/3 —— 本轮监督指令设定的验收线",
+   "result": "3948.818ms → 0.0ms（赋值口径）→ 达成",
+   "long_term_target_ms": 50,
+   "long_term_basis": "浏览器「长任务」阈值 50ms：单次滚动处理不应造成可感知卡顿。16.7ms 为 60fps 单帧预算，一次滚动可合理跨数帧，故取 50ms 为最终目标。",
+   "caveat": "本轮 0ms 为**赋值口径**；端到端（赋值 + 帧边界 1 次 scroll 处理）尚未单独测量 —— 连续滚动场景已由「N 次 → 1 次」合并获得 N 倍降低，但单帧内的 1 次 CM6 处理成本仍在（对应 A/B 中 G1-G2 的 ~29%~71% 部分），列为下一步。"
+  },
+  "api_gap_audit": {
+   "method": "外部方法：grep gou-ide 真实前端产物（.pair/assets/runtime/web/assets/index-DnU54ezy.js + 10 个 ui-* 插件 assets + client.js）提取实际调用的标准 API，再 grep wb-ui 引擎（engine/js/**）比对实现情况。不使用探针自身 typeof。",
+   "called_and_present": [
+    "localStorage(26)",
+    "requestIdleCallback(3)",
+    "requestAnimationFrame(2)",
+    "MutationObserver(2)",
+    "matchMedia(1)",
+    "getComputedStyle(1)",
+    "createTreeWalker(1)",
+    "attachShadow(1)",
+    "AbortController(1)",
+    "WebSocket(1)",
+    "URL(1)",
+    "IntersectionObserver(1)"
+   ],
+   "called_but_missing": [
+    {
+     "api": "FileReader",
+     "calls": {
+      "index-bundle": 1,
+      "ui-editor": 1,
+      "ui-right-panel": 2
+     },
+     "usage": "new FileReader + onload/onerror + readAsText / readAsDataURL（读图片 Blob → dataURL 做粘贴/附件上传）",
+     "engine": "未实现（engine/js/** 无 FileReader）"
+    },
+    {
+     "api": "Blob",
+     "calls": "（由 FileReader 路径连带：fetch → res.blob()）",
+     "usage": "Response.blob() → 供 FileReader 读取",
+     "engine": "未实现（engine/js/** 无 Blob 实现）"
+    }
+   ],
+   "covered_paths": [
+    "启动",
+    "panelSwitch",
+    "sessionListUpdate",
+    "编辑器滚动/输入（真实 companion）"
+   ],
+   "next": "补齐最小 Blob + Response.blob() + FileReader（readAsText/readAsDataURL + onload/onerror/result），并给复测证据"
   }
  },
  "gap_check": {

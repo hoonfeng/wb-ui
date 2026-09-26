@@ -1377,9 +1377,53 @@ func (wv *WebView) FlushFrameBoundaryResources() {
 	wv.flushDynamicScripts()
 }
 
+// pendingScrollEls 收集**本帧内**被赋值的滚动容器（按元素去重），在帧边界统一派发。
+//
+// 浏览器语义：scroll 事件是**异步**的 —— 同一轮内对同一容器多次改 scrollTop，
+// 只派发**一次** scroll（高频滚动在派发前被合并）。此前引擎在 setElementScrollOffset
+// 里**同步**派发：连续滚动（CodeMirror 6 的程序化滚动 / 滚动条拖动回写 / scrollIntoView）
+// 每赋值一次就跑一遍全部 scroll 监听器（CM6 的 scroll 处理 → requestMeasure → viewport
+// 重算 → gutter 虚拟化重渲染），真实编辑器实测稳态 3948.818ms/op（A/B 对照实验 G1）。
+var (
+	pendingScrollMu  sync.Mutex
+	pendingScrollEls = map[*dom.Element]struct{}{}
+)
+
+// queueScrollEvent 把元素加入本帧待派发集合（O(1)，按元素去重）。
+func queueScrollEvent(el *dom.Element) {
+	if el == nil {
+		return
+	}
+	pendingScrollMu.Lock()
+	pendingScrollEls[el] = struct{}{}
+	pendingScrollMu.Unlock()
+}
+
+// flushScrollEvents 在帧边界派发去重后的 scroll 事件：同一元素**每帧最多一次**，
+// 且所有元素复用同一个 Event 实例（与浏览器一致：一次滚动一个事件对象）。
+func flushScrollEvents() {
+	pendingScrollMu.Lock()
+	if len(pendingScrollEls) == 0 {
+		pendingScrollMu.Unlock()
+		return
+	}
+	els := make([]*dom.Element, 0, len(pendingScrollEls))
+	for el := range pendingScrollEls {
+		els = append(els, el)
+	}
+	pendingScrollEls = map[*dom.Element]struct{}{}
+	pendingScrollMu.Unlock()
+	ev := dom.NewEvent("scroll", false, false, false)
+	for _, el := range els {
+		el.DispatchEvent(ev)
+	}
+}
+
 func (wv *WebView) Render() ([]byte, error) {
 	// 帧边界：执行本帧之前排队的动态 <script src>（JS 栈之外，见 handleDynamicScript）。
 	wv.flushDynamicScripts()
+	// 帧边界：派发本帧内合并（按元素去重）后的 scroll 事件 —— 浏览器语义（异步 + 合并）。
+	flushScrollEvents()
 	if wv.destroyed || wv.page == nil || wv.mainFrame == nil {
 		return nil, ErrDestroyed
 	}
@@ -1698,7 +1742,19 @@ func (wv *WebView) injectRenderTreeBridge() {
 		})
 	}
 	wvBridgeOf(wv).setElementScrollOffset = func(el *dom.Element, x, y float64) {
-		forceLayout()
+		// ★ 滚动赋值是**纯几何操作**：只有当确有「待处理的布局 / 渲染树变更」时才同步布局。
+		// 浏览器与此一致 —— 写 scrollTop/scrollLeft 不触发 forced reflow，只有**读**几何
+		// 属性（scrollHeight / offsetHeight 等）才强制布局。
+		//
+		// 此前此处无条件调用 forceLayout()（RebuildRenderTreeIfNeeded + EnsureLayout 全量
+		// 重建+布局），使连续滚动（CodeMirror 6 的 scroll 监听驱动的程序化滚动、滚动条拖动
+		// 回写、scrollIntoView 等）**每一次赋值都做一次全量布局**。真实编辑器实测：
+		// 稳态 3948.818ms/op（见 docs/PERF_BASELINE.md 的 A/B 对照实验 G1）。
+		// 布局未脏时跳过，几何沿用当前值（ScrollRange 的 clamp 用当前几何，语义不变）。
+		if fr := wv.mainFrame.Frame(); fr != nil && fr.NeedsLayout() {
+			fr.RebuildRenderTreeIfNeeded()
+			wv.EnsureLayout()
+		}
 		rv := wv.RenderView()
 		box := func() *rendering.RenderBox {
 			if rv == nil || el == nil {
@@ -1747,7 +1803,11 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 设置值/CM6 自动滚动）后行号不刷新——用户「滚动该绘制的行号
 		// 不显示，仍裁切」的直接根因。
 		if el != nil {
-			el.DispatchEvent(dom.NewEvent("scroll", false, false, false))
+			// ★ 2026-09 改为**异步 + 帧内合并**派发（浏览器语义）：同一帧内多次赋值只派发
+			// 一次 scroll，避免连续滚动把全部 scroll 监听器（CM6 的 scroll → requestMeasure
+			// → viewport 重算）跑 N 遍 —— 真实编辑器实测稳态 3948.818ms/op（A/B 对照 G1），
+			// 同步派发是其中主要成本。语义不变：滚动后仍会派发，只是延到帧边界且去重。
+			queueScrollEvent(el)
 		}
 	}
 	installBridgeDispatch()
