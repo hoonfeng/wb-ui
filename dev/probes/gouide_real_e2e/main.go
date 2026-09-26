@@ -444,6 +444,10 @@ const jsCollect = `(function () {
 
 // ─── WebView 驱动 ─────────────────────────────────────────────────────────
 
+// perfOneResult 保存 -interaction 单交互模式的结果，并写入报告 JSON ——
+// 保证每个性能数字都能在 out/ 下追溯到落盘产物（而非只存在于 stdout）。
+var perfOneResult string
+
 func pumpFrame(wv *webkit.WebView) {
 	if el := wv.JSInterpreter().GetEventLoop(); el != nil {
 		el.ProcessTasks(0)
@@ -581,11 +585,17 @@ func main() {
 		} else {
 			fmt.Printf("[perf] 交互执行：%s\n", s)
 		}
+		// 驱动若干帧：让交互引发的异步链（promise / 微任务 / 定时器 / 网络回调）
+		// 有机会推进，随后读回的 promise 状态才是最终态（pending 即「永不结算」的硬证据）。
+		for i := 0; i < 60; i++ {
+			pumpFrame(wv)
+		}
 		if pf != nil {
 			pprof.StopCPUProfile()
 			_ = pf.Close()
 		}
 		if oneRaw, oerr := evalStr(wv, `JSON.stringify(window.__perfOne || null)`); oerr == nil {
+			perfOneResult = oneRaw
 			fmt.Printf("[perf] 单交互结果 %s\n", oneRaw)
 		}
 	}
@@ -666,15 +676,16 @@ func main() {
 			"interactionHarnessMs":    perfHarnessMs,
 			"interactions":            perfWrap,
 		},
-		"acceptance": acceptance,
-		"dom":        coll,
+		"acceptance":     acceptance,
+		"oneInteraction": perfOneResult,
+		"dom":            coll,
 		"serverStubs": map[string]any{
 			"uiBootEntries": len(boot.Entries),
 			"uiBootGraph":   boot,
 			"skipped":       bootNotes,
 		},
 		"http": map[string]any{
-			"ok": rl.ok, "miss": rl.miss, "missing": missingPaths,
+			"ok": rl.ok, "miss": rl.miss, "missing": missingPaths, "all": rl.items,
 		},
 		"console": consoleOut,
 		"screenshot": map[string]any{
@@ -894,13 +905,185 @@ func jsPerfOne(name string, iters int) string {
     if (!items.length) { return 'ERR:no-items'; }
     pick = function (i) { return items[i % items.length]; };
   } else {
-    if (name === 'editorScrollSeeded') {
+    if (name === 'sessionListSplit') {
+      // B-1：同一序列内分解「首交互 1 次」与「稳态 N 次」——
+      // 首交互含首次点击触发的完整重建（预热效应），稳态则不含。
+      host = document.querySelector('.plugin-area-conversation') || document.querySelector('.conversation-container');
+      if (!host) { return 'ERR:no-conversation'; }
+      var itemsS = host.querySelectorAll('button, [role="button"], [class*="item"], [class*="session"], [class*="row"], li');
+      if (!itemsS.length) { return 'ERR:no-items'; }
+      var tF = now();
+      click(itemsS[0]); void host.offsetHeight;
+      var firstMs = now() - tF;
+      var tS = now();
+      for (var si = 1; si <= iters; si++) { click(itemsS[si % itemsS.length]); void host.offsetHeight; }
+      var steadyTotal = now() - tS;
+      window.__perfOne = { name: name, candidates: itemsS.length,
+                           firstMs: +firstMs.toFixed(3),
+                           steadyIters: iters, steadyTotalMs: +steadyTotal.toFixed(2),
+                           steadyPerOpMs: +(steadyTotal / iters).toFixed(3) };
+      return 'done';
+    } else if (name === 'editorInput') {
+      // C：输入路径（等价负载）—— 向注入的文档节点写 textContent + 强制布局，
+      // 语义等同「编辑器每敲一键触发文本变更 → 重排」。
+      var edhI = document.querySelector('.plugin-area-editor') || document.querySelector('.editor-container');
+      var targetI = '';
+      if (edhI && edhI.clientHeight > 24) { host = edhI; targetI = 'editor-container(active)'; }
+      if (!host) {
+        var allI = document.getElementsByTagName('*'), bestI = null;
+        for (var qi = 0; qi < allI.length; qi++) {
+          var eqi = allI[qi];
+          if (eqi.scrollHeight > eqi.clientHeight + 8 && eqi.clientHeight > 24) {
+            if (!bestI || (eqi.scrollHeight - eqi.clientHeight) > (bestI.scrollHeight - bestI.clientHeight)) { bestI = eqi; }
+          }
+        }
+        host = bestI; targetI = bestI ? ('real-scrollable:' + String(bestI.className || '').slice(0, 40)) : '';
+      }
+      // 兜底：单独跑本交互时页面上可能没有任何可滚动容器（market-panel 只有点击后才出现），
+      // 此时挂到 body（自带尺寸）—— 保证测量不依赖面板状态。
+      if (!host) { host = document.body; targetI = 'body(fallback)'; }
+      var docI = document.createElement('div');
+      docI.className = 'code seeded-doc';
+      docI.style.height = '200px';
+      docI.style.overflow = 'auto';
+      var lineI = document.createElement('div');
+      lineI.className = 'line';
+      var spI = document.createElement('span');
+      spI.className = 't-ident';
+      spI.textContent = 'init';
+      lineI.appendChild(spI);
+      docI.appendChild(lineI);
+      host.appendChild(docI);
+      var opI = mesure(iters, function (i) {
+        spI.textContent = 'const v' + i + ' = ' + ((i * 7919) % 9973) + ';';
+        void docI.offsetHeight;
+      });
+      window.__perfOne = { name: name, target: targetI, seeded: true, op: opI,
+                           note: '输入路径等价负载：写 textContent + 强制布局' };
+      return 'done';
+    } else if (name === 'modalOpen') {
+      // C：命令面板/模态打开路径 —— 点 titlebar 菜单按钮（打开下拉/模态）+ 强制布局。
+      var tbM = document.querySelector('.plugin-area-titlebar');
+      var btnsM = tbM ? tbM.querySelectorAll('button') : [];
+      if (!btnsM.length) { return 'ERR:no-titlebar-buttons'; }
+      var hostM = document.querySelector('.plugin-area-modals') || document.querySelector('.modals-host') || tbM;
+      click(btnsM[0]); void hostM.offsetHeight;
+      var opM = mesure(iters, function (i) { click(btnsM[i % btnsM.length]); void hostM.offsetHeight; });
+      window.__perfOne = { name: name, candidates: btnsM.length, op: opM,
+                           modalInnerLen: (hostM.innerHTML || '').length };
+      return 'done';
+    } else if (name === 'editorActivate') {
+      // 驱动真实「打开文件」链路的第一步：调用壳的 loadFileTree（coreActions），
+      // 由它去请求后端文件列表 → 文件树出现条目 → 后续点击条目打开文件。
+      var rA = { steps: [], err: null, tree: null, opened: null };
+      try {
+        var C3 = window.__PAIRCODE_CORE;
+        if (C3 && C3.actions && typeof C3.actions.loadFileTree === 'function') {
+          // 跟踪 promise 最终状态（对象引用 → 后续读回可拿到已更新的 state）。
+          // 这是「打开文件链路是否可达」的**硬证据**：pending=永不结算（依赖未接通的通道）、
+          // rejected=精确报错、resolved=拿到了数据。
+          // 三步链：① 读工作区列表 → ② 切换工作区 → ③ 加载文件树。
+          // 每步记录**精确返回值**（这是「链路是否可达」的硬证据，替代推断）。
+          var stA = { state: 'pending', tries: [] };
+          var WS = 'F:/syproject/gou-ide';
+          try {
+            if (typeof C3.actions.loadWsList === 'function') {
+              try {
+                var r1 = C3.actions.loadWsList();
+                stA.tries.push('loadWsList → ' + ((r1 && typeof r1.then === 'function') ? 'promise' : String(r1).slice(0, 80)));
+              } catch (e) { stA.tries.push('loadWsList threw:' + String((e && e.message) || e)); }
+            } else { stA.tries.push('no loadWsList'); }
+            if (typeof C3.actions.switchWorkspace === 'function') {
+              try {
+                var r2 = C3.actions.switchWorkspace(WS);
+                stA.tries.push('switchWorkspace(' + WS + ') → ' + ((r2 && typeof r2.then === 'function') ? 'promise' : String(r2).slice(0, 80)));
+              } catch (e) { stA.tries.push('switchWorkspace threw:' + String((e && e.message) || e)); }
+            } else { stA.tries.push('no switchWorkspace'); }
+            var pr = C3.actions.loadFileTree(WS);
+            if (pr && typeof pr.then === 'function') {
+              stA.tries.push('loadFileTree(' + WS + ') → promise');
+              pr.then(function (v) {
+                stA.state = 'resolved:' + String(JSON.stringify(v)).slice(0, 300);
+                stA.tries.push('loadFileTree resolved');
+              }, function (e) {
+                stA.state = 'rejected:' + String((e && (e.stack || e.message)) || e);
+                stA.tries.push('loadFileTree rejected');
+              });
+            } else { stA.tries.push('loadFileTree → ' + typeof pr); stA.state = 'not-promise'; }
+          } catch (e) { stA.state = 'throw:' + String((e && e.stack) || e); }
+          rA.promise = stA;
+        } else {
+          rA.steps.push('no loadFileTree action');
+        }
+      } catch (e) { rA.err = String((e && e.stack) || e); }
+      var tl = document.querySelector('.plugin-area-sidebar') || document.querySelector('.explorer');
+      rA.tree = tl ? { cls: String(tl.className), innerLen: (tl.innerHTML || '').length,
+                       text: ((tl.textContent || '').replace(/\s+/g, ' ')).trim().slice(0, 160) } : null;
+      window.__perfOne = { name: name, r: rA };
+      return 'done';
+    } else if (name === 'editorProbe') {
+      // 编辑器激活入口探测（证据驱动，先探清可调用面再动手）：
+      //   ① 可用全局与 __PAIRCODE_CORE 的 actions/api（含 fs）
+      //   ② 编辑器容器的真实尺寸（clientH/scrollH —— 判定面板是否已激活可见）
+      //   ③ Vue 组件链的 setupState/ctx 键名（定位 openFiles/fileContents/activeFile）
+      // prod 构建下 el.__vueParentComponent 可能不存在，故同时尝试 el.__vnode.component。
+      var r = { globals: {}, core: null, coreActions: null, coreApi: null, coreApiFs: null,
+                uiEditor: null, host: null, hasVueComp: false, vueChain: [], err: null };
+      try {
+        var gs = ['UiEditor', 'monaco', 'CodeMirror', 'cm', '__PAIRCODE_CORE', 'paircodeHost'];
+        for (var g = 0; g < gs.length; g++) { r.globals[gs[g]] = typeof window[gs[g]]; }
+        var CORE = window.__PAIRCODE_CORE;
+        if (CORE) {
+          r.core = Object.keys(CORE).slice(0, 40);
+          r.coreActions = (CORE.actions && typeof CORE.actions === 'object') ? Object.keys(CORE.actions).slice(0, 60) : null;
+          r.coreApi = (CORE.api && typeof CORE.api === 'object') ? Object.keys(CORE.api).slice(0, 60) : null;
+          if (CORE.api && CORE.api.fs && typeof CORE.api.fs === 'object') { r.coreApiFs = Object.keys(CORE.api.fs).slice(0, 30); }
+        }
+        if (window.UiEditor && typeof window.UiEditor === 'object') { r.uiEditor = Object.keys(window.UiEditor).slice(0, 60); }
+        var elE = document.querySelector('.editor-container') || document.querySelector('.plugin-area-editor');
+        if (elE) {
+          r.host = { cls: String(elE.className), innerLen: (elE.innerHTML || '').length,
+                     clientH: elE.clientHeight, scrollH: elE.scrollHeight, children: elE.children.length };
+          var vc = elE.__vueParentComponent || (elE.__vnode && elE.__vnode.component) || null;
+          r.hasVueComp = !!vc;
+          var cur = vc, depth = 0;
+          while (cur && depth < 10) {
+            r.vueChain.push({
+              d: depth,
+              name: (cur.type && (cur.type.name || cur.type.__name)) || '?',
+              setup: cur.setupState ? Object.keys(cur.setupState).slice(0, 30) : [],
+              ctx: cur.ctx ? Object.keys(cur.ctx).slice(0, 30) : []
+            });
+            cur = cur.parent; depth++;
+          }
+        }
+      } catch (e) { r.err = String((e && e.stack) || e); }
+      window.__perfOne = { name: name, probe: r };
+      return 'done';
+    } else if (name === 'editorScrollSeeded') {
       // 真实产物启动态未打开文件 → 编辑器为空（不可滚动，滚动性能是盲区）。
       // 这里注入**等价的长文档 DOM**（200 行，形态对齐 idepage 压测页代码视图：
       // .line + .ln + token span），使「长文档滚动 + 强制布局」路径可度量。
       // 标注 seeded=true —— 非真实 openFile 路径，是等价负载。
-      host = document.querySelector('.plugin-area-editor') || document.querySelector('.editor-container');
-      if (!host) { return 'ERR:no-editor-host'; }
+      // 目标容器选择（记录 target 以便追溯）：
+      //   ① 编辑器容器若已激活可见（clientHeight>24）→ 直接用它；
+      //   ② 否则回落到**页面真实可滚动容器**（如 market-panel）—— 保证 scrollH>0、
+      //      滚动是真实发生的（而非注入到高度为 0 的隐藏容器里）。
+      var edh = document.querySelector('.plugin-area-editor') || document.querySelector('.editor-container');
+      var target = '';
+      if (edh && edh.clientHeight > 24) { host = edh; target = 'editor-container(active)'; }
+      if (!host) {
+        var allQ = document.getElementsByTagName('*'), bestQ = null;
+        for (var q = 0; q < allQ.length; q++) {
+          var eq = allQ[q];
+          if (eq.scrollHeight > eq.clientHeight + 8 && eq.clientHeight > 24) {
+            if (!bestQ || (eq.scrollHeight - eq.clientHeight) > (bestQ.scrollHeight - bestQ.clientHeight)) { bestQ = eq; }
+          }
+        }
+        host = bestQ;
+        target = bestQ ? ('real-scrollable:' + String(bestQ.className || '').slice(0, 40)) : '';
+      }
+      if (!host) { host = document.body; target = 'body(fallback)'; }
       var doc = document.createElement('div');
       doc.className = 'code seeded-doc';
       doc.style.overflow = 'auto';
@@ -929,8 +1112,8 @@ func jsPerfOne(name string, iters int) string {
       var tot = now() - t0s;
       window.__perfOne = { name: name, iters: iters, totalMs: +tot.toFixed(2),
                            perOpMs: +(tot / iters).toFixed(3), scrollH: doc.scrollHeight,
-                           clientH: doc.clientHeight, seeded: true,
-                           note: '注入等价长文档（2000 行）—— 真实产物启动态无打开文件' };
+                           clientH: doc.clientHeight, seeded: true, target: target,
+                           note: '注入 200 行等价长文档到**真实可滚动容器**（编辑器未激活时的等价负载）；target 见字段' };
       return 'done';
     }
     return 'ERR:unknown-interaction:' + name;
