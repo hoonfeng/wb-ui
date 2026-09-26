@@ -19,7 +19,9 @@
   .tree-row:hover { background: #232833; }
   .tree-row.dir { color: #7fb0ff; }
   .ico { display: inline-block; width: 12px; color: #6b7484; }
-  .code { flex: 1 1 auto; overflow: auto; background: #14161a; padding: 4px 0;
+  /* min-height:0 是 flex 项能真正滚动的必要条件：默认 min-height:auto 时该项被内容撑开，
+     scrollTop 赋值无效 → __runScroll 空转（实测 scroll.acc=0、perOp 却非 0，属假指标）。 */
+  .code { flex: 1 1 auto; min-height: 0; overflow: auto; background: #14161a; padding: 4px 0;
     font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 16px; }
   .line { white-space: pre; height: 16px; }
   .ln { display: inline-block; width: 44px; text-align: right; padding-right: 10px; color: #4a5262; }

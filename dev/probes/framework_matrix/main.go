@@ -57,6 +57,7 @@ func jsStartSync(cfg stageCfg, isVue bool) string {
 		b.WriteString(`window.__runReflow(` + itoa(cfg.nReflow) + `);`)
 		b.WriteString(`window.__runStyleRecalc(` + itoa(cfg.nStyle) + `);`)
 		b.WriteString(`window.__runScroll(` + itoa(cfg.nScroll) + `);`)
+		b.WriteString(`if (window.__runInput) { window.__runInput(` + itoa(cfg.nScroll) + `); }`)
 		b.WriteString(`window.` + upd + `(` + itoa(cfg.nUpdate) + `);`)
 	}
 	b.WriteString(`return 'ok';}catch(e){window.__bench.fatal=String((e&&e.stack)||e);return 'err';}})()`)
@@ -66,6 +67,34 @@ func jsStartSync(cfg stageCfg, isVue bool) string {
 const jsReady = `(window.__bench && window.__bench.ready) ? 1 : 0`
 const jsUpdateDone = `(window.__bench && (window.__bench.reactUpdate || window.__bench.vueUpdate)) ? 1 : 0`
 const jsBench = `JSON.stringify(window.__bench)`
+
+// jsInjectInput 由探针注入「编辑器输入」等价基准（夹具页未内置该入口）：
+// 反复改写代码视图某行的文本节点 + 强制同步布局 —— 语义等同编辑器每敲一键触发的
+// 「文本变更 → 重排」。用于给出 editor 口径下的 input per-op（此前为 null）。
+const jsInjectInput = `(function () {
+  window.__runInput = function (n) {
+    var el = document.querySelector('.code');
+    if (!el) { return 'no-code'; }
+    var span = null;
+    var lines = el.querySelectorAll('.line');
+    for (var i = 0; i < lines.length && !span; i++) {
+      var cands = lines[i].querySelectorAll('span');
+      for (var j = 0; j < cands.length; j++) {
+        if (cands[j].className && String(cands[j].className).indexOf('ln') < 0) { span = cands[j]; break; }
+      }
+    }
+    if (!span) { return 'no-span'; }
+    var t0 = performance.now();
+    for (var k = 0; k < n; k++) {
+      span.textContent = 'const v' + k + ' = ' + ((k * 7919) % 9973) + ';';
+      void el.offsetHeight;
+    }
+    var t1 = performance.now();
+    window.__bench.editorInput = { n: n, totalMs: +(t1 - t0).toFixed(2), perOpUs: +(((t1 - t0) * 1000) / n).toFixed(2) };
+    return 'ok';
+  };
+  return 'injected';
+})()`
 const jsFatal = `(window.__bench && window.__bench.fatal) || ''`
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
@@ -244,6 +273,12 @@ func runStage(name string, isVue bool, cfg stageCfg) *runResult {
 		}
 	}
 
+	// 注入「编辑器输入」等价基准（夹具页未内置 __runInput；在基准启动前定义）
+	if s, ierr := evalStr(wv, jsInjectInput); ierr != nil {
+		fmt.Printf("[WARN] 输入基准注入失败：%v\n", ierr)
+	} else {
+		fmt.Printf("[ok] 输入基准：%s\n", s)
+	}
 	if _, err := evalStr(wv, jsStartSync(cfg, isVue)); err != nil {
 		fmt.Printf("[FAIL] %s 基准启动：%v\n", name, err)
 		return nil
