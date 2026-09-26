@@ -1,0 +1,44 @@
+--- 原始: F:\MyGolangPrograms\pkg\mod/rogchap.com/v8go@v0.9.0/cgo.go
++++ fork: _temp/v8spike/v8go-local/cgo.go
+--- "F:\\MyGolangPrograms\\pkg\\mod/rogchap.com/v8go@v0.9.0/cgo.go"	2026-09-27 03:12:16.576155700 +0800
++++ _temp/v8spike/v8go-local/cgo.go	2026-09-27 03:16:06.619696200 +0800
+@@ -6,8 +6,10 @@
+ 
+ //go:generate clang-format -i --verbose -style=Chromium v8go.h v8go.cc
+ 
+-// #cgo CXXFLAGS: -fno-rtti -fPIC -std=c++17 -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -I${SRCDIR}/deps/include -Wall -DV8_ENABLE_SANDBOX
+-// #cgo LDFLAGS: -pthread -lv8
++// #cgo !windows CXXFLAGS: -fno-rtti -fPIC -std=c++17 -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -I${SRCDIR}/deps/include -Wall -DV8_ENABLE_SANDBOX
++// #cgo !windows LDFLAGS: -pthread -lv8
++// #cgo windows CXXFLAGS: -fno-rtti -std=c++17 -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -DV8_ENABLE_SANDBOX -I${SRCDIR}/../../v8sdk/mingw64/include -Wall
++// #cgo windows LDFLAGS: -pthread -L${SRCDIR}/../../v8sdk/mingw64/lib -lv8 -lv8_libbase -lv8_libplatform
+ // #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/deps/darwin_x86_64
+ // #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/deps/darwin_arm64
+ // #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/deps/linux_x86_64 -ldl
+
+--- 原始: F:\MyGolangPrograms\pkg\mod/rogchap.com/v8go@v0.9.0/v8go.cc
++++ fork: _temp/v8spike/v8go-local/v8go.cc
+--- "F:\\MyGolangPrograms\\pkg\\mod/rogchap.com/v8go@v0.9.0/v8go.cc"	2026-09-27 03:12:19.244967200 +0800
++++ _temp/v8spike/v8go-local/v8go.cc	2026-09-27 03:15:22.306270600 +0800
+@@ -399,7 +399,9 @@
+   Local<Template> tmpl = tmpl_ptr->ptr.Get(iso);
+ 
+ void TemplateFreeWrapper(TemplatePtr tmpl) {
+-  tmpl->ptr.Empty();  // Just does `val_ = 0;` without calling V8::DisposeGlobal
++  // V8 >= 11.9 移除了 Persistent::Empty()（旧版仅执行 `val_ = 0;`，不调用
++  // V8::DisposeGlobal）。紧随其后的 delete 会析构 Persistent，其析构同样
++  // 不释放 handle，语义与旧版一致。
+   delete tmpl;
+ }
+ 
+@@ -1389,7 +1391,9 @@
+     return nullptr;
+   }
+ 
+-  Local<Value> result = obj->GetInternalField(idx);
++  // V8 >= 11.9 中 Object::GetInternalField 返回 Local<Data>（旧版为
++  // Local<Value>），需显式 Cast。
++  Local<Value> result = Local<Value>::Cast(obj->GetInternalField(idx));
+ 
+   m_value* new_val = new m_value;
+   new_val->id = 0;

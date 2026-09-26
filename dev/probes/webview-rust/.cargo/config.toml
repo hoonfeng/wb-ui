@@ -1,0 +1,13 @@
+# 判别实验专用：走 rsproxy.cn 镜像
+# 实测（2026-09-27）：crates.io 直连 2.7KB/s（20 分钟级）、rsproxy.cn 5MB/s
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli = true

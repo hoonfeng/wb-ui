@@ -257,6 +257,38 @@ func installBridgeDispatch() {
 			if b := wvBridgeOf(wv); b != nil && b.onNodeInserted != nil {
 				b.onNodeInserted(n)
 			}
+			// ★ 运行时动态插入的 <script src>（createElement("script") + src +
+			//   appendChild）：浏览器语义要求取回并执行、执行完派发 load（onload
+			//   回调）。gou-ide 的区域包 client 半全靠这个模式装载编译 bundle 并
+			//   注册槽位（见 /plugins-assets/ui-titlebar/client.js）——此前引擎只
+			//   处理装配期的 <script>，动态脚本永不执行 → 槽位表恒为空 → 桌面端
+			//   各区域停在「未装配」空态（实测 2026-09-25）。
+			if el, ok := n.(*dom.Element); ok && el.IsConnected() {
+				switch el.LocalName() {
+				case "script":
+					if src := el.GetAttribute("src"); src != "" {
+						wv.handleDynamicScript(el, src)
+					}
+				case "link":
+					if isStyleSheetLink(el) {
+						if href := el.GetAttribute("href"); href != "" {
+							wv.handleDynamicStylesheet(el, href)
+						}
+					}
+				}
+			}
+		}
+		// ★ <script src> 属性变化（已连接文档）：走同一条动态脚本装载路径。
+		bindings.ScriptSrcChanged = func(el *dom.Element, src string) {
+			if wv := webViewForNode(el); wv != nil {
+				wv.handleDynamicScript(el, src)
+			}
+		}
+		// ★ <link rel=stylesheet> 的 rel/href 变化（已连接文档）：同一条动态样式表路径。
+		bindings.StylesheetHrefChanged = func(el *dom.Element, href string) {
+			if wv := webViewForNode(el); wv != nil {
+				wv.handleDynamicStylesheet(el, href)
+			}
 		}
 		bindings.OnNodeRemoved = func(n dom.Node) {
 			wv := webViewForNode(n)
@@ -288,7 +320,7 @@ func installBridgeDispatch() {
 				b.iframeSrcChanged(el, src)
 			}
 		}
-		// window.innerWidth/innerHeight 按解释器归属分派（挂件 Resize
+				// window.innerWidth/innerHeight 按解释器归属分派（挂件 Resize
 		// 不再覆盖配置窗口的视口尺寸）。
 		bindings.ViewportSizeForInterpreter = func(in *jsc.Interpreter) (float64, float64, bool) {
 			wv := webViewForInterpreter(in)
@@ -379,6 +411,11 @@ type WebView struct {
 	// 窗口）喂入 HandleMouseButton/MouseMove/Wheel 获得浏览器标准交互
 	// （含 select 下拉弹层）。app.Host 场景仍走 Host 自身管线。
 	interact *Interaction
+	// dynScriptMu/dynScripts 是「运行时动态插入的 <script src>」待执行队列：
+	// appendChild 发生在 JS 执行栈内，goja 不允许在 native 调用栈内重入执行
+	// 脚本，故先入队、在帧边界（Render 开头）取回并执行。
+	dynScriptMu sync.Mutex
+	dynScripts  []dynScript
 
 	// formFocus 表单交互服务（惰性创建）：焦点管理/点击定位光标/文本
 	// 编辑/blur-Enter 提交 onchange。裸 WebView 宿主（configwin）此前
@@ -1329,7 +1366,20 @@ func (wv *WebView) onAsyncImageLoaded(url string) {
 	}
 }
 
+// FlushFrameBoundaryResources 在帧边界执行排队的动态资源（运行时插入的
+// <script src> 与 <link rel=stylesheet>）。
+//
+// WebView.Render() 内部已调用（headless / 探针路径）；但窗口渲染循环
+// （app.Host.Run）走 processEvents→EnsureLayout→Paint→Present，**不经过**
+// Render()，必须每帧显式调用一次，否则运行时插入的插件 client 半永不执行
+// （gou-ide 界面显示「标题栏未装配(ui-titlebar)」等降级占位符）。
+func (wv *WebView) FlushFrameBoundaryResources() {
+	wv.flushDynamicScripts()
+}
+
 func (wv *WebView) Render() ([]byte, error) {
+	// 帧边界：执行本帧之前排队的动态 <script src>（JS 栈之外，见 handleDynamicScript）。
+	wv.flushDynamicScripts()
 	if wv.destroyed || wv.page == nil || wv.mainFrame == nil {
 		return nil, ErrDestroyed
 	}
@@ -1929,6 +1979,11 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 向上找 overflow 滚动容器累加偏移。box 为 nil（inline 无 CSS box）
 		// 时退化为原 DOM 链兜底（Range 文本测量等场景 box 存在，此处
 		// 主要服务元素几何）。
+		// ★ 祖先链上的 transform：子元素的**视觉**矩形必须累计祖先的变换
+		// （绘制端 applyTransformOpsSized 沿祖先链压栈，几何端此前只看自身
+		// 元素 → 两者不一致）。并行切片记录 transform 串 + 参考尺寸 + 布局位置。
+		var trT []string
+		var trW, trH, trX, trY []float64
 		anc := rendering.RenderObject(nil)
 		if box != nil {
 			anc = rendering.RenderObject(box)
@@ -1942,6 +1997,14 @@ func (wv *WebView) injectRenderTreeBridge() {
 				continue
 			}
 			b := pb
+			// ★ 记录祖先链上的 transform（见返回处的视觉矩形累计）。
+			if st := b.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
+				trT = append(trT, st.Transform)
+				trW = append(trW, b.Width())
+				trH = append(trH, b.Height())
+				trX = append(trX, b.X())
+				trY = append(trY, b.Y())
+			}
 			anc = par
 			if stickySeen {
 				if cs := b.Style(); cs != nil &&
@@ -1965,14 +2028,33 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 依赖矩形定位/居中的应用全部错位（引擎层根治，应用无需补偿）。
 		// 注释说明：transform 是元素局部变换，与祖先滚动平移可交换，
 		// 先扣滚动再应用 transform 语义正确。
+		// ★ 祖先 transform 累计（CSSOM-View §4.2：返回元素的**视觉**视口矩形）：
+		// 元素位于带 transform 的祖先内时（顶栏居中组 .tb-nav 的 left:50%+
+		// translate(-50%)、弹窗 translate(-50%,-50%)），视觉位置与布局位置相差
+		// 祖先的变换位移——只应用自身 transform 会让子元素的 rect 停在布局位置
+		// （gou-ide 顶栏胶囊 rect.x=800 而绘制实际在 534，凡按 rect 定位/命中/
+		// 测量的调用方全部错位）。
+		// 逐层「从内到外」把坐标映射到上一层：p = A.pos + M_A(p − A.pos)。
+		// 复用 TransformRect（w=h=0 时退化为单点映射），与绘制端同一套
+		// tokenizer/长度解析（含 translate 百分比按元素自身 border box 解析）。
+		// trT 为空（无 transform 祖先）时下方结果与旧行为逐位一致（零回归）。
+		rx0, ry0, rw, rh := x0, y0, w, h
+		for i := range trT {
+			lx, ly := rx0-trX[i], ry0-trY[i]
+			mx, my, mw, mh, ok := rendering.TransformRect(trT[i], trW[i], trH[i], lx, ly, rw, rh)
+			if !ok {
+				continue
+			}
+			rx0, ry0, rw, rh = mx+trX[i], my+trY[i], mw, mh
+		}
 		if box != nil {
 			if st := box.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
-				if nx, ny, nw, nh, ok := rendering.TransformRect(st.Transform, w, h, x0-sx, y0-sy, w, h); ok {
+				if nx, ny, nw, nh, ok := rendering.TransformRect(st.Transform, w, h, rx0-sx, ry0-sy, rw, rh); ok {
 					return nx, ny, nw, nh
 				}
 			}
 		}
-		return x0 - sx, y0 - sy, w, h
+		return rx0 - sx, ry0 - sy, rw, rh
 	}
 	// Range.getClientRects 文本测量需要元素 computed 字体（CodeMirror 6
 	// 的 charWidth/lineHeight 探测；缺 createRange/字体时测量抛异常，
@@ -2154,4 +2236,163 @@ func firstTextSegmentBase(rv *rendering.RenderView, el *dom.Element) (float64, f
 	}
 	s := found.Segments()[0]
 	return s.X, s.Y, true
+}
+
+// handleDynamicScript 处理**运行时插入文档**的 <script src>。
+//
+// 浏览器语义：脚本元素被插入文档（或已连接时设置 src）即取回并执行，
+// 执行完派发 load（onload 回调），失败派发 error。此前引擎只在文档装配期
+// 处理 <script>（page.Frame.executeInlineScripts），运行时 appendChild 的
+// 脚本永不执行 —— gou-ide 的区域包 client 半全靠这个模式装载编译 bundle
+// 并注册槽位（见 /plugins-assets/ui-titlebar/client.js），于是槽位表恒为空、
+// 各区域全部停在「未装配」空态。
+//
+// 关键约束：appendChild 在 JS 执行栈内被调用，goja 不允许在 native 调用
+// 栈内重入执行脚本，所以取回/执行**排队到事件循环**（与页面的 setTimeout
+// 同一条队列，宿主每帧 ProcessTasks 驱动）。
+// dynScript 是一条待处理的动态资源（元素 + 解析后的绝对 URL + 种类）。
+// kind: "script"（<script src>）/ "stylesheet"（<link rel=stylesheet>）。
+type dynScript struct {
+	el   *dom.Element
+	url  string
+	kind string
+}
+
+// handleDynamicScript 处理**运行时插入文档**的 <script src>。
+//
+// 浏览器语义：脚本元素被插入文档即取回并执行，执行完派发 load（onload
+// 回调），取回/执行失败派发 error。此前引擎只在文档装配期处理 <script>
+// （page.Frame.executeInlineScripts），运行时 appendChild 的脚本永不执行 ——
+// gou-ide 的区域包 client 半全靠这个模式装载编译 bundle 并注册槽位
+// （见 /plugins-assets/ui-titlebar/client.js），于是槽位表恒为空、各区域
+// 全部停在「未装配」空态。
+//
+// 关键约束：appendChild 在 JS 执行栈内被调用，goja 不允许在 native 调用
+// 栈内重入执行脚本，所以这里只**入队**，由 flushDynamicScripts 在帧边界
+// （Render 开头，JS 栈之外）取回并执行。
+func (wv *WebView) handleDynamicScript(el *dom.Element, src string) {
+	if el == nil || src == "" {
+		return
+	}
+	if el.GetAttribute("data-wb-dynscript") == "1" {
+		return // 幂等：重复 append 不重复执行
+	}
+	el.SetAttribute("data-wb-dynscript", "1")
+	abs := dom.ResolveURL(wv.documentBaseURL(), src)
+	wv.dynScriptMu.Lock()
+	wv.dynScripts = append(wv.dynScripts, dynScript{el: el, url: abs, kind: "script"})
+	wv.dynScriptMu.Unlock()
+	if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+		fmt.Fprintln(os.Stderr, "[dynscript] queued "+abs)
+	}
+}
+
+// flushDynamicScripts 执行队列里的动态脚本（帧边界调用，见 handleDynamicScript）。
+func (wv *WebView) flushDynamicScripts() {
+	wv.dynScriptMu.Lock()
+	pending := wv.dynScripts
+	wv.dynScripts = nil
+	wv.dynScriptMu.Unlock()
+	for _, p := range pending {
+		switch p.kind {
+		case "stylesheet":
+			wv.runDynamicStylesheet(p.el, p.url)
+		default:
+			wv.runDynamicScript(p.el, p.url)
+		}
+	}
+}
+
+// runDynamicScript 取回并执行一个动态 <script src>，按结果派发 load/error。
+func (wv *WebView) runDynamicScript(el *dom.Element, abs string) {
+	code, err := wv.loadExternalResource(abs, PurposeScript)
+	if err != nil {
+		if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, "[dynscript] load FAIL "+abs+": "+err.Error())
+		}
+		bindings.FireResourceEvent(wv.JSInterpreter(), el, "error")
+		return
+	}
+	if strings.TrimSpace(code) == "" {
+		bindings.FireResourceEvent(wv.JSInterpreter(), el, "load")
+		return
+	}
+	rt := wv.JSInterpreter()
+	if rt == nil {
+		return
+	}
+	// document.currentScript 语义（HTML §4.12.1）：脚本执行期间指向该元素
+	// （与装配期 page.Frame.runScriptForElement 一致）。
+	prev := bindings.CurrentScriptElement
+	bindings.CurrentScriptElement = el
+	_, err = rt.RunJS(code)
+	bindings.CurrentScriptElement = prev
+	if err != nil {
+		bindings.FireResourceEvent(rt, el, "error")
+		return
+	}
+	rt.RunJobs()
+	bindings.FireResourceEvent(rt, el, "load")
+}
+
+// isStyleSheetLink 判断 <link> 是否为样式表链接（rel 含 stylesheet 关键字）。
+func isStyleSheetLink(el *dom.Element) bool {
+	if el == nil || el.LocalName() != "link" {
+		return false
+	}
+	rel := strings.ToLower(el.GetAttribute("rel"))
+	for _, part := range strings.Fields(rel) {
+		if part == "stylesheet" {
+			return true
+		}
+	}
+	return false
+}
+
+// handleDynamicStylesheet 处理**运行时插入文档**的 <link rel=stylesheet>。
+//
+// 此前引擎只在装配期处理 <link>（page.Frame.extractAndAddStyles），运行时
+// 插入的样式表永不生效 —— 插件包 CSS 正是这么加载的（client.js 里
+// createElement('link') + rel/href + appendChild），于是插件区域全部按
+// 无样式裸布局渲染（实测 ui-titlebar 的 height:40px 不生效，整条顶栏被
+// 内容撑到 631px、logo 被撑成 512px）。
+//
+// 与动态脚本同一约束：入队、帧边界执行（goja 不允许 native 栈内重入）。
+func (wv *WebView) handleDynamicStylesheet(el *dom.Element, href string) {
+	if el == nil || href == "" {
+		return
+	}
+	if el.GetAttribute("data-wb-dynstyle") == "1" {
+		return // 幂等
+	}
+	el.SetAttribute("data-wb-dynstyle", "1")
+	abs := dom.ResolveURL(wv.documentBaseURL(), href)
+	wv.dynScriptMu.Lock()
+	wv.dynScripts = append(wv.dynScripts, dynScript{el: el, url: abs, kind: "stylesheet"})
+	wv.dynScriptMu.Unlock()
+	if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+		fmt.Fprintln(os.Stderr, "[dynstyle] queued "+abs)
+	}
+}
+
+// runDynamicStylesheet 取回并接入一张运行时动态 <link rel=stylesheet>。
+func (wv *WebView) runDynamicStylesheet(el *dom.Element, abs string) {
+	cssText, err := wv.loadExternalResource(abs, PurposeStylesheet)
+	if err != nil {
+		if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, "[dynstyle] load FAIL "+abs+": "+err.Error())
+		}
+		bindings.FireResourceEvent(wv.JSInterpreter(), el, "error")
+		return
+	}
+	if mf := wv.mainFrame; mf != nil {
+		if fr := mf.Frame(); fr != nil {
+			fr.AddStyleSheetFromText(el, abs, cssText)
+			fr.MarkRenderTreeDirty()
+		}
+	}
+	if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+		fmt.Fprintln(os.Stderr, "[dynstyle] applied "+abs)
+	}
+	bindings.FireResourceEvent(wv.JSInterpreter(), el, "load")
 }
