@@ -32,7 +32,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -326,6 +328,26 @@ const jsInjectErrors = `(function () {
   if (cw) {
     console.warn = function () { try { E.consoleWarn.push(Array.prototype.join.call(arguments, ' ')); } catch (x) {} return cw.apply(console, arguments); };
   }
+  // 缺失 API 访问计数（q7 证据）：把当前未定义的候选全局装 getter **只计数**，
+  // 访问仍返回 undefined（语义不变），用于判定「真实运行路径是否真的碰过它」。
+  var HITS = window.__missingApiHits = {};
+  var CAND = ['Intl', 'WeakRef', 'customElements', 'reportError', 'WebAssembly', 'BroadcastChannel',
+              'FinalizationRegistry', 'TextEncoder', 'TextDecoder', 'PerformanceObserver',
+              'IntersectionObserver', 'ResizeObserver', 'queueMicrotask', 'structuredClone',
+              'requestIdleCallback', 'matchMedia', 'getComputedStyle'];
+  for (var mi = 0; mi < CAND.length; mi++) {
+    (function (nm) {
+      if (typeof window[nm] !== 'undefined') { return; }
+      HITS[nm] = 0;
+      try {
+        Object.defineProperty(window, nm, {
+          configurable: true,
+          get: function () { HITS[nm]++; return undefined; },
+          set: function () {}
+        });
+      } catch (e) { HITS[nm] = -1; }
+    })(CAND[mi]);
+  }
   return 'installed';
 })()`
 
@@ -390,6 +412,7 @@ const jsCollect = `(function () {
   for (var j = 0; j < apis.length; j++) { o.apis[apis[j]] = typeof window[apis[j]]; }
 
   o.e2eErrors = window.__e2eErrors || null;
+  o.missingApiHits = safe(function () { return window.__missingApiHits || null; }, null);
 
   // 诊断：壳的核心全局 + 已加载的区域 bundle 全局（判断剩余区域为何未装配）
   o.core = safe(function () {
@@ -446,6 +469,9 @@ func main() {
 	out := flag.String("out", "out/gouide-real-e2e.json", "JSON 报告输出路径")
 	pngOut := flag.String("png", "screenshots/gouide-real-e2e.png", "渲染截图输出路径")
 	holdSec := flag.Float64("hold", 0, "装载后再等 N 秒（给异步插件加载留时间）")
+	cpuProfile := flag.String("cpuprofile", "", "CPU profile 路径（**只覆盖** -interaction 指定的交互）")
+	interaction := flag.String("interaction", "", "只采样该交互：panelSwitch | sessionListUpdate")
+	iterations := flag.Int("iterations", 60, "采样时该交互的迭代次数")
 	flag.Parse()
 
 	root := *gouide
@@ -530,6 +556,40 @@ func main() {
 	}
 
 	// ─── 性能埋点：3 类真实交互（面板切换 / 编辑器滚动 / 会话列表更新）───
+	// （线 1）单交互采样模式：只跑 -interaction 指定交互并采 CPU profile，
+	// 使样本**全部**落在「交互 + 同步布局」上，不被其它交互稀释。
+	if *interaction != "" {
+		var pf *os.File
+		if *cpuProfile != "" {
+			var perr error
+			pf, perr = os.Create(*cpuProfile)
+			if perr != nil {
+				fmt.Printf("[FAIL] profile 文件创建：%v\n", perr)
+				os.Exit(1)
+			}
+			if serr := pprof.StartCPUProfile(pf); serr != nil {
+				fmt.Printf("[FAIL] StartCPUProfile：%v\n", serr)
+				os.Exit(1)
+			}
+			fmt.Printf("[profile] 采样 %s ×%d → %s\n", *interaction, *iterations, *cpuProfile)
+		} else {
+			// 未指定 profile 路径 → 只测耗时（用于 A/B 对照，如 GOGC 调参）
+			fmt.Printf("[perf] 只测耗时 %s ×%d（未采样）\n", *interaction, *iterations)
+		}
+		if s, eerr := evalStr(wv, jsPerfOne(*interaction, *iterations)); eerr != nil {
+			fmt.Printf("[FAIL] 交互执行：%v\n", eerr)
+		} else {
+			fmt.Printf("[perf] 交互执行：%s\n", s)
+		}
+		if pf != nil {
+			pprof.StopCPUProfile()
+			_ = pf.Close()
+		}
+		if oneRaw, oerr := evalStr(wv, `JSON.stringify(window.__perfOne || null)`); oerr == nil {
+			fmt.Printf("[perf] 单交互结果 %s\n", oneRaw)
+		}
+	}
+
 	perfT0 := time.Now()
 	if s, perr := evalStr(wv, jsPerf); perr != nil {
 		fmt.Printf("[WARN] 交互埋点注入失败：%v\n", perr)
@@ -805,6 +865,89 @@ const jsPerf = `(function () {
 
   return 'started';
 })()`
+
+// jsPerfOne 生成「只跑指定交互 N 次」的脚本，供单独 CPU 采样用（profile 仅覆盖该交互）。
+// 每次交互后立即读一次布局属性 —— 与真实交互「改完就读布局」的语义一致。
+func jsPerfOne(name string, iters int) string {
+	return `(function () {
+  var now = function () { return performance.now(); };
+  function click(el) {
+    if (!el) { return false; }
+    try {
+      if (typeof el.click === 'function') { el.click(); return true; }
+      if (el.dispatchEvent) { el.dispatchEvent(new Event('click', { bubbles: true })); return true; }
+    } catch (e) {}
+    return false;
+  }
+  var name = '` + name + `', iters = ` + itoa(iters) + `;
+  var host = null, pick = null;
+  if (name === 'panelSwitch') {
+    host = document.querySelector('.plugin-area-activitybar');
+    if (!host) { return 'ERR:no-activitybar'; }
+    var cand = host.querySelectorAll('button, [role="button"], [class*="item"], [class*="tab"], [class*="icon"], [class*="btn"]');
+    if (!cand.length) { cand = host.children; }
+    pick = function (i) { return cand[i % cand.length]; };
+  } else if (name === 'sessionListUpdate') {
+    host = document.querySelector('.plugin-area-conversation') || document.querySelector('.conversation-container');
+    if (!host) { return 'ERR:no-conversation'; }
+    var items = host.querySelectorAll('button, [role="button"], [class*="item"], [class*="session"], [class*="row"], li');
+    if (!items.length) { return 'ERR:no-items'; }
+    pick = function (i) { return items[i % items.length]; };
+  } else {
+    if (name === 'editorScrollSeeded') {
+      // 真实产物启动态未打开文件 → 编辑器为空（不可滚动，滚动性能是盲区）。
+      // 这里注入**等价的长文档 DOM**（200 行，形态对齐 idepage 压测页代码视图：
+      // .line + .ln + token span），使「长文档滚动 + 强制布局」路径可度量。
+      // 标注 seeded=true —— 非真实 openFile 路径，是等价负载。
+      host = document.querySelector('.plugin-area-editor') || document.querySelector('.editor-container');
+      if (!host) { return 'ERR:no-editor-host'; }
+      var doc = document.createElement('div');
+      doc.className = 'code seeded-doc';
+      doc.style.overflow = 'auto';
+      doc.style.height = '400px';
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < 200; i++) {
+        var line = document.createElement('div');
+        line.className = 'line';
+        var ln = document.createElement('span');
+        ln.className = 'ln';
+        ln.textContent = String(i + 1);
+        line.appendChild(ln);
+        var sp = document.createElement('span');
+        sp.className = 'tok t-ident';
+        sp.textContent = 'const value' + i + ' = compute(' + i + ');';
+        line.appendChild(sp);
+        frag.appendChild(line);
+      }
+      doc.appendChild(frag);
+      host.appendChild(doc);
+      var maxScroll = Math.max(1, doc.scrollHeight - doc.clientHeight);
+      var step = Math.max(1, Math.floor(maxScroll / 12));
+      doc.scrollTop = 0; void doc.offsetHeight;
+      var t0s = now();
+      for (var s = 0; s < iters; s++) { doc.scrollTop = (s % 12) * step; void doc.offsetHeight; }
+      var tot = now() - t0s;
+      window.__perfOne = { name: name, iters: iters, totalMs: +tot.toFixed(2),
+                           perOpMs: +(tot / iters).toFixed(3), scrollH: doc.scrollHeight,
+                           clientH: doc.clientHeight, seeded: true,
+                           note: '注入等价长文档（2000 行）—— 真实产物启动态无打开文件' };
+      return 'done';
+    }
+    return 'ERR:unknown-interaction:' + name;
+  }
+  click(pick(0)); void host.offsetHeight;
+  var t0 = now();
+  for (var i = 0; i < iters; i++) {
+    click(pick(i + 1));
+    void host.offsetHeight;
+  }
+  var total = now() - t0;
+  window.__perfOne = { name: name, iters: iters, totalMs: +total.toFixed(2), perOpMs: +(total / iters).toFixed(3) };
+  return 'done';
+})()`
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // jsPerfCollect 读回埋点结果，并确认交互后 DOM 仍正常。
 const jsPerfCollect = `(function () {

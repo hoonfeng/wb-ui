@@ -965,7 +965,7 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 				return
 			}
 			if rsv := fr.Resolver(); rsv != nil {
-				rsv.ClearCache()
+				rsv.InvalidateSubtree(el)
 			}
 			fr.MarkRenderTreeDirty()
 			fr.SetNeedsLayout(true)

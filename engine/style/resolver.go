@@ -281,6 +281,41 @@ func (r *Resolver) Invalidate(el *dom.Element) {
 	}
 }
 
+// InvalidateSubtree 丢弃「class 变化影响范围内」的 per-element 样式缓存，
+// 用来替代 ClearCache() 的全表清空（后者使下一次重建把**整棵文档树**重新解析）。
+//
+// 覆盖范围与理由：
+//   - el 自身与整棵后代子树：祖先的 class 参与后代选择器匹配
+//     （如 .cm-focused .cm-cursor 决定光标 display:block）；
+//   - el 父节点的整个子树：覆盖兄弟选择器 .a + .b / .a ~ .b；
+//   - el 的祖先链：:has() 让子级的 class 反向影响祖先的匹配结果。
+//
+// 实测（真实 gouide 产物，406 元素，panelSwitch ×150）：每次 class 变更原先走
+// ClearCache + 下次重建全树重解析，交互同步耗时里 ResolveElement 占 ~50%
+// （60900 次 ≈ 71µs/次，即缓存全部未命中）；本方法把重算限制在受影响子树。
+func (r *Resolver) InvalidateSubtree(el *dom.Element) {
+	if el == nil || r.cache == nil {
+		return
+	}
+	for p := parentElement(el); p != nil; p = parentElement(p) {
+		delete(r.cache, p)
+	}
+	var root dom.Node = el
+	if p := parentElement(el); p != nil {
+		root = p
+	}
+	var walk func(n dom.Node)
+	walk = func(n dom.Node) {
+		if e, ok := n.(*dom.Element); ok {
+			delete(r.cache, e)
+		}
+		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+			walk(c)
+		}
+	}
+	walk(root)
+}
+
 // maxImportDepth 限制 @import 链的递归深度。CSS 规范未规定上限，浏览器用
 // 实现上限挡住病态嵌套与 A→B→A 循环导入（否则递归无限展开）。
 const maxImportDepth = 8
