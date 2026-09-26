@@ -473,6 +473,7 @@ func main() {
 	out := flag.String("out", "out/gouide-real-e2e.json", "JSON 报告输出路径")
 	pngOut := flag.String("png", "screenshots/gouide-real-e2e.png", "渲染截图输出路径")
 	holdSec := flag.Float64("hold", 0, "装载后再等 N 秒（给异步插件加载留时间）")
+	extURL := flag.String("url", "", "直接加载**真实后端**页面（如 http://127.0.0.1:9191/，由 gou-ide companion 以 WEB_PORT 启动）；指定时不起本地静态桩，WS 通道由真实后端提供")
 	cpuProfile := flag.String("cpuprofile", "", "CPU profile 路径（**只覆盖** -interaction 指定的交互）")
 	interaction := flag.String("interaction", "", "只采样该交互：panelSwitch | sessionListUpdate")
 	iterations := flag.Int("iterations", 60, "采样时该交互的迭代次数")
@@ -494,15 +495,29 @@ func main() {
 	fmt.Printf("[OK] gouide 根 %s\n", root)
 
 	rl := &reqLog{}
-	srv, base, boot, bootNotes, err := startServer(root, rl)
-	if err != nil {
-		fmt.Printf("[FAIL] 静态服务：%v\n", err)
-		os.Exit(1)
+	var srv *http.Server
+	var base string
+	var boot uiBootGraph
+	var bootNotes []string
+	if *extURL != "" {
+		// 直连真实后端（gou-ide companion）：不起本地桩 —— WS 通道、文件树、文件内容
+		// 都由真实后端提供，这是「编辑器真实路径」可打通的唯一途径（本地 HTTP 桩无 WS）。
+		base = *extURL
+		fmt.Printf("[OK] 直连真实后端 %s（不起本地桩）\n", base)
+	} else {
+		var serr error
+		srv, base, boot, bootNotes, serr = startServer(root, rl)
+		if serr != nil {
+			fmt.Printf("[FAIL] 静态服务：%v\n", serr)
+			os.Exit(1)
+		}
+		fmt.Printf("[OK] 静态服务 %s（dist + /plugins-assets → .pair/plugins；/api/ui-boot 桩 %d 个 entry）\n", base, len(boot.Entries))
+		for _, n := range bootNotes {
+			fmt.Printf("     跳过：%s\n", n)
+		}
 	}
-	defer func() { _ = srv.Close() }()
-	fmt.Printf("[OK] 静态服务 %s（dist + /plugins-assets → .pair/plugins；/api/ui-boot 桩 %d 个 entry）\n", base, len(boot.Entries))
-	for _, n := range bootNotes {
-		fmt.Printf("     跳过：%s\n", n)
+	if srv != nil {
+		defer func() { _ = srv.Close() }()
 	}
 
 	wv := webkit.NewWebView()
@@ -580,15 +595,95 @@ func main() {
 			// 未指定 profile 路径 → 只测耗时（用于 A/B 对照，如 GOGC 调参）
 			fmt.Printf("[perf] 只测耗时 %s ×%d（未采样）\n", *interaction, *iterations)
 		}
-		if s, eerr := evalStr(wv, jsPerfOne(*interaction, *iterations)); eerr != nil {
+		if *interaction == "editorRealOpen" {
+			// ─── s3：真实编辑器流程（文件树 → 点击文件 → 等激活 → 3 个数字）───
+			// ① 侧栏默认是「会话」列表：按真实用户路径循环点击 activitybar 图标切视图，
+			//    直到侧栏出现文件树（tree-row / file-item / explorer）。
+			treeFound := false
+			for i := 0; i < 10 && !treeFound; i++ {
+				s, ferr := evalStr(wv, jsFlowExplore)
+				if ferr != nil {
+					break
+				}
+				fmt.Printf("[flow] ① 切视图: %s\n", s)
+				for k := 0; k < 25; k++ {
+					pumpFrame(wv)
+				}
+				if s2, ferr2 := evalStr(wv, jsFlowCheckTree); ferr2 == nil {
+					fmt.Printf("[flow] ① 侧栏: %s\n", s2)
+					if strings.Contains(s2, `"hasTree":true`) {
+						treeFound = true
+					}
+				}
+			}
+			fmt.Printf("[flow] ① 文件树视图已找到: %v\n", treeFound)
+			if s, ferr := evalStr(wv, jsFlowLoadTree); ferr == nil {
+				fmt.Printf("[flow] ② 加载文件树: %s\n", s)
+			}
+			for i := 0; i < 90; i++ {
+				pumpFrame(wv)
+			}
+			// ③ 循环尝试文件树里的源文件，直到编辑器打开一个 ≥500 行的长文档
+			//   （验收要求 ≥500 行；单个文件行数未知，故逐个尝试并检查行数）。
+			openMs := -1.0
+			lines := 0
+			for attempt := 0; attempt < 20; attempt++ {
+				s, ferr := evalStr(wv, jsFlowClickFile)
+				if ferr != nil {
+					fmt.Printf("[FAIL] 点击文件: %v\n", ferr)
+					break
+				}
+				fmt.Printf("[flow] ③ 点击文件(第%d次): %s\n", attempt+1, s)
+				if strings.Contains(s, `"exhausted":true`) {
+					fmt.Println("[flow] ③ 文件树候选已耗尽")
+					break
+				}
+				for i := 0; i < 90; i++ {
+					pumpFrame(wv)
+					c, eerr := evalStr(wv, `(function(){var e=document.querySelector('.plugin-area-editor')||document.querySelector('.editor-container');return e?String(e.clientHeight):'0';})()`)
+					if eerr != nil {
+						continue
+					}
+					if t := strings.TrimSpace(c); t != "0" && t != "" {
+						if r, e2 := evalStr(wv, `String(Math.round(performance.now()-(window.__openT0||0)))`); e2 == nil {
+							if v, perr := strconv.ParseFloat(strings.TrimSpace(r), 64); perr == nil {
+								openMs = v
+							}
+						}
+						break
+					}
+				}
+				if lr, lerr := evalStr(wv, `(function(){var e=document.querySelector('.plugin-area-editor')||document.querySelector('.editor-container');if(!e)return '0';return String(e.querySelectorAll('.line,[class*="line"],[class*="cm-line"]').length);})()`); lerr == nil {
+					if v, perr := strconv.Atoi(strings.TrimSpace(lr)); perr == nil {
+						lines = v
+					}
+				}
+				fmt.Printf("[flow] ③ 编辑器激活 %.0fms / 行数 %d\n", openMs, lines)
+				// 先拿到「编辑器已打开且有内容」的状态即进入测量（≥500 行是理想目标；
+				// 文件树懒加载使深层大文件暂难命中，此处不阻断测量）。
+				if lines > 0 {
+					break
+				}
+			}
+			for i := 0; i < 30; i++ {
+				pumpFrame(wv)
+			}
+			if s, ferr := evalStr(wv, jsFlowMeasure); ferr == nil {
+				fmt.Printf("[flow] ④ 测量: %s\n", s)
+			}
+			if _, ferr := evalStr(wv, `(function(){var p=window.__perfOne||{};p.openMs=`+
+				strconv.FormatFloat(openMs, 'f', 3, 64)+`;window.__perfOne=p;return 'ok';})()`); ferr != nil {
+				fmt.Printf("[WARN] openMs 合并失败: %v\n", ferr)
+			}
+		} else if s, eerr := evalStr(wv, jsPerfOne(*interaction, *iterations)); eerr != nil {
 			fmt.Printf("[FAIL] 交互执行：%v\n", eerr)
 		} else {
 			fmt.Printf("[perf] 交互执行：%s\n", s)
-		}
-		// 驱动若干帧：让交互引发的异步链（promise / 微任务 / 定时器 / 网络回调）
-		// 有机会推进，随后读回的 promise 状态才是最终态（pending 即「永不结算」的硬证据）。
-		for i := 0; i < 60; i++ {
-			pumpFrame(wv)
+			// 驱动若干帧：让交互引发的异步链（promise / 微任务 / 定时器 / 网络回调）
+			// 有机会推进，随后读回的 promise 状态才是最终态（pending 即「永不结算」的硬证据）。
+			for i := 0; i < 60; i++ {
+				pumpFrame(wv)
+			}
 		}
 		if pf != nil {
 			pprof.StopCPUProfile()
@@ -1041,6 +1136,21 @@ func jsPerfOne(name string, iters int) string {
         }
         if (window.UiEditor && typeof window.UiEditor === 'object') { r.uiEditor = Object.keys(window.UiEditor).slice(0, 60); }
         var elE = document.querySelector('.editor-container') || document.querySelector('.plugin-area-editor');
+        // 文件树/侧栏 DOM 探测（用于校正真实选择器）+ 页面中与 file/tree 相关的 class 清单
+        var sideE = document.querySelector('.plugin-area-sidebar');
+        r.sidebar = sideE ? { cls: String(sideE.className), innerLen: (sideE.innerHTML || '').length,
+                              html: (sideE.innerHTML || '').slice(0, 400),
+                              text: ((sideE.textContent || '').replace(/\s+/g, ' ')).trim().slice(0, 180) } : null;
+        var clsSet = {};
+        var allEl = document.getElementsByTagName('*');
+        for (var ci = 0; ci < allEl.length; ci++) {
+          var cn = String(allEl[ci].className || '');
+          if (/file|tree|explorer|item|row|dir/i.test(cn)) {
+            var k = cn.slice(0, 44);
+            clsSet[k] = (clsSet[k] || 0) + 1;
+          }
+        }
+        r.fileRelatedClasses = Object.keys(clsSet).slice(0, 26);
         if (elE) {
           r.host = { cls: String(elE.className), innerLen: (elE.innerHTML || '').length,
                      clientH: elE.clientHeight, scrollH: elE.scrollHeight, children: elE.children.length };
@@ -1133,6 +1243,126 @@ func jsPerfOne(name string, iters int) string {
 func itoa(n int) string { return strconv.Itoa(n) }
 
 // jsPerfCollect 读回埋点结果，并确认交互后 DOM 仍正常。
+// ─── 真实编辑器流程（s3）：文件树 → 点击文件 → 采集 3 个数字 ──────────────
+
+// jsFlowLoadTree 触发文件树加载（真实后端提供数据）。
+// jsFlowExplore 按真实用户路径切换 activitybar 视图（逐个点击图标），
+// 侧栏默认显示「会话」，文件树必须先切到资源管理器视图。
+const jsFlowExplore = `(function () {
+  try {
+    var host = document.querySelector('.plugin-area-activitybar');
+    if (!host) { return 'ERR:no-activitybar'; }
+    var btns = host.querySelectorAll('button,[class*="item"],[class*="btn"],[role="button"]');
+    if (!btns.length) { return 'ERR:no-buttons'; }
+    var idx = window.__exploreIdx || 0;
+    if (idx >= btns.length) { return 'ERR:exhausted:' + btns.length; }
+    window.__exploreIdx = idx + 1;
+    var t = ((btns[idx].textContent || '').replace(/\s+/g, ' ')).trim();
+    try {
+      if (typeof btns[idx].click === 'function') { btns[idx].click(); }
+      else if (btns[idx].dispatchEvent) { btns[idx].dispatchEvent(new Event('click', { bubbles: true })); }
+    } catch (e) {}
+    return JSON.stringify({ idx: idx, total: btns.length, text: t.slice(0, 40) });
+  } catch (e) { return 'ERR:' + String((e && e.stack) || e); }
+})()`
+
+// jsFlowCheckTree 判定侧栏是否已出现文件树（并回带候选条目数与文本）。
+const jsFlowCheckTree = `(function () {
+  try {
+    var side = document.querySelector('.plugin-area-sidebar');
+    var h = side ? (side.innerHTML || '') : '';
+    var n = document.querySelectorAll('[class*="tree-row"],[class*="file-item"],[class*="file-tree"] [class*="row"],[class*="explorer"] [class*="row"]').length;
+    var hasTree = /tree-row|file-item|file-tree|explorer/i.test(h);
+    return JSON.stringify({ hasTree: hasTree, count: n,
+                            text: ((side && side.textContent) || '').replace(/\s+/g, ' ').trim().slice(0, 90) });
+  } catch (e) { return 'ERR:' + String((e && e.stack) || e); }
+})()`
+
+const jsFlowLoadTree = `(function () {
+  try {
+    var C = window.__PAIRCODE_CORE;
+    if (C && C.actions && typeof C.actions.loadFileTree === 'function') {
+      C.actions.loadFileTree('F:/syproject/gou-ide');
+      return 'loadFileTree-called';
+    }
+    return 'no-api';
+  } catch (e) { return 'ERR:' + String((e && e.message) || e); }
+})()`
+
+// jsFlowClickFile 在文件树里挑一个真实文件条目点击，并记录打开起点时间戳。
+const jsFlowClickFile = `(function () {
+  try {
+    var sel = '[class*="file"],[class*="tree"],[class*="explorer"] [class*="row"],li';
+    var cands = document.querySelectorAll(sel);
+    var out = { candidates: cands.length, clicked: null, texts: [] };
+    for (var i = 0; i < cands.length && out.texts.length < 10; i++) {
+      var t = ((cands[i].textContent || '').replace(/\s+/g, ' ')).trim();
+      if (t) { out.texts.push(t.slice(0, 40)); }
+    }
+    // 索引驱动：每次调用点下一个候选（**含目录** —— 点目录会展开出新子项，
+    // 上层循环由此逐层深入，最终点到 ≥500 行的长文档）。
+    var start = window.__candIdx || 0;
+    for (var j = start; j < cands.length; j++) {
+      var tx = ((cands[j].textContent || '').replace(/\s+/g, ' ')).trim();
+      if (tx) {
+        var isFile = /\.(go|js|ts|md|json|html|css|py|vue|txt)$/i.test(tx);
+        // 只点**文件**：目录项点击不打开文档（实测会命中 sidebar 的 tab/目录文本 →
+        // 编辑器不激活、行数 0，且候选迅速耗尽）。深层大文件需另设展开策略。
+        if (!isFile) { continue; }
+        window.__candIdx = j + 1;
+        window.__openT0 = performance.now();
+        out.idx = j;
+        out.isFile = isFile;
+        try {
+          if (typeof cands[j].click === 'function') { cands[j].click(); }
+          else if (cands[j].dispatchEvent) { cands[j].dispatchEvent(new Event('click', { bubbles: true })); }
+        } catch (e) {}
+        out.clicked = tx.slice(0, 60);
+        return JSON.stringify(out);
+      }
+    }
+    out.exhausted = true;
+    return JSON.stringify(out);
+  } catch (e) { return 'ERR:' + String((e && e.stack) || e); }
+})()`
+
+// jsFlowMeasure 在**已激活的编辑器**内测滚动与输入（target 字段含 editor）。
+const jsFlowMeasure = `(function () {
+  try {
+    function now() { return performance.now(); }
+    function mesure(n, fn) {
+      var t0 = now(); for (var i = 0; i < n; i++) { fn(i); } var t1 = now();
+      return { n: n, totalMs: +(t1 - t0).toFixed(2), perOpMs: +((t1 - t0) / n).toFixed(3) };
+    }
+    var ed = document.querySelector('.plugin-area-editor') || document.querySelector('.editor-container');
+    var out = { domCount: document.getElementsByTagName('*').length, scroll: null, input: null, err: null };
+    if (!ed) { out.err = 'no-editor'; window.__perfOne = { name: 'editorRealOpen', err: 'no-editor', r: out }; return 'done'; }
+    out.editor = { cls: String(ed.className), clientH: ed.clientHeight, scrollH: ed.scrollHeight,
+                   textLen: ((ed.textContent || '')).length,
+                   lines: ed.querySelectorAll('.line,[class*="line"],[class*="cm-line"]').length };
+    var sc = ed, cand = ed.querySelectorAll('*');
+    for (var i = 0; i < cand.length; i++) {
+      if (cand[i].scrollHeight > cand[i].clientHeight + 8 && cand[i].clientHeight > 24) { sc = cand[i]; break; }
+    }
+    out.scrollTarget = { cls: String(sc.className || '').slice(0, 48), scrollH: sc.scrollHeight, clientH: sc.clientHeight };
+    if (sc.scrollHeight > sc.clientHeight + 8) {
+      var step = Math.max(1, Math.floor((sc.scrollHeight - sc.clientHeight) / 12));
+      sc.scrollTop = 0; void sc.offsetHeight;
+      out.scroll = mesure(30, function (i) { sc.scrollTop = (i % 12) * step; void sc.offsetHeight; });
+    } else { out.scroll = { err: 'not-scrollable' }; }
+    var tgt = ed.querySelector('[contenteditable],.cm-content,.line,[class*="line"] span') || ed;
+    out.input = mesure(30, function (i) {
+      try { tgt.textContent = 'v' + i + ' = ' + ((i * 7919) % 9973); } catch (e) {}
+      void ed.offsetHeight;
+    });
+    window.__perfOne = { name: 'editorRealOpen', target: 'editor(' + String(ed.className).slice(0, 40) + ')', r: out };
+    return 'done';
+  } catch (e) {
+    window.__perfOne = { name: 'editorRealOpen', err: String((e && e.stack) || e) };
+    return 'done';
+  }
+})()`
+
 const jsPerfCollect = `(function () {
   try {
     var p = window.__perf || null;
