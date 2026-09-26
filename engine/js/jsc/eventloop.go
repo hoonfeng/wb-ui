@@ -64,11 +64,19 @@ type EventLoop struct {
 	// animFrames 动画帧回调队列（requestAnimationFrame）。
 	animFrames []*scheduledTask
 
+	// immediates setImmediate 回调队列：与 macrotasks 分开存放，在每轮
+	// 宏任务之前优先清空。不参与 DueTime 排序（语义：尽快，且先于
+	// setTimeout(cb, 0) 执行）。
+	immediates []*scheduledTask
+
 	// timerIDSeq 自增定时器 ID。
 	timerIDSeq int32
 
 	// animIDSeq 自增动画帧 ID。
 	animIDSeq int32
+
+	// immediateIDSeq 自增 setImmediate ID。
+	immediateIDSeq int32
 
 	// startTime 事件循环启动时的单调时间（毫秒）。
 	startTime int64
@@ -85,6 +93,7 @@ func NewEventLoop(interp *Interpreter) *EventLoop {
 		macrotasks:  make([]*scheduledTask, 0),
 		microtasks:  make([]*microtask, 0),
 		animFrames:  make([]*scheduledTask, 0),
+		immediates:  make([]*scheduledTask, 0),
 	}
 	interp.eventLoop = el
 	return el
@@ -162,6 +171,39 @@ func (el *EventLoop) ClearInterval(id int) {
 	el.removeMacrotask(id)
 }
 
+// SetImmediate 调度一个回调尽快执行（下一轮任务阶段之前）。
+//
+// 与 setTimeout(cb, 0) 的差异（IE10+ / Node 语义）：
+//   - 不参与宏任务的 DueTime 排序 —— 排在到期定时器之前执行；
+//   - 因此「setImmediate 先于 setTimeout(0)」这一常见语义得到保证。
+//
+// 返回任务 ID，可用于 clearImmediate。
+func (el *EventLoop) SetImmediate(callback JSValue) int {
+	if !callback.IsCallable() {
+		return 0
+	}
+	id := int(atomic.AddInt32(&el.immediateIDSeq, 1))
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	el.immediates = append(el.immediates, &scheduledTask{
+		ID:       id,
+		Callback: callback,
+	})
+	return id
+}
+
+// ClearImmediate 取消指定 ID 的 setImmediate 任务。
+func (el *EventLoop) ClearImmediate(id int) {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	for i, t := range el.immediates {
+		if t.ID == id {
+			el.immediates = append(el.immediates[:i], el.immediates[i+1:]...)
+			return
+		}
+	}
+}
+
 // RequestAnimationFrame 注册一个动画帧回调，在下次 ProcessTasks 结尾执行。
 // 返回动画帧 ID，可用于 CancelAnimationFrame。
 func (el *EventLoop) RequestAnimationFrame(callback JSValue) int {
@@ -215,8 +257,10 @@ func (el *EventLoop) Reset() {
 	el.macrotasks = nil
 	el.microtasks = nil
 	el.animFrames = nil
+	el.immediates = nil
 	el.timerIDSeq = 0
 	el.animIDSeq = 0
+	el.immediateIDSeq = 0
 	el.running = false
 }
 
@@ -238,8 +282,21 @@ func (el *EventLoop) ProcessTasks(_ int64) {
 	// → 行号栏按 14px/行步进而内容 18.2px，逐行错位。剩余宏任务由宿主
 	// 下一帧的 ProcessTasks 继续处理。
 	budget := 500
+	// ★ setImmediate 优先 + 防饿死：每轮先取 immediate；连续处理 32 个
+	//   immediate 后强制给到期定时器一次机会（避免自发调度的 setImmediate
+	//   把 setTimeout/setInterval 永久饿死）。
+	immediateStreak := 0
 	for budget > 0 {
-		task := el.popNextMacrotask(now)
+		var task *scheduledTask
+		if immediateStreak < 32 {
+			task = el.popImmediate()
+		}
+		if task != nil {
+			immediateStreak++
+		} else {
+			task = el.popNextMacrotask(now)
+			immediateStreak = 0
+		}
 		if task == nil {
 			break
 		}
@@ -286,7 +343,7 @@ func (el *EventLoop) IsRunning() bool {
 func (el *EventLoop) PendingTasks() int {
 	el.mu.Lock()
 	defer el.mu.Unlock()
-	return len(el.macrotasks) + len(el.microtasks) + len(el.animFrames)
+	return len(el.macrotasks) + len(el.microtasks) + len(el.animFrames) + len(el.immediates)
 }
 
 // ─── 内部方法 ──────────────────────────────────────────
@@ -317,6 +374,18 @@ func (el *EventLoop) popNextMacrotask(nowMs int64) *scheduledTask {
 	}
 	task := el.macrotasks[0]
 	el.macrotasks = el.macrotasks[1:]
+	return task
+}
+
+// popImmediate 弹出下一个 setImmediate 任务（FIFO，无到期检查，线程安全）。
+func (el *EventLoop) popImmediate() *scheduledTask {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	if len(el.immediates) == 0 {
+		return nil
+	}
+	task := el.immediates[0]
+	el.immediates = el.immediates[1:]
 	return task
 }
 

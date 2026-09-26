@@ -70,6 +70,25 @@ type baseDynamicObject struct {
 	// Vue 3.5's patchEvent (stores event invokers on DOM elements via
 	// el[Symbol("_vei")] = {}).
 	symValues *orderedMap
+
+	// strFlags holds the property-descriptor flags of string-keyed expando
+	// properties defined from JS (Object.defineProperty) for keys the host
+	// handler does not own. The values themselves stay in the host expando
+	// store (e.g. bindings.lazyElemProps.expando) so there is exactly one
+	// copy of each value. Vendored extension: the original goja dynamic
+	// object rejected any descriptor with enumerable/writable/configurable
+	// = false ("Dynamic object field %q cannot be made non-enumerable"),
+	// which broke Vue 3.5 — mountElement brands every element with
+	// def(el, '__vnode', vnode, false) (non-enumerable), so
+	// createApp().mount() threw TypeError and rendered nothing.
+	strFlags map[string]strPropFlags
+}
+
+// strPropFlags 是 host 不拥有的字符串 expando 属性的描述符标志。
+type strPropFlags struct {
+	writable     bool
+	enumerable   bool
+	configurable bool
 }
 
 type dynamicObject struct {
@@ -245,11 +264,25 @@ func (o *baseDynamicObject) getSym(p *Symbol, receiver Value) Value {
 }
 
 func (o *dynamicObject) getOwnPropStr(u unistring.String) Value {
-	return o.d.Get(u.String())
+	v := o.d.Get(u.String())
+	if v == nil {
+		return nil
+	}
+	// 被 defineProperty 定义过的 expando 属性：带上描述符标志返回，使
+	// Object.getOwnPropertyDescriptor 反映真实标志位。
+	if f, ok := o.strFlagOf(u.String()); ok {
+		return &valueProperty{
+			value:        v,
+			writable:     f.writable,
+			enumerable:   f.enumerable,
+			configurable: f.configurable,
+		}
+	}
+	return v
 }
 
 func (o *dynamicObject) getOwnPropIdx(v valueInt) Value {
-	return o.d.Get(v.String())
+	return o.getOwnPropStr(v.string())
 }
 
 func (o *baseDynamicObject) getOwnPropSym(p *Symbol) Value {
@@ -306,6 +339,11 @@ func (o *dynamicObject) setOwnStr(p unistring.String, v Value, throw bool) bool 
 				return res
 			}
 		}
+	}
+	// 非可写 expando（defineProperty writable:false）拒绝赋值。
+	if f, ok := o.strFlagOf(prop); ok && !f.writable {
+		typeErrorResult(throw, "Cannot assign to read only property '%s' of a dynamic object", prop)
+		return false
 	}
 	return o._set(prop, v, throw)
 }
@@ -412,6 +450,38 @@ func (o *baseDynamicObject) hasOwnPropertySym(s *Symbol) bool {
 	return o.symValues != nil && o.symValues.has(s)
 }
 
+// ─── strFlags：host 不拥有的字符串 expando 属性的描述符标志 ───────────────
+//
+// 值由 host 的 expando 存储（唯一副本），这里只记标志位。
+
+func (o *baseDynamicObject) strFlagOf(key string) (strPropFlags, bool) {
+	if o.strFlags == nil {
+		return strPropFlags{}, false
+	}
+	f, ok := o.strFlags[key]
+	return f, ok
+}
+
+func (o *baseDynamicObject) setStrFlag(key string, f strPropFlags) {
+	if o.strFlags == nil {
+		o.strFlags = make(map[string]strPropFlags)
+	}
+	o.strFlags[key] = f
+}
+
+func (o *baseDynamicObject) delStrFlag(key string) {
+	if o.strFlags != nil {
+		delete(o.strFlags, key)
+	}
+}
+
+// expandoNonEnumerable 报告 key 是否为「被 defineProperty 显式标为非枚举」的
+// expando 属性（枚举路径需跳过它）。
+func (o *baseDynamicObject) expandoNonEnumerable(key string) bool {
+	f, ok := o.strFlagOf(key)
+	return ok && !f.enumerable
+}
+
 func (o *baseDynamicObject) checkDynamicObjectPropertyDescr(name fmt.Stringer, descr PropertyDescriptor, throw bool) bool {
 	if descr.Getter != nil || descr.Setter != nil {
 		typeErrorResult(throw, "Dynamic objects do not support accessor properties")
@@ -433,17 +503,55 @@ func (o *baseDynamicObject) checkDynamicObjectPropertyDescr(name fmt.Stringer, d
 }
 
 func (o *dynamicObject) defineOwnPropertyStr(name unistring.String, desc PropertyDescriptor, throw bool) bool {
-	if o.checkDynamicObjectPropertyDescr(name, desc, throw) {
-		return o._set(name.String(), desc.Value, throw)
+	// host 拥有的键：标志位由 host 决定，描述符必须保持「全 true」。
+	if o.d.Has(name.String()) {
+		if o.checkDynamicObjectPropertyDescr(name, desc, throw) {
+			return o._set(name.String(), desc.Value, throw)
+		}
+		return false
 	}
-	return false
+	// host 不拥有的键：JS 侧 expando，允许完整描述符（Vue 的 def() 依赖此处）。
+	return o.defineExpandoStr(name, desc, throw)
+}
+
+// defineExpandoStr 定义 host 不拥有的字符串属性（expando）：值经 host 的 Set
+// 存入其 expando 表，标志位记入 strFlags（值保持单副本）。
+func (o *dynamicObject) defineExpandoStr(name unistring.String, desc PropertyDescriptor, throw bool) bool {
+	if desc.Getter != nil || desc.Setter != nil {
+		typeErrorResult(throw, "Dynamic objects do not support accessor properties")
+		return false
+	}
+	key := name.String()
+	f, exists := o.strFlagOf(key)
+	if !exists {
+		// 新属性默认全 true（与 dynamic object 的隐式属性一致）。
+		f = strPropFlags{writable: true, enumerable: true, configurable: true}
+	} else if !f.configurable {
+		// 不可配置属性：拒绝改标志（普通对象语义）。
+		if desc.Configurable == FLAG_TRUE ||
+			(desc.Enumerable != FLAG_NOT_SET && desc.Enumerable.Bool() != f.enumerable) {
+			typeErrorResult(throw, "Cannot redefine property: %s", key)
+			return false
+		}
+	}
+	if desc.Writable != FLAG_NOT_SET {
+		f.writable = desc.Writable.Bool()
+	}
+	if desc.Enumerable != FLAG_NOT_SET {
+		f.enumerable = desc.Enumerable.Bool()
+	}
+	if desc.Configurable != FLAG_NOT_SET {
+		f.configurable = desc.Configurable.Bool()
+	}
+	o.setStrFlag(key, f)
+	if desc.Value != nil {
+		return o._set(key, desc.Value, throw)
+	}
+	return true
 }
 
 func (o *dynamicObject) defineOwnPropertyIdx(name valueInt, desc PropertyDescriptor, throw bool) bool {
-	if o.checkDynamicObjectPropertyDescr(name, desc, throw) {
-		return o._set(name.String(), desc.Value, throw)
-	}
-	return false
+	return o.defineOwnPropertyStr(name.string(), desc, throw)
 }
 
 func (o *baseDynamicObject) defineOwnPropertySym(name *Symbol, desc PropertyDescriptor, throw bool) bool {
@@ -465,7 +573,12 @@ func (o *baseDynamicObject) defineOwnPropertySym(name *Symbol, desc PropertyDesc
 }
 
 func (o *dynamicObject) _delete(prop string, throw bool) bool {
+	if f, ok := o.strFlagOf(prop); ok && !f.configurable {
+		typeErrorResult(throw, "Cannot delete property %q of a dynamic object", prop)
+		return false
+	}
 	if o.d.Delete(prop) {
+		o.delStrFlag(prop)
 		return true
 	}
 	typeErrorResult(throw, "Could not delete property %q of a dynamic object", prop)
@@ -541,6 +654,10 @@ func (i *dynamicObjectPropIter) next() (propIterItem, iterNextFunc) {
 		name := i.propNames[i.idx]
 		i.idx++
 		if i.o.d.Has(name) {
+			// defineProperty 标为非枚举的 expando 属性不出现在 for-in/Object.keys。
+			if i.o.expandoNonEnumerable(name) {
+				continue
+			}
 			return propIterItem{name: newStringValue(name), enumerable: _ENUM_TRUE}, i.next
 		}
 	}
@@ -601,6 +718,10 @@ func (o *dynamicObject) stringKeys(all bool, accum []Value) []Value {
 		copy(accum, oldAccum)
 	}
 	for _, key := range keys {
+		// all=true（getOwnPropertyNames/Reflect.ownKeys）才包含非枚举属性。
+		if !all && o.expandoNonEnumerable(key) {
+			continue
+		}
 		accum = append(accum, newStringValue(key))
 	}
 	return accum

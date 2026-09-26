@@ -41,7 +41,8 @@ func currentWorkerScriptFetcher() worker.ScriptFetcher {
 // 已实现：new Worker(url, {name}) / postMessage / onmessage / onerror /
 // addEventListener / removeEventListener / terminate；脚本支持 data: URL 或宿主
 // 注入的 Fetcher。未实现（有意保留，见 docs/CALIB.md）：module worker、Blob URL
-// 脚本、transferable、MessageChannel/MessagePort、SharedWorker/ServiceWorker。
+// 脚本、transferable、SharedWorker/ServiceWorker。
+// MessageChannel/MessagePort 已实现（见 message_port.go，同在本函数注册）。
 func installWorker(rt *jsc.Interpreter, g *jsc.JSObject) {
 	// MessageEvent（worker / 消息类事件的标准事件接口）。
 	g.Set("MessageEvent", jsc.FunctionValue(rt.NewConstructor("MessageEvent",
@@ -81,6 +82,10 @@ func installWorker(rt *jsc.Interpreter, g *jsc.JSObject) {
 
 	// Worker 构造器。
 	g.Set("Worker", jsc.FunctionValue(rt.NewConstructor("Worker", newWorker)))
+
+	// MessageChannel / MessagePort（消息通道：React Scheduler 的宏任务源之一，
+	// 见 message_port.go）。与 MessageEvent 同域注册。
+	installMessageChannel(rt, g)
 }
 
 // newWorker 实现 new Worker(scriptURL, options)：

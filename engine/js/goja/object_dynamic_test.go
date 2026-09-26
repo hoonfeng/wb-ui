@@ -115,10 +115,17 @@ func TestDynamicObject(t *testing.T) {
 	assert("test" in o, "'test' in o");
 	assert(deepEqual(Object.getOwnPropertyDescriptor(o, "test"), {value: 42, writable: true, enumerable: true, configurable: true}), "prop desc");
 
+	// vendored 放宽：host 不拥有的键允许完整描述符（含 non-enumerable /
+	// read-only）。原版 goja 在此抛 TypeError，而 Vue 3.5 的
+	// def(el, '__vnode', vnode, false) 依赖该定义成功（否则 createApp().mount()
+	// 失败、页面空白）。见 object_dynamic.go 的 strFlags 说明。
+	Object.defineProperty(o, "test1", {value: 0, writable: false, enumerable: false, configurable: true});
+	assert(deepEqual(Object.getOwnPropertyDescriptor(o, "test1"), {value: 0, writable: false, enumerable: false, configurable: true}), "define prop desc");
+
 	assert.throws(TypeError, function() {
 		"use strict";
-		Object.defineProperty(o, "test1", {value: 0, writable: false, enumerable: false, configurable: true});
-	}, "define prop");
+		o.test1 = 1;
+	}, "write to read-only expando");
 
 	var keys = [];
 	for (var key in o) {

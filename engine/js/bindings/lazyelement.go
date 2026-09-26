@@ -64,7 +64,7 @@ var elemAccessorProps = map[string]bool{
 	// baseURI：文档基准（document.baseURI）随时可能因导航或 <base href> 变化，
 	// 活值——适配器层缓存住就会读到过期 URL。
 	"baseURI": true,
-	"id": true, "className": true, "title": true, "src": true,
+	"id": true, "className": true, "title": true, "src": true, "hidden": true,
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
 	"onclick": true,
 	"track":   true, "textTracks": true,
@@ -249,7 +249,7 @@ var (
 		"multiple", "selectedIndex", "options", "selectedOptions", "selected",
 		"tagName", "nodeName", "nodeType", "getRootNode", "attachShadow", "shadowRoot",
 		"compareDocumentPosition", "nodeValue",
-		"id", "className", "title", "src",
+		"id", "className", "title", "src", "hidden",
 		"attributes", "innerHTML", "outerHTML", "textContent", "content",
 		"getContext", "width", "height", "toDataURL",
 		"track", "textTracks",
@@ -293,10 +293,15 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 		return v, acc, true
 	}
 	switch key {
-	case "constructor":
-		o := jsc.NewObject(rt.ObjectPrototype())
-		o.Set("name", jsc.StringValue("Element"))
-		return jsc.ObjectValue(o), nil, true
+	// 注：不再硬编码 "constructor"。
+	// 元素包装器的原型链（htmlelements.go 建立的 XxxElement.prototype →
+	// HTMLElement.prototype → Element.prototype → Node.prototype →
+	// EventTarget.prototype）已能提供正确的 el.constructor，与浏览器一致：
+	//   div.constructor === HTMLDivElement
+	//   div.constructor.name === "HTMLDivElement"
+	// 此前这里返回固定的 {name:"Element"} 假对象，会**拦截**原型链查找
+	//（handler.Get 返回非 undefined 即不再走原型链），导致所有元素的
+	// el.constructor.name 都误报 "Element"（库依赖它做元素类型分派的会走错分支）。
 
 	// ── Node tree ──
 	case "appendChild":
@@ -759,6 +764,22 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				}
 				return jsc.Undefined()
 			}, 0)), nil, true
+	case "click":
+		// ★ 程序化点击（DOM 标准 HTMLElement.click）：向元素自身派发一个可冒泡、
+		//   可取消的 click MouseEvent（bubbles=true, cancelable=true, button=0,
+		//   detail=1，与真实点击一致）。大量 JS 依赖它做程序化触发（菜单项、
+		//   tab、自定义控件、「点击外部关闭」等）；此前元素对象**没有 click 成员**
+		//   → `TypeError: Object has no member 'click'`（实测：在真实 IDE 页面
+		//   headless 复核里注入 `d.click()` 直接抛错 → 程序化点击链路整条不可用）。
+		return jsc.FunctionValue(jsc.NewNativeFunction("click",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				el.DispatchEvent(dom.NewMouseEventFromInit(dom.EventClick, dom.MouseEventInit{
+					EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
+					Button:    dom.MouseButtonLeft,
+					Detail:    1,
+				}))
+				return jsc.Undefined()
+			}, 0)), nil, true
 
 	// ── form control：value / checked / disabled / type ──
 	case "value":
@@ -1101,6 +1122,45 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				}}, true
 		}
 		return jsc.JSValue{}, nil, false
+	case "complete":
+		if tag == "img" {
+			// ★ HTMLImageElement.complete：src 为空 → true；元素带 data-loaded
+			//   → true；否则以「位图是否已解码」为准（复用 imgPixelDim 的解码
+			//   路径，与 width/height accessor 同源）。
+			//   此前 JS 侧读不到 complete/naturalWidth（返回 undefined）→ 依赖图片
+			//   加载状态的**懒加载 / 占位 / 骨架屏 / 失败重试**逻辑全部走错分支
+			//   （实测真实窗口 `document.querySelector('img').complete` 为 undefined，
+			//   浏览器同页面同视口为 true）。
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					if el.GetAttribute("src") == "" {
+						return jsc.BooleanValue(true)
+					}
+					if el.HasAttribute("data-loaded") {
+						return jsc.BooleanValue(true)
+					}
+					return jsc.BooleanValue(imgPixelDim(el, true) > 0)
+				}}, true
+		}
+		return jsc.JSValue{}, nil, false
+	case "naturalWidth":
+		if tag == "img" {
+			// HTMLImageElement.naturalWidth = 解码位图宽度（未解码时 0）。
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					return jsc.NumberValue(imgPixelDim(el, true))
+				}}, true
+		}
+		return jsc.JSValue{}, nil, false
+	case "naturalHeight":
+		if tag == "img" {
+			// HTMLImageElement.naturalHeight = 解码位图高度（未解码时 0）。
+			return jsc.JSValue{}, &elemAccessor{
+				get: func() jsc.JSValue {
+					return jsc.NumberValue(imgPixelDim(el, false))
+				}}, true
+		}
+		return jsc.JSValue{}, nil, false
 	case "height":
 		if tag == "canvas" {
 			return jsc.JSValue{}, &elemAccessor{
@@ -1221,8 +1281,75 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 		return jsc.JSValue{}, &elemAccessor{
 			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("title")) },
 			set: func(v jsc.JSValue) { el.SetAttribute("title", v.ToString()) }}, true
+	case "hidden":
+		// ★ HTML §4.12.2：hidden 是**反射属性**，IDL 类型为 (boolean or DOMString)。
+		//   setter：true / "" / "until-found" → setAttribute("hidden", 值或空串)；
+		//           false / null / undefined → removeAttribute("hidden")。
+		//   getter：无属性 → false；属性值 "until-found" → "until-found"；否则 true。
+		//   ★ 此前引擎**完全没有**该 accessor（grep 零命中）→ `el.hidden = true`
+		//   只是给 JS 对象塞了个自定义字段，DOM 与布局毫不知情：某组件的两个被隐藏 span 仍是 flex item，
+		//   各占一个 gap（各 5px）→ 该块宽 83 而浏览器 73（16+2+6+5+44+5+0+5+0 vs
+		//   16+2+6+5+44，逐像素吻合），右段容器被撑到 259（浏览器 248）。
+		//   本 accessor 与 resolver.go 的 `[hidden]{display:none}` UA 规则配合闭环。
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue {
+				if !el.HasAttribute("hidden") {
+					return jsc.BooleanValue(false)
+				}
+				if el.GetAttribute("hidden") == "until-found" {
+					return jsc.StringValue("until-found")
+				}
+				return jsc.BooleanValue(true)
+			},
+			set: func(v jsc.JSValue) {
+				if v.ToBoolean() || v.ToString() == "until-found" {
+					if v.ToString() == "until-found" {
+						el.SetAttribute("hidden", "until-found")
+					} else {
+						el.SetAttribute("hidden", "")
+					}
+				} else {
+					el.RemoveAttribute("hidden")
+				}
+				InvalidateComputedStyle(el)
+				// ★ 仅清 computed 缓存不够：hidden 改变的是**布局可见性**，必须同时
+				//   标脏渲染树（复用 className setter 的同一回调 OnClassChanged），
+				//   否则布局不会重算。实测：新 harness 下 `hasAttribute("hidden")`
+				//   已为 true（accessor 生效），但该块仍 83 —— 元素仍是 flex item、
+				//   仍各占一个 gap，正是「读值已变、布局未重算」。
+				if OnClassChanged != nil {
+					OnClassChanged(el)
+				}
+			}}, true
+	// ★ <link> 的 href / rel：此前落到 expando 兜底 → 不写 DOM 属性，
+	//   运行时插入的样式表既读不到 href 也无法接入级联（插件包 CSS 全丢，
+	//   实测 ui-titlebar 的 height:40px 不生效、整条顶栏被内容撑到 631px）。
+	//   仅对 link 提供（其它元素的 href 语义各异，保持 expando 兜底不变）。
+	case "href":
+		if el.LocalName() != "link" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("href")) },
+			set: func(v jsc.JSValue) {
+				el.SetAttribute("href", v.ToString())
+				maybeLoadLinkStylesheet(el)
+			}}, true
+	case "rel":
+		if el.LocalName() != "link" {
+			return jsc.JSValue{}, nil, false
+		}
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("rel")) },
+			set: func(v jsc.JSValue) {
+				el.SetAttribute("rel", v.ToString())
+				maybeLoadLinkStylesheet(el)
+			}}, true
 	case "src":
-		if el.LocalName() != "iframe" && el.LocalName() != "img" && el.LocalName() != "video" {
+		// ★ script 也必须有 src 访问器：此前只在 iframe/img/video 命中，
+		//   <script>.src 落到 expando 兜底 → 不写 DOM 属性（getAttribute('src')
+		//   读不到）、插入文档时也无法取回执行，运行时动态脚本装载整条断掉。
+		if el.LocalName() != "iframe" && el.LocalName() != "img" && el.LocalName() != "video" && el.LocalName() != "script" {
 			return jsc.JSValue{}, nil, false
 		}
 		return jsc.JSValue{}, &elemAccessor{
@@ -1231,6 +1358,11 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				el.SetAttribute("src", v.ToString())
 				if IFrameSrcChanged != nil && el.LocalName() == "iframe" {
 					IFrameSrcChanged(el, v.ToString())
+				}
+				// ★ <script src>：HTML「prepare a script」语义——已连接文档的脚本
+				//   元素在其 src 变化时取回并执行（未连接时留待插入时处理）。
+				if ScriptSrcChanged != nil && el.LocalName() == "script" && el.IsConnected() {
+					ScriptSrcChanged(el, v.ToString())
 				}
 				// img/video：src 变化后清除旧解码图（下次渲染/绘制按新 src
 				// 重新解码）。
@@ -1403,4 +1535,30 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			}}, true
 	}
 	return jsc.JSValue{}, nil, false
+}
+
+// linkIsStyleSheet 判断 <link> 是否为样式表链接（rel 含 stylesheet，
+// 大小写不敏感；rel 允许空格分隔的多个关键字）。
+func linkIsStyleSheet(el *dom.Element) bool {
+	if el == nil || el.LocalName() != "link" {
+		return false
+	}
+	rel := strings.ToLower(strings.TrimSpace(el.GetAttribute("rel")))
+	for _, part := range strings.Fields(rel) {
+		if part == "stylesheet" {
+			return true
+		}
+	}
+	return false
+}
+
+// maybeLoadLinkStylesheet 在 <link rel=stylesheet> 的 rel/href 变化后被调用：
+// 元素已连接文档且有 href 时，交给宿主加载并接入级联（见 webkit 侧分派）。
+func maybeLoadLinkStylesheet(el *dom.Element) {
+	if StylesheetHrefChanged == nil || !linkIsStyleSheet(el) || !el.IsConnected() {
+		return
+	}
+	if href := el.GetAttribute("href"); href != "" {
+		StylesheetHrefChanged(el, href)
+	}
 }

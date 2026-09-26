@@ -311,6 +311,16 @@ func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this 
 		}
 		return result.obj
 	})
+	// ★ 让 fn.name 反映构造器名（浏览器语义：HTMLDivElement.name ===
+	// "HTMLDivElement"）。goja 对 Go 函数默认取「Go 函数全名」
+	//（如 wb-ui/engine/js/jsc.(*Interpreter).NewConstructor.func1），而脚本普遍读
+	// ctor.name / el.constructor.name 做类型分派（React、Vue、Lit、各类
+	// isElement 辅助函数）。函数 name 在 goja 里是 configurable 的，
+	// 故用 DefineDataProperty 覆盖（普通赋值会被 writable:false 静默忽略）。
+	if obj, ok := constVal.(*goja.Object); ok {
+		_ = obj.DefineDataProperty("name", r.vm.ToValue(name),
+			goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+	}
 	return &JSFunction{
 		v:       constVal,
 		id:      fmt.Sprintf("ctor:%s:%p", name, fn),

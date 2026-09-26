@@ -23,20 +23,33 @@ import (
 	"wb-ui/engine/js/jsc"
 )
 
-// listenerKey identifies a registered JS callback by its (event type, JS function
-// identity). The function identity is the *JSFunction.String() (which is a stable
-// pointer-based id like "js:0x..."), because AsFunction() creates a new *JSFunction
-// each call so pointer identity is unreliable.
+// listenerKey uniquely identifies one JS listener registration: the target it is
+// installed on, the event type, the JS function identity, and the capture phase.
+// The function identity is *JSFunction.String() (a stable pointer-based id like
+// "js:0x..."); AsFunction() creates a new *JSFunction per call, so Go pointer
+// identity is unreliable and the string id is used instead.
+//
+// ★ target 必须参与键：同一个 JS 回调可以挂在多个元素上，每个 target 要各自持有
+//   独立的 jsListener（否则移除/派发会串台到别的元素）。
 type listenerKey struct {
+	target    dom.EventTarget
 	eventType string
 	fnID      string
+	capture   bool
 }
 
-// registeredListeners is the side-table mapping a listenerKey to the jsListener
-// instances created for it. It exists because dom.EventTarget.RemoveEventListener
-// matches listeners by Go identity, while JS callers only have the JS function value;
-// the side-table lets us recover the Go listener for a given JS callback.
-var registeredListeners = map[listenerKey][]*jsListener{}
+// registeredListeners is the side-table of live JS listeners, keyed by the full
+// registration identity above. It serves two purposes:
+//
+//  1. addEventListener 去重：dom.EventTarget 按 Go listener 对象身份判重
+//     （listenerEquals），而本包每次 add 都新建 jsListener —— 若不复用，同一 JS
+//     回调重复注册就不会被去重（DOM 规范要求同 (type, callback, capture) 的重复
+//     注册是 no-op），监听器只增不减，一次事件被处理多次。
+//     实测（2026-09-26）：Vue 的 @change 在桌面端累积到 2 个 → 选择工具集时
+//     「本对话已切换工具集为 X」toast 弹两条；浏览器（Blink 自带去重）只有一条。
+//  2. removeEventListener 定位：JS 侧只有函数值，靠该表取回注册时的 Go listener，
+//     dom 层的身份比较才能命中并真正移除（此前每次新建 listener → 永不相等）。
+var registeredListeners = map[listenerKey]*jsListener{}
 
 // jsListener wraps a JS callback so it can be installed on a dom.EventTarget. It
 // implements dom.EventListener by converting the event to a JS object and invoking the
@@ -55,9 +68,22 @@ func (l *jsListener) HandleEvent(e dom.Event) {
 		fmt.Printf("[evt] jsListener.HandleEvent type=%q\n", e.Type())
 	}
 	ev := eventToJS(l.interp, e)
-	// 'this' for a bare function callback is undefined (matching addEventListener
-	// semantics where the callback is invoked as a plain call, not a method).
-	_, err := l.interp.Call(l.fn, jsc.Undefined(), []jsc.JSValue{ev})
+	// ★ 浏览器语义（DOM 标准 inner invoke）：监听器是 Function 且事件的
+	//   currentTarget 非 null 时，**this = currentTarget**（即绑定的元素）——
+	//   这是 addEventListener 回调里 this.classList.add(...) 能工作的前提。
+	//   此前固定传 Undefined（旧注释误以为「plain call」就是浏览器行为）→
+	//   handler 内 this 为 undefined，this.classList 全部落空（实测：点击
+	//   导航胶囊后 .active 被循环清空却加不到被点项，快照 active=count=0，
+	//   视图 display 也不切换）。
+	thisVal := jsc.Undefined()
+	if ev.IsObject() {
+		if o := ev.AsObject(); o != nil {
+			if ct, ok := o.GetByKey("currentTarget"); ok && !ct.IsNull() && !ct.IsUndefined() {
+				thisVal = ct
+			}
+		}
+	}
+	_, err := l.interp.Call(l.fn, thisVal, []jsc.JSValue{ev})
 	// ★ Flush goja's Promise microtasks: Vue's @click handler mutates reactive
 	// state and schedules the DOM update via Promise.resolve().then. Runtime.Call
 	// does NOT run those jobs (only RunProgram does), so without this the DOM
@@ -75,7 +101,7 @@ func (l *jsListener) HandleEvent(e dom.Event) {
 func makeAddEventListener(target dom.EventTarget) *jsc.JSFunction {
 	return jsc.NewNativeFunction("addEventListener",
 		func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) < 2 {
+			if len(args) < 2 || !args[1].IsFunction() {
 				return jsc.Undefined()
 			}
 			eventType := args[0].ToString()
@@ -84,17 +110,41 @@ func makeAddEventListener(target dom.EventTarget) *jsc.JSFunction {
 			if len(args) >= 3 {
 				capture = args[2].ToBoolean()
 			}
+			key := listenerKey{target: target, eventType: eventType, fnID: jsFn.AsFunction().String(), capture: capture}
+			if _, dup := registeredListeners[key]; dup {
+				// ★ DOM 规范 §2.7（addEventListener）：type/callback/capture 完全
+				//   相同的重复注册是 no-op，不产生第二个监听器。此前每次调用都新建
+				//   jsListener，dom 层按对象身份判重必然失败 → 重复注册全部生效，
+				//   事件被处理多次（Vue @change 双触发 → toast 双弹）。
+				if os.Getenv("WB_EVT_DEBUG") != "" {
+					fmt.Printf("[evt] addEventListener DUPLICATE(ignored) target=%s type=%q\n", targetDesc(target), eventType)
+				}
+				return jsc.Undefined()
+			}
 			listener := &jsListener{interp: in, fn: jsFn}
-			// dom.EventTarget.AddEventListener rejects an identical (callback, capture)
-			// duplicate per the DOM spec; we ignore the result and still record the
-			// listener so removal can find the active instance.
-			target.AddEventListener(eventType, listener, capture)
-			if jsFn.IsFunction() {
-				key := listenerKey{eventType: eventType, fnID: jsFn.AsFunction().String()}
-				registeredListeners[key] = append(registeredListeners[key], listener)
+			// 只有真正装上（未被 dom 层判重拒绝）才记录，保证表与实际注册一致。
+			if target.AddEventListener(eventType, listener, capture) {
+				registeredListeners[key] = listener
+				if os.Getenv("WB_EVT_DEBUG") != "" {
+					// %p 打印 EventTarget 动态值（元素指针），用于区分「同一元素重复注册」
+					// 与「多个同类元素各注册一次」——两者在 tag.class 上无法分辨。
+					fmt.Printf("[evt] addEventListener OK target=%s(%p) type=%q capture=%v fnID=%s\n",
+						targetDesc(target), target, eventType, capture, key.fnID)
+				}
 			}
 			return jsc.Undefined()
 		}, 2)
+}
+
+// targetDesc 把 EventTarget 描述成调试可读的 "tag.class"（非元素时退化为 Go 类型名）。
+func targetDesc(t dom.EventTarget) string {
+	if el, ok := t.(*dom.Element); ok {
+		if cls := el.ClassName(); cls != "" {
+			return el.LocalName() + "." + cls
+		}
+		return el.LocalName()
+	}
+	return fmt.Sprintf("%T", t)
 }
 
 // makeRemoveEventListener returns a native JS function that unregisters a previously
@@ -111,12 +161,10 @@ func makeRemoveEventListener(target dom.EventTarget) *jsc.JSFunction {
 			if len(args) >= 3 {
 				capture = args[2].ToBoolean()
 			}
-			key := listenerKey{eventType: eventType, fnID: args[1].AsFunction().String()}
-			list := registeredListeners[key]
-			for i, l := range list {
+			key := listenerKey{target: target, eventType: eventType, fnID: args[1].AsFunction().String(), capture: capture}
+			if l, ok := registeredListeners[key]; ok {
 				if target.RemoveEventListener(eventType, l, capture) {
-					registeredListeners[key] = append(list[:i], list[i+1:]...)
-					break
+					delete(registeredListeners, key)
 				}
 			}
 			return jsc.Undefined()

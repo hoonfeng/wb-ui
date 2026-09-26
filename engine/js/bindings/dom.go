@@ -173,6 +173,13 @@ func roElementSize(el *dom.Element) (float64, float64) {
 	if GetElementBoxRect == nil || el == nil {
 		return 0, 0
 	}
+	// ★ 不要改用 GetElementBoxRectFast（2026-09-27 实测回归）：虽然宿主
+	// 是在 EnsureLayout 之后调用本函数、看似"布局已完成，直读缓存足够"，
+	// 但 getElementBoxRect 开头的 forceLayout()（RebuildRenderTreeIfNeeded
+	// 绕过 rebuild cooldown 的强制重建）正是让渲染树在帧末回到 clean 的
+	// 关键。改走 Fast（跳过强制重建）后脏状态会跨帧累积，实测 IDE 页面
+	// layout 从 ~80ms 恶化到 ~350ms（total 200ms → 450ms，两次独立测量
+	// 一致；RO 本身尺寸稳定、无回调风暴）。
 	_, _, w, h := GetElementBoxRect(el)
 	return w, h
 }
@@ -287,6 +294,36 @@ var (
 // 水合脚本中断。
 var CurrentScriptElement *dom.Element
 
+// FireResourceEvent 触发元素上的资源事件（load/error）：先调 on<type> 属性
+// 处理器，再走 dispatchEvent（addEventListener 注册的监听器）。
+//
+// 宿主在异步资源到位后调用——运行时动态 <script src> 的 onload 就走这里
+// （浏览器语义：经典脚本取回并执行后派发 load，取回/执行失败派发 error）。
+func FireResourceEvent(rt *jsc.Interpreter, el *dom.Element, typ string) {
+	if rt == nil || el == nil {
+		return
+	}
+	wrapped := wrapElement(rt, el)
+	if wrapped == nil {
+		return
+	}
+	// ★ 事件对象必须在**当前解释器**的 runtime 里构造：
+	//   jsc.NewObject(nil) 会新建独立 goja runtime，跨 runtime 使用即抛
+	//   "Illegal runtime transition of an Object"。
+	ev := rt.ObjectPrototype()
+	ev.SetClassName("Event")
+	ev.Set("type", jsc.StringValue(typ))
+	ev.Set("target", jsc.ObjectValue(wrapped))
+	evVal := jsc.ObjectValue(ev)
+	if h, ok := wrapped.GetByKey("on" + typ); ok && h.IsCallable() {
+		_, _ = rt.Call(h, jsc.ObjectValue(wrapped), []jsc.JSValue{evVal})
+	}
+	if d, ok := wrapped.GetByKey("dispatchEvent"); ok && d.IsCallable() {
+		_, _ = rt.Call(d, jsc.ObjectValue(wrapped), []jsc.JSValue{evVal})
+	}
+}
+
+
 // namedNodeMapCache 缓存每个元素的 attributes 集合对象：DOM 规定
 // `el.attributes === el.attributes`（同一 NamedNodeMap 实例），因此不能每次
 // 访问都新建对象。集合内容保持 live —— 每次属性读/写后由 refreshNamedNodeMap
@@ -319,6 +356,17 @@ const domBindingsMarker = "\x00__wbui_dom_bindings_registered"
 // （浏览器 iframe navigation 语义）。nil 时静默跳过（测试环境）。
 var IFrameSrcChanged func(el *dom.Element, src string)
 
+// ScriptSrcChanged 在 <script> 的 src 属性变化且元素已连接文档时调用
+// （webkit 注入实现）：按 HTML「prepare a script」语义取回并执行脚本——
+// gou-ide 的区域包 client 半正是靠运行时装载编译 bundle 注册槽位。
+var ScriptSrcChanged func(el *dom.Element, src string)
+
+// StylesheetHrefChanged 在 <link rel=stylesheet> 的 href 变化（或插入文档）
+// 且元素已连接时调用（webkit 注入实现）：运行时动态样式表按浏览器语义
+// 取回并接入级联——插件包 CSS 全靠这条路径（client.js 里 createElement('link')
+// + rel/href + appendChild）。
+var StylesheetHrefChanged func(el *dom.Element, href string)
+
 // ElementFromPoint 实现 document.elementFromPoint（webkit 分派器注入，
 // 按解释器归属路由到对应 WebView 的渲染树命中）。视口坐标 → 命中的
 // 最顶层元素（层叠感知：z-index/遮罩/弹窗按绘制顺序，后被绘制者在上）。
@@ -335,7 +383,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 导航累积（内存探针实测：每次 LoadHTML +28MB、+38 万对象）。
 	if registeredDocument != document {
 		clearNodeCache()
-		registeredListeners = map[listenerKey][]*jsListener{}
+		registeredListeners = map[listenerKey]*jsListener{}
 		windowEventListeners = map[string][]jsc.JSValue{}
 		dom.ResetObserverRegistry()
 	}
@@ -616,6 +664,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	domDocFragProto = docFragProto
 	domAttrProto = attrProto
 	domNamedNodeMapProto = jsc.FunctionValue(nnmCtor).AsObject().GetStr("prototype").AsObject()
+
+	// ── HTML*Element 构造器体系（HTML 规范 §4）──
+	// 建立全部具体元素接口构造器 + tag → prototype 分派表（htmlelements.go）。
+	// 必须在此处调用：依赖上面接好的
+	// HTMLElement.prototype.__proto__ = Element.prototype。
+	registerHTMLElementTypes(rt, g, htmlElementProto, svgElementProto)
 
 	// ── Element.prototype: attribute 方法（标准 DOM 设计）──
 	// 属性方法定义在 prototype 上而非每个包装实例上：
@@ -1113,19 +1167,42 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			if len(args) >= 1 {
 				if n := unwrapNode(args[0]); n != nil {
 					computed = computedStyleFor(n)
+					computed = withDisplayFallback(computed, n)
+					// ★ display 回退：computedStyleFor 的级联只收录**声明过**的属性，
+					//   未声明 display 的元素（如 `<span>`、插件注入的 div）不会出现在
+					//   表里 → `getComputedStyle(el).display` 返回 undefined，污染一切
+					//   依赖它的 JS（实测某个被隐藏的 span 的 disp=undefined）。
+					//   此处按 UA 语义补默认值：带 hidden 属性 → "none"；否则按标签的
+					//   UA 默认 display 映射（block / inline-block / inline）。
+					if _, ok := computed["display"]; !ok {
+						if e, ok2 := n.(*dom.Element); ok2 {
+							computed["display"] = uaDefaultDisplayFor(e)
+						}
+					}
 				}
 			}
 			if computed == nil {
 				computed = map[string]string{}
 			}
 			// 常用属性直接回写到对象属性（camelCase，与浏览器一致）
-			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginBottom", "paddingTop", "paddingBottom", "textAlign", "whiteSpace", "overflow", "overflowX", "overflowY", "overflowWrap", "wordBreak", "textOverflow", "cursor", "zIndex", "verticalAlign", "maxHeight", "minHeight", "maxWidth", "minWidth", "borderRadius", "boxShadow", "userSelect", "pointerEvents", "top", "left", "right", "bottom", "transform", "flexDirection", "alignItems", "justifyContent", "fontStyle", "fontVariant", "letterSpacing", "textDecoration", "borderTop", "borderBottom", "borderLeft", "borderRight", "borderStyle", "borderWidth", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "padding", "margin", "gap", "rowGap", "columnGap", "gridTemplateColumns", "gridTemplateRows", "boxSizing", "float", "clear", "listStyle", "backgroundImage", "backgroundRepeat", "backgroundPosition", "backgroundSize", "outline", "content", "clipPath"} {
+			// ★ 四向 padding/margin 缺一不可：此前白名单只有 paddingTop/Bottom 与
+			//   marginTop/Bottom，**缺 paddingRight/Left、marginRight/Left** →
+			//   `getComputedStyle(el).paddingLeft/paddingRight` 恒为 undefined
+			//   （实测 gou-ide `.chat-input`：pt=8px pb=8px 而 pr/pl=undefined），
+			//   一切依赖四向 computed 的 JS 自适应计算拿到 undefined 后走错分支。
+			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginRight", "marginBottom", "marginLeft", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "textAlign", "whiteSpace", "overflow", "overflowX", "overflowY", "overflowWrap", "wordBreak", "textOverflow", "cursor", "zIndex", "verticalAlign", "maxHeight", "minHeight", "maxWidth", "minWidth", "borderRadius", "boxShadow", "userSelect", "pointerEvents", "top", "left", "right", "bottom", "transform", "flexDirection", "alignItems", "justifyContent", "fontStyle", "fontVariant", "letterSpacing", "textDecoration", "borderTop", "borderBottom", "borderLeft", "borderRight", "borderStyle", "borderWidth", "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "alignSelf", "flexWrap", "backgroundSize", "backgroundRepeat", "backgroundPosition", "backgroundClip", "flex", "flexGrow", "flexShrink", "flexBasis", "order", "objectFit", "mixBlendMode", "filter", "transition", "animation", "willChange", "tableLayout", "borderCollapse", "direction", "writingMode", "textTransform", "wordSpacing", "textIndent", "aspectRatio", "gridGap", "gridColumn", "gridRow", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "padding", "margin", "gap", "rowGap", "columnGap", "gridTemplateColumns", "gridTemplateRows", "boxSizing", "float", "clear", "listStyle", "backgroundImage", "backgroundRepeat", "backgroundPosition", "backgroundSize", "outline", "content", "clipPath"} {
 				key := prop
 				if k := camelToKebab(prop); k != prop {
 					key = k
 				}
 			if v, ok := computed[key]; ok {
 				cs.Set(prop, jsc.StringValue(v))
+			} else if init, ok2 := uaInitialComputedValues[prop]; ok2 {
+				// ★ 浏览器保证 computed style 对**每个属性恒有值**（未声明 = CSS 初始值）：
+				//   引擎级联 map 只含声明值 → 未声明属性读到 undefined →
+				//   parseFloat(cs.fontSize)=NaN 一类分支走错。此处仅补 JS 对象层，
+				//   不改 computedStyleFor 的 map（避免影响布局与继承链计算）。
+				cs.Set(prop, jsc.StringValue(init))
 			}
 		}
 		// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
@@ -1135,6 +1212,49 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				cs.Set("backgroundColor", jsc.StringValue(v))
 			} else {
 				cs.Set("backgroundColor", jsc.StringValue("rgba(0, 0, 0, 0)"))
+			}
+		}
+		// ★ border / border-width 简写展开：浏览器 getComputedStyle 的
+		//   borderTopWidth 等 longhand 由 `border: 1px solid #333`（或
+		//   `border-width: 1px 2px`）展开而来。此前未展开 → 读数是 undefined
+		//   （实测最小复现：声明了 `border:1px solid #333` 而 bt=undefined），
+		//   依赖边框宽度做布局/自适应计算的 JS 全部失效。
+		bwTok := func(s string) string {
+			for _, f := range strings.Fields(s) {
+				// 宽度 token：数字开头（1px / 2px / 0.5em），排除样式与颜色关键字
+				if len(f) > 0 && (f[0] == '0' || f[0] == '1' || f[0] == '2' || f[0] == '3' ||
+					f[0] == '4' || f[0] == '5' || f[0] == '6' || f[0] == '7' ||
+					f[0] == '8' || f[0] == '9' || f[0] == '.') {
+					return f
+				}
+			}
+			return ""
+		}
+		for _, longhand := range []string{"border-top-width", "border-right-width", "border-bottom-width", "border-left-width"} {
+			if _, ok := computed[longhand]; ok {
+				continue
+			}
+			w := ""
+			if v, ok2 := computed["border-width"]; ok2 {
+				w = bwTok(v)
+			} else if v, ok2 := computed["border"]; ok2 {
+				w = bwTok(v)
+			}
+			if w != "" {
+				computed[longhand] = w
+			}
+		}
+		// ★ 顺序：白名单回写循环在上方**已经执行完**，因此展开得到的 longhand
+		//   必须在这里补写回对象（否则 computed 里有了、对象属性仍 undefined ——
+		//   实测 `border:1px solid #333` 声明下 bt=undefined 正是此因）。
+		for longhand, prop := range map[string]string{
+			"border-top-width":    "borderTopWidth",
+			"border-right-width":  "borderRightWidth",
+			"border-bottom-width": "borderBottomWidth",
+			"border-left-width":   "borderLeftWidth",
+		} {
+			if v, ok := computed[longhand]; ok {
+				cs.Set(prop, jsc.StringValue(v))
 			}
 		}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
@@ -1151,7 +1271,18 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 							return jsc.StringValue(v)
 						}
 					}
-					return jsc.StringValue("")
+					// ★ 浏览器 getPropertyValue 对**每个属性恒有值**（未声明 = CSS 初始值）：
+				//   引擎级联 map 只含声明值 → 未声明属性返回 ""，与浏览器不同，
+				//   下游 parseFloat("")=NaN 与 parseFloat("16px") 行为差异明显。
+				//   与属性访问路径共用 uaInitialComputedValues（camelCase 键）。
+				if camel := kebabToCamel(prop); camel != prop {
+					if init, ok := uaInitialComputedValues[camel]; ok {
+						return jsc.StringValue(init)
+					}
+				} else if init, ok := uaInitialComputedValues[prop]; ok {
+					return jsc.StringValue(init)
+				}
+				return jsc.StringValue("")
 				}, 1)))
 			cs.Set("getPropertyPriority", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyPriority",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
@@ -1412,9 +1543,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// EventTarget 基类（可实例化的非 DOM 事件目标）。
 	// 浏览器标准 API：addEventListener / removeEventListener / dispatchEvent。
 	// 组件库或自定义事件源（如 WebSocket stub、状态总线）可能直接使用它。
+	var etTargetProto *jsc.JSObject
 	g.Set("EventTarget", jsc.FunctionValue(rt.NewConstructor("EventTarget",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			obj := jsc.NewObject(in.ObjectPrototype())
+			obj := jsc.NewObject(etTargetProto)
 			listeners := map[string][]jsc.JSValue{} // type → JS callbacks
 			obj.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
@@ -1476,6 +1608,21 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				}, 1)))
 			return obj
 		})))
+
+	// ★ DOM 规范：Node 继承 EventTarget（Node.prototype.__proto__ =
+	// EventTarget.prototype）。此前缺这一环，导致
+	// `document.body instanceof EventTarget` 为 false（浏览器为 true），
+	// 事件系统类库（检测目标是否事件目标）会走错分支。
+	// 同时把 etTargetProto 回填给上面的构造器闭包，使
+	// `new EventTarget() instanceof EventTarget` 成立。
+	if etv, ok := g.GetByKey("EventTarget"); ok && etv.IsObject() {
+		if p := etv.AsObject().GetStr("prototype").AsObject(); p != nil {
+			etTargetProto = p
+			if nodeProto != nil {
+				nodeProto.Set("__proto__", jsc.ObjectValue(p))
+			}
+		}
+	}
 
 	// WebSocket 构造器（通用 stub）。
 	// wb-ui 引擎不内置真实 WebSocket 传输；此 stub 提供完整的浏览器语法
@@ -1954,6 +2101,27 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			if el := in.GetEventLoop(); el != nil && len(args) > 0 && args[0].IsNumber() {
 				el.ClearInterval(int(args[0].ToNumber()))
+			}
+			return jsc.Undefined()
+		}, 1)))
+
+	// setImmediate / clearImmediate（事件循环驱动）。
+	// 语义：不参与宏任务的到期排序，在每轮到期定时器之前执行（IE10+/Node）。
+	// 存在性很重要——React Scheduler 的宿主回调按
+	// isInputPending → setImmediate → MessageChannel → setTimeout 依次回退，
+	// 缺前者就落到下一档（调度粒度随之变粗）。
+	g.Set("setImmediate", jsc.FunctionValue(jsc.NewNativeFunction("setImmediate",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 1 || !args[0].IsCallable() {
+				return jsc.NumberValue(0)
+			}
+			el := in.EnsureEventLoop()
+			return jsc.NumberValue(float64(el.SetImmediate(args[0])))
+		}, 1)))
+	g.Set("clearImmediate", jsc.FunctionValue(jsc.NewNativeFunction("clearImmediate",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if el := in.GetEventLoop(); el != nil && len(args) > 0 && args[0].IsNumber() {
+				el.ClearImmediate(int(args[0].ToNumber()))
 			}
 			return jsc.Undefined()
 		}, 1)))
@@ -3208,17 +3376,9 @@ func refreshNamedNodeMap(entry *namedNodeMapEntry, el *dom.Element) {
 func ClearPageBindingsFor(interp *jsc.Interpreter, doc *dom.Document) {
 	clearNodeCache()
 	if interp != nil {
-		for k, list := range registeredListeners {
-			kept := list[:0]
-			for _, l := range list {
-				if l.interp != interp {
-					kept = append(kept, l)
-				}
-			}
-			if len(kept) == 0 {
+		for k, l := range registeredListeners {
+			if l.interp == interp {
 				delete(registeredListeners, k)
-			} else {
-				registeredListeners[k] = kept
 			}
 		}
 		for k, fns := range windowEventListeners {
@@ -3428,6 +3588,121 @@ func compareDocPosition(a, b dom.Node) int {
 // 永久破坏。浏览器语义：在光标处插入文本节点 → 派发 input 事件 → CM6 的
 // readDOMChange 对比 DOM/state 差异后重建正确结构。返回 false 表示无有效
 // selection（调用方应回退：跳过 DOM 修改，仅派发 input 事件）。
+// SelectionInsideElement 报告当前 DOM Selection 的起点是否位于 root 子树内。
+//
+// 用途：contenteditable 的字符插入必须先校验「selection 属于该元素」——
+// sstate.ranges 是**全局单例**，会残留其它元素（终端 textarea、上一次 CM6
+// 光标、已卸载节点）的旧 selection；此时 InsertTextAtSelection 会把字符插到
+// **别处**并返回 true，目标输入框仍为空（实测：ev:input 触发 5 次而
+// .chat-input 的 inputDetail len=0/htmlLen=0/kids=0 —— 用户「点击输入框打字
+// 无反应」的另一条成因）。
+func SelectionInsideElement(root *dom.Element) bool {
+	if root == nil || len(sstate.ranges) == 0 {
+		return false
+	}
+	r := sstate.ranges[0]
+	if r == nil {
+		return false
+	}
+	sc := r.GetStr("startContainer")
+	if sc.IsNull() || sc.IsUndefined() {
+		return false
+	}
+	node := unwrapNode(sc)
+	if node == nil {
+		return false
+	}
+	// ★ 陈旧 range 严格化：起点所在节点已从文档分离（上一个页面 / 已卸载元素）时，
+	//   该 selection 对当前元素无效（浏览器语义：分离节点不参与选择命中）。
+	//   sstate 是包级单例、跨 WebView 复用，会残留旧页面的 range —— 不校验会把
+	//   退格/插入误判成「有有效选区」而走错路径（实测：同包全量测试时退格走了旧的
+	//   setFocusedElementValue 路径（对 contenteditable 直接 return，保护 CM6 结构
+	//   的正确设计）→ 退格完全无效、textContent 保持 "hello"；单独跑因无残留而正确）。
+	if !node.IsConnected() {
+		return false
+	}
+	for n := node; n != nil; n = n.ParentNode() {
+		if n == dom.Node(root) {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteCharFromContentEditable 在 contenteditable 根的**内容末尾**删除一个字符
+// （forward=false 退格：删末尾字符；forward=true：caret 在末尾、其后无字符，不动）。
+// 用于「页面从不维护 DOM Selection」的手写 contenteditable：
+// sstate.ranges 恒为空 → 选区路径无效；而 setFocusedElementValue 对 contenteditable
+// 直接 return（保护 CodeMirror 6 的结构化 DOM，正确）→ 退格完全无效
+// （实测：键入 "hello" 后退格 3 次 textContent 仍为 "hello"）。与字符输入的
+// AppendTextToContentEditable 对称，作为无 Selection 时的兜底删除。
+// 返回 true 表示已改写 DOM。
+func DeleteCharFromContentEditable(root *dom.Element, forward bool) bool {
+	if root == nil || forward {
+		// 向后的 Delete：无 caret 时位置视为内容末尾，其后无字符可删。
+		return false
+	}
+	var target *dom.Text
+	var walk func(n dom.Node)
+	walk = func(n dom.Node) {
+		for _, c := range n.ChildNodes() {
+			if t, ok := c.(*dom.Text); ok && len([]rune(t.NodeValue())) > 0 {
+				target = t
+			}
+			walk(c)
+		}
+	}
+	walk(root)
+	if target == nil {
+		return false
+	}
+	rs := []rune(target.NodeValue())
+	if len(rs) == 0 {
+		return false
+	}
+	if err := target.SetNodeValue(string(rs[:len(rs)-1])); err != nil {
+		return false
+	}
+	return true
+}
+
+// AppendTextToContentEditable 在 contenteditable 根的**内容末尾**追加文本，用于
+// 「无有效 DOM Selection」时的兜底插入（浏览器语义：contenteditable 聚焦后输入的
+// 字符必须进入文档；无 caret 时追加到内容末尾）。
+//
+// 背景：InsertTextAtSelection 依赖 sstate.ranges（DOM Selection 状态），而
+// sstate.ranges 只在页面调用 selection.collapse()/addRange()/setBaseAndExtent()
+// 时才被填充。CodeMirror 6 每次点击都会写 collapse，所以 CM6 输入区正常；但
+// **手写 contenteditable**（gou-ide 对话输入框 .chat-input：只监听 @input/@keydown、
+// 从不碰 selection API）在真实点击聚焦后 ranges 恒为空 → InsertTextAtSelection
+// 返回 false → 字符被**静默丢弃**（实测证据：ev:input 触发 5 次而 DOM 文本长度为 0，
+// 用户表现为「点击输入框后打字无反应」）。
+// 返回 true 并同步 sstate.ranges 到插入点之后，保证连续输入逐字追加。
+func AppendTextToContentEditable(root *dom.Element, text string) bool {
+	if root == nil || text == "" {
+		return false
+	}
+	// 末节点是文本节点时直接续写（保持节点数最小，页面序列化最简）。
+	if last := root.LastChild(); last != nil {
+		if t, ok := last.(*dom.Text); ok {
+			if err := t.SetNodeValue(t.NodeValue() + text); err == nil {
+				sstate.updateRangeForInsert(t, len([]rune(text)))
+				return true
+			}
+		}
+	}
+	doc := root.OwnerDocument()
+	if doc == nil {
+		return false
+	}
+	ins := dom.NewText(doc, text)
+	if err := root.AppendChild(ins); err != nil {
+		return false
+	}
+	sstate.updateRangeForInsert(ins, len([]rune(text)))
+	return true
+}
+
 func InsertTextAtSelection(text string) bool {
 	if len(sstate.ranges) == 0 {
 		return false
@@ -3699,6 +3974,12 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	// <video>/<audio> 走媒体元素原型（HTMLMediaElement 家族）。
 	if mp := mediaElementPrototypeFor(el); mp != nil {
 		proto = mp
+	} else if hp := htmlElementPrototypeFor(el); hp != nil {
+		// 其余元素按 HTML 接口分派（HTMLDivElement/HTMLIFrameElement/...），
+		// 使 `div instanceof HTMLDivElement`、`div.constructor.name` 成立。
+		// 原型链：XxxElement.prototype → HTMLElement.prototype → Element.prototype
+		// → Node.prototype（htmlelements.go 建立）。
+		proto = hp
 	}
 	props := &lazyElemProps{
 		el:      el,
@@ -4931,6 +5212,21 @@ func computedStyleFor(el dom.Node) map[string]string {
 	if el == nil {
 		return map[string]string{}
 	}
+	// ★ WB_COMPUTED_DEBUG=1：诊断必须放在 cssCacheGet **之前** —— 缓存命中会提前
+	//   return（真实页面该元素 computed 早已入缓存），此前把打印放缓存之后 →
+	//   连续两轮拿不到 matchedDecls（输出为空）。此处至少明确区分「缓存命中」与
+	//   「规则未匹配」两种情况，避免再用推断代替数据。
+	debugComputed := os.Getenv("WB_COMPUTED_DEBUG") != ""
+	if debugComputed {
+		if e2, ok2 := el.(*dom.Element); ok2 && strings.Contains(e2.ClassName(), "chat-input") {
+			if cached, ok3 := cssCacheGet(el); ok3 {
+				fmt.Printf("[computed-dump] <%s class=%q> CACHE HIT: cached padding-top=%q min-height=%q (decls 不可见，需清缓存或首帧采集)\n",
+					e2.LocalName(), e2.ClassName(), cached["padding-top"], cached["min-height"])
+			} else {
+				fmt.Printf("[computed-dump] <%s class=%q> CACHE MISS: 走完整级联，将打印 matchedDecls\n", e2.LocalName(), e2.ClassName())
+			}
+		}
+	}
 	if cached, ok := cssCacheGet(el); ok {
 		return cached
 	}
@@ -5010,6 +5306,22 @@ func computedStyleFor(el dom.Node) map[string]string {
 		}
 		return decls[i].order < decls[j].order
 	})
+	// ★ WB_COMPUTED_DEBUG=1：打印匹配到该元素的**全部声明**（名称/值/!important/
+	//   源顺序），仅针对 chat-input 以减少噪音。用于定位「规则匹配却读不到」或
+	//   「被更高优先级声明覆盖」的真因 —— 禁止用推断代替该数据。
+	if os.Getenv("WB_COMPUTED_DEBUG") != "" {
+		if e2, ok := el.(*dom.Element); ok && strings.Contains(e2.ClassName(), "chat-input") {
+			fmt.Printf("[computed-dump] <%s class=%q> matched decls=%d\n", e2.LocalName(), e2.ClassName(), len(decls))
+			for _, md := range decls {
+				n := md.decl.Name
+				if n == "padding" || strings.HasPrefix(n, "padding-") || n == "min-height" ||
+					n == "font-size" || n == "box-sizing" || n == "height" {
+					fmt.Printf("[computed-dump]   %-18s = %-30v imp=%-5v order=%d\n",
+						n, md.decl.Value, md.decl.Important, md.order)
+				}
+			}
+		}
+	}
 	// 第一遍：普通声明（!important 稍后覆盖）
 	for _, md := range decls {
 		if md.decl.Important {
@@ -5038,6 +5350,14 @@ func computedStyleFor(el dom.Node) map[string]string {
 	// computed style 的简写展开即可对齐 fit 计算。
 	expandBoxShorthand(out, "padding", []string{"padding-top", "padding-right", "padding-bottom", "padding-left"})
 	expandBoxShorthand(out, "margin", []string{"margin-top", "margin-right", "margin-bottom", "margin-left"})
+	// ★ overflow 简写展开：浏览器  → overflowX/overflowY 均为
+	//   "auto"（getComputedStyle 恒展开简写）。此前只展 padding/margin →
+	//   读 overflowX/overflowY 得 undefined，依赖它判断「是否可滚」的 JS 失效。
+	expandOverflowShorthand(out)
+	// ★ border 简写展开（style/color 部分；width 已有 bwTok 展开）：
+	//   浏览器  → borderTopStyle="dashed"、
+	//   borderTopColor="rgb(18, 52, 86)" 等长写恒有值。
+	expandBorderStyleLonghand(out)
 	// 解析 var(--xxx) 引用（自定义属性继承链：:root → body → ... → el）。
 	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
 	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
@@ -5337,3 +5657,218 @@ func isKnownCSSProperty(prop string) bool {
 
 // Silence unused import warning
 var _ = fmt.Sprintf
+
+
+// withDisplayFallback 给 getComputedStyle 的结果补 display 默认值：级联只收录
+// **声明过**的属性，未声明 display 的元素（span 等）不在表里 → JS 读
+// getComputedStyle(el).display 得 undefined（实测某个被 hidden 的
+// span 读 disp=undefined，污染一切依赖 display 的逻辑）。按 UA 语义回退：
+// hidden → "none"；块级 → "block"；可替换/表单控件 → "inline-block"；其它 → "inline"。
+func withDisplayFallback(m map[string]string, n dom.Node) map[string]string {
+	if m == nil {
+		m = map[string]string{}
+	}
+	if _, ok := m["display"]; ok {
+		return m
+	}
+	e, ok := n.(*dom.Element)
+	if !ok || e == nil {
+		return m
+	}
+	d := "inline"
+	if e.HasAttribute("hidden") {
+		d = "none"
+	} else {
+		switch e.LocalName() {
+		case "html", "body", "div", "p", "section", "article", "header", "footer",
+			"main", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol",
+			"li", "form", "blockquote", "pre", "figure", "figcaption", "fieldset",
+			"details", "summary", "dialog", "address", "hr":
+			d = "block"
+		case "button", "input", "select", "textarea", "img", "svg", "canvas",
+			"video", "audio", "iframe", "embed", "object", "progress", "meter":
+			d = "inline-block"
+		}
+	}
+	m["display"] = d
+	return m
+}
+
+
+// uaDefaultDisplayFor 返回元素的 UA 默认 display 值：hidden → "none"；块级 →
+// "block"；可替换/表单控件 → "inline-block"；其它 → "inline"。供
+// getComputedStyle 在级联未声明 display 时回退使用 —— 否则 JS 读到 undefined，
+// 污染一切依赖 display 的逻辑（含 hidden 缺陷的验证）。
+func uaDefaultDisplayFor(e *dom.Element) string {
+	if e == nil {
+		return "inline"
+	}
+	if e.HasAttribute("hidden") {
+		return "none"
+	}
+	switch e.LocalName() {
+	case "html", "body", "div", "p", "section", "article", "header", "footer",
+		"main", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol",
+		"li", "form", "blockquote", "pre", "figure", "figcaption", "fieldset",
+		"details", "summary", "dialog", "address", "hr":
+		return "block"
+	case "button", "input", "select", "textarea", "img", "svg", "canvas",
+		"video", "audio", "iframe", "embed", "object", "progress", "meter":
+		return "inline-block"
+	}
+	return "inline"
+}
+
+
+// uaInitialComputedValues 是 CSS 规范里各属性的**初始值**（initial value）表。
+// 浏览器 getComputedStyle 对每个属性恒有值（未声明即初始值）；引擎的级联 map
+// 只含声明值，未声明属性会读到 undefined —— 依赖它的 JS（parseFloat(fontSize)、
+// 判断 min-width/max-width、读 pointer-events 做命中判断等）会走错分支。
+// 仅在 JS 对象层回退，不影响 computedStyleFor 的 map 与布局/继承计算。
+var uaInitialComputedValues = map[string]string{
+	"fontSize":       "16px",
+	"lineHeight":     "normal",
+	"fontWeight":     "400",
+	"fontStyle":      "normal",
+	"fontFamily":     "",
+	"pointerEvents":  "auto",
+	"alignItems":     "normal",
+	"justifyContent": "normal",
+	"alignSelf":      "auto",
+	"minWidth":       "auto",
+	"maxWidth":       "none",
+	"minHeight":      "auto",
+	"maxHeight":      "none",
+	"overflowX":      "visible",
+	"overflowY":      "visible",
+	"zIndex":         "auto",
+	"boxSizing":      "content-box",
+	"textAlign":      "start",
+	"whiteSpace":     "normal",
+	"flexDirection":  "row",
+	"flexWrap":       "nowrap",
+	"borderRadius":   "0px",
+	"opacity":        "1",
+	"visibility":     "visible",
+	"position":       "static",
+	"transform":      "none",
+	"cursor":         "auto",
+	"verticalAlign":  "baseline",
+	"borderStyle":    "none",
+	"borderColor":    "currentcolor",
+	"borderTopStyle":    "none",
+	"borderRightStyle":  "none",
+	"borderBottomStyle": "none",
+	"borderLeftStyle":   "none",
+	"backgroundImage":    "none",
+	"backgroundRepeat":   "repeat",
+	"backgroundSize":     "auto",
+	"backgroundPosition": "0% 0%",
+	"backgroundClip":     "border-box",
+	"listStyle":          "outside none disc",
+	"textDecoration":     "none solid currentcolor",
+	"outline":            "none",
+	"float":              "none",
+	"clear":              "none",
+	"userSelect":         "auto",
+	"wordBreak":          "normal",
+	"textOverflow":       "clip",
+	"overflowWrap":       "normal",
+	"letterSpacing":      "normal",
+	"top":                "auto",
+	"left":               "auto",
+	"right":              "auto",
+	"bottom":             "auto",
+	"width":              "auto",
+	"height":             "auto",
+	"gap":                "normal",
+	"rowGap":             "normal",
+	"columnGap":          "normal",
+}
+
+// expandOverflowShorthand 把 overflow 简写展开为 overflow-x / overflow-y：
+// HTML 语义（CSS Overflow 3）：单值  同时设定两轴；双值
+//  分别为 x / y。已显式声明的长写不覆盖。
+func expandOverflowShorthand(out map[string]string) {
+	if _, ok := out["overflow-x"]; ok {
+		if _, ok2 := out["overflow-y"]; ok2 {
+			return
+		}
+	}
+	v, ok := out["overflow"]
+	if !ok {
+		return
+	}
+	parts := strings.Fields(v)
+	if len(parts) == 0 {
+		return
+	}
+	x, y := parts[0], parts[0]
+	if len(parts) >= 2 {
+		y = parts[1]
+	}
+	if _, ok := out["overflow-x"]; !ok {
+		out["overflow-x"] = x
+	}
+	if _, ok := out["overflow-y"]; !ok {
+		out["overflow-y"] = y
+	}
+}
+
+// expandBorderStyleLonghand 由 border / border-style 简写展开四边的 style 与
+// color 长写（width 已由 bwTok 路径处理）。浏览器 getComputedStyle 下
+//  的 borderTopStyle/borderTopColor 恒有值。
+func expandBorderStyleLonghand(out map[string]string) {
+	styleTok := func(s string) string {
+		for _, f := range strings.Fields(s) {
+			switch strings.ToLower(f) {
+			case "none", "hidden", "dotted", "dashed", "solid", "double",
+				"groove", "ridge", "inset", "outset":
+				return strings.ToLower(f)
+			}
+		}
+		return ""
+	}
+	colorTok := func(s string) string {
+		for _, f := range strings.Fields(s) {
+			if len(f) > 0 && (f[0] == '#' || strings.HasPrefix(f, "rgb") ||
+				strings.HasPrefix(f, "hsl") || f == "transparent" || f == "currentcolor") {
+				return f
+			}
+			// 颜色关键字（red / blue …）：排除已知的 style 与 width token
+			if len(f) > 2 && styleTok(f) == "" && f[0] >= 'a' && f[0] <= 'z' {
+				if _, err := strconv.ParseFloat(f, 64); err != nil && !strings.HasSuffix(f, "px") {
+					return f
+				}
+			}
+		}
+		return ""
+	}
+	src := []string{}
+	if v, ok := out["border"]; ok {
+		src = append(src, v)
+	}
+	if v, ok := out["border-style"]; ok {
+		src = append(src, v)
+	}
+	for _, s := range src {
+		if st := styleTok(s); st != "" {
+			for _, lh := range []string{"border-top-style", "border-right-style", "border-bottom-style", "border-left-style"} {
+				if _, ok := out[lh]; !ok {
+					out[lh] = st
+				}
+			}
+			break
+		}
+	}
+	for _, s := range src {
+		if c := colorTok(s); c != "" {
+			for _, lh := range []string{"border-top-color", "border-right-color", "border-bottom-color", "border-left-color"} {
+				if _, ok := out[lh]; !ok {
+					out[lh] = c
+				}
+			}
+			break
+		}
+	}
+}
