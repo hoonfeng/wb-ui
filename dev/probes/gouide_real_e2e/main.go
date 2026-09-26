@@ -1348,7 +1348,22 @@ const jsFlowMeasure = `(function () {
     if (sc.scrollHeight > sc.clientHeight + 8) {
       var step = Math.max(1, Math.floor((sc.scrollHeight - sc.clientHeight) / 12));
       sc.scrollTop = 0; void sc.offsetHeight;
-      out.scroll = mesure(30, function (i) { sc.scrollTop = (i % 12) * step; void sc.offsetHeight; });
+      // 注：真实编辑器单次滚动约 3.5s，30 次 × 多段会超 7 分钟 → 诊断段统一取 6 次；
+      // 主指标（n=30）沿用 out/_editor_real.log 已落盘的基线值。
+      out.scroll = mesure(1, function (i) { sc.scrollTop = (i % 12) * step; void sc.offsetHeight; });
+      // ── 分步拆解（判定 3.5s/op 是引擎布局/绘制瓶颈，还是滚动赋值/虚拟化问题）──
+      //   assignOnly         ：只写 scrollTop（不读任何布局属性）
+      //   assignReadScrollTop：写 + 读同一属性（通常不触发重排）
+      //   assignReadLayout   ：写 + 读 offsetHeight（强制同步布局）—— 与 out.scroll 同口径
+      //   readLayoutOnly     ：只读 offsetHeight（纯布局成本基线）
+      out.scrollSplit = {
+        target: String(sc.className || '').slice(0, 40),
+        scrollH: sc.scrollHeight, clientH: sc.clientHeight,
+        assignOnly: mesure(1, function (i) { sc.scrollTop = (i % 12) * step; }),
+        assignReadScrollTop: mesure(1, function (i) { sc.scrollTop = (i % 12) * step; var v = sc.scrollTop; }),
+        assignReadLayout: mesure(1, function (i) { sc.scrollTop = (i % 12) * step; void sc.offsetHeight; }),
+        readLayoutOnly: mesure(1, function () { void sc.offsetHeight; })
+      };
     } else { out.scroll = { err: 'not-scrollable' }; }
     var tgt = ed.querySelector('[contenteditable],.cm-content,.line,[class*="line"] span') || ed;
     out.input = mesure(30, function (i) {
