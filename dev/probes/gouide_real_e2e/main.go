@@ -1364,6 +1364,32 @@ const jsFlowMeasure = `(function () {
         assignReadLayout: mesure(1, function (i) { sc.scrollTop = (i % 12) * step; void sc.offsetHeight; }),
         readLayoutOnly: mesure(1, function () { void sc.offsetHeight; })
       };
+      // ── A/B 对照实验（判定根因：CM6 的 scroll 处理 vs scrollTop 赋值路径本身）──
+      //   G1 现状：正常派发 scroll 事件 → CodeMirror 6 的监听器执行
+      //   G2 阻断：capture 阶段 stopImmediatePropagation → CM6 收不到 scroll 事件
+      //   同一会话、同一 cm-scroller，各 n=12；区分「首次」与「稳态（后 11 次均值）」
+      //   （首次含 CM6 首次测量/虚拟化初始化，与稳态不可混谈）
+      var ABn = 12, s1 = [], s2 = [];
+      sc.scrollTop = 0; void sc.offsetHeight;
+      for (var g1 = 0; g1 < ABn; g1++) {
+        var a0 = now(); sc.scrollTop = (g1 % 12) * step; var a1 = now();
+        s1.push(+(a1 - a0).toFixed(3));
+      }
+      var blk = function (e) { e.stopImmediatePropagation(); };
+      window.addEventListener('scroll', blk, true);
+      sc.scrollTop = 0; void sc.offsetHeight;
+      for (var g2 = 0; g2 < ABn; g2++) {
+        var b0 = now(); sc.scrollTop = (g2 % 12) * step; var b1 = now();
+        s2.push(+(b1 - b0).toFixed(3));
+      }
+      window.removeEventListener('scroll', blk, true);
+      var meanOf = function (a) { var t = 0; for (var i = 0; i < a.length; i++) { t += a[i]; } return +(t / a.length).toFixed(3); };
+      out.scrollAB = {
+        n: ABn,
+        g1: { first: s1[0], mean: meanOf(s1), steadyMean: meanOf(s1.slice(1)), samples: s1 },
+        g2: { first: s2[0], mean: meanOf(s2), steadyMean: meanOf(s2.slice(1)), samples: s2 },
+        note: 'G1=现状（正常派发 scroll）；G2=capture 阶段 stopImmediatePropagation 阻断 scroll（CM6 收不到）'
+      };
     } else { out.scroll = { err: 'not-scrollable' }; }
     var tgt = ed.querySelector('[contenteditable],.cm-content,.line,[class*="line"] span') || ed;
     out.input = mesure(30, function (i) {

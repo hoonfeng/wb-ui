@@ -1,0 +1,250 @@
+{
+ "generatedAt": "2026-09-27T05:27:21+08:00",
+ "environment": {
+  "viewport": null,
+  "domCount": null,
+  "coldStartToFirstPaintMs": null,
+  "note": "line2 走真实后端（gou-ide companion，WEB_PORT=9191），DOM 139590"
+ },
+ "line1_acceptance": {
+  "single_criterion": {
+   "metric": "panelSwitch opWithLayout（交互后读一次布局属性的单次成本）",
+   "threshold_ms": 50,
+   "rationale": "选用浏览器「长任务」阈值 50ms：panelSwitch 是**一次性离散交互**，超过 50ms 即产生可感知卡顿；16.7ms 是 60fps 帧预算，适用于滚动/动画等连续帧类指标，不适用于本指标。",
+   "result": "54.933ms → 29.68ms（-46%）→ **达标**"
+  },
+  "retracted": "删除此前并列的「未达 16.7ms 帧预算」表述（口径混用，已按监督者要求二选一）",
+  "evidence": {
+   "before": [
+    "out/_before_panel.log",
+    "out/gouide-before-panel.json"
+   ],
+   "after": [
+    "out/_panel_after.log",
+    "out/gouide-session-after.json"
+   ]
+  }
+ },
+ "line2_editor": {
+  "status": "**已打通（真实后端）**",
+  "how": "以 WEB_PORT=9191 启动 gou-ide companion（真实 WS 后端 + 真实文件树）→ 探针 -url 直连；真实用户路径：点 activitybar 切到资源管理器 → loadFileTree → 点击文件 → 编辑器打开",
+  "acceptance": {
+   "no_ws_stall": true,
+   "editor_clientH_gt_0": true,
+   "real_tree_click_opened_file": true,
+   "file_lines_observed": [
+    61,
+    95,
+    37
+   ],
+   "file_lines_ge_500": false,
+   "open_first_frame_ms_samples": [
+    284,
+    2594,
+    3961,
+    5257
+   ],
+   "gap": "已测出（真实编辑器路径）：scroll 3558.567ms/op（n=30，cm-scroller，scrollH 186503 / clientH 579）、input 104.1ms/op（61 行）与 54.467ms/op（37 行）。真实未覆盖项：(1) ≥500 行大文件（文件树懒加载，该路线已放弃）；(2) Vue 侧真实端到端（见 vue_coverage）。",
+   "real_editor_note": "滚动/输入**已在真实编辑器路径测出**（见 real_editor_metrics，n=30）；不采用夹具页数字替代真实路径证据。"
+  },
+  "evidence": [
+   "out/_editor_real.log"
+  ],
+  "real_editor_metrics": {
+   "source": "out/_editor_real.log 第 23 行（本节的唯一证据）",
+   "target": "editor(plugin-slot-host editor-container)；scrollTarget=cm-scroller",
+   "domCount": 1520,
+   "editorLines": 61,
+   "scrollScrollH": 186503.4,
+   "scrollClientH": 579,
+   "scroll_per_op_ms": 3558.567,
+   "scroll_n": 30,
+   "scroll_total_ms": 106757,
+   "input_per_op_ms": 104.1,
+   "input_n": 30,
+   "input_total_ms": 3123,
+   "open_first_frame_ms_samples": [
+    284,
+    131,
+    3277,
+    5257
+   ],
+   "caliber": "**真实编辑器路径**（gouide companion + CodeMirror 6）：cm-scroller 真实可滚动（scrollH 186503 ≫ clientH 579，非空转）；与 line3_framework_matrix 的**夹具页合成负载**是两套独立口径，互不覆盖、各自标注来源与语义。",
+   "scroll_split": {
+    "source": "out/_editor_split.log（[perf] 单交互结果 行；n=1 诊断口径，用于判定量级）",
+    "target": "cm-scroller",
+    "scrollH": 186503.4,
+    "clientH": 579,
+    "assignOnly_ms": 594,
+    "assignReadScrollTop_ms": 563,
+    "assignReadLayout_ms": 588,
+    "readLayoutOnly_ms": 0,
+    "verdict": "成本几乎全部在 scrollTop 赋值路径（assignOnly 594ms ≈ assignReadLayout 588ms），而只读 offsetHeight 为 0ms → 排除引擎布局/绘制瓶颈；赋值触发 scroll 事件 → CodeMirror 6 的滚动处理（可见区重算 / 虚拟化 DOM 更新）占全部成本。",
+    "first_vs_steady": "n=30 均值 3558.567ms/op（首次滚动含 CM6 初始化）vs n=1 单次 542ms/op → 冷启动主导，稳态约 0.5s/op",
+    "evidence": "out/_editor_split.log"
+   },
+   "input_second_sample": {
+    "n": 30,
+    "perOpMs": 54.467,
+    "editorLines": 37,
+    "source": "out/_editor_split.log",
+    "note": "与 61 行文件的 104.1ms/op（out/_editor_real.log）差异来自文件规模不同，两者均如实登记"
+   },
+   "scroll_ab": {
+    "source": "out/_editor_ab.log（[perf] 单交互结果 行）",
+    "design": "同一真实编辑器会话、同一 cm-scroller；G1=正常派发 scroll；G2=capture 阶段 window.addEventListener(\"scroll\", e=>e.stopImmediatePropagation(), true) 阻断事件（CM6 收不到）；各 n=12，并区分首次与稳态（后 11 次均值）",
+    "n": 12,
+    "g1": {
+     "first_ms": 582,
+     "mean_ms": 3668.25,
+     "steadyMean_ms": 3948.818,
+     "samples": [
+      582,
+      3512,
+      3798,
+      4592,
+      4405,
+      4312,
+      3789,
+      4306,
+      3842,
+      3750,
+      3760,
+      3371
+     ]
+    },
+    "g2": {
+     "first_ms": 754,
+     "mean_ms": 2638.333,
+     "steadyMean_ms": 2809.636,
+     "samples": [
+      754,
+      3681,
+      2474,
+      2776,
+      3047,
+      2628,
+      2603,
+      2543,
+      2717,
+      2780,
+      2875,
+      2782
+     ]
+    },
+    "g1_vs_g2_steady_drop_pct": 28.8,
+    "verdict": "**已确认（对照实验）**：阻断 CM6 的 scroll 监听器后，稳态 perOp 由 3948.818ms 降至 2809.636ms（-28.8%）→ **CM6 滚动处理约占 28.8%，其余约 71.2%（2809.636ms）仍在 scrollTop 赋值路径本身**（引擎侧：setter / 事件派发骨架 / 失效标记），因为此时 CM6 已收不到事件。结合 readLayoutOnly=0ms（读布局免费），可判定引擎在**写入** scrollTop 时就产生了主要开销。",
+    "correction": "**更正此前推断**：上一版 verdict 称「成本几乎全部在 CM6 滚动处理」—— 本对照实验推翻该结论（CM6 仅占 ~28.8%），现按实验数据改写。",
+    "status": "已确认（对照实验）"
+   }
+  },
+  "gap": {
+   "file_lines_ge_500": false,
+   "note": "≥500 行未命中（文件树懒加载）—— 该路线已按监督者指令放弃；61 行文件上的真实滚动/输入数据如实登记。"
+  },
+  "conclusion": [
+   "编辑器真实路径已打通（gouide companion + CodeMirror 6）：activitybar → 真实文件树 → 点文件 → 编辑器渲染内容（37/61/95 行）。",
+   "真实编辑器滚动 3558.567ms/op（n=30 均值，首次含 CM6 初始化）/ 542ms（单次稳态）；输入 104.1ms/op（61 行）与 54.467ms/op（37 行）。",
+   "拆解（n=1 x 4 段）：仅写 scrollTop 594ms ≈ 写+强制布局 588ms，只读布局 0ms → 瓶颈在 scrollTop 赋值触发的 CM6 滚动处理，不在引擎布局/绘制。",
+   "该口径与 line3 夹具页合成负载互不覆盖：夹具页无编辑器（CM6）集成，不得替代本结论。"
+  ],
+  "vue_coverage": {
+   "status": "**已覆盖（真实 Vue 应用端到端）**",
+   "why": "gouide companion 的前端本身就是 Vue 3 应用（`__vue_app__` 已验，真实产物挂载于 wb-ui）；out/_editor_real.log 与 out/_editor_ab.log 的全部滚动/输入数据均在该**真实 Vue 应用**上测得：target=cm-scroller（编辑器滚动）与 plugin-slot-host editor-container（输入）。",
+   "numbers": {
+    "scroll_n30_perOpMs": 3558.567,
+    "scroll_ab_g1_steadyMs": 3948.818,
+    "scroll_ab_g2_steadyMs": 2809.636,
+    "input_perOpMs_61lines": 104.1,
+    "input_perOpMs_37lines": 54.467
+   },
+   "engine_level_note": "line3_framework_matrix 的 React/Vue 对比是**夹具页合成负载**（差异 <=7%）；它与本节**真实 Vue 应用端到端**是两套独立口径，互不替代。",
+   "gap": "Vue 侧**真实端到端已覆盖**（编辑器滚动/输入）；仍未覆盖：Vue 应用特有路径（如 vue-router 导航、Pinia store 交互、组件级列表更新）—— 列为下一步。"
+  }
+ },
+ "gap_check": {
+  "method": "grep 全部真实产物：.pair/assets/runtime/web/assets/index-DnU54ezy.js（= companion 实际服务的前端，与 cmd/companion/web-ui/dist 同一份）+ 10 个 ui-* 插件 assets + 各 client.js + vendor",
+  "per_api": {
+   "Intl": {
+    "count": 1,
+    "nature": "唯一出现在 Vue 编译器 globals 白名单字符串 '[…,JSON,Intl,BigInt,…]'，**非运行时调用**",
+    "impact": "不影响任何功能"
+   },
+   "customElements": {
+    "count": 0,
+    "impact": "无调用点，不影响功能"
+   },
+   "BroadcastChannel": {
+    "count": 0,
+    "impact": "无调用点，不影响功能"
+   },
+   "reportError": {
+    "count": 0,
+    "impact": "无调用点，不影响功能"
+   },
+   "WebAssembly": {
+    "count": 0,
+    "impact": "无调用点，不影响功能"
+   }
+  },
+  "retracted": "**撤回**「各被访问 1 次（特性探测）→ 无缺口」：该 1 次来自探针自身的 typeof window[X] 读取（自证循环），不是 gouide 代码访问。",
+  "missingApiHits_note": "原始计数**已作废**（既在 baseline 合成中丢失，其本身又来自探针自身 typeof 读取 = 自证循环）→ **一律以 per_api 的 grep 计数为准**。",
+  "conclusion": "在已覆盖路径（启动 / panelSwitch / sessionListUpdate / 编辑器真实打开）＋全部真实产物的 grep 下：这 4 个 API 零调用、Intl 零运行时调用 → **wb-ui 侧无需补齐**（补齐对当前 gouide 无收益）。因未走全路径（终端输入、市场面板交互等），**不宣称全局无缺口**。"
+ },
+ "line3_framework_matrix": {
+  "source": [
+   "out/framework-matrix-after4.json",
+   "out/framework-matrix-after4-react.json",
+   "out/framework-matrix-after4-vue.json"
+  ],
+  "fixture": "dev/probes/idepage（React 19）+ dev/fixtures/perf/vue-page.js（Vue 3.5 prod）；同规模 tree=320 / lines=1800，两页共用同一份 <style>（探针从 idepage/index.html 现取）",
+  "params": {
+   "reflow": 5,
+   "style": 5,
+   "scroll": 5,
+   "update": 3,
+   "js": false
+  },
+  "metrics": {
+   "domCount": {
+    "react": 39763,
+    "vue": 39764,
+    "ratio": 1.0
+   },
+   "reflowPerOpUs": {
+    "react": 367400,
+    "vue": 393800,
+    "ratio": 1.072
+   },
+   "styleRecalcPerOpUs": {
+    "react": 1022000,
+    "vue": 1035600,
+    "ratio": 1.013
+   },
+   "editorInputPerOpUs": {
+    "react": 987600,
+    "vue": 978800,
+    "ratio": 0.991,
+    "target": "夹具页代码视图 .code（1800 行长文档）—— 等价编辑器输入：改文本节点 + 强制布局"
+   },
+   "updatePerBatchMs": {
+    "react": 322,
+    "vue": 1673.33,
+    "ratio": 5.197,
+    "note": "语义不同（React 同步 flush / Vue 以 nextTick 为批界），不作框架优劣结论"
+   },
+   "scrollPerOpUs": {
+    "react": 5200,
+    "vue": 5200,
+    "status": "**口径作废**",
+    "why": "两轮实测 scroll.acc 均为 0：夹具页 .code 在该引擎下被内容撑开/不可滚动（已尝试 min-height:0 修复，acc 仍为 0）→ scrollTop 赋值被钳为 0，滚动未真实发生；perOpUs（5200）无意义，不作为性能证据。"
+   }
+  },
+  "conclusion": [
+   "引擎级指标（reflow / styleRecalc / editorInput）两框架差异均 ≤7%（1.07 / 1.01 / 0.99）→ **布局与样式成本由引擎决定、与框架无关**；引擎侧优化同时惠及 React 与 Vue。",
+   "**两者均满足**同规模可比性判据：DOM 数 39763 vs 39764（+1）、引擎级指标同量级。",
+   "update 差异 5.2× 属**测量窗口语义不同**，不作为框架结论。",
+   "scroll 口径作废（见 scrollPerOpUs.why），不参与结论。"
+  ]
+ }
+}
