@@ -55,3 +55,7 @@ __pycache__/
 # Go build cache / native assets download cache (local)
 /.cache/
 
+
+# 运行产物（压测基线报告、渲染截图）
+/out/
+/screenshots/
