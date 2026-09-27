@@ -724,3 +724,28 @@ func (b *nodeBase) IsCharacterDataNode() bool {
 }
 func (b *nodeBase) IsDocumentNode() bool     { return b.nodeType == NodeDocument }
 func (b *nodeBase) IsDocumentFragment() bool { return b.nodeType == NodeDocumentFragment }
+
+// CommonAncestor returns the lowest common ancestor (LCA) of a and b in the DOM
+// tree, or nil when either is nil or they belong to different trees.
+//
+// This mirrors the "common ancestor" step of the UI Events hover dispatch: when
+// the pointer moves from a to b, only the elements of a's ancestor chain below
+// the LCA receive mouseleave, and only b's ancestors below the LCA receive
+// mouseenter — the pointer never left the LCA, so it must not be told it lost
+// hover. A nil result means the full chains participate (pointer entered or
+// left the window).
+func CommonAncestor(a, b Node) Node {
+	if a == nil || b == nil {
+		return nil
+	}
+	ancestors := make(map[Node]bool, 8)
+	for n := a; n != nil; n = n.ParentNode() {
+		ancestors[n] = true
+	}
+	for n := b; n != nil; n = n.ParentNode() {
+		if ancestors[n] {
+			return n
+		}
+	}
+	return nil
+}

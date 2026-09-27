@@ -321,17 +321,19 @@ func (i *Interaction) MouseMove(x, y float64) {
 	}
 	newEl := rendering.HitTest(rv, x, y, "")
 	if newEl != i.hoveredEl {
-		if i.hoveredEl != nil {
-			i.hoveredEl.SetHovered(false)
-			i.dispatchHover(i.hoveredEl, newEl, x, y)
+		oldHover := i.hoveredEl
+		if oldHover != nil {
+			oldHover.SetHovered(false)
 		}
 		if newEl != nil {
 			newEl.SetHovered(true)
-			if i.hoveredEl == nil {
-				i.dispatchHover(nil, newEl, x, y)
-			}
 		}
 		i.hoveredEl = newEl
+		// ★ 单次派发完整 hover 序列（out/leave + over/enter，含最近共同祖先
+		// 判定）。旧的两段式调用（oldEl != nil 时只派 out、oldEl == nil 时
+		// 才派 over）丢掉了 mouseenter/mouseleave，且把「指针在同一组件内部
+		// 移动」误判为离开组件（@mouseleave 绑在面板上的下拉菜单会因此自关闭）。
+		i.dispatchHover(oldHover, newEl, x, y)
 		i.markDirty() // :hover 样式重绘
 	}
 	// 事件派发：拖拽（按下中）必须持续派发（JS 拖拽/分隔条监听
@@ -373,7 +375,14 @@ func (i *Interaction) MouseLeave() {
 	}
 }
 
-// dispatchHover 派发 mouseover/mouseout（进入/离开目标）。
+// dispatchHover 派发完整 hover 序列（UI Events）：mouseout/mouseleave 到离开
+// 链、mouseover/mouseenter 到进入链。mouseover/mouseout 冒泡且带
+// relatedTarget；mouseenter/mouseleave 不冒泡、relatedTarget 为 null。
+//
+// ★ 链的范围由最近共同祖先（LCA）决定：指针从 oldEl 移到 newEl 时，只有 LCA
+// 之下的元素真的「离开/进入」。鼠标在同一组件内部移动（如面板 padding 命中
+// 面板自身 → 移入其子菜单项）不得给面板派 mouseleave，否则组件的
+// hover-to-close 逻辑会误关（与 app.Host.dispatchHoverEvents 同一语义）。
 func (i *Interaction) dispatchHover(oldEl, newEl *dom.Element, x, y float64) {
 	fr := i.wv.MainFrame()
 	if fr == nil {
@@ -387,26 +396,84 @@ func (i *Interaction) dispatchHover(oldEl, newEl *dom.Element, x, y float64) {
 	if doc == nil {
 		return
 	}
+	if oldEl == nil && newEl == nil {
+		return
+	}
+	common := hoverCommonAncestor(oldEl, newEl)
 	if oldEl != nil {
+		var mouseOutRel dom.EventTarget
+		if newEl != nil {
+			mouseOutRel = newEl
+		}
 		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOut, dom.MouseEventInit{
-			EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
-			ClientX:   x,
-			ClientY:   y,
-			Button:    dom.MouseButtonLeft,
-			Buttons:   0,
-			Detail:    0,
+			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
+			ClientX:       x,
+			ClientY:       y,
+			Button:        dom.MouseButtonLeft,
+			Buttons:       0,
+			Detail:        0,
+			RelatedTarget: mouseOutRel,
 		}))
+		// mouseleave：沿离开链自内向外逐个派发（不冒泡），到 LCA 为止。
+		for n := dom.Node(oldEl); n != nil && n != common; n = n.ParentNode() {
+			leaveEl, ok := n.(*dom.Element)
+			if !ok {
+				break // Document/Text 等非元素节点不接收 mouseleave。
+			}
+			leaveEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseLeave, dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+				ClientX:   x,
+				ClientY:   y,
+				Button:    dom.MouseButtonLeft,
+				Buttons:   0,
+				Detail:    0,
+			}))
+		}
 	}
 	if newEl != nil {
+		var mouseOverRel dom.EventTarget
+		if oldEl != nil {
+			mouseOverRel = oldEl
+		}
 		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseOver, dom.MouseEventInit{
-			EventInit: dom.EventInit{Bubbles: true, Cancelable: true},
-			ClientX:   x,
-			ClientY:   y,
-			Button:    dom.MouseButtonLeft,
-			Buttons:   0,
-			Detail:    0,
+			EventInit:     dom.EventInit{Bubbles: true, Cancelable: true},
+			ClientX:       x,
+			ClientY:       y,
+			Button:        dom.MouseButtonLeft,
+			Buttons:       0,
+			Detail:        0,
+			RelatedTarget: mouseOverRel,
 		}))
+		// mouseenter：沿进入链自外向内逐个派发（不冒泡），自 LCA 之下开始。
+		var enterChain []*dom.Element
+		for n := dom.Node(newEl); n != nil && n != common; n = n.ParentNode() {
+			enterEl, ok := n.(*dom.Element)
+			if !ok {
+				break
+			}
+			enterChain = append(enterChain, enterEl)
+		}
+		for idx := len(enterChain) - 1; idx >= 0; idx-- {
+			enterChain[idx].DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseEnter, dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+				ClientX:   x,
+				ClientY:   y,
+				Button:    dom.MouseButtonLeft,
+				Buttons:   0,
+				Detail:    0,
+			}))
+		}
 	}
+}
+
+// hoverCommonAncestor is the *dom.Element flavour of dom.CommonAncestor: it
+// guards the typed-nil case (a nil *dom.Element boxed into a dom.Node is not a
+// nil interface) and delegates to the single engine-side implementation.
+func hoverCommonAncestor(a, b *dom.Element) dom.Node {
+	if a == nil || b == nil {
+		return nil
+	}
+	return dom.CommonAncestor(a, b)
 }
 
 // Wheel 处理滚轮：滚动命中容器 + 派发 wheel DOM 事件。deltaY 为滚轮

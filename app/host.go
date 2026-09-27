@@ -2320,6 +2320,19 @@ func (h *Host) hoverStyleFastPath(rv *rendering.RenderView, fr *page.Frame, oldE
 // bubble and have a null relatedTarget. clientX/clientY are viewport CSS coordinates
 // (clientX/clientY semantics, same as mousemove).
 func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY float64) {
+	if oldEl == nil && newEl == nil {
+		return
+	}
+	// ★ 最近共同祖先（LCA）语义：指针从 oldEl 移到 newEl 时，只有「离开链」上
+	// 位于 LCA 之下的元素收到 mouseleave、只有「进入链」上位于 LCA 之下的元素
+	// 收到 mouseenter（UI Events §5.2 / DOM 事件分发）。典型场景：鼠标从
+	// .menu-dropdown 的 padding（命中面板自身）移入其子 .menu-item —— 两者
+	// LCA 就是面板，指针从未离开面板，**不得**给面板派 mouseleave；反之从子
+	// 元素移回面板也不得给子元素派 mouseleave。此前实现无条件给 oldEl 派
+	// mouseleave，于是「面板 → 菜单项」这一步误派 mouseleave → 宿主组件
+	// 200ms 定时关闭菜单（PairCode「鼠标移到菜单项上菜单自己消失」根因），
+	// 且面板自身因进入链不长派而收不到 mouseenter。
+	common := hoverCommonAncestor(oldEl, newEl)
 	if oldEl != nil {
 		// relatedTarget is the element the pointer moved onto (newEl). Assign it via an
 		// EventTarget interface so a nil newEl stays a true nil interface — passing the
@@ -2336,12 +2349,19 @@ func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY f
 			Button:        dom.MouseButtonNone,
 			RelatedTarget: mouseOutRel,
 		}))
-		oldEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseLeave, dom.MouseEventInit{
-			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
-			ClientX:   clientX,
-			ClientY:   clientY,
-			Button:    dom.MouseButtonNone,
-		}))
+		// mouseleave：沿离开链自内向外逐个派发（不冒泡），到 LCA 为止。
+		for n := dom.Node(oldEl); n != nil && n != common; n = n.ParentNode() {
+			leaveEl, ok := n.(*dom.Element)
+			if !ok {
+				break // Document/Text 等非元素节点不接收 mouseleave。
+			}
+			leaveEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseLeave, dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+				ClientX:   clientX,
+				ClientY:   clientY,
+				Button:    dom.MouseButtonNone,
+			}))
+		}
 	}
 	if newEl != nil {
 		var mouseOverRel dom.EventTarget
@@ -2355,13 +2375,36 @@ func (h *Host) dispatchHoverEvents(oldEl, newEl *dom.Element, clientX, clientY f
 			Button:        dom.MouseButtonNone,
 			RelatedTarget: mouseOverRel,
 		}))
-		newEl.DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseEnter, dom.MouseEventInit{
-			EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
-			ClientX:   clientX,
-			ClientY:   clientY,
-			Button:    dom.MouseButtonNone,
-		}))
+		// mouseenter：沿进入链自外向内逐个派发（不冒泡），自 LCA 之下开始。
+		// 先收集（内 → 外）再反向派发，保证祖先先于后代收到 mouseenter。
+		var enterChain []*dom.Element
+		for n := dom.Node(newEl); n != nil && n != common; n = n.ParentNode() {
+			enterEl, ok := n.(*dom.Element)
+			if !ok {
+				break
+			}
+			enterChain = append(enterChain, enterEl)
+		}
+		for i := len(enterChain) - 1; i >= 0; i-- {
+			enterChain[i].DispatchEvent(dom.NewMouseEventFromInit(dom.EventMouseEnter, dom.MouseEventInit{
+				EventInit: dom.EventInit{Bubbles: false, Cancelable: false},
+				ClientX:   clientX,
+				ClientY:   clientY,
+				Button:    dom.MouseButtonNone,
+			}))
+		}
 	}
+}
+
+// hoverCommonAncestor is the *dom.Element flavour of dom.CommonAncestor. It
+// guards the typed-nil case first (a nil *dom.Element boxed into a dom.Node
+// interface is not nil, which would defeat the nil check inside the helper) and
+// then delegates to the single engine-side implementation.
+func hoverCommonAncestor(a, b *dom.Element) dom.Node {
+	if a == nil || b == nil {
+		return nil
+	}
+	return dom.CommonAncestor(a, b)
 }
 
 // layoutAffectingChanged reports whether a computed-style change from a to b
