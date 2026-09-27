@@ -38,6 +38,22 @@ var (
 	// PerfDOMOps 量化派发期间的 DOM 变更次数（createElement/createTextNode/
 	// appendChild/insertBefore/replaceChild/removeChild/setAttribute/textContent 写）。
 	PerfDOMOps int
+	// perfAPIActive 仅在「正被观测的那次 scroll 派发」期间为真：API 级计时开关
+	// 只对本轮派发生效，避免同帧内其它事件（pointer/mouse/…）的 API 调用混进
+	// 本轮的分解表。
+	perfAPIActive bool
+)
+
+// ─── API 级计时的引擎侧接线（可选；nil 时零开销）───
+// 脚本引擎层（bindings 安装 DOM 全局时）把 jsc 包的实现接上来，用于把
+// listener 回调耗时二级分解为「引擎 API 调用耗时」与「goja 纯 JS 执行」。
+// dom 不 import jsc（依赖方向单向），故用函数变量注入，模式同
+// InlineEventAttrRunner。
+var (
+	PerfAPIScopeReset func()
+	PerfAPIScopeEnter func()
+	PerfAPIScopeExit  func()
+	PerfAPIScopeDump  func(listenerTime time.Duration) string
 )
 
 // InlineEventAttrRunner executes an event-handler content attribute (the "code" in
@@ -228,6 +244,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		perfListenerTime, perfListenerN = 0, 0
 		PerfLayoutCount, PerfLayoutTime, PerfTreeRebuildCount = 0, 0, 0
 		PerfDOMOps = 0
+		perfAPIActive = true
+		if PerfAPIScopeReset != nil {
+			PerfAPIScopeReset()
+		}
 		tMark = time.Now()
 	}
 	ev, ok := event.(eventInternal)
@@ -341,6 +361,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		fmt.Fprintf(os.Stderr, "[DISP] scroll path=%d build=%v cap=%v tgt=%v bub=%v def=%v listeners=%d listenerTime=%v layouts=%d layoutTime=%v treeRebuilds=%d domOps=%d\n",
 			len(path), tBuild, tCap, tTgt, tBub, tDef, perfListenerN, perfListenerTime,
 			PerfLayoutCount, PerfLayoutTime, PerfTreeRebuildCount, PerfDOMOps)
+		if PerfAPIScopeDump != nil {
+			fmt.Fprint(os.Stderr, PerfAPIScopeDump(perfListenerTime))
+		}
+		perfAPIActive = false
 	}
 	return !event.DefaultPrevented()
 }
@@ -509,7 +533,14 @@ func fireEventListeners(target EventTarget, event Event, capture bool) {
 		}
 		if perfDispOn {
 			lt := time.Now()
+			api := perfAPIActive && PerfAPIScopeEnter != nil
+			if api {
+				PerfAPIScopeEnter()
+			}
 			l.callback.HandleEvent(event)
+			if api {
+				PerfAPIScopeExit()
+			}
 			perfListenerTime += time.Since(lt)
 			perfListenerN++
 		} else {

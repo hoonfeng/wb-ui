@@ -79,6 +79,20 @@ type RenderView struct {
 	// 优先、UI 库模式拒绝网络。由 RenderTreeBuilder 在重建渲染树时重新
 	// 赋值（每次 Build 都是新的 RenderView）。
 	imageLoader ImageResourceLoader
+
+	// boxContentSizeCache 缓存 BoxContentSize 的结果（键为 RenderBox 指针）。
+	//
+	// ★ 为什么需要：CM6 的 scroll handler 每轮滚动会连续读
+	//   scrollHeight/clientHeight/scrollWidth/clientWidth，每次都经 webkit 的
+	//   几何桥（getElementScrollMetrics → forceLayout + BoxContentSize），而
+	//   BoxContentSize 是全子树递归（且对每个 overflow 子盒再递归一次）。
+	//   3 轮滚动窗口的 CPU profile 实测该路径占 89.62%（BoxContentSize 递归
+	//   自身 76.82% flat），是滚动 1.8s 的唯一大头。
+	//
+	// 失效：syncGeometry()（每次布局后的几何刷新）与 ApplyTextChange()（文本段
+	// 原地更新）。渲染树重建会整体换新 RenderView，缓存随旧对象一同丢弃，
+	// 因此不存在跨重建的陈旧项。
+	boxContentSizeCache map[*RenderBox][2]float64
 }
 
 // SetResolver attaches the style resolver used to build the render tree.
@@ -444,6 +458,8 @@ func (v *RenderView) ApplyTextChange(node dom.Node) bool {
 	if node == nil {
 		return false
 	}
+	// 文本段被原地更新（不重建渲染树）→ 内容尺寸缓存必须作废。
+	v.InvalidateContentSizeCache()
 	ro := v.FindRenderObjectForNode(node)
 	rt, ok := ro.(*RenderText)
 	if !ok {
@@ -635,7 +651,33 @@ func (v *RenderView) ScrollTargetAt(x, y float64) ScrollTarget {
 // BoxContentSize returns the content width and height of a scrollable box,
 // computed as the bounding box of all render children relative to the
 // padding box. Returns (0,0) if no children.
+//
+// ★ 带缓存：同一「几何版本」内的重复读取直接命中（见 boxContentSizeCache
+// 字段的说明）。命中时 O(1)，未命中才走全子树递归。
 func (v *RenderView) BoxContentSize(box *RenderBox) (float64, float64) {
+	if box == nil {
+		return 0, 0
+	}
+	if c, ok := v.boxContentSizeCache[box]; ok {
+		return c[0], c[1]
+	}
+	w, h := v.boxContentSizeUncached(box)
+	if v.boxContentSizeCache == nil {
+		v.boxContentSizeCache = make(map[*RenderBox][2]float64, 8)
+	}
+	v.boxContentSizeCache[box] = [2]float64{w, h}
+	return w, h
+}
+
+// InvalidateContentSizeCache 丢弃 BoxContentSize 的缓存结果。任何会改变
+// 「子树几何 / 文本段」的操作之后必须调用（syncGeometry 与 ApplyTextChange
+// 已内置调用）；滚动偏移变化不影响内容尺寸，无需失效。
+func (v *RenderView) InvalidateContentSizeCache() { v.boxContentSizeCache = nil }
+
+// boxContentSizeUncached 是 BoxContentSize 的原始实现（全子树递归）。内部对
+// overflow 子盒的递归调用仍走带缓存的 BoxContentSize，因此一次遍历即可把
+// 沿途所有子盒的结果都填进缓存。
+func (v *RenderView) boxContentSizeUncached(box *RenderBox) (float64, float64) {
 	pb := box.PaddingBoxRect()
 	var maxRight, maxBottom float64
 	found := false
@@ -1299,6 +1341,9 @@ func (v *RenderView) syncScrollbarReserve() bool {
 func (v *RenderView) LayoutState() *layout.LayoutState { return v.layoutState }
 
 func (v *RenderView) syncGeometry() {
+	// 布局刚把新的几何写入各 box.frame（含文本段）→ 之前缓存的 BoxContentSize
+	// 结果全部作废。
+	v.InvalidateContentSizeCache()
 	layoutRoot := v.LayoutBox()
 	if layoutRoot == nil { return }
 	state := v.layoutState

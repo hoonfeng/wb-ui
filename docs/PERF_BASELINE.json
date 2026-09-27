@@ -181,13 +181,54 @@
       "after": "out/_editor_ab_async.log"
      },
      "regression": "cssprobe 63/64 + 260/264（与基线一致）；全量 go test 无失败",
-     "verdict": "未达成（端到端口径）",
+     "verdict": "未达成（该阶段：异步合并仅到 1800.7ms；已由 stage4_geometry_cache 的几何缓存根治）",
      "e2e_before_n1_ms": null,
      "e2e_after_n1_ms": 1800.7,
      "e2e_after_n12_ms": 1847.0,
      "e2e_threshold_ms": 1300,
      "override_reason": "此前「赋值口径 3948.818ms → 0.0ms」为测量窗口效应：探针的纯 JS 循环内不会触发 Go 侧 Render()/flushScrollEvents()，12 次赋值只入合并队列、一次 dispatch 都没跑，故必然 0ms —— 该口径已作废，以端到端口径为准。"
     },
+     "stage4_geometry_cache": {
+      "round": "第10轮 必做2 · 监督者第1次指令 A 分支（定位真因并根治）",
+      "verdict": "**达成**（端到端口径）",
+      "e2e_before_n1_ms": 2006.8,
+      "e2e_after_n1_runs_ms": [
+       33.2,
+       34.3
+      ],
+      "e2e_before_n12_ms": 2021.4,
+      "e2e_after_n12_runs_ms": [
+       33.7,
+       35.6
+      ],
+      "e2e_threshold_ms": 1300,
+      "listener_time_before_s": "1.64~1.91",
+      "listener_time_after_s": "0.00101~0.00352",
+      "root_cause": "engine/rendering/renderview.go BoxContentSize：无缓存的全子树递归 + 对 overflow 子盒再次递归自身（O(n·depth)）；CM6 的 scroll handler 每轮连续读 scrollHeight/clientHeight/scrollWidth/clientWidth，每次读经 webkit 几何桥 getElementScrollMetrics → forceLayout + 一次全量递归 → 1.8s 与滚动次数无关（N=1 ≈ N=12），随 DOM 规模退化。",
+      "cpu_profile": {
+       "probe": "-interaction scrollProf（采样窗口仅 3 轮 N=1 滚动）",
+       "duration_s": 5.85,
+       "total_samples_s": 5.78,
+       "top": {
+        "rendering.(*RenderView).BoxContentSize.func1": "flat 76.82% / cum 89.62%",
+        "webkit.(*WebView).injectRenderTreeBridge.func7": "cum 89.62%（= getElementScrollMetrics, webview.go:1814）",
+        "main.evalStr": "cum 1.73%（goja 执行）",
+        "GC": "~5%"
+       }
+      },
+      "change": "engine/rendering/renderview.go：新增 boxContentSizeCache + InvalidateContentSizeCache()，BoxContentSize 改为缓存包装（未命中才走原实现 boxContentSizeUncached，沿途子盒结果一并填充）；失效点 syncGeometry()（布局后）与 ApplyTextChange()（文本段更新后）；渲染树重建换新 RenderView 时缓存随旧对象丢弃。",
+      "semantics_evidence": "编辑器 DOM bench 返回值逐项一致（offsetHeight(.cm-scroller)=5790000、scrollTop=11398000、clientHeight=5790000、offsetWidth(.cm-line)=6480000）；clientHeight 1e4 基准 1041.4ms→6.5ms；精准回归 engine/rendering、engine/page、engine/style、engine/dom、webkit 全 ok。",
+      "evidence": {
+       "before": "out/_api_e2e.log",
+       "after": [
+        "out/_api_e2e_after.log",
+        "out/_api_e2e_after2.log"
+       ],
+       "profile": "out/_scroll_only.prof",
+       "doc": "docs/PERF_DISPATCH_BREAKDOWN.md"
+      },
+      "overturns": "前版结论「1.65s = 1100 万次 JS 操作 = CM6 handler 在 goja 上的执行量，引擎侧无可削减点」**作废**：API 名单插桩漏计几何桥（getElementScrollMetrics 不经 JSObject.Set/SetAccessor 注册），差额推断非实测；CPU profile 实测 goja 执行仅 1.73%。"
+     },
     "e2e_caliber": {
      "definition": "一次 sc.scrollTop=v 赋值 + 其触发的帧边界 flush 中那 1 次 DispatchEvent(scroll)（含 CM6 handler 全程）都计入窗口",
      "probe": "dev/probes/gouide_real_e2e -interaction editorE2E（Go 侧打点：赋值 → wv.Render()）",
@@ -246,14 +287,15 @@
       "gBCR_1e3_ms": 4.4,
       "querySelector_1e3_ms": 145.2
      },
-     "attribution": "按 150ns/基本操作折算 1.65s ≈ 1100 万次 JS 基本操作 → 余额 100% 是 CM6 的 scroll handler 在 goja 解释器上的执行量（字符串/对象/正则密集路径的倍率远高于纯数值循环）。引擎侧无可削减点。",
+     "attribution": "【已更正】原判断「余额 100% 是 CM6 handler 在 goja 上的执行量、引擎侧无可削减点」为**假阴性 + 估算跳跃**：名单插桩（JSObject.Set/SetAccessor）覆盖不到几何桥 scrollHeight/clientHeight/scrollWidth/clientWidth（走 wvBridge 闭包 getElementScrollMetrics）。CPU profile（滚动窗口 5.78s 样本）实测：BoxContentSize 递归 flat 76.82% / cum 89.62%，func7(=getElementScrollMetrics) cum 89.62%，goja 执行(main.evalStr) 仅 1.73% → 真因是引擎侧随 DOM 规模退化的重复全树递归，已加缓存根治（见 stage4_geometry_cache）。",
      "levers": {
       "done": [
        "滚动事件帧边界合并派发（同帧 N 次 → 1 次）",
-       "写 scrollTop 不再无条件 forceLayout"
+       "写 scrollTop 不再无条件 forceLayout",
+       "RenderView.BoxContentSize 内容尺寸缓存 + 布局/文本失效点（第10轮 A 分支，根治 89.62% 成本）"
       ],
-      "engine_side_remaining": "无（骨架已零成本）",
-      "real_lever": "JS 引擎速度（超出「不换 V8」约束）或宿主框架的滚动处理量（前端侧 CM6 viewport 策略）"
+      "engine_side_remaining": "指标1 路径已清零（33.2ms ≤ 1300ms）；另在编辑器 DOM 上发现 querySelector ~200µs / querySelectorAll ~380µs / elementFromPoint ~165µs / getComputedStyle ~47µs，均**不在** scroll handler 调用路径（handler 内相关调用数为 0），列为后续可选优化项",
+      "real_lever": "（原「JS 引擎速度」结论作废）真实杠杆是引擎侧「每次调用重算」的实现：几何尺寸缓存（本轮已完成）、选择器匹配/命中测试索引（待做）"
      }
     }
    }
@@ -265,8 +307,10 @@
   "conclusion": [
    "编辑器真实路径已打通（gouide companion + CodeMirror 6）：activitybar → 真实文件树 → 点文件 → 编辑器渲染内容（37/61/95 行）。",
    "真实编辑器滚动 3558.567ms/op（n=30 均值，首次含 CM6 初始化）/ 542ms（单次稳态）；输入 104.1ms/op（61 行）与 54.467ms/op（37 行）。",
-   "拆解（n=1 x 4 段）：仅写 scrollTop 594ms ≈ 写+强制布局 588ms，只读布局 0ms → 瓶颈在 scrollTop 赋值触发的 CM6 滚动处理，不在引擎布局/绘制。",
-   "该口径与 line3 夹具页合成负载互不覆盖：夹具页无编辑器（CM6）集成，不得替代本结论。"
+   "拆解（n=1 x 4 段）：仅写 scrollTop 594ms ≈ 写+强制布局 588ms，只读布局 0ms。（**后续 A 分支实测更正**：该表述误导——真因非「CM6 处理量」而是引擎侧 RenderView.BoxContentSize 的重复全树递归，见下条）",
+   "该口径与 line3 夹具页合成负载互不覆盖：夹具页无编辑器（CM6）集成，不得替代本结论。",
+   "【第10轮 A 分支】CPU profile 定位真因：滚动窗口 89.62% 在引擎侧 RenderView.BoxContentSize（无缓存全树递归 + 对 overflow 子盒重复递归；goja 执行仅 1.73%）；加内容尺寸缓存后同端口径 N=1 2006.8ms → 33.2/34.3ms（N=12 2021.4 → 33.7/35.6ms），listenerTime 1.64~1.91s → 1.01~3.52ms，**指标1（≤1300ms）达成**。",
+   "【纠错】此前「1.65s = 1100 万次 JS 操作 = CM6 handler 在 goja 上的执行量，引擎侧无可削减点」作废：API 名单插桩（JSObject.Set/SetAccessor）覆盖不到几何桥 getElementScrollMetrics，差额推断非实测，导致方向性误判。"
   ],
   "vue_coverage": {
    "status": "**部分覆盖**（此前写成「已覆盖」不实，已更正）",
@@ -286,10 +330,10 @@
    "metric": "真实编辑器滚动稳态 perOp（A/B 的 G1 组，n=12，稳态=后 11 次均值）",
    "this_round_threshold_ms": 1300,
    "this_round_basis": "原始 3948.818ms 的 1/3 —— 本轮监督指令设定的验收线",
-   "result": "3948.818ms → 0.0ms（赋值口径）→ 达成",
+   "result": "3948.818ms（赋值口径）→ 端到端 2006.8ms → **33.2 / 34.3ms（两次独立复现，几何缓存后）** → 达成",
    "long_term_target_ms": 50,
    "long_term_basis": "浏览器「长任务」阈值 50ms：单次滚动处理不应造成可感知卡顿。16.7ms 为 60fps 单帧预算，一次滚动可合理跨数帧，故取 50ms 为最终目标。",
-   "caveat": "本轮 0ms 为**赋值口径**；端到端（赋值 + 帧边界 1 次 scroll 处理）尚未单独测量 —— 连续滚动场景已由「N 次 → 1 次」合并获得 N 倍降低，但单帧内的 1 次 CM6 处理成本仍在（对应 A/B 中 G1-G2 的 ~29%~71% 部分），列为下一步。"
+   "caveat": "端到端口径 = 一次 sc.scrollTop=v 赋值 + 其触发的帧边界 flush 中那 1 次 DispatchEvent(scroll)（含 CM6 handler 全程）。两次独立复现：N=1 33.2 / 34.3ms，N=12 33.7 / 35.6ms；均 ≤ 1300ms 阈值（余量 ~39×）。"
   },
   "api_gap_audit": {
    "method": "外部方法：grep gou-ide 真实前端产物（.pair/assets/runtime/web/assets/index-DnU54ezy.js + 10 个 ui-* 插件 assets + client.js）提取实际调用的标准 API，再 grep wb-ui 引擎（engine/js/**）比对实现情况。不使用探针自身 typeof。",

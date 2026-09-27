@@ -465,6 +465,77 @@ func evalStr(wv *webkit.WebView, js string) (string, error) {
 	return v.ToString(), nil
 }
 
+// ─── 编辑器激活后的 DOM 基准（监督者第 1 次监督指令必做项）───
+// 此前 jsbench 是在**首页简陋 DOM** 上测的（document.body 兜底），其数字不能代表
+// 编辑器场景。本函数在编辑器已激活（.cm-line 存在）后重跑 gBCR/offsetHeight/
+// querySelector 等，并先打印 DOM 规模作为「确实是编辑器 DOM」的证据。
+//
+// 这些调用发生在 Go 侧直接 EvalJS 中（不在任何 event listener 作用域内），所以
+// 不会被 API 级插桩计入分解表——两套测量互不污染。
+func runEditorDOMBench(wv *webkit.WebView) {
+	bench := func(label, js string) {
+		t0 := time.Now()
+		out, err := evalStr(wv, js)
+		d := time.Since(t0)
+		fmt.Printf("[bench-editor] %-32s %9.1fms  out=%s err=%v\n",
+			label, float64(d.Microseconds())/1000, strings.TrimSpace(out), err)
+	}
+	bench("DOM 规模（编辑器 DOM 取证）", `(function(){return JSON.stringify({allNodes:document.getElementsByTagName('*').length,cmLines:document.querySelectorAll('.cm-line').length,cmScroller:document.querySelectorAll('.cm-scroller').length,editorAreas:document.querySelectorAll('.plugin-area-editor').length});})()`)
+	bench("空循环 1e6（goja 基线）", `(function(){var s=0;for(var i=0;i<1000000;i++){s+=i;}return String(s);})()`)
+	bench("offsetHeight 1e4 (.cm-scroller)", `(function(){var e=document.querySelector('.cm-scroller');if(!e)return 'NO-SCROLLER';var h=0;for(var i=0;i<10000;i++){h+=e.offsetHeight;}return String(h);})()`)
+	bench("offsetHeight 1e4 (.cm-line)", `(function(){var e=document.querySelector('.cm-line');if(!e)return 'NO-LINE';var h=0;for(var i=0;i<10000;i++){h+=e.offsetHeight;}return String(h);})()`)
+	bench("offsetWidth 1e4 (.cm-line)", `(function(){var e=document.querySelector('.cm-line');if(!e)return 'NO-LINE';var h=0;for(var i=0;i<10000;i++){h+=e.offsetWidth;}return String(h);})()`)
+	bench("scrollTop 读 1e4 (.cm-scroller)", `(function(){var e=document.querySelector('.cm-scroller');if(!e)return 'NO-SCROLLER';var h=0;for(var i=0;i<10000;i++){h+=e.scrollTop;}return String(h);})()`)
+	bench("clientHeight 1e4 (.cm-scroller)", `(function(){var e=document.querySelector('.cm-scroller');if(!e)return 'NO-SCROLLER';var h=0;for(var i=0;i<10000;i++){h+=e.clientHeight;}return String(h);})()`)
+	bench("gBCR 1e3 (.cm-scroller)", `(function(){var e=document.querySelector('.cm-scroller');if(!e)return 'NO-SCROLLER';var r=0;for(var i=0;i<1000;i++){r+=e.getBoundingClientRect().top;}return String(r);})()`)
+	bench("gBCR 1e3 (.cm-line)", `(function(){var e=document.querySelector('.cm-line');if(!e)return 'NO-LINE';var r=0;for(var i=0;i<1000;i++){r+=e.getBoundingClientRect().top;}return String(r);})()`)
+	bench("getClientRects 1e3 (.cm-line)", `(function(){var e=document.querySelector('.cm-line');if(!e)return 'NO-LINE';var r=0;for(var i=0;i<1000;i++){r+=e.getClientRects().length;}return String(r);})()`)
+	bench("getComputedStyle 1e3 (.cm-line)", `(function(){var e=document.querySelector('.cm-line');if(!e)return 'NO-LINE';var r=0;for(var i=0;i<1000;i++){var cs=getComputedStyle(e);if(cs)r+=parseFloat(cs.fontSize)||0;}return String(r);})()`)
+	bench("querySelector 1e4 (.cm-line)", `(function(){var n=0;for(var i=0;i<10000;i++){if(document.querySelector('.cm-line'))n++;}return String(n);})()`)
+	bench("querySelectorAll 1e3 (.cm-line)", `(function(){var n=0;for(var i=0;i<1000;i++){n+=document.querySelectorAll('.cm-line').length;}return String(n);})()`)
+	bench("elementFromPoint 1e3", `(function(){var n=0;for(var i=0;i<1000;i++){if(document.elementFromPoint(400,300))n++;}return String(n);})()`)
+}
+
+// openEditorForBench 走真实用户路径打开编辑器（切视图 → 文件树 → 点文件 → 等激活），
+// 供 jsbenchEditor 独立入口复用；返回是否成功出现行元素。
+func openEditorForBench(wv *webkit.WebView) bool {
+	treeFound := false
+	for i := 0; i < 10 && !treeFound; i++ {
+		s, ferr := evalStr(wv, jsFlowExplore)
+		if ferr != nil {
+			break
+		}
+		fmt.Printf("[bench-open] 切视图: %s\n", s)
+		for k := 0; k < 25; k++ {
+			pumpFrame(wv)
+		}
+		if s2, e2 := evalStr(wv, jsFlowCheckTree); e2 == nil && strings.Contains(s2, `"hasTree":true`) {
+			treeFound = true
+		}
+	}
+	fmt.Printf("[bench-open] 文件树已找到: %v\n", treeFound)
+	if s, ferr := evalStr(wv, jsFlowLoadTree); ferr == nil {
+		fmt.Printf("[bench-open] 加载文件树: %s\n", s)
+	}
+	for i := 0; i < 90; i++ {
+		pumpFrame(wv)
+	}
+	for attempt := 0; attempt < 6; attempt++ {
+		if s, ferr := evalStr(wv, jsFlowClickFile); ferr == nil {
+			fmt.Printf("[bench-open] 点文件: %s\n", s)
+		}
+		for i := 0; i < 90; i++ {
+			pumpFrame(wv)
+		}
+		lr, _ := evalStr(wv, `(function(){var e=document.querySelector('.plugin-area-editor');if(!e)return '0';return String(e.querySelectorAll('.line,[class*="line"],[class*="cm-line"]').length);})()`)
+		if v, perr := strconv.Atoi(strings.TrimSpace(lr)); perr == nil && v > 0 {
+			fmt.Printf("[bench-open] 编辑器已打开，行数 %d\n", v)
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	gouide := flag.String("gouide", "", "gouide 仓库根（缺省自动探测 ../gou-ide 等）")
 	rounds := flag.Int("rounds", 150, "驱动轮数（每轮含事件循环 + 布局 + 渲染）")
@@ -750,6 +821,51 @@ func main() {
 			bench("querySelector 1e3", `(function(){var n=0;for(var i=0;i<1000;i++){if(document.querySelector('.cm-scroller'))n++;}return String(n);})()`)
 			perfOneResult = `{"jsbench":"done"}`
 			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "jsbenchEditor" {
+			// ─── 编辑器激活后 DOM 上的 jsbench（独立入口）───
+			// 监督者要求：不得再用首页 DOM 的数字代表编辑器场景。
+			if !openEditorForBench(wv) {
+				fmt.Printf("[perf] 编辑器未激活，bench 结果不可用\n")
+			}
+			runEditorDOMBench(wv)
+			perfOneResult = `{"jsbenchEditor":"done"}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "scrollProf" {
+			// ─── 只做 N=1 端到端滚动（供 CPU profile 采样）───
+			// editorE2E 里后接的编辑器 DOM bench 会把 querySelector(2.2s)/
+			// clientHeight(1.0s) 等高位样本混进 profile，稀释滚动本身的栈；故单独
+			// 开一个只含「打开编辑器 + N=1 滚动」的入口，让采样全部落在滚动的
+			// listener 回调上。
+			if !openEditorForBench(wv) {
+				fmt.Printf("[prof] 编辑器未激活\n")
+			}
+			// ★ 采样窗口只覆盖「3 轮 N=1 滚动」：pprof 在 openEditor 之后才启动、
+			//   3 轮结束时停止，因此 profile 里不含打开编辑器/驱动帧/bench 的样本，
+			//   top 帧可直接回答「listener 回调里的 ~1.9s 花在什么代码上」。
+			//   采样时长 ≈ 3×2s，足以积累样本。
+			profPath := "out/_scroll_only.prof"
+			pf, perr := os.Create(profPath)
+			if perr != nil {
+				fmt.Printf("[prof] profile 创建失败: %v\n", perr)
+			} else if serr := pprof.StartCPUProfile(pf); serr != nil {
+				fmt.Printf("[prof] StartCPUProfile 失败: %v\n", serr)
+			} else {
+				fmt.Printf("[prof] 开始采样（仅滚动窗口）→ %s\n", profPath)
+			}
+			assign := `(function(){var sc=document.querySelector('.cm-scroller');if(!sc)return 'no-scroller';sc.scrollTop=120;return 'ok';})()`
+			for r := 0; r < 3; r++ {
+				t0 := time.Now()
+				_, _ = evalStr(wv, assign)
+				_, _ = wv.Render()
+				fmt.Printf("[prof] N=1 第%d轮: %.1fms\n", r+1, float64(time.Since(t0).Microseconds())/1000)
+			}
+			pprof.StopCPUProfile()
+			if pf != nil {
+				_ = pf.Close()
+			}
+			fmt.Printf("[prof] 采样已停止（仅滚动窗口 → %s）\n", profPath)
+			perfOneResult = `{"scrollProf":"done"}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
 		} else if *interaction == "editorE2E" {
 			// ─── 端到端口径（第10轮必做1）───
 			// 一次「滚动」= 一次 sc.scrollTop=v 赋值 **+ 其触发的帧边界 flush 中那 1 次
@@ -821,6 +937,9 @@ func main() {
 			n12 := n12Sum / 3
 			fmt.Printf("[e2e] N=1  端到端: %.1fms（赋值+1次flush，扣 Render 基线后约 %.1fms）\n", n1, n1-renderBase)
 			fmt.Printf("[e2e] N=12 端到端: %.1fms（12 次赋值合并为 1 次 flush，扣基线后约 %.1fms）\n", n12, n12-renderBase)
+			// ─── 编辑器激活后的 DOM 基准（监督者第 1 次监督指令必做项）───
+			// 放在 N=1/N=12 之后：bench 期间不产生 scroll 派发，不干扰 [DISP] 系列输出。
+			runEditorDOMBench(wv)
 			perfOneResult = `{"e2e":{"renderBaselineMs":` + strconv.FormatFloat(renderBase, 'f', 3, 64) +
 				`,"n1_ms":` + strconv.FormatFloat(n1, 'f', 3, 64) +
 				`,"n12_ms":` + strconv.FormatFloat(n12, 'f', 3, 64) +

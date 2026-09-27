@@ -564,6 +564,13 @@ func (o *JSObject) Set(key string, val JSValue) {
 	if val.nativeFn != nil && val.interp == nil && o.interp != nil {
 		val.interp = o.interp
 	}
+	// API 级插桩（perfapi.go）：名单内的方法在**注册时**包一层计时 wrapper
+	// （wrapper 内部自带开关判断，默认关闭时原样返回 fn，运行路径零开销）。
+	// 放在这里而不是逐个 binding 调用点，是为了让所有经 Set 注册的方法
+	// （含 fn1/fn2 这类通用包装产生的 "fn" 名）都能按注册名被统计。
+	if val.nativeFn != nil {
+		val.nativeFn = perfWrapNative(key, val.nativeFn)
+	}
 	o.obj.Set(key, val.val(targetRt))
 }
 
@@ -613,11 +620,13 @@ func (o *JSObject) SetAccessor(prop string, getter, setter interface{}) {
 	var gfn goja.Value
 	switch g := getter.(type) {
 	case func(*Interpreter) JSValue:
+		g = perfWrapGet1(prop, g)
 		gfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
 			val := g(interp)
 			return val.val(rt)
 		})
 	case func(*Interpreter, JSValue) JSValue:
+		g = perfWrapGet2(prop, g)
 		gfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
 			val := g(interp, JSValue{})
 			return val.val(rt)
@@ -628,6 +637,7 @@ func (o *JSObject) SetAccessor(prop string, getter, setter interface{}) {
 	if setter != nil {
 		switch s := setter.(type) {
 		case func(*Interpreter, JSValue, JSValue):
+			s = perfWrapSet(prop, s)
 			sfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
 				v := JSValue{v: call.Argument(0), interp: interp}
 				s(interp, JSValue{}, v)

@@ -1,86 +1,161 @@
-# 滚动「同步派发」成本拆解（第10轮 必做2）
+# 滚动「同步派发」成本拆解（第10轮 必做2 → 监督者第1次指令 A 分支定稿）
 
-**结论（一句话）**：每次滚动约 **1.65s** 的成本 **100% 出现在宿主框架（CodeMirror 6）的
-scroll 监听器回调内部**；引擎侧的派发骨架（事件路径构建 / 捕获 / 冒泡 / 默认行为）是 **零成本**，
-同步全量布局、渲染树重建、DOM 变更均为 **0 次** —— **引擎侧没有可削减的派发骨架开销**。
+**最终结论（一句话）**：滚动 1.8s 成本的 **89.62% 是引擎侧的 `RenderView.BoxContentSize`
+重复全树递归**（CM6 的 scroll handler 每轮读 `scrollHeight/clientHeight` → 几何桥
+`getElementScrollMetrics` → `forceLayout` + 无缓存的全子树遍历）。**不是 goja 纯 JS 执行量**。
+加缓存后同端口径 **N=1：2006.8ms → 33.2ms（↓60×）**，**指标1 达成**（阈值 ≤1300ms）。
+
+> ## ⚠️ 对本文档前一版结论的纠正（必读）
+>
+> 前一版结论为「1.65s ≈ 1100 万次 JS 操作 = CM6 handler 在 goja 上的执行量，引擎侧无对应
+> 可削减点」。**该结论错误，已被本轮实测推翻**，原因有二：
+> 1. **API 级插桩覆盖不到几何桥**：名单插桩只覆盖 `JSObject.Set` / `SetAccessor` 注册的
+>    DOM API；而 `scrollHeight/clientHeight/scrollWidth/clientWidth` 走的是 webkit 的
+>    `wvBridge` Go 闭包（`getElementScrollMetrics`），**不在注册表里** → 摘要为 `apiCallN=16 /
+>    apiSum≈1ms`，是**假阴性**。
+> 2. **差额推断不是实测**：把 `listenerTime − apiSum` 当作 "goja JS" 属于估算跳跃。
+>    按监督者要求改用 **CPU profile 实测滚动窗口**（见 §3），真因即现形。
+> 监督者的判断（"更像是某种随 DOM 规模退化的重复计算，而非与滚动处理量成正比的纯 JS"）
+> **成立**。
 
 ---
 
 ## 1. 口径与工具
 
 - **端到端口径**（监督者指定）：一次 `sc.scrollTop = v` 赋值 **+ 其触发的帧边界 flush 中那 1 次
-  `DispatchEvent(scroll)`**（含 CM6 handler 全程）都计入窗口。
-- **测量**：`dev/probes/gouide_real_e2e -interaction editorE2E`（Go 侧打点：赋值 → `wv.Render()`，
-  并在同一次运行内先测「仅 `Render()`」基线）。
-- **插桩**（`WB_PERF_DISPATCH=1` 开启，默认关闭、零开销）：
-  - `engine/dom/eventtarget.go`：`DispatchEvent` 分段计时（buildEventPath / capture / target /
-    bubble / default）+ listener 回调计时 + DOM 变更计数。
-  - `engine/page/frameview.go`：`FrameView.Layout()` 次数与累计耗时、渲染树重建计数。
-- **JS/桥基准**：`dev/probes/gouide_real_e2e -interaction jsbench`。
+  `DispatchEvent(scroll)`**（含 CM6 handler 全程）。`dev/probes/gouide_real_e2e -interaction editorE2E`，
+  Go 侧打点「赋值 → `wv.Render()`」，同一次运行内先测「仅 `Render()`」基线。
+- **插桩**（`WB_PERF_DISPATCH=1` 开启；**默认关闭零开销**）：
+  - `engine/dom/eventtarget.go`：派发分段计时 + listener 回调计时 + DOM 变更计数；并提供
+    `PerfAPIScope{Reset,Enter,Exit,Dump}` 钩子（dom 不依赖 jsc，用函数变量注入）。
+  - `engine/js/jsc/perfapi.go`（新增）：**API 级计数/计时**，包裹点是 binding 层的**两个统一注册
+    入口** `JSObject.Set`（方法）与 `JSObject.SetAccessor`（属性读写）——**不逐调用点改插桩**；
+    嵌套时只有最外层计入耗时（避免重复计同一段时间）。
+  - `dev/probes/gouide_real_e2e -interaction scrollProf`（新增）：**pprof 采样窗口只覆盖 3 轮
+    N=1 滚动**（打开编辑器之后再 `StartCPUProfile`、3 轮结束即 `StopCPUProfile`），使 top 帧
+    直接回答「listener 里那 ~1.8s 花在什么代码上」。
+  - `-interaction jsbenchEditor` / `editorE2E` 内的 `runEditorDOMBench`（新增）：在**编辑器激活后
+    的 DOM** 上重跑基准（首页 DOM 数字不代表编辑器场景，见 §5）。
 
-## 2. 分段占比表（端到端段，连续 6 次一致）
+## 2. 一级分解：名单内 DOM API 在 listener 内的调用（6 轮一致）
 
-| 段 | 耗时 | 占比 |
-|---|---|---|
-| `buildEventPath`（17 层路径） | 0s | **0%** |
-| capture 阶段 | 0s | **0%** |
-| **target 阶段** | **1.65 ~ 1.84s** | **100%** |
-| bubble 阶段 | 0s | **0%** |
-| `defaultEventHandler` | 0s | **0%** |
-| **合计** | **1.65 ~ 1.84s** | 100% |
+| 轮次 | listenerTime | API 调用数 | API 累计 | 占比 |
+|---|---|---|---|---|
+| 1 | 1.9068s | 16 | 1.0541ms | 0.06% |
+| 2 | 1.7492s | 16 | 1.029ms | 0.06% |
+| 3 | 1.8204s | 16 | 515.5µs | 0.03% |
+| 4 | 1.8009s | 16 | 511.4µs | 0.03% |
+| 5 | 1.6440s | 16 | 1.5358ms | 0.09% |
+| 6 | 1.8301s | 16 | 1.053ms | 0.06% |
 
-target 阶段细分（`listeners=1`，该唯一监听器即 CM6 的 scroll handler）：
+top2 仅 `getComputedStyle`（n=15）、`getSelection`（n=1）；`getBoundingClientRect` /
+`offsetHeight` / `querySelector` / `style` / `elementFromPoint` 在 handler 内**零调用**。
 
-| 项 | 值 | 占比 |
-|---|---|---|
-| listener 回调合计（`listenerTime`） | 1.65 ~ 1.84s | **100%** |
-| └ 同步全量布局 `FrameView.Layout()` | **0 次 / 0s** | 0% |
-| └ 渲染树重建 | **0 次** | 0% |
-| └ DOM 变更（createElement / createTextNode / appendChild / insertBefore / replaceChild / removeChild / setAttribute / textContent 写） | **0 次** | 0% |
+**这张表本身不足以支持「引擎侧无削减空间」** —— 它是**假阴性**（§0 说明：几何桥不在名单注册表里）。
+它的正确用途是：证明「常规 DOM API 面」不是成本来源，从而把注意力推向几何桥。
 
-## 3. 关键否定证据（逐项排除）
+## 3. 二级分解：CPU profile 实测（**决定性证据**）
 
-1. **不是派发骨架**：`build=0s cap=0s bub=0s def=0s`（17 层路径遍历零成本）。
-2. **不是 layout thrashing**：`layouts=0 layoutTime=0s` —— 此前「每次滚动触发 ~44 次全量布局」
-   的假设被数据**否决**。
-3. **不是渲染树重建**：`treeRebuilds=0`。
-4. **不是 DOM 变更风暴**：`domOps=0`。
-5. **不是 Go↔JS 桥开销**：jsbench 实测（首页 DOM）：
+`-interaction scrollProf`，采样窗口 = 仅 3 轮 N=1 滚动，`Duration 5.85s / Total samples 5.78s`：
 
-   | 基准 | 耗时 | 单位成本 |
-   |---|---|---|
-   | 空循环 1e6 | 150.4ms | 150ns / 迭代 |
-   | 空循环 1e5 | 12.2ms | 122ns / 迭代 |
-   | offsetHeight 读 1e4 | 15.6ms | 1.56µs / 次 |
-   | scrollTop 读 1e4 | 4.8ms | 0.48µs / 次 |
-   | getBoundingClientRect 1e3 | 4.4ms | 4.4µs / 次 |
-   | querySelector 1e3 | 145.2ms | 145µs / 次 |
+| 帧 | flat | cum | 说明 |
+|---|---|---|---|
+| **`rendering.(*RenderView).BoxContentSize.func1`** | **76.82%** | 89.62% | 全子树递归 walk |
+| `rendering.(*renderObjectBase).FirstChild` / `NextSibling` | 3.63% / 3.29% | — | 递归遍历本身 |
+| `rendering.asRenderBox` / `overflowClipsContentStyle` | 1.90% / 1.90% | — | 每盒类型/样式判定 |
+| `webkit.(*WebView).injectRenderTreeBridge.func7` | 0.01s | **89.62%** | **= `getElementScrollMetrics`（webview.go:1814）** |
+| `main.evalStr`（JS 求值） | — | **1.73%** | goja 执行仅 1.73% |
+| GC 合计 | ~5% | — | — |
 
-   → DOM 属性读、几何读都是 **µs 级**，**桥不是瓶颈**。
+- `func7` 的 cum **5.18s ≈ 三轮 listenerTime 合计 5.4s** —— 时间归属闭合。
+- `getElementScrollMetrics` 内部：`forceLayout()`（≈6%）+ `rv.BoxContentSize(box)`（≈83%）+
+  `Vertical/HorizontalScrollbarMetrics`。
 
-## 4. 归因
+## 4. 根因
 
-按 goja 基本操作成本（150ns/次）折算，1.65s ≈ **1100 万次 JS 基本操作**。
-即余额 **100% 是 CM6 的 scroll handler 在 goja 解释器上的执行量**
-（含字符串 / 对象 / 正则密集路径，其相对 V8 的倍率远高于纯数值循环）。
-**引擎侧无对应可削减点**。
+`RenderView.BoxContentSize`（`engine/rendering/renderview.go:638`）：
 
-## 5. 已做 / 可做的事
+1. **无缓存**：每次调用都对 box 的**整棵子树**做递归 walk（遍历 `FirstChild/NextSibling`、
+   逐盒读 `frame`/`Style`/`Segments`）。
+2. **重复递归**：对每个 `overflow` 子盒还会**再次调用自身**（原 679 行
+   `if iw, ih := v.BoxContentSize(cb); ...`），同一子树被反复遍历 → 最坏 O(n·depth) 级退化。
+3. **触发面**：CM6 的 scroll handler 每轮滚动会**连续读** `scrollHeight` / `clientHeight` /
+   `scrollWidth` / `clientWidth`；每次读都经 webkit 几何桥 → `forceLayout()` + 一次全量递归。
+   4 次读 × 每次全树 = 1.8s（94 行 CM6 DOM + 整棵渲染树，1774 个节点）。
+   → 这正是「随 DOM 规模退化的重复计算」，与滚动处理量（N=1 与 N=12 耗时几乎相同）无关。
 
-- **已做（本轮）**：滚动事件改为**帧边界合并派发** → 同一帧内 N 次滚动只跑 **1 次** handler
-  （实测 N=12 与 N=1 相差 <30ms，合并生效）。真实滚轮是每帧 1 次赋值，故**单次成本不因此改变**。
-- **已做（本轮）**：写 `scrollTop` 不再触发无条件 `forceLayout()`（与浏览器一致；
-  实测对端到端无改善 −0.4%，已如实记录）。
-- **引擎侧进一步**：**无** —— 骨架已零成本。真正的杠杆在 **JS 引擎速度**（超出「不换 V8」约束）
-  或**宿主框架的滚动处理量**（前端侧，如 CM6 的 viewport 更新策略），不在本引擎的
-  派发 / 布局 / DOM 路径上。
+## 5. 优化与同端口径对照
 
-## 6. 指标1 判定
+**改动**（`engine/rendering/renderview.go`）：新增 `boxContentSizeCache map[*RenderBox][2]float64`
+与 `InvalidateContentSizeCache()`；`BoxContentSize` 变为「缓存命中 O(1) / 未命中才递归」的包装，
+原实现体改名 `boxContentSizeUncached`（内部对 overflow 子盒的递归调用仍走缓存版，一次遍历即把
+沿途所有子盒结果填入缓存）。**失效点**：`syncGeometry()`（每次布局后的几何刷新）与
+`ApplyTextChange()`（文本段原地更新）；渲染树重建会整体换新 `RenderView`，缓存随旧对象丢弃，
+不存在跨重建的陈旧项。滚动偏移变化不影响内容尺寸，故不失效。
 
-**未达成**。端到端 **N=1 = 1801 ~ 2122ms**（阈值 ≤1300ms，超出 0.39~0.63 倍）；
-N=12 = 1847 ~ 2150ms。同口径 before（异步合并前，`a327149^`）见 `docs/PERF_BASELINE.json`
-的 `scroll_ab` 段。
+### 5.1 端到端对照（`-interaction editorE2E`，同一二进制口径）
 
-> 说明：本轮此前曾以「赋值口径 3948.818ms → 0.0ms」宣称达成，**该口径不成立** ——
-> 纯 JS 循环窗口内不会触发 Go 侧 `Render()`/`flushScrollEvents()`，派发被移出窗口而非消失。
-> 已在 baseline 中更正为「未达成」，并以本文件的分段占比表为准。
+| 口径 | 优化前 | 优化后（第 1 次） | 优化后（第 2 次独立复现） |
+|---|---|---|---|
+| **N=1 端到端** | **2006.8ms**（净 1975.8） | **33.2ms**（净 0.0） | **34.3ms** |
+| **N=12 端到端** | **2021.4ms**（净 1990.4） | **33.7ms**（净 0.6） | **35.6ms** |
+| `[DISP]` listenerTime（6 轮） | 1.64 ~ 1.91s | 1.01 ~ 3.52ms | — |
+| `layouts` / `treeRebuilds` / `domOps` | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+**指标1：达成**（阈值 ≤1300ms → 实测 33.2ms，余量 ~39×）。
+
+### 5.2 语义等价证据（缓存未返回陈旧值）
+
+| 检查 | 结果 |
+|---|---|
+| 编辑器 DOM bench 返回值（优化前 → 优化后） | `offsetHeight(.cm-scroller)` 5790000 → **5790000**；`scrollTop` 11398000 → **11398000**；`clientHeight` 5790000 → **5790000**；`offsetWidth(.cm-line)` 6480000 → **6480000**（逐项一致） |
+| `clientHeight 1e4` 基准 | 1041.4ms → **6.5ms**（↓160×，正是缓存命中路径） |
+| 精准回归 | `engine/rendering` `engine/page` `engine/style` `engine/dom` `webkit` **全 ok**（含 `content_size_perf_test`、`scrollbar_resident_test`、`scroll_chaining_test` 等钉死用例） |
+
+## 6. 编辑器 DOM 上的基准（**替代此前首页 DOM 数字**）
+
+`-interaction jsbenchEditor` / `editorE2E` 内置，DOM 取证：`allNodes=1774, cmLines=94, cmScroller=1`
+（首页 DOM 仅 405 节点、`.cm-scroller` 不存在 —— 再次说明首页数字不能代表编辑器场景）。
+
+| 基准 | 编辑器 DOM（优化前） | 编辑器 DOM（优化后） | 单位成本 |
+|---|---|---|---|
+| 空循环 1e6（goja 基线） | 149 ~ 153ms | 129 ~ 134ms | ~140ns/迭代 |
+| `offsetHeight` 1e4 (.cm-scroller) | 33.3ms | 21.3ms | 2.1µs |
+| `offsetHeight` 1e4 (.cm-line) | 19.9ms | 18.8ms | 1.9µs |
+| `scrollTop` 读 1e4 | 5.7ms | 6.5ms | 0.65µs |
+| **`clientHeight` 1e4 (.cm-scroller)** | **1041.4ms** | **6.5ms** | 0.65µs（**本次修复直接受益**） |
+| `getBoundingClientRect` 1e3 | 4.6 ~ 5.3ms | 4.4 ~ 4.9ms | ~5µs |
+| `getClientRects` 1e3 | 5.8 ~ 15.7ms | 6.0ms | ~6µs |
+| `getComputedStyle` 1e3 | 51.4ms | 46.9ms | ~47µs |
+| **`querySelector` 1e4** | 1981 ~ 2257ms | 2024ms | **~200µs** |
+| **`querySelectorAll` 1e3** | 383 ~ 436ms | 380ms | **~380µs** |
+| **`elementFromPoint` 1e3** | 166.8 ~ 203.1ms | 169.0 ~ 164.4ms | **~165µs** |
+
+**独立发现（不在指标1路径上，列为后续项）**：编辑器 DOM 上 `querySelector`（~200µs/次）、
+`querySelectorAll`（~380µs/次）、`elementFromPoint`（~165µs/次）、`getComputedStyle`（~47µs/次）
+相对浏览器仍有 10~100× 差距（疑为每次调用重建选择器匹配/无索引）。CM6 的 scroll handler
+**不调用**这些 API（§2：handler 内相关调用为 0），故它们与本轮指标1 无关，另行收口。
+
+## 7. 指标1 判定与建议
+
+- **判定：达成**。端到端 N=1：**2006.8ms → 33.2/34.3ms**（同端口径、两次独立复现）；阈值 ≤1300ms。
+- **此前"不换 V8 不可达"的说法作废**：该结论建立在前一版的假阴性插桩与差额估算之上；
+  本轮实测表明成本在**引擎侧的重复计算**，属可修范围，且已修复。
+- **后续可选**（与本轮无关）：§6 的四个退化 API 需要时单独优化（选择器索引 / 命中测试剪枝）；
+  在不换 V8 的前提下，这类"每次调用重算"的引擎实现仍有可观空间。
+
+## 8. 复现命令
+
+```bash
+# 端到端（含编辑器 DOM bench + [DISP]/[DISP-API] 分解表）
+WB_PERF_DISPATCH=1 ./out/_api_probe3.exe -url http://127.0.0.1:9191/ -interaction editorE2E
+# 仅滚动的 CPU profile（采样窗口只有 3 轮 N=1）
+WB_PERF_DISPATCH=1 ./out/_api_probe3.exe -url http://127.0.0.1:9191/ -interaction scrollProf
+go tool pprof -top -nodecount=25 out/_api_probe3.exe out/_scroll_only.prof
+go tool pprof -list='injectRenderTreeBridge' out/_api_probe3.exe out/_scroll_only.prof
+# 编辑器 DOM 基准（独立入口）
+WB_PERF_DISPATCH=1 ./out/_api_probe3.exe -url http://127.0.0.1:9191/ -interaction jsbenchEditor
+```
+
+产物：`out/_api_e2e.log`（优化前）、`out/_api_e2e_after.log` / `out/_api_e2e_after2.log`
+（优化后两次复现）、`out/_scroll_only.prof`（滚动窗口 profile）、`out/_api_prof2.log`。

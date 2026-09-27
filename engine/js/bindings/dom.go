@@ -395,6 +395,16 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	g := rt.GlobalObject()
 	registeredDocument = document
 
+	// ── API 级性能插桩接线（WB_PERF_DISPATCH=1 时有效；默认关闭零开销）──
+	// 把 jsc 包的 API 计数/计时设施接到 dom 包的 hook 上：dom 层在进入 listener
+	// 回调时置位开关、退出时关闭，本轮 scroll 派发结束时输出分解表。jsc 侧的
+	// wrapper 只在「名单内的 API 名 + 开关开启」时才真正安装（见 perfapi.go），
+	// 因此默认运行时路径只是原函数直调。
+	dom.PerfAPIScopeReset = jsc.PerfAPIReset
+	dom.PerfAPIScopeEnter = jsc.PerfAPIEnter
+	dom.PerfAPIScopeExit = jsc.PerfAPIExit
+	dom.PerfAPIScopeDump = func(lt time.Duration) string { return jsc.PerfAPIDump(12, lt) }
+
 	// ── Selection 单例（提前创建）──────────────────────────────
 	// ★ CodeMirror 6 等库依赖 document.getSelection()。幂等分支每次
 	// EvalJS/RunJS 前都会新建 document 对象；若 getSelection 只在首次
