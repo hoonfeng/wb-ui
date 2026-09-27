@@ -539,6 +539,10 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	// 移入 paintLayerContents 入口（★ 效果层（mask/opacity SaveLayer）
 	// 之后应用：逃逸子层弹栈移除本层裁剪时，祖先效果保留——见
 	// paintLayerContents 层裁剪注释）。
+	if isFixedLayer && debugenv.Enabled("WB_LAYER_CULL") {
+		log.Printf("[layer-fixed-visit] %s clipSpecified=%v clip=(%.1f,%.1f,%.1fx%.1f) hasClip=%v esc=%v",
+			layerName(layer), clipSpecified, clip.X, clip.Y, clip.Width, clip.Height, hasClip, hasEscapingChildLayer(layer))
+	}
 	if isFixedLayer {
 		info.canvas.Save()
 	}
@@ -555,6 +559,10 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		if hasEscapingChildLayer(layer) || info.transformDepth > 0 {
 			// fallthrough：逃逸子层可能绘制；transform 空间内 clip 无效
 		} else {
+			if debugenv.Enabled("WB_LAYER_CULL") {
+				log.Printf("[layer-cull-drop] %s clipSpecified=%v clip=(%.1f,%.1f,%.1fx%.1f) fixed=%v transformDepth=%d",
+					layerName(layer), clipSpecified, clip.X, clip.Y, clip.Width, clip.Height, isFixedLayer, info.transformDepth)
+			}
 			if isFixedLayer {
 				info.canvas.Restore() // 抵消前面的 Save
 			}
@@ -948,6 +956,22 @@ func layerEscapesClip(child, parent *RenderLayer) bool {
 	st := child.owner.Style()
 	if st == nil || (st.Position != style.PositionAbsolute && st.Position != style.PositionFixed) {
 		return false
+	}
+	// ★ 视口 fixed 的包含块恒为视口（CSS 2.1 §11.1.1），任何祖先的 overflow
+	// 裁剪都不适用于它 —— 无条件逃逸 parent 的裁剪。
+	//
+	// 这里必须用 isViewportFixed 口径，**不能**只依赖 ContainingBlock()：
+	// containingBlockBase() 把 fixed 与 absolute 一视同仁，返回「最近的
+	// positioned 祖先」，而视口 fixed 的包含块与 positioned 祖先无关。当那个
+	// 祖先恰好就是 parent 层自身时 → cbStrictlyAbove(parent, parent) = false
+	// → 逃逸判定失败 → parent 在「零尺寸 clip」分支整层 return，菜单层从不被
+	// 遍历（帮助菜单 .menu-dropdown 完全不可见的根因）。
+	//
+	// 被 transform/filter/backdrop-filter 祖先捕获的 fixed **不是**视口 fixed
+	// （isViewportFixed 为 false）：其包含块就是那个祖先，仍受祖先 overflow
+	// 裁剪、必须留在祖先变换空间内，继续走下面的 ContainingBlock 路径。
+	if st.Position == style.PositionFixed && isViewportFixed(child.owner) {
+		return true
 	}
 	box := asRenderBox(child.owner)
 	if box == nil {
