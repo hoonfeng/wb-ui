@@ -136,13 +136,35 @@ top2 仅 `getComputedStyle`（n=15）、`getSelection`（n=1）；`getBoundingCl
 相对浏览器仍有 10~100× 差距（疑为每次调用重建选择器匹配/无索引）。CM6 的 scroll handler
 **不调用**这些 API（§2：handler 内相关调用为 0），故它们与本轮指标1 无关，另行收口。
 
+### 6.1 上述四个退化 API 的收口（commit `5c66363`）
+
+| API | 根因 | 改动 | 证据 |
+|---|---|---|---|
+| `querySelector` | `GetAttribute/HasAttribute` 每次 `strings.ToLower(属性名)` + map 查找；子孙遍历重复取 `nodeBaseOf` | 属性名已小写时**零分配直查**；css 属性选择器与 js bindings 查询统一走该入口；遍历复用 `nodeBaseOf` | 端到端 1e4：2978.2 → **1765.3ms（-40.7%）**；Go 紧邻对照（3000x×3 中位数）68.0 → **29.6µs（-56.5%）** |
+| `querySelectorAll` | 与 `querySelector` 同一匹配入口 | 同上 | 端到端 1e3：500.4 → **447.7ms（-10.5%）**；Go 对照 144.0 → **68.3µs（-52.6%）** |
+| `getComputedStyle` | 每次调用在函数内构造 **117 元素白名单切片**并对每项跑 `camelToKebab`（含分配）；`border-width` longhand 回写还每次构造 4 项 map 字面量（分配 + 顺序随机） | 白名单与 kebab 键改**包级预计算一次**（成员/顺序/三处重复项逐字保留）；回写改有序切片表 | 基准（`-benchtime=200000x`）：**14,475 ns/op / 224 allocs / 4920 B → 41 ns/op / 0 allocs**；对照实测 ≈47µs/次 → 每次省 ≈14.4µs |
+| `elementFromPoint` | 命中测试本身要遍历层树/渲染树（**本质成本**，非可去开销） | **未改算法**：核查 `attrName == ""` 时各处已 `if attrName != ""` 跳过属性读取，不存在「每次调用」浪费；仅从属性/遍历热路径间接受益 | 配对窗口 266.5 → **226.3ms（-15%）** |
+
+**语义等价证据**：`engine/js/bindings/computed_style_props_test.go` 断言预计算表与优化前字面量
+**逐项一致**（117 项，含 `backgroundRepeat` / `backgroundPosition` / `backgroundSize` 三处重复项），
+并固化新旧固定开销对照基准；`engine/js/bindings/query_perf_test.go` 固化 `querySelector` 热路径基准。
+**回归**：`go test -count=1 ./engine/{dom,js/bindings,css,style,rendering,layout}` 六包全绿
+（`out/_test_after_round2.log`）。
+
+★ **口径提醒**：探针端到端数字波动 ±11~30%，上表端到端项仅作量级参考，**以同窗口 Go 微基准
+紧邻对照为准**。
+
 ## 7. 指标1 判定与建议
 
 - **判定：达成**。端到端 N=1：**2006.8ms → 33.2/34.3ms**（同端口径、两次独立复现）；阈值 ≤1300ms。
 - **此前"不换 V8 不可达"的说法作废**：该结论建立在前一版的假阴性插桩与差额估算之上；
   本轮实测表明成本在**引擎侧的重复计算**，属可修范围，且已修复。
-- **后续可选**（与本轮无关）：§6 的四个退化 API 需要时单独优化（选择器索引 / 命中测试剪枝）；
-  在不换 V8 的前提下，这类"每次调用重算"的引擎实现仍有可观空间。
+- **§6 四个退化 API 的处置**：`querySelector` / `querySelectorAll` / `getComputedStyle` 已收口
+  （§6.1，commit `5c66363`）；`elementFromPoint` 经代码核查属命中测试遍历的**本质成本**
+  （无每次调用的固定浪费），本轮未改其算法，仅在属性/遍历热路径上间接受益（-15%）。
+- **剩余可选方向**：选择器匹配**索引化**（跨调用缓存选择器→元素集）与命中测试**剪枝**。
+  两者都必须先建立「DOM 版本 + 查询键」的失效协议（否则返回陈旧结果），风险高于本轮改动，
+  故本轮不做；需要时可单列一轮设计。
 
 ## 8. 复现命令
 

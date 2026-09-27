@@ -462,5 +462,37 @@
    "update 差异 5.2× 属**测量窗口语义不同**，不作为框架结论。",
    "scroll 口径作废（见 scrollPerOpUs.why），不参与结论。"
   ]
+  },
+  "dom_hotpath_round2": {
+   "what": "wb-ui 引擎侧 DOM/样式热路径收口（querySelector / querySelectorAll / getComputedStyle），semantic-preserving",
+   "commit": "5c66363",
+   "changes": [
+    "Element.GetAttribute/HasAttribute：属性名已小写时零分配直查（原实现每次 strings.ToLower + map 查找）；css 属性选择器匹配与 js bindings 查询绑定统一走该入口；子孙遍历复用 nodeBaseOf",
+    "getComputedStyle：117 项白名单与 kebab 键从每次调用构造切片 + 逐项 camelToKebab 改为包级预计算一次；border-width longhand 回写从每次构造 4 项 map 字面量改为有序切片表"
+   ],
+   "go_microbench": {
+    "cmd": "go test ./engine/js/bindings/ -run TestComputedStylePropEntriesConsistent -bench BenchmarkComputedStyleWhitelist -benchtime=200000x -count=1",
+    "legacy_ns_per_op": 14475,
+    "legacy_allocs_per_op": 224,
+    "legacy_bytes_per_op": 4920,
+    "precomputed_ns_per_op": 40.98,
+    "precomputed_allocs_per_op": 0,
+    "caliber_note": "legacy 用 strings.Split 模拟被移除的切片构造（偏保守，可能高估原成本）；对照实测 getComputedStyle ≈47µs/次"
+   },
+   "probe_paired": {
+    "querySelector_1e4_ms": [2978.2, 1765.3],
+    "querySelectorAll_1e3_ms": [500.4, 447.7],
+    "elementFromPoint_ms": [266.5, 226.3],
+    "go_probe_immediate_us": {
+     "querySelector_3000x_median": [68.0, 29.6],
+     "querySelectorAll_3000x_median": [144.0, 68.3]
+    },
+    "caliber_note": "探针端到端波动 ±11~30%，以同窗口 Go 微基准紧邻对照为准"
+   },
+   "verification": {
+    "six_packages": "go test -count=1 ./engine/{dom,js/bindings,css,style,rendering,layout} 全 ok → out/_test_after_round2.log",
+    "equivalence": "engine/js/bindings/computed_style_props_test.go：预计算表与优化前字面量逐项一致（117 项，含三处重复项）"
+   },
+   "not_done": "elementFromPoint 命中测试成本属遍历本身（attrName 为空时各处已跳过属性读取），未改算法，仅间接受益；选择器索引化 / 命中测试剪枝需先建失效协议，单列一轮"
  }
 }
