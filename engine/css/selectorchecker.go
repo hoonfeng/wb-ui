@@ -270,12 +270,9 @@ func matchAttribute(s SimpleSelector, el *dom.Element) bool {
 	case MatchExact:
 		return actual == expected
 	case MatchList:
-		for _, tok := range strings.Fields(actual) {
-			if tok == expected {
-				return true
-			}
-		}
-		return false
+		// [attr~=value] 的 token 匹配与 Element::hasClassName() 同规则、同热路径
+		// （每节点一次），共用零分配实现；语义与 strings.Fields 逐字对齐。
+		return dom.HasWhitespaceSeparatedToken(actual, expected)
 	case MatchHyphen:
 		return actual == expected || strings.HasPrefix(actual, expected+"-")
 	case MatchBegin:

@@ -323,7 +323,6 @@ func FireResourceEvent(rt *jsc.Interpreter, el *dom.Element, typ string) {
 	}
 }
 
-
 // namedNodeMapCache 缓存每个元素的 attributes 集合对象：DOM 规定
 // `el.attributes === el.attributes`（同一 NamedNodeMap 实例），因此不能每次
 // 访问都新建对象。集合内容保持 live —— 每次属性读/写后由 refreshNamedNodeMap
@@ -371,6 +370,52 @@ var StylesheetHrefChanged func(el *dom.Element, href string)
 // 按解释器归属路由到对应 WebView 的渲染树命中）。视口坐标 → 命中的
 // 最顶层元素（层叠感知：z-index/遮罩/弹窗按绘制顺序，后被绘制者在上）。
 var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
+
+// ── getComputedStyle 白名单回写表（包级预计算一次）────────────────────────
+// computedStylePropWhitelistCSV 是 getComputedStyle 回写到 JS 对象属性上的
+// 属性清单，**逐字保留原先函数内字面量的成员与顺序**（含 backgroundRepeat /
+// backgroundPosition / backgroundSize 三项重复——保留重复以保证与优化前
+// 行为逐字一致：重复项只是重复写同一个键/属性，无副作用）。
+//
+// ★ 为什么提到包级：该回写循环对**每次** getComputedStyle 调用都执行，原先
+//   写法在函数内构造 []string 切片、并对每一项跑一次 camelToKebab（字符串
+//   扫描 + 可能分配）。真实编辑器 DOM 上 getComputedStyle 1e3 实测 47~62ms
+//   （≈47µs/次），而浏览器同操作约 1µs —— 其中一笔固定开销就是每次调用的
+//   ~120 次转换与 ~120 元素切片分配。预计算后每次调用只剩 map 查找 + cs.Set。
+const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath"
+
+// computedStylePropEntry 是白名单的一项：prop 是回写到 JS 对象的 camelCase
+// 属性名（getComputedStyle(el).fontSize），key 是级联 map 里的 kebab-case 键
+// （getPropertyValue('font-size')）；无连字符时两者相同。
+type computedStylePropEntry struct {
+	prop string
+	key  string
+}
+
+// computedStylePropEntries 由上面的 CSV 在包加载时展开一次（顺序与 CSV 一致）。
+var computedStylePropEntries = func() []computedStylePropEntry {
+	props := strings.Split(computedStylePropWhitelistCSV, ",")
+	out := make([]computedStylePropEntry, 0, len(props))
+	for _, p := range props {
+		key := p
+		if k := camelToKebab(p); k != p {
+			key = k
+		}
+		out = append(out, computedStylePropEntry{prop: p, key: key})
+	}
+	return out
+}()
+
+// borderWidthLonghandProps 把 border/border-width 简写展开出的四条 longhand
+// 回写到对象属性。原先在 getComputedStyle 内用 map 字面量构造（每次调用都
+// 分配一个 4 项 map，且迭代顺序随机）；提到包级改为有序切片，语义等价
+// （四项互不影响）但零分配、顺序确定。
+var borderWidthLonghandProps = []struct{ longhand, prop string }{
+	{"border-top-width", "borderTopWidth"},
+	{"border-right-width", "borderRightWidth"},
+	{"border-bottom-width", "borderBottomWidth"},
+	{"border-left-width", "borderLeftWidth"},
+}
 
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// ★ 保存 interpreter：InsertTextAtSelection 插入后重建 selection
@@ -1145,7 +1190,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	screen.Set("height", jsc.NumberValue(800))
 	g.Set("screen", jsc.ObjectValue(screen))
 
-// window.console 由 SetupGlobal 设置
+	// window.console 由 SetupGlobal 设置
 
 	// localStorage / sessionStorage（内存存储，对标浏览器）
 	// 可通过 SetLocalStoragePersist 开启文件持久化（desktop 端重启不丢状态）。
@@ -1200,73 +1245,69 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			//   `getComputedStyle(el).paddingLeft/paddingRight` 恒为 undefined
 			//   （实测 gou-ide `.chat-input`：pt=8px pb=8px 而 pr/pl=undefined），
 			//   一切依赖四向 computed 的 JS 自适应计算拿到 undefined 后走错分支。
-			for _, prop := range []string{"color", "backgroundColor", "background", "fontFamily", "fontSize", "lineHeight", "fontWeight", "borderColor", "width", "height", "display", "position", "opacity", "visibility", "marginTop", "marginRight", "marginBottom", "marginLeft", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "textAlign", "whiteSpace", "overflow", "overflowX", "overflowY", "overflowWrap", "wordBreak", "textOverflow", "cursor", "zIndex", "verticalAlign", "maxHeight", "minHeight", "maxWidth", "minWidth", "borderRadius", "boxShadow", "userSelect", "pointerEvents", "top", "left", "right", "bottom", "transform", "flexDirection", "alignItems", "justifyContent", "fontStyle", "fontVariant", "letterSpacing", "textDecoration", "borderTop", "borderBottom", "borderLeft", "borderRight", "borderStyle", "borderWidth", "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "alignSelf", "flexWrap", "backgroundSize", "backgroundRepeat", "backgroundPosition", "backgroundClip", "flex", "flexGrow", "flexShrink", "flexBasis", "order", "objectFit", "mixBlendMode", "filter", "transition", "animation", "willChange", "tableLayout", "borderCollapse", "direction", "writingMode", "textTransform", "wordSpacing", "textIndent", "aspectRatio", "gridGap", "gridColumn", "gridRow", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "padding", "margin", "gap", "rowGap", "columnGap", "gridTemplateColumns", "gridTemplateRows", "boxSizing", "float", "clear", "listStyle", "backgroundImage", "backgroundRepeat", "backgroundPosition", "backgroundSize", "outline", "content", "clipPath"} {
-				key := prop
-				if k := camelToKebab(prop); k != prop {
-					key = k
-				}
-			if v, ok := computed[key]; ok {
-				cs.Set(prop, jsc.StringValue(v))
-			} else if init, ok2 := uaInitialComputedValues[prop]; ok2 {
-				// ★ 浏览器保证 computed style 对**每个属性恒有值**（未声明 = CSS 初始值）：
-				//   引擎级联 map 只含声明值 → 未声明属性读到 undefined →
-				//   parseFloat(cs.fontSize)=NaN 一类分支走错。此处仅补 JS 对象层，
-				//   不改 computedStyleFor 的 map（避免影响布局与继承链计算）。
-				cs.Set(prop, jsc.StringValue(init))
-			}
-		}
-		// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
-		// 恒有值（简写会展开到各子属性；无背景时返回透明 rgba(0,0,0,0)）。
-		if _, ok := computed["background-color"]; !ok {
-			if v, ok2 := computed["background"]; ok2 {
-				cs.Set("backgroundColor", jsc.StringValue(v))
-			} else {
-				cs.Set("backgroundColor", jsc.StringValue("rgba(0, 0, 0, 0)"))
-			}
-		}
-		// ★ border / border-width 简写展开：浏览器 getComputedStyle 的
-		//   borderTopWidth 等 longhand 由 `border: 1px solid #333`（或
-		//   `border-width: 1px 2px`）展开而来。此前未展开 → 读数是 undefined
-		//   （实测最小复现：声明了 `border:1px solid #333` 而 bt=undefined），
-		//   依赖边框宽度做布局/自适应计算的 JS 全部失效。
-		bwTok := func(s string) string {
-			for _, f := range strings.Fields(s) {
-				// 宽度 token：数字开头（1px / 2px / 0.5em），排除样式与颜色关键字
-				if len(f) > 0 && (f[0] == '0' || f[0] == '1' || f[0] == '2' || f[0] == '3' ||
-					f[0] == '4' || f[0] == '5' || f[0] == '6' || f[0] == '7' ||
-					f[0] == '8' || f[0] == '9' || f[0] == '.') {
-					return f
+			// ★ 白名单与 kebab 键均为包级预计算（computedStylePropEntries），
+			//   此处不再每次调用构造切片/跑 camelToKebab。表成员与顺序逐字
+			//   等同于原先的字面量（见 computedStylePropWhitelistCSV 注释）。
+			for _, entry := range computedStylePropEntries {
+				prop, key := entry.prop, entry.key
+				if v, ok := computed[key]; ok {
+					cs.Set(prop, jsc.StringValue(v))
+				} else if init, ok2 := uaInitialComputedValues[prop]; ok2 {
+					// ★ 浏览器保证 computed style 对**每个属性恒有值**（未声明 = CSS 初始值）：
+					//   引擎级联 map 只含声明值 → 未声明属性读到 undefined →
+					//   parseFloat(cs.fontSize)=NaN 一类分支走错。此处仅补 JS 对象层，
+					//   不改 computedStyleFor 的 map（避免影响布局与继承链计算）。
+					cs.Set(prop, jsc.StringValue(init))
 				}
 			}
-			return ""
-		}
-		for _, longhand := range []string{"border-top-width", "border-right-width", "border-bottom-width", "border-left-width"} {
-			if _, ok := computed[longhand]; ok {
-				continue
+			// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
+			// 恒有值（简写会展开到各子属性；无背景时返回透明 rgba(0,0,0,0)）。
+			if _, ok := computed["background-color"]; !ok {
+				if v, ok2 := computed["background"]; ok2 {
+					cs.Set("backgroundColor", jsc.StringValue(v))
+				} else {
+					cs.Set("backgroundColor", jsc.StringValue("rgba(0, 0, 0, 0)"))
+				}
 			}
-			w := ""
-			if v, ok2 := computed["border-width"]; ok2 {
-				w = bwTok(v)
-			} else if v, ok2 := computed["border"]; ok2 {
-				w = bwTok(v)
+			// ★ border / border-width 简写展开：浏览器 getComputedStyle 的
+			//   borderTopWidth 等 longhand 由 `border: 1px solid #333`（或
+			//   `border-width: 1px 2px`）展开而来。此前未展开 → 读数是 undefined
+			//   （实测最小复现：声明了 `border:1px solid #333` 而 bt=undefined），
+			//   依赖边框宽度做布局/自适应计算的 JS 全部失效。
+			bwTok := func(s string) string {
+				for _, f := range strings.Fields(s) {
+					// 宽度 token：数字开头（1px / 2px / 0.5em），排除样式与颜色关键字
+					if len(f) > 0 && (f[0] == '0' || f[0] == '1' || f[0] == '2' || f[0] == '3' ||
+						f[0] == '4' || f[0] == '5' || f[0] == '6' || f[0] == '7' ||
+						f[0] == '8' || f[0] == '9' || f[0] == '.') {
+						return f
+					}
+				}
+				return ""
 			}
-			if w != "" {
-				computed[longhand] = w
+			for _, longhand := range []string{"border-top-width", "border-right-width", "border-bottom-width", "border-left-width"} {
+				if _, ok := computed[longhand]; ok {
+					continue
+				}
+				w := ""
+				if v, ok2 := computed["border-width"]; ok2 {
+					w = bwTok(v)
+				} else if v, ok2 := computed["border"]; ok2 {
+					w = bwTok(v)
+				}
+				if w != "" {
+					computed[longhand] = w
+				}
 			}
-		}
-		// ★ 顺序：白名单回写循环在上方**已经执行完**，因此展开得到的 longhand
-		//   必须在这里补写回对象（否则 computed 里有了、对象属性仍 undefined ——
-		//   实测 `border:1px solid #333` 声明下 bt=undefined 正是此因）。
-		for longhand, prop := range map[string]string{
-			"border-top-width":    "borderTopWidth",
-			"border-right-width":  "borderRightWidth",
-			"border-bottom-width": "borderBottomWidth",
-			"border-left-width":   "borderLeftWidth",
-		} {
-			if v, ok := computed[longhand]; ok {
-				cs.Set(prop, jsc.StringValue(v))
+			// ★ 顺序：白名单回写循环在上方**已经执行完**，因此展开得到的 longhand
+			//   必须在这里补写回对象（否则 computed 里有了、对象属性仍 undefined ——
+			//   实测 `border:1px solid #333` 声明下 bt=undefined 正是此因）。
+			// ★ 包级有序表（原先每次调用构造 map 字面量：分配 + 顺序随机）。
+			for _, lw := range borderWidthLonghandProps {
+				if v, ok := computed[lw.longhand]; ok {
+					cs.Set(lw.prop, jsc.StringValue(v))
+				}
 			}
-		}
 			cs.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) == 0 {
@@ -1282,17 +1323,17 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 						}
 					}
 					// ★ 浏览器 getPropertyValue 对**每个属性恒有值**（未声明 = CSS 初始值）：
-				//   引擎级联 map 只含声明值 → 未声明属性返回 ""，与浏览器不同，
-				//   下游 parseFloat("")=NaN 与 parseFloat("16px") 行为差异明显。
-				//   与属性访问路径共用 uaInitialComputedValues（camelCase 键）。
-				if camel := kebabToCamel(prop); camel != prop {
-					if init, ok := uaInitialComputedValues[camel]; ok {
+					//   引擎级联 map 只含声明值 → 未声明属性返回 ""，与浏览器不同，
+					//   下游 parseFloat("")=NaN 与 parseFloat("16px") 行为差异明显。
+					//   与属性访问路径共用 uaInitialComputedValues（camelCase 键）。
+					if camel := kebabToCamel(prop); camel != prop {
+						if init, ok := uaInitialComputedValues[camel]; ok {
+							return jsc.StringValue(init)
+						}
+					} else if init, ok := uaInitialComputedValues[prop]; ok {
 						return jsc.StringValue(init)
 					}
-				} else if init, ok := uaInitialComputedValues[prop]; ok {
-					return jsc.StringValue(init)
-				}
-				return jsc.StringValue("")
+					return jsc.StringValue("")
 				}, 1)))
 			cs.Set("getPropertyPriority", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyPriority",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
@@ -1466,10 +1507,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 			if len(args) >= 2 && args[1].IsObject() {
 				if o := args[1].AsObject(); o != nil {
-				for _, k := range []string{"bubbles", "cancelable",
-					"key", "code", "keyCode", "which", "charCode",
-					"ctrlKey", "shiftKey", "altKey", "metaKey",
-					"repeat", "isComposing"} {
+					for _, k := range []string{"bubbles", "cancelable",
+						"key", "code", "keyCode", "which", "charCode",
+						"ctrlKey", "shiftKey", "altKey", "metaKey",
+						"repeat", "isComposing"} {
 						if v, ok := o.GetByKey(k); ok {
 							ev.Set(k, v)
 						}
@@ -1497,12 +1538,20 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			ev.Set("bubbles", jsc.BooleanValue(false))
 			ev.Set("cancelable", jsc.BooleanValue(false))
 			ev.Set("composed", jsc.BooleanValue(false))
-			if len(args) >= 1 { ev.Set("type", jsc.StringValue(args[0].ToString())) }
+			if len(args) >= 1 {
+				ev.Set("type", jsc.StringValue(args[0].ToString()))
+			}
 			if len(args) >= 2 && args[1].IsObject() {
 				if o := args[1].AsObject(); o != nil {
-					if v, ok := o.GetByKey("detail"); ok { ev.Set("detail", v) }
-					if v, ok := o.GetByKey("bubbles"); ok { ev.Set("bubbles", v) }
-					if v, ok := o.GetByKey("cancelable"); ok { ev.Set("cancelable", v) }
+					if v, ok := o.GetByKey("detail"); ok {
+						ev.Set("detail", v)
+					}
+					if v, ok := o.GetByKey("bubbles"); ok {
+						ev.Set("bubbles", v)
+					}
+					if v, ok := o.GetByKey("cancelable"); ok {
+						ev.Set("cancelable", v)
+					}
 				}
 			}
 			return ev
@@ -1771,7 +1820,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			obj := jsc.NewObject(in.ObjectPrototype())
 			obj.Set("parseFromString", jsc.FunctionValue(jsc.NewNativeFunction("parseFromString",
 				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 2 { return jsc.Null() }
+					if len(a) < 2 {
+						return jsc.Null()
+					}
 					html := a[0].ToString()
 					div := domParserDoc.CreateElement("div")
 					div.SetInnerHTML(html)
@@ -1838,7 +1889,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					}
 				}
 				obj.Set("search", jsc.StringValue(("?" + queryPart)))
-				obj.Set("origin", jsc.StringValue(obj.GetStr("protocol").ToString() + "//" + obj.GetStr("hostname").ToString()))
+				obj.Set("origin", jsc.StringValue(obj.GetStr("protocol").ToString()+"//"+obj.GetStr("hostname").ToString()))
 			}
 			// searchParams：URLSearchParams 实例
 			sp := makeURLSearchParams(in, queryPart)
@@ -2261,21 +2312,39 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			obj.SetInternal(mo)
 			obj.Set("observe", jsc.FunctionValue(jsc.NewNativeFunction("observe",
 				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 1 { return jsc.Undefined() }
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
 					targetObj := a[0].AsObject()
-					if targetObj == nil { return jsc.Undefined() }
+					if targetObj == nil {
+						return jsc.Undefined()
+					}
 					target, _ := targetObj.Internal().(*dom.Element)
-					if target == nil { return jsc.Undefined() }
+					if target == nil {
+						return jsc.Undefined()
+					}
 					opts := &dom.MutationObserverOptions{}
 					if len(a) >= 2 && a[1].IsObject() {
 						optObj := a[1].AsObject()
 						if optObj != nil {
-							if v, ok := optObj.GetByKey("childList"); ok { opts.ChildList = v.ToBoolean() }
-							if v, ok := optObj.GetByKey("attributes"); ok { opts.Attributes = v.ToBoolean() }
-							if v, ok := optObj.GetByKey("characterData"); ok { opts.CharacterData = v.ToBoolean() }
-							if v, ok := optObj.GetByKey("subtree"); ok { opts.Subtree = v.ToBoolean() }
-							if v, ok := optObj.GetByKey("attributeOldValue"); ok { opts.AttributeOldValue = v.ToBoolean() }
-							if v, ok := optObj.GetByKey("characterDataOldValue"); ok { opts.CharacterDataOldValue = v.ToBoolean() }
+							if v, ok := optObj.GetByKey("childList"); ok {
+								opts.ChildList = v.ToBoolean()
+							}
+							if v, ok := optObj.GetByKey("attributes"); ok {
+								opts.Attributes = v.ToBoolean()
+							}
+							if v, ok := optObj.GetByKey("characterData"); ok {
+								opts.CharacterData = v.ToBoolean()
+							}
+							if v, ok := optObj.GetByKey("subtree"); ok {
+								opts.Subtree = v.ToBoolean()
+							}
+							if v, ok := optObj.GetByKey("attributeOldValue"); ok {
+								opts.AttributeOldValue = v.ToBoolean()
+							}
+							if v, ok := optObj.GetByKey("characterDataOldValue"); ok {
+								opts.CharacterDataOldValue = v.ToBoolean()
+							}
 							if filter, ok := optObj.GetByKey("attributeFilter"); ok && filter.IsObject() {
 								arr := filter.AsObject()
 								if arr != nil {
@@ -2357,11 +2426,17 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			obj := jsc.NewObject(in.ObjectPrototype())
 			obj.Set("observe", jsc.FunctionValue(jsc.NewNativeFunction("observe",
 				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 1 { return jsc.Undefined() }
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
 					targetObj := a[0].AsObject()
-					if targetObj == nil { return jsc.Undefined() }
+					if targetObj == nil {
+						return jsc.Undefined()
+					}
 					target, _ := targetObj.Internal().(*dom.Element)
-					if target == nil { return jsc.Undefined() }
+					if target == nil {
+						return jsc.Undefined()
+					}
 					observed = append(observed, target)
 					// 立即通过微任务通知 100% 可见（对标浏览器首次 observe 行为）
 					el := in.EnsureEventLoop()
@@ -2383,9 +2458,13 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				}, 1)))
 			obj.Set("unobserve", jsc.FunctionValue(jsc.NewNativeFunction("unobserve",
 				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-					if len(a) < 1 { return jsc.Undefined() }
+					if len(a) < 1 {
+						return jsc.Undefined()
+					}
 					targetObj := a[0].AsObject()
-					if targetObj == nil { return jsc.Undefined() }
+					if targetObj == nil {
+						return jsc.Undefined()
+					}
 					target, _ := targetObj.Internal().(*dom.Element)
 					for i, el := range observed {
 						if el == target {
@@ -2553,7 +2632,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					c := jsc.NewObject(interp.ObjectPrototype())
 					for _, k := range []string{
 						"startContainer", "startOffset", "endContainer", "endOffset"} {
-						if v, ok := o.GetByKey(k); ok { c.Set(k, v) }
+						if v, ok := o.GetByKey(k); ok {
+							c.Set(k, v)
+						}
 					}
 					c.Set("collapsed", o.GetStr("collapsed"))
 					return jsc.ObjectValue(c)
@@ -2615,8 +2696,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 
 	selObj.Set("getRangeAt", jsc.FunctionValue(jsc.NewNativeFunction("getRangeAt",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if len(a) == 0 { return jsc.Null() }
-idx := int(a[0].ToNumber())
+			if len(a) == 0 {
+				return jsc.Null()
+			}
+			idx := int(a[0].ToNumber())
 			if idx >= 0 && idx < len(sstate.ranges) {
 				return jsc.ObjectValue(sstate.ranges[idx])
 			}
@@ -2624,14 +2707,24 @@ idx := int(a[0].ToNumber())
 		}, 1)))
 	selObj.Set("addRange", jsc.FunctionValue(jsc.NewNativeFunction("addRange",
 		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if len(a) == 0 { return jsc.Undefined() }
+			if len(a) == 0 {
+				return jsc.Undefined()
+			}
 			sel := this.AsObject()
 			r := a[0].AsObject()
 			sstate.ranges = append(sstate.ranges, r)
-			if sc, ok := r.GetByKey("startContainer"); ok { sel.Set("anchorNode", sc) }
-			if so, ok := r.GetByKey("startOffset"); ok { sel.Set("anchorOffset", so) }
-			if ec, ok := r.GetByKey("endContainer"); ok { sel.Set("focusNode", ec) }
-			if eo, ok := r.GetByKey("endOffset"); ok { sel.Set("focusOffset", eo) }
+			if sc, ok := r.GetByKey("startContainer"); ok {
+				sel.Set("anchorNode", sc)
+			}
+			if so, ok := r.GetByKey("startOffset"); ok {
+				sel.Set("anchorOffset", so)
+			}
+			if ec, ok := r.GetByKey("endContainer"); ok {
+				sel.Set("focusNode", ec)
+			}
+			if eo, ok := r.GetByKey("endOffset"); ok {
+				sel.Set("focusOffset", eo)
+			}
 			sel.Set("rangeCount", jsc.NumberValue(float64(len(sstate.ranges))))
 			sel.Set("isCollapsed", jsc.BooleanValue(false))
 			sel.Set("type", jsc.StringValue("Range"))
@@ -2639,7 +2732,9 @@ idx := int(a[0].ToNumber())
 		}, 1)))
 	selObj.Set("removeRange", jsc.FunctionValue(jsc.NewNativeFunction("removeRange",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if len(a) == 0 { return jsc.Undefined() }
+			if len(a) == 0 {
+				return jsc.Undefined()
+			}
 			target := a[0].AsObject()
 			for i, r := range sstate.ranges {
 				if r == target {
@@ -2906,7 +3001,7 @@ type ElementWrapper struct {
 func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.SetClassName("Document")
-obj.SetInternal(doc)
+	obj.SetInternal(doc)
 
 	obj.Set("getElementById", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		if el := doc.GetElementById(arg); el != nil {
@@ -3024,7 +3119,9 @@ obj.SetInternal(doc)
 
 	// Accessors
 	obj.SetAccessor("body", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		if b := doc.Body(); b != nil { return jsc.ObjectValue(wrapElement(in, b)) }
+		if b := doc.Body(); b != nil {
+			return jsc.ObjectValue(wrapElement(in, b))
+		}
 		return jsc.Null()
 	}), nil)
 	// ★ 浏览器标准：document.defaultView === window。CodeMirror 6 的
@@ -3035,11 +3132,15 @@ obj.SetInternal(doc)
 		return in.GlobalObject().GetOrZero("window")
 	}), nil)
 	obj.SetAccessor("head", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		if h := doc.Head(); h != nil { return jsc.ObjectValue(wrapElement(in, h)) }
+		if h := doc.Head(); h != nil {
+			return jsc.ObjectValue(wrapElement(in, h))
+		}
 		return jsc.Null()
 	}), nil)
 	obj.SetAccessor("documentElement", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		if de := doc.DocumentElement(); de != nil { return jsc.ObjectValue(wrapElement(in, de)) }
+		if de := doc.DocumentElement(); de != nil {
+			return jsc.ObjectValue(wrapElement(in, de))
+		}
 		return jsc.Null()
 	}), nil)
 	obj.SetAccessor("title",
@@ -3288,7 +3389,7 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 	sp.SetIterator(func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 		return jsc.ObjectValue(makeIter(allEntries()))
 	})
-			sp.Set("forEach", jsc.FunctionValue(jsc.NewNativeFunction("forEach", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+	sp.Set("forEach", jsc.FunctionValue(jsc.NewNativeFunction("forEach", func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) == 0 || !args[0].IsCallable() {
 			return jsc.Undefined()
 		}
@@ -3411,10 +3512,11 @@ func ClearPageBindingsFor(interp *jsc.Interpreter, doc *dom.Document) {
 	dom.ClearObserverRegistryFor(doc)
 }
 
-
 // isStyleElement reports whether n is an HTML <style> element.
 func isStyleElement(n dom.Node) bool {
-	if n == nil { return false }
+	if n == nil {
+		return false
+	}
 	el, ok := n.(*dom.Element)
 	return ok && strings.EqualFold(el.TagName(), "style")
 }
@@ -4003,6 +4105,7 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	nodeWrapperCache[el] = obj
 	return obj
 }
+
 // ─── classList ──────────────────────────────────────────
 
 func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
@@ -4018,36 +4121,60 @@ func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 
 	cls.Set("add", jsc.FunctionValue(jsc.NewNativeFunction("add",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.Undefined() }
+			if len(args) == 0 {
+				return jsc.Undefined()
+			}
 			m := make(map[string]bool)
-			for _, c := range get() { m[c] = true }
-			for _, a := range args { m[a.ToString()] = true }
+			for _, c := range get() {
+				m[c] = true
+			}
+			for _, a := range args {
+				m[a.ToString()] = true
+			}
 			var r []string
-			for c := range m { r = append(r, c) }
+			for c := range m {
+				r = append(r, c)
+			}
 			set(r)
 			return jsc.Undefined()
 		}, 1)))
 	cls.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.Undefined() }
+			if len(args) == 0 {
+				return jsc.Undefined()
+			}
 			m := make(map[string]bool)
-			for _, c := range get() { m[c] = true }
-			for _, a := range args { delete(m, a.ToString()) }
+			for _, c := range get() {
+				m[c] = true
+			}
+			for _, a := range args {
+				delete(m, a.ToString())
+			}
 			var r []string
-			for c := range m { r = append(r, c) }
+			for c := range m {
+				r = append(r, c)
+			}
 			set(r)
 			return jsc.Undefined()
 		}, 1)))
 	cls.Set("contains", jsc.FunctionValue(jsc.NewNativeFunction("contains",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.BooleanValue(false) }
+			if len(args) == 0 {
+				return jsc.BooleanValue(false)
+			}
 			n := args[0].ToString()
-			for _, c := range get() { if c == n { return jsc.BooleanValue(true) } }
+			for _, c := range get() {
+				if c == n {
+					return jsc.BooleanValue(true)
+				}
+			}
 			return jsc.BooleanValue(false)
 		}, 1)))
 	cls.Set("toggle", jsc.FunctionValue(jsc.NewNativeFunction("toggle",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.BooleanValue(false) }
+			if len(args) == 0 {
+				return jsc.BooleanValue(false)
+			}
 			n := args[0].ToString()
 			force := len(args) >= 2
 			cs := get()
@@ -4070,7 +4197,9 @@ func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 		}, 2)))
 	cls.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.Null() }
+			if len(args) == 0 {
+				return jsc.Null()
+			}
 			idx := int(args[0].ToNumber())
 			cs := get()
 			if idx < 0 || idx >= len(cs) {
@@ -4097,13 +4226,17 @@ func makeDataset(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	// methods and also attempt to pre-populate known data-* attrs.
 	ds.Set("get", jsc.FunctionValue(jsc.NewNativeFunction("_get",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) == 0 { return jsc.StringValue("") }
+			if len(args) == 0 {
+				return jsc.StringValue("")
+			}
 			key := "data-" + camelToKebab(args[0].ToString())
 			return jsc.StringValue(el.GetAttribute(key))
 		}, 1)))
 	ds.Set("set", jsc.FunctionValue(jsc.NewNativeFunction("_set",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			if len(args) < 2 { return jsc.Undefined() }
+			if len(args) < 2 {
+				return jsc.Undefined()
+			}
 			key := "data-" + camelToKebab(args[0].ToString())
 			el.SetAttribute(key, args[1].ToString())
 			return jsc.Undefined()
@@ -4286,7 +4419,9 @@ func parseStyle(s string) map[string]string {
 	m := make(map[string]string)
 	for _, part := range strings.Split(s, ";") {
 		part = strings.TrimSpace(part)
-		if part == "" { continue }
+		if part == "" {
+			continue
+		}
 		kv := strings.SplitN(part, ":", 2)
 		if len(kv) == 2 {
 			m[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
@@ -4354,7 +4489,9 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 	obj.SetAccessor("childElementCount", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		n := 0
 		for c := frag.FirstChild(); c != nil; c = c.NextSibling() {
-			if _, ok := c.(*dom.Element); ok { n++ }
+			if _, ok := c.(*dom.Element); ok {
+				n++
+			}
 		}
 		return jsc.NumberValue(float64(n))
 	}), nil)
@@ -4364,9 +4501,13 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 
 	// appendChild
 	obj.Set("appendChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
-		if n == nil { return jsc.Null() }
+		if n == nil {
+			return jsc.Null()
+		}
 		frag.AppendChild(n)
-		if OnNodeInserted != nil { OnNodeInserted(n) }
+		if OnNodeInserted != nil {
+			OnNodeInserted(n)
+		}
 		if isStyleElement(n) {
 			BumpStyleVersion()
 			if OnStyleNodeAdded != nil {
@@ -4377,16 +4518,24 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 	})))
 	// removeChild — Vue 3 insertStaticContent uses this
 	obj.Set("removeChild", funcVal(fn1Node(func(_ *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue {
-		if n == nil { return jsc.Null() }
+		if n == nil {
+			return jsc.Null()
+		}
 		frag.RemoveChild(n)
-		if OnNodeRemoved != nil { OnNodeRemoved(n) }
+		if OnNodeRemoved != nil {
+			OnNodeRemoved(n)
+		}
 		return a
 	})))
 	// insertBefore — Vue 3 insertStaticContent uses this to insert template content
 	obj.Set("insertBefore", funcVal(fn2Node(func(_ *jsc.Interpreter, nc, rc dom.Node, a0, a1 jsc.JSValue) jsc.JSValue {
-		if nc == nil { return jsc.Null() }
+		if nc == nil {
+			return jsc.Null()
+		}
 		frag.InsertBefore(nc, rc)
-		if OnNodeInserted != nil { OnNodeInserted(nc) }
+		if OnNodeInserted != nil {
+			OnNodeInserted(nc)
+		}
 		return a0
 	})))
 	// hasChildNodes
@@ -4477,6 +4626,7 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 	nodeWrapperCache[t] = obj
 	return obj
 }
+
 // ─── TreeWalker（document.createTreeWalker / NodeFilter 常量）───
 // CodeMirror 6 与前端文本测量用 createTreeWalker 遍历文本节点（SHOW_TEXT）。
 
@@ -4899,7 +5049,9 @@ func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 	nodeWrapperCache[c] = obj
 	obj.Set("remove", jsc.FunctionValue(jsc.NewNativeFunction("remove",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			if p := c.ParentNode(); p != nil { p.RemoveChild(c) }
+			if p := c.ParentNode(); p != nil {
+				p.RemoveChild(c)
+			}
 			return jsc.Undefined()
 		}, 0)))
 	obj.SetAccessor("data",
@@ -4931,8 +5083,12 @@ func wrapComment(rt *jsc.Interpreter, c *dom.Comment) *jsc.JSObject {
 // ─── Helpers ───────────────────────────────────────────
 
 func unwrapNode(v jsc.JSValue) dom.Node {
-	if !v.IsObject() { return nil }
-	if n, ok := v.AsObject().Internal().(dom.Node); ok { return n }
+	if !v.IsObject() {
+		return nil
+	}
+	if n, ok := v.AsObject().Internal().(dom.Node); ok {
+		return n
+	}
 	return nil
 }
 
@@ -5020,33 +5176,41 @@ func fn0(fn func(in *jsc.Interpreter) jsc.JSValue) *jsc.JSFunction {
 
 func fn1(fn func(in *jsc.Interpreter, arg string) jsc.JSValue) *jsc.JSFunction {
 	return jsc.NewNativeFunction("fn", func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-		if len(args) == 0 { return jsc.Null() }
+		if len(args) == 0 {
+			return jsc.Null()
+		}
 		return fn(in, args[0].ToString())
 	}, 1)
 }
 
 func fn2(fn func(in *jsc.Interpreter, a, b string) jsc.JSValue) *jsc.JSFunction {
 	return jsc.NewNativeFunction("fn", func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-		if len(args) < 2 { return jsc.Undefined() }
+		if len(args) < 2 {
+			return jsc.Undefined()
+		}
 		return fn(in, args[0].ToString(), args[1].ToString())
 	}, 2)
 }
 
 func fn1Node(fn func(in *jsc.Interpreter, n dom.Node, a jsc.JSValue) jsc.JSValue) *jsc.JSFunction {
 	return jsc.NewNativeFunction("fn", func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-		if len(args) == 0 { return jsc.Null() }
+		if len(args) == 0 {
+			return jsc.Null()
+		}
 		return fn(in, unwrapNode(args[0]), args[0])
 	}, 1)
 }
 
 func fn2Node(fn func(in *jsc.Interpreter, n1, n2 dom.Node, a0, a1 jsc.JSValue) jsc.JSValue) *jsc.JSFunction {
 	return jsc.NewNativeFunction("fn", func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-		if len(args) < 2 { return jsc.Null() }
+		if len(args) < 2 {
+			return jsc.Null()
+		}
 		return fn(in, unwrapNode(args[0]), unwrapNode(args[1]), args[0], args[1])
 	}, 2)
 }
 
-	// arr helpers
+// arr helpers
 func arrElem(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	return arrayValue(in, len(els), func(i int) jsc.JSValue {
 		if isNilEl(els[i]) {
@@ -5076,7 +5240,9 @@ func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 }
 func arrayValue(in *jsc.Interpreter, n int, fn func(int) jsc.JSValue) jsc.JSValue {
 	arr := make([]jsc.JSValue, n)
-	for i := 0; i < n; i++ { arr[i] = fn(i) }
+	for i := 0; i < n; i++ {
+		arr[i] = fn(i)
+	}
 	return jsc.ObjectValue(jsc.NewArrayForInterp(in, arr))
 }
 func arrJS(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
@@ -5668,7 +5834,6 @@ func isKnownCSSProperty(prop string) bool {
 // Silence unused import warning
 var _ = fmt.Sprintf
 
-
 // withDisplayFallback 给 getComputedStyle 的结果补 display 默认值：级联只收录
 // **声明过**的属性，未声明 display 的元素（span 等）不在表里 → JS 读
 // getComputedStyle(el).display 得 undefined（实测某个被 hidden 的
@@ -5704,7 +5869,6 @@ func withDisplayFallback(m map[string]string, n dom.Node) map[string]string {
 	return m
 }
 
-
 // uaDefaultDisplayFor 返回元素的 UA 默认 display 值：hidden → "none"；块级 →
 // "block"；可替换/表单控件 → "inline-block"；其它 → "inline"。供
 // getComputedStyle 在级联未声明 display 时回退使用 —— 否则 JS 读到 undefined，
@@ -5729,47 +5893,46 @@ func uaDefaultDisplayFor(e *dom.Element) string {
 	return "inline"
 }
 
-
 // uaInitialComputedValues 是 CSS 规范里各属性的**初始值**（initial value）表。
 // 浏览器 getComputedStyle 对每个属性恒有值（未声明即初始值）；引擎的级联 map
 // 只含声明值，未声明属性会读到 undefined —— 依赖它的 JS（parseFloat(fontSize)、
 // 判断 min-width/max-width、读 pointer-events 做命中判断等）会走错分支。
 // 仅在 JS 对象层回退，不影响 computedStyleFor 的 map 与布局/继承计算。
 var uaInitialComputedValues = map[string]string{
-	"fontSize":       "16px",
-	"lineHeight":     "normal",
-	"fontWeight":     "400",
-	"fontStyle":      "normal",
-	"fontFamily":     "",
-	"pointerEvents":  "auto",
-	"alignItems":     "normal",
-	"justifyContent": "normal",
-	"alignSelf":      "auto",
-	"minWidth":       "auto",
-	"maxWidth":       "none",
-	"minHeight":      "auto",
-	"maxHeight":      "none",
-	"overflowX":      "visible",
-	"overflowY":      "visible",
-	"zIndex":         "auto",
-	"boxSizing":      "content-box",
-	"textAlign":      "start",
-	"whiteSpace":     "normal",
-	"flexDirection":  "row",
-	"flexWrap":       "nowrap",
-	"borderRadius":   "0px",
-	"opacity":        "1",
-	"visibility":     "visible",
-	"position":       "static",
-	"transform":      "none",
-	"cursor":         "auto",
-	"verticalAlign":  "baseline",
-	"borderStyle":    "none",
-	"borderColor":    "currentcolor",
-	"borderTopStyle":    "none",
-	"borderRightStyle":  "none",
-	"borderBottomStyle": "none",
-	"borderLeftStyle":   "none",
+	"fontSize":           "16px",
+	"lineHeight":         "normal",
+	"fontWeight":         "400",
+	"fontStyle":          "normal",
+	"fontFamily":         "",
+	"pointerEvents":      "auto",
+	"alignItems":         "normal",
+	"justifyContent":     "normal",
+	"alignSelf":          "auto",
+	"minWidth":           "auto",
+	"maxWidth":           "none",
+	"minHeight":          "auto",
+	"maxHeight":          "none",
+	"overflowX":          "visible",
+	"overflowY":          "visible",
+	"zIndex":             "auto",
+	"boxSizing":          "content-box",
+	"textAlign":          "start",
+	"whiteSpace":         "normal",
+	"flexDirection":      "row",
+	"flexWrap":           "nowrap",
+	"borderRadius":       "0px",
+	"opacity":            "1",
+	"visibility":         "visible",
+	"position":           "static",
+	"transform":          "none",
+	"cursor":             "auto",
+	"verticalAlign":      "baseline",
+	"borderStyle":        "none",
+	"borderColor":        "currentcolor",
+	"borderTopStyle":     "none",
+	"borderRightStyle":   "none",
+	"borderBottomStyle":  "none",
+	"borderLeftStyle":    "none",
 	"backgroundImage":    "none",
 	"backgroundRepeat":   "repeat",
 	"backgroundSize":     "auto",

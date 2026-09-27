@@ -494,6 +494,14 @@ func runEditorDOMBench(wv *webkit.WebView) {
 	bench("querySelector 1e4 (.cm-line)", `(function(){var n=0;for(var i=0;i<10000;i++){if(document.querySelector('.cm-line'))n++;}return String(n);})()`)
 	bench("querySelectorAll 1e3 (.cm-line)", `(function(){var n=0;for(var i=0;i<1000;i++){n+=document.querySelectorAll('.cm-line').length;}return String(n);})()`)
 	bench("elementFromPoint 1e3", `(function(){var n=0;for(var i=0;i<1000;i++){if(document.elementFromPoint(400,300))n++;}return String(n);})()`)
+	// ── 绑定层成本分离（本轮新增）────────────────────────────────────────────
+	// 真实编辑器 DOM 上 querySelector 1e4 实测 1367ms（137µs/次），而同等节点规模的
+	// Go 层微基准只测到 ~34µs/次（engine/js/bindings/query_perf_test.go）→ 差额不在
+	// 查询算法里，而在每次 JS→Go 调用/成员查找上。下面三条**只读成员、不调用**，
+	// 把这条基线的量级量出来：若它本身就接近 137µs，则后续优化必须落在绑定层。
+	bench("成员读取 1e4 (document.querySelector)", `(function(){var n=0;for(var i=0;i<10000;i++){if(document.querySelector)n++;}return String(n);})()`)
+	bench("成员读取 1e4 (document.body)", `(function(){var n=0;for(var i=0;i<10000;i++){if(document.body)n++;}return String(n);})()`)
+	bench("成员读取 1e4 (window.document)", `(function(){var n=0;for(var i=0;i<10000;i++){if(window.document)n++;}return String(n);})()`)
 }
 
 // openEditorForBench 走真实用户路径打开编辑器（切视图 → 文件树 → 点文件 → 等激活），
@@ -865,6 +873,38 @@ func main() {
 			}
 			fmt.Printf("[prof] 采样已停止（仅滚动窗口 → %s）\n", profPath)
 			perfOneResult = `{"scrollProf":"done"}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "qsProf" {
+			// ─── 采样窗口只覆盖 querySelector 循环（慢 API 定位）───
+			// 真实编辑器 DOM 上 querySelector 1e4 = ~1400-1500ms（~150µs/次），而
+			// 同等节点规模的 Go 层微基准只有 ~34µs/次
+			// （engine/js/bindings/query_perf_test.go），且「成员读取 1e4」仅 2.1ms
+			// （210ns/次，见 runEditorDOMBench）——差额既不在查询算法也不在成员查找。
+			// 本入口把采样窗口严格限制在这 5×1e4 次调用上，让 top 帧直接回答
+			// 「这 150µs/次花在哪一段」。
+			if !openEditorForBench(wv) {
+				fmt.Printf("[prof] 编辑器未激活\n")
+			}
+			profPath := "out/_qs_only.prof"
+			pf, perr := os.Create(profPath)
+			if perr != nil {
+				fmt.Printf("[prof] profile 创建失败: %v\n", perr)
+			} else if serr := pprof.StartCPUProfile(pf); serr != nil {
+				fmt.Printf("[prof] StartCPUProfile 失败: %v\n", serr)
+			} else {
+				fmt.Printf("[prof] 开始采样（仅 querySelector 窗口）→ %s\n", profPath)
+			}
+			for r := 0; r < 5; r++ {
+				t0 := time.Now()
+				out, _ := evalStr(wv, `(function(){var n=0;for(var i=0;i<10000;i++){if(document.querySelector('.cm-line'))n++;}return String(n);})()`)
+				fmt.Printf("[prof] qs 第%d轮: %.1fms out=%s\n", r+1, float64(time.Since(t0).Microseconds())/1000, strings.TrimSpace(out))
+			}
+			pprof.StopCPUProfile()
+			if pf != nil {
+				_ = pf.Close()
+			}
+			fmt.Printf("[prof] 采样已停止（仅 querySelector 窗口 → %s）\n", profPath)
+			perfOneResult = `{"qsProf":"done"}`
 			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
 		} else if *interaction == "editorE2E" {
 			// ─── 端到端口径（第10轮必做1）───

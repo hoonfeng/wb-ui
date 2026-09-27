@@ -318,14 +318,36 @@ func (e *Element) PartNames() []string {
 // HasAttribute reports whether a named attribute is present, mirroring
 // Element::hasAttribute(name).
 func (e *Element) HasAttribute(name string) bool {
-	_, ok := e.attrs[strings.ToLower(name)]
+	_, ok := e.attrs[lowerAttrName(name)]
 	return ok
 }
 
 // GetAttribute returns the attribute value or the empty string when absent, mirroring
 // Element::getAttribute(name). Attribute names are matched case-insensitively for HTML.
 func (e *Element) GetAttribute(name string) string {
-	return e.attrs[strings.ToLower(name)]
+	return e.attrs[lowerAttrName(name)]
+}
+
+// lowerAttrName returns the lower-cased attribute name used as the attrs map key.
+//
+// ★ 零分配快路径：HTML 属性名匹配不区分大小写，而调用方传进来的绝大多数是**已经
+// 全小写的字面量**（"class" / "id" / "style" / "data-*"）。原先无条件
+// strings.ToLower(name) 会在每次读取时分配一个新字符串。GetAttribute 处在选择器
+// 匹配（每个节点都要读 class/id/type…）与样式解析的每节点热路径上：实测真实编辑器
+// DOM（1774 节点）上 querySelector×1e4 的 CPU profile 中，属性读取链路累计占 ~48%
+// cum 样本（stringslite.ToLower + mapaccess1_faststr），而 Go 层微基准显示查询算法
+// 本身只占小部分。
+//
+// 语义与 strings.ToLower 完全对齐：只要出现 ASCII 大写字母或非 ASCII 字节就回退到
+// strings.ToLower（unicode 映射规则不变），否则原样返回（零分配、无扫描开销之外的成本）。
+func lowerAttrName(name string) string {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 0x80 || (c >= 'A' && c <= 'Z') {
+			return strings.ToLower(name)
+		}
+	}
+	return name
 }
 
 // SetAttribute sets an attribute value, mirroring Element::setAttribute(name, value).
@@ -334,7 +356,7 @@ func (e *Element) SetAttribute(name, value string) {
 	if perfDispOn {
 		PerfDOMOps++
 	}
-	key := strings.ToLower(name)
+	key := lowerAttrName(name)
 	oldValue, existed := e.attrs[key]
 	if _, exists := e.attrs[key]; !exists {
 		e.attrOrder = append(e.attrOrder, key)
@@ -352,7 +374,7 @@ func (e *Element) SetAttribute(name, value string) {
 // RemoveAttribute removes an attribute, mirroring Element::removeAttribute(name). It
 // returns whether an attribute was removed.
 func (e *Element) RemoveAttribute(name string) bool {
-	key := strings.ToLower(name)
+	key := lowerAttrName(name)
 	oldValue, ok := e.attrs[key]
 	if !ok {
 		return false
@@ -519,18 +541,74 @@ func (e *Element) SetClassName(c string) { e.SetAttribute("class", c) }
 func (e *Element) ClassName() string { return e.GetClassName() }
 
 // HasClassName reports whether the element's class list contains name, mirroring
-// Element::hasClassName().
+// Element::hasClassName(). See HasWhitespaceSeparatedToken for the zero-allocation
+// rationale and the exact strings.Fields semantics it preserves.
 func (e *Element) HasClassName(name string) bool {
-	for _, c := range strings.Fields(e.GetClassName()) {
-		if c == name {
-			return true
-		}
-	}
-	return false
+	return HasWhitespaceSeparatedToken(e.GetClassName(), name)
 }
 
 // classList returns the space-separated class names.
 func (e *Element) classList() []string { return strings.Fields(e.GetClassName()) }
+
+// HasWhitespaceSeparatedToken reports whether the whitespace-separated token list in s
+// contains token — the rule behind Element::hasClassName() and [attr~=value].
+//
+// ★ 零分配：不用 strings.Fields（它每次调用都分配一个 []string 及其底层数组）。
+// class / [attr~=] 匹配处在 querySelector / querySelectorAll / matches / closest 与
+// 样式解析的**每节点**热路径上：实测 CPU profile（编辑器形 DOM 1614 节点、
+// querySelectorAll×3000，见 engine/js/bindings/query_perf_test.go）中 strings.Fields
+// 占 23.7% 样本、mallocgc 占 18.6%，且全部来自此处。
+//
+// 语义与 strings.Fields 逐字对齐（不因省分配而改变行为）：
+//   - 空 token 永不匹配（strings.Fields 不产生空字段）；
+//   - 先做子串快速否定：一个完整 token 必然是原串的子串，故「s 不含 token ⇒ 不匹配」
+//     是安全的必要条件——绝大多数节点在此一步出局，无需逐字段扫描；
+//   - ASCII 串走按空白切分的字节扫描（零分配）；含非 ASCII 字节的串回退到
+//     strings.Fields 本身，保证 U+00A0 等 unicode 空白语义与优化前完全一致。
+func HasWhitespaceSeparatedToken(s, token string) bool {
+	if token == "" {
+		return false
+	}
+	if !strings.Contains(s, token) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			for _, f := range strings.Fields(s) {
+				if f == token {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if isFieldWhitespaceByte(s[i]) {
+			if start >= 0 {
+				if s[start:i] == token {
+					return true
+				}
+				start = -1
+			}
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+	}
+	return start >= 0 && s[start:] == token
+}
+
+// isFieldWhitespaceByte reports whether b is whitespace as split by strings.Fields
+// (space, \t, \n, \v, \f, \r).
+func isFieldWhitespaceByte(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\v', '\f', '\r':
+		return true
+	}
+	return false
+}
 
 // GetElementById returns the first descendant Element whose id attribute matches id,
 // searching in pre-order, mirroring NonElementParentNode::getElementById.
@@ -711,6 +789,54 @@ func walkDescendantsNode(root Node, fn func(Node) bool) {
 		return true
 	}
 	walk(root)
+}
+
+// WalkDescendantElements performs the same pre-order traversal as WalkDescendants
+// (the root element itself first, then its subtree) but invokes fn only for **element**
+// nodes, and walks the tree through the internal node link fields instead of re-running
+// the Node interface assertion (nodeBaseOf) for every visited node.
+//
+// Why: selector queries (querySelector / querySelectorAll / getElementById /
+// getElementsByTagName) only care about elements, yet a real DOM has at least as many
+// text nodes as elements. With WalkDescendants every text node costs an interface
+// assertion plus a closure call into a callback that immediately discards it. Measured
+// on an editor-shaped DOM (engine/js/bindings/query_perf_test.go), the traversal frame
+// (WalkDescendants.func1) was the single largest cumulative sample owner (~63%) before
+// the selector-level fixes, with dom.nodeBaseOf still flat ~14% after them.
+//
+// Semantics are identical to WalkDescendants restricted to elements: same pre-order,
+// same root-inclusive start, same "return false stops everything".
+func (e *Element) WalkDescendantElements(fn func(*Element) bool) {
+	var walk func(b *nodeBase) bool
+	walk = func(b *nodeBase) bool {
+		// 每个节点只解析一次 nodeBase：nextSibling 与 firstChild 都从它读，
+		// 避免原先「nextSibling 一次 + firstChild 一次」的双重接口断言
+		// （profile 里 dom.nodeBaseOf 在真实编辑器 DOM 的 querySelector 窗口
+		// 里 flat 18.8%，是仅次于属性 map 查找的第二热点）。
+		for c := b.firstChild; c != nil; {
+			cb := nodeBaseOf(c)
+			if cb == nil {
+				break
+			}
+			next := cb.nextSibling
+			if el, ok := c.(*Element); ok {
+				if !fn(el) {
+					return false
+				}
+			}
+			if cb.firstChild != nil {
+				if !walk(cb) {
+					return false
+				}
+			}
+			c = next
+		}
+		return true
+	}
+	if !fn(e) {
+		return
+	}
+	walk(nodeBaseOf(e))
 }
 
 // equalAttributes reports whether two elements have the same attributes, used by
