@@ -668,8 +668,17 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 		}
 		info.layerOwnClipActive = rects.OwnClip
 		info.layerOwnClip = Rect{
-			X: rects.OwnRect.X, Y: rects.OwnRect.Y,
-			Width: rects.OwnRect.Width, Height: rects.OwnRect.Height,
+			// ★ 传【绝对坐标】的 LayerRect（未减滚动），不要传 OwnRect：
+			//   applyOwnOverflowClip 在本层上下文里调用 Clip()，Skia 会按
+			//   当前 CTM 变换该矩形，而此处 CTM 已含祖先滚动容器的
+			//   translate(-scroll)（非层滚动容器同样由 paintLayerContents
+			//   施加）。若传已减过滚动量的 OwnRect，滚动量就被【扣两次】，
+			//   元素自身的 overflow 裁剪与内容错位整整一个滚动量——
+			//   .conv-title（overflow:hidden + text-overflow:ellipsis）的
+			//   标题文字被裁成 1~2px 残线，即"滚动后列表标题只剩一条横线"
+			//   （实测：对该元素强制 overflow:visible 后文字全部恢复）。
+			X: rects.LayerRect.X, Y: rects.LayerRect.Y,
+			Width: rects.LayerRect.Width, Height: rects.LayerRect.Height,
 		}
 	}
 	// ★ opacity∈[0.98,1) 直接 alpha 绘制（省 offscreen 合成，见 fixed 分支）。

@@ -315,6 +315,35 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 	}
 	// Walk the ancestor layer chain intersecting with each ancestor's overflow clip.
 	innerSX, innerSY := 0.0, 0.0
+	// ★ 层链口径的滚动总量（供下面 ancestorRect 的 outS 公式使用）。
+	//   原设计里 totalS 与 innerS 同取层链；2026-09 把 totalS 改成对象链
+	//   （修 ownRect 的滚动偏移）后这条公式失衡，因此这里显式按层链口径
+	//   另算一份，非层滚动容器由下方的 inS 单独补偿。
+	layerSX, layerSY := 0.0, 0.0
+	// 层 owner 集合：把 inS 限定为【非层】滚动容器——层滚动已由
+	// outS/innerS 的层链口径覆盖，重复计入会过度补偿。
+	layerOwners := map[RenderObject]bool{}
+	if view != nil {
+		for cur2 := l.parent; cur2 != nil; cur2 = cur2.parent {
+			if cur2.owner == nil {
+				continue
+			}
+			layerOwners[cur2.owner] = true
+			cb2 := asRenderBox(cur2.owner)
+			if cb2 == nil {
+				continue
+			}
+			cs2 := cur2.owner.Style()
+			if cs2 == nil {
+				continue
+			}
+			if cs2.OverflowX != style.OverflowVisible || cs2.OverflowY != style.OverflowVisible {
+				sx2, sy2 := view.BoxScrollOffset(cb2)
+				layerSX += sx2
+				layerSY += sy2
+			}
+		}
+	}
 	// ★ 这里【有意】保持层链遍历（与上面 totalS 的对象链不同）：
 	//   祖先 overflow 裁剪的语义单位是「层」——非层的中间元素不构成裁剪
 	//   单元。改成对象链会引入额外 clip 交集，破坏 fixed 祖先自身裁剪
@@ -343,10 +372,43 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 			if view != nil {
 				sx, sy = view.BoxScrollOffset(cb)
 			}
-			// This ancestor's viewport in device space: its content-coord
-			// padding box shifted by the scroll of ancestors OUTSIDE it.
-			ancestorRect.X -= totalSX - innerSX - sx
-			ancestorRect.Y -= totalSY - innerSY - sy
+			// 该祖先视口在 device 空间 = padding box 减去【位于它之外】的滚动。
+			// outS 取层链口径（layerS - innerS - sx，与 innerS 同源 = 原设计），
+			// 保证嵌套滚动场景（TestCalculateRectsNestedScroll）行为不变。
+			//
+			// ★ inS：位于该祖先【内部】的【非层】滚动容器（对象链口径）。
+			//   canvas 在应用本裁剪时已含有它的 translate——非层滚动容器由
+			//   paintLayerContents 平移内容，子层/子内容绘制时已生效——因此
+			//   必须抵消，否则祖先 clip 与内容错位整整一个滚动量：元素自身
+			//   overflow:hidden + text-overflow:ellipsis（.conv-title）会把
+			//   标题文字裁成 1~2px 残线（"滚动后列表标题只剩一条横线"的
+			//   根因：.conv-list 不生成 RenderLayer，它的滚动量原先既不在
+			//   层链 outS 中，也从未被补偿）。
+			//   旧公式 `totalS(对象链) - innerS(层链) - sx` 正是这样混用了
+			//   两条链（2026-09 把 totalS 改为对象链以修 ownRect 后遗留）。
+			inSX, inSY := 0.0, 0.0
+			if view != nil {
+				for p := l.owner.Parent(); p != nil && p != cur.owner; p = p.Parent() {
+					if layerOwners[p] {
+						continue
+					}
+					pb := asRenderBox(p)
+					if pb == nil {
+						continue
+					}
+					pcs := p.Style()
+					if pcs == nil {
+						continue
+					}
+					if pcs.OverflowX != style.OverflowVisible || pcs.OverflowY != style.OverflowVisible {
+						ix, iy := view.BoxScrollOffset(pb)
+						inSX += ix
+						inSY += iy
+					}
+				}
+			}
+			ancestorRect.X -= layerSX - innerSX - sx - inSX
+			ancestorRect.Y -= layerSY - innerSY - sy - inSY
 			innerSX += sx
 			innerSY += sy
 			if !hasClip {
