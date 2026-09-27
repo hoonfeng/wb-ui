@@ -47,6 +47,15 @@ type Frame struct {
 	// SetPendingDocumentURL）：文档装配过程中就要用它解析相对引用。
 	pendingDocumentURL string
 
+	// readyState mirrors Document::readyState()（HTML §3.1.4）：文档解析期间为
+	// "loading"，解析完成（DOM 就绪、DOMContentLoaded 可触发）为
+	// "interactive"，子资源全部就绪（load 事件后）为 "complete"。
+	// ★ 前端库据此判断「何时可以安全操作 DOM」：jQuery 的 ready()、Vue 的
+	// mount 时机检测、以及大量 "if (document.readyState !== 'loading')" 门禁
+	// 都直接读它——缺失时读到 undefined，库会走错分支或抛错（覆盖矩阵 §五
+	// P0-2）。零值（从未装配过文档）按规范回报 "loading"。
+	readyState string
+
 	// renderView is the root of the render tree built from document, mirroring
 	// the render view reached via LocalFrame::contentRenderer() / FrameView.
 	renderView *rendering.RenderView
@@ -191,6 +200,32 @@ func (f *Frame) RenderView() *rendering.RenderView { return f.renderView }
 // View returns the FrameView, mirroring LocalFrame::view().
 func (f *Frame) View() *FrameView { return f.view }
 
+// ReadyState mirrors Document::readyState(). 尚未装配文档（零值）时按规范
+// 回报 "loading"——文档还没解析完。
+func (f *Frame) ReadyState() string {
+	if f.readyState == "" {
+		return "loading"
+	}
+	return f.readyState
+}
+
+// SetReadyState 推进文档加载状态。宿主在解析完成时置 "interactive"、
+// 资源全部就绪时置 "complete"（见 WebView.LoadHTML）。
+func (f *Frame) SetReadyState(s string) { f.readyState = s }
+
+// StyleSheets returns every stylesheet attached to the current document: the
+// ones extracted from <style> elements plus those attached at runtime through a
+// script-inserted <link rel=stylesheet> (how every gou-ide plugin ships its
+// CSS). It backs document.styleSheets (CSSOM §document.styleSheets).
+// ★ 两个列表都要报：仅报 styleSheets 会让插件注入的样式在页面上可见、
+//   却不出现在 document.styleSheets 里（库据此判断「样式已就绪」会误判）。
+func (f *Frame) StyleSheets() []*css.CSSStyleSheet {
+	out := make([]*css.CSSStyleSheet, 0, len(f.styleSheets)+len(f.dynamicStyleSheets))
+	out = append(out, f.styleSheets...)
+	out = append(out, f.dynamicStyleSheets...)
+	return out
+}
+
 // Resolver returns the style resolver used to build this frame's render tree.
 // Callers may add style sheets to it before (re)loading a document so that the
 // next render-tree build takes them into account.
@@ -278,6 +313,10 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	if f.view != nil {
 		f.view.SetNeedsLayout(true)
 	}
+	// 文档已解析 + 样式已提取 + 渲染树已构建 ⇒ DOM 就绪（DOMContentLoaded
+	// 时机）。资源（图片/外链样式）未必然就绪，故不直接置 "complete"——
+	// 由宿主在加载流程收尾时推进（WebView.LoadHTML）。
+	f.readyState = "interactive"
 	Logf("SetDocument", "done")
 }
 

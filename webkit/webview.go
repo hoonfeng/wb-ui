@@ -107,6 +107,24 @@ func webViewForNode(n dom.Node) *WebView {
 	return nil
 }
 
+// webViewForDocument 返回当前装配着该 Document 的 WebView（按 mainFrame 的
+// 文档标识匹配）。★ 不复用 webViewForNode：它按 n.OwnerDocument() 反查，而
+// Document 自身的 ownerDocument 在规范里是 null（Node 语义），拿 Document
+// 去查会落空。
+func webViewForDocument(doc *dom.Document) *WebView {
+	if doc == nil {
+		return nil
+	}
+	webviewsMu.RLock()
+	defer webviewsMu.RUnlock()
+	for wv := range webviews {
+		if wv.mainFrame != nil && wv.mainFrame.Document() == doc {
+			return wv
+		}
+	}
+	return nil
+}
+
 // webViewForInterpreter 返回拥有该 JS 解释器的 WebView。
 func webViewForInterpreter(in *jsc.Interpreter) *WebView {
 	if in == nil {
@@ -163,6 +181,31 @@ func installBridgeDispatch() {
 				return nil
 			}
 			return rendering.HitTest(rv, x, y, "")
+		}
+		// document.readyState 接线：值随所属 frame 的加载阶段推进
+		// （SetDocument → "interactive"，装载收尾 → "complete"）。
+		bindings.DocumentReadyState = func(doc *dom.Document) string {
+			wv := webViewForDocument(doc)
+			if wv == nil || wv.mainFrame == nil {
+				return "complete"
+			}
+			fr := wv.mainFrame.Frame()
+			if fr == nil {
+				return "complete"
+			}
+			return fr.ReadyState()
+		}
+		// document.styleSheets 接线：<style> 提取的 + 运行时注入的 <link>。
+		bindings.DocumentStyleSheets = func(doc *dom.Document) []*css.CSSStyleSheet {
+			wv := webViewForDocument(doc)
+			if wv == nil || wv.mainFrame == nil {
+				return nil
+			}
+			fr := wv.mainFrame.Frame()
+			if fr == nil {
+				return nil
+			}
+			return fr.StyleSheets()
 		}
 		bindings.GetElementBoxRectFast = func(el *dom.Element) (float64, float64, float64, float64) {
 			wv := webViewForNode(el)
@@ -1007,6 +1050,12 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	//   （<iframe> 元素本身仍参与布局/绘制，只是没有子文档）。
 	if wv.mode.allowsSubframes() {
 		wv.loadIFrameDocuments()
+	}
+	// 加载流程收尾：DOM 已解析、页面脚本已执行、渲染树已重建 ⇒ readyState
+	// 推进到 "complete"（HTML §3.1.4，load 事件之后的状态）。此前页面脚本
+	// 执行时读到的是 SetDocument 置的 "interactive"。
+	if fr := wv.mainFrame.Frame(); fr != nil {
+		fr.SetReadyState("complete")
 	}
 	return nil
 }

@@ -27,6 +27,17 @@ import (
 // styles. When nil, dynamic <style> injection is silently ignored.
 var OnStyleNodeAdded func(node dom.Node)
 
+// DocumentReadyState 由宿主（webkit.WebView）注入：按文档返回其所属 frame 的
+// readyState（"loading"/"interactive"/"complete"）。未注入时 document.readyState
+// 回退 "complete"（脚本能跑就说明文档已可用，比 undefined 安全——库的
+// "!== 'loading'" 门禁在 undefined 下恒假）。
+var DocumentReadyState func(doc *dom.Document) string
+
+// DocumentStyleSheets 由宿主（webkit.WebView）注入：返回该文档已装配的全部
+// 样式表（<style> 提取的 + 运行时注入的 <link rel=stylesheet>）。未注入时
+// document.styleSheets 为空列表。
+var DocumentStyleSheets func(doc *dom.Document) []*css.CSSStyleSheet
+
 // ViewportWidth / ViewportHeight 为 window.innerWidth/innerHeight 提供值
 // （webkit.WebView.Resize 同步）。CM6 的 visiblePixelRange 用它们计算可见
 // 像素视口，undefined 会产生 NaN → viewport 永不更新（滚动不重渲染行号）。
@@ -3182,6 +3193,31 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 		return jsc.StringValue("CSS1Compat")
 	}), nil)
 
+	// document.readyState（HTML §3.1.4）：jQuery ready()、Vue mount 时机探测、
+	// 以及大量 `if (document.readyState !== 'loading')` 门禁都直接读它。值由
+	// 宿主按 frame 的加载阶段提供（见 DocumentReadyState）。
+	obj.SetAccessor("readyState", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if DocumentReadyState != nil {
+			return jsc.StringValue(DocumentReadyState(doc))
+		}
+		return jsc.StringValue("complete")
+	}), nil)
+	// document.scripts（HTML §3.1.4）：文档内全部 <script> 的实时集合。库用它
+	// 做「已加载脚本扫描」（懒加载 / 去重注入）。沿用 getElementsByTagName 的
+	// 数组语义 —— HTMLCollection 构造器本身属 P1（覆盖矩阵 §二 B）。
+	obj.SetAccessor("scripts", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrJS(in, doc.GetElementsByTagName("script"))
+	}), nil)
+	// document.styleSheets（CSSOM §document.styleSheets）：StyleSheetList。包含
+	// <style> 提取的与运行时注入的样式表（后者正是插件 CSS 的通道）。
+	obj.SetAccessor("styleSheets", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		var sheets []*css.CSSStyleSheet
+		if DocumentStyleSheets != nil {
+			sheets = DocumentStyleSheets(doc)
+		}
+		return wrapStyleSheetList(in, sheets)
+	}), nil)
+
 	// document.hasFocus() — CodeMirror 6 等库用它判断编辑器是否获得焦点
 	// （决定光标/选区渲染）。wb-ui 由 Element.SetFocused 记录焦点状态，
 	// Document 维护 focused 元素缓存（O(1)，不遍历全文档）。
@@ -5249,6 +5285,77 @@ func arrJS(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	return arrayValue(in, len(els), func(i int) jsc.JSValue {
 		return jsc.ObjectValue(wrapElement(in, els[i]))
 	})
+}
+
+// wrapStyleSheetList 把样式表列表暴露成 StyleSheetList 语义（CSSOM §document.
+// styleSheets）：length + item(i) + 索引属性 + 可遍历。库常做
+// `Array.from(document.styleSheets)` 或按 length 判断样式是否已装配。
+func wrapStyleSheetList(in *jsc.Interpreter, sheets []*css.CSSStyleSheet) jsc.JSValue {
+	obj := jsc.NewObject(in.ObjectPrototype())
+	obj.SetClassName("StyleSheetList")
+	// ★ 预建包装对象数组：索引访问与 item(i) 必须返回**同一身份**的对象
+	//   （浏览器里 StyleSheetList 是 reflector，`list[0] === list.item(0)`）。
+	//   每次现造会让两者引用不等，破坏库用来做去重/比较的身份判断。
+	objs := make([]*jsc.JSObject, len(sheets))
+	for i, s := range sheets {
+		objs[i] = wrapStyleSheet(in, s)
+		obj.Set(strconv.Itoa(i), jsc.ObjectValue(objs[i]))
+	}
+	obj.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(objs)))
+	}), nil)
+	obj.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) == 0 {
+				return jsc.Null()
+			}
+			i := int(args[0].ToNumber())
+			if i < 0 || i >= len(objs) {
+				return jsc.Null()
+			}
+			return jsc.ObjectValue(objs[i])
+		}, 1)))
+	return jsc.ObjectValue(obj)
+}
+
+// wrapStyleSheet 把 CSSStyleSheet 暴露成 JS 对象（CSSOM §CSSStyleSheet）：
+// href/title/type/disabled/ownerNode 与 cssRules/rules。★ cssRules 只提供
+// length/item（CSSRule 对象模型未移植，见 css/stylesheet.go 的 Completeness
+// 说明），而库最常用的恰好是 `sheet.cssRules.length` 这一探测。
+func wrapStyleSheet(in *jsc.Interpreter, s *css.CSSStyleSheet) *jsc.JSObject {
+	obj := jsc.NewObject(in.ObjectPrototype())
+	obj.SetClassName("CSSStyleSheet")
+	obj.SetInternal(s)
+	obj.SetAccessor("href", strAcc(s.Href()), nil)
+	obj.SetAccessor("title", strAcc(s.Title()), nil)
+	obj.SetAccessor("type", strAcc(s.Type()), nil)
+	obj.SetAccessor("disabled",
+		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.BooleanValue(s.Disabled()) }),
+		func(_ *jsc.Interpreter, _ jsc.JSValue, v jsc.JSValue) { s.SetDisabled(v.ToBoolean()) })
+	obj.SetAccessor("ownerNode", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if n := s.OwnerNode(); n != nil {
+			if el, ok := n.(*dom.Element); ok {
+				return jsc.ObjectValue(wrapElement(in, el))
+			}
+		}
+		return jsc.Null()
+	}), nil)
+	ruleListAcc := getter(func(in *jsc.Interpreter) jsc.JSValue {
+		rules := s.Rules()
+		ro := jsc.NewObject(in.ObjectPrototype())
+		ro.SetClassName("CSSRuleList")
+		ro.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.NumberValue(float64(len(rules)))
+		}), nil)
+		ro.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+				return jsc.Null()
+			}, 1)))
+		return jsc.ObjectValue(ro)
+	})
+	obj.SetAccessor("cssRules", ruleListAcc, nil)
+	obj.SetAccessor("rules", ruleListAcc, nil)
+	return obj
 }
 
 // cssEscapeIdent 按 CSSOM 规范的 CSS.escape 转义 CSS 标识符。
