@@ -14,7 +14,31 @@
 
 package dom
 
-import "reflect"
+import (
+	"fmt"
+	"os"
+	"reflect"
+	"time"
+)
+
+// ─── 派发性能插桩（临时诊断用；WB_PERF_DISPATCH=1 开启，默认关闭）───
+// 目的：定位 scroll 同步派发骨架的真实耗时分布（buildEventPath / capture / target /
+// bubble 三段遍历 / listener 回调 / defaultEventHandler）。只对 event.Type()=="scroll" 记录。
+var perfDispOn = os.Getenv("WB_PERF_DISPATCH") != "" && os.Getenv("WB_PERF_DISPATCH") != "0"
+
+var (
+	perfListenerTime time.Duration
+	perfListenerN    int
+	// PerfLayoutCount / PerfLayoutTime 由引擎各层（page/rendering）在 WB_PERF_DISPATCH
+	// 开启时累加，用于量化「一次事件派发期间触发了多少次同步全量布局」。
+	PerfLayoutCount int
+	PerfLayoutTime  time.Duration
+	// PerfTreeRebuildCount 量化派发期间的渲染树重建次数。
+	PerfTreeRebuildCount int
+	// PerfDOMOps 量化派发期间的 DOM 变更次数（createElement/createTextNode/
+	// appendChild/insertBefore/replaceChild/removeChild/setAttribute/textContent 写）。
+	PerfDOMOps int
+)
 
 // InlineEventAttrRunner executes an event-handler content attribute (the "code" in
 // <button onclick="code">) during event dispatch on that element. The DOM package
@@ -72,7 +96,7 @@ type EventListenerOptions struct {
 type AddEventListenerOptions struct {
 	Capture bool
 	Passive bool
-	Once   bool
+	Once    bool
 }
 
 // registeredListener is the internal record kept for one (type, listener, capture)
@@ -197,6 +221,15 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 	if event == nil {
 		return true
 	}
+	perfOn := perfDispOn && event.Type() == "scroll"
+	var tBuild, tCap, tTgt, tBub, tDef time.Duration
+	var tMark time.Time
+	if perfOn {
+		perfListenerTime, perfListenerN = 0, 0
+		PerfLayoutCount, PerfLayoutTime, PerfTreeRebuildCount = 0, 0, 0
+		PerfDOMOps = 0
+		tMark = time.Now()
+	}
 	ev, ok := event.(eventInternal)
 	if !ok {
 		// No internal hooks: just fire listeners on this target.
@@ -208,6 +241,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 	// host) and includes slot nodes when the event is composed; a non-composed event
 	// stops at its shadow root.
 	path := buildEventPath(Node(b.self), event.Composed())
+	if perfOn {
+		tBuild = time.Since(tMark)
+		tMark = time.Now()
+	}
 	ev.setTarget(b.self)
 	ev.setPath(path)
 	ev.resetBeforeDispatch()
@@ -249,6 +286,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 			fireEventListeners(path[i], event, true)
 		}
 	}
+	if perfOn {
+		tCap = time.Since(tMark)
+		tMark = time.Now()
+	}
 
 	// Target phase: fire capture then bubble listeners on the target.
 	if !event.PropagationStopped() {
@@ -258,6 +299,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		if !event.ImmediatePropagationStopped() {
 			fireEventListeners(path[0], event, false)
 		}
+	}
+	if perfOn {
+		tTgt = time.Since(tMark)
+		tMark = time.Now()
 	}
 
 	// Bubble phase: target's parent -> root.
@@ -270,6 +315,10 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 			setCurrent(path[i])
 			fireEventListeners(path[i], event, false)
 		}
+	}
+	if perfOn {
+		tBub = time.Since(tMark)
+		tMark = time.Now()
 	}
 
 	ev.setEventPhase(EventNone)
@@ -286,6 +335,12 @@ func (b *nodeBase) DispatchEvent(event Event) bool {
 		if dh, ok := path[0].(defaultActionHandler); ok {
 			dh.defaultEventHandler(event)
 		}
+	}
+	if perfOn {
+		tDef = time.Since(tMark)
+		fmt.Fprintf(os.Stderr, "[DISP] scroll path=%d build=%v cap=%v tgt=%v bub=%v def=%v listeners=%d listenerTime=%v layouts=%d layoutTime=%v treeRebuilds=%d domOps=%d\n",
+			len(path), tBuild, tCap, tTgt, tBub, tDef, perfListenerN, perfListenerTime,
+			PerfLayoutCount, PerfLayoutTime, PerfTreeRebuildCount, PerfDOMOps)
 	}
 	return !event.DefaultPrevented()
 }
@@ -452,7 +507,14 @@ func fireEventListeners(target EventTarget, event Event, capture bool) {
 		if ev != nil {
 			ev.setInPassiveListener(l.passive)
 		}
-		l.callback.HandleEvent(event)
+		if perfDispOn {
+			lt := time.Now()
+			l.callback.HandleEvent(event)
+			perfListenerTime += time.Since(lt)
+			perfListenerN++
+		} else {
+			l.callback.HandleEvent(event)
+		}
 		if ev != nil {
 			ev.setInPassiveListener(false)
 		}

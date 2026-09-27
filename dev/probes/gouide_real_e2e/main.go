@@ -595,7 +595,239 @@ func main() {
 			// 未指定 profile 路径 → 只测耗时（用于 A/B 对照，如 GOGC 调参）
 			fmt.Printf("[perf] 只测耗时 %s ×%d（未采样）\n", *interaction, *iterations)
 		}
-		if *interaction == "editorRealOpen" {
+		if *interaction == "vueflow" {
+			// ─── 必做4：Vue 特有路径实测（vue-router 导航 + Pinia store 交互）───
+			// Vue 3 生产构建把 app 实例挂在容器元素的 __vue_app__ 上（也遍历兜底），
+			// 从 globalProperties 取 $router / $pinia。
+			init := `(function(){
+				var res = {hasApp:false, hasRouter:false, hasPinia:false, navMs:-1, navError:'',
+					piniaMs:-1, piniaDetail:'', storeKeys:[], storeId:'', beforeUrl:'', afterUrl:'',
+					routeBefore:'', routeAfter:''};
+				var app = null;
+				var el = document.querySelector('#app');
+				if (el && el.__vue_app__) app = el.__vue_app__;
+				// 多区域插件各自 createApp → 遍历**全部** __vue_app__ 实例，
+				// 并从 config.globalProperties 与 _context.provides 的 Symbol
+				// （app.use(router/pinia) 也走 provide）两处找 $router / $pinia。
+				var apps = [];
+				var all = document.querySelectorAll('*');
+				for (var i = 0; i < all.length; i++) {
+					if (all[i].__vue_app__) apps.push(all[i].__vue_app__);
+				}
+				if (app && apps.indexOf(app) < 0) apps.push(app);
+				res.appCount = apps.length;
+				var router = null, pinia = null;
+				for (var a = 0; a < apps.length; a++) {
+					var gpa = (apps[a].config && apps[a].config.globalProperties) || {};
+					if (!router && gpa.$router) router = gpa.$router;
+					if (!pinia && gpa.$pinia) pinia = gpa.$pinia;
+					var prov = apps[a]._context && apps[a]._context.provides;
+					if (prov) {
+						var syms = Object.getOwnPropertySymbols(prov);
+						for (var s = 0; s < syms.length; s++) {
+							var d = String(syms[s].description || '');
+							if (!pinia && d === 'pinia') pinia = prov[syms[s]];
+							if (!router && d === 'router') router = prov[syms[s]];
+						}
+					}
+				}
+				app = apps.length ? apps[0] : app;
+				res.hasApp = !!app;
+				if (!app) { window.__vueResult = res; return 'no-app'; }
+				res.hasRouter = !!router;
+				res.hasPinia = !!pinia;
+				res.beforeUrl = String(location.href);
+				if (router && router.currentRoute && router.currentRoute.value) {
+					res.routeBefore = String(router.currentRoute.value.path);
+				}
+				var finish = function(){
+					if (router && router.currentRoute && router.currentRoute.value) {
+						res.routeAfter = String(router.currentRoute.value.path);
+					}
+					res.afterUrl = String(location.href);
+					if (pinia && pinia._s && typeof pinia._s.keys === 'function') {
+						var keys = [];
+						var it = pinia._s.keys();
+						for (var k = it.next(); !k.done; k = it.next()) { keys.push(String(k.value)); }
+						res.storeKeys = keys.slice(0, 8);
+						if (keys.length) {
+							res.storeId = keys[0];
+							var st = pinia._s.get(keys[0]);
+							var t1 = Date.now();
+							try {
+								if (st && typeof st.$patch === 'function') { st.$patch({}); }
+								else if (st && typeof st.$reset === 'function') { st.$reset(); }
+								res.piniaMs = Date.now() - t1;
+							} catch (e) { res.piniaDetail = String(e); }
+						}
+					}
+					window.__vueResult = res;
+				};
+				if (router && typeof router.push === 'function') {
+					var target = null;
+					res.routeBefore = res.routeBefore || '';
+					var t0 = Date.now();
+					try {
+						var pr = router.push(target === null ? res.routeBefore : target);
+						if (pr && typeof pr.then === 'function') {
+							pr.then(function(){ res.navMs = Date.now() - t0; finish(); },
+								function(e){ res.navError = String(e); finish(); });
+							return 'started-nav';
+						}
+					} catch (e) { res.navError = String(e); }
+					res.navMs = Date.now() - t0;
+				}
+				finish();
+				return 'started';
+			})()`
+			if s, err := evalStr(wv, init); err != nil {
+				fmt.Printf("[vueflow] 初始化失败: %v\n", err)
+			} else {
+				fmt.Printf("[vueflow] %s\n", strings.TrimSpace(s))
+			}
+			for i := 0; i < 90; i++ {
+				pumpFrame(wv)
+			}
+			res, _ := evalStr(wv, `JSON.stringify(window.__vueResult)`)
+			fmt.Printf("[vueflow] 结果 %s\n", strings.TrimSpace(res))
+			perfOneResult = `{"vueflow":` + strings.TrimSpace(res) + `}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "webapi" {
+			// ─── Web API 实机复测（必做3）：fetch → Response.blob() → FileReader ──
+			// 验收要求：拿到**实际读出的文本 / dataURL**（不是 typeof 存在性）。
+			init := `(function(){
+				window.__apiTest = {text:'pending', dataURL:'pending', blobSize:0, blobType:'', altEvent:''};
+				fetch('/api/health').then(function(r){
+					window.__apiTest.respBlobOk = (typeof r.blob === 'function');
+					return r.blob();
+				}).then(function(b){
+					window.__apiTest.blobSize = b.size;
+					window.__apiTest.blobType = b.type;
+					var fr1 = new FileReader();
+					fr1.onload = function(){
+						window.__apiTest.text = String(fr1.result).slice(0, 120);
+						window.__apiTest.textState = fr1.readyState;
+					};
+					fr1.onerror = function(){ window.__apiTest.text = 'onerror'; };
+					fr1.readAsText(b);
+					var fr2 = new FileReader();
+					fr2.onload = function(){ window.__apiTest.dataURL = String(fr2.result).slice(0, 80); };
+					fr2.readAsDataURL(b);
+					var fr3 = new FileReader();
+					fr3.addEventListener('load', function(){ window.__apiTest.altEvent = 'fired'; });
+					fr3.readAsText(b);
+				}).catch(function(e){ window.__apiTest.text = 'catch:' + e; });
+				return 'started';
+			})()`
+			if s, err := evalStr(wv, init); err != nil {
+				fmt.Printf("[webapi] 初始化失败: %v\n", err)
+			} else {
+				fmt.Printf("[webapi] %s\n", strings.TrimSpace(s))
+			}
+			for i := 0; i < 90; i++ {
+				pumpFrame(wv)
+			}
+			res, _ := evalStr(wv, `JSON.stringify(window.__apiTest)`)
+			fmt.Printf("[webapi] 结果 %s\n", strings.TrimSpace(res))
+			perfOneResult = `{"webapi":` + strings.TrimSpace(res) + `}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "jsbench" {
+			// ─── JS/桥速度基准（必做2 配套）：区分「goja 解释器固有速度」与
+			// 「Go↔JS 桥 / DOM 原语开销」，据此判断滚动 handler 的 ~1.65s
+			// 在引擎侧是否存在可削减点。
+			bench := func(label, js string) {
+				t0 := time.Now()
+				out, err := evalStr(wv, js)
+				d := time.Since(t0)
+				fmt.Printf("[bench] %-26s %9.1fms  out=%s err=%v\n",
+					label, float64(d.Microseconds())/1000, strings.TrimSpace(out), err)
+			}
+			bench("空循环 1e6", `(function(){var s=0;for(var i=0;i<1000000;i++){s+=i;}return String(s);})()`)
+			bench("空循环 1e5", `(function(){var s=0;for(var i=0;i<100000;i++){s+=i;}return String(s);})()`)
+			bench("offsetHeight 读 1e4", `(function(){var e=document.querySelector('.cm-scroller')||document.body;var h=0;for(var i=0;i<10000;i++){h+=e.offsetHeight;}return String(h);})()`)
+			bench("scrollTop 读 1e4", `(function(){var e=document.querySelector('.cm-scroller')||document.body;var h=0;for(var i=0;i<10000;i++){h+=e.scrollTop;}return String(h);})()`)
+			bench("getBoundingClientRect 1e3", `(function(){var e=document.querySelector('.cm-scroller')||document.body;var r=0;for(var i=0;i<1000;i++){r+=e.getBoundingClientRect().top;}return String(r);})()`)
+			bench("querySelector 1e3", `(function(){var n=0;for(var i=0;i<1000;i++){if(document.querySelector('.cm-scroller'))n++;}return String(n);})()`)
+			perfOneResult = `{"jsbench":"done"}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "editorE2E" {
+			// ─── 端到端口径（第10轮必做1）───
+			// 一次「滚动」= 一次 sc.scrollTop=v 赋值 **+ 其触发的帧边界 flush 中那 1 次
+			// dispatch（含 CM6 的 scroll 处理）**。由 Go 侧「赋值 → wv.Render()」打点实现
+			// （Render() 内部会调 flushScrollEvents()）。
+			// 分别测：N=1（真实单次滚动，最关键）与 N=12（同一帧内连续 12 次赋值，只 1 次 flush）。
+			// 另测「仅 Render()」基线，便于扣除整帧渲染本身的开销。
+			treeFound := false
+			for i := 0; i < 10 && !treeFound; i++ {
+				s, ferr := evalStr(wv, jsFlowExplore)
+				if ferr != nil {
+					break
+				}
+				fmt.Printf("[e2e] 切视图: %s\n", s)
+				for k := 0; k < 25; k++ {
+					pumpFrame(wv)
+				}
+				if s2, e2 := evalStr(wv, jsFlowCheckTree); e2 == nil && strings.Contains(s2, `"hasTree":true`) {
+					treeFound = true
+				}
+			}
+			if s, ferr := evalStr(wv, jsFlowLoadTree); ferr == nil {
+				fmt.Printf("[e2e] 加载文件树: %s\n", s)
+			}
+			for i := 0; i < 90; i++ {
+				pumpFrame(wv)
+			}
+			for attempt := 0; attempt < 6; attempt++ {
+				if s, ferr := evalStr(wv, jsFlowClickFile); ferr == nil {
+					fmt.Printf("[e2e] 点文件: %s\n", s)
+				}
+				for i := 0; i < 90; i++ {
+					pumpFrame(wv)
+				}
+				lr, _ := evalStr(wv, `(function(){var e=document.querySelector('.plugin-area-editor');if(!e)return '0';return String(e.querySelectorAll('.line,[class*="line"],[class*="cm-line"]').length);})()`)
+				if v, perr := strconv.Atoi(strings.TrimSpace(lr)); perr == nil && v > 0 {
+					fmt.Printf("[e2e] 编辑器已打开，行数 %d\n", v)
+					break
+				}
+			}
+			const assignOnce = `(function(){var sc=document.querySelector('.cm-scroller');if(!sc)return 'no-scroller';sc.scrollTop=120;return 'ok';})()`
+			batch := func(k int) string {
+				return `(function(){var sc=document.querySelector('.cm-scroller');if(!sc)return 'no-scroller';for(var i=0;i<` + strconv.Itoa(k) + `;i++){sc.scrollTop=(i+1)*120;}return 'ok';})()`
+			}
+			// 基线：仅 Render()（无赋值）
+			tb := time.Now()
+			for i := 0; i < 3; i++ {
+				_, _ = wv.Render()
+			}
+			renderBase := float64(time.Since(tb).Microseconds()) / 1000 / 3
+			fmt.Printf("[e2e] 基线 仅Render: %.3fms/次\n", renderBase)
+			// N=1：赋值 1 次 + 帧边界 1 次（3 轮取均值）
+			var n1Sum float64
+			for r := 0; r < 3; r++ {
+				t0 := time.Now()
+				_, _ = evalStr(wv, assignOnce)
+				_, _ = wv.Render()
+				n1Sum += float64(time.Since(t0).Microseconds()) / 1000
+			}
+			n1 := n1Sum / 3
+			// N=12：同帧内连续 12 次赋值 + 帧边界 1 次（3 轮取均值）
+			var n12Sum float64
+			for r := 0; r < 3; r++ {
+				t1 := time.Now()
+				_, _ = evalStr(wv, batch(12))
+				_, _ = wv.Render()
+				n12Sum += float64(time.Since(t1).Microseconds()) / 1000
+			}
+			n12 := n12Sum / 3
+			fmt.Printf("[e2e] N=1  端到端: %.1fms（赋值+1次flush，扣 Render 基线后约 %.1fms）\n", n1, n1-renderBase)
+			fmt.Printf("[e2e] N=12 端到端: %.1fms（12 次赋值合并为 1 次 flush，扣基线后约 %.1fms）\n", n12, n12-renderBase)
+			perfOneResult = `{"e2e":{"renderBaselineMs":` + strconv.FormatFloat(renderBase, 'f', 3, 64) +
+				`,"n1_ms":` + strconv.FormatFloat(n1, 'f', 3, 64) +
+				`,"n12_ms":` + strconv.FormatFloat(n12, 'f', 3, 64) +
+				`,"n1_net_ms":` + strconv.FormatFloat(n1-renderBase, 'f', 3, 64) +
+				`,"n12_net_ms":` + strconv.FormatFloat(n12-renderBase, 'f', 3, 64) + `}}`
+			fmt.Printf("[perf] 单交互结果 %s\n", perfOneResult)
+		} else if *interaction == "editorRealOpen" {
 			// ─── s3：真实编辑器流程（文件树 → 点击文件 → 等激活 → 3 个数字）───
 			// ① 侧栏默认是「会话」列表：按真实用户路径循环点击 activitybar 图标切视图，
 			//    直到侧栏出现文件树（tree-row / file-item / explorer）。

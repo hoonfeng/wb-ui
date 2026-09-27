@@ -18,10 +18,10 @@ import "strings"
 // document as their owner so that IsConnected and event dispatch work correctly.
 type Document struct {
 	nodeBase
-	title        string
-	contentType  string
-	url          string
-	quirks       bool
+	title       string
+	contentType string
+	url         string
+	quirks      bool
 
 	// focusedEl 缓存当前 focused 元素（SetFocused 维护）。bindings 的
 	// document.hasFocus()/activeElement 用它 O(1) 查询——此前每次遍历
@@ -112,6 +112,9 @@ func (d *Document) cloneShallow(_ *Document) Node {
 // for <input>, <select>, <textarea>, etc. so that the created element carries
 // the correct tag and can be used with the type-safe wrapper functions.
 func (d *Document) CreateElement(tagName string) *Element {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	key := strings.ToLower(tagName)
 	if ctor, ok := elementFactory[key]; ok {
 		return ctor(d, tagName)
@@ -122,6 +125,9 @@ func (d *Document) CreateElement(tagName string) *Element {
 // CreateTextNode returns a new Text node owned by this document, mirroring
 // Document::createTextNode(data).
 func (d *Document) CreateTextNode(data string) *Text {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	return NewText(d, data)
 }
 

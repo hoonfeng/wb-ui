@@ -133,7 +133,7 @@
      ]
     },
     "g1_vs_g2_steady_drop_pct": 28.8,
-    "verdict": "**已确认（对照实验）**：阻断 CM6 的 scroll 监听器后，稳态 perOp 由 3948.818ms 降至 2809.636ms（-28.8%）→ **CM6 滚动处理约占 28.8%，其余约 71.2%（2809.636ms）仍在 scrollTop 赋值路径本身**（引擎侧：setter / 事件派发骨架 / 失效标记），因为此时 CM6 已收不到事件。结合 readLayoutOnly=0ms（读布局免费），可判定引擎在**写入** scrollTop 时就产生了主要开销。",
+    "verdict": "未达成（端到端口径）",
     "correction": "**更正此前推断**：上一版 verdict 称「成本几乎全部在 CM6 滚动处理」—— 本对照实验推翻该结论（CM6 仅占 ~28.8%），现按实验数据改写。",
     "status": "已确认（对照实验）",
     "g1_after_fix": {
@@ -180,7 +180,81 @@
       "before": "out/_editor_ab.log",
       "after": "out/_editor_ab_async.log"
      },
-     "regression": "cssprobe 63/64 + 260/264（与基线一致）；全量 go test 无失败"
+     "regression": "cssprobe 63/64 + 260/264（与基线一致）；全量 go test 无失败",
+     "verdict": "未达成（端到端口径）",
+     "e2e_before_n1_ms": null,
+     "e2e_after_n1_ms": 1800.7,
+     "e2e_after_n12_ms": 1847.0,
+     "e2e_threshold_ms": 1300,
+     "override_reason": "此前「赋值口径 3948.818ms → 0.0ms」为测量窗口效应：探针的纯 JS 循环内不会触发 Go 侧 Render()/flushScrollEvents()，12 次赋值只入合并队列、一次 dispatch 都没跑，故必然 0ms —— 该口径已作废，以端到端口径为准。"
+    },
+    "e2e_caliber": {
+     "definition": "一次 sc.scrollTop=v 赋值 + 其触发的帧边界 flush 中那 1 次 DispatchEvent(scroll)（含 CM6 handler 全程）都计入窗口",
+     "probe": "dev/probes/gouide_real_e2e -interaction editorE2E（Go 侧打点：赋值 → wv.Render()）",
+     "after": {
+      "n1_ms": 1800.7,
+      "n12_ms": 1847.0,
+      "render_baseline_ms": 45.98,
+      "runs": [
+       {
+        "n1": 2122.4,
+        "n12": 2150.4
+       },
+       {
+        "n1": 1918.7,
+        "n12": 1859.3
+       },
+       {
+        "n1": 1800.7,
+        "n12": 1847.0
+       }
+      ]
+     },
+     "semantics": "N=12 与 N=1 相差 <30ms → 帧内合并生效（12 次处理降为 1 次）；但真实滚轮是每帧 1 次赋值，故单次 handler 成本（~1.7s）原样保留。"
+    },
+    "dispatch_breakdown": {
+     "doc": "docs/PERF_DISPATCH_BREAKDOWN.md",
+     "instrumentation": "engine/dom/eventtarget.go（DispatchEvent 分段计时 + listener 计时 + DOM 变更计数）、engine/page/frameview.go（FrameView.Layout 次数/耗时 + 渲染树重建），WB_PERF_DISPATCH=1 开启，默认关闭零开销",
+     "caliber": "端到端段（连续 6 次一致）",
+     "segments": {
+      "buildEventPath(17层)": "0s (0%)",
+      "capture": "0s (0%)",
+      "target": "1.65~1.84s (100%)",
+      "bubble": "0s (0%)",
+      "defaultEventHandler": "0s (0%)"
+     },
+     "target_detail": {
+      "listeners": 1,
+      "listenerTime_s": "1.65~1.84 (100%)",
+      "sync_full_layouts": "0 次 / 0s",
+      "render_tree_rebuilds": "0 次",
+      "dom_mutations": "0 次"
+     },
+     "ruled_out": [
+      "派发骨架（build/capture/bubble/default 全 0）",
+      "layout thrashing（layouts=0）",
+      "渲染树重建（treeRebuilds=0）",
+      "DOM 变更风暴（domOps=0）",
+      "Go↔JS 桥开销（jsbench: offsetHeight 1.56µs/次、scrollTop 0.48µs/次、getBoundingClientRect 4.4µs/次）"
+     ],
+     "jsbench": {
+      "probe": "-interaction jsbench",
+      "loop_1e6_ms": 150.4,
+      "loop_1e6_per_iter_ns": 150,
+      "offsetHeight_read_1e4_ms": 15.6,
+      "scrollTop_read_1e4_ms": 4.8,
+      "gBCR_1e3_ms": 4.4,
+      "querySelector_1e3_ms": 145.2
+     },
+     "attribution": "按 150ns/基本操作折算 1.65s ≈ 1100 万次 JS 基本操作 → 余额 100% 是 CM6 的 scroll handler 在 goja 解释器上的执行量（字符串/对象/正则密集路径的倍率远高于纯数值循环）。引擎侧无可削减点。",
+     "levers": {
+      "done": [
+       "滚动事件帧边界合并派发（同帧 N 次 → 1 次）",
+       "写 scrollTop 不再无条件 forceLayout"
+      ],
+      "engine_side_remaining": "无（骨架已零成本）",
+      "real_lever": "JS 引擎速度（超出「不换 V8」约束）或宿主框架的滚动处理量（前端侧 CM6 viewport 策略）"
+     }
     }
    }
   },

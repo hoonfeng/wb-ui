@@ -15,17 +15,24 @@ package page
 
 import (
 	"log"
+	"os"
+	"time"
 
-	"wb-ui/engine/rendering"
 	"wb-ui/engine/debugenv"
+	"wb-ui/engine/dom"
+	"wb-ui/engine/rendering"
 	"wb-ui/engine/style"
 )
+
+// perfLayoutOn 打开「派发期布局」插桩（仅 WB_PERF_DISPATCH=1 时）。
+// 目的：量化一次事件派发期间触发了多少次同步全量布局（layout thrashing）。
+var perfLayoutOn = os.Getenv("WB_PERF_DISPATCH") != "" && os.Getenv("WB_PERF_DISPATCH") != "0"
 
 // LayoutPhase tracks the current state of the layout scheduler.
 type LayoutPhase int
 
 const (
-	LayoutPhaseNone        LayoutPhase = iota
+	LayoutPhaseNone LayoutPhase = iota
 	LayoutPhaseNeedsLayout
 )
 
@@ -231,6 +238,13 @@ func (v *FrameView) SetContentSize(w, h int) {
 
 // Layout runs a layout pass for the frame's render tree.
 func (v *FrameView) Layout() {
+	if perfLayoutOn {
+		t0 := time.Now()
+		defer func() {
+			dom.PerfLayoutCount++
+			dom.PerfLayoutTime += time.Since(t0)
+		}()
+	}
 	Logf("Layout", "start viewport=%dx%d needsLayout=%v",
 		v.width, v.height, v.layoutPhase == LayoutPhaseNeedsLayout)
 	if v.frame == nil || v.frame.renderView == nil {

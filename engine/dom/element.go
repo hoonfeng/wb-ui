@@ -331,6 +331,9 @@ func (e *Element) GetAttribute(name string) string {
 // SetAttribute sets an attribute value, mirroring Element::setAttribute(name, value).
 // A new attribute is appended to the insertion order.
 func (e *Element) SetAttribute(name, value string) {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	key := strings.ToLower(name)
 	oldValue, existed := e.attrs[key]
 	if _, exists := e.attrs[key]; !exists {
@@ -418,6 +421,7 @@ func notifyDynamicPseudoChanged(e *Element) {
 //   - `div:hover a` 选择器：后代的缓存依赖**祖先**的 hovered 状态
 //   - :hover 冒泡匹配（悬停子元素 → 祖先也匹配 :hover）：祖先的缓存
 //     依赖**后代**的 hovered 状态
+//
 // 因此状态变化必须 bump 自身 + 全部祖先 + 全部后代（后代树遍历），
 // 否则清除 hover 后缓存仍返回旧的 :hover 样式（"无操作时渲染被影响"）。
 func (e *Element) bumpDynamicPseudoVersion() {

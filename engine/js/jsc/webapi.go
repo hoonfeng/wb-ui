@@ -8,6 +8,7 @@ package jsc
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"strconv"
 	"time"
@@ -28,6 +29,266 @@ func (r *Interpreter) RegisterWebAPIs() {
 	r.registerNavigator()
 	r.registerAbortController()
 	r.registerWeakRef()
+	r.registerBlob()
+	r.registerFileReader()
+}
+
+// ── Blob / File / FileReader ─────────────────────────────
+
+// blobDataKey 是 Blob 原始字节的内部承载字段名。Go string 可无损承载任意字节，
+// 且跨 Go↔JS 边界不需要逐元素拷贝；fetch 的 Response.blob() 与 FileReader 都按
+// 这个约定读写，因而无需在包之间共享具体类型。
+const blobDataKey = "__wbBlobData"
+
+// promiseResolved 返回一个已解决的 Promise（包装 value）。
+func (r *Interpreter) promiseResolved(v goja.Value) goja.Value {
+	pr, resolve, _ := r.vm.NewPromise()
+	_ = resolve(v)
+	return r.vm.ToValue(pr)
+}
+
+// uint8ArrayValue 把字节切片转成 Uint8Array（无 Uint8Array 时退化为字符串）。
+func (r *Interpreter) uint8ArrayValue(data []byte) goja.Value {
+	ctor := r.vm.Get("Uint8Array")
+	if ctor == nil {
+		return r.vm.ToValue(string(data))
+	}
+	arr, err := r.vm.New(ctor, r.vm.ToValue(int64(len(data))))
+	if err != nil {
+		return r.vm.ToValue(string(data))
+	}
+	for i, b := range data {
+		arr.Set(strconv.Itoa(i), r.vm.ToValue(int64(b)))
+	}
+	return arr
+}
+
+// blobPartBytes 把 Blob 构造参数的一个 part 转成字节：
+// 另一个 Blob（内部字节字段）> TypedArray/Array（按元素）> 其他（字符串化）。
+func (r *Interpreter) blobPartBytes(p goja.Value) []byte {
+	if p == nil || goja.IsUndefined(p) || goja.IsNull(p) {
+		return nil
+	}
+	if o := p.ToObject(r.vm); o != nil {
+		if d := o.Get(blobDataKey); d != nil && !goja.IsUndefined(d) && !goja.IsNull(d) {
+			return []byte(d.String())
+		}
+		if lv := o.Get("length"); lv != nil && !goja.IsUndefined(lv) && !goja.IsNull(lv) {
+			n := int(lv.ToInteger())
+			buf := make([]byte, 0, n)
+			for i := 0; i < n; i++ {
+				ev := o.Get(strconv.Itoa(i))
+				if ev == nil || goja.IsUndefined(ev) || goja.IsNull(ev) {
+					buf = append(buf, 0)
+					continue
+				}
+				buf = append(buf, byte(ev.ToInteger()))
+			}
+			return buf
+		}
+	}
+	return []byte(p.String())
+}
+
+func (r *Interpreter) registerBlob() {
+	r.vm.Set("Blob", func(call goja.ConstructorCall) *goja.Object {
+		obj := r.vm.NewObject()
+		var data []byte
+		if len(call.Arguments) >= 1 {
+			if parts := call.Argument(0).ToObject(r.vm); parts != nil {
+				if lv := parts.Get("length"); lv != nil && !goja.IsUndefined(lv) && !goja.IsNull(lv) {
+					n := int(lv.ToInteger())
+					for i := 0; i < n; i++ {
+						data = append(data, r.blobPartBytes(parts.Get(strconv.Itoa(i)))...)
+					}
+				}
+			}
+		}
+		mimeType := ""
+		if len(call.Arguments) >= 2 {
+			if opts := call.Argument(1).ToObject(r.vm); opts != nil {
+				if t := opts.Get("type"); t != nil && !goja.IsUndefined(t) && !goja.IsNull(t) {
+					mimeType = t.String()
+				}
+			}
+		}
+		obj.Set("size", r.vm.ToValue(int64(len(data))))
+		obj.Set("type", r.vm.ToValue(mimeType))
+		obj.Set(blobDataKey, r.vm.ToValue(string(data)))
+		obj.Set("text", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			return r.promiseResolved(r.vm.ToValue(string(data)))
+		}))
+		obj.Set("arrayBuffer", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			return r.promiseResolved(r.uint8ArrayValue(data))
+		}))
+		obj.Set("slice", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			start, end := 0, len(data)
+			if len(call2.Arguments) >= 1 {
+				start = int(call2.Argument(0).ToInteger())
+			}
+			if len(call2.Arguments) >= 2 {
+				end = int(call2.Argument(1).ToInteger())
+			}
+			if start < 0 {
+				start += len(data)
+			}
+			if end < 0 {
+				end += len(data)
+			}
+			if start < 0 {
+				start = 0
+			}
+			if end > len(data) {
+				end = len(data)
+			}
+			if start > end {
+				start = end
+			}
+			sub := r.vm.NewObject()
+			sub.Set("size", r.vm.ToValue(int64(end-start)))
+			sub.Set("type", r.vm.ToValue(mimeType))
+			sub.Set(blobDataKey, r.vm.ToValue(string(data[start:end])))
+			return r.vm.ToValue(sub)
+		}))
+		return obj
+	})
+}
+
+func (r *Interpreter) registerFileReader() {
+	r.vm.Set("FileReader", func(call goja.ConstructorCall) *goja.Object {
+		obj := r.vm.NewObject()
+		obj.Set("EMPTY", r.vm.ToValue(int64(0)))
+		obj.Set("LOADING", r.vm.ToValue(int64(1)))
+		obj.Set("DONE", r.vm.ToValue(int64(2)))
+		obj.Set("readyState", r.vm.ToValue(int64(0)))
+		obj.Set("result", goja.Null())
+		obj.Set("error", goja.Null())
+
+		// fire 依次触发 onX 内容属性与 addEventListener 注册的同名监听器。
+		fire := func(typ string) {
+			ev := r.vm.NewObject()
+			ev.Set("type", r.vm.ToValue(typ))
+			ev.Set("target", obj)
+			ev.Set("currentTarget", obj)
+			if h := obj.Get("on" + typ); h != nil && !goja.IsUndefined(h) && !goja.IsNull(h) {
+				if fn, ok := goja.AssertFunction(h); ok {
+					_, _ = fn(obj, ev)
+				}
+			}
+			if lo := obj.Get("__wbFRListeners"); lo != nil && !goja.IsUndefined(lo) && !goja.IsNull(lo) {
+				if lobj := lo.ToObject(r.vm); lobj != nil {
+					if av := lobj.Get(typ); av != nil && !goja.IsUndefined(av) && !goja.IsNull(av) {
+						if ao := av.ToObject(r.vm); ao != nil {
+							if nv := ao.Get("length"); nv != nil {
+								for i := 0; i < int(nv.ToInteger()); i++ {
+									if f, ok := goja.AssertFunction(ao.Get(strconv.Itoa(i))); ok {
+										_, _ = f(obj, ev)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		read := func(blob goja.Value, mode string) {
+			var data []byte
+			mimeType := ""
+			if blob != nil && !goja.IsUndefined(blob) && !goja.IsNull(blob) {
+				if bo := blob.ToObject(r.vm); bo != nil {
+					if d := bo.Get(blobDataKey); d != nil && !goja.IsUndefined(d) && !goja.IsNull(d) {
+						data = []byte(d.String())
+					} else {
+						data = r.blobPartBytes(blob)
+					}
+					if t := bo.Get("type"); t != nil && !goja.IsUndefined(t) && !goja.IsNull(t) {
+						mimeType = t.String()
+					}
+				}
+			}
+			obj.Set("readyState", r.vm.ToValue(int64(1)))
+			doRead := func() {
+				switch mode {
+				case "text":
+					obj.Set("result", r.vm.ToValue(string(data)))
+				case "dataurl":
+					obj.Set("result", r.vm.ToValue("data:"+mimeType+";base64,"+
+						base64.StdEncoding.EncodeToString(data)))
+				case "arraybuffer":
+					obj.Set("result", r.uint8ArrayValue(data))
+				default: // binarystring
+					obj.Set("result", r.vm.ToValue(string(data)))
+				}
+				obj.Set("readyState", r.vm.ToValue(int64(2)))
+				fire("load")
+				fire("loadend")
+			}
+			// 规范要求异步完成（事件在调用返回后触发）；有 setTimeout 就走异步。
+			if tm := r.vm.Get("setTimeout"); tm != nil && !goja.IsUndefined(tm) && !goja.IsNull(tm) {
+				if f, ok := goja.AssertFunction(tm); ok {
+					_, _ = f(goja.Undefined(),
+						r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+							doRead()
+							return goja.Undefined()
+						}),
+						r.vm.ToValue(int64(0)))
+					return
+				}
+			}
+			doRead()
+		}
+
+		obj.Set("readAsText", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			read(call2.Argument(0), "text")
+			return goja.Undefined()
+		}))
+		obj.Set("readAsDataURL", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			read(call2.Argument(0), "dataurl")
+			return goja.Undefined()
+		}))
+		obj.Set("readAsArrayBuffer", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			read(call2.Argument(0), "arraybuffer")
+			return goja.Undefined()
+		}))
+		obj.Set("readAsBinaryString", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			read(call2.Argument(0), "binarystring")
+			return goja.Undefined()
+		}))
+		obj.Set("abort", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			obj.Set("readyState", r.vm.ToValue(int64(2)))
+			obj.Set("result", goja.Null())
+			fire("abort")
+			fire("loadend")
+			return goja.Undefined()
+		}))
+		obj.Set("addEventListener", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			typ := call2.Argument(0).String()
+			var lobj *goja.Object
+			if lo := obj.Get("__wbFRListeners"); lo == nil || goja.IsUndefined(lo) || goja.IsNull(lo) {
+				lobj = r.vm.NewObject()
+				obj.Set("__wbFRListeners", r.vm.ToValue(lobj))
+			} else {
+				lobj = lo.ToObject(r.vm)
+			}
+			var arr *goja.Object
+			if av := lobj.Get(typ); av == nil || goja.IsUndefined(av) || goja.IsNull(av) {
+				arr = r.vm.NewObject()
+				arr.Set("length", r.vm.ToValue(int64(0)))
+				lobj.Set(typ, r.vm.ToValue(arr))
+			} else {
+				arr = av.ToObject(r.vm)
+			}
+			n := int(arr.Get("length").ToInteger())
+			arr.Set(strconv.Itoa(n), call2.Argument(1))
+			arr.Set("length", r.vm.ToValue(int64(n+1)))
+			return goja.Undefined()
+		}))
+		obj.Set("removeEventListener", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+			return goja.Undefined()
+		}))
+		return obj
+	})
 }
 
 // ── TextEncoder ─────────────────────────────────────────
@@ -363,4 +624,3 @@ func (r *Interpreter) registerAbortController() {
 	}
 	r.vm.Set("AbortSignal", sigCtor)
 }
-

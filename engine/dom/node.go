@@ -299,6 +299,9 @@ func removeIfPresent(child Node) {
 // performs the DOM hierarchy checks: newChild must not be an ancestor of this node, and
 // this node must be a container. newChild is first removed from any existing parent.
 func (b *nodeBase) AppendChild(newChild Node) error {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	if newChild == nil {
 		return ErrInvalidNodeType
 	}
@@ -359,6 +362,9 @@ func (b *nodeBase) documentForAdoption() *Document {
 // InsertBefore inserts newChild before refChild, mirroring Node::insertBefore(). A nil
 // refChild appends. refChild must be a child of this node.
 func (b *nodeBase) InsertBefore(newChild, refChild Node) error {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	if newChild == nil {
 		return ErrInvalidNodeType
 	}
@@ -400,6 +406,9 @@ func (b *nodeBase) InsertBefore(newChild, refChild Node) error {
 // ReplaceChild replaces oldChild with newChild in the child list, mirroring
 // Node::replaceChild().
 func (b *nodeBase) ReplaceChild(newChild, oldChild Node) error {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	if newChild == nil || oldChild == nil {
 		return ErrInvalidNodeType
 	}
@@ -448,6 +457,9 @@ func (b *nodeBase) ReplaceChild(newChild, oldChild Node) error {
 // RemoveChild detaches child, mirroring Node::removeChild(). child must be a child of
 // this node.
 func (b *nodeBase) RemoveChild(child Node) error {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	if child == nil {
 		return ErrNotFound
 	}
@@ -494,8 +506,9 @@ func (b *nodeBase) adoptSubtree(node Node, doc *Document) {
 // Node::textContent(). For character-data nodes (Text/Comment/...) it returns the
 // node's data; for containers it walks the subtree in document order.
 // ★ 容器只拼接 Text 节点后代：注释/PI 不参与父容器拼接（DOM 规范 Node.textContent）。
-//   否则 paintButtonText（renderformcontrol.go）会把图标 <svg><!-- Folder -->…</svg>
-//   的注释原文当按钮文字绘制，界面出现图标名文字污染。
+//
+//	否则 paintButtonText（renderformcontrol.go）会把图标 <svg><!-- Folder -->…</svg>
+//	的注释原文当按钮文字绘制，界面出现图标名文字污染。
 func (b *nodeBase) TextContent() string {
 	switch b.nodeType {
 	case NodeText, NodeComment, NodeCDATASection, NodeProcessingInstruction:
@@ -517,6 +530,9 @@ func (b *nodeBase) TextContent() string {
 // For character-data nodes it sets the data; for containers it removes all children and
 // appends a single Text node holding the string (when non-empty).
 func (b *nodeBase) SetTextContent(s string) error {
+	if perfDispOn {
+		PerfDOMOps++
+	}
 	switch b.nodeType {
 	case NodeText, NodeComment, NodeCDATASection, NodeProcessingInstruction:
 		return b.self.SetNodeValue(s)

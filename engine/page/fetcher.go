@@ -155,6 +155,24 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 			return resolvePromise(in2, in2.ValueOf(parsed))
 		}, 0)
 		respObj.Set("json", jsc.FunctionValue(jsonFn))
+		// Response.blob()：字节以内部字段 __wbBlobData 承载（与 jsc 包 registerBlob/
+		// registerFileReader 约定一致），FileReader.readAsDataURL 直接消费。
+		blobFn := jsc.NewNativeFunction("blob", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+			bo := jsc.NewObject(in2.ObjectPrototype())
+			bo.Set("size", jsc.NumberValue(float64(len(respBody))))
+			bo.Set("type", jsc.StringValue(resp.Header.Get("Content-Type")))
+			bo.Set("__wbBlobData", jsc.StringValue(bodyText))
+			bo.Set("text", jsc.FunctionValue(jsc.NewNativeFunction("text",
+				func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
+					return resolvePromise(in3, jsc.StringValue(bodyText))
+				}, 0)))
+			bo.Set("arrayBuffer", jsc.FunctionValue(jsc.NewNativeFunction("arrayBuffer",
+				func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
+					return resolvePromise(in3, jsc.StringValue(bodyText))
+				}, 0)))
+			return resolvePromise(in2, jsc.ObjectValue(bo))
+		}, 0)
+		respObj.Set("blob", jsc.FunctionValue(blobFn))
 		headersObj := jsc.NewObject(in.ObjectPrototype())
 		for k, vs := range resp.Header {
 			headersObj.Set(k, jsc.StringValue(strings.Join(vs, ", ")))
@@ -658,6 +676,22 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 		return resolvePromise(in2, in2.ValueOf(parsed))
 	}, 0)
 	respObj.Set("json", jsc.FunctionValue(jsonFn))
+	blobFn := jsc.NewNativeFunction("blob", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+		bo := jsc.NewObject(in2.ObjectPrototype())
+		bo.Set("size", jsc.NumberValue(float64(len(bodyText))))
+		bo.Set("type", jsc.StringValue("application/json"))
+		bo.Set("__wbBlobData", jsc.StringValue(bodyText))
+		bo.Set("text", jsc.FunctionValue(jsc.NewNativeFunction("text",
+			func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
+				return resolvePromise(in3, jsc.StringValue(bodyText))
+			}, 0)))
+		bo.Set("arrayBuffer", jsc.FunctionValue(jsc.NewNativeFunction("arrayBuffer",
+			func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
+				return resolvePromise(in3, jsc.StringValue(bodyText))
+			}, 0)))
+		return resolvePromise(in2, jsc.ObjectValue(bo))
+	}, 0)
+	respObj.Set("blob", jsc.FunctionValue(blobFn))
 
 	headersObj := jsc.NewObject(in.ObjectPrototype())
 	headersObj.Set("Content-Type", jsc.StringValue("application/json"))
