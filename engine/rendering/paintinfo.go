@@ -142,6 +142,18 @@ type PaintInfo struct {
 	layerAncestorClip       Rect
 	layerOwnClipActive      bool
 	layerOwnClip            Rect
+
+	// ★ deferringRootLayers / deferredRootLayers：「根层叠上下文提升」。
+	// 浏览器语义：position:fixed 元素（未被 transform/filter/opacity 祖先
+	// 捕获）的层叠上下文由**根**创建 —— 它的 z-index 与根下所有内容比较、
+	// 绘制在未定位内容之上，与 DOM 顺序无关（CSS 2.1 §E.2 / CSS Position 3）。
+	// 本引擎的绘制顺序 = 层树 DOM 递归顺序，因此 DOM 靠前的 fixed 面板
+	// （IDE 顶栏 ui-titlebar 内的 .menu-dropdown，z-index:9999）会被其后的
+	// 内容层覆盖：菜单只露出与标题栏重叠的那一条，其余被内容区盖住。
+	// 首遍递归（deferringRootLayers=true）把这类层登记进 deferredRootLayers
+	// 并跳过常规绘制；首遍结束后按 z-index 升序补画（见 Paint）。
+	deferringRootLayers bool
+	deferredRootLayers  []*RenderLayer
 }
 
 // NewPaintInfo constructs a PaintInfo targeting the given canvas for the given dirty

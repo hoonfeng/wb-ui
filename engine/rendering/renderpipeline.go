@@ -165,8 +165,26 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 			m0 := canvas.GetMatrix()
 			log.Printf("[ctm] Paint entry scaleX=%.3f tx=%.1f ty=%.1f", m0.ScaleX, m0.TransX, m0.TransY)
 		}
+		info.deferringRootLayers = true
 		tTree := time.Now()
 		paintLayerTree(view.RootLayer(), info)
+		info.deferringRootLayers = false
+		// ★ 根层叠上下文提升（见 PaintInfo.deferredRootLayers）：首遍延后的
+		// fixed+z-index 层按 z-index 升序补画在**所有**普通层之上。浏览器里
+		// fixed 元素的层叠上下文由根创建，其 z-index 与根下内容整体比较；
+		// 缺此步骤时 DOM 靠前的 fixed 面板会被随后的内容层覆盖 —— IDE 顶栏
+		// 「帮助」下拉面板只露出与标题栏重叠的那一条，其余被内容区盖住。
+		if layers := info.deferredRootLayers; len(layers) > 0 {
+			sort.SliceStable(layers, func(i, j int) bool {
+				return layerZIndex(layers[i]) < layerZIndex(layers[j])
+			})
+			if debugenv.Enabled("WB_LAYER_CULL") {
+				log.Printf("[paint-deferred-root] n=%d", len(layers))
+			}
+			for _, dl := range layers {
+				paintLayerTree(dl, info)
+			}
+		}
 		if paintStatsEnabled() {
 			log.Printf("[paint-timing] tree=%v", time.Since(tTree).Round(time.Microsecond))
 		}
@@ -467,6 +485,17 @@ func paintLayerWithEffects(layer *RenderLayer, info *PaintInfo, layerRect layout
 // This mirrors RenderLayer::paintLayer / paintLayerContents ordering.
 func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	if layer == nil {
+		return
+	}
+	// ★ 根层叠上下文提升（首遍）：视口 fixed + z-index>0 且未被层叠上下文
+	// 祖先捕获的层，延后到首遍结束、按 z-index 补画在所有普通层之上
+	// （见 PaintInfo.deferredRootLayers 与 Paint 的补画段）。放在几何
+	// 计算之前 —— 这类层在首遍完全不画（否则会被重复绘制两次）。
+	if info != nil && info.deferringRootLayers && rootStackingEnabled() && defersToRootStackingContext(layer) {
+		info.deferredRootLayers = append(info.deferredRootLayers, layer)
+		if debugenv.Enabled("WB_LAYER_CULL") {
+			log.Printf("[layer-defer-root] %s z=%d", layerName(layer), layerZIndex(layer))
+		}
 		return
 	}
 	if paintDebugEnabled() {
@@ -1072,6 +1101,78 @@ func sortLayerByZ(layers []*RenderLayer, ascending bool) {
 		}
 		return zi > zj
 	})
+}
+
+// rootStackingOnce / rootStackingFlag cache the WB_ROOT_STACKING_DISABLED
+// escape hatch（os.Getenv 在 Windows 上是 syscall，绘制期按层查询需缓存）。
+var (
+	rootStackingOnce sync.Once
+	rootStackingFlag bool
+)
+
+// rootStackingEnabled 报告「根层叠上下文提升」是否启用（默认启用；
+// WB_ROOT_STACKING_DISABLED=1 关闭，用于 A/B 对照与快速回退）。
+func rootStackingEnabled() bool {
+	rootStackingOnce.Do(func() {
+		rootStackingFlag = !debugenv.Enabled("WB_ROOT_STACKING_DISABLED")
+	})
+	return rootStackingFlag
+}
+
+// layerBlocksFixedPromotion 报告祖先层是否「不可打包提升」：opacity<1、
+// transform/filter 非 none —— 它们的效果依赖绘制栈（SaveLayer / 变换空间），
+// 其后代 fixed 层必须留在该栈内绘制，不得提升到根。
+//
+// ★ 定位 + z-index≠auto 的祖先**不算阻断**（原因见 defersToRootStackingContext）。
+func layerBlocksFixedPromotion(l *RenderLayer) bool {
+	if l == nil {
+		return false
+	}
+	box := asRenderBox(l.Owner())
+	if box == nil {
+		return false
+	}
+	st := box.Style()
+	if st == nil {
+		return false
+	}
+	return st.Opacity < 1.0 || st.Transform != "" || st.Filter != ""
+}
+
+// defersToRootStackingContext 报告 layer（视口 fixed + z-index>0）是否需提升到
+// 根层叠上下文、在首遍结束按 z-index 排序补画。
+//
+// 背景：浏览器里 fixed 元素的层叠上下文由根创建（未被 transform/filter 祖先
+// 捕获时），其 z-index 与根下内容整体比较；本引擎的绘制顺序 = 层树 DOM 递归
+// 顺序，因此 DOM 靠前的 fixed 面板会被随后的内容层覆盖 —— IDE 顶栏 ui-titlebar
+// 的 .menu-dropdown{position:fixed;z-index:9999} 只露出与标题栏重叠的一条，
+// 其余被内容区盖住（实测菜单 rect y=28..271，而 titlebar 高 40）。
+//
+// ★ 祖先阻断只认「不可打包提升」的绘制上下文（opacity/transform/filter）：
+// 定位 + z-index≠auto 的祖先不阻断 —— 本引擎尚未实现「同一层叠上下文内跨父层
+// 按 z-index 排序」，若据此阻断，.titlebar{position:relative;z-index:100} 内的
+// 菜单永远无法提升（实测该祖先正是唯一 blocker）。fixed 层的可视位置由视口
+// 决定、与祖先层叠上下文无关（fixed 分支的 RestoreToCount/ResetFixedTransform
+// 已表达同一语义）。
+func defersToRootStackingContext(layer *RenderLayer) bool {
+	if layer == nil || layer.Owner() == nil {
+		return false
+	}
+	if !isViewportFixed(layer.Owner()) {
+		return false
+	}
+	if layerZIndex(layer) <= 0 {
+		return false
+	}
+	for p := layer.Parent(); p != nil; p = p.Parent() {
+		if layerBlocksFixedPromotion(p) {
+			if debugenv.Enabled("WB_LAYER_CULL") {
+				log.Printf("[defer-blocked] %s 被祖先 %s 阻断（opacity/transform/filter）", layerName(layer), layerName(p))
+			}
+			return false
+		}
+	}
+	return true
 }
 
 // paintLayerContent paints the layer owner's subtree in phase order, excluding the
