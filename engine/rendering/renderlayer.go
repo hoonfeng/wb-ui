@@ -256,18 +256,26 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 	// 应用，越过包含块（更高祖先）即停止。
 	isOutOfFlow := false
 	var escapeCB RenderObject
+	// ★ escapesAll：视口固定（position:fixed 且无祖先建立包含块）的包含块恒为
+	//   视口，任何祖先的 overflow 都不适用于它（CSS 2.1 §11.1.1）。
+	//   ★★ 这里【不能】用 `escapeCB = nil` 表达"逃逸一切"：下面的逃逸判定以
+	//   `escapeCB != nil` 为前提，置 nil 会让判定整体失效 —— 于是每一级祖先的
+	//   overflow clip 照常累积进 ClipRect，被标题栏祖先（40px 高）折叠成零，
+	//   paintLayerTree 的空 clip cull 随即整层跳过：帮助菜单（.menu-dropdown =
+	//   fixed + z-index:9999，挂在标题栏内）因此完全不显示。
+	escapesAll := false
 	if cs := l.owner.Style(); cs != nil {
 		isOutOfFlow = cs.Position == style.PositionAbsolute || cs.Position == style.PositionFixed
 		if isOutOfFlow {
 			if box := asRenderBox(l.owner); box != nil {
-				escapeCB = box.ContainingBlock()
 				if isFixed {
-					// 视口固定的包含块恒为视口：所有祖先 overflow 都不
-					// 适用（paintLayerTree 的 fixed 重置同样按视口处理）。
-					// 被 transform 祖先捕获的 fixed 不属于此列——它的
-					// 包含块就是那个祖先（box.ContainingBlock() 已正确
-					// 返回它），祖先 overflow 照常裁剪。
-					escapeCB = nil
+					// 视口固定：逃逸所有祖先的 overflow clip。
+					escapesAll = true
+				} else {
+					// absolute：包含块严格在裁剪祖先之上才逃逸。被
+					// transform/filter 祖先捕获的 fixed 不走此列（isFixed
+					// 为 false），祖先裁剪照常应用。
+					escapeCB = box.ContainingBlock()
 				}
 			}
 		}
@@ -364,7 +372,7 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 		}
 		if cs.OverflowX != style.OverflowVisible || cs.OverflowY != style.OverflowVisible {
 			// 定位后代逃逸：包含块在此祖先之上 → 该级 overflow clip 不适用。
-			if isOutOfFlow && escapeCB != nil && cbStrictlyAbove(cur.owner, escapeCB) {
+			if isOutOfFlow && (escapesAll || (escapeCB != nil && cbStrictlyAbove(cur.owner, escapeCB))) {
 				continue
 			}
 			ancestorRect := cb.PaddingBoxRect()
