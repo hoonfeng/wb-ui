@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -2436,6 +2437,19 @@ func (wv *WebView) handleDynamicStylesheet(el *dom.Element, href string) {
 }
 
 // runDynamicStylesheet 取回并接入一张运行时动态 <link rel=stylesheet>。
+//
+// ★ 接入方式：把取回的 CSS 文本写进一个**新建的 <style> 元素**插入
+// <head>，而不是只走 Frame.AddStyleSheetFromText —— 后者在真实页面上
+// 表现为「调试日志打印 applied，但样式完全不生效」（同一份 CSS 手工注入
+// <style> 立即生效）。已排除的原因：CSS 语法（@keyframes / @media /
+// [data-v-…] 属性选择器实测全部正确）、资源 MIME（text/css、无 nosniff）、
+// 元素样式缓存（新建元素同样拿不到）、样式表被重扫移除（动态表已分离到
+// Frame.dynamicStyleSheets）。
+//
+// <style> 通路是引擎自装配期起就在用的主通路（Frame.extractAndAddStyles），
+// 与 <link> 语义等价：同为 author origin、同一级联顺序、同一组规则。实测
+// 对同一批插件 CSS 立即生效（帮助菜单恢复 position:fixed + z-index:9999，
+// 不再被标题栏祖先的 overflow:hidden 裁掉）。
 func (wv *WebView) runDynamicStylesheet(el *dom.Element, abs string) {
 	cssText, err := wv.loadExternalResource(abs, PurposeStylesheet)
 	if err != nil {
@@ -2445,9 +2459,19 @@ func (wv *WebView) runDynamicStylesheet(el *dom.Element, abs string) {
 		bindings.FireResourceEvent(wv.JSInterpreter(), el, "error")
 		return
 	}
+	// data-wb-dynstyle-src 便于在页面上核对「某外部表的文本确实进来了」。
+	js := "(function(){var s=document.createElement('style');s.setAttribute('data-wb-dynstyle-src', " +
+		strconv.Quote(abs) + ");s.textContent = " + strconv.Quote(cssText) +
+		";document.head.appendChild(s);return 1})()"
+	if _, err := wv.EvalJS(js); err != nil {
+		if os.Getenv("WB_DYNSCRIPT_DEBUG") != "" {
+			fmt.Fprintln(os.Stderr, "[dynstyle] style-inject FAIL "+abs+": "+err.Error())
+		}
+		bindings.FireResourceEvent(wv.JSInterpreter(), el, "error")
+		return
+	}
 	if mf := wv.mainFrame; mf != nil {
 		if fr := mf.Frame(); fr != nil {
-			fr.AddStyleSheetFromText(el, abs, cssText)
 			fr.MarkRenderTreeDirty()
 		}
 	}

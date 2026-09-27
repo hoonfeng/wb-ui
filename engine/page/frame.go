@@ -65,6 +65,21 @@ type Frame struct {
 	// accumulating when style content changes dynamically.
 	styleSheets []*css.CSSStyleSheet
 
+	// dynamicStyleSheets tracks stylesheets attached at runtime through
+	// AddStyleSheetFromText (a <link rel=stylesheet> inserted by script —
+	// how every gou-ide plugin package ships its CSS).
+	//
+	// ★ They are deliberately kept OUT of styleSheets: extractAndAddStyles
+	// removes every sheet listed there before re-scanning the document (so an
+	// edited <style> text does not leave stale rules behind), but a runtime
+	// <link> is never re-scanned — handleDynamicStylesheet marks it with
+	// data-wb-dynstyle=1 and loads it exactly once. Sharing one list dropped
+	// every plugin stylesheet on the next DOM/style change: the whole IDE fell
+	// back to unstyled layout mid-session, and the titlebar's help menu lost
+	// position:fixed/z-index and was clipped away inside the 40px titlebar
+	// (「帮助菜单被遮挡 / 不在最前」的根因).
+	dynamicStyleSheets []*css.CSSStyleSheet
+
 	// ScriptEngine is an optional callback for executing JavaScript. When set,
 	// executeInlineScripts calls it for each inline <script> element found in
 	// the document. The WebView sets this to its EvalJS method so that inline
@@ -632,6 +647,13 @@ func (f *Frame) extractAndAddStyles() {
 		if href == "" {
 			continue
 		}
+		// ★ 运行时由脚本插入的 <link rel=stylesheet> 已走
+		//   handleDynamicStylesheet → AddStyleSheetFromText（表存在
+		//   dynamicStyleSheets，且只加载一次）。这里再取一次会重复接入
+		//   同一份 CSS，并把它塞回会被重扫清空的 styleSheets —— 跳过。
+		if linkEl.GetAttribute("data-wb-dynstyle") == "1" {
+			continue
+		}
 		// ★ 按文档基准（含 `<base href>`）解析成绝对 URL 再加载：① 相对引用
 		//   在装配过程中就要解析，此时宿主的「当前基准」可能还没登记；② 该
 		//   绝对 URL 同时成为样式表的 BaseURL，`@import` 的逐级解析因此不再
@@ -677,7 +699,16 @@ func (f *Frame) AddStyleSheetFromText(owner dom.Node, href, cssText string) {
 	p := css.NewParser(cssText)
 	p.ParseStyleSheetInto(sheet)
 	f.resolver.AddStyleSheet(sheet)
-	f.styleSheets = append(f.styleSheets, sheet)
+	// ★ 加表之后必须清 per-element 样式缓存：AddStyleSheet 只作废
+	//   pseudoProbe/selectionCached，**不动 r.cache**（见 resolver.go），
+	//   而 extractAndAddStyles 的内联 <style> 路径之所以「立即生效」，正是
+	//   因为它在 Add 之前先 RemoveStyleSheet（Remove 里调 ClearCache）。
+	//   动态 <link> 没有这一步 —— 已解析过的元素继续返回缓存里的旧样式，
+	//   整表看似「applied 但不起作用」（实测菜单拿不到 position:fixed）。
+	f.resolver.ClearCache()
+	// ★ 进 dynamicStyleSheets 而非 styleSheets：外部样式表只加载一次，
+	//   绝不能参与 extractAndAddStyles 的「先全撤再重扫」（见字段注释）。
+	f.dynamicStyleSheets = append(f.dynamicStyleSheets, sheet)
 	if f.renderView != nil {
 		f.renderView.MarkAllDirty()
 	}
