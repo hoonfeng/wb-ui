@@ -84,19 +84,35 @@ func (s *svgFilledShape) paint(canvas *graphics.Canvas, ctx *svgPaintContext) {
 	}
 	// Gradient fill: paint the shape geometry directly with the gradient
 	// shader (the shape's own paint would only use flat colors).
+	// ★ 不再 return：渐变只【替代 fill】，描边（含 stroke 渐变）与 clip/
+	//   opacity 等仍须照常绘制。原先 return 让「渐变填充 + 描边」的图形
+	//   整条描边消失 —— AboutModal logo 的圆角方块
+	//   `<rect rx='96' ry='96' fill='url(#bgGrad)' stroke='#1a3a4a'
+	//   stroke-width='2'>` 因此只铺了一层与弹窗底色几乎同色的渐变，
+	//   圆角轮廓（那 2px stroke）完全不画 ⇒ 用户可见现象为「logo 没有圆角」。
+	//   注意：原先的 canvas.Restore 由 return + defer 触发，取消 return 后
+	//   必须立即还原，否则变换会泄漏到后续 stroke 绘制。
+	gradientPainted := false
 	if s.gradientID != "" {
 		if g, ok := ctx.gradients[s.gradientID]; ok {
+			restore := func() {}
 			if s.transform != "" {
 				canvas.Save()
-				defer canvas.Restore()
+				restore = func() { canvas.Restore() }
 				applyTransformOps(canvas, s.transform)
 			}
 			paintShapeGradient(canvas, s.shape, g)
-			return
+			restore()
+			gradientPainted = true
 		}
 	}
 	c2 := *ctx
 	c2.fill = s.fill
+	if gradientPainted {
+		// 渐变已铺满形状：置零避免随后按 s.fill 又画一层平色（直角矩形），
+		// 把圆角渐变盖成直角。
+		c2.fill = graphics.Color{}
+	}
 	c2.stroke = s.stroke
 	c2.strokeWidth = s.strokeWidth
 	c2.lineCap = s.lineCap
@@ -389,6 +405,21 @@ func paintShapeGradient(canvas *graphics.Canvas, shape svgShape, g *svgGradient)
 	}
 	switch s := shape.(type) {
 	case *svgRect:
+		// ★ 圆角矩形（rx/ry）：渐变铺色按直角矩形做，先设圆角裁剪再铺 ——
+		//   否则 `fill='url(#g)' + rx` 的方块会被画成直角（渐变底溢出圆角），
+		//   与浏览器（圆角内铺渐变）不一致。AboutModal logo 的 448×448
+		//   rx=96 深色底即此场景。
+		r := s.rx
+		if r == 0 {
+			r = s.ry
+		}
+		if r > 0 {
+			canvas.Save()
+			canvas.ClipRoundRect(s.x, s.y, s.w, s.h, r)
+			paintGradientOnShape(canvas, g, s.x, s.y, s.w, s.h)
+			canvas.Restore()
+			return
+		}
 		paintGradientOnShape(canvas, g, s.x, s.y, s.w, s.h)
 	case *svgCircle:
 		paintGradientOnShape(canvas, g, s.cx-s.r, s.cy-s.r, s.r*2, s.r*2)
