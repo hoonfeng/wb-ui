@@ -299,6 +299,7 @@ func removeIfPresent(child Node) {
 // performs the DOM hierarchy checks: newChild must not be an ancestor of this node, and
 // this node must be a container. newChild is first removed from any existing parent.
 func (b *nodeBase) AppendChild(newChild Node) error {
+	bumpDOMChangeSeq()
 	if perfDispOn {
 		PerfDOMOps++
 	}
@@ -362,6 +363,7 @@ func (b *nodeBase) documentForAdoption() *Document {
 // InsertBefore inserts newChild before refChild, mirroring Node::insertBefore(). A nil
 // refChild appends. refChild must be a child of this node.
 func (b *nodeBase) InsertBefore(newChild, refChild Node) error {
+	bumpDOMChangeSeq()
 	if perfDispOn {
 		PerfDOMOps++
 	}
@@ -406,6 +408,7 @@ func (b *nodeBase) InsertBefore(newChild, refChild Node) error {
 // ReplaceChild replaces oldChild with newChild in the child list, mirroring
 // Node::replaceChild().
 func (b *nodeBase) ReplaceChild(newChild, oldChild Node) error {
+	bumpDOMChangeSeq()
 	if perfDispOn {
 		PerfDOMOps++
 	}
@@ -457,6 +460,7 @@ func (b *nodeBase) ReplaceChild(newChild, oldChild Node) error {
 // RemoveChild detaches child, mirroring Node::removeChild(). child must be a child of
 // this node.
 func (b *nodeBase) RemoveChild(child Node) error {
+	bumpDOMChangeSeq()
 	if perfDispOn {
 		PerfDOMOps++
 	}

@@ -93,6 +93,23 @@ type RenderView struct {
 	// 原地更新）。渲染树重建会整体换新 RenderView，缓存随旧对象一同丢弃，
 	// 因此不存在跨重建的陈旧项。
 	boxContentSizeCache map[*RenderBox][2]float64
+
+	// fixedProbeDone/fixedProbeVal 缓存「渲染树内是否存在 position:fixed
+	// 元素」——命中测试 Pass1（fixed 子树优先）的剪枝依据。
+	//
+	// 探测本身是一次全树深度优先遍历（找到即停），但只在首次命中测试时
+	// 发生；此后每次命中测试都省下 Pass1 这趟全树遍历。cpuprofile 实测
+	// Pass1（hitTestFixedInner）占编辑器场景 HitTest 的 41.8%（200ms
+	// flat / 280ms cum，总样本 670ms），而编辑器与多数页面 DOM 并无
+	// position:fixed 元素——无 fixed 时 Pass1 对结果零贡献。
+	//
+	// 失效：① 渲染树整体重建 → 每次 Build 都是新 RenderView，缓存随旧
+	// 对象丢弃（同 boxContentSizeCache 的语义）；② 渲染树就地变更 →
+	// RenderTreeUpdater.Update() 调 InvalidateHitTestProbes()；
+	// ③ 样式变化改变 position（display/position/float/clear）→ 走全量
+	// 重建（见 page.Frame.RebuildStyleForElement），即 ① 覆盖。
+	fixedProbeDone bool
+	fixedProbeVal  bool
 }
 
 // SetResolver attaches the style resolver used to build the render tree.
@@ -349,6 +366,15 @@ func (v *RenderView) PresentedBoxScrollOffset(box *RenderBox) (float64, float64)
 	if box == nil || box.Node() == nil {
 		return 0, 0
 	}
+	// ★ 快速路径（命中测试热路径，每节点调用一次）：快照与实时值都为空
+	//   时结果必为 (0,0)——直接返回，跳过以 dom.Node 接口为 key 的 map
+	//   查找（接口 key 的哈希/比较是该路径上最贵的常数项，且失败查找
+	//   还要走 mapKeyError 路径）。语义与下方分支逐项等价：
+	//   - 快照 nil + 实时空 → 原走 BoxScrollOffset → 空 map 查不到 → 0,0
+	//   - 快照空 map（已呈现、无滚动）+ 实时空 → 原查快照无此键 → 0,0
+	if len(v.presentedBoxScrollOffsets) == 0 && len(v.boxScrollOffsets) == 0 {
+		return 0, 0
+	}
 	if v.presentedBoxScrollOffsets == nil {
 		// 快照从未建立（该视图从未 Paint 过）：无视觉帧可依，回退实时值。
 		return v.BoxScrollOffset(box)
@@ -358,6 +384,52 @@ func (v *RenderView) PresentedBoxScrollOffset(box *RenderBox) (float64, float64)
 	}
 	// 快照 map 存在但无此键（建快照时该 box 未滚动）：就是 0。
 	return 0, 0
+}
+
+// InvalidateHitTestProbes 失效命中测试的探测缓存。渲染树被**就地**变更
+// （节点增删、样式刷新）后必须调用：变更可能引入或移除 position:fixed
+// 元素，缓存若不失效会让剪枝后的 HitTest 漏掉 fixed 子树（点击弹窗穿透
+// 到下层元素）。渲染树整体重建不需要调用——重建换新 RenderView 实例，
+// 缓存随旧对象丢弃。
+func (v *RenderView) InvalidateHitTestProbes() {
+	if v == nil {
+		return
+	}
+	v.fixedProbeDone = false
+}
+
+// MayHaveFixedDescendant 报告渲染树内是否存在 position:fixed 元素（含其
+// 后代）。结果缓存到下一次 InvalidateHitTestProbes 或渲染树重建。
+// 保守取向：无法判断（v 为 nil）时返回 true —— 宁可多跑一趟 Pass1，
+// 不可漏掉 fixed 命中。
+func (v *RenderView) MayHaveFixedDescendant() bool {
+	if v == nil {
+		return true
+	}
+	if !v.fixedProbeDone {
+		v.fixedProbeVal = hasFixedInTree(RenderObject(v))
+		v.fixedProbeDone = true
+	}
+	return v.fixedProbeVal
+}
+
+// hasFixedInTree 深度优先扫描渲染树，遇到 position:fixed 的盒子立即返回
+// true（与 hitTestFixedInner 的 isFixed 判据同源：box.Style().Position）。
+func hasFixedInTree(o RenderObject) bool {
+	if o == nil {
+		return false
+	}
+	if box := asRenderBox(o); box != nil {
+		if st := box.Style(); st != nil && st.Position == style.PositionFixed {
+			return true
+		}
+	}
+	for c := o.FirstChild(); c != nil; c = c.NextSibling() {
+		if hasFixedInTree(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // ScrollStackOffsetFor 返回 o 的**祖先链**（不含 o 自身）上所有滚动容器

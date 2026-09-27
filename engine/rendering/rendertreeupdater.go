@@ -110,6 +110,12 @@ func (u *RenderTreeUpdater) Update() {
 		}
 	}
 	u.pending = u.pending[:0]
+	// ★ 命中测试探测缓存失效：就地增删节点可能引入/移除 position:fixed
+	//   元素，缓存的「树内无 fixed」结论会随之失真（失真的后果是点击
+	//   弹窗穿透到下层元素）。整体重建走新 RenderView，无需在此处理。
+	if u.view != nil {
+		u.view.InvalidateHitTestProbes()
+	}
 	// Rebuild the layer tree to pick up any new compositing conditions.
 	if u.view != nil && u.view.compositor != nil {
 		u.view.compositor.BuildLayerTree(u.view)

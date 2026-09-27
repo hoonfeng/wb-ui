@@ -73,6 +73,12 @@ func BoxViewportRect(rv *RenderView, o RenderObject) (x, y, w, h float64) {
 	return
 }
 
+// HitTestPruneFixedDisabled 关闭「树内无 position:fixed 元素时跳过 Pass1」
+// 的剪枝，恒定执行 Pass1。仅供诊断与等价性测试使用——剪枝开/关的命中
+// 结果必须逐点一致（见 hittest_prune_test.go 的逐点扫描）；生产路径保持
+// false（无 fixed 时省下整趟全树遍历）。
+var HitTestPruneFixedDisabled = false
+
 // HitTest walks the render tree rooted at rv and returns the deepest Element whose
 // bounding box contains (x, y) and that has the given attribute set (e.g. "onclick").
 // When attrName is empty, returns the deepest box-bearing element at the point.
@@ -88,9 +94,15 @@ func HitTest(rv *RenderView, x, y float64, attrName string) *dom.Element {
 	// Pass 1: fixed-position subtrees win (dialog overlay / context menus).
 	var best *dom.Element
 	var bestArea float64 = -1
-	hitTestFixedFirst(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
-	if best != nil {
-		return best
+	// ★ 剪枝：渲染树内不存在 position:fixed 元素时，这整趟全树遍历对
+	//   结果零贡献（它只对 fixed 子树内的盒子感兴趣）——直接跳过。
+	//   探测结果缓存在 RenderView 上（MayHaveFixedDescendant），并按
+	//   「渲染树就地变更」失效；树重建则换新 RenderView 实例。
+	if HitTestPruneFixedDisabled || rv.MayHaveFixedDescendant() {
+		hitTestFixedFirst(RenderObject(rv), x, y, attrName, &best, &bestArea, rv)
+		if best != nil {
+			return best
+		}
 	}
 	// Pass 2: ★ 层叠感知命中（镜像 paintLayerTree 的绘制顺序：后绘制的在
 	// 上、先命中）。z-index/定位浮层（遮罩/弹窗）必须挡下层元素，否则

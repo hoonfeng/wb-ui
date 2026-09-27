@@ -20,7 +20,7 @@ func parseSelectorList(selector string) *css.SelectorList {
 // ElementMatches 检查元素是否匹配给定的 CSS 选择器。
 // 镜像 Element::matches(selectors)。
 func ElementMatches(el *dom.Element, selector string) bool {
-	selList := parseSelectorList(selector)
+	selList := cachedParseSelectorList(selector)
 	if selList == nil || len(selList.Selectors) == 0 {
 		return false
 	}
@@ -36,7 +36,7 @@ func ElementMatches(el *dom.Element, selector string) bool {
 // ElementClosest 沿祖先链向上查找第一个匹配选择器的元素。
 // 镜像 Element::closest(selectors)。
 func ElementClosest(el *dom.Element, selector string) *dom.Element {
-	selList := parseSelectorList(selector)
+	selList := cachedParseSelectorList(selector)
 	if selList == nil || len(selList.Selectors) == 0 {
 		return nil
 	}
@@ -54,7 +54,7 @@ func ElementClosest(el *dom.Element, selector string) *dom.Element {
 // ElementQuerySelector 在元素子树中查找第一个匹配选择器的后代元素。
 // 镜像 Element::querySelector(selectors)。
 func ElementQuerySelector(el *dom.Element, selector string) *dom.Element {
-	selList := parseSelectorList(selector)
+	selList := cachedParseSelectorList(selector)
 	if selList == nil || len(selList.Selectors) == 0 {
 		return nil
 	}
@@ -62,6 +62,11 @@ func ElementQuerySelector(el *dom.Element, selector string) *dom.Element {
 	// Match → matchComplex → matchCompound → matchSimple 四层调用与按值传递。
 	// 实测依据见文件末「快路径」注释块。
 	if kind, v := classifySimpleQuery(selList); kind != simpleQueryNone {
+		// ★ 结构索引：文档级查询直接取候选（重复查询同一选择器 O(1)）；
+		//   索引不可用（子树查询/游离元素/诊断开关）时回退下面的遍历。
+		if fast, handled := indexedFirstMatch(el, kind, v); handled {
+			return fast
+		}
 		var fast *dom.Element
 		el.WalkDescendantElements(func(e *dom.Element) bool {
 			if matchSimpleQuery(kind, v, e) {
@@ -89,12 +94,16 @@ func ElementQuerySelector(el *dom.Element, selector string) *dom.Element {
 // ElementQuerySelectorAll 在元素子树中查找所有匹配选择器的后代元素。
 // 镜像 Element::querySelectorAll(selectors)。
 func ElementQuerySelectorAll(el *dom.Element, selector string) []*dom.Element {
-	selList := parseSelectorList(selector)
+	selList := cachedParseSelectorList(selector)
 	if selList == nil || len(selList.Selectors) == 0 {
 		return nil
 	}
 	// 简单选择器快路径（同 ElementQuerySelector）。
 	if kind, v := classifySimpleQuery(selList); kind != simpleQueryNone {
+		// ★ 结构索引（同 ElementQuerySelector）：返回副本，避免调用方改写缓存。
+		if fast, handled := indexedAllMatches(el, kind, v); handled {
+			return fast
+		}
 		var fast []*dom.Element
 		el.WalkDescendantElements(func(e *dom.Element) bool {
 			if matchSimpleQuery(kind, v, e) {

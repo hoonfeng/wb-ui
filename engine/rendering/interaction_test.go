@@ -22,7 +22,7 @@ import (
 // mkRuntime builds a document + render view + JS runtime wired together so
 // addEventListener from JS registers on real DOM elements and DispatchEvent
 // invokes the JS callback — the exact pipeline Vue @click uses.
-func mkRuntime(t *testing.T, body string) (*dom.Document, *rendering.RenderView, *jsc.Interpreter, *strings.Builder) {
+func mkRuntime(t testing.TB, body string) (*dom.Document, *rendering.RenderView, *jsc.Interpreter, *strings.Builder) {
 	t.Helper()
 	if graphics.GetFontManager() == nil {
 		_ = graphics.InitFontManager("")
@@ -74,7 +74,7 @@ func extractStylesTest(root *dom.Element, resolver *style.Resolver) {
 	}
 }
 
-func findEl(t *testing.T, doc *dom.Document, cls string) *dom.Element {
+func findEl(t testing.TB, doc *dom.Document, cls string) *dom.Element {
 	t.Helper()
 	for _, el := range doc.GetElementsByTagName("div") {
 		if strings.Contains(el.GetAttribute("class"), cls) {
@@ -101,7 +101,7 @@ func findEl(t *testing.T, doc *dom.Document, cls string) *dom.Element {
 }
 
 // hitCenter finds the render box for cls and returns its center in page coords.
-func hitCenter(t *testing.T, rv *rendering.RenderView, cls string) (float64, float64) {
+func hitCenter(t testing.TB, rv *rendering.RenderView, cls string) (float64, float64) {
 	t.Helper()
 	var bx, by, bw, bh float64
 	found := false

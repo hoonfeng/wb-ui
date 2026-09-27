@@ -176,6 +176,10 @@ var OnElementAttributeChanged func(el *Element, localName, oldValue string, oldE
 
 // notifyAttributeChanged 触发上面的属性变更回调（未注册时无操作）。
 func notifyAttributeChanged(el *Element, name, oldValue string, oldExisted bool, newValue string, newExisted bool) {
+	// DOM 变更序号：属性变更会让「按 tag/class/id 派生的索引」失效
+	//（class / id 都是属性）。放在无条件钩子的入口，与是否有
+	// OnElementAttributeChanged 注册者无关。见 change_seq.go。
+	bumpDOMChangeSeq()
 	if OnElementAttributeChanged != nil {
 		OnElementAttributeChanged(el, name, oldValue, oldExisted, newValue, newExisted)
 	}
