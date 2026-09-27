@@ -143,7 +143,7 @@ top2 仅 `getComputedStyle`（n=15）、`getSelection`（n=1）；`getBoundingCl
 | `querySelector` | `GetAttribute/HasAttribute` 每次 `strings.ToLower(属性名)` + map 查找；子孙遍历重复取 `nodeBaseOf` | 属性名已小写时**零分配直查**；css 属性选择器与 js bindings 查询统一走该入口；遍历复用 `nodeBaseOf` | 端到端 1e4：2978.2 → **1765.3ms（-40.7%）**；Go 紧邻对照（3000x×3 中位数）68.0 → **29.6µs（-56.5%）** |
 | `querySelectorAll` | 与 `querySelector` 同一匹配入口 | 同上 | 端到端 1e3：500.4 → **447.7ms（-10.5%）**；Go 对照 144.0 → **68.3µs（-52.6%）** |
 | `getComputedStyle` | 每次调用在函数内构造 **117 元素白名单切片**并对每项跑 `camelToKebab`（含分配）；`border-width` longhand 回写还每次构造 4 项 map 字面量（分配 + 顺序随机） | 白名单与 kebab 键改**包级预计算一次**（成员/顺序/三处重复项逐字保留）；回写改有序切片表 | 基准（`-benchtime=200000x`）：**14,475 ns/op / 224 allocs / 4920 B → 41 ns/op / 0 allocs**；对照实测 ≈47µs/次 → 每次省 ≈14.4µs |
-| `elementFromPoint` | 命中测试本身要遍历层树/渲染树（**本质成本**，非可去开销） | **未改算法**：核查 `attrName == ""` 时各处已 `if attrName != ""` 跳过属性读取，不存在「每次调用」浪费；仅从属性/遍历热路径间接受益 | 配对窗口 266.5 → **226.3ms（-15%）** |
+| `elementFromPoint` | `HitTest` 的 Pass1（`hitTestFixedFirst`）**无条件全树 DFS**，却只对 fixed 子树内的盒子感兴趣——树里没有 `position:fixed` 时对结果零贡献（cpuprofile：占 HitTest 纯工作量的 **61%**）；另有每节点一次 `PresentedBoxScrollOffset` 的接口 key（`dom.Node`）map 查找 | **命中测试剪枝**（commit `adae53e`）：`RenderView.MayHaveFixedDescendant` 惰性探测 + 缓存，无 fixed 时跳过整趟 Pass1；滚动偏移空即短路查表；失效协议 = 树重建换新 RenderView / 就地变更调 `InvalidateHitTestProbes`（钩子已审计挂全） | 同窗口 Go 基准（编辑器形树 1200+ 节点）：**56,974 → 6,197 ns/op（-89.1%）**；miss 路径 43,347 → **566 ns/op（-98.7%）**；正确性见 `hittest_prune_test.go` |
 
 **语义等价证据**：`engine/js/bindings/computed_style_props_test.go` 断言预计算表与优化前字面量
 **逐项一致**（117 项，含 `backgroundRepeat` / `backgroundPosition` / `backgroundSize` 三处重复项），
@@ -159,12 +159,22 @@ top2 仅 `getComputedStyle`（n=15）、`getSelection`（n=1）；`getBoundingCl
 - **判定：达成**。端到端 N=1：**2006.8ms → 33.2/34.3ms**（同端口径、两次独立复现）；阈值 ≤1300ms。
 - **此前"不换 V8 不可达"的说法作废**：该结论建立在前一版的假阴性插桩与差额估算之上；
   本轮实测表明成本在**引擎侧的重复计算**，属可修范围，且已修复。
-- **§6 四个退化 API 的处置**：`querySelector` / `querySelectorAll` / `getComputedStyle` 已收口
-  （§6.1，commit `5c66363`）；`elementFromPoint` 经代码核查属命中测试遍历的**本质成本**
-  （无每次调用的固定浪费），本轮未改其算法，仅在属性/遍历热路径上间接受益（-15%）。
-- **剩余可选方向**：选择器匹配**索引化**（跨调用缓存选择器→元素集）与命中测试**剪枝**。
-  两者都必须先建立「DOM 版本 + 查询键」的失效协议（否则返回陈旧结果），风险高于本轮改动，
-  故本轮不做；需要时可单列一轮设计。
+- **§6 四个退化 API 的处置（全部收口）**：
+  - `getComputedStyle`：白名单/回写表预计算（§6.1，commit `5c66363`）；
+  - `elementFromPoint`：**命中测试剪枝**（commit `adae53e`）——无 `position:fixed` 的树
+    跳过 Pass1 全树遍历（-89.1%）；
+  - `querySelector` / `querySelectorAll`：**选择器匹配索引化**（commit `adae53e`）——
+    选择器解析缓存（纯函数映射，无需失效）+ 文档级 tag/class/id **按需索引**
+    （按 DOM 变更序号失效）：`querySelector` 27,090 → **48.6 ns/op（≈557×）**、
+    `querySelectorAll` 74,176 → **8,465 ns/op（≈8.8×）**。
+- **失效协议（索引化的前提，本轮建立）**：`dom.DOMChangeSeq()`（`engine/dom/change_seq.go`，
+  atomic、只增不减），挂点 = 4 个结构 mutation 方法 + `notifyAttributeChanged`
+  （`SetAttribute`/`RemoveAttribute` 的无条件钩子）。索引只依赖 tag/class/id，
+  因此失效面 = 结构变更 + 属性变更，已全覆盖；**只增不减 ⇒ 宁可多失效，
+  绝不返回陈旧结果**。
+- **剩余可选方向（非阻塞）**：索引目前只覆盖「单 compound + 单 simple」形态
+  （`.cls` / `#id` / `tag` / `*`）；组合器 / 多 compound 的查询仍走全树遍历。
+  若后续在此出现热点，可扩展为「取最右 compound 的候选集 + 逐候选验证」。
 
 ## 8. 复现命令
 

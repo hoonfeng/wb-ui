@@ -494,5 +494,57 @@
     "equivalence": "engine/js/bindings/computed_style_props_test.go：预计算表与优化前字面量逐项一致（117 项，含三处重复项）"
    },
    "not_done": "elementFromPoint 命中测试成本属遍历本身（attrName 为空时各处已跳过属性读取），未改算法，仅间接受益；选择器索引化 / 命中测试剪枝需先建失效协议，单列一轮"
- }
+ },
+  "dom_hotpath_round3": {
+    "what": "两个遗留项收口：命中测试剪枝（elementFromPoint）+ 选择器匹配索引化（querySelector 族），并建立 DOM 变更序号失效协议",
+    "commit": "adae53e",
+    "changes": [
+     "HitTest Pass1 剪枝：hitTestFixedFirst 原为无条件全树 DFS（只对 fixed 子树内的盒子感兴趣）；新增 RenderView.MayHaveFixedDescendant 惰性探测并缓存「树内是否存在 position:fixed 元素」，无 fixed 时跳过整趟 Pass1",
+     "PresentedBoxScrollOffset 快速路径：快照与实时偏移都为空时直接返回 (0,0)，跳过以 dom.Node 接口为 key 的 map 查找（命中测试每节点一次）",
+     "剪枝失效协议：树整体重建换新 RenderView（缓存随旧对象丢弃）；就地变更由 RenderTreeUpdater.Update 调 InvalidateHitTestProbes；全部树写入入口已审计",
+     "选择器解析缓存：字符串到 css.SelectorList 是纯函数映射，无需失效协议；AST 只读共享；上限 512 满则整体清空",
+     "dom 层 DOM 变更序号（change_seq.go，atomic、只增不减）：挂点 = AppendChild/InsertBefore/RemoveChild/ReplaceChild + notifyAttributeChanged（SetAttribute/RemoveAttribute 的无条件钩子）",
+     "bindings 文档级 tag/class/id 索引（按需填充）：新 key 最多一次全文档扫描（最坏不慢于遍历），重复查询同一选择器 O(1)；按变更序号整体失效；querySelectorAll 返回副本防调用方污染；子树与游离元素查询回退遍历"
+    ],
+    "go_microbench": {
+     "hit_test_cmd": "go test ./engine/rendering/ -run ^$ -bench BenchmarkHitTest -benchtime=300x -count=1",
+     "hit_test_walk_before_vs_pruned_after_ns_per_op": {
+      "EditorDOM": [
+       56974,
+       6197
+      ],
+      "EditorDOMAttr": [
+       65346,
+       9396
+      ],
+      "FlatDOM": [
+       23937,
+       3860
+      ],
+      "MissPoint": [
+       43347,
+       566
+      ]
+     },
+     "query_cmd": "go test ./engine/js/bindings/ -run ^$ -bench BenchmarkQuerySelector -benchtime=3000x -count=1",
+     "query_walk_vs_indexed_ns_per_op": {
+      "querySelector": [
+       27090,
+       48.6
+      ],
+      "querySelectorAll": [
+       74176,
+       8465
+      ]
+     },
+     "profile": "HitTest Pass1（hitTestFixedInner）占纯工作的 61%：cpuprofile 6000x 下 flat 200ms / cum 280ms，总样本 670ms（其中 cgocall 210ms 为 skia 字体初始化噪声）"
+    },
+    "correctness": {
+     "hit_test_prune": "engine/rendering/hittest_prune_test.go：剪枝开/关网格逐点一致（4 夹具 x 2 attr x 30 点）、探测结果与夹具事实一致、就地插入 position:fixed 后缓存必须失效、fixed 子树优先语义保留",
+     "query_index": "engine/js/bindings/dom_query_index_test.go：索引/遍历逐项一致（3 夹具 x 14 选择器）、6 类 DOM 变更后索引失效、副本语义防污染",
+     "six_packages": "go test -count=1 ./engine/{dom,js/bindings,css,style,rendering,layout} 全绿 -> out/_test_after_round3.log"
+    },
+    "caliber_note": "本轮无端到端探针数字：新构建 companion 以 WEB_PORT=9197 独立实例启动（未触碰 9090/9191），探针在其上长时间无输出（疑等待页面就绪条件），故不引用任何端到端数字；本表一律为同窗口紧邻 Go 微基准对照。",
+    "not_done": "索引仅覆盖单 compound + 单 simple 形态（.cls / #id / tag / *）；组合器与多 compound 查询仍走全树遍历（后续若成热点可扩展为最右 compound 候选集 + 逐候选验证）"
+  }
 }
