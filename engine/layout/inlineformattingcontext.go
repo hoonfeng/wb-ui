@@ -1002,8 +1002,35 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// 按基线公式算 12 + (15-14.52)/2 + 11.64 - 8 = 15.88 ≈ 浏览器 16.0。
 					childBH := cldG.BorderBoxHeight()
 					if childBH > 0 {
-						baseLine := currentLine.y + halfLeading + textAscent
+						// ★ 行盒基线 = 【全体基线对齐盒】要求的最大值（CSS 2.1
+						//   §10.8.1）：替换元素要求「行盒顶→基线」至少
+						//   marginTop + borderBoxH（它的基线就是 margin box
+						//   底边），文本只要求 halfLeading + 字体 ascent。
+						//   此前固定取文本度量，比文本行高的替换元素（AboutModal
+						//   的 64×64 logo）底边坐上文本基线后，顶边整体浮出行盒
+						//   上方（实测 图片 y=246 vs 父容器 y=296，上移 50px →
+						//   logo 与标题间出现空洞；浏览器 y=296 正好贴容器顶）。
+						//   矮于文本行的图标（如 .qexec-caret 的 8px svg）required
+						//   被文本基线兜住 → 定位与旧公式逐位相同，零回归。
+						required := margin.Top + childBH
+						textBase := halfLeading + textAscent
+						if required > textBase && required > currentLine.maxBaseline {
+							// 本行基线随最高的替换元素下沉；本元素登记进
+							// baselineBoxes，后续出现更高者时一并下移
+							// （与表单控件共用同一条行内基线机制）。
+							currentLine.maxBaseline = required
+						}
+						baseLineTop := textBase
+						if currentLine.maxBaseline > baseLineTop {
+							baseLineTop = currentLine.maxBaseline
+						}
+						baseLine := currentLine.y + baseLineTop
 						cldG.SetTopLeft(baseLine-childBH-margin.Bottom, cldG.Left())
+						// 基线在 margin box 底边 → 基线以下深度即 margin.Bottom。
+						currentLine.baselineBoxes = append(currentLine.baselineBoxes, cld)
+						if margin.Bottom > currentLine.maxDescent {
+							currentLine.maxDescent = margin.Bottom
+						}
 					}
 				}
 			}
