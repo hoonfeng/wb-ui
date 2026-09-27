@@ -275,15 +275,18 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 	view := l.owner.View()
 	totalSX, totalSY := 0.0, 0.0
 	if view != nil && !isFixed {
-		for cur := l.parent; cur != nil; cur = cur.parent {
-			if cur.owner == nil {
-				continue
-			}
-			cb := asRenderBox(cur.owner)
+		// ★ 遍历【渲染对象祖先链】，而不是层链：滚动容器（overflow:auto/
+		//   scroll，如 .conv-list 列表容器）不一定生成独立 RenderLayer，
+		//   只走层链会漏掉它的滚动偏移 —— 而绘制端 paintLayerContents 是按
+		//   box 的 overflow 样式应用 translate（与是否成层无关）。两边脱钩
+		//   会让本层坐标/裁剪停在【未平移】位置：滚动到底后内容已平移，
+		//   背景却按未平移位置绘制并盖住文字（"列表标题滚动后消失"）。
+		for p := l.owner.Parent(); p != nil; p = p.Parent() {
+			cb := asRenderBox(p)
 			if cb == nil {
 				continue
 			}
-			cs := cur.owner.Style()
+			cs := p.Style()
 			if cs == nil {
 				continue
 			}
@@ -292,7 +295,7 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 				totalSX += sx
 				totalSY += sy
 			}
-			if isViewportFixed(cur.owner) {
+			if isViewportFixed(p) {
 				break
 			}
 		}
@@ -312,6 +315,12 @@ func (l *RenderLayer) CalculateRectsFull() LayerRects {
 	}
 	// Walk the ancestor layer chain intersecting with each ancestor's overflow clip.
 	innerSX, innerSY := 0.0, 0.0
+	// ★ 这里【有意】保持层链遍历（与上面 totalS 的对象链不同）：
+	//   祖先 overflow 裁剪的语义单位是「层」——非层的中间元素不构成裁剪
+	//   单元。改成对象链会引入额外 clip 交集，破坏 fixed 祖先自身裁剪
+	//   （回归 TestFixedAncestorOwnClipStillApplies 由 300x200 塌成零 rect）。
+	//   滚动偏移的漏算由上面 totalS 的对象链修复，已足以让本层坐标与
+	//   裁剪跟随内容平移。
 	for cur := l.parent; cur != nil; cur = cur.parent {
 		if cur.owner == nil {
 			continue
