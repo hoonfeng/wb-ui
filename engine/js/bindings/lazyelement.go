@@ -50,6 +50,12 @@ type lazyElemProps struct {
 var elemAccessorProps = map[string]bool{
 	"parentNode": true, "parentElement": true, "nextSibling": true, "previousSibling": true,
 	"firstChild": true, "lastChild": true, "childElementCount": true, "children": true, "childNodes": true,
+	// Element 级遍历（DOM §4.4 ParentNode / NonDocumentTypeChildNode）：
+	// 与 firstChild/nextSibling 同属活值——子树或兄弟一变更读取结果就不同。
+	// 适配器层缓存住会让 `while (el.firstElementChild)` 类搬运循环永远看到
+	// 同一个节点（与 firstChild 同一个 insertStaticContent 死循环坑）。
+	"firstElementChild": true, "lastElementChild": true,
+	"nextElementSibling": true, "previousElementSibling": true,
 	"ownerDocument": true,
 	"scrollTop": true, "scrollLeft": true, "scrollHeight": true, "scrollWidth": true,
 	"clientHeight": true, "clientWidth": true, "offsetHeight": true, "offsetWidth": true,
@@ -221,6 +227,83 @@ func (p *lazyElemProps) Keys() []string {
 	return out
 }
 
+// ── Element 级遍历（DOM 标准 §4.4）──────────────────────────
+//
+// firstElementChild/lastElementChild/nextElementSibling/previousElementSibling
+// 只认 Element：跳过 Text（含纯空白文本节点）与 Comment，无则返回 nil。
+// 遍历口径与 children/childElementCount 一致（FirstChild → NextSibling 链），
+// 且**每次读取重新遍历**、不做任何缓存——树变更后立刻反映（见
+// elemAccessorProps 的活值说明）。
+
+// firstElementChildOf 返回 n 的第一个 Element 子节点，无则 nil。
+func firstElementChildOf(n dom.Node) dom.Node {
+	if isNilNode(n) {
+		return nil
+	}
+	for c := n.FirstChild(); !isNilNode(c); c = c.NextSibling() {
+		if e, ok := c.(*dom.Element); ok && e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// lastElementChildOf 返回 n 的最后一个 Element 子节点，无则 nil。
+func lastElementChildOf(n dom.Node) dom.Node {
+	if isNilNode(n) {
+		return nil
+	}
+	for c := n.LastChild(); !isNilNode(c); c = c.PreviousSibling() {
+		if e, ok := c.(*dom.Element); ok && e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// nextElementSiblingOf 返回 n 之后最近的 Element 兄弟（跳过 Text/Comment），
+// 无则 nil。
+func nextElementSiblingOf(n dom.Node) dom.Node {
+	if isNilNode(n) {
+		return nil
+	}
+	for s := n.NextSibling(); !isNilNode(s); s = s.NextSibling() {
+		if e, ok := s.(*dom.Element); ok && e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// previousElementSiblingOf 返回 n 之前最近的 Element 兄弟（跳过 Text/Comment），
+// 无则 nil。
+func previousElementSiblingOf(n dom.Node) dom.Node {
+	if isNilNode(n) {
+		return nil
+	}
+	for s := n.PreviousSibling(); !isNilNode(s); s = s.PreviousSibling() {
+		if e, ok := s.(*dom.Element); ok && e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// elementChildrenOf 返回 n 的全部 Element 子节点（文档序，跳过 Text/Comment）。
+// Element.children / DocumentFragment.children 共用同一口径。
+func elementChildrenOf(n dom.Node) []*dom.Element {
+	if isNilNode(n) {
+		return nil
+	}
+	var els []*dom.Element
+	for c := n.FirstChild(); !isNilNode(c); c = c.NextSibling() {
+		if e, ok := c.(*dom.Element); ok && e != nil {
+			els = append(els, e)
+		}
+	}
+	return els
+}
+
 // elemKnownProps / elemKnownPropNames：元素包装器的全部已知属性名
 // （installElementProperty 的 case 全集 + constructor）。
 var (
@@ -234,6 +317,7 @@ var (
 		"addEventListener", "removeEventListener", "dispatchEvent",
 		"parentNode", "parentElement", "nextSibling", "previousSibling",
 		"firstChild", "lastChild", "childElementCount", "children", "childNodes",
+		"firstElementChild", "lastElementChild", "nextElementSibling", "previousElementSibling",
 		"ownerDocument",
 		"baseURI",
 		"scrollTop", "scrollLeft", "scrollHeight", "scrollWidth",
@@ -568,6 +652,25 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			return getter(func(in *jsc.Interpreter) jsc.JSValue {
 				return arrNode(in, el.ChildNodes())
 			})(rt, jsc.JSValue{})
+		}}, true
+	// Element 级遍历（DOM 标准 ParentNode / NonDocumentTypeChildNode）：
+	// 只认 Element，跳过 Text/Comment（含纯空白文本节点），无则 null。
+	// live accessor：每次读取重新遍历子树/兄弟链，不缓存（同 firstChild）。
+	case "firstElementChild":
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			return nodeAccFn(rt, func() dom.Node { return firstElementChildOf(el) })(rt, jsc.JSValue{})
+		}}, true
+	case "lastElementChild":
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			return nodeAccFn(rt, func() dom.Node { return lastElementChildOf(el) })(rt, jsc.JSValue{})
+		}}, true
+	case "nextElementSibling":
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			return nodeAccFn(rt, func() dom.Node { return nextElementSiblingOf(el) })(rt, jsc.JSValue{})
+		}}, true
+	case "previousElementSibling":
+		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {
+			return nodeAccFn(rt, func() dom.Node { return previousElementSiblingOf(el) })(rt, jsc.JSValue{})
 		}}, true
 	case "ownerDocument":
 		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue {

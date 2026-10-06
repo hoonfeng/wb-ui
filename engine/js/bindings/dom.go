@@ -4636,6 +4636,13 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 	obj.SetAccessor("previousSibling", nodeAccFn(rt, func() dom.Node { return frag.PreviousSibling() }), nil)
 	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return frag.FirstChild() }), nil)
 	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return frag.LastChild() }), nil)
+	// Element 级遍历（DOM §4.4）：DocumentFragment 同族 API——只认 Element，
+	// 跳过 Text/Comment，无则 null（<template>.content 与 Vue insertStaticContent
+	// 的 `while (frag.firstElementChild)` 类搬运循环依赖它，缺了会静默终止）。
+	obj.SetAccessor("firstElementChild", nodeAccFn(rt, func() dom.Node { return firstElementChildOf(frag) }), nil)
+	obj.SetAccessor("lastElementChild", nodeAccFn(rt, func() dom.Node { return lastElementChildOf(frag) }), nil)
+	obj.SetAccessor("nextElementSibling", nodeAccFn(rt, func() dom.Node { return nextElementSiblingOf(frag) }), nil)
+	obj.SetAccessor("previousElementSibling", nodeAccFn(rt, func() dom.Node { return previousElementSiblingOf(frag) }), nil)
 	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		return arrNode(in, frag.ChildNodes())
 	}), nil)
@@ -4647,6 +4654,9 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 			}
 		}
 		return jsc.NumberValue(float64(n))
+	}), nil)
+	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrElem(in, elementChildrenOf(frag))
 	}), nil)
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(frag.TextContent()) }),
@@ -4723,8 +4733,20 @@ func wrapShadowRoot(rt *jsc.Interpreter, sr *dom.ShadowRoot) *jsc.JSObject {
 	obj.SetAccessor("host", nodeAccFn(rt, func() dom.Node { return sr.Host() }), nil)
 	obj.SetAccessor("firstChild", nodeAccFn(rt, func() dom.Node { return sr.FirstChild() }), nil)
 	obj.SetAccessor("lastChild", nodeAccFn(rt, func() dom.Node { return sr.LastChild() }), nil)
+	// Element 级遍历（DOM §4.4）：ShadowRoot 继承 DocumentFragment，同一族 API
+	// （只认 Element，跳过 Text/Comment）。
+	obj.SetAccessor("firstElementChild", nodeAccFn(rt, func() dom.Node { return firstElementChildOf(sr) }), nil)
+	obj.SetAccessor("lastElementChild", nodeAccFn(rt, func() dom.Node { return lastElementChildOf(sr) }), nil)
+	obj.SetAccessor("nextElementSibling", nodeAccFn(rt, func() dom.Node { return nextElementSiblingOf(sr) }), nil)
+	obj.SetAccessor("previousElementSibling", nodeAccFn(rt, func() dom.Node { return previousElementSiblingOf(sr) }), nil)
 	obj.SetAccessor("childNodes", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		return arrNode(in, sr.ChildNodes())
+	}), nil)
+	obj.SetAccessor("childElementCount", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(elementChildrenOf(sr))))
+	}), nil)
+	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		return arrElem(in, elementChildrenOf(sr))
 	}), nil)
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(sr.TextContent()) }),

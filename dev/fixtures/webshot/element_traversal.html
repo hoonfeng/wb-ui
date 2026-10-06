@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>element_traversal</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<pre id="out"></pre>
+<script>
+// Element 级遍历 API 双侧（wbui vs Edge）逐项比对夹具：
+//   Element.prototype.firstElementChild / lastElementChild
+//   Element.prototype.nextElementSibling / previousElementSibling
+// 以及同族 DocumentFragment / ShadowRoot 的对应属性。
+// 每行一条断言（key=value），两侧文本逐行比对即「行为逐项一致」的硬证据。
+(function () {
+  var lines = [];
+  function say(k, v) { lines.push(k + '=' + v); }
+  function el(tag, id) { var e = document.createElement(tag); if (id) { e.id = id; } return e; }
+  function name(n) { return (n === null || n === undefined) ? 'null' : (n.id || String(n.nodeName)); }
+
+  // ── 1) 空元素：4 个 accessor 均 null ──
+  var empty = el('div');
+  say('empty.firstElementChild', name(empty.firstElementChild));
+  say('empty.lastElementChild', name(empty.lastElementChild));
+  say('empty.nextElementSibling', name(empty.nextElementSibling));
+  say('empty.previousElementSibling', name(empty.previousElementSibling));
+  say('empty.childElementCount', empty.childElementCount);
+
+  // ── 2) 仅注释子节点 ──
+  var co = el('p');
+  co.appendChild(document.createComment('only'));
+  say('commentOnly.firstElementChild', name(co.firstElementChild));
+  say('commentOnly.lastElementChild', name(co.lastElementChild));
+
+  // ── 3) 混合子节点：纯空白文本 / 注释 / 元素 / 文本 / 元素 / 注释 ──
+  var root = el('div', 'root');
+  var a = el('span', 'a'), b = el('span', 'b');
+  root.appendChild(document.createTextNode('   \n\t '));
+  root.appendChild(document.createComment('lead'));
+  root.appendChild(a);
+  root.appendChild(document.createTextNode('mid'));
+  root.appendChild(b);
+  root.appendChild(document.createComment('tail'));
+  say('root.firstElementChild', name(root.firstElementChild));
+  say('root.lastElementChild', name(root.lastElementChild));
+  say('a.nextElementSibling', name(a.nextElementSibling));
+  say('b.previousElementSibling', name(b.previousElementSibling));
+  say('a.previousElementSibling', name(a.previousElementSibling));
+  say('b.nextElementSibling', name(b.nextElementSibling));
+  say('root.children.length', root.children.length);
+  say('root.children[0]', name(root.children[0]));
+  say('root.children[1]', name(root.children[1]));
+  say('root.childElementCount', root.childElementCount);
+
+  // ── 4) 相邻兄弟是 Text 时的穿透 ──
+  var s3 = el('div', 's3');
+  var x = el('div', 'x'), y = el('div', 'y'), z = el('div', 'z');
+  s3.appendChild(x);
+  s3.appendChild(document.createTextNode('  '));
+  s3.appendChild(document.createTextNode('between'));
+  s3.appendChild(y);
+  s3.appendChild(document.createTextNode('after'));
+  s3.appendChild(z);
+  say('x.nextSibling.nodeType', x.nextSibling.nodeType);
+  say('x.nextElementSibling', name(x.nextElementSibling));
+  say('y.previousElementSibling', name(y.previousElementSibling));
+  say('z.previousSibling.nodeType', z.previousSibling.nodeType);
+  say('z.previousElementSibling', name(z.previousElementSibling));
+  say('z.nextElementSibling', name(z.nextElementSibling));
+
+  // ── 5) live（不缓存）+ while 搬运循环终止 ──
+  var live = el('div', 'live');
+  var l1 = el('i', 'l1');
+  live.appendChild(l1);
+  live.firstElementChild; live.lastElementChild;   // 先读一次：缓存住即暴露
+  var l2 = el('i', 'l2');
+  live.appendChild(l2);
+  say('live.lastElementChild.afterAppend', name(live.lastElementChild));
+  live.removeChild(l1);
+  say('live.firstElementChild.afterRemove', name(live.firstElementChild));
+  var moved = 0;
+  while (live.firstElementChild) {
+    live.removeChild(live.firstElementChild);
+    moved++;
+    if (moved > 5) { break; }
+  }
+  say('live.moved', moved);
+  say('live.firstElementChild.afterDrain', name(live.firstElementChild));
+
+  // ── 6) DocumentFragment / ShadowRoot 同族 ──
+  var frag = document.createDocumentFragment();
+  var f1 = el('i', 'f1'), f2 = el('b', 'f2');
+  frag.appendChild(document.createTextNode('  '));
+  frag.appendChild(f1);
+  frag.appendChild(document.createComment('c'));
+  frag.appendChild(f2);
+  say('frag.firstElementChild', name(frag.firstElementChild));
+  say('frag.lastElementChild', name(frag.lastElementChild));
+  say('frag.firstChild.nodeType', frag.firstChild.nodeType);
+  say('frag.children.length', frag.children.length);
+  say('frag.childElementCount', frag.childElementCount);
+
+  var host = el('div');
+  var sr = host.attachShadow({ mode: 'open' });
+  var s1 = el('span', 's1');
+  sr.appendChild(document.createComment('c'));
+  sr.appendChild(s1);
+  sr.appendChild(document.createTextNode('tail'));
+  say('sr.firstElementChild', name(sr.firstElementChild));
+  say('sr.lastElementChild', name(sr.lastElementChild));
+  say('sr.children.length', sr.children.length);
+  say('sr.childElementCount', sr.childElementCount);
+
+  // ── 7) elProps 覆盖（webplatform 探针 elProps 的遍历子集）──
+  var refNames = ['parentNode', 'parentElement', 'nextSibling', 'previousSibling',
+                  'firstChild', 'lastChild', 'childNodes', 'children', 'childElementCount',
+                  'firstElementChild', 'lastElementChild', 'nextElementSibling', 'previousElementSibling'];
+  var miss = [];
+  var probe = document.createElement('div');
+  for (var i = 0; i < refNames.length; i++) {
+    var ok = false;
+    try { ok = (refNames[i] in probe); } catch (e) { ok = false; }
+    if (!ok) { miss.push(refNames[i]); }
+  }
+  say('elProps_subset.total', refNames.length);
+  say('elProps_subset.missing', miss.length ? miss.join(' ') : '(none)');
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

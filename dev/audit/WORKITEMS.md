@@ -1820,9 +1820,10 @@ asc_content   = asc_c（再 round）
 | `dev/tools/fontmetric -scan` | 逐字号垂直度量扫描（asc/desc/lead/lineH/rAsc） |
 | `dev/fixtures/webshot/cjk_linebox_scan.html` | 扫描表夹具本体（可重复生成） |
 
-**顺带发现（登记，未在本轮处理）**：wbui 的 `Element.firstElementChild` 实测返回
-`undefined`（`children[0]` 正常），会让依赖它的页面脚本静默终止 —— 夹具已改用
-`children[0]` 规避，建议后续补 DOM 实现。
+**顺带发现（第 15 轮已修 → §15）**：wbui 的 `Element.firstElementChild` 曾实测返回
+`undefined`（`children[0]` 正常），会让依赖它的页面脚本静默终止 —— 夹具当初改用
+`children[0]` 规避。第 15 轮已按 DOM 标准补齐 Element 级 4 个遍历 accessor，并同批
+闭合 `DocumentFragment`/`ShadowRoot` 的同族缺口；实测/单测/双侧探针证据见 §15。
 
 ---
 
@@ -1982,3 +1983,126 @@ monospace 映射字体度量的既有差（接受项，§13-6 已定性）；but
 - 代码：`engine/layout/layoututil.go`、`engine/layout/inlineformattingcontext.go`
 - 证据：`dev/output/wbui-audit/ALL4.txt`、`cjk_linebox_scan.*`、`cjk_text_vs_input_scan.*`、
   `dev/output/tmp/wbui_before.txt`（修复前基线快照）
+
+---
+
+## 15｜Element 级遍历 API 缺失（**已修：按 DOM 标准补齐**）
+
+监督对象：§13-7 登记的遗留「`Element.firstElementChild` 实测返回 `undefined`」。
+本轮补齐 `Element.prototype` 的 4 个遍历 accessor，并同批闭合 `DocumentFragment` /
+`ShadowRoot` 的同族缺口；**未触碰任何布局/字体度量代码**（`engine/layout` 零改动，见 15-5）。
+
+### 15-1｜缺失清单（核实方法：**大小写不敏感**全仓重搜）
+
+| API | 标准归属 | 修复前 | 修复后 |
+|---|---|---|---|
+| `Element.prototype.firstElementChild` | DOM ParentNode | **缺失**（实测 `undefined`） | 已实现 |
+| `Element.prototype.lastElementChild` | DOM ParentNode | **缺失** | 已实现 |
+| `Element.prototype.nextElementSibling` | DOM NonDocumentTypeChildNode | **缺失** | 已实现 |
+| `Element.prototype.previousElementSibling` | DOM NonDocumentTypeChildNode | **缺失** | 已实现 |
+| `DocumentFragment.prototype.{同上 4 个}` | 同族（ParentNode 混入） | **缺失** | 已实现（同批） |
+| `ShadowRoot.prototype.{同上 4 个}` | 同族（继承 DocumentFragment） | **缺失** | 已实现（同批） |
+| `Element` 的 `firstChild/lastChild/nextSibling/previousSibling/children/childElementCount` | Node/ParentNode | 已有（口径参照） | **保持不变** |
+
+核实方法：`grep -i 'firstelementchild|lastelementchild|nextelementsibling|previouselementsibling'`
+全仓 —— 仅命中 `WORKITEMS.md` 登记、夹具注释与探针 `elProps` 清单，Go/JS 侧**零实现**。
+★ 必须大小写不敏感：`firstElementChild` 是驼峰小写（JS 侧字面量），Go 侧若实现会是
+大写 `FirstElementChild`，大小写敏感搜索会漏判。
+
+### 15-2｜实现（最小加法，复用既有 children 遍历口径）
+
+`engine/js/bindings/lazyelement.go`（**+103 行**）：
+
+| 位置 | 改动 |
+|---|---|
+| `elemAccessorProps` | 登记 4 个名字为**活值**（与 `firstChild` 同类：每次读取重新求值，适配器层不得缓存）——`while (el.firstElementChild)` 搬运循环靠它终止，与 `firstChild` 是同一个 Vue `insertStaticContent` 死循环坑 |
+| `elemKnownPropNames` | 登记 4 个名字（`'firstElementChild' in el` → true，走 `Has` 表） |
+| `installElementProperty` | 新增 4 个 `case`，各返回 `&elemAccessor{get: ...}`（**getter-only + live**），经 `nodeAccFn` 返回包装对象；无匹配时由 `nodeAccFn` 转 `null` |
+| 新增辅助 | `firstElementChildOf` / `lastElementChildOf` / `nextElementSiblingOf` / `previousElementSiblingOf` / `elementChildrenOf` —— 遍历口径 = `FirstChild → NextSibling` 链 + `c.(*dom.Element)` 判定，与既有 `children`/`childElementCount` **完全一致** |
+
+`engine/js/bindings/dom.go`（**+22 行**）：`wrapDocFrag` / `wrapShadowRoot` 各补 4 个同族
+accessor，并补 `DocumentFragment.children`、`ShadowRoot.children`/`childElementCount`
+（原缺口，一并闭合，避免留同类开放项）。
+
+语义：跳过 Text（含**纯空白**文本节点）与 Comment；无匹配返回 `null`（非 `undefined`）；
+继承 `lazyelement.go` 既有的「accessor 属性不缓存」约定，未引入任何缓存。
+
+### 15-3｜Go 单测（`engine/js/bindings/element_traversal_test.go`，7 用例**全 PASS**）
+
+| 用例 | 覆盖 |
+|---|---|
+| `TestElementTraversalEmpty` | 空元素 → 4 个 accessor 全 `null`；`'in'` 为 true（属性存在，非 `undefined`） |
+| `TestElementTraversalCommentOnly` | 仅注释子 → `first/lastElementChild` 均 `null` |
+| `TestElementTraversalMixedChildren` | 混合序列（空白文本/注释/元素/文本/元素/注释）下 4 个 accessor 各自正确，且与 `children`/`childElementCount` 口径一致 |
+| `TestElementSiblingSkipsAdjacentText` | `nextSibling` 指向 Text 时 `nextElementSibling` **继续找**（前/后双向穿透） |
+| `TestElementTraversalIsLive` | 不缓存：先读一次再插/删 → 结果立刻变化；`while (firstElementChild)` 搬运循环**有限步终止** |
+| `TestDocumentFragmentAndShadowRootElementTraversal` | frag/sr 同族 + `children`/`childElementCount` |
+| `TestElementTraversalHelpersGoLevel` | Go 层直接断言（不经 JS 引擎）+ typed-nil 参数 |
+
+### 15-4｜双侧探针（wbui vs Edge，逐项一致）
+
+**A. 专项夹具**（新增 `dev/fixtures/webshot/element_traversal.html`，38 条值级断言）：
+
+```
+dev/tools/gprobe_cmp.sh dev/fixtures/webshot/element_traversal.html element_traversal
+→ IDENTICAL（Edge 基线 == wbui；wbui=38 行 / Edge=38 行）
+```
+
+产物：`dev/output/wbui-audit/element_traversal.{wbui.txt,edge.txt,cmp.txt,edge.html}`
+（`.cmp.txt` 为空 = 逐行完全一致）。
+
+**B. `dev/probes/webplatform`**（覆盖矩阵；elProps 已列这 4 个名字）：
+
+```
+go run ./dev/probes/webplatform -out dev/output/wbui-audit/webplatform.wbui.json
+→ elementProps 42/65；缺失清单**不含** firstElementChild / lastElementChild /
+  nextElementSibling / previousElementSibling（修复前 firstElementChild 实测 undefined，
+  必在该清单内）
+```
+
+Edge 侧同 `elProps` 清单的遍历子集在夹具中逐项验证：`elProps_subset.total=13`、
+`elProps_subset.missing=(none)`，双侧一致。
+
+### 15-5｜收敛判据与零回归
+
+- **零回归红线**：重跑 16 个正式探针 → `ALL5.txt` 与 `ALL4.txt` **逐项一致**
+  （`diff` 零差异，17 行 = 17 行）⇒ 只增 DOM API、未碰布局。
+- `CGO_ENABLED=1 go build ./...` **OK**；`go test ./engine/...` **全部 ok**
+  （`engine/js/bindings` 1.3s）；`go vet ./engine/js/bindings/` OK。
+- `gofmt` **零新增差异**：`gofmt -l .` 计数 **299 = 299**（A/B 同源：`git stash` 撤改前后
+  一致），新增测试文件不在 dirty 列表内。
+- **`engine/layout` 零改动**：`git status` 仅 `engine/js/bindings/{lazyelement.go,dom.go}`、
+  新测试文件与新增夹具 ⇒ 布局/字体度量收敛态不受影响。
+
+### 15-6｜范围判定：`Document` 侧同类缺口（**明确关闭，非「建议后续补」**）
+
+`dev/probes/webplatform` 的 `documentProps` 缺失清单同时含
+`firstChild / lastChild / childNodes / children / childElementCount / firstElementChild /
+lastElementChild`，外加 `nodeType / nodeName / ownerDocument / characterSet / domain /
+dir / location` 等，共 **38/56 项**。经核实，这是 **`Document` 包装器整体未实现
+Node/ParentNode/Document 接口的成组缺失**，与本轮「Element 级遍历 accessor」不是同一
+工作项，判定三条理由：
+
+1. **成组而非对称**：`Document` 缺的是整族接口（遍历 + `nodeType/nodeName` + Document
+   自身 20 余属性）；单补 `firstElementChild` 反而制造「`firstElementChild` 有、`firstChild`
+   无」的更不一致状态；
+2. **依赖缺失**：标准语义下 `document.firstChild` 通常是 `DocumentType`（doctype），而
+   `engine/dom` **未建模 DocumentType**（全仓仅有 `NodeDocumentType = 10` 常量与
+   TreeWalker 的 `ShowDocumentType` 过滤器位），`nodeAccFn` 也不识别该节点类型 ⇒
+   完全对齐需一个独立的「DocumentType 节点 + Document 接口实现」工作项；
+3. **验收红线**：本轮红线是「只增 DOM API、零回归」，塞入 Document 接口重做会显著扩大
+   验证面并引入与布局无关的回归风险。
+
+⇒ **本轮范围正式关闭**：该条登记为**独立可执行工作项**（缺失清单与依赖已在上文逐项明列，
+非「建议后续补」）。`Element` / `DocumentFragment` / `ShadowRoot` 三处的 Element 级遍历族
+**已全部闭合，无剩余同类开放项**。
+
+### 15-7｜本轮改动与产物
+
+- 代码：`engine/js/bindings/lazyelement.go`（+103）、`engine/js/bindings/dom.go`（+22）
+- 测试：`engine/js/bindings/element_traversal_test.go`（新增，7 用例）
+- 夹具：`dev/fixtures/webshot/element_traversal.html`（新增）
+- 证据：`dev/output/wbui-audit/element_traversal.*`（双侧 IDENTICAL 38/38）、
+  `webplatform.wbui.json`（elementProps 42/65，4 个 accessor 已不在缺失清单）、
+  `ALL5.txt`（== `ALL4.txt`，零回归）
+- 定位：`engine/layout` **零改动**
