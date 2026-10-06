@@ -52,7 +52,47 @@ while [ "$i" -lt "$total" ]; do
 done > "$OUTDIR/$NAME.wbui.txt"
 
 echo "== [$NAME] Edge (--dump-dom) =="
+# ★ 视口口径补偿（实测驱动，禁用魔数）：Edge 在 Windows 无头下 `--window-size=W,H`
+#   得到的**实际视口小于 W,H** —— 本机实测为恒定的非客户区偏移（宽 −26 / 高 −93），
+#   且**不传 --window-size 时默认仅 754x487**（这正是此前 g4_inlineblock 读到 754 的
+#   唯一来源）。而 webshot 的 -w/-h 就是精确的 CSS 视口（默认 1280x800）。不补偿会让
+#   「块宽=视口宽」的夹具（g4 的 .line 未设 width）在两侧出现整批假差异 —— 曾据此把
+#   g4 误判成 WONTFIX「口径差」。做法：先实测当前偏移 → 按 offset 放大 --window-size
+#   反向补偿 → 迭代确认实测视口恰为目标值（最多 3 轮；探测失败即退出，绝不带错误
+#   口径继续比对）。
+#   --force-device-scale-factor=1 额外锁死 DPR，防宿主高 DPI 再叠一层口径差
+#   （CSS 视口 = 物理宽 / DPR）。
+VIEWPORT_W=1280
+VIEWPORT_H=800
+VP_PROBE="$TMPDIR/_vp_probe.html"
+cat > "$VP_PROBE" <<'HTMLEOF'
+<!doctype html><meta charset="utf-8"><pre id="vpo"></pre><script>
+document.getElementById('vpo').textContent=innerWidth+'x'+innerHeight;
+</script>
+HTMLEOF
+edge_inner() {  # $1 = window-size；回显实际 "宽x高"
+  "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+    --window-size="$1" --force-device-scale-factor=1 \
+    --virtual-time-budget=1500 --dump-dom \
+    "file:///$(cygpath -m "$ROOT/$VP_PROBE")" 2>/dev/null \
+    | sed -n 's/.*<pre id="vpo">\([0-9][0-9]*x[0-9][0-9]*\)<\/pre>.*/\1/p' | head -1
+}
+EDGE_WS="${VIEWPORT_W},${VIEWPORT_H}"
+vp_try=1
+while [ "$vp_try" -le 3 ]; do
+  vp_got="$(edge_inner "$EDGE_WS")"
+  case "$vp_got" in
+    *x*) ;;
+    *) echo "[$NAME] Edge 视口探测失败（得到 '$vp_got'），拒绝带错误口径比对" >&2; exit 4 ;;
+  esac
+  vp_iw="${vp_got%x*}"; vp_ih="${vp_got#*x}"
+  if [ "$vp_iw" -eq "$VIEWPORT_W" ] && [ "$vp_ih" -eq "$VIEWPORT_H" ]; then break; fi
+  EDGE_WS="$((VIEWPORT_W * 2 - vp_iw)),$((VIEWPORT_H * 2 - vp_ih))"
+  vp_try=$((vp_try + 1))
+done
+echo "     Edge 视口实测 $(edge_inner "$EDGE_WS")（目标 ${VIEWPORT_W}x${VIEWPORT_H}；--window-size=$EDGE_WS）"
 "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+  --window-size="$EDGE_WS" --force-device-scale-factor=1 \
   --virtual-time-budget=3000 --dump-dom \
   "file:///$(cygpath -m "$ROOT/$PROBE")" \
   > "$OUTDIR/$NAME.edge.html" 2>/dev/null
