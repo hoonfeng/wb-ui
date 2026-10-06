@@ -638,7 +638,9 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 	case "classList":
 		return jsc.ObjectValue(makeClassList(rt, el)), nil, true
 	case "style":
-		return jsc.ObjectValue(makeStyleObject(rt, el)), nil, true
+		// ★ C-P4-3：句柄缓存——同一元素同一解释器返回同一对象（浏览器语义
+		// `el.style === el.style` 也要求如此）。
+		return jsc.ObjectValue(styleObjectFor(rt, el)), nil, true
 
 	// ── Events ──
 	case "addEventListener":

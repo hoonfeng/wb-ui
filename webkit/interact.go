@@ -61,6 +61,13 @@ type Interaction struct {
 	// 最近光标位置（wheel/拖拽用）
 	lastX, lastY float64
 
+	// 帧内合并的待处理移动（T4 事件派发聚合）：宿主在事件批里用
+	// MouseMoveBatched 记录坐标、批末 FlushMoves 派发一次。pendingMove 为
+	// false 时零开销，默认路径（MouseMove）完全不受影响。
+	pendingMove        bool
+	pendingMoveX       float64
+	pendingMoveY       float64
+
 	// dirty 交互改变了渲染状态（hover/active/弹层/滚动等）——宿主渲染
 	// 循环读取 NeedsRender() 后调用 ClearDirty()，避免事件风暴无限渲染。
 	dirty bool
@@ -125,11 +132,24 @@ func (i *Interaction) view() *rendering.RenderView {
 // dispatchMouse 把鼠标事件派发到命中元素（无命中 → document，拖拽/标题栏
 // 场景需要 document 级监听器持续收到 mousemove）。坐标即 clientX/clientY。
 func (i *Interaction) dispatchMouse(evtType string, x, y float64, buttons uint16) {
-	rv := i.view()
-	if rv == nil {
-		return
+	i.dispatchMouseAt(evtType, x, y, buttons, nil, false)
+}
+
+// dispatchMouseAt 派发鼠标事件到命中元素（未命中时按原语义把 move/up 派发到
+// document 级监听器）。
+//
+// known=true 表示 target 是调用方**已经算出的**命中结果（Move 路径的 hover
+// 追踪刚对同一坐标命中过）：鼠标移动是最高频的交互事件，每次移动重复命中
+// 测试要遍历整棵渲染树，复用同一结果即可省掉一半命中开销（T4）。
+func (i *Interaction) dispatchMouseAt(evtType string, x, y float64, buttons uint16, target *dom.Element, known bool) {
+	if !known {
+		rv := i.view()
+		if rv == nil {
+			return
+		}
+		target = rendering.HitTest(rv, x, y, "")
 	}
-	el := rendering.HitTest(rv, x, y, "")
+	el := target
 	if el == nil {
 		if evtType == dom.EventMouseMove || evtType == dom.EventMouseUp {
 			if fr := i.wv.MainFrame(); fr != nil {
@@ -304,6 +324,32 @@ func (i *Interaction) MouseButton(x, y float64, button, action int) {
 
 // MouseMove 处理鼠标移动：hover 追踪 + mousemove 派发。
 func (i *Interaction) MouseMove(x, y float64) {
+	i.mouseMoveNow(x, y)
+}
+
+// MouseMoveBatched 记录一次鼠标移动，待 FlushMoves 统一处理（帧内合并）。
+//
+// 鼠标移动是事件批里最密集的事件（系统重发 WM_MOUSEMOVE、拖拽时一轮
+// PollEvents 收到多条）；逐条走完整管线意味着每条都做命中测试 + 构造事件
+// 对象 + 冒泡派发，而中间坐标页面根本观察不到——JS 看到的是最后位置。
+// 浏览器同样对 mousemove 做帧内合并（UI Events 的 coalesced events）。
+// 宿主在事件批开始时改用本方法、批末调用 FlushMoves 即可合并一批移动。
+func (i *Interaction) MouseMoveBatched(x, y float64) {
+	i.pendingMove = true
+	i.pendingMoveX, i.pendingMoveY = x, y
+}
+
+// FlushMoves 派发待处理的鼠标移动；无待处理时零开销（首行即返回）。
+func (i *Interaction) FlushMoves() {
+	if !i.pendingMove {
+		return
+	}
+	i.pendingMove = false
+	i.mouseMoveNow(i.pendingMoveX, i.pendingMoveY)
+}
+
+// mouseMoveNow 是一次完整的移动处理（MouseMove / FlushMoves 的共同实现）。
+func (i *Interaction) mouseMoveNow(x, y float64) {
 	i.lastX, i.lastY = x, y
 	if i.wv == nil || i.wv.destroyed {
 		return
@@ -338,7 +384,8 @@ func (i *Interaction) MouseMove(x, y float64) {
 	// document mousemove）；非按下时也派发（JS hover 效果），但
 	// 不置 dirty（避免 鼠标移动→渲染→系统重发 WM_MOUSEMOVE 风暴）。
 	if i.pressed {
-		i.dispatchMouse(dom.EventMouseMove, x, y, 1)
+		// ★ T4：复用上面 hover 追踪刚算出的命中结果，省一次渲染树命中测试。
+		i.dispatchMouseAt(dom.EventMouseMove, x, y, 1, newEl, true)
 		// ★ 拖选中扩展表单控件选区（拖选文本，见 FormFocus.ExtendMouseSelect；
 		// 非控件/未按下时内部短路）。
 		if ff := i.wv.FormFocus(); ff != nil {
@@ -346,7 +393,7 @@ func (i *Interaction) MouseMove(x, y float64) {
 		}
 		i.markDirty()
 	} else {
-		i.dispatchMouse(dom.EventMouseMove, x, y, 0)
+		i.dispatchMouseAt(dom.EventMouseMove, x, y, 0, newEl, true)
 	}
 }
 
