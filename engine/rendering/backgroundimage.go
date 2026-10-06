@@ -78,18 +78,42 @@ var svgBackgroundCache = struct {
 	docs map[string]*svgDocument
 }{docs: map[string]*svgDocument{}}
 
-// loadBackgroundSVG resolves and parses a background-image SVG (data:
-// image/svg+xml URIs or file paths). Returns nil when the URL is not an SVG
-// or cannot be parsed. Results are cached by URL.
+// loadBackgroundSVG resolves and parses an SVG image reference
+// (data:image/svg+xml URIs, file:// URLs or document-relative paths). Returns
+// nil when the reference is not an SVG or cannot be parsed. Results are cached
+// by (resolved) URL.
 func loadBackgroundSVG(url string) *svgDocument {
+	return loadBackgroundSVGWith(url, currentImageLoaderForDraw())
+}
+
+// loadBackgroundSVGWith 是 loadBackgroundSVG 的实现体。
+//
+// ★ U5（缺陷 D3）：此前只认 `data:image/svg+xml` 与「不含冒号的裸路径」，
+// 因此 `file://`（含冒号）与文档相对路径**一律返回 nil**——文件引用的 SVG
+// 图标/贴图全都不显示（探针实测 C 组第三列空白）。修复方式：非 data: 的
+// 引用交给宿主 loader，走与栅格图**完全同一条链**（宿主 ResourceResolver
+// 优先 → 按文档基准绝对化 → 逐 URL 策略门禁 → 取字节），于是
+//   - ModeBrowser / AllowAll：`file://` 与相对路径都可渲染（= Edge 行为）；
+//   - Toolkit + DenyExternal（默认）：仍拒（安全默认不变，TC-M-902）；
+//   - Toolkit + AllowHostResolved：仅放行宿主 resolver 提供的引用。
+// 无 loader（独立渲染测试、dev 探针、纯 rendering 用法）时保留既有的
+// 「本地路径直接读」行为。
+//
+// 网络引用（http(s)/协议相对 //）不在本路径同步取字节：同步网络请求会
+// 阻塞渲染线程，栅格图同样把它们交给异步加载（见 loadBackgroundImageWith
+// 的 loader 分支）。本项（D3）只涉及 file:// 与相对路径。
+func loadBackgroundSVGWith(url string, loader ImageResourceLoader) *svgDocument {
 	svgBackgroundCache.mu.Lock()
 	defer svgBackgroundCache.mu.Unlock()
 	if d, ok := svgBackgroundCache.docs[url]; ok {
 		return d
 	}
 	var text string
+	cacheKey := url
 	low := strings.ToLower(url)
-	if strings.HasPrefix(low, "data:image/svg+xml") {
+	switch {
+	case strings.HasPrefix(low, "data:image/svg+xml"):
+		// data: 自带内容、不经外部通道 → 与资源策略解耦，两种模式都放行。
 		if strings.Contains(low, ";base64,") {
 			if b, ok := decodeDataURI(url); ok {
 				text = string(b)
@@ -102,8 +126,42 @@ func loadBackgroundSVG(url string) *svgDocument {
 				text = raw
 			}
 		}
-	} else if !strings.Contains(url, ":") { // file path
-		if b, err := os.ReadFile(url); err == nil {
+	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"),
+		strings.HasPrefix(low, "//"):
+		return nil
+	default:
+		ref := url
+		if loader != nil {
+			if abs := loader.ResolveURL(ref); abs != "" {
+				ref = abs
+			}
+			// ★ 同步取字节只对「本地 + SVG 扩展名」开放：本函数在 paint
+			//   线程上被调用（每个 `<img src>` 与 background-image 都会做一次
+			//   SVG 探测），对栅格图或远端引用同步取字节会**阻塞渲染线程**
+			//   并与栅格图的异步加载重复发请求——实测 `<img src="slow.png">`
+			//   （相对路径先被绝对化成本页 http URL）在这里同步发起请求，
+			//   Render 被扣住整个 HTTP 超时（30s），回归用例
+			//   TestAsyncImageLoadMarksFrameDirty 因此由 PASS(0.12s) 变 FAIL。
+			//   栅格图、data: 之外的远端引用一律交给异步通道
+			//   （loadBackgroundImageWith 的 loader 分支）。
+			if !isSVGReference(ref) || isRemoteReference(ref) {
+				return nil
+			}
+			if !loader.AllowsURL(ref) {
+				return nil
+			}
+			// 缓存按**解析后**的 URL 索引：同页同引用共享，跨页同相对路径
+			//（各自绝对化到不同文件）不会互相串台。
+			cacheKey = ref
+			if d, ok := svgBackgroundCache.docs[ref]; ok {
+				return d
+			}
+			b, err := loader.Load(ref)
+			if err != nil {
+				return nil
+			}
+			text = string(b)
+		} else if b, err := os.ReadFile(localFilePath(ref)); err == nil {
 			text = string(b)
 		}
 	}
@@ -114,8 +172,44 @@ func loadBackgroundSVG(url string) *svgDocument {
 	if doc == nil {
 		return nil
 	}
-	svgBackgroundCache.docs[url] = doc
+	svgBackgroundCache.docs[cacheKey] = doc
 	return doc
+}
+
+// localFilePath 把引用转成本地文件路径：`file:///F:/dir/x.svg` → `F:/dir/x.svg`
+//（Windows 盘符形式，URL 的 Path 带前导斜杠），其余（相对/绝对路径）原样
+// 返回。与 webkit.FileURLPath 同一套规范化，但渲染层不能反向依赖 webkit。
+func localFilePath(ref string) string {
+	if !strings.HasPrefix(strings.ToLower(ref), "file://") {
+		return ref
+	}
+	p := ref[len("file://"):]
+	p = strings.TrimPrefix(p, "localhost")
+	if len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+		// Windows 盘符路径：/F:/dir/file → F:/dir/file
+		p = p[1:]
+	}
+	return p
+}
+
+// isSVGReference 报告引用是否**看起来**是 SVG（按路径扩展名判定，忽略
+// query/fragment 与大小写）。用于在 paint 线程上决定「要不要同步取字节」：
+// 同步通道只服务本地 SVG 文件，栅格图与远端引用一律走异步加载通道。
+func isSVGReference(ref string) bool {
+	p := ref
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
+	}
+	low := strings.ToLower(p)
+	return strings.HasSuffix(low, ".svg") || strings.HasSuffix(low, ".svgz")
+}
+
+// isRemoteReference 报告引用是否指向远端（http(s) 或协议相对 //）——这类
+// 引用在 paint 线程上绝不同步取字节（HTTP 超时会扣住整个渲染线程）。
+func isRemoteReference(ref string) bool {
+	low := strings.ToLower(ref)
+	return strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") ||
+		strings.HasPrefix(low, "//")
 }
 
 // parseSVGText parses an SVG document string and builds the svgDocument for
@@ -263,8 +357,8 @@ func SetBackgroundImageLoadedCallback(cb func(url string)) {
 var bgImageLoadedListeners = struct {
 	mu   sync.Mutex
 	next int
-	fns  map[int]func(string)
-}{fns: map[int]func(string){}}
+	fns  map[int]func(string, bool)
+}{fns: map[int]func(string, bool){}}
 
 // AddBackgroundImageLoadedListener 注册图片（异步）加载完成监听器，返回
 // 幂等的注销函数。
@@ -274,7 +368,11 @@ var bgImageLoadedListeners = struct {
 // 多了一张图」——`<img>` / background-image 的字节在后台 goroutine 取回后
 // 没有任何人置脏，图片就**永远不画出来**。宿主（webkit.WebView）用本接口
 // 接线：图片到位 → 标记渲染树脏 + MarkAllDirty。
-func AddBackgroundImageLoadedListener(fn func(string)) func() {
+//
+// ★ ok 表示本次**是否解码成功**：宿主据此为文档里的 `<img>` 派发
+// load / error（HTML 规范的事件语义）。此前只有 url，宿主无法区分成功与
+// 失败——`<img onerror>` 永远收不到通知，图片失败重试/占位逻辑失效。
+func AddBackgroundImageLoadedListener(fn func(url string, ok bool)) func() {
 	if fn == nil {
 		return func() {}
 	}
@@ -294,9 +392,9 @@ func AddBackgroundImageLoadedListener(fn func(string)) func() {
 }
 
 // notifyBackgroundImageLoaded 触发「图片加载完成」（成功与失败都触发，与
-// 既有单回调语义一致）。在取字节的 goroutine 里调用：先取快照再回调，不持
-// 锁调用外部代码。
-func notifyBackgroundImageLoaded(url string) {
+// 既有单回调语义一致；ok 区分二者，供宿主派发 load / error）。在取字节的
+// goroutine 里调用：先取快照再回调，不持锁调用外部代码。
+func notifyBackgroundImageLoaded(url string, ok bool) {
 	backgroundImageCache.mu.Lock()
 	cb := bgImageLoadedCallback
 	backgroundImageCache.mu.Unlock()
@@ -304,14 +402,57 @@ func notifyBackgroundImageLoaded(url string) {
 		cb(url)
 	}
 	bgImageLoadedListeners.mu.Lock()
-	fns := make([]func(string), 0, len(bgImageLoadedListeners.fns))
+	fns := make([]func(string, bool), 0, len(bgImageLoadedListeners.fns))
 	for _, fn := range bgImageLoadedListeners.fns {
 		fns = append(fns, fn)
 	}
 	bgImageLoadedListeners.mu.Unlock()
 	for _, fn := range fns {
-		fn(url)
+		fn(url, ok)
 	}
+}
+
+// IsImageReady 报告某个 URL 的图片是否已**解码就绪**（命中解码缓存，或已
+// 登记为动图帧序列）。
+//
+// 用途：`data:` URL 走 loadBackgroundImageWith 的同步分支解码，不产生异步
+// 完成通知——宿主无法通过监听器得知「这张内联图已经好了」。宿主在绘制后
+// 用它补派发 `<img>` 的 load 事件（见 webkit 的 flushImageEvents）。
+func IsImageReady(url string) bool {
+	backgroundImageCache.mu.Lock()
+	_, ok := backgroundImageCache.imgs[url]
+	backgroundImageCache.mu.Unlock()
+	if ok {
+		return true
+	}
+	return IsAnimatedImageURL(url)
+}
+
+// RequestImageLoad 主动为某个 URL 发起一次异步加载（若尚未在加载、尚未
+// 就绪，且不在失败退避窗口内）。重复调用是廉价的（受 loading/退避保护）。
+//
+// 为什么需要它：引擎的图片加载此前只发生在**绘制**路径（loadBackgroundImage
+// → loader），而替换元素的盒尺寸来自资源固有尺寸——**加载失败的资源量不出
+// 尺寸、盒塌成 0×0、于是根本不绘制**，加载也就永远不发起，最终「图片失败」
+// 既不显示也不报错（`<img onerror>` 永远收不到通知）。浏览器语义是「src
+// 生效即开始加载」，与是否绘制无关；宿主（webkit）用本接口把这条语义补上。
+func RequestImageLoad(url string, loader ImageResourceLoader) {
+	if url == "" || loader == nil {
+		return
+	}
+	if !loader.AllowsURL(url) {
+		return // 策略拒绝：既不加载也不通知（安全默认）
+	}
+	backgroundImageCache.mu.Lock()
+	defer backgroundImageCache.mu.Unlock()
+	if _, ok := backgroundImageCache.imgs[url]; ok {
+		return
+	}
+	if backgroundImageCache.loading[url] || bgImageBackingOff(url) {
+		return
+	}
+	backgroundImageCache.loading[url] = true
+	go fetchImageViaLoaderAsync(url, loader)
 }
 
 // LoadImageSync 是 loadBackgroundImage 的导出包装（供 webkit 桥按 <img>
@@ -347,10 +488,10 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 // 由渲染层静默联网。loader 为 nil 时保持既有内置行为（独立渲染/探针场景
 // 逐字节不变）。
 func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *DecodedImage {
-	// ★ data: URI 自带内容、不涉及任何外部资源——必须在模式门禁**之前**放行
-	//（契约见 image_resource.go 的 AllowsExternal：「data: URL 不走本判定」，
-	// 两种模式都允许）。此前门禁在前，UI 库模式（ModeToolkit）下连 data: 图都
-	// 被拒：`<video poster="data:…">`、内嵌 data: 图标、内联 SVG 的
+	// ★ data: URI 自带内容、不涉及任何外部资源——必须在策略门禁**之前**放行
+	//（契约见 image_resource.go 的 AllowsURL：「data: URL 恒放行，与资源策略
+	// 解耦」，两种模式都允许）。此前门禁在前，UI 库模式（ModeToolkit）下连
+	// data: 图都被拒：`<video poster="data:…">`、内嵌 data: 图标、内联 SVG 的
 	// `background-image: url(data:image/png;base64,…)` 全部画不出来。
 	if b, ok := decodeDataURI(url); ok {
 		// 动图（A4）：data: URI 里的 GIF/WebP 动画同样按当前时刻取帧——一次性登记帧
@@ -371,16 +512,19 @@ func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *D
 		return img
 	}
 	if loader != nil && url != "" {
-		// ★ 模式门禁先于缓存查询：backgroundImageCache 是进程级全局的，
+		// ★ 策略门禁先于缓存查询：backgroundImageCache 是进程级全局的，
 		//   若另一个 WebView（浏览器模式）已经加载过同一 URL，缓存命中会
 		//   让 UI 库模式下被拒绝的图片照样显示——门禁被缓存旁路（探针实测：
 		//   ModeToolkit 里的 `<img src="http://…/pic.png">` 显示出了浏览器
 		//   模式刚取回的图）。
-		if !loader.AllowsExternal() {
-			return nil
-		}
+		// ★ 顺序：先按文档基准解析为绝对 URL，再**逐 URL** 判定策略——
+		//   AllowHostResolved 的放行对象是「宿主明确提供的那个引用」，
+		//   必须先拿到解析后的引用才判得准（TC-M-903/904）。
 		if abs := loader.ResolveURL(url); abs != "" {
 			url = abs
+		}
+		if !loader.AllowsURL(url) {
+			return nil
 		}
 	}
 	// 动图（A4）：已登记的 url **每次绘制**都按当前时刻取帧——不能走下面的单帧缓存
@@ -469,7 +613,7 @@ func fetchImageViaLoaderAsync(url string, loader ImageResourceLoader) {
 		backgroundImageCache.retryAt[url] = time.Now().Add(bgImageRetryBackoff)
 	}
 	backgroundImageCache.mu.Unlock()
-	notifyBackgroundImageLoaded(url)
+	notifyBackgroundImageLoaded(url, loaded)
 }
 
 // fetchBackgroundImageAsync downloads an http(s) image off-thread and stores
@@ -493,7 +637,7 @@ func fetchBackgroundImageAsync(url string) {
 		backgroundImageCache.retryAt[url] = time.Now().Add(bgImageRetryBackoff)
 	}
 	backgroundImageCache.mu.Unlock()
-	notifyBackgroundImageLoaded(url)
+	notifyBackgroundImageLoaded(url, loaded)
 }
 
 // bgSizeMode describes how background-size scales the image.

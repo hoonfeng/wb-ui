@@ -81,15 +81,30 @@ func (l *webViewImageLoader) ResolveURL(ref string) string {
 	return abs
 }
 
-// AllowsExternal 与外部资源通道同一条门禁：UI 库模式不允许网络/文件系统
-// 图片引用（http(s)/file/相对路径），浏览器模式允许。渲染层据此在**缓存
-// 查询之前**拒绝——否则进程级全局图片缓存会让别的 WebView 已取回的同名
-// URL 穿透模式门禁。
-func (l *webViewImageLoader) AllowsExternal() bool {
+// AllowsURL 逐 URL 判定（渲染层传入的已是按文档基准解析后的绝对 URL）——
+// 与 loadExternalResource 是同一条门禁（决策 1）：AllowHostResolved 是
+// **逐引用**放行，粗粒度的「模式是否允许外部资源」无法表达「这个 URL 宿主
+// 给了、那个没给」。渲染层在**缓存查询之前**调用它——否则进程级全局图片
+// 缓存会让别的 WebView 已取回的同名 URL 穿透策略：
+//   - data: 自带内容、不经外部通道 → 恒放行（与策略解耦）；
+//   - AllowAll → 放行；
+//   - AllowHostResolved → 仅放行宿主 ResourceResolver 明确提供的引用
+//     （resolver 未命中即拒，TC-M-903；http(s) 仍拒，TC-M-904）；
+//   - DenyExternal → 拒（http(s)/file/相对路径一律不加载）。
+func (l *webViewImageLoader) AllowsURL(url string) bool {
 	if l == nil || l.wv == nil {
 		return false
 	}
-	return l.wv.mode.allowsExternalURLs()
+	if strings.HasPrefix(strings.ToLower(url), "data:") {
+		return true
+	}
+	switch l.wv.effectiveResourcePolicy() {
+	case AllowAll:
+		return true
+	case AllowHostResolved:
+		return l.wv.resolverProvides(url)
+	}
+	return false
 }
 
 // Load 取图片字节：统一走 loadExternalResource（宿主 ResourceResolver →

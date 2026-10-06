@@ -33,13 +33,18 @@ type ImageResourceLoader interface {
 	// 失败（例如 UI 库模式拒绝了网络引用）——调用方不缓存失败结果。
 	Load(absURL string) ([]byte, error)
 
-	// AllowsExternal 报告当前策略是否允许**外部**（网络/文件系统）图片
-	// 引用。false 时渲染层在**查询缓存之前**就拒绝该引用（UI 库模式）：
-	// 图片缓存（backgroundImageCache）是进程级全局的，若别的 WebView 已经
-	// 加载过同一 URL，只看缓存会让被模式门禁拒绝的图片照样显示出来——
-	// 模式承诺因此被缓存旁路。data: URL 不走本判定（自带内容，两种模式都
-	// 允许）。
-	AllowsExternal() bool
+	// AllowsURL 报告**已按文档基准解析为绝对 URL** 的引用是否允许加载。
+	// false 时渲染层在**查询缓存之前**就拒绝该引用：图片缓存
+	//（backgroundImageCache）是进程级全局的，若别的 WebView 已经加载过同一
+	// URL，只看缓存会让被策略拒绝的图片照样显示出来——策略承诺因此被缓存
+	// 旁路（探针实测过：ModeToolkit 里的 `<img src="http://…/pic.png">`
+	// 显示出了浏览器模式刚取回的图）。
+	//
+	// 为什么逐 URL 而不是「模式是否允许外部资源」：资源策略
+	// AllowHostResolved 只放行宿主 ResourceResolver **明确提供**的引用，
+	// 粗粒度判定无法表达「这个 URL 宿主给了、那个没给」。data: URL 自带
+	// 内容、不经外部通道，恒放行（与策略解耦，两种模式都允许）。
+	AllowsURL(url string) bool
 }
 
 // currentImageLoader 是本线程当前绘制上下文的图片 loader。由 Paint 入口

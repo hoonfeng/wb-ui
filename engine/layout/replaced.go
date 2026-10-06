@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"wb-ui/engine/dom"
+	"wb-ui/engine/platform/graphics"
 )
 
 // maxResourceProbeBytes bounds how much of a local file is read while probing
@@ -407,6 +408,17 @@ func svgViewBox(tag string) (float64, float64) {
 func rasterIntrinsic(data []byte) (float64, float64, bool) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		// ★ 并集探测（U3 / 缺陷 D4）：绘制走 Skia（PNG/JPEG/GIF/WebP/BMP/
+		//   ICO），而上面这条 Go 标准库路径只覆盖 PNG/JPEG/GIF。WebP/BMP/
+		//   ICO 因此「画得出来但量不出固有尺寸」——`<img>` 不给 CSS 尺寸时
+		//   盒子塌成 0。布局层先用 DecodeConfig（只读文件头）探，失败再让
+		//   Skia 兜底，使两套 codec 集合取并集。
+		//   注：兜底是完整解码，且 readResource 只读文件前
+		//   maxResourceProbeBytes 字节——超大的 WebP/BMP/ICO 可能因此仍量不
+		//   出尺寸（不会更糟：与修复前同样是「无固有尺寸」）。
+		if w, h, ok := graphics.DecodeSize(data); ok {
+			return w, h, true
+		}
 		return 0, 0, false
 	}
 	return float64(cfg.Width), float64(cfg.Height), true

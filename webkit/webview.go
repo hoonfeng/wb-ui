@@ -522,6 +522,11 @@ type WebView struct {
 	// resourceResolver 是宿主资源解析器（可选）：两种模式都先经它，
 	// UI 库模式下是外部资源引用的唯一通道。
 	resourceResolver ResourceResolver
+	// resourcePolicy 是宿主显式声明的资源策略（见 resource_policy.go）。
+	// resourcePolicySet 为 false 时策略按模式推导（ModeBrowser → AllowAll、
+	// ModeToolkit → DenyExternal），即历史行为。
+	resourcePolicy    ResourcePolicy
+	resourcePolicySet bool
 	// resourceCache 是本 WebView 的资源内存缓存（惰性创建，见
 	// resource_cache.go）：浏览器 memory cache 语义——同一 URL 只取一次。
 	resourceCacheMu sync.Mutex
@@ -534,6 +539,12 @@ type WebView struct {
 	// videoFrameOff 是「播放帧已交付」全局监听器的注销函数（A2-③，与
 	// imageLoadedOff 同一条规矩：NewWebViewWithMode 注册、Destroy 注销）。
 	videoFrameOff func()
+	// pendingImageEvents 记录**异步**图片加载结果（url → 是否成功）：写入方
+	// 是取字节的 goroutine（onAsyncImageLoaded），消费方是主线程的
+	// flushImageEvents。DispatchEvent 会调用页面 JS，必须在解释器线程执行，
+	// 因此这里只排队、不派发。
+	pendingImageMu     sync.Mutex
+	pendingImageEvents map[string]bool
 	// resourceLoadedMu 保护 onResourceLoaded（回调在取字节的 goroutine 里
 	// 触发，宿主可能在任意线程设置）。
 	resourceLoadedMu sync.Mutex
@@ -1594,7 +1605,7 @@ func (wv *WebView) SetOnResourceLoaded(fn func(url string)) {
 // Paint）在下一帧画出新图片。图片可能改变布局（`<img>` 没有宽高属性时布局
 // 依赖图片固有尺寸），因此一并请求重新布局——Frame.MarkRenderTreeDirty
 // 内部有 cooldown 合并连续变更。
-func (wv *WebView) onAsyncImageLoaded(url string) {
+func (wv *WebView) onAsyncImageLoaded(url string, ok bool) {
 	if wv == nil || wv.destroyed {
 		return
 	}
@@ -1607,11 +1618,126 @@ func (wv *WebView) onAsyncImageLoaded(url string) {
 			rv.MarkAllDirty()
 		}
 	}
+	// ★ 图片契约（文档 §5 G8 / U2）：加载完成必须让文档里的 <img> 收到
+	//   load / error 事件。此前这里只做引擎内部置脏重绘，JS 侧
+	//   `img.onload` / `addEventListener('load')` / `onerror` 永不触发——
+	//   懒加载、骨架屏、失败重试、占位图逻辑全部失效（实测探针 EVENTS 为空）。
+	//
+	// ★ 线程边界：本函数跑在取字节的 goroutine 上，而 DispatchEvent 会调用
+	//   页面 JS（解释器不是线程安全的）——只排队，由主线程的
+	//   flushImageEvents（每次 Render 之后）真正派发。
+	wv.pendingImageMu.Lock()
+	if wv.pendingImageEvents == nil {
+		wv.pendingImageEvents = map[string]bool{}
+	}
+	wv.pendingImageEvents[url] = ok
+	wv.pendingImageMu.Unlock()
 	wv.resourceLoadedMu.Lock()
 	fn := wv.onResourceLoaded
 	wv.resourceLoadedMu.Unlock()
 	if fn != nil {
 		fn(url)
+	}
+}
+
+// resolveImageURLFor 把 `<img src>` 里的引用按文档基准解析为绝对 URL——与
+// 渲染层的图片 loader 同一套解析（webViewImageLoader.ResolveURL，失败则保留
+// 原样引用）。data: 引用原样返回：渲染层的解码缓存键就是原始 data: URL。
+func (wv *WebView) resolveImageURLFor(src string) string {
+	if src == "" || strings.HasPrefix(src, "data:") {
+		return src
+	}
+	l := &webViewImageLoader{wv: wv}
+	if abs := l.ResolveURL(src); abs != "" {
+		return abs
+	}
+	return src
+}
+
+// fireImageEventOnce 为元素派发一次事件：同一 src 下每种事件只派发一次
+//（内部属性记录「上次派发时的 src」——元素换 src 后需重新派发）。
+func (wv *WebView) fireImageEventOnce(el *dom.Element, ev string) {
+	marker := "data-wb-imgevt-" + ev
+	src := el.GetAttribute("src")
+	if el.GetAttribute(marker) == src {
+		return
+	}
+	el.SetAttribute(marker, src)
+	// load / error 都不冒泡（HTML 规范）：canBubble=false。
+	el.DispatchEvent(dom.NewEvent(ev, false, false, false))
+}
+
+// fireImageElementEvents 为文档中引用该 URL 的**每一个** `<img>` 派发
+// load（ok=true）或 error（ok=false）。同一 URL 的多个元素都要收到——
+// 规范如此，且「同一 URL 两个 <img>」的元素状态一致性是既有缺陷点
+//（文档 §5 G8 的 TC-M-805）。
+func (wv *WebView) fireImageElementEvents(url string, ok bool) {
+	if wv == nil || wv.destroyed {
+		return
+	}
+	doc := wv.Document()
+	if doc == nil {
+		return
+	}
+	ev := "load"
+	if !ok {
+		ev = "error"
+	}
+	for _, el := range doc.GetElementsByTagName("img") {
+		src := el.GetAttribute("src")
+		if src == "" {
+			continue
+		}
+		if wv.resolveImageURLFor(src) != url {
+			continue
+		}
+		wv.fireImageEventOnce(el, ev)
+	}
+}
+
+// flushImageEvents 扫描文档中的 `<img>`，为「已解码就绪但尚未派发 load」的
+// 元素补派发 load。在每次 Render 之后调用：`data:` 图片走渲染层的**同步**
+// 解码分支，不产生异步完成通知，只有绘制之后才知道它已经好了。
+//
+// 这里**不**派发 error：未就绪可能是「策略拒绝」「尚未取回」「确实失败」，
+// 这条路径区分不了；失败由异步通知（onAsyncImageLoaded ok=false）负责。
+func (wv *WebView) flushImageEvents() {
+	if wv == nil || wv.destroyed {
+		return
+	}
+	doc := wv.Document()
+	if doc == nil {
+		return
+	}
+	// ① 异步加载结果（由取字节的 goroutine 排队）：成功派发 load、失败派发
+	//    error（`<img onerror>` 此前永远收不到通知）。
+	wv.pendingImageMu.Lock()
+	pending := wv.pendingImageEvents
+	wv.pendingImageEvents = nil
+	wv.pendingImageMu.Unlock()
+	for url, ok := range pending {
+		wv.fireImageElementEvents(url, ok)
+	}
+	// ② 同步就绪（`data:` 内联图片）：绘制后缓存已有位图即视为加载完成。
+	//   ★ 未就绪的引用在这里**主动发起加载**（rendering.RequestImageLoad）：
+	//   引擎的图片加载此前只发生在**绘制**路径，而替换元素的盒尺寸来自资源
+	//   固有尺寸——取不到尺寸的失败资源盒塌成 0×0、根本不绘制，加载于是
+	//   永不发起，`<img onerror>` 也就永远收不到通知（实测：探针 error 恒
+	//   为 undefined）。浏览器语义是「src 生效即开始加载」，与是否绘制无关。
+	//   策略拒绝（UI 库模式拒绝 http(s)/file）由 RequestImageLoad 内部挡下：
+	//   既不加载也不通知，与「拒绝 ≠ 失败」的既有边界一致。
+	loader := &webViewImageLoader{wv: wv}
+	for _, el := range doc.GetElementsByTagName("img") {
+		src := el.GetAttribute("src")
+		if src == "" {
+			continue
+		}
+		abs := wv.resolveImageURLFor(src)
+		if !rendering.IsImageReady(abs) {
+			rendering.RequestImageLoad(abs, loader)
+			continue
+		}
+		wv.fireImageEventOnce(el, "load")
 	}
 }
 
@@ -1729,6 +1855,10 @@ func (wv *WebView) Render() ([]byte, error) {
 	wv.canvas.Clear(graphics.Color{})
 	dirtyRect := graphics.Rect{X: 0, Y: 0, Width: float64(wv.width), Height: float64(wv.height)}
 	rendering.Paint(rv, wv.canvas, dirtyRect)
+	// ★ 图片契约（U2）：`data:` 等**同步解码**的图片在本次绘制后已就绪，
+	//   补派发 `<img>` 的 load 事件（异步图片由 onAsyncImageLoaded 负责）。
+	//   放在 Paint 之后：就绪以解码缓存为准，而缓存由绘制路径填充。
+	wv.flushImageEvents()
 	return wv.canvas.Pixels(), nil
 }
 

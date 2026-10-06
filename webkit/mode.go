@@ -62,8 +62,10 @@ func (m Mode) allowsNetwork() bool { return m != ModeToolkit }
 // allowsSubframes 报告该模式是否装配 <iframe> 子文档。
 func (m Mode) allowsSubframes() bool { return m != ModeToolkit }
 
-// allowsExternalURLs 报告该模式是否允许 http(s)/file 外部资源引用。
-func (m Mode) allowsExternalURLs() bool { return m != ModeToolkit }
+// ★ 外部资源引用的放行不再由模式二元决定：见 resource_policy.go 的
+// ResourcePolicy（决策 1）——模式的角色退化为「默认策略的推导依据」
+//（ModeBrowser → AllowAll、ModeToolkit → DenyExternal，见
+// effectiveResourcePolicy）。
 
 // allowsNavigation 报告该模式是否允许导航（LoadURL / 顶层文档换源）。
 func (m Mode) allowsNavigation() bool { return m != ModeToolkit }
@@ -198,8 +200,13 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 		cache.put(ref, cachedResource{content: res.content, contentType: res.contentType})
 		return res.content, nil
 	}
-	if !wv.mode.allowsExternalURLs() {
-		return "", fmt.Errorf("%w: %q（UI 库模式请用 SetResourceResolver 提供，或改用 data: URL）",
+	// ★ 门禁按**资源策略**求值（见 resource_policy.go）：未显式设置时
+	//   按模式推导（ModeBrowser → AllowAll、ModeToolkit → DenyExternal），
+	//   与历史行为一致；需要读盘的 UI 库宿主显式声明 AllowHostResolved
+	//   （其放行发生在上面 resolver 通道，不受本门禁影响）。
+	if !wv.allowsExternalURLs() {
+		return "", fmt.Errorf("%w: %q（UI 库模式请用 SetResourceResolver 提供，或改用 data: URL；"+
+			"需要放行宿主已解析资源的宿主可 SetResourcePolicy(AllowHostResolved)）",
 			ErrExternalResourceBlocked, ref)
 	}
 	// ★ 缓存查询放在模式门禁之后（见函数注释第 5 条）。
