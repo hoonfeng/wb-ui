@@ -16,7 +16,10 @@
 
 package css
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // RuleType mirrors StyleRuleType in StyleRuleType.h.
 type RuleType int
@@ -52,12 +55,16 @@ type Rule interface {
 // CSSPropertySourceData concept. The Value is stored as a token slice so that the
 // resolver can interpret it lazily (e.g. resolve var() or evaluate calc()).
 type Declaration struct {
-	Name       string
-	Value      []Token
-	Important  bool
+	Name      string
+	Value     []Token
+	Important bool
 }
 
 // String renders the declaration as "name: value; !important" if set.
+//
+// ★ 第 22 轮分清两个口径：String / ValueString 是**引擎内部**文本（解析器、
+// 级联、渲染层读值用），url token **不带引号** —— 渲染层据此解析并加载资源。
+// 浏览器口径（cssText / getPropertyValue 的文本）请用 CSSText / CSSTextValue。
 func (d Declaration) String() string {
 	var sb []byte
 	sb = append(sb, d.Name...)
@@ -75,10 +82,122 @@ func (d Declaration) ValueString() string {
 	return valueStringOf(d.Value)
 }
 
+// CSSText 渲染 CSSOM 口径的声明文本（`name: value`，带 ` !important`）。
+// 与 String 的差别只在**属性特化**与该值里的 url token 引号（见 CSSTextValue）。
+func (d Declaration) CSSText() string {
+	var sb []byte
+	sb = append(sb, d.Name...)
+	sb = append(sb, ':', ' ')
+	sb = append(sb, d.CSSTextValue()...)
+	if d.Important {
+		sb = append(sb, " !important"...)
+	}
+	return string(sb)
+}
+
+// CSSTextValue 返回 CSSOM 口径的声明值（浏览器 cssText / getPropertyValue 的
+// 文本）：url token 带双引号 + font-family 的属性特化。
+//
+// ★ 依据（Edge --dump-dom 实测，dev/output/wbui-audit/r22url.edge.txt）：
+//
+//	.a1{background-image:url(foo.png)}   → url("foo.png")
+//	.a2{background-image:url("bar.png")} → url("bar.png")
+//	.a3{font-family:"Probe Font",serif}  → "Probe Font", serif（含空格 → 保留引号）
+//	@font-face{font-family:"ProbeFont"}  → ProbeFont（可作标识符 → 去引号）
+//
+// 只在 CSSOM 展示层（engine/js/bindings/domctors.go 的规则 style / cssText）
+// 使用；引擎内部路径继续走 ValueString（那里 url 不带引号）。
+func (d Declaration) CSSTextValue() string {
+	v := valueStringOfCSSOM(d.Value)
+	if strings.EqualFold(strings.TrimSpace(d.Name), "font-family") {
+		v = unquoteFontFamilies(v)
+	}
+	return v
+}
+
+// unquoteFontFamilies 实现 font-family 的 CSSOM 序列化特化：字体名若可写作
+// CSS 标识符（不含空格等），序列化时**省略引号**。
+//
+// ★ Edge 基线（dev/output/wbui-audit/r22url.edge.txt）：
+//
+//	.a3{font-family:"Probe Font",serif} → font-family: "Probe Font", serif;（含空格 → 保留引号）
+//	.a4{font-family:ProbeFont}          → font-family: ProbeFont;（本就是标识符）
+//	@font-face{font-family:"ProbeFont"} → font-family: ProbeFont;（可作标识符 → 去引号）
+func unquoteFontFamilies(v string) string {
+	parts := splitTopLevelCommas(v)
+	for i, part := range parts {
+		p := strings.TrimSpace(part)
+		if len(p) >= 2 && (p[0] == '"' && p[len(p)-1] == '"' || p[0] == '\'' && p[len(p)-1] == '\'') {
+			if inner := p[1 : len(p)-1]; isCSSIdentLike(inner) {
+				parts[i] = inner
+				continue
+			}
+		}
+		parts[i] = p
+	}
+	return strings.Join(parts, ", ")
+}
+
+// splitTopLevelCommas 按**引号外**的逗号切分（字体名内部可能含逗号）。
+func splitTopLevelCommas(v string) []string {
+	var out []string
+	var b strings.Builder
+	var quote byte
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case quote != 0:
+			b.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+			b.WriteByte(c)
+		case c == ',':
+			out = append(out, b.String())
+			b.Reset()
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return append(out, b.String())
+}
+
+// isCSSIdentLike 判断 s 是否可写作 CSS 标识符（近似判定：首字符非数字，其余为
+// 字母 / 数字 / 连字符 / 下划线 / 非 ASCII）。用于 font-family 的去引号特化。
+func isCSSIdentLike(s string) bool {
+	if s == "" || s == "-" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 0x80 {
+			continue
+		}
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_', c == '-':
+		case c >= '0' && c <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // valueStringOf serializes a token slice into CSSOM-style text: whitespace and
 // comment tokens are dropped, the inter-token separator follows browser rules
 // (see appendValueSeparator) — rgb(0,128,0) round-trips as "rgb(0, 128, 0)".
-func valueStringOf(toks []Token) string {
+func valueStringOf(toks []Token) string { return valueStringOfMode(toks, false) }
+
+// valueStringOfCSSOM 与 valueStringOf 相同，只有 url token 按 CSSOM 口径带双引号
+// （见 Declaration.CSSTextValue）。
+func valueStringOfCSSOM(toks []Token) string { return valueStringOfMode(toks, true) }
+
+func valueStringOfMode(toks []Token, cssomURL bool) string {
 	var sb []byte
 	for i, tok := range toks {
 		if isValueSeparatorToken(tok) {
@@ -87,7 +206,11 @@ func valueStringOf(toks []Token) string {
 		if len(sb) > 0 {
 			appendValueSeparator(&sb, toks[i-1], tok)
 		}
-		sb = append(sb, serializeToken(tok)...)
+		if cssomURL {
+			sb = append(sb, serializeTokenCSSOM(tok)...)
+		} else {
+			sb = append(sb, serializeToken(tok)...)
+		}
 	}
 	return string(sb)
 }
@@ -109,6 +232,7 @@ func isValueSeparatorToken(t Token) bool {
 //   - after a function token "rgb(" → NO space:  rgb(0, 128, 0)
 //   - after a comma → ONE space:                  rgb(0, 128, 0)
 //   - otherwise → ONE space:                      1px solid red
+//
 // Without this, <style>background: rgb(0,128,0)</style> round-trips through the
 // token stream as "rgb( 0 , 128 , 0 )" — getComputedStyle().backgroundColor
 // differs from Chrome's "rgb(0, 128, 0)" and string comparisons fail.
@@ -125,6 +249,16 @@ func appendValueSeparator(sb *[]byte, prev, cur Token) {
 		// "0, 128" / "1px solid red"
 		*sb = append(*sb, ' ')
 	}
+}
+
+// serializeTokenCSSOM 与 serializeToken 相同，但 url token 按 CSSOM 口径带双引号
+// （tokenizer 已剥掉原文的引号 —— 带引号与不带引号两种写法都产出 Value 不含引号
+// 的 TokenURL）。基线：dev/output/wbui-audit/r22url.edge.txt。仅供 CSSTextValue 用。
+func serializeTokenCSSOM(t Token) string {
+	if t.Type == TokenURL {
+		return "url(\"" + t.Value + "\")"
+	}
+	return serializeToken(t)
 }
 
 // serializeToken renders a single token back to CSS text. This is a minimal helper
@@ -213,10 +347,10 @@ func (*MediaRule) Type() RuleType { return RuleMedia }
 
 // ImportRule is the Go translation of StyleRuleImport: an href plus a media query.
 type ImportRule struct {
-	Href      string
-	Media     string
-	Supports  string
-	Origin    Origin
+	Href     string
+	Media    string
+	Supports string
+	Origin   Origin
 }
 
 // Type implements Rule.
@@ -234,9 +368,9 @@ func (*FontFaceRule) Type() RuleType { return RuleFontFace }
 // KeyframesRule is the Go translation of StyleRuleKeyframes. Each Keyframe holds a
 // list of selector keys (e.g. "0%", "50%", "from", "to") plus declarations.
 type KeyframesRule struct {
-	Name     string
+	Name      string
 	Keyframes []KeyframeRule
-	Origin   Origin
+	Origin    Origin
 }
 
 // Type implements Rule.

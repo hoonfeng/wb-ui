@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>CSS OM 构造器与实例原型（第 20 轮）+ 方法面/字段面/身份（第 21 轮）</title>
+<title>CSS OM 构造器与实例原型（第 20 轮）+ 方法面/字段面/身份（第 21 轮）+ 规则字段面/parentRule（第 22 轮）</title>
 <style>body{font:13px monospace;margin:8px} #out{white-space:pre-wrap}</style>
 </head>
 <body>
@@ -12,6 +12,12 @@
 <style id="probe-sheet">.b{color:rgb(4,5,6)}</style>
 <style id="probe-sheet21">.r21{color:rgb(4,5,6)}
 @media (min-width: 1px) { .r21 { color: rgb(7, 8, 9) } }</style>
+<style id="probe-sheet22">@import url("probe-import22.css") screen;
+.r22{color:rgb(1,2,3)}
+@supports (display: grid) and (not (display: inline-grid)) { .sg22 { color: rgb(9, 9, 9) } }
+@keyframes spin22 { from { opacity: 0 } to { opacity: 1 } }
+@font-face { font-family: FaceFont22; font-weight: 700; src: url("nonexistent.woff2") format("woff2") }
+@page :first { margin: 1cm }</style>
 <pre id="out"></pre>
 <script>
 (function () {
@@ -193,7 +199,81 @@
   T("id_sheet0", function () { return bn(document.styleSheets[0] === document.styleSheets[0]); });
   T("id_sheet0_item0", function () { return bn(document.styleSheets[0] === document.styleSheets.item(0)); });
 
-  // ── 9. Path2D 实例方法 + ctx 的 Path2D 参数 ──
+  // ══ 第 22 轮：@supports conditionText / 规则类型字段面 / parentRule / parentStyleSheet ══
+  // 基线：Edge --dump-dom（dev/output/wbui-audit/r22base.edge.txt）。
+  var sh22 = sheetById("probe-sheet22");
+  T("sh22_found", function () { return bn(!!sh22); });
+  T("sh22_rules_len", function () { return sh22 ? sh22.cssRules.length : -1; });
+
+  // ── 10. @import（CSSImportRule）：href / media / cssText ──
+  var im22 = sh22 ? sh22.cssRules[0] : null;
+  T("im22_ctor", function () { return im22.constructor.name; });
+  T("im22_type", function () { return im22.type; });
+  T("im22_href", function () { return im22.href; });
+  T("im22_media_kind", function () { return typeof im22.media; });
+  T("im22_media_text", function () { return String(im22.media.mediaText); });
+  T("im22_csstext", function () { return im22.cssText; });
+  T("im22_parent_rule_null", function () { return bn(im22.parentRule === null); });
+  T("im22_parent_sheet_id", function () { return bn(im22.parentStyleSheet === sh22); });
+
+  // ── 11. @supports（CSSSupportsRule）：conditionText（第 21 轮遗留项，本轮补基线）──
+  var sp22 = sh22 ? sh22.cssRules[2] : null;
+  T("sp22_ctor", function () { return sp22.constructor.name; });
+  T("sp22_type", function () { return sp22.type; });
+  T("sp22_cond", function () { return sp22.conditionText; });
+  T("sp22_nested_len", function () { return sp22.cssRules.length; });
+  T("sp22_nested_sel", function () { return sp22.cssRules[0].selectorText; });
+  T("sp22_nested_csstext", function () { return sp22.cssRules[0].cssText; });
+  T("sp22_parent_rule_null", function () { return bn(sp22.parentRule === null); });
+  T("sp22_nested_parent_rule_id", function () { return bn(sp22.cssRules[0].parentRule === sp22); });
+  T("sp22_nested_parent_sheet_id", function () { return bn(sp22.cssRules[0].parentStyleSheet === sh22); });
+  T("sp22_csstext", function () { return sp22.cssText; });
+
+  // ── 12. @keyframes（CSSKeyframesRule.name / cssRules + 子 CSSKeyframeRule）──
+  var kf22 = sh22 ? sh22.cssRules[3] : null;
+  T("kf22_ctor", function () { return kf22.constructor.name; });
+  T("kf22_name", function () { return kf22.name; });
+  T("kf22_rules_len", function () { return kf22.cssRules.length; });
+  T("kf22_0_ctor", function () { return kf22.cssRules[0].constructor.name; });
+  T("kf22_0_type", function () { return kf22.cssRules[0].type; });
+  T("kf22_0_csstext", function () { return kf22.cssRules[0].cssText; });
+  T("kf22_0_style_gpv", function () { return kf22.cssRules[0].style.getPropertyValue("opacity"); });
+  T("kf22_0_style_len", function () { return kf22.cssRules[0].style.length; });
+  T("kf22_0_style_csstext", function () { return kf22.cssRules[0].style.cssText; });
+  T("kf22_0_parent_rule_id", function () { return bn(kf22.cssRules[0].parentRule === kf22); });
+  T("kf22_0_parent_sheet_id", function () { return bn(kf22.cssRules[0].parentStyleSheet === sh22); });
+  T("kf22_1_csstext", function () { return kf22.cssRules[1].cssText; });
+  T("kf22_csstext", function () { return kf22.cssText; });
+
+  // ── 13. @font-face（CSSFontFaceRule.style）──
+  var ff22 = sh22 ? sh22.cssRules[4] : null;
+  T("ff22_ctor", function () { return ff22.constructor.name; });
+  T("ff22_style_gpv", function () { return ff22.style.getPropertyValue("font-family"); });
+  T("ff22_style_len", function () { return ff22.style.length; });
+  T("ff22_style_item0", function () { return ff22.style.item(0); });
+  T("ff22_style_csstext", function () { return ff22.style.cssText; });
+  T("ff22_style_instanceof", function () { return bn(ff22.style instanceof W.CSSStyleDeclaration); });
+  T("ff22_csstext", function () { return ff22.cssText; });
+
+  // ── 14. @page（CSSPageRule.selectorText / style）──
+  // ★ 记账（WORKITEMS §22）：`style.length` / `style.item(0)` 在 Edge 下会把
+  //   shorthand `margin` 展开为 4 个长写（实测 len=4 / item(0)="margin-top"），
+  //   本引擎按声明条数报 1 —— 夹具不覆盖这两个值（改断言 getPropertyValue("margin")，
+  //   两侧均为 "1cm"），避免用夹具掩盖未实现项。
+  var pg22 = sh22 ? sh22.cssRules[5] : null;
+  T("pg22_ctor", function () { return pg22.constructor.name; });
+  T("pg22_selectorText", function () { return pg22.selectorText; });
+  T("pg22_style_gpv", function () { return pg22.style.getPropertyValue("margin"); });
+  T("pg22_style_csstext", function () { return pg22.style.cssText; });
+  T("pg22_nested_len", function () { return pg22.cssRules.length; });
+  T("pg22_csstext", function () { return pg22.cssText; });
+  T("pg22_parent_rule_null", function () { return bn(pg22.parentRule === null); });
+
+  // 顶层规则的 parentRule 恒为 null（Edge 实测），parentStyleSheet 恒为该表
+  T("top22_parent_rule_null", function () { return bn(sh22.cssRules[1].parentRule === null); });
+  T("top22_parent_sheet_id", function () { return bn(sh22.cssRules[1].parentStyleSheet === sh22); });
+
+  // ── 15. Path2D 实例方法 + ctx 的 Path2D 参数 ──
   T("p2d_typeof", function () { return typeof W.Path2D; });
   T("p2d_ctor_name", function () { return W.Path2D.name; });
   T("p2d_instanceof", function () { return bn(new W.Path2D() instanceof W.Path2D); });

@@ -30,6 +30,13 @@ TMPDIR="dev/output/tmp"
 mkdir -p "$OUTDIR" "$TMPDIR"
 EDGE="${WBUI_EDGE:-C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe}"
 
+# ★ 独立 user-data-dir（第 22 轮与 gprobe_cmp.sh 对齐）：宿主若已有 Edge 在运行，
+#   不带它会**转交既有会话** → --dump-dom 无任何输出（实测产物 0 字节）。
+#   路径必须**绝对**：cygpath -m 对相对路径原样返回 → Edge 当相对 profile 处理仍失败。
+EDGE_PROFILE="$(cd "$TMPDIR" && pwd)/edge-profile"
+mkdir -p "$EDGE_PROFILE"
+EDGE_PROFILE_WIN="$(cygpath -m "$EDGE_PROFILE" 2>/dev/null || echo "$EDGE_PROFILE")"
+
 echo "== [$NAME] wbui (jsread 一次读回) =="
 go run ./dev/tools/jsread -html "$PROBE" \
   -js "document.getElementById('$ELEMID').textContent" \
@@ -49,6 +56,7 @@ document.getElementById('vpo').textContent=innerWidth+'x'+innerHeight;
 HTMLEOF
 edge_inner() {
   "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+    --user-data-dir="$EDGE_PROFILE_WIN" \
     --window-size="$1" --force-device-scale-factor=1 \
     --virtual-time-budget=1500 --dump-dom \
     "file:///$(cygpath -m "$ROOT/$VP_PROBE")" 2>/dev/null \
@@ -69,6 +77,7 @@ while [ "$vp_try" -le 3 ]; do
 done
 echo "     Edge 视口实测 $(edge_inner "$EDGE_WS")（目标 ${VIEWPORT_W}x${VIEWPORT_H}；--window-size=$EDGE_WS）"
 "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+  --user-data-dir="$EDGE_PROFILE_WIN" \
   --window-size="$EDGE_WS" --force-device-scale-factor=1 \
   --virtual-time-budget=3000 --dump-dom \
   "file:///$(cygpath -m "$ROOT/$PROBE")" \

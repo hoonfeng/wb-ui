@@ -874,9 +874,17 @@ func cssRuleTypeCode(t css.RuleType) int {
 //	CSSMediaRule / CSSSupportsRule：conditionText + cssRules（嵌套）+ 多行 cssText
 //	                            （Edge 实测 "@media (min-width: 1px) {\n  .b { … }\n}"）
 //
-// 其余规则类型（@font-face / @keyframes / @keyframe / @import / @namespace /
-// @page）仍只有 type —— 如实记账（WORKITEMS §21）。
-func wrapCSSRule(in *jsc.Interpreter, r css.Rule) *jsc.JSObject {
+// ★ 第 22 轮（以 Edge --dump-dom 基线为准补齐 —— 证据 dev/output/wbui-audit/r22base.edge.txt）：
+//
+//	parentRule / parentStyleSheet  所有规则可用（顶层规则的 parentRule 为 null）
+//	CSSImportRule    href / media（MediaList：mediaText / length / item）/ cssText
+//	CSSFontFaceRule  style / cssText
+//	CSSKeyframesRule name / cssRules（子项 CSSKeyframeRule：style / cssText）/ cssText
+//	CSSPageRule      selectorText / style / cssText
+//	CSSMediaRule     media（MediaList）
+//
+// @namespace 仍只有 type —— 如实记账（WORKITEMS §22；不在本轮范围，未取基线不宣称）。
+func wrapCSSRule(in *jsc.Interpreter, r css.Rule, parent *jsc.JSObject, parentSheet *jsc.JSObject) *jsc.JSObject {
 	name := "CSSRule"
 	t := css.RuleUnknown
 	if r != nil {
@@ -889,30 +897,34 @@ func wrapCSSRule(in *jsc.Interpreter, r css.Rule) *jsc.JSObject {
 	obj.SetAccessor("type", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(cssRuleTypeCode(t)))
 	}), nil)
+	// ★ 第 22 轮：parentRule / parentStyleSheet。Edge 实测：顶层规则的 parentRule
+	//   为 null，嵌套规则为**父规则的包装对象**；parentStyleSheet 是该规则所属的
+	//   CSSStyleSheet 包装对象（与 `document.styleSheets[i]` 同一身份）。
+	obj.SetAccessor("parentRule", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if parent == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(parent)
+	}), nil)
+	obj.SetAccessor("parentStyleSheet", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if parentSheet == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(parentSheet)
+	}), nil)
 	switch v := r.(type) {
 	case *css.StyleRule:
 		sel := selectorTextOf(v.Selectors)
 		obj.SetAccessor("selectorText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(sel)
 		}), nil)
-		// ★ 身份稳定：Edge 实测 `rule.style === rule.style` 为 true（同一条规则
-		//   的样式声明是同一对象）。缓存挂在规则包装对象的闭包（per-runtime）。
-		var styleObj jsc.JSValue
-		haveStyle := false
-		obj.SetAccessor("style", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			if haveStyle {
-				return styleObj
-			}
-			styleObj = styleDeclObj(in, v.Declarations)
-			haveStyle = true
-			return styleObj
-		}), nil)
+		setStyleAccessor(obj, v.Declarations)
 		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(cssRuleTextOf(v))
 		}), nil)
 		// CSSGroupingRule（CSS Nesting）：子规则列表（无嵌套时长度为 0）。
 		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			return jsc.ObjectValue(wrapCSSRuleList(in, v.NestedRules))
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.NestedRules, obj, parentSheet))
 		}), nil)
 	case *css.MediaRule:
 		// conditionText 按浏览器序列化规则规范化（见 normalizeConditionText）。
@@ -920,24 +932,72 @@ func wrapCSSRule(in *jsc.Interpreter, r css.Rule) *jsc.JSObject {
 		obj.SetAccessor("conditionText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(cond)
 		}), nil)
+		// ★ 第 22 轮：media（MediaList）—— Edge 实测 `cssRules[i].media` 是对象，
+		//   其 mediaText 即规范化后的条件文本。
+		mediaObj := mediaListObj(in, cond)
+		obj.SetAccessor("media", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(mediaObj)
+		}), nil)
 		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules))
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules, obj, parentSheet))
 		}), nil)
 		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(cssRuleTextOf(v))
 		}), nil)
 	case *css.SupportsRule:
-		// 与 @media 同一规范化（★ 夹具未覆盖 @supports 的 conditionText，
-		// 该分支未经 Edge 对比 —— 见 WORKITEMS §21 遗留）。
+		// 与 @media 同一规范化。★ 第 22 轮补 Edge 基线覆盖（WORKITEMS §22）：
+		// `@supports (display: grid) and (not (display: inline-grid))` 的
+		// conditionText 两侧一致（r22base.edge.txt）。
 		cond := normalizeConditionText(v.Condition)
 		obj.SetAccessor("conditionText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(cond)
 		}), nil)
 		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
-			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules))
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules, obj, parentSheet))
 		}), nil)
 		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(cssRuleTextOf(v))
+		}), nil)
+	case *css.ImportRule:
+		obj.SetAccessor("href", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(v.Href)
+		}), nil)
+		mediaObj := mediaListObj(in, strings.TrimSpace(v.Media))
+		obj.SetAccessor("media", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(mediaObj)
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssImportTextOf(v))
+		}), nil)
+	case *css.FontFaceRule:
+		setStyleAccessor(obj, v.Declarations)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue("@font-face { " + cssDeclsText(v.Declarations) + " }")
+		}), nil)
+	case *css.KeyframesRule:
+		kfName := v.Name
+		obj.SetAccessor("name", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(kfName)
+		}), nil)
+		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(wrapKeyframeList(in, v.Keyframes, obj, parentSheet))
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssKeyframesTextOf(v))
+		}), nil)
+	case *css.PageRule:
+		sel := v.Selector
+		obj.SetAccessor("selectorText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(sel)
+		}), nil)
+		setStyleAccessor(obj, v.Declarations)
+		// Edge 实测（r22base：r5_nested_len=0）：CSSPageRule 继承 CSSGroupingRule，
+		// cssRules 存在但恒为空列表。
+		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(newRuleListObj(in, 0, nil))
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(pageRuleTextOf(v))
 		}), nil)
 	}
 	return obj
@@ -982,13 +1042,15 @@ func selectorTextOf(l *css.SelectorList) string {
 
 // cssDeclsText 序列化声明列表为 CSSOM 文本：分号 + 空格分隔、末尾带分号
 // （Edge 实测 "color: rgb(1, 2, 3); font-size: 15px;"；空列表为 ""）。
+// ★ 第 22 轮：走 Declaration.CSSText（CSSOM 口径 —— url 带引号、font-family
+// 去引号），而不是引擎内部的 Declaration.String。
 func cssDeclsText(decls []css.Declaration) string {
 	if len(decls) == 0 {
 		return ""
 	}
 	parts := make([]string, 0, len(decls))
 	for _, d := range decls {
-		parts = append(parts, d.String())
+		parts = append(parts, d.CSSText())
 	}
 	return strings.Join(parts, "; ") + ";"
 }
@@ -999,11 +1061,73 @@ func cssRuleTextOf(r css.Rule) string {
 	case *css.StyleRule:
 		return selectorTextOf(v.Selectors) + " { " + cssDeclsText(v.Declarations) + " }"
 	case *css.MediaRule:
-		return conditionRuleTextOf("@media "+v.Condition, v.Rules)
+		return conditionRuleTextOf("@media "+normalizeConditionText(v.Condition), v.Rules)
 	case *css.SupportsRule:
-		return conditionRuleTextOf("@supports "+v.Condition, v.Rules)
+		return conditionRuleTextOf("@supports "+normalizeConditionText(v.Condition), v.Rules)
+	case *css.ImportRule:
+		return cssImportTextOf(v)
+	case *css.FontFaceRule:
+		return "@font-face { " + cssDeclsText(v.Declarations) + " }"
+	case *css.KeyframesRule:
+		return cssKeyframesTextOf(v)
+	case *css.PageRule:
+		return pageRuleTextOf(v)
 	}
 	return ""
+}
+
+// cssImportTextOf 序列化 @import。
+// ★ Edge 实测（r22base.edge.txt）：href 一律包在 url("…") 里，media 非空时以空格
+// 接上，行尾分号 —— `@import url("probe-import.css") screen;`
+func cssImportTextOf(v *css.ImportRule) string {
+	s := `@import url("` + v.Href + `")`
+	if m := strings.TrimSpace(v.Media); m != "" {
+		s += " " + m
+	}
+	return s + ";"
+}
+
+// pageRuleTextOf 序列化 @page（Edge 实测 `@page :first { margin: 1cm; }`；
+// 选择器为空时退化为 `@page { … }`）。
+func pageRuleTextOf(v *css.PageRule) string {
+	head := "@page"
+	if sel := strings.TrimSpace(v.Selector); sel != "" {
+		head += " " + sel
+	}
+	return head + " { " + cssDeclsText(v.Declarations) + " }"
+}
+
+// cssKeyframesTextOf 序列化 @keyframes。
+// ★ Edge 实测格式（r22base.edge.txt）：首行 `@keyframes spin { ` **带一个尾随
+// 空格**，每条关键帧缩进 2 空格、各占一行，收尾 `}` 独占一行。
+func cssKeyframesTextOf(v *css.KeyframesRule) string {
+	var b strings.Builder
+	b.WriteString("@keyframes " + v.Name + " { \n")
+	for i := range v.Keyframes {
+		b.WriteString("  " + cssKeyframeTextOf(&v.Keyframes[i]) + "\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// cssKeyframeTextOf 序列化单条关键帧（Edge 实测 `0% { opacity: 0; }`；
+// 一条规则带多个键时以 ", " 连接）。
+// ★ Edge 会把关键字键规范化：`from` → `0%`、`to` → `100%`（实测 r3_0_cssText /
+// r3_1_cssText 用的是原文 from/to，而 Edge 输出 0%/100%）。引擎 AST 保留原文
+// （Keys 供动画匹配用），故只在**序列化层**做换算。
+func cssKeyframeTextOf(k *css.KeyframeRule) string {
+	keys := make([]string, 0, len(k.Keys))
+	for _, key := range k.Keys {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "from":
+			keys = append(keys, "0%")
+		case "to":
+			keys = append(keys, "100%")
+		default:
+			keys = append(keys, strings.TrimSpace(key))
+		}
+	}
+	return strings.Join(keys, ", ") + " { " + cssDeclsText(k.Declarations) + " }"
 }
 
 // conditionRuleTextOf 构造分组规则（@media / @supports）的多行 cssext 文本
@@ -1038,7 +1162,8 @@ func styleDeclObj(in *jsc.Interpreter, decls []css.Declaration) jsc.JSValue {
 		if key == "" {
 			continue
 		}
-		val := strings.TrimSpace(decls[i].ValueString())
+		// ★ 第 22 轮：CSSOM 口径取值（url 带引号 / font-family 去引号）。
+		val := strings.TrimSpace(decls[i].CSSTextValue())
 		obj.Set(key, jsc.StringValue(val))
 		if camel := kebabToCamel(key); camel != key {
 			obj.Set(camel, jsc.StringValue(val))
@@ -1081,7 +1206,7 @@ func styleDeclObj(in *jsc.Interpreter, decls []css.Declaration) jsc.JSValue {
 				return jsc.StringValue("")
 			}
 			if i, ok := declByName(a[0].ToString()); ok {
-				return jsc.StringValue(strings.TrimSpace(decls[i].ValueString()))
+				return jsc.StringValue(strings.TrimSpace(decls[i].CSSTextValue()))
 			}
 			return jsc.StringValue("")
 		}, 1)))
@@ -1101,12 +1226,61 @@ func styleDeclObj(in *jsc.Interpreter, decls []css.Declaration) jsc.JSValue {
 // wrapCSSRuleList 把规则数组包装成 CSSRuleList（CSSOM §1.4）：length + item(i) +
 // 索引属性；索引与 item(i) 返回**同一身份**的规则对象（浏览器里 CSSRuleList 是
 // legacy platform object，`list[0] === list.item(0)`）。
-func wrapCSSRuleList(in *jsc.Interpreter, rules []css.Rule) *jsc.JSObject {
+//
+// ★ 第 22 轮：parent / parentSheet 透传给每条规则（规则对象上的 parentRule /
+// parentStyleSheet；嵌套规则的 parent 即本列表所属的**规则包装对象**）。
+func wrapCSSRuleList(in *jsc.Interpreter, rules []css.Rule, parent *jsc.JSObject, parentSheet *jsc.JSObject) *jsc.JSObject {
+	return newRuleListObj(in, len(rules), func(i int) *jsc.JSObject {
+		return wrapCSSRule(in, rules[i], parent, parentSheet)
+	})
+}
+
+// wrapKeyframeList 把 @keyframes 的关键帧数组包装成 CSSRuleList（子项是
+// CSSKeyframeRule —— 它不在 css.Rule 接口里，故单独走 wrapKeyframeRule）。
+func wrapKeyframeList(in *jsc.Interpreter, kfs []css.KeyframeRule, parent *jsc.JSObject, parentSheet *jsc.JSObject) *jsc.JSObject {
+	return newRuleListObj(in, len(kfs), func(i int) *jsc.JSObject {
+		return wrapKeyframeRule(in, &kfs[i], parent, parentSheet)
+	})
+}
+
+// wrapKeyframeRule 包装单条 CSSKeyframeRule（type = 8 —— Edge 实测 r3_0_type=8）。
+// 字段面：type / parentRule / parentStyleSheet / style（CSSStyleDeclaration）/
+// cssText（`0% { opacity: 0; }`）。keyText 未实现（未取基线，不宣称）。
+func wrapKeyframeRule(in *jsc.Interpreter, k *css.KeyframeRule, parent *jsc.JSObject, parentSheet *jsc.JSObject) *jsc.JSObject {
+	obj := jsc.NewObject(domIfaceProtoOr("CSSKeyframeRule", in.ObjectPrototype()))
+	obj.SetClassName("CSSKeyframeRule")
+	obj.SetInternal(k)
+	obj.SetAccessor("type", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(cssRuleTypeCode(css.RuleKeyframe)))
+	}), nil)
+	obj.SetAccessor("parentRule", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if parent == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(parent)
+	}), nil)
+	obj.SetAccessor("parentStyleSheet", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		if parentSheet == nil {
+			return jsc.Null()
+		}
+		return jsc.ObjectValue(parentSheet)
+	}), nil)
+	setStyleAccessor(obj, k.Declarations)
+	obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(cssKeyframeTextOf(k))
+	}), nil)
+	return obj
+}
+
+// newRuleListObj 构造 CSSRuleList 风格对象：length + item(i) + 索引属性，且索引与
+// item(i) 返回**同一身份**（legacy platform object 语义）。at(i) 由调用方提供 ——
+// 普通规则（wrapCSSRule）与关键帧（wrapKeyframeRule）两条路径共用。
+func newRuleListObj(in *jsc.Interpreter, n int, at func(int) *jsc.JSObject) *jsc.JSObject {
 	ro := jsc.NewObject(domIfaceProtoOr("CSSRuleList", in.ObjectPrototype()))
 	ro.SetClassName("CSSRuleList")
-	objs := make([]*jsc.JSObject, len(rules))
-	for i, r := range rules {
-		objs[i] = wrapCSSRule(in, r)
+	objs := make([]*jsc.JSObject, n)
+	for i := 0; i < n; i++ {
+		objs[i] = at(i)
 		ro.Set(strconv.Itoa(i), jsc.ObjectValue(objs[i]))
 	}
 	ro.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
@@ -1124,4 +1298,60 @@ func wrapCSSRuleList(in *jsc.Interpreter, rules []css.Rule) *jsc.JSObject {
 			return jsc.ObjectValue(objs[i])
 		}, 1)))
 	return ro
+}
+
+// setStyleAccessor 在规则包装对象上安装 `style`（CSSStyleDeclaration）。
+// ★ 身份稳定（Edge 实测 `rule.style === rule.style` 为 true）：缓存挂在**规则包装
+// 对象的闭包**（per-runtime）—— CSSStyleRule / CSSFontFaceRule / CSSPageRule /
+// CSSKeyframeRule 四条路径共用同一实现。
+func setStyleAccessor(obj *jsc.JSObject, decls []css.Declaration) {
+	var styleObj jsc.JSValue
+	haveStyle := false
+	obj.SetAccessor("style", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if haveStyle {
+			return styleObj
+		}
+		styleObj = styleDeclObj(in, decls)
+		haveStyle = true
+		return styleObj
+	}), nil)
+}
+
+// mediaListObj 构造 MediaList。Edge 实测：CSSMediaRule.media 与 CSSImportRule.media
+// 都是**对象**（不是字符串），其 mediaText 为逗号分隔的条件文本，另有 length /
+// item(i)。为遵守第 22 轮「不新增构造器」约束，这里只造对象 + className，
+// 不注册 MediaList 原型（夹具据此只断言 typeof 与 mediaText）。
+func mediaListObj(in *jsc.Interpreter, text string) *jsc.JSObject {
+	obj := jsc.NewObject(in.ObjectPrototype())
+	obj.SetClassName("MediaList")
+	text = strings.TrimSpace(text)
+	obj.SetAccessor("mediaText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(text)
+	}), nil)
+	var items []string
+	if text != "" {
+		for _, part := range strings.Split(text, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				items = append(items, p)
+			}
+		}
+	}
+	for i := range items {
+		obj.Set(strconv.Itoa(i), jsc.StringValue(items[i]))
+	}
+	obj.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(items)))
+	}), nil)
+	obj.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.Null()
+			}
+			i := int(a[0].ToNumber())
+			if i < 0 || i >= len(items) {
+				return jsc.Null()
+			}
+			return jsc.StringValue(items[i])
+		}, 1)))
+	return obj
 }

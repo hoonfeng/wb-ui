@@ -564,8 +564,16 @@ func (p *Parser) skipUntil(kinds ...TokenType) {
 
 // consumeUntilLeftBrace consumes tokens until a { is the next token (without
 // consuming the brace) and returns the consumed tokens serialized as a string.
+//
+// ★ 第 22 轮修复：token 之间用**条件空格**（原实现无条件补一个空格），否则
+// `@page :first` 会被序列化成 ": first" —— Edge 实测为 ":first"
+// （dev/output/wbui-audit/r22base.edge.txt 的 r5_selectorText）。
+// 判定逻辑与 appendValueSeparator 同源但**不复用**：那个函数服务于声明值
+// 序列化（valueStringOf），改它会牵动全部夹具的声明文本，风险不成比例。
 func (p *Parser) consumeUntilLeftBrace() string {
 	var sb strings.Builder
+	var prev Token
+	havePrev := false
 	for !p.atEnd() {
 		t := p.peek()
 		if t.Type == TokenLeftBrace {
@@ -575,10 +583,29 @@ func (p *Parser) consumeUntilLeftBrace() string {
 		if t.Type == TokenSemicolon {
 			return sb.String()
 		}
+		if havePrev && needConditionSeparator(prev, t) {
+			sb.WriteByte(' ')
+		}
 		sb.WriteString(serializeToken(t))
-		sb.WriteByte(' ')
+		prev = t
+		havePrev = true
 	}
 	return sb.String()
+}
+
+// needConditionSeparator 判定条件文本（@media / @supports / @page 的花括号前导
+// 文本）里相邻两个 token 之间是否需要空格：逗号 / 右括号 / 冒号前后不加，
+// 其余（如 "screen and (…)"、"url() format()"）加一个空格。
+func needConditionSeparator(prev, cur Token) bool {
+	switch cur.Type {
+	case TokenComma, TokenRightParenthesis, TokenColon, TokenSemicolon:
+		return false
+	}
+	switch prev.Type {
+	case TokenFunction, TokenLeftParenthesis, TokenColon:
+		return false
+	}
+	return true
 }
 
 // consumeUntilSemicolonOrBrace consumes tokens until ; or { is the next token and
@@ -704,13 +731,13 @@ func (p *Parser) parseComplexSelector() (ComplexSelector, bool) {
 				p.consume()
 				rel = RelationIndirectAdjacent
 			default:
-			// Not a combinator delimiter (> + ~). This is the start of the next
-			// compound selector (e.g. .class or *universal). If whitespace
-			// preceded it, treat as a descendant combinator (do NOT consume).
-			if !hadWhitespace {
-				return cs, true
-			}
-			rel = RelationDescendant
+				// Not a combinator delimiter (> + ~). This is the start of the next
+				// compound selector (e.g. .class or *universal). If whitespace
+				// preceded it, treat as a descendant combinator (do NOT consume).
+				if !hadWhitespace {
+					return cs, true
+				}
+				rel = RelationDescendant
 			}
 		default:
 			if !hadWhitespace {

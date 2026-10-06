@@ -2874,6 +2874,203 @@ CSSOM 的 `type` 编号（1/3/4/5/6/7/8/10/12，Chromium 口径）；`CSSRuleLis
 
 ---
 
+# §22｜第 22 次监督轮：先堵验收可信度，再清 §21-6 遗留
+
+**监督者指令**：① 清构建污染使 `go build ./...` 真退出码 0；② 修 `cgo_env.bat` 在
+`go build` 失败时仍报 `[BUILD OK]`（含 test 分支及同类脚本）；③ `@supports` 的
+conditionText 扩展进 cssom 夹具（**先取 Edge 基线**）；④ `@keyframes`(name/cssRules)、
+`@font-face`(style)、`@import`(href/media)、`@page`(selectorText/style) 字段面 +
+`parentRule`/`parentStyleSheet`（每项先取 Edge 基线，实现不了按边界记账）。
+判据数字不得变。
+
+**上轮被拦原因（本轮已修）**：§21-8 完成定义第 4 条「go build ./... OK」实测**不成立**
+（退出码 1），且 `cgo_env.bat` 失败时误报 `[BUILD OK]` —— **验收工具会误报成功**。
+
+## 22-1｜阻断项：(a) 构建污染清除
+
+- **污染源**：`dev/output/tmp/c2d_head.go`（`package bindings`）与 `ga_head.go`
+  （`package jsc`）—— 第 20/21 轮为比对临时落盘的**源码副本**，被 `go build ./...`
+  扫到 → `found packages bindings and jsc in dev/output/tmp`。
+- **处置**：删除（两文件均未被 git 跟踪：`git check-ignore -v` → `.gitignore:68 /dev/output/`）。
+- **验证**：`CGO_ENABLED=1 go build ./...` → 输出为空、**exit=0**；`dev/output` 下仅剩
+  `cgobench/main.go`、`langbench/main.go`（各自独立包，合法）。
+- ★ **本轮自查中我自己复发了一次同类污染并已修正（如实记录）**：做 gofmt 检查时把 LF
+  副本写到 `dev/output/tmp/fmt/*.go` → `go build ./...` 立刻报
+  `found packages bindings (chk_dom.go) and css (chk_parser.go) in dev/output/tmp/fmt`。
+  已 `rm -rf` 该目录，并把 gofmt 检查改为 **stdin 方式**
+  （`tr -d '\r' < file | gofmt -d`，零落盘）。**教训记账**：任何临时 `.go` 一律不得落在
+  Go 扫描路径下；若必须落盘，目录名以 `_` 开头（Go 工具忽略）或放仓库外。
+
+## 22-2｜阻断项：(b) cgo_env.bat 退出码误报 —— 三重根因全部修复
+
+| # | 根因 | 证据 | 修法 |
+|---|---|---|---|
+| 1 | `if %ERRORLEVEL% EQU 0` 位于 `if /i "%1"=="build" ( … )` **括号块内** —— cmd 解析复合语句时一次性展开 `%ERRORLEVEL%`（取进入块前的 0） | 监督者实测「失败仍打 `[BUILD OK]`」 | 改 `if errorlevel 1`（运行时求值） |
+| 2 | `.bat` 为 **LF-only** 行尾 —— cmd 对 LF-only 批处理的 `exit /b N` **不传退出码** | 同一脚本 CRLF 版 `exit /b 7` → 7；LF 版 → 0 | 转 CRLF + 新增 `.gitattributes`（`*.bat text eol=crlf`）钉死 |
+| 3 | `exit /b N` 放在**括号块内**本身不可靠（同形不同果） | 7 行最小脚本：e3 嵌套块 `( echo A3 & exit /b 3 )`→3 ✓；e4 `( if 1==1 exit /b 4 )`→4 ✓；e5 独立行 `exit /b 5`→5 ✓；**e6 块内 echo 后 `if 1==1 exit /b 6`→0 ✗**；**e2 原 if/else-if 链内 `( echo FAILED & exit /b 9 )`→0 ✗** | 分派改**顶层 `if … goto :label`**，handler 内用无括号的 `if errorlevel 1 goto :xxx_failed` + `exit /b 1` |
+
+**四用例实证**（原始输出见 §22-6）：
+
+| 用例 | 期望 | 实测 |
+|---|---|---|
+| ① `dev/output/failcase/main.go` 语法错误 → `cgo_env.bat build` | FAILED + 退出码 1 | **`[BUILD FAILED]` + 退出码 1** ✓ |
+| ② 删除 failcase → `cgo_env.bat build` | OK + 0 | **`[BUILD OK]` + 退出码 0** ✓ |
+| ③ `cgo_env.bat test -badflag` | FAILED + 1 | **`[SOME TESTS FAILED]` + 退出码 1** ✓ |
+| ④ `cgo_env.bat test -count=1 -run XXXNOMATCH` | PASSED + 0 | **`[ALL TESTS PASSED]` + 退出码 0** ✓ |
+
+**同类脚本自查**：`dev/tools/jsprobe_cmp.sh` 也缺 `--user-data-dir`（第 21 轮只修了
+`gprobe_cmp.sh`）→ 按同一写法补上（含绝对 profile 路径注释）。`.bat`/`.cmd` 全仓仅
+`cgo_env.bat` 一处（另有一处 node_modules 内的第三方脚本，不属本项目）。
+`.bat` 保持**全 ASCII**（本轮首次修补时写了中文 REM，cmd 在代码页 936 下误读 UTF-8 字节
+并破坏括号配对，出现 `'cho' 不是内部或外部命令` —— 已改英文注释并做非 ASCII 字符检查）。
+
+## 22-3｜先取 Edge 基线（禁凭规范推断）
+
+临时探针（不提交）：`dev/output/tmp/r22base.html`（8 条规则：@import/@style/@supports/
+@keyframes/@font-face/@page/@media/@media>@supports）+ `r22url.html`（url / font-family
+序列化）。Edge `--dump-dom` 实测落盘：
+`dev/output/wbui-audit/r22base.edge.txt`、`r22url.edge.txt`。
+
+关键基线：`parentRule` 顶层为 `null`、嵌套为父规则对象；`parentStyleSheet` 为 CSSStyleSheet；
+`@import` → `href="probe-import.css"` / `media=obj:screen` / `@import url("probe-import.css") screen;`；
+`@keyframes` → `name="spin"` / 子规则 `0% { opacity: 0; }` / cssText 首行 `@keyframes spin { ␠` **带尾随空格**；
+`@font-face` → `style.cssText="font-family: ProbeFont; font-weight: 700; src: url("nonexistent.woff2") format("woff2");"`；
+`@page` → `selectorText=":first"` / `style.cssText="margin: 1cm;"` / `cssRules.length=0`；
+`url(foo.png)` 与 `url("bar.png")` **都**序列化为 `url("…")`；`font-family:"ProbeFont"` → `ProbeFont`
+（可作标识符去引号），`font-family:"Probe Font",serif` → 保留引号。
+
+★ **基线也确认：`@supports` 的 conditionText 在第 21 轮就已正确**
+（`(display: grid) and (not (display: inline-grid))` 两侧一致）—— 本轮补的是**夹具覆盖面**。
+
+## 22-4｜实现（`engine/js/bindings/domctors.go`、`engine/css/{parser,rule}.go`）
+
+| 项 | 实现要点 | 依据 |
+|---|---|---|
+| `parentRule` / `parentStyleSheet` | 所有规则通用；顶层 `null`、嵌套为**父规则包装对象**（身份相等）、sheet 为 `document.styleSheets[i]` 同一对象 | r22base.edge.txt |
+| `CSSImportRule` | `href` / `media`（MediaList：`mediaText`/`length`/`item`，**不新增构造器**故只造对象+className）/ `cssText` | 同上 |
+| `CSSKeyframesRule` | `name` / `cssRules`（子 `CSSKeyframeRule`：type=8、`style`、`cssText`）/ `cssText`（复刻 Edge 首行尾随空格与 2 空格缩进） | 同上 |
+| `CSSFontFaceRule` | `style`（CSSStyleDeclaration，身份稳定）/ `cssText` | 同上 |
+| `CSSPageRule` | `selectorText` / `style` / `cssRules`（恒空）/ `cssText` | 同上 |
+| `CSSMediaRule` | 补 `media`（MediaList） | 同上 |
+
+本轮由基线暴露并修复的**真实缺陷**：
+
+1. **`@page` selectorText 多空格**：`consumeUntilLeftBrace` 无条件给每个 token 后补空格 →
+   `:first` 变 `": first"`。改为**条件空格**（`needConditionSeparator`：逗号/右括号/冒号
+   前后不加），且**刻意不复用** `appendValueSeparator` —— 那个函数服务于声明值序列化，
+   改它会牵动全部夹具的声明文本（红线风险）。
+2. **`url()` 序列化丢引号**：`serializeToken` 输出 `url(x.png)`，Edge 恒为 `url("x.png")`。
+3. **`@keyframes` 键未规范化**：源 `from`/`to` → Edge 输出 `0%`/`100%`（只在序列化层换算，
+   AST 保留原文供动画匹配）。
+4. **`font-family` 属性特化未实现**：Edge 对可作标识符的字体名去引号。
+
+★ **分层决策（关键，避免回归）**：2 与 4 只作用于 **CSSOM 口径**，不碰引擎内部文本。
+第一版把它们做进底层 `Declaration.String()/ValueString()` 后，`engine/style` 的
+`url_base_test.go` 立刻 **9 处失败**（渲染层读 `cs.BackgroundImage` 期望 `url(...)` 无引号 ——
+那是引擎内部值文本，不是浏览器 cssText）。正确分层：
+
+- `Declaration.String()/ValueString()`：**引擎内部**文本（解析/级联/渲染读值）→ url **不带**引号；
+- `Declaration.CSSText()/CSSTextValue()`：**CSSOM 口径**（浏览器 cssText / getPropertyValue 文本）
+  → url 带引号 + font-family 特化；由 `domctors.go` 的 `cssDeclsText` / `styleDeclObj` 使用。
+
+分层后 `go test ./engine/...` **23 包 0 FAIL**，夹具仍全 IDENTICAL。
+
+## 22-5｜验收证据（原始命令输出见 §22-6 / 产物在 `dev/output/wbui-audit/`）
+
+| 证据 | 结果 |
+|---|---|
+| `CGO_ENABLED=1 go build ./...`（清理后） | 输出为空、**exit=0** |
+| `cgo_env.bat` 四用例 | 失败→1+`[BUILD FAILED]`；成功→0+`[BUILD OK]`；test 分支同 |
+| `CGO_ENABLED=1 go test -count=1 ./engine/...` | **23 包 ok / 0 FAIL**（exit 0） |
+| cssom 夹具（111 → **165 行**：新增 @import/@supports/@keyframes/@font-face/@page/parentRule） | **IDENTICAL**（165/165；`cssom.cmp.txt` **0 字节**） |
+| 红线四夹具（`REVERIFY22.txt`） | element_attrs 85/85、element_geom 61/61、document_doctype 34/34、document_props 74/74 全 **IDENTICAL** |
+| ALL 前 16 行（`ALL12b.txt` vs `ALL11.txt`） | **SAME-ZERO-DIFF**（逐字零差异） |
+| canvas2d / constructors 回归 | 20/20、62/62 **IDENTICAL** |
+| 判据（`webplatform.batch22.json`） | `globalsCore 271/271`（missing=[]）、`globals 271/356`、partition `dup=0/notCovered=0/extra=0` |
+| gofmt | 4 个改动 .go 文件 stdin 复查**零差异**（`gofmt -d` 空输出） |
+| `engine/layout` | **零改动**（`git diff --stat HEAD -- engine/layout` 空） |
+
+## 22-6｜原始命令输出（节选，均为本轮实测）
+
+```
+# ① 污染清除后构建
+$ find dev/output -name '*.go' -type f
+dev/output/cgobench/main.go
+dev/output/langbench/main.go
+$ CGO_ENABLED=1 go build ./...   → 输出为空；exit=0
+
+# ② cgo_env.bat 四用例（故意失败 → 真实构建 → test 失败 → test 成功）
+$ cmd //c 'cgo_env.bat build'            # dev/output/failcase/main.go 语法错误存在
+dev\output\failcase\main.go:4:7: syntax error: unexpected name is at end of statement
+[BUILD FAILED]                           退出码=1
+$ cmd //c 'cgo_env.bat build'            # 删除 failcase 后
+[BUILD OK]                               退出码=0
+$ cmd //c 'cgo_env.bat test -badflag'
+[SOME TESTS FAILED]                      退出码=1
+$ cmd //c 'cgo_env.bat test -count=1 -run XXXNOMATCH'
+[ALL TESTS PASSED]                       退出码=0
+
+# ③ 引擎测试
+$ CGO_ENABLED=1 go test -count=1 ./engine/...
+ok 包数: 23 / FAIL 行数: 0                退出码=0
+
+# ④ 夹具与判据
+$ dev/tools/gprobe_cmp.sh dev/fixtures/webshot/cssom.html cssom out
+== [cssom] diff ==  IDENTICAL（Edge 基线 == wbui；wbui=165 行 / Edge=165 行）   cmp.txt 0 字节
+$ cat dev/output/wbui-audit/REVERIFY22.txt
+element_attrs|IDENTICAL（…85 行 / 85 行）… document_props|IDENTICAL（…74 / 74）
+cssom|IDENTICAL（…165 / 165）canvas2d|IDENTICAL（…20 / 20）constructors|IDENTICAL（…62 / 62）
+$ diff <(head -16 ALL11.txt) <(head -16 ALL12b.txt)   → 空（SAME-ZERO-DIFF）
+$ go run ./dev/probes/webplatform -out …/webplatform.batch22.json
+globals           271/356    76.1%
+globalsCore       271/271   100.0%   ★ 收敛判据 missing（必须为 0）: []
+分层完备性: 三组与 globals 全量**互相**恰好覆盖（dup=0, notCovered=0, extra=0）
+```
+
+## 22-7｜★ 完成定义（本轮，逐条已实测）
+
+1. `go build ./...` 退出码 **0**（输出为空）；
+2. `cgo_env.bat` 故意失败用例报 `[BUILD FAILED]` 且退出码 **1**；真实构建报 `[BUILD OK]`
+   退出码 0；test 分支同（四用例全覆盖，见 §22-2）；
+3. `go test -count=1 ./engine/...` **23 包 0 FAIL**；
+4. cssom 夹具（扩展后）双侧 **IDENTICAL** 且 `cmp.txt` **0 字节**；
+5. 红线四夹具 85/61/34/74 IDENTICAL；ALL 前 16 行与历史**逐字零差异**；
+6. 判据不变：`globalsCore 271/271`、`globals 271/356`、partition 双向空；
+7. gofmt 无新增未格式化；`engine/layout` 零改动。
+
+## 22-8｜遗留与边界记账（如实 —— 均为「未实现」，不是「实现但未验证」）
+
+1. **`@page` 的 `style.length` / `style.item(0)`**：Edge 把 shorthand `margin` 展开为 4 个长写
+   （实测 `len=4` / `item(0)="margin-top"`），本引擎按声明条数报 `1` / `"margin"`。**未实现**
+   （需要 longhand 展开表，会牵动全部 style 的 length/item 语义）；夹具改用
+   `getPropertyValue("margin")`（两侧 `1cm`）断言 —— 不用夹具掩盖。
+2. **`el.style`（`dom.go` 的 styleProxy）与 `getComputedStyle` 的 url 值口径**：本轮只把
+   **规则对象**的 style/cssText 切到 CSSOM 口径；内联 `el.style.getPropertyValue("background-image")`
+   等路径**未改动、未取基线**（未做）。
+3. **`@namespace`** 仍只有 `type`（未取基线、未实现）。
+4. **`CSSKeyframeRule.keyText`** 未实现（未取基线；只做了 `style`/`cssText`/`type`）。
+5. **MediaList 未注册构造器**（遵守「不新增构造器」约束）：`media` 是对象 + `mediaText`/
+   `length`/`item` 可用，但 `constructor.name` 不是 `MediaList`、`instanceof MediaList` 不成立
+   （夹具据此只断言 `typeof` 与 `mediaText`）。
+6. 第 21 轮既有边界未变：规则 `style` 是**只读快照**（写不回改样式表）、Path2D 方法挂实例而非
+   原型、`new Path2D(svgPathData)` 的 SVG 解析未实现（空路径）。
+
+## 22-9｜汇报（结论）
+
+- **阻断项已堵**：`go build ./...` 真退出码 **0**（污染清除，含我自己复发一次的同类污染记录）；
+  `cgo_env.bat` 三重根因全修（块内 `%ERRORLEVEL%` 固化 / LF-only 行尾吞退出码 / 块内
+  `exit /b` 不可靠），四用例实证「失败→`[BUILD FAILED]`+1、成功→`[BUILD OK]`+0」，
+  同类脚本 `jsprobe_cmp.sh` 一并自查补齐。
+- **§21-6 遗留已清**：`@supports` conditionText 进夹具并 IDENTICAL；`@keyframes`(name/cssRules)、
+  `@font-face`(style)、`@import`(href/media)、`@page`(selectorText/style) 与 `parentRule`/
+  `parentStyleSheet` 全部**先取 Edge 基线再实现**并断言（cssom 111→165 行，双侧 IDENTICAL）。
+- **判据未变**：`globalsCore 271/271`、`globals 271/356`、partition 全空；红线 85/61/34/74、
+  ALL 前 16 行逐字零差异、`go test ./engine/...` 23 包 0 FAIL、gofmt 无新增、layout 零改动。
+- **剩余边界**（§22-8）：@page style 的 shorthand 展开、el.style/getComputedStyle 的 url 口径、
+  @namespace / keyText / MediaList 原型 —— 明确标为**未实现**，不以夹具掩盖。
+
+---
+
 # §21｜CSS OM「构造器存在 → 方法/字段可用」收口（第 21 次监督轮）
 
 **本轮范围（监督者锁定）**：只提升第 20 轮已收进 `globalsCore` 的接口从「构造器存在」

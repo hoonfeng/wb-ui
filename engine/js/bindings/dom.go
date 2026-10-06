@@ -5999,7 +5999,10 @@ func wrapStyleSheet(in *jsc.Interpreter, s *css.CSSStyleSheet) *jsc.JSObject {
 		// ★ 第 20/21 轮：CSSRuleList + 规则对象（CSSOM §1.4）。列表构造统一走
 		//   wrapCSSRuleList（索引访问与 item(i) 返回同一身份；嵌套规则的
 		//   cssRules 复用同一实现）。
-		ruleList = wrapCSSRuleList(in, rules)
+		// ★ 第 22 轮：parent = nil（顶层规则的 parentRule 为 null）、
+		//   parentSheet = 本包装对象（Edge 实测 `rule.parentStyleSheet` 就是
+		//   `document.styleSheets[i]` 那个对象 —— 身份一致）。
+		ruleList = wrapCSSRuleList(in, rules, nil, obj)
 		ruleListLen = len(rules)
 		return jsc.ObjectValue(ruleList)
 	})
