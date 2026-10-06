@@ -201,6 +201,15 @@ button {
 	cursor: default;
 	box-sizing: border-box;
 	-webkit-appearance: button;
+	/* ★ H8（Edge 实测）：按钮的内部行盒**不继承**父元素的 line-height。
+	   h2_baseline_matrix 的 l_button_* 四例：父 line-height 取
+	   20px / 1.5 / 40px 时 Edge 的 button 边框盒高**恒为 21**，而 wbui 曾
+	   随父值膨胀到 26 / 26 / 51.5 —— 因为 line-height 是可继承属性，UA 没给
+	   button 覆盖，内部匿名行盒就用了父的 line-height。Chromium 的按钮
+	   内部内容区行高固定（等同 uaControlFontSize 的 normal 行高 ≈15px，
+	   加 padding 2 + border 4 = 21）。显式覆盖为 normal 使内部行盒取
+	   **按钮自身字体**的度量行高，与浏览器一致。 */
+	line-height: normal;
 }
 
 button[disabled], input[disabled] {

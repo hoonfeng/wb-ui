@@ -13,8 +13,13 @@
 #   dev/output/wbui-audit/<名>.cmp.txt    逐行 diff（空 = 完全一致）
 #   dev/output/wbui-audit/<名>.edge.html  Edge --dump-dom 原始产物
 #
-# 实现要点：webshot 的 [js] 打印被 summarizeJS 截到 400 字符，故按 6 行一批、
+# 实现要点：webshot 的 [js] 打印被 summarizeJS 截到 400 字符，故按 3 行一批、
 # 用 U+0001 作为批内分隔符分多次读回，最后还原成完整文本。
+#
+# ★ P2-1（假 IDENTICAL 防护）：wbui 侧首批 `go run` 编译超时会让 total=0，
+#   while 不执行 → wbui.txt 为空；旧版 diff 不报错也不等于「一致」，极端时
+#   两侧都空会产出空 diff 冒充 IDENTICAL。现在硬性断言：任一侧 0 行 → 退出 2；
+#   diff 为空但行数不等 → 退出 3。**任何「IDENTICAL」都必须伴随两侧非空且行数相等。**
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
@@ -30,9 +35,8 @@ mkdir -p "$OUTDIR" "$TMPDIR"
 EDGE="${WBUI_EDGE:-C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe}"
 
 echo "== [$NAME] wbui (webshot) =="
-# 先读总行数，再按需分批 —— 每批 3 行：webshot 的 [js] 打印被 summarizeJS 截到
-# 400 字符，而探针单行可达 ~100 字符（g2/g7 的 rect + 多属性行），6 行一批会被
-# 截断导致尾部结果丢失。
+# 先读总行数，再按需分批：webshot 的 [js] 打印被 summarizeJS 截到 400 字符，
+# 而探针单行可达 ~100 字符，批越大越可能被截断导致尾部结果丢失。此处每批 3 行。
 total="$(go run ./dev/probes/webshot -html "$PROBE" -out "$TMPDIR/$NAME.wbui.png" \
     -js "var e=document.getElementById('$ELEMID'); e?e.textContent.split('\n').length:0" \
     2>/dev/null | sed -n 's/^\[js\] => //p')"
@@ -45,7 +49,7 @@ while [ "$i" -lt "$total" ]; do
       2>/dev/null | sed -n 's/^\[js\] => //p')"
   [ -n "$chunk" ] && printf '%s\n' "$chunk" | sed -e 's/\\n/\n/g' -e 's/\x01/\n/g'
   i=$((i+3))
-done | sed '/^$/d' > "$OUTDIR/$NAME.wbui.txt"
+done > "$OUTDIR/$NAME.wbui.txt"
 
 echo "== [$NAME] Edge (--dump-dom) =="
 "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
@@ -65,7 +69,7 @@ txt = html.unescape(m.group(1)) if m else ''
 open(dst, 'w', encoding='utf-8', newline='').write(txt.rstrip('\n') + '\n' if txt else '')
 PY
 
-echo "== [$NAME] 归一（CRLF→LF + 末尾换行统一）=="
+echo "== [$NAME] 归一（CRLF→LF + 末尾换行统一 + 去空行）=="
 python - "$OUTDIR/$NAME.edge.txt" "$OUTDIR/$NAME.wbui.txt" <<'PY'
 import sys
 # 两侧统一口径：CRLF/CR → LF；去掉末尾所有空行后，各补且仅补一个 '\n'。
@@ -79,9 +83,21 @@ for p in sys.argv[1:]:
 PY
 
 echo "== [$NAME] diff =="
+# ── P2-1：两侧非空 + 行数一致断言（详见文件头说明）──
+WB_LINES=$(wc -l < "$OUTDIR/$NAME.wbui.txt" | tr -d ' ')
+ED_LINES=$(wc -l < "$OUTDIR/$NAME.edge.txt" | tr -d ' ')
+if [ "$WB_LINES" -eq 0 ] || [ "$ED_LINES" -eq 0 ]; then
+  echo "[$NAME] 抓取失败：wbui=$WB_LINES 行 / Edge=$ED_LINES 行（拒绝产出 diff，防假 IDENTICAL）" >&2
+  rm -f "$OUTDIR/$NAME.cmp.txt"
+  exit 2
+fi
 if diff -u --strip-trailing-cr "$OUTDIR/$NAME.edge.txt" "$OUTDIR/$NAME.wbui.txt" > "$OUTDIR/$NAME.cmp.txt"; then
-  echo "IDENTICAL（Edge 基线 == wbui）"
+  if [ "$WB_LINES" -ne "$ED_LINES" ]; then
+    echo "[$NAME] 假 IDENTICAL：diff 为空但行数不等（wbui=$WB_LINES / Edge=$ED_LINES）" >&2
+    exit 3
+  fi
+  echo "IDENTICAL（Edge 基线 == wbui；wbui=$WB_LINES 行 / Edge=$ED_LINES 行）"
 else
-  echo "DIFF（- Edge / + wbui），共 $(grep -c '^[-+][^-+]' "$OUTDIR/$NAME.cmp.txt") 行差异"
+  echo "DIFF（- Edge / + wbui），共 $(grep -c '^[-+][^-+]' "$OUTDIR/$NAME.cmp.txt") 行差异（wbui=$WB_LINES 行 / Edge=$ED_LINES 行）"
   cat "$OUTDIR/$NAME.cmp.txt"
 fi

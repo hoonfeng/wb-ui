@@ -91,6 +91,7 @@ const (
 	TextOverflowClip TextOverflowType = iota
 	TextOverflowEllipsis
 )
+
 type TextAlignType int
 
 const (
@@ -190,8 +191,8 @@ type ComputedStyle struct {
 // NewComputedStyle returns a ComputedStyle with spec-default values.
 func NewComputedStyle() *ComputedStyle {
 	return &ComputedStyle{
-		InheritedData:    *DefaultInheritedData(),
-		NonInheritedData: *DefaultNonInheritedData(),
+		InheritedData:       *DefaultInheritedData(),
+		NonInheritedData:    *DefaultNonInheritedData(),
 		CustomProperties:    map[string][]css.Token{},
 		Properties:          map[string]string{},
 		ImportantProperties: map[string]bool{},
@@ -248,7 +249,6 @@ func cloneMapCT(src map[string][]css.Token) map[string][]css.Token {
 	}
 	return dst
 }
-
 
 // InheritFrom copies inherited properties from parent.
 func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
@@ -347,7 +347,33 @@ func (c *ComputedStyle) GetProperty(name string) string {
 	case "font-style":
 		return c.FontStyle
 	case "line-height":
-		return c.LineHeight.String()
+		// ★ computed value 归一（CSS-INLINE-3 §4.2 + Edge 实测）：
+		// line-height 声明为数值 / 百分比 / 相对长度时，getComputedStyle
+		// 返回**相对本元素 computed font-size 解析后的绝对长度** ——
+		// `line-height:1.5` + `font-size:16px` → "24px"，而非原样回显 "1.5"。
+		// 只有 `normal` 关键字保持字面量。
+		//
+		// 此前直接 Length.String() → 数值原样回显成 "1.5"，与浏览器不一致
+		// （h2_baseline_matrix 的 l_input_lh15 / l_button_lh15 /
+		// l_select_lh15 / l_textarea_lh15 四例；Edge 侧均为 "24px"）。
+		switch c.LineHeight.Unit {
+		case "normal":
+			return "normal"
+		case "", "%", "em", "rem":
+			fs := c.FontSize.Value
+			if fs <= 0 {
+				fs = 16
+			}
+			v := c.LineHeight.Value
+			if c.LineHeight.Unit == "%" {
+				v = v / 100 * fs
+			} else {
+				v = v * fs
+			}
+			return formatFloat(v) + "px"
+		default:
+			return c.LineHeight.String()
+		}
 	case "width":
 		return c.Width.String()
 	case "height":
@@ -435,6 +461,9 @@ func (c *ComputedStyle) GetProperty(name string) string {
 	case "opacity":
 		return formatFloat(c.Opacity)
 	case "z-index":
+		if c.ZIndexAuto {
+			return "auto"
+		}
 		return strconv.Itoa(c.ZIndex)
 	case "flex-direction":
 		return c.FlexDirection

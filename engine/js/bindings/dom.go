@@ -389,6 +389,53 @@ var StylesheetHrefChanged func(el *dom.Element, href string)
 var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
 
 // ── getComputedStyle 白名单回写表（包级预计算一次）────────────────────────
+// normalizeLineHeightComputed 把级联里的 line-height 原始值归一为浏览器
+// getComputedStyle 的语义：数值 / 百分比 / em / rem 相对**本元素 computed
+// font-size** 解析为绝对长度（px）；`normal` 与已是绝对长度的值原样返回。
+//
+// 例：`line-height:1.5` + `font-size:16px` → "24px"；`150%` → "24px"；
+// `2em` → "32px"；`normal` → "normal"；`20px` → "20px"。
+func normalizeLineHeightComputed(lh, fontSize string) string {
+	s := strings.TrimSpace(lh)
+	if s == "" || s == "normal" {
+		return lh
+	}
+	// 已是绝对长度 / 视口单位：原样返回。
+	for _, u := range []string{"px", "pt", "pc", "cm", "mm", "in", "q", "vw", "vh", "vmin", "vmax"} {
+		if strings.HasSuffix(s, u) {
+			return lh
+		}
+	}
+	fs := 16.0
+	if f, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(fontSize), "px"), 64); err == nil && f > 0 {
+		fs = f
+	}
+	num := func(str string) (float64, bool) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(str), 64)
+		return f, err == nil
+	}
+	// rem 必须在 em 之前判："2rem" 也以 "em" 结尾。
+	switch {
+	case strings.HasSuffix(s, "rem"):
+		if f, ok := num(strings.TrimSuffix(s, "rem")); ok {
+			return strconv.FormatFloat(f*fs, 'f', -1, 64) + "px"
+		}
+	case strings.HasSuffix(s, "em"):
+		if f, ok := num(strings.TrimSuffix(s, "em")); ok {
+			return strconv.FormatFloat(f*fs, 'f', -1, 64) + "px"
+		}
+	case strings.HasSuffix(s, "%"):
+		if f, ok := num(strings.TrimSuffix(s, "%")); ok {
+			return strconv.FormatFloat(f/100*fs, 'f', -1, 64) + "px"
+		}
+	default:
+		if f, ok := num(s); ok {
+			return strconv.FormatFloat(f*fs, 'f', -1, 64) + "px"
+		}
+	}
+	return lh
+}
+
 // computedStylePropWhitelistCSV 是 getComputedStyle 回写到 JS 对象属性上的
 // 属性清单，**逐字保留原先函数内字面量的成员与顺序**（含 backgroundRepeat /
 // backgroundPosition / backgroundSize 三项重复——保留重复以保证与优化前
@@ -1263,6 +1310,18 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 						if norm, nok := css.TransformToMatrix(tv, refW, refH, fs); nok {
 							computed["transform"] = norm
 						}
+					}
+					// ★ line-height 的 computed 值归一为**绝对长度**（Edge 实测）：
+					//   `line-height:1.5` + `font-size:16px` → getComputedStyle 返回
+					//   "24px"；百分比同理（150% → "24px"）；`normal` 与显式长度
+					//   （"20px"）保持原样。级联里存的是**原始声明值**（"1.5"），
+					//   直接回写 → 与 Edge 不一致（h2_baseline_matrix 的
+					//   l_input_lh15 / l_button_lh15 / l_select_lh15 /
+					//   l_textarea_lh15 四例：Edge "24px" / wbui "1.5"）。
+					//   与 transform 一样只在**回写阶段**归一，不动 computedStyleFor
+					//   的 map（布局侧读的是 Length 结构，不走这张表）。
+					if lh, ok := computed["line-height"]; ok && lh != "" {
+						computed["line-height"] = normalizeLineHeightComputed(lh, computed["font-size"])
 					}
 					// ★ display 回退：computedStyleFor 的级联只收录**声明过**的属性，
 					//   未声明 display 的元素（如 `<span>`、插件注入的 div）不会出现在

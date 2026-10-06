@@ -1284,6 +1284,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				//   12.07 会让 relTop 差 0.07（h2_baseline_formula 实测
 				//   3.930 vs Edge 4.000）。
 				ba = math.Round(ba)
+				// ★ 显式 height 的控件：内容区被撑高，内部文本在内容区**垂直
+				//   居中**（Chromium 的编辑框 / 按钮内文本对齐），基线随之下移
+				//   (contentH − textH)/2。无显式 height 时 contentH == 文本行高
+				//   → 增量为 0，退化回纯字体 ascent（不影响既有已对齐的用例）。
+				//   Edge 实测（h2_baseline_matrix）：e_input_h30（border-box 36）
+				//   relTop=0 / lineH=36（控件**撑满**行盒），而只取字体 ascent
+				//   （15）时 relTop=4 / lineH=40；e_button_h30（30）同理 0/30。
+				//   公式：控件顶→基线 = borderTop + paddingTop +
+				//   round(ascent) + (contentH − textH)/2。
+				if ch := cldG.ContentHeight(); ch > 0 {
+					if th := fontLineGap(cld); th > 0 && ch > th {
+						ba += (ch - th) / 2
+					}
+				}
 				if off, ok := formControlBaselineFromBorderTop(el, cldG.BorderTop(), cldG.PaddingTop(), cldG.BorderBoxHeight(), ba); ok {
 					// ★ 行盒顶→基线的距离取「strut 与控件要求」的较大者：控件
 					//   基线坐在行盒基线上，而行盒基线至少由 strut 的 ascent
