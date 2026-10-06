@@ -27,6 +27,12 @@ func init() {
 	layout.MeasureTextFunc = func(family string, size float64, weight int, style2, text string) float64 {
 		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}, text)
 	}
+	// ★ 表单控件固有宽所需的「最大字符宽」= Skia 的 (fXMax − fXMin)，
+	//   与 WebKit/Blink 的 maxCharWidth 同源（FontSkia.cpp::initCharWidths
+	//   取 round(fXMax − fXMin)）。见 layout.inputIntrinsicContentWidth。
+	layout.FontMaxCharWidthFunc = func(family string, size float64, weight int, style2 string) float64 {
+		return graphics.GlobalFontMaxCharWidth(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2})
+	}
 	// ★ CJK 回退字体度量：Blink 的行盒度量会合并参与该行的**所有**字体
 	//   （取行间距最大的一套），含中文的 Arial 行因此拿到 CJK 回退字体的
 	//   行盒（24px 实测 Edge 35 / 仅主字体 28）。缺失此注入时 layout 退回

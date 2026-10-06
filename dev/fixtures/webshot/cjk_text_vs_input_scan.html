@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>cjk text vs input value scan</title>
+<style>html,body{margin:0}</style><body>
+<div style="font:16px sans-serif">
+<div id="p1">Mixed中英</div>
+<div id="p2"><input id="ii2" type="text" value="Mixed中英"></div>
+<div id="p3">Mixed</div>
+<div id="p4"><input id="ii4" type="text" value="Mixed"></div>
+<div id="p5">中英</div>
+<div id="p6"><input id="ii6" type="text" value="中英"></div>
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var L=[],buf=[];
+function emit(s){buf.push(s);if(buf.length===3){L.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){L.push(buf.join(' '));buf=[];}}
+function r3(v){return Math.round(v*1000)/1000;}
+['p1','p2','ii2','p3','p4','ii4','p5','p6','ii6'].forEach(function(id){
+  var e=document.getElementById(id),r=e.getBoundingClientRect();
+  var p=e.parentElement.getBoundingClientRect();
+  emit(id+'_h='+r3(r.height));
+  emit(id+'_rel='+r3(r.top-p.top));
+  emit(id+'_w='+r3(r.width));
+});
+flush();
+document.getElementById('out').textContent=L.join('\n');
+</script></body>
+</html>

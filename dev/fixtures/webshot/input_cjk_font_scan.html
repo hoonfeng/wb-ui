@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><title>input cjk font vs char scan</title>
+<style>html,body{margin:0}</style><body>
+<div style="font:16px sans-serif">
+<div id="d1"><input id="i1" type="text" value="A"></div>
+<div id="d2"><input id="i2" type="text" value="A" style="font:16px 'Noto Sans SC'"></div>
+<div id="d3"><input id="i3" type="text" value="中" style="font:16px Arial"></div>
+<div id="d4"><input id="i4" type="text" value="中" style="font:13.3333px Arial"></div>
+<div id="d5"><input id="i5" type="text" value="A" style="font:13.3333px Arial"></div>
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var L=[],buf=[];
+function emit(s){buf.push(s);if(buf.length===3){L.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){L.push(buf.join(' '));buf=[];}}
+function r3(v){return Math.round(v*1000)/1000;}
+['d1','i1','d2','i2','d3','i3','d4','i4','d5','i5'].forEach(function(id){
+  var e=document.getElementById(id),r=e.getBoundingClientRect();
+  var p=e.parentElement.getBoundingClientRect();
+  emit(id+'_h='+r3(r.height));
+  emit(id+'_rel='+r3(r.top-p.top));
+  emit(id+'_w='+r3(r.width));
+});
+flush();
+document.getElementById('out').textContent=L.join('\n');
+</script></body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>textarea line box scan</title>
+<style>html,body{margin:0}</style><body>
+<div style="font:16px sans-serif">
+<div id="ta2"><textarea id="t2" rows="2">文本text</textarea></div>
+<div id="ta1"><textarea id="t1" rows="1">A</textarea></div>
+<div id="span1"><span id="s1">X</span></div>
+<div id="plain">X</div>
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var L=[],buf=[];
+function emit(s){buf.push(s);if(buf.length===3){L.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){L.push(buf.join(' '));buf=[];}}
+function r2(v){return Math.round(v*100)/100;}
+['ta2','t2','ta1','t1','span1','s1','plain'].forEach(function(id){
+  var e=document.getElementById(id),r=e.getBoundingClientRect(),cs=getComputedStyle(e);
+  emit(id+'_h='+r2(r.height));
+  emit(id+'_top='+r2(r.top));
+  emit(id+'_va='+(cs.verticalAlign||'-'));
+});
+flush();
+document.getElementById('out').textContent=L.join('\n');
+</script></body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>textarea br input basline scan</title>
+<style>html,body{margin:0}</style><body>
+<div id="c1" style="font:16px sans-serif">
+<textarea id="c1t" rows="2">文本text</textarea><br>
+<input id="c1i" type="text" value="Mixed中英">
+</div>
+<div id="c2" style="font:16px sans-serif">
+<textarea id="c2t" rows="2">文本text</textarea><br>
+<span id="c2s">X</span>
+</div>
+<div id="c3" style="font:16px sans-serif">
+<span id="c3s">X</span><br>
+<input id="c3i" type="text" value="Mixed中英">
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var L=[],buf=[];
+function emit(s){buf.push(s);if(buf.length===3){L.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){L.push(buf.join(' '));buf=[];}}
+function r2(v){return Math.round(v*100)/100;}
+['c1t','c1i','c2t','c2s','c3s','c3i'].forEach(function(id){
+  var e=document.getElementById(id),r=e.getBoundingClientRect();
+  emit(id+'_top='+r2(r.top)+'_h='+r2(r.height));
+});
+flush();
+document.getElementById('out').textContent=L.join('\n');
+</script></body>
+</html>

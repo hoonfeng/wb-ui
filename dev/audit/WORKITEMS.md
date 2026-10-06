@@ -1394,11 +1394,30 @@ cols 默认 20、fs 13.3333 ⇒ `20×7 + 21 = 161` ✓。
 | A2 | `h2_replaced_linebox`：replaced 元素行盒高 | `host=68.500` | `host=68.250` | **0.25px** | `im`（64×64 img）两侧**完全一致**；差在行盒高 `68.5 = 64 + strut descent`，即 13px/1.5 宿主下 strut descent 的取值口径 | 亚像素（<1px），且并沿垂直方向等比传导（host2/im2 的 top 同差），无实现缺口特征 |
 | A3 | `g4`：`w1` 宽 / `i2` x | `29.65625` / `33.59375` | `29.648` / `33.584` | **0.008** / **0.0098** | `white-space:pre` 三空格的文本测量亚像素；`i2` 的 x 由 `i1(30)+空格宽` 累积而来 | 亚像素（<1px）；属文本测量精度，非布局语义 |
 | A4 | `g1_formctl` t5：按钮宽 | `36.015625` | `36.012969970703125` | **0.0027px** | 按钮内文本宽的小数位差异（位置/高度/padding/border/字体逐项一致） | 亚像素（<1px）；无任何可辨识的实现缺口 |
+| A5 | `h2_control_baseline` c–j 行的 `top` | `64.15625`（各行为 `…15625`） | `64`（各行为整数） | **0.156px** | 与 A1 **同源**：`vertical-align:middle` 的 x-height 语义（Noto Sans SC 16px `xHeight/2 = 4.344`）产生的块流内偏移，沿垂直方向等比传导到该容器后续**每一行** | 亚像素（<1px）；与 A1 同源同因，适用于 A1 的不改理由（改它须整体重估 UA 默认 `vertical-align`） |
+| A6 | 同上 f 行（`<button>`）宽 | `24.15625` | `24.14451026916504` | **0.0117px** | 按钮内文本宽的小数位差异（高度/padding/border/字体逐项一致） | 亚像素（<1px）；同 A4（按钮文本测量精度） |
+| A7 | `g7_listpseudo` tb（`<table>`）宽 | `34.25` | `34.239999771118164` | **0.01px** | 「A」「B」单元格文本宽 + `border-spacing` 的亚像素累积 | 亚像素（<1px）；**高度已修**（32 ✓，见 §12-4），仅宽度残留 |
+| A8 | `formtext_probe` b1（`<button>`）宽 | `42.671875` | `42.66659927368164` | **0.0053px** | 按钮内文本宽的小数位差异 | 亚像素（<1px）；同 A4 |
 
 > 对 A1 的补充事实（与 A2 同源）：本表仅登记**渲染精度**类。若将来要动 A1，必须先
 > 整体评估「UA 默认 vertical-align」的改动面，不可局部修 —— 这也是本轮维持不改的依据。
 
+#### 11-5b｜非布局差异（CSSOM 序列化口径，**不计入像素收敛**）
+
+`minibox` 探针 8/8 行不同，但**几何量 y/h 逐项完全一致**（y = 0/20/44/64/89/109、
+h = 20/24/20/25/20 全部相同），差异只在 `getComputedStyle` 的**字符串序列化**：
+
+| 差异 | Edge | wbui | 性质 |
+|---|---|---|---|
+| `font-family: sans-serif` 的 computed 值 | 解析后的实际族名（`"Noto Sans SC"`） | 字面 generic 名（`sans-serif`） | CSSOM 对 generic family 的序列化口径；**渲染结果相同**（canvas 度量探针实测两侧 `'0'` 宽均为 8.88，同一字体） |
+| `font-size: 0` 的 computed 值 | `0px`（长度恒带单位） | `0` | CSSOM 对零长度的序列化；**不影响任何几何量** |
+
+⇒ 该探针**不是布局缺口**（无 px 差异），登记为口径差异；因不产生像素偏差故不设阈值判定。
+
 ### 11-6｜收敛判据
+
+> ⚠️ **本小节已被 §12-6 取代**：它只覆盖 4 个探针，曾导致「无遗留」结论被证伪
+> （另有 3 个正式探针存在 ≥1px 缺口未登记）。保留于此仅为追溯历史。
 
 | 探针 | 差异行数 | 剩余内容 |
 |---|---|---|
@@ -1409,3 +1428,226 @@ cols 默认 20、fs 13.3333 ⇒ `20×7 + 21 = 161` ✓。
 
 ⇒ **四项探针的剩余差异全部落在「已知接受差异」表内（且均为亚像素 < 1px），
 无未登记的 ≥1px 实现缺口 ⇒ 判定「无遗留」。**
+
+---
+
+## 第 12 次监督轮（2026-10）：验收集补全 + ≥1px 缺口处置
+
+> 起因：第 11 轮的「无遗留」被**证伪** —— 当时只跑了 4 个探针（g5/g1/g4/
+> h2_replaced_linebox）+ h2_baseline_matrix 就宣布收敛，而**另有 3 个同样正式交付的
+> 探针存在未登记的 ≥1px 实现缺口**（h2_control_baseline 的 j 行差 46px、
+> g7_listpseudo 的表格高差 2px、formtext_probe 的 i2 top 差 1px）。本轮先把验收集
+> 补全到全部 16 个探针，再逐项处置。
+
+### 12-1｜验收集补全：16 个正式探针全量重跑并落盘
+
+命令（仓库根，逐个）：`dev/tools/gprobe_cmp.sh dev/fixtures/webshot/<探针>.html`；
+产物 `dev/output/wbui-audit/<探针>.{wbui,edge,cmp}.txt`，汇总 `ALL.txt`（修复前）/
+`ALL2.txt`（修复后）。
+
+**修复前**全量结果（监督者点名的 3 个缺口加粗）：
+
+| 探针 | 差异行数 | 内容 |
+|---|---|---|
+| `g1_formctl` | 2 | A4（t5 亚像素） |
+| `g2_transform` | **0** | IDENTICAL |
+| `g3_scrollbar` | **0** | IDENTICAL |
+| `g4_inlineblock` | 10 | A1 + A3 |
+| `g5_mixedtext` | **0** | IDENTICAL |
+| `g6_supports` | **0** | IDENTICAL |
+| `g7_listpseudo` | **2** | **tb 表格高 30 vs 32（2px）** + 宽 0.01px |
+| `formtext_probe` | **4** | **i2 top 130 vs 129（1px）** + b1 宽 0.0053px |
+| `minibox` | 16 | 非布局（CSSOM 序列化，见 §11-5b） |
+| `h2_baseline_formula` | **0** | IDENTICAL |
+| `h2_baseline_matrix` | 2 | A1（仅 v_middle） |
+| `h2_control_baseline` | **16** | **j 行 input 宽 177 vs 223（46px）**、**g 行 select 宽 32 vs 33（1px）** + 各行 top 0.156px（A5） |
+| `h2_replaced_linebox` | 10 | A2 |
+| `h4_supports_bounds` | **0** | IDENTICAL |
+| `h6_misc_props` | **0** | IDENTICAL |
+| `h7_transform_norm` | **0** | IDENTICAL |
+
+### 12-2｜a 项：`<input>` 固有内容宽随 font-size / 字体度量缩放（**已修**）
+
+**缺口**：`h2_control_baseline` j 行 `<input style="font:16px sans-serif">` Edge 宽
+**223** / wbui **177**（46px）。
+
+**根因**：`formControlContentSize` 用固定常数 `size × 8.0 + 9.0`
+（`formControlAvgCharWidth` / `formControlMaxCharWidth`），与 font-size / font-family
+**完全无关**。a 行（继承 UA 默认 Arial 13.3333px）恰好 = 169 所以看着「对」，j 行
+（16px sans-serif）仍是 169 → 边框盒 177。
+
+**实测反推**（新增夹具 `dev/fixtures/webshot/h2_input_width_scan.html`：size 轴 ×
+font-size 轴 × 字体轴交叉，输出压成短 token 以避开 `summarizeJS` 的 400 字符截断；
+度量工具 `dev/tools/fontmetric`）。Edge 实测 `<input size=20>` 内容宽：
+
+| 字体 @16px | 内容宽 | avgCharWidth | xMax−xMin |
+|---|---|---|---|
+| Arial | 195 | 8.0000 | 42.6328 |
+| Noto Sans SC（= `sans-serif`） | 215 | 7.9680 | 62.7360 |
+| Courier New | 202 | 9.6016 | 11.9062 |
+| Times New Roman | 194 | 8.0000 | 41.8281 |
+| Arial @13.3333px | 169 | 6.6666 | 35.5273 |
+
+font-size 扫描 10 组（Arial，size=20/30 两点解斜率 c 与截距 d）**全部吻合**：
+
+```
+内容宽 = ceil(round(avgCharWidth) × size) + (round(maxCharWidth) − round(avgCharWidth))
+```
+
+这正是 WebKit/Blink 的 `RenderTextControlSingleLine::preferredContentLogicalWidth`
+（`ref/WebKit/Source/WebCore/rendering/RenderTextControlSingleLine.cpp:386-420`）：
+
+```cpp
+LayoutUnit result = LayoutUnit::fromFloatCeil(charWidth * factor);
+if (maxCharWidth > 0.f) result += maxCharWidth - charWidth;
+```
+
+其中 `maxCharWidth = round(fXMax − fXMin)`、`charWidth = roundf(avgCharWidth)`
+（`platform/graphics/skia/FontSkia.cpp:126-131`）。
+
+**实现（4 处）**：
+
+1. `goskia/skia/text.go`：`FontMetrics` 补 `AvgCharWidth / MaxCharWidth / XMin / XMax`
+   并读出 —— C 层 `sk_fontmetrics_t` 本就有这些成员（`sk_types.h:339-342`），Go 侧未读；
+2. `engine/platform/graphics/canvas.go`：`fontMetricsEntry` 加 `maxCharWidth`
+   （同一次 `Metrics()` 调用内取，零额外 cgo）+ 新增 `GlobalFontMaxCharWidth`；
+3. `engine/layout/layoututil.go` + `engine/rendering/renderview.go`：新增
+   `FontMaxCharWidthFunc` 钩子及其 Skia 实现；
+4. `engine/layout/formcontrol.go`：input 分支改调新函数 `inputIntrinsicContentWidth`
+   （avg 取 `'x'` 的 advance 作 GDI `tmAveCharWidth` 等价量 —— 本机 SkiaSharp 后端的
+   `fAvgCharWidth` 恒为 0，见 `fontmetric`；度量不可用时回退旧常数）。
+
+**验收**：j 行 177 → **223** ✓（a 行 177 保持 ✓）。
+
+### 12-3｜b 项：`<select>` 固有宽取整 round → **ceil**（**已修：实现差，非半边界**）
+
+**缺口**：`h2_control_baseline` g 行 `<select><option>G</option></select>` Edge 33 /
+wbui 32。
+
+**判定依据**（新增夹具 `dev/fixtures/webshot/select_width_scan.html`：13 组 option，
+同页输出 canvas 文本宽 + select 宽）：
+
+| option | Edge 文本宽 | **ceil** | round | Edge 实测宽 |
+|---|---|---|---|---|
+| "G" | 10.3685 | **11 ✓** | 10 ✗ | 33 |
+| "M" | 11.1040 | **12 ✓** | 11 ✗ | 34 |
+| "0" | 7.4135 | **8 ✓** | 7 ✗ | 30 |
+| 5×"A" | 44.4550 | **45 ✓** | 44 ✗ | 67 |
+| "A"/"i"/"W"/"AA"/"AAA"/10×"A"/20×"A" | — | ✓ | ✓ | 31/25/35/40/49/111/200 |
+
+⇒ **ceil 13/13 全吻合；round 有 6 例各少 1px** ⇒ 是**实现差（round 误用）**，
+不是半边界精度。修：`selectMaxOptionTextWidth` 的 `math.Round(best)` → `math.Ceil(best)`。
+
+> 旧注释据 11 组数据得出的「round」结论是**巧合**：那几组文本宽小数部分恰好 > 0.5，
+> round 与 ceil 同值；补入小数部分 < 0.5 的用例才区分开。
+
+**验收**：g 行 32 → **33** ✓。
+
+### 12-4｜c 项：表格内容高少一条 `border-spacing`（**已修**）
+
+**缺口**：`g7_listpseudo` 的 `<table>` Edge 高 32 / wbui 30（2px）。
+
+**定位**（新增夹具 `dev/fixtures/webshot/table_rowheight_scan.html`）：**td 高两侧一致
+（均 26）**，差在**表格盒高**：Edge `30 = 2 + 26 + 2`，wbui `28 = 26 + 2`。
+UA 默认 `border-spacing: 2px`（separate 模型）下内容区**上下各一条**间距，而
+`tableformattingcontext.go` 只累加了「每行之后」那一条：
+
+```go
+totalHeight := 0.0
+for _, h := range rowHeights { totalHeight += h + spacingY }
+```
+
+⇒ 改为以 `spacingY` 起始：`(行数+1) × spacingY + Σ 行高`。collapse 模型
+`spacingY = 0`（`spacingX, spacingY := 0.0, 0.0` 只在 `!collapse` 分支赋值），不受影响。
+
+**验收**：`table_rowheight_scan` **IDENTICAL**（t1_h 30 = Edge 30 ✓）；
+`g7_listpseudo` tb 高 30 → **32** ✓（仅剩宽 0.01px 亚像素，记 A7）。
+
+### 12-5｜d 项：`<input>` 的 `value` 含 CJK 时的行盒度量（**未修复，如实登记**）
+
+**缺口**：`formtext_probe` 的 i2 行 `<input value="Mixed中英">` Edge `top=129` /
+wbui `130`（**1px，≥1px 缺口**）。
+
+**根因（已实测定位到机制）**：新增夹具 `dev/fixtures/webshot/cjk_text_vs_input_scan.html`、
+`input_value_baseline_scan.html`、`input_cjk_font_scan.html` 做同页同字体对照：
+
+| 用例（容器 `font:16px sans-serif`） | Edge 行盒高 / `rel` | wbui | 结论 |
+|---|---|---|---|
+| 纯文本 `Mixed中英`（div） | 24 / — | 24 / — | ✓ 一致 |
+| **`<input value="Mixed中英">`** | **24 / 3** | **25 / 4** | ✗ 差 1px |
+| `<input value="A">` | 25 / 4 | 25 / 4 | ✓ 一致 |
+| 纯文本 `Mixed` | 24 | 24 | ✓ |
+| `<input value="Mixed">`（拉丁） | 25 | 25 | ✓ |
+| **`<input value="中" style="font:16px Arial">`** | **24 / 0** | **26 / 2** | ✗ 差 2px |
+| `<input value="中" style="font:13.3333px Arial">` | 24 / 3 | 25 / 4 | ✗ 差 1px |
+
+⇒ **同一字体、仅 `value` 内容不同即复现** ⇒ 差异由 **`value` 属性里的 CJK 字符**触发：
+Edge 让 **CJK 回退字体的度量参与该行行盒**（与「纯文本 CJK 行」同值 24），而 wbui 的
+`boxHasCJK(box)`（`layoututil.go:803-822`）**只扫描文本子节点**，input 的 CJK 在
+属性里故不参与 —— wbui 遂按「拉丁行」度量（25）。
+
+**为何本轮不改（而不是「当亚像素放行」）**：
+
+1. `effectiveFontMetrics` 同时服务**行盒度量**与**控件自身高度**（`formControlContentSize`
+   的 `lineH = fontLineGap(box)`）。把 `boxHasCJK` 扩展到读 `value` 会**同时改变 input
+   的高度**（实测 input 高 21 两侧一致，属已对齐量），而 Edge **只改行盒、不改控件高**；
+2. 要做到「只影响行盒」须在 IFC 的 strut 计算处引入独立 CJK 分支，并按
+   `formControlBaselineFromBorderTop` 的 ascent 参数（`inlineformattingcontext.go:1360-1380`，
+   `ba = math.Round(fontAscentDescent(cld))`）复刻 Edge 的「含 CJK 时控件基线下高 = 5」
+   规律（21−16 / 24−19 两个字号自洽）；
+3. 但该规律**与已知字体度量都不吻合**（Noto Sans SC 的 descent：13.3333px 取整为 4、
+   16px 为 5，无法同时给出 5/5），说明还缺一条未识别的规则 —— 需先补一轮更大范围的
+   `value` × 字号扫描（含 `textarea`、`button`）定出**可复算公式**，直接改属臆测。
+
+⇒ **本项保持 ≥1px 缺口状态，不登记入 §11-5 亚像素表**，作为本轮**唯一未完成项**如实
+上报：第 11 轮「无遗留」的判定在 d 项上**仍不成立**。
+
+### 12-6｜收敛判据（**覆盖全部 16 个正式探针**）
+
+修复后全量重跑（汇总 `dev/output/wbui-audit/ALL2.txt`）：
+
+| # | 探针 | 差异行数 | 剩余内容 |
+|---|---|---|---|
+| 1 | `g1_formctl` | 2（1 对） | 仅 A4（t5 宽 0.0027px） |
+| 2 | `g2_transform` | **0** | IDENTICAL |
+| 3 | `g3_scrollbar` | **0** | IDENTICAL |
+| 4 | `g4_inlineblock` | 10（5 对） | 仅 A1 + A3 |
+| 5 | `g5_mixedtext` | **0** | IDENTICAL |
+| 6 | `g6_supports` | **0** | IDENTICAL |
+| 7 | `g7_listpseudo` | 2（1 对） | 仅 A7（宽 0.01px）；**高 32 ✓ 已修** |
+| 8 | `formtext_probe` | 4（2 对） | A8（b1 宽 0.0053px）+ **§12-5 的 i2 top 1px（未修）** |
+| 9 | `minibox` | 16（8 对） | 非布局：CSSOM 序列化（§11-5b），几何 y/h 全一致 |
+| 10 | `h2_baseline_formula` | **0** | IDENTICAL |
+| 11 | `h2_baseline_matrix` | 2（1 对） | 仅 A1（v_middle） |
+| 12 | `h2_control_baseline` | 16（8 对） | A5（各行 top 0.156px）+ A6（f 宽 0.0117px）；**j 宽 223 ✓、g 宽 33 ✓ 已修** |
+| 13 | `h2_replaced_linebox` | 10（5 对） | 仅 A2（0.25px） |
+| 14 | `h4_supports_bounds` | **0** | IDENTICAL |
+| 15 | `h6_misc_props` | **0** | IDENTICAL |
+| 16 | `h7_transform_norm` | **0** | IDENTICAL |
+
+**判据结论**：16 个探针中 8 个 IDENTICAL；其余 8 个的剩余差异逐项为 A1–A8
+（均 <1px，已登记）或 §11-5b 的非布局序列化口径 —— **唯一例外是 `formtext_probe`
+的 i2 `top` 1px（§12-5），它 ≥1px 且未修复** ⇒ 本轮判定为「**除 §12-5 外收敛**」，
+**不宣称「无遗留」**。
+
+### 12-7｜回归验证
+
+| 检查 | 结果 |
+|---|---|
+| `go build ./...` | OK（CGO_ENABLED=1 + goskia/bin 在 PATH） |
+| `go test ./engine/...` | **23 包全 ok**（layout / rendering / platform/graphics 均通过） |
+| `h2_baseline_matrix` | 47/47，仍**仅 v_middle 1 对** ⇒ 无回归 ✓ |
+| `g5_mixedtext` | 仍 **IDENTICAL** ✓ |
+| `g2/g3/g6/h4/h6/h7` | 仍 **IDENTICAL** ✓ |
+| `table_rowheight_scan`（新夹具） | **IDENTICAL** ✓ |
+
+**新增夹具（可复跑，作为实测证据保留）**：
+
+| 夹具 | 用途 |
+|---|---|
+| `h2_input_width_scan.html` | input 固有宽的 size × font-size × 字体交叉扫描 |
+| `select_width_scan.html` | select 取整方式判定（13 组） |
+| `table_rowheight_scan.html` | 表格盒高 vs 单元格高分解 |
+| `textarea_lineheight_scan.html` / `textarea_br_input_scan.html` | textarea 行盒与 `<br>` 影响 |
+| `input_value_baseline_scan.html` / `cjk_text_vs_input_scan.html` / `input_cjk_font_scan.html` | §12-5 的 CJK 触发因子分离 |
+| `dev/tools/fontmetric`（Go） | 打印 Skia 水平/垂直字体度量（avgCharWidth、xMax−xMin、ascent…） |

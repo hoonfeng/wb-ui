@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>select intrinsic width scan</title>
+<style>html,body{margin:0}</style><body>
+<div style="font:13.3333px Arial;position:absolute;left:0;top:0">
+<select id="sG"><option>G</option></select>
+<select id="sA"><option>A</option></select>
+<select id="si"><option>i</option></select>
+<select id="sW"><option>W</option></select>
+<select id="sM"><option>M</option></select>
+<select id="s0"><option>0</option></select>
+<select id="sm"><option>m</option></select>
+<select id="sg"><option>g</option></select>
+<select id="sAA"><option>AA</option></select>
+<select id="sAAA"><option>AAA</option></select>
+<select id="sA5"><option>AAAAA</option></select>
+<select id="sA10"><option>AAAAAAAAAA</option></select>
+<select id="sA20"><option>AAAAAAAAAAAAAAAAAAAA</option></select>
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var cases=[['G','G'],['A','A'],['i','i'],['W','W'],['M','M'],['0','0'],['m','m'],['g','g'],
+           ['AA','AA'],['AAA','AAA'],['A5','AAAAA'],['A10','AAAAAAAAAA'],['A20','AAAAAAAAAAAAAAAAAAAA']];
+var buf=[],lines=[];
+function emit(s){buf.push(s);if(buf.length===3){lines.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){lines.push(buf.join(' '));buf=[];}}
+function r4(v){return Math.round(v*10000)/10000;}
+var cv=document.createElement('canvas').getContext('2d');
+cv.font='13.3333px Arial';
+for(var k=0;k<cases.length;k++){
+  var el=document.getElementById('s'+cases[k][0]);
+  emit('Sw_'+cases[k][0]+'='+r4(el.getBoundingClientRect().width));
+  emit('Tw_'+cases[k][0]+'='+r4(cv.measureText(cases[k][1]).width));
+}
+flush();
+document.getElementById('out').textContent=lines.join('\n');
+</script></body>

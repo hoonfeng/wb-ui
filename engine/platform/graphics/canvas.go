@@ -2704,6 +2704,12 @@ type fontMetricsEntry struct {
 	descent  float64
 	xHeight  float64
 	lineGap  float64
+	// maxCharWidth = Skia 的 (fXMax − fXMin)：字体全部字形的水平 extent（px）。
+	// WebKit/Blink 用它计算表单控件的 UA 固有内容宽 ——
+	// RenderTextControlSingleLine::preferredContentLogicalWidth 的 maxCharWidth
+	// 即 platform/graphics/skia/FontSkia.cpp 的 initCharWidths() 里的
+	// round(fXMax − fXMin)。实测见 dev/tools/fontmetric。
+	maxCharWidth float64
 	resolved bool // false = Skia 字体无法解析（值为 fallback）
 }
 
@@ -2745,6 +2751,9 @@ func fontMetricsFor(font Font) fontMetricsEntry {
 			e.xHeight = float64(m.XHeight)
 		}
 		e.lineGap = float64(m.Leading)
+		if m.XMax > m.XMin {
+			e.maxCharWidth = float64(m.XMax - m.XMin)
+		}
 		e.resolved = true
 	}
 
@@ -2810,6 +2819,21 @@ func GlobalFontXHeight(font Font) float64 {
 // hhea/sTypo lineGap value. Returns 0 on failure.
 func GlobalFontLineGap(font Font) float64 {
 	return fontMetricsFor(font).lineGap
+}
+
+// GlobalFontMaxCharWidth 返回字体的**最大字符宽** = Skia 的 (fXMax − fXMin)，单位 px。
+//
+// 这正是 WebKit/Blink 计算表单控件固有内容宽时所用的 maxCharWidth：
+// WebCore/rendering/RenderTextControlSingleLine.cpp 的
+// preferredContentLogicalWidth() 里 `maxCharWidth = roundf(primaryFont().maxCharWidth())`，
+// 而 Skia 平台的 FontSkia.cpp::initCharWidths() 把它定为 round(fXMax − fXMin)。
+//
+// 本机实测（dev/tools/fontmetric，16px）：Arial 42.6328、Noto Sans SC 62.7360、
+// Courier New 11.9062、Times New Roman 41.8281、Tahoma 39.2266 —— 与 Edge 的
+// <input size=N> 实测宽逐项吻合（dev/fixtures/webshot/h2_input_width_scan.html）。
+// 返回 0 表示字体无法解析或该度量不可用，调用方应回退到自己的常数近似。
+func GlobalFontMaxCharWidth(font Font) float64 {
+	return fontMetricsFor(font).maxCharWidth
 }
 
 // GlobalCJKFontMetrics 返回**该 font 渲染 CJK 字形时实际使用的字体**的

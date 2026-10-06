@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>table cell row height scan</title>
+<style>html,body{margin:0;font:16px sans-serif}</style><body>
+<div id="dA">A</div>
+<div id="dMixed">Mixed中英</div>
+<table id="t1"><tr><td id="cA">A</td></tr></table>
+<table id="t2"><tr><td id="cMixed">Mixed中英</td></tr></table>
+<div id="dSpan"><span id="sA">A</span></div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var L=[],buf=[];
+function emit(s){buf.push(s);if(buf.length===3){L.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){L.push(buf.join(' '));buf=[];}}
+function r2(v){return Math.round(v*100)/100;}
+['t1','cA','t2','cMixed','dA','dMixed','sA'].forEach(function(id){
+  var e=document.getElementById(id),r=e.getBoundingClientRect(),cs=getComputedStyle(e);
+  emit(id+'_h='+r2(r.height));
+  emit(id+'_fs='+cs.fontSize);
+  emit(id+'_lh='+cs.lineHeight);
+});
+flush();
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

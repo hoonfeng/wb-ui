@@ -284,7 +284,15 @@ func (c *TableFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		}
 	}
 
-	totalHeight := 0.0
+	// ★ 内容盒高必须含**上下两条** border-spacing：separate 模型下内容区起点
+	//   已内缩 spacingY（见上方 `y += spacingY`），末尾还要再留一条 —— 即
+	//   (行数+1) × spacingY + Σ 行高（CSS 2.1 §17.6.1：间距围绕每一个单元格）。
+	//   此前只算了「每行之后」那一条（行数 × spacingY），表格内容高恒定少
+	//   spacingY 像素（UA 默认 border-spacing:2px → 少 2px）：
+	//   dev/fixtures/webshot/table_rowheight_scan.html 的单行表格 Edge 30
+	//   （= 2 + 26 + 2）而 wbui 28（= 26 + 2）；g7_listpseudo 的 <table>
+	//   同为 Edge 32 / wbui 30。collapse 模型 spacingY = 0，不受影响。
+	totalHeight := spacingY
 	for _, h := range rowHeights {
 		totalHeight += h + spacingY
 	}

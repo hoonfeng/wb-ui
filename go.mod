@@ -9,6 +9,6 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904
-	github.com/hoonfeng/goskia v0.0.0-20260914160914-eca85bf3e450
+	github.com/hoonfeng/goskia v0.0.0-20261006060753-395100befa2a
 	golang.org/x/text v0.3.8
 )

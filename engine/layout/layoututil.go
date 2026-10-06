@@ -454,6 +454,21 @@ var CJKFontMetricsFunc func(family string, size float64, weight int, style strin
 
 // MeasureTextFunc measures the advance width of text. Set by the embedder.
 var MeasureTextFunc func(family string, size float64, weight int, style, text string) float64
+
+// FontMaxCharWidthFunc 返回字体在给定字号下的**最大字符宽**（px），语义等于
+// Skia 的 (fXMax − fXMin)。Set by the embedder（见 engine/rendering/renderview.go）。
+//
+// 用途：表单控件的 UA 固有内容宽。WebKit/Blink 的
+// RenderTextControlSingleLine::preferredContentLogicalWidth 用
+//
+//	内容宽 = ceil(avgCharWidth × size) + (maxCharWidth − avgCharWidth)
+//
+// 其中 avgCharWidth 取字体的平均字符宽（Windows/GDI 下等价于 'x' 的 advance，
+// WebKit 对它取 roundf），maxCharWidth 即本钩子返回值再取 roundf
+// （FontSkia.cpp::initCharWidths: m_maxCharWidth = round(fXMax − fXMin)）。
+//
+// 未设置或返回 0 时调用方回退到实测常数近似。
+var FontMaxCharWidthFunc func(family string, size float64, weight int, style string) float64
 func computeBoxModelForBox(box *ElementBox, cbContentWidth, fontSizeVal float64) (margin, padding, border Edges) {
 	return computeBoxModel(box, cbContentWidth, fontSizeVal)
 }

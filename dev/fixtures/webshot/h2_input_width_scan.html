@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8"><title>input intrinsic content width scan (c/d decomposition)</title>
+<style>html,body{margin:0}</style>
+<body>
+<div id="host" style="position:absolute;left:-9000px;top:0;width:8000px;font:16px sans-serif"></div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var host=document.getElementById('host'),buf=[],lines=[];
+function emit(s){buf.push(s);if(buf.length===3){lines.push(buf.join(' '));buf=[];}}
+function flush(){if(buf.length){lines.push(buf.join(' '));buf=[];}}
+function r4(v){return Math.round(v*10000)/10000;}
+function cw(el){var r=el.getBoundingClientRect(),cs=getComputedStyle(el);
+  return r4(r.width-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight)
+    -parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth));}
+function mk(size,font){var el=document.createElement('input');el.type='text';
+  if(size)el.setAttribute('size',size);if(font)el.style.font=font;host.appendChild(el);return el;}
+// B: 每个 font-size 取 size=20 / 30 两点 → 精确分离 c=斜率, d=截距
+var fss=[8,10,12,13.3333,14,16,18,20,24,32];
+for(var j=0;j<fss.length;j++){
+  var f=fss[j]+'px Arial';
+  emit('B'+fss[j]+'_20='+cw(mk(20,f)));
+  emit('B'+fss[j]+'_30='+cw(mk(30,f)));
+}
+// C: 每个字体 @16px 取 size=20 / 30 两点 → c/d 的字体依赖
+var fmap={'Arial':'Arial','sans':'sans-serif','mono':'monospace','serif':'serif','TNR':'Times New Roman',
+  'Verdana':'Verdana','Tahoma':'Tahoma','Courier':'Courier New','SegoeUI':'Segoe UI','NotoSansSC':'Noto Sans SC'};
+var cks=['Arial','sans','mono','serif','TNR','Verdana','Tahoma','Courier','SegoeUI','NotoSansSC'];
+for(var k=0;k<cks.length;k++){
+  var ff='16px '+fmap[cks[k]];
+  emit('C_'+cks[k]+'_20='+cw(mk(20,ff)));
+  emit('C_'+cks[k]+'_30='+cw(mk(30,ff)));
+}
+// D: 不设 font（UA 控件字体）取两点
+emit('D_20='+cw(mk(20,null))); emit('D_30='+cw(mk(30,null)));
+// E: canvas 度量（含 normal 行高的字体上下界），用于反推 c/d 所用之量
+var cv=document.createElement('canvas').getContext('2d');
+function met(f,label){cv.font=f;var zero=cv.measureText('0').width,mx=0,sum=0,n=0;
+  for(var c=32;c<127;c++){var t=cv.measureText(String.fromCharCode(c)).width;if(t>mx)mx=t;sum+=t;n++;}
+  var fb=cv.measureText('Hg');
+  var asc=fb.fontBoundingBoxAscent||0,desc=fb.fontBoundingBoxDescent||0;
+  emit('E_'+label+'_avg='+r4(sum/n));emit('E_'+label+'_max='+r4(mx));
+  emit('E_'+label+'_0='+r4(zero));emit('E_'+label+'_lh='+r4(asc+desc));}
+met('16px Arial','A16');met('13.3333px Arial','A13');met('16px Noto Sans SC','N16');met('16px monospace','M16');
+flush();
+document.getElementById('out').textContent=lines.join('\n');
+</script></body>

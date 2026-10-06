@@ -1,7 +1,8 @@
 // Form-control UA geometry (mirrors Chromium/Blink html.css + HTML's
 // intrinsic-size rules):
 //
-//	<input type=text> content width = size × avgCharWidth + maxCharWidth
+//	<input type=text> content width = ceil(avgCharWidth × size)
+//	                                + (maxCharWidth − avgCharWidth)
 //	                  (size defaults to 20) and content height = one line box;
 //	<textarea>        content width = cols × round(0.5 × fontSize) + 15
 //	                  (cols defaults to 20; see textareaColumnWidth),
@@ -29,10 +30,10 @@ import (
 )
 
 const (
-	// formControlAvgCharWidth / formControlMaxCharWidth approximate Blink's
-	// character-width estimate for the UA control font (Arial at 13.3333px):
-	// an <input size="20"> is 169px wide inside its (4px) padding and (4px)
-	// border, i.e. 20×8 + 9.
+	// formControlAvgCharWidth / formControlMaxCharWidth 是 <input> 固有内容宽的
+	// **回退常数**：只有字体度量取不到时（无嵌入方、字体解析失败）才用；取自
+	// Arial 13.3333px 这一组实测值（20×8 + 9 = 169，恰为 a 行 / Edge 177−8）。
+	// 正常路径见 inputIntrinsicContentWidth（随 font-size 与字体度量缩放）。
 	formControlAvgCharWidth = 8.0
 	formControlMaxCharWidth = 9.0
 	// HTML defaults: input size=20, textarea cols=20 (rows=2, see textareaRows).
@@ -141,12 +142,65 @@ func formControlContentSize(box *ElementBox) (w, h float64, ok bool) {
 			return formControlRangeWidth, formControlRangeHeight, true
 		}
 		size := formControlAttrFloat(el, "size", formControlDefaultSize)
-		return size*formControlAvgCharWidth + formControlMaxCharWidth, lineH, true
+		return inputIntrinsicContentWidth(box, size), lineH, true
 	case "textarea":
 		cols := formControlAttrFloat(el, "cols", formControlDefaultCols)
 		return cols*textareaColumnWidth(box) + formTextareaColExtra, textareaRows(box) * lineH, true
 	}
 	return 0, 0, false
+}
+
+// inputIntrinsicContentWidth 返回 <input type=text> 的 UA 固有**内容**宽度。
+//
+// 公式取自 WebKit/Blink（WebCore/rendering/RenderTextControlSingleLine.cpp 的
+// preferredContentLogicalWidth()）：
+//
+//	内容宽 = ceil(avgCharWidth × size) + (maxCharWidth − avgCharWidth)
+//
+// 其中 avgCharWidth 是字体的平均字符宽（Windows/GDI 下等价于 'x' 的 advance，
+// WebKit 的 fastAverageCharWidthIfAvailable 对它取 roundf），maxCharWidth 在
+// Skia 平台是 round(fXMax − fXMin)（platform/graphics/skia/FontSkia.cpp 的
+// initCharWidths()）。两者都**随 font-size 和字体度量缩放**。
+//
+// ★ 为什么不能用固定常数：旧实现是 `size×8 + 9`（按 Arial 13.3333px 一组值
+// 硬编码），与 font-size / font-family 完全无关。于是 a 行（继承 UA 默认
+// 13.3333px Arial）恰好落在 169 看着「对」，而 j 行
+// `<input style="font:16px sans-serif">` Edge 内容宽 215（边框盒 223 = 215+8）
+// 而 wbui 仍给 169（边框盒 177）—— 差 46px。
+//
+// Edge 实测反推（font-size 扫描 10 组 × 2 个 size + 字体扫描 9 组，见
+// dev/fixtures/webshot/h2_input_width_scan.html；度量见 dev/tools/fontmetric）：
+//
+//	字体 @16px        avgCharWidth  maxCharWidth   size=20 内容宽
+//	Arial                8.0000       42.6328          195
+//	Noto Sans SC         7.9680       62.7360          215
+//	Courier New          9.6016       11.9062          202
+//	Times New Roman      8.0000       41.8281          194
+//	Arial @13.3333px     6.6666       35.5273          169
+//
+// 逐项与 Edge 的 <input size=N> 实测宽一致（195/215/202/194/169）。
+func inputIntrinsicContentWidth(box *ElementBox, size float64) float64 {
+	fs := fontSizeOf(box)
+	if fs <= 0 {
+		fs = 13.3333
+	}
+	fam := fontFamilyOf(box)
+	wt := fontWeightOf(box)
+	st := fontStyleOf(box)
+	var avg, maxC float64
+	if MeasureTextFunc != nil {
+		// 'x' 的 advance 即 GDI tmAveCharWidth 的等价量（本机 SkiaSharp 后端的
+		// fAvgCharWidth 恒为 0，见 dev/tools/fontmetric），WebKit 对平均字符宽取 roundf。
+		avg = math.Round(MeasureTextFunc(fam, fs, wt, st, "x"))
+	}
+	if FontMaxCharWidthFunc != nil {
+		maxC = math.Round(FontMaxCharWidthFunc(fam, fs, wt, st))
+	}
+	if avg > 0 && maxC > 0 {
+		return math.Ceil(avg*size) + (maxC - avg)
+	}
+	// 字体度量不可用时的回退：保留旧的实测常数（Arial 13.3333px）。
+	return size*formControlAvgCharWidth + formControlMaxCharWidth
 }
 
 // textareaColumnWidth 返回 <textarea> 每个 cols 列的**内容**宽度。
@@ -204,19 +258,28 @@ func selectContentWidth(box *ElementBox) (float64, bool) {
 }
 
 // selectMaxOptionTextWidth 扫描 <select> 的所有 <option>（含 <optgroup> 内），
-// 返回「最宽 option 文本宽」经 **round 量化 + 20px 下拉箭头区** 后的值。
+// 返回「最宽 option 文本宽」经 **向上取整 + 20px 下拉箭头区** 后的值。
 // ok=false 表示不是 select 或没有任何非空 option。
 //
-// ★ 量化与箭头区由 Edge 实测确定（11 组：Arial 与 monospace，option 长度 1..20，
-// 含单字符 "i"），全部零偏差：
+// ★ 取整方式与箭头区由 Edge 实测确定（dev/fixtures/webshot/select_width_scan.html：
+// 13 组单字符/多字符 option，同页对照，文本宽取 canvas measureText）：
 //
-//	"A"   → round(8.9063)=9  → 9+20=29     "AA" → round(17.8126)=18 → 38
-//	"AAA" → round(26.7189)=27 → 47         5×"A"→ round(44.5315)=45 → 65
-//	10×"A"→ round(89.0625)=89 → 109        "i"  → round(2.9688)=3  → 23
-//	monospace 10×"A" → round(70)=70 → 90
+//	option   Edge 文本宽   ceil   内容宽   Edge 边框盒
+//	"G"        10.3685      11      31        33
+//	"A"         8.8910       9      29        31
+//	"i"         2.9615       3      23        25
+//	"W"        12.5815      13      33        35
+//	"M"        11.1040      12      32        34
+//	"0"         7.4135       8      28        30
+//	5×"A"      44.4550      45      65        67
+//	10×"A"     88.9099      89     109       111
+//	20×"A"    177.8198     178     198       200
 //
-// 叠加 UA 的 1px border×2 后即得边框盒宽（31/40/49/67/111/25/92 = 上列值+2）。
-// 量化是必需的：不取整时 "A" 只得 30.906（Edge 31）。修复前 wbui 完全没有箭头区
+// ★ 是 **ceil 而非 round**：G / M / 0 / m / g / 5×"A" 六例的文本宽小数部分 < 0.5，
+// round 会各少 1px（g 行 `<select><option>G</option></select>` 实测 Edge 33 /
+// 修复前 wbui 32），ceil 才逐项吻合（13/13）。叠加 UA 的 1px border×2 后即得
+// 边框盒宽（上表末列 = 内容宽 + 2）。
+// 取整是必需的：不取整时 "A" 只得 30.891（Edge 31）。修复前 wbui 完全没有箭头区
 // （g1_formctl 的 t6 = 10.893，恰为 option 文本宽 8.893 + border 2）。
 func selectMaxOptionTextWidth(box *ElementBox) (float64, bool) {
 	el := box.Element()
@@ -249,7 +312,7 @@ func selectMaxOptionTextWidth(box *ElementBox) (float64, bool) {
 	}
 	// 箭头区在 max-width 钳制**之前**加入 —— 浏览器先算 max-content
 	// （文本 + 箭头 + padding + border），再用 max-width 钳制。
-	return math.Round(best) + formSelectArrowWidth, true
+	return math.Ceil(best) + formSelectArrowWidth, true
 }
 
 // selectIntrinsicContentWidth 返回 <select> 的固有**内容**宽度（已含箭头区，
