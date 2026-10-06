@@ -2492,13 +2492,13 @@ func paintObjectForeground(o RenderObject, info *PaintInfo) {
 		PaintImage(box, info)
 		return
 	}
-	// <video poster> / <audio poster>：poster 是替代画面（HTML §4.8.8），
-	// 按与 <img> 相同的规则绘制（object-fit / object-position / 圆角 / 不
-	// 透明度）。此前只认 <img>，三个 poster 全是空白（video-poster 4 项）。
+	// <video>/<audio> 的画面，按与 <img> 相同的规则绘制（object-fit /
+	// object-position / 圆角 / 不透明度）：<video> 优先画宿主注入的当前帧
+	// （主线 A1），无帧时回退 poster 替代画面；两者都没有则不画。此前只在
+	// poster 非空时进入本路径，无 poster 的 <video> 从不绘制、poster 也全是
+	// 空白（video-poster 4 项）。
 	if ln := el.LocalName(); ln == "video" || ln == "audio" {
-		if strings.TrimSpace(el.GetAttribute("poster")) != "" {
-			PaintImage(box, info)
-		}
+		PaintImage(box, info)
 		return
 	}
 	// canvas elements: blit the element's backing bitmap (CanvasBitmap

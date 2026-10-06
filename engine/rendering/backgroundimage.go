@@ -347,6 +347,29 @@ func loadBackgroundImage(url, baseDir string) *DecodedImage {
 // 由渲染层静默联网。loader 为 nil 时保持既有内置行为（独立渲染/探针场景
 // 逐字节不变）。
 func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *DecodedImage {
+	// ★ data: URI 自带内容、不涉及任何外部资源——必须在模式门禁**之前**放行
+	//（契约见 image_resource.go 的 AllowsExternal：「data: URL 不走本判定」，
+	// 两种模式都允许）。此前门禁在前，UI 库模式（ModeToolkit）下连 data: 图都
+	// 被拒：`<video poster="data:…">`、内嵌 data: 图标、内联 SVG 的
+	// `background-image: url(data:image/png;base64,…)` 全部画不出来。
+	if b, ok := decodeDataURI(url); ok {
+		// 动图（A4）：data: URI 里的 GIF/WebP 动画同样按当前时刻取帧——一次性登记帧
+		// 序列，之后每次绘制都重新选帧。
+		if img, isAnim := animatedFrameForData(url, b); isAnim {
+			return img
+		}
+		backgroundImageCache.mu.Lock()
+		defer backgroundImageCache.mu.Unlock()
+		if img, hit := backgroundImageCache.imgs[url]; hit {
+			return img
+		}
+		img := NewDecodedImage(b)
+		if img == nil {
+			return nil
+		}
+		backgroundImageCache.imgs[url] = img
+		return img
+	}
 	if loader != nil && url != "" {
 		// ★ 模式门禁先于缓存查询：backgroundImageCache 是进程级全局的，
 		//   若另一个 WebView（浏览器模式）已经加载过同一 URL，缓存命中会
@@ -360,15 +383,18 @@ func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *D
 			url = abs
 		}
 	}
+	// 动图（A4）：已登记的 url **每次绘制**都按当前时刻取帧——不能走下面的单帧缓存
+	// （一个 url 只存一帧，一旦命中缓存 GIF 会永远停在登记那一刻的帧上）。
+	if img, ok := animatedFrameForURL(url); ok {
+		return img
+	}
 	backgroundImageCache.mu.Lock()
 	defer backgroundImageCache.mu.Unlock()
 	if img, ok := backgroundImageCache.imgs[url]; ok {
 		return img
 	}
 	var data []byte
-	if b, ok := decodeDataURI(url); ok {
-		data = b
-	} else if loader != nil {
+	if loader != nil {
 		// 宿主接线：data: 之外的引用（http(s)/file/相对）交给宿主。首次
 		// 调用异步启动并返回 nil，goroutine 填充缓存 + 触发已加载回调，
 		// 之后的 paint 命中缓存即画出。
@@ -406,11 +432,15 @@ func loadBackgroundImageWith(url, baseDir string, loader ImageResourceLoader) *D
 	if len(data) == 0 {
 		return nil
 	}
-	img := NewDecodedImage(data)
+	// 动图（A4）：宿主注册了解码器且识别成功时，这里返回的是**当前应显示的帧**，
+	// 且该 url 不再进单帧缓存（否则后续绘制会拿到登记那一刻的固定帧）。
+	img := decodeImageOrAnimated(url, data)
 	if img == nil {
 		return nil
 	}
-	backgroundImageCache.imgs[url] = img
+	if !IsAnimatedImageURL(url) {
+		backgroundImageCache.imgs[url] = img
+	}
 	return img
 }
 
@@ -423,8 +453,10 @@ func fetchImageViaLoaderAsync(url string, loader ImageResourceLoader) {
 	delete(backgroundImageCache.loading, url)
 	loaded := false
 	if err == nil && len(data) > 0 {
-		if img := NewDecodedImage(data); img != nil {
-			backgroundImageCache.imgs[url] = img
+		if img := decodeImageOrAnimated(url, data); img != nil {
+			if !IsAnimatedImageURL(url) { // 动图不进单帧缓存（见 loadBackgroundImageWith）
+				backgroundImageCache.imgs[url] = img
+			}
 			loaded = true
 		}
 	}
@@ -448,8 +480,10 @@ func fetchBackgroundImageAsync(url string) {
 	delete(backgroundImageCache.loading, url)
 	loaded := false
 	if err == nil && len(data) > 0 {
-		if img := NewDecodedImage(data); img != nil {
-			backgroundImageCache.imgs[url] = img
+		if img := decodeImageOrAnimated(url, data); img != nil {
+			if !IsAnimatedImageURL(url) { // 动图不进单帧缓存（见 loadBackgroundImageWith）
+				backgroundImageCache.imgs[url] = img
+			}
 			loaded = true
 		}
 	}

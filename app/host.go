@@ -159,6 +159,9 @@ type Host struct {
 	menuFn func(x, y int, canCut, canCopy, canPaste, canSelectAll bool) int
 	wv  *webkit.WebView
 
+	// devTools 是 CDP 调试服务句柄（EnableRemoteDebugging 启动后非 nil）。
+	devTools *DevTools
+
 	// ftMark 是 WB_FRAMETIME 诊断用的中间时间点（rendering.Paint 调用前），
 	// 用于把「paint 段」再拆成「Paint 前的宿主逻辑」与「Paint+Present 本身」。
 	ftMark time.Time
@@ -422,6 +425,14 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 			log.Printf("[devtools] inject __devtools failed: %v", err)
 		}
 	}
+	// ★ 媒体元数据（实现路径主线 A0）：宿主侧用 ffmpeg 探测 <video>/<audio>
+	// 的时长与画面尺寸——不注入时 duration 恒为 NaN（时间轴/进度条/倍速菜单
+	// 全部读不到数据）。探测按 src 惰性触发并缓存；本机没有 ffmpeg 时静默保持
+	// 「时长未知」，不编造进度。
+	InstallMediaMetadataResolver(wv, "")
+	// ★ 动图（实现路径主线 A4）：宿主用 goskia 的 SkCodec 解 GIF/WebP 多帧，渲染层按
+	// 帧时长选帧。不接线时动图仍只显示第一帧（既有行为）。
+	InstallAnimatedImageSource()
 	win, err := window.NewWindow(width, height, title)
 	if err != nil {
 		return nil, fmt.Errorf("app: %w", err)
@@ -1239,7 +1250,26 @@ func (h *Host) SetIMECompositionPos(cssX, cssY float64) {
 // Run starts the render + event loop. It blocks until the window is closed.
 // Each iteration: layouts the WebView, paints onto the GPU surface, presents,
 // then processes input events (resize / scroll / mouse click / IME).
+// EnableRemoteDebugging 在 127.0.0.1:port 上开 CDP 调试服务（port<=0 = 关闭，
+// 零开销）。宿主在 Run() 之前调用；返回的句柄用于「重新加载后通知 NotePageLoad」
+// 与「退出时 Close」。
+func (h *Host) EnableRemoteDebugging(port int) (*DevTools, error) {
+	if h == nil {
+		return nil, nil
+	}
+	dt, err := StartDevTools(h.wv, port)
+	if err != nil {
+		return nil, err
+	}
+	h.devTools = dt
+	return dt, nil
+}
+
 func (h *Host) Run() {
+	// 调试服务随宿主生命周期：Run 返回（窗口关闭）时关停。
+	if h.devTools != nil {
+		defer func() { _ = h.devTools.Close() }()
+	}
 	// Set up the keyframes lookup bridge so the rendering package can find
 	// @keyframes rules stored in the style resolver.
 	if mf := h.wv.MainFrame(); mf != nil {
@@ -1487,7 +1517,9 @@ func (h *Host) Run() {
 		//   - 光标闪烁翻转 → caretTick
 		//   - 鼠标移动 → EventCursorMove 无条件 MarkAllDirty（滚动条
 		//     hover 高亮依赖 cursor 位置，见 processEvents）
-		needPaint := h.firstFrame || (rv != nil && (rv.IsDirty() || h.smoothActive || animActive || caretTick))
+		//   - 动图在播放（GIF/WebP 动画）→ HasAnimatedImages()：否则按需渲染的宿主在
+		//     没有其它脏源时会跳过 Paint，动图停在某一帧
+		needPaint := h.firstFrame || (rv != nil && (rv.IsDirty() || h.smoothActive || animActive || caretTick || rendering.HasAnimatedImages()))
 		if os.Getenv("WB_PAINT_DEBUG") != "" {
 			if needPaint && (h.lastPaintDbg != needPaint || h.dbgFrame%60 == 0) {
 				log.Printf("[paintdbg] frame=%d needPaint=%v firstFrame=%v dirty=%v caret=%v rv=%v",
@@ -3255,7 +3287,16 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 	if imeEvs := h.win.PollIMEEvents(); len(imeEvs) > 0 {
 		h.applyIMEEvents(imeEvs)
 	}
-	for _, ev := range h.win.PollEvents() {
+	// ★ T4 事件派发聚合：把本批里**连续**的鼠标移动合并为段内最后一条。
+	// 系统重发 WM_MOUSEMOVE、拖拽时一轮 PollEvents 常收到一串移动；逐条处理
+	// 意味着每条都做命中测试 + hover 样式重算 + mousemove 冒泡派发 + 渲染脏
+	// 标记，而中间坐标页面根本观察不到（浏览器同样只派发合并后的位置，
+	// 即 UI Events 的 coalesced events 语义）。只合并「连续」段内的前序事件，
+	// 段内最后一条位置不变、与其他事件的相对顺序也不变。
+	// 裸 WebView 宿主（不经过 app.Host）可用 webkit 的 HandleMouseMoveBatched /
+	// FlushMouseMoves 自行做同样的批内合并。
+	events := coalesceCursorMoves(h.win.PollEvents())
+	for _, ev := range events {
 		switch ev.Type {
 		case window.EventResize:
 			h.wv.Resize(h.win.Width(), h.win.Height())

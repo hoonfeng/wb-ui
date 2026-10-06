@@ -197,11 +197,11 @@ func TestMediaElementSourceChild(t *testing.T) {
 func TestMediaElementMetadataResolver(t *testing.T) {
 	rt, doc, _ := newRuntimeWithDoc(t)
 	newVideoFixture(doc)
-	MediaMetadataResolver = func(src string) (float64, bool) {
+	MediaMetadataResolver = func(src string) (MediaMetadata, bool) {
 		if src == "probe.mp4" {
-			return 12.5, true
+			return MediaMetadata{Duration: 12.5, Width: 640, Height: 360}, true
 		}
-		return 0, false
+		return MediaMetadata{}, false
 	}
 	defer func() { MediaMetadataResolver = nil }()
 
@@ -222,6 +222,8 @@ func TestMediaElementMetadataResolver(t *testing.T) {
 		if (v.duration !== 12.5) throw new Error("duration = " + v.duration);
 		if (v.readyState !== 4) throw new Error("readyState = " + v.readyState + "，want 4");
 		if (v.networkState !== 1) throw new Error("networkState = " + v.networkState);
+		if (v.videoWidth !== 640) throw new Error("videoWidth = " + v.videoWidth);
+		if (v.videoHeight !== 360) throw new Error("videoHeight = " + v.videoHeight);
 		if (v.buffered.length !== 1 || v.buffered.start(0) !== 0 || v.buffered.end(0) !== 12.5) {
 			throw new Error("buffered 不符");
 		}
@@ -230,6 +232,82 @@ func TestMediaElementMetadataResolver(t *testing.T) {
 		if (got !== "loadstart,durationchange,loadedmetadata,loadeddata,canplay,canplaythrough") {
 			throw new Error("事件序列 = " + got);
 		}
+		}
+	`)
+}
+
+// TestMediaElementMetadataUnknownDuration 覆盖「探测到了尺寸但时长未知」的
+// 资源（宿主 ffmpeg 只解析出视频轨道、没算出时长）：尺寸生效、readyState 停在
+// HAVE_METADATA，不派发 canplay——没有时长就不该声称可以播放。
+func TestMediaElementMetadataUnknownDuration(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	newVideoFixture(doc)
+	MediaMetadataResolver = func(src string) (MediaMetadata, bool) {
+		if src == "probe.webm" {
+			return MediaMetadata{Duration: math.NaN(), Width: 120, Height: 80}, true
+		}
+		return MediaMetadata{}, false
+	}
+	defer func() { MediaMetadataResolver = nil }()
+
+	mustRun(t, rt, `
+		{
+		globalThis.__events = [];
+		const v = document.getElementById("player");
+		["loadstart", "durationchange", "loadedmetadata", "loadeddata", "canplay", "canplaythrough"].forEach((t) => {
+			v.addEventListener(t, () => { __events.push(t); });
+		});
+		v.src = "probe.webm";
+		}
+	`)
+	drainEventLoop(rt)
+	mustRun(t, rt, `
+		{
+		const v = document.getElementById("player");
+		if (!Number.isNaN(v.duration)) throw new Error("duration 应为 NaN，实际 " + v.duration);
+		if (v.readyState !== 1) throw new Error("readyState = " + v.readyState + "，want 1");
+		if (v.videoWidth !== 120 || v.videoHeight !== 80) {
+			throw new Error("尺寸 = " + v.videoWidth + "x" + v.videoHeight);
+		}
+		const got = __events.join(",");
+		if (got !== "loadstart,durationchange,loadedmetadata") {
+			throw new Error("事件序列 = " + got);
+		}
+		}
+	`)
+}
+
+// TestMediaElementMetadataResetOnReload 覆盖切源：新资源的尺寸必须先清零，
+// 否则旧视频的 videoWidth 会挂在新资源上（脚本据此布局会错）。
+func TestMediaElementMetadataResetOnReload(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+	newVideoFixture(doc)
+	MediaMetadataResolver = func(src string) (MediaMetadata, bool) {
+		if src == "a.mp4" {
+			return MediaMetadata{Duration: 3, Width: 640, Height: 360}, true
+		}
+		if src == "b.webm" {
+			return MediaMetadata{Duration: 5}, true // 纯音频：无尺寸
+		}
+		return MediaMetadata{}, false
+	}
+	defer func() { MediaMetadataResolver = nil }()
+
+	mustRun(t, rt, `document.getElementById("player").src = "a.mp4";`)
+	drainEventLoop(rt)
+	mustRun(t, rt, `
+		const v = document.getElementById("player");
+		if (v.videoWidth !== 640) throw new Error("首源 videoWidth = " + v.videoWidth);
+	`)
+	mustRun(t, rt, `document.getElementById("player").src = "b.webm";`)
+	drainEventLoop(rt)
+	mustRun(t, rt, `
+		{
+		const v = document.getElementById("player");
+		if (v.videoWidth !== 0 || v.videoHeight !== 0) {
+			throw new Error("切源后尺寸应清零，实际 " + v.videoWidth + "x" + v.videoHeight);
+		}
+		if (v.duration !== 5) throw new Error("duration = " + v.duration);
 		}
 	`)
 }

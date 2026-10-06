@@ -2227,12 +2227,23 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	// cache); SVG sources parse and paint as vectors.
 	var src string
 	if el, ok := box.Node().(*dom.Element); ok {
-		src = el.GetAttribute("src")
-		// <video>/<audio> 的替代画面来自 poster 属性（没有 src 图像）。
-		if src == "" {
-			if ln := el.LocalName(); ln == "video" || ln == "audio" {
-				src = el.GetAttribute("poster")
+		if ln := el.LocalName(); ln == "video" || ln == "audio" {
+			// ★ <video>/<audio> 的 **src 不是图片**（mp4/wav…），画面来自：
+			//   ① 主线 A1 的宿主注入帧（<video> 当前播放位置的那一帧）；
+			//   ② poster 替代画面。
+			// 选哪个按规范里 poster frame 的定义二选一：有 poster 属性且图可用、
+			// 且 show poster flag 置位（尚未播放/seek）→ 用 poster；否则用当前帧
+			//（两者都没有才什么都不画）。既不是「帧永远优先」也不是「poster 永远
+			// 优先」。以前把 src 当图片去解码——每次绘制都白读一遍 mp4 再让 Skia
+			// 判失败，而且视频永远出不了画面（无 poster 的 <video> 整条路径不绘制）。
+			if ln == "video" && !videoShowsPoster(el) {
+				if frame := videoFrameForElement(el); frame != nil {
+					img = frame
+				}
 			}
+			src = el.GetAttribute("poster")
+		} else {
+			src = el.GetAttribute("src")
 		}
 	}
 	if debugenv.Enabled("WB_IMG_DEBUG") {
@@ -2273,6 +2284,14 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 				}
 			}
 			return true
+		}
+	}
+	// ★ 动图（A4）：box 上的 DecodedImage 是「某次绘制取到的帧」的快照，直接复用会让
+	//   GIF/WebP 动画永远停在那一帧（首帧加载后被 SetDecodedImage 固化）。动图的帧由
+	//   引擎按帧时长选（见 imageanimation.go），所以每次绘制都要重新问「现在哪一帧」。
+	if src != "" {
+		if anim, isAnim := animatedFrameForSrc(src); isAnim && anim != nil {
+			img = anim
 		}
 	}
 	if img == nil || !img.Loaded() {

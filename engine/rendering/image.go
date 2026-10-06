@@ -60,6 +60,21 @@ func NewDecodedImage(data []byte) *DecodedImage {
 	}
 }
 
+// NewDecodedImageFromSkia 用**已解码的 Skia 位图**构造 DecodedImage（A4 动图帧用）：
+// 宿主（app 层）已经用 SkCodec 解出了帧位图，再走 PNG 编解码就是白绕一圈。
+// 所有权随位图移交：返回的 DecodedImage 在 Release 时释放它。
+func NewDecodedImageFromSkia(img *SkiaImage) *DecodedImage {
+	if img == nil {
+		return nil
+	}
+	return &DecodedImage{
+		skImg:  img,
+		loaded: true,
+		width:  img.Width(),
+		height: img.Height(),
+	}
+}
+
 // Loaded reports whether the image has been successfully decoded.
 func (di *DecodedImage) Loaded() bool {
 	di.mu.Lock()

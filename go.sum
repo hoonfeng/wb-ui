@@ -14,5 +14,7 @@ github.com/hoonfeng/goskia v0.0.0-20260914160914-eca85bf3e450 h1:jLaqKp9dPSlVacc
 github.com/hoonfeng/goskia v0.0.0-20260914160914-eca85bf3e450/go.mod h1:LWohuKCOU8WPB8rFOijMJA0t4gk2e4IZigpvHEiLTvM=
 github.com/hoonfeng/goskia v0.0.0-20261006060753-395100befa2a h1:3aRzM9JYbfhq5m3+j8qGOTYWWY62X46+YGi5wI6IROQ=
 github.com/hoonfeng/goskia v0.0.0-20261006060753-395100befa2a/go.mod h1:LWohuKCOU8WPB8rFOijMJA0t4gk2e4IZigpvHEiLTvM=
+github.com/hoonfeng/goskia v0.0.0-20261006194810-5015494aa077 h1:OK1yMpEB7OGlQG+YCffd+2m24+Q0lgd/dWLJdUajOQ4=
+github.com/hoonfeng/goskia v0.0.0-20261006194810-5015494aa077/go.mod h1:LWohuKCOU8WPB8rFOijMJA0t4gk2e4IZigpvHEiLTvM=
 golang.org/x/text v0.3.8 h1:nAL+RVCQ9uMn3vJZbV+MRnydTJFPf8qqY42YiA6MrqY=
 golang.org/x/text v0.3.8/go.mod h1:E6s5w1FMmriuDzIBO73fBruAKo1PCIq6d2Q6DHfQ8WQ=

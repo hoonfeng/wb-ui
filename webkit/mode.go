@@ -283,3 +283,7 @@ func fileURLPath(ref string) string {
 	}
 	return strings.TrimPrefix(ref, "file://")
 }
+
+// FileURLPath 是 fileURLPath 的导出形式：宿主把页面里的资源引用映射到本地
+// 文件时需要同一套规范化（媒体元数据探测、外部分析工具）。
+func FileURLPath(ref string) string { return fileURLPath(ref) }

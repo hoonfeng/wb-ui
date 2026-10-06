@@ -83,7 +83,7 @@ func (wf *WebFrame) Document() *dom.Document {
 // RenderView returns the root of the render tree for the frame's document, mirroring
 // the render view obtained via WebFrame::contentRenderer() -> view->renderRoot().
 func (wf *WebFrame) RenderView() *rendering.RenderView {
-	if wf.frame == nil {
+	if wf == nil || wf.frame == nil {
 		return nil
 	}
 	return wf.frame.RenderView()

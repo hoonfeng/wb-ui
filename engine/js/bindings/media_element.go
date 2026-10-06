@@ -28,17 +28,34 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"wb-ui/engine/dom"
 	"wb-ui/engine/js/jsc"
+	"wb-ui/engine/rendering"
 )
 
 // ─── 宿主注入 ────────────────────────────────────────────
 
-// MediaMetadataResolver 由宿主设置：探测 src 指向的媒体时长（秒）。宿主可用
-// ffmpeg 探测本地文件——返回 ok=false 表示探测失败（回退到「时长未知」）。
-// 未设置时所有资源都按「时长未知」处理。
-var MediaMetadataResolver func(src string) (float64, bool)
+// MediaMetadata 是宿主探测到的媒体元数据（HTML §4.8.6：时长与画面尺寸都在
+// 元数据阶段可得，对应 L1 的 duration/videoWidth/videoHeight）。
+type MediaMetadata struct {
+	// Duration 是媒体时长（秒）；NaN 表示时长未知（不编造播放进度）。
+	Duration float64
+	// Width/Height 是视频轨道的像素尺寸；0 表示未知（纯音频资源合法）。
+	Width  int
+	Height int
+	// FPS 是视频轨道的帧率（帧/秒）；0 表示未知（纯音频资源，或容器没给帧率）。
+	// 引擎侧用它把「帧」的概念带进播放时钟与预取（media_element.go 的
+	// prefetchNextFrame 按帧预取；宿主按同一位移量化取帧时刻，见
+	// app/mediaprobe.go 的 FrameTimeQuantizer）。
+	FPS float64
+}
+
+// MediaMetadataResolver 由宿主设置：探测 src 指向的媒体元数据。宿主可用
+// `ffmpeg -i <src>` 解析 stderr 的 Duration / 视频尺寸——返回 ok=false 表示
+// 探测失败（回退到「时长未知」）。未设置时所有资源都按「时长未知」处理。
+var MediaMetadataResolver func(src string) (MediaMetadata, bool)
 
 // ─── 规范常量 ────────────────────────────────────────────
 
@@ -63,6 +80,13 @@ const (
 // mediaTimeUpdateMs 是播放时钟步长（timeupdate 的规范建议频率量级）。
 const mediaTimeUpdateMs = 250
 
+// mediaPrefetchFrames 是知道帧率时每次 tick 预取的帧数（A2：更长的预取窗口）。
+// 窗口宽度 = 帧数 ÷ 帧率（10fps 下 3 帧 = 300ms，与一个 timeupdate 步长同量级），
+// 保证「下一次 timeupdate 要显示的帧」必定已在路上。渲染层按帧折叠键并对在飞请求
+// 去重（engine/rendering/videoframe.go 的 quantize + inflight），所以一次预取几个
+// 时刻不会变成几次解码：同一帧只算一次，已缓存/已在飞的时刻直接跳过。
+const mediaPrefetchFrames = 3
+
 // ─── 状态 ────────────────────────────────────────────────
 
 // mediaHandler 是一个 on* 事件处理器属性：既是 JS 函数值（读取时返回原函数），
@@ -84,6 +108,9 @@ type mediaElementState struct {
 	seeking      bool
 	currentTime  float64
 	duration     float64 // NaN = 未知（未注入元数据）
+	videoW       int     // videoWidth：宿主探测到的视频宽（0 = 未知/纯音频）
+	videoH       int     // videoHeight
+	fps          float64 // 视频帧率（0 = 未知）：预取按帧推进时用它，见 prefetchNextFrame
 	volume       float64
 	muted        bool
 	playbackRate float64
@@ -96,6 +123,18 @@ type mediaElementState struct {
 	loadedSrc string
 	clock     bool
 	handlers  map[string]*mediaHandler
+
+	// showPoster 是 HTML 的 show poster flag（§4.8.8）：资源加载后、play() 或
+	// currentTime 设为非 0 之前，<video> 显示的是 poster 替代画面，而不是视频帧。
+	showPoster bool
+
+	// rvfc / rvfcNext / presented / lastFrameNo 是 requestVideoFrameCallback 的
+	// 状态（A2-③）：回调表（handle → 函数，回调触发后即失效）、下一个句柄、已呈现
+	// 帧数（规范的 presentedFrames，从 1 开始）、上一次呈现的帧号（-1 = 尚未呈现）。
+	rvfc        map[int]jsc.JSValue
+	rvfcNext    int
+	presented   uint64
+	lastFrameNo int64
 }
 
 var (
@@ -124,8 +163,11 @@ func mediaStateFor(in *jsc.Interpreter, el *dom.Element) *mediaElementState {
 			defaultRate:  1,
 			// muted IDL 属性的初始值来自 muted content attribute（HTML
 			// §4.8.6）；此后 muted 是播放器状态，不再反射 attribute。
-			muted:    el.HasAttribute("muted"),
-			handlers: map[string]*mediaHandler{},
+			muted:      el.HasAttribute("muted"),
+			handlers:    map[string]*mediaHandler{},
+			showPoster:  true,
+			rvfc:        map[int]jsc.JSValue{},
+			lastFrameNo: -1,
 		}
 		mediaElCache[el] = st
 		created = true
@@ -224,6 +266,40 @@ func (st *mediaElementState) effectiveSrc() string {
 	return ""
 }
 
+// syncVideoState 把「元素当前显示什么」告知渲染层（主线 A1：宿主注入帧流）。
+// <video> 的画面由宿主解码，经 rendering.VideoFrameSource 通道按 (url, 时间点)
+// 取回并绘制；<audio> 没有画面，不参与该通道。
+//
+// 何时调用：元数据就绪（给出首帧）、seek、播放时钟推进、play/pause 改变 poster
+// flag。没到 HAVE_METADATA、无源、或出错时清掉记录——渲染层随之回退 poster。
+func (st *mediaElementState) syncVideoState() {
+	if st.el == nil || st.el.LocalName() != "video" {
+		return
+	}
+	src := st.effectiveSrc()
+	if st.hasError || strings.TrimSpace(src) == "" || st.readyState < mediaHaveMetadata {
+		st.clearVideoState()
+		return
+	}
+	rendering.SetElementVideoState(st.el, rendering.VideoElementState{
+		URL:        src,
+		Time:       st.currentTime,
+		ShowPoster: st.showPoster,
+		// Playing 决定 painter 取帧的方式（A2）：时钟在走就不能同步等解码，
+		// 否则每一帧都要在渲染线程上等宿主跑一次 ffmpeg。
+		Playing: st.clock && !st.paused && !st.ended,
+	})
+}
+
+// clearVideoState 清除元素的显示状态（切源 / 出错 / 卸载）：渲染层不再为它向
+// 宿主要帧，元素回到 poster 替代画面（HTML §4.8.8）。
+func (st *mediaElementState) clearVideoState() {
+	if st.el == nil {
+		return
+	}
+	rendering.SetElementVideoState(st.el, rendering.VideoElementState{})
+}
+
 // setSrc 写入 src（IDL 属性）：反射 attribute 并重新执行资源选择算法。
 func (st *mediaElementState) setSrc(src string) {
 	st.el.SetAttribute("src", src)
@@ -266,10 +342,15 @@ func (st *mediaElementState) startLoadFor(src string) {
 	st.networkState = mediaNetworkLoading
 	st.readyState = mediaHaveNothing
 	st.duration = math.NaN()
+	st.videoW, st.videoH = 0, 0
 	st.currentTime = 0
 	st.ended = false
 	st.hasError = false
 	st.errorObj = nil
+	// 新的资源还没有画面：清掉旧状态（否则切换 src 后会继续显示上一个视频的帧），
+	// 并复位 show poster flag——带 poster 的 <video> 加载后先显示 poster。
+	st.showPoster = true
+	st.clearVideoState()
 	// ★ 整个流程在同一个任务里按序同步派发：EventLoop 对相同 deadline 的任务
 	// 不保证 FIFO（堆序），把 loadstart 与 loadedmetadata 拆成两个任务会让事件
 	// 顺序抖动（实测出现过 loadedmetadata 早于 loadstart）。
@@ -288,16 +369,8 @@ func (st *mediaElementState) finishLoad() {
 	}
 	src := st.loadedSrc
 	if MediaMetadataResolver != nil {
-		if d, ok := MediaMetadataResolver(src); ok && !math.IsNaN(d) {
-			st.duration = d
-			st.networkState = mediaNetworkIdle
-			st.readyState = mediaHaveMetadata
-			st.fireEvent("durationchange")
-			st.fireEvent("loadedmetadata")
-			st.readyState = mediaHaveEnoughData
-			st.fireEvent("loadeddata")
-			st.fireEvent("canplay")
-			st.fireEvent("canplaythrough")
+		if meta, ok := MediaMetadataResolver(src); ok {
+			st.applyMetadata(meta)
 			return
 		}
 	}
@@ -305,6 +378,7 @@ func (st *mediaElementState) finishLoad() {
 		st.networkState = mediaNetworkNoSource
 		st.readyState = mediaHaveNothing
 		st.setError(mediaErrSrcNotSupported, "The media resource could not be loaded")
+		st.clearVideoState()
 		st.fireEvent("error")
 		return
 	}
@@ -314,6 +388,39 @@ func (st *mediaElementState) finishLoad() {
 	st.readyState = mediaHaveMetadata
 	st.fireEvent("durationchange")
 	st.fireEvent("loadedmetadata")
+	// HAVE_METADATA 时 currentTime=0：让宿主给出首帧，脚本立即读到的画面与
+	// videoWidth/Height 一致（时长未知只影响播放时钟，不影响首帧可取）。
+	st.syncVideoState()
+}
+
+// applyMetadata 应用宿主探测到的元数据。时长已知时推进到 HAVE_ENOUGH_DATA 并
+// 派发 loadeddata/canplay/canplaythrough；时长未知（NaN）时停在 HAVE_METADATA
+// ——尺寸等元数据是可信的，但播放时钟没有依据，派发 canplay 会误导脚本以为
+// 可以开始播放。视频尺寸在此生效（videoWidth/videoHeight）。
+func (st *mediaElementState) applyMetadata(meta MediaMetadata) {
+	st.duration = meta.Duration
+	if meta.Width > 0 {
+		st.videoW = meta.Width
+	}
+	if meta.Height > 0 {
+		st.videoH = meta.Height
+	}
+	if meta.FPS > 0 {
+		st.fps = meta.FPS
+	}
+	st.networkState = mediaNetworkIdle
+	st.readyState = mediaHaveMetadata
+	st.fireEvent("durationchange")
+	st.fireEvent("loadedmetadata")
+	if math.IsNaN(st.duration) {
+		st.syncVideoState()
+		return
+	}
+	st.readyState = mediaHaveEnoughData
+	st.fireEvent("loadeddata")
+	st.fireEvent("canplay")
+	st.fireEvent("canplaythrough")
+	st.syncVideoState()
 }
 
 // isUnreachableMediaSrc 判定本引擎肯定取不到的源（http/https 需要网络栈）。
@@ -368,12 +475,19 @@ func (st *mediaElementState) play() jsc.JSValue {
 	if st.readyState == mediaHaveNothing && st.networkState != mediaNetworkLoading {
 		st.startLoadFor(st.effectiveSrc())
 	}
+	// 开始播放：show poster flag 清除（放在 startLoadFor 之后——加载算法会把
+	// flag 复位，先清会被它盖掉）。此后 <video> 显示的是真实帧，不是 poster。
+	st.showPoster = false
+	// ★ 先起时钟再同步显示状态：Playing 由「时钟是否在走」推出，反过来写会让
+	// play() 后的头 250ms（首个 tick 之前）仍然声称 Playing=false——painter
+	// 就会去同步取帧，白白在渲染线程上等一次解码。
+	st.startClock()
+	st.syncVideoState()
 	// play/playing 同任务顺序派发（同上：跨任务的顺序不可依赖）。
 	mediaRunLater(in, func() {
 		st.fireEvent("play")
 		st.fireEvent("playing")
 	})
-	st.startClock()
 	return in.ResolvePromise(jsc.Undefined())
 }
 
@@ -384,6 +498,9 @@ func (st *mediaElementState) pause() {
 	}
 	st.paused = true
 	st.clock = false
+	// 暂停要上报状态（Playing 随之转 false）：此后绘制会在静止态同步取当前
+	// 时刻的帧——暂停瞬间看到的画面必须精确，而不是继续异步凑合。
+	st.syncVideoState()
 	mediaRunLater(st.interp, func() { st.fireEvent("pause") })
 }
 
@@ -427,12 +544,142 @@ func (st *mediaElementState) tick() {
 		st.ended = true
 		st.paused = true
 		st.clock = false
+		st.syncVideoState()
+		st.maybePresentVideoFrame() // 末尾那一帧也是「新呈现的一帧」
 		st.fireEvent("timeupdate")
 		st.fireEvent("ended")
 		return
 	}
+	st.syncVideoState()
+	st.maybePresentVideoFrame()
+	st.prefetchNextFrame()
 	st.fireEvent("timeupdate")
 	st.scheduleTick()
+}
+
+// prefetchNextFrame 请求宿主**异步**预取「下一次时间更新会显示的帧」（A2）：
+// 播放中渲染线程不等解码，靠的就是帧总比绘制早一步到（app 侧的 worker 池跑
+// 解码器，见 MediaProbe.FramePump）。
+//
+// 末尾把请求收敛到 duration：越界时刻没有帧，宿主会把 duration 对应到最后一帧
+// （见 app/mediaprobe.go 的 clampFrameTime），所以播放结束时那一帧也是预取来的。
+func (st *mediaElementState) prefetchNextFrame() {
+	if st.el == nil || st.el.LocalName() != "video" {
+		return
+	}
+	src := st.effectiveSrc()
+	if strings.TrimSpace(src) == "" {
+		return
+	}
+	// 步长：知道帧率就按**帧**推进（预取到的就是接下来要显示的那几帧本身），否则
+	// 退回「一个时钟步长」。窗口宽度见 mediaPrefetchFrames。
+	step := float64(mediaTimeUpdateMs) / 1000 * st.playbackRate
+	count := 1
+	if st.fps > 0 {
+		step = st.playbackRate / st.fps
+		count = mediaPrefetchFrames
+	}
+	for i := 1; i <= count; i++ {
+		next := st.currentTime + step*float64(i)
+		if !math.IsNaN(st.duration) && st.duration > 0 && next > st.duration {
+			next = st.duration
+		}
+		rendering.PrefetchVideoFrame(src, next)
+	}
+}
+
+// ─── requestVideoFrameCallback（A2-③）────────────────────
+
+// requestVideoFrameCallback 实现 video.requestVideoFrameCallback(cb)：注册「新一帧
+// 呈现」回调并返回句柄（规范里是 callback id，非 0；参数不可调用时返回 0 = 无效句柄）。
+//
+// 时机：本引擎的帧由宿主按需注入，没有真实合成器，因此「呈现」定义为**播放时钟推进
+// 到新的帧号**（tick 里判定，见 maybePresentVideoFrame）。回调触发一次后即失效——
+// 与规范一致（要持续观察就得在回调里再注册一次，这也是 rVFC 的常规用法）。
+func (st *mediaElementState) requestVideoFrameCallback(args []jsc.JSValue) int {
+	if len(args) == 0 || !args[0].IsCallable() {
+		return 0
+	}
+	if st.rvfc == nil {
+		st.rvfc = map[int]jsc.JSValue{}
+	}
+	st.rvfcNext++
+	handle := st.rvfcNext
+	st.rvfc[handle] = args[0]
+	return handle
+}
+
+// cancelVideoFrameCallback 取消一个尚未触发的帧呈现回调（重复取消是 no-op，与
+// addEventListener 的 handle 语义一致：失效的 handle 不该报错）。
+func (st *mediaElementState) cancelVideoFrameCallback(handle int) {
+	delete(st.rvfc, handle)
+}
+
+// frameNo 返回 currentTime 所属的帧号（HTML 里「该帧的媒体时间戳所属帧」）。
+// 帧率未知时退化为毫秒粒度：粒度只影响回调频率，不会丢帧。
+func (st *mediaElementState) frameNo() int64 {
+	if st.fps > 0 {
+		return int64(math.Floor(st.currentTime*st.fps + 1e-6))
+	}
+	return int64(st.currentTime * 1000)
+}
+
+// maybePresentVideoFrame 在时钟推进后判定「是否呈现了新一帧」并触发回调（A2-③）。
+// 帧号没变就什么都不做——这正是 rVFC 与 timeupdate 的区别：timeupdate 按固定频率报
+// 时钟，rVFC 只在**真的有新帧**时回调。
+func (st *mediaElementState) maybePresentVideoFrame() {
+	// ★ 帧号跟踪**不能**受「当前有没有注册回调」影响：否则注册回调那一刻的
+	// lastFrameNo 会停留在很久以前的帧号上，注册后第一次时钟推进就误报一次「新帧」
+	// （规范要的是「下一次新帧呈现」，不是「立刻回调」）。
+	n := st.frameNo()
+	changed := n != st.lastFrameNo
+	st.lastFrameNo = n
+	if !changed || len(st.rvfc) == 0 {
+		return
+	}
+	st.fireVideoFrameCallbacks()
+}
+
+// fireVideoFrameCallbacks 调用已注册的帧呈现回调，并按规范填 VideoFrameCallbackMetadata
+// （presentedFrames 从 1 开始、mediaTime 是该帧的**起点**而不是 currentTime）。
+//
+// 已知差异（记录在 docs/TECH_DEBT.md）：回调里的 `this` 传 undefined 而不是元素本身；
+// 没有真实合成器，presentationTime/expectedDisplayTime 是宿主 wall clock 的近似值
+// （单调、可用于测帧间隔），processingDuration 恒为 0。
+func (st *mediaElementState) fireVideoFrameCallbacks() {
+	handlers := st.rvfc
+	if len(handlers) == 0 {
+		return
+	}
+	st.rvfc = map[int]jsc.JSValue{} // 一次性：触发过的句柄即失效
+	st.presented++
+
+	now := float64(time.Now().UnixNano()) / 1e6
+	mediaTime := st.currentTime
+	if st.fps > 0 {
+		mediaTime = math.Floor(st.currentTime*st.fps+1e-6) / st.fps
+	}
+	interp := st.interp
+	presented := st.presented
+	for _, fn := range handlers {
+		f := fn
+		mediaRunLater(interp, func() {
+			if interp == nil || !f.IsFunction() {
+				return
+			}
+			meta := jsc.NewObject(nil)
+			meta.Set("presentationTime", jsc.NumberValue(now))
+			meta.Set("expectedDisplayTime", jsc.NumberValue(now+16.7)) // 下一个 60Hz 帧
+			meta.Set("width", jsc.NumberValue(float64(st.videoW)))
+			meta.Set("height", jsc.NumberValue(float64(st.videoH)))
+			meta.Set("mediaTime", jsc.NumberValue(mediaTime))
+			meta.Set("presentedFrames", jsc.NumberValue(float64(presented)))
+			meta.Set("processingDuration", jsc.NumberValue(0))
+			_, _ = interp.Call(f, jsc.Undefined(), []jsc.JSValue{
+				jsc.NumberValue(now), jsc.ObjectValue(meta),
+			})
+		})
+	}
 }
 
 // setCurrentTime 实现 currentTime 的 setter（含 seeking/seeked 事件）。
@@ -451,10 +698,19 @@ func (st *mediaElementState) setCurrentTime(t float64) {
 	}
 	st.currentTime = t
 	st.seeking = true
+	if t > 0 {
+		// show poster flag 在 currentTime 被设为非 0 时清除（HTML §4.8.8）：
+		// seek 到中间就该看到画面，而不是继续看 poster。
+		st.showPoster = false
+	}
+	st.syncVideoState()
 	mediaRunLater(st.interp, func() {
 		st.fireEvent("seeking")
 		st.seeking = false
 		st.fireEvent("seeked")
+		// seek 的落点是一帧新的画面 → 也是一次「呈现」（规范里 rVFC 在 seek 后同样
+		// 会触发；暂停态没有 tick，不在这里报就永远不会报）。
+		st.maybePresentVideoFrame()
 	})
 }
 
@@ -573,6 +829,8 @@ var mediaElementPropNames = map[string]bool{
 	"videoWidth": true, "videoHeight": true,
 	"canPlayType": true, "load": true, "play": true, "pause": true,
 	"fastSeek": true, "addTextTrack": true, "captureStream": true,
+	// A2-③：帧呈现回调（HTML §4.8.7 的 requestVideoFrameCallback）。
+	"requestVideoFrameCallback": true, "cancelVideoFrameCallback": true,
 }
 
 // mediaEventNames 是媒体元素会派发的事件类型（on* 处理器属性按此集合识别）。
@@ -817,10 +1075,14 @@ func installMediaElementProperty(rt *jsc.Interpreter, el *dom.Element, key strin
 		}}, true
 	case "buffered", "played", "seekable":
 		return jsc.JSValue{}, &elemAccessor{get: func() jsc.JSValue { return st.ranges() }}, true
-	case "videoWidth", "videoHeight":
-		// 画面尺寸由宿主解码决定（本层不持有位图）；未解码时为 0。
+	case "videoWidth":
+		// 画面尺寸来自宿主探测的元数据（本层不持有位图）；未知时为 0。
 		return jsc.JSValue{}, &elemAccessor{
-			get: func() jsc.JSValue { return jsc.NumberValue(0) },
+			get: func() jsc.JSValue { return jsc.NumberValue(float64(st.videoW)) },
+		}, true
+	case "videoHeight":
+		return jsc.JSValue{}, &elemAccessor{
+			get: func() jsc.JSValue { return jsc.NumberValue(float64(st.videoH)) },
 		}, true
 	case "canPlayType":
 		return funcVal(rt.NewNativeFunction("canPlayType",
@@ -867,6 +1129,19 @@ func installMediaElementProperty(rt *jsc.Interpreter, el *dom.Element, key strin
 			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 				return jsc.Null()
 			}, 0)), nil, true
+	case "requestVideoFrameCallback":
+		return funcVal(rt.NewNativeFunction("requestVideoFrameCallback",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				return jsc.NumberValue(float64(st.requestVideoFrameCallback(args)))
+			}, 1)), nil, true
+	case "cancelVideoFrameCallback":
+		return funcVal(rt.NewNativeFunction("cancelVideoFrameCallback",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) > 0 {
+					st.cancelVideoFrameCallback(int(args[0].ToNumber()))
+				}
+				return jsc.Undefined()
+			}, 1)), nil, true
 	}
 	return jsc.JSValue{}, nil, false
 }
