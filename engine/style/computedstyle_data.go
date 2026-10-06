@@ -100,9 +100,20 @@ type InheritedData struct {
 // 语义最清晰，无隐式共享可变状态）。
 func DefaultInheritedData() *InheritedData {
 	return &InheritedData{
-		Color:       Color{R: 0, G: 0, B: 0, A: 0xFF},
-		FontSize:    Length{Value: 16, Unit: "px"},
-		FontFamily:  "serif",
+		Color:    Color{R: 0, G: 0, B: 0, A: 0xFF},
+		FontSize: Length{Value: 16, Unit: "px"},
+		// ★ 2026-09 D7「默认族」修复：初始值此前是 "serif" → 所有**无
+		//   font-family 声明**的文本 computed 落到衬线族（解析层
+		//   LookupTypeface("serif") → m.serifTF = SimSun 宋体）：拉丁走宋体
+		//   西文（24px 下 10 个 M = 120px，浏览器 194.88px）、中文走宋体。
+		//   而 CSS 规范规定 font-family 的初始值 = UA 相关的**无衬线**默认
+		//   （浏览器 computed 为具体默认族名，实测 Edge 基准 = "Noto Sans SC"，
+		//   sans-serif 通用族解析到同一字体 → 无衬线黑体）。
+		//   这里归一为通用族 "sans-serif"：解析层统一映射到与 Edge 等价的
+		//   字体（fontmgr.resolveFamily → osLookup("Noto Sans SC")，缺失时
+		//   兜底 m.sansTF）→ 拉丁无衬线、中文黑体，与浏览器一致；且不硬编码
+		//   某个平台的具体字体名，跨机器仍有完整回退链。
+		FontFamily:  "sans-serif",
 		FontWeight:  "400",
 		FontStyle:   "normal",
 		FontVariant: "normal",
@@ -277,8 +288,8 @@ type NonInheritedData struct {
 	// （虚拟滚动、动画层提示、`will-change: transform` 的浮层）层叠顺序
 	// 与浏览器不一致。
 	WillChange string
-	// Isolation 是 isolation 的值（`isolate` 创建层叠上下文，CSS
-	// Compositing §4）。
+	// Isolation 是 isolation 的值（`isolate` 创建层叠上下文，
+	// CSS Compositing §4）。
 	Isolation string
 
 	// ── Transitions / Animations ──
@@ -301,6 +312,11 @@ type NonInheritedData struct {
 	TranslateY float64
 	ScaleX     float64
 	ScaleY     float64
+	// TransformAnimated 标记本帧 TranslateX/Y/ScaleX/Y 是 CSS 动画/过渡的
+	// 补间结果（有效值）。scale 的合法值域包含 0（元素缩到不可见），零值
+	// 无法充当「未使用」哨兵，故单独置位；动画结束或失去 @keyframes 时由
+	// rendering.applyAnimationToStyle 复位。
+	TransformAnimated bool
 
 	// ── State ──
 	DisplaySet bool

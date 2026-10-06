@@ -1,4 +1,4 @@
-﻿// Translation of: Source/WebCore/platform/graphics/FontCache.h
+// Translation of: Source/WebCore/platform/graphics/FontCache.h
 //                  Source/WebCore/platform/graphics/FontCache.cpp
 // Completeness: 80%
 //
@@ -73,12 +73,13 @@ type FontManager struct {
 	mu        sync.RWMutex
 	fonts     []loadedFont
 	customTF  map[string]*skia.Typeface // @font-face registered fonts, keyed by lowercased family name
-	defaultTF *skia.Typeface // default sans-serif (prefers CJK coverage)
-	sansTF    *skia.Typeface  // generic sans-serif
-	monoTF    *skia.Typeface  // generic monospace
-	serifTF   *skia.Typeface  // generic serif
-	emojiTF   *skia.Typeface  // emoji font (Segoe UI Emoji / Noto Color Emoji)
-	symbolTF  *skia.Typeface // symbol font (Segoe UI Symbol) for geometric shapes/arrows
+	defaultTF *skia.Typeface            // default sans-serif (prefers CJK coverage)
+	sansTF    *skia.Typeface            // generic sans-serif
+	monoTF    *skia.Typeface            // generic monospace
+	serifTF   *skia.Typeface            // generic serif
+	emojiTF   *skia.Typeface            // emoji font (Segoe UI Emoji / Noto Color Emoji)
+	symbolTF  *skia.Typeface            // symbol font (Segoe UI Symbol) for geometric shapes/arrows
+	cjkTF     *skia.Typeface            // CJK fallback for primary faces without CJK glyphs
 
 	// systemFontsLoaded guards LoadSystemFonts against duplicate scans
 	// (ensureFonts / NewHost may both call it; fonts must load only once).
@@ -331,10 +332,10 @@ func (m *FontManager) LoadSystemFontsLegacy() {
 		index    int
 	}
 	targets := []sysFont{
-		{"msyh.ttc", 0},     // Microsoft YaHei Regular (default proportional CJK)
-		{"msyhbd.ttc", 0},   // Microsoft YaHei Bold (real bold variant)
-		{"consola.ttf", 0},  // Consolas Regular (English monospace)
-		{"simsun.ttc", 1},   // NSimSun (CJK monospace, index 1 of the TTC)
+		{"msyh.ttc", 0},    // Microsoft YaHei Regular (default proportional CJK)
+		{"msyhbd.ttc", 0},  // Microsoft YaHei Bold (real bold variant)
+		{"consola.ttf", 0}, // Consolas Regular (English monospace)
+		{"simsun.ttc", 1},  // NSimSun (CJK monospace, index 1 of the TTC)
 	}
 	for _, t := range targets {
 		path := filepath.Join(winFontDir, t.filename)
@@ -515,6 +516,19 @@ func (m *FontManager) selectDefaults() {
 	if m.defaultTF == nil {
 		m.defaultTF = m.monoTF
 	}
+	// CJK 回退（主字体无 CJK 字形时使用，见 CJKTypeface）：与 Edge 对齐取
+	// Noto Sans SC —— Chromium/Edge 在 Windows 上对「拉丁主字体 + 中文」的
+	// 回退落在 Noto Sans SC（系统装有 NotoSansSC-VF.ttf），其行盒度量与雅黑
+	// 不同（24px 实测 div.offsetHeight：Noto Sans SC 35px / 雅黑 31px），
+	// 字形也不同。此前一律回落雅黑 → 含中文的 Arial 行盒矮 4px、基线偏移
+	// 4–5px。取不到 Noto Sans SC 时回落雅黑（sansTF），再回落 defaultTF。
+	m.cjkTF = skia.NewTypeface("Noto Sans SC", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+	if m.cjkTF == nil {
+		m.cjkTF = m.sansTF
+	}
+	if m.cjkTF == nil {
+		m.cjkTF = m.defaultTF
+	}
 	// emoji: find the first font with emoji flag set (e.g. Segoe UI Emoji
 	// on Windows, Noto Color Emoji on Linux/macOS).
 	m.emojiTF = nil
@@ -634,18 +648,68 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 	// resolve (terminating the fallback chain).
 	resolveFamily := func(f string) (string, bool) {
 		switch f {
-		case "", "sans-serif", "default", "system-ui", "ui-sans-serif":
-			return "microsoft yahei", true // generic �?always available
-		case "serif", "times", "times new roman", "ui-serif":
-			return "kochi mincho", true // generic �?always available
+		case "", "sans-serif", "default", "ui-sans-serif", "-apple-system":
+			// ★ 2026-09 D7「默认族」修复（第二轮）：以 Edge 基准实测为准
+			//   （headless=new + --dump-dom 探针，24px 下 10 个 M 的宽度）：
+			//     无声明 / sans-serif / ui-sans-serif / -apple-system
+			//       → "Noto Sans SC"（194.88px）——浏览器这四个语义**同族**
+			//     system-ui → "Microsoft YaHei"（234.49px，与 sans-serif 不同）
+			//     Arial     → Arial（199.92px）
+			//   上一轮把这一组映射到 "arial" 属**对齐错目标**：浏览器
+			//   sans-serif 通用族解析到 Noto Sans SC（194.88），既非 Arial，
+			//   也解释了未声明 font-family 的文档默认族同样是它。
+			//   isGeneric=true 保证 Noto Sans SC 缺失时仍落到 m.sansTF
+			//   （雅黑，黑体无衬线）兜底，绝不回落到衬线族。
+			return "noto sans sc", true // generic → always available
+		case "system-ui":
+			// Edge 实测 system-ui = 微软雅黑（234.49），与 sans-serif 不同。
+			return "microsoft yahei", true // generic → always available
+		case "serif", "ui-serif":
+			// ★ Edge 基准实测（24px 三维指纹 M10/I10/line-height:normal 行盒高）：
+			//   serif → Noto Serif SC（234 / 97.2 / 35）。此前映射到 kochi
+			//   mincho（未加载）→ 最终落到 serifTF = SimSun（120 / 120 / 27），
+			//   拉丁字形宽度只有 Edge 的一半（120 vs 234），整行文本全部重排。
+			return "noto serif sc", true // generic → always available
+		case "times", "times new roman":
+			// 显式族名 → 真 Times New Roman（Edge 指纹 213.4 / 79.92 / 27）。
+			// 此前并入 serif 组 → 落到宋体（120 / 120 / 27），M 宽差 78%。
+			return "times new roman", false
 		case "monospace", "mono", "ui-monospace":
-			return "consolas", true // generic → always available (Edge falls back to Consolas when Google Fonts unreachable)
+			// ★ Edge 基准实测：monospace → SimSun（120 / 120 / 27），**不是**
+			//   Consolas（131.95 / 131.95 / 28）—— 中文 Windows 的等宽默认字体
+			//   是宋体，每字符宽 0.5em 而非 Consolas 的 0.5498em，长行会累积整行错位。
+			return "simsun", true // generic → always available
 		case "arial", "helvetica":
-			return "microsoft yahei", false // alias, not generic
-		case "microsoft yahei", "微软雅黑", "microsoft yahei ui", "segoe ui", "-apple-system",
+			// ★ 不再硬别名到微软雅黑（D7 根因）：雅黑的拉丁字形显著宽于 Arial
+			//   —— 实测 10 个 `M` @24px：雅黑 234.5px，浏览器 Arial 197px
+			//   （+19%）。凡声明 `font-family: Arial, Helvetica, sans-serif`
+			//   的页面（Bootstrap/绝大多数站点），文字度量、换行位置与行数都会
+			//   与浏览器不一致；Vue/React 夹具那 5% 的像素差异主要来自这里。
+			//   Helvetica 在 Windows 上通常缺失，浏览器按度量兼容替换为 Arial，
+			//   这里同样落到 arial（白名单已加载 arial.ttf，classifyFont 记为
+			//   "arial"）。中文仍由绘制层的 CJK 字体回退处理（见 canvas.go 的
+			//   getCJKSkiaFont），不会出现豆腐块。
+			return "arial", false
+		case "segoe ui":
+			// 白名单加载 segoeui*.ttf，classifyFont 按文件名记为 "segoeui"。
+			return "segoeui", false
+		case "segoe ui symbol":
+			return "seguisym", false
+		case "segoe ui emoji":
+			return "seguiemj", false
+		case "microsoft yahei", "微软雅黑", "microsoft yahei ui",
 			"pingfang sc", "pingfang", "hiragino sans gb", "hiragino", "simhei",
-			"simsun", "nsimsun", "heiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
+			"heiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
 			return "microsoft yahei", false
+		case "simsun", "nsimsun":
+			// ★ 宋体/新宋体是**具体的衬线族**，不是雅黑的别名：实测把两者并入
+			//   雅黑组后，`font-family: SimSun` 的拉丁 advance 变成 234.49
+			//   （雅黑），而 Edge 为 120（宋体西文半宽），行盒高 31 vs 27。
+			//   osLookup 可把两者解析到真 face（SimSun / NSimSun）。
+			return "simsun", false
+		case "noto sans sc", "noto sans", "notosanssc":
+			// 浏览器基准的默认无衬线族（见上）：显式声明同样解析到此目标。
+			return "noto sans sc", false
 		case "roboto":
 			return "roboto", false
 		}
@@ -654,14 +718,18 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 
 	for _, fam := range families {
 		targetFamily, isGeneric := resolveFamily(fam)
-		// CJK families: prefer OS-name lookup (skia.NewTypeface) because
-		// TTC faces loaded via NewTypefaceFromData may fail to render CJK
-		// glyphs (tofu). OS faces keep Skia's system fallback chain, so
-		// Chinese text renders instead of showing boxes.
-		if targetFamily == "microsoft yahei" || targetFamily == "nsimsun" || targetFamily == "simsun" {
-			if tf := m.osLookup(targetFamily, weight, italic); tf != nil {
-				return tf
-			}
+		// OS 名查找优先（skia.NewTypeface）：
+		//   - CJK 族：TTC faces loaded via NewTypefaceFromData may fail to
+		//     render CJK glyphs (tofu); OS faces keep Skia's system fallback
+		//     chain, so Chinese text renders instead of showing boxes.
+		//   - 西文族（Arial / Segoe UI …）：从文件加载的 face 没有斜体/粗体
+		//     变体，italic 请求会拿到 regular face 并触发双重斜切
+		//     （typeface_weight_test 的 TestTypefaceItalicSystemLookup 正是
+		//     这个回归）——交给 Skia 按 FontStyle 匹配正确的 face。
+		// 表外的族返回 nil，继续走下面的 findBest，不截断 CSS font-family
+		// 的回退链。
+		if tf := m.osLookup(targetFamily, weight, italic); tf != nil {
+			return tf
 		}
 		// Try exact family + weight/italic match first.
 		if tf := m.findBest(targetFamily, weight, italic); tf != nil {
@@ -676,7 +744,9 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 		// Generic families always resolve (they terminate the fallback chain).
 		if isGeneric {
 			switch fam {
-			case "", "sans-serif", "default", "system-ui", "ui-sans-serif":
+			case "", "sans-serif", "default", "ui-sans-serif", "-apple-system":
+				return m.sansTF
+			case "system-ui":
 				return m.sansTF
 			case "serif", "times", "times new roman", "ui-serif":
 				return m.serifTF
@@ -695,7 +765,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *skia.Typeface {
 	var osName string
 	switch targetFamily {
-	case "microsoft yahei":
+	case "microsoft yahei", "微软雅黑", "microsoft yahei ui":
 		osName = "Microsoft YaHei"
 	case "nsimsun":
 		osName = "NSimSun"
@@ -703,6 +773,32 @@ func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *sk
 		osName = "SimSun"
 	case "consolas":
 		osName = "Consolas"
+	case "arial":
+		osName = "Arial"
+	case "noto sans sc":
+		// 系统装有 NotoSansSC-VF.ttf（Windows Fonts）；DirectWrite 名查找可用
+		// （探针实测 skia.NewTypeface("Noto Sans SC") != nil）。取不到时
+		// 上层 isGeneric 分支回落 m.sansTF。
+		osName = "Noto Sans SC"
+	case "noto serif sc":
+		// 系统装有 NotoSerifSC-VF.ttf；Edge 的 serif 通用族实测解析到它
+		// （24px 指纹 234 / 97.2 / 35）。取不到时回落 m.serifTF。
+		osName = "Noto Serif SC"
+	case "times new roman":
+		// times.ttf（Windows Fonts）；Edge 的显式 Times New Roman 指纹
+		// 213.4 / 79.92 / 27。
+		osName = "Times New Roman"
+	case "courier new":
+		// cour.ttf（Windows Fonts）；Edge 指纹 144.02 / 144.02 / 27。
+		// 缺此分支时落到默认衬线/无衬线兜底（本机实测退化为雅黑 234.49 /
+		// 70.55 / 31），等宽文本宽度差 62%。
+		osName = "Courier New"
+	case "segoeui":
+		osName = "Segoe UI"
+	case "seguisym":
+		osName = "Segoe UI Symbol"
+	case "seguiemj":
+		osName = "Segoe UI Emoji"
 	default:
 		return nil
 	}
@@ -764,6 +860,9 @@ func (m *FontManager) SymbolTypeface() *skia.Typeface {
 func (m *FontManager) CJKTypeface() *skia.Typeface {
 	if m == nil {
 		return nil
+	}
+	if m.cjkTF != nil {
+		return m.cjkTF
 	}
 	if m.sansTF != nil {
 		return m.sansTF
