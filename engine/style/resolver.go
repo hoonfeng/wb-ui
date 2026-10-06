@@ -2153,11 +2153,21 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.MinHeight = l
 		}
 	case "max-width":
-		if l, ok := parseLength(valueString); ok {
+		// ★ CSS-SIZING-3：`max-width:none` = 无上限（不是长度）。parseLength 只认
+		// auto/fit-content/min-content/max-content，none 会返回 false —— 此前整条
+		// 声明被静默丢弃，层叠于是回落到低优先级规则（实测 AI-PS：scoped
+		// `.screen-main[data-v-*]{max-width:1440px}` 压过覆盖层
+		// `#app .screen-main{max-width:none}`，浏览器该处 computed=none）。
+		// 语义侧早已支持：layout.resolveMinMax 见 Unit=="none" 即 maxAuto=true。
+		if strings.EqualFold(strings.TrimSpace(valueString), "none") {
+			cs.MaxWidth = Length{Unit: "none"}
+		} else if l, ok := parseLength(valueString); ok {
 			cs.MaxWidth = l
 		}
 	case "max-height":
-		if l, ok := parseLength(valueString); ok {
+		if strings.EqualFold(strings.TrimSpace(valueString), "none") {
+			cs.MaxHeight = Length{Unit: "none"}
+		} else if l, ok := parseLength(valueString); ok {
 			cs.MaxHeight = l
 		}
 	case "margin":

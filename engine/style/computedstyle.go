@@ -131,6 +131,9 @@ func (l Length) String() string {
 	if l.Unit == "normal" {
 		return "normal"
 	}
+	if l.Unit == "none" {
+		return "none"
+	}
 	return formatFloat(l.Value) + l.Unit
 }
 

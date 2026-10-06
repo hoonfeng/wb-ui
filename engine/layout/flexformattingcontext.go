@@ -1611,6 +1611,23 @@ func (c *FlexFormattingContext) resolveCrossSizes(items []*flexItem, isRow, _, _
 				if fit < 0 { fit = 0 }
 				g.SetContentWidth(fit)
 			}
+			// ★ 交叉轴 min/max-width clamp（对称于 row 分支的 min/max-height，
+			// CSS-FLEXBOX §9.4.6：cross size 确定后按自身 min/max 约束调整）。
+			// 此前 column 分支缺失该约束：有 max-width 的 flex item 几何保持未约束值，
+			// 而 item 内部布局的交叉轴基准（Layout 开头对 cw 的同款 clamp）却是约束后
+			// 的值 —— 同一 max-width 两处取值不一致（AI-PS .screen-main 实测：item 几何
+			// 1920、内部子项 width:100% = 1440，右侧留白 480；浏览器此处为 1440/1440）。
+			if minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cbWidth, fontSizeOf(it.box)); !minAuto || !maxAuto {
+				hp := g.HorizontalBorderAndPadding()
+				bb := g.ContentWidth() + hp
+				if newBB := clampSize(bb, minW, maxW, minAuto, maxAuto); newBB != bb {
+					newContent := newBB - hp
+					if newContent < 0 {
+						newContent = 0
+					}
+					g.SetContentWidth(newContent)
+				}
+			}
 			// ★ 2026-09-26：column 容器的交叉轴（宽度）一旦改变，必须**重新布局
 			// item 内部** —— 否则块级内容（文本换行）仍按改尺寸之前的宽度排版。
 			//
@@ -1921,6 +1938,23 @@ func (c *FlexFormattingContext) applyPositions(items []*flexItem, container *Ele
 						w = 0
 					}
 					g.SetContentWidth(w)
+				}
+				// ★ 交叉轴 min/max-width clamp（对称于 row 分支上面对 height:100% 的
+				// min/max-height clamp）：上面刚按容器 cw 重设 content 宽——width:100%
+				// 会覆盖 resolveCrossSizes 的 clamp 结果，必须再按 item 自身 max-width
+				// 约束。实测（AI-PS .screen-main，1920 视口）：width:100% 让 item 几何
+				// 回到 1920，而它内部子项的交叉轴基准是 1440（同一 max-width 两处取值
+				// 不一致），右侧留白 480；浏览器此处为 1440/1440。
+				if minW, maxW, minAuto, maxAuto := resolveMinMax(cs.MinWidth, cs.MaxWidth, cw, fontSizeOf(it.box)); !minAuto || !maxAuto {
+					hp := g.HorizontalBorderAndPadding()
+					bb := g.ContentWidth() + hp
+					if newBB := clampSize(bb, minW, maxW, minAuto, maxAuto); newBB != bb {
+						newContent := newBB - hp
+						if newContent < 0 {
+							newContent = 0
+						}
+						g.SetContentWidth(newContent)
+					}
 				}
 			}
 		}

@@ -43,10 +43,15 @@ body {
   display: flex;
   flex-direction: column;
   align-self: stretch;   /* 横向铺满 screen-main */
-  /* ★ 必须用视口单位而非 100%：wb-ui 引擎存在「flex 容器宽度被父级拉伸到更大尺寸后，
-     其子项交叉轴的解析基准仍是拉伸前的旧值」的缺陷（插桩实测：.screen-main 已是 1920，
-     但传给 .d-main_app 的基准 cbWidth 仍是 fit-content 的 1440）——故 width:100% 与
-     align-self:stretch 都只铺到 1440；100vw 不依赖该基准，实测可正确铺满。 */
+  /* ★ 2026-10：根因已定位并修复（详见 .pair/project.md「引擎行为实测」）。
+     产物中 .screen-main 的 scoped 规则带 max-width:1440px（设计宽）；宽视口下屏幕根被它
+     收缩后，本层的 `max-width: none`（上面第 35 行）本该解除该约束，但引擎 parseLength
+     不识别 `none` → 声明被静默丢弃 → 1440 依然生效 → .d-main_app 的交叉轴基准只剩 1440
+     （容器几何 1920 与子项 1440 脱节，右侧留白 480）。引擎侧两处已修：
+       ① max-width / max-height 支持 `none`（engine/style/resolver.go）；
+       ② flex 列向 item 的交叉轴几何应用自身 max-width（engine/layout/flexformattingcontext.go）。
+     修复后实测：width:100% 与 width:100vw 在 1920 视口都铺满（d-main_app=1920）。
+     此处保留 100vw 为等价的安全写法（不依赖上述基准链）。 */
   width: 100vw;
   height: 100%;
   min-height: 0;
@@ -159,7 +164,11 @@ body {
 /* 视口窄到画布区容不下 720px 画板时（stage 内容宽 < 720），改为撑满容器宽度：
    .d-ab-photo 的百分比 padding 同步缩高 ⇒ 整板等比缩放、比例不失真。
    断点推导：视口 W → 中栏 W-48-288，减 stage 左右 padding 48 即画板可用宽，
-   W ≤ 1100 时该值 < 720。（wb-ui 引擎不支持百分比 max-width，故用媒体查询而非常量上限。） */
+   W ≤ 1100 时该值 < 720。
+   实测（2026-10）：wb-ui 引擎**支持**百分比 max-width（基准 = 包含块内容宽）——上面
+   .d-artboard 的 `max-width:100%` 正是该机制；故本媒体查询并非引擎能力所迫，而是显式
+   覆盖产物宽度的写法。max-width 的绝对长度 / 百分比 / none 三种形态均已实测生效
+   （engine/layout 的 TestFlex_ColumnItemMaxWidth* 与 engine/style/max_none_test.go）。 */
 @media (max-width: 1100px) {
   #app .d-artboard {
     width: 100%;
