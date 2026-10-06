@@ -25,8 +25,10 @@ import (
 	"image/png"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"wb-ui/app"
 	"wb-ui/engine/js/jsc"
@@ -40,6 +42,8 @@ func main() {
 	width := flag.Int("w", 1440, "视口宽")
 	height := flag.Int("h", 900, "视口高")
 	audit := flag.Bool("audit", false, "布局审计（无头）：量化视口/文档尺寸与各容器几何，列出越界与内容溢出")
+	debugPort := flag.Int("remote-debugging-port", 0, "CDP 调试端口（0=关闭；只绑 127.0.0.1）")
+	hold := flag.Duration("hold", 0, "自检后保持运行（供外部工具连接调试，如 15s）")
 	flag.Parse()
 
 	distAbs, err := filepath.Abs(*dist)
@@ -59,6 +63,15 @@ func main() {
 	console := &jsc.BufferLogger{}
 	wv.SetConsoleLogger(console)
 
+	// ②′ 媒体元数据（实现路径主线 A0）：宿主侧用 ffmpeg 探测 <video>/<audio>
+	// 的时长与画面尺寸。放在加载产物之前——页面里的媒体元素一旦读属性就会
+	// 触发加载流程。本机没有 ffmpeg 时保持「时长未知」（duration=NaN）。
+	app.InstallMediaMetadataResolver(wv, "")
+
+	// ②″ 动图（实现路径主线 A4）：宿主用 goskia 的 SkCodec 解 GIF/WebP 多帧，渲染层
+	// 按帧时长选帧（无头自检要验证「连续帧差异」，见 mediaframe_selftest.go 的 A4-1）。
+	app.InstallAnimatedImageSource()
+
 	// ② 接线：资源拦截器 + 引擎观测 + 请求/事件桩路由。
 	ic := newInterceptor(distAbs)
 	ic.attach(wv)
@@ -77,8 +90,24 @@ func main() {
 	log.Printf("psai: 产物目录=%s", distAbs)
 	ic.Report()
 
+	// ④ CDP 调试服务（实现路径主线 B0/B1）：默认关闭（端口 0 = 不监听、零开销）；
+	// 开启时只绑 127.0.0.1，并打印 "DevTools listening on ws://…" 供外部工具发现。
+	dt, err := app.StartDevTools(wv, *debugPort)
+	if err != nil {
+		log.Printf("psai: 启动 CDP 调试服务失败: %v", err)
+	}
+	if dt != nil {
+		defer func() { _ = dt.Close() }()
+	}
+
 	if *verify {
-		runVerify(wv, ic, *pngOut, console)
+		runVerify(wv, ic, *pngOut, console, dt)
+		// 外部工具验证用：自检结束后保持进程与服务存活一段时间（curl/netstat/
+		// 外部 WS 客户端在此期间连本机 127.0.0.1:<port>）。
+		if *hold > 0 && dt != nil {
+			log.Printf("psai: 保持运行 %s 供外部工具连接（%s）", *hold, dt.Server.Addr())
+			time.Sleep(*hold)
+		}
 		return
 	}
 	if *audit {
@@ -208,7 +237,7 @@ func runAudit(wv *webkit.WebView, ic *Interceptor, pngPath string) {
 }
 
 // runVerify 无头自检：断言产物已装配、验证拦截链路端到端可用，并出 PNG。
-func runVerify(wv *webkit.WebView, ic *Interceptor, pngPath string, console *jsc.BufferLogger) {
+func runVerify(wv *webkit.WebView, ic *Interceptor, pngPath string, console *jsc.BufferLogger, dt *app.DevTools) {
 	fmt.Println("\n=== 无头自检：产物装配 ===")
 	probe(wv, "document.title")
 	probe(wv, "document.querySelectorAll('.d-ai-prompt').length")
@@ -279,10 +308,101 @@ func runVerify(wv *webkit.WebView, ic *Interceptor, pngPath string, console *jsc
 		}
 	}
 
+	mediaSelfCheck(wv, ic)
+
+	// 主线 A1：视频出画面（宿主注入帧流）——判据 A1-1/2/3。
+	mediaFrameSelfCheck(wv, ic)
+
+	// 主线 A2 起步：播放时画面随时间推进——判据 A2-1/2/3。
+	mediaPlaybackSelfCheck(wv, ic)
+
+	// 主线 A2 续做：精确到帧的 seek 与连续帧采样——判据 A2-5/6
+	// （A2-② 的更长预取窗口由 A2-4 的统计与这两个判据共同覆盖）。
+	mediaExactSeekSelfCheck(wv, ic)
+	mediaContinuousFrameSelfCheck(wv, ic)
+	mediaFrameCallbackSelfCheck(wv, ic)
+
+	devtoolsSelfCheck(dt, wv)
+
+	// 主线 A4：动图帧推进（GIF 连续帧差异）。
+	// ★ 放在 CDP 判据**之后**：这条判据要连续采样 6 次（约 2 秒），页面状态在等待期间
+	// 会推进——先跑它会让 CDP 判据的目标元素（工具条/输入框）不再处于初始状态（判据 5
+	// 与键盘项直接变成「跳过」）。自检插桩的规矩：不改变其它判据的前置状态。
+	mediaAnimatedImageSelfCheck(wv, ic)
+
+	// 主线 B 的 S3 场景（browser-level 连接 + 扁平会话 + Page.navigate + 设备仿真）。
+	// ★ 必须排在最后：判据 14 会把页面导航走（探针页），末尾再导航回原文档——
+	// 任何依赖当前页面 DOM/状态的判据都不能排在它后面。
+	devtoolsS3SelfCheck(dt, wv)
+
 	ic.Report()
 	fmt.Println("\n=== 页面控制台输出 ===")
 	fmt.Print(console.String())
 	fmt.Println("=== 无头自检结束 ===")
+}
+
+// mediaSelfCheck 是主线 A0（媒体元数据注入）的无头验收：宿主用 ffmpeg 探测出
+// 时长/尺寸 → 页面里新建的 <video> 应拿到 duration≈1、videoWidth/Height=120x80，
+// 且事件按 loadstart→durationchange→loadedmetadata→loadeddata→canplay 派发。
+// 本机没有 ffmpeg 时打印「跳过」——宿主缺依赖时引擎保持 duration=NaN（不编造）。
+func mediaSelfCheck(wv *webkit.WebView, ic *Interceptor) {
+	fmt.Println("\n=== 无头自检：媒体元数据（主线 A0 · L1）===")
+	clip, err := ensureProbeClip()
+	if err != nil {
+		fmt.Printf("  跳过：%v\n", err)
+		return
+	}
+	fmt.Printf("  探测样本：%s\n", clip)
+	if _, err := wv.EvalJS(fmt.Sprintf(`(function(){
+		window.__media = { events: [] };
+		var v = document.createElement('video');
+		v.id = 'media-probe';
+		['loadstart','durationchange','loadedmetadata','loadeddata','canplay'].forEach(function(t){
+			v.addEventListener(t, function(){ window.__media.events.push(t); });
+		});
+		v.src = %s;
+		document.body.appendChild(v);
+		window.__media.readyState0 = v.readyState;
+	})()`, jsString(fileURLOf(clip)))); err != nil {
+		fmt.Printf("  建 <video> 失败: %v\n", err)
+		return
+	}
+	// 媒体事件是宏任务（loadstart 与元数据派发都在任务里），推进事件循环。
+	ic.settle(wv, 8)
+	probe(wv, "document.getElementById('media-probe').readyState")
+	probe(wv, "document.getElementById('media-probe').duration")
+	probe(wv, "document.getElementById('media-probe').videoWidth + 'x' + document.getElementById('media-probe').videoHeight")
+	probe(wv, "JSON.stringify(window.__media.events)")
+}
+
+// ensureProbeClip 准备媒体自检用的样本：1 秒 / 120x80 的 testsrc 视频，由本机
+// ffmpeg 生成到 _temp/mediaverify/（产物不入库，与 _temp 里其它证据同规矩）。
+// 本机没有 ffmpeg 时返回 error，调用方打印「跳过」。
+func ensureProbeClip() (string, error) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", fmt.Errorf("本机没有 ffmpeg：<video>/<audio> 无法探测元数据")
+	}
+	dir := filepath.Join("_temp", "mediaverify")
+	out := filepath.Join(dir, "probe-120x80-1s.mp4")
+	// 一律返回绝对路径：调用方把它转成 file:// URL 交给引擎，相对路径会丢盘符。
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+		return abs, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc=duration=1:size=120x80:rate=10",
+		"-pix_fmt", "yuv420p", abs)
+	if outp, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("生成探测样本失败: %v（%s）", err, strings.TrimSpace(string(outp)))
+	}
+	return abs, nil
 }
 
 // runWindow 打开窗口（真实交互：鼠标/键盘事件进入引擎 → 页面 → Go 拦截器）。
@@ -370,6 +490,11 @@ func renderPNG(wv *webkit.WebView, path string) error {
 
 // fileURLOf 把本地路径转成 file:// URL（Windows 盘符路径 → file:///F:/…）。
 func fileURLOf(p string) string {
+	// 相对路径先绝对化：否则 "file://" + "/_temp/x.mp4" 产出 file:///_temp/x.mp4
+	// （缺盘符）——引擎与宿主都解析不到这个文件。
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
 	sl := filepath.ToSlash(p)
 	if !strings.HasPrefix(sl, "/") {
 		sl = "/" + sl

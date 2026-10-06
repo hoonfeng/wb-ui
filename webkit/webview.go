@@ -355,6 +355,35 @@ func installBridgeDispatch() {
 			}
 			return nil
 		}
+		// ★ 按解释器归属解析（matchMedia 优先用这条）：Provider 是包级单例，
+		// 多 WebView 时只能指向其中之一 —— 实测两个 WebView 同存时被测 WebView
+		// 的 DSF 变化不会反映到 matchMedia（读到另一个 WebView 的像素比），
+		// 甚至与自身 getComputedStyle 结论矛盾。归属解析后每个页面只用自己的
+		// 视口/像素比。
+		bindings.MediaQueryContextForInterpreter = func(in *jsc.Interpreter) *css.MediaQueryContext {
+			wv := webViewForInterpreter(in)
+			if wv == nil {
+				return nil
+			}
+			if b := wvBridgeOf(wv); b != nil && b.mediaQueryCtx != nil {
+				return b.mediaQueryCtx()
+			}
+			return nil
+		}
+		// ★ getComputedStyle 的 @media 判定（bindings.computedStyleFor →
+		// mediaMatches）也要同一份上下文，但那里有元素、没有解释器：
+		// 按元素归属解析，避免多 WebView 并存时读到另一个页面的像素比
+		// （表现为 matchMedia 已命中而 computed style 停在基础规则）。
+		bindings.MediaQueryContextForElement = func(n dom.Node) *css.MediaQueryContext {
+			wv := webViewForNode(n)
+			if wv == nil {
+				return nil
+			}
+			if b := wvBridgeOf(wv); b != nil && b.mediaQueryCtx != nil {
+				return b.mediaQueryCtx()
+			}
+			return nil
+		}
 		bindings.IFrameSrcChanged = func(el *dom.Element, src string) {
 			wv := webViewForNode(el)
 			if wv == nil {
@@ -372,6 +401,15 @@ func installBridgeDispatch() {
 				return 0, 0, false
 			}
 			return float64(wv.width), float64(wv.height), true
+		}
+		// window.devicePixelRatio 同样按解释器归属分派（每个 WebView 各自的
+		// 设备像素比，Emulation 只影响被仿真的那个页面）。
+		bindings.DevicePixelRatioForInterpreter = func(in *jsc.Interpreter) (float64, bool) {
+			wv := webViewForInterpreter(in)
+			if wv == nil {
+				return 0, false
+			}
+			return wv.DeviceScaleFactor(), true
 		}
 		// popover（HTML §6.12）的异步任务队列：toggle 事件必须异步派发
 		// （规范 queue an element task），这里按元素找到所属 WebView 的 JS
@@ -416,6 +454,14 @@ type WebView struct {
 	// SetPointerCapabilities 调整为触屏（coarse/none）等场景。
 	hoverCapability   string
 	pointerCapability string
+	// deviceScaleFactor 是设备像素比（CDP Emulation.setDeviceMetricsOverride
+	// 的 deviceScaleFactor；浏览器默认 1）。由 SetDeviceScaleFactor 设置。
+	//
+	// ★ 语义边界（如实记录，见 docs/TECH_DEBT.md）：引擎按 **CSS 像素**光栅化，
+	// 本值不改变布局尺寸，只影响 ① window.devicePixelRatio ② CSS 媒体查询
+	// （min-resolution / -webkit-device-pixel-ratio / dppx…）
+	// ③ Page.captureScreenshot 的输出分辨率（宿主按 DSF 放大）。
+	deviceScaleFactor float64
 
 	// currentURL 是主文档的加载 URL（LoadURL 设置，LoadHTML 直出内容时为
 	// ""）。它是「文档基地址」的唯一来源：iframe 相对路径 src
@@ -485,6 +531,9 @@ type WebView struct {
 	// （NewWebViewWithMode 注册、Destroy 注销）。不注销会让渲染层的全局
 	// 监听器集合永久持有已销毁的 WebView。
 	imageLoadedOff func()
+	// videoFrameOff 是「播放帧已交付」全局监听器的注销函数（A2-③，与
+	// imageLoadedOff 同一条规矩：NewWebViewWithMode 注册、Destroy 注销）。
+	videoFrameOff func()
 	// resourceLoadedMu 保护 onResourceLoaded（回调在取字节的 goroutine 里
 	// 触发，宿主可能在任意线程设置）。
 	resourceLoadedMu sync.Mutex
@@ -548,6 +597,29 @@ func (wv *WebView) HandleMouseButton(x, y float64, button, action int) {
 func (wv *WebView) HandleMouseMove(x, y float64) {
 	if it := wv.Interaction(); it != nil && !wv.destroyed {
 		it.MouseMove(x, y)
+	}
+}
+
+// HandleMouseMoveBatched 把鼠标移动并入当前事件批（不立即派发）。
+//
+// 配合 FlushMouseMoves 使用：宿主在事件批开始时改用本方法喂入移动、批末调用
+// FlushMouseMoves，一批内多条移动即合并为一次 hover 追踪 + 一次 mousemove
+// 派发（坐标取批内最后一次）。鼠标移动是事件批里最密集的事件，宿主每帧
+// PollEvents 可能拿到多条；逐条派发会让页面在两次渲染之间收到大量坐标，
+// 且每次都要命中测试 + 构造事件对象（T4 事件派发聚合）。
+//
+// 未调用 FlushMouseMoves 时移动不会派发，因此宿主必须成对使用；单条移动
+// 路径（HandleMouseMove）行为不变。
+func (wv *WebView) HandleMouseMoveBatched(x, y float64) {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.MouseMoveBatched(x, y)
+	}
+}
+
+// FlushMouseMoves 派发当前批内累积的鼠标移动（无累积时零开销）。
+func (wv *WebView) FlushMouseMoves() {
+	if it := wv.Interaction(); it != nil && !wv.destroyed {
+		it.FlushMoves()
 	}
 }
 
@@ -674,6 +746,11 @@ func NewWebViewWithMode(mode Mode) *WebView {
 	//   rendering.SetBackgroundImageLoadedCallback 只有测试在用，主链路
 	//   没有人接线。
 	wv.imageLoadedOff = rendering.AddBackgroundImageLoadedListener(wv.onAsyncImageLoaded)
+	// ★ 播放帧交付完成 → 自动置脏重绘（A2-③）：异步抽帧的字节在 worker
+	// goroutine 上回来，按需渲染的宿主（app.Host 空闲帧跳过 Paint）不会自己
+	// 发现帧缓存里多了一帧——没有这条通知，播放画面要等**下一次别的重绘理由**
+	// 才更新，看起来就是卡的。
+	wv.videoFrameOff = rendering.AddVideoFrameReadyListener(wv.onAsyncVideoFrame)
 	// ★ iframe 子文档：渲染侧（paint/hit-test）经 IFrameLookup 取回
 	// iframe 元素的子 Frame 渲染视图（避免 rendering→page 包循环依赖）。
 	rendering.IFrameLookup = func(el *dom.Element) rendering.IFrameSubdocument {
@@ -792,6 +869,102 @@ func (wv *WebView) PointerCapability() string {
 	return wv.pointerCapability
 }
 
+// SetDeviceScaleFactor 设置设备像素比（CDP Emulation.setDeviceMetricsOverride 的
+// deviceScaleFactor；浏览器默认 1）。非正数按 1 处理。
+//
+// ★ 语义边界（如实记录，见 docs/TECH_DEBT.md）：引擎按 **CSS 像素**光栅化，
+// 本值不改变布局尺寸，只影响 ① window.devicePixelRatio ② CSS 媒体查询
+// （min-resolution / -webkit-device-pixel-ratio / dppx…）
+// ③ Page.captureScreenshot 的输出分辨率（宿主按 DSF 放大输出）。
+func (wv *WebView) SetDeviceScaleFactor(dsf float64) {
+	if dsf <= 0 {
+		dsf = 1
+	}
+	if wv.DeviceScaleFactor() == dsf {
+		return
+	}
+	wv.deviceScaleFactor = dsf
+	bindings.DevicePixelRatio = dsf
+	// 设备像素比是媒体特性的输入 → 全文档样式都要重新匹配。两处缓存都要失效：
+	//  ① bindings 的 computed style 缓存（getComputedStyle 路径，全量——媒体查询
+	//     影响所有元素，不能只清子树）；
+	//  ② 样式 resolver 的元素级级联缓存 + 渲染树重建（与 class 变更同一条路径，
+	//     见 onClassChanged）。
+	// 缺 ① 会让页面读到旧样式（实测：DSF=2 后 matchMedia 已为 true，但
+	// getComputedStyle 仍返回基础规则的 color）。
+	bindings.BumpStyleVersion()
+	fr := wv.mainFrame.Frame()
+	if fr == nil {
+		return
+	}
+	// ★ 媒体查询求值的输入也包含 DSF：resolver 的上下文必须一起刷新，否则
+	// @media (min-resolution: 2dppx) 这类规则永不匹配（实测 computed color
+	// 停在基础规则，与 matchMedia 已 true 自相矛盾）。
+	wv.syncMediaQueryContext()
+	if rsv := fr.Resolver(); rsv != nil {
+		if doc := wv.mainFrame.Document(); doc != nil {
+			if root := doc.DocumentElement(); root != nil {
+				rsv.InvalidateSubtree(root)
+			}
+		}
+	}
+	fr.MarkRenderTreeDirty()
+	fr.SetNeedsLayout(true)
+}
+
+// DeviceScaleFactor 返回当前设备像素比（默认 1）。
+func (wv *WebView) DeviceScaleFactor() float64 {
+	if wv.deviceScaleFactor <= 0 {
+		return 1
+	}
+	return wv.deviceScaleFactor
+}
+
+// mediaQueryContext 返回本 WebView 当前的媒体查询求值上下文。
+//
+// 单一来源：matchMedia（bindings.MediaQueryContextForInterpreter → bridge）、
+// js 层 @media 规则求值与样式解析（resolver）都取这一份，同一页面就不会在不同
+// 路径下给出互相矛盾的结论（曾经 matchMedia 为 true 而 computed style 仍停在
+// 基础规则）。
+func (wv *WebView) mediaQueryContext() *css.MediaQueryContext {
+	w, h := wv.width, wv.height
+	if w <= 0 {
+		w = DefaultWebViewWidth
+	}
+	if h <= 0 {
+		h = DefaultWebViewHeight
+	}
+	orientation := "landscape"
+	if h > w {
+		orientation = "portrait"
+	}
+	return &css.MediaQueryContext{
+		Width: w, Height: h, DeviceWidth: w, DeviceHeight: h,
+		// ★ B3：设备像素比来自 Emulation（默认 1）——(min-resolution) /
+		//   (-webkit-device-pixel-ratio) / dppx 据此匹配。
+		DevicePixelRatio: wv.DeviceScaleFactor(), Orientation: orientation,
+		PrefersColorScheme: wv.PrefersColorScheme(),
+		Hover:              wv.HoverCapability(), AnyHover: wv.HoverCapability(),
+		Pointer:            wv.PointerCapability(), AnyPointer: wv.PointerCapability(),
+	}
+}
+
+// syncMediaQueryContext 把当前设备像素比同步给样式 resolver：@media 的
+// resolution 系列（min-resolution / dppx / dpi / dpcm）与 matchMedia 因此用同一
+// 份输入。只改 dpr，不动 resolver 的视口尺寸（frame.SetViewportSize 才是权威）。
+func (wv *WebView) syncMediaQueryContext() {
+	if wv.mainFrame == nil {
+		return
+	}
+	fr := wv.mainFrame.Frame()
+	if fr == nil {
+		return
+	}
+	if rsv := fr.Resolver(); rsv != nil {
+		rsv.SetDevicePixelRatio(wv.DeviceScaleFactor())
+	}
+}
+
 // BeforePageScripts is an optional hook invoked after DOM bindings are
 // registered but before any page <script> executes. The `window` global
 // object exists at this point (it is created by RegisterDOMBindings), so
@@ -900,26 +1073,13 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		// matchMedia 需要真实视口上下文（尺寸随 wv 变化、颜色方案随
 		// SetPrefersColorScheme 设置；指针能力暂用默认值）。
 		installBridgeDispatch()
-		wvBridgeOf(wv).mediaQueryCtx = func() *css.MediaQueryContext {
-			w, h := wv.width, wv.height
-			if w <= 0 {
-				w = DefaultWebViewWidth
-			}
-			if h <= 0 {
-				h = DefaultWebViewHeight
-			}
-			orientation := "landscape"
-			if h > w {
-				orientation = "portrait"
-			}
-			return &css.MediaQueryContext{
-				Width: w, Height: h, DeviceWidth: w, DeviceHeight: h,
-				DevicePixelRatio: 1, Orientation: orientation,
-				PrefersColorScheme: wv.PrefersColorScheme(),
-				Hover:              wv.HoverCapability(), AnyHover: wv.HoverCapability(),
-				Pointer: wv.PointerCapability(), AnyPointer: wv.PointerCapability(),
-			}
-		}
+		// 上下文定义只有 WebView.mediaQueryContext 一份：matchMedia（经 bridge）
+		// 与样式解析（经 resolver）必须用同一份，避免两处漂移。
+		wvBridgeOf(wv).mediaQueryCtx = wv.mediaQueryContext
+		// ★ 同步给样式 resolver：@media (min-resolution: …) 的求值走 resolver 的
+		// 媒体查询上下文，不同步则 DSF 变化后 matchMedia 已 true 而 computed
+		// style 仍停在基础规则（实测自相矛盾）。
+		wv.syncMediaQueryContext()
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
 		// ★ 模式接线（2/4）：Worker/WebSocket 是浏览器并发/长连接能力，
 		//   UI 库模式下从全局隐藏（typeof Worker === "undefined" /
@@ -1300,6 +1460,13 @@ func (wv *WebView) documentBaseURL() string {
 
 // refreshBaseHref 重新读 `<base href>` 并缓存（宿主线程调用：装配完成时、
 // DOM 结构变更回调里）。解释器线程只读缓存值（见 documentBaseURL）。
+// DocumentBaseURL 返回主文档的解析基准（document.baseURI），供宿主把页面里的
+// 相对引用映射到本地资源（媒体元数据探测、资源拦截、外部分析工具）。返回空串
+// 表示当前文档没有来源 URL（LoadHTML 直出内容）。
+func (wv *WebView) DocumentBaseURL() string { return wv.documentBaseURL() }
+
+// refreshBaseHref 重新读 `<base href>` 并缓存（宿主线程调用：装配完成时、
+// DOM 结构变更回调里）。解释器线程只读缓存值（见 documentBaseURL）。
 func (wv *WebView) refreshBaseHref() {
 	if wv == nil || wv.mainFrame == nil {
 		return
@@ -1362,6 +1529,11 @@ func (wv *WebView) Destroy() {
 	if wv.imageLoadedOff != nil {
 		wv.imageLoadedOff()
 		wv.imageLoadedOff = nil
+	}
+	// 1c2. 播放帧交付监听器（同一条理由：rendering 的全局集合捕获本 WebView）。
+	if wv.videoFrameOff != nil {
+		wv.videoFrameOff()
+		wv.videoFrameOff = nil
 	}
 	// 1d. 导航历史栈（bindings 的全局表持有 JS 值/闭包）。
 	bindings.ResetNavigationStates(wv.jsInterpreter)
@@ -1440,6 +1612,31 @@ func (wv *WebView) onAsyncImageLoaded(url string) {
 	wv.resourceLoadedMu.Unlock()
 	if fn != nil {
 		fn(url)
+	}
+}
+
+// onAsyncVideoFrame 是渲染层「播放帧已交付」通知的接收端（A2-③）：标记渲染树脏 +
+// 全量重绘，让按需渲染的宿主在下一帧画出新帧。
+//
+// 与图片那条通知（onAsyncImageLoaded）的差别：**不**请求重新布局——视频画面不参与
+// 布局（元素几何由 CSS 决定，videoWidth/Height 早在元数据阶段就生效了），换帧只影响
+// 绘制。这是每次播放换帧都会走的路径，少做一次 layout 请求是必要的。
+//
+// 回调在宿主 worker 的交付 goroutine 上执行；这里只置脏标记（引擎自带的标记有
+// cooldown 合并），真正的重绘发生在宿主主循环的下一帧。
+func (wv *WebView) onAsyncVideoFrame(_ string, _ float64) {
+	if wv == nil || wv.destroyed {
+		return
+	}
+	mf := wv.mainFrame
+	if mf == nil {
+		return
+	}
+	if fr := mf.Frame(); fr != nil {
+		fr.MarkRenderTreeDirty()
+	}
+	if rv := mf.RenderView(); rv != nil {
+		rv.MarkAllDirty()
 	}
 }
 
@@ -1680,6 +1877,27 @@ func (wv *WebView) ConsoleOutput() string {
 	return wv.jsLogger.String()
 }
 
+// ConsoleLogEntry 是一条带级别的控制台记录（CDP 的 Log.entryAdded 与
+// Runtime.consoleAPICalled 需要级别：DevTools 里 error/warn 有红/黄区分）。
+type ConsoleLogEntry struct {
+	Level string // log/info/warn/error/debug
+	Text  string
+}
+
+// ConsoleEntries 返回带级别的控制台记录（全量）。宿主适配层记自己的游标做增量——
+// 引擎侧不做「取完即清」，避免多个消费者互相偷走对方的日志。
+func (wv *WebView) ConsoleEntries() []ConsoleLogEntry {
+	if wv == nil || wv.jsLogger == nil {
+		return nil
+	}
+	entries, _ := wv.jsLogger.ConsoleEntries(0)
+	out := make([]ConsoleLogEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, ConsoleLogEntry{Level: e.Level, Text: e.Text})
+	}
+	return out
+}
+
 // SetConsoleLogger replaces the JS console's logger. After calling this,
 // ConsoleOutput returns messages from the new logger.
 func (wv *WebView) SetConsoleLogger(l *jsc.BufferLogger) {
@@ -1821,8 +2039,13 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// <img>/<video> src 变化：清除渲染盒的解码图缓存并重建渲染树
 	//（下次绘制按新 src 解码 —— canvas 2D drawImage 源和 <img> 渲染共用）。
 	bindings.OnImageSrcChanged = func(el *dom.Element) {
-		if fr := wv.mainFrame.Frame(); fr != nil {
-			if rv := wv.RenderView(); rv != nil {
+		// ★ 按元素归属解析宿主 WebView（理由同 GetElementComputedSnapshot）。
+		owner := webViewForNode(el)
+		if owner == nil || owner.mainFrame == nil {
+			return
+		}
+		if fr := owner.mainFrame.Frame(); fr != nil {
+			if rv := owner.RenderView(); rv != nil {
 				if box := rv.FindRenderBoxForNode(el); box != nil {
 					box.SetDecodedImage(nil)
 				}
@@ -1981,8 +2204,18 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// computedStyleFor 的 height/width 兜底用它——CM6 measure 期间渲染树
 	// 频繁 dirty，若每次强制全量 rebuild（~22ms）→ 测量-布局风暴。
 	bindings.GetElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
-		rv := wv.RenderView()
-		wvBridgeOf(wv).getElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
+		// ★ 按元素归属解析宿主 WebView（理由同 GetElementComputedSnapshot）：捕获
+		// 注入时的 wv 会在「后创建者被销毁」后拿到 nil 渲染树，紧接着
+		// FindRenderBoxForNode 解引用 → panic（自检 S3 判据 15 实测复现）。
+		owner := webViewForNode(el)
+		if owner == nil || el == nil {
+			return 0, 0, 0, 0
+		}
+		wvBridgeOf(owner).getElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
+			return 0, 0, 0, 0
+		}
+		rv := owner.RenderView()
+		if rv == nil {
 			return 0, 0, 0, 0
 		}
 		box := rv.FindRenderBoxForNode(el)
@@ -2038,8 +2271,17 @@ func (wv *WebView) injectRenderTreeBridge() {
 	// 这里给出的是布局/绘制实际使用的值（font-size 已是 D1 绝对化后的 px），
 	// 保证 JS / 布局 / 绘制三方同源。
 	bindings.GetElementComputedSnapshot = func(el *dom.Element) map[string]string {
-		rv := wv.RenderView()
-		if rv == nil || el == nil {
+		// ★ 按元素**归属**解析宿主 WebView，不捕获注入时的 wv：同一进程可同时存在
+		// 多个 WebView（多窗口宿主、自检里的临时宿主），捕获写法有两个后果：
+		// ① 后创建者覆盖前者 → 前者页面读到后者渲染树的数据；
+		// ② 后者销毁后回调悬挂在已释放的 WebView 上 → RenderView 内部 nil 解引用
+		//    直接 panic（自检 S3 判据 15 实测复现）。
+		owner := webViewForNode(el)
+		if owner == nil || el == nil {
+			return nil
+		}
+		rv := owner.RenderView()
+		if rv == nil {
 			return nil
 		}
 		ro := rv.FindRenderObjectForNode(el)
@@ -2417,6 +2659,11 @@ func (wv *WebView) injectRenderTreeBridge() {
 }
 
 func (wv *WebView) RenderView() *rendering.RenderView {
+	// 防御：WebView 已销毁（mainFrame 被释放）时不能解引用——全局桥回调可能
+	// 在多 WebView 场景下拿到已销毁实例（见 GetElementComputedSnapshot 注入注释）。
+	if wv == nil || wv.mainFrame == nil {
+		return nil
+	}
 	return wv.mainFrame.RenderView()
 }
 

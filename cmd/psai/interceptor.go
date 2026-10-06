@@ -266,13 +266,30 @@ func countHits(rs []ResourceHit) int {
 // settle 推进引擎事件循环：让 <script src> 的异步加载/执行与 Promise 回调跑完
 // （与 webkit 测试里 EnsureLayout+Render 循环同款；额外的短睡让异步 goroutine 有机会落地）。
 func (ic *Interceptor) settle(wv *webkit.WebView, rounds int) {
+	start := time.Now()
 	for i := 0; i < rounds; i++ {
 		wv.EnsureLayout()
 		if _, err := wv.Render(); err != nil {
 			return
 		}
+		driveEventLoop(wv, time.Since(start).Milliseconds())
 		time.Sleep(3 * time.Millisecond)
 	}
+}
+
+// driveEventLoop 处理到期的宏任务与微任务——app.Host 每帧做的同一件事
+// （app/host.go processEventLoop）。无头自检缺了这一步时，setTimeout/rAF 排的
+// 任务永远不执行：媒体事件（loadstart/loadedmetadata）、延迟回调会整批缺失，
+// 自检结论就与真实宿主窗口里的行为不一致。
+func driveEventLoop(wv *webkit.WebView, elapsedMs int64) {
+	interp := wv.JSInterpreter()
+	if interp == nil {
+		return
+	}
+	if el := interp.GetEventLoop(); el != nil {
+		el.ProcessTasks(elapsedMs)
+	}
+	interp.RunJobs()
 }
 
 func truncate(s string, n int) string {

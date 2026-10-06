@@ -239,6 +239,21 @@ func (r *Resolver) SetViewportSize(w, h int) bool {
 	return true
 }
 
+// SetDevicePixelRatio updates the device pixel ratio used for media query
+// evaluation (resolution features: min-resolution / dppx / dpi / dpcm).
+// Returns true when the value actually changed.
+//
+// ★ 为什么不复用 SetMediaQueryContext：那个调用会把整个上下文替换掉，视口
+// 尺寸也会被调用方的快照覆盖，而视口尺寸的权威来源是 frame.SetViewportSize。
+// DSF 变化只该改这一个字段（resolution 系列特性的输入）。
+func (r *Resolver) SetDevicePixelRatio(dpr float64) bool {
+	if r.mediaQueryCtx.DevicePixelRatio == dpr {
+		return false
+	}
+	r.mediaQueryCtx.DevicePixelRatio = dpr
+	return true
+}
+
 // SetMediaQueryContext replaces the entire media query evaluation context.
 // Call this when device characteristics change (e.g. orientation, DPR).
 func (r *Resolver) SetMediaQueryContext(ctx css.MediaQueryContext) {

@@ -56,6 +56,10 @@ view-transition 伪元素、模式不可热切换、`ui` 包不做声明式响�
 桌面端「无真实网络」场景的**有意设计**（不建连接、不崩溃、事件由宿主推入），
 不是 bug。有真实传输需求时在宿主注入层覆盖 `window.WebSocket` 即可，无需改引擎。
 
+> ★ **与 CDP 的关系（2026-10-06 补注）**：CDP 调试协议的**服务端在 Go 侧**（`net/http` + 最小 WS 实现），
+> **不依赖**引擎内的 `WebSocket` 是否具备真实网络；两者互不影响。规划见
+> [docs/implementation-path.md](implementation-path.md) §3「主线 B」。
+
 ---
 
 ## 已知差异与有意保留的边界
@@ -274,4 +278,256 @@ gouide 真实产物 7 个区域槽位全部渲染（证据：`out/gouide-real-e2
 - **`ui` 包不做声明式/响应式**：没有虚拟 DOM、没有 diff、没有响应式绑定——它是
   「Go 操作引擎 DOM 的便利 API + 双源（native/web）组件注册表」。需要声明式
   响应式时走 web 方式（Vue 等在页面脚本里做）。
+
+## CDP 调试服务端的实现边界（2026-10-07）
+
+内置 CDP 服务端已实装（主线 B0/B1，使用说明见 [docs/CDP.md](CDP.md)）。以下是
+**有意保留**的边界，不是待修的 bug：
+
+- **控制台级别已保真（2026-10-07 补做 S2）**：`jsc.BufferLogger` 增 `Entries`
+  （Level + Text），`console.log/info/warn/error/debug` 各自落账 → `Log.entryAdded` 与
+  `Runtime.consoleAPICalled` 按级别上报。**剩余边界**：事件时间戳是宿主事件泵
+  （150ms 轮询）取走的时刻，不是页面里 `console.error` 的真实时刻；引擎不带堆栈
+  （`Runtime.consoleAPICalled` 没有 `stackTrace`）；`console.table`/`group` 等仍是
+  普通文本。
+- **`objectId` 句柄已实装，但存在页面侧（2026-10-07 补做 S2）**：句柄表是页面里的
+  `window.__cdpHandles` 数组（`app/cdp.go`），`objectId` 形如 `cdp:3`——好处是句柄与
+  JS 值同生命周期、宿主不必跨 goroutine 持 goja 值。**剩余边界**：① 句柄随页面导航
+  失效（表在页面里）；② `Runtime.getProperties` 只回**自身**属性（无原型链、
+  `internalProperties` 恒空）；③ 句柄没有「对象组」语义（`releaseObjectGroup` 是 no-op）；
+  ④ 事件/异常里不会自动带 objectId（`Runtime.exceptionThrown` 未实装）。
+- **`deviceScaleFactor` 只接受 1**：引擎没有 DSF / 移动端仿真，传其他值**明确
+  报错**而不是静默忽略——静默忽略会让客户端以为缩放生效，量出来的几何全是错的。
+- **`Page.captureScreenshot` 只支持 `format=png`**：宿主侧只有 PNG 编码路径
+  （`Render()` 给像素缓冲）。请求 jpeg 时明确报错，避免「声称 jpeg 实为 png」。
+- **中键点击明确报错**：引擎鼠标管线只处理左键点击与右键 contextmenu。
+- **`Target.attachToTarget` 只支持 `flatten:true`**：非 flatten 需要为每个会话开
+  独立隧道；CDP 客户端普遍用 flatten，不做无谓复杂度。
+- **Windows 上不设 `SO_REUSEADDR`**：该选项在 Windows 的语义会让**其他进程**也能
+  抢绑同一端口（与 Unix 不同），对「执行任意 JS」的调试端口不可接受。代价是端口
+  处于 `TIME_WAIT` 时无法立即重绑——宿主错误信息会提示换端口。
+- **不做 permessage-deflate、不做子协议协商**：`ws` 子包只实现 CDP 需要的那一小块
+  （掩码文本帧 + ping/pong/close + 分片），换取零新依赖。
+- **CSS 只读到「计算值 / 内联 / 匹配规则」三样（2026-10-07 补做 S2）**：
+  `getMatchedStylesForNode` 是在页面上遍历 `document.styleSheets` + `querySelectorAll`
+  判定命中得来的（引擎没暴露「元素 → 匹配规则」的内部接口，那要动样式解析层）。
+  **剩余边界**：没有 specificity、没有规则的源码行号（`SourceURL` 只有样式表 href）、
+  不支持 `CSS.setStyleSheetText` / `CSS.getStyleSheetText` / `CSS.setPropertyText`
+  ——Elements 面板的**样式编辑**因此不可用（属性编辑走 `DOM.setAttributeValue` 可用）。
+- **元素高亮（`Overlay.highlightNode`）未实现**：DevTools 的悬停高亮要在引擎里画一层
+  覆盖——引擎有 hit-test 与几何，但没有「调试高亮」这层绘制（S2 面板仍能选节点、看几何与样式）。
+- **`DOM.getNodeForLocation` / `DOM.setOuterHTML` / `DOM.performSearch` 未实现**：
+  前者需要「坐标 → 节点」的稳定映射（`elementFromPoint` 可用，但要把元素转成 backendID
+  路径，属可加项）；后两者属 Elements 面板的编辑/搜索路径——当前明确回 -32601，
+  不静默成功（客户端能区分「不支持」与「执行了没效果」）。
+- **引擎 `getAttribute` 在属性缺失时回空串（不是 `null`）**：浏览器语义是 `null`，本引擎回 `""`。
+  CDP 判据 10 因此只断言「删除后不再读到 42」而不是「读到 null」。这是**引擎的 DOM 语义差异**，
+  不是 CDP 层的（记在此处，避免下次又当成 CDP 的 bug 去查）。
+
+## 媒体帧通道的实现边界（2026-10-07 · 主线 A1/A2）
+
+视频出画面已实装（宿主注入帧流，见 [docs/implementation-path.md](implementation-path.md) §0.1 与 §2）。
+以下是**有意保留**的边界与代价：
+
+- **取帧分两条路，只有静止态会阻塞渲染线程**（A2 起）：播放推进中（`VideoElementState.Playing`）
+  painter **不同步**等解码——绑定层每次 tick 预取下一时刻（`PrefetchVideoFrame`），宿主 worker
+  池异步交付（`app/mediaframepump.go`），未交付时先显示上一次成功显示的帧。判据 A2-4 实测
+  「播放全程同步抽帧 0 次」。静止态（首帧 / seek / 暂停）仍走同步：那次绘制必须在本次画出结果
+  （宿主 `FrameAt` 自带缓存与负缓存，稳态下不重复跑 ffmpeg）。
+- **预取窗口已按帧率给，但「判定粒度」仍是时钟步长**（2026-10-07 补做 A2-②）：宿主探测到 fps 后
+  随元数据交给引擎（`MediaMetadata.FPS`），绑定层按帧预取 `mediaPrefetchFrames`(3) 帧（10fps =
+  300ms 窗口），帧率未知时退回一个时钟步长。★ 仍未做到「每帧都提前备好」：呈现与预取的**判定**
+  挂在 250ms 的时钟步长上，10fps 素材每秒只推进 4 次时钟——真正的逐帧播放（30fps 也每帧一次）
+  要等播放时钟与帧率对齐（见本文末「A2 剩余的剩余项」）。
+- **帧到达后的重绘通知已接线**（2026-10-07 补做 A2-③）：`rendering.AddVideoFrameReadyListener`
+  → `webkit.onAsyncVideoFrame` → `MarkRenderTreeDirty + MarkAllDirty`（**不**请求重排：画面不参与
+  布局）。按需渲染的宿主因此不会再停在上一帧；反向验证见 `webkit/videoframe_repaint_test.go`。
+  代价：交付发生在 worker goroutine 上，标记与绘制之间隔着宿主的一帧（可接受）。
+- **同一时刻可能被抽两次**：渲染层的去重只覆盖「它自己提交的请求」（同步路径与异步预取各算一路），
+  宿主的 `FrameAt` 缓存也不做并发合并。实测影响可忽略（多跑一次 ffmpeg，结果一致）；若要收紧，
+  应在宿主缓存上做 in-flight 合并（A2 剩余）。
+- **seek 已精确到帧，但取样点由帧率推导**（2026-10-07 补做 A2-①）：实测 `-ss t` 是 **ceil 语义**
+  （取「时间戳 ≥ t 的第一帧」，见 implementation-path 实现事实 18），因此宿主把请求值左移到目标帧
+  区间的取样点 `(k-0.5)/fps`（`app/mediaprobe.go` 的 `alignFrameTime`）；判据 A2-5 用按帧号的
+  `-vf select=eq(n,k)` 逐帧比对通过（20 个采样点）。**代价与剩余风险**：需要帧率（未知时不对齐，
+  偏差 ≤ 一帧）；`-ss` 仍在 `-i` 之前，靠「取样点落在目标帧区间内」保证落点，样本的编码时间基若
+  与 `k/fps` 偏离较大（异常容器）时可能再次偏一帧。
+- **帧缓存是 64 条 FIFO**（渲染层已解码帧 + 宿主 PNG 字节各一层）：播放是前向推进，FIFO 淘汰掉的
+  恰好是已播过的旧时刻（预取只提交未来时刻），当前实现够用；但**回退显示**（`last`）指向的帧若被
+  淘汰，那一帧就会短暂空窗。长播放 + 大帧（1080p）需要按播放前进淘汰 + 有界预取窗口（A2 剩余）。
+- **没有原生播放控件、没有自动播放**：`controls` 属性不绘制任何 UI；`autoplay` 不自动起播
+  （宿主/脚本调 `play()`）。这两项都要等 A2/A3 一起定。
+- **不校验帧尺寸与 `videoWidth/Height` 的一致性**：帧按 `object-fit` 拉伸进内容盒，宿主给的帧
+  若与元数据尺寸不符不会告警（A2 可加一致性检查）。
+- **音频仍无输出**（A3）：`<audio>` 不参与帧通道（`<video>` 之外的元素一律不取帧），
+  `decodeAudioData`/`AudioContext` 不存在。
+- **播放结束时的最后一帧靠「越界收敛」拿到**（2026-10-07 补）：`currentTime == duration`
+  这个精确时刻没有帧（1s/10fps 的末帧在 0.9s），宿主按已探测时长把请求收敛到
+  `duration - 0.1s`（`MediaProbe.clampFrameTime`）+ 退一步重试。副作用是**seek 到时长末尾**
+  拿到的是末帧之前的帧（视觉上就是最后一帧）。★ 本机 ffmpeg 的 `-sseof -0.05` 在这些样本上
+  产出 0 字节（`-ss 0.9` 才有帧），所以末尾兜底不用它。
+- **`requestVideoFrameCallback` 的已知差异**（2026-10-07 实装 A2-③）：本引擎没有合成器，「新帧
+  呈现」定义为**帧号变化**（`frameNo = floor(currentTime*fps)`，帧率未知退化为毫秒）：
+  ① 回调**粒度 = 播放时钟步长**（10fps/1s 的素材回调 4 次而不是 10 次，判据 A2-7 就此断言）；
+  ② 回调里的 `this` 传 `undefined`（规范是元素本身）；③ `presentationTime` / `expectedDisplayTime`
+  是宿主 wall clock 的近似值（单调、可用于量帧间隔），`processingDuration` 恒 0；
+  ④ 回调经宏任务派发（与其它媒体事件一致），比规范的「合成器提交时同步调用」晚一个任务。
+- **A2 剩余的剩余项**：① `videoWidth` 与帧尺寸的一致性检查（帧按 `object-fit` 拉伸进内容盒，
+  尺寸不符时不告警）；② 宿主抽帧缓存的 in-flight 合并（渲染层与宿主各有一路去重）；
+  ③ 播放时钟与帧率对齐（现在的 tick 固定 250ms，逐帧播放需要「每帧一个 tick」或按帧率推进）；
+  ④ 帧缓存淘汰策略（64 条 FIFO，回退显示指向的帧被淘汰时短暂空窗）。
+
+## JS 引擎后端抽象的现状与边界（2026-10-07 · C-P2）
+
+`engine/js/jsc` 已完成**后端接口抽象的第一步**（见 [docs/implementation-path.md](implementation-path.md) §4.5 的 C-P2 行）：
+
+- **已达成**：goja 的类型与构造器全部收敛到 `engine/js/jsc/backend_goja.go`（全包唯一 import goja
+  的文件），其余六个文件只用 `be*` 名；`backend.go` 给出 `Backend` / `RuntimeHandle` 契约与后端注册表；
+  `bindings` 零改动（它只用 jsc 的公开 API）。
+- **明说的边界**：这**不是**「第二个后端的实现」——`Backend` 契约目前只覆盖「建运行时 / 执行脚本 /
+  取全局对象」（任何后端都必须有的最小面），且 jsc 的实现仍与 goja 的**对象模型同构**（`beValue` 是
+  `goja.Value` 的别名，零成本）。真正的 V8 后端（`backend_v8.go` + MSYS2 SDK + v8go fork）是 C-P3，
+  属「必须用户确认」的体积/许可/构建复杂度门槛（§6）。
+- **契约为什么不预先铺开**：按 C-P2 的原则「等真后端接进来时按**实际编译错误**补齐，而不是凭想象
+  设计一套没人用的抽象」——把接口方法写满会在没有第二个实现时无法验证，反而变成猜测。
+- **换后端时的已知难点**（给 C-P3 的提醒）：`JSValue` 里带 `interp *Interpreter` 与 `nativeFn`，
+  且绑定层大量依赖 `ToObject/ToValue/Call` 的隐式转换；V8 侧需要句柄表（Persistent + Scope）与
+  「Go 回调 → v8 函数」的适配，跨界成本还会上升 7.4–240×（§1.3 实测）。因此 C-P3 之前应先做
+  C-P4 的跨界优化，否则「换后端提速」会被跨界开销吃掉。
+
+## 动图（A4）的实现边界（2026-10-07）
+
+GIF/WebP 动画已实装（宿主用 goskia 的 SkCodec 解多帧，引擎按帧时长推进，见
+[docs/implementation-path.md](implementation-path.md) §0.1 的 A4 行）。**有意保留**的边界：
+
+- **帧推进精度依赖宿主给的时长**：容器没给时长（部分 GIF/WebP）时按 100ms/帧兜底；
+  `loops == 0`（只播一次）停在末帧，`loops < 0` 无限循环，`loops > 0` **近似**为循环
+  （Skia 的 repetitionCount 语义是「再播 n 次」，没有精确映射成「共播 n+1 次」）。
+- **重绘驱动要宿主接线**：按需渲染的宿主必须把 `rendering.HasAnimatedImages()` 纳入「本帧是否
+  需要 Paint」的判断（`app/host.go` 已接；不接的话动图会停在某一帧——这个坑在自检里以
+  「6 次采样只出现 1 种颜色」暴露过）。
+- **帧位图常驻内存**：每帧一张 `DecodedImage`，且解码策略是**一次性全解**（Skia 的增量帧依赖
+  `fPriorFrame`，随机访问要重解前置帧，逐帧按需解反而更慢）。长动画 × 大图会明显吃内存，
+  没有「按需解帧 / 释放远帧」机制。
+- **动画只在「有图在动」时推进**：不跟踪元素可见性（滚出视口也继续推进），代价是每帧一次
+  选帧（可忽略）与宿主持续重绘。
+- **入口覆盖**：`<img>` 与 `background-image` 都走同一通道（动图不进单帧缓存）；`canvas` 的
+  `drawImage(gif)` 仍只拿首帧（canvas 侧没有帧推进，属未落地）。
+- **格式支持取决于 Skia**：goskia 的 codec 绑定与格式无关，能解什么由 libSkiaSharp 决定
+  （本机实测 GIF 通过；**WebP 动画未验证**——要验证需补样本）。
+- **`<img>` 的 alt 回退与动图并存**：解码失败的动图仍走 alt 文本路径（既有行为不变）。
+
+## C-P4 跨界优化（2026-10-08）：已完成的范围与仍然存在的边界
+
+详细数据与复现命令见 **[docs/CROSS_BOUNDARY_PERF.md](CROSS_BOUNDARY_PERF.md)**。要点：
+
+- **已达成（实测）**：`styleProxy` 写路径同值快速路径 + 写路径副本 ⇒ `SetPropertyDotted`
+  686 531 → **106 393 ns/op**（分配 6 628 → 928）、同值 `SetPropertyNoop` 386 938 → **79 123 ns/op**；
+  读 `GetPropertyValue` 609 588 → 415 324 ns/op。
+- **事件派发聚合（T4）**：Move 路径复用 hover 追踪的命中结果（原先每次移动两次 `HitTest`）；
+  宿主事件批里**连续**移动合并为段内最后一条（`app/input_coalesce.go` 的 `coalesceCursorMoves`，
+  UI Events coalesced events 语义）；裸 WebView 宿主可用 `HandleMouseMoveBatched` / `FlushMouseMoves`。
+- **`el.style` 句柄缓存（T5）**：现在满足浏览器语义 `el.style === el.style`（按元素 + 解释器缓存，
+  随文档切换清理）。**但实测取句柄本身不是热点**（15.9 → 16.4 µs/1000 次，持平）——缓存是为语义与
+  后续访问稳定性，不是为这一项的吞吐，别把它当性能主因。
+- **仍然存在的边界**：`getPropertyValue` 每次仍构造返回串与补白名单属性（读路径 ~4.8k allocs/1000 次，
+  未优化）；`cssText` 读必须每次序列化（持平，符合预期）。
+- **换后端的杠杆仍然成立**：单次跨界 108–197 ns（JS→Go 回调 / Go→JS 调用 / `obj.Get` 12 ns），
+  本轮把**跨境次数**与**同值写**的天花板压低后，C-P3（V8）的收益结构才看得清（见下节）。
+
+## A3 音频后端：现状与开工前置（2026-10-08 结论）
+
+**现状（未开工，属 P3「必须用户确认」项）**：
+
+- `<audio>` 不参与帧通道——引擎的媒体帧通道只服务 `<video>`（见本文「媒体」节），因此音频**无输出**；
+- `decodeAudioData` / `AudioContext` / `OscillatorNode` 等 Web Audio 面**不存在**；
+- 编码侧（`MediaRecorder` 等）同样未落地。
+
+**开工需要的三件事**（缺一不可，因此本轮只落结论、不动代码）：
+
+1. **平台音频 API**：Windows 侧（WASAPI/`winmm`）与 goskia/GLFW 侧的音频输出接口都要扩
+   —— 当前 `goskia` 只有 GL/Skia 面，没有音频面，这不在 wb-ui 单侧能完成的范围内；
+2. **后端选型**：自带解码（复用已集成的 ffmpeg/宿主 ffmpeg 管线，与 A2 视频同源）vs 只做输出
+   （宿主给 PCM）——前者更完整、后者更轻；选型未定；
+3. **用户拍板**：涉及分发体积与平台 API 门槛，与 C-P3（+60MB）同属需确认项。
+
+**建议路线（若获准开工）**：沿用 A1 已验证的「宿主注入」思路 —— 视频侧当初就是**把解码器留在宿主、
+引擎只接帧流**（因此不受分发体积约束）。音频同样可先做「宿主注入 PCM 流 + 引擎侧 `<audio>` 状态机
+（`currentTime`/`paused`/`ended`）」，把平台音频 API 关在宿主里；Web Audio 图（`AudioContext`）
+另立一期，不与之捆绑。
+
+## C-P3 V8 后端探测结论（2026-10-08 汇总，未开工）
+
+**探测已做且结论明确**（数据源：`docs/implementation-path.md` §4.5、`scripts/v8/README.md`）：
+
+- **可行性已实测通过**：MSYS2 `mingw-w64-x86_64-v8 11.9` + 本地 fork 的 v8go（补丁 6 行）在 Windows 上
+  **编译 / 链接 / 运行 / 基准全通过** ⇒ 「V8 路线在 Windows 上跑得通」不再是假设；
+- **收益（纯 JS 计算）**：fib 6.9×、array 12.1×、string concat **232×**、object prop **87×**、
+  closure 45×；但 `try/catch` 反而 **goja 快 3.1×**（V8 侧不擅长的路径）；
+- **代价（跨界）**：V8 的 JS↔Go 每次调用比 goja **慢 7.4×–240×**（`obj.Get` 240×、`obj.Set` 67×、
+  JS→Go 回调 7.4×）⇒ 换后端只在「代码在 JS 里跑」的负载上赚，在边界负载上亏；
+- **未决门槛**：分发体积 **+≈60 MB**、许可与构建复杂度（MSYS2 SDK + 维护 v8go fork）、
+  跨平台版本不一致（Windows 11.9 / 其他平台待定）⇒ 属 P3「必须用户确认」；
+- **净结论**：**C-P4 是本项的前置**（本轮已完成，见上节）——把跨界次数与同值写的天花板压低之后，
+  「换 V8 值不值」才是在真实负载上可判定的事；在后端未接入前，`jsc` 的后端抽象只铺到
+  「建运行时 / 执行脚本 / 取全局对象」（C-P2 结论：按实际编译错误补齐，不预先想象契约）。
+
+## webkit 测试基线：3 个 pre-existing 失败与 @media 归属缺陷（2026-10-07）
+
+### 一、三个 pre-existing 失败（有 HEAD 对比证据，非本轮引入）
+
+对比方法（**两边同一条命令**，排除环境差异）：
+
+```bat
+git worktree add ../wb-ui-head HEAD          REM HEAD = 45da5dd
+set CGO_ENABLED=1 && set GOWORK=off
+go test ./webkit/... -count=1                 REM 分别在 ../wb-ui-head 与工作区执行
+```
+
+为什么两边都用 `GOWORK=off`：父目录 `F:\syproject\go.work` 里 `use ./GWui` 指向的目录只剩
+`.Pair`（无 `go.mod`）⇒ 整个 workspace 不可用（`go` 直接报
+`cannot load module ..\GWui listed in go.work file`）；`GOWORK=off` 让两边都按 `go.mod` 解析，
+且解析到的 goskia 与本地 `goskia` 目录 HEAD 是**同一 commit**（工作区 `go.mod` 已升到
+`v0.0.0-20261006194810-5015494aa077` = `5015494aa077`），因此两次运行的差异只剩 wb-ui 自身代码。
+
+| 运行 | goskia 版本 | 失败用例 |
+|---|---|---|
+| HEAD worktree | `v0.0.0-20261006060753-395100befa2a` | `TestButtonTextVerticalCenter`、`TestCM6RangeMeasurementMatchesSkia`、`TestCheckedStateInvalidatesStyle` |
+| 工作区（本轮改动） | `v0.0.0-20261006194810-5015494aa077` | 同上 3 个（用例名逐字相同） |
+
+失败摘要（HEAD 输出原文）：
+
+- `TestButtonTextVerticalCenter`：`button_center_test.go:82: glyph vertical center 19.0 too far from button center 21 (range 19.5..22.5)`；
+- `TestCM6RangeMeasurementMatchesSkia`：`cm6_measure_skia_test.go:99: getClientRects height 14.8281 != Skia ascent+descent 13.0000`；
+- `TestCheckedStateInvalidatesStyle`：`formstate_invalidation_test.go:75/91: SetChecked(true) 后 #c color="rgb(1, 2, 3)"，want "rgb(9, 9, 9)"`。
+
+**判定 pre-existing**：三项在 HEAD 与工作区的失败用例名、失败文件与行号、断言值完全一致。
+（另有 4 个 webkit 级失败只在 HEAD 侧的 goskia 版本上出现/消失的项，本表只列上述 3 个共同项。）
+
+### 二、本轮修掉的缺陷：getComputedStyle 的 @media 判定丢失「元素归属」
+
+**症状**：新增用例 `TestDeviceScaleFactor` 单独 `-run` 跑通过，与同包其他「建 WebView」的用例
+**并跑**时失败 —— `window.devicePixelRatio === 2` 与
+`matchMedia("(min-resolution: 2dppx)").matches === true` 都正确，但
+`getComputedStyle(#a).color` 仍是基础规则的 `rgb(1, 2, 3)`（媒体查询里声明的 `rgb(4, 5, 6)` 未生效）。
+
+**根因**：`computedStyleFor`（getComputedStyle 的实现）在 bindings 内自行走一遍级联，
+其 `@media` 判定用 `mediaMatches` → **包级单例** `MediaQueryContextProvider`（无元素/解释器上下文，
+只能遍历 `webviews` 取第一个）。多 WebView 同进程时（主窗口 + 挂件窗口，或同包测试并存多个
+WebView）会读到**另一个页面**的像素比（1）⇒ `min-resolution: 2dppx` 不匹配。
+`matchMedia` 早先用 `MediaQueryContextForInterpreter` 解决过同类问题，这条路径漏了。
+
+**修复**：新增 `bindings.MediaQueryContextForElement func(dom.Node) *css.MediaQueryContext`
+（webkit 侧按元素归属注入，走 `webViewForNode` → 该 WebView 的 `mediaQueryCtx`），
+`mediaMatches(rule, el)` 优先按归属解析 → 退化到包级 Provider → 最后默认上下文，
+与 `ForInterpreter` 同构；`@media` 与 `matchMedia` 从此共用同一份输入。
+
+**验证**：修复前「单独跑 PASS / 与 `TestButtonTextVerticalCenter` 并跑 FAIL」；
+修复后两种跑法均 PASS；`./webkit/...` 全量失败集合回到上述 3 个；
+`./engine/js/bindings/... ./engine/style/... ./engine/css/...` 无回归。
+
+### 三、环境提醒
+
+父目录 `F:\syproject\go.work` 的 `use ./GWui` 目前指向一个没有 `go.mod` 的目录（只剩 `.Pair`），
+该 workspace 整体不可用：在 wb-ui 下跑任何 `go` 命令都需 `GOWORK=off`（或修好那份 go.work）。
 

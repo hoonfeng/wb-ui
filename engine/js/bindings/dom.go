@@ -48,8 +48,19 @@ var (
 	ViewportWidth  float64
 	ViewportHeight float64
 
+	// DevicePixelRatio 为 window.devicePixelRatio 提供值（设备像素比，
+	// 默认 1）。宿主（webkit.WebView.SetDeviceScaleFactor，或 CDP 的
+	// Emulation.setDeviceMetricsOverride{deviceScaleFactor}）设置后页面
+	// **立即**读到新值——设备像素比是运行时可变的环境量，不能像早期实现
+	// 那样硬编码成常量。
+	DevicePixelRatio float64
+
 	// ViewportSizeForInterpreter 按 JS 解释器返回其所属 WebView 的视口尺寸。
 	ViewportSizeForInterpreter func(in *jsc.Interpreter) (w, h float64, ok bool)
+
+	// DevicePixelRatioForInterpreter 按 JS 解释器返回其所属 WebView 的设备
+	// 像素比（多 WebView 场景：每个 WebView 各自仿真自己的 DSF，互不覆盖）。
+	DevicePixelRatioForInterpreter func(in *jsc.Interpreter) (d float64, ok bool)
 )
 
 // OnInlineStyleChanged is an optional callback invoked when an element's
@@ -285,6 +296,27 @@ func elNameForRO(el *dom.Element) string {
 // （视口尺寸、devicePixelRatio、颜色方案等）；由宿主（webkit.WebView）
 // 在注册时注入真实值；nil 时 matchMedia 用默认值（1280×800、light）。
 var MediaQueryContextProvider func() *css.MediaQueryContext
+
+// MediaQueryContextForInterpreter 是同一份上下文，但**按解释器归属**解析。
+//
+// 为什么需要它：Provider 是包级单例，多 WebView（多文档、多解释器）场景下
+// 它只能指向其中一个 —— 实测两个 WebView 同存时，被测 WebView 调
+// SetDeviceScaleFactor(2) 后 matchMedia("(min-resolution: 2dppx)") 仍按**另一个**
+// WebView 的像素比求值（命中结果与 getComputedStyle 自相矛盾）。因此
+// matchMedia 优先用它，Provider 仅作「拿不到归属」时的兜底。
+var MediaQueryContextForInterpreter func(in *jsc.Interpreter) *css.MediaQueryContext
+
+// MediaQueryContextForElement 是同一份上下文，但**按元素归属**解析
+// （getComputedStyle 的 @media 判定用，见 computedStyleFor → mediaMatches）。
+//
+// 为什么需要它：computedStyleFor 在 bindings 内自己走一遍级联（不走 resolver），
+// 其 @media 判定原先只能用包级 Provider —— 比 matchMedia 的 ForInterpreter
+// 少一层归属信息。多 WebView 同进程时（主窗口 + 挂件窗口，或同包测试并存多个
+// WebView），Provider 只能指向其中一个：实测单独跑一个 DSF 用例通过，与另一个
+// 建 WebView 的用例并跑就失败（读到另一个 WebView 的像素比 → DSF=2 时
+// @media (min-resolution: 2dppx) 不匹配，getComputedStyle 停在基础规则，
+// 与 matchMedia 已命中自相矛盾）。按元素归属后每个页面只用自己的视口与像素比。
+var MediaQueryContextForElement func(n dom.Node) *css.MediaQueryContext
 
 // windowEventListeners 存储 window 上的事件监听器（window.dispatchEvent
 // 真分发用）。key 为事件类型字符串（如 "resize"、"message"、自定义事件）。
@@ -704,8 +736,23 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// ★ devicePixelRatio（浏览器标准）：xterm 的 dpr = window.devicePixelRatio
 	//   （无 fallback）用于 cellHeight = ceil(charSize.height × dpr) 计算。
 	//   此前未定义 → undefined → cell.height = NaN → style.height="NaNpx"
-	//   → 行高异常、终端内容画到视口外（空白）。CSS 像素渲染 → 1。
-	g.Set("devicePixelRatio", jsc.NumberValue(1))
+	//   → 行高异常、终端内容画到视口外（空白）。CSS 像素渲染 → 默认 1。
+	// ★ B3（CDP Emulation 的 deviceScaleFactor）：改成**动态 accessor**——
+	//   设备像素比是运行时可变的环境量（CDP 会中途改它），硬编码 1 会让
+	//   Emulation 仿真形同虚设（页面永远读到 1）。无 DSF 的宿主读到默认 1，
+	//   既有行为不变；多 WebView 按解释器分派（DevicePixelRatioForInterpreter）。
+	g.SetAccessor("devicePixelRatio", getter(func(in *jsc.Interpreter) jsc.JSValue {
+		if DevicePixelRatioForInterpreter != nil {
+			if d, ok := DevicePixelRatioForInterpreter(in); ok {
+				return jsc.NumberValue(d)
+			}
+		}
+		d := DevicePixelRatio
+		if d <= 0 {
+			d = 1
+		}
+		return jsc.NumberValue(d)
+	}), nil)
 
 	// ── DOM Constructors (Go 原生) ─────────────────────────
 	// Each constructor's .prototype is extracted and used by the
@@ -2246,7 +2293,13 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
 				Pointer: "fine", AnyPointer: "fine",
 			}
-			if MediaQueryContextProvider != nil {
+			// ★ 优先按解释器归属解析（多 WebView 不串台），无归属信息再回退
+			// 包级 Provider（单 WebView 宿主的既有接线不变）。
+			if MediaQueryContextForInterpreter != nil {
+				if c := MediaQueryContextForInterpreter(in); c != nil {
+					ctx = *c
+				}
+			} else if MediaQueryContextProvider != nil {
 				if c := MediaQueryContextProvider(); c != nil {
 					ctx = *c
 				}
@@ -3759,6 +3812,9 @@ func makeURLSearchParams(in *jsc.Interpreter, query string) *jsc.JSObject {
 
 func clearNodeCache() {
 	nodeWrapperCache = make(map[dom.Node]*jsc.JSObject)
+	// ★ C-P4-3：style 句柄缓存同样持有元素与 goja 对象，随文档切换一起清
+	// （否则旧文档的元素与其 style 对象泄漏，内存探针会看到每次导航累积）。
+	styleObjectCache = make(map[*dom.Element]styleObjectEntry)
 	namedNodeMapMu.Lock()
 	namedNodeMapCache = map[*dom.Element]*namedNodeMapEntry{}
 	namedNodeMapMu.Unlock()
@@ -4678,6 +4734,14 @@ func kebabToCamel(s string) string {
 type styleProxy struct {
 	el *dom.Element
 	vm *goja.Runtime
+
+	// ★ C-P4-1 解析缓存：decls 是读路径（getPropertyValue / length / item /
+	// cssText / Keys）的中枢，此前每次调用都重新解析 style 属性文本（实测
+	// getPropertyValue 约 1.5µs/次）。以「上次解析的文本」为键：任何写路径都要
+	// 回写属性文本 → 文本一变缓存自动失效，不需要额外的失效钩子。
+	cachedText  string
+	cachedDecls []styleDecl
+	cachedOK    bool
 }
 
 // ── 第 21 轮：CSSStyleDeclaration 的保序声明模型 ──────────────────────
@@ -4815,9 +4879,26 @@ func splitImportant(v string) (string, bool) {
 	return v, false
 }
 
-// decls 返回当前元素的保序声明列表。
+// decls 返回当前元素的保序声明列表（**带解析缓存**）。返回值与缓存共享底层
+// 数组，只读使用；写路径请用 declsForWrite。
 func (s *styleProxy) decls() []styleDecl {
-	return parseStyleDecls(s.el.GetAttribute("style"))
+	text := s.el.GetAttribute("style")
+	if s.cachedOK && s.cachedText == text {
+		return s.cachedDecls
+	}
+	decls := parseStyleDecls(text)
+	s.cachedText, s.cachedDecls, s.cachedOK = text, decls, true
+	return decls
+}
+
+// declsForWrite 返回**可安全修改**的声明副本（写路径专用）：setStyleDecl 命中
+// 同名声明时会原地改 Value，若直接改 decls() 的共享数组就把解析缓存写脏了
+// （属性文本没变、缓存内容已变 → 后续读拿到错值）。
+func (s *styleProxy) declsForWrite() []styleDecl {
+	src := s.decls()
+	out := make([]styleDecl, len(src))
+	copy(out, src)
+	return out
 }
 
 func (s *styleProxy) Get(key string) goja.Value {
@@ -4847,7 +4928,7 @@ func (s *styleProxy) Get(key string) goja.Value {
 			if len(call.Arguments) < 2 {
 				return goja.Undefined()
 			}
-			decls := s.decls()
+			decls := s.declsForWrite()
 			name := call.Arguments[0].String()
 			v := call.Arguments[1].String()
 			// ★ 第 21 轮：第三参数 priority 按 CSSOM 接受 "important"（大小写
@@ -4864,8 +4945,19 @@ func (s *styleProxy) Get(key string) goja.Value {
 			//   空值声明，getComputedStyle().transform 返回 "" 而非初始值
 			//   "none"（Edge 实测：h7_transform_norm 的空值 case → Edge none / wbui ""）。
 			if strings.TrimSpace(call.Arguments[1].String()) == "" {
+				// ★ C-P4-1 无变更快速路径：没有该声明时「移除」是空操作。
+				if _, ok := matchStyleDecl(decls, name); !ok {
+					return goja.Undefined()
+				}
 				decls = removeStyleDecl(decls, name)
 			} else {
+				// ★ C-P4-1 同值快速路径：声明已存在且值一致 → 属性文本不会变，
+				// 跳过 SetAttribute / 计算样式失效 / 宿主回调。Vue/React 的
+				// patchStyle 在 diff 未变时反复写同值，此前每次都触发一次全文档
+				// 样式失效。
+				if i, ok := matchStyleDecl(decls, name); ok && decls[i].Value == v {
+					return goja.Undefined()
+				}
 				decls = setStyleDecl(decls, name, v)
 			}
 			s.el.SetAttribute("style", joinStyleDecls(decls))
@@ -4929,12 +5021,14 @@ func (s *styleProxy) Get(key string) goja.Value {
 			if len(call.Arguments) == 0 {
 				return vm.ToValue("")
 			}
-			decls := s.decls()
+			decls := s.declsForWrite()
 			name := call.Arguments[0].String()
-			old := ""
-			if i, ok := matchStyleDecl(decls, name); ok {
-				old, _ = splitImportant(decls[i].Value)
+			i, ok := matchStyleDecl(decls, name)
+			if !ok {
+				// ★ C-P4-1 无变更快速路径：没有该声明 → 不写属性、不失效。
+				return vm.ToValue("")
 			}
+			old, _ := splitImportant(decls[i].Value)
 			s.el.SetAttribute("style", joinStyleDecls(removeStyleDecl(decls, name)))
 			return vm.ToValue(old)
 		})
@@ -4968,7 +5062,7 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		return false // let goja handle as a regular property (function assignment)
 	default:
 		// CSS property write: parse existing style, update, write back
-		decls := s.decls()
+		decls := s.declsForWrite()
 		strVal := val.String()
 		ckey := camelToKebab(key)
 		// ★ 空白串（"  "）也须视为「移除属性」：CSSOM 规定属性值首尾空白不计入，
@@ -4977,8 +5071,16 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		//   留下一个空值声明，getComputedStyle().transform 返回 ""（Edge 为 none）。
 		//   这是 h7_transform_norm 唯一残留差异的来源。
 		if strings.TrimSpace(strVal) == "" || strVal == "undefined" || strVal == "null" {
+			// ★ C-P4-1 无变更快速路径：没有该声明时「移除」是空操作。
+			if _, ok := matchStyleDecl(decls, ckey); !ok {
+				return true
+			}
 			decls = removeStyleDecl(decls, ckey)
 		} else {
+			// ★ C-P4-1 同值快速路径（见 setProperty 处说明）。
+			if i, ok := matchStyleDecl(decls, ckey); ok && decls[i].Value == strVal {
+				return true
+			}
 			decls = setStyleDecl(decls, ckey, strVal)
 		}
 		s.el.SetAttribute("style", joinStyleDecls(decls))
@@ -5020,9 +5122,40 @@ func (s *styleProxy) Keys() []string {
 }
 
 func (s *styleProxy) Delete(key string) bool {
-	s.el.SetAttribute("style", joinStyleDecls(removeStyleDecl(s.decls(), key)))
+	decls := s.declsForWrite()
+	if _, ok := matchStyleDecl(decls, key); !ok {
+		return true // ★ C-P4-1 无变更快速路径：没有该声明 → 不写属性、不失效
+	}
+	s.el.SetAttribute("style", joinStyleDecls(removeStyleDecl(decls, key)))
 	InvalidateComputedStyle(s.el)
 	return true
+}
+
+// styleObjectEntry 缓存一条 el.style 句柄（带所属解释器，避免跨 rt 复用 goja 对象
+// ——goja 对跨 runtime 的对象访问会报 "Illegal runtime transition"）。
+type styleObjectEntry struct {
+	rt  *jsc.Interpreter
+	obj *jsc.JSObject
+}
+
+// styleObjectCache 按元素缓存 `el.style` 的 JS 对象（C-P4-3 句柄缓存）：
+// 浏览器里 CSSStyleDeclaration 是**稳定实例**（`el.style === el.style` 为 true），
+// 而宿主侧此前每次取句柄都新建 dynamic object + 装配原型（实测 ~159ns/次）；
+// Vue 的 patchStyle、CM6 的 gutter spacer 等热路径反复取句柄，开销可观。
+// 生命周期与 nodeWrapperCache 一致（clearNodeCache 里清空）。
+var styleObjectCache = make(map[*dom.Element]styleObjectEntry)
+
+// styleObjectFor 取（必要时创建）元素的 style 包装对象。
+func styleObjectFor(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
+	if el == nil {
+		return makeStyleObject(rt, el)
+	}
+	if e, ok := styleObjectCache[el]; ok && e.rt == rt {
+		return e.obj
+	}
+	obj := makeStyleObject(rt, el)
+	styleObjectCache[el] = styleObjectEntry{rt: rt, obj: obj}
+	return obj
 }
 
 func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
@@ -6224,7 +6357,7 @@ func computedStyleFor(el dom.Node) map[string]string {
 					decls = append(decls, matchedDecl{spec: spec, order: orderCounter, decl: d})
 				}
 			case *css.MediaRule:
-				if mediaMatches(rl) {
+				if mediaMatches(rl, el) {
 					applyRules(rl.Rules)
 				}
 			}
@@ -6793,7 +6926,7 @@ func substituteVars(s string, vars map[string]string, depth int) string {
 
 // mediaMatches 判断 MediaRule 条件是否匹配当前媒体上下文
 // （视口尺寸/颜色方案来自 MediaQueryContextProvider，与 matchMedia 一致）。
-func mediaMatches(rule *css.MediaRule) bool {
+func mediaMatches(rule *css.MediaRule, el dom.Node) bool {
 	if rule == nil {
 		return false
 	}
@@ -6806,7 +6939,15 @@ func mediaMatches(rule *css.MediaRule) bool {
 		PrefersColorScheme: "light", Hover: "hover", AnyHover: "hover",
 		Pointer: "fine", AnyPointer: "fine",
 	}
-	if MediaQueryContextProvider != nil {
+	// ★ 归属优先：@media 与 matchMedia 必须用同一份上下文。el 可为 nil
+	//   （无归属）→ 退化到包级 Provider，再退化到默认上下文。
+	resolved := false
+	if MediaQueryContextForElement != nil && el != nil {
+		if c := MediaQueryContextForElement(el); c != nil {
+			ctx, resolved = *c, true
+		}
+	}
+	if !resolved && MediaQueryContextProvider != nil {
 		if c := MediaQueryContextProvider(); c != nil {
 			ctx = *c
 		}

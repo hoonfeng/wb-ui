@@ -8,8 +8,9 @@
 //     parser produces []MediaQuery directly
 //   - CSS Level 4 range syntax (width >= 400px) is not supported; only the
 //     Level 3 feature:value form
-//   - resolution, scan, grid, update, overflow-block, overflow-inline, scripting
-//     features are not evaluated
+//   - resolution 系列**已支持**（dppx / dpi / dpcm，见 compareResolution）；
+//     scan, grid, update, overflow-block, overflow-inline, scripting features
+//     are not evaluated
 //   - prefers-reduced-motion, prefers-contrast, forced-colors are not evaluated
 package css
 
@@ -168,6 +169,15 @@ func evaluateFeature(f MediaFeature, ctx MediaQueryContext) bool {
 		return value == "" || strings.EqualFold(value, ctx.Pointer)
 	case name == "any-pointer":
 		return value == "" || strings.EqualFold(value, ctx.AnyPointer)
+	case name == "resolution":
+		// CSS Media Queries 4 §4.5：<resolution> 特性。CDP 的
+		// Emulation.setDeviceMetricsOverride{deviceScaleFactor} 在这里可见
+		// （Chrome 的 min-resolution/max-resolution 也由 DSF 推导）。
+		return compareResolution(value, ctx.DevicePixelRatio, false, false)
+	case name == "min-resolution":
+		return compareResolution(value, ctx.DevicePixelRatio, true, false)
+	case name == "max-resolution":
+		return compareResolution(value, ctx.DevicePixelRatio, false, true)
 	case name == "color":
 		// Boolean feature: always true for typical displays (color depth > 0).
 		return value == "" || true
@@ -214,6 +224,52 @@ func compareFloat(value string, actual float64, min, max bool) bool {
 		return actual <= v
 	}
 	return actual == v
+}
+
+// compareResolution 把 <resolution> 值（dppx / dpi / dpcm；无单位按 dppx）换算成
+// 设备像素比再比较。换算依据 CSS Values：1dppx = 1 设备像素/CSS 像素 = 96dpi
+// = 96/2.54 dpcm。用容差比较，避免 dpi/dpcm 换算的浮点误差把等值判成不等。
+func compareResolution(value string, actual float64, min, max bool) bool {
+	if value == "" {
+		return true
+	}
+	v, ok := parseResolution(value)
+	if !ok {
+		return false
+	}
+	const eps = 1e-6
+	switch {
+	case min:
+		return actual+eps >= v
+	case max:
+		return actual <= v+eps
+	}
+	d := actual - v
+	if d < 0 {
+		d = -d
+	}
+	return d <= eps
+}
+
+// parseResolution 解析 <resolution>：dppx / dpi / dpcm / 无单位（按 dppx）。
+func parseResolution(s string) (float64, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	parse := func(unit string) (float64, bool) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, unit)), 64)
+		return f, err == nil
+	}
+	switch {
+	case strings.HasSuffix(s, "dppx"):
+		return parse("dppx")
+	case strings.HasSuffix(s, "dpcm"):
+		f, ok := parse("dpcm")
+		return f * 2.54 / 96, ok
+	case strings.HasSuffix(s, "dpi"):
+		f, ok := parse("dpi")
+		return f / 96, ok
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	return f, err == nil
 }
 
 // parseCSSPx parses a CSS pixel length like "768px" to an int.
