@@ -43,9 +43,10 @@ body {
   display: flex;
   flex-direction: column;
   align-self: stretch;   /* 横向铺满 screen-main */
-  /* ★ 必须用视口单位而非 100%：wb-ui 引擎会把 flex 容器内子项的百分比宽度退化为
-     fit-content（1920 视口实测仅 1440 = 三列理想宽之和，于是大窗口右侧留白），
-     且 align-self:stretch 也无效。100vw 实测可正确铺满。 */
+  /* ★ 必须用视口单位而非 100%：wb-ui 引擎存在「flex 容器宽度被父级拉伸到更大尺寸后，
+     其子项交叉轴的解析基准仍是拉伸前的旧值」的缺陷（插桩实测：.screen-main 已是 1920，
+     但传给 .d-main_app 的基准 cbWidth 仍是 fit-content 的 1440）——故 width:100% 与
+     align-self:stretch 都只铺到 1440；100vw 不依赖该基准，实测可正确铺满。 */
   width: 100vw;
   height: 100%;
   min-height: 0;
