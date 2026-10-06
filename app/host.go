@@ -3847,54 +3847,25 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 								h.closeSelectPopup()
 							}
 						}
-						sel := activeEl
-						if sel.LocalName() != "select" {
-							// 允许点击 select 的箭头/内部子元素时也打开（子元素少见）
-							for p := sel.ParentElement(); p != nil; p = p.ParentElement() {
-								if p.LocalName() == "select" {
-									sel = p
-									break
-								}
-							}
-						}
-						if sel.LocalName() == "select" && h.selectPopup == nil {
+						// 点击目标回溯到最近的 <select>（含箭头/内部子元素），
+						// 共享实现 webkit.SelectClickTarget 与 Interaction 一致；
+						// activeEl 为 nil 时返回 nil，不会像此前那样直接解引用。
+						if sel := webkit.SelectClickTarget(activeEl); sel != nil && h.selectPopup == nil {
 							h.handleSelectClick(sel, rv, cssX, cssY)
 						}
 
 						// ── Toggle checkbox / radio on click ──
+						// 切换语义（含 radio 同组互斥、change 派发、user validity
+						// 置位）在 webkit.ToggleCheckboxRadio——与裸 WebView 的标准
+						// 交互服务共用同一份实现（此前两处逐行重复，必然漂移）。
 						if activeEl.LocalName() == "input" {
 							inputType := activeEl.GetAttribute("type")
 							if inputType == "checkbox" || inputType == "radio" {
-								if in, ok := html5.ToInputElement(activeEl); ok {
-									if inputType == "checkbox" {
-										in.SetChecked(!in.Checked())
-									} else if inputType == "radio" {
-										// Uncheck all radio buttons with same name
-										name := activeEl.GetAttribute("name")
-										if name != "" && h.wv.MainFrame() != nil {
-											doc := h.wv.MainFrame().Document()
-											if doc != nil {
-												allInputs := doc.GetElementsByTagName("input")
-												for _, r := range allInputs {
-													if r.GetAttribute("type") == "radio" && r.GetAttribute("name") == name {
-														if r2, ok2 := html5.ToInputElement(r); ok2 {
-															r2.SetChecked(false)
-														}
-													}
-												}
-											}
-										}
-										in.SetChecked(true)
-									}
-									// ★ 派发 change 事件：Vue 的 v-model（checkbox/radio）
-									// 监听 change 更新组件状态。此前只 toggle 了
-									// DOM checked 属性而不派发事件，导致「组件不可
-									// 操作」——视觉上勾选但 Vue 状态未同步。
-									// 点击即用户交互 → user validity 置位。
-									bindings.MarkUserInteracted(activeEl)
-									activeEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+								if webkit.ToggleCheckboxRadio(activeEl) {
 									if debugPaintLog {
-										log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
+										if in, ok := html5.ToInputElement(activeEl); ok {
+											log.Printf("[dbg/click] toggled %s checked=%v", inputType, in.Checked())
+										}
 									}
 									h.wv.RebuildRenderTree()
 								}
@@ -5020,12 +4991,17 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	if rv == nil {
 		return
 	}
-	csX, csY := h.win.ContentScale()
-	if csX <= 0 {
-		csX = 1
-	}
-	if csY <= 0 {
-		csY = 1
+	// 与 handleContextMenu 一致：测试宿主（NewHostForTest）没有平台窗口，
+	// 按 scale=1 处理——否则无窗口环境无法走真实 click 链路做验证。
+	csX, csY := 1.0, 1.0
+	if h.win != nil {
+		csX, csY = h.win.ContentScale()
+		if csX <= 0 {
+			csX = 1
+		}
+		if csY <= 0 {
+			csY = 1
+		}
 	}
 	clickCSSX := ev.X / csX
 	clickCSSY := ev.Y / csY
@@ -5072,6 +5048,10 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 			// 唯一非 null 的场景。
 			if !clickPrevented {
 				popover.RunActivation(deepest, deepest)
+				// <summary> 的点击激活行为（HTML §4.11.4）：切换所属 <details>
+				// 的 open 并派发 toggle。引擎此前缺这条默认行为 → 桌面端折叠
+				// 面板（gou-ide 监督者看板等）点不开，浏览器原生支持。
+				html5.ActivateSummary(deepest)
 			}
 			if deepest.LocalName() == "a" {
 				h.handleAnchorClick(deepest)
@@ -5262,9 +5242,6 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 	h.processEventLoop()
 	h.wv.RebuildRenderTree()
 }
-// handleSelectClick opens the <select> dropdown popup for sel: a
-// fixed-position overlay listing the select's <option> elements, positioned
-// just below the select box. Mirrors WebKit RenderMenuList.showPopup.
 // setRangeValueFromX computes a <input type="range"> value from a horizontal
 // CSS-viewport x coordinate, snapped to the input's step, and writes it back
 // to the DOM (SetValue). Mirrors the browser: clicking the track or dragging
@@ -5394,140 +5371,49 @@ func atoiOr(s string, def int) int {
 }
 
 func (h *Host) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, cssX, cssY float64) {
-	selEl, ok := html5.ToSelectElement(sel)
-	if !ok {
+	// 定位、构造、选项样式、兜底样式表注入都在 webkit.BuildSelectPopup——
+	// 与裸 WebView 的 Interaction 共用同一份实现。此前这里与
+	// webkit/interact.go 各维护一套弹层构造，已出现实质漂移：桌面端不注入
+	// 兜底样式（页面无 .select-popup-option 规则族时弹层裸装：无行高/
+	// 内边距/hover/选中色）、内联令牌无兜底值（--bg-secondary 缺失时无底色）、
+	// 选项命中判据与 option 取值回退语义也不同。
+	overlay := webkit.BuildSelectPopup(h.wv, sel, rv)
+	if overlay == nil {
 		return
 	}
-	if selEl.Disabled() {
-		return
-	}
-	// 定位 select 的屏幕位置（相对于当前 RenderView 的滚动偏移）。
-	var sx, sy float64
-	var boxW float64 = 180
-	var boxH float64 = 0
-	if box := rv.FindRenderBoxForNode(sel); box != nil {
-		sx, sy = box.AbsoluteX(), box.AbsoluteY()
-		boxH = box.Height()
-		if bw := box.Width(); bw > 0 {
-			boxW = bw
-		}
-		// popup 层是 fixed 定位（相对视口），select 的 absolute 坐标
-		// 已含滚动偏移，减去当前滚动量得到视口坐标。
-		if _, sy0 := rv.BoxScrollOffset(box); sy0 > 0 {
-			sy -= sy0
-		}
-	}
-	// 创建浮层容器（fixed 定位，覆盖在 select 下方）。
-	doc := h.wv.MainFrame().Document()
-	if doc == nil {
-		return
-	}
-	overlay := doc.CreateElement("div")
-	overlay.SetAttribute("class", "select-popup")
-	// 高度：option 行数 * 行高（用实际 option 数量；超 8 项滚动）。
-	opts := selEl.Options()
-	rowH := 24
-	n := len(opts)
-	if n > 8 {
-		n = 8
-	}
-	popH := n*rowH + 4
-	// 浮层从 select 底部下方展开（浏览器标准），不覆盖 select 本身。
-	popTop := sy + boxH
-	viewH := h.wv.Height()
-	// 底部空间不足时向上展开（浮层底部对齐视口底部）。
-	if popTop+float64(popH) > float64(viewH)-8 {
-		popTop = sy - float64(popH)
-		if popTop < 0 {
-			popTop = 0
-		}
-	}
-	overlay.SetAttribute("style", fmt.Sprintf("position:fixed;left:%.0fpx;top:%.0fpx;width:%.0fpx;height:%dpx;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:9999;overflow-y:auto;", sx, popTop, boxW, popH))
-	// 添加每个 option。
-	current := selEl.Value()
-	// ★ option 全部用 class 驱动样式（布局/hover/选中/禁用态都放样式表，
-	// 见 index.html 的 .select-popup-option 规则族）——内联 style 优先级
-	// 高于外部规则，会阻挡 :hover 伪类的背景切换。与浏览器一致：popup
-	// option 的样式由 CSS 规则管理。
-	for _, opt := range opts {
-		optEl := doc.CreateElement("div")
-		optEl.SetAttribute("class", "select-popup-option")
-		optVal := opt.GetAttribute("value")
-		if optVal == "" {
-			optVal = opt.TextContent()
-		}
-		optEl.SetAttribute("data-value", optVal)
-		optEl.SetAttribute("data-select-popup", "1")
-		if opt.HasAttribute("disabled") {
-			optEl.SetAttribute("class", "select-popup-option select-popup-option-disabled")
-		} else if optVal == current {
-			optEl.SetAttribute("class", "select-popup-option select-popup-option-selected")
-		}
-		txt := doc.CreateTextNode(opt.TextContent())
-		_ = optEl.AppendChild(txt)
-		_ = overlay.AppendChild(optEl)
-	}
-	// 挂到 body 末尾（fixed 定位层）。
-	body := doc.Body()
-	if body == nil {
-		return
-	}
-	_ = body.AppendChild(overlay)
 	h.selectPopup = overlay
 	h.selectPopupSelect = sel
 	h.wv.RebuildRenderTree()
 	h.wv.EnsureLayout()
 }
 
-// closeSelectPopup removes the open dropdown overlay, if any.
+// closeSelectPopup removes the open dropdown overlay, if any（共享实现
+// webkit.RemoveSelectPopup 顺带重建渲染树）。
 func (h *Host) closeSelectPopup() {
 	if h.selectPopup == nil {
 		return
 	}
-	body := h.wv.MainFrame().Document().Body()
-	if body != nil {
-		_ = body.RemoveChild(h.selectPopup)
-	}
+	webkit.RemoveSelectPopup(h.wv, h.selectPopup)
 	h.selectPopup = nil
 	h.selectPopupSelect = nil
-	h.wv.RebuildRenderTree()
 }
 
 // popupContains reports whether el is inside the currently open popup layer.
 func (h *Host) popupContains(el *dom.Element) bool {
-	if el == nil || h.selectPopup == nil {
-		return false
-	}
-	for p := el; p != nil; p = p.ParentElement() {
-		if p == h.selectPopup {
-			return true
-		}
-	}
-	return false
+	return webkit.SelectPopupContains(h.selectPopup, el)
 }
 
 // selectPopupOptionClicked applies the clicked <option>'s value to the owning
 // <select> and dispatches a change event so Vue v-model updates the model.
+//
+// 语义在 webkit.ApplySelectPopupOption（命中判据统一为 data-select-popup=
+// "1"；此前这里用 data-value != ""，value="" 的合法空值选项点不动）。
 func (h *Host) selectPopupOptionClicked(el *dom.Element) {
-	if el == nil || h.selectPopupSelect == nil {
+	if !webkit.ApplySelectPopupOption(h.selectPopupSelect, el) {
 		return
 	}
-	if el.LocalName() == "div" && el.GetAttribute("data-value") != "" {
-		// disabled option 不选择。
-		cls := el.GetAttribute("class")
-		if strings.Contains(cls, "disabled") {
-			return
-		}
-		sel := h.selectPopupSelect
-		if selEl, ok := html5.ToSelectElement(sel); ok {
-			selEl.SetValue(el.GetAttribute("data-value"))
-		}
-		// 派发 change（冒泡）→ Vue v-model 更新。
-		bindings.MarkUserInteracted(sel)
-		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
-		if debugPaintLog {
-			log.Printf("[dbg/click] select set value=%q", el.GetAttribute("data-value"))
-		}
+	if debugPaintLog {
+		log.Printf("[dbg/click] select set value=%q", el.GetAttribute("data-value"))
 	}
 }
 
@@ -5571,43 +5457,16 @@ func handleFormSubmitClick(el *dom.Element) {
 	}
 }
 
-// handleLabelToggle 实现 <label> 的点击转发：点击 label 或其任意后代，
-// 切换内部包裹的 checkbox/radio 的选中状态（浏览器 label 语义）。
+// handleLabelToggle 实现 <label> 的点击转发（切换 label 内第一个
+// checkbox/radio，浏览器 label 语义）。实现在 webkit.ToggleLabeledControl
+// ——与裸 WebView 的 Interaction 共用同一份，转发路径与按下切换语义一致
+// （radio 同组互斥 + change 派发；此前只翻 checked 位，开关类组件点击
+// label 后 Vue v-model 不同步）。
+//
 // 开关（switch）的 track span 点击因此能 toggle 内嵌 checkbox，
 // 且 `input:checked + .track::after` 滑块随之移动。
 func handleLabelToggle(el *dom.Element) {
-	if el == nil {
-		return
-	}
-	// 向上找 label 祖先。
-	lab := el
-	for lab != nil && lab.LocalName() != "label" {
-		lab = lab.ParentElement()
-	}
-	if lab == nil {
-		return
-	}
-	// 找 label 内第一个 checkbox/radio。
-	for c := lab.FirstChild(); c != nil; c = c.NextSibling() {
-		e, ok := c.(*dom.Element)
-		if !ok || e.LocalName() != "input" {
-			continue
-		}
-		typ := e.GetAttribute("type")
-		if typ != "checkbox" && typ != "radio" {
-			continue
-		}
-		in, ok := html5.ToInputElement(e)
-		if !ok {
-			continue
-		}
-		if typ == "checkbox" {
-			in.SetChecked(!in.Checked())
-		} else {
-			in.SetChecked(true)
-		}
-		return
-	}
+	webkit.ToggleLabeledControl(el)
 }
 
 // handleAnchorClick performs navigation when an <a> element is clicked.

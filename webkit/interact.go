@@ -24,10 +24,8 @@ package webkit
 import (
 	"log"
 	"os"
-	"strings"
 	"time"
 
-	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/dom"
 	"wb-ui/engine/html5"
 	"wb-ui/engine/popover"
@@ -581,6 +579,13 @@ func (i *Interaction) handleClick(rv *rendering.RenderView, el *dom.Element, x, 
 	// 规范里这是 click 的默认行为，因此被 preventDefault 时不做。
 	if !prevented {
 		popover.RunActivation(el, el)
+		// <summary> 的点击激活行为（HTML §4.11.4）：切换所属 <details> 的 open
+		// 并派发 toggle。open 变化会经 UA 规则 details:not([open]) > :not(summary)
+		// 改变子树 display → 立即同步渲染树与布局（与 select 弹层同款一次性同步）。
+		if html5.ActivateSummary(el) {
+			i.wv.RebuildRenderTree()
+			i.wv.EnsureLayout()
+		}
 	}
 	handleLabelToggle(el)
 }
@@ -612,77 +617,18 @@ func execInlineHandler(wv *WebView, el *dom.Element, attr string) bool {
 	return err == nil
 }
 
-// handleLabelToggle 实现 <label> 的点击转发：点击 label 或其任意后代，
-// 切换内部包裹的 checkbox/radio（浏览器 label 语义）。
+// handleLabelToggle 实现 <label> 的点击转发（切换 label 内第一个
+// checkbox/radio）。实现在 ToggleLabeledControl——与 app.Host 共用同一份，
+// 避免「按下切换」与「label 转发」两套语义（radio 同组互斥、change 派发）。
 func handleLabelToggle(el *dom.Element) {
-	if el == nil {
-		return
-	}
-	lab := el
-	for lab != nil && lab.LocalName() != "label" {
-		lab = lab.ParentElement()
-	}
-	if lab == nil {
-		return
-	}
-	for c := lab.FirstChild(); c != nil; c = c.NextSibling() {
-		e, ok := c.(*dom.Element)
-		if !ok || e.LocalName() != "input" {
-			continue
-		}
-		typ := e.GetAttribute("type")
-		if typ != "checkbox" && typ != "radio" {
-			continue
-		}
-		in, ok := html5.ToInputElement(e)
-		if !ok {
-			continue
-		}
-		if typ == "checkbox" {
-			in.SetChecked(!in.Checked())
-		} else {
-			in.SetChecked(true)
-		}
-		return
-	}
+	ToggleLabeledControl(el)
 }
 
-// handleCheckboxRadio mousedown 时的 checkbox/radio 点击切换（浏览器
-// 在 click 时切换；引擎统一在按下时切换并派发 change——与 app.Host 一致）。
+// handleCheckboxRadio mousedown 时的 checkbox/radio 点击切换（浏览器在
+// click 时切换；引擎统一在按下时切换并派发 change）。实现在
+// ToggleCheckboxRadio——与 app.Host 共用同一份。
 func (i *Interaction) handleCheckboxRadio(activeEl *dom.Element) {
-	if activeEl == nil || activeEl.LocalName() != "input" {
-		return
-	}
-	inputType := activeEl.GetAttribute("type")
-	if inputType != "checkbox" && inputType != "radio" {
-		return
-	}
-	in, ok := html5.ToInputElement(activeEl)
-	if !ok {
-		return
-	}
-	if inputType == "checkbox" {
-		in.SetChecked(!in.Checked())
-	} else {
-		// radio：同行内同名互斥
-		name := activeEl.GetAttribute("name")
-		if name != "" && i.wv.MainFrame() != nil {
-			if doc := i.wv.MainFrame().Document(); doc != nil {
-				for _, r := range doc.GetElementsByTagName("input") {
-					if r.GetAttribute("type") == "radio" && r.GetAttribute("name") == name {
-						if r2, ok2 := html5.ToInputElement(r); ok2 {
-							r2.SetChecked(false)
-						}
-					}
-				}
-			}
-		}
-		in.SetChecked(true)
-	}
-	// 点击切换 checkbox/radio = 用户交互 → user validity 置位
-	// （:user-valid / :user-invalid 依赖它）。
-	bindings.MarkUserInteracted(activeEl)
-	activeEl.DispatchEvent(dom.NewEvent("change", true, false, false))
+	ToggleCheckboxRadio(activeEl)
 }
 
 // ── select 下拉弹层 ──
@@ -712,80 +658,13 @@ func (i *Interaction) handleSelectPopup(rv *rendering.RenderView, activeEl *dom.
 	}
 }
 
-// handleSelectClick 打开 select 下拉弹层：固定定位浮层层列出 <option>，
-// 点击 option 设值 + 派发 change（宿主 JS 的 onchange 由 change 事件驱动）。
+// handleSelectClick 打开 select 下拉弹层：定位、构造、选项样式、
+// 兜底样式表注入都在 BuildSelectPopup（与 app.Host 共用同一份）。
 func (i *Interaction) handleSelectClick(sel *dom.Element, rv *rendering.RenderView, cssX, cssY float64) {
-	selEl, ok := html5.ToSelectElement(sel)
-	if !ok {
+	overlay := BuildSelectPopup(i.wv, sel, rv)
+	if overlay == nil {
 		return
 	}
-	if selEl.Disabled() {
-		return
-	}
-	var sx, sy float64
-	var boxW float64 = 180
-	var boxH float64 = 0
-	if box := rv.FindRenderBoxForNode(sel); box != nil {
-		// BoxViewportRect 返回视口坐标（布局坐标减去所有祖先滚动容器的滚动偏移），
-		// 与 position:fixed 定位一致；AbsoluteX/Y 是布局坐标，不含滚动补偿。
-		vx, vy, vw, vh := rendering.BoxViewportRect(rv, box)
-		sx, sy = vx, vy
-		boxH = vh
-		if vw > 0 {
-			boxW = vw
-		}
-	}
-	doc := i.wv.MainFrame().Document()
-	if doc == nil {
-		return
-	}
-	overlay := doc.CreateElement("div")
-	overlay.SetAttribute("class", "select-popup")
-	opts := selEl.Options()
-	rowH := 24
-	n := len(opts)
-	if n > 8 {
-		n = 8
-	}
-	popH := n*rowH + 4
-	popTop := sy + boxH
-	viewH := i.wv.Height()
-	if popTop+float64(popH) > float64(viewH)-8 {
-		popTop = sy - float64(popH)
-		if popTop < 0 {
-			popTop = 0
-		}
-	}
-	overlay.SetAttribute("style", "position:fixed;left:"+itoa(int(sx))+"px;top:"+itoa(int(popTop))+"px;width:"+itoa(int(boxW))+"px;height:"+itoa(popH)+"px;background:var(--select-popup-bg,#1c2333);border:1px solid var(--select-popup-border,#3a4a75);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.4);z-index:9999;overflow-y:auto;")
-	current := selEl.Value()
-	for _, opt := range opts {
-		optEl := doc.CreateElement("div")
-		optEl.SetAttribute("class", "select-popup-option")
-		optVal := opt.GetAttribute("value")
-		if !opt.HasAttribute("value") {
-			optVal = opt.TextContent()
-		}
-		optEl.SetAttribute("data-value", optVal)
-		optEl.SetAttribute("data-select-popup", "1")
-		cls := "select-popup-option"
-		if opt.HasAttribute("disabled") {
-			cls += " select-popup-option-disabled"
-		} else if optVal == current {
-			cls += " select-popup-option-selected"
-		}
-		optEl.SetAttribute("class", cls)
-		optEl.SetAttribute("style", "display:block;padding:4px 10px;font-size:14px;line-height:16px;color:var(--select-popup-fg,#e8eaf0);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;")
-		txt := doc.CreateTextNode(opt.TextContent())
-		_ = optEl.AppendChild(txt)
-		_ = overlay.AppendChild(optEl)
-	}
-	body := doc.Body()
-	if body == nil {
-		return
-	}
-	_ = body.AppendChild(overlay)
-	// :hover 选项高亮（页面可覆盖样式；引擎兜底规则防「弹层可见无样式」）
-	i.ensurePopupStyle(doc)
 	i.selectPopup = overlay
 	i.selectPopupSelect = sel
 	// ★ 一次性重建+布局（DOM 变更（弹层/样式）可能已标记渲染树脏，重建
@@ -794,97 +673,23 @@ func (i *Interaction) handleSelectClick(sel *dom.Element, rv *rendering.RenderVi
 	i.wv.EnsureLayout()
 }
 
-// ensurePopupStyle 注入弹层默认样式（幂等：页面有同名规则时以页面为准，
-// 追加的 style 元素不覆盖页面规则——页面规则在 style 注入前已解析，
-// 相同选择器后者优先：注入在 body 尾部的 style 晚于 head 规则 → 引擎
-// 兜底生效；页面在 head 中预置规则则更早解析 → 页面规则优先）。
-func (i *Interaction) ensurePopupStyle(doc *dom.Document) {
-	if doc == nil {
-		return
-	}
-	if doc.GetElementById("wb-ui-select-popup-style") != nil {
-		return
-	}
-	style := doc.CreateElement("style")
-	style.SetAttribute("id", "wb-ui-select-popup-style")
-	css := "\n.select-popup-option:hover{background:#2a3a5f}\n.select-popup-option-selected{background:#3b6fd4;color:#fff}\n.select-popup-option-disabled{opacity:.45;cursor:not-allowed}\n"
-	_ = style.AppendChild(doc.CreateTextNode(css))
-	if head := doc.Head(); head != nil {
-		_ = head.AppendChild(style)
-	} else if body := doc.Body(); body != nil {
-		_ = body.AppendChild(style)
-	}
-}
-
-// closeSelectPopup 移除下拉弹层。
+// closeSelectPopup 移除下拉弹层（共享实现 RemoveSelectPopup 顺带重建渲染树）。
 func (i *Interaction) closeSelectPopup() {
 	if i.selectPopup == nil {
 		return
 	}
-	body := i.wv.MainFrame().Document().Body()
-	if body != nil {
-		_ = body.RemoveChild(i.selectPopup)
-	}
+	RemoveSelectPopup(i.wv, i.selectPopup)
 	i.selectPopup = nil
 	i.selectPopupSelect = nil
-	i.wv.RebuildRenderTree()
 }
 
 // popupContains 报告 el 是否在弹层内。
 func (i *Interaction) popupContains(el *dom.Element) bool {
-	if el == nil || i.selectPopup == nil {
-		return false
-	}
-	for p := el; p != nil; p = p.ParentElement() {
-		if p == i.selectPopup {
-			return true
-		}
-	}
-	return false
+	return SelectPopupContains(i.selectPopup, el)
 }
 
-// selectPopupOptionClicked 应用弹层选项的点击：设置 select 值 + change。
+// selectPopupOptionClicked 应用弹层选项的点击（共享实现
+// ApplySelectPopupOption：写值 + user validity 置位 + change 派发）。
 func (i *Interaction) selectPopupOptionClicked(el *dom.Element) {
-	if el == nil || i.selectPopupSelect == nil {
-		return
-	}
-	if el.LocalName() == "div" && el.GetAttribute("data-select-popup") == "1" {
-		cls := el.GetAttribute("class")
-		if strings.Contains(cls, "disabled") {
-			return
-		}
-		sel := i.selectPopupSelect
-		if selEl, ok := html5.ToSelectElement(sel); ok {
-			selEl.SetValue(el.GetAttribute("data-value"))
-		}
-		// change 派发（onchange 属性处理器由 dom 层 InlineEventAttrRunner
-		// 钩子在派发路径统一执行——宿主 JS 面板的 onchange="apply('id',
-		// 'device',this.value)" 生效，此前依赖此处手动执行，现钩子接管）。
-		// 用户选择了 option → user validity 置位。
-		bindings.MarkUserInteracted(sel)
-		sel.DispatchEvent(dom.NewEvent("change", true, false, false))
-	}
-}
-
-// itoa 整数转十进制。
-func itoa(v int) string {
-	if v == 0 {
-		return "0"
-	}
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	var buf [12]byte
-	pos := len(buf)
-	for v > 0 {
-		pos--
-		buf[pos] = byte('0' + v%10)
-		v /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return string(buf[pos:])
+	ApplySelectPopupOption(i.selectPopupSelect, el)
 }

@@ -88,12 +88,25 @@ func (i HTMLInputElement) Checked() bool {
 }
 
 // SetChecked sets the checked state.
+//
+// :checked 的匹配结果随之变化（`input:checked + .track::after` 开关滑块、
+// 勾选态配色），而属性是引擎直接改的（不经 JS setAttribute 那条自带失效的
+// 链路）→ 必须显式失效样式与渲染，否则 computed style 与画面停留在上一次
+// 状态。与 <details> 的 open、popover 的 open 同一条链路
+// （html5.InvalidateStyle，由 bindings 注入）。
+//
+// 无变化（c == Checked()）时不做任何事：radio 同组互斥会给一批组员设
+// false，其中多数已是 false，逐次失效纯属浪费。
 func (i HTMLInputElement) SetChecked(c bool) {
+	if c == i.Checked() {
+		return
+	}
 	if c {
 		i.El.SetAttribute("checked", "checked")
 	} else {
 		i.El.RemoveAttribute("checked")
 	}
+	invalidateState(i.El)
 }
 
 // DefaultChecked returns the default checked state from HTML.

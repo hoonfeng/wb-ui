@@ -129,6 +129,9 @@ func (s HTMLSelectElement) SetSelectedIndex(idx int) {
 			o.RemoveAttribute("selected")
 		}
 	}
+	// option[selected] 变了 → option:checked 的匹配结果与触发条显示值都变，
+	// 必须失效样式与渲染（与 checked 同一条链路）。
+	invalidateState(s.El)
 }
 
 // Value returns the value of the first selected option. For a selected option
@@ -203,6 +206,8 @@ func (s HTMLSelectElement) SetValue(v string) {
 			o.RemoveAttribute("selected")
 		}
 	}
+	// 选中项变化 → option:checked 的匹配结果变化（同 checked 链路）。
+	invalidateState(s.El)
 }
 
 // WillValidate reports whether the select participates in validation.
@@ -311,6 +316,8 @@ func (o HTMLOptionElement) SetSelected(s bool) {
 	} else {
 		o.El.RemoveAttribute("selected")
 	}
+	// option:checked 的匹配结果变化（同 checked 链路）。
+	invalidateState(o.El)
 }
 
 // DefaultSelected reports the selected attribute as set in HTML.
