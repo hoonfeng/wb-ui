@@ -6,6 +6,7 @@
 package rendering
 
 import (
+	"math"
 	"testing"
 
 	"wb-ui/engine/dom"
@@ -68,19 +69,21 @@ func resolveWithUA(t *testing.T, src, sel string) *style.ComputedStyle {
 
 func TestUAStyleHeadingFontSize(t *testing.T) {
 	cs := resolveWithUA(t, `<html><body><h1>Title</h1><h6>small</h6></body></html>`, "h1")
-	// UA stylesheet declares font-size:2em; the computed style keeps the
-	// relative unit, and the layout engine resolves it against the parent
-	// font-size (16px × 2 = 32px). Verify the declaration was applied.
-	if cs.FontSize.Value != 2 || cs.FontSize.Unit != "em" {
-		t.Errorf("h1 font-size = %v, want 2em (UA default)", cs.FontSize)
+	// UA stylesheet declares font-size:2em. The **computed value of font-size
+	// is an absolute length** (CSS Fonts §3.1), so the resolver normalizes it
+	// to px against the parent's computed font-size (initial 16px × 2 = 32px).
+	// Keeping the raw "2em" here used to make the painter draw the heading at
+	// 2px (painter.toGraphicsFont read .Value as px) while layout used 32px.
+	if cs.FontSize.Value != 32 || cs.FontSize.Unit != "px" {
+		t.Errorf("h1 font-size = %v, want 32px (2em resolved against 16px)", cs.FontSize)
 	}
 	if cs.FontWeight != "bold" {
 		t.Errorf("h1 font-weight = %q, want bold", cs.FontWeight)
 	}
 
 	cs6 := resolveWithUA(t, `<html><body><h1>Title</h1><h6>small</h6></body></html>`, "h6")
-	if cs6.FontSize.Unit != "em" || cs6.FontSize.Value != 0.67 {
-		t.Errorf("h6 font-size = %v, want 0.67em (UA default)", cs6.FontSize)
+	if cs6.FontSize.Unit != "px" || math.Abs(cs6.FontSize.Value-10.72) > 0.001 {
+		t.Errorf("h6 font-size = %v, want 10.72px (0.67em resolved against 16px)", cs6.FontSize)
 	}
 }
 
