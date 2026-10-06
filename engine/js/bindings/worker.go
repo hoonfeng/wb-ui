@@ -46,8 +46,10 @@ func currentWorkerScriptFetcher() worker.ScriptFetcher {
 func installWorker(rt *jsc.Interpreter, g *jsc.JSObject) {
 	// MessageEvent（worker / 消息类事件的标准事件接口）。
 	g.Set("MessageEvent", jsc.FunctionValue(rt.NewConstructor("MessageEvent",
-		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			// ★ 第 19 轮：返回 this（原型链 MessageEvent → Event）→
+			// `new MessageEvent("message") instanceof MessageEvent` 成立。
+			ev := domCtorThis(in, thisVal, domIfaceProto("MessageEvent"))
 			ev.SetClassName("MessageEvent")
 			evType := "message"
 			if len(args) >= 1 && args[0].Export() != nil {

@@ -38,7 +38,7 @@ type htmlElementInterface struct {
 	// name 全局构造器名（HTMLDivElement 等）。
 	name string
 	// tags 该接口对应的标签名（小写）。一个接口可对应多个标签
-	//（HTMLHeadingElement → h1..h6；HTMLTableSectionElement → thead/tbody/tfoot）。
+	// （HTMLHeadingElement → h1..h6；HTMLTableSectionElement → thead/tbody/tfoot）。
 	tags []string
 }
 
@@ -127,6 +127,9 @@ var htmlElementInterfaces = []htmlElementInterface{
 	// 画布与交互
 	{name: "HTMLCanvasElement", tags: []string{"canvas"}},
 	{name: "HTMLDetailsElement", tags: []string{"details"}},
+	// ★ 第 19 轮：HTMLSummaryElement（HTML §4.11.2）。<summary> 此前落到
+	// HTMLUnknownElement.prototype → `summary instanceof HTMLSummaryElement` 不成立。
+	{name: "HTMLSummaryElement", tags: []string{"summary"}},
 	{name: "HTMLDialogElement", tags: []string{"dialog"}},
 
 	// 兜底：无对应接口的未知标签（<foo>）。自定义元素（名称含 '-'）在浏览器里
@@ -240,7 +243,7 @@ func registerHTMLElementTypes(rt *jsc.Interpreter, g *jsc.JSObject, htmlElementP
 //
 // 返回 nil 表示无可用分派（调用方回退到 Element.prototype）。
 // 分派顺序：具体接口 → SVG 专属标签 → 自定义元素（HTMLElement）→ 未知标签
-//（HTMLUnknownElement）。<video>/<audio> 由 mediaElementPrototypeFor 处理，
+// （HTMLUnknownElement）。<video>/<audio> 由 mediaElementPrototypeFor 处理，
 // 本函数不涉及（表内已排除，避免覆盖媒体元素方法）。
 func htmlElementPrototypeFor(el *dom.Element) *jsc.JSObject {
 	if el == nil {
@@ -252,6 +255,17 @@ func htmlElementPrototypeFor(el *dom.Element) *jsc.JSObject {
 		return nil
 	}
 	tag := el.LocalName()
+	// ★ 第 19 轮：SVG / MathML 专属标签优先分派到**具体接口**原型
+	// （SVGSVGElement/SVGPathElement/SVGTextElement/SVGImageElement/SVGUseElement/
+	// SVGForeignObjectElement/MathMLElement）。此前所有 SVG 标签共用
+	// SVGElement.prototype → `svg instanceof SVGSVGElement` 不成立。
+	// 命名空间仍是小写标签名启发式（本文件顶部 svgOwnedTags 的既有局限）。
+	if p := svgElementProtoForTag(tag); p != nil {
+		return p
+	}
+	if p := mathMLElementProtoForTag(tag); p != nil {
+		return p
+	}
 	if p := htmlProtoByTag[tag]; p != nil {
 		return p
 	}

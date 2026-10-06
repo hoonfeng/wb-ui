@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>DOM 接口构造器与 prototype 链（第 19 轮）</title>
+<style>body{font:13px monospace;margin:8px} #out{white-space:pre-wrap}</style>
+</head>
+<body>
+<div id="host"></div>
+<pre id="out"></pre>
+<script>
+(function () {
+  var L = [];
+  function p(k, v) { L.push(k + "=" + v); }
+  function T(k, fn) { try { p(k, fn()); } catch (e) { p(k, "THROW"); } }
+  function bn(v) { return v ? "true" : "false"; }
+  var W = window;
+
+  // ── 1. 构造器存在性（I 组 DOM 核心 / F 组事件 / H 组 SVG+MathML / G 组 summary）──
+  var CTORS = [
+    "Node","NodeList","Element","Attr","NamedNodeMap","HTMLCollection","DOMTokenList",
+    "Document","HTMLDocument","DocumentFragment","ShadowRoot","Text","Comment","CharacterData",
+    "CDATASection","ProcessingInstruction","DocumentType","XMLDocument","DOMImplementation",
+    "Range","Selection","DOMParser","XMLSerializer","TreeWalker","NodeIterator",
+    "DOMRect","DOMRectList","DOMRectReadOnly",
+    "EventTarget","Event","UIEvent","MouseEvent","PointerEvent","KeyboardEvent","InputEvent",
+    "WheelEvent","DragEvent","FocusEvent","TouchEvent","ClipboardEvent","AnimationEvent",
+    "TransitionEvent","ErrorEvent","CustomEvent","MessageEvent","SubmitEvent",
+    "SVGElement","SVGSVGElement","SVGGraphicsElement","SVGGeometryElement","SVGPathElement",
+    "SVGTextElement","SVGImageElement","SVGUseElement","SVGForeignObjectElement","MathMLElement",
+    "HTMLElement","HTMLHtmlElement","HTMLBodyElement","HTMLDivElement",
+    "HTMLDetailsElement","HTMLDialogElement"
+  ];
+  var miss = [];
+  for (var i = 0; i < CTORS.length; i++) {
+    if (typeof W[CTORS[i]] !== "function") { miss.push(CTORS[i]); }
+  }
+  p("ctor_missing", miss.length ? miss.join("|") : "NONE");
+
+  // ── 2. new X() instanceof X（仅双方都可构造的接口）──
+  function make(C, args) { return new (Function.prototype.bind.apply(C, [null].concat(args)))(); }
+  var NEWABLE = [
+    ["Event", ["x"]], ["CustomEvent", ["x"]], ["UIEvent", ["x"]], ["MouseEvent", ["x"]],
+    ["PointerEvent", ["x"]], ["KeyboardEvent", ["x"]], ["InputEvent", ["x"]], ["WheelEvent", ["x"]],
+    ["DragEvent", ["x"]], ["FocusEvent", ["x"]], ["TouchEvent", ["x"]], ["ClipboardEvent", ["x"]],
+    ["AnimationEvent", ["x"]], ["TransitionEvent", ["x"]], ["ErrorEvent", ["x"]],
+    ["PopStateEvent", ["x"]], ["HashChangeEvent", ["x"]],
+    ["PageTransitionEvent", ["x"]], ["StorageEvent", ["x"]], ["SubmitEvent", ["x"]],
+    ["MessageEvent", ["x"]],
+    ["DOMParser", []], ["XMLSerializer", []], ["Range", []], ["DOMRect", []], ["DOMRectReadOnly", []],
+    ["Document", []], ["DocumentFragment", []],
+    ["Text", ["t"]], ["Comment", ["c"]]
+  ];
+  var notNew = [];
+  for (var j = 0; j < NEWABLE.length; j++) {
+    var nm = NEWABLE[j][0];
+    try {
+      var obj = make(W[nm], NEWABLE[j][1]);
+      if (!(obj instanceof W[nm])) { notNew.push(nm); }
+    } catch (e) { notNew.push(nm + "?throw"); }
+  }
+  p("new_instanceof_fail", notNew.length ? notNew.join("|") : "NONE");
+
+  // ── 3. prototype 链（父接口）──
+  //    注：NodeList/HTMLCollection/DOMRectList 的父原型在本引擎是有意偏差
+  //    （指向 Array.prototype 以保留数组方法），故不在此对比。
+  var LINKS = [
+    ["HTMLDocument", "Document"], ["XMLDocument", "Document"], ["Document", "Node"],
+    ["Element", "Node"], ["HTMLElement", "Element"], ["HTMLDivElement", "HTMLElement"],
+    ["SVGElement", "Element"],
+    ["SVGSVGElement", "SVGGraphicsElement"], ["SVGGraphicsElement", "SVGElement"],
+    ["SVGPathElement", "SVGGeometryElement"], ["SVGGeometryElement", "SVGGraphicsElement"],
+    ["SVGUseElement", "SVGGraphicsElement"],
+    ["MathMLElement", "Element"],
+    ["Text", "CharacterData"], ["Comment", "CharacterData"], ["CDATASection", "Text"],
+    ["ProcessingInstruction", "CharacterData"], ["CharacterData", "Node"],
+    ["Attr", "Node"], ["DocumentFragment", "Node"], ["ShadowRoot", "DocumentFragment"],
+    ["DocumentType", "Node"],
+    ["UIEvent", "Event"], ["MouseEvent", "UIEvent"], ["PointerEvent", "MouseEvent"],
+    ["WheelEvent", "MouseEvent"], ["KeyboardEvent", "UIEvent"], ["InputEvent", "UIEvent"],
+    ["FocusEvent", "UIEvent"], ["DragEvent", "MouseEvent"], ["TouchEvent", "UIEvent"],
+    ["CustomEvent", "Event"], ["MessageEvent", "Event"], ["ErrorEvent", "Event"],
+    ["ToggleEvent", "Event"], ["ClipboardEvent", "Event"],
+    ["DOMRect", "DOMRectReadOnly"],
+    ["DOMTokenList", "Object"], ["Selection", "Object"], ["NodeIterator", "Object"],
+    ["TreeWalker", "Object"], ["EventTarget", "Object"], ["DOMImplementation", "Object"]
+  ];
+  var badLink = [];
+  for (var k = 0; k < LINKS.length; k++) {
+    var a = W[LINKS[k][0]];
+    var bProto = (LINKS[k][1] === "Object") ? Object.prototype : (W[LINKS[k][1]] && W[LINKS[k][1]].prototype);
+    if (typeof a !== "function" || !bProto) { badLink.push(LINKS[k][0] + "?undef"); continue; }
+    if (Object.getPrototypeOf(a.prototype) !== bProto) { badLink.push(LINKS[k][0] + "->" + LINKS[k][1]); }
+  }
+  p("proto_mismatch", badLink.length ? badLink.join("|") : "NONE");
+
+  // ── 4. 真实实例 instanceof ──
+  var host = document.getElementById("host");
+  var div = document.createElement("div");
+  var summary = document.createElement("summary");
+  var svgNS = "http://www.w3.org/2000/svg";
+  var mathNS = "http://www.w3.org/1998/Math/MathML";
+  var svg = document.createElementNS(svgNS, "svg");
+  var path = document.createElementNS(svgNS, "path");
+  var math = document.createElementNS(mathNS, "math");
+  var txt = document.createTextNode("x");
+  var cm = document.createComment("c");
+  var frag = document.createDocumentFragment();
+  var rng = document.createRange();
+  var walker = document.createTreeWalker(host);
+  var iter = document.createNodeIterator(host);
+  var sel = document.getSelection();
+  var impl = document.implementation;
+  var shadow = host.attachShadow({ mode: "open" });
+  var xmlDoc = new DOMParser().parseFromString("<root/>", "text/xml");
+
+  function is(obj, iface) {
+    var C = W[iface];
+    if (typeof C !== "function") { return "noctor"; }
+    try { return bn(obj instanceof C); } catch (e) { return "THROW"; }
+  }
+  p("inst_document", [is(document, "Document"), is(document, "HTMLDocument"), is(document, "Node")].join(","));
+  p("inst_div", [is(div, "HTMLDivElement"), is(div, "HTMLElement"), is(div, "Element"), is(div, "Node")].join(","));
+  p("inst_svg", [is(svg, "SVGSVGElement"), is(svg, "SVGGraphicsElement"), is(svg, "SVGElement"), is(svg, "Element")].join(","));
+  p("inst_path", [is(path, "SVGPathElement"), is(path, "SVGGeometryElement"), is(path, "SVGGraphicsElement")].join(","));
+  p("inst_math", [is(math, "MathMLElement"), is(math, "Element")].join(","));
+  p("inst_text", [is(txt, "Text"), is(txt, "CharacterData"), is(txt, "Node")].join(","));
+  p("inst_comment", [is(cm, "Comment"), is(cm, "CharacterData")].join(","));
+  p("inst_frag", [is(frag, "DocumentFragment"), is(frag, "Node")].join(","));
+  p("inst_range", is(rng, "Range"));
+  p("inst_walker", is(walker, "TreeWalker"));
+  p("inst_iter", is(iter, "NodeIterator"));
+  p("inst_sel", is(sel, "Selection"));
+  p("inst_impl", is(impl, "DOMImplementation"));
+  p("inst_shadow", [is(shadow, "ShadowRoot"), is(shadow, "DocumentFragment"), is(shadow, "Node")].join(","));
+  p("inst_xmldoc", [is(xmlDoc, "XMLDocument"), is(xmlDoc, "Document")].join(","));
+  p("inst_forms", is(document.forms, "HTMLCollection"));
+  p("inst_classlist", is(div.classList, "DOMTokenList"));
+  p("inst_qsa", is(host.querySelectorAll("div"), "NodeList"));
+  p("inst_children", is(host.children, "HTMLCollection"));
+  p("inst_childnodes", is(host.childNodes, "NodeList"));
+  p("inst_rects", is(host.getClientRects(), "DOMRectList"));
+  p("inst_bcr", [is(host.getBoundingClientRect(), "DOMRect"), is(host.getBoundingClientRect(), "DOMRectReadOnly")].join(","));
+  p("inst_attrs", is(host.attributes, "NamedNodeMap"));
+  p("inst_getelements", is(document.getElementsByTagName("div"), "HTMLCollection"));
+
+  // ── 5. 由构造器产生的实例 ──
+  var eEv = make(W.Event, ["x"]);
+  var eMouse = make(W.MouseEvent, ["x"]);
+  var ePointer = make(W.PointerEvent, ["x"]);
+  p("inst_event", [is(eEv, "Event"), is(eEv, "UIEvent")].join(","));
+  p("inst_mouse", [is(eMouse, "MouseEvent"), is(eMouse, "UIEvent"), is(eMouse, "Event")].join(","));
+  p("inst_pointer", [is(ePointer, "PointerEvent"), is(ePointer, "MouseEvent"), is(ePointer, "UIEvent")].join(","));
+  p("inst_wheel", is(make(W.WheelEvent, ["x"]), "MouseEvent"));
+  p("inst_keyboard", is(make(W.KeyboardEvent, ["x"]), "UIEvent"));
+  p("inst_input", is(make(W.InputEvent, ["x"]), "UIEvent"));
+  p("inst_custom", is(make(W.CustomEvent, ["x"]), "Event"));
+  p("inst_submit", [is(make(W.SubmitEvent, ["x"]), "SubmitEvent"), is(make(W.SubmitEvent, ["x"]), "Event")].join(","));
+
+  // ── 6. 派发路径的实例身份（引擎产生的事件对象）──
+  var seen = "none";
+  host.addEventListener("click", function (e) {
+    seen = [bn(e instanceof W.MouseEvent), bn(e instanceof W.UIEvent), bn(e instanceof W.Event), e.constructor.name].join(",");
+  });
+  host.dispatchEvent(new W.MouseEvent("click", { bubbles: true }));
+  p("dispatch_click", seen);
+
+  // ── 7. constructor.name ──
+  p("cn_document", document.constructor.name);
+  p("cn_div", div.constructor.name);
+  p("cn_svg", svg.constructor.name);
+  p("cn_path", path.constructor.name);
+  p("cn_math", math.constructor.name);
+  p("cn_text", txt.constructor.name);
+  p("cn_comment", cm.constructor.name);
+  p("cn_frag", frag.constructor.name);
+  p("cn_range", rng.constructor.name);
+  p("cn_walker", walker.constructor.name);
+  p("cn_iter", iter.constructor.name);
+  p("cn_sel", sel.constructor.name);
+  p("cn_impl", impl.constructor.name);
+  p("cn_shadow", shadow.constructor.name);
+  p("cn_xmldoc", xmlDoc.constructor.name);
+  p("cn_event", eEv.constructor.name);
+  p("cn_mouse", eMouse.constructor.name);
+  p("cn_pointer", ePointer.constructor.name);
+  p("cn_rect", host.getBoundingClientRect().constructor.name);
+
+  // ── 8. XMLSerializer（可用的实例能力）──
+  var ser = new W.XMLSerializer();
+  var el2 = document.createElement("div");
+  el2.setAttribute("id", "a");
+  el2.appendChild(document.createElement("span"));
+  var s = ser.serializeToString(el2);
+  p("xmlser_type", typeof s);
+  p("xmlser_has_span", bn(s.indexOf("span") >= 0));
+  p("xmlser_has_id", bn(s.indexOf("id") >= 0));
+
+  // ── 9. NodeIterator / Selection / DOMImplementation 实例 API ──
+  p("iter_api", [typeof iter.nextNode, typeof iter.previousNode, typeof iter.detach, String(iter.whatToShow)].join(","));
+  p("iter_ref_root", iter.referenceNode === host ? "true" : "false");
+  p("impl_api", [typeof impl.createHTMLDocument, typeof impl.createDocumentType, typeof impl.hasFeature].join(","));
+  p("sel_api", [typeof sel.getRangeAt, typeof sel.addRange, typeof sel.removeAllRanges, String(sel.rangeCount)].join(","));
+
+  document.getElementById("out").textContent = L.join("\n");
+})();
+</script>
+</body>
+</html>

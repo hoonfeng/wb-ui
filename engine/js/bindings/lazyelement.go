@@ -60,7 +60,7 @@ var elemAccessorProps = map[string]bool{
 	// isConnected 是活值（节点进出文档树就变），必须每次求值（第 18 次监督轮：
 	// 它同时从「方法」纠正为布尔属性，见 installElementProperty 的 case）。
 	"isConnected": true,
-	"scrollTop": true, "scrollLeft": true, "scrollHeight": true, "scrollWidth": true,
+	"scrollTop":   true, "scrollLeft": true, "scrollHeight": true, "scrollWidth": true,
 	"clientHeight": true, "clientWidth": true, "offsetHeight": true, "offsetWidth": true,
 	"offsetTop": true, "offsetLeft": true,
 	"value": true, "checked": true, "type": true, "disabled": true,
@@ -73,7 +73,7 @@ var elemAccessorProps = map[string]bool{
 	// baseURI：文档基准（document.baseURI）随时可能因导航或 <base href> 变化，
 	// 活值——适配器层缓存住就会读到过期 URL。
 	"baseURI": true,
-	"id": true, "className": true, "title": true, "src": true, "hidden": true,
+	"id":      true, "className": true, "title": true, "src": true, "hidden": true,
 	"attributes": true, "innerHTML": true, "outerHTML": true, "textContent": true, "content": true,
 	"onclick": true,
 	"track":   true, "textTracks": true,
@@ -85,7 +85,7 @@ var elemAccessorProps = map[string]bool{
 	// 改变 `:popover-open` 与 UA 的 display 规则），invoker 的四个属性则实时
 	// 反射到属性值。不登记就会踩「第一次读是 null，之后 setAttribute 也读到
 	// 旧的 null」的缓存坑（popover 属性的 getter 返回值随属性变化）。
-	"popover": true,
+	"popover":              true,
 	"popoverTargetElement": true, "popoverTargetAction": true,
 	"command": true, "commandForElement": true,
 	// Element 侧属性收口（第 16 次监督轮 · 批 A）：反射属性一律是活值——
@@ -349,6 +349,9 @@ var (
 		"clientHeight", "clientWidth", "offsetHeight", "offsetWidth", "offsetTop", "offsetLeft",
 		"onclick",
 		"getBoundingClientRect", "getClientRects", "scrollIntoView",
+		// ★ 第 19 轮：类别① 收口方法（实现在 elemdomapi.go 的 Element.prototype）。
+		"scrollIntoViewIfNeeded", "checkVisibility", "setHTML", "scroll",
+		"setPointerCapture", "releasePointerCapture", "hasPointerCapture",
 		"remove", "focus", "blur",
 		"value", "checked", "type", "disabled",
 		// indeterminate 是 input 的 IDL 状态（:indeterminate 读它），必须
@@ -424,7 +427,7 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 	//   div.constructor === HTMLDivElement
 	//   div.constructor.name === "HTMLDivElement"
 	// 此前这里返回固定的 {name:"Element"} 假对象，会**拦截**原型链查找
-	//（handler.Get 返回非 undefined 即不再走原型链），导致所有元素的
+	// （handler.Get 返回非 undefined 即不再走原型链），导致所有元素的
 	// el.constructor.name 都误报 "Element"（库依赖它做元素类型分派的会走错分支）。
 
 	// ── Node tree ──
@@ -606,9 +609,10 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 		return jsc.FunctionValue(jsc.NewNativeFunction("querySelectorAll",
 			func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 				if len(args) == 0 {
-					return arrElem(in, nil)
+					return arrElemAs(in, nil, "NodeList")
 				}
-				return arrElem(in, ElementQuerySelectorAll(el, args[0].ToString()))
+				// ★ 第 19 轮：元素 querySelectorAll 同样返回 NodeList。
+				return arrElemAs(in, ElementQuerySelectorAll(el, args[0].ToString()), "NodeList")
 			}, 1)), nil, true
 	case "insertAdjacentHTML":
 		return jsc.FunctionValue(jsc.NewNativeFunction("insertAdjacentHTML",
@@ -688,7 +692,8 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 						els = append(els, e)
 					}
 				}
-				return arrElem(in, els)
+				// ★ 第 19 轮：children 是 HTMLCollection。
+				return arrElemAs(in, els, "HTMLCollection")
 			})(rt, jsc.JSValue{})
 		}}, true
 	case "childNodes":
@@ -844,44 +849,31 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 
 	// ── Position / dimension ──
 	case "getBoundingClientRect":
+		// ★ 第 19 轮：改用 makeDOMRect（DOMRect 接口原型）→
+		// `el.getBoundingClientRect() instanceof DOMRect / DOMRectReadOnly` 成立
+		// （与 Edge 一致；此前返回裸对象，constructor.name 为 "Object"）。
 		return jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",
 			func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-				r := jsc.NewObject(in.ObjectPrototype())
 				left, top, w, h := 0.0, 0.0, 0.0, 0.0
 				if GetElementBoxRect != nil {
 					left, top, w, h = GetElementBoxRect(el)
 				}
-				r.Set("x", jsc.NumberValue(left))
-				r.Set("y", jsc.NumberValue(top))
-				r.Set("width", jsc.NumberValue(w))
-				r.Set("height", jsc.NumberValue(h))
-				r.Set("top", jsc.NumberValue(top))
-				r.Set("right", jsc.NumberValue(left+w))
-				r.Set("bottom", jsc.NumberValue(top+h))
-				r.Set("left", jsc.NumberValue(left))
-				return jsc.ObjectValue(r)
+				return jsc.ObjectValue(makeDOMRect(in, left, top, w, h))
 			}, 0)), nil, true
 	case "getClientRects":
-		// 浏览器标准返回元素边框矩形的数组（[1 个 rect]）。CM6 的
+		// 浏览器标准：返回元素边框矩形的列表（通常 1 个 rect）。CM6 的
 		// clientRectsFor(元素) 用它取行内 span 的宽度/高度。
+		// ★ 第 19 轮：容器为 DOMRectList、元素为 DOMRect（规范返回类型，
+		// 此前是裸数组 + 裸对象）。
 		return jsc.FunctionValue(jsc.NewNativeFunction("getClientRects",
 			func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 				left, top, w, h := 0.0, 0.0, 0.0, 0.0
 				if GetElementBoxRect != nil {
 					left, top, w, h = GetElementBoxRect(el)
 				}
-				r := jsc.NewObject(in.ObjectPrototype())
-				r.Set("x", jsc.NumberValue(left))
-				r.Set("y", jsc.NumberValue(top))
-				r.Set("width", jsc.NumberValue(w))
-				r.Set("height", jsc.NumberValue(h))
-				r.Set("top", jsc.NumberValue(top))
-				r.Set("right", jsc.NumberValue(left+w))
-				r.Set("bottom", jsc.NumberValue(top+h))
-				r.Set("left", jsc.NumberValue(left))
-				arr := jsc.NewArray(in.ObjectPrototype(), []jsc.JSValue{jsc.ObjectValue(r)})
-				arr.Set("length", jsc.NumberValue(1))
-				return jsc.ObjectValue(arr)
+				return jsc.ObjectValue(wrapDOMRectList(in, []jsc.JSValue{
+					jsc.ObjectValue(makeDOMRect(in, left, top, w, h)),
+				}))
 			}, 0)), nil, true
 	case "scrollIntoView":
 		return jsc.FunctionValue(jsc.NewNativeFunction("scrollIntoView",
@@ -1251,7 +1243,7 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				}
 				if ctype != "2d" {
 					// WebGL / bitmaprenderer 尚未支持（v1）：返回 null
-					//（浏览器对不支持的类型返回 null，调用方需自理）。
+					// （浏览器对不支持的类型返回 null，调用方需自理）。
 					return jsc.Null()
 				}
 				return canvas2DGetContext(in, el)

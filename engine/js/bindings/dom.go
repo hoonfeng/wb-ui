@@ -441,9 +441,10 @@ func normalizeLineHeightComputed(lh, fontSize string) string {
 // backgroundPosition / backgroundSize 三项重复——保留重复以保证与优化前
 // 行为逐字一致：重复项只是重复写同一个键/属性，无副作用）。
 // ★ H5：末尾追加 scrollbarGutter —— scrollbar-gutter 的 computed 值。
-//   注意 H4 已把 scrollbar-gutter 纳入**已知 CSS 属性表**，但 getComputedStyle
-//   的输出白名单是**独立**的一张表，两者都要有（H6 踩过同一坑：初始值表只对
-//   白名单属性生效）。
+//
+//	注意 H4 已把 scrollbar-gutter 纳入**已知 CSS 属性表**，但 getComputedStyle
+//	的输出白名单是**独立**的一张表，两者都要有（H6 踩过同一坑：初始值表只对
+//	白名单属性生效）。
 //
 // ★ 为什么提到包级：该回写循环对**每次** getComputedStyle 调用都执行，原先
 //
@@ -487,6 +488,10 @@ var borderWidthLonghandProps = []struct{ longhand, prop string }{
 }
 
 func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
+	// ★ 第 19 轮：接口原型注册表按 runtime 隔离 —— 见 domctors.go 的
+	// resetAndAdoptDOMRegistry（跨 rt 复用 prototype 会被 goja 拒绝 "Illegal
+	// runtime transition of an Object"，导致 document 挂不上全局）。
+	resetAndAdoptDOMRegistry(rt, rt.GlobalObject())
 	// ★ 保存 interpreter：InsertTextAtSelection 插入后重建 selection
 	// range 需要（makeSelRange 用 rt.ObjectPrototype）。
 	sstate.rt = rt
@@ -526,13 +531,18 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 直接抛 "Object has no member 'getSelection'"。因此 Selection
 	// 单例必须在幂等分支之前创建，且两处 docObj 都需挂 getSelection。
 	// sstate 为包级（见文件尾部附近定义），供 InsertTextAtSelection 使用。
-	selObj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：Selection 接口原型（`document.getSelection() instanceof Selection`）。
+	selObj := jsc.NewObject(domIfaceProtoOr("Selection", rt.ObjectPrototype()))
+	selObj.SetClassName("Selection")
 	selObj.Set("anchorNode", jsc.Null())
 	selObj.Set("anchorOffset", jsc.NumberValue(0))
 	selObj.Set("focusNode", jsc.Null())
 	selObj.Set("focusOffset", jsc.NumberValue(0))
 	selObj.Set("isCollapsed", jsc.BooleanValue(true))
 	selObj.Set("type", jsc.StringValue("None"))
+	// ★ 第 19 轮：rangeCount 初值（规范：无 Range 时为 0；此前只在 addRange/
+	// removeAllRanges 时才设置 → 初始读取得到 undefined，与浏览器不一致）。
+	selObj.Set("rangeCount", jsc.NumberValue(0))
 	// ★ 保存 Selection 单例：updateRangeForInsert 插入后需同步
 	// anchorNode/focusNode 等字段（CM6 的 DOMObserver 直接读这些字段，
 	// 而非 getRangeAt）——不同步则读到旧光标位置，IME 输入后光标不后移。
@@ -783,7 +793,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	docFragProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	attrProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	// <video>/<audio> 包装器使用 HTMLVideoElement/HTMLAudioElement 原型
-	//（→ HTMLMediaElement → HTMLElement），因此 `video instanceof HTMLMediaElement`
+	// （→ HTMLMediaElement → HTMLElement），因此 `video instanceof HTMLMediaElement`
 	// 成立、且媒体方法仍在原型链上可达。
 	if domMediaProto != nil {
 		domMediaProto.Set("__proto__", jsc.ObjectValue(htmlElementProto))
@@ -1488,7 +1498,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// Event 基类构造函数
 	g.Set("Event", jsc.FunctionValue(rt.NewConstructor("Event",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（goja 按 Event.prototype 构造），使
+			// `new Event('x') instanceof Event` 与 ev.constructor.name 成立。
+			ev := domCtorThis(in, thisVal, domIfaceProto("Event"))
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("bubbles", jsc.BooleanValue(false))
 			ev.Set("cancelable", jsc.BooleanValue(false))
@@ -1534,7 +1546,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// MouseEvent 构造函数
 	g.Set("MouseEvent", jsc.FunctionValue(rt.NewConstructor("MouseEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（原型链 MouseEvent → UIEvent → Event）。
+			ev := domCtorThis(in, thisVal, domIfaceProto("MouseEvent"))
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("bubbles", jsc.BooleanValue(false))
 			ev.Set("cancelable", jsc.BooleanValue(false))
@@ -1580,7 +1593,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 也用于测试/无障碍滚动）。字段含 deltaX/deltaY/deltaZ/deltaMode。
 	g.Set("WheelEvent", jsc.FunctionValue(rt.NewConstructor("WheelEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（原型链 WheelEvent → MouseEvent → UIEvent → Event）。
+			ev := domCtorThis(in, thisVal, domIfaceProto("WheelEvent"))
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("bubbles", jsc.BooleanValue(false))
 			ev.Set("cancelable", jsc.BooleanValue(false))
@@ -1630,7 +1644,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// KeyboardEvent 构造函数
 	g.Set("KeyboardEvent", jsc.FunctionValue(rt.NewConstructor("KeyboardEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（原型链 KeyboardEvent → UIEvent → Event）。
+			ev := domCtorThis(in, thisVal, domIfaceProto("KeyboardEvent"))
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("bubbles", jsc.BooleanValue(false))
 			ev.Set("cancelable", jsc.BooleanValue(false))
@@ -1674,7 +1689,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// CustomEvent 构造函数
 	g.Set("CustomEvent", jsc.FunctionValue(rt.NewConstructor("CustomEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（原型链 CustomEvent → Event）。
+			ev := domCtorThis(in, thisVal, domIfaceProto("CustomEvent"))
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("detail", jsc.Null())
 			ev.Set("bubbles", jsc.BooleanValue(false))
@@ -1706,7 +1722,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 属性初值按 IDL：oldState/newState 是空串、source 是 null。
 	g.Set("ToggleEvent", jsc.FunctionValue(rt.NewConstructor("ToggleEvent",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			ev := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（原型链 ToggleEvent → Event）。
+			ev := domCtorThis(in, thisVal, domIfaceProto("ToggleEvent"))
 			ev.SetClassName("ToggleEvent")
 			ev.Set("type", jsc.StringValue(""))
 			ev.Set("oldState", jsc.StringValue(""))
@@ -1959,7 +1976,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	domParserDoc := document // capture for closures
 	g.Set("DOMParser", jsc.FunctionValue(rt.NewConstructor("DOMParser",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			obj := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（`new DOMParser() instanceof DOMParser`）。
+			obj := domCtorThis(in, thisVal, domIfaceProto("DOMParser"))
 			obj.Set("parseFromString", jsc.FunctionValue(jsc.NewNativeFunction("parseFromString",
 				func(interp *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 					if len(a) < 2 {
@@ -1968,7 +1986,16 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					html := a[0].ToString()
 					div := domParserDoc.CreateElement("div")
 					div.SetInnerHTML(html)
-					mockDoc := jsc.NewObject(interp.ObjectPrototype())
+					// ★ 第 19 轮：产物接口按 MIME 决定 —— text/html → HTMLDocument，
+					// 其余（text/xml、application/xml、image/svg+xml…）→ XMLDocument
+					// （DOM §4.5），因此 `p.parseFromString(s,"text/xml") instanceof
+					// XMLDocument` 成立。
+					iface := "HTMLDocument"
+					if mime := a[1].ToString(); strings.Contains(mime, "xml") {
+						iface = "XMLDocument"
+					}
+					mockDoc := jsc.NewObject(domIfaceProtoOr(iface, interp.ObjectPrototype()))
+					mockDoc.SetClassName(iface)
 					wrappedDiv := wrapElement(interp, div)
 					mockDoc.Set("documentElement", jsc.ObjectValue(wrappedDiv))
 					mockDoc.Set("body", jsc.ObjectValue(wrappedDiv))
@@ -2703,7 +2730,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// Range constructor
 	g.Set("Range", jsc.FunctionValue(rt.NewConstructor("Range",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
-			r := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 19 轮：返回 this（goja 按 Range.prototype 构造）→
+			// `new Range() instanceof Range` 成立。
+			r := domCtorThis(in, thisVal, domIfaceProto("Range"))
 			r.Set("startContainer", jsc.Null())
 			r.Set("startOffset", jsc.NumberValue(0))
 			r.Set("endContainer", jsc.Null())
@@ -2989,6 +3018,16 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// 得到 NaN → style.height="NaNpx" → 行高异常（310px）→ 终端内容
 	// 画到视口外（y≈918），用户看到终端空白。
 	applyCanvas2DPatch(rt)
+	// ★ 第 19 次监督轮：DOM 接口构造器族 + prototype 链（domctors.go）、
+	// Window 身份属性、atob/btoa、Audio/Option。必须在全部既有构造器
+	// （Node/Element/HTMLElement/SVGElement/Event 族/Range/DOMParser/
+	// MessageEvent/HTML*Element）注册完成之后调用 —— domAdoptIface 复用它们的
+	// prototype，domRegisterIface 注册本引擎此前缺失的接口（NodeList/
+	// Document/HTMLDocument/ShadowRoot/Selection/DOMRect 族/SVG 接口/事件子类…）。
+	registerDOMInterfaces(rt, g)
+	registerWindowIdentity(rt, g)
+	registerBase64Globals(rt, g)
+	registerExtraElementCtors(rt, g, document)
 	// 完整注册完成——打上幂等标记（后续调用仅刷新 document）。
 	rt.GlobalObject().Set(domBindingsMarker, jsc.BooleanValue(true))
 }
@@ -3124,6 +3163,24 @@ type ElementWrapper struct {
 // ─── Document ──────────────────────────────────────────
 
 func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
+	return wrapDocumentAs(rt, doc, "HTMLDocument")
+}
+
+// wrapDocumentAs 同 wrapDocument，但显式指定接口名（HTMLDocument / XMLDocument）。
+//
+// ★ 第 19 轮：主文档与 DOMImplementation.createHTMLDocument 的产物是
+// HTMLDocument，DOMParser.parseFromString(…, "application/xml") 与 createDocument
+// 的产物是 XMLDocument（DOM §4.5）。二者 prototype 链均为 → Document.prototype
+// → Node.prototype，所以 `document instanceof Document` 与
+// `document instanceof HTMLDocument` 同时成立。
+//
+// ★ 第 17 次监督轮：document 包装对象进 nodeWrapperCache —— 同一 *dom.Document
+// 必须只对应一个 JS 对象。否则 `doctype.parentNode === document`、
+// `documentElement.parentNode === document`、`el.ownerDocument === document`
+// 这些**身份**判断全部失败（库与夹具都用 === 判同一文档），且
+// DOMImplementation.createHTMLDocument 造出的第二个文档与它自己的节点也会
+// 各自拿到不同包装。
+func wrapDocumentAs(rt *jsc.Interpreter, doc *dom.Document, ifaceName string) *jsc.JSObject {
 	// ★ 第 17 次监督轮：document 包装对象进 nodeWrapperCache —— 同一 *dom.Document
 	// 必须只对应一个 JS 对象。否则 `doctype.parentNode === document`、
 	// `documentElement.parentNode === document`、`el.ownerDocument === document`
@@ -3133,8 +3190,8 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	if cached, ok := nodeWrapperCache[doc]; ok {
 		return cached
 	}
-	obj := jsc.NewObject(rt.ObjectPrototype())
-	obj.SetClassName("Document")
+	obj := jsc.NewObject(domIfaceProtoOr(ifaceName, rt.ObjectPrototype()))
+	obj.SetClassName(ifaceName)
 	obj.SetInternal(doc)
 
 	obj.Set("getElementById", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
@@ -3225,6 +3282,71 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 			}
 			return jsc.ObjectValue(wrapTreeWalker(in, dom.NewTreeWalker(root, what, filter)))
 		}, 3)))
+	// createNodeIterator（DOM §4.4）：此前只有 createTreeWalker，NodeIterator
+	// 接口因此没有实例。dom 层 engine/dom/nodeiterator.go 已完整移植，这里接线。
+	obj.Set("createNodeIterator", jsc.FunctionValue(jsc.NewNativeFunction("createNodeIterator",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) == 0 {
+				return jsc.Null()
+			}
+			root := unwrapNode(args[0])
+			if root == nil {
+				return jsc.Null()
+			}
+			what := uint32(dom.ShowAll)
+			if len(args) > 1 {
+				what = uint32(args[1].ToNumber())
+			}
+			var filter dom.NodeFilter
+			if len(args) > 2 && !args[2].IsNull() && !args[2].IsUndefined() {
+				if fo := args[2].AsObject(); fo != nil {
+					if af, ok := fo.GetByKey("acceptNode"); ok && !af.IsNull() && !af.IsUndefined() {
+						filter = dom.NodeFilterFunc(func(n dom.Node) dom.NodeFilterResult {
+							res, _ := in.Call(af, jsc.Undefined(), []jsc.JSValue{nodeToJS(in, n)})
+							return dom.NodeFilterResult(uint16(res.ToNumber()))
+						})
+					}
+				}
+			}
+			return jsc.ObjectValue(wrapNodeIterator(in, dom.NewNodeIterator(root, what, filter)))
+		}, 3)))
+	// caretRangeFromPoint / caretPositionFromPoint（CSSOM-View §7.3）：用同一套
+	// 层叠命中（ElementFromPoint）定位光标所在的元素，再给出该处的空 Range /
+	// CaretPosition。前端用它做「点击处插入光标」「拖拽落点」。
+	obj.Set("caretRangeFromPoint", jsc.FunctionValue(jsc.NewNativeFunction("caretRangeFromPoint",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if ElementFromPoint == nil || len(args) < 2 {
+				return jsc.Null()
+			}
+			el := ElementFromPoint(in, args[0].ToNumber(), args[1].ToNumber())
+			if el == nil {
+				return jsc.Null()
+			}
+			return jsc.ObjectValue(wrapRange(in, el, 0, el, 0))
+		}, 2)))
+	obj.Set("caretPositionFromPoint", jsc.FunctionValue(jsc.NewNativeFunction("caretPositionFromPoint",
+		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if ElementFromPoint == nil || len(args) < 2 {
+				return jsc.Null()
+			}
+			el := ElementFromPoint(in, args[0].ToNumber(), args[1].ToNumber())
+			if el == nil {
+				return jsc.Null()
+			}
+			cp := jsc.NewObject(in.ObjectPrototype())
+			cp.SetClassName("CaretPosition")
+			cp.Set("offsetNode", nodeToJS(in, el))
+			cp.Set("offset", jsc.NumberValue(0))
+			cp.Set("getClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getClientRect",
+				func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+					l, t, w, h := 0.0, 0.0, 0.0, 0.0
+					if GetElementBoxRect != nil {
+						l, t, w, h = GetElementBoxRect(el)
+					}
+					return jsc.ObjectValue(makeDOMRect(in, l, t, w, h))
+				}, 0)))
+			return jsc.ObjectValue(cp)
+		}, 2)))
 	obj.Set("createComment", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapComment(in, doc.CreateComment(arg)))
 	})))
@@ -3242,15 +3364,18 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 		return jsc.Null()
 	})))
 	obj.Set("querySelectorAll", funcVal(fn1(func(in *jsc.Interpreter, sel string) jsc.JSValue {
-		return arrElem(in, DocumentQuerySelectorAll(doc, sel))
+		// ★ 第 19 轮：querySelectorAll 返回 **NodeList**（规范类型）；
+		// 数组语义保留（NodeList.prototype → Array.prototype，见 domctors.go）。
+		return arrElemAs(in, DocumentQuerySelectorAll(doc, sel), "NodeList")
 	})))
 	obj.Set("getElementsByTagName", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		els := doc.GetElementsByTagName(arg)
-		return arrJS(in, els)
+		// ★ 第 19 轮：getElementsBy* 返回 **HTMLCollection**（规范类型）。
+		return arrElemAs(in, els, "HTMLCollection")
 	})))
 	obj.Set("getElementsByClassName", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		els := doc.GetElementsByClassName(arg)
-		return arrJS(in, els)
+		return arrElemAs(in, els, "HTMLCollection")
 	})))
 	obj.Set("addEventListener", jsc.FunctionValue(makeAddEventListener(doc)))
 	obj.Set("removeEventListener", jsc.FunctionValue(makeRemoveEventListener(doc)))
@@ -3334,7 +3459,7 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	// 做「已加载脚本扫描」（懒加载 / 去重注入）。沿用 getElementsByTagName 的
 	// 数组语义 —— HTMLCollection 构造器本身属 P1（覆盖矩阵 §二 B）。
 	obj.SetAccessor("scripts", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrJS(in, doc.GetElementsByTagName("script"))
+		return arrElemAs(in, doc.GetElementsByTagName("script"), "HTMLCollection")
 	}), nil)
 	// document.styleSheets（CSSOM §document.styleSheets）：StyleSheetList。包含
 	// <style> 提取的与运行时注入的样式表（后者正是插件 CSS 的通道）。
@@ -4162,7 +4287,9 @@ func nodeToJS(in *jsc.Interpreter, n dom.Node) jsc.JSValue {
 
 // makeDOMRect 创建一个 DOMRect 对象。
 func makeDOMRect(in *jsc.Interpreter, x, y, w, h float64) *jsc.JSObject {
-	r := jsc.NewObject(in.ObjectPrototype())
+	// ★ 第 19 轮：DOMRect 接口原型（getBoundingClientRect / IntersectionObserver
+	// entry 的 boundingClientRect 等据此满足 instanceof DOMRect / DOMRectReadOnly）。
+	r := jsc.NewObject(domIfaceProtoOr("DOMRect", in.ObjectPrototype()))
 	r.Set("x", jsc.NumberValue(x))
 	r.Set("y", jsc.NumberValue(y))
 	r.Set("width", jsc.NumberValue(w))
@@ -4311,7 +4438,8 @@ func wrapElement(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 // ─── classList ──────────────────────────────────────────
 
 func makeClassList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
-	cls := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：classList 是 DOMTokenList（`el.classList instanceof DOMTokenList`）。
+	cls := jsc.NewObject(domIfaceProtoOr("DOMTokenList", rt.ObjectPrototype()))
 	get := func() []string { return strings.Fields(el.GetClassName()) }
 	set := func(c []string) {
 		el.SetClassName(strings.Join(c, " "))
@@ -4725,7 +4853,7 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 		return jsc.NumberValue(float64(n))
 	}), nil)
 	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrElem(in, elementChildrenOf(frag))
+		return arrElemAs(in, elementChildrenOf(frag), "HTMLCollection")
 	}), nil)
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(frag.TextContent()) }),
@@ -4790,7 +4918,8 @@ func wrapDocFrag(rt *jsc.Interpreter, frag *dom.DocumentFragment) *jsc.JSObject 
 
 // wrapShadowRoot 包装 dom.ShadowRoot 为 JS 对象（最小实现：树导航 + host/mode）。
 func wrapShadowRoot(rt *jsc.Interpreter, sr *dom.ShadowRoot) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：ShadowRoot 接口原型（ShadowRoot → DocumentFragment → Node）。
+	obj := jsc.NewObject(domIfaceProtoOr("ShadowRoot", rt.ObjectPrototype()))
 	obj.SetClassName("ShadowRoot")
 	obj.SetInternal(sr)
 
@@ -4815,7 +4944,7 @@ func wrapShadowRoot(rt *jsc.Interpreter, sr *dom.ShadowRoot) *jsc.JSObject {
 		return jsc.NumberValue(float64(len(elementChildrenOf(sr))))
 	}), nil)
 	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrElem(in, elementChildrenOf(sr))
+		return arrElemAs(in, elementChildrenOf(sr), "HTMLCollection")
 	}), nil)
 	obj.SetAccessor("textContent",
 		getter(func(_ *jsc.Interpreter) jsc.JSValue { return jsc.StringValue(sr.TextContent()) }),
@@ -4876,7 +5005,8 @@ func wrapText(rt *jsc.Interpreter, t *dom.Text) *jsc.JSObject {
 
 // wrapTreeWalker 创建一个 JS TreeWalker 对象，包装 dom.TreeWalker。
 func wrapTreeWalker(rt *jsc.Interpreter, w *dom.TreeWalker) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：TreeWalker 接口原型。
+	obj := jsc.NewObject(domIfaceProtoOr("TreeWalker", rt.ObjectPrototype()))
 	obj.SetClassName("TreeWalker")
 	obj.SetInternal(w)
 
@@ -4945,7 +5075,8 @@ type rangeState struct {
 // lineHeight=14，行号栏按 14px/行步进而内容按真实行高 18.2px，逐行错位。
 func wrapRange(rt *jsc.Interpreter, sn dom.Node, so int, en dom.Node, eo int) *jsc.JSObject {
 	st := &rangeState{startNode: sn, startOff: so, endNode: en, endOff: eo}
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：Range 接口原型。
+	obj := jsc.NewObject(domIfaceProtoOr("Range", rt.ObjectPrototype()))
 	obj.SetClassName("Range")
 	obj.SetInternal(st)
 
@@ -5028,34 +5159,16 @@ func wrapRange(rt *jsc.Interpreter, sn dom.Node, so int, en dom.Node, eo int) *j
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			var rects []jsc.JSValue
 			if l, t, w, h, ok := rangeRect(st); ok {
-				r := jsc.NewObject(in.ObjectPrototype())
-				r.Set("x", jsc.NumberValue(l))
-				r.Set("y", jsc.NumberValue(t))
-				r.Set("left", jsc.NumberValue(l))
-				r.Set("top", jsc.NumberValue(t))
-				r.Set("width", jsc.NumberValue(w))
-				r.Set("height", jsc.NumberValue(h))
-				r.Set("right", jsc.NumberValue(l+w))
-				r.Set("bottom", jsc.NumberValue(t+h))
-				rects = append(rects, jsc.ObjectValue(r))
+				// ★ 第 19 轮：矩形统一由 makeDOMRect 构造（DOMRect 接口原型），
+				// 容器为 DOMRectList（规范返回类型，此前是裸数组）。
+				rects = append(rects, jsc.ObjectValue(makeDOMRect(in, l, t, w, h)))
 			}
-			arr := jsc.NewArray(in.ObjectPrototype(), rects)
-			arr.Set("length", jsc.NumberValue(float64(len(rects))))
-			return jsc.ObjectValue(arr)
+			return jsc.ObjectValue(wrapDOMRectList(in, rects))
 		}, 0)))
 	obj.Set("getBoundingClientRect", jsc.FunctionValue(jsc.NewNativeFunction("getBoundingClientRect",
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-			r := jsc.NewObject(in.ObjectPrototype())
 			l, t, w, h, _ := rangeRect(st)
-			r.Set("x", jsc.NumberValue(l))
-			r.Set("y", jsc.NumberValue(t))
-			r.Set("left", jsc.NumberValue(l))
-			r.Set("top", jsc.NumberValue(t))
-			r.Set("width", jsc.NumberValue(w))
-			r.Set("height", jsc.NumberValue(h))
-			r.Set("right", jsc.NumberValue(l+w))
-			r.Set("bottom", jsc.NumberValue(t+h))
-			return jsc.ObjectValue(r)
+			return jsc.ObjectValue(makeDOMRect(in, l, t, w, h))
 		}, 0)))
 	obj.SetAccessor("startContainer", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return nodeJS(rt, st.startNode)
@@ -5482,8 +5595,21 @@ func arrElem(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 	})
 }
 
+// arrElemAs 与 arrElem 同，但把结果数组的原型指向集合接口
+// （NodeList / HTMLCollection）—— `el.querySelectorAll("x") instanceof NodeList`、
+// `el.children instanceof HTMLCollection` 因此成立，而数组方法（map/indexOf/
+// slice）经 Array.prototype 链仍可达（见 domctors.go 文件头的兼容性取舍）。
+func arrElemAs(in *jsc.Interpreter, els []*dom.Element, iface string) jsc.JSValue {
+	v := arrElem(in, els)
+	if o := v.AsObject(); o != nil {
+		domAttachProto(o, iface)
+	}
+	return v
+}
+
 func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
-	return arrayValue(in, len(nodes), func(i int) jsc.JSValue {
+	// ★ 第 19 轮：childNodes 返回 **NodeList**（规范类型；数组语义保留）。
+	v := arrayValue(in, len(nodes), func(i int) jsc.JSValue {
 		if isNilNode(nodes[i]) {
 			return jsc.Null()
 		}
@@ -5509,6 +5635,10 @@ func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 		}
 		return jsc.Null()
 	})
+	if o := v.AsObject(); o != nil {
+		domAttachProto(o, "NodeList")
+	}
+	return v
 }
 func arrayValue(in *jsc.Interpreter, n int, fn func(int) jsc.JSValue) jsc.JSValue {
 	arr := make([]jsc.JSValue, n)
@@ -6645,16 +6775,16 @@ var cssSingleKeywordProps = map[string]map[string]bool{
 	"display": cssKeywordSet("block", "inline", "inline-block", "flex", "inline-flex",
 		"grid", "inline-grid", "flow-root", "list-item", "table", "inline-table",
 		"table-row", "table-row-group", "table-cell", "table-caption", "contents", "none"),
-	"position":   cssKeywordSet("static", "relative", "absolute", "fixed", "sticky"),
-	"float":      cssKeywordSet("none", "left", "right", "inline-start", "inline-end"),
-	"clear":      cssKeywordSet("none", "left", "right", "both", "inline-start", "inline-end"),
-	"visibility": cssKeywordSet("visible", "hidden", "collapse"),
-	"box-sizing": cssKeywordSet("content-box", "border-box"),
-	"object-fit": cssKeywordSet("fill", "contain", "cover", "none", "scale-down"),
-	"table-layout":    cssKeywordSet("auto", "fixed"),
-	"border-collapse": cssKeywordSet("separate", "collapse"),
-	"direction":       cssKeywordSet("ltr", "rtl"),
-	"writing-mode":    cssKeywordSet("horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"),
+	"position":         cssKeywordSet("static", "relative", "absolute", "fixed", "sticky"),
+	"float":            cssKeywordSet("none", "left", "right", "inline-start", "inline-end"),
+	"clear":            cssKeywordSet("none", "left", "right", "both", "inline-start", "inline-end"),
+	"visibility":       cssKeywordSet("visible", "hidden", "collapse"),
+	"box-sizing":       cssKeywordSet("content-box", "border-box"),
+	"object-fit":       cssKeywordSet("fill", "contain", "cover", "none", "scale-down"),
+	"table-layout":     cssKeywordSet("auto", "fixed"),
+	"border-collapse":  cssKeywordSet("separate", "collapse"),
+	"direction":        cssKeywordSet("ltr", "rtl"),
+	"writing-mode":     cssKeywordSet("horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"),
 	"text-orientation": cssKeywordSet("mixed", "upright", "sideways"),
 	"mix-blend-mode": cssKeywordSet("normal", "multiply", "screen", "overlay", "darken",
 		"lighten", "color-dodge", "color-burn", "hard-light", "soft-light",
@@ -6692,9 +6822,9 @@ var cssSingleKeywordProps = map[string]map[string]bool{
 var cssMultiKeywordProps = map[string]map[string]bool{
 	"contain": cssKeywordSet("none", "strict", "content", "size", "layout", "style",
 		"paint", "inline-size", "block-size"),
-	"color-scheme": cssKeywordSet("normal", "light", "dark", "only"),
-	"scrollbar-gutter": cssKeywordSet("auto", "stable", "always", "both-edges"),
-	"overscroll-behavior": cssKeywordSet("auto", "contain", "none"),
+	"color-scheme":          cssKeywordSet("normal", "light", "dark", "only"),
+	"scrollbar-gutter":      cssKeywordSet("auto", "stable", "always", "both-edges"),
+	"overscroll-behavior":   cssKeywordSet("auto", "contain", "none"),
 	"overscroll-behavior-x": cssKeywordSet("auto", "contain", "none"),
 	"overscroll-behavior-y": cssKeywordSet("auto", "contain", "none"),
 	"touch-action": cssKeywordSet("auto", "none", "manipulation", "pan-x", "pan-y",
@@ -6868,23 +6998,23 @@ func uaDefaultDisplayFor(e *dom.Element) string {
 // 判断 min-width/max-width、读 pointer-events 做命中判断等）会走错分支。
 // 仅在 JS 对象层回退，不影响 computedStyleFor 的 map 与布局/继承计算。
 var uaInitialComputedValues = map[string]string{
-	"fontSize":           "16px",
-	"lineHeight":         "normal",
-	"fontWeight":         "400",
-	"fontStyle":          "normal",
-	"fontFamily":         "",
-	"pointerEvents":      "auto",
-	"alignItems":         "normal",
-	"justifyContent":     "normal",
-	"alignSelf":          "auto",
-	"minWidth":           "auto",
-	"maxWidth":           "none",
-	"minHeight":          "auto",
-	"maxHeight":          "none",
-	"overflowX":          "visible",
-	"overflowY":          "visible",
+	"fontSize":       "16px",
+	"lineHeight":     "normal",
+	"fontWeight":     "400",
+	"fontStyle":      "normal",
+	"fontFamily":     "",
+	"pointerEvents":  "auto",
+	"alignItems":     "normal",
+	"justifyContent": "normal",
+	"alignSelf":      "auto",
+	"minWidth":       "auto",
+	"maxWidth":       "none",
+	"minHeight":      "auto",
+	"maxHeight":      "none",
+	"overflowX":      "visible",
+	"overflowY":      "visible",
 	// ★ H5：scrollbar-gutter 的 CSS 初始值是 auto（不为滚动条预留空间）。
-	"scrollbarGutter":    "auto",
+	"scrollbarGutter": "auto",
 	// ★ H6：text-wrap 的初始值是 wrap（Edge 实测 h6_misc_props 的默认元素 tw=wrap）。
 	"textWrap":           "wrap",
 	"zIndex":             "auto",
@@ -6933,15 +7063,15 @@ var uaInitialComputedValues = map[string]string{
 	// ★ 列表 / 表格 / 断行 / 合成相关（G7、G5、G2 探针实测 undefined）：
 	//   浏览器对**每个**属性恒返回计算值（未声明 = CSS 初始值），缺失会让依赖
 	//   这些值的 JS 走错分支。
-	"listStyleType":      "disc",
-	"listStylePosition":  "outside",
-	"listStyleImage":     "none",
-	"borderCollapse":     "separate",
-	"borderSpacing":      "0px",
-	"lineBreak":          "auto",
-	"willChange":         "auto",
-	"clipPath":           "none",
-	"filter":             "none",
+	"listStyleType":     "disc",
+	"listStylePosition": "outside",
+	"listStyleImage":    "none",
+	"borderCollapse":    "separate",
+	"borderSpacing":     "0px",
+	"lineBreak":         "auto",
+	"willChange":        "auto",
+	"clipPath":          "none",
+	"filter":            "none",
 }
 
 // expandOverflowShorthand 把 overflow 简写展开为 overflow-x / overflow-y：

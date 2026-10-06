@@ -2538,3 +2538,157 @@ G（HTMLSummaryElement）、F（事件构造器 17）—— 做法与第 17 轮 
 **注册全局构造器 + prototype 链**，使 `instanceof` / `constructor.name` 成立；这些接口的
 **实例**引擎多已具备，属「性价比最高」的一批。`globals` 因此仍是**无界类别**，其
 「missing 清零」不作为收敛判据（§17-3 的分层清单建议仍待采纳）。
+
+---
+
+## §19｜第 19 次监督轮：构造器清零（**有界**）+ globals 分层固化 + 剩余方法归类
+
+### 19-1｜A. 构造器清零（应做批，逐项验收）
+
+做法与第 17 轮 `DocumentType` 完全一致：**注册全局构造器 + 接 prototype 链**
+（`domctors.go` 的 `domRegisterIface` / `domAdoptIface`），并把引擎**已有实例**的原型
+指向对应接口（`domAttachProto`），因此 `new X() instanceof X`、
+`Object.getPrototypeOf(x) === X.prototype`、`x.constructor.name === "X"` 同时成立。
+
+| 组 | 清单 | 数量 | 落地方式 |
+|---|---|---|---|
+| **I** DOM 核心 | NodeList / NodeIterator / TreeWalker / HTMLCollection / DOMTokenList / Document / HTMLDocument / XMLDocument / ShadowRoot / CDATASection / ProcessingInstruction / DOMImplementation / DOMRect / DOMRectReadOnly / DOMRectList / Selection / XMLSerializer（+ **CharacterData**，Text/Comment/PI 的规范父接口） | 17 (+1) | 新建构造器；实例接线：wrapDocument→HTMLDocument、wrapShadowRoot、wrapTreeWalker、wrapAttr/PI/CDATA、makeDOMRect、makeClassList/part→DOMTokenList、集合→NodeList/HTMLCollection、XMLSerializer 复用 GetOuterHTML 序列化器 |
+| **H** SVG / MathML | SVGSVGElement / SVGGraphicsElement / SVGGeometryElement / SVGPathElement / SVGTextElement / SVGImageElement / SVGUseElement / SVGForeignObjectElement / MathMLElement | 9 | 按**标签**分派（svgTagIface / mathMLTags → 接口 prototype），此前所有 SVG 标签共用 SVGElement.prototype |
+| **G** HTML | HTMLSummaryElement | 1 | 入 htmlelements 表（tags: summary） |
+| **F** 事件 | UIEvent / PointerEvent / InputEvent / DragEvent / FocusEvent / TouchEvent / ClipboardEvent / AnimationEvent / TransitionEvent / ErrorEvent / PromiseRejectionEvent / PopStateEvent / HashChangeEvent / BeforeUnloadEvent / PageTransitionEvent / StorageEvent / SubmitEvent（+ 顺带 CompositionEvent） | 17 (+1) | 带 init-dict 白名单填充；**原型链按规范**：PointerEvent/DragEvent/WheelEvent → MouseEvent → UIEvent → Event；KeyboardEvent/InputEvent/FocusEvent/TouchEvent → UIEvent；其余 → Event |
+
+探针 `globals` 全量：**191/354 → 252/354**（+61；含本轮新增的 Window 身份属性、atob/btoa、Audio/Option）。
+
+### 19-2｜B. globals 分层（收敛关键，已固化进探针）
+
+探针 `globals` 拆为三组并分别报 present/total（`main.go`）：
+
+| 组 | present/total | 参与收敛判定 |
+|---|---|---|
+| **globalsCore** | **252/252 = 100%（missing = []）** | ★ **是**（本类别的收敛判据） |
+| globalsOptional | 1/59（present: `CSS`） | 否 |
+| globalsExcluded | 1/45（present: `OffscreenCanvas`） | 否 |
+
+- **excluded = 已定案不追（固化在探针里，不计入核心分母）**：
+  A 图形/GPU 与 DOM 几何（Path2D / ImageData / OffscreenCanvas / CanvasRenderingContext2D /
+  WebGLRenderingContext / WebGL2RenderingContext / ImageBitmap / createImageBitmap /
+  DOMPoint / DOMMatrix / DOMQuad，11）、B WASM 与并发隔离（SharedArrayBuffer / Atomics /
+  WebAssembly / crossOriginIsolated，4）、C Intl（1）、宿主内建函数
+  （GeneratorFunction / AsyncFunction / AsyncGeneratorFunction，3 —— **浏览器全局同样不可见**，
+  `typeof === "undefined"`，第 18 轮删 `undefined` 的同类处理）、
+  D 调度/导航/系统集成（Scheduler / scheduler / TaskController / TaskPriorityChangeEvent /
+  navigation / Navigation / ViewTransition / documentPictureInPicture / LaunchQueue /
+  IdleDetector / WakeLock / getScreenDetails / showOpenFilePicker / showSaveFilePicker /
+  EyeDropper，15）、E Typed OM 与 Animation（CSSStyleValue / CSSUnitValue / CSSTransformValue /
+  CSSImageValue / CSSKeywordValue / CSSNumericValue / DocumentTimeline / Animation /
+  KeyframeEffect，9）、K 观察者（PerformanceObserver / ReportingObserver，2）。合计 **45**。
+- **分层完备性检查**（探针输出 `partition`）：三组并集**恰好覆盖** `globals` 全量 ——
+  `dup=0, notCovered=0`（本轮实测），因此「核心组 missing=0」是有界、可复算的判据。
+
+### 19-3｜C. 剩余方法逐项归类（不再模糊留白）
+
+**elementMethods（60 项）**：51 → **58/60**。剩 9 项逐项归类：
+
+| 方法 | 归类 | 说明 |
+|---|---|---|
+| `checkVisibility` | **本轮 done** | 文档内 + computed `display!=none` / `visibility!=hidden,collapse`（可选字典项未建模） |
+| `scroll` | **本轮 done** | no-op（无元素级滚动容器；与既有 scrollTo 同义） |
+| `scrollIntoViewIfNeeded` | **本轮 done** | no-op（非标准但广泛使用） |
+| `setHTML` | **本轮 done** | 退化为 innerHTML（引擎无 HTML sanitizer，已记账） |
+| `setPointerCapture` | **本轮 done** | 记录 pointerId 捕获状态 |
+| `releasePointerCapture` | **本轮 done** | 同上 |
+| `hasPointerCapture` | **本轮 done** | 同上（派发路径的捕获重定向未建模） |
+| `animate` | **不追** | Web Animations 子系统（E 组已定案不追） |
+| `getAnimations` | **不追** | 同上 |
+
+**documentMethods（49 项）**：27 → **30/49**。剩 22 项逐项归类：
+
+| 方法 | 归类 | 说明 |
+|---|---|---|
+| `createNodeIterator` | **本轮 done** | 真实现（dom.NodeIterator 已移植，接线 + 包装） |
+| `caretRangeFromPoint` | **本轮 done** | 用 ElementFromPoint 层叠命中 → 空 Range（近似） |
+| `caretPositionFromPoint` | **本轮 done** | 同上 → CaretPosition（offsetNode/offset/getClientRect） |
+| `execCommand` | **乐不追（legacy）** | 规范标 legacy；编辑器路径已走 Selection/InputEvent |
+| `queryCommandSupported` / `queryCommandEnabled` / `queryCommandState` / `queryCommandValue` | **不追（legacy）** | execCommand 家族（同上） |
+| `write` / `writeln` / `open` / `close` | **不追（legacy）** | `document.open/close/write` 会清空文档，语义风险高且前端框架不用 |
+| `createExpression` / `createNSResolver` / `evaluate` | **不追** | XPath 子系统（未建模） |
+| `getBoxQuads` / `convertPointFromNode` / `convertPointToNode` | **不追** | CSSOM-View 几何对象扩展（A 组几何，未建模） |
+| `startViewTransition` | **不追** | D 组（View Transition 子系统） |
+| `getAnimations` | **不追** | E 组（Animation 子系统） |
+| `exitPointerLock` | **不追** | Pointer Lock 子系统（未建模；`pointerLockElement` 已 present） |
+| `getElementsByTagNameNS` | **不追** | 引擎 DOM 不建模命名空间（标签名折叠为小写 literal，见 element.go 文件头） |
+
+### 19-4｜双侧验收（新夹具 `constructors.html`，6 类检查项）
+
+```
+== [constructors_ctors] diff ==  IDENTICAL（Edge 基线 == wbui；wbui=62 行 / Edge=62 行）
+```
+
+检查项：① 62 个构造器 `typeof === "function"`（`ctor_missing=NONE`）；② 33 个可构造接口的
+`new X() instanceof X`（`new_instanceof_fail=NONE`）；③ 46 条 prototype 链
+（`proto_mismatch=NONE`）；④ 26 组真实实例 instanceof（document/div/svg/path/math/text/
+comment/frag/range/walker/iter/sel/impl/shadow/xmlDoc/forms/classList/qsa/children/
+childNodes/rects/bcr/attrs/getElementsBy*）；⑤ 派发路径事件身份
+（`dispatch_click=true,true,true,MouseEvent`）；⑥ `constructor.name` 20 项 + XMLSerializer/
+NodeIterator/DOMImplementation/Selection 实例 API。
+
+### 19-5｜★ 本轮探值/夹具发现并修复的真实缺陷（8 项）
+
+1. **包级原型注册表跨 runtime 泄漏**（**最严重**）：`domIfacePro` 是包级 map，第二个
+   runtime 的 `wrapDocument` 会拿到前一个 rt 的 prototype → goja 抛
+   `Illegal runtime transition of an Object` → `document` 没能挂上全局 → **整个
+   bindings 测试包 121 个测试报 "document is not defined"**（单独跑某测试却通过）。
+   修法：`resetAndAdoptDOMRegistry`（RegisterDOMBindings 入口清空 + 从**当前 rt** 的全局
+   构造器重填 prototype）。修后 `go test ./engine/...` 恢复 **23 包 ok / 0 FAIL**。
+   ★ 这是「单元测试全绿」才能暴露的缺陷 —— 探针（单 rt）与夹具都不会发现它。
+2. `document` / Selection 单例在注册流程**早期**创建（早于构造器注册）→ 原型落空
+   （`document instanceof Document` 曾为 false）。修法：注册末尾显式刷新二者原型。
+3. `Range` / `MessageEvent` 构造器返回**自建对象**（原型 = Object.prototype）→
+   `new Range() instanceof Range` 为 false。修法：改为返回 goja 按 `X.prototype` 构造的 this。
+4. 元素 `getBoundingClientRect` / `getClientRects` 返回**裸对象/裸数组** →
+   改用 `makeDOMRect` / `wrapDOMRectList`（`constructor.name` 由 "Object" 变 "DOMRect"）。
+5. `Selection.rangeCount` 初值缺失（undefined）→ 初值 0。
+6. `querySelectorAll` / `children` / `childNodes` / `getElementsBy*` 返回**裸数组** →
+   原型指向 NodeList / HTMLCollection（数组方法仍经 Array.prototype 可达）。
+7. `rt.ObjectPrototype()` 被误当作 `Object.prototype` 用作父原型（**6 处偏差**）——
+   jsc 的实现是 `&JSObject{obj: r.vm.NewObject()}`（新建空对象）。修法：「父为 Object」的
+   接口传 nil，保留 goja 默认 `[[Prototype]]`。
+8. `CharacterData` 未建模 → Text/Comment/ProcessingInstruction 的父链直接指 Node
+   （与浏览器不一致）。修法：注册 CharacterData（CDATASection → Text → CharacterData）。
+
+### 19-6｜★ 完成定义（**写死**，作为本类别的收敛判据）
+
+当且仅当以下**全部**成立，第 19 轮视为完成（全部已在 §19-4/19-7 给出实测证据）：
+
+1. `globalsCore.missing == []`（当前 **252/252**）；
+2. I / H / G / F 四组构造器**全部 present**（§19-1 三张表逐项，探针 `globals` 复核）；
+3. 红线四夹具 **IDENTICAL**：`element_attrs` 85/85、`element_geom` 61/61、
+   `document_doctype` 34/34、`document_props` 74/74；
+4. ALL9 快照与 ALL8 **逐项零差异**（16 个历史夹具的 IDENTICAL/DIFF 结论逐行一致）；
+5. 新夹具 `constructors` 双侧 **IDENTICAL**（62/62）；
+6. 工程红线：`go test ./engine/...` **23 包 ok / 0 FAIL**；`go vet` 无新告警；
+   `engine/layout` **零改动**；`gofmt` 无新增未格式化文件。
+
+### 19-7｜★ 汇报（两行结论，固化）
+
+- **本轮后核心组 present/total = 252/252（100%，missing = []）**
+- **剩余不追清单（globalsExcluded，45 项）**：A 图形/GPU 与 DOM 几何 11、B WASM 与并发隔离 4、
+  C Intl 1、宿主内建函数 3、D 调度/导航/系统集成 15、E Typed OM 与 Animation 9、K 观察者 2。
+  另有 **globalsOptional 59 项**（可做子系统：网络/持久化、CSS OM、XPath、字体/视口、
+  Highlight、Window 方法与 BarProp）——不计入收敛判据。
+
+### 19-8｜遗留与有意偏差（如实记账）
+
+1. **集合类接口的父原型指向 Array.prototype**（NodeList / HTMLCollection / DOMRectList）——
+   有意偏差：引擎既有的集合返回数组，前端代码历史依赖 `.map()/.indexOf()`。规范里这些
+   prototype 的父是 Object.prototype。
+2. **Node 未继承 EventTarget**（规范/浏览器：`Node.prototype.__proto__ === EventTarget.prototype`）。
+3. **不可构造接口的宽容语义**：Chromium 对多数 DOM 接口 `new X()` 抛 Illegal constructor，
+   本引擎返回对象（不抛）。夹具已按「双方都可构造的接口」对比。
+4. **HTMLSummaryElement 属超集**：Chromium 未暴露该全局（`typeof === "undefined"`），
+   wbui 按 HTML §4.11.2 提供 → 不参与双面对比。
+5. **SVGTextElement 缺中间接口** `SVGTextPositioningElement`（Chromium 有）。
+6. `setHTML` 无 sanitizer（退化为 innerHTML）；pointer capture 只记录状态（无事件重定向）；
+   `caretPositionFromPoint` 用 ElementFromPoint 近似（offset 恒 0）。
+7. `XMLSerializer.serializeToString` 复用 `GetOuterHTML` 的同一序列化器（格式与浏览器
+   XMLSerializer 的细节可能不同；夹具只验类型与包含性）。

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 
 	"wb-ui/engine/dom"
 	"wb-ui/engine/js/jsc"
@@ -48,7 +49,10 @@ const liveCollectionIndexLimit = 64
 // 集合引用后仍能观察到 DOM 增删（`const c = el.getElementsByClassName("x");
 // el.append(div); c.length` 会 +1）。
 func makeLiveElementCollection(in *jsc.Interpreter, className string, build func() []*dom.Element) *jsc.JSObject {
-	obj := jsc.NewObject(in.ObjectPrototype())
+	// ★ 第 19 轮：集合接口原型（HTMLCollection / NodeList）——
+	// `el.getElementsByClassName("x") instanceof HTMLCollection`、
+	// `document.getElementsByName("n") instanceof NodeList` 成立。
+	obj := jsc.NewObject(domIfaceProtoOr(className, in.ObjectPrototype()))
 	obj.SetClassName(className)
 	for i := 0; i < liveCollectionIndexLimit; i++ {
 		idx := i
@@ -470,6 +474,69 @@ func installElementProtoDOMMethods(proto *jsc.JSObject) {
 		}
 		return jsc.ObjectValue(jsc.NewArrayForInterp(in, items))
 	})
+
+	// ─── 类别① 收口（第 19 轮）：滚动 / 可见性 / setHTML / 指针捕获 ───────
+
+	// scroll（CSSOM-View §6.1）：元素的 scroll() 与已实现的 scrollTo() 同义。
+	// 本引擎无元素级滚动容器语义（页面滚动由宿主窗口控制），故为 no-op ——
+	// 存在性 + 调用不抛错是与浏览器对齐的最小面。
+	protoMethod(proto, "scroll", 0, func(_ *jsc.Interpreter, _ *dom.Element, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.Undefined()
+	})
+	// scrollIntoViewIfNeeded（非标准但广泛使用，等同 scrollIntoView 的
+	// 「仅在需要时滚动」）：本引擎无滚动容器，no-op。
+	protoMethod(proto, "scrollIntoViewIfNeeded", 0, func(_ *jsc.Interpreter, _ *dom.Element, _ []jsc.JSValue) jsc.JSValue {
+		return jsc.Undefined()
+	})
+	// checkVisibility（CSSOM-View §6.6）：元素在文档中、且 computed display 非
+	// none、visibility 非 hidden/collapse 时为 true（本引擎 computed 值来自级联
+	// map，与布局同一来源）。可选字典项（checkOpacity/checkVisibilityCSS 等）
+	// 未建模，见 WORKITEMS §19 归类表。
+	protoMethod(proto, "checkVisibility", 1, func(_ *jsc.Interpreter, el *dom.Element, _ []jsc.JSValue) jsc.JSValue {
+		if !el.IsConnected() {
+			return jsc.BooleanValue(false)
+		}
+		cs := computedStyleFor(el)
+		if d, ok := cs["display"]; ok && d == "none" {
+			return jsc.BooleanValue(false)
+		}
+		if v, ok := cs["visibility"]; ok && (v == "hidden" || v == "collapse") {
+			return jsc.BooleanValue(false)
+		}
+		return jsc.BooleanValue(true)
+	})
+	// setHTML（HTML §4.9 setHTML + Sanitizer API）：本引擎无 HTML sanitizer，
+	// 语义退化为 innerHTML 写入（已记账，见 WORKITEMS §19 归类表）。
+	protoMethod(proto, "setHTML", 1, func(_ *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Undefined()
+		}
+		el.SetInnerHTML(args[0].ToString())
+		return jsc.Undefined()
+	})
+	// Pointer capture（Pointer Events L2 §4.1）：元素持有某个 pointerId 的捕获时
+	// hasPointerCapture 为 true；set/release 成对维护。派发路径的「捕获优先投递」
+	// 未建模（本引擎的指针事件来自宿主窗口，无 pointerId 重定向），见 WORKITEMS。
+	protoMethod(proto, "setPointerCapture", 1, func(_ *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Undefined()
+		}
+		pointerCaptureAdd(el, int(args[0].ToNumber()))
+		return jsc.Undefined()
+	})
+	protoMethod(proto, "releasePointerCapture", 1, func(_ *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.Undefined()
+		}
+		pointerCaptureDel(el, int(args[0].ToNumber()))
+		return jsc.Undefined()
+	})
+	protoMethod(proto, "hasPointerCapture", 1, func(_ *jsc.Interpreter, el *dom.Element, args []jsc.JSValue) jsc.JSValue {
+		if len(args) == 0 {
+			return jsc.BooleanValue(false)
+		}
+		return jsc.BooleanValue(pointerCaptureHas(el, int(args[0].ToNumber())))
+	})
 }
 
 // ─── Document：ParentNode + 工厂 + 导入 ────────────────────────────────────
@@ -571,9 +638,9 @@ func installDocumentDOMMethods(rt *jsc.Interpreter, obj *jsc.JSObject, doc *dom.
 			data = args[0].ToString()
 		}
 		// ★ DOM §4.9.5：HTML 文档上 createCDATASection 必须抛 NotSupportedError
-		//（HTML 没有 CDATA section 概念）。本引擎的文档都是 text/html，因此这条
+		// （HTML 没有 CDATA section 概念）。本引擎的文档都是 text/html，因此这条
 		// 路径总是抛错——与 Edge 行为一致；CDATASection 节点类型本身已建模
-		//（engine/dom/processinginstruction.go），供 XML 文档使用。
+		// （engine/dom/processinginstruction.go），供 XML 文档使用。
 		ct := strings.ToLower(strings.TrimSpace(doc.ContentType()))
 		if ct == "" || strings.Contains(ct, "html") {
 			panic(in.VM().NewGoError(errors.New(
@@ -598,6 +665,8 @@ func wrapAttr(in *jsc.Interpreter, a *dom.Attr) *jsc.JSObject {
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.SetClassName("Attr")
 	obj.SetInternal(a)
+	// ★ 第 19 轮：Attr → Node.prototype 原型链（instanceof Attr / Node）。
+	domAttachProto(obj, "Attr")
 	obj.SetAccessor("name", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(a.Name())
 	}), nil)
@@ -664,6 +733,8 @@ func wrapProcessingInstruction(in *jsc.Interpreter, p *dom.ProcessingInstruction
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.SetClassName("ProcessingInstruction")
 	obj.SetInternal(p)
+	// ★ 第 19 轮：ProcessingInstruction 接口原型。
+	domAttachProto(obj, "ProcessingInstruction")
 	obj.SetAccessor("target", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(p.Target())
 	}), nil)
@@ -708,6 +779,8 @@ func wrapCDATASection(in *jsc.Interpreter, c *dom.CDATASection) *jsc.JSObject {
 	obj := jsc.NewObject(in.ObjectPrototype())
 	obj.SetClassName("CDATASection")
 	obj.SetInternal(c)
+	// ★ 第 19 轮：CDATASection → Text.prototype → Node.prototype（规范继承）。
+	domAttachProto(obj, "CDATASection")
 	obj.SetAccessor("nodeName", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(c.NodeName())
 	}), nil)
@@ -734,4 +807,55 @@ func wrapCDATASection(in *jsc.Interpreter, c *dom.CDATASection) *jsc.JSObject {
 	}), nil)
 	nodeWrapperCache[c] = obj
 	return obj
+}
+
+// ─── 指针捕获状态（Pointer Events L2 §4.1）────────────────────────────────
+//
+// 元素 → 已捕获的 pointerId 集合。setPointerCapture/releasePointerCapture/
+// hasPointerCapture 三者共用；元素被移除后条目随元素一起被 GC（map 键是
+// *dom.Element）。
+
+var (
+	pointerCaptureMu sync.Mutex
+	pointerCaptureEl = map[*dom.Element]map[int]bool{}
+)
+
+// pointerCaptureAdd 记录 el 捕获了指针 id（幂等）。
+func pointerCaptureAdd(el *dom.Element, id int) {
+	if el == nil {
+		return
+	}
+	pointerCaptureMu.Lock()
+	defer pointerCaptureMu.Unlock()
+	m := pointerCaptureEl[el]
+	if m == nil {
+		m = map[int]bool{}
+		pointerCaptureEl[el] = m
+	}
+	m[id] = true
+}
+
+// pointerCaptureDel 解除 el 对指针 id 的捕获。
+func pointerCaptureDel(el *dom.Element, id int) {
+	if el == nil {
+		return
+	}
+	pointerCaptureMu.Lock()
+	defer pointerCaptureMu.Unlock()
+	if m := pointerCaptureEl[el]; m != nil {
+		delete(m, id)
+		if len(m) == 0 {
+			delete(pointerCaptureEl, el)
+		}
+	}
+}
+
+// pointerCaptureHas 报告 el 当前是否捕获着指针 id。
+func pointerCaptureHas(el *dom.Element, id int) bool {
+	if el == nil {
+		return false
+	}
+	pointerCaptureMu.Lock()
+	defer pointerCaptureMu.Unlock()
+	return pointerCaptureEl[el][id]
 }

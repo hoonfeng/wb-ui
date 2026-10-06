@@ -514,7 +514,7 @@ func installElementAttrProperty(rt *jsc.Interpreter, el *dom.Element, key string
 
 	case "translate":
 		// HTML §3.2.6.3：枚举 yes/no，missing value default = true
-		//（invalid value default 同样是 yes）。
+		// （invalid value default 同样是 yes）。
 		return jsc.JSValue{}, &elemAccessor{
 			get: func() jsc.JSValue {
 				if el.HasAttribute("translate") {
@@ -891,7 +891,8 @@ func elementIsContentEditable(el *dom.Element) bool {
 // part 内容属性）。语义与 classList 同族：length/value/item/contains/
 // add/remove/toggle 全部实时读属性。
 func makePartTokenList(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：part 与 classList 同为 DOMTokenList 接口。
+	obj := jsc.NewObject(domIfaceProtoOr("DOMTokenList", rt.ObjectPrototype()))
 	tokens := func() []string { return strings.Fields(el.GetAttribute("part")) }
 	write := func(list []string) {
 		el.SetAttribute("part", strings.Join(list, " "))

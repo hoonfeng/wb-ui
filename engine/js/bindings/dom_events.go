@@ -30,7 +30,8 @@ import (
 // identity is unreliable and the string id is used instead.
 //
 // ★ target 必须参与键：同一个 JS 回调可以挂在多个元素上，每个 target 要各自持有
-//   独立的 jsListener（否则移除/派发会串台到别的元素）。
+//
+//	独立的 jsListener（否则移除/派发会串台到别的元素）。
 type listenerKey struct {
 	target    dom.EventTarget
 	eventType string
@@ -187,6 +188,27 @@ func makeDispatchEvent(target dom.EventTarget) *jsc.JSFunction {
 		}, 1)
 }
 
+// eventInterfaceName 返回 dom.Event 对应的 JS 事件接口名（第 19 轮原型链分派用）。
+// 引擎派发/创建的事件对象据此挂上对应接口的 prototype，使
+// `e instanceof PointerEvent`、`e.constructor.name === "InputEvent"` 等成立。
+func eventInterfaceName(e dom.Event) string {
+	switch e.(type) {
+	case *dom.MouseEvent:
+		return "MouseEvent"
+	case *dom.KeyboardEvent:
+		return "KeyboardEvent"
+	case *dom.WheelEvent:
+		return "WheelEvent"
+	case *dom.InputEvent:
+		return "InputEvent"
+	case *dom.ToggleEvent:
+		return "ToggleEvent"
+	case *dom.CompositionEvent:
+		return "CompositionEvent"
+	}
+	return "Event"
+}
+
 // eventToJS converts a dom.Event to a JS object with the standard Event properties and
 // methods (type/target/bubbles/cancelable/... plus preventDefault/stopPropagation).
 // MouseEvent adds the coordinate/modifier fields.
@@ -194,8 +216,12 @@ func eventToJS(in *jsc.Interpreter, e dom.Event) jsc.JSValue {
 	if e == nil {
 		return jsc.Undefined()
 	}
-	obj := jsc.NewObject(in.ObjectPrototype())
-	obj.SetClassName("Event")
+	// ★ 第 19 轮：事件实例的原型指向对应事件接口 prototype（此前是
+	// Object.prototype + 仅 className），因此引擎派发的事件同样满足
+	// `e instanceof MouseEvent` / `e.constructor.name === "MouseEvent"`。
+	evName := eventInterfaceName(e)
+	obj := jsc.NewObject(domIfaceProtoOr(evName, in.ObjectPrototype()))
+	obj.SetClassName(evName)
 	obj.SetInternal(e)
 	obj.Set("type", jsc.StringValue(e.Type()))
 	obj.Set("bubbles", jsc.BooleanValue(e.Bubbles()))

@@ -163,7 +163,7 @@ func installDocumentIfaceProps(rt *jsc.Interpreter, obj *jsc.JSObject, doc *dom.
 		return arrNode(in, doc.ChildNodes())
 	}), nil)
 	obj.SetAccessor("children", getter(func(in *jsc.Interpreter) jsc.JSValue {
-		return arrElem(in, documentElementChildren(doc))
+		return arrElemAs(in, documentElementChildren(doc), "HTMLCollection")
 	}), nil)
 	obj.SetAccessor("firstElementChild", nodeAccFn(rt, func() dom.Node { return firstElementChildNode(doc) }), nil)
 	obj.SetAccessor("lastElementChild", nodeAccFn(rt, func() dom.Node { return lastElementChildNode(doc) }), nil)
@@ -335,7 +335,9 @@ func installDocumentIfaceProps(rt *jsc.Interpreter, obj *jsc.JSObject, doc *dom.
 // 由调用方在每次属性读取时按当前 DOM 重建（见 installCollection），因此对使用者
 // 表现为 live 集合。
 func wrapElementCollection(in *jsc.Interpreter, className string, els []*dom.Element) *jsc.JSObject {
-	obj := jsc.NewObject(in.ObjectPrototype())
+	// ★ 第 19 轮：集合接口原型（HTMLCollection/HTMLAllCollection），
+	// 使 `document.forms instanceof HTMLCollection` 成立。
+	obj := jsc.NewObject(domIfaceProtoOr(className, in.ObjectPrototype()))
 	obj.SetClassName(className)
 	objs := make([]*jsc.JSObject, len(els))
 	for i, el := range els {
@@ -437,7 +439,8 @@ func makeLocationObject(in *jsc.Interpreter, rawURL string) *jsc.JSObject {
 // （规范允许对任何特性返回 true 的历史遗留 API）；createDocumentType /
 // createHTMLDocument / createDocument 按规范语义返回新文档或 doctype 节点。
 func makeDOMImplementation(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
-	obj := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 19 轮：DOMImplementation 接口原型（document.implementation instanceof …）。
+	obj := jsc.NewObject(domIfaceProtoOr("DOMImplementation", rt.ObjectPrototype()))
 	obj.SetClassName("DOMImplementation")
 	obj.Set("hasFeature", jsc.FunctionValue(jsc.NewNativeFunction("hasFeature",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
