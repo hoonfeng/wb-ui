@@ -1178,6 +1178,18 @@ top = strutAscent(19) − xHeight/2(4.344) − childH/2(10.5) = 4.156 ✓
 
 ### P3｜四个遗留探针的重跑结论（本轮全部重跑，两侧行数相等且非空）
 
+> ⚠️ **本节结论已被第 11 次监督轮取代，勿再引用**（见文末「## 第 11 次监督轮」）：
+> - `g5_mixedtext` m2 —— **已修复**（现为 IDENTICAL）；且本节写的根因（「IFC 回填缺
+>   显式 width 例外」）**不完整**：IFC 那处只是表层，真正把 200 撑成 309.376 的是
+>   `renderview.go` syncOne 的 frame 撑开（详见 §11-2）；
+> - `g4_inlineblock` 的 754 vs 1280 —— 本节判「探针视口口径差、非 wbui 布局 bug」
+>   **方向正确但停在结论上、没修工具**；第 11 轮已给 `gprobe_cmp.sh` 加实测视口补偿
+>   并重跑，l1–l4 宽度两侧均 1280（详见 §11-1）；
+> - `g1_formctl` t6 / t7 —— **已修复**（31 / 161，与 Edge 零差，详见 §11-3）；
+> - 最终保留为「已知接受差异」的只有亚像素项（§11-5 表）。
+>
+> 以下原文保留作历史记录。
+
 | 探针 | 两侧行数 | 差异 | 定性 |
 |---|---|---|---|
 | `g5_mixedtext` | 5/5 | 1 行（m2） | **wbui 真 bug**（fixed-width 被内容撑开） |
@@ -1243,3 +1255,157 @@ Edge 无头默认视口 ≠ wbui webshot 的 1280 ⇒ 754 与 1280 是**两侧�
 > t6/t7 同属 `engine/layout/formcontrol.go` 的**控件固有尺寸**公式，与已提交的表单
 > **交互**任务线（`webkit/forminteract.go`）不同模块；本轮按「严格聚焦 P2 四项、
 > 不扩散范围」的要求列为遗留，未在无实测公式依据的情况下擅改。
+
+---
+
+## 第 11 次监督轮（2026-10）：工具口径修正 + 三项遗留全部关闭
+
+监督者判定第 10 轮「任务未完成」的三项，本轮**全部处理完毕**。顺序即监督者指定顺序。
+
+### 11-1｜`gprobe_cmp.sh` 的 Edge 视口口径（**工具缺陷，已修**）
+
+**实测先行**（不猜口径）：用探针页读 Edge 的 `innerWidth/innerHeight`，得到两个决定性事实 ——
+
+```
+--headless --hide-scrollbars（不传 window-size）  → inner=754x487   ← 原 754 的唯一来源
+--headless --hide-scrollbars --window-size=1280,800 → inner=1254x707  ← 仍不是 1280！
+--headless --hide-scrollbars --window-size=1306,893 → inner=1280x800  ✓
+```
+
+即 Edge 在 Windows 无头下 `--window-size=W,H` 的**实际视口小于 W,H**，偏移恒定
+（宽 −26 / 高 −93 = 非客户区）；`--force-device-scale-factor=1` 与不传结果相同，说明
+宿主本就是 DPR=1（该参数仅作防高 DPI 二次口径差的保险）。**修法不是硬编码 1306,893**，
+而是让脚本自适应：
+
+1. 用临时探针页**实测**当前 `--window-size` 下的真实视口；
+2. 按实测偏移**反向放大** `--window-size` 并要求实测＝1280x800；
+3. 最多迭代 3 轮，**探测失败即 `exit 4`**（拒绝带错误口径继续比对），成功时打印实测值自证。
+
+顺带修掉一个真实 bug：探针页用相对路径写、却把相对路径交给 `cygpath -m` → 生成
+`file:///dev/output/...` 无效 URL、Edge 加载失败返回空（首轮探测就因此失败）。改为
+`cygpath -m "$ROOT/$VP_PROBE"`。
+
+**复评 g4_inlineblock**（原「WONTFIX 口径差」结论**作废**）：
+
+```
+视口实测 1280x800 ✓
+l1 | rect=0,4,1280,25       两侧一致 ✓
+l2 | rect=0,33,1280,24      两侧一致 ✓
+```
+
+⇒ 宽度差异**全部消除**（754 与 1280 之争到此终结）；剩余见 §11-5。
+
+### 11-2｜`g5_mixedtext` m2：定宽块被内容撑开（**已修，IDENTICAL**）
+
+**定位过程（三层，逐层实测）**：
+
+1. 先按监督者提示改 IFC「内容宽回填」加显式 width 例外 —— **无效**（m2 仍 309.376）。
+2. 加诊断（`WBUI_IFC_W=1`）发现进 IFC 的 `box` 是**匿名包装盒**：`#<anon> unit=""`，
+   `cs.Width.Unit` 恒为空 —— 因为匿名包装盒的 style 由 `NewComputedStyle + InheritFrom`
+   构造、**故意不继承 width**（`box.go:738-745`），所以「显式 width 例外」在它身上判不出来。
+   据此加「匿名块级盒不回填」（其宽恒为父内容宽，浏览器语义正确）。**仍无效** ——
+   诊断显示匿名盒已回到 `borderW=200`，而 m2 的 rect 依旧 309.376。
+3. 由此判定撑开**不在 IFC**，转向几何→渲染树同步：元凶是 `renderview.go:1558-1561`
+   的 syncOne —— 它在 `syncChildren` 后把**任何含文本子节点的盒** frame 撑到文本右边界
+   （`box.frame.Width = maxRight - box.frame.X`），此前只排除了表格内部盒与 flex item。
+
+**最终修法（对称于既有的高度侧设计）**：
+
+| 文件 | 改动 |
+|---|---|
+| `engine/layout/blockformattingcontext.go` | 新增 `widthIsAutoForBox` / **`WidthIsDefiniteForBox`**（对称于既有的 `HeightIsDefiniteForBox`，判定口径与 IFC/BFC 既有写法一致：`Unit==""` 或 `"auto"` 视为 auto） |
+| `engine/rendering/renderview.go` | syncOne **两处** frame 撑开点（L1505 wrapper 分支、L1558 子文本分支）加 `!layout.WidthIsDefiniteForBox(lb)` |
+| `engine/layout/inlineformattingcontext.go` | 回填段排除**匿名块级盒**（`box.Element()==nil && !IsInlineLevel()`） |
+
+**为什么 m1/m3/m4/m5 没暴露**：回填/撑开只在内容宽 > 200 时才生效 ——
+m1/m3/m4/m5 的回填值 176.992 / 192.000 / 192.480 / 192.000 均 < 200，恰好压在阈值下；
+只有 m2（36 字符无断行机会，309.376）突破。
+
+**验收**：`g5_mixedtext` → **IDENTICAL（5/5 逐项一致）**；m2 宽 = 200 ✓。
+
+### 11-3｜`g1_formctl` t6 / t7：控件固有尺寸公式（**已修，与 Edge 零差**）
+
+先用探针**实测反推公式**（监督者要求「先实测确认常量、不得臆测」），共三组：
+
+**A 组（select / textarea 的基本量）** → 得到 textarea 单位列宽 7（= monospace 13.3333px
+实测字符宽）、select 需补约 22px。
+
+**B 组（select 的长度/字体扫描 + textarea 的字体对照）**：
+
+| select option | Edge 宽 | round(文本宽)+22 |
+|---|---|---|
+| `A` | 31 | round(8.9063)=9 → 31 ✓ |
+| `AA` / `AAA` / `5×A` / `10×A` | 40 / 49 / 67 / 111 | 18→40 ✓ / 27→49 ✓ / 45→67 ✓ / 89→111 ✓ |
+| `i` | 25 | round(2.9688)=3 → 25 ✓ |
+| monospace `10×A` | 92 | round(70)=70 → 92 ✓ |
+
+⇒ **`select` 边框盒宽 = round(最宽 option 文本宽) + 20（箭头区） + 1px border×2**（零偏差）。
+
+**关键反证**：textarea 在 `13.3333px` 下 **Arial 与 monospace 同宽**（cols=10 → 91，
+cols=20 → 161）⇒ 列宽**与作者 font-family 无关**（Chromium 用 UA 控制字体度量），故只能
+按字号推导，不能去查字体度量。
+
+**C 组（font-size 扫描 8..32px，反推每列宽）**：8→4, 10→5, 12→6, 13.3333→7, 14→7,
+16→8, 18→9, 20→10, 24→12, 32→16 ⇒ **每列宽 = round(0.5 × font-size)**；且常数项
+（内容宽额外 +15）在 13.3333px 与 20px 两组**均为 15**（与字号无关）。
+
+⇒ **`textarea` 边框盒宽 = cols × round(0.5×fs) + 15 + padding 4 + border 2**；
+cols 默认 20、fs 13.3333 ⇒ `20×7 + 21 = 161` ✓。
+
+**代码改动**（`engine/layout/formcontrol.go`）：
+
+- 新增常量 `formTextareaColExtra = 15.0`、`formSelectArrowWidth = 20.0`；
+- 新增 `textareaColumnWidth(box)`（`round(0.5×fs)`，含已知局限说明）；
+- 把 select 的扫描抽成 `selectMaxOptionTextWidth`（round + 箭头区）、
+  `clampSelectMaxWidth`（max-width 钳制）、`selectIntrinsicContentWidth`（内容宽）；
+  `selectContentWidth` 改为复用它们（外盒语义不变，flex 消费方不受影响）；
+- `inlineformattingcontext.go`：inline-block 尺寸推导处对 select 走
+  `selectIntrinsicContentWidth`（此前 `formControlContentSize` 有意不为 select 返回尺寸，
+  导致 select 被**裸 option 文本**撑开——这正是 t6 只有 10.893 的原因）。
+
+**验收**：`g1_formctl` t6 `31` ✓、t7 `161` ✓（与 Edge 逐字相同）；差异 3 行 → **1 行**（仅 t5 亚像素）。
+
+### 11-4｜矩阵与回归验证（全绿）
+
+| 检查 | 结果 |
+|---|---|
+| `go build ./...` | OK |
+| `h2_baseline_matrix` | **47/47**，差异仍 **2 行（仅 v_middle）** → 无回归 ✓ |
+| `g5_mixedtext` | **IDENTICAL**（5/5）✓ |
+| `g1_formctl` | 7/7，差异 1 行（t5 亚像素）✓ |
+| `g4_inlineblock` | 7/7，差异 5 对（见 §11-5）✓ |
+| `h2_replaced_linebox` | 6/6，差异 5 对（0.25px 亚像素）✓ |
+| `go test ./engine/...` | 全通过 |
+
+> **`go test ./...` 的 3 个 FAIL 与本次改动无关（已实测证明）**：`wb-ui/webkit` 包的
+> `TestButtonTextVerticalCenter`、`TestCM6RangeMeasurementMatchesSkia`、
+> `TestCheckedStateInvalidatesStyle` —— 用 `git stash` 回到 HEAD（`43e496e`）重跑，
+> **输出逐字相同**，属既有失败。本次改动前只跑过 `./engine/...`（不含 webkit 包），
+> 故此前未暴露。
+
+### 11-5｜已知接受差异表（**关闭项**，不再作为「遗留 bug」）
+
+判据：**仅亚像素（< 1px）且根因已由实测证明为「精度/语义口径」类**才登记于此；
+表中每项都给出**数值 + 根因 + 不改理由**。凡 ≥1px 的实现缺口一律不在此表（本表当前无此类）。
+
+| # | 位置 | Edge | wbui | 差值 | 根因（实测） | 不改理由 |
+|---|---|---|---|---|---|---|
+| A1 | `h2_baseline_matrix` / `g4 l3`：`vertical-align:middle` 行盒 | `relTop=4.156 lineH=25.156` | `relTop=4.000 lineH=25.000` | **0.156px**（g4 行盒高表现为 0.65625） | 度量探针实测 Noto Sans SC 16px `xHeight=8.688` ⇒ `xHeight/2=4.344`；Edge `19 − 4.344 − 10.5 = 4.156` **精确吻合** ⇒ 是 **x-height 语义**而非取整误差 | ① 亚像素；② 修它必须连带把 input/button 的 UA 默认 `vertical-align` 由 `middle` 改 `baseline`（Edge 实测默认=baseline），否则 **30 行已对齐用例全部退化**；收益仅 0.156px |
+| A2 | `h2_replaced_linebox`：replaced 元素行盒高 | `host=68.500` | `host=68.250` | **0.25px** | `im`（64×64 img）两侧**完全一致**；差在行盒高 `68.5 = 64 + strut descent`，即 13px/1.5 宿主下 strut descent 的取值口径 | 亚像素（<1px），且并沿垂直方向等比传导（host2/im2 的 top 同差），无实现缺口特征 |
+| A3 | `g4`：`w1` 宽 / `i2` x | `29.65625` / `33.59375` | `29.648` / `33.584` | **0.008** / **0.0098** | `white-space:pre` 三空格的文本测量亚像素；`i2` 的 x 由 `i1(30)+空格宽` 累积而来 | 亚像素（<1px）；属文本测量精度，非布局语义 |
+| A4 | `g1_formctl` t5：按钮宽 | `36.015625` | `36.012969970703125` | **0.0027px** | 按钮内文本宽的小数位差异（位置/高度/padding/border/字体逐项一致） | 亚像素（<1px）；无任何可辨识的实现缺口 |
+
+> 对 A1 的补充事实（与 A2 同源）：本表仅登记**渲染精度**类。若将来要动 A1，必须先
+> 整体评估「UA 默认 vertical-align」的改动面，不可局部修 —— 这也是本轮维持不改的依据。
+
+### 11-6｜收敛判据
+
+| 探针 | 差异行数 | 剩余内容 |
+|---|---|---|
+| `g5_mixedtext` | **0** | 无（IDENTICAL） |
+| `g1_formctl` | **1 对** | 仅 A4（t5 亚像素） |
+| `g4_inlineblock` | **5 对** | 仅 A1（l3 及其垂直传导 l4/w1/i1/i2）+ A3（w1/i2 水平亚像素） |
+| `h2_replaced_linebox` | **5 对** | 仅 A2（0.25px 及其传导） |
+
+⇒ **四项探针的剩余差异全部落在「已知接受差异」表内（且均为亚像素 < 1px），
+无未登记的 ≥1px 实现缺口 ⇒ 判定「无遗留」。**
