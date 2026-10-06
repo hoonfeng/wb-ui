@@ -979,12 +979,24 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 
 			// If content height is still 0 (no CSS height), use line height.
+			// ★ 例外：**无内容的 inline-block**（宽高均 auto 且无子内容）高度应为 0
+			//   —— Edge 实测 ib_empty ctrlH=0；行高兜底会把空盒撑成 24，并让它
+			//   被当成有高度的盒子参与行盒（relTop 由 19 变 0）。
+			//   纯 inline 的 span 高度对布局无影响（CSS 2.1 §10.6.1），保留兜底。
 			if cldG.ContentHeight() <= 0 {
-				lineH := fontLineGap(cld)
-				if lineH <= 0 {
-					lineH = fs * 1.2
+				skipLineHeightFallback := false
+				if cs := cld.Style(); cs != nil && cs.Display == style.DisplayInlineBlock && !cld.IsReplaced() {
+					if el := cld.Element(); el != nil && inlineIsEmpty(el) {
+						skipLineHeightFallback = true
+					}
 				}
-				cldG.SetContentHeight(lineH)
+				if !skipLineHeightFallback {
+					lineH := fontLineGap(cld)
+					if lineH <= 0 {
+						lineH = fs * 1.2
+					}
+					cldG.SetContentHeight(lineH)
+				}
 			}
 
 			// ★ min-height / max-height clamp（CSS 2.1 §10.7，border-box 语义）。
@@ -1162,23 +1174,37 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						// ★ el != nil 是必须的：匿名盒（Element() == nil）没有 DOM 元素，
 						//   inlineIsEmpty(nil) 会解引用空指针 panic（CJK 夹具必经此路径）。
 						if el := cld.Element(); el != nil && !isFormControlElement(el) && inlineIsEmpty(el) &&
-							chnCS != nil && chnCS.Height.Unit != "" && chnCS.Height.Unit != "auto" {
-							asc := margin.Top + cldG.BorderBoxHeight()
-							if strutAscent > asc {
-								asc = strutAscent
-							}
-							desc := margin.Bottom
-							if strutDescent > desc {
-								desc = strutDescent
-							}
-							if asc > currentLine.maxBaseline {
-								currentLine.maxBaseline = asc
-							}
-							if desc > currentLine.maxDescent {
-								currentLine.maxDescent = desc
-							}
-							if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
-								currentLine.lineH = h
+							chnCS != nil {
+							if chnCS.Height.Unit != "" && chnCS.Height.Unit != "auto" {
+								asc := margin.Top + cldG.BorderBoxHeight()
+								if strutAscent > asc {
+									asc = strutAscent
+								}
+								desc := margin.Bottom
+								if strutDescent > desc {
+									desc = strutDescent
+								}
+								if asc > currentLine.maxBaseline {
+									currentLine.maxBaseline = asc
+								}
+								if desc > currentLine.maxDescent {
+									currentLine.maxDescent = desc
+								}
+								if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
+									currentLine.lineH = h
+								}
+							} else {
+								// ★ 无显式高度的空 inline-block：自身高度为 0
+								//   （Edge 实测 ib_empty ctrlH=0），其基线 = 底边
+								//   margin 边（CSS 2.1 §10.8.1：空 inline-block 无
+								//   行内内容）⇒ 底边坐在行盒基线上 ⇒ top =
+								//   行盒顶→基线距离。Edge 实测 relTop=19 = strutAscent。
+								//   高度 0 不改变行盒高（仍由 strut 决定 24）。
+								base := strutAscent
+								if currentLine.maxBaseline > base {
+									base = currentLine.maxBaseline
+								}
+								cldG.SetTopLeft(currentLine.y+base, cldG.Left())
 							}
 						}
 						if need := margin.Top + cldG.BorderBoxHeight() + margin.Bottom; need > currentLine.lineH {
