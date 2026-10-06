@@ -44,7 +44,28 @@ func main() {
 	audit := flag.Bool("audit", false, "布局审计（无头）：量化视口/文档尺寸与各容器几何，列出越界与内容溢出")
 	debugPort := flag.Int("remote-debugging-port", 0, "CDP 调试端口（0=关闭；只绑 127.0.0.1）")
 	hold := flag.Duration("hold", 0, "自检后保持运行（供外部工具连接调试，如 15s）")
+	// 媒体验证工装（文档 §6.2 第 2 条 / §8.2 阶段 0）：与 AI-PS 产物加载无关，
+	// 因此放在读取 dist 之前分流。
+	media := flag.Bool("media", false, "媒体验证：四配置矩阵 + L0–L4 判定 + Markdown 报告（本机按需，不入 CI 门禁）")
+	mediaSamples := flag.String("media-samples", filepath.Join("dev", "media", "samples"), "媒体验证：样本目录（gen_samples.py 的产物）")
+	mediaOut := flag.String("media-out", filepath.Join("dev", "media", "out"), "媒体验证：报告/截图输出目录")
+	mediaBaseline := flag.String("media-baseline", filepath.Join("dev", "media", "baseline.json"), "媒体验证：基线期望表（等级比对）")
+	mediaEdge := flag.Bool("media-edge", false, "媒体验证：启用 Edge 双端对照（无 Edge 时标 SKIP(no-edge)）")
+	mediaUpdate := flag.Bool("media-update-baseline", false, "媒体验证：把本次结果写回基线期望表")
+	mediaOnly := flag.String("media-only", "", "媒体验证：只跑名字含该子串的样本（调试用）")
 	flag.Parse()
+
+	if *media {
+		os.Exit(runMediaProbe(mediaOpts{
+			Samples:   *mediaSamples,
+			Out:       *mediaOut,
+			Baseline:  *mediaBaseline,
+			Edge:      *mediaEdge,
+			Update:    *mediaUpdate,
+			Only:      *mediaOnly,
+			ViewportW: *width,
+		}))
+	}
 
 	distAbs, err := filepath.Abs(*dist)
 	if err != nil {

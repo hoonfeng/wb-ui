@@ -1,0 +1,2695 @@
+{
+  "version": 1,
+  "generated_at": "2026-10-07T05:24:30+08:00",
+  "note": "媒体格式能力等级基线（引擎等级）。Edge 等级在 -media-edge 且本机有 Edge 时回填；由 cmd/psai -media -media-update-baseline 生成（文档 §6.2 第 2 条）。",
+  "entries": [
+    {
+      "config": "Browser",
+      "sample": "anim-2frames.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-2frames.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-2frames.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-noloop.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-noloop.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-noloop.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-uneven-delay.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-uneven-delay.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "anim-uneven-delay.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Browser",
+      "sample": "corrupt.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "corrupt.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "corrupt.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "gradient.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "gradient.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "gradient.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "huge-4096.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "huge-4096.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "huge-4096.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "icon-24.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "icon-24.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "icon-24.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "inline-svg-data-uri",
+      "source": "data",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "mislabeled.png",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "mislabeled.png",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "mislabeled.png",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-64.ico",
+      "source": "data",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-64.ico",
+      "source": "file",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-64.ico",
+      "source": "rel",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossless.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossless.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossless.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossy.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossy.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad-lossy.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.avif",
+      "source": "data",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.avif",
+      "source": "file",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.avif",
+      "source": "rel",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.bmp",
+      "source": "data",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.bmp",
+      "source": "file",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.bmp",
+      "source": "rel",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.jpg",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.jpg",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.jpg",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.tiff",
+      "source": "data",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.tiff",
+      "source": "file",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "quad.tiff",
+      "source": "rel",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "ratio-only.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "ratio-only.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "ratio-only.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "rect-120x80.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "rect-120x80.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "rect-120x80.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.m4a",
+      "source": "data",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.m4a",
+      "source": "file",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.m4a",
+      "source": "rel",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.mp3",
+      "source": "data",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.mp3",
+      "source": "file",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.mp3",
+      "source": "rel",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.ogg",
+      "source": "data",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.ogg",
+      "source": "file",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.ogg",
+      "source": "rel",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.wav",
+      "source": "data",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.wav",
+      "source": "file",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "sine-440-1s.wav",
+      "source": "rel",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "solid-red-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "solid-red-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "solid-red-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.webm",
+      "source": "data",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.webm",
+      "source": "file",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "testsrc-1s.webm",
+      "source": "rel",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "twophase-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "twophase-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "twophase-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "with space.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "with space.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "with space.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "zero-bytes.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "zero-bytes.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Browser",
+      "sample": "中文名-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "中文名-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "中文名-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "图标-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "图标-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Browser",
+      "sample": "图标-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-2frames.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-2frames.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-2frames.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-noloop.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-noloop.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-noloop.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-uneven-delay.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-uneven-delay.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "anim-uneven-delay.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "corrupt.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "corrupt.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "corrupt.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "gradient.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "gradient.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "gradient.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "huge-4096.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "huge-4096.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "huge-4096.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "icon-24.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "icon-24.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "icon-24.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "inline-svg-data-uri",
+      "source": "data",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "mislabeled.png",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "mislabeled.png",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "mislabeled.png",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-64.ico",
+      "source": "data",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-64.ico",
+      "source": "file",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-64.ico",
+      "source": "rel",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossless.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossless.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossless.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossy.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossy.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad-lossy.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.avif",
+      "source": "data",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.avif",
+      "source": "file",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.avif",
+      "source": "rel",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.bmp",
+      "source": "data",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.bmp",
+      "source": "file",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.bmp",
+      "source": "rel",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.jpg",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.jpg",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.jpg",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.tiff",
+      "source": "data",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.tiff",
+      "source": "file",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "quad.tiff",
+      "source": "rel",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "ratio-only.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "ratio-only.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "ratio-only.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "rect-120x80.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "rect-120x80.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "rect-120x80.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.m4a",
+      "source": "data",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.m4a",
+      "source": "file",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.m4a",
+      "source": "rel",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.mp3",
+      "source": "data",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.mp3",
+      "source": "file",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.mp3",
+      "source": "rel",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.ogg",
+      "source": "data",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.ogg",
+      "source": "file",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.ogg",
+      "source": "rel",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.wav",
+      "source": "data",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.wav",
+      "source": "file",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "sine-440-1s.wav",
+      "source": "rel",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "solid-red-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "solid-red-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "solid-red-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.webm",
+      "source": "data",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.webm",
+      "source": "file",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "testsrc-1s.webm",
+      "source": "rel",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "twophase-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "twophase-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "twophase-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "with space.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "with space.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "with space.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "zero-bytes.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "zero-bytes.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "中文名-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "中文名-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "中文名-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "图标-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "图标-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowAll",
+      "sample": "图标-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-2frames.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-2frames.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-2frames.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-noloop.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-noloop.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-noloop.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-uneven-delay.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-uneven-delay.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "anim-uneven-delay.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "corrupt.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "corrupt.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "corrupt.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "gradient.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "gradient.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "gradient.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "huge-4096.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "huge-4096.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "huge-4096.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "icon-24.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "icon-24.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "icon-24.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "inline-svg-data-uri",
+      "source": "data",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "mislabeled.png",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "mislabeled.png",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "mislabeled.png",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-64.ico",
+      "source": "data",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-64.ico",
+      "source": "file",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-64.ico",
+      "source": "rel",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossless.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossless.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossless.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossy.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossy.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad-lossy.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.avif",
+      "source": "data",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.avif",
+      "source": "file",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.avif",
+      "source": "rel",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.bmp",
+      "source": "data",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.bmp",
+      "source": "file",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.bmp",
+      "source": "rel",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.jpg",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.jpg",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.jpg",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.tiff",
+      "source": "data",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.tiff",
+      "source": "file",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "quad.tiff",
+      "source": "rel",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "ratio-only.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "ratio-only.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "ratio-only.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "rect-120x80.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "rect-120x80.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "rect-120x80.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.m4a",
+      "source": "data",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.m4a",
+      "source": "file",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.m4a",
+      "source": "rel",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.mp3",
+      "source": "data",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.mp3",
+      "source": "file",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.mp3",
+      "source": "rel",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.ogg",
+      "source": "data",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.ogg",
+      "source": "file",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.ogg",
+      "source": "rel",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.wav",
+      "source": "data",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.wav",
+      "source": "file",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "sine-440-1s.wav",
+      "source": "rel",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "solid-red-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "solid-red-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "solid-red-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.webm",
+      "source": "data",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.webm",
+      "source": "file",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "testsrc-1s.webm",
+      "source": "rel",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "twophase-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "twophase-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "twophase-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "with space.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "with space.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "with space.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "zero-bytes.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "zero-bytes.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "中文名-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "中文名-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "中文名-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "图标-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "图标-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+AllowHostResolved",
+      "sample": "图标-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-2frames.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-2frames.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-2frames.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-3frames-rgb.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-noloop.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-noloop.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-noloop.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-uneven-delay.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L4"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-uneven-delay.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "anim-uneven-delay.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "corrupt.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "corrupt.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "corrupt.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "gradient.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "gradient.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "gradient.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "huge-4096.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "huge-4096.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "huge-4096.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "icon-24.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "icon-24.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "icon-24.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "inline-svg-data-uri",
+      "source": "data",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "mislabeled.png",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "mislabeled.png",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "mislabeled.png",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-64.ico",
+      "source": "data",
+      "format": "ico",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-64.ico",
+      "source": "file",
+      "format": "ico",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-64.ico",
+      "source": "rel",
+      "format": "ico",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossless.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossless.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossless.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossy.webp",
+      "source": "data",
+      "format": "webp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossy.webp",
+      "source": "file",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad-lossy.webp",
+      "source": "rel",
+      "format": "webp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.avif",
+      "source": "data",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.avif",
+      "source": "file",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.avif",
+      "source": "rel",
+      "format": "avif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.bmp",
+      "source": "data",
+      "format": "bmp",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.bmp",
+      "source": "file",
+      "format": "bmp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.bmp",
+      "source": "rel",
+      "format": "bmp",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.gif",
+      "source": "data",
+      "format": "gif",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.gif",
+      "source": "file",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.gif",
+      "source": "rel",
+      "format": "gif",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.jpg",
+      "source": "data",
+      "format": "jpeg",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.jpg",
+      "source": "file",
+      "format": "jpeg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.jpg",
+      "source": "rel",
+      "format": "jpeg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.tiff",
+      "source": "data",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.tiff",
+      "source": "file",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "quad.tiff",
+      "source": "rel",
+      "format": "tiff",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "ratio-only.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "ratio-only.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "ratio-only.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "rect-120x80.svg",
+      "source": "data",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "rect-120x80.svg",
+      "source": "file",
+      "format": "svg",
+      "grade": "L2"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "rect-120x80.svg",
+      "source": "rel",
+      "format": "svg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.m4a",
+      "source": "data",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.m4a",
+      "source": "file",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.m4a",
+      "source": "rel",
+      "format": "m4a",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.mp3",
+      "source": "data",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.mp3",
+      "source": "file",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.mp3",
+      "source": "rel",
+      "format": "mp3",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.ogg",
+      "source": "data",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.ogg",
+      "source": "file",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.ogg",
+      "source": "rel",
+      "format": "ogg",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.wav",
+      "source": "data",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.wav",
+      "source": "file",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "sine-440-1s.wav",
+      "source": "rel",
+      "format": "wav",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "solid-red-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "solid-red-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "solid-red-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.webm",
+      "source": "data",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.webm",
+      "source": "file",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "testsrc-1s.webm",
+      "source": "rel",
+      "format": "webm",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "twophase-1s.mp4",
+      "source": "data",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "twophase-1s.mp4",
+      "source": "file",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "twophase-1s.mp4",
+      "source": "rel",
+      "format": "mp4",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "with space.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "with space.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "with space.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "zero-bytes.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "zero-bytes.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "中文名-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "中文名-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "中文名-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "图标-方块.png",
+      "source": "data",
+      "format": "png",
+      "grade": "L3"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "图标-方块.png",
+      "source": "file",
+      "format": "png",
+      "grade": "L0"
+    },
+    {
+      "config": "Toolkit+DenyExternal",
+      "sample": "图标-方块.png",
+      "source": "rel",
+      "format": "png",
+      "grade": "L0"
+    }
+  ]
+}

@@ -8,6 +8,10 @@
 > ★ **实现路径已收敛（2026-10-06）**：本方案的**实现**部分（视频/音频真实播放 = **主线 A**）的分期、依赖与验收
 > 已并入 [docs/implementation-path.md](implementation-path.md) §2；该总纲同时收录 **CDP 调试协议（主线 B）** 与
 > **JS 引擎对标（主线 C）**，三线共用同一分期表（总纲 §6）。本文继续作为**验证侧设计稿**（L0–L4 分级、判定标准）。
+> ★ **2026-10 复测已执行（四配置 × 96 格）**：结果与缺口清单见 §3.4，完整证据见
+> `dev/media/out/report.md` 与四配置 `matrix-*.png`，回归基线由 `dev/media/baseline.json` 承载。
+> 本轮修复 U2（`<img>` load/error 契约）、U5（SVG file/rel 渲染）、D4（WebP/BMP/ICO 固有尺寸），
+> 并修复一处**引入即发现并修掉**的回归 R1（SVG 探测在 paint 线程同步联网）。
 
 ---
 
@@ -18,6 +22,8 @@
 1. **光栅图像解码完整**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 都能解码并绘制；
 2. **SVG 走自有矢量路径**，不入 Skia 解码器；
 3. **动画只取首帧**：GIF / WebP 动画无帧推进机制，视觉上恒为静态首帧；
+   ★ **2026-10 复测更新**：GIF 动画已能**帧推进**（3 个动画样本 × 3 来源均达 L4）；
+   WebP 动画仍恒为静态首帧（缺口 D11）。
 4. **视频、音频没有内置解码与输出能力**（无解码器、无音频后端）——
    ★ **2026-10-07 更新**：宿主注入元数据（A0）与帧（A1）之后，`<video>` 已能完成资源加载（L1：`readyState=4`、
    `duration`、`videoWidth/Height`）并**画出画面**（L2：无 poster 时画当前帧、有 poster 时先画 poster）；
@@ -27,6 +33,10 @@
    `AllowsExternal` 判定」，但实现把模式门禁放在了 `decodeDataURI` 之前。门禁顺序改正后 `data:` 无条件
    放行（`<video poster="data:…">` 在 ModeToolkit 下已能绘制，见 G5 的 TC-M-502 实测）；`file://` 与
    `http(s)` 的拒绝语义不变。
+6. ★ **2026-10 复测新增（契约侧）**：`<img>` 的 `load` / `error` 事件契约已补齐（U2）——
+   此前「画得出但脚本测不到」（§3.3 D1）的两侧现在都可用：`complete` / `naturalWidth` 正确，
+   加载成功派发 `load`、失败派发 `error`。**SVG 仍是例外**（无固有尺寸、无 `load`/`complete`，
+   见缺口 D8）。
 
 第 5 条是本次盘点最重要的发现，直接决定「AI-PS 界面里图片能不能用」。
 
@@ -173,15 +183,66 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 ### 3.3 契约层缺陷（画得出，但脚本测不到）
 
-| # | 现象 | 证据 | 影响 |
+| # | 现象 | 证据 | 影响 | 状态（2026-10 复测，见 §3.4） |
+|---|---|---|---|---|
+| D1 | ModeBrowser 下 file:// 图片**真实绘制**，但 `img.complete=false`、`naturalWidth=0` | C 组 PNG 可见图案 vs `render-out.txt` 报告 | 脚本无法判断加载完成；懒加载/骨架屏/占位逻辑失效 | ✅ **已修复**（U2：契约列 0 → 66 ✅，`complete=true`） |
+| D2 | ModeToolkit 下 `data:` 自包含图被拒 | A/B 组全灰 | UI 库模式无法使用内联图标/贴图 | ✅ **已修复**（门禁移到 `decodeDataURI` 之后，`data:` 无条件放行） |
+| D3 | `svg` 仅 `data:` 可渲染，`file://`/相对路径空白 | C 组第三列 svg 行为 | 文件引用的 SVG 图标不显示 | ✅ **已修复**（U5：file/rel 的 SVG 已绘制，实测 D=✅） |
+| D4 | WebP/BMP/ICO 无固有尺寸 | §3.1 Go 列 ❌ | `<img>` 未给尺寸时 0×0 塌陷 | ✅ **已修复**（Skia `DecodeSize` 兜底 → 三者均 L3） |
+| D5 | `<video>`/`<audio>` `readyState` 恒 0、`duration=NaN`、`currentTime` 不推进 | `render-out.txt` 中 `"rs":0` 全部 | 播放器类库走「未就绪」分支，永不 ready | 🟡 **部分修复**（A0：视频已派发 `loadedmetadata`，契约 C=✅） |
+| D6 | `MediaMetadataResolver` 宿主从未注入 | `grep` 全仓仅定义(`media_element.go:41`)+单测赋值 | 即便本地 mp4 也拿不到时长 | ✅ **已修复**（A0：`app.InstallMediaMetadataResolver` 已在探针与 psai 装配） |
+| D7 | 动图无帧推进 API | `goskia/skia` 无 codec/frame API（仅 `DecodeImage`/`NewImageFromPixels`） | GIF/WebP 动画恒为静态 | 🟡 **部分修复**（GIF 动图已达 L4；**WebP 动图仍未推进**，见 D11） |
+
+### 3.4 本轮复测结果（2026-10）：四配置 × 96 格
+
+工装：`python dev/media/gen_samples.py`（32 文件 + 1 内联条目 = 33 项样本）→ `cmd/psai -media`
+（四配置矩阵页 + L0–L4 判定 + Markdown 报告 + 基线比对；`-media-update-baseline` 更新期望表）。
+样本与矩阵页不入库（决策 5），**报告与四配置截图入库**（§6.3 证据纪律）。
+
+| 配置 | L0 | L1 | L2 | L3 | L4 |
+|---|---|---|---|---|---|
+| Browser | 36 | 0 | 9 | **42** | **9** |
+| Toolkit+AllowAll | 36 | 0 | 9 | 39 | 12 |
+| Toolkit+AllowHostResolved | 36 | 0 | 9 | 39 | 12 |
+| Toolkit+DenyExternal（默认） | 73 | 0 | 6 | 13 | 4 |
+
+- **光栅静态全绿**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 在 data / file / rel 三种来源下
+  全部 **L3**（含 `huge-4096.png`、含空格与中文文件名）。
+- **GIF 动图已 L4**：3 个动画样本 × 3 来源 = 9 格达到「内容随时间变化」（A=✅）。
+- **Toolkit+DenyExternal 保持安全默认**：file/rel 一律不加载（L0），只有 `data:` 无条件放行（L3/L4）。
+- ★ **Browser 与 Toolkit+AllowAll 的等级差异（L3 42/39、L4 9/12）来自动图帧时机**：同一页
+  在两次运行中截帧落在不同帧，`framesDiffer`（静止/播放/推进三帧采样）判定随之抖动。这是
+  **判定抖动**而非渲染差异——两配置的静态截图仍逐像素一致（报告「A/D 一致性」节）。
+
+**本轮修复的引擎缺陷**
+
+| 编号 | 缺陷 | 修法与落点 | 证据 |
 |---|---|---|---|
-| D1 | ModeBrowser 下 file:// 图片**真实绘制**，但 `img.complete=false`、`naturalWidth=0` | C 组 PNG 可见图案 vs `render-out.txt` 报告 | 脚本无法判断加载完成；懒加载/骨架屏/占位逻辑失效 |
-| D2 | ModeToolkit 下 `data:` 自包含图被拒 | A/B 组全灰 | UI 库模式无法使用内联图标/贴图 |
-| D3 | `svg` 仅 `data:` 可渲染，`file://`/相对路径空白 | C 组第三列 svg 行为 | 文件引用的 SVG 图标不显示 |
-| D4 | WebP/BMP/ICO 无固有尺寸 | §3.1 Go 列 ❌ | `<img>` 未给尺寸时 0×0 塌陷 |
-| D5 | `<video>`/`<audio>` `readyState` 恒 0、`duration=NaN`、`currentTime` 不推进 | `render-out.txt` 中 `"rs":0` 全部 | 播放器类库走「未就绪」分支，永不 ready |
-| D6 | `MediaMetadataResolver` 宿主从未注入 | `grep` 全仓仅定义(`media_element.go:41`)+单测赋值 | 即便本地 mp4 也拿不到时长 |
-| D7 | 动图无帧推进 API | `goskia/skia` 无 codec/frame API（仅 `DecodeImage`/`NewImageFromPixels`） | GIF/WebP 动画恒为静态 |
+| **U2** | `<img>` 的 `load`/`error` 从不派发（`onload`/`onerror` 失效） | 渲染层通知带 `ok` + 就绪查询；`webkit` 侧 goroutine 排队 → 主线程 `flushImageEvents` 派发；补 `rendering.RequestImageLoad`（浏览器「src 生效即加载」，不再依赖绘制） | `webkit/img_event_dispatch_test.go` 4 用例；探针失败路径备注「onerror 已派发（契约正确）」 |
+| **U5 / D3** | SVG 仅 `data:` 可渲染 | `loadBackgroundSVGWith` 让 file:// 与相对路径走与栅格图同一条 loader 链 | 探针中 `rect-120x80.svg` / `icon-24.svg` / `ratio-only.svg` 的 file 与 rel 均 D=✅ |
+| **D4** | WebP/BMP/ICO 无固有尺寸 | `layout.rasterIntrinsic` 在 Go `DecodeConfig` 失败时用 Skia `DecodeSize` 兜底 | 三者均达 L3（G=✅） |
+| **R1** | *（本轮引入并修复的回归）* SVG 探测在 paint 线程同步 `loader.Load`：对栅格图/远端引用同步发请求，`Render()` 被扣住整个 HTTP 超时（实测 30 s）并重复发请求 | 同步通道收紧为「本地 + `.svg`/`.svgz` 扩展名」；栅格图与远端引用一律走异步通道 | `TestAsyncImageLoadMarksFrameDirty`：HEAD PASS(0.12 s) → 引入后 FAIL(60 s) → 修复后 PASS(0.12 s) |
+
+**探针自身缺陷（测量伪影，会把引擎能力判低）**
+
+1. `settleReal` 只推进事件循环、**从不渲染**——而本引擎的图片加载与事件派发由绘制驱动 →
+   契约列恒 ❌；
+2. 内联事件属性用**双引号**字面量作参数 → `onload="mvNote("c0",'load')"` 属性在第二个双引号处
+   提前闭合 → 页面侧 `window.__mediaEvents` 恒为空；
+3. 像素采样只支持 `quad`/`solid` 两种模式 → 动图（帧色）与渐变样本一律判「未绘制」。
+
+修 1–3 后：契约列 **0 → 66 ✅**，Browser 下 L3/L4 由 **0 → 51** 格（`L1` 归零）。
+
+**仍存在的缺口（转入 §8.1 / 阶段 3）**
+
+| 编号 | 缺口 | 实测表现 | Browser 下格数 |
+|---|---|---|---|
+| D8 | `<img src="*.svg">` 无固有尺寸、无 `complete`/`load` 契约 | 画得出（D=✅）但 `naturalWidth=0`、契约 ❌ → 卡在 L2 | 9 |
+| D9 | `data:image/svg+xml`（非 base64、URL 编码形式）内联 SVG 不绘制 | L0（另一条 `data:image/svg+xml;base64` 路径正常） | 1 |
+| D10 | `<video>` **画面未绘制** | 帧流在推进（file/rel 的 A=✅）、`loadedmetadata` 已派发（C=✅），但采样点无画面（D=❌）→ L0 | 12 |
+| D11 | WebP 动图帧推进未生效 | `anim-2frames.webp` A=❌ → L3（GIF 同类样本为 L4） | 3 |
+| D12 | 音频无解码/输出后端 | L0（预期现状，需音频后端） | 12 |
+| — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
 ---
 
@@ -405,17 +466,17 @@ D1 … （现象 / 证据文件 / 影响面 / 建议）
 
 ### 8.1 不可用项（按优先级）
 
-| 级别 | 编号 | 问题 | 现状 | **修法/路线（已确认）** | 影响面 |
-|---|---|---|---|---|---|
-| **P0** | U1 | ModeToolkit 下光栅图片一律不渲染（含 `data:`） | A/B 组实测全灰 | **决策 1：(c) 新增资源策略开关**，`data:` 无条件放行、默认值不变（§8.2 阶段 1） | AI-PS 及一切 UI 库模式宿主无法显示任何位图 |
-| **P0** | U2 | 图片契约失效：`complete`/`naturalWidth` 恒 false/0、`onload` 疑似不派发 | C 组报告 vs 截图矛盾 | 阶段 1：按「解码缓存就绪」修 IDL 反射与事件派发 | 所有依赖图片加载事件的业务逻辑失效 |
-| **P1** | U3 | WebP/BMP/ICO 无固有尺寸（两套 codec 集不一致） | 实测 Go DecodeConfig ❌ | 阶段 2：Skia 优先 + Go 兜底（或注册 `x/image/webp`+`bmp`） | 未给尺寸的 `<img>` 塌陷 |
-| **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 |
-| **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 |
-| **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 |
-| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 |
-| **P2** | U8 | `MediaMetadataResolver` 宿主未注入 | 仅定义+单测 | 阶段 3 前置：宿主接 `ffmpeg -i` 探测时长（一次赋值） | 即使本地媒体也拿不到时长 |
-| **P3** | U9 | AVIF/TIFF 不支持 | 实测 ❌ | 维持不支持（写入基线，不投入） | 新格式资源不可用（可接受） |
+| 级别 | 编号 | 问题 | 现状 | **修法/路线（已确认）** | 影响面 | **复测状态（2026-10，§3.4）** |
+|---|---|---|---|---|---|---|
+| **P0** | U1 | ModeToolkit 下光栅图片一律不渲染（含 `data:`） | A/B 组实测全灰 | **决策 1：(c) 新增资源策略开关**，`data:` 无条件放行、默认值不变（§8.2 阶段 1） | AI-PS 及一切 UI 库模式宿主无法显示任何位图 | ✅ **已闭环**（`data:` 在 Toolkit 下 L3/L4；`AllowHostResolved`/`AllowAll` 开关可用） |
+| **P0** | U2 | 图片契约失效：`complete`/`naturalWidth` 恒 false/0、`onload` 疑似不派发 | C 组报告 vs 截图矛盾 | 阶段 1：按「解码缓存就绪」修 IDL 反射与事件派发 | 所有依赖图片加载事件的业务逻辑失效 | ✅ **已闭环**（契约列 0 → 66 ✅；`load`/`error` 均派发） |
+| **P1** | U3 | WebP/BMP/ICO 无固有尺寸（两套 codec 集不一致） | 实测 Go DecodeConfig ❌ | 阶段 2：Skia 优先 + Go 兜底（或注册 `x/image/webp`+`bmp`） | 未给尺寸的 `<img>` 塌陷 | ✅ **已闭环**（Skia `DecodeSize` 兜底，三者 L3；SVG 仍缺 → D8） |
+| **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 | 🟡 **部分闭环**（GIF 达 L4；**WebP 未推进** → D11） |
+| **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 | ✅ **已闭环**（file/rel 已绘制；固有尺寸与契约仍缺 → D8） |
+| **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 | 🟡 **部分闭环**（A0/A1：元数据与帧流在跑；探针采样点仍无画面 → D10） |
+| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ❌ **未闭环**（12 格 L0，需音频后端） |
+| **P2** | U8 | `MediaMetadataResolver` 宿主未注入 | 仅定义+单测 | 阶段 3 前置：宿主接 `ffmpeg -i` 探测时长（一次赋值） | 即使本地媒体也拿不到时长 | ✅ **已闭环**（A0：探针与 psai 均装配该 resolver） |
+| **P3** | U9 | AVIF/TIFF 不支持 | 实测 ❌ | 维持不支持（写入基线，不投入） | 新格式资源不可用（可接受） | ✅ **维持**（6 格 L0，已入基线） |
 
 ### 8.2 落地计划（分阶段，已按七项决策定型）
 
@@ -514,6 +575,23 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
 ---
 
+### 9.3 本轮（2026-10）验证与修复记录
+
+| 事项 | 结论 | 证据 |
+|---|---|---|
+| 四配置 × 96 格复测 | Browser：**L3 42 / L4 9** / L2 9 / L0 36；`Toolkit+DenyExternal` 保持安全默认（file/rel 全拒，仅 `data:` 放行） | `dev/media/out/report.md`、`matrix-*.png` |
+| 回归基线 | 384 条（配置 × 样本 × 来源）等级期望表，等级下降即非零退出 | `dev/media/baseline.json` |
+| **U2** `<img>` load/error 契约 | ✅ 已闭环：成功派发 `load`、失败派发 `error`、`complete`/`naturalWidth` 正确 | `webkit/img_event_dispatch_test.go`（4 用例）+ 探针失败路径备注 |
+| **U5 / D3** SVG `file://` 与相对路径 | ✅ 已闭环：走与栅格图同一条 loader 链（9 格由 L0 → L2） | 探针 `*.svg` 行的 file/rel 列 D=✅ |
+| **D4** WebP/BMP/ICO 固有尺寸 | ✅ 已闭环：Skia `DecodeSize` 兜底（三格式 × 三来源 = 9 格 L3） | 探针 `quad.bmp` / `quad-*.webp` / `quad-64.ico` |
+| **R1**（引入即发现并修掉的回归） | SVG 探测在 paint 线程同步 `loader.Load` → 栅格图/远端引用被同步取字节，`Render()` 扣住整个 HTTP 超时（实测 30 s）且重复发请求；已收紧为「本地 + `.svg` 扩展名」 | `TestAsyncImageLoadMarksFrameDirty`：HEAD PASS(0.12 s) → 引入后 FAIL(60 s) → 修复后 PASS(0.12 s) |
+| 探针 3 处测量伪影 | 已修：①`settleReal` 不渲染即采集；②内联事件属性用双引号字面量作参数导致属性提前闭合；③采样只支持 quad/solid（动图与渐变样本误判未绘制） | 契约列 **0 → 66 ✅**；Browser 下 L3/L4 由 **0 → 51** 格 |
+| 全量测试 | `GOWORK=off go test ./... -count=1`：**仅 webkit 3 个 pre-existing 失败**（已用 HEAD 版本实证同样失败，非本轮引入） | `TestButtonTextVerticalCenter` / `TestCM6RangeMeasurementMatchesSkia` / `TestCheckedStateInvalidatesStyle` |
+
+仍存缺口见 §3.4 末表（D8–D12），全部转入 §8.2 阶段 2/3。
+
+---
+
 ## 附：本次盘点产出的证据索引
 
 | 文件 | 内容 |
@@ -525,5 +603,10 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | `_temp/mediacheck/render/B-toolkit-resolver.png` | ModeToolkit + resolver：与 A **逐字节相同** |
 | `_temp/mediacheck/render/C-browser.png` | ModeBrowser 对照：三列光栅图全部画出 |
 | `_temp/mediacheck/samples/` | 21 个格式样本（PIL/ffmpeg 生成） |
+| **`dev/media/gen_samples.py`** | **媒体验证样本生成脚本**（32 文件 + 1 内联条目；入库，决策 5） |
+| **`dev/media/baseline.json`** | **等级回归基线**：384 条（四配置 × 样本 × 来源），由 `-media-update-baseline` 生成 |
+| **`dev/media/out/report.md`** | **四配置 L0–L4 报告**：总表 / 缺陷清单 / 与基线差异 / A-D 一致性（Browser vs Toolkit+AllowAll） |
+| **`dev/media/out/matrix-*.png`**、`geom-*.json` | 四配置静止态与播放态截图 + 逐格几何/IDL/事件采集（证据） |
+| **`cmd/psai/mediaprobe.go`** | `-media` 探针实现：矩阵页构建、判定器、报告、基线比对（入库） |
 
 > 注（决策 5/6）：以上路径全部位于 `_temp/`（已被 git 忽略），**不随仓库提交**。落地时改为「脚本入库 + 样本本机生成、报告仅本地产物」（§6.2、§6.4）；本表仅记录设计阶段的证据出处。
