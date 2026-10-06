@@ -1003,3 +1003,23 @@ input/textarea 对齐 Edge（21 / 41），代价是 select 被顺带拉低 2px�
 
 `h2_baseline_matrix.{wbui,edge,cmp}.txt`（10 行 diff 的最新证据）、
 `h2_baseline_matrix.head*.{wbui,edge,cmp}.txt`（HEAD 与 30f7440 基线）。
+
+#### P2 根因定位（第 9 轮追加；读码 + 探针口径确认）
+
+探针口径（`h2_baseline_matrix.html` L97-100）：
+`relTop = 元素 top − host top`、`ctrlH = 元素高`、`lineH = host 容器高`。
+用例定义：L52-57 的 `v_*` = `<input style="vertical-align:X">`（父 16px/normal）；
+L63-64 `t_text_bigger` = `<span style="font-size:32px">X</span><input>`；
+L72-73 `ib_empty` = 空 `<span style="display:inline-block;width:30px">`。
+
+| 用例 | 根因 | 性质 |
+|---|---|---|
+| `v_top` | `engine/layout/inlineformattingcontext.go` L1028-1074 的 vertical-align 分支**只覆盖 `middle`(L1033) 与 `baseline`(L1050)**，无 `top` → 退化为 baseline 的 relTop=4；Edge 为 0.000（子盒顶贴行盒顶） | **实现缺口** |
+| `v_bottom` | 同上，无 `bottom` 分支 → 退化为 relTop=4；Edge 为 3.000（= lineH 24 − ctrlH 21，底对齐） | **实现缺口** |
+| `v_middle` | wbui 走 L1033 middle 分支（relTop=4.000）本身合理；差 0.156 与 lineH 的差（Edge 25.156 / wbui 25.000）同步出现 → **先分离「行盒高口径」再判断**，不能直接归因于 middle 公式 | 口径待分离 |
+| `t_text_bigger` | 行内 `32px span` + `input`：Edge 让 input 落到 relTop=22（行盒被 32px 文字撑高后仍按基线对齐），wbui 给 relTop=4 —— 同行大字号对行盒的撑高没有传导到 input 的基线对齐（lineH 两边都是 46，说明撑高本身已实现，差在**对齐传导**） | **实现缺口** |
+| `ib_empty` | Edge 空 inline-block 高度 **0**（`ctrlH=0.000`）；wbui 给 24（套用 host 行高）。空 inline-block 无内容时应为 0 高 | **实现缺口** |
+
+**结论**：4 项为真实实现缺口（`top`/`bottom` 分支缺失、空 inline-block 高度、行内大字号撑高的对齐传导），
+**一律未标 WONTFIX**；1 项（`v_middle`）需先分离行盒高口径。均待第 10 轮修复，
+修复后必须复跑 `gprobe_cmp.sh` 并附两侧行数相等的证据。
