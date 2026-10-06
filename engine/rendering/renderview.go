@@ -1502,7 +1502,12 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				// 的单元格在此被撑到文本宽——fixed-table-layout 的
 				// "later separate row cannot resize first track" 背景从 50px 画成
 				// 277.3px；浏览器中内容只溢出、不改变单元格尺寸。
-				if box := asRenderBox(ro); box != nil && len(segs) > 0 && !renderIsTableInternalBox(ro) {
+				// ★ 同「确定高度」的处理（见下方 HeightIsDefiniteForBox 的说明）：
+				//   CSS 显式 width 的盒子，内容溢出**不改变盒宽**（内容只溢出）。
+				//   实测（g5_mixedtext m2：`.l{width:200px}` + 36 字符无断行机会
+				//   的连续英文串）：此处把 200 撑成 309.376，而 Edge 是 200。
+				if box := asRenderBox(ro); box != nil && len(segs) > 0 &&
+					!renderIsTableInternalBox(ro) && !layout.WidthIsDefiniteForBox(lb) {
 					textRight := segs[0].X + segs[0].Width
 					frameRight := box.frame.X + box.frame.Width
 					if textRight > frameRight && !renderIsFlexItem(ro) {
@@ -1555,7 +1560,12 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				}
 			}
 		}
-		if maxRight > frameRight {
+		// ★ definite width 例外：与上面的高度侧（HeightIsDefiniteForBox）对称。
+		//   `width:200px` 的块内文本溢出时，浏览器只让内容溢出、不改元素宽；
+		//   此处的撑开会把定宽块（连同其背景框）拉宽 —— 实测 g5_mixedtext m2
+		//   200 → 309.376（Edge 200）。flex item 仍按原样排除（其宽由 flex
+		//   算法决定，auto 宽时才需要兜底防 overflow:hidden 剪字）。
+		if maxRight > frameRight && !layout.WidthIsDefiniteForBox(lb) {
 			if !renderIsFlexItem(ro) {
 				box.frame.Width = maxRight - box.frame.X
 			}

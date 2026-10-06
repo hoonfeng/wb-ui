@@ -860,7 +860,20 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				// form_controls 的 textarea w / range x / progress x,y 四处差异
 				// 是同一个根因。
 				_, _, attrSized := formControlContentSize(cld)
-				if !hasExplicitIB && !attrSized {
+				// ★ <select> 单独处理：它的固有内容宽 = round(最宽 option 文本宽)
+				//   + 20（下拉箭头区），见 formcontrol.go 的实测（11 组零偏差）。
+				//   formControlContentSize 有意不为 select 返回尺寸（它服务 flex 的
+				//   intrinsicContentWidth 那条路径），若放任下面的裸文本路径撑开，
+				//   g1_formctl 的 t6 只得到 10.893（= option 文本宽 8.893 + border 2，
+				//   Edge 为 31 —— 恰好差一个箭头区）。
+				ctrlSized := attrSized
+				if !ctrlSized {
+					if w, ok := selectIntrinsicContentWidth(cld); ok {
+						cldG.SetContentWidth(w)
+						ctrlSized = true
+					}
+				}
+				if !hasExplicitIB && !ctrlSized {
 					if txt := inlineBoxTextContent(cld); txt != "" {
 						if tw := measureText(cld, txt); tw > 0 {
 							if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && tw > mw {
@@ -1523,7 +1536,32 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 单元格含 nowrap 长文本时，列轨道宽 50 会被文本宽 277.3 覆盖
 	// （fixed-table-layout 的 "later separate row cannot resize first track"，见
 	// isTableInternalBox）。浏览器中单元格宽度与内容无关，内容只会溢出。
-	if !isFlexItem(box) && !box.IsAbsolutelyPositioned() && !isTableInternalBox(box) {
+	//
+	// ★ 显式 width 例外（author-specified definite width）：若本盒有非 auto 的
+	// width（px/%/em…），其 used width 由 CSS 决定——浏览器中内容只会**溢出**，
+	// 绝不改元素的 border-box 宽。实测反例（g5_mixedtext m2：`.l{width:200px}`
+	// 内 36 字符连续英文串、word-break:normal 无断行机会）：Edge 宽 200 /
+	// wbui 309.376 —— 本回填把定宽容器整体撑开；同夹具中 auto 宽的
+	// m1/m3/m4/m5 两侧完全一致，缺口恰在「显式 width 未被排除」。
+	// 判断口径与上方 auto-width 扩展处（L261）保持一致：Unit==""（零值）同样
+	// 视为非显式宽度。
+	//
+	// ★ 匿名**块级**包装盒例外（无对应元素 + display:block，见 box.go buildChildren
+	// 中 NodeGenericElement + DisplayBlock 的包裹盒）：它的宽度恒为父盒内容宽
+	// （fill-available），浏览器中内容只会溢出、绝不撑开它——这正解释了为何
+	// 「显式 width 例外」单独加还不够：进 IFC 的 box 是匿名盒，其 style 由
+	// NewComputedStyle + InheritFrom 构造，**故意不继承 width**（box.go:738-745），
+	// 故 width.Unit 恒为 ""，例外判不出来。实测（WBUI_IFC_W=1）：
+	//   [ifc-w-in]  #<anon> unit="" cw=200.000 borderW=200.000
+	//   [ifc-w-out] #<anon> explicit=false total=309.376 borderW=309.376
+	// 即该匿名盒被 200 → 309.376 撑开并经几何传出，令 div#m2 的 rect 宽也变
+	// 309.376；而 m1/m3/m4/m5 的回填值（176.992/192/192.480/192）均 < 200，故
+	// 恰好未暴露。匿名**行内**包装盒不在此列——其宽本就由内容（shrink-to-fit）决定。
+	// ★ 跳过本块时 totalWidth 保持 0 → 下方 `if totalWidth > 0 { contentWidth =
+	// totalWidth }` 一并跳过，text-align 仍按声明的定宽计算。
+	hasExplicitWidth := cs != nil && cs.Width.Unit != "" && cs.Width.Unit != "auto"
+	isAnonymousBlock := box.Element() == nil && !box.IsInlineLevel()
+	if !hasExplicitWidth && !isAnonymousBlock && !isFlexItem(box) && !box.IsAbsolutelyPositioned() && !isTableInternalBox(box) {
 		for _, ps := range pending {
 			right := ps.seg.X + ps.seg.Width - contentX
 			if right > totalWidth {

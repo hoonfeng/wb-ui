@@ -3,8 +3,10 @@
 //
 //	<input type=text> content width = size × avgCharWidth + maxCharWidth
 //	                  (size defaults to 20) and content height = one line box;
-//	<textarea>        content width = cols × avgCharWidth (cols defaults to 20),
+//	<textarea>        content width = cols × round(0.5 × fontSize) + 15
+//	                  (cols defaults to 20; see textareaColumnWidth),
 //	                  content height = rows × line box (rows defaults to 2);
+//	<select>          content width = round(widest option text) + 20 (arrow area),
 //	checkbox / radio  are 13×13 CSS px; a range control is 129×16.
 //
 // These are *content-box* sizes. The UA padding and border that give an
@@ -18,6 +20,7 @@
 package layout
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -35,6 +38,14 @@ const (
 	// HTML defaults: input size=20, textarea cols=20 (rows=2, see textareaRows).
 	formControlDefaultSize = 20.0
 	formControlDefaultCols = 20.0
+	// ★ Edge 实测（11 组 font-size 扫描 + 4 组 cols 扫描）：<textarea> 的内容宽
+	//   = cols × 列宽 + **15**，该 15 与字号无关（13.3333px 与 20px 两组均为 15）。
+	//   叠加 UA 的 padding:2px + border:1px（共 6px）后，cols=20 的默认 textarea
+	//   边框盒 = 20×7 + 21 = **161**（Edge 161 / 修复前 wbui 166）。
+	formTextareaColExtra = 15.0
+	// ★ Edge 实测（7 组 option 长度 × 2 种字体）：<select> 在「最宽 option 文本宽」
+	//   之外还有 **20px** 的下拉箭头/指示区（加 1px border×2 共 +22）。
+	formSelectArrowWidth = 20.0
 	// Chromium paints checkbox/radio as 13×13 boxes and a range control as
 	// 129×16 (its UA margins sit in style.applyFormControlUserAgentDefaults).
 	formControlCheckboxSize = 13.0
@@ -133,9 +144,33 @@ func formControlContentSize(box *ElementBox) (w, h float64, ok bool) {
 		return size*formControlAvgCharWidth + formControlMaxCharWidth, lineH, true
 	case "textarea":
 		cols := formControlAttrFloat(el, "cols", formControlDefaultCols)
-		return cols * formControlAvgCharWidth, textareaRows(box) * lineH, true
+		return cols*textareaColumnWidth(box) + formTextareaColExtra, textareaRows(box) * lineH, true
 	}
 	return 0, 0, false
+}
+
+// textareaColumnWidth 返回 <textarea> 每个 cols 列的**内容**宽度。
+//
+// Edge 实测（11 组 font-size 扫描：8/10/12/13.3333/14/16/18/20/24/26.6667/32px，
+// 各 cols=10，反推 列宽=(边框盒宽−21)/10）：
+//
+//	8→4, 10→5, 12→6, 13.3333→7, 14→7, 16→8, 18→9, 20→10, 24→12, 32→16
+//
+// 即 **列宽 = round(0.5 × font-size)**，且与作者 font-family **无关** ——
+// 13.3333px 下 Arial 与 monospace 得到同宽（cols=10 → 均为 91，cols=20 → 均为 161）。
+// 这说明 Chromium 用 UA 控制字体的度量而非作者声明的 font-family，故此处只按
+// 字号推导，不查字体度量。**必须取整**：不取整时 13.3333px 得 6.667/列，
+// cols=20 会算成 154.3（Edge 161）。
+//
+// 已知局限：font-size:26.6667px（比例非整数）实测每列 13.4，本公式给 13
+// （差 0.4/列）。该字号在真实页面中极罕见，且不影响 UA 默认的 13.3333px
+// （验收点 g1_formctl 的 t7）。
+func textareaColumnWidth(box *ElementBox) float64 {
+	fs := fontSizeOf(box)
+	if fs <= 0 {
+		fs = 13.3333
+	}
+	return math.Round(fs * 0.5)
 }
 
 // selectContentWidth 返回 <select> 的内在**内容**宽度：最宽 <option> 的文本宽
@@ -150,6 +185,40 @@ func formControlContentSize(box *ElementBox) (w, h float64, ok bool) {
 // 里宽 38px（浏览器 240px，命中 max-width 上限），option 文本全部截断，并把
 // 兄弟项（margin-left:auto 的 "Enter 发送 · Shift+Enter 换行"）带偏 105px。
 func selectContentWidth(box *ElementBox) (float64, bool) {
+	best, ok := selectMaxOptionTextWidth(box)
+	if !ok {
+		return 0, false
+	}
+	best = clampSelectMaxWidth(box, best)
+	if box.Style() != nil {
+		// ★ 返回**外盒**宽：intrinsicContentWidth 末尾对走到结尾的路径统一加
+		//   自身 padding+border，但提前 return 的分支不会被加（既有的
+		//   formControlContentSize 路径返回内容宽，由 flex 的 paddingMain
+		//   机制承担差值）。本分支的消费方是 flex 的 base size 与 inline-flex
+		//   容器的 max-content 递归——两处都按**外盒**语义使用，漏加会让
+		//   select 的边框盒比浏览器少 38px（实测 202 vs 240）。
+		_, p, b := computeBoxModel(box, 0, fontSizeOf(box))
+		best += p.Left + p.Right + b.Left + b.Right
+	}
+	return best, true
+}
+
+// selectMaxOptionTextWidth 扫描 <select> 的所有 <option>（含 <optgroup> 内），
+// 返回「最宽 option 文本宽」经 **round 量化 + 20px 下拉箭头区** 后的值。
+// ok=false 表示不是 select 或没有任何非空 option。
+//
+// ★ 量化与箭头区由 Edge 实测确定（11 组：Arial 与 monospace，option 长度 1..20，
+// 含单字符 "i"），全部零偏差：
+//
+//	"A"   → round(8.9063)=9  → 9+20=29     "AA" → round(17.8126)=18 → 38
+//	"AAA" → round(26.7189)=27 → 47         5×"A"→ round(44.5315)=45 → 65
+//	10×"A"→ round(89.0625)=89 → 109        "i"  → round(2.9688)=3  → 23
+//	monospace 10×"A" → round(70)=70 → 90
+//
+// 叠加 UA 的 1px border×2 后即得边框盒宽（31/40/49/67/111/25/92 = 上列值+2）。
+// 量化是必需的：不取整时 "A" 只得 30.906（Edge 31）。修复前 wbui 完全没有箭头区
+// （g1_formctl 的 t6 = 10.893，恰为 option 文本宽 8.893 + border 2）。
+func selectMaxOptionTextWidth(box *ElementBox) (float64, bool) {
 	el := box.Element()
 	if el == nil || !strings.EqualFold(el.LocalName(), "select") {
 		return 0, false
@@ -178,33 +247,49 @@ func selectContentWidth(box *ElementBox) (float64, bool) {
 	if best <= 0 {
 		return 0, false
 	}
-	// ★ max-width 钳制：select 的内容宽同样受自身 max-width 约束。gou-ide 的
-	//   .sp-select 声明 max-width:240px，最宽 option 需要 ≈259px 内容宽——浏览器
-	//   给 240px 边框盒；不钳制时 intrinsicContentWidth 会把 297px 外盒宽上传给
-	//   inline-flex 容器 .sp-wrap 的 max-content（容器自身没有 max-width，钳不住），
-	//   于是 .ibb-btns 超出输入卡可用宽度，把三个按钮挤到第二行。
-	if cs := box.Style(); cs != nil {
-		if maxW, ok := definiteWidth(cs.MaxWidth, 0, fontSizeOf(box)); ok && maxW > 0 {
-			if isBorderBox(box) {
-				// max-width 是**边框盒**上限（box-sizing:border-box）→ 换算成内容宽上限。
-				_, pb, bd := computeBoxModel(box, 0, fontSizeOf(box))
-				if lim := maxW - pb.Horizontal() - bd.Horizontal(); lim > 0 && best > lim {
-					best = lim
-				}
-			} else if best > maxW {
-				best = maxW
-			}
-		}
-		// ★ 返回**外盒**宽：intrinsicContentWidth 末尾对走到结尾的路径统一加
-		//   自身 padding+border，但提前 return 的分支不会被加（既有的
-		//   formControlContentSize 路径返回内容宽，由 flex 的 paddingMain
-		//   机制承担差值）。本分支的消费方是 flex 的 base size 与 inline-flex
-		//   容器的 max-content 递归——两处都按**外盒**语义使用，漏加会让
-		//   select 的边框盒比浏览器少 38px（实测 202 vs 240）。
-		_, p, b := computeBoxModel(box, 0, fontSizeOf(box))
-		best += p.Left + p.Right + b.Left + b.Right
+	// 箭头区在 max-width 钳制**之前**加入 —— 浏览器先算 max-content
+	// （文本 + 箭头 + padding + border），再用 max-width 钳制。
+	return math.Round(best) + formSelectArrowWidth, true
+}
+
+// selectIntrinsicContentWidth 返回 <select> 的固有**内容**宽度（已含箭头区，
+// 并受自身 max-width 钳制），供 IFC 推导 inline-block 尺寸使用。
+//
+// 为什么 IFC 必须走这里：IFC 对 inline-block 子盒会用其**文本内容**撑开
+// （见 inlineformattingcontext.go 的 inlineBoxTextContent 路径），而
+// formControlContentSize 有意不为 select 返回尺寸（它服务 flex 的
+// intrinsicContentWidth 那条路径），于是 select 被裸 option 文本撑开 ——
+// g1_formctl 的 t6 实测 10.893（Edge 31）。
+func selectIntrinsicContentWidth(box *ElementBox) (float64, bool) {
+	best, ok := selectMaxOptionTextWidth(box)
+	if !ok {
+		return 0, false
 	}
-	return best, true
+	return clampSelectMaxWidth(box, best), true
+}
+
+// clampSelectMaxWidth 对 select 的**内容**宽施加自身 max-width 约束。
+// ★ max-width:240px 的 .sp-select（gou-ide）：最宽 option 需要 ≈259px 内容宽 ——
+// 浏览器给 240px 边框盒；不钳制时 intrinsicContentWidth 会把 297px 外盒宽上传给
+// inline-flex 容器 .sp-wrap 的 max-content（容器自身没有 max-width，钳不住），
+// 于是 .ibb-btns 超出输入卡可用宽度，把三个按钮挤到第二行。
+func clampSelectMaxWidth(box *ElementBox, best float64) float64 {
+	cs := box.Style()
+	if cs == nil {
+		return best
+	}
+	if maxW, ok := definiteWidth(cs.MaxWidth, 0, fontSizeOf(box)); ok && maxW > 0 {
+		if isBorderBox(box) {
+			// max-width 是**边框盒**上限（box-sizing:border-box）→ 换算成内容宽上限。
+			_, pb, bd := computeBoxModel(box, 0, fontSizeOf(box))
+			if lim := maxW - pb.Horizontal() - bd.Horizontal(); lim > 0 && best > lim {
+				return lim
+			}
+		} else if best > maxW {
+			return maxW
+		}
+	}
+	return best
 }
 
 // formControlAttrFloat parses a positive integer attribute (size/cols), falling

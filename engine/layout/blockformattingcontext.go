@@ -739,6 +739,36 @@ func HeightIsDefiniteForBox(box *ElementBox) bool {
 	return !heightIsAutoForBox(box)
 }
 
+// widthIsAutoForBox reports whether box 的 CSS 宽度是 auto（由包含块填充或内容
+// 决定），即 width 未显式指定。判定口径与 IFC 的 auto-width 扩展、BFC 的
+// min/max 解析保持一致：Unit 为 ""（零值/未设置，含匿名包装盒）或 "auto" 均
+// 视为 auto。匿名包装盒的 style 经 NewComputedStyle + InheritFrom 构造，
+// **故意不继承 width**（box.go buildChildren），因此恒为 auto ✓。
+func widthIsAutoForBox(box *ElementBox) bool {
+	if box == nil || box.Style() == nil {
+		return true
+	}
+	cs := box.Style()
+	return cs.Width.Unit == "" || cs.Width.Unit == "auto"
+}
+
+// WidthIsDefiniteForBox reports whether box 的 CSS 宽度是**确定值**（definite，
+// 由 CSS 显式给定），而不是 auto（fill-available / 由内容决定）。对称于
+// HeightIsDefiniteForBox。
+//
+// 渲染层需要这条信息：CSS 2.1 §10.3.3 下，definite width 的盒子宽度
+// **不因内容溢出而改变**（内容只溢出，不改 border-box 宽）。渲染层的兜底逻辑
+// 会把 frame 撑到「文本内容右边界」（engine/rendering/renderview.go 的 syncOne，
+// 用于让溢出的文本不被 overflow:hidden 剪掉），该兜底对 definite width 的盒子
+// 必须跳过 —— 否则 `.l{width:200px}` 内 36 字符连续英文串（word-break:normal，
+// 无断行机会）会把 200 撑成 309.376（g5_mixedtext m2；Edge 为 200，内容溢出）。
+func WidthIsDefiniteForBox(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	return !widthIsAutoForBox(box)
+}
+
 // childNeedsHeightConstraintForBox reports whether a block-level child that is
 // itself a grid container must be given the parent's remaining height so its
 // fr rows can resolve (a grid with height:auto has no definite height to
