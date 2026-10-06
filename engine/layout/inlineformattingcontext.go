@@ -1215,6 +1215,34 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			}
 
 			// Compute inline child's content width from text segments.
+			// ★ 同行内联文本盒参与行盒基线（CSS 2.1 §10.8）：字号大于容器
+			//   strut 的纯 inline 子盒（如 <span style="font-size:32px">）
+			//   把行盒基线连同 maxBaseline 一起下沉，后续表单控件/替换元素
+			//   才能坐在正确基线上（h2_baseline_matrix 的 t_text_bigger：
+			//   Edge relTop=22 = maxBaseline(37) − off(15)；此前 maxBaseline
+			//   只有 strut 的 19 ⇒ relTop=4，与 Edge 差 18px）。
+			//   仅当子盒要求的「行盒顶→基线」**大于** strut 时才生效，故对
+			//   同级字号、以及整行只有普通文本的页面零影响。
+			if cldCS := cld.Style(); cldCS != nil && cld.IsInline() && !cld.IsReplaced() &&
+				cldCS.Display == style.DisplayInline && cld.Element() != nil {
+				if ba, _ := fontAscentDescent(cld); ba > 0 {
+					base := halfLeading + math.Round(ba)
+					if base > strutAscent && base > currentLine.maxBaseline {
+						delta := base - currentLine.maxBaseline
+						currentLine.maxBaseline = base
+						// 本行已放置的基线盒与已生成文本段整体下移，
+						// 保持它们与新基线的相对关系。
+						for _, b := range currentLine.baselineBoxes {
+							bg := state.GeometryForBox(b)
+							bg.SetTopLeft(bg.Top()+delta, bg.Left())
+						}
+						for i := currentLine.segStart; i < len(pending); i++ {
+							pending[i].seg.Y += delta
+						}
+					}
+				}
+			}
+
 			// Without this, cldW=0 and subsequent text on same line overlaps.
 			// For non-explicit-width inline children this re-computation is
 			// unconditional: the wrap-constraint above may have set a
