@@ -34,6 +34,16 @@ TMPDIR="dev/output/tmp"
 mkdir -p "$OUTDIR" "$TMPDIR"
 EDGE="${WBUI_EDGE:-C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe}"
 
+# ★ 独立 user-data-dir（第 21 轮实测修复）：宿主若已有 Edge 在运行，不带它会
+#   把命令行**转交给既有会话** → --dump-dom 无任何输出（实测产物 0 字节），
+#   本脚本的「任一侧 0 行即退出 2」会拦住比对（不会产出假 IDENTICAL，但整轮
+#   验收无法推进，且错误信息不指向真因）。用独立 profile 强制起新实例。
+#   （路径必须是**绝对**的：cygpath -m 对相对路径原样返回，Edge 会把它当相对
+#     profile 目录处理 → 仍然失败。实测 cygpath -m "dev/…" → "dev/…"。）
+EDGE_PROFILE="$(cd "$TMPDIR" && pwd)/edge-profile"
+mkdir -p "$EDGE_PROFILE"
+EDGE_PROFILE_WIN="$(cygpath -m "$EDGE_PROFILE" 2>/dev/null || echo "$EDGE_PROFILE")"
+
 echo "== [$NAME] wbui (webshot) =="
 # 先读总行数，再按需分批：webshot 的 [js] 打印被 summarizeJS 截到 400 字符，
 # 而探针单行可达 ~100 字符，批越大越可能被截断导致尾部结果丢失。此处每批 3 行。
@@ -72,6 +82,7 @@ document.getElementById('vpo').textContent=innerWidth+'x'+innerHeight;
 HTMLEOF
 edge_inner() {  # $1 = window-size；回显实际 "宽x高"
   "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+    --user-data-dir="$EDGE_PROFILE_WIN" \
     --window-size="$1" --force-device-scale-factor=1 \
     --virtual-time-budget=1500 --dump-dom \
     "file:///$(cygpath -m "$ROOT/$VP_PROBE")" 2>/dev/null \
@@ -92,6 +103,7 @@ while [ "$vp_try" -le 3 ]; do
 done
 echo "     Edge 视口实测 $(edge_inner "$EDGE_WS")（目标 ${VIEWPORT_W}x${VIEWPORT_H}；--window-size=$EDGE_WS）"
 "$EDGE" --headless --disable-gpu --no-sandbox --hide-scrollbars \
+  --user-data-dir="$EDGE_PROFILE_WIN" \
   --window-size="$EDGE_WS" --force-device-scale-factor=1 \
   --virtual-time-budget=3000 --dump-dom \
   "file:///$(cygpath -m "$ROOT/$PROBE")" \

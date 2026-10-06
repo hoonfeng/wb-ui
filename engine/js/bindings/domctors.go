@@ -491,11 +491,30 @@ func registerDOMInterfaces(rt *jsc.Interpreter, g *jsc.JSObject) {
 	// 列入 globalsExcluded，与探针 globals 的 typeof 口径不符（§20-4 修正）：
 	//   getContext('2d') 返回对象              → CanvasRenderingContext2D
 	//   createImageData / getImageData 返回对象 → ImageData
-	//   Path2D：引擎尚无 Path2D 对象建模（fill(path)/stroke(path) 未实现）→
-	//   仅注册全局构造器（空壳），不接实例（夹具不对比 Path2D 实例）。
+	//   Path2D：第 21 轮接上了实例方法与 ctx 的路径参数（canvas2d.go 的 path2D：
+	//   moveTo/lineTo/rect/arc/closePath/bezierCurveTo/quadraticCurveTo/ellipse/
+	//   arcTo/roundRect/addPath；ctx.fill/stroke/clip/isPointInPath 接受 Path2D）。
+	//   ★ 遗留（WORKITEMS §21）：`new Path2D(svgPathData)` 的 SVG 字符串解析未实现
+	//   → 传字符串得到空路径（不抛错）。
 	domRegisterIface(rt, g, "CanvasRenderingContext2D", nil)
 	domRegisterIface(rt, g, "ImageData", nil)
-	domRegisterIface(rt, g, "Path2D", nil)
+	domRegisterIfaceFn(rt, g, "Path2D", nil,
+		func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			obj := domCtorThis(in, this, domIfaceProto("Path2D"))
+			p := &path2D{}
+			// new Path2D(otherPath2D)：拷贝其命令（规范要求独立副本，不共享状态）。
+			if len(args) >= 1 {
+				if src := path2DFrom(args[0]); src != nil {
+					p.cmds = append(p.cmds, src.cmds...)
+					p.curX, p.curY, p.hasCur = src.curX, src.curY, src.hasCur
+				}
+				// 字符串（SVG path data）与其它入参：宽容 —— 不解析、不抛错（遗留见上）。
+			}
+			obj.SetClassName("Path2D")
+			obj.SetInternal(p)
+			installPath2DMethods(obj)
+			return obj
+		})
 
 	// ★ 刷新「注册之前就已创建」的实例原型：主 document 与 Selection 单例在
 	// RegisterDOMBindings 早期创建（早于本函数），当时注册表为空 → 原型落空
@@ -846,10 +865,17 @@ func cssRuleTypeCode(t css.RuleType) int {
 // 与 `cssRules.item(i)` 的返回类型）。原型按规则类型分派，使
 // `rule instanceof CSSStyleRule`、`rule.constructor.name === "CSSStyleRule"` 成立。
 //
-// ★ 字段面（如实记账，WORKITEMS §20-6）：本轮只暴露 CSSOM 必需的 `type` 数字编号
-// 与对象身份（原型 / constructor / SetInternal 携带的 Go 规则指针）；selectorText /
-// style / media / conditionText 等具体字段面未实现 —— 本轮目标是「规则实例可见 +
-// 接口原型正确」，而非补齐整套 CSSOM 字段面。
+// ★ 第 21 轮：字段面（第 20 轮只暴露了 `type` 与对象身份）。按 Edge 实测基线：
+//
+//	CSSStyleRule.selectorText = "#d" / ".b, #c"
+//	CSSStyleRule.cssText      = "#d { color: rgb(1, 2, 3); font-size: 15px; }"
+//	CSSStyleRule.style        = CSSStyleDeclaration（getPropertyValue / cssText /
+//	                            length / item 可用，属性读写 kebab 与 camelCase 双键）
+//	CSSMediaRule / CSSSupportsRule：conditionText + cssRules（嵌套）+ 多行 cssText
+//	                            （Edge 实测 "@media (min-width: 1px) {\n  .b { … }\n}"）
+//
+// 其余规则类型（@font-face / @keyframes / @keyframe / @import / @namespace /
+// @page）仍只有 type —— 如实记账（WORKITEMS §21）。
 func wrapCSSRule(in *jsc.Interpreter, r css.Rule) *jsc.JSObject {
 	name := "CSSRule"
 	t := css.RuleUnknown
@@ -863,5 +889,239 @@ func wrapCSSRule(in *jsc.Interpreter, r css.Rule) *jsc.JSObject {
 	obj.SetAccessor("type", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.NumberValue(float64(cssRuleTypeCode(t)))
 	}), nil)
+	switch v := r.(type) {
+	case *css.StyleRule:
+		sel := selectorTextOf(v.Selectors)
+		obj.SetAccessor("selectorText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(sel)
+		}), nil)
+		// ★ 身份稳定：Edge 实测 `rule.style === rule.style` 为 true（同一条规则
+		//   的样式声明是同一对象）。缓存挂在规则包装对象的闭包（per-runtime）。
+		var styleObj jsc.JSValue
+		haveStyle := false
+		obj.SetAccessor("style", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			if haveStyle {
+				return styleObj
+			}
+			styleObj = styleDeclObj(in, v.Declarations)
+			haveStyle = true
+			return styleObj
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssRuleTextOf(v))
+		}), nil)
+		// CSSGroupingRule（CSS Nesting）：子规则列表（无嵌套时长度为 0）。
+		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.NestedRules))
+		}), nil)
+	case *css.MediaRule:
+		// conditionText 按浏览器序列化规则规范化（见 normalizeConditionText）。
+		cond := normalizeConditionText(v.Condition)
+		obj.SetAccessor("conditionText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cond)
+		}), nil)
+		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules))
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssRuleTextOf(v))
+		}), nil)
+	case *css.SupportsRule:
+		// 与 @media 同一规范化（★ 夹具未覆盖 @supports 的 conditionText，
+		// 该分支未经 Edge 对比 —— 见 WORKITEMS §21 遗留）。
+		cond := normalizeConditionText(v.Condition)
+		obj.SetAccessor("conditionText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cond)
+		}), nil)
+		obj.SetAccessor("cssRules", getter(func(in *jsc.Interpreter) jsc.JSValue {
+			return jsc.ObjectValue(wrapCSSRuleList(in, v.Rules))
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssRuleTextOf(v))
+		}), nil)
+	}
 	return obj
+}
+
+// normalizeConditionText 按浏览器的 CSSOM 序列化规则规范化条件文本
+// （@media / @supports 的 conditionText）：
+//
+//	"( min-width :  1px )" → "(min-width: 1px)"
+//
+// 规则：折叠连续空白、去掉左括号后 / 右括号前 / 冒号前的空白、冒号后恰一个空格、
+// 逗号后恰一个空格。
+//
+// 依据（Edge 实测，dev/output/tmp/r21edge2.txt）：`@media ( min-width :  1px )`
+// 的 conditionText 为 "(min-width: 1px)"；而引擎 css 包保存的是**声明原文**
+// （"( min-width :  1px )"）→ 不规范化会与浏览器不一致。
+// 只在**展示层**（本 getter）规范化，不动 css 包的解析结果（条件匹配用的是
+// 解析后的 MediaQuery 结构，不读这段文本）。
+func normalizeConditionText(s string) string {
+	out := strings.Join(strings.Fields(s), " ")
+	if out == "" {
+		return out
+	}
+	out = strings.ReplaceAll(out, "( ", "(")
+	out = strings.ReplaceAll(out, " )", ")")
+	out = strings.ReplaceAll(out, " :", ":")
+	out = strings.ReplaceAll(out, ":", ": ")
+	out = strings.ReplaceAll(out, ":  ", ": ")
+	out = strings.ReplaceAll(out, " ,", ",")
+	out = strings.ReplaceAll(out, ",", ", ")
+	out = strings.ReplaceAll(out, ",  ", ", ")
+	return strings.TrimSpace(out)
+}
+
+// selectorTextOf 返回选择器列表的 CSSOM 文本（无选择器时 ""）。
+func selectorTextOf(l *css.SelectorList) string {
+	if l == nil {
+		return ""
+	}
+	return l.String()
+}
+
+// cssDeclsText 序列化声明列表为 CSSOM 文本：分号 + 空格分隔、末尾带分号
+// （Edge 实测 "color: rgb(1, 2, 3); font-size: 15px;"；空列表为 ""）。
+func cssDeclsText(decls []css.Declaration) string {
+	if len(decls) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(decls))
+	for _, d := range decls {
+		parts = append(parts, d.String())
+	}
+	return strings.Join(parts, "; ") + ";"
+}
+
+// cssRuleTextOf 序列化单条规则为 CSSOM 文本（规则自身与分组规则的子规则共用）。
+func cssRuleTextOf(r css.Rule) string {
+	switch v := r.(type) {
+	case *css.StyleRule:
+		return selectorTextOf(v.Selectors) + " { " + cssDeclsText(v.Declarations) + " }"
+	case *css.MediaRule:
+		return conditionRuleTextOf("@media "+v.Condition, v.Rules)
+	case *css.SupportsRule:
+		return conditionRuleTextOf("@supports "+v.Condition, v.Rules)
+	}
+	return ""
+}
+
+// conditionRuleTextOf 构造分组规则（@media / @supports）的多行 cssext 文本
+// （Edge 实测：子规则缩进 2 空格、花括号独占行）。
+func conditionRuleTextOf(head string, rules []css.Rule) string {
+	var b strings.Builder
+	b.WriteString(head)
+	b.WriteString(" {\n")
+	for _, r := range rules {
+		b.WriteString("  ")
+		b.WriteString(cssRuleTextOf(r))
+		b.WriteString("\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// styleDeclObj 把规则的声明列表暴露成 CSSStyleDeclaration 实例
+// （`styleSheet.cssRules[i].style`，即 CSS-in-JS / 主题探测最常用的路径）。
+//
+// 与浏览器一致的契约：原型 + constructor.name + instanceof、属性访问
+// （kebab-case 与 camelCase 两种键都能读到值）、getPropertyValue、
+// getPropertyPriority、item(i)、length、cssText。
+//
+// ★ 如实记账（WORKITEMS §21 遗留）：这是**只读快照** —— 通过它写入
+// （setProperty / 属性赋值）不会回改样式表与渲染（浏览器会），故未提供写方法。
+func styleDeclObj(in *jsc.Interpreter, decls []css.Declaration) jsc.JSValue {
+	obj := jsc.NewObject(domIfaceProtoOr("CSSStyleDeclaration", in.ObjectPrototype()))
+	obj.SetClassName("CSSStyleDeclaration")
+	for i := range decls {
+		key := strings.ToLower(strings.TrimSpace(decls[i].Name))
+		if key == "" {
+			continue
+		}
+		val := strings.TrimSpace(decls[i].ValueString())
+		obj.Set(key, jsc.StringValue(val))
+		if camel := kebabToCamel(key); camel != key {
+			obj.Set(camel, jsc.StringValue(val))
+		}
+	}
+	obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(cssDeclsText(decls))
+	}), nil)
+	obj.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(decls)))
+	}), nil)
+	obj.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.StringValue("")
+			}
+			i := int(a[0].ToNumber())
+			if i < 0 || i >= len(decls) {
+				return jsc.StringValue("")
+			}
+			return jsc.StringValue(strings.ToLower(strings.TrimSpace(decls[i].Name)))
+		}, 1)))
+	// declByName 按 CSSOM 语义查找声明：属性名大小写不敏感、camelCase 先换算。
+	declByName := func(name string) (int, bool) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return -1, false
+		}
+		want := strings.ToLower(camelToKebab(name))
+		for i := range decls {
+			if strings.ToLower(strings.TrimSpace(decls[i].Name)) == want {
+				return i, true
+			}
+		}
+		return -1, false
+	}
+	obj.Set("getPropertyValue", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyValue",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.StringValue("")
+			}
+			if i, ok := declByName(a[0].ToString()); ok {
+				return jsc.StringValue(strings.TrimSpace(decls[i].ValueString()))
+			}
+			return jsc.StringValue("")
+		}, 1)))
+	obj.Set("getPropertyPriority", jsc.FunctionValue(jsc.NewNativeFunction("getPropertyPriority",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.StringValue("")
+			}
+			if i, ok := declByName(a[0].ToString()); ok && decls[i].Important {
+				return jsc.StringValue("important")
+			}
+			return jsc.StringValue("")
+		}, 1)))
+	return jsc.ObjectValue(obj)
+}
+
+// wrapCSSRuleList 把规则数组包装成 CSSRuleList（CSSOM §1.4）：length + item(i) +
+// 索引属性；索引与 item(i) 返回**同一身份**的规则对象（浏览器里 CSSRuleList 是
+// legacy platform object，`list[0] === list.item(0)`）。
+func wrapCSSRuleList(in *jsc.Interpreter, rules []css.Rule) *jsc.JSObject {
+	ro := jsc.NewObject(domIfaceProtoOr("CSSRuleList", in.ObjectPrototype()))
+	ro.SetClassName("CSSRuleList")
+	objs := make([]*jsc.JSObject, len(rules))
+	for i, r := range rules {
+		objs[i] = wrapCSSRule(in, r)
+		ro.Set(strconv.Itoa(i), jsc.ObjectValue(objs[i]))
+	}
+	ro.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.NumberValue(float64(len(objs)))
+	}), nil)
+	ro.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			if len(a) == 0 {
+				return jsc.Null()
+			}
+			i := int(a[0].ToNumber())
+			if i < 0 || i >= len(objs) {
+				return jsc.Null()
+			}
+			return jsc.ObjectValue(objs[i])
+		}, 1)))
+	return ro
 }

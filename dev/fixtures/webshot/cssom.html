@@ -2,12 +2,16 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>CSS OM 构造器与实例原型（第 20 轮）</title>
+<title>CSS OM 构造器与实例原型（第 20 轮）+ 方法面/字段面/身份（第 21 轮）</title>
 <style>body{font:13px monospace;margin:8px} #out{white-space:pre-wrap}</style>
 </head>
 <body>
 <div id="d" class="a">x</div>
+<div id="s21" style="width: 10px; height: 20px">s</div>
+<canvas id="cv21" width="8" height="8"></canvas>
 <style id="probe-sheet">.b{color:rgb(4,5,6)}</style>
+<style id="probe-sheet21">.r21{color:rgb(4,5,6)}
+@media (min-width: 1px) { .r21 { color: rgb(7, 8, 9) } }</style>
 <pre id="out"></pre>
 <script>
 (function () {
@@ -100,6 +104,133 @@
   T("mql_media", function () { return String(mq.media); });
   T("mql_matches", function () { return bn(mq.matches); });
   T("mqle_instanceof", function () { return bn(new W.MediaQueryListEvent("change") instanceof W.Event); });
+
+  // ══ 第 21 轮：方法面 / 字段面 / 身份稳定 / Path2D ══
+
+  // ── 6. CSSStyleDeclaration 方法面（el.style，最高优先）──
+  var s21 = document.getElementById("s21");
+  p("s21_gpv_type", typeof s21.style.getPropertyValue);
+  p("s21_gpp_type", typeof s21.style.getPropertyPriority);
+  p("s21_item_type", typeof s21.style.item);
+  T("s21_gpv_width", function () { return s21.style.getPropertyValue("width"); });
+  T("s21_gpv_Width", function () { return s21.style.getPropertyValue("Width"); });
+  T("s21_gpv_bogus", function () { return s21.style.getPropertyValue("bogus-prop"); });
+  T("s21_gpp_width", function () { return s21.style.getPropertyPriority("width"); });
+  T("s21_len", function () { return s21.style.length; });
+  T("s21_item0", function () { return s21.style.item(0); });
+  T("s21_item1", function () { return s21.style.item(1); });
+  T("s21_item_big", function () { return s21.style.item(99); });
+  T("s21_idx0_eq_item0", function () { return bn(s21.style[0] === s21.style.item(0)); });
+  T("s21_csstext", function () { return s21.style.cssText; });
+  T("s21_proto_is", function () { return bn(Object.getPrototypeOf(s21.style) === W.CSSStyleDeclaration.prototype); });
+
+  // priority（setProperty 第三参数）与 removeProperty 返回值
+  var s21b = document.createElement("div");
+  T("s21b_set_custom", function () { s21b.style.setProperty("--x", "5px"); return "OK"; });
+  T("s21b_set_imp", function () { s21b.style.setProperty("color", "red", "important"); return "OK"; });
+  T("s21b_gpv_color", function () { return s21b.style.getPropertyValue("color"); });
+  T("s21b_gpp_color", function () { return s21b.style.getPropertyPriority("color"); });
+  T("s21b_gpv_custom", function () { return s21b.style.getPropertyValue("--x"); });
+  T("s21b_len", function () { return s21b.style.length; });
+  T("s21b_item0", function () { return s21b.style.item(0); });
+  T("s21b_item1", function () { return s21b.style.item(1); });
+  T("s21b_csstext", function () { return s21b.style.cssText; });
+  T("s21b_rp_ret", function () { return s21b.style.removeProperty("color"); });
+  T("s21b_rp_len", function () { return s21b.style.length; });
+  T("s21b_rp_csstext", function () { return s21b.style.cssText; });
+
+  // getComputedStyle 的方法面
+  var cs21 = W.getComputedStyle(s21);
+  T("cs21_gpv_type", function () { return typeof cs21.getPropertyValue; });
+  T("cs21_gpp_type", function () { return typeof cs21.getPropertyPriority; });
+  T("cs21_item_type", function () { return typeof cs21.item; });
+  T("cs21_len_gt0", function () { return bn(cs21.length > 0); });
+  T("cs21_gpv_width", function () { return cs21.getPropertyValue("width"); });
+  T("cs21_gpv_Width", function () { return cs21.getPropertyValue("Width"); });
+  T("cs21_gpp_width", function () { return cs21.getPropertyPriority("width"); });
+  T("cs21_item0_kind", function () { return typeof cs21.item(0); });
+  T("cs21_item_big", function () { return cs21.item(999999); });
+
+  // ── 7. CSSStyleRule 字段面（selectorText / style / cssText）──
+  var sh21 = sheetById("probe-sheet21");
+  T("sh21_found", function () { return bn(!!sh21); });
+  T("sh21_rules_len", function () { return sh21 ? sh21.cssRules.length : -1; });
+  var r21 = sh21 ? sh21.cssRules[0] : null;
+  T("r21_selectorText", function () { return r21.selectorText; });
+  T("r21_cssText", function () { return r21.cssText; });
+  T("r21_type", function () { return r21.type; });
+  T("r21_style_typeof", function () { return typeof r21.style; });
+  T("r21_style_gpv", function () { return r21.style.getPropertyValue("color"); });
+  T("r21_style_gpv_camel", function () { return r21.style.getPropertyValue("color"); });
+  T("r21_style_color", function () { return r21.style.color; });
+  T("r21_style_gpp", function () { return r21.style.getPropertyPriority("color"); });
+  T("r21_style_csstext", function () { return r21.style.cssText; });
+  T("r21_style_len", function () { return r21.style.length; });
+  T("r21_style_item0", function () { return r21.style.item(0); });
+  T("r21_style_ctor", function () { return r21.style.constructor.name; });
+  T("r21_style_instanceof", function () { return bn(r21.style instanceof W.CSSStyleDeclaration); });
+  T("r21_style_proto_is", function () {
+    return bn(Object.getPrototypeOf(r21.style) === W.CSSStyleDeclaration.prototype);
+  });
+
+  // @media 规则（分组规则：conditionText + 嵌套 cssRules）
+  var mr21 = sh21 ? sh21.cssRules[1] : null;
+  T("mr21_type", function () { return mr21.type; });
+  T("mr21_ctor", function () { return mr21.constructor.name; });
+  T("mr21_cond", function () { return mr21.conditionText; });
+  T("mr21_nested_len", function () { return mr21.cssRules.length; });
+  T("mr21_nested0_type", function () { return mr21.cssRules[0].type; });
+  T("mr21_nested0_st", function () { return mr21.cssRules[0].selectorText; });
+  T("mr21_nested0_csstext", function () { return mr21.cssRules[0].cssText; });
+  T("mr21_nested0_style_gpv", function () { return mr21.cssRules[0].style.getPropertyValue("color"); });
+
+  // ── 8. 身份稳定（cssRules / 规则对象 / style / styleSheets）──
+  T("id_rules", function () { return bn(sh21.cssRules === sh21.cssRules); });
+  T("id_rule0", function () { return bn(sh21.cssRules[0] === sh21.cssRules[0]); });
+  T("id_rule0_item0", function () { return bn(sh21.cssRules[0] === sh21.cssRules.item(0)); });
+  T("id_style", function () { return bn(r21.style === r21.style); });
+  T("id_sheets", function () { return bn(document.styleSheets === document.styleSheets); });
+  T("id_sheet0", function () { return bn(document.styleSheets[0] === document.styleSheets[0]); });
+  T("id_sheet0_item0", function () { return bn(document.styleSheets[0] === document.styleSheets.item(0)); });
+
+  // ── 9. Path2D 实例方法 + ctx 的 Path2D 参数 ──
+  T("p2d_typeof", function () { return typeof W.Path2D; });
+  T("p2d_ctor_name", function () { return W.Path2D.name; });
+  T("p2d_instanceof", function () { return bn(new W.Path2D() instanceof W.Path2D); });
+  T("p2d_methods", function () {
+    var names = ["moveTo","lineTo","rect","arc","closePath","fill","stroke","addPath",
+                 "bezierCurveTo","quadraticCurveTo","ellipse","arcTo","roundRect"];
+    var pd = new W.Path2D(); var m = [];
+    for (var n = 0; n < names.length; n++) { if (typeof pd[names[n]] === "function") { m.push(names[n]); } }
+    return m.join(",");
+  });
+  T("p2d_path_ops", function () {
+    var q = new W.Path2D();
+    q.moveTo(0, 0); q.lineTo(8, 0); q.rect(0, 0, 4, 4); q.arc(4, 4, 2, 0, 3.14);
+    q.closePath(); q.bezierCurveTo(1, 1, 2, 2, 3, 3); q.quadraticCurveTo(1, 1, 2, 2);
+    q.ellipse(4, 4, 2, 1, 0, 0, 3.14); q.arcTo(1, 1, 2, 2, 1); q.roundRect(0, 0, 4, 4, 1);
+    return "OK";
+  });
+  T("p2d_addPath", function () {
+    var a = new W.Path2D(); a.rect(0, 0, 2, 2);
+    var b = new W.Path2D(); b.addPath(a); b.addPath(a, {a:1,b:0,c:0,d:1,e:3,f:4});
+    return "OK";
+  });
+  T("p2d_new_from_pd", function () { return bn(new W.Path2D(new W.Path2D()) instanceof W.Path2D); });
+  T("p2d_new_from_svg", function () { return bn(new W.Path2D("M0 0 L10 10") instanceof W.Path2D); });
+  T("p2d_new_bogus", function () { new W.Path2D(42); return "OK"; });
+  var ctx21 = document.getElementById("cv21").getContext("2d");
+  T("p2d_ctx_ctor", function () { return ctx21.constructor.name; });
+  T("p2d_ctx_fill", function () { ctx21.fill(new W.Path2D()); return "OK"; });
+  T("p2d_ctx_stroke", function () { ctx21.stroke(new W.Path2D()); return "OK"; });
+  T("p2d_ctx_fill_evenodd", function () { ctx21.fill(new W.Path2D(), "evenodd"); return "OK"; });
+  T("p2d_ctx_clip", function () { ctx21.clip(new W.Path2D()); return "OK"; });
+  T("p2d_ctx_ipip", function () { ctx21.isPointInPath(new W.Path2D(), 1, 1); return "OK"; });
+  T("p2d_ctx_fill_rect_shape", function () {
+    var q = new W.Path2D(); q.rect(0, 0, 4, 4);
+    ctx21.fill(q);
+    return "OK";
+  });
 
   document.getElementById("out").textContent = L.join("\n");
 })();

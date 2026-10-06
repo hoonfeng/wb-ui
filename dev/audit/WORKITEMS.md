@@ -2871,3 +2871,203 @@ CSSOM 的 `type` 编号（1/3/4/5/6/7/8/10/12，Chromium 口径）；`CSSRuleLis
   C Intl 1、宿主内建函数 3、D 调度/导航/系统集成 15、E Typed OM 与 Animation 9、
   K 观察者 2。另有 **globalsOptional 44 项**（网络/持久化、XPath、字体/视口、
   Highlight、Window 方法与 BarProp）—— 不计入收敛判据。
+
+---
+
+# §21｜CSS OM「构造器存在 → 方法/字段可用」收口（第 21 次监督轮）
+
+**本轮范围（监督者锁定）**：只提升第 20 轮已收进 `globalsCore` 的接口从「构造器存在」
+到「方法/字段可用」；**不新增构造器、不改判据分组刷数字**。证据落盘 `dev/output/wbui-audit/`。
+
+判据数字**未变**（复算见 §21-5）：`globalsCore 271/271`、`globals 271/356`、
+`partition` 双向 `dup=notCovered=extra=0` —— 与本轮实现前的 §20 完全一致。
+
+## 21-0｜先取 Edge 基线（禁止凭记忆/规范推断）
+
+新增临时基线探针 `dev/output/tmp/r21edge.html`（84 行）与 `r21edge2.html`（38 行），
+用 Edge `--dump-dom` 实测（产物 `r21edge.txt` / `r21edge2.txt`）。关键基线事实：
+
+| 项 | Edge 实测 |
+|---|---|
+| `getPropertyValue("Width")` | `"10px"`（**大小写不敏感**；`"HEIGHT"` → `"20px"`） |
+| `getPropertyValue("bogus-prop")` / `""` | `""`（空串，不是 null/undefined） |
+| `getPropertyPriority("width")` | `""`；带 `!important` 时 `"important"` |
+| `style.length` | **声明条数**（内联 `width/height` → 2；含自定义属性） |
+| `style.item(0)` / `style[0]` | `"width"`（**属性名**）；`item(-1)`/`item(99)` → `""`；`style[0] === style.item(0)` **true** |
+| `style.cssText` | `"width: 10px; height: 20px;"`（**规范化**：冒号后恰一个空格 + 尾分号） |
+| `setProperty(n,v,"important")` | 后 `getPropertyPriority` → `"important"`；cssText 含 `!important` |
+| `removeProperty` 返回 | 剥掉 `!important` 的值（`"red"`） |
+| `CSSStyleRule.selectorText` | `".b"` / `".b, #c"` |
+| `CSSStyleRule.cssText` | `".b { color: rgb(4, 5, 6); }"` |
+| `CSSStyleRule.style.*` | `CSSStyleDeclaration` 实例；`style.cssText = "color: rgb(4, 5, 6);"` |
+| `CSSMediaRule.conditionText` | `"(min-width: 1px)"`（**已规范化**；原文 `( min-width :  1px )`） |
+| 身份 | `sheet.cssRules === sheet.cssRules`、`cssRules[0] === cssRules[0]`、`rule.style === rule.style`、`document.styleSheets === document.styleSheets` **全 true** |
+| `Path2D` 实例方法 | `moveTo,lineTo,rect,arc,closePath,addPath,bezierCurveTo,quadraticCurveTo,ellipse,arcTo,roundRect`（**不含 fill/stroke** —— 那是 ctx 的方法） |
+| `ctx.fill/stroke(path)`、`ctx.clip(path)`、`ctx.isPointInPath(path,x,y)` | 全部可用（不抛） |
+
+## 21-1｜CSSStyleDeclaration 方法面（必做 1，最高优先）
+
+`engine/js/bindings/dom.go` 的 `styleProxy`（`el.style` 的 goja DynamicObject）在
+`Get` 的 `default`（CSS 属性取值）**之前**新增显式分支：
+
+| 分支 | 行为（对齐 Edge 基线） |
+|---|---|
+| `getPropertyValue(name)` | 大小写不敏感匹配；camelCase 先换算 kebab；返回**不含** `!important` 的值；未声明 `""`；自定义属性 `--x` 名大小写敏感 |
+| `getPropertyPriority(name)` | `"important"` / `""` |
+| `item(i)` | 第 i 条声明的**属性名**；越界 `""`（Edge 语义，不是 null） |
+| `length` | 声明条数 |
+| **索引键** `style[0]` | 第 i 条声明的属性名（在 default 之前处理，否则 `"0"` 被当属性名查询返回 `""`） |
+
+同时 `setProperty` 支持第三参数 `priority`（`"important"`，大小写不敏感）；
+`removeProperty` 返回值剥掉 `!important`。`cssText` / `setProperty` / `removeProperty`
+的既有能力**未回退**（红线四夹具 + ALL 前 16 行零差异验证，见 §21-5）。
+
+`getComputedStyle(el)` 返回对象（`dom.go`）补上 `item(i)`（返回属性名、越界 `""`）
+与 `length`（`> 0`；浏览器对每个属性恒有值 → 数量级几百，夹具只断言 `> 0`）。
+
+★ **顺序模型（本条的真正前提）**：`item(i)` / `cssText` / 索引访问都要求**按声明顺序**
+枚举，而原实现以 `map[string]string` 存声明（顺序随机）→ 同一个页面的
+`style.item(0)` 可能是 `"width"` 也可能是 `"height"`。本轮引入**保序声明列表**
+（`styleDecl` / `parseStyleDecls` / `joinStyleDecls` / `setStyleDecl` / `removeStyleDecl`，
+同名声明覆盖时保留首次出现位置），`styleProxy` 的 Get/Set/Has/Keys/Delete 全部改走它。
+`joinStyle`/`parseStyle` 保留原签名（`dom.go` computed 级联处仍在用），属性文本格式不变。
+
+## 21-2｜CSSStyleRule 字段面 + 分组规则嵌套（必做 2）
+
+`engine/js/bindings/domctors.go` 的 `wrapCSSRule` 按规则类型分派字段面（第 20 轮只有 `type`）：
+
+| 规则类型 | 新增字段 | 依据 |
+|---|---|---|
+| `CSSStyleRule` | `selectorText`（`SelectorList.String()`）、`cssText`（`sel + " { " + decls + " }"`）、`style`（`styleDeclObj`：CSSStyleDeclaration 实例）、`cssRules`（CSS Nesting 子规则） | Edge 实测 |
+| `CSSMediaRule` | `conditionText`、`cssRules`、多行 `cssText` | Edge 实测（`@media (…) {\n  .b { … }\n}`） |
+| `CSSSupportsRule` | 同上（`@supports`） | ★ 未经 Edge 对比，见 §21-6 |
+
+新增 `styleDeclObj`：把规则的声明列表暴露成可用的 `CSSStyleDeclaration`
+（原型 + `constructor.name` + `instanceof` 成立；kebab 与 camelCase 双键可读；
+`getPropertyValue`/`getPropertyPriority`/`item(i)`/`length`/`cssText` 可用）。
+
+**`conditionText` 规范化**：引擎 css 包保存的是**声明原文**（`"( min-width :  1px )"`），
+而 Edge 的 `conditionText` 是 `"(min-width: 1px)"` —— 夹具首先暴露该差异
+（`mr21_cond`），按监督者「先取 Edge 基线再定行为、禁止改夹具掩盖」的要求
+**修引擎**：新增 `normalizeConditionText`（折叠空白、去括号内/冒号前空白、冒号与逗号
+后恰一空格），只在展示层（getter）使用，不动 css 包解析结果（条件匹配读的是解析后的
+`MediaQuery` 结构，不读这段文本）。
+
+## 21-3｜身份稳定（必做 3）
+
+| 断言 | 第 20 轮 | 本轮 |
+|---|---|---|
+| `sheet.cssRules === sheet.cssRules` | false（每次新建） | **true**（`wrapStyleSheet` 闭包缓存 CSSRuleList，规则条数变化时重建） |
+| `cssRules[0] === cssRules[0]` / `=== item(0)` | 后者 true、前者 false | **均 true**（缓存列表内含预建规则对象） |
+| `rule.style === rule.style` | false | **true**（`wrapCSSRule` 闭包缓存 style 对象） |
+| `document.styleSheets === document.styleSheets` | false | **true**（`styleSheets` getter 闭包缓存 StyleSheetList） |
+| `styleSheets[0] === styleSheets[0]` / `=== item(0)` | 后者 true、前者 false | **均 true** |
+
+缓存一律挂在**包装对象的闭包**里（per-runtime —— `jsc.JSObject` 绑定创建它的 runtime，
+绝不跨 rt 复用）；集合条数变化时重建，避免读到过期集合。
+
+## 21-4｜Path2D（必做 4）：接 canvas2d 已有路径能力（非空壳）
+
+`engine/js/bindings/canvas2d.go`：
+
+1. **抽象**：把路径辅助函数（`arcSegment`/`appendArc`/`appendEllipse`/`appendArcTo`/
+   `appendRoundRect`/`appendRoundRectCorner`）的目标参数从 `*skia.Path` 泛化为
+   `pathSink`（canvas 用 `skiaPathSink` 适配，行为不变），几何副本参数泛化为 `geomSink`。
+2. **`path2D`**：把路径**记录**成基本命令（moveTo/lineTo/quadTo/cubicTo/close）——
+   arc/ellipse/arcTo/roundRect 复用 canvas 的同一套贝塞尔展开函数，经 `pathSink`
+   直接写入记录器；实例方法：`moveTo/lineTo/quadraticCurveTo/bezierCurveTo/closePath/
+   rect/arc/ellipse/arcTo/roundRect/addPath`。
+3. **`addPath(other[, matrix])`**：追加 other 的命令；带 `{a,b,c,d,e,f}` 矩阵时对命令点做
+   仿射变换（命令只有基本类型 → 变换精确）。
+4. **`ctx.fill/stroke/clip/isPointInPath` 接受 Path2D**：把命令**重放**到临时
+   `skia.Path`（用完即 `Release`，不长期持有 native 资源；**不改变** canvas 当前路径，
+   与规范一致）。`isPointInPath(path,…)` 走 `skia.Path.Contains`（几何副本只对 canvas
+   当前路径维护）。
+5. **构造器**：`new Path2D()` / `new Path2D(otherPath2D)`（拷贝命令）可用；
+   `new Path2D(42)` 宽容不抛。
+
+★ **明示降级（如实记账，不是空壳冒充）**：`new Path2D(svgPathDataString)` 的 **SVG 路径
+字符串解析未实现**（引擎无可复用的 SVG path 解析器）→ 传字符串得到**空路径**（不抛错，
+与 Chromium 的宽容度一致）。夹具对此**只断言 `instanceof`（不抛）**，不断言解析结果。
+
+## 21-5｜验收证据（全部落盘 `dev/output/wbui-audit/`）
+
+| 证据 | 结果 |
+|---|---|
+| `cssom` 夹具（扩展至 111 行，覆盖 21-1/2/3/4 全部 API） | **IDENTICAL**（wbui=111 / Edge=111；`cssom.cmp.txt` 0 字节） |
+| `canvas2d` 夹具（回归 —— canvas2d.go 改动最大） | **IDENTICAL**（20/20） |
+| `constructors` 夹具（回归） | **IDENTICAL**（62/62） |
+| 红线四夹具（`REDLINE11.txt`） | `element_attrs` 85/85、`element_geom` 61/61、`document_doctype` 34/34、`document_props` 74/74 **全 IDENTICAL** |
+| `ALL11.txt`（19 个夹具全跑） | 前 16 行与 `ALL10.txt` **逐字零差异**（`SAME-ZERO-DIFF`）；第 17 行 cssom 由 29 行→**111 行**（夹具扩展，预期变化） |
+| 探针 `webplatform.batch21.json` | `globalsCore 271/271`（`missing=[]`）、`globals 271/356`、`partition` 双向 `dup=0/notCovered=0/extra=0`；`documentProps 53/53`、`elementProps 65/65`、`documentMethods 30/49`、`elementMethods 58/60` |
+| 工程 | `go build ./...` OK；`go test -count=1 ./engine/...` **23 包 ok / 0 FAIL**（含 bindings 复跑）；`gofmt -l` 全仓（排除 `.pair`）293（未新增未格式化文件：本轮 3 个 .go 改动文件在 CRLF 归一副本上分别为 0 / 0 / 98 行差异，canvas2d.go 基线为 99 行）；`engine/layout` **零改动** |
+
+## 21-6｜遗留与有意偏差（如实记账）
+
+1. **`new Path2D(svgPathData)`**：SVG 字符串解析未实现 → 空路径（见 §21-4 ★）。
+2. **Path2D 方法挂在实例上**而非 `Path2D.prototype`（原型上只有 `constructor`；
+   `instanceof` / `constructor.name` / 方法可用性均成立）。原型是**按 runtime 隔离**的
+   注册表，把原生方法批量挂原型需要在每个 rt 重建，收益与风险不成比例。
+3. **规则 `style` 是只读快照**：通过 `rule.style.setProperty(...)` 写入**不会**回改样式表与
+   渲染（浏览器会）。故未提供写路径 —— 半实现（改了对象不改级联）比不支持更危险。
+4. **规则 `style.length` 不展开 shorthand**：Edge 对 `.b,#c{color:…;margin:0}` 报 `length=5`
+   （margin 展开为 4 个长写），本引擎按声明条数报 2。夹具刻意使用**不含 shorthand 的规则**
+   做 `length`/`item(0)` 断言（`.r21{color:rgb(4,5,6)}` → 两侧都是 1 / `"color"`），
+   **未对齐项已记录**，不用夹具掩盖。
+5. **`@supports` 的 `conditionText`** 用同一 `normalizeConditionText`，但**夹具未覆盖**
+   → 该分支未经 Edge 对比（属于「实现但未验证」，故不宣称已对齐）。
+6. **其余规则类型的字段面未实现**：`@font-face` / `@keyframes` / `@keyframe` / `@import` /
+   `@namespace` / `@page` 仍只暴露 `type` 与原型；规则对象也**没有** `parentRule` /
+   `parentStyleSheet`（Edge 有）。
+7. **`getComputedStyle(el).item(i)` 的枚举顺序不保证**（级联 map 无序）：夹具只断言
+   `typeof item(0) === "string"` 与越界 `""`，不比较具体属性名。
+8. **不可构造接口的宽容语义**（`new CSSStyleDeclaration()` 不抛，Chromium 抛
+   `Illegal constructor`）—— 第 20 轮既有取向，本轮未变。
+
+## 21-7｜★ 本轮发现并修复的真实缺陷（5 项）
+
+1. **声明顺序模型缺失（`map` 无序）**：`item(i)` / `cssText` / `style[0]` 在同一页面上取值
+   随机 → 与浏览器不可比。改为保序声明列表（§21-1 ★）。这是「方法面可用」的真正前提。
+2. **`cssText` 未规范化**：`style="width: 10px; height:20px"` 的 `cssText` 原样返回
+   `"height:20px"`，而 Edge 恒为 `"height: 20px;"`。改为按 Edge 规范化（冒号后恰一空格 +
+   尾分号，尾分号是 `style.cssText += "…"` 拼接安全性的既有依赖）→ 红线四夹具与 ALL
+   前 16 行零差异证明未回归。
+3. **`conditionText` 未规范化**（§21-2）：夹具先暴露（`mr21_cond` 差异 → 复跑 IDENTICAL），
+   修的是引擎而非夹具。
+4. **`rule.style` 身份不稳定**：每次访问新建对象（`rule.style === rule.style` 为 false）
+   → 闭包缓存。
+5. **验收脚本 `dev/tools/gprobe_cmp.sh` 在宿主已有 Edge 会话时静默失败**：不带
+   `--user-data-dir` 时命令行被**转交给既有会话** → `--dump-dom` 输出 0 字节
+   （实测产物 0 字节、脚本第 129 行报「抓取失败」退出 2，不会产出假 IDENTICAL，
+   但错误信息不指向真因、整轮验收无法推进）。修法：加独立 `--user-data-dir`，
+   且路径**必须绝对**（实测 `cygpath -m "dev/output/tmp/edge-profile"` 对相对路径
+   原样返回 → Edge 仍失败；改为 `$(cd "$TMPDIR" && pwd)` 取绝对路径后成功）。
+   该修复只影响 Edge 的 profile 目录，**不改变视口语义与比对口径**（视口探测/补偿逻辑未动）。
+
+## 21-8｜★ 完成定义（**写死**，本轮收敛判据）
+
+当且仅当以下**全部**成立，第 21 轮视为完成：
+
+1. `cssom` 夹具双侧 **IDENTICAL**（111 行）且 `cssom.cmp.txt` 为 **0 字节**；
+2. 监督者指定的 4 项 API（`el.style` 方法面、`CSSStyleRule` 字段面、`cssRules` 身份稳定、
+   `Path2D` 实例方法/明示降级）在夹具中**逐项有断言**且两侧一致；
+3. `globalsCore 271/271`（`missing=[]`）、`globals ≥ 271`（实测 271/356）、
+   `partition` 双向全空 —— **判据数字不得因本轮而变**；
+4. `go build ./...` OK；`go test -count=1 ./engine/...` 全绿（23 包 0 FAIL）；`gofmt` 无新增
+   未格式化文件；`engine/layout` 零改动；
+5. 红线四夹具 IDENTICAL（85/61/34/74）；`ALL11.txt` 前 16 行与 `ALL10.txt` 逐字零差异；
+6. 降级项（Path2D 的 SVG 字符串、规则 style 只读、shorthand 未展开、@supports 未验证）
+   在 §21-4 / §21-6 **如实记账**，不得以空壳冒充 present。
+
+## 21-9｜★ 汇报（两行结论）
+
+- **第 21 轮后：`el.style`/`getComputedStyle` 的 CSSStyleDeclaration 方法面
+  （getPropertyValue/getPropertyPriority/item/length/索引 + priority）、CSSStyleRule 字段面
+  （selectorText/style/cssText，含 @media 嵌套）、cssRules/style/styleSheets 身份稳定、
+  Path2D 实例方法与 ctx 的 Path2D 参数 —— 全部落地并双侧 IDENTICAL
+  （`cssom` 29 行 → **111 行**，`cmp.txt` 0 字节）。**
+- **判据数字未变（未刷数字）：`globalsCore 271/271`、`globals 271/356`、`partition`
+  双向全空；`canvas2d` 20/20、`constructors` 62/62、红线四夹具 85/61/34/74 IDENTICAL、
+  `ALL11` 前 16 行与 `ALL10` 逐字零差异、`go test ./engine/...` 23 包 0 FAIL、
+  `engine/layout` 零改动。降级项（Path2D 的 SVG 字符串解析、规则 style 只读快照、
+  规则 style shorthand 不展开、@supports conditionText 未验证）已在 §21-4/§21-6 记账。**

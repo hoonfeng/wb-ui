@@ -690,8 +690,58 @@ func (s *canvas2DCtxState) curPath() *skia.Path {
 	return s.path
 }
 
+// ── 路径写入目标（第 21 轮抽象）───────────────────────────────────────
+//
+// canvas 的当前路径由 skia.Path 承载；Path2D（`new Path2D()`）把同一套路径
+// 能力记录成**基本命令序列**（供 ctx.fill/stroke/clip/isPointInPath 重放）。
+// 两者共用本文件的路径辅助函数（arc / ellipse / arcTo / roundRect 的贝塞尔
+// 展开），故把目标参数抽象成 pathSink，几何副本（采样表）抽象成 geomSink。
+
+// pathSink 是路径命令的接收者。
+type pathSink interface {
+	MoveTo(x, y float32)
+	LineTo(x, y float32)
+	QuadTo(x0, y0, x1, y1 float32)
+	CubicTo(x0, y0, x1, y1, x2, y2 float32)
+	Close()
+}
+
+// skiaPathSink 把 *skia.Path 适配成 pathSink（skia.Path 的同名方法带 *Path
+// 返回值，不满足接口签名）。
+type skiaPathSink struct{ p *skia.Path }
+
+// MoveTo 见 pathSink。
+func (s skiaPathSink) MoveTo(x, y float32) { s.p.MoveTo(x, y) }
+
+// LineTo 见 pathSink。
+func (s skiaPathSink) LineTo(x, y float32) { s.p.LineTo(x, y) }
+
+// QuadTo 见 pathSink。
+func (s skiaPathSink) QuadTo(x0, y0, x1, y1 float32) { s.p.QuadTo(x0, y0, x1, y1) }
+
+// CubicTo 见 pathSink。
+func (s skiaPathSink) CubicTo(x0, y0, x1, y1, x2, y2 float32) {
+	s.p.CubicTo(x0, y0, x1, y1, x2, y2)
+}
+
+// Close 见 pathSink。
+func (s skiaPathSink) Close() { s.p.Close() }
+
+// geomSink 是 canvas **几何副本**（isPointInPath / isPointInStroke 用的采样表与
+// 当前点）的接收者：canvas 上下文自身实现；Path2D 无采样表 → no-op（仅自维护
+// 当前点，供 appendArcTo 读取）。
+type geomSink interface {
+	geomNewSubpath(x, y float64)
+	geomLineTo(x, y float64)
+	geomSampleCubic(x1, y1, x2, y2, x3, y3 float64, steps int)
+	geomSampleQuad(x1, y1, x2, y2 float64, steps int)
+	geomArcPoints(cx, cy, rx, ry, start, end, rotation float64, ccw bool)
+	geomCurPoint() (geomPoint, bool)
+	geomClose()
+}
+
 // arcSegment 用单三次贝塞尔近似一角弧（|δ| ≤ π/2 精度优良）。
-func arcSegment(p *skia.Path, cx, cy, r, a0, a1 float64) {
+func arcSegment(p pathSink, cx, cy, r, a0, a1 float64) {
 	if r <= 0 {
 		p.LineTo(float32(cx), float32(cy))
 		return
@@ -709,7 +759,7 @@ func arcSegment(p *skia.Path, cx, cy, r, a0, a1 float64) {
 }
 
 // appendArc 把 arc 追加到 path（moveTo 至弧起点后分段三次贝塞尔）。
-func appendArc(p *skia.Path, cx, cy, r, start, end float64, ccw bool) {
+func appendArc(p pathSink, cx, cy, r, start, end float64, ccw bool) {
 	delta := end - start
 	if !ccw {
 		if delta <= -2*math.Pi {
@@ -1124,7 +1174,7 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			cx, cy, r := argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0)
 			start, end := argNum(a, 3, 0), argNum(a, 4, 0)
 			ccw := argBool(a, 5, false)
-			appendArc(s.curPath(), cx, cy, r, start, end, ccw)
+			appendArc(skiaPathSink{s.curPath()}, cx, cy, r, start, end, ccw)
 			s.geomArcPoints(cx, cy, r, r, start, end, 0, ccw)
 			return jsc.Undefined()
 		}, 5)))
@@ -1137,7 +1187,7 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			cx, cy, rx, ry := argN(0, 0), argN(1, 0), argN(2, 0), argN(3, 0)
 			a0, a1 := argN(5, 0), argN(6, 2*math.Pi)
 			ccw := argBool(a, 7, false)
-			appendEllipse(p, cx, cy, rx, ry, a0, a1, ccw)
+			appendEllipse(skiaPathSink{p}, cx, cy, rx, ry, a0, a1, ccw)
 			s.geomArcPoints(cx, cy, rx, ry, a0, a1, 0, ccw)
 			return jsc.Undefined()
 		}, 7)))
@@ -1155,7 +1205,7 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 		}, 4)))
 	o.Set("arcTo", jsc.FunctionValue(jsc.NewNativeFunction("arcTo",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			appendArcTo(s.curPath(), s, argNum(a, 0, 0), argNum(a, 1, 0),
+			appendArcTo(skiaPathSink{s.curPath()}, s, argNum(a, 0, 0), argNum(a, 1, 0),
 				argNum(a, 2, 0), argNum(a, 3, 0), argNum(a, 4, 0))
 			return jsc.Undefined()
 		}, 5)))
@@ -1163,20 +1213,37 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 	// [tl,tr,br,bl] 与 [{x,y},...] 形式（CSS 圆角简写语义）。
 	o.Set("roundRect", jsc.FunctionValue(jsc.NewNativeFunction("roundRect",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			appendRoundRect(s.curPath(), s, argNum(a, 0, 0), argNum(a, 1, 0),
+			appendRoundRect(skiaPathSink{s.curPath()}, s, argNum(a, 0, 0), argNum(a, 1, 0),
 				argNum(a, 2, 0), argNum(a, 3, 0), parseRoundRectRadii(a, 4))
 			return jsc.Undefined()
 		}, 1)))
 	o.Set("fill", jsc.FunctionValue(jsc.NewNativeFunction("fill",
 		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			obj := this.AsObject()
-			if obj == nil || bm.Cv == nil || s.path == nil {
+			if obj == nil || bm.Cv == nil {
 				return jsc.Undefined()
 			}
-			if rule := argStr(a, 0, "nonzero"); rule == "evenodd" {
-				s.path.SetFillType(skia.FillTypeEvenOdd)
+			// ★ 第 21 轮：`fill(path2d[, fillRule])` —— 传入 Path2D 时把其命令
+			//   重放到**临时** skia.Path（用完即释放；不改变 canvas 的当前路径，
+			//   与规范一致）。无参数 / 非 Path2D 参数时沿用当前路径。
+			sp := s.path
+			ruleIdx := 0
+			if len(a) > 0 {
+				if pd := path2DFrom(a[0]); pd != nil {
+					if tmp := pd.replay(); tmp != nil {
+						defer tmp.Release()
+						sp = tmp
+						ruleIdx = 1
+					}
+				}
+			}
+			if sp == nil {
+				return jsc.Undefined()
+			}
+			if rule := argStr(a, ruleIdx, "nonzero"); rule == "evenodd" {
+				sp.SetFillType(skia.FillTypeEvenOdd)
 			} else {
-				s.path.SetFillType(skia.FillTypeWinding)
+				sp.SetFillType(skia.FillTypeWinding)
 			}
 			col, sh, owns := resolveStyle(obj, "fillStyle")
 			alpha := c2dNum(obj, "globalAlpha", 1)
@@ -1186,16 +1253,29 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 				if owns {
 					defer sh.Release()
 				}
-				bm.Cv.FillPathShaderEffect(s.path, sh, alpha, blend, eff)
+				bm.Cv.FillPathShaderEffect(sp, sh, alpha, blend, eff)
 			} else {
-				bm.Cv.FillPathFullEffect(s.path, col, alpha, blend, eff)
+				bm.Cv.FillPathFullEffect(sp, col, alpha, blend, eff)
 			}
 			return jsc.Undefined()
 		}, 1)))
 	o.Set("stroke", jsc.FunctionValue(jsc.NewNativeFunction("stroke",
-		func(_ *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			obj := this.AsObject()
-			if obj == nil || bm.Cv == nil || s.path == nil {
+			if obj == nil || bm.Cv == nil {
+				return jsc.Undefined()
+			}
+			// ★ 第 21 轮：`stroke(path2d)`（同 fill：临时路径重放）。
+			sp := s.path
+			if len(a) > 0 {
+				if pd := path2DFrom(a[0]); pd != nil {
+					if tmp := pd.replay(); tmp != nil {
+						defer tmp.Release()
+						sp = tmp
+					}
+				}
+			}
+			if sp == nil {
 				return jsc.Undefined()
 			}
 			col, sh, owns := resolveStyle(obj, "strokeStyle")
@@ -1209,17 +1289,35 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 				if owns {
 					defer sh.Release()
 				}
-				bm.Cv.StrokePathShaderEffect(s.path, lw, sh, alpha, cap, join, blend, eff)
+				bm.Cv.StrokePathShaderEffect(sp, lw, sh, alpha, cap, join, blend, eff)
 			} else {
-				bm.Cv.StrokePathFullEffect(s.path, lw, col, alpha, cap, join, blend, eff)
+				bm.Cv.StrokePathFullEffect(sp, lw, col, alpha, cap, join, blend, eff)
 			}
 			return jsc.Undefined()
-		}, 0)))
+		}, 1)))
 	// isPointInPath / isPointInStroke：基于路径的几何副本做精确判定（skia 的
 	// Path 无法反查点集，几何副本在路径构建时同步维护；坐标为用户空间，与规范
 	// 一致——查询点同样在用户空间，无需逆变换）。
 	o.Set("isPointInPath", jsc.FunctionValue(jsc.NewNativeFunction("isPointInPath",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			// ★ 第 21 轮：`isPointInPath(path2d, x, y[, fillRule])` —— Path2D 参数
+			//   走 skia 的 Path.Contains（几何副本只对 canvas 当前路径维护，
+			//   Path2D 场景没有它）。
+			if len(a) > 0 {
+				if pd := path2DFrom(a[0]); pd != nil {
+					sp := pd.replay()
+					if sp == nil {
+						return jsc.BooleanValue(false)
+					}
+					defer sp.Release()
+					if argStr(a, 3, "nonzero") == "evenodd" {
+						sp.SetFillType(skia.FillTypeEvenOdd)
+					} else {
+						sp.SetFillType(skia.FillTypeWinding)
+					}
+					return jsc.BooleanValue(sp.Contains(float32(argNum(a, 1, 0)), float32(argNum(a, 2, 0))))
+				}
+			}
 			evenOdd := argStr(a, 2, "nonzero") == "evenodd"
 			return jsc.BooleanValue(s.pointInGeom(argNum(a, 0, 0), argNum(a, 1, 0), evenOdd))
 		}, 2)))
@@ -1236,15 +1334,30 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 		}, 2)))
 	o.Set("clip", jsc.FunctionValue(jsc.NewNativeFunction("clip",
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-			if bm.Cv == nil || s.path == nil {
+			if bm.Cv == nil {
 				return jsc.Undefined()
 			}
-			if rule := argStr(a, 0, "nonzero"); rule == "evenodd" {
-				s.path.SetFillType(skia.FillTypeEvenOdd)
-			} else {
-				s.path.SetFillType(skia.FillTypeWinding)
+			// ★ 第 21 轮：`clip(path2d[, fillRule])`（同 fill：临时路径重放）。
+			sp := s.path
+			ruleIdx := 0
+			if len(a) > 0 {
+				if pd := path2DFrom(a[0]); pd != nil {
+					if tmp := pd.replay(); tmp != nil {
+						defer tmp.Release()
+						sp = tmp
+						ruleIdx = 1
+					}
+				}
 			}
-			bm.Cv.ClipPath(s.path)
+			if sp == nil {
+				return jsc.Undefined()
+			}
+			if rule := argStr(a, ruleIdx, "nonzero"); rule == "evenodd" {
+				sp.SetFillType(skia.FillTypeEvenOdd)
+			} else {
+				sp.SetFillType(skia.FillTypeWinding)
+			}
+			bm.Cv.ClipPath(sp)
 			return jsc.Undefined()
 		}, 1)))
 
@@ -1770,11 +1883,11 @@ func numStr(v float64) string {
 //
 // 规范要点：当前点不存在时等价于 moveTo(x1,y1)；半径 0 或三点共线退化为
 // lineTo(x1,y1)；半径大于可用切线长度时按规范放大（保证弧与两边相切）。
-func appendArcTo(p *skia.Path, s *canvas2DCtxState, x1, y1, x2, y2, r float64) {
-	p0, ok := s.geomCurPoint()
+func appendArcTo(p pathSink, g geomSink, x1, y1, x2, y2, r float64) {
+	p0, ok := g.geomCurPoint()
 	if !ok {
 		p.MoveTo(float32(x1), float32(y1))
-		s.geomNewSubpath(x1, y1)
+		g.geomNewSubpath(x1, y1)
 		return
 	}
 	if math.IsNaN(r) || r < 0 {
@@ -1785,7 +1898,7 @@ func appendArcTo(p *skia.Path, s *canvas2DCtxState, x1, y1, x2, y2, r float64) {
 	l1, l2 := math.Hypot(v1x, v1y), math.Hypot(v2x, v2y)
 	degenerate := func() {
 		p.LineTo(float32(x1), float32(y1))
-		s.geomLineTo(x1, y1)
+		g.geomLineTo(x1, y1)
 	}
 	if l1 == 0 || l2 == 0 || r == 0 {
 		degenerate()
@@ -1822,7 +1935,7 @@ func appendArcTo(p *skia.Path, s *canvas2DCtxState, x1, y1, x2, y2, r float64) {
 	dist := r / math.Sin(theta/2)
 	cx, cy := x1+bx/bl*dist, y1+by/bl*dist
 	p.LineTo(float32(t1x), float32(t1y))
-	s.geomLineTo(t1x, t1y)
+	g.geomLineTo(t1x, t1y)
 	start := math.Atan2(t1y-cy, t1x-cx)
 	end := math.Atan2(t2y-cy, t2x-cx)
 	// 走短弧（两切点之间的弧 < π）：负向增量用 ccw=true。
@@ -1835,7 +1948,7 @@ func appendArcTo(p *skia.Path, s *canvas2DCtxState, x1, y1, x2, y2, r float64) {
 	}
 	ccw := delta < 0
 	appendArc(p, cx, cy, r, start, end, ccw)
-	s.geomArcPoints(cx, cy, r, r, start, end, 0, ccw)
+	g.geomArcPoints(cx, cy, r, r, start, end, 0, ccw)
 }
 
 // resolveRadius 解析单个圆角半径值（数字或 {x, y}）。
@@ -1904,10 +2017,10 @@ func parseRoundRectRadii(a []jsc.JSValue, idx int) [4]geomPoint {
 }
 
 // appendRoundRectCorner 用一段三次贝塞尔近似椭圆角弧（≤90°），同步几何副本。
-func appendRoundRectCorner(p *skia.Path, s *canvas2DCtxState, cx, cy, rx, ry, a0, a1 float64) {
+func appendRoundRectCorner(p pathSink, g geomSink, cx, cy, rx, ry, a0, a1 float64) {
 	if rx <= 0 || ry <= 0 {
 		p.LineTo(float32(cx), float32(cy))
-		s.geomLineTo(cx, cy)
+		g.geomLineTo(cx, cy)
 		return
 	}
 	x0 := cx + rx*math.Cos(a0)
@@ -1918,12 +2031,12 @@ func appendRoundRectCorner(p *skia.Path, s *canvas2DCtxState, cx, cy, rx, ry, a0
 	c1x, c1y := x0-k*rx*math.Sin(a0), y0+k*ry*math.Cos(a0)
 	c2x, c2y := x1+k*rx*math.Sin(a1), y1-k*ry*math.Cos(a1)
 	p.CubicTo(float32(c1x), float32(c1y), float32(c2x), float32(c2y), float32(x1), float32(y1))
-	s.geomSampleCubic(c1x, c1y, c2x, c2y, x1, y1, 8)
+	g.geomSampleCubic(c1x, c1y, c2x, c2y, x1, y1, 8)
 }
 
 // appendRoundRect 构造圆角矩形路径（radii 顺序 tl/tr/br/bl；负值归零、
 // 超过半宽半高按规范夹取）。
-func appendRoundRect(p *skia.Path, s *canvas2DCtxState, x, y, w, h float64, radii [4]geomPoint) {
+func appendRoundRect(p pathSink, g geomSink, x, y, w, h float64, radii [4]geomPoint) {
 	if w < 0 {
 		x += w
 		w = -w
@@ -1951,25 +2064,25 @@ func appendRoundRect(p *skia.Path, s *canvas2DCtxState, x, y, w, h float64, radi
 	tl, tr, br, bl := clampR(radii[0]), clampR(radii[1]), clampR(radii[2]), clampR(radii[3])
 	const halfPi = math.Pi / 2
 	p.MoveTo(float32(x+tl.X), float32(y))
-	s.geomNewSubpath(x+tl.X, y)
+	g.geomNewSubpath(x+tl.X, y)
 	p.LineTo(float32(x+w-tr.X), float32(y))
-	s.geomLineTo(x+w-tr.X, y)
-	appendRoundRectCorner(p, s, x+w-tr.X, y+tr.Y, tr.X, tr.Y, -halfPi, 0)
+	g.geomLineTo(x+w-tr.X, y)
+	appendRoundRectCorner(p, g, x+w-tr.X, y+tr.Y, tr.X, tr.Y, -halfPi, 0)
 	p.LineTo(float32(x+w), float32(y+h-br.Y))
-	s.geomLineTo(x+w, y+h-br.Y)
-	appendRoundRectCorner(p, s, x+w-br.X, y+h-br.Y, br.X, br.Y, 0, halfPi)
+	g.geomLineTo(x+w, y+h-br.Y)
+	appendRoundRectCorner(p, g, x+w-br.X, y+h-br.Y, br.X, br.Y, 0, halfPi)
 	p.LineTo(float32(x+bl.X), float32(y+h))
-	s.geomLineTo(x+bl.X, y+h)
-	appendRoundRectCorner(p, s, x+bl.X, y+h-bl.Y, bl.X, bl.Y, halfPi, math.Pi)
+	g.geomLineTo(x+bl.X, y+h)
+	appendRoundRectCorner(p, g, x+bl.X, y+h-bl.Y, bl.X, bl.Y, halfPi, math.Pi)
 	p.LineTo(float32(x), float32(y+tl.Y))
-	s.geomLineTo(x, y+tl.Y)
-	appendRoundRectCorner(p, s, x+tl.X, y+tl.Y, tl.X, tl.Y, math.Pi, 3*halfPi)
+	g.geomLineTo(x, y+tl.Y)
+	appendRoundRectCorner(p, g, x+tl.X, y+tl.Y, tl.X, tl.Y, math.Pi, 3*halfPi)
 	p.Close()
-	s.geomClose()
+	g.geomClose()
 }
 
 // appendEllipse 追加椭圆弧（rx/ry 半径，a0..a1 角，忽略 rotation——v1）。
-func appendEllipse(p *skia.Path, cx, cy, rx, ry, a0, a1 float64, ccw bool) {
+func appendEllipse(p pathSink, cx, cy, rx, ry, a0, a1 float64, ccw bool) {
 	if rx == 0 || ry == 0 {
 		p.LineTo(float32(cx), float32(cy))
 		return
@@ -2082,4 +2195,262 @@ func clampByte(v float64) float64 {
 	return v
 }
 
+// ─── Path2D（第 21 轮）────────────────────────────────────────────────
+//
+// HTML §canvas：`new Path2D()` 构造可复用路径，`ctx.fill(path)` / `ctx.stroke(path)`
+// / `ctx.clip(path)` / `ctx.isPointInPath(path, x, y)` 接受它。引擎已有完整的 2D
+// 路径能力（本文件的 arcSegment/appendArc/appendEllipse/appendArcTo/appendRoundRect，
+// 最终落到 Skia），本轮把 Path2D 接到这套能力上：
+//
+//   - 实例方法把路径**记录**成基本命令序列（moveTo/lineTo/quadTo/cubicTo/close）；
+//     arc / ellipse / arcTo / roundRect 在记录时即展开为贝塞尔（复用 canvas 的
+//     同一套辅助函数，经 pathSink 接口写入记录器）；
+//   - fill/stroke/clip/isPointInPath 收到 Path2D 时把命令**重放**到临时
+//     skia.Path（用完即释放，不长期持有 native 资源）；
+//   - addPath(other[, matrix]) 追加 other 的命令，带 matrix 时对命令点做仿射变换
+//     （命令只有基本类型 → 变换精确）。
+//
+// ★ 如实记账（WORKITEMS §21）：`new Path2D(svgPathDataString)` 的 SVG 路径解析
+//   未实现（引擎没有可复用的 SVG path 解析器）→ 传字符串得到**空路径**（不抛错，
+//   与 Chromium 的宽容度一致）。实例方法挂在**实例**上（原型仍是 Path2D.prototype，
+//   `instanceof` / `constructor.name` 成立）。
+
+// Path2D 命令类型（只保留基本命令：圆弧/椭圆/圆角矩形在记录时展开为贝塞尔）。
+const (
+	p2dMoveTo = iota
+	p2dLineTo
+	p2dQuadTo
+	p2dCubicTo
+	p2dClose
+)
+
+// path2DCmd 是一条路径命令；p 最多用 6 个坐标（cubicTo）。
+type path2DCmd struct {
+	kind int
+	p    [6]float32
+}
+
+// path2D 是 Path2D 的 Go 侧状态（挂在 JS 对象的 internal 槽上）。
+type path2D struct {
+	cmds   []path2DCmd
+	curX   float32
+	curY   float32
+	hasCur bool
+}
+
+// MoveTo 见 pathSink。
+func (p *path2D) MoveTo(x, y float32) {
+	p.cmds = append(p.cmds, path2DCmd{kind: p2dMoveTo, p: [6]float32{x, y}})
+	p.curX, p.curY, p.hasCur = x, y, true
+}
+
+// LineTo 见 pathSink。
+func (p *path2D) LineTo(x, y float32) {
+	p.cmds = append(p.cmds, path2DCmd{kind: p2dLineTo, p: [6]float32{x, y}})
+	p.curX, p.curY, p.hasCur = x, y, true
+}
+
+// QuadTo 见 pathSink。
+func (p *path2D) QuadTo(x0, y0, x1, y1 float32) {
+	p.cmds = append(p.cmds, path2DCmd{kind: p2dQuadTo, p: [6]float32{x0, y0, x1, y1}})
+	p.curX, p.curY, p.hasCur = x1, y1, true
+}
+
+// CubicTo 见 pathSink。
+func (p *path2D) CubicTo(x0, y0, x1, y1, x2, y2 float32) {
+	p.cmds = append(p.cmds, path2DCmd{kind: p2dCubicTo, p: [6]float32{x0, y0, x1, y1, x2, y2}})
+	p.curX, p.curY, p.hasCur = x2, y2, true
+}
+
+// Close 见 pathSink。
+func (p *path2D) Close() {
+	p.cmds = append(p.cmds, path2DCmd{kind: p2dClose})
+}
+
+// ── geomSink：Path2D 没有 canvas 的几何副本（采样表），全部 no-op；只有
+//    geomCurPoint 返回记录器自己维护的当前点（appendArcTo 依赖它）。──
+
+// geomNewSubpath 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomNewSubpath(x, y float64) {}
+
+// geomLineTo 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomLineTo(x, y float64) {}
+
+// geomSampleCubic 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomSampleCubic(x1, y1, x2, y2, x3, y3 float64, steps int) {}
+
+// geomSampleQuad 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomSampleQuad(x1, y1, x2, y2 float64, steps int) {}
+
+// geomArcPoints 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomArcPoints(cx, cy, rx, ry, start, end, rotation float64, ccw bool) {}
+
+// geomClose 见 geomSink（Path2D 无采样表）。
+func (p *path2D) geomClose() {}
+
+// geomCurPoint 返回记录器维护的当前点（appendArcTo 的起点；无当前点时返回 false，
+// 与 canvas 路径无当前点的语义一致）。
+func (p *path2D) geomCurPoint() (geomPoint, bool) {
+	if !p.hasCur {
+		return geomPoint{}, false
+	}
+	return geomPoint{X: float64(p.curX), Y: float64(p.curY)}, true
+}
+
+// replay 把记录的命令重放到新的 skia.Path（调用方负责 Release）。
+func (p *path2D) replay() *skia.Path {
+	sp := skia.NewPath()
+	if sp == nil {
+		return nil
+	}
+	for _, c := range p.cmds {
+		switch c.kind {
+		case p2dMoveTo:
+			sp.MoveTo(c.p[0], c.p[1])
+		case p2dLineTo:
+			sp.LineTo(c.p[0], c.p[1])
+		case p2dQuadTo:
+			sp.QuadTo(c.p[0], c.p[1], c.p[2], c.p[3])
+		case p2dCubicTo:
+			sp.CubicTo(c.p[0], c.p[1], c.p[2], c.p[3], c.p[4], c.p[5])
+		case p2dClose:
+			sp.Close()
+		}
+	}
+	return sp
+}
+
+// appendFrom 追加 other 的命令；m 为仿射矩阵 (a,b,c,d,e,f)，恒等时原样拷贝
+// （基本命令的点在仿射下精确变换）。
+func (p *path2D) appendFrom(other *path2D, m [6]float64) {
+	identity := m[0] == 1 && m[1] == 0 && m[2] == 0 && m[3] == 1 && m[4] == 0 && m[5] == 0
+	for _, c := range other.cmds {
+		if identity {
+			p.cmds = append(p.cmds, c)
+			continue
+		}
+		nc := c
+		for i := 0; i+1 < len(nc.p); i += 2 {
+			x, y := float64(c.p[i]), float64(c.p[i+1])
+			nc.p[i] = float32(m[0]*x + m[2]*y + m[4])
+			nc.p[i+1] = float32(m[1]*x + m[3]*y + m[5])
+		}
+		p.cmds = append(p.cmds, nc)
+	}
+	if len(other.cmds) > 0 {
+		p.curX, p.curY, p.hasCur = other.curX, other.curY, other.hasCur
+	}
+}
+
+// path2DFrom 从 JS 值取 Path2D 的 Go 状态（非本引擎创建的 Path2D 返回 nil）。
+func path2DFrom(v jsc.JSValue) *path2D {
+	if !v.IsObject() {
+		return nil
+	}
+	o := v.AsObject()
+	if o == nil {
+		return nil
+	}
+	if p, ok := o.Internal().(*path2D); ok {
+		return p
+	}
+	return nil
+}
+
+// installPath2DMethods 在 Path2D 实例上装配路径方法（构造器与内部创建共用）。
+func installPath2DMethods(obj *jsc.JSObject) {
+	each := func(name string, fn func(p *path2D, a []jsc.JSValue)) {
+		obj.Set(name, jsc.FunctionValue(jsc.NewNativeFunction(name,
+			func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				if p := path2DFrom(this); p != nil {
+					fn(p, a)
+				}
+				return jsc.Undefined()
+			}, 1)))
+	}
+	each("moveTo", func(p *path2D, a []jsc.JSValue) {
+		p.MoveTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)))
+	})
+	each("lineTo", func(p *path2D, a []jsc.JSValue) {
+		p.LineTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)))
+	})
+	each("quadraticCurveTo", func(p *path2D, a []jsc.JSValue) {
+		p.QuadTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)),
+			float32(argNum(a, 2, 0)), float32(argNum(a, 3, 0)))
+	})
+	each("bezierCurveTo", func(p *path2D, a []jsc.JSValue) {
+		p.CubicTo(float32(argNum(a, 0, 0)), float32(argNum(a, 1, 0)),
+			float32(argNum(a, 2, 0)), float32(argNum(a, 3, 0)),
+			float32(argNum(a, 4, 0)), float32(argNum(a, 5, 0)))
+	})
+	each("closePath", func(p *path2D, _ []jsc.JSValue) { p.Close() })
+	each("rect", func(p *path2D, a []jsc.JSValue) {
+		x, y := argNum(a, 0, 0), argNum(a, 1, 0)
+		w, h := argNum(a, 2, 0), argNum(a, 3, 0)
+		p.MoveTo(float32(x), float32(y))
+		p.LineTo(float32(x+w), float32(y))
+		p.LineTo(float32(x+w), float32(y+h))
+		p.LineTo(float32(x), float32(y+h))
+		p.Close()
+	})
+	each("arc", func(p *path2D, a []jsc.JSValue) {
+		appendArc(p, argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0),
+			argNum(a, 3, 0), argNum(a, 4, 0), argBool(a, 5, false))
+	})
+	each("ellipse", func(p *path2D, a []jsc.JSValue) {
+		appendEllipse(p, argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0),
+			argNum(a, 5, 0), argNum(a, 6, 2*math.Pi), argBool(a, 7, false))
+	})
+	each("arcTo", func(p *path2D, a []jsc.JSValue) {
+		appendArcTo(p, p, argNum(a, 0, 0), argNum(a, 1, 0),
+			argNum(a, 2, 0), argNum(a, 3, 0), argNum(a, 4, 0))
+	})
+	each("roundRect", func(p *path2D, a []jsc.JSValue) {
+		appendRoundRect(p, p, argNum(a, 0, 0), argNum(a, 1, 0), argNum(a, 2, 0), argNum(a, 3, 0),
+			parseRoundRectRadii(a, 4))
+	})
+	obj.Set("addPath", jsc.FunctionValue(jsc.NewNativeFunction("addPath",
+		func(_ *jsc.Interpreter, this jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+			dst := path2DFrom(this)
+			if dst == nil || len(a) == 0 {
+				return jsc.Undefined()
+			}
+			src := path2DFrom(a[0])
+			if src == nil {
+				return jsc.Undefined()
+			}
+			// transform 是 DOMMatrix2DInit：本引擎无 DOMMatrix 构造器，但对象字面量
+			// {a,b,c,d,e,f} 一律接受（缺省恒等），与规范一致。
+			m := [6]float64{1, 0, 0, 1, 0, 0}
+			if len(a) >= 2 && a[1].IsObject() {
+				if mo := a[1].AsObject(); mo != nil {
+					m[0] = canvasObjNum(mo, "a", 1)
+					m[1] = canvasObjNum(mo, "b", 0)
+					m[2] = canvasObjNum(mo, "c", 0)
+					m[3] = canvasObjNum(mo, "d", 1)
+					m[4] = canvasObjNum(mo, "e", 0)
+					m[5] = canvasObjNum(mo, "f", 0)
+				}
+			}
+			dst.appendFrom(src, m)
+			return jsc.Undefined()
+		}, 1)))
+}
+
+// newPath2DObject 创建 Path2D 的 JS 对象（空路径；构造器内联使用）。
+func newPath2DObject(in *jsc.Interpreter, p *path2D) *jsc.JSObject {
+	obj := jsc.NewObject(domIfaceProtoOr("Path2D", in.ObjectPrototype()))
+	obj.SetClassName("Path2D")
+	obj.SetInternal(p)
+	installPath2DMethods(obj)
+	return obj
+}
+
+// canvasObjNum 读 JS 对象上的数字属性（缺失/undefined/null 时返回 def）。
+func canvasObjNum(o *jsc.JSObject, key string, def float64) float64 {
+	if v, ok := o.GetByKey(key); ok && !v.IsUndefined() && !v.IsNull() {
+		return v.ToNumber()
+	}
+	return def
+}
 

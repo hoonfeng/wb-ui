@@ -1494,6 +1494,31 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 				func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 					return jsc.StringValue("")
 				}, 1)))
+			// ★ 第 21 轮：CSSStyleDeclaration 的 item(i)/length（此前只有
+			//   getPropertyValue/getPropertyPriority/cssText，item/length 缺失 →
+			//   `getComputedStyle(el).length` 为 undefined、item 调用抛 TypeError）。
+			//   契约与 Edge 一致：item(i) 返回**属性名**（string）、越界返回 ""
+			//   （Edge 实测 item(0) 为 string、越界为 ""）；length 为属性条数
+			//   （浏览器对每个 CSS 属性恒有值 → 数量级几百，本引擎按级联 map
+			//   的条数报告 —— 夹具只断言 > 0，不比较具体数值）。
+			cs.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
+				func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+					if len(a) == 0 {
+						return jsc.StringValue("")
+					}
+					i := int(a[0].ToNumber())
+					if i < 0 || i >= len(computed) {
+						return jsc.StringValue("")
+					}
+					for k := range computed {
+						if i == 0 {
+							return jsc.StringValue(k)
+						}
+						i--
+					}
+					return jsc.StringValue("")
+				}, 1)))
+			cs.Set("length", jsc.NumberValue(float64(len(computed))))
 			cs.Set("cssText", jsc.StringValue(""))
 			return jsc.ObjectValue(cs)
 		}, 1)))
@@ -3468,12 +3493,27 @@ func wrapDocumentAs(rt *jsc.Interpreter, doc *dom.Document, ifaceName string) *j
 	}), nil)
 	// document.styleSheets（CSSOM §document.styleSheets）：StyleSheetList。包含
 	// <style> 提取的与运行时注入的样式表（后者正是插件 CSS 的通道）。
+	// ★ 第 21 轮：列表与其中样式表包装对象**身份稳定** —— CSSOM 要求
+	//   `document.styleSheets === document.styleSheets`、
+	//   `styleSheets[0] === styleSheets[0]`、`styleSheets[0] === styleSheets.item(0)`
+	//   成立（库用引用比较做去重 / 判断样式是否已装配）。此前每次访问都重新包装
+	//   → 三个断言全为 false。缓存挂在闭包里（per-runtime —— jsc.JSObject 绑定
+	//   创建它的 runtime）；样式表条数变化时重建。
+	var sheetList jsc.JSValue
+	sheetListLen := -1
+	haveSheetList := false
 	obj.SetAccessor("styleSheets", getter(func(in *jsc.Interpreter) jsc.JSValue {
 		var sheets []*css.CSSStyleSheet
 		if DocumentStyleSheets != nil {
 			sheets = DocumentStyleSheets(doc)
 		}
-		return wrapStyleSheetList(in, sheets)
+		if haveSheetList && sheetListLen == len(sheets) {
+			return sheetList
+		}
+		sheetList = wrapStyleSheetList(in, sheets)
+		sheetListLen = len(sheets)
+		haveSheetList = true
+		return sheetList
 	}), nil)
 
 	// document.hasFocus() — CodeMirror 6 等库用它判断编辑器是否获得焦点
@@ -4637,8 +4677,159 @@ type styleProxy struct {
 	vm *goja.Runtime
 }
 
+// ── 第 21 轮：CSSStyleDeclaration 的保序声明模型 ──────────────────────
+//
+// style 属性以**文本**存于元素上，但 CSSStyleDeclaration 的
+// length / item(i) / [i] / cssText 都要求**按声明顺序**枚举；map 无序，
+// 故这里用切片保序。同名声明覆盖时保留**首次出现的位置**（Chromium 的
+// CSSStyleDeclaration 亦然：`color:red; color:blue` → 只有一条 color，
+// 位置在首次出现处）。
+type styleDecl struct {
+	Name  string
+	Value string
+}
+
+// parseStyleDecls 解析 style 属性文本为保序声明列表。
+func parseStyleDecls(s string) []styleDecl {
+	var out []styleDecl
+	idx := make(map[string]int, 8)
+	for _, part := range strings.Split(s, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(kv[0])
+		if name == "" {
+			continue
+		}
+		val := strings.TrimSpace(kv[1])
+		if i, ok := idx[name]; ok {
+			out[i].Value = val
+			continue
+		}
+		idx[name] = len(out)
+		out = append(out, styleDecl{Name: name, Value: val})
+	}
+	return out
+}
+
+// joinStyleDecls 把保序声明列表写回 style 属性文本（"name:value;name:value"，
+// 与既有 joinStyle 的输出格式一致 —— 规范化（冒号后空格）只发生在 cssText
+// getter 一侧（serializeCSSText），属性文本本身保持紧凑形式）。
+func joinStyleDecls(decls []styleDecl) string {
+	parts := make([]string, 0, len(decls))
+	for _, d := range decls {
+		parts = append(parts, d.Name+":"+d.Value)
+	}
+	return strings.Join(parts, ";")
+}
+
+// styleIndexKey 判断 `style[0]` 这类索引键并返回下标。
+func styleIndexKey(key string) (int, bool) {
+	if key == "" {
+		return 0, false
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < '0' || key[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(key)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// matchStyleDecl 按 CSSOM 语义查找声明（getPropertyValue / setProperty /
+// removeProperty 路径）：属性名**大小写不敏感**（Edge 实测
+// getPropertyValue("Width") 命中 "width"），camelCase 先换算为 kebab-case
+// 再查；自定义属性（--x）名大小写敏感（规范）。
+func matchStyleDecl(decls []styleDecl, name string) (int, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return -1, false
+	}
+	if strings.HasPrefix(name, "--") {
+		for i, d := range decls {
+			if d.Name == name {
+				return i, true
+			}
+		}
+		return -1, false
+	}
+	want := strings.ToLower(camelToKebab(name))
+	for i, d := range decls {
+		if strings.ToLower(d.Name) == want {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// matchStyleDeclExact 按原样名字精确匹配（属性访问 `style.width` 的**既有**
+// 语义，大小写敏感 —— 第 21 轮不改这条路径的行为）。
+func matchStyleDeclExact(decls []styleDecl, name string) (int, bool) {
+	for i, d := range decls {
+		if d.Name == name {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// setStyleDecl 写入声明：已存在则**原位替换**（保持声明顺序），否则追加。
+func setStyleDecl(decls []styleDecl, name, value string) []styleDecl {
+	if i, ok := matchStyleDecl(decls, name); ok {
+		decls[i].Value = value
+		return decls
+	}
+	return append(decls, styleDecl{Name: name, Value: value})
+}
+
+// removeStyleDecl 删除声明（大小写不敏感），返回新列表。
+func removeStyleDecl(decls []styleDecl, name string) []styleDecl {
+	i, ok := matchStyleDecl(decls, name)
+	if !ok {
+		return decls
+	}
+	return append(decls[:i:i], decls[i+1:]...)
+}
+
+// splitImportant 把声明值拆成「值 + 是否 !important」（CSSOM：getPropertyValue
+// 不含优先级，getPropertyPriority 返回 "important"/""）。
+func splitImportant(v string) (string, bool) {
+	t := strings.TrimRight(v, " \t")
+	if i := strings.LastIndex(t, "!"); i >= 0 {
+		if strings.EqualFold(strings.TrimSpace(t[i+1:]), "important") {
+			return strings.TrimSpace(t[:i]), true
+		}
+	}
+	return v, false
+}
+
+// decls 返回当前元素的保序声明列表。
+func (s *styleProxy) decls() []styleDecl {
+	return parseStyleDecls(s.el.GetAttribute("style"))
+}
+
 func (s *styleProxy) Get(key string) goja.Value {
 	vm := s.vm
+	// ★ 第 21 轮：CSSStyleDeclaration 是 indexed + named properties 对象 ——
+	//   `style[0]` 返回第 0 条声明的**属性名**，与 `style.item(0)` 同值
+	//   （Edge 实测 `style[0] === style.item(0)` 为 true）。索引键必须在 default
+	//   的「CSS 属性取值」分支**之前**处理，否则 "0" 会被当属性名查询而返回 ""。
+	if idx, ok := styleIndexKey(key); ok {
+		decls := s.decls()
+		if idx < len(decls) {
+			return vm.ToValue(decls[idx].Name)
+		}
+		return vm.ToValue("")
+	}
 	switch key {
 	case "cssText":
 		// ★ 浏览器标准：cssText getter 返回序列化形式——每个声明以分号结尾
@@ -4653,19 +4844,28 @@ func (s *styleProxy) Get(key string) goja.Value {
 			if len(call.Arguments) < 2 {
 				return goja.Undefined()
 			}
-			props := parseStyle(s.el.GetAttribute("style"))
+			decls := s.decls()
 			name := call.Arguments[0].String()
 			v := call.Arguments[1].String()
+			// ★ 第 21 轮：第三参数 priority 按 CSSOM 接受 "important"（大小写
+			//   不敏感、允许前后空白；其它值忽略）。Edge 实测：
+			//   setProperty("color","red","important") 之后
+			//   getPropertyPriority("color") === "important"、
+			//   cssText === "color: red !important;"。
+			if len(call.Arguments) >= 3 &&
+				strings.EqualFold(strings.TrimSpace(call.Arguments[2].String()), "important") {
+				v = strings.TrimSpace(v) + " !important"
+			}
 			// ★ CSSOM 规范：setProperty(name, "") 等价于 removeProperty(name)。
 			//   此前无条件写入 → `setProperty('transform','')` 之后级联里存着
 			//   空值声明，getComputedStyle().transform 返回 "" 而非初始值
 			//   "none"（Edge 实测：h7_transform_norm 的空值 case → Edge none / wbui ""）。
-			if strings.TrimSpace(v) == "" {
-				delete(props, name)
+			if strings.TrimSpace(call.Arguments[1].String()) == "" {
+				decls = removeStyleDecl(decls, name)
 			} else {
-				props[name] = v
+				decls = setStyleDecl(decls, name, v)
 			}
-			s.el.SetAttribute("style", joinStyle(props))
+			s.el.SetAttribute("style", joinStyleDecls(decls))
 			// 与 styleProxy.Set 路径对齐：不失效缓存会让后续 getComputedStyle 读到旧值。
 			InvalidateComputedStyle(s.el)
 			if OnInlineStyleChanged != nil {
@@ -4673,22 +4873,73 @@ func (s *styleProxy) Get(key string) goja.Value {
 			}
 			return goja.Undefined()
 		})
+	case "getPropertyValue":
+		// CSSOM §1.2：返回声明值（不含 !important）；未声明返回 ""。属性名
+		// 大小写不敏感（Edge 实测 getPropertyValue("Width") 命中 "width"）。
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return vm.ToValue("")
+			}
+			decls := s.decls()
+			if i, ok := matchStyleDecl(decls, call.Arguments[0].String()); ok {
+				v, _ := splitImportant(decls[i].Value)
+				return vm.ToValue(v)
+			}
+			return vm.ToValue("")
+		})
+	case "getPropertyPriority":
+		// CSSOM §1.2：返回 "important" 或 ""。
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return vm.ToValue("")
+			}
+			decls := s.decls()
+			if i, ok := matchStyleDecl(decls, call.Arguments[0].String()); ok {
+				if _, imp := splitImportant(decls[i].Value); imp {
+					return vm.ToValue("important")
+				}
+			}
+			return vm.ToValue("")
+		})
+	case "item":
+		// CSSOM §1.2：返回第 i 条声明的**属性名**；越界返回 ""（Edge 实测：
+		// item(-1) / item(99) 均返回 ""，不是 null）。
+		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return vm.ToValue("")
+			}
+			decls := s.decls()
+			i := int(call.Arguments[0].ToInteger())
+			if i < 0 || i >= len(decls) {
+				return vm.ToValue("")
+			}
+			return vm.ToValue(decls[i].Name)
+		})
+	case "length":
+		// CSSOM §1.2：声明条数（Edge 实测：内联 style 的 length 即声明数，
+		// 含自定义属性）。
+		return vm.ToValue(len(s.decls()))
 	case "removeProperty":
 		return vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) == 0 {
 				return vm.ToValue("")
 			}
-			props := parseStyle(s.el.GetAttribute("style"))
-			old := props[call.Arguments[0].String()]
-			delete(props, call.Arguments[0].String())
-			s.el.SetAttribute("style", joinStyle(props))
+			decls := s.decls()
+			name := call.Arguments[0].String()
+			old := ""
+			if i, ok := matchStyleDecl(decls, name); ok {
+				old, _ = splitImportant(decls[i].Value)
+			}
+			s.el.SetAttribute("style", joinStyleDecls(removeStyleDecl(decls, name)))
 			return vm.ToValue(old)
 		})
 	default:
 		// CSS property: return the value from the style attribute
-		props := parseStyle(s.el.GetAttribute("style"))
-		if v, ok := props[camelToKebab(key)]; ok {
-			return vm.ToValue(v)
+		//（属性访问路径保持**既有**语义：精确名匹配 + camelCase 换算；值原样
+		//  返回（含 !important），与浏览器 `style.width` 一致。）
+		decls := s.decls()
+		if i, ok := matchStyleDeclExact(decls, camelToKebab(key)); ok {
+			return vm.ToValue(decls[i].Value)
 		}
 		return vm.ToValue("")
 	}
@@ -4710,7 +4961,7 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		return false // let goja handle as a regular property (function assignment)
 	default:
 		// CSS property write: parse existing style, update, write back
-		props := parseStyle(s.el.GetAttribute("style"))
+		decls := s.decls()
 		strVal := val.String()
 		ckey := camelToKebab(key)
 		// ★ 空白串（"  "）也须视为「移除属性」：CSSOM 规定属性值首尾空白不计入，
@@ -4719,11 +4970,11 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		//   留下一个空值声明，getComputedStyle().transform 返回 ""（Edge 为 none）。
 		//   这是 h7_transform_norm 唯一残留差异的来源。
 		if strings.TrimSpace(strVal) == "" || strVal == "undefined" || strVal == "null" {
-			delete(props, ckey)
+			decls = removeStyleDecl(decls, ckey)
 		} else {
-			props[ckey] = strVal
+			decls = setStyleDecl(decls, ckey, strVal)
 		}
-		s.el.SetAttribute("style", joinStyle(props))
+		s.el.SetAttribute("style", joinStyleDecls(decls))
 		if os.Getenv("WB_STYLE_DEBUG") != "" {
 			fmt.Fprintf(os.Stderr, "[styleProxy] Set(%q, %q) tag=%s id=%s → %q\n",
 				key, strVal, s.el.TagName(), s.el.GetAttribute("id"), s.el.GetAttribute("style"))
@@ -4738,27 +4989,31 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 
 func (s *styleProxy) Has(key string) bool {
 	switch key {
-	case "cssText", "setProperty", "removeProperty":
+	case "cssText", "setProperty", "removeProperty",
+		"getPropertyValue", "getPropertyPriority", "item", "length":
 		return true
 	}
-	props := parseStyle(s.el.GetAttribute("style"))
-	_, ok := props[key]
+	decls := s.decls()
+	if idx, ok := styleIndexKey(key); ok {
+		return idx < len(decls)
+	}
+	_, ok := matchStyleDeclExact(decls, key)
 	return ok
 }
 
 func (s *styleProxy) Keys() []string {
-	props := parseStyle(s.el.GetAttribute("style"))
-	keys := []string{"cssText", "setProperty", "removeProperty"}
-	for k := range props {
-		keys = append(keys, k)
+	decls := s.decls()
+	keys := make([]string, 0, len(decls)+7)
+	keys = append(keys, "cssText", "setProperty", "removeProperty")
+	keys = append(keys, "length", "item", "getPropertyValue", "getPropertyPriority")
+	for _, d := range decls {
+		keys = append(keys, d.Name)
 	}
 	return keys
 }
 
 func (s *styleProxy) Delete(key string) bool {
-	props := parseStyle(s.el.GetAttribute("style"))
-	delete(props, key)
-	s.el.SetAttribute("style", joinStyle(props))
+	s.el.SetAttribute("style", joinStyleDecls(removeStyleDecl(s.decls(), key)))
 	InvalidateComputedStyle(s.el)
 	return true
 }
@@ -4811,17 +5066,19 @@ func joinStyle(m map[string]string) string {
 // （无分号）会让追加拼出非法声明（"height:0pxvisibility..."），
 // 导致声明的 visibility/height 全部失效。
 func serializeCSSText(style string) string {
-	if strings.TrimSpace(style) == "" {
+	decls := parseStyleDecls(style)
+	if len(decls) == 0 {
 		return ""
 	}
-	parts := strings.Split(style, ";")
-	var out []string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		out = append(out, part+";")
+	// ★ 第 21 轮：按 Edge 实测基线规范化 —— 每条声明 **"name: value;"**（冒号后
+	//   恰一个空格），声明之间单个空格分隔。此前直接把属性原文按 "; " 切块加尾
+	//   分号（"height:20px" 原样保留），而浏览器 cssText 恒为规范化形式
+	//   （Edge 实测：style="width: 10px; height:20px" → cssText
+	//   "width: 10px; height: 20px;"）。尾分号保持不变 —— `style.cssText += "..."`
+	//   的追加拼接安全性依赖它。
+	out := make([]string, 0, len(decls))
+	for _, d := range decls {
+		out = append(out, d.Name+": "+d.Value+";")
 	}
 	return strings.Join(out, " ")
 }
@@ -5726,36 +5983,25 @@ func wrapStyleSheet(in *jsc.Interpreter, s *css.CSSStyleSheet) *jsc.JSObject {
 		}
 		return jsc.Null()
 	}), nil)
+	// ★ 第 21 轮：规则列表**身份稳定** —— CSSOM 要求 `sheet.cssRules === sheet.cssRules`
+	//   为 true（同一 CSSStyleSheet 包装对象上的连续访问返回同一 CSSRuleList；
+	//   规则对象亦然：`cssRules[0] === cssRules[0]`）。此前每次访问新建 CSSRuleList
+	//   并把全部规则重新包装 → 两个断言都是 false。缓存挂在**本包装对象的闭包**里
+	//   （per-runtime —— jsc.JSObject 绑定创建它的 runtime，绝不跨 rt 复用）；
+	//   规则条数变化时重建，避免读到过期集合。
+	var ruleList *jsc.JSObject
+	ruleListLen := -1
 	ruleListAcc := getter(func(in *jsc.Interpreter) jsc.JSValue {
 		rules := s.Rules()
-		// ★ 第 20 轮：CSSRuleList + 规则对象（CSSOM §1.4）。
-		//   预建规则包装对象：索引访问与 item(i) 必须返回**同一身份**的对象
-		//   （浏览器里 CSSRuleList 是 legacy platform object，`list[0] === list.item(0)`）。
-		//   此前 item() 恒返回 null、也没有索引属性 → 前端读 `sheet.cssRules[0]`
-		//   得到 undefined（探针 globals 口径下 CSSRule 家族因此只有全局名可补，
-		//   实例面缺失 —— 本轮补齐实例）。
-		ro := jsc.NewObject(domIfaceProtoOr("CSSRuleList", in.ObjectPrototype()))
-		ro.SetClassName("CSSRuleList")
-		robjs := make([]*jsc.JSObject, len(rules))
-		for i, r := range rules {
-			robjs[i] = wrapCSSRule(in, r)
-			ro.Set(strconv.Itoa(i), jsc.ObjectValue(robjs[i]))
+		if ruleList != nil && ruleListLen == len(rules) {
+			return jsc.ObjectValue(ruleList)
 		}
-		ro.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-			return jsc.NumberValue(float64(len(robjs)))
-		}), nil)
-		ro.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
-				if len(a) == 0 {
-					return jsc.Null()
-				}
-				i := int(a[0].ToNumber())
-				if i < 0 || i >= len(robjs) {
-					return jsc.Null()
-				}
-				return jsc.ObjectValue(robjs[i])
-			}, 1)))
-		return jsc.ObjectValue(ro)
+		// ★ 第 20/21 轮：CSSRuleList + 规则对象（CSSOM §1.4）。列表构造统一走
+		//   wrapCSSRuleList（索引访问与 item(i) 返回同一身份；嵌套规则的
+		//   cssRules 复用同一实现）。
+		ruleList = wrapCSSRuleList(in, rules)
+		ruleListLen = len(rules)
+		return jsc.ObjectValue(ruleList)
 	})
 	obj.SetAccessor("cssRules", ruleListAcc, nil)
 	obj.SetAccessor("rules", ruleListAcc, nil)
