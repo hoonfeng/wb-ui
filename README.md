@@ -39,6 +39,7 @@
 | `engine/js/bindings/` | DOM/Web API 的 JS 绑定，以及按运行模式的能力裁剪 | `Source/WebCore/bindings` |
 | `engine/js/worker/` | Web Worker 并发脚本执行 | `Source/WebCore/workers` |
 | `engine/debugenv/` | 进程启动时的调试开关快照（`WB_*` / `WBUI_*`） | — |
+| `engine/devtools/cdp/` | 内置 CDP 调试服务端（`ws` 子包 = RFC6455 子集 + JSON-RPC 分派 + 域实现） | `Source/WebKit/UIProcess/API`（DevTools 协议侧） |
 | `engine/gpu/` | GPU 进程 / Skia 后端桥（**占位，未实现**） | `Source/WebKit/GPUProcess` |
 
 工具、示例与资源：
@@ -125,10 +126,16 @@ go run ./dev/probes/tddiag -file dev/suites/cssprobe/fixtures/fixed-table-layout
 | [docs/MODES.md](docs/MODES.md) | 运行模式（浏览器 / UI 工具包）与 UI 构建方式 |
 | [docs/CALIB.md](docs/CALIB.md) | 渲染校准与诊断工具（calib / tddiag / cssprobe / scriptsdiag） |
 | [docs/TECH_DEBT.md](docs/TECH_DEBT.md) | 遗留项取舍结论与有意保留的边界 |
+| [docs/implementation-path.md](docs/implementation-path.md) | **实现路径总纲**：媒体真实播放 / CDP 调试协议 / JS 引擎对标（三线分期与验收；**P0/P1 与 P2 全部落地**——A1/A2 全项、A4 动图、B2（CDP S2）、C-P2（jsc 后端接口抽象）） |
+| [docs/CDP.md](docs/CDP.md) | **CDP 调试协议使用说明**（端点、支持的域与方法、验收判据实测、已知边界；含 S2 的 `objectId` 句柄表 / DOM 编辑 / CSS 域 / console 分级） |
+| [docs/media-format-verification-plan.md](docs/media-format-verification-plan.md) | 媒体格式真实可用性验证（L0–L4 分级）设计稿 |
+| [docs/PERF_BASELINE.md](docs/PERF_BASELINE.md) | 性能基线（受控副本）与复现命令 |
 
 > 计划类文档（原 `MASK_P3_PLAN.md`、`INCREMENTAL_DESIGN.md`、`PERF_PLAN.md`）已随实现落地
 > 删除——诊断与方案在 git 历史里，实现要点在代码注释与测试里；未实现项的逐条取舍结论
 > 留在 `docs/TECH_DEBT.md`。
+> 2026-10 新增文档：`implementation-path.md`（实现路径总纲，其 P0/P1、A1 与 A2 全项已实装，见该文 §0.1）、
+> `CDP.md`（已实装的调试协议使用说明）、`media-format-verification-plan.md`（媒体验证设计稿，仍是计划）。
 
 ## 第三方素材
 
