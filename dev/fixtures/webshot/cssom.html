@@ -18,6 +18,11 @@
 @keyframes spin22 { from { opacity: 0 } to { opacity: 1 } }
 @font-face { font-family: FaceFont22; font-weight: 700; src: url("nonexistent.woff2") format("woff2") }
 @page :first { margin: 1cm }</style>
+<style id="probe-sheet23">@namespace url("http://www.w3.org/1999/xhtml");
+@namespace svg url("http://www.w3.org/2000/svg");
+.n23{color:rgb(2,3,4)}
+@keyframes multi23 { from, 50% { opacity: 0.25 } to { opacity: 1 } }</style>
+<div id="d23" style="background-image: url(foo23.png); font-family: 'ProbeFont23'">z</div>
 <pre id="out"></pre>
 <script>
 (function () {
@@ -311,6 +316,47 @@
     ctx21.fill(q);
     return "OK";
   });
+
+  // ══ 第 23 轮：@namespace 字段 / keyText / CSSOM 值口径（inline + computed）══
+  // 基线：Edge --dump-dom（dev/output/wbui-audit/r23base.edge.txt、r23b.edge.txt）。
+  // ★ Path2D 的「方法挂原型」在本引擎会打断渲染初始化（实测卡死），已按 WONTFIX
+  //   记账（WORKITEMS §23-4），故不在此断言 prototype.moveTo —— 只断言实例方法可用
+  //   （见上方第 15 节的 p2d_methods / p2d_path_ops）。
+  var sh23 = sheetById("probe-sheet23");
+  T("sh23_found", function () { return bn(!!sh23); });
+  T("sh23_len", function () { return sh23 ? sh23.cssRules.length : -1; });
+  T("sh23_rules_dump", function () {
+    var o = [], rs = sh23.cssRules;
+    for (var i = 0; i < rs.length; i++) { o.push(i + "|" + rs[i].type + "|" + rs[i].constructor.name); }
+    return o.join(" ; ");
+  });
+  T("ns23_prefix0", function () { return JSON.stringify(sh23.cssRules[0].prefix); });
+  T("ns23_uri0", function () { return sh23.cssRules[0].namespaceURI; });
+  T("ns23_csstext0", function () { return sh23.cssRules[0].cssText; });
+  T("ns23_prefix1", function () { return JSON.stringify(sh23.cssRules[1].prefix); });
+  T("ns23_uri1", function () { return sh23.cssRules[1].namespaceURI; });
+  T("ns23_csstext1", function () { return sh23.cssRules[1].cssText; });
+  T("ns23_href_undefined", function () { return bn(typeof sh23.cssRules[0].href === "undefined"); });
+  T("ns23_parent_null", function () { return bn(sh23.cssRules[0].parentRule === null); });
+
+  // @keyframes 多键（`from, 50%` → "0%, 50%"）
+  var kf23 = sh23 ? sh23.cssRules[3] : null;
+  T("kf23_ctor", function () { return kf23.constructor.name; });
+  T("kf23_keytext0", function () { return kf23.cssRules[0].keyText; });
+  T("kf23_keytext1", function () { return kf23.cssRules[1].keyText; });
+  T("kf23_csstext0", function () { return kf23.cssRules[0].cssText; });
+  // 单键 keyText（probe-sheet22 的 from / to）
+  T("kf22_keytext0", function () { return kf22.cssRules[0].keyText; });
+  T("kf22_keytext1", function () { return kf22.cssRules[1].keyText; });
+
+  // 内联 style 的 CSSOM 值口径（url 带双引号 / font-family 去引号）
+  var d23 = document.getElementById("d23");
+  T("inline23_bg_gpv", function () { return d23.style.getPropertyValue("background-image"); });
+  T("inline23_bg_prop", function () { return d23.style.backgroundImage; });
+  T("inline23_ff_gpv", function () { return d23.style.getPropertyValue("font-family"); });
+  T("inline23_csstext", function () { return d23.style.cssText; });
+  // computed 的 CSSOM 值口径（computed 的 url **绝对化**已判 WONTFIX，故不断言 url）
+  T("computed23_ff", function () { return W.getComputedStyle(d23).getPropertyValue("font-family"); });
 
   document.getElementById("out").textContent = L.join("\n");
 })();

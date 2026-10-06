@@ -999,6 +999,22 @@ func wrapCSSRule(in *jsc.Interpreter, r css.Rule, parent *jsc.JSObject, parentSh
 		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 			return jsc.StringValue(pageRuleTextOf(v))
 		}), nil)
+	case *css.NamespaceRule:
+		// ★ 第 23 轮（Edge 基线 dev/output/wbui-audit/r23base.edge.txt）：
+		//   CSSNamespaceRule 暴露 prefix / namespaceURI / cssText。
+		//   ★ href **不实现**：Edge 实测 `typeof rule.href === "undefined"` ——
+		//   该接口本就没有 href 属性（监督者列出的 href 经基线核对不存在），
+		//   故不在对象上定义它，读出来即 undefined，与 Edge 一致。
+		nsPrefix, nsURI := v.Prefix, v.URI
+		obj.SetAccessor("prefix", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(nsPrefix)
+		}), nil)
+		obj.SetAccessor("namespaceURI", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(nsURI)
+		}), nil)
+		obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+			return jsc.StringValue(cssNamespaceTextOf(nsPrefix, nsURI))
+		}), nil)
 	}
 	return obj
 }
@@ -1118,16 +1134,48 @@ func cssKeyframesTextOf(v *css.KeyframesRule) string {
 func cssKeyframeTextOf(k *css.KeyframeRule) string {
 	keys := make([]string, 0, len(k.Keys))
 	for _, key := range k.Keys {
-		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "from":
-			keys = append(keys, "0%")
-		case "to":
-			keys = append(keys, "100%")
-		default:
-			keys = append(keys, strings.TrimSpace(key))
-		}
+		keys = append(keys, normalizeKeyframeKey(key))
 	}
 	return strings.Join(keys, ", ") + " { " + cssDeclsText(k.Declarations) + " }"
+}
+
+// normalizeKeyframeKey 规范化单个关键帧键：`from` → `0%`、`to` → `100%`。
+// 引擎 AST 保留原文（Keys 供动画匹配用），换算只发生在**序列化层**。
+func normalizeKeyframeKey(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "from":
+		return "0%"
+	case "to":
+		return "100%"
+	}
+	return strings.TrimSpace(key)
+}
+
+// cssKeyframeKeyTextOf 返回 CSSKeyframeRule.keyText（★ 第 23 轮，Edge 基线
+// dev/output/wbui-audit/r23b.edge.txt）：
+//
+//	@keyframes { from { … }          → keyText = "0%"
+//	@keyframes { from, 50% { … }     → keyText = "0%, 50%"
+func cssKeyframeKeyTextOf(k *css.KeyframeRule) string {
+	keys := make([]string, 0, len(k.Keys))
+	for _, key := range k.Keys {
+		keys = append(keys, normalizeKeyframeKey(key))
+	}
+	return strings.Join(keys, ", ")
+}
+
+// cssNamespaceTextOf 序列化 @namespace 规则（★ 第 23 轮，Edge 基线
+// dev/output/wbui-audit/r23base.edge.txt）：
+//
+//	@namespace url("http://www.w3.org/1999/xhtml");    （无前缀 → prefix = ""）
+//	@namespace svg url("http://www.w3.org/2000/svg");  （有前缀）
+//
+// url 恒带**双引号**、末尾带分号。
+func cssNamespaceTextOf(prefix, uri string) string {
+	if prefix != "" {
+		return "@namespace " + prefix + " url(\"" + uri + "\");"
+	}
+	return "@namespace url(\"" + uri + "\");"
 }
 
 // conditionRuleTextOf 构造分组规则（@media / @supports）的多行 cssext 文本
@@ -1266,6 +1314,11 @@ func wrapKeyframeRule(in *jsc.Interpreter, k *css.KeyframeRule, parent *jsc.JSOb
 		return jsc.ObjectValue(parentSheet)
 	}), nil)
 	setStyleAccessor(obj, k.Declarations)
+	// ★ 第 23 轮：CSSKeyframeRule.keyText（Edge 基线 r23b.edge.txt：单键
+	//   `0%` / `100%`；一条规则带多个键时以 ", " 连接 —— `from, 50%` → `"0%, 50%"`）。
+	obj.SetAccessor("keyText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
+		return jsc.StringValue(cssKeyframeKeyTextOf(k))
+	}), nil)
 	obj.SetAccessor("cssText", getter(func(_ *jsc.Interpreter) jsc.JSValue {
 		return jsc.StringValue(cssKeyframeTextOf(k))
 	}), nil)

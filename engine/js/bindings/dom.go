@@ -1381,7 +1381,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			for _, entry := range computedStylePropEntries {
 				prop, key := entry.prop, entry.key
 				if v, ok := computed[key]; ok {
-					cs.Set(prop, jsc.StringValue(v))
+					// ★ 第 23 轮：CSSOM 口径（url token 带双引号 / font-family 去引号）
+					//   —— 与 getPropertyValue 路径同口径（Edge 基线
+					//   dev/output/wbui-audit/r23base.edge.txt）。
+					cs.Set(prop, jsc.StringValue(css.CSSTextValueOf(prop, v)))
 				} else if init, ok2 := uaInitialComputedValues[prop]; ok2 {
 					// ★ 浏览器保证 computed style 对**每个属性恒有值**（未声明 = CSS 初始值）：
 					//   引擎级联 map 只含声明值 → 未声明属性读到 undefined →
@@ -1470,11 +1473,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					}
 					prop := strings.ToLower(strings.TrimSpace(a[0].ToString()))
 					if v, ok := computed[prop]; ok {
-						return jsc.StringValue(v)
+						return jsc.StringValue(css.CSSTextValueOf(prop, v))
 					}
 					if camel := kebabToCamel(prop); camel != prop {
 						if v, ok := computed[camel]; ok {
-							return jsc.StringValue(v)
+							return jsc.StringValue(css.CSSTextValueOf(camel, v))
 						}
 					}
 					// ★ 浏览器 getPropertyValue 对**每个属性恒有值**（未声明 = CSS 初始值）：
@@ -4883,7 +4886,9 @@ func (s *styleProxy) Get(key string) goja.Value {
 			decls := s.decls()
 			if i, ok := matchStyleDecl(decls, call.Arguments[0].String()); ok {
 				v, _ := splitImportant(decls[i].Value)
-				return vm.ToValue(v)
+				// ★ 第 23 轮：CSSOM 口径（url 带引号 / font-family 去引号）——
+				//   Edge 基线 dev/output/wbui-audit/r23base.edge.txt。
+				return vm.ToValue(css.CSSTextValueOf(decls[i].Name, v))
 			}
 			return vm.ToValue("")
 		})
@@ -4939,7 +4944,9 @@ func (s *styleProxy) Get(key string) goja.Value {
 		//  返回（含 !important），与浏览器 `style.width` 一致。）
 		decls := s.decls()
 		if i, ok := matchStyleDeclExact(decls, camelToKebab(key)); ok {
-			return vm.ToValue(decls[i].Value)
+			// ★ 第 23 轮：属性访问路径与 getPropertyValue 同口径（值文本仍保留
+			//   !important，只有 url 引号 / font-family 引号被规范化）。
+			return vm.ToValue(css.CSSTextValueOf(decls[i].Name, decls[i].Value))
 		}
 		return vm.ToValue("")
 	}
@@ -5078,7 +5085,9 @@ func serializeCSSText(style string) string {
 	//   的追加拼接安全性依赖它。
 	out := make([]string, 0, len(decls))
 	for _, d := range decls {
-		out = append(out, d.Name+": "+d.Value+";")
+		// ★ 第 23 轮：cssText 也走 CSSOM 值口径（Edge 实测
+		//   `background-image: url("foo.png"); background-repeat: repeat-x;`）。
+		out = append(out, d.Name+": "+css.CSSTextValueOf(d.Name, d.Value)+";")
 	}
 	return strings.Join(out, " ")
 }

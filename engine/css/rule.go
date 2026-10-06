@@ -115,6 +115,112 @@ func (d Declaration) CSSTextValue() string {
 	return v
 }
 
+// CSSTextValueOf 把「属性名 + 原始值文本」转成 CSSOM 口径的值文本：url token 带
+// 双引号 + font-family 去引号。供**声明来源是字符串**的路径使用 —— 内联 style
+// （`el.style`，声明来自 style 属性原文）与 `getComputedStyle` 的值文本。
+//
+// ★ 依据（Edge --dump-dom 实测，dev/output/wbui-audit/r23base.edge.txt）：
+//
+//	style="background-image: url(foo.png)"   → getPropertyValue → url("foo.png")
+//	style="background-image: url('bar.png')" → getPropertyValue → url("bar.png")
+//	style="font-family: 'ProbeFont'"         → getPropertyValue → ProbeFont
+//
+// ★ 与 CSSTextValue 的关系：CSSTextValue 作用于**解析器产物**（DeclarationValue
+// token 列表），本函数作用于**原始声明文本**（未经 token 化）；二者输出同一口径。
+// 不含 url( 且非 font-family 的值原样返回（快速短路，避免给热路径加开销）。
+func CSSTextValueOf(name, value string) string {
+	if value == "" {
+		return value
+	}
+	v := quoteURLTokens(value)
+	if isFontFamilyName(name) {
+		v = unquoteFontFamilies(v)
+	}
+	return v
+}
+
+// isFontFamilyName 判断属性名是否是 font-family（同时接受 kebab 与 camelCase 写法）。
+func isFontFamilyName(name string) bool {
+	n := strings.TrimSpace(name)
+	return strings.EqualFold(n, "font-family") || strings.EqualFold(n, "fontFamily")
+}
+
+// quoteURLTokens 把值文本里**引号外**的 url(...) 统一序列化为 url("...")
+// （CSSOM 口径：Chromium 恒以双引号序列化 url token；已带引号的统一为双引号）。
+// 字符串字面量内部的 "url(" 不受影响（整段原样复制）。
+func quoteURLTokens(v string) string {
+	if !strings.Contains(strings.ToLower(v), "url(") {
+		return v
+	}
+	var b strings.Builder
+	b.Grow(len(v) + 8)
+	for i := 0; i < len(v); {
+		c := v[i]
+		if c == '"' || c == '\'' {
+			// 字符串字面量：整段复制（含其转义序列）。
+			q := c
+			b.WriteByte(c)
+			i++
+			for i < len(v) {
+				b.WriteByte(v[i])
+				if v[i] == '\\' && i+1 < len(v) {
+					i++
+					b.WriteByte(v[i])
+					i++
+					continue
+				}
+				if v[i] == q {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if hasURLPrefixAt(v, i) {
+			start := i + 4
+			j := start
+			for j < len(v) && v[j] != ')' {
+				j++
+			}
+			if j < len(v) {
+				inner := strings.TrimSpace(v[start:j])
+				if len(inner) >= 2 && (inner[0] == '"' && inner[len(inner)-1] == '"' ||
+					inner[0] == '\'' && inner[len(inner)-1] == '\'') {
+					inner = inner[1 : len(inner)-1]
+				}
+				b.WriteString("url(\"")
+				b.WriteString(strings.ReplaceAll(inner, "\"", "\\\""))
+				b.WriteString("\")")
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(c)
+		i++
+	}
+	return b.String()
+}
+
+// hasURLPrefixAt 判断 v[i:] 是否以 `url(` 开头（大小写不敏感），且其前一个字符
+// 不是标识符字符 —— 后者避免把 `myurl(` 这类自定义标识符误当 url token。
+func hasURLPrefixAt(v string, i int) bool {
+	if i+4 > len(v) || !strings.EqualFold(v[i:i+4], "url(") {
+		return false
+	}
+	if i == 0 {
+		return true
+	}
+	prev := v[i-1]
+	switch {
+	case prev == '-' || prev == '_':
+		return false
+	case prev >= 'a' && prev <= 'z', prev >= 'A' && prev <= 'Z', prev >= '0' && prev <= '9':
+		return false
+	}
+	return true
+}
+
 // unquoteFontFamilies 实现 font-family 的 CSSOM 序列化特化：字体名若可写作
 // CSS 标识符（不含空格等），序列化时**省略引号**。
 //

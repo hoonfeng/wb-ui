@@ -3071,6 +3071,185 @@ globalsCore       271/271   100.0%   ★ 收敛判据 missing（必须为 0）: 
 
 ---
 
+# §23｜第 23 次监督轮：§22-8 六项的**决议式收口**（DONE / WONTFIX，不留悬置）
+
+**监督者指令**：只做遗留的决议式收口 —— **禁止扩展新验收面/新夹具**（仅允许为验证既有遗留所需的
+最小夹具改动）；§22-8 六项逐条落定为 **A=DONE**（先取 Edge 基线 → 实现 → 断言 IDENTICAL → 回填实测
+数字）或 **B=WONTFIX**（理由 + 实测风险依据，不得悬置）；增补「收官账」；复跑并落盘全部验收；
+提交推送 + 「无遗留」终审表。
+
+## 23-0｜先取 Edge 基线（禁凭规范推断）
+
+两个**临时**探针（`.html`，落在被 gitignore 的 `dev/output/tmp/`，**不含 `.go`**），Edge `--dump-dom`
+与 wbui 双跑（`dev/tools/gprobe_cmp.sh`），产物落盘 `dev/output/wbui-audit/`：
+
+| 探针 | 覆盖 | 产物 |
+|---|---|---|
+| `r23base.html` | @namespace（无前缀 / 有前缀）、单键 keyText、inline + computed 的 url/font-family、@page 的 style.length/item | `r23base.{edge,wbui,cmp}.txt` |
+| `r23b.html` | 多键 keyText、`Path2D.prototype.*`、实例 `hasOwnProperty`、规则 style 写回、`Path2D(svgPathData)` | `r23b.{edge,wbui,cmp}.txt` |
+
+**Edge 实测基线（关键条目）**：
+
+| 观测 | Edge 实测 |
+|---|---|
+| `@namespace url(…)` / `@namespace svg url(…)` | `prefix=""` / `"svg"`；`namespaceURI` 为对应 URI；**`href === undefined`**；`cssText="@namespace url(\"…\");"` |
+| `@keyframes{from{}}` / `{from, 50%{}}` | `keyText="0%"` / `"0%, 50%"`（多键以 `", "` 连接） |
+| inline `style="background-image: url(foo.png)"` | `getPropertyValue` → `url("foo.png")`（**双引号**）；`style.backgroundImage` 同值 |
+| inline `style="background-image: url('bar.png')"` | → `url("bar.png")`（单引号 → 双引号） |
+| inline `style="font-family: 'ProbeFont'"` | → `ProbeFont`（可作标识符 → **去引号**） |
+| computed 的 `background-image` | `url("file:///F:/…/foo.png")` —— **绝对 URL**（含宿主绝对路径） |
+| computed 的 `font-family` | `ProbeFont`（去引号） |
+| `@page{margin:1cm}` 的 style | `cssText="margin: 1cm;"`（**未展开**）但 `length=4`、`item(0)="margin-top"`、`getPropertyValue("margin-top")="1cm"` |
+| 规则 style 写回 `rule.style.setProperty("color", …)` | **生效**：`getPropertyValue` 与 `rule.cssText` 随之改变 |
+| `Path2D.prototype.moveTo/rect/addPath/roundRect` | `"function"`；实例 `hasOwnProperty("moveTo") === false`；`Path2D.prototype.fill === undefined` |
+| `new Path2D("M0 0 L8 0 L8 8 Z")` | 路径被解析：`isPointInPath(p,6,2) === true` |
+
+## 23-1｜§22-8 六项终局决议
+
+| # | 项 | 决议 | 依据（实测） |
+|---|---|---|---|
+| 1 | `@namespace` 的 prefix / namespaceURI（+ `href`） | **A（DONE）** | 基线：prefix=`""`/`"svg"`、namespaceURI=URI、**`href` 实测 `undefined`** → 实现前两者 + `cssText`，**刻意不定义 `href`**（读出来即 undefined，与 Edge 一致）。夹具断言 IDENTICAL |
+| 2 | `CSSKeyframeRule.keyText` | **A（DONE）** | 基线：单键 `"0%"`/`"100%"`、多键 `"0%, 50%"` → 复用 `normalizeKeyframeKey`（from/to 换算）实现，夹具断言 IDENTICAL |
+| 3 | `el.style` / `getComputedStyle` 的 url 值口径 | **A（DONE）+ 局部 B** | **序列化层（url 双引号 + font-family 去引号）→ A**：新增 `css.CSSTextValueOf`，接入 inline 的 `getPropertyValue`/属性访问/`cssText` 与 computed 的 `getPropertyValue`/属性回写 → 夹具 IDENTICAL。**computed 的 url 绝对化 → B**：见 23-4 #1 |
+| 4 | `@page` 的 `style.length` / `item(i)`（shorthand 展开） | **B（WONTFIX）** | 基线显示 Edge 的 `style.cssText` **仍是 `margin: 1cm;`**（未展开），只有 length/item/长写查询走展开 → 见 23-4 #2 |
+| 5 | MediaList 构造器原型 | **B（WONTFIX）** | 受「**不新增构造器**」约束（第 20 轮判据分组口径 + 第 21 轮明令）→ 见 23-4 #3 |
+| 6a | 规则 `style` 只读快照 | **B（WONTFIX）** | 实测：Edge 写回**生效**（`wb_gpv_after=rgb(200, 0, 0)`、`cssText` 同步变），wbui 的 `setProperty` **不存在**（`THROW:TypeError`）→ 见 23-4 #4 |
+| 6b | Path2D 方法挂**实例**而非原型 | **B（WONTFIX）** | ★ 本轮最重实测：改成挂原型后 **webshot 渲染初始化卡死**（回退即恢复）→ 见 23-3 / 23-4 #5 |
+| 6c | `new Path2D(svgPathData)` 空路径 | **B（WONTFIX）** | 实测：Edge `isPointInPath(p,6,2)=true`（解析出真实路径），wbui `false`（空路径）→ 见 23-4 #6 |
+
+**结论：六项全部落定 —— A 项 3 条（#1、#2、#3 的序列化层），B 项 5 条（#3 的 computed 绝对化、#4、#5、
+#6a、#6b、#6c），无一条悬置。**
+
+## 23-2｜实现（A 项）
+
+| 文件 | 改动 |
+|---|---|
+| `engine/js/bindings/domctors.go` | `wrapCSSRule` 增 `case *css.NamespaceRule`（`prefix`/`namespaceURI`/`cssText`，**不定义 `href`**）；`wrapKeyframeRule` 增 `keyText`；新增 `normalizeKeyframeKey`/`cssKeyframeKeyTextOf`/`cssNamespaceTextOf`（`cssKeyframeTextOf` 改为复用 `normalizeKeyframeKey`） |
+| `engine/css/rule.go` | 新增 `CSSTextValueOf(name, value)`（url token → 双引号 + font-family 去引号）、`quoteURLTokens`、`hasURLPrefixAt`、`isFontFamilyName`；**不动** `ValueString` / `CSSTextValue` |
+| `engine/js/bindings/dom.go` | inline 三处（`getPropertyValue`、属性访问 default、`serializeCSSText`）+ computed 两处（属性回写循环、`getPropertyValue`）接 `css.CSSTextValueOf` |
+
+**分层原则**（第 22 轮教训的延续）：`engine/css` 的**解析器产物**路径（`Declaration.CSSTextValue`）与
+**原始声明文本**路径（`CSSTextValueOf`）输出同一 CSSOM 口径；引擎内部值文本（`ValueString`）与渲染层
+语义**不变** —— `go test ./engine/...` 23 包 0 FAIL 验证（含 `engine/style` 的 url 无引号期望）。
+
+## 23-3｜★ 本轮最重要的事实：Path2D 方法挂原型会**打断渲染初始化**（已实测并回退）
+
+监督者建议该项可走 A。我按 A 实现（把 `installPath2DMethods` 装到 `Path2D.prototype`，实例仅在原型
+不可用时兜底），**结果 webshot 在 `[fontmgr] loaded 60 system font(s) total` 之后卡死**（最简页面
+`dev/output/tmp/_vp_probe.html` 亦卡，150s 超时无 PNG 产物）。三次对照实验：
+
+| 实验 | 命令（摘要） | 结果 |
+|---|---|---|
+| ① 全改动在 | `timeout 150 go run ./dev/probes/webshot -html _vp_probe.html -js "1+1"` | **卡死**（>150s 无产物；`webshot.exe` 常驻 183MB） |
+| ② **git stash 全部改动** | 同上 | **秒级完成**：`[js] => 2` + `PNG …（1280x800）` + `EXIT=0`（`t23b.png`） |
+| ③ **仅回退 Path2D 原型装配**（保留其余 CSSOM 改动） | 同上 | **恢复正常**：`[js] => 2` + PNG + `EXIT=0`（`t23d.png`） |
+
+→ 元凶锁定为「把 natives 批量写入 DOM 接口原型」这一步（装配时机在 `RegisterDOMBindings` 期间）。
+**按监督者「A 路径有回归风险优先判 B」的指示，该项判 B（WONTFIX）并回退**（`canvas2d.go` 整文件回退、
+`domctors.go` 的装配与兜底分支回退）。旁证：同一改动还让 `go test ./engine/js/bindings` 由 **1.658s**
+恶化到 **10+ 分钟不返回**（回退后恢复 1.658s）—— 即它同时打断了测试运行。
+
+## 23-4｜B 项（WONTFIX）理由与实测风险
+
+1. **computed 的 url 绝对化（#3 局部）**：Edge 的 `getComputedStyle(el).getPropertyValue("background-image")`
+   返回 `url("file:///F:/syproject/wb-ui/dev/output/tmp/foo.png")` —— **绝对 URL**。对齐必须实现 **base URL
+   解析**（文档 URL / `<base href>` / 样式表自身 URL），属**样式计算层**而非 CSSOM 序列化层；且该值与
+   文档所在目录强绑定（夹具会变成**位置相关**）。wbui 等价能力：渲染层读 Go 侧值文本，相对 URL 已正确
+   解析（`engine/style` 的 `url_base_test.go` 覆盖）。
+2. **`@page` 的 shorthand 展开（#4）**：Edge 实测 `style.cssText` **不展开**（`"margin: 1cm;"`），但
+   `length=4` + `item(0..3)="margin-top/right/bottom/left"` + `getPropertyValue("margin-top")="1cm"`。
+   即展开只作用于 **length / item / 长写 getPropertyValue** 三条查询路径；实现需覆盖
+   margin/padding/border/background/font/… 的**长写展开表**，并改动**全部** `CSSStyleDeclaration` 的
+   length/item/getPropertyValue 语义 —— 那正是 §21-1 已验收的 `el.style`/`rule.style` 方法面，风险 > 收益。
+   **夹具处置**：`@page` 断言用 `getPropertyValue("margin")`（两侧 `1cm`），并在夹具注释写明为何不断言
+   length/item（不用夹具掩盖）。
+3. **MediaList 构造器原型（#5）**：约束来源是「**不新增构造器**」（第 20 轮把 `globalsCore` 分组口径定为
+   「window 上的接口构造器清单」，第 21 轮明令「不新增构造器、不改判据分组刷数字」）。注册 `MediaList`
+   会改变 `globalsCore` 的面（271 → 272），与收敛判据冲突。实测现状：`typeof rule.media === "object"`、
+   `media.mediaText`/`length`/`item(i)` 可用、`constructor.name === "MediaList"`；`instanceof MediaList`
+   不成立（原型链上没有该全局）。夹具据此只断言 `typeof` 与 `mediaText`。
+4. **规则 `style` 只读快照（#6a）**：实测 Edge 里 `rule.style.setProperty("color","rgb(200, 0, 0)")` **生效**；
+   wbui 里同一调用 `THROW:TypeError`（该对象只暴露读方法）。实现「活」样式表需要：(a) 解析期 `StyleRule`
+   声明列表可变并回写文档样式表；(b) **文档级**样式失效 → 重算级联 + 重排（现有失效路径只有元素级
+   `InvalidateComputedStyle`）；(c) 与第 22 轮新增的 `parentRule`/`parentStyleSheet` 包装对象身份缓存同步。
+   属独立的「样式表可变性」子系统，风险显著；等价能力：改 `el.style` / 插入 `<style>`。
+5. **Path2D 方法挂原型（#6b）**：见 23-3。功能等价性：`typeof path.moveTo === "function"` 为真、全部
+   路径方法可用、`ctx.fill/stroke/clip/isPointInPath` 接受 Path2D、`canvas2d` 夹具 20/20 IDENTICAL ——
+   只有 `Path2D.prototype.moveTo` 这一**特征检测**路径与 Edge 不同。
+6. **`new Path2D(svgPathData)`（#6c）**：实测 Edge `isPointInPath(p, 6, 2) === true`（把
+   `"M0 0 L8 0 L8 8 Z"` 解析成真实路径），wbui `false`（宽容忽略字符串 → 空路径，不抛错）。实现需要完整
+   的 SVG path data 解析器（M/m L/l H/h V/v C/c S/s Q/q T/t A/a Z，含 arc→bezier 转换与隐式重复规则），
+   属独立子系统且需新的渲染级验收面。等价能力：用 `moveTo/lineTo/…` 直接构造同一路径。
+
+## 23-5｜验收证据（本轮实测，产物在 `dev/output/wbui-audit/`）
+
+| 证据 | 结果 |
+|---|---|
+| `CGO_ENABLED=1 go build ./...` | 空输出、**exit=0** |
+| `go test -count=1 ./engine/...` | **23 包 ok / 0 FAIL**（`engine/js/bindings 1.658s`） |
+| `cssom` 夹具（165 → **187 行**：新增 @namespace/keyText/inline+computed 值口径断言） | **IDENTICAL（187/187）**，`cssom.cmp.txt` **0 字节** |
+| 红线四夹具（`REVERIFY23.txt`） | element_attrs **85/85**、element_geom **61/61**、document_doctype **34/34**、document_props **74/74** 全 IDENTICAL |
+| canvas2d / constructors 回归 | **20/20**、**62/62** IDENTICAL |
+| 判据（`webplatform.batch23.json`） | `globalsCore 271/271`（`missing=[]`）、`globals 271/356`、分层完备性 `dup=0/notCovered=0/extra=0` |
+| ALL13（16 个历史夹具全跑）前 16 行 vs `ALL12b.txt` 前 16 行 | **SAME-ZERO-DIFF（逐字零差异）** —— 见 23-6 |
+| gofmt | 3 个改动 `.go` 文件 stdin 复查**零差异** |
+| `engine/layout` | **零改动**（`git diff --stat HEAD -- engine/layout` 空） |
+
+## 23-6｜★ 收官账（全仓开放遗留逐条 DONE / WONTFIX）
+
+**① §8 结构化台账（A–H 合计 42 项）**：**42/42 DONE、0 TODO**（含显式 WONTFIX：A3、C3、D 类 2 项、
+E2/E3、H2 子项、H8 —— 均附根因与实测数据）。H 类 8 项中 H1–H7 DONE、H8 与 H2 子项 WONTFIX。
+
+**② §22-8 六项**：见 23-1 决议表 —— **3 项 A（DONE）+ 5 项 B（WONTFIX）**，无悬置。
+
+**③ §21-6 复检（8 条）**：
+
+| §21-6 条 | 复检结论 |
+|---|---|
+| 1 `@supports` 未验证 | **DONE**（第 22 轮进夹具并 IDENTICAL） |
+| 2 shorthand 未展开 | **WONTFIX**（§23-4 #2） |
+| 3 Path2D SVG 字符串 | **WONTFIX**（§23-4 #6） |
+| 4 规则 style 只读 | **WONTFIX**（§23-4 #4） |
+| 5 Path2D 方法挂实例 | **WONTFIX**（§23-4 #5；实测致卡死故不改） |
+| 6 其余规则类型字段面 + parentRule/parentStyleSheet | **DONE**（第 22 轮 + 本轮 @namespace/keyText 补齐） |
+| 7 `getComputedStyle().item(i)` 枚举顺序不保证 | **WONTFIX**（级联 map 无序；夹具只断言 `typeof` 与越界 `""`） |
+| 8 不可构造接口的宽容语义 | **WONTFIX**（第 20 轮既有取向，本轮未变） |
+
+**④ 本轮新增的开放项（如实登记，已判 WONTFIX 而非悬置）**：computed 的 url 绝对化（§23-4 #1）。
+
+**★ 结论：全仓开放遗留 = §8 台账 42/42 + §22-8 六项 + §21-6 八条 + 本轮新增 1 条，全部为 DONE 或
+WONTFIX，无一条「未实现 / 悬置」。**
+
+**ALL 前 16 行 SAME-ZERO-DIFF 实证**（本轮实测）：
+
+```
+$ diff <(head -16 dev/output/wbui-audit/ALL12b.txt) <(head -16 dev/output/wbui-audit/ALL13.txt)
+（无输出）
+SAME-ZERO-DIFF（逐字零差异）
+$ cat dev/output/wbui-audit/ALL13.txt        # 16 行 + ALL13DONE
+g1_formctl|DIFF（… 2 行差异）… h7_transform_norm|IDENTICAL（… 29 行 / Edge=29 行）
+```
+
+即 16 个历史夹具的**逐行结论（含已知 DIFF 项的行数）与本轮前完全一致**：IDENTICAL 8 项
+（g2/g3/g5/g6/g6 系…）、DIFF 8 项（g1 2 行、g4 10 行、g7 2 行、formtext_probe 2 行、minibox 16 行、
+h2_baseline_matrix 2 行、h2_control_baseline 16 行、h2_replaced_linebox 10 行）—— 无新增差异、无
+行数漂移，证明本轮改动对既有验收面零回归。
+
+## 23-7｜汇报
+
+- **六项决议全部落地**：3 项 A（@namespace prefix/namespaceURI/cssText、CSSKeyframeRule.keyText、
+  el.style 与 computed 的 CSSOM 值序列化）+ 5 项 B（computed url 绝对化、@page shorthand 展开、
+  MediaList 原型、规则 style 只读、Path2D 挂原型、Path2D(svg)）—— 每条附 Edge 基线或实测证据。
+- **A 项均先取基线再实现并断言 IDENTICAL**：cssom 165 → **187 行**双侧 IDENTICAL（cmp 0 字节）；
+  红线四夹具 85/61/34/74、canvas2d 20/20、constructors 62/62 全 IDENTICAL；判据未变（globalsCore
+  271/271、globals 271/356、partition 全空）；`go test ./engine/...` 23 包 0 FAIL；gofmt 零差异；
+  `engine/layout` 零改动。
+- **★ 重要副作用（已如实处理）**：Path2D 挂原型的 A 尝试**实测打断渲染初始化**（webshot 卡死、
+  bindings 测试由 1.658s 恶化到 10+ 分钟），经「全改动 / stash / 仅回退该项」三次对照锁定并回退，
+  按监督者指示判 **B（WONTFIX）** 并给证据链。
+
+---
+
 # §21｜CSS OM「构造器存在 → 方法/字段可用」收口（第 21 次监督轮）
 
 **本轮范围（监督者锁定）**：只提升第 20 轮已收进 `globalsCore` 的接口从「构造器存在」
