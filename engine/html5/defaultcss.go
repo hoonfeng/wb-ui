@@ -226,6 +226,17 @@ select {
 	border: 1px solid #767676;
 	background-color: #ffffff;
 	box-sizing: border-box;
+	/* ★ H2-b（Edge 实测）：select 的边框盒高恒为 **19px**，不随 author 字号变化
+	   （h2_baseline_matrix 的 c_select_f8/f16/f32 与 l_select_* 共 7 例，Edge 全部
+	   为 19）。19 = 控件 UA 字体（13.3333px Arial）行高 15 + 内部绘制留白 2 +
+	   border 1px×2。Chromium 的这 2px 由 select 控件自身绘制，**不占 CSS padding**
+	   —— 所以不能用 padding 补（Edge 计算值是 pad=0px，见上一条注释），也不能用
+	   line-height 补（Edge 计算值是 normal）。
+	   7b05238 把控件字体族由 inherit（Noto Sans SC，13.3333px 行盒 19）统一为
+	   Arial（行盒 15）后，input/textarea 因此对齐 Edge（21 / 41），但 select 的
+	   19 也被顺带拉低成 17。这里用 min-height 把高度拉回 19，且不动 padding /
+	   line-height —— select 的 computed 样式仍与 Edge 逐项一致。 */
+	min-height: 19px;
 }
 
 option {
