@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"wb-ui/engine/dom"
 	"wb-ui/engine/debugenv"
+	"wb-ui/engine/dom"
 	"wb-ui/engine/layout"
 	"wb-ui/engine/platform/graphics"
 	"wb-ui/engine/style"
@@ -131,7 +131,7 @@ func Paint(view *RenderView, canvas *graphics.Canvas, rect Rect) {
 	info.SetDirtyCheckEnabled(view.IsDirty() && !anyBoxScroll)
 	if paintDebugEnabled() {
 		log.Printf("[paint] dirty=%v anyScroll=%v offsets=%d", view.IsDirty(), anyBoxScroll, view.ScrollOffsetCount())
-	}	// Record the save depth at entry so fixed layers can restore to a
+	} // Record the save depth at entry so fixed layers can restore to a
 	// clip-free state via RestoreToCount (see paintLayerTree).
 	info.initialSaveCount = canvas.SaveCount()
 
@@ -478,10 +478,11 @@ func paintLayerWithEffects(layer *RenderLayer, info *PaintInfo, layerRect layout
 // top (composited), and finally the canvas state is restored.
 //
 // Child layers are painted in CSS stacking order (CSS 2.1 §9.9 / Appendix E):
-//   1. child layers with negative z-index, most-negative first
-//   2. child layers with z-index:auto (or z-index:0 in a stacking context),
-//      in tree order — this pass paints the layer's own subtree as well
-//   3. child layers with positive z-index, smallest first
+//  1. child layers with negative z-index, most-negative first
+//  2. child layers with z-index:auto (or z-index:0 in a stacking context),
+//     in tree order — this pass paints the layer's own subtree as well
+//  3. child layers with positive z-index, smallest first
+//
 // This mirrors RenderLayer::paintLayer / paintLayerContents ordering.
 func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 	if layer == nil {
@@ -747,11 +748,58 @@ func paintLayerTree(layer *RenderLayer, info *PaintInfo) {
 //
 // ★ 只用于【自身】overflow 裁剪：祖先裁剪属于祖先坐标系、不随本层 transform
 // 移动，必须由调用方在未变换空间单独应用（见 LayerRects）。
+// hasElementTransform 报告元素当前是否带有需要施加的变换：静态 `transform`
+// （仅当没有动画接管该属性时由绘制路径解析字符串）或 CSS 动画/过渡的补间
+// 结果（TranslateX/Y/ScaleX/Y）。
+func hasElementTransform(st *style.ComputedStyle) bool {
+	if st == nil {
+		return false
+	}
+	if st.TransformAnimated {
+		return true
+	}
+	return st.Transform != "" && st.Transform != "none" && st.AnimationName == ""
+}
+
+// applyElementTransformOps 应用元素自身的变换操作并报告是否真的施加了。
+//
+// 两条来源：
+//   - CSS 动画/过渡补间（st.TransformAnimated，见 rendering/animation.go）；
+//   - 静态 transform 字符串（translate/scale/rotate/skew 列表）。
+//
+// ★ 为什么必须有动画这条路径：带 `AnimationName` 的元素会被静态路径**跳过**
+// （动画期间 transform 由动画接管），而补间结果此前只写进
+// st.TranslateX/Y/ScaleX/Y 就没人读了 —— 于是所有 @keyframes / transition 的
+// translate/scale 动画在画面上完全不动（实测 24 帧 x 恒为 10-49），只有
+// opacity 与颜色动画可见。
+//
+// 调用方须已把矩阵平移至 transform-origin（本函数在原点空间施加操作）。
+func applyElementTransformOps(canvas *graphics.Canvas, st *style.ComputedStyle, w, h float64) bool {
+	if canvas == nil || st == nil {
+		return false
+	}
+	if st.TransformAnimated {
+		tx, ty := st.TranslateX, st.TranslateY
+		sx, sy := st.ScaleX, st.ScaleY
+		if sx == 0 && sy == 0 {
+			// 动画未声明 scale：字段保持零值哨兵 → 视作 1:1。
+			sx, sy = 1, 1
+		}
+		if tx == 0 && ty == 0 && sx == 1 && sy == 1 {
+			return false
+		}
+		canvas.Translate(tx, ty)
+		canvas.Scale(sx, sy)
+		return true
+	}
+	return applyTransformOpsSized(canvas, st.Transform, w, h)
+}
+
 func applyOwnOverflowClip(canvas *graphics.Canvas, layer *RenderLayer, r Rect, radius float64) {
 	var restoreMatrix func()
 	if layer != nil && layer.Owner() != nil {
 		if rb := asRenderBox(layer.Owner()); rb != nil {
-			if st := rb.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
+			if st := rb.Style(); hasElementTransform(st) {
 				originX, originY := rb.X(), rb.Y()
 				if ox := resolveTransformOrigin(st.TransformOriginX, rb.Width()); ox >= 0 {
 					originX += ox
@@ -761,7 +809,7 @@ func applyOwnOverflowClip(canvas *graphics.Canvas, layer *RenderLayer, r Rect, r
 				}
 				restoreMatrix = canvas.PushMatrix()
 				canvas.Translate(originX, originY)
-				applyTransformOpsSized(canvas, st.Transform, rb.Width(), rb.Height())
+				applyElementTransformOps(canvas, st, rb.Width(), rb.Height())
 				canvas.Translate(-originX, -originY)
 			}
 		}
@@ -874,8 +922,6 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 		}
 	}
 
-	paintLayerContent(layer, info)
-
 	// ★ CSS transform 后代空间：transform 元素的所有后代（含 absolute
 	// child layer，如图标内部的 .sq）都在其变换空间内绘制（CSS 变换
 	// 作用于整个元素子树）。walkSubtreeExposed 只对 owner 自身 + 非
@@ -884,22 +930,17 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 	// 若不在此重新应用父 transform，absolute 子元素会画在未变换的
 	// 位置（"transform:rotate(45deg) 的图标内部小方块不旋转"）。
 	needsChildTransform := false
-	if applyLayerChildTransform(layer, info) {
-		needsChildTransform = true
-	}
+	// 注意：applyLayerChildTransform 的实际调用在 paintLayerContent 之后
+	// （见下方 auto/pos 绘制段）——负 z-index 子层必须先于自身内容绘制。
 
-	// Collect child layers and bucket them by stacking position.
+	// ★ 层叠列表收集（D3，WebKit RenderLayer::collectLayers 语义）：只由
+	//   「层叠收集边界」（创建层叠上下文 / 滚动裁剪容器 / 根层）收集子层；
+	//   非层叠上下文的中间层（`position:relative` + `z-index:auto`）把子层
+	//   透传给最近的边界祖先，使深层 z-index 能与本上下文的其它层一起
+	//   排序（修复「子 z-index:999 被困在父 z-index:auto 层内」）。
 	var neg, auto, pos []*RenderLayer
-	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
-		z := layerZIndex(child)
-		switch {
-		case z < 0:
-			neg = append(neg, child)
-		case z > 0:
-			pos = append(pos, child)
-		default:
-			auto = append(auto, child)
-		}
+	if layerIsStackingBoundary(layer) {
+		collectStackingLayers(layer, &neg, &auto, &pos)
 	}
 	// Negative z-index: most negative first (e.g. -2 before -1).
 	sortLayerByZ(neg, true)
@@ -947,9 +988,28 @@ func paintLayerContents(layer *RenderLayer, info *PaintInfo) {
 		paintLayerTree(child, info)
 	}
 
-	for _, child := range neg {
-		paintChild(child)
+	// ★ 负 z-index 子层叠上下文先于自身内容绘制（CSS 2.1 §9.9.1 步骤 3）：
+	//   它们位于上下文根背景**之下**——`z-index:-1` 的子元素必须被父背景
+	//   盖住。绘制时单独应用父 transform 并还原：paintLayerContent 内部
+	//   会为自身内容再应用一次（各自 Save/Restore，互不叠加）。
+	if len(neg) > 0 {
+		negTransform := applyLayerChildTransform(layer, info)
+		for _, child := range neg {
+			paintChild(child)
+		}
+		if negTransform {
+			info.transformDepth--
+			info.canvas.Restore()
+		}
 	}
+
+	paintLayerContent(layer, info)
+
+	// 子层变换空间（内容已自行处理 transform，此处为 auto/pos 子层建立）。
+	if applyLayerChildTransform(layer, info) {
+		needsChildTransform = true
+	}
+
 	for _, child := range auto {
 		paintChild(child)
 	}
@@ -1046,7 +1106,7 @@ func applyLayerChildTransform(layer *RenderLayer, info *PaintInfo) bool {
 		return false
 	}
 	st := rb.Style()
-	if st == nil || st.Transform == "" || st.AnimationName != "" {
+	if !hasElementTransform(st) {
 		return false
 	}
 	info.canvas.Save()
@@ -1058,7 +1118,7 @@ func applyLayerChildTransform(layer *RenderLayer, info *PaintInfo) bool {
 		originY += oy
 	}
 	info.canvas.Translate(originX, originY)
-	if applyTransformOpsSized(info.canvas, st.Transform, rb.Width(), rb.Height()) {
+	if applyElementTransformOps(info.canvas, st, rb.Width(), rb.Height()) {
 		info.canvas.Translate(-originX, -originY)
 		info.transformDepth++
 		return true
@@ -1067,27 +1127,145 @@ func applyLayerChildTransform(layer *RenderLayer, info *PaintInfo) bool {
 	return false
 }
 
-// layerZIndex returns the owner's effective z-index for stacking. A z-index only
-// participates in stacking when the layer's owner is positioned (CSS 2.1 §10.6)
-// or the layer establishes a stacking context (opacity/transform/filter/overflow);
-// otherwise it behaves as auto (0).
+// layerZIndex returns the owner's effective z-index for stacking. z-index 只对
+// **创建层叠上下文**的层参与排序（CSS 2.1 §9.9 + CSS Position §3.4）：定位
+// 元素且 z-index != auto，或 fixed/sticky/opacity/transform/filter 等。其余
+// 一律按 z-index:auto（0）处理——包括 `position:relative; z-index:auto` 与
+// `overflow` 容器（overflow 创建 BFC 但**不**创建层叠上下文）。
 func layerZIndex(layer *RenderLayer) int {
-	if layer == nil || layer.owner == nil {
+	if !layerCreatesStackingContext(layer) {
 		return 0
 	}
-	st := layer.owner.Style()
-	if st == nil {
-		return 0
-	}
-	// Non-positioned elements ignore z-index unless they create a stacking
-	// context via opacity/transform/filter/overflow.
-	positioned := st.Position != style.PositionStatic
-	stackingCtx := st.Opacity < 1.0 || st.Transform != "" || st.Filter != "" ||
-		st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible
-	if !positioned && !stackingCtx {
+	st := layer.Owner().Style()
+	if st == nil || st.ZIndexAuto {
 		return 0
 	}
 	return st.ZIndex
+}
+
+// layerCreatesStackingContext 报告该层是否创建层叠上下文（CSS Positioned
+// Layout §3.4 / CSS 2.1 §9.9 / CSS Transforms / CSS Filters / CSS Masking）。
+// 创建层叠上下文的元素自成排序单元：其子层在它内部排序，不与外部兄弟层
+// 直接比较；反之（如 `position:relative; z-index:auto`）其子层要提升到最近
+// 的层叠上下文祖先一起排序。
+func layerCreatesStackingContext(layer *RenderLayer) bool {
+	if layer == nil || layer.Owner() == nil {
+		return false
+	}
+	// 根（RenderView 层）恒为层叠上下文。
+	if layer.Parent() == nil {
+		return true
+	}
+	st := layer.Owner().Style()
+	if st == nil {
+		return false
+	}
+	// ① 定位元素且 z-index != auto（显式数值 / z-index:0 都算）。
+	if st.Position != style.PositionStatic && !st.ZIndexAuto {
+		return true
+	}
+	// ② fixed / sticky 无需 z-index 即创建层叠上下文。
+	if st.Position == style.PositionFixed || st.Position == style.PositionSticky {
+		return true
+	}
+	// ③ opacity < 1 / transform / filter / backdrop-filter / mask。
+	if st.Opacity < 1.0 || st.Transform != "" || st.Filter != "" || st.BackdropFilter != "" {
+		return true
+	}
+	// ④ isolation: isolate（CSS Compositing §4）与 will-change 含创建
+	//    上下文的属性（CSS Will Change §2）。
+	if st.Isolation == "isolate" {
+		return true
+	}
+	if willChangeCreatesStackingContext(st.WillChange) {
+		return true
+	}
+	if mv := st.GetProperty("mask-image"); mv != "" && !strings.EqualFold(strings.TrimSpace(mv), "none") {
+		return true
+	}
+	return false
+}
+
+// willChangeCreatesStackingContext 报告 will-change 的值是否使元素创建层叠
+// 上下文（CSS Will Change §2：值中出现「会创建层叠上下文」的属性时，元素
+// 立即获得该上下文）。`auto` / `scroll-position` / `contents` 不创建。
+func willChangeCreatesStackingContext(v string) bool {
+	if v == "" || v == "auto" {
+		return false
+	}
+	for _, prop := range []string{"transform", "opacity", "filter", "perspective", "mix-blend-mode", "isolation"} {
+		if strings.Contains(v, prop) {
+			return true
+		}
+	}
+	return false
+}
+
+// canPromoteThroughLayer 报告能否把 layer 的子层「透传」到上层收集排序。
+// 滚动/裁剪容器（overflow != visible）是下钻边界：其子层绘制在本层的滚动
+// 坐标系与裁剪之下（本引擎用 canvas translate + clip 实现），提升到上层会
+// 丢失该平移与裁剪，因此不透传（其子层由它自己收集绘制）。
+func canPromoteThroughLayer(layer *RenderLayer) bool {
+	if layer == nil || layer.Owner() == nil {
+		return true
+	}
+	st := layer.Owner().Style()
+	if st == nil {
+		return true
+	}
+	if st.OverflowX != style.OverflowVisible || st.OverflowY != style.OverflowVisible {
+		return false
+	}
+	return true
+}
+
+// layerIsStackingBoundary 报告 layer 是否为其子层的「层叠收集边界」：创建
+// 层叠上下文、或是下钻被阻止的滚动/裁剪容器、或是根层。只有边界层收集
+// （并排序）子层；非边界的中间层把子层让给最近的边界祖先收集——这正是
+// WebKit RenderLayer::collectLayers 的透传语义。
+func layerIsStackingBoundary(layer *RenderLayer) bool {
+	if layer == nil {
+		return false
+	}
+	if layer.Parent() == nil {
+		return true
+	}
+	if layerCreatesStackingContext(layer) {
+		return true
+	}
+	return !canPromoteThroughLayer(layer)
+}
+
+// collectStackingLayers 按 WebKit RenderLayer::collectLayers 语义收集 layer
+// 的层叠绘制列表：
+//   - 创建层叠上下文的子层：按 z-index 归入 neg/auto/pos 桶（其内部由它
+//     自己收集，不再下钻）；
+//   - 非层叠上下文的子层（`position:relative/absolute` + `z-index:auto`）：
+//     自身按 z-index:auto 语义归入 auto 桶，并**继续下钻**其子层，使深层
+//     z-index 能与本上下文的其它层一起排序（修复「子 z-index:999 被困在
+//     父 z-index:auto 层内」——D3 场景 2）；
+//   - 滚动/裁剪容器（下钻边界）：自身归入 auto 桶、不再下钻。
+//
+// 由于非边界层不再自行收集，每个层恰好被收集一次，不会重复绘制。
+func collectStackingLayers(layer *RenderLayer, neg, auto, pos *[]*RenderLayer) {
+	for child := layer.FirstChild(); child != nil; child = child.NextSibling() {
+		if layerCreatesStackingContext(child) {
+			switch z := layerZIndex(child); {
+			case z < 0:
+				*neg = append(*neg, child)
+			case z > 0:
+				*pos = append(*pos, child)
+			default:
+				*auto = append(*auto, child)
+			}
+			continue // 其内部归属它自己（它自己是收集边界）
+		}
+		// 非层叠上下文的普通层：自身按 auto 语义绘制（CSS 2.1 §9.9.1 步骤 8）。
+		*auto = append(*auto, child)
+		if canPromoteThroughLayer(child) {
+			collectStackingLayers(child, neg, auto, pos)
+		}
+	}
 }
 
 // sortLayerByZ sorts layers by owner z-index ascending (desc=true for negative
@@ -1297,8 +1475,10 @@ func paintSubtreeByPhase(root RenderObject, info *PaintInfo, excluded map[Render
 // after all children are done.
 //
 // Save hierarchy (two-level nesting):
-//   Level 1 (outer): clip to padding box (overflow: hidden/auto/scroll)
-//   Level 2 (inner): translate for per-box scroll offset
+//
+//	Level 1 (outer): clip to padding box (overflow: hidden/auto/scroll)
+//	Level 2 (inner): translate for per-box scroll offset
+//
 // Children are painted with both clip + translate active.
 // After restoring Level 2, overflow controls (scrollbars, text-overflow ellipsis)
 // are painted at Level 1 (clipped but NOT translated), matching browser behavior
@@ -1383,7 +1563,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 	// after applying it.
 	needsTransformRestore := false
 	if box := asRenderBox(root); box != nil && info != nil && info.canvas != nil {
-		if st := box.Style(); st != nil && st.Transform != "" && st.AnimationName == "" {
+		if st := box.Style(); hasElementTransform(st) {
 			info.canvas.Save()
 			// CSS transforms rotate/scale around the element's
 			// transform-origin (default 50% 50% = box center), but the
@@ -1397,7 +1577,7 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 				originY += oy
 			}
 			info.canvas.Translate(originX, originY)
-			if applyTransformOpsSized(info.canvas, st.Transform, box.Width(), box.Height()) {
+			if applyElementTransformOps(info.canvas, st, box.Width(), box.Height()) {
 				info.canvas.Translate(-originX, -originY)
 				needsTransformRestore = true
 				info.transformDepth++
@@ -1638,8 +1818,8 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							// touch feature). No cursor-over-box gating here.
 
 							// Darker scrollbar colors (better contrast vs white track).
-							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}   // #FFFFFF white track
-							thumbCol := graphics.Color{R: 160, G: 160, B: 160, A: 255}   // #A0A0A0 thumb (was #C0C0C0)
+							trackCol := graphics.Color{R: 255, G: 255, B: 255, A: 255}      // #FFFFFF white track
+							thumbCol := graphics.Color{R: 160, G: 160, B: 160, A: 255}      // #A0A0A0 thumb (was #C0C0C0)
 							thumbHoverCol := graphics.Color{R: 128, G: 128, B: 128, A: 255} // #808080 hover (was #A0A0A0)
 
 							// CSS scrollbar-color: "thumb track" overrides the
@@ -1686,121 +1866,127 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 							// （旧值 #606060 在深色主题下明显比 thumb 深一档）。
 							arrowCol := thumbCol
 
-						sx, sy := float64(0), float64(0)
-						cursorX, cursorY := float64(0), float64(0)
-						if info.rv != nil {
-							sx, sy = info.rv.BoxScrollOffset(box)
-							// Form-control text scrolls through per-element
-							// FormControlTextScroll (input caret / pre-mode textarea),
-							// not BoxScrollOffset — mirror it so the horizontal thumb
-							// follows the control's own scroll, not a sibling's.
-							if el, ok := box.Node().(*dom.Element); ok {
-								if el.LocalName() == "textarea" || el.LocalName() == "input" {
-									sx = FormControlTextScroll(el)
+							sx, sy := float64(0), float64(0)
+							cursorX, cursorY := float64(0), float64(0)
+							if info.rv != nil {
+								sx, sy = info.rv.BoxScrollOffset(box)
+								// Form-control text scrolls through per-element
+								// FormControlTextScroll (input caret / pre-mode textarea),
+								// not BoxScrollOffset — mirror it so the horizontal thumb
+								// follows the control's own scroll, not a sibling's.
+								if el, ok := box.Node().(*dom.Element); ok {
+									if el.LocalName() == "textarea" || el.LocalName() == "input" {
+										sx = FormControlTextScroll(el)
+									}
+								}
+								cursorX, cursorY = info.rv.CursorPos()
+							}
+							if style.DiagEnabled("scrollbar") && debugenv.Enabled("WB_SB_DEBUG") {
+								if el, ok := box.Node().(*dom.Element); ok {
+									style.Diagf("scrollbar", "VSB-GEO %q pb=(%.0f,%.0f %.0fx%.0f) scrollT=(%.0f,%.0f) self=(%.0f,%.0f) sy=%.0f",
+										el.GetAttribute("class"), pb.X, pb.Y, pb.Width, pb.Height,
+										info.scrollTranslateX, info.scrollTranslateY, sx, sy, sy)
 								}
 							}
-							cursorX, cursorY = info.rv.CursorPos()
-						}
-						if style.DiagEnabled("scrollbar") && debugenv.Enabled("WB_SB_DEBUG") {
-							if el, ok := box.Node().(*dom.Element); ok {
-								style.Diagf("scrollbar", "VSB-GEO %q pb=(%.0f,%.0f %.0fx%.0f) scrollT=(%.0f,%.0f) self=(%.0f,%.0f) sy=%.0f",
-									el.GetAttribute("class"), pb.X, pb.Y, pb.Width, pb.Height,
-									info.scrollTranslateX, info.scrollTranslateY, sx, sy, sy)
-							}
-						}
 
 							// (viewW/viewH already computed above for needsX; the
 							// thumb geometry below reuses them.)
 
 							// ── Vertical scrollbar ──
-						if needsV {
-							vx := pb.X + pb.Width - scrollW
-							vy := pb.Y
-							vh := pb.Height
-							if needsH {
-								vh -= scrollW
-							}
-							if vh <= arrowSize*2+arrowGap*2 {
-								goto endV
-							}
+							if needsV {
+								vx := pb.X + pb.Width - scrollW
+								vy := pb.Y
+								vh := pb.Height
+								if needsH {
+									vh -= scrollW
+								}
+								if vh <= arrowSize*2+arrowGap*2 {
+									goto endV
+								}
 
-							// Track background (transparent track from ::-webkit-scrollbar-track
-							// { background: transparent } is skipped — browser shows only the thumb).
-							if trackCol.A > 0 {
-								info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
-							}
+								// Track background (transparent track from ::-webkit-scrollbar-track
+								// { background: transparent } is skipped — browser shows only the thumb).
+								if trackCol.A > 0 {
+									info.canvas.FillRect(vx, vy, scrollW, vh, trackCol)
+								}
 
-							if !webkitSB {
-								// 上下箭头三角：宽 6.4、高 5.6，在 15×15 按钮内居中。
-								// ★ 实测（有头 Edge，dpr=1.25，.pp-list 逐行像素扫描）：
-								// 三角占 8 物理像素宽 × 7 物理像素高 = 6.4 × 5.6 CSS；
-								// 颜色 = thumb 色。
-								// 三角在「箭头按钮 + gap」区间内居中：有头 Edge 实测三角中心距
-								// 轨道顶端 8.8px，正合 (15+3)/2 = 9（差 0.2px），而不是仅在
-								// 15px 按钮内居中的 7.5px。radius 必须传 0 —— 传 0.8 会把尖角
-								// 磨掉，实测三角高度从 7 物理像素缩到 5，肉眼可见地偏小。
-								upBtnY := vy
-								acx := vx + scrollW/2
-								acy := upBtnY + (arrowSize+arrowGap)/2
-								info.canvas.FillRoundedTriangle(acx, acy-2.8, acx-3.2, acy+2.8, acx+3.2, acy+2.8, 0, arrowCol)
-
-								// Down arrow.
-								dcy := vy + vh - (arrowSize+arrowGap)/2
-								info.canvas.FillRoundedTriangle(acx, dcy+2.8, acx-3.2, dcy-2.8, acx+3.2, dcy-2.8, 0, arrowCol)
-							}
-
-							// Thumb (rounded rect, pill shape) — geometry from the shared
-							// ScrollbarMetrics so host drag/wheel map identically to paint.
-							if vm := VerticalScrollbarMetrics(info.rv, box); vm.OK {
-								syRatio := sy / vm.MaxScroll
-								if syRatio < 0 { syRatio = 0 }
-								if syRatio > 1 { syRatio = 1 }
-								thumbTrackSpace := vm.TrackLen - vm.ThumbLen
-								thumbY := vy + syRatio*thumbTrackSpace
 								if !webkitSB {
-									thumbY += arrowSize + arrowGap
+									// 上下箭头三角：宽 6.4、高 5.6，在 15×15 按钮内居中。
+									// ★ 实测（有头 Edge，dpr=1.25，.pp-list 逐行像素扫描）：
+									// 三角占 8 物理像素宽 × 7 物理像素高 = 6.4 × 5.6 CSS；
+									// 颜色 = thumb 色。
+									// 三角在「箭头按钮 + gap」区间内居中：有头 Edge 实测三角中心距
+									// 轨道顶端 8.8px，正合 (15+3)/2 = 9（差 0.2px），而不是仅在
+									// 15px 按钮内居中的 7.5px。radius 必须传 0 —— 传 0.8 会把尖角
+									// 磨掉，实测三角高度从 7 物理像素缩到 5，肉眼可见地偏小。
+									upBtnY := vy
+									acx := vx + scrollW/2
+									acy := upBtnY + (arrowSize+arrowGap)/2
+									info.canvas.FillRoundedTriangle(acx, acy-2.8, acx-3.2, acy+2.8, acx+3.2, acy+2.8, 0, arrowCol)
+
+									// Down arrow.
+									dcy := vy + vh - (arrowSize+arrowGap)/2
+									info.canvas.FillRoundedTriangle(acx, dcy+2.8, acx-3.2, dcy-2.8, acx+3.2, dcy-2.8, 0, arrowCol)
 								}
 
-								isHover := cursorX >= vx && cursorX <= vx+scrollW &&
-									cursorY >= thumbY && cursorY <= thumbY+vm.ThumbLen
-								tCol := thumbCol
-								if isHover { tCol = thumbHoverCol }
+								// Thumb (rounded rect, pill shape) — geometry from the shared
+								// ScrollbarMetrics so host drag/wheel map identically to paint.
+								if vm := VerticalScrollbarMetrics(info.rv, box); vm.OK {
+									syRatio := sy / vm.MaxScroll
+									if syRatio < 0 {
+										syRatio = 0
+									}
+									if syRatio > 1 {
+										syRatio = 1
+									}
+									thumbTrackSpace := vm.TrackLen - vm.ThumbLen
+									thumbY := vy + syRatio*thumbTrackSpace
+									if !webkitSB {
+										thumbY += arrowSize + arrowGap
+									}
 
-								rad := 5.0
-								if thumbRadius > 0 {
-									rad = thumbRadius
+									isHover := cursorX >= vx && cursorX <= vx+scrollW &&
+										cursorY >= thumbY && cursorY <= thumbY+vm.ThumbLen
+									tCol := thumbCol
+									if isHover {
+										tCol = thumbHoverCol
+									}
+
+									rad := 5.0
+									if thumbRadius > 0 {
+										rad = thumbRadius
+									}
+									// 自绘滚动条的 thumb 是**胶囊**（实测圆角 = 宽度一半）；
+									// 自定义 webkit 滚动条保持 5px 圆角（index.html 的
+									// `::-webkit-scrollbar-thumb{border-radius:5px}`）。
+									if !webkitSB {
+										rad = sbThumbRadius(scrollW)
+									}
+									if style.DiagEnabled("scrollbar") {
+										cn := ""
+										if el, ok := box.Node().(*dom.Element); ok {
+											cn = el.GetAttribute("class")
+										}
+										style.Diagf("scrollbar", "VSB %q: scrollW=%.0f webkitSB=%v thumbCol=#%02x%02x%02x%02x trackCol=#%02x%02x%02x%02x vx=%.0f thumbY=%.0f thumbLen=%.0f trackLen=%.0f sy=%.0f maxScroll=%.0f rad=%.0f pbY=%.0f vy=%.0f",
+											cn, scrollW, webkitSB,
+											thumbCol.R, thumbCol.G, thumbCol.B, thumbCol.A,
+											trackCol.R, trackCol.G, trackCol.B, trackCol.A,
+											vx, thumbY, vm.ThumbLen, vm.TrackLen, sy, vm.MaxScroll, rad, box.PaddingBoxRect().Y, vy)
+									}
+									if webkitSB {
+										// Custom webkit scrollbar: thumb fills the FULL
+										// scrollbar width like the browser, no breathing room.
+										info.canvas.FillRoundRect(vx, thumbY, scrollW, vm.ThumbLen, rad, tCol)
+									} else {
+										// 自绘滚动条：thumb 在轨道内左右各留 sbThumbInset。
+										// ★ 实测（有头 Edge，15px 轨道）：thumb 宽 8.8px、居中。
+										info.canvas.FillRoundRect(vx+sbThumbInset, thumbY, sbThumbWidth(scrollW), vm.ThumbLen, rad, tCol)
+									}
 								}
-								// 自绘滚动条的 thumb 是**胶囊**（实测圆角 = 宽度一半）；
-								// 自定义 webkit 滚动条保持 5px 圆角（index.html 的
-								// `::-webkit-scrollbar-thumb{border-radius:5px}`）。
-								if !webkitSB {
-									rad = sbThumbRadius(scrollW)
-								}
-							if style.DiagEnabled("scrollbar") {
-								cn := ""
-								if el, ok := box.Node().(*dom.Element); ok {
-									cn = el.GetAttribute("class")
-								}
-								style.Diagf("scrollbar", "VSB %q: scrollW=%.0f webkitSB=%v thumbCol=#%02x%02x%02x%02x trackCol=#%02x%02x%02x%02x vx=%.0f thumbY=%.0f thumbLen=%.0f trackLen=%.0f sy=%.0f maxScroll=%.0f rad=%.0f pbY=%.0f vy=%.0f",
-									cn, scrollW, webkitSB,
-									thumbCol.R, thumbCol.G, thumbCol.B, thumbCol.A,
-									trackCol.R, trackCol.G, trackCol.B, trackCol.A,
-									vx, thumbY, vm.ThumbLen, vm.TrackLen, sy, vm.MaxScroll, rad, box.PaddingBoxRect().Y, vy)
 							}
-								if webkitSB {
-									// Custom webkit scrollbar: thumb fills the FULL
-									// scrollbar width like the browser, no breathing room.
-									info.canvas.FillRoundRect(vx, thumbY, scrollW, vm.ThumbLen, rad, tCol)
-								} else {
-									// 自绘滚动条：thumb 在轨道内左右各留 sbThumbInset。
-									// ★ 实测（有头 Edge，15px 轨道）：thumb 宽 8.8px、居中。
-									info.canvas.FillRoundRect(vx+sbThumbInset, thumbY, sbThumbWidth(scrollW), vm.ThumbLen, rad, tCol)
-								}
-							}
-						}
 						endV:
 
-													// ── Horizontal scrollbar ──
+							// ── Horizontal scrollbar ──
 							if needsH {
 								hx := pb.X
 								hy := pb.Y + pb.Height - scrollW
@@ -1812,29 +1998,33 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									goto endH
 								}
 
-							// Track background (transparent → skip, browser-style).
-							if trackCol.A > 0 {
-								info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
-							}
+								// Track background (transparent → skip, browser-style).
+								if trackCol.A > 0 {
+									info.canvas.FillRect(hx, hy, hw, scrollW, trackCol)
+								}
 
-							if !webkitSB {
-								// 左右箭头：与上下箭头同尺寸（宽 5.6、高 6.4，即旋转 90°），
-								// 在 15×15 按钮内居中。
-								aCy := hy + (scrollW+arrowGap)/2
-								lCx := hx + (arrowSize+arrowGap)/2
-								info.canvas.FillRoundedTriangle(lCx-2.8, aCy, lCx+2.8, aCy-3.2, lCx+2.8, aCy+3.2, 0, arrowCol)
+								if !webkitSB {
+									// 左右箭头：与上下箭头同尺寸（宽 5.6、高 6.4，即旋转 90°），
+									// 在 15×15 按钮内居中。
+									aCy := hy + (scrollW+arrowGap)/2
+									lCx := hx + (arrowSize+arrowGap)/2
+									info.canvas.FillRoundedTriangle(lCx-2.8, aCy, lCx+2.8, aCy-3.2, lCx+2.8, aCy+3.2, 0, arrowCol)
 
-								// Right arrow.
-								rCx := hx + hw - (arrowSize+arrowGap)/2
-								info.canvas.FillRoundedTriangle(rCx+2.8, aCy, rCx-2.8, aCy-3.2, rCx-2.8, aCy+3.2, 0, arrowCol)
-							}
+									// Right arrow.
+									rCx := hx + hw - (arrowSize+arrowGap)/2
+									info.canvas.FillRoundedTriangle(rCx+2.8, aCy, rCx-2.8, aCy-3.2, rCx-2.8, aCy+3.2, 0, arrowCol)
+								}
 
 								// Thumb — geometry from the shared ScrollbarMetrics so
 								// host drag/wheel map identically to paint.
 								if hm := HorizontalScrollbarMetrics(info.rv, box); hm.OK {
 									sxRatio := sx / hm.MaxScroll
-									if sxRatio < 0 { sxRatio = 0 }
-									if sxRatio > 1 { sxRatio = 1 }
+									if sxRatio < 0 {
+										sxRatio = 0
+									}
+									if sxRatio > 1 {
+										sxRatio = 1
+									}
 									thumbTrackSpace := hm.TrackLen - hm.ThumbLen
 									thumbX := hx + sxRatio*thumbTrackSpace
 									if !webkitSB {
@@ -1844,23 +2034,25 @@ func walkSubtreeExcluded(root RenderObject, excluded map[RenderObject]bool, info
 									isHover := cursorY >= hy && cursorY <= hy+scrollW &&
 										cursorX >= thumbX && cursorX <= thumbX+hm.ThumbLen
 									tCol := thumbCol
-									if isHover { tCol = thumbHoverCol }
+									if isHover {
+										tCol = thumbHoverCol
+									}
 
 									radH := 5.0
-								if thumbRadius > 0 {
-									radH = thumbRadius
-								}
-								if !webkitSB {
-									radH = sbThumbRadius(scrollW) // 胶囊（同竖直方向）
-								}
-								if webkitSB {
-									info.canvas.FillRoundRect(thumbX, hy, hm.ThumbLen, scrollW, radH, tCol)
-								} else {
-									info.canvas.FillRoundRect(thumbX, hy+sbThumbInset, hm.ThumbLen, sbThumbWidth(scrollW), radH, tCol)
-								}
+									if thumbRadius > 0 {
+										radH = thumbRadius
+									}
+									if !webkitSB {
+										radH = sbThumbRadius(scrollW) // 胶囊（同竖直方向）
+									}
+									if webkitSB {
+										info.canvas.FillRoundRect(thumbX, hy, hm.ThumbLen, scrollW, radH, tCol)
+									} else {
+										info.canvas.FillRoundRect(thumbX, hy+sbThumbInset, hm.ThumbLen, sbThumbWidth(scrollW), radH, tCol)
+									}
 								}
 							}
-							endH:
+						endH:
 
 							// Corner fill (transparent track → skip).
 							if needsV && needsH && trackCol.A > 0 {
@@ -1991,8 +2183,13 @@ func computeStickyOffset(box *RenderBox, view *RenderView) (float64, float64) {
 		}
 	}
 	var sy float64
+	scrollportTop := 0.0
 	if scrollBox != nil {
 		_, sy = view.BoxScrollOffset(scrollBox)
+		// ★ scrollport 原点：sticky 的 top/bottom 偏移是相对**滚动容器的
+		//   padding box 边**（CSS Position §3.4 sticky positioning），不是
+		//   页面原点。嵌套滚动容器里必须带上该原点。
+		scrollportTop = scrollBox.PaddingBoxRect().Y
 	} else {
 		_, sy = view.ScrollOffset()
 	}
@@ -2010,9 +2207,17 @@ func computeStickyOffset(box *RenderBox, view *RenderView) (float64, float64) {
 		} else {
 			top = 0
 		}
+		// ★ pin 目标 = 滚动容器顶边 + top（CSS §3.4：top 相对 scrollport 顶边）。
+		//   此前直接把 `staticY-sy` 与裸 `top` 比较，等于把 scrollport 原点
+		//   当成 0 → 嵌套滚动容器（夹具 .scroller 顶边 y=11）里 pin 位置整体
+		//   偏上 11px：滚动 60px 后红条被画到 y-1..19，再被滚动容器裁剪成
+		//   只剩 y11-19（约 9px），表现为"sticky 被后续流内容覆盖"——实际是
+		//   自身绘制位置偏移（去背景实验：把 .content 背景设为透明后红条仍只
+		//   有 10px，可排除覆盖）。页面级滚动时 scrollportTop=0，行为不变。
+		pinTop := scrollportTop + top
 		vy := staticY - sy
-		if vy < top && staticBottom > 0 {
-			dy := top - vy
+		if vy < pinTop && staticBottom > 0 {
+			dy := pinTop - vy
 			return 0, dy
 		}
 	}
@@ -2192,6 +2397,7 @@ func parseBlendMode(s string) *skia.BlendMode {
 	}
 	return &m
 }
+
 // insideCenteredLabelButton reports whether o is a descendant of a <button>
 // whose label is painted CENTERED by PaintFormControl→paintButtonText; the
 // IFC-placed RenderText must then be skipped to avoid double painting.

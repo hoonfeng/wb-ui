@@ -90,8 +90,14 @@ body { margin: 0; font-family: sans-serif; font-size: 12px; }
 	}
 	if len(lines) == 0 {
 		// 无文本段（文本可能挂在匿名盒上）：退回按行高区间判断。
+		// ★ D7 后的行高基准：`font-family: sans-serif` 现在解析到浏览器基准的
+		//   Noto Sans SC（见 fontmgr.resolveFamily），12px 中文 normal 行高
+		//   = 17px —— Edge 同夹具实测 `sans-serif=17 / Microsoft YaHei=16 /
+		//   无声明=17`，故 2 行合计 34px 是**正确值**（旧区间 12..16 是基于
+		//   Arial(13.8)/雅黑(16) 的过时期望）。区间放宽到 12..18 后仍可区分：
+		//   1 行（17 → lineH 8.5 失败）、2 行（34 → 17 通过）、4 行（68 → 34 失败）。
 		lineH := g.BorderBoxHeight() / 2
-		if lineH < 12 || lineH > 16 {
+		if lineH < 12 || lineH > 18 {
 			t.Errorf("title height %.1f: unexpected line height", g.BorderBoxHeight())
 		}
 		return

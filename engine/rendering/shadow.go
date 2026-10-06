@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hoonfeng/goskia/skia"
+
 	"wb-ui/engine/platform/graphics"
 )
 
@@ -203,13 +205,21 @@ func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Sh
 			continue
 		}
 		col := sh.Color
-		blurFactor := 1.0
-		if sh.Blur > 0 {
-			blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
-		}
-		col.A = uint8(float64(col.A) * blurFactor * opacity)
+		col.A = uint8(float64(col.A) * opacity)
 		if col.A == 0 {
 			continue
+		}
+		// ★ 真实高斯模糊（CSS Backgrounds §7.1：blur radius r ↔ sigma = r/2）。
+		// 此前用「按比例降低 alpha」（math.Max(0.3, 1-blur/50)）冒充模糊：那只是
+		// 把阴影整体调淡，**不产生任何扩散** —— 硬边矩形仍停在原地，远离盒子的
+		// 区域完全没有阴影。实测 composite 夹具（box-shadow:8px 8px 10px
+		// rgba(0,0,0,.9)）：方块右下 8px 处 wb-ui 是 #f4f4f4（无阴影），浏览器
+		// 是 #c5c5c5（仍有阴影）。
+		sigma := math.Max(0, sh.Blur) / 2
+		blurred := sigma > 0.01
+		if blurred {
+			canvas.SaveLayerWithFilter(skia.NewBlurImageFilter(
+				float32(sigma), float32(sigma), skia.TileModeClamp, nil))
 		}
 
 		if sh.Inset {
@@ -227,6 +237,9 @@ func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Sh
 			// The strip width/height equals |offset|.
 			dx, dy := sh.OffsetX, sh.OffsetY
 			if dx == 0 && dy == 0 {
+				if blurred {
+					canvas.Restore()
+				}
 				canvas.Restore()
 				continue
 			}
@@ -270,6 +283,9 @@ func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Sh
 				canvas.FillRect(fx, fy, fw, fh, col)
 			}
 			canvas.Restore()
+			if blurred {
+				canvas.Restore()
+			}
 			continue
 		}
 		// Non-inset shadow.
@@ -277,17 +293,6 @@ func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Sh
 		sy := y + sh.OffsetY - sh.Spread
 		sw := w + 2*sh.Spread
 		sh2 := h + 2*sh.Spread
-
-		// Blur approximation: reduce alpha proportionally to blur radius.
-		col = sh.Color
-		blurFactor = 1.0
-		if sh.Blur > 0 {
-			blurFactor = math.Max(0.3, 1.0-sh.Blur/50.0)
-		}
-		col.A = uint8(float64(col.A) * blurFactor * opacity)
-		if col.A == 0 {
-			continue
-		}
 
 		sr := r + sh.Spread
 		if sr < 0 {
@@ -297,6 +302,10 @@ func paintBoxShadow(canvas *graphics.Canvas, x, y, w, h, r float64, shadows []Sh
 			canvas.FillRoundRect(sx, sy, sw, sh2, sr, col)
 		} else {
 			canvas.FillRect(sx, sy, sw, sh2, col)
+		}
+		if blurred {
+			// 关闭模糊离屏层：Restore 时 Skia 对层内容做高斯模糊再合成。
+			canvas.Restore()
 		}
 	}
 }

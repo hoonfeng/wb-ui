@@ -221,6 +221,9 @@ func TestLayerTreeZIndexOrdering(t *testing.T) {
 		st := style.NewComputedStyle()
 		st.Position = style.PositionAbsolute
 		st.ZIndex = z
+		// 手工构造样式须同步语义字段：显式 `z-index: <n>`（含 0）表示
+		// 「非 auto」，才满足创建层叠上下文的条件（见 layerCreatesStackingContext）。
+		st.ZIndexAuto = false
 		st.BackgroundColor = c
 		box := NewRenderBox(doc.CreateElement(name), st)
 		box.SetLocation(10, 10)
@@ -267,6 +270,7 @@ func TestLayerTreeZIndexNegativeBehind(t *testing.T) {
 		st := style.NewComputedStyle()
 		st.Position = style.PositionAbsolute
 		st.ZIndex = z
+		st.ZIndexAuto = false // 同 TestLayerTreeZIndexOrdering：显式 z-index
 		st.BackgroundColor = c
 		box := NewRenderBox(doc.CreateElement(name), st)
 		box.SetLocation(10, 10)

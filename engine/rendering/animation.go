@@ -1,7 +1,9 @@
 // Translation of: Source/WebCore/animation/AnimationTimeline.cpp
-//                  Source/WebCore/animation/KeyframeEffect.cpp
-//                  Source/WebCore/animation/KeyframeModel.cpp
-//                  Source/WebCore/animation/CSSAnimation.cpp
+//
+//	Source/WebCore/animation/KeyframeEffect.cpp
+//	Source/WebCore/animation/KeyframeModel.cpp
+//	Source/WebCore/animation/CSSAnimation.cpp
+//
 // Completeness: 45%
 // Simplifications:
 //   - timing-function uses simplified cubic-bezier approximation (non-analytic)
@@ -173,6 +175,7 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64,
 		// 无动画定义：动画驱动结束，清除驱动标志（painter 回退静态色）。
 		st.AnimatedBackgroundActive = false
 		st.AnimatedColorActive = false
+		clearAnimatedTransform(st)
 		return false
 	}
 	duration := st.AnimationDuration
@@ -217,6 +220,7 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64,
 			// 标志（painter 回退静态色，避免残留最后动画帧）。
 			st.AnimatedBackgroundActive = false
 			st.AnimatedColorActive = false
+			clearAnimatedTransform(st)
 			// visibility 同样回退静态值（否则「淡出 + visibility:hidden」
 			// 动画结束后元素永久不可见——它只是结束，不是隐藏指令）。
 			if st.StaticVisibility != "" {
@@ -278,6 +282,24 @@ func applyAnimationToStyle(st *style.ComputedStyle, time float64,
 	return true
 }
 
+// clearAnimatedTransform 复位动画补间留下的变换状态。
+//
+// 动画结束（无 forwards/both fill）或失去 @keyframes 后必须回落到元素自身的
+// 静态 transform；否则元素会永久停在最后一帧的位移/缩放上，且
+// TransformAnimated 残留会让绘制层一直走动画路径。
+func clearAnimatedTransform(st *style.ComputedStyle) {
+	if st == nil {
+		return
+	}
+	if !st.TransformAnimated && st.TranslateX == 0 && st.TranslateY == 0 &&
+		st.ScaleX == 0 && st.ScaleY == 0 {
+		return
+	}
+	st.TransformAnimated = false
+	st.TranslateX, st.TranslateY = 0, 0
+	st.ScaleX, st.ScaleY = 0, 0
+}
+
 // applyProgressToStyle applies the interpolated keyframe values at the given
 // progress (0.0–1.0) to the ComputedStyle.
 func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progress float64) {
@@ -290,23 +312,34 @@ func applyProgressToStyle(st *style.ComputedStyle, kf *css.KeyframesRule, progre
 	}
 
 	// Transform: translateX / translateY
+	animated := false
 	if tx, ok := interpolateTransformTranslate(kf, progress, "translateX"); ok {
 		st.TranslateX = tx
+		animated = true
 	}
 	if ty, ok := interpolateTransformTranslate(kf, progress, "translateY"); ok {
 		st.TranslateY = ty
+		animated = true
 	}
 
 	// Transform: scale / scaleX / scaleY
 	if s, ok := interpolateTransformScale(kf, progress); ok {
 		st.ScaleX = s
 		st.ScaleY = s
+		animated = true
 	}
 	if sx, ok := interpolateKeyframeFloat(kf, progress, "scaleX", 1.0); ok {
 		st.ScaleX = sx
+		animated = true
 	}
 	if sy, ok := interpolateKeyframeFloat(kf, progress, "scaleY", 1.0); ok {
 		st.ScaleY = sy
+		animated = true
+	}
+	if animated {
+		// 只有真的有 transform 补间时才置位：否则「只动 opacity 的动画」会让
+		// 绘制层误以为存在动画变换（scale 走 1:1 空变换，无害但白跑一遍矩阵）。
+		st.TransformAnimated = true
 	}
 
 	// Color

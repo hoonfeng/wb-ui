@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"wb-ui/engine/dom"
 	"wb-ui/engine/debugenv"
+	"wb-ui/engine/dom"
 	"wb-ui/engine/layout"
 	"wb-ui/engine/platform/graphics"
 	"wb-ui/engine/style"
@@ -223,7 +223,9 @@ func hasCJKChars(rs []rune) bool {
 // construction that TextPainter performs before drawing.
 func toGraphicsFont(st *style.ComputedStyle) graphics.Font {
 	if st == nil {
-		return graphics.Font{Family: "serif", Size: 16, Weight: 400, Style: "normal"}
+		// ★ D7 默认族：兜底与 ComputedStyle 初始值保持一致（sans-serif →
+		//   与浏览器等价的默认无衬线族），不得再用衬线族。
+		return graphics.Font{Family: "sans-serif", Size: 16, Weight: 400, Style: "normal"}
 	}
 	size := st.FontSize.Value
 	if size <= 0 {
@@ -415,10 +417,30 @@ func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInf
 		if sdc, ok := info.canvas.DeviceClipBounds(); ok {
 			log.Printf("[dbg/clip] %s deviceClip=(%.0f,%.0f %.0fx%.0f) goClip=(%.0f,%.0f %.0fx%.0f) has=%v",
 				elName, sdc.X, sdc.Y, sdc.Width, sdc.Height,
-				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.X }; return -1 }(),
-				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Y }; return -1 }(),
-				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Width }; return -1 }(),
-				func() float64 { if c, h := info.canvas.ClipRect(); h { return c.Height }; return -1 }(),
+				func() float64 {
+					if c, h := info.canvas.ClipRect(); h {
+						return c.X
+					}
+					return -1
+				}(),
+				func() float64 {
+					if c, h := info.canvas.ClipRect(); h {
+						return c.Y
+					}
+					return -1
+				}(),
+				func() float64 {
+					if c, h := info.canvas.ClipRect(); h {
+						return c.Width
+					}
+					return -1
+				}(),
+				func() float64 {
+					if c, h := info.canvas.ClipRect(); h {
+						return c.Height
+					}
+					return -1
+				}(),
 				func() bool { _, h := info.canvas.ClipRect(); return h }())
 		}
 	}
@@ -532,7 +554,6 @@ func PaintBorder(box *RenderBox, info *PaintInfo) {
 	}
 	// ★ 滚动容器自身边框同样固定于视口（与 PaintBackground 同理）：
 	// 补偿 box 自身 scroll offset，抵消 paintLayerContents 的内容 translate。
-
 
 	ox, oy := 0.0, 0.0
 	if info.rv != nil {
@@ -839,10 +860,12 @@ func paintRoundedBorderSide(canvas *graphics.Canvas, side string, x, y, w, h, wi
 
 // fillDiagBelow / fillDiagBelowRev / fillDiagAbove / fillDiagAboveRev 按角
 // 拼接对角线把 corner 矩形的一半填成 col（0 尺寸元素的角恢复专用）：
-//   below    ：对角线 (0,0)→(cw,ch) 下方
-//   belowRev ：对角线 (0,ch)→(cw,0) 下方
-//   above    ：对角线 (0,0)→(cw,ch) 上方
-//   aboveRev ：对角线 (0,ch)→(cw,0) 上方
+//
+//	below    ：对角线 (0,0)→(cw,ch) 下方
+//	belowRev ：对角线 (0,ch)→(cw,0) 下方
+//	above    ：对角线 (0,0)→(cw,ch) 上方
+//	aboveRev ：对角线 (0,ch)→(cw,0) 上方
+//
 // 与 paintBorderCorners 内部闭包等价，只是方向可按需选择——0 尺寸元素
 // 的 left/right 四边形已包含拼接斜边，bottom 覆盖的角部必须恢复对角线
 // 「上方」（四边形内），而普通元素恢复的是「下方」（left 中间段在下方）。
@@ -1272,6 +1295,25 @@ func PaintText(text *RenderText, info *PaintInfo) {
 	if ch := info.canvas.FontCapHeight(font); ch > 0 {
 		baselineH = ch
 	}
+	// ★ 显式 line-height 与 line-height:normal 的**度量来源不同**（实测 Edge，
+	//   主字体 Arial + 中文，div.offsetHeight 与墨迹 bbox 双向验证）：
+	//     · 显式 line-height：half-leading 按**主字体**度量算 —— Arial+中文
+	//       LH24/28/32/35/40 的基线逐行等于 (LH-(a_Arial+d_Arial))/2 + a_Arial；
+	//     · line-height:normal：按 FontFallbackList 的**合并**度量（含 CJK
+	//       回退字体 Noto Sans SC，24px 下 a+d=35）。
+	//   二者在「拉丁主字体 + 含中文」时相差约 2px，不区分会让显式 LH 的中文行
+	//   恒定偏低 2px（cjkline.html 探针实测）。
+	explicitLineHeight := st.LineHeight.Unit != "" && st.LineHeight.Unit != "normal"
+	// cjkDrawMetrics 返回 CJK 段用于 half-leading 的 (ascent, descent)。
+	cjkDrawMetrics := func() (float64, float64) {
+		if explicitLineHeight {
+			return ascent, graphics.GlobalFontDescent(font)
+		}
+		if ca, cd := info.canvas.FontCJKMetrics(font); ca > 0 && cd > 0 {
+			return ca, cd
+		}
+		return baselineH, baselineH * 0.3
+	}
 	// ★ CJK 与拉丁文本必须共享同一 baseline（浏览器行为：同一行内中英文
 	//   基线对齐——中文 glyph 顶 ~0.85em、底 ~-0.12em，英文 cap 顶 ~0.72em）。
 	//   此前对含 CJK 的 segment 改用 FontCJKMetrics 的 ascent 定位 baseline，
@@ -1405,12 +1447,34 @@ func PaintText(text *RenderText, info *PaintInfo) {
 						drawAscent = baselineH
 						drawDescent = baselineH * 0.3
 					}
+					// ★ CJK 同样使用**字体真实度量**（与拉丁共用一套浏览器
+					//   half-leading 公式），而非字形视觉 bbox —— 后者是「行盒
+					//   按主字体度量计算」时的补偿；行盒度量已纳入 CJK 回退字体
+					//   （layout.effectiveFontMetrics）后，视觉 bbox 反而残留
+					//   1–2px 偏差（实测 Arial+中文 LH32：偏低 2px）。
+					//   度量来源统一见上方 cjkDrawMetrics（显式 line-height →
+					//   主字体度量；normal → 合并度量），覆盖视觉 bbox 近似。
+					drawAscent, drawDescent = cjkDrawMetrics()
 				} else {
-					drawAscent = baselineH
+					// ★ 拉丁：必须用字体**真实 ascent**（含升部 b/d/h/l 与变音符
+					//   空间），不能用 capHeight 近似。浏览器 half-leading 公式是
+					//     baseline = 行盒顶 + (lineHeight-(ascent+descent))/2 + ascent
+					//   把 ascent 换成 capHeight 会让 baseline 整体偏高
+					//   (ascent-capHeight)/2，且偏移随字体浮动：实测 24px 下
+					//   Noto Sans SC +5.1px、Arial +2.3px、微软雅黑 +3px，与
+					//   line-height 取值无关（LH32 与 LH40 同为 2.3px）。这正是
+					//   「纯拉丁行整体偏高、中文行却完全一致」的根因——含 CJK 的
+					//   段走下方 CJK 分支（视觉 bbox），不受此处影响。
+					drawAscent = ascent
 					drawDescent = graphics.GlobalFontDescent(font)
 				}
 				fontH := drawAscent + drawDescent
-				if fontH > 0 && seg0.LineHeight > fontH {
+				// ★ 无条件应用 half-leading 公式（负半行距同样成立）：
+				//   baseline = 行盒顶 + (lineHeight-(ascent+descent))/2 + ascent。
+				//   此前限定 LineHeight > fontH（行盒高于字体内容）才应用，负半行距
+				//   （line-height 小于字体内容高，如 LH20 + Noto Sans SC 的 a+d=35）
+				//   时退回 capHeight 直接定位，偏差反而更大。
+				if fontH > 0 {
 					boxCenter := seg0.LineY + seg0.LineHeight/2
 					centeredBaseline := boxCenter + drawAscent - fontH/2
 					flexHalfLeading = centeredBaseline - (seg0.Y + baselineH)
@@ -1425,16 +1489,13 @@ func PaintText(text *RenderText, info *PaintInfo) {
 		if seg0.LineHeight > 0 {
 			var drawAscent, drawDescent float64
 			if hasCJKChars([]rune(content)) {
-				vTop, vBottom := info.canvas.FontCJKBounds(font, content)
-				if vTop < 0 && vBottom > 0 {
-					drawAscent = -vTop
-					drawDescent = vBottom
-				} else {
-					drawAscent = baselineH
-					drawDescent = baselineH * 0.3
-				}
+				// ★ 度量来源见上方 cjkDrawMetrics（显式 line-height → 主字体
+				//   度量；normal → 合并度量），不再使用字形视觉 bbox。
+				drawAscent, drawDescent = cjkDrawMetrics()
 			} else {
-				drawAscent = baselineH
+				// 拉丁：真实 ascent（同上——capHeight 近似会让 baseline 偏高
+				// (ascent-capHeight)/2）。
+				drawAscent = ascent
 				drawDescent = graphics.GlobalFontDescent(font)
 			}
 			fontH := drawAscent + drawDescent
@@ -1528,7 +1589,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			paintTextShadow(info.canvas, textShadows, seg.X, baseline, sub, font, opacity)
 		}
 	}
-	
+
 	// text-overflow:ellipsis truncation: find ancestor with this property.
 	toCB := findTextOverflowAncestor(text)
 	// Compute ellipsis width: three tightly-spaced filled circles.
@@ -1569,7 +1630,7 @@ func PaintText(text *RenderText, info *PaintInfo) {
 			baseline = seg.Y + absBaselineH
 		}
 
-	// ── text-overflow:ellipsis ──
+		// ── text-overflow:ellipsis ──
 		// Walk segments sequentially from the left. Track cumulative width from the
 		// content box start. The ellipsis only kicks in when text genuinely
 		// OVERFLOWS the content box (segRight > content width) — text that
@@ -1710,11 +1771,12 @@ func PaintText(text *RenderText, info *PaintInfo) {
 // positions follow CSS conventions: underline sits just below the baseline,
 // line-through crosses the midline of the x-height.
 // paintTextStrokeAware 按 paint-order 绘制文本与 -webkit-text-stroke 描边：
-// - 无描边（width<=0 / 透明）→ 普通 DrawText（零额外开销）
-// - paint-order 默认（normal/fill 先）→ 先画填充再画描边（描边在文字上，
-//   Chromium 默认行为）
-// - paint-order: stroke（或 "stroke fill"）→ 先画描边再画填充（描边在
-//   文字下、轮廓外扩不盖字形——挂件文字描边常用）
+//   - 无描边（width<=0 / 透明）→ 普通 DrawText（零额外开销）
+//   - paint-order 默认（normal/fill 先）→ 先画填充再画描边（描边在文字上，
+//     Chromium 默认行为）
+//   - paint-order: stroke（或 "stroke fill"）→ 先画描边再画填充（描边在
+//     文字下、轮廓外扩不盖字形——挂件文字描边常用）
+//
 // 描边用 glyph 轮廓（goskia PaintStyleStroke），字形边缘平滑，取代
 // 8 方向 text-shadow 模拟（对角线 45° 有锯齿/星芒）。
 func paintTextStrokeAware(canvas *graphics.Canvas, x, baseline float64, text string, font graphics.Font, col graphics.Color, st *style.ComputedStyle) {

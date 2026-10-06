@@ -70,13 +70,18 @@ func TestScrollContainerContentMovesOnPaint(t *testing.T) {
 		}
 		return false
 	}
-	// 行间距 = 行盒高度：默认 line-height 现为 normal（字体度量），
-	// 显式 line-height:1.2 时 16px → 19.2。动态取字体度量，避免字体/行高变化漂移。
-	a, d, g := layout.FontMetricsFunc("serif", 16, 400, "normal")
-	lineGap := a + d + g
-	if lineGap <= 0 {
-		lineGap = 19.0 // 兜底（历史 1.2×16 值）
+	// ★ 行距从**实测**相邻两行推出，而不是从字体度量估算：
+	//   line-height:normal 的真实行盒高是「ascent/descent/lineGap 各自 round
+	//   后相加」（layout.fontLineGap 的网格对齐语义），与浮点 a+d+g 每行可差
+	//   ~1px，累计 3 行即越出下方 ±3px 容差；serif 族解析目标变化（现为
+	//   Noto Serif SC，不再落到宋体）也会整体改变行高。实测推导对两者免疫，
+	//   且检验的仍是同一条物理行（第 4 行）随滚动上移 50px。
+	secondY := findDarkRow(c0, int(pb.X+8), int(pb.X+150), textY0+16, int(pb.Y)+120)
+	if secondY < 0 {
+		t.Fatalf("no second text line below y=%d", textY0)
 	}
+	lineGap := float64(secondY - textY0)
+	t.Logf("line gap measured from adjacent lines = %.1f", lineGap)
 	from := textY0 + int(3*lineGap)
 	to := from - 50
 	t.Logf("4th line: scrollTop=0 at y=%d, scrollTop=50 at y=%d (want -50), lineGap=%.1f", from, to, lineGap)
