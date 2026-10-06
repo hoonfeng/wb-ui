@@ -11,23 +11,49 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"wb-ui/engine/js/goja"
 )
 
 // ─── BufferLogger ───────────────────────────────────────
 
+// LogEntry 是一条**带级别**的控制台记录。CDP 的 Log.entryAdded 与
+// Runtime.consoleAPICalled 需要级别（error/warn 在 DevTools 里是红/黄），而引擎早
+// 期的日志管道只存纯文本——Lines 因此保留（既有消费者不受影响），级别走 Entries。
+type LogEntry struct {
+	Level string // log/info/warn/error/debug
+	Text  string
+}
+
 type BufferLogger struct {
-	mu    sync.Mutex
-	Lines []string
+	mu      sync.Mutex
+	Lines   []string
+	Entries []LogEntry
 }
 
 func (l *BufferLogger) Write(p []byte) (int, error) {
+	return l.WriteLevel("log", p)
+}
+
+// WriteLevel 写入一条带级别的记录（console.warn/error/... 按各自级别落账）。
+func (l *BufferLogger) WriteLevel(level string, p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	text := string(p)
 	l.Lines = append(l.Lines, text)
+	l.Entries = append(l.Entries, LogEntry{Level: level, Text: text})
 	return len(p), nil
+}
+
+// ConsoleEntries 返回「自 since 起」的带级别条目与新的游标（增量语义：宿主适配层
+// 记游标，只把新条目转成 CDP 事件）。
+func (l *BufferLogger) ConsoleEntries(since int) ([]LogEntry, int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if since < 0 || since > len(l.Entries) {
+		since = len(l.Entries)
+	}
+	out := make([]LogEntry, len(l.Entries)-since)
+	copy(out, l.Entries[since:])
+	return out, len(l.Entries)
 }
 
 func (l *BufferLogger) String() string {
@@ -43,7 +69,7 @@ type NativeFunc func(in *Interpreter, this JSValue, args []JSValue) JSValue
 // ─── Interpreter ────────────────────────────────────────
 
 type Interpreter struct {
-	vm        *goja.Runtime
+	vm        *beRuntime
 	eventLoop *EventLoop
 
 	// 编译缓存：大脚本（如前端 bundle）重复执行时跳过 parse+compile。
@@ -54,41 +80,46 @@ type Interpreter struct {
 }
 
 func NewInterpreter() *Interpreter {
-	vm := goja.New()
+	vm := beNew()
 	return &Interpreter{vm: vm}
 }
 
 func (r *Interpreter) SetupGlobal(logger *BufferLogger) {
 	consoleObj := r.vm.NewObject()
-	logFunc := func(call goja.FunctionCall) goja.Value {
-		parts := make([]string, len(call.Arguments))
-		for i, arg := range call.Arguments {
-			parts[i] = formatConsoleArg(arg)
+	// 按级别落账（level 透传给 BufferLogger.Entries，供 CDP 的 Log.entryAdded /
+	// Runtime.consoleAPICalled 保真上报）。此前五个方法共用一个不分级的函数，
+	// 前端在 DevTools 里看不到 error/warn 的红黄区分。
+	logAt := func(level string) func(call beFunctionCall) beValue {
+		return func(call beFunctionCall) beValue {
+			parts := make([]string, len(call.Arguments))
+			for i, arg := range call.Arguments {
+				parts[i] = formatConsoleArg(arg)
+			}
+			line := strings.Join(parts, " ")
+			if logger != nil {
+				_, _ = logger.WriteLevel(level, []byte(line+"\n"))
+			} else {
+				fmt.Println(line)
+			}
+			return beUndefined()
 		}
-		line := strings.Join(parts, " ")
-		if logger != nil {
-			fmt.Fprintln(logger, line)
-		} else {
-			fmt.Println(line)
-		}
-		return goja.Undefined()
 	}
-	consoleObj.Set("log", logFunc)
-	consoleObj.Set("error", logFunc)
-	consoleObj.Set("warn", logFunc)
-	consoleObj.Set("info", logFunc)
-	consoleObj.Set("debug", logFunc)
+	consoleObj.Set("log", logAt("log"))
+	consoleObj.Set("error", logAt("error"))
+	consoleObj.Set("warn", logAt("warn"))
+	consoleObj.Set("info", logAt("info"))
+	consoleObj.Set("debug", logAt("debug"))
 	r.vm.Set("console", consoleObj)
 }
 
 // formatConsoleArg 将 console.log 参数格式化为可读文本。
 // 对象/数组尝试 JSON 序列化（避免 Go map 的 %v 打印出 map[]），
 // 失败时回退到 Go %v。
-func formatConsoleArg(v goja.Value) string {
+func formatConsoleArg(v beValue) string {
 	if v == nil {
 		return "<nil>"
 	}
-	if obj, ok := v.(*goja.Object); ok {
+	if obj, ok := v.(*beObject); ok {
 		if b, err := json.Marshal(obj.Export()); err == nil {
 			return string(b)
 		}
@@ -140,7 +171,7 @@ const progCacheMaxBytes = 32 * 1024 * 1024
 
 type cachedProgram struct {
 	srcLen int
-	prog   *goja.Program
+	prog   *beProgram
 }
 
 var progHashSeed = maphash.MakeSeed()
@@ -149,10 +180,10 @@ func progHash(s string) uint64 {
 	return maphash.String(progHashSeed, s)
 }
 
-// runCached 编译大脚本并缓存其 *goja.Program，命中缓存时直接 RunProgram。
+// runCached 编译大脚本并缓存其 *beProgram，命中缓存时直接 RunProgram。
 // 用 hash + srcLen 双重校验避免 hash 碰撞误命中；编译失败不缓存；
 // 缓存总源码字节超限时整体清空。
-func (r *Interpreter) runCached(code string) (goja.Value, error) {
+func (r *Interpreter) runCached(code string) (beValue, error) {
 	key := progHash(code)
 
 	r.progMu.Lock()
@@ -169,7 +200,7 @@ func (r *Interpreter) runCached(code string) (goja.Value, error) {
 	r.progMu.Unlock()
 
 	t0 := time.Now()
-	prog, err := goja.Compile("cached.js", code, false)
+	prog, err := beCompile("cached.js", code, false)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +238,7 @@ func (r *Interpreter) Evaluate(code string) (interface{}, error) {
 }
 
 func (r *Interpreter) Call(fn JSValue, this JSValue, args []JSValue) (JSValue, error) {
-	gojaArgs := make([]goja.Value, len(args))
+	gojaArgs := make([]beValue, len(args))
 	for i, a := range args {
 		gojaArgs[i] = a.val(r.vm)
 	}
@@ -268,8 +299,8 @@ func (r *Interpreter) ValueOf(v any) JSValue {
 		ab := vm.NewArrayBuffer(val)
 		ctorVal := vm.Get("Uint8Array")
 		abVal := vm.ToValue(ab)
-		if ctor, ok := ctorVal.(*goja.Object); ok {
-			if v, err := vm.Call(ctor, goja.Undefined(), abVal); err == nil {
+		if ctor, ok := ctorVal.(*beObject); ok {
+			if v, err := vm.Call(ctor, beUndefined(), abVal); err == nil {
 				return JSValue{v: v, interp: r}
 			}
 		}
@@ -291,7 +322,7 @@ func (r *Interpreter) NewNativeFunction(name string, fn NativeFunc, _ int) *JSFu
 // NewConstructor 创建一个可 new 调用的构造函数。fn 接收 (interpreter, this, args)，
 // 返回新创建的 JSObject（作为 new 表达式的结果）。
 func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this JSValue, args []JSValue) *JSObject) *JSFunction {
-	constVal := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	constVal := r.vm.ToValue(func(call beConstructorCall) *beObject {
 		interp := r
 		this := JSValue{v: call.This, interp: interp}
 		n := len(call.Arguments)
@@ -317,9 +348,9 @@ func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this 
 	// ctor.name / el.constructor.name 做类型分派（React、Vue、Lit、各类
 	// isElement 辅助函数）。函数 name 在 goja 里是 configurable 的，
 	// 故用 DefineDataProperty 覆盖（普通赋值会被 writable:false 静默忽略）。
-	if obj, ok := constVal.(*goja.Object); ok {
+	if obj, ok := constVal.(*beObject); ok {
 		_ = obj.DefineDataProperty("name", r.vm.ToValue(name),
-			goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+			beFLAGFALSE, beFLAGTRUE, beFLAGFALSE)
 	}
 	return &JSFunction{
 		v:       constVal,
@@ -328,13 +359,13 @@ func (r *Interpreter) NewConstructor(name string, fn func(in *Interpreter, this 
 	}
 }
 
-// wrapNativeFunc 使用指定 goja.Runtime 包装 NativeFunc。
+// wrapNativeFunc 使用指定 beRuntime 包装 NativeFunc。
 // ★ 性能：每次调用 make([]JSValue, n) 分配——Vue mount 百万级 DOM API
 // 调用（createElement/setAttribute/style 等）都走此边界。改为栈上小数组
 // （≤8 参数零分配；>8 才 make）。fn 若存储 args 逃逸时编译器自动转堆，
 // 语义不变。
-func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) goja.Value {
-	return r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) beValue {
+	return r.vm.ToValue(func(call beFunctionCall) beValue {
 		this := JSValue{v: call.This, interp: interp}
 		n := len(call.Arguments)
 		var buf [8]JSValue
@@ -349,7 +380,7 @@ func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) goja.Va
 		}
 		result := fn(interp, this, args)
 		if result.v == nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		return result.v
 	})
@@ -367,18 +398,18 @@ func (r *Interpreter) RejectPromise(errStr JSValue) JSValue {
 	return JSValue{v: p.PromiseObj(), interp: r}
 }
 
-func (r *Interpreter) VM() *goja.Runtime { return r.vm }
+func (r *Interpreter) VM() *beRuntime { return r.vm }
 
 // ─── JSValue ────────────────────────────────────────────
 
 type JSValue struct {
-	v        goja.Value
+	v        beValue
 	nativeFn NativeFunc // 未绑定运行时的原生函数（包级 NewNativeFunction 使用）
 	interp   *Interpreter
 }
 
-// val 返回底层 goja.Value。对于未绑定的原生函数，使用指定运行时创建包装。
-func (v JSValue) val(rt *goja.Runtime) goja.Value {
+// val 返回底层 beValue。对于未绑定的原生函数，使用指定运行时创建包装。
+func (v JSValue) val(rt *beRuntime) beValue {
 	if v.v != nil {
 		return v.v
 	}
@@ -390,16 +421,16 @@ func (v JSValue) val(rt *goja.Runtime) goja.Value {
 		// 在目标运行时创建包装
 		return interp.wrapNativeFunc(v.nativeFn, interp)
 	}
-	return goja.Undefined()
+	return beUndefined()
 }
 
 func (v JSValue) IsUndefined() bool { return v.v == nil && v.nativeFn == nil }
-func (v JSValue) IsNull() bool      { return v.v != nil && goja.IsNull(v.v) }
+func (v JSValue) IsNull() bool      { return v.v != nil && beIsNull(v.v) }
 func (v JSValue) IsBoolean() bool {
 	if v.v == nil {
 		return false
 	}
-	if _, isObj := v.v.(*goja.Object); isObj {
+	if _, isObj := v.v.(*beObject); isObj {
 		return false
 	}
 	_, ok := v.v.Export().(bool)
@@ -409,7 +440,7 @@ func (v JSValue) IsNumber() bool {
 	if v.v == nil {
 		return false
 	}
-	if _, isObj := v.v.(*goja.Object); isObj {
+	if _, isObj := v.v.(*beObject); isObj {
 		return false
 	}
 	switch v.v.Export().(type) {
@@ -422,7 +453,7 @@ func (v JSValue) IsString() bool {
 	if v.v == nil {
 		return false
 	}
-	if _, isObj := v.v.(*goja.Object); isObj {
+	if _, isObj := v.v.(*beObject); isObj {
 		return false
 	}
 	_, ok := v.v.Export().(string)
@@ -435,7 +466,7 @@ func (v JSValue) IsObject() bool {
 	if v.v == nil {
 		return v.nativeFn != nil
 	}
-	_, isObj := v.v.(*goja.Object)
+	_, isObj := v.v.(*beObject)
 	return isObj || v.nativeFn != nil
 }
 func (v JSValue) IsFunction() bool {
@@ -449,7 +480,7 @@ func (v JSValue) SameAs(other JSValue) bool {
 		}
 		return reflect.ValueOf(v.nativeFn).Pointer() == reflect.ValueOf(other.nativeFn).Pointer()
 	}
-	// goja.Value 接口比较：对象/函数为指针比较（同一 JS 对象 → true），
+	// beValue 接口比较：对象/函数为指针比较（同一 JS 对象 → true），
 	// 原始值（string/number/bool）按值比较。
 	return v.v == other.v
 }
@@ -458,9 +489,8 @@ func (v JSValue) SameAs(other JSValue) bool {
 // 用于跨解释器注册表（bindings 事件监听 side-table）按解释器过滤清理。
 func (v JSValue) Interp() *Interpreter { return v.interp }
 
-
 func (v JSValue) ToString() string {
-	if v.v == nil || goja.IsUndefined(v.v) || goja.IsNull(v.v) {
+	if v.v == nil || beIsUndefined(v.v) || beIsNull(v.v) {
 		return ""
 	}
 	return v.v.String()
@@ -488,7 +518,7 @@ func (v JSValue) AsObject() *JSObject {
 	if v.v == nil {
 		return nil
 	}
-	obj, ok := v.v.(*goja.Object)
+	obj, ok := v.v.(*beObject)
 	if !ok {
 		return nil
 	}
@@ -519,7 +549,7 @@ func (v JSValue) Export() interface{} {
 // ─── JSObject ───────────────────────────────────────────
 
 type JSObject struct {
-	obj    *goja.Object
+	obj    *beObject
 	interp *Interpreter
 }
 
@@ -580,7 +610,7 @@ func (o *JSObject) SetIterator(fn NativeFunc) {
 	if o == nil || o.obj == nil || o.interp == nil {
 		return
 	}
-	_ = o.obj.SetSymbol(goja.SymIterator, o.interp.wrapNativeFunc(fn, o.interp))
+	_ = o.obj.SetSymbol(beSymIterator, o.interp.wrapNativeFunc(fn, o.interp))
 }
 
 func (o *JSObject) GetStr(key string) JSValue {
@@ -589,7 +619,7 @@ func (o *JSObject) GetStr(key string) JSValue {
 	}
 	v := o.obj.Get(key)
 	if v == nil {
-		return JSValue{v: goja.Undefined()}
+		return JSValue{v: beUndefined()}
 	}
 	return JSValue{v: v, interp: o.interp}
 }
@@ -617,36 +647,36 @@ func (o *JSObject) SetAccessor(prop string, getter, setter interface{}) {
 	rt := o.interp.vm
 	interp := o.interp
 
-	var gfn goja.Value
+	var gfn beValue
 	switch g := getter.(type) {
 	case func(*Interpreter) JSValue:
 		g = perfWrapGet1(prop, g)
-		gfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
+		gfn = rt.ToValue(func(call beFunctionCall) beValue {
 			val := g(interp)
 			return val.val(rt)
 		})
 	case func(*Interpreter, JSValue) JSValue:
 		g = perfWrapGet2(prop, g)
-		gfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
+		gfn = rt.ToValue(func(call beFunctionCall) beValue {
 			val := g(interp, JSValue{})
 			return val.val(rt)
 		})
 	}
 
-	var sfn goja.Value = goja.Undefined()
+	var sfn beValue = beUndefined()
 	if setter != nil {
 		switch s := setter.(type) {
 		case func(*Interpreter, JSValue, JSValue):
 			s = perfWrapSet(prop, s)
-			sfn = rt.ToValue(func(call goja.FunctionCall) goja.Value {
+			sfn = rt.ToValue(func(call beFunctionCall) beValue {
 				v := JSValue{v: call.Argument(0), interp: interp}
 				s(interp, JSValue{}, v)
-				return goja.Undefined()
+				return beUndefined()
 			})
 		}
 	}
 	if gfn != nil {
-		_ = o.obj.DefineAccessorProperty(prop, gfn, sfn, goja.FLAG_TRUE, goja.FLAG_TRUE)
+		_ = o.obj.DefineAccessorProperty(prop, gfn, sfn, beFLAGTRUE, beFLAGTRUE)
 	}
 }
 
@@ -669,20 +699,20 @@ func (o *JSObject) SetClassName(name string) {
 // ─── JSFunction ─────────────────────────────────────────
 
 type JSFunction struct {
-	v        goja.Value
+	v        beValue
 	id       string
 	nativeFn NativeFunc // 未绑定的原生函数
-	wrapped  bool        // true 表示已绑定到运行时
+	wrapped  bool       // true 表示已绑定到运行时
 }
 
 func (f *JSFunction) String() string { return f.id }
 
 // ─── 工厂函数 ───────────────────────────────────────────
 
-func StringValue(s string) JSValue  { return JSValue{v: goja.NewString(s)} }
-func NumberValue(f float64) JSValue { return JSValue{v: goja.NewFloat(f)} }
-func BooleanValue(b bool) JSValue   { return JSValue{v: goja.NewBoolean(b)} }
-func Null() JSValue                 { return JSValue{v: goja.Null()} }
+func StringValue(s string) JSValue  { return JSValue{v: beNewString(s)} }
+func NumberValue(f float64) JSValue { return JSValue{v: beNewFloat(f)} }
+func BooleanValue(b bool) JSValue   { return JSValue{v: beNewBoolean(b)} }
+func Null() JSValue                 { return JSValue{v: beNull()} }
 func Undefined() JSValue            { return JSValue{} }
 
 func ObjectValue(o *JSObject) JSValue {
@@ -710,7 +740,7 @@ func NewObject(proto *JSObject) *JSObject {
 	if proto != nil && proto.interp != nil {
 		interp = proto.interp
 	} else {
-		interp = &Interpreter{vm: goja.New()}
+		interp = &Interpreter{vm: beNew()}
 	}
 	obj := &JSObject{obj: interp.vm.NewObject(), interp: interp}
 	// proto 参数必须真正生效：设置原型链（vendored goja 无 SetPrototype API，
@@ -723,9 +753,9 @@ func NewObject(proto *JSObject) *JSObject {
 	return obj
 }
 
-// WrapObject wraps an existing goja.Object (e.g. from NewDynamicObject) as a JSObject.
+// WrapObject wraps an existing beObject (e.g. from NewDynamicObject) as a JSObject.
 // The object must belong to the same runtime as the interpreter.
-func WrapObject(obj *goja.Object, interp *Interpreter) *JSObject {
+func WrapObject(obj *beObject, interp *Interpreter) *JSObject {
 	return &JSObject{obj: obj, interp: interp}
 }
 
@@ -769,7 +799,7 @@ func NewArray(proto *JSObject, items []JSValue) *JSObject {
 			}
 		}
 		if interp == nil {
-			interp = &Interpreter{vm: goja.New()}
+			interp = &Interpreter{vm: beNew()}
 		}
 	}
 	gojaItems := make([]interface{}, len(items))

@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"wb-ui/engine/js/goja"
 	"wb-ui/engine/dom"
 )
 
@@ -88,12 +87,12 @@ type EventLoop struct {
 // NewEventLoop 创建一个绑定到给定 Interpreter 的事件循环。
 func NewEventLoop(interp *Interpreter) *EventLoop {
 	el := &EventLoop{
-		interp:      interp,
-		startTime:   time.Now().UnixMilli(),
-		macrotasks:  make([]*scheduledTask, 0),
-		microtasks:  make([]*microtask, 0),
-		animFrames:  make([]*scheduledTask, 0),
-		immediates:  make([]*scheduledTask, 0),
+		interp:     interp,
+		startTime:  time.Now().UnixMilli(),
+		macrotasks: make([]*scheduledTask, 0),
+		microtasks: make([]*microtask, 0),
+		animFrames: make([]*scheduledTask, 0),
+		immediates: make([]*scheduledTask, 0),
 	}
 	interp.eventLoop = el
 	return el
@@ -463,7 +462,7 @@ var runtimePool = sync.Pool{
 func GetPooledInterpreter() *Interpreter {
 	rt := runtimePool.Get().(*Interpreter)
 	// 重置全局状态（goja Runtime 内部状态通过新建 VM 重置）
-	rt.vm = goja.New()
+	rt.vm = beNew()
 	rt.eventLoop = nil
 	return rt
 }

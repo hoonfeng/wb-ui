@@ -53,12 +53,12 @@ var perfAPINames = map[string]bool{
 	"matches":          true,
 	"closest":          true,
 	// Range
-	"createRange":      true,
-	"getRangeAt":       true,
-	"comparePoint":     true,
-	"intersectsNode":   true,
-	"startContainer":   true,
-	"endContainer":     true,
+	"createRange":             true,
+	"getRangeAt":              true,
+	"comparePoint":            true,
+	"intersectsNode":          true,
+	"startContainer":          true,
+	"endContainer":            true,
 	"commonAncestorContainer": true,
 	// Selection
 	"getSelection":    true,
@@ -79,10 +79,10 @@ type perfAPIStat struct {
 }
 
 var (
-	perfAPITbl   = map[string]*perfAPIStat{}
-	perfAPIDepth int           // 当前嵌套深度：>0 表示处于另一 API 内部
-	perfAPIOn    bool          // listener 作用域开关（由 dom 包在进入/退出 listener 时置位）
-	perfAPITotal time.Duration // 最外层 API 耗时之和
+	perfAPITbl    = map[string]*perfAPIStat{}
+	perfAPIDepth  int           // 当前嵌套深度：>0 表示处于另一 API 内部
+	perfAPIOn     bool          // listener 作用域开关（由 dom 包在进入/退出 listener 时置位）
+	perfAPITotal  time.Duration // 最外层 API 耗时之和
 	perfAPITotalN int
 )
 

@@ -21,8 +21,6 @@
 
 package jsc
 
-import "wb-ui/engine/js/goja"
-
 // InjectBrowserEnv 注入已有 Go 实现的浏览器 API。
 func (r *Interpreter) InjectBrowserEnv() {
 	if r.eventLoop == nil {
@@ -31,7 +29,7 @@ func (r *Interpreter) InjectBrowserEnv() {
 	el := r.eventLoop
 
 	// ── setTimeout(fn, delay) ──
-	r.vm.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("setTimeout", func(call beFunctionCall) beValue {
 		delay := call.Argument(1).ToInteger()
 		if delay < 0 {
 			delay = 0
@@ -40,13 +38,13 @@ func (r *Interpreter) InjectBrowserEnv() {
 		id := el.SetTimeout(cb, delay)
 		return r.vm.ToValue(float64(id))
 	})
-	r.vm.Set("clearTimeout", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("clearTimeout", func(call beFunctionCall) beValue {
 		el.ClearTimeout(int(call.Argument(0).ToInteger()))
-		return goja.Undefined()
+		return beUndefined()
 	})
 
 	// ── setInterval(fn, interval) ──
-	r.vm.Set("setInterval", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("setInterval", func(call beFunctionCall) beValue {
 		interval := call.Argument(1).ToInteger()
 		if interval < 1 {
 			interval = 1
@@ -55,26 +53,26 @@ func (r *Interpreter) InjectBrowserEnv() {
 		id := el.SetInterval(cb, interval)
 		return r.vm.ToValue(float64(id))
 	})
-	r.vm.Set("clearInterval", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("clearInterval", func(call beFunctionCall) beValue {
 		el.ClearInterval(int(call.Argument(0).ToInteger()))
-		return goja.Undefined()
+		return beUndefined()
 	})
 
 	// ── requestAnimationFrame(fn) ──
-	r.vm.Set("requestAnimationFrame", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("requestAnimationFrame", func(call beFunctionCall) beValue {
 		cb := JSValue{v: call.Argument(0), interp: r}
 		id := el.RequestAnimationFrame(cb)
 		return r.vm.ToValue(float64(id))
 	})
-	r.vm.Set("cancelAnimationFrame", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("cancelAnimationFrame", func(call beFunctionCall) beValue {
 		el.CancelAnimationFrame(int(call.Argument(0).ToInteger()))
-		return goja.Undefined()
+		return beUndefined()
 	})
 
 	// ── queueMicrotask(fn) ──
-	r.vm.Set("queueMicrotask", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("queueMicrotask", func(call beFunctionCall) beValue {
 		cb := JSValue{v: call.Argument(0), interp: r}
 		el.QueueMicrotask(cb)
-		return goja.Undefined()
+		return beUndefined()
 	})
 }

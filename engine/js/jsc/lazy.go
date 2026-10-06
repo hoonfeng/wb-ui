@@ -5,8 +5,6 @@
 // createElement 只付对象+Internal 成本，属性按需创建。
 package jsc
 
-import "wb-ui/engine/js/goja"
-
 // LazyPropSet 是惰性对象的属性供应器。
 type LazyPropSet interface {
 	// Get 返回属性值（含 accessor 的即时求值）。缺失返回 Undefined()。
@@ -27,15 +25,15 @@ type LazyLiveProps interface {
 	Live(key string) bool
 }
 
-// lazyGojaAdapter 把 LazyPropSet 适配为 goja.DynamicObject，并缓存已物化
-// 的 goja.Value（保证函数同一性：el.appendChild === el.appendChild）。
+// lazyGojaAdapter 把 LazyPropSet 适配为 beDynamicObject，并缓存已物化
+// 的 beValue（保证函数同一性：el.appendChild === el.appendChild）。
 type lazyGojaAdapter struct {
 	interp *Interpreter
 	h      LazyPropSet
-	cache  map[string]goja.Value
+	cache  map[string]beValue
 }
 
-func (a *lazyGojaAdapter) get(key string) goja.Value {
+func (a *lazyGojaAdapter) get(key string) beValue {
 	if v, ok := a.cache[key]; ok {
 		return v
 	}
@@ -52,9 +50,9 @@ func (a *lazyGojaAdapter) get(key string) goja.Value {
 	return gv
 }
 
-func (a *lazyGojaAdapter) Get(key string) goja.Value { return a.get(key) }
+func (a *lazyGojaAdapter) Get(key string) beValue { return a.get(key) }
 
-func (a *lazyGojaAdapter) Set(key string, val goja.Value) bool {
+func (a *lazyGojaAdapter) Set(key string, val beValue) bool {
 	ok := a.h.Set(key, JSValue{v: val, interp: a.interp})
 	if ok {
 		delete(a.cache, key)
@@ -62,7 +60,7 @@ func (a *lazyGojaAdapter) Set(key string, val goja.Value) bool {
 	return ok
 }
 
-func (a *lazyGojaAdapter) Has(key string) bool  { return a.h.Has(key) }
+func (a *lazyGojaAdapter) Has(key string) bool { return a.h.Has(key) }
 func (a *lazyGojaAdapter) Delete(key string) bool {
 	ok := a.h.Delete(key)
 	if ok {
@@ -79,7 +77,7 @@ func NewLazyObject(interp *Interpreter, proto *JSObject, h LazyPropSet) *JSObjec
 	if interp == nil {
 		return NewObject(proto)
 	}
-	ad := &lazyGojaAdapter{interp: interp, h: h, cache: map[string]goja.Value{}}
+	ad := &lazyGojaAdapter{interp: interp, h: h, cache: map[string]beValue{}}
 	dyn := interp.VM().NewDynamicObject(ad)
 	obj := &JSObject{obj: dyn, interp: interp}
 	if proto != nil && proto.obj != nil {

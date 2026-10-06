@@ -12,8 +12,6 @@ import (
 	"errors"
 	"strconv"
 	"time"
-
-	"wb-ui/engine/js/goja"
 )
 
 // RegisterWebAPIs registers browser-standard Web APIs as Go native functions.
@@ -41,14 +39,14 @@ func (r *Interpreter) RegisterWebAPIs() {
 const blobDataKey = "__wbBlobData"
 
 // promiseResolved 返回一个已解决的 Promise（包装 value）。
-func (r *Interpreter) promiseResolved(v goja.Value) goja.Value {
+func (r *Interpreter) promiseResolved(v beValue) beValue {
 	pr, resolve, _ := r.vm.NewPromise()
 	_ = resolve(v)
 	return r.vm.ToValue(pr)
 }
 
 // uint8ArrayValue 把字节切片转成 Uint8Array（无 Uint8Array 时退化为字符串）。
-func (r *Interpreter) uint8ArrayValue(data []byte) goja.Value {
+func (r *Interpreter) uint8ArrayValue(data []byte) beValue {
 	ctor := r.vm.Get("Uint8Array")
 	if ctor == nil {
 		return r.vm.ToValue(string(data))
@@ -65,20 +63,20 @@ func (r *Interpreter) uint8ArrayValue(data []byte) goja.Value {
 
 // blobPartBytes 把 Blob 构造参数的一个 part 转成字节：
 // 另一个 Blob（内部字节字段）> TypedArray/Array（按元素）> 其他（字符串化）。
-func (r *Interpreter) blobPartBytes(p goja.Value) []byte {
-	if p == nil || goja.IsUndefined(p) || goja.IsNull(p) {
+func (r *Interpreter) blobPartBytes(p beValue) []byte {
+	if p == nil || beIsUndefined(p) || beIsNull(p) {
 		return nil
 	}
 	if o := p.ToObject(r.vm); o != nil {
-		if d := o.Get(blobDataKey); d != nil && !goja.IsUndefined(d) && !goja.IsNull(d) {
+		if d := o.Get(blobDataKey); d != nil && !beIsUndefined(d) && !beIsNull(d) {
 			return []byte(d.String())
 		}
-		if lv := o.Get("length"); lv != nil && !goja.IsUndefined(lv) && !goja.IsNull(lv) {
+		if lv := o.Get("length"); lv != nil && !beIsUndefined(lv) && !beIsNull(lv) {
 			n := int(lv.ToInteger())
 			buf := make([]byte, 0, n)
 			for i := 0; i < n; i++ {
 				ev := o.Get(strconv.Itoa(i))
-				if ev == nil || goja.IsUndefined(ev) || goja.IsNull(ev) {
+				if ev == nil || beIsUndefined(ev) || beIsNull(ev) {
 					buf = append(buf, 0)
 					continue
 				}
@@ -91,12 +89,12 @@ func (r *Interpreter) blobPartBytes(p goja.Value) []byte {
 }
 
 func (r *Interpreter) registerBlob() {
-	r.vm.Set("Blob", func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("Blob", func(call beConstructorCall) *beObject {
 		obj := r.vm.NewObject()
 		var data []byte
 		if len(call.Arguments) >= 1 {
 			if parts := call.Argument(0).ToObject(r.vm); parts != nil {
-				if lv := parts.Get("length"); lv != nil && !goja.IsUndefined(lv) && !goja.IsNull(lv) {
+				if lv := parts.Get("length"); lv != nil && !beIsUndefined(lv) && !beIsNull(lv) {
 					n := int(lv.ToInteger())
 					for i := 0; i < n; i++ {
 						data = append(data, r.blobPartBytes(parts.Get(strconv.Itoa(i)))...)
@@ -107,7 +105,7 @@ func (r *Interpreter) registerBlob() {
 		mimeType := ""
 		if len(call.Arguments) >= 2 {
 			if opts := call.Argument(1).ToObject(r.vm); opts != nil {
-				if t := opts.Get("type"); t != nil && !goja.IsUndefined(t) && !goja.IsNull(t) {
+				if t := opts.Get("type"); t != nil && !beIsUndefined(t) && !beIsNull(t) {
 					mimeType = t.String()
 				}
 			}
@@ -115,13 +113,13 @@ func (r *Interpreter) registerBlob() {
 		obj.Set("size", r.vm.ToValue(int64(len(data))))
 		obj.Set("type", r.vm.ToValue(mimeType))
 		obj.Set(blobDataKey, r.vm.ToValue(string(data)))
-		obj.Set("text", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("text", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			return r.promiseResolved(r.vm.ToValue(string(data)))
 		}))
-		obj.Set("arrayBuffer", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("arrayBuffer", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			return r.promiseResolved(r.uint8ArrayValue(data))
 		}))
-		obj.Set("slice", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("slice", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			start, end := 0, len(data)
 			if len(call2.Arguments) >= 1 {
 				start = int(call2.Argument(0).ToInteger())
@@ -155,14 +153,14 @@ func (r *Interpreter) registerBlob() {
 }
 
 func (r *Interpreter) registerFileReader() {
-	r.vm.Set("FileReader", func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("FileReader", func(call beConstructorCall) *beObject {
 		obj := r.vm.NewObject()
 		obj.Set("EMPTY", r.vm.ToValue(int64(0)))
 		obj.Set("LOADING", r.vm.ToValue(int64(1)))
 		obj.Set("DONE", r.vm.ToValue(int64(2)))
 		obj.Set("readyState", r.vm.ToValue(int64(0)))
-		obj.Set("result", goja.Null())
-		obj.Set("error", goja.Null())
+		obj.Set("result", beNull())
+		obj.Set("error", beNull())
 
 		// fire 依次触发 onX 内容属性与 addEventListener 注册的同名监听器。
 		fire := func(typ string) {
@@ -170,18 +168,18 @@ func (r *Interpreter) registerFileReader() {
 			ev.Set("type", r.vm.ToValue(typ))
 			ev.Set("target", obj)
 			ev.Set("currentTarget", obj)
-			if h := obj.Get("on" + typ); h != nil && !goja.IsUndefined(h) && !goja.IsNull(h) {
-				if fn, ok := goja.AssertFunction(h); ok {
+			if h := obj.Get("on" + typ); h != nil && !beIsUndefined(h) && !beIsNull(h) {
+				if fn, ok := beAssertFunction(h); ok {
 					_, _ = fn(obj, ev)
 				}
 			}
-			if lo := obj.Get("__wbFRListeners"); lo != nil && !goja.IsUndefined(lo) && !goja.IsNull(lo) {
+			if lo := obj.Get("__wbFRListeners"); lo != nil && !beIsUndefined(lo) && !beIsNull(lo) {
 				if lobj := lo.ToObject(r.vm); lobj != nil {
-					if av := lobj.Get(typ); av != nil && !goja.IsUndefined(av) && !goja.IsNull(av) {
+					if av := lobj.Get(typ); av != nil && !beIsUndefined(av) && !beIsNull(av) {
 						if ao := av.ToObject(r.vm); ao != nil {
 							if nv := ao.Get("length"); nv != nil {
 								for i := 0; i < int(nv.ToInteger()); i++ {
-									if f, ok := goja.AssertFunction(ao.Get(strconv.Itoa(i))); ok {
+									if f, ok := beAssertFunction(ao.Get(strconv.Itoa(i))); ok {
 										_, _ = f(obj, ev)
 									}
 								}
@@ -192,17 +190,17 @@ func (r *Interpreter) registerFileReader() {
 			}
 		}
 
-		read := func(blob goja.Value, mode string) {
+		read := func(blob beValue, mode string) {
 			var data []byte
 			mimeType := ""
-			if blob != nil && !goja.IsUndefined(blob) && !goja.IsNull(blob) {
+			if blob != nil && !beIsUndefined(blob) && !beIsNull(blob) {
 				if bo := blob.ToObject(r.vm); bo != nil {
-					if d := bo.Get(blobDataKey); d != nil && !goja.IsUndefined(d) && !goja.IsNull(d) {
+					if d := bo.Get(blobDataKey); d != nil && !beIsUndefined(d) && !beIsNull(d) {
 						data = []byte(d.String())
 					} else {
 						data = r.blobPartBytes(blob)
 					}
-					if t := bo.Get("type"); t != nil && !goja.IsUndefined(t) && !goja.IsNull(t) {
+					if t := bo.Get("type"); t != nil && !beIsUndefined(t) && !beIsNull(t) {
 						mimeType = t.String()
 					}
 				}
@@ -225,12 +223,12 @@ func (r *Interpreter) registerFileReader() {
 				fire("loadend")
 			}
 			// 规范要求异步完成（事件在调用返回后触发）；有 setTimeout 就走异步。
-			if tm := r.vm.Get("setTimeout"); tm != nil && !goja.IsUndefined(tm) && !goja.IsNull(tm) {
-				if f, ok := goja.AssertFunction(tm); ok {
-					_, _ = f(goja.Undefined(),
-						r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+			if tm := r.vm.Get("setTimeout"); tm != nil && !beIsUndefined(tm) && !beIsNull(tm) {
+				if f, ok := beAssertFunction(tm); ok {
+					_, _ = f(beUndefined(),
+						r.vm.ToValue(func(beFunctionCall) beValue {
 							doRead()
-							return goja.Undefined()
+							return beUndefined()
 						}),
 						r.vm.ToValue(int64(0)))
 					return
@@ -239,40 +237,40 @@ func (r *Interpreter) registerFileReader() {
 			doRead()
 		}
 
-		obj.Set("readAsText", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("readAsText", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			read(call2.Argument(0), "text")
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("readAsDataURL", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("readAsDataURL", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			read(call2.Argument(0), "dataurl")
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("readAsArrayBuffer", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("readAsArrayBuffer", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			read(call2.Argument(0), "arraybuffer")
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("readAsBinaryString", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("readAsBinaryString", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			read(call2.Argument(0), "binarystring")
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("abort", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("abort", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			obj.Set("readyState", r.vm.ToValue(int64(2)))
-			obj.Set("result", goja.Null())
+			obj.Set("result", beNull())
 			fire("abort")
 			fire("loadend")
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("addEventListener", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
+		obj.Set("addEventListener", r.vm.ToValue(func(call2 beFunctionCall) beValue {
 			typ := call2.Argument(0).String()
-			var lobj *goja.Object
-			if lo := obj.Get("__wbFRListeners"); lo == nil || goja.IsUndefined(lo) || goja.IsNull(lo) {
+			var lobj *beObject
+			if lo := obj.Get("__wbFRListeners"); lo == nil || beIsUndefined(lo) || beIsNull(lo) {
 				lobj = r.vm.NewObject()
 				obj.Set("__wbFRListeners", r.vm.ToValue(lobj))
 			} else {
 				lobj = lo.ToObject(r.vm)
 			}
-			var arr *goja.Object
-			if av := lobj.Get(typ); av == nil || goja.IsUndefined(av) || goja.IsNull(av) {
+			var arr *beObject
+			if av := lobj.Get(typ); av == nil || beIsUndefined(av) || beIsNull(av) {
 				arr = r.vm.NewObject()
 				arr.Set("length", r.vm.ToValue(int64(0)))
 				lobj.Set(typ, r.vm.ToValue(arr))
@@ -282,10 +280,10 @@ func (r *Interpreter) registerFileReader() {
 			n := int(arr.Get("length").ToInteger())
 			arr.Set(strconv.Itoa(n), call2.Argument(1))
 			arr.Set("length", r.vm.ToValue(int64(n+1)))
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("removeEventListener", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
-			return goja.Undefined()
+		obj.Set("removeEventListener", r.vm.ToValue(func(call2 beFunctionCall) beValue {
+			return beUndefined()
 		}))
 		return obj
 	})
@@ -294,13 +292,13 @@ func (r *Interpreter) registerFileReader() {
 // ── TextEncoder ─────────────────────────────────────────
 
 func (r *Interpreter) registerTextEncoder() {
-	r.vm.Set("TextEncoder", func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("TextEncoder", func(call beConstructorCall) *beObject {
 		obj := r.vm.NewObject()
 
 		obj.Set("encoding", r.vm.ToValue("utf-8"))
 
 		// encode(s: string) → Uint8Array
-		obj.Set("encode", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		obj.Set("encode", r.vm.ToValue(func(call beFunctionCall) beValue {
 			s := call.Argument(0).String()
 			n := len(s)
 			ctor := r.vm.Get("Uint8Array")
@@ -315,7 +313,7 @@ func (r *Interpreter) registerTextEncoder() {
 		}))
 
 		// encodeInto(source: string, destination: Uint8Array) → { read, written }
-		obj.Set("encodeInto", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		obj.Set("encodeInto", r.vm.ToValue(func(call beFunctionCall) beValue {
 			s := call.Argument(0).String()
 			destObj := call.Argument(1).ToObject(r.vm)
 			var destLen int64
@@ -342,14 +340,14 @@ func (r *Interpreter) registerTextEncoder() {
 // ── TextDecoder ─────────────────────────────────────────
 
 func (r *Interpreter) registerTextDecoder() {
-	r.vm.Set("TextDecoder", func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("TextDecoder", func(call beConstructorCall) *beObject {
 		obj := r.vm.NewObject()
 		obj.Set("encoding", r.vm.ToValue("utf-8"))
 		obj.Set("fatal", r.vm.ToValue(false))
 		obj.Set("ignoreBOM", r.vm.ToValue(false))
 
 		// decode(input?: Uint8Array) → string
-		obj.Set("decode", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		obj.Set("decode", r.vm.ToValue(func(call beFunctionCall) beValue {
 			if len(call.Arguments) == 0 {
 				return r.vm.ToValue("")
 			}
@@ -376,7 +374,7 @@ func (r *Interpreter) registerTextDecoder() {
 
 func (r *Interpreter) registerCrypto() {
 	cryptoObj := r.vm.NewObject()
-	cryptoObj.Set("getRandomValues", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	cryptoObj.Set("getRandomValues", r.vm.ToValue(func(call beFunctionCall) beValue {
 		arg := call.Argument(0)
 		argObj := arg.ToObject(r.vm)
 		length := int(argObj.Get("length").ToInteger())
@@ -398,18 +396,18 @@ func (r *Interpreter) registerCrypto() {
 func (r *Interpreter) registerStructuredClone() {
 	// structuredClone(value) — deep copy using goja's JSON round-trip.
 	// Covers Pinia/Vue use cases (plain objects, arrays, primitives).
-	r.vm.Set("structuredClone", func(call goja.FunctionCall) goja.Value {
+	r.vm.Set("structuredClone", func(call beFunctionCall) beValue {
 		if len(call.Arguments) == 0 {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		jsonFn := r.vm.Get("JSON").ToObject(r.vm).Get("stringify")
-		jsonCall, _ := r.vm.Call(jsonFn, goja.Undefined(), call.Argument(0))
+		jsonCall, _ := r.vm.Call(jsonFn, beUndefined(), call.Argument(0))
 		if jsonCall == nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		v, err := r.vm.RunString(jsonCall.String())
 		if err != nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		return v
 	})
@@ -428,27 +426,27 @@ func (r *Interpreter) registerStructuredClone() {
 // 同理，FinalizationRegistry 的回调永不触发（对应「目标未被回收」），register/
 // unregister 按规范分别返回 undefined / false。
 func (r *Interpreter) registerWeakRef() {
-	r.vm.Set("WeakRef", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("WeakRef", r.vm.ToValue(func(call beConstructorCall) *beObject {
 		if len(call.Arguments) == 0 {
 			panic(r.vm.NewTypeError("WeakRef: 1 argument required, but only 0 present."))
 		}
 		target := call.Argument(0)
-		if target == nil || target == goja.Undefined() || target == goja.Null() {
+		if target == nil || target == beUndefined() || target == beNull() {
 			panic(r.vm.NewTypeError("WeakRef: target must be an object"))
 		}
 		obj := r.vm.NewObject()
-		obj.Set("deref", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		obj.Set("deref", r.vm.ToValue(func(beFunctionCall) beValue {
 			return target
 		}))
 		return obj
 	}))
 
-	r.vm.Set("FinalizationRegistry", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("FinalizationRegistry", r.vm.ToValue(func(call beConstructorCall) *beObject {
 		obj := r.vm.NewObject()
-		obj.Set("register", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return goja.Undefined()
+		obj.Set("register", r.vm.ToValue(func(beFunctionCall) beValue {
+			return beUndefined()
 		}))
-		obj.Set("unregister", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		obj.Set("unregister", r.vm.ToValue(func(beFunctionCall) beValue {
 			return r.vm.ToValue(false)
 		}))
 		return obj
@@ -460,7 +458,7 @@ func (r *Interpreter) registerWeakRef() {
 func (r *Interpreter) registerPerformance() {
 	start := time.Now()
 	perfObj := r.vm.NewObject()
-	perfObj.Set("now", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	perfObj.Set("now", r.vm.ToValue(func(call beFunctionCall) beValue {
 		elapsed := time.Since(start).Seconds() * 1000
 		return r.vm.ToValue(elapsed)
 	}))
@@ -492,34 +490,34 @@ func (r *Interpreter) registerNavigator() {
 //   - abort() 幂等（只派发一次）；监听器先于 onabort 执行；{once:true} 生效
 func (r *Interpreter) registerAbortController() {
 	type listener struct {
-		fn   goja.Value
+		fn   beValue
 		once bool
 	}
 	type signalState struct {
-		obj     *goja.Object
+		obj     *beObject
 		aborted bool
-		reason  goja.Value
+		reason  beValue
 		ls      map[string][]listener
 	}
 	// abortReason：无 reason 时用 Error("signal is aborted without reason")，
 	// 语义对齐浏览器（DOMException AbortError）。
-	abortReason := func(reason goja.Value) goja.Value {
-		if reason != nil && !goja.IsUndefined(reason) && !goja.IsNull(reason) {
+	abortReason := func(reason beValue) beValue {
+		if reason != nil && !beIsUndefined(reason) && !beIsNull(reason) {
 			return reason
 		}
 		return r.vm.NewGoError(errors.New("signal is aborted without reason"))
 	}
 	// dispatch：先走 addEventListener 的监听器，再走 on<type> 属性处理器。
-	dispatch := func(st *signalState, ev *goja.Object, typ string) {
+	dispatch := func(st *signalState, ev *beObject, typ string) {
 		ls := st.ls[typ]
 		delete(st.ls, typ)
 		for _, l := range ls {
-			if fn, ok := goja.AssertFunction(l.fn); ok {
+			if fn, ok := beAssertFunction(l.fn); ok {
 				_, _ = fn(st.obj, ev)
 			}
 		}
 		if h := st.obj.Get("on" + typ); h != nil {
-			if fn, ok := goja.AssertFunction(h); ok {
+			if fn, ok := beAssertFunction(h); ok {
 				_, _ = fn(st.obj, ev)
 			}
 		}
@@ -528,10 +526,10 @@ func (r *Interpreter) registerAbortController() {
 		st := &signalState{ls: map[string][]listener{}}
 		obj := r.vm.NewObject()
 		obj.Set("aborted", r.vm.ToValue(false))
-		obj.Set("reason", goja.Undefined())
+		obj.Set("reason", beUndefined())
 		st.obj = obj
-		obj.Set("addEventListener", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-			if _, ok := goja.AssertFunction(call.Argument(1)); ok {
+		obj.Set("addEventListener", r.vm.ToValue(func(call beFunctionCall) beValue {
+			if _, ok := beAssertFunction(call.Argument(1)); ok {
 				t := call.Argument(0).String()
 				once := false
 				if len(call.Arguments) >= 3 {
@@ -543,9 +541,9 @@ func (r *Interpreter) registerAbortController() {
 				}
 				st.ls[t] = append(st.ls[t], listener{fn: call.Argument(1), once: once})
 			}
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("removeEventListener", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		obj.Set("removeEventListener", r.vm.ToValue(func(call beFunctionCall) beValue {
 			t := call.Argument(0).String()
 			cur := st.ls[t]
 			out := cur[:0]
@@ -556,10 +554,10 @@ func (r *Interpreter) registerAbortController() {
 				out = append(out, l)
 			}
 			st.ls[t] = out
-			return goja.Undefined()
+			return beUndefined()
 		}))
-		obj.Set("dispatchEvent", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-			ev, ok := call.Argument(0).(*goja.Object)
+		obj.Set("dispatchEvent", r.vm.ToValue(func(call beFunctionCall) beValue {
+			ev, ok := call.Argument(0).(*beObject)
 			if !ok {
 				return r.vm.ToValue(false)
 			}
@@ -571,15 +569,15 @@ func (r *Interpreter) registerAbortController() {
 			dispatch(st, ev, typ)
 			return r.vm.ToValue(true)
 		}))
-		obj.Set("throwIfAborted", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		obj.Set("throwIfAborted", r.vm.ToValue(func(call beFunctionCall) beValue {
 			if st.aborted {
 				panic(st.reason)
 			}
-			return goja.Undefined()
+			return beUndefined()
 		}))
 		return st
 	}
-	doAbort := func(st *signalState, reason goja.Value) {
+	doAbort := func(st *signalState, reason beValue) {
 		if st.aborted {
 			return
 		}
@@ -592,28 +590,28 @@ func (r *Interpreter) registerAbortController() {
 		ev.Set("target", st.obj)
 		dispatch(st, ev, "abort")
 	}
-	r.vm.Set("AbortController", func(call goja.ConstructorCall) *goja.Object {
+	r.vm.Set("AbortController", func(call beConstructorCall) *beObject {
 		st := makeSignal()
 		ctrl := r.vm.NewObject()
 		ctrl.Set("signal", st.obj)
-		ctrl.Set("abort", r.vm.ToValue(func(call2 goja.FunctionCall) goja.Value {
-			var reason goja.Value
+		ctrl.Set("abort", r.vm.ToValue(func(call2 beFunctionCall) beValue {
+			var reason beValue
 			if len(call2.Arguments) >= 1 {
 				reason = call2.Argument(0)
 			}
 			doAbort(st, reason)
-			return goja.Undefined()
+			return beUndefined()
 		}))
 		return ctrl
 	})
 	// AbortSignal：全局构造器 + 静态 abort(reason)（规范里 signal 不可 new，
 	// 但深拷贝/结构化克隆场景会 `AbortSignal.abort(reason)`）。
-	sigCtor := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	sigCtor := r.vm.ToValue(func(call beConstructorCall) *beObject {
 		return makeSignal().obj
 	})
 	if o := sigCtor.ToObject(r.vm); o != nil {
-		o.Set("abort", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-			var reason goja.Value
+		o.Set("abort", r.vm.ToValue(func(call beFunctionCall) beValue {
+			var reason beValue
 			if len(call.Arguments) >= 1 {
 				reason = call.Argument(0)
 			}

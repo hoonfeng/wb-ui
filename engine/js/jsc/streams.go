@@ -33,15 +33,13 @@ package jsc
 
 import (
 	"sync"
-
-	"wb-ui/engine/js/goja"
 )
 
 // ─── 内部状态 ────────────────────────────────────────────
 
 // streamChunk 是队列里的一个分块：值 + 按 size 策略算出的权重（背压用）。
 type streamChunk struct {
-	value goja.Value
+	value beValue
 	size  float64
 }
 
@@ -55,11 +53,11 @@ type streamReadRequest struct {
 // readableState 是 ReadableStream（及其派生流）的内部状态。
 type readableState struct {
 	interp  *Interpreter
-	vm      *goja.Runtime
-	obj     *goja.Object
+	vm      *beRuntime
+	obj     *beObject
 	items   []streamChunk
 	done    bool
-	err     goja.Value
+	err     beValue
 	pending []*streamReadRequest
 	// down 是 pipeTo/pipeThrough 连接的下游 TransformStream：非 nil 时 enqueue
 	// 直接推给下游（同步泵，确定性最好）。
@@ -67,17 +65,17 @@ type readableState struct {
 
 	// 队列策略（背压）
 	highWaterMark float64
-	sizeFn        goja.Value
+	sizeFn        beValue
 	queueSize     float64
 
 	// underlyingSource 钩子
-	pullFn   goja.Value
-	cancelFn goja.Value
+	pullFn   beValue
+	cancelFn beValue
 	pulling  bool
 
 	// ctrl 是 ReadableStreamDefaultController（同一流始终同一对象：start 与
 	// pull 收到的必须 ===）。
-	ctrl *goja.Object
+	ctrl *beObject
 
 	// reader 是当前持有的读锁（locked 属性 = reader != nil）。
 	reader *readerState
@@ -87,8 +85,8 @@ type readableState struct {
 type readerState struct {
 	interp        *Interpreter
 	st            *readableState
-	obj           *goja.Object
-	closedPromise goja.Value
+	obj           *beObject
+	closedPromise beValue
 	closedResolve func(interface{}) error
 	closedReject  func(interface{}) error
 }
@@ -97,16 +95,16 @@ type readerState struct {
 // （pipeTo 的目标）。
 type transformState struct {
 	interp      *Interpreter
-	vm          *goja.Runtime
+	vm          *beRuntime
 	readable    *readableState
-	readableObj *goja.Object
-	writableObj *goja.Object
-	obj         *goja.Object
-	transform   goja.Value
-	flush       goja.Value
+	readableObj *beObject
+	writableObj *beObject
+	obj         *beObject
+	transform   beValue
+	flush       beValue
 	closed      bool
 	// writer 是当前持有的写锁（getWriter 后 writable.locked = true）。
-	writer *goja.Object
+	writer *beObject
 	// onClose 在可写端关闭后调用（pipeTo 的完成通知）。
 	onClose func()
 }
@@ -118,21 +116,21 @@ type pipeOptions struct {
 	preventCancel bool
 }
 
-// streamRealm 是每个 goja.Runtime 一份的 Streams 原型/构造器集合。
+// streamRealm 是每个 beRuntime 一份的 Streams 原型/构造器集合。
 // 原型挂在构造器的 prototype 上，实例经 __proto__ 继承（instanceof 成立）。
 type streamRealm struct {
-	readableProto  *goja.Object
-	transformProto *goja.Object
-	encoderProto   *goja.Object
-	decoderProto   *goja.Object
-	writableProto  *goja.Object
-	readerProto    *goja.Object
-	writerProto    *goja.Object
+	readableProto  *beObject
+	transformProto *beObject
+	encoderProto   *beObject
+	decoderProto   *beObject
+	writableProto  *beObject
+	readerProto    *beObject
+	writerProto    *beObject
 }
 
 var (
 	streamRealmsMu sync.Mutex
-	streamRealms   = map[*goja.Runtime]*streamRealm{}
+	streamRealms   = map[*beRuntime]*streamRealm{}
 )
 
 // ─── 注册 ────────────────────────────────────────────────
@@ -164,16 +162,16 @@ func (r *Interpreter) realmOf() *streamRealm {
 // RunJobs 驱动）。没有 Promise 时退化为同步调用（保证功能不丢）。
 func (r *Interpreter) queueMicrotask(fn func()) {
 	p, resolve, _ := r.vm.NewPromise()
-	_ = resolve(goja.Undefined())
+	_ = resolve(beUndefined())
 	obj := p.PromiseObj()
-	then, ok := goja.AssertFunction(obj.Get("then"))
+	then, ok := beAssertFunction(obj.Get("then"))
 	if !ok {
 		fn()
 		return
 	}
-	cb := r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+	cb := r.vm.ToValue(func(beFunctionCall) beValue {
 		fn()
-		return goja.Undefined()
+		return beUndefined()
 	})
 	if _, err := then(obj, cb); err != nil {
 		fn()
@@ -182,26 +180,26 @@ func (r *Interpreter) queueMicrotask(fn func()) {
 
 // thenValue 在 v 是 thenable 时按 then 链回调，否则立即调用 onOk。
 // （pipeTo 的鸭子类型目标：write() 可能返回 Promise，也可能同步返回。）
-func (r *Interpreter) thenValue(v goja.Value, onOk func(goja.Value), onErr func(goja.Value)) {
-	obj, ok := v.(*goja.Object)
+func (r *Interpreter) thenValue(v beValue, onOk func(beValue), onErr func(beValue)) {
+	obj, ok := v.(*beObject)
 	if !ok {
 		onOk(v)
 		return
 	}
-	then, ok := goja.AssertFunction(obj.Get("then"))
+	then, ok := beAssertFunction(obj.Get("then"))
 	if !ok {
 		onOk(v)
 		return
 	}
-	okFn := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	okFn := r.vm.ToValue(func(call beFunctionCall) beValue {
 		onOk(call.Argument(0))
-		return goja.Undefined()
+		return beUndefined()
 	})
-	errFn := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	errFn := r.vm.ToValue(func(call beFunctionCall) beValue {
 		if onErr != nil {
 			onErr(call.Argument(0))
 		}
-		return goja.Undefined()
+		return beUndefined()
 	})
 	if _, err := then(obj, okFn, errFn); err != nil && onErr != nil {
 		onErr(r.vm.ToValue(err.Error()))
@@ -209,12 +207,12 @@ func (r *Interpreter) thenValue(v goja.Value, onOk func(goja.Value), onErr func(
 }
 
 // callOrIgnore 调用对象上的方法（忽略返回值与错误）。
-func (r *Interpreter) callOrIgnore(obj goja.Value, method string, args ...goja.Value) {
-	o, ok := obj.(*goja.Object)
+func (r *Interpreter) callOrIgnore(obj beValue, method string, args ...beValue) {
+	o, ok := obj.(*beObject)
 	if !ok {
 		return
 	}
-	fn, ok := goja.AssertFunction(o.Get(method))
+	fn, ok := beAssertFunction(o.Get(method))
 	if !ok {
 		return
 	}
@@ -227,16 +225,16 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 	// ReadableStreamDefaultReader.prototype
 	readerProto := r.vm.NewObject()
 	realm.readerProto = readerProto
-	readerProto.Set("read", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readerProto.Set("read", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if rs := readerStateOf(call.This); rs != nil && rs.st != nil {
 			return rs.st.read()
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
-	readerProto.Set("releaseLock", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readerProto.Set("releaseLock", r.vm.ToValue(func(call beFunctionCall) beValue {
 		rs := readerStateOf(call.This)
 		if rs == nil || rs.st == nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		st := rs.st
 		// 规范：释放锁会让挂起的读请求以 TypeError 拒绝。
@@ -251,30 +249,30 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 			st.reader = nil
 		}
 		rs.st = nil
-		return goja.Undefined()
+		return beUndefined()
 	}))
-	readerProto.Set("cancel", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readerProto.Set("cancel", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if rs := readerStateOf(call.This); rs != nil && rs.st != nil {
 			return rs.st.cancelStream(call.Argument(0))
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
 	_ = readerProto.DefineAccessorProperty("closed",
-		r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.vm.ToValue(func(call beFunctionCall) beValue {
 			if rs := readerStateOf(call.This); rs != nil {
 				if rs.closedPromise != nil {
 					return rs.closedPromise
 				}
-				return r.resolvedPromise(goja.Undefined())
+				return r.resolvedPromise(beUndefined())
 			}
-			return r.resolvedPromise(goja.Undefined())
-		}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+			return r.resolvedPromise(beUndefined())
+		}), beUndefined(), beFLAGFALSE, beFLAGTRUE)
 
 	// ReadableStream.prototype
 	readableProto := r.vm.NewObject()
 	realm.readableProto = readableProto
 
-	readableProto.Set("getReader", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readableProto.Set("getReader", r.vm.ToValue(func(call beFunctionCall) beValue {
 		st := readableStateOf(call.This)
 		if st == nil {
 			panic(r.vm.NewTypeError("Illegal invocation"))
@@ -285,13 +283,13 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 		// mode:'byob' 不支持缓冲区分离语义（按默认读处理，见文件头说明）。
 		return r.newReaderObject(realm, st)
 	}))
-	readableProto.Set("pipeThrough", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readableProto.Set("pipeThrough", r.vm.ToValue(func(call beFunctionCall) beValue {
 		st := readableStateOf(call.This)
 		if st == nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		arg := call.Argument(0)
-		o, ok := arg.(*goja.Object)
+		o, ok := arg.(*beObject)
 		if !ok {
 			panic(r.vm.NewTypeError("pipeThrough expects a {readable, writable} pair"))
 		}
@@ -303,32 +301,32 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 		// 任意 {readable, writable} 对（鸭子类型）。
 		readable := o.Get("readable")
 		writable := o.Get("writable")
-		if writable == nil || goja.IsUndefined(writable) {
+		if writable == nil || beIsUndefined(writable) {
 			panic(r.vm.NewTypeError("pipeThrough target has no writable"))
 		}
 		_ = r.pipeToDuck(st, writable, r.pipeOptionsFrom(call.Argument(1)))
 		return readable
 	}))
-	readableProto.Set("pipeTo", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readableProto.Set("pipeTo", r.vm.ToValue(func(call beFunctionCall) beValue {
 		st := readableStateOf(call.This)
 		if st == nil {
-			return r.resolvedPromise(goja.Undefined())
+			return r.resolvedPromise(beUndefined())
 		}
 		target := call.Argument(0)
 		if ts := transformStateOf(target); ts != nil {
 			st.pipeInto(ts)
-			return r.resolvedPromise(goja.Undefined())
+			return r.resolvedPromise(beUndefined())
 		}
 		return r.pipeToDuck(st, target, r.pipeOptionsFrom(call.Argument(1)))
 	}))
-	readableProto.Set("cancel", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readableProto.Set("cancel", r.vm.ToValue(func(call beFunctionCall) beValue {
 		st := readableStateOf(call.This)
 		if st == nil {
-			return r.resolvedPromise(goja.Undefined())
+			return r.resolvedPromise(beUndefined())
 		}
 		return st.cancelStream(call.Argument(0))
 	}))
-	readableProto.Set("tee", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	readableProto.Set("tee", r.vm.ToValue(func(call beFunctionCall) beValue {
 		st := readableStateOf(call.This)
 		if st == nil {
 			panic(r.vm.NewTypeError("Illegal invocation"))
@@ -337,24 +335,24 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 		return r.vm.NewArray(a, b)
 	}))
 	_ = readableProto.DefineAccessorProperty("locked",
-		r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.vm.ToValue(func(call beFunctionCall) beValue {
 			if st := readableStateOf(call.This); st != nil {
 				return r.vm.ToValue(st.reader != nil)
 			}
 			return r.vm.ToValue(false)
-		}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+		}), beUndefined(), beFLAGFALSE, beFLAGTRUE)
 
 	// ReadableStream 构造器
-	var ctorVal goja.Value
-	ctorVal = r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	var ctorVal beValue
+	ctorVal = r.vm.ToValue(func(call beConstructorCall) *beObject {
 		src := call.Argument(0)
 		st := r.newReadableState(realm)
 		st.applyStrategy(call.Argument(1))
-		if o, ok := src.(*goja.Object); ok {
+		if o, ok := src.(*beObject); ok {
 			st.pullFn = o.Get("pull")
 			st.cancelFn = o.Get("cancel")
-			if fn, ok2 := goja.AssertFunction(o.Get("start")); ok2 {
-				if _, err := fn(goja.Undefined(), st.controller()); err != nil {
+			if fn, ok2 := beAssertFunction(o.Get("start")); ok2 {
+				if _, err := fn(beUndefined(), st.controller()); err != nil {
 					st.errorStream(r.vm.ToValue(err.Error()))
 				}
 			}
@@ -366,7 +364,7 @@ func (r *Interpreter) registerReadableStream(realm *streamRealm) {
 	r.vm.Set("ReadableStream", ctorVal)
 	// 让 `stream instanceof ReadableStream` 成立：构造器 prototype 指向
 	// 实例实际继承的原型对象（goja 自动建的 prototype 会被这里覆盖）。
-	if o, ok := ctorVal.(*goja.Object); ok {
+	if o, ok := ctorVal.(*beObject); ok {
 		o.Set("prototype", readableProto)
 	}
 }
@@ -384,7 +382,7 @@ func (r *Interpreter) newReadableState(realm *streamRealm) *readableState {
 }
 
 // newReaderObject 创建 reader 对象（锁流、建 closed Promise）。
-func (r *Interpreter) newReaderObject(realm *streamRealm, st *readableState) goja.Value {
+func (r *Interpreter) newReaderObject(realm *streamRealm, st *readableState) beValue {
 	p, resolve, reject := r.vm.NewPromise()
 	rd := &readerState{
 		interp:        r,
@@ -394,7 +392,7 @@ func (r *Interpreter) newReaderObject(realm *streamRealm, st *readableState) goj
 		closedReject:  reject,
 	}
 	if st.done {
-		_ = resolve(goja.Undefined())
+		_ = resolve(beUndefined())
 	} else if st.err != nil {
 		_ = reject(st.err)
 	}
@@ -409,28 +407,28 @@ func (r *Interpreter) newReaderObject(realm *streamRealm, st *readableState) goj
 }
 
 // applyStrategy 应用 QueuingStrategy（second argument）：highWaterMark / size。
-func (s *readableState) applyStrategy(v goja.Value) {
-	o, ok := v.(*goja.Object)
+func (s *readableState) applyStrategy(v beValue) {
+	o, ok := v.(*beObject)
 	if !ok || o == nil {
 		return
 	}
-	if hwm := o.Get("highWaterMark"); hwm != nil && !goja.IsUndefined(hwm) {
+	if hwm := o.Get("highWaterMark"); hwm != nil && !beIsUndefined(hwm) {
 		if f := hwm.ToFloat(); f > 0 {
 			s.highWaterMark = f
 		}
 	}
-	if sz := o.Get("size"); sz != nil && !goja.IsUndefined(sz) {
+	if sz := o.Get("size"); sz != nil && !beIsUndefined(sz) {
 		s.sizeFn = sz
 	}
 }
 
 // chunkSize 返回一个 chunk 的队列大小（默认 1，可被 strategy.size 覆盖）。
-func (s *readableState) chunkSize(chunk goja.Value) float64 {
-	fn, ok := goja.AssertFunction(s.sizeFn)
+func (s *readableState) chunkSize(chunk beValue) float64 {
+	fn, ok := beAssertFunction(s.sizeFn)
 	if !ok {
 		return 1
 	}
-	out, err := fn(goja.Undefined(), chunk)
+	out, err := fn(beUndefined(), chunk)
 	if err != nil {
 		return 1
 	}
@@ -442,41 +440,41 @@ func (s *readableState) chunkSize(chunk goja.Value) float64 {
 }
 
 // desiredSize 是控制器可继续入队的空间；流结束/出错后为 null（规范语义）。
-func (s *readableState) desiredSize() goja.Value {
+func (s *readableState) desiredSize() beValue {
 	if s.done || s.err != nil {
-		return goja.Null()
+		return beNull()
 	}
 	return s.vm.ToValue(s.highWaterMark - s.queueSize)
 }
 
 // controller 返回该流的 ReadableStreamDefaultController（同一流同一对象）。
-func (s *readableState) controller() *goja.Object {
+func (s *readableState) controller() *beObject {
 	if s.ctrl != nil {
 		return s.ctrl
 	}
 	c := s.vm.NewObject()
 	s.ctrl = c
-	c.Set("enqueue", s.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	c.Set("enqueue", s.vm.ToValue(func(call beFunctionCall) beValue {
 		s.enqueue(call.Argument(0))
-		return goja.Undefined()
+		return beUndefined()
 	}))
-	c.Set("close", s.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	c.Set("close", s.vm.ToValue(func(call beFunctionCall) beValue {
 		s.closeStream()
-		return goja.Undefined()
+		return beUndefined()
 	}))
-	c.Set("error", s.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	c.Set("error", s.vm.ToValue(func(call beFunctionCall) beValue {
 		s.errorStream(call.Argument(0))
-		return goja.Undefined()
+		return beUndefined()
 	}))
 	_ = c.DefineAccessorProperty("desiredSize",
-		s.vm.ToValue(func(goja.FunctionCall) goja.Value { return s.desiredSize() }),
-		goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+		s.vm.ToValue(func(beFunctionCall) beValue { return s.desiredSize() }),
+		beUndefined(), beFLAGFALSE, beFLAGTRUE)
 	return c
 }
 
 // enqueue 入队一个 chunk：已连接下游则直接推给下游（含 transform 链），
 // 否则满足挂起的 read()，再否则缓冲（计入队列大小/背压）。
-func (s *readableState) enqueue(chunk goja.Value) {
+func (s *readableState) enqueue(chunk beValue) {
 	if s.done || s.err != nil {
 		return
 	}
@@ -497,7 +495,7 @@ func (s *readableState) enqueue(chunk goja.Value) {
 }
 
 // readResult 构造 read() 的结清值 {value, done}。
-func (s *readableState) readResult(v goja.Value, done bool) goja.Value {
+func (s *readableState) readResult(v beValue, done bool) beValue {
 	o := s.vm.NewObject()
 	o.Set("value", v)
 	o.Set("done", s.vm.ToValue(done))
@@ -515,14 +513,14 @@ func (s *readableState) closeStream() {
 	}
 	s.done = true
 	for _, req := range s.pending {
-		_ = req.resolve(s.readResult(goja.Undefined(), true))
+		_ = req.resolve(s.readResult(beUndefined(), true))
 	}
 	s.pending = nil
 	s.settleReaderClosed(nil)
 }
 
 // errorStream 以错误结束流：挂起的 read() 全部 reject，并向下游传播。
-func (s *readableState) errorStream(e goja.Value) {
+func (s *readableState) errorStream(e beValue) {
 	if s.done || s.err != nil {
 		return
 	}
@@ -544,10 +542,10 @@ func (s *readableState) errorStream(e goja.Value) {
 
 // cancelStream 取消流（readable.cancel(reason) / reader.cancel(reason)）：
 // 中止已连接的下游、结清读请求、调用 underlyingSource.cancel(reason)。
-func (s *readableState) cancelStream(reason goja.Value) goja.Value {
+func (s *readableState) cancelStream(reason beValue) beValue {
 	p, resolve, _ := s.vm.NewPromise()
 	if s.done || s.err != nil {
-		_ = resolve(goja.Undefined())
+		_ = resolve(beUndefined())
 		return p.PromiseObj()
 	}
 	if s.down != nil {
@@ -557,28 +555,28 @@ func (s *readableState) cancelStream(reason goja.Value) goja.Value {
 	}
 	s.done = true
 	for _, req := range s.pending {
-		_ = req.resolve(s.readResult(goja.Undefined(), true))
+		_ = req.resolve(s.readResult(beUndefined(), true))
 	}
 	s.pending = nil
 	s.settleReaderClosed(nil)
-	if fn, ok := goja.AssertFunction(s.cancelFn); ok {
-		if _, err := fn(goja.Undefined(), reason); err != nil {
-			_ = resolve(goja.Undefined())
+	if fn, ok := beAssertFunction(s.cancelFn); ok {
+		if _, err := fn(beUndefined(), reason); err != nil {
+			_ = resolve(beUndefined())
 			return p.PromiseObj()
 		}
 	}
-	_ = resolve(goja.Undefined())
+	_ = resolve(beUndefined())
 	return p.PromiseObj()
 }
 
 // settleReaderClosed 结清 reader.closed（正常结束 resolve，出错 reject）。
-func (s *readableState) settleReaderClosed(err goja.Value) {
+func (s *readableState) settleReaderClosed(err beValue) {
 	rd := s.reader
 	if rd == nil || rd.closedResolve == nil {
 		return
 	}
 	if err == nil {
-		_ = rd.closedResolve(goja.Undefined())
+		_ = rd.closedResolve(beUndefined())
 	} else {
 		_ = rd.closedReject(err)
 	}
@@ -587,7 +585,7 @@ func (s *readableState) settleReaderClosed(err goja.Value) {
 }
 
 // read 返回 Promise<{value, done}>：有缓冲立即结清，否则挂起等数据。
-func (s *readableState) read() goja.Value {
+func (s *readableState) read() beValue {
 	p, resolve, reject := s.vm.NewPromise()
 	if s.err != nil {
 		_ = reject(s.err)
@@ -605,7 +603,7 @@ func (s *readableState) read() goja.Value {
 		return p.PromiseObj()
 	}
 	if s.done {
-		_ = resolve(s.readResult(goja.Undefined(), true))
+		_ = resolve(s.readResult(beUndefined(), true))
 		return p.PromiseObj()
 	}
 	s.pending = append(s.pending, &streamReadRequest{resolve: resolve, reject: reject})
@@ -619,7 +617,7 @@ func (s *readableState) shouldPull() bool {
 	if s.done || s.err != nil || s.down != nil {
 		return false
 	}
-	if s.pullFn == nil || goja.IsUndefined(s.pullFn) {
+	if s.pullFn == nil || beIsUndefined(s.pullFn) {
 		return false
 	}
 	if s.reader == nil {
@@ -639,11 +637,11 @@ func (s *readableState) maybePull() {
 		if !s.shouldPull() {
 			return
 		}
-		fn, ok := goja.AssertFunction(s.pullFn)
+		fn, ok := beAssertFunction(s.pullFn)
 		if !ok {
 			return
 		}
-		if _, err := fn(goja.Undefined(), s.controller()); err != nil {
+		if _, err := fn(beUndefined(), s.controller()); err != nil {
 			s.errorStream(s.vm.ToValue(err.Error()))
 		}
 	})
@@ -676,7 +674,7 @@ func (s *readableState) pipeInto(t *transformState) {
 
 // teeReadable 把流分成两个独立分支（原流被锁定）。两分支都还有队列空间时才
 // 继续向源流拉取——tee 的背压语义正是「最慢的分支决定拉取速度」。
-func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (goja.Value, goja.Value) {
+func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (beValue, beValue) {
 	branchA := r.newReadableState(realm)
 	branchB := r.newReadableState(realm)
 	// tee 会锁住原流（规范：tee() 后原流 locked）。
@@ -690,7 +688,7 @@ func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (goja.
 		}
 		return b.highWaterMark-b.queueSize > 0
 	}
-	closeBoth := func(e goja.Value) {
+	closeBoth := func(e beValue) {
 		if e == nil {
 			branchA.closeStream()
 			branchB.closeStream()
@@ -707,8 +705,8 @@ func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (goja.
 		}
 		// 需要时再拉：分支被读走数据后由 maybePull 触发（见 pullFn 布置）
 		res := src.read()
-		r.thenValue(res, func(v goja.Value) {
-			o, ok := v.(*goja.Object)
+		r.thenValue(res, func(v beValue) {
+			o, ok := v.(*beObject)
 			if !ok {
 				closeBoth(nil)
 				return
@@ -721,15 +719,15 @@ func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (goja.
 			branchA.enqueue(val)
 			branchB.enqueue(val)
 			pump()
-		}, func(e goja.Value) {
+		}, func(e beValue) {
 			closeBoth(e)
 		})
 	}
 	// 分支被读取/写入后继续泵（两分支各自成为驱动源）。
 	installTeePump := func(b *readableState) {
-		b.pullFn = r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		b.pullFn = r.vm.ToValue(func(call beFunctionCall) beValue {
 			pump()
-			return goja.Undefined()
+			return beUndefined()
 		})
 		b.highWaterMark = 1
 	}
@@ -742,19 +740,19 @@ func (r *Interpreter) teeReadable(src *readableState, realm *streamRealm) (goja.
 // ─── pipeTo（鸭子类型可写端）─────────────────────────────
 
 // pipeOptionsFrom 解析 pipeTo/pipeThrough 的选项对象。
-func (r *Interpreter) pipeOptionsFrom(v goja.Value) pipeOptions {
+func (r *Interpreter) pipeOptionsFrom(v beValue) pipeOptions {
 	opts := pipeOptions{}
-	o, ok := v.(*goja.Object)
+	o, ok := v.(*beObject)
 	if !ok || o == nil {
 		return opts
 	}
-	if p := o.Get("preventClose"); p != nil && !goja.IsUndefined(p) {
+	if p := o.Get("preventClose"); p != nil && !beIsUndefined(p) {
 		opts.preventClose = p.ToBoolean()
 	}
-	if p := o.Get("preventAbort"); p != nil && !goja.IsUndefined(p) {
+	if p := o.Get("preventAbort"); p != nil && !beIsUndefined(p) {
 		opts.preventAbort = p.ToBoolean()
 	}
-	if p := o.Get("preventCancel"); p != nil && !goja.IsUndefined(p) {
+	if p := o.Get("preventCancel"); p != nil && !beIsUndefined(p) {
 		opts.preventCancel = p.ToBoolean()
 	}
 	return opts
@@ -762,22 +760,22 @@ func (r *Interpreter) pipeOptionsFrom(v goja.Value) pipeOptions {
 
 // pipeWriter 是可写端的鸭子类型视图（write/close/abort 三个方法）。
 type pipeWriter struct {
-	obj   goja.Value
-	write goja.Value
-	close goja.Value
-	abort goja.Value
+	obj   beValue
+	write beValue
+	close beValue
+	abort beValue
 }
 
 // resolvePipeWriter 把 pipeTo 的目标解析成 writer：优先 getWriter()，其次目标
 // 自身就是 writer（有 write 方法）。
-func (r *Interpreter) resolvePipeWriter(target goja.Value) *pipeWriter {
-	o, ok := target.(*goja.Object)
+func (r *Interpreter) resolvePipeWriter(target beValue) *pipeWriter {
+	o, ok := target.(*beObject)
 	if !ok || o == nil {
 		return nil
 	}
-	if fn, ok := goja.AssertFunction(o.Get("getWriter")); ok {
+	if fn, ok := beAssertFunction(o.Get("getWriter")); ok {
 		if w, err := fn(o); err == nil {
-			if wo, ok := w.(*goja.Object); ok {
+			if wo, ok := w.(*beObject); ok {
 				return &pipeWriter{
 					obj:   wo,
 					write: wo.Get("write"),
@@ -788,7 +786,7 @@ func (r *Interpreter) resolvePipeWriter(target goja.Value) *pipeWriter {
 		}
 		return nil
 	}
-	if w := o.Get("write"); w != nil && !goja.IsUndefined(w) {
+	if w := o.Get("write"); w != nil && !beIsUndefined(w) {
 		return &pipeWriter{obj: o, write: w, close: o.Get("close"), abort: o.Get("abort")}
 	}
 	return nil
@@ -796,7 +794,7 @@ func (r *Interpreter) resolvePipeWriter(target goja.Value) *pipeWriter {
 
 // pipeToDuck 实现任意可写端的 pipeTo：then 链泵数据、结束关闭目标、错误双向往
 // 传播，返回 Promise（写完/关闭后 resolve）。选项语义遵循规范。
-func (r *Interpreter) pipeToDuck(st *readableState, target goja.Value, opts pipeOptions) goja.Value {
+func (r *Interpreter) pipeToDuck(st *readableState, target beValue, opts pipeOptions) beValue {
 	p, resolve, reject := r.vm.NewPromise()
 	w := r.resolvePipeWriter(target)
 	if w == nil {
@@ -808,14 +806,14 @@ func (r *Interpreter) pipeToDuck(st *readableState, target goja.Value, opts pipe
 		st.reader = &readerState{interp: r, st: st}
 	}
 	done := false
-	finish := func(v goja.Value) {
+	finish := func(v beValue) {
 		if done {
 			return
 		}
 		done = true
 		_ = resolve(v)
 	}
-	fail := func(e goja.Value) {
+	fail := func(e beValue) {
 		if done {
 			return
 		}
@@ -829,25 +827,25 @@ func (r *Interpreter) pipeToDuck(st *readableState, target goja.Value, opts pipe
 			return
 		}
 		res := st.read()
-		r.thenValue(res, func(v goja.Value) {
-			o, ok := v.(*goja.Object)
+		r.thenValue(res, func(v beValue) {
+			o, ok := v.(*beObject)
 			if !ok {
 				// 非规范结清值：按关闭处理（不阻塞调用方）。
 				if !opts.preventClose {
 					r.callOrIgnore(w.obj, "close")
 				}
-				finish(goja.Undefined())
+				finish(beUndefined())
 				return
 			}
 			if d := o.Get("done"); d != nil && d.ToBoolean() {
 				if !opts.preventClose {
 					r.callOrIgnore(w.obj, "close")
 				}
-				finish(goja.Undefined())
+				finish(beUndefined())
 				return
 			}
 			// 写一个 chunk：目标 write 可能返回 Promise（等待它），也可能同步返回。
-			fn, ok := goja.AssertFunction(w.write)
+			fn, ok := beAssertFunction(w.write)
 			if !ok {
 				fail(r.vm.NewTypeError("pipeTo writable has no write()"))
 				return
@@ -860,13 +858,13 @@ func (r *Interpreter) pipeToDuck(st *readableState, target goja.Value, opts pipe
 				fail(r.vm.ToValue(err.Error()))
 				return
 			}
-			r.thenValue(out, func(goja.Value) { pump() }, func(e goja.Value) {
+			r.thenValue(out, func(beValue) { pump() }, func(e beValue) {
 				if !opts.preventCancel {
 					st.cancelStream(e)
 				}
 				fail(e)
 			})
-		}, func(e goja.Value) {
+		}, func(e beValue) {
 			// 源流出错：中止目标（除非 preventAbort），pipeTo 以该错误 reject。
 			if !opts.preventAbort {
 				r.callOrIgnore(w.obj, "abort", e)
@@ -884,7 +882,7 @@ func (r *Interpreter) registerTransformStream(realm *streamRealm) {
 	// WritableStream.prototype（getWriter 形态）
 	writableProto := r.vm.NewObject()
 	realm.writableProto = writableProto
-	writableProto.Set("getWriter", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writableProto.Set("getWriter", r.vm.ToValue(func(call beFunctionCall) beValue {
 		ts := transformStateOf(call.This)
 		if ts == nil {
 			panic(r.vm.NewTypeError("Illegal invocation"))
@@ -898,65 +896,65 @@ func (r *Interpreter) registerTransformStream(realm *streamRealm) {
 		ts.writer = obj
 		return obj
 	}))
-	writableProto.Set("abort", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writableProto.Set("abort", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.abortStream(call.Argument(0))
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
-	writableProto.Set("close", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writableProto.Set("close", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.closeStream()
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
 	_ = writableProto.DefineAccessorProperty("locked",
-		r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.vm.ToValue(func(call beFunctionCall) beValue {
 			if ts := transformStateOf(call.This); ts != nil {
 				return r.vm.ToValue(ts.writer != nil)
 			}
 			return r.vm.ToValue(false)
-		}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+		}), beUndefined(), beFLAGFALSE, beFLAGTRUE)
 
 	writerProto := r.vm.NewObject()
 	realm.writerProto = writerProto
-	writerProto.Set("write", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writerProto.Set("write", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.write(call.Argument(0))
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
-	writerProto.Set("close", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writerProto.Set("close", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.closeStream()
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
-	writerProto.Set("abort", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writerProto.Set("abort", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.abortStream(call.Argument(0))
 		}
-		return r.resolvedPromise(goja.Undefined())
+		return r.resolvedPromise(beUndefined())
 	}))
-	writerProto.Set("releaseLock", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+	writerProto.Set("releaseLock", r.vm.ToValue(func(call beFunctionCall) beValue {
 		if ts := transformStateOf(call.This); ts != nil {
 			ts.writer = nil
 		}
-		return goja.Undefined()
+		return beUndefined()
 	}))
-	writerProto.Set("ready", r.resolvedPromise(goja.Undefined()))
-	writerProto.Set("closed", r.resolvedPromise(goja.Undefined()))
+	writerProto.Set("ready", r.resolvedPromise(beUndefined()))
+	writerProto.Set("closed", r.resolvedPromise(beUndefined()))
 
 	transformProto := r.vm.NewObject()
 	realm.transformProto = transformProto
 
-	var ctorVal goja.Value
-	ctorVal = r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	var ctorVal beValue
+	ctorVal = r.vm.ToValue(func(call beConstructorCall) *beObject {
 		ts := r.newTransformState(realm, transformProto, call.Argument(0))
 		return ts.obj
 	})
 	r.vm.Set("TransformStream", ctorVal)
-	if o, ok := ctorVal.(*goja.Object); ok {
+	if o, ok := ctorVal.(*beObject); ok {
 		o.Set("prototype", transformProto)
 	}
 }
@@ -964,7 +962,7 @@ func (r *Interpreter) registerTransformStream(realm *streamRealm) {
 // newTransformState 创建一条转换流：可读端（readable）+ 可写端（writable）。
 // selfProto 是本体对象的原型（TransformStream 或 TextEncoderStream 等）；
 // transformer 为 {transform, flush} 形态的字典（可为 undefined）。
-func (r *Interpreter) newTransformState(realm *streamRealm, selfProto *goja.Object, transformer goja.Value) *transformState {
+func (r *Interpreter) newTransformState(realm *streamRealm, selfProto *beObject, transformer beValue) *transformState {
 	readable := r.newReadableState(realm)
 	ts := &transformState{interp: r, vm: r.vm, readable: readable, readableObj: readable.obj}
 
@@ -984,7 +982,7 @@ func (r *Interpreter) newTransformState(realm *streamRealm, selfProto *goja.Obje
 	obj.Set("writable", w)
 	ts.obj = obj
 
-	if o, ok := transformer.(*goja.Object); ok {
+	if o, ok := transformer.(*beObject); ok {
 		ts.transform = o.Get("transform")
 		ts.flush = o.Get("flush")
 	}
@@ -993,16 +991,16 @@ func (r *Interpreter) newTransformState(realm *streamRealm, selfProto *goja.Obje
 
 // write 把一个 chunk 写入转换流：调用 transform(chunk, controller)，
 // controller.enqueue 写入可读端。无 transform 时透传。
-func (t *transformState) write(chunk goja.Value) {
+func (t *transformState) write(chunk beValue) {
 	if t.closed {
 		return
 	}
-	fn, ok := goja.AssertFunction(t.transform)
+	fn, ok := beAssertFunction(t.transform)
 	if !ok {
 		t.readable.enqueue(chunk)
 		return
 	}
-	if _, err := fn(goja.Undefined(), chunk, t.readable.controller()); err != nil {
+	if _, err := fn(beUndefined(), chunk, t.readable.controller()); err != nil {
 		t.readable.errorStream(t.vm.ToValue(err.Error()))
 	}
 }
@@ -1013,8 +1011,8 @@ func (t *transformState) closeStream() {
 		return
 	}
 	t.closed = true
-	if fn, ok := goja.AssertFunction(t.flush); ok {
-		if _, err := fn(goja.Undefined(), t.readable.controller()); err != nil {
+	if fn, ok := beAssertFunction(t.flush); ok {
+		if _, err := fn(beUndefined(), t.readable.controller()); err != nil {
 			t.readable.errorStream(t.vm.ToValue(err.Error()))
 			t.notifyClosed()
 			return
@@ -1025,7 +1023,7 @@ func (t *transformState) closeStream() {
 }
 
 // abortStream 中止转换流：可读端以错误结束（规范：abort 让 readable 出错）。
-func (t *transformState) abortStream(reason goja.Value) {
+func (t *transformState) abortStream(reason beValue) {
 	if t.closed {
 		return
 	}
@@ -1038,7 +1036,7 @@ func (t *transformState) abortStream(reason goja.Value) {
 }
 
 // errorStream 把上游错误传播到转换流（可读端出错、可写端进入已关闭态）。
-func (t *transformState) errorStream(e goja.Value) {
+func (t *transformState) errorStream(e beValue) {
 	if t.closed {
 		return
 	}
@@ -1061,14 +1059,14 @@ func (r *Interpreter) registerTextEncoderStream(realm *streamRealm) {
 	proto := r.vm.NewObject()
 	realm.encoderProto = proto
 	proto.Set("encoding", "utf-8")
-	var ctorVal goja.Value
-	ctorVal = r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
-		ts := r.newTransformState(realm, proto, goja.Undefined())
+	var ctorVal beValue
+	ctorVal = r.vm.ToValue(func(call beConstructorCall) *beObject {
+		ts := r.newTransformState(realm, proto, beUndefined())
 		ts.transform = r.newTextEncoderTransform()
 		return ts.obj
 	})
 	r.vm.Set("TextEncoderStream", ctorVal)
-	if o, ok := ctorVal.(*goja.Object); ok {
+	if o, ok := ctorVal.(*beObject); ok {
 		o.Set("prototype", proto)
 	}
 }
@@ -1079,81 +1077,81 @@ func (r *Interpreter) registerTextDecoderStream(realm *streamRealm) {
 	proto.Set("encoding", "utf-8")
 	proto.Set("fatal", r.vm.ToValue(false))
 	proto.Set("ignoreBOM", r.vm.ToValue(false))
-	var ctorVal goja.Value
-	ctorVal = r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
-		ts := r.newTransformState(realm, proto, goja.Undefined())
+	var ctorVal beValue
+	ctorVal = r.vm.ToValue(func(call beConstructorCall) *beObject {
+		ts := r.newTransformState(realm, proto, beUndefined())
 		transform, flush := r.newTextDecoderTransforms()
 		ts.transform = transform
 		ts.flush = flush
 		return ts.obj
 	})
 	r.vm.Set("TextDecoderStream", ctorVal)
-	if o, ok := ctorVal.(*goja.Object); ok {
+	if o, ok := ctorVal.(*beObject); ok {
 		o.Set("prototype", proto)
 	}
 }
 
 // newTextEncoderTransform 返回 string → Uint8Array 的 transform 函数。
 // 复用已注册的 TextEncoder（Go 原生），保持与 textEncoder.encode 完全一致。
-func (r *Interpreter) newTextEncoderTransform() goja.Value {
+func (r *Interpreter) newTextEncoderTransform() beValue {
 	encCtor := r.vm.Get("TextEncoder")
 	if encCtor == nil {
-		return goja.Undefined()
+		return beUndefined()
 	}
 	encObj, err := r.vm.New(encCtor)
 	if err != nil {
-		return goja.Undefined()
+		return beUndefined()
 	}
-	encodeFn, ok := goja.AssertFunction(encObj.Get("encode"))
+	encodeFn, ok := beAssertFunction(encObj.Get("encode"))
 	if !ok {
-		return goja.Undefined()
+		return beUndefined()
 	}
-	return r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		out, err := encodeFn(goja.Undefined(), call.Argument(0))
+	return r.vm.ToValue(func(call beFunctionCall) beValue {
+		out, err := encodeFn(beUndefined(), call.Argument(0))
 		if err != nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		r.callMethod(call.Argument(1), "enqueue", out)
-		return goja.Undefined()
+		return beUndefined()
 	})
 }
 
 // newTextDecoderTransforms 返回 Uint8Array → string 的 (transform, flush)。
 // transform 用 {stream: true} 保留不完整的多字节序列，flush 结清残余。
-func (r *Interpreter) newTextDecoderTransforms() (goja.Value, goja.Value) {
+func (r *Interpreter) newTextDecoderTransforms() (beValue, beValue) {
 	decCtor := r.vm.Get("TextDecoder")
 	if decCtor == nil {
-		return goja.Undefined(), goja.Undefined()
+		return beUndefined(), beUndefined()
 	}
 	decObj, err := r.vm.New(decCtor)
 	if err != nil {
-		return goja.Undefined(), goja.Undefined()
+		return beUndefined(), beUndefined()
 	}
-	decodeFn, ok := goja.AssertFunction(decObj.Get("decode"))
+	decodeFn, ok := beAssertFunction(decObj.Get("decode"))
 	if !ok {
-		return goja.Undefined(), goja.Undefined()
+		return beUndefined(), beUndefined()
 	}
 	opts := r.vm.NewObject()
 	opts.Set("stream", r.vm.ToValue(true))
-	transform := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		out, err := decodeFn(goja.Undefined(), call.Argument(0), opts)
+	transform := r.vm.ToValue(func(call beFunctionCall) beValue {
+		out, err := decodeFn(beUndefined(), call.Argument(0), opts)
 		if err != nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		if s := out.String(); s != "" {
 			r.callMethod(call.Argument(1), "enqueue", out)
 		}
-		return goja.Undefined()
+		return beUndefined()
 	})
-	flush := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		out, err := decodeFn(goja.Undefined())
+	flush := r.vm.ToValue(func(call beFunctionCall) beValue {
+		out, err := decodeFn(beUndefined())
 		if err != nil {
-			return goja.Undefined()
+			return beUndefined()
 		}
 		if s := out.String(); s != "" {
 			r.callMethod(call.Argument(0), "enqueue", out)
 		}
-		return goja.Undefined()
+		return beUndefined()
 	})
 	return transform, flush
 }
@@ -1161,32 +1159,32 @@ func (r *Interpreter) newTextDecoderTransforms() (goja.Value, goja.Value) {
 // ─── 辅助 ────────────────────────────────────────────────
 
 // resolvedPromise 返回已结清的 Promise（用于无真正异步性的 API 返回值）。
-func (r *Interpreter) resolvedPromise(v goja.Value) goja.Value {
+func (r *Interpreter) resolvedPromise(v beValue) beValue {
 	p, resolve, _ := r.vm.NewPromise()
 	_ = resolve(v)
 	return p.PromiseObj()
 }
 
 // callMethod 调用对象的某个方法（this = 该对象），失败静默返回 undefined。
-func (r *Interpreter) callMethod(obj goja.Value, method string, args ...goja.Value) goja.Value {
-	o, ok := obj.(*goja.Object)
+func (r *Interpreter) callMethod(obj beValue, method string, args ...beValue) beValue {
+	o, ok := obj.(*beObject)
 	if !ok {
-		return goja.Undefined()
+		return beUndefined()
 	}
-	fn, ok := goja.AssertFunction(o.Get(method))
+	fn, ok := beAssertFunction(o.Get(method))
 	if !ok {
-		return goja.Undefined()
+		return beUndefined()
 	}
 	res, err := fn(o, args...)
 	if err != nil {
-		return goja.Undefined()
+		return beUndefined()
 	}
 	return res
 }
 
 // readableStateOf 从 this 取出可读流状态（非流对象返回 nil）。
-func readableStateOf(this goja.Value) *readableState {
-	o, ok := this.(*goja.Object)
+func readableStateOf(this beValue) *readableState {
+	o, ok := this.(*beObject)
 	if !ok || o == nil {
 		return nil
 	}
@@ -1195,8 +1193,8 @@ func readableStateOf(this goja.Value) *readableState {
 }
 
 // readerStateOf 从 this 取出读控制器状态。
-func readerStateOf(this goja.Value) *readerState {
-	o, ok := this.(*goja.Object)
+func readerStateOf(this beValue) *readerState {
+	o, ok := this.(*beObject)
 	if !ok || o == nil {
 		return nil
 	}
@@ -1206,8 +1204,8 @@ func readerStateOf(this goja.Value) *readerState {
 
 // transformStateOf 从 JS 值取出转换流状态：既接受 TransformStream 本体对象，
 // 也接受它的可读端/可写端（pipeTo 的目标常是 writable）。
-func transformStateOf(v goja.Value) *transformState {
-	o, ok := v.(*goja.Object)
+func transformStateOf(v beValue) *transformState {
+	o, ok := v.(*beObject)
 	if !ok || o == nil {
 		return nil
 	}
