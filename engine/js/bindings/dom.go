@@ -400,7 +400,7 @@ var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
 //	扫描 + 可能分配）。真实编辑器 DOM 上 getComputedStyle 1e3 实测 47~62ms
 //	（≈47µs/次），而浏览器同操作约 1µs —— 其中一笔固定开销就是每次调用的
 //	~120 次转换与 ~120 元素切片分配。预计算后每次调用只剩 map 查找 + cs.Set。
-const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath"
+const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath,listStyleType,borderSpacing,lineBreak"
 
 // computedStylePropEntry 是白名单的一项：prop 是回写到 JS 对象的 camelCase
 // 属性名（getComputedStyle(el).fontSize），key 是级联 map 里的 kebab-case 键
@@ -5642,6 +5642,11 @@ func computedStyleFor(el dom.Node) map[string]string {
 	//   回退初始值 16px；布局侧读 ComputedStyle.FontSize 却是 24px —— 同一元素
 	//   「读到的字号」与「画出来的字号」脱节（E4/G5 探针命中）。
 	expandFontShorthand(out)
+	// ★ list-style 简写展开（与 engine/style 的 case "list-style" 对应）：
+	//   `list-style: square` 只落在级联 map 的 "list-style" 键上 →
+	//   getComputedStyle(el).listStyleType 落空、回退初始值 disc（G7 探针：
+	//   square/decimal 的 computed 与 disc 无差别）。
+	expandListStyleShorthand(out)
 	// 解析 var(--xxx) 引用（自定义属性继承链：:root → body → ... → el）。
 	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
 	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
@@ -6181,6 +6186,18 @@ var uaInitialComputedValues = map[string]string{
 	"gap":                "normal",
 	"rowGap":             "normal",
 	"columnGap":          "normal",
+	// ★ 列表 / 表格 / 断行 / 合成相关（G7、G5、G2 探针实测 undefined）：
+	//   浏览器对**每个**属性恒返回计算值（未声明 = CSS 初始值），缺失会让依赖
+	//   这些值的 JS 走错分支。
+	"listStyleType":      "disc",
+	"listStylePosition":  "outside",
+	"listStyleImage":     "none",
+	"borderCollapse":     "separate",
+	"borderSpacing":      "0px",
+	"lineBreak":          "auto",
+	"willChange":         "auto",
+	"clipPath":           "none",
+	"filter":             "none",
 }
 
 // expandOverflowShorthand 把 overflow 简写展开为 overflow-x / overflow-y：
@@ -6306,6 +6323,43 @@ func expandFontShorthand(out map[string]string) {
 			set("line-height", "normal")
 		} else {
 			set("line-height", lineHeight)
+		}
+	}
+}
+
+// expandListStyleShorthand 把 list-style 简写展开为 list-style-type /
+// list-style-position / list-style-image。浏览器 getComputedStyle 恒返回展开后的
+// 长写；级联 map 只存简写键时读 listStyleType 会落空。关键字归类与
+// engine/style 的 `case "list-style"` 同思路：类型关键字 → type，inside/outside
+// → position，url()/渐变 → image。已显式声明的长写不覆盖。
+func expandListStyleShorthand(out map[string]string) {
+	v, ok := out["list-style"]
+	if !ok {
+		return
+	}
+	set := func(k, val string) {
+		if val == "" {
+			return
+		}
+		if _, exists := out[k]; !exists {
+			out[k] = val
+		}
+	}
+	for _, tok := range strings.Fields(v) {
+		low := strings.ToLower(tok)
+		switch low {
+		case "disc", "circle", "square", "decimal", "decimal-leading-zero",
+			"lower-alpha", "upper-alpha", "lower-roman", "upper-roman",
+			"lower-greek", "lower-latin", "upper-latin", "armenian", "georgian",
+			"none":
+			set("list-style-type", low)
+		case "inside", "outside":
+			set("list-style-position", low)
+		default:
+			if strings.HasPrefix(low, "url(") || strings.HasPrefix(low, "linear-gradient(") ||
+				strings.HasPrefix(low, "radial-gradient(") {
+				set("list-style-image", tok)
+			}
 		}
 	}
 }
