@@ -4,7 +4,10 @@
 // Simplifications:
 //   - Element embeds nodeBase (no separate ContainerNode layer); attribute storage is a
 //     Go map plus an insertion-ordered name slice instead of WebKit's ElementData
-//   - qualified names / namespaces are collapsed to a plain local tag name
+//   - element tag names are collapsed to a plain local tag name; **attribute**
+//     namespaces ARE modelled (nsAttrs, DOM §4.9 setAttributeNS/getAttributeNS 族)
+//     since 第 18 次监督轮 — the element's attribute value map stays the single
+//     source of truth, nsAttrs only records namespace/prefix/localName per name
 //   - shadow DOM is implemented (ShadowRoot + slot projection, see shadowroot.go);
 //     custom elements and animation/ARIA hooks are omitted
 //   - setInnerHTML uses a small stack-based HTML fragment parser (see documentfragment.go)
@@ -30,6 +33,13 @@ type Element struct {
 	localName string
 	attrOrder []string
 	attrs     map[string]string
+	// nsAttrs 记录属性的命名空间信息，键 = 小写限定名（qualified name）。只有
+	// setAttributeNS 且 namespace 非空时才写入；普通属性（setAttribute）的
+	// namespace 为 null，不在这张表里（查询时按“无命名空间属性”规则回落到
+	// attrs 本身）。属性的**值**永远以 attrs 为唯一真相源，nsAttrs 只存
+	// namespace/prefix/localName —— 这样属性值只有一条写入路径（SetAttribute），
+	// 样式失效、MutationObserver、序列化全部自动一致。
+	nsAttrs map[string]nsAttrEntry
 
 	// Dynamic pseudo-class state, set by the embedding application (e.g. from
 	// mouse/keyboard event handlers). These mirror the interactive pseudo-classes
@@ -412,6 +422,119 @@ func (e *Element) AttributeNames() []string {
 // Element::hasAttributes().
 func (e *Element) HasAttributes() bool { return len(e.attrs) > 0 }
 
+// --- Attribute namespaces (DOM §4.9: the *AttributeNS family) ---------------
+
+// nsAttrEntry is the namespace bookkeeping stored in Element.nsAttrs for an
+// attribute set through setAttributeNS with a non-null namespace.
+type nsAttrEntry struct {
+	namespace string // namespace URI（非空，null 命名空间的属性不进这张表）
+	prefix    string // 限定名的前缀（"xlink"），无前缀时为空串
+	localName string // 去掉前缀的本地名（已按 HTML 规则小写化）
+}
+
+// SetAttributeNS sets an attribute with an explicit namespace, mirroring
+// Element::setAttributeNS(namespace, qualifiedName, value). Per DOM §4.9.3:
+//   - a null (empty) namespace falls back to plain setAttribute semantics
+//   - on an HTML element the qualified name is ASCII-lowercased before storing
+//   - an existing attribute with the same (namespace, localName) pair is updated in
+//     place; when its qualified name differs it is removed first (the spec's
+//     "change an attribute" step)
+//
+// The value itself is written through SetAttribute, so namespace-qualified
+// attributes take exactly the same style-invalidation / mutation-observer /
+// serialisation path as ordinary ones.
+func (e *Element) SetAttributeNS(namespace, qualifiedName, value string) {
+	ns := namespace
+	qn := lowerAttrName(qualifiedName)
+	prefix, local := splitQualifiedAttrName(qn)
+	if ns == "" {
+		// null 命名空间：与 setAttribute 等价（顺带清掉可能存在的 NS 记录）。
+		if e.nsAttrs != nil {
+			delete(e.nsAttrs, qn)
+		}
+		e.SetAttribute(qn, value)
+		return
+	}
+	for n, a := range e.nsAttrs {
+		if a.namespace == ns && a.localName == local && n != qn {
+			delete(e.nsAttrs, n)
+			e.RemoveAttribute(n)
+		}
+	}
+	if e.nsAttrs == nil {
+		e.nsAttrs = make(map[string]nsAttrEntry)
+	}
+	e.nsAttrs[qn] = nsAttrEntry{namespace: ns, prefix: prefix, localName: local}
+	e.SetAttribute(qn, value)
+}
+
+// findAttrNS locates the attribute matching (namespace, localName) per DOM §4.9's
+// "get an attribute by namespace and local name" algorithm, returning the stored
+// qualified name together with its namespace bookkeeping.
+//
+// A null namespace matches an ordinary attribute (whose namespace is null and whose
+// local name is its name), which is what `el.getAttributeNS(null, "id")` must find.
+func (e *Element) findAttrNS(namespace, localName string) (string, nsAttrEntry, bool) {
+	ln := lowerAttrName(localName)
+	for n, a := range e.nsAttrs {
+		if a.namespace == namespace && a.localName == ln {
+			return n, a, true
+		}
+	}
+	if namespace == "" {
+		if _, ok := e.attrs[ln]; ok {
+			return ln, nsAttrEntry{localName: ln}, true
+		}
+	}
+	return "", nsAttrEntry{}, false
+}
+
+// GetAttributeNS returns the value of the attribute with the given namespace and
+// local name, or the empty string when absent, mirroring
+// Element::getAttributeNS(namespace, localName).
+func (e *Element) GetAttributeNS(namespace, localName string) string {
+	if name, _, ok := e.findAttrNS(namespace, localName); ok {
+		return e.attrs[name]
+	}
+	return ""
+}
+
+// HasAttributeNS reports whether an attribute with the given namespace and local
+// name is present, mirroring Element::hasAttributeNS(namespace, localName).
+func (e *Element) HasAttributeNS(namespace, localName string) bool {
+	_, _, ok := e.findAttrNS(namespace, localName)
+	return ok
+}
+
+// RemoveAttributeNS removes the attribute with the given namespace and local name,
+// mirroring Element::removeAttributeNS(namespace, localName). It reports whether an
+// attribute was removed.
+func (e *Element) RemoveAttributeNS(namespace, localName string) bool {
+	name, _, ok := e.findAttrNS(namespace, localName)
+	if !ok {
+		return false
+	}
+	if e.nsAttrs != nil {
+		delete(e.nsAttrs, name)
+	}
+	return e.RemoveAttribute(name)
+}
+
+// AttributeNamespace returns the namespace bookkeeping for the attribute stored
+// under qualified name (prefix, localName, ok). The binding layer uses it to build
+// an Attr reflector with the right namespaceURI/prefix/localName.
+func (e *Element) AttributeNamespace(qualifiedName string) (prefix, localName, namespace string, ok bool) {
+	qn := lowerAttrName(qualifiedName)
+	if _, exists := e.attrs[qn]; !exists {
+		return "", "", "", false
+	}
+	if a, has := e.nsAttrs[qn]; has {
+		return a.prefix, a.localName, a.namespace, true
+	}
+	prefix, local := splitQualifiedAttrName(qn)
+	return prefix, local, "", true
+}
+
 // --- Dynamic pseudo-class state --------------------------------------------
 
 // IsHovered reports whether the element is currently in the hover state
@@ -632,12 +755,17 @@ func (e *Element) GetElementById(id string) *Element {
 
 // GetElementsByTagName returns all descendant elements whose tag name matches tagName
 // ("*" matches all), mirroring Element::getElementsByTagName.
+//
+// ★ 第 18 次监督轮：**只返回后代，不含元素自身**（DOM §4.9 Element 的
+// getElementsByTagName 定义在"descendants"上）。此前走含自身的遍历，导致
+// `div.getElementsByTagName("*")` 把 div 自己也算进去（夹具实测 Edge=3 / wbui=4），
+// 而 `el.getElementsByTagName('div')` 更是直接返回自身。
 func (e *Element) GetElementsByTagName(tagName string) []*Element {
 	var out []*Element
 	want := strings.ToLower(tagName)
 	all := want == "*"
 	e.walkDescendants(func(n Node) bool {
-		if el, ok := n.(*Element); ok {
+		if el, ok := n.(*Element); ok && el != e {
 			if all || el.LocalName() == want {
 				out = append(out, el)
 			}
@@ -649,13 +777,15 @@ func (e *Element) GetElementsByTagName(tagName string) []*Element {
 
 // GetElementsByClassName returns all descendant elements that have token in their class
 // list, mirroring Element::getElementsByClassName.
+//
+// ★ 第 18 次监督轮：与 GetElementsByTagName 同口径 —— 只算后代，不含元素自身。
 func (e *Element) GetElementsByClassName(token string) []*Element {
 	if token == "" {
 		return nil
 	}
 	var out []*Element
 	e.walkDescendants(func(n Node) bool {
-		if el, ok := n.(*Element); ok {
+		if el, ok := n.(*Element); ok && el != e {
 			if el.HasClassName(token) {
 				out = append(out, el)
 			}

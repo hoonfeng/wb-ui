@@ -409,3 +409,103 @@ func RegisteredElementCount() int {
 func ClearRegisteredElements() {
 	elementFactory = map[string]ElementConstructor{}
 }
+
+// --- Attribute / PI / CDATA factories and node import (DOM §4.9) -----------
+//
+// ★ 第 18 次监督轮新增。此前 Document 只有 createElement/createTextNode/
+// createComment/createDocumentFragment/createEvent：createAttribute、
+// createProcessingInstruction、createCDATASection、importNode、adoptNode、
+// getElementsByName 六项完全缺失（探针 documentMethods missing）。
+
+// CreateAttribute returns a new **detached** attribute node owned by this document,
+// mirroring Document::createAttribute(name). The attribute is not attached to any
+// element (ownerElement is null) until it is handed to an element; that is why the
+// result carries its own value until then.
+func (d *Document) CreateAttribute(name string) *Attr {
+	if perfDispOn {
+		PerfDOMOps++
+	}
+	return NewAttr(d, name, "")
+}
+
+// CreateAttributeNS returns a new detached attribute node with an explicit namespace,
+// mirroring Document::createAttributeNS(namespace, qualifiedName).
+func (d *Document) CreateAttributeNS(namespace, qualifiedName string) *Attr {
+	return NewAttrNS(d, namespace, qualifiedName, "")
+}
+
+// CreateProcessingInstruction returns a new processing instruction, mirroring
+// Document::createProcessingInstruction(target, data). DOM §4.9.6 rejects:
+//   - a target that is not a valid XML name, or that is an ASCII case-insensitive
+//     match for "xml" → InvalidCharacterError
+//   - data containing "?>" → InvalidCharacterError
+func (d *Document) CreateProcessingInstruction(target, data string) (*ProcessingInstruction, error) {
+	if !isValidProcessingInstructionTarget(target) || strings.Contains(data, "?>") {
+		return nil, ErrInvalidCharacter
+	}
+	return NewProcessingInstruction(d, target, data), nil
+}
+
+// CreateCDATASection returns a new CDATA section node, mirroring
+// Document::createCDATASection(data). ★ HTML documents must reject this with a
+// NotSupportedError (DOM §4.9.5) — that check lives in the binding layer, which knows
+// the document's MIME type; the DOM factory itself only builds the node (an XML
+// document legitimately gets a CDATASection here).
+func (d *Document) CreateCDATASection(data string) *CDATASection {
+	return NewCDATASection(d, data)
+}
+
+// ImportNode imports n (cloned, retargeted at this document) mirroring
+// Document::importNode(node, deep). DOM §4.9.2 rejects Document and DocumentType
+// nodes with a NotSupportedError; every other node is deep/shallow cloned into this
+// document (the clone's ownerDocument is this document, the original is untouched).
+func (d *Document) ImportNode(n Node, deep bool) (Node, error) {
+	if isNilNode(n) {
+		return nil, nil
+	}
+	switch n.NodeType() {
+	case NodeDocument, NodeDocumentType:
+		return nil, ErrNotSupported
+	}
+	return cloneNodeInto(n, d, deep), nil
+}
+
+// AdoptNode moves n (and its subtree) into this document, mirroring
+// Document::adoptNode(node): the node is first removed from its parent, then its owner
+// document (recursively) becomes this document. DOM §4.9.3 rejects Document nodes with
+// a NotSupportedError; an Attr is detached from its element instead of being removed
+// from a parent (attributes have no parent in the tree).
+func (d *Document) AdoptNode(n Node) (Node, error) {
+	if isNilNode(n) {
+		return nil, nil
+	}
+	if n.NodeType() == NodeDocument {
+		return nil, ErrNotSupported
+	}
+	if a, ok := n.(*Attr); ok {
+		a.detach()
+		return a, nil
+	}
+	if p := n.ParentNode(); !isNilNode(p) {
+		_ = p.RemoveChild(n)
+	}
+	if b := nodeBaseOf(n); b != nil {
+		b.adoptSubtree(n, d)
+	}
+	return n, nil
+}
+
+// GetElementsByName returns all elements in the document whose `name` content
+// attribute equals name, in document order, mirroring Document::getElementsByName.
+// The spec returns a live NodeList; the binding layer re-evaluates the query on each
+// access so callers observe the same liveness.
+func (d *Document) GetElementsByName(name string) []*Element {
+	var out []*Element
+	walkDescendantsNode(d, func(n Node) bool {
+		if el, ok := n.(*Element); ok && el.GetAttribute("name") == name {
+			out = append(out, el)
+		}
+		return true
+	})
+	return out
+}

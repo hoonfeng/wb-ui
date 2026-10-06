@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>element_domapi</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<div id="host"><span id="a" class="c1 c2">A</span><span id="b" class="c2">B</span><em id="c">C</em></div>
+<pre id="out"></pre>
+<script>
+// 类别① 第一批元素侧标准 DOM 方法（第 18 次监督轮）双侧（wbui vs Edge）**值级**比对：
+//   ParentNode append/prepend/replaceChildren（结构 + 顺序 + DocumentFragment 展开）、
+//   ChildNode before/after/replaceWith、getElementsByTagName/getElementsByClassName
+//   （**live**：保留引用后观察增删）、insertAdjacentElement/insertAdjacentText、
+//   isEqualNode/isSameNode/webkitMatchesSelector、
+//   setAttributeNS/getAttributeNS/hasAttributeNS/removeAttributeNS/getAttributeNames。
+// ★ 转义/可比性约定同 document_props.html（标记转义 + 只输出可比形式）。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+  function attempt(fn) { try { return fn(); } catch (e) { return 'throw'; } }
+  var XLINK = 'http://www.w3.org/1999/xlink';
+  var host = document.getElementById('host');
+
+  // ── 1) 存在性（typeof === 'function'，即 webplatform 探针 elementMethods 的口径）──
+  var names = ['append', 'prepend', 'replaceChildren', 'before', 'after', 'replaceWith',
+               'getElementsByTagName', 'getElementsByClassName', 'insertAdjacentElement',
+               'insertAdjacentText', 'isEqualNode', 'isSameNode', 'webkitMatchesSelector',
+               'setAttributeNS', 'getAttributeNS', 'hasAttributeNS', 'removeAttributeNS',
+               'getAttributeNames'];
+  var probe = document.createElement('div');
+  var miss = [];
+  for (var i = 0; i < names.length; i++) { if (typeof probe[names[i]] !== 'function') { miss.push(names[i]); } }
+  say('fn.total', names.length);
+  say('fn.missing', miss.length ? miss.join(' ') : '(none)');
+  // 属性存在性（`in`）在浏览器里同样成立（方法位于 Element.prototype）
+  var inMissing = [];
+  for (var j = 0; j < names.length; j++) { if (!(names[j] in probe)) { inMissing.push(names[j]); } }
+  say('in.missing', inMissing.length ? inMissing.join(' ') : '(none)');
+
+  // ── 2) ParentNode：append / prepend（顺序 = 参数顺序；字符串转 Text）──
+  var p = document.createElement('div');
+  p.append('x', document.createElement('b'), 'y');
+  say('append.childNodes.length', p.childNodes.length);
+  say('append.0.nodeType', p.childNodes[0].nodeType);
+  say('append.0.data', p.childNodes[0].data);
+  say('append.1.nodeName', p.childNodes[1].nodeName);
+  say('append.2.data', p.childNodes[2].data);
+  say('append.returns.undefined', p.append() === undefined);
+  p.prepend('head');
+  say('prepend.firstChild.data', p.firstChild.data);
+  say('prepend.length', p.childNodes.length);
+  // DocumentFragment 展开（片段本身不进 DOM）
+  var frag = document.createDocumentFragment();
+  frag.appendChild(document.createElement('i'));
+  frag.appendChild(document.createElement('u'));
+  var fragHolder = document.createElement('div');
+  fragHolder.append(frag);
+  say('append.frag.children', fragHolder.childNodes.length);
+  say('append.frag.0.nodeName', fragHolder.childNodes[0].nodeName);
+  say('append.frag.1.nodeName', fragHolder.childNodes[1].nodeName);
+  say('append.frag.emptied', frag.childNodes.length);
+
+  // ── 3) ChildNode：before / after / replaceWith ──
+  var par = document.createElement('div');
+  var mid = document.createElement('b'); mid.id = 'mid';
+  par.appendChild(mid);
+  mid.before('t1');
+  mid.after('t2');
+  say('childnode.length', par.childNodes.length);
+  say('childnode.0.data', par.childNodes[0].data);
+  say('childnode.1.id', par.childNodes[1].id);
+  say('childnode.2.data', par.childNodes[2].data);
+  var extra = document.createElement('i'); extra.id = 'ex';
+  mid.before(extra);
+  say('before.element.order', par.childNodes[1].id);
+  say('before.element.mid.shifted', par.childNodes[2].id);
+  var rep = document.createElement('u'); rep.id = 'rep';
+  mid.replaceWith(rep);
+  say('replaceWith.length', par.childNodes.length);
+  say('replaceWith.mid.gone', par.querySelector('#mid') === null);
+  say('replaceWith.rep.present', par.querySelector('#rep') !== null);
+  say('replaceWith.rep.at.old.index', par.childNodes[2].id);
+  // 游离元素上的 before/after/replaceWith 是 no-op（规范：无父即无操作）
+  var lone = document.createElement('div');
+  lone.before('x'); lone.after('y'); lone.replaceWith(document.createElement('b'));
+  say('detached.before.noop', lone.parentNode === null);
+  say('detached.before.children', lone.childNodes.length);
+
+  // ── 4) replaceChildren ──
+  var rc = document.createElement('div');
+  rc.append('1', '2');
+  say('rc.before.length', rc.childNodes.length);
+  rc.replaceChildren('3');
+  say('rc.after.length', rc.childNodes.length);
+  say('rc.after.0.data', rc.childNodes[0].data);
+  rc.replaceChildren();
+  say('rc.empty.length', rc.childNodes.length);
+
+  // ── 5) getElementsByClassName / getElementsByTagName（**live** 集合）──
+  var col = host.getElementsByClassName('c2');
+  say('gcn.initial.length', col.length);
+  say('gcn.item0.id', col.item(0) ? col.item(0).id : 'NONE');
+  say('gcn.index0.id', col[0] ? col[0].id : 'NONE');
+  say('gcn.index1.id', col[1] ? col[1].id : 'NONE');
+  say('gcn.index9', col[9]);
+  say('gcn.named.item', col.namedItem('b') ? col.namedItem('b').id : 'NONE');
+  var added = document.createElement('div'); added.className = 'c2'; added.id = 'added';
+  host.appendChild(added);
+  say('gcn.after.append.length', col.length);
+  say('gcn.after.append.index2.id', col[2] ? col[2].id : 'NONE');
+  host.removeChild(added);
+  say('gcn.after.remove.length', col.length);
+  say('gcn.multi.length', host.getElementsByClassName('c1 c2').length);
+  say('gcn.multi.0.id', host.getElementsByClassName('c1 c2')[0] ? host.getElementsByClassName('c1 c2')[0].id : 'NONE');
+  say('gcn.empty.length', host.getElementsByClassName('').length);
+  var byTag = host.getElementsByTagName('span');
+  say('gtn.length', byTag.length);
+  say('gtn.0.id', byTag[0] ? byTag[0].id : 'NONE');
+  say('gtn.star.length', host.getElementsByTagName('*').length);
+  say('gtn.upper.length', host.getElementsByTagName('SPAN').length);
+  say('gtn.self.excluded', host.getElementsByTagName('div').length);
+  // live：byTag 也随 DOM 变化
+  var span3 = document.createElement('span'); span3.id = 's3';
+  host.appendChild(span3);
+  say('gtn.live.after.append', byTag.length);
+  host.removeChild(span3);
+  say('gtn.live.after.remove', byTag.length);
+
+  // ── 6) insertAdjacentElement / insertAdjacentText ──
+  var iax = document.createElement('div');
+  var iaxInner = document.createElement('span'); iaxInner.id = 'iax-in';
+  iax.appendChild(iaxInner);
+  host.appendChild(iax);
+  var ret = iax.insertAdjacentElement('afterbegin', document.createElement('i'));
+  say('iae.returns.nodeName', ret ? ret.nodeName : 'NONE');
+  say('iae.afterbegin.first', iax.firstChild.nodeName);
+  iaxInner.insertAdjacentElement('beforebegin', document.createElement('b'));
+  say('iae.beforebegin.index1', iax.childNodes[1].nodeName);
+  iax.insertAdjacentElement('beforeend', document.createElement('u'));
+  say('iae.beforeend.last', iax.lastChild.nodeName);
+  iaxInner.insertAdjacentElement('afterend', document.createElement('em'));
+  say('iae.afterend.index3', iax.childNodes[3].nodeName);
+  iax.insertAdjacentText('beforeend', 'T');
+  say('iat.beforeend.last.nodeType', iax.lastChild.nodeType);
+  say('iat.beforeend.last.data', iax.lastChild.data);
+  say('iat.returns.undefined', iax.insertAdjacentText('beforeend', 'Z') === undefined);
+  // 非法位置：规范（与 Edge 实测）抛 SyntaxError，故用 attempt 只断言「抛出了」。
+  say('iae.bad.position.throws', attempt(function () {
+    iax.insertAdjacentElement('nope', document.createElement('b'));
+    return 'no-throw';
+  }));
+  say('iat.bad.position.throws', attempt(function () {
+    iax.insertAdjacentText('nope', 'z');
+    return 'no-throw';
+  }));
+  say('iae.childcount.stable', iax.childNodes.length);
+  host.removeChild(iax);
+
+  // ── 7) isEqualNode / isSameNode / webkitMatchesSelector ──
+  var e1 = document.createElement('div'); e1.className = 'eq'; e1.innerHTML = '<b>1</b>';
+  var e2 = document.createElement('div'); e2.className = 'eq'; e2.innerHTML = '<b>1</b>';
+  var e3 = document.createElement('div'); e3.className = 'other'; e3.innerHTML = '<b>1</b>';
+  var e4 = document.createElement('div'); e4.className = 'eq'; e4.innerHTML = '<b>2</b>';
+  say('isEqualNode.structurally.same', e1.isEqualNode(e2));
+  say('isEqualNode.class.differs', e1.isEqualNode(e3));
+  say('isEqualNode.text.differs', e1.isEqualNode(e4));
+  say('isEqualNode.null', e1.isEqualNode(null));
+  say('isEqualNode.self', e1.isEqualNode(e1));
+  say('isSameNode.self', e1.isSameNode(e1));
+  say('isSameNode.other', e1.isSameNode(e2));
+  say('isSameNode.null', e1.isSameNode(null));
+  say('wms.matches', e1.webkitMatchesSelector('.eq'));
+  say('wms.no.match', e1.webkitMatchesSelector('.nope'));
+
+  // ── 8) 命名空间属性族（DOM §4.9）──
+  var nsEl = document.createElement('div');
+  say('ns.missing.is.null', nsEl.getAttributeNS(XLINK, 'href'));
+  say('ns.missing.has', nsEl.hasAttributeNS(XLINK, 'href'));
+  nsEl.setAttributeNS(XLINK, 'xlink:href', 'V1');
+  say('ns.get.local', nsEl.getAttributeNS(XLINK, 'href'));
+  say('ns.get.qualified.is.null', nsEl.getAttributeNS(XLINK, 'xlink:href'));
+  say('ns.get.plain', nsEl.getAttribute('xlink:href'));
+  say('ns.has', nsEl.hasAttributeNS(XLINK, 'href'));
+  say('ns.has.other.ns', nsEl.hasAttributeNS('http://example.com/ns', 'href'));
+  say('ns.has.plain', nsEl.hasAttribute('xlink:href'));
+  say('ns.names', nsEl.getAttributeNames().join(','));
+  nsEl.setAttributeNS(XLINK, 'xlink:href', 'V2');
+  say('ns.update.get', nsEl.getAttributeNS(XLINK, 'href'));
+  say('ns.update.names.count', nsEl.getAttributeNames().length);
+  nsEl.setAttribute('data-plain', 'P');
+  say('ns.mixed.names', nsEl.getAttributeNames().join(','));
+  nsEl.removeAttributeNS(XLINK, 'href');
+  say('ns.after.remove.has', nsEl.hasAttributeNS(XLINK, 'href'));
+  say('ns.after.remove.plain.has', nsEl.hasAttribute('xlink:href'));
+  say('ns.after.remove.names', nsEl.getAttributeNames().join(','));
+  // null 命名空间：按 localName 命中普通属性
+  var plainEl = document.createElement('div');
+  plainEl.id = 'pid';
+  plainEl.setAttribute('data-k', 'v');
+  say('ns.null.id', plainEl.getAttributeNS(null, 'id'));
+  say('ns.null.data-k', plainEl.getAttributeNS(null, 'data-k'));
+  say('ns.null.missing.is.null', plainEl.getAttributeNS(null, 'nope'));
+  say('ns.null.has.id', plainEl.hasAttributeNS(null, 'id'));
+  say('ns.null.has.missing', plainEl.hasAttributeNS(null, 'nope'));
+  // 空串命名空间与 null 等价（规范：null 命名空间即""）
+  plainEl.setAttributeNS('', 'data-e', 'E');
+  say('ns.empty.equals.null', plainEl.getAttributeNS(null, 'data-e'));
+  // 属性值改变后 getAttribute/getAttributeNS 同步（单一真相源）
+  plainEl.setAttribute('data-k', 'v2');
+  say('ns.value.sync', plainEl.getAttributeNS(null, 'data-k'));
+  // removeAttributeNS 对普通属性同样生效
+  say('ns.remove.plain', plainEl.removeAttributeNS(null, 'data-k'));
+  say('ns.remove.plain.after', plainEl.hasAttributeNS(null, 'data-k'));
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

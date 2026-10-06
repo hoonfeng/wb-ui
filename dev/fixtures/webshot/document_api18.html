@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>document_api18</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<input name="nm1" id="nm-in"><input name="nm1" id="nm-in2"><input name="other">
+<pre id="out"></pre>
+<script>
+// 类别① 第一批 Document 侧（第 18 次监督轮）双侧（wbui vs Edge）**值级**比对：
+//   ParentNode append/prepend/replaceChildren（Document 只做存在性/arity/无参调用——
+//   Document 的层级约束只允许一个 Element 子节点，插入节点会抛 HierarchyRequestError，
+//   探值意义上没有可比结构可断言）、
+//   importNode（浅/深、ownerDocument 重定向、原节点不动）、
+//   adoptNode（从原父摘除 + ownerDocument 改变 + 返回同一节点）、
+//   getElementsByName（live NodeList）、
+//   createAttribute（name/value/nodeType/nodeName/localName/prefix/namespaceURI/
+//   ownerElement/specified + value 可写）、
+//   createProcessingInstruction（nodeType/nodeName/target/data/nodeValue + 非法 target 抛错）、
+//   createCDATASection（HTML 文档必须抛错）。
+// ★ 转义/可比性约定同 document_props.html。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+  function attempt(fn) { try { return fn(); } catch (e) { return 'throw'; } }
+  var d = document;
+
+  // ── 1) 存在性（typeof === 'function'，即 webplatform 探针 documentMethods 的口径）──
+  var names = ['append', 'prepend', 'replaceChildren', 'importNode', 'adoptNode',
+               'getElementsByName', 'createAttribute', 'createProcessingInstruction',
+               'createCDATASection'];
+  var miss = [];
+  for (var i = 0; i < names.length; i++) { if (typeof d[names[i]] !== 'function') { miss.push(names[i]); } }
+  say('fn.total', names.length);
+  say('fn.missing', miss.length ? miss.join(' ') : '(none)');
+  // 形式参数个数（variadic 的 ParentNode 方法为 0）。★ 只探 variadic 三项：
+  // 本引擎的 native 函数 `Function.length` 恒为 0（jsc.NewNativeFunction 的 argc
+  // 形参在适配层被忽略），那是引擎层既有口径、与本轮这些 DOM 方法的实现无关，
+  // 探它有差异也会把「口径差」误当成「实现缺失」。
+  say('arity.append', d.append.length);
+  say('arity.prepend', d.prepend.length);
+  say('arity.replaceChildren', d.replaceChildren.length);
+
+  // ── 2) Document 的 ParentNode 方法：无参调用是安全的 no-op（不改变文档结构）──
+  var childCountBefore = d.childNodes.length;
+  say('doc.append.noarg', attempt(function () { d.append(); return 'ok'; }));
+  say('doc.prepend.noarg', attempt(function () { d.prepend(); return 'ok'; }));
+  say('doc.childNodes.stable', d.childNodes.length === childCountBefore);
+
+  // ── 3) createAttribute ──
+  var at = d.createAttribute('data-x');
+  say('ca.name', at.name);
+  say('ca.value.initial', at.value);
+  say('ca.nodeType', at.nodeType);
+  say('ca.nodeName', at.nodeName);
+  say('ca.localName', at.localName);
+  say('ca.prefix', at.prefix);
+  say('ca.namespaceURI', at.namespaceURI);
+  say('ca.ownerElement', at.ownerElement);
+  say('ca.specified', at.specified);
+  say('ca.textContent', at.textContent);
+  at.value = 'vv';
+  say('ca.value.after.set', at.value);
+  say('ca.value.after.set.nodeValue', at.nodeValue);
+  say('ca.name.upper.lowered', d.createAttribute('DATA-Y').name);
+
+  // ── 4) createProcessingInstruction ──
+  var pi = d.createProcessingInstruction('xml-stylesheet', 'href="a.css" type="text/css"');
+  say('pi.nodeType', pi.nodeType);
+  say('pi.nodeName', pi.nodeName);
+  say('pi.target', pi.target);
+  say('pi.data', pi.data);
+  say('pi.nodeValue', pi.nodeValue);
+  say('pi.parentNode', pi.parentNode);
+  say('pi.data.writable', (function () { pi.data = 'd2'; return pi.data; })());
+  say('pi.bad.target.throws', attempt(function () {
+    var p2 = d.createProcessingInstruction('1bad', 'x');
+    return 'no-throw:' + p2.nodeType;
+  }));
+
+  // ── 5) createCDATASection：HTML 文档必须抛错（DOM §4.9.5）──
+  say('cdata.html.throws', attempt(function () {
+    var c = d.createCDATASection('x');
+    return 'no-throw:' + c.nodeType;
+  }));
+
+  // ── 6) importNode ──
+  var src = d.createElement('div');
+  src.id = 'src';
+  src.className = 'imp';
+  src.innerHTML = '<b>hi</b><i>yo</i>';
+  var shallow = d.importNode(src, false);
+  say('import.shallow.nodeName', shallow.nodeName);
+  say('import.shallow.children', shallow.childNodes.length);
+  say('import.shallow.class', shallow.className);
+  say('import.shallow.is.new', shallow === src);
+  say('import.shallow.owner.is.doc', shallow.ownerDocument === d);
+  say('import.shallow.not.connected', shallow.isConnected);
+  var deep = d.importNode(src, true);
+  say('import.deep.children', deep.childNodes.length);
+  say('import.deep.innerHTML', deep.innerHTML);
+  say('import.deep.firstChild.data', deep.childNodes[0].childNodes[0].data);
+  say('import.deep.owner.is.doc', deep.ownerDocument === d);
+  say('import.original.untouched', src.childNodes.length);
+  say('import.original.parent', src.parentNode === null);
+
+  // ── 7) adoptNode ──
+  var holder = d.createElement('div');
+  var child = d.createElement('span');
+  child.id = 'ad1';
+  holder.appendChild(child);
+  say('adopt.before.parent.is.holder', child.parentNode === holder);
+  var adopted = d.adoptNode(child);
+  say('adopt.returns.same', adopted === child);
+  say('adopt.after.parent.is.null', child.parentNode === null);
+  say('adopt.after.parentnode.value', child.parentNode);
+  say('adopt.owner.is.doc', child.ownerDocument === d);
+  say('adopt.holder.empty', holder.childNodes.length);
+  say('adopt.subtree.owner', (function () {
+    var wrap = d.createElement('div');
+    var inner = d.createElement('span');
+    wrap.appendChild(inner);
+    d.adoptNode(wrap);
+    return inner.ownerDocument === d;
+  })());
+
+  // ── 8) getElementsByName（live NodeList）──
+  var byName = d.getElementsByName('nm1');
+  say('gByName.length', byName.length);
+  say('gByName.0.id', byName[0] ? byName[0].id : 'NONE');
+  say('gByName.item1.id', byName.item(1) ? byName.item(1).id : 'NONE');
+  say('gByName.none.length', d.getElementsByName('no-such-name').length);
+  var extra = d.createElement('input');
+  // 用 setAttribute 建立 name 内容属性（getElementsByName 按内容属性匹配）。
+  // 注：`extra.name = 'nm1'` 这类 IDL 反射（HTMLInputElement.name → content
+  // attribute）本引擎尚未移植，属元素 IDL 属性收口的另一类工作，故此处不探它。
+  extra.setAttribute('name', 'nm1');
+  extra.id = 'nm-live';
+  d.body.appendChild(extra);
+  say('gByName.live.after.append', byName.length);
+  say('gByName.live.index2.id', byName[2] ? byName[2].id : 'NONE');
+  d.body.removeChild(extra);
+  say('gByName.live.after.remove', byName.length);
+
+  d.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

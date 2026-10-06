@@ -582,6 +582,28 @@ func (b *nodeBase) CloneNode(deep bool) Node {
 // IsSameNode reports identity, mirroring Node::isSameNode().
 func (b *nodeBase) IsSameNode(other Node) bool { return other != nil && other == b.self }
 
+// cloneNodeInto clones n into doc, mirroring the copy step of Document::importNode:
+// unlike CloneNode (which keeps the original owner document) the destination document
+// is explicit, so an imported subtree belongs to the importing document while the
+// original stays where it was.
+func cloneNodeInto(n Node, doc *Document, deep bool) Node {
+	b := nodeBaseOf(n)
+	if b == nil {
+		return nil
+	}
+	cl, ok := n.(cloneable)
+	if !ok {
+		return nil
+	}
+	copied := cl.cloneShallow(doc)
+	if deep && copied != nil {
+		for c := b.firstChild; c != nil; c = nodeBaseOf(c).nextSibling {
+			_ = copied.AppendChild(cloneNodeInto(c, doc, true))
+		}
+	}
+	return copied
+}
+
 // IsEqualNode reports structural equality, mirroring Node::isEqualNode(). Two nodes are
 // equal when they share the same type, name, value (for character data), attributes (for
 // elements) and equal children in order.

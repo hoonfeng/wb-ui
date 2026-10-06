@@ -57,6 +57,9 @@ var elemAccessorProps = map[string]bool{
 	"firstElementChild": true, "lastElementChild": true,
 	"nextElementSibling": true, "previousElementSibling": true,
 	"ownerDocument": true,
+	// isConnected 是活值（节点进出文档树就变），必须每次求值（第 18 次监督轮：
+	// 它同时从「方法」纠正为布尔属性，见 installElementProperty 的 case）。
+	"isConnected": true,
 	"scrollTop": true, "scrollLeft": true, "scrollHeight": true, "scrollWidth": true,
 	"clientHeight": true, "clientWidth": true, "offsetHeight": true, "offsetWidth": true,
 	"offsetTop": true, "offsetLeft": true,
@@ -326,6 +329,15 @@ var (
 		"appendChild", "removeChild", "insertBefore", "replaceChild", "replaceChildren",
 		"contains", "cloneNode", "hasChildNodes", "isConnected",
 		"matches", "closest", "querySelector", "querySelectorAll", "insertAdjacentHTML",
+		// ★ 第 18 次监督轮：类别① 第一批标准 DOM 方法（实现在 elemdomapi.go 的
+		// Element.prototype 上）。这里登记是为了 `'append' in el` 一类**属性存在性**
+		// 判断与浏览器一致（lazyElemProps.Has 只查这张表 + expando）。
+		"append", "prepend", "before", "after", "replaceWith",
+		"getElementsByTagName", "getElementsByClassName",
+		"insertAdjacentElement", "insertAdjacentText",
+		"isEqualNode", "isSameNode", "webkitMatchesSelector",
+		"setAttributeNS", "getAttributeNS", "hasAttributeNS", "removeAttributeNS",
+		"getAttributeNames",
 		"dataset", "classList", "style",
 		"addEventListener", "removeEventListener", "dispatchEvent",
 		"parentNode", "parentElement", "nextSibling", "previousSibling",
@@ -551,9 +563,13 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			return jsc.BooleanValue(el.HasChildNodes())
 		})), nil, true
 	case "isConnected":
-		return funcVal(fn0(func(_ *jsc.Interpreter) jsc.JSValue {
+		// ★ 第 18 次监督轮：isConnected 是 Node 的**布尔属性**（只读），不是方法。
+		// 此前实现为方法 → `el.isConnected` 返回一个 native 函数；夹具实测
+		// wbui 得到 "function ... { [native code] }"、Edge 得到 false/true。
+		// 它同时是**活值**（节点进出文档就变），故登记进 elemAccessorProps。
+		return jsc.Undefined(), &elemAccessor{get: func() jsc.JSValue {
 			return jsc.BooleanValue(el.IsConnected())
-		})), nil, true
+		}}, true
 
 	// ── CSS 选择器匹配 ──
 	case "matches":

@@ -965,6 +965,14 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		return jsc.Undefined()
 	})
 
+	// ★ 第 18 次监督轮：类别① 第一批标准 DOM 方法（ParentNode/ChildNode、
+	// getElementsByTagName/getElementsByClassName（live 集合）、insertAdjacent*、
+	// isEqualNode/isSameNode/webkitMatchesSelector、命名空间属性族
+	// setAttributeNS/getAttributeNS/hasAttributeNS/removeAttributeNS/getAttributeNames）。
+	// 全部实现见 elemdomapi.go；装在 Element.prototype 上，与上面的 protoAttr
+	// 属性方法同族（浏览器里它们同样位于 Element.prototype）。
+	installElementProtoDOMMethods(elementProto)
+
 	// location：与**文档 URL** 联动。
 	//
 	// 此前是写死 "about:blank"/"file:" 的静态桩——LoadURL 导航后页面脚本
@@ -3370,6 +3378,12 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 	// 逐项语义与实现见 dociface.go。
 	installDocumentIfaceProps(rt, obj, doc)
 
+	// ★ 第 18 次监督轮：Document 侧的类别① 方法（ParentNode 的 append/prepend/
+	// replaceChildren、importNode/adoptNode、getElementsByName，以及
+	// createAttribute/createProcessingInstruction/createCDATASection）。实现见
+	// elemdomapi.go 的 installDocumentDOMMethods。
+	installDocumentDOMMethods(rt, obj, doc)
+
 	nodeWrapperCache[doc] = obj
 	return obj
 }
@@ -4130,6 +4144,17 @@ func nodeToJS(in *jsc.Interpreter, n dom.Node) jsc.JSValue {
 		// **document 包装对象本身**才能满足 `=== document`（此前落到 default
 		// → 返回 null，夹具实测 doctype.parentNode.is.document=false）。
 		return jsc.ObjectValue(wrapDocument(in, v))
+	case *dom.Attr:
+		// ★ 第 18 次监督轮：Attr 节点（createAttribute 的返回值、
+		// getAttributeNode 一类的节点取值）。
+		return jsc.ObjectValue(wrapAttr(in, v))
+	case *dom.ProcessingInstruction:
+		// ★ 第 18 次监督轮：PI 节点（createProcessingInstruction 的返回值；
+		// 它也出现在 childNodes 里）。
+		return jsc.ObjectValue(wrapProcessingInstruction(in, v))
+	case *dom.CDATASection:
+		// ★ 第 18 次监督轮：CDATA 节点（XML 文档的 createCDATASection 结果）。
+		return jsc.ObjectValue(wrapCDATASection(in, v))
 	default:
 		return jsc.Null()
 	}
@@ -5364,6 +5389,12 @@ func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
 			return jsc.ObjectValue(wrapDocument(in, v))
 		case *dom.DocumentFragment:
 			return jsc.ObjectValue(wrapDocFrag(in, v))
+		case *dom.Attr:
+			return jsc.ObjectValue(wrapAttr(in, v))
+		case *dom.ProcessingInstruction:
+			return jsc.ObjectValue(wrapProcessingInstruction(in, v))
+		case *dom.CDATASection:
+			return jsc.ObjectValue(wrapCDATASection(in, v))
 		}
 		return jsc.Null()
 	}
@@ -5469,6 +5500,12 @@ func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 			return jsc.ObjectValue(wrapDocument(in, v))
 		case *dom.DocumentFragment:
 			return jsc.ObjectValue(wrapDocFrag(in, v))
+		case *dom.Attr:
+			return jsc.ObjectValue(wrapAttr(in, v))
+		case *dom.ProcessingInstruction:
+			return jsc.ObjectValue(wrapProcessingInstruction(in, v))
+		case *dom.CDATASection:
+			return jsc.ObjectValue(wrapCDATASection(in, v))
 		}
 		return jsc.Null()
 	})

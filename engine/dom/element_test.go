@@ -93,9 +93,10 @@ func TestGetElementsByTagName(t *testing.T) {
 		t.Errorf("getElementsByTagName(p) = %d, want 2", len(ps))
 	}
 	all := root.GetElementsByTagName("*")
-	// div + p + span + p = 4
-	if len(all) != 4 {
-		t.Errorf("getElementsByTagName(*) = %d, want 4", len(all))
+	// p + span + p = 3（★ 第 18 次监督轮：元素**自身**按 DOM 规范不计入后代集合，
+	// 此前实现把 div 自己也算进来，与浏览器不一致）
+	if len(all) != 3 {
+		t.Errorf("getElementsByTagName(*) = %d, want 3", len(all))
 	}
 }
 

@@ -2405,3 +2405,136 @@ DOM↔CSS↔Layout↔Paint↔Editing 链路移植为可嵌入的桌面端 HTML U
 3. **探针口径**：`globals` 类别建议改为**分层清单**（核心 DOM/JS 必需 / 可选子系统 /
    遗留属性），使「missing 清零」在该类别上成为**有界**目标；否则 165 项里将长期有
    ~140 项属于「不追」集合，「清零」在数学上不可达。
+
+---
+
+## §18｜第 18 次监督轮：探针口径收口 + 类别① 第一批实质清零
+
+### 18-1｜探针口径修正（去虚项后的**真实分母**）
+
+判定口径不变（`global` = typeof ≠ 'undefined'；`fn` = typeof === 'function'；
+`prop` = `in`）。修正的是**清单本身**：删掉永远判不到/被重复计数的虚项，并把
+「方法」误列进属性类别（或反之）的条目归位。
+
+| 类别 | 旧（含虚项） | 新（真实分母） | 修正内容 |
+|---|---|---|---|
+| `globals` | 195/360 | **191/354** | 删 `undefined`（`typeof undefined !== 'undefined'` 恒 false ⇒ **永久缺失**，在数学上不可达）；去重 `frames` / `Range` / `DOMParser` / `AbortSignal` / `HTMLOptGroupElement` |
+| `documentProps` | 56/56 | **53/53** | 去重 `scrollingElement`；移出 `hasFocus` / `getSelection`（它们是**方法**，已在 `docMethods`） |
+| `documentMethods` | 20/51 | **18/49** | 去重 `createElement` / `createRange` |
+| `elementMethods` | 34/64 | **34/60** | 去重 `before` / `after`；移出 `scrollTop` / `scrollLeft`（**反射属性**，`typeof` 永不为 function —— 其可写语义改由 `elementProps` 的 prop 口径覆盖） |
+| `elementProps` | 65/65 | 65/65 | — |
+
+**账目可复算**（防「数字对不上」）：旧 missing 165 = 新 missing 163 + `undefined`（恒缺 1）
++ `frames` 重复（1，且 `frames` 在 wbui 里本就缺失）；present 195 → 191 恰为 4 个
+**present 重复项**（`Range` / `DOMParser` / `AbortSignal` / `HTMLOptGroupElement`）。
+
+基线落盘：`dev/output/wbui-audit/webplatform.batch18.json`（+ `.txt`，含逐类 missing 清单）。
+
+### 18-2｜类别① 第一批：实质接口清零
+
+探针前后（同一次 clean 运行）：
+
+| 类别 | 本轮前 | 本轮后 | 净增 |
+|---|---|---|---|
+| `documentMethods` | 18/49 | **27/49** | **+9** |
+| `elementMethods` | 34/60 | **51/60** | **+17** |
+| `documentProps` / `elementProps` | 53/53 / 65/65 | 53/53 / 65/65 | 维持 100% |
+
+本轮指令清单**逐项 present**（无一项遗漏）：
+
+- **ParentNode（Element/Document 共用）**：`append` `prepend` `replaceChildren`
+  —— 统一走 `insertNodesBefore`（Node 原样插入、DocumentFragment 先展开、字符串转
+  Text、一次调用内顺序 = 参数顺序）。
+- **ChildNode（Element）**：`before` `after` `replaceWith`（`remove` 已有）。
+- **Element 查询**：`getElementsByTagName` `getElementsByClassName`
+  —— 返回**真 live** 集合（`makeLiveElementCollection`：length / 索引 / item /
+  namedItem 每次读取重新求值，保留引用后仍可观察增删）；多 class token 按空白拆分。
+- **Element 插入**：`insertAdjacentElement` `insertAdjacentText`（四个位置 + 非法位置抛
+  SyntaxError）。
+- **Element 比较**：`isEqualNode` `isSameNode` `webkitMatchesSelector`（= matches 别名）。
+- **命名空间属性族**：`setAttributeNS` `getAttributeNS` `hasAttributeNS`
+  `removeAttributeNS` `getAttributeNames`。
+- **Document**：`append` `prepend` `replaceChildren`、`importNode` `adoptNode`、
+  `getElementsByName`、`createAttribute` `createProcessingInstruction` `createCDATASection`。
+
+**建模层新增**（`engine/dom`，本轮允许 touch；`engine/layout` 零改动）：
+
+- `engine/dom/attr.go`：`Attr` 节点类型（nodeType=2）。挂载时是所属元素的**活反射器**
+  （`Value()` 读 `el.attrs[name]`、`SetValue()` 写穿到 `el.SetAttribute`），因此元素与
+  Attr 不可能不一致；游离态（`createAttribute` 的返回值）保留私有值。
+- `engine/dom/processinginstruction.go`：`ProcessingInstruction`（nodeType=7，target+data）
+  与 `CDATASection`（nodeType=4），以及 PI target 的 XML Name 校验（含 "xml" 保留名拒绝）。
+- `engine/dom/element.go`：`nsAttrs`（键 = 小写限定名 → namespace/prefix/localName）+
+  `SetAttributeNS` / `GetAttributeNS` / `HasAttributeNS` / `RemoveAttributeNS` /
+  `AttributeNamespace`。★ 属性**值**仍只存 `attrs`（单一真相源），所以 NS 属性与普通属性
+  走完全相同的样式失效 / MutationObserver / 序列化路径。
+- `engine/dom/document.go`：`CreateAttribute` / `CreateAttributeNS` /
+  `CreateProcessingInstruction` / `CreateCDATASection` / `ImportNode` / `AdoptNode` /
+  `GetElementsByName`；`engine/dom/node.go`：`cloneNodeInto`（importNode 的「换文档克隆」）。
+- 绑定层 `engine/js/bindings/elemdomapi.go`（新增）：上述全部方法 + `makeLiveElementCollection`
+  + `wrapAttr` / `wrapProcessingInstruction` / `wrapCDATASection`；`nodeToJS` / `nodeAccFn` /
+  `arrNode` 同步识别三种新节点类型。
+
+### 18-3｜探值（不只存在性）发现并修复的 **5 处真实缺陷**
+
+1. **`Element.getElementsByTagName` / `getElementsByClassName` 把元素自身算进结果**
+   —— 夹具实测 `div.getElementsByTagName("*")`：Edge=3 / wbui=4，
+   `div.getElementsByTagName("div")` 更是返回自身。按 DOM §4.9（定义在 *descendants* 上）
+   修 `dom.Element` 两处遍历排除自身；`element_test.go` 的期望同步订正（4 → 3）；
+   绑定层多 token 收集器同样排除自身。
+2. **`Element.isConnected` 被实现为方法**（`el.isConnected` 返回 native 函数；Edge 返回布尔）
+   —— 修为**布尔只读属性**并登记为活值（`elemAccessorProps`）。grep 确认全仓库无
+   `isConnected()` 调用点，零回归。
+3. **`Attr` 包装缺 `textContent`**（Edge `<>` / wbui `undefined`）—— 补；并补
+   `parentNode`（恒 null，规范：属性不在树里）。
+4. **`ProcessingInstruction` / `CDATASection` 包装缺 `parentNode` / `ownerDocument`**
+   （Edge `null` / wbui `undefined`）—— 补（走 `nodeAccFn`，插入后能取回父节点）。
+5. **`insertAdjacent{Element,Text}` 非法位置**：Edge 抛 SyntaxError，wbui 原返回 null
+   —— 改为抛（与规范/Edge 一致），夹具以 `attempt()` 断言「抛出了」。
+
+### 18-4｜验收证据（缺一不可，全部实测落盘）
+
+| 项 | 结果 |
+|---|---|
+| 探针清零点 | `webplatform.batch18.json`（真实分母）→ `webplatform.batch18b.json`（本轮实现后）：`documentMethods` 18→**27/49**、`elementMethods` 34→**51/60**；本轮清单项**全部 present** |
+| 新增夹具双侧 IDENTICAL | `element_domapi.html` **95/95**、`document_api18.html` **56/56**（`dev/output/wbui-audit/*.{wbui,edge,cmp}.txt`） |
+| 探值类型 | append/prepend 后 childNodes 顺序与类型、DocumentFragment 展开与清空、before/after/replaceWith 结构与「游离元素 no-op」、replaceChildren 空参、**live 集合**（保留引用后 append/remove 观察 length 与索引）、getElementsByTagName `*`/大小写/自身排除、insertAdjacent 四位置 + 非法位置抛出、isEqualNode 真/假（结构同/class 异/文本异/null/self）、webkitMatchesSelector、NS 往返（set→get→has→names→update→remove）、`getAttributeNS(null, …)` 命中普通属性、`getAttributeNS` 缺失返回 **null**、createAttribute 全字段 + value 可写、createProcessingInstruction 全字段 + 非法 target 抛出、**createCDATASection 在 HTML 文档抛出**、importNode 浅/深 + ownerDocument 重定向 + 原节点不动、adoptNode 摘除 + owner 变更 + 返回同一节点 + 子树递归、getElementsByName live |
+| 零回归（红线四夹具） | `element_attrs` **85/85**、`element_geom` **61/61**、`document_doctype` **34/34**、`document_props` **74/74** —— 全 IDENTICAL |
+| ALL 快照 | `ALL8.txt == ALL7.txt` **逐项零差异（17 行）**（16 个历史夹具的 IDENTICAL/DIFF 结论逐条复现，含既有 DIFF 项的行数） |
+| 工程 | `CGO_ENABLED=1 go build ./...` OK；`go test ./engine/...` **23 包 ok / 0 FAIL**；`go vet ./engine/...` 本轮改动文件**零新告警**（仅既有 `engine/platform/ime/ime_windows.go` 3 条 unsafe.Pointer）；`gofmt -l` **298**（= 基线 299 − 1：`engine/dom/element.go` 原有的 CRLF 格式问题被顺带规范化，我新增的 3 个文件均干净）；**`engine/layout` 零改动** |
+
+### 18-5｜本轮探值顺带暴露的遗留（**不属**本轮清单，如实记账）
+
+1. **表单控件的 `name` IDL 反射未移植**：`input.name = "x"` 在 wbui 里只落到 expando，
+   不写 `name` 内容属性（夹具因此改用 `setAttribute("name", …)` 建立内容属性来完成
+   `getElementsByName` 的 live 探值）。这属「元素 IDL 属性收口」另一类工作。
+2. **native 函数 `Function.length` 恒为 0**（`jsc.NewNativeFunction` 的 argc 形参在适配层被
+   忽略）—— 引擎层既有口径，与 DOM 方法实现无关，夹具已改为只探 variadic 的 0。
+3. **`getAttribute` 缺失时返回空串而非 null**（`getAttributeNS` 本轮已按规范返回 null）
+   —— 既有行为，改动面大，留待 IDL/DOM 收口轮统一处理。
+4. 剩余缺口：`elementMethods` 9 项（`animate` `checkVisibility` `getAnimations`
+   `hasPointerCapture` `releasePointerCapture` `scroll` `scrollIntoViewIfNeeded` `setHTML`
+   `setPointerCapture`）、`documentMethods` 22 项（`caretPositionFromPoint` `caretRangeFromPoint`
+   `close` `convertPointFromNode` `convertPointToNode` `createExpression` `createNSResolver`
+   `createNodeIterator` `evaluate` `execCommand` `exitPointerLock` `getAnimations` `getBoxQuads`
+   `getElementsByTagNameNS` `open` `queryCommand*` ×4 `startViewTransition` `write` `writeln`）
+   → 第 19 轮。
+
+### 18-6｜★ 不追边界定案（**经监督确认**，作为「完成」定义的一部分）
+
+**确认为不追（不要求实现）** —— 类别② 中非轻量 DOM 引擎目标的部分：A 图形/GPU
+（WebGL/WebGL2/Canvas2D/OffscreenCanvas/ImageBitmap/DOM 几何对象）、B WASM/并发
+（WebAssembly/SharedArrayBuffer/Atomics/crossOriginIsolated）、C Intl、D 调度/导航
+（Scheduler/Navigation/ViewTransition/IdleDetector/LaunchQueue）、E 的 Typed OM
+（CSSUnitValue 等）与 Animation/KeyframeEffect、J 网络/持久化/系统权限
+（Request/Response/Headers/EventSource/File/FormData/indexedDB/caches/CookieStore/
+Notification/Geolocation）、K 观察者（PerformanceObserver/ReportingObserver）。
+
+**确认为应做（放到第 19 轮）**：类别 I（DOM 核心构造器 ~25：Node/NodeList/Element/Attr/
+NamedNodeMap/HTMLCollection/DOMTokenList/Range/Selection/Document/HTMLDocument/
+DocumentFragment/ShadowRoot/Text/Comment/CDATASection/ProcessingInstruction/XMLDocument/
+DOMImplementation/DOMParser/XMLSerializer/…）、H（SVG/MathML 构造器 9）、
+G（HTMLSummaryElement）、F（事件构造器 17）—— 做法与第 17 轮 `DocumentType` 完全一致：
+**注册全局构造器 + prototype 链**，使 `instanceof` / `constructor.name` 成立；这些接口的
+**实例**引擎多已具备，属「性价比最高」的一批。`globals` 因此仍是**无界类别**，其
+「missing 清零」不作为收敛判据（§17-3 的分层清单建议仍待采纳）。
