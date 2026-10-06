@@ -587,6 +587,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | **R1**（引入即发现并修掉的回归） | SVG 探测在 paint 线程同步 `loader.Load` → 栅格图/远端引用被同步取字节，`Render()` 扣住整个 HTTP 超时（实测 30 s）且重复发请求；已收紧为「本地 + `.svg` 扩展名」 | `TestAsyncImageLoadMarksFrameDirty`：HEAD PASS(0.12 s) → 引入后 FAIL(60 s) → 修复后 PASS(0.12 s) |
 | 探针 3 处测量伪影 | 已修：①`settleReal` 不渲染即采集；②内联事件属性用双引号字面量作参数导致属性提前闭合；③采样只支持 quad/solid（动图与渐变样本误判未绘制） | 契约列 **0 → 66 ✅**；Browser 下 L3/L4 由 **0 → 51** 格 |
 | 全量测试 | `GOWORK=off go test ./... -count=1`：**仅 webkit 3 个 pre-existing 失败**（已用 HEAD 版本实证同样失败，非本轮引入） | `TestButtonTextVerticalCenter` / `TestCM6RangeMeasurementMatchesSkia` / `TestCheckedStateInvalidatesStyle` |
+| 视觉与像素复核（§8.3 第 3 条） | `Browser` 与 `Toolkit+DenyExternal` 截图经 `read_image` **人眼复核**：图案只出现在预期列（后者仅 `data:` 列有内容，file:// 与相对路径全为灰底）；另对 Browser 的 95 格做**自动化像素核验**（报告的绘制判定 vs 截图中心像素）→ **0 处矛盾** | `matrix-Browser.png`、`matrix-Toolkit-DenyExternal.png` |
 
 仍存缺口见 §3.4 末表（D8–D12），全部转入 §8.2 阶段 2/3。
 
