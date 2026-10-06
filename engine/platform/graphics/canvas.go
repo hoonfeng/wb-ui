@@ -1,4 +1,4 @@
-﻿// Translation of: Source/WebCore/platform/graphics/GraphicsContext.h
+// Translation of: Source/WebCore/platform/graphics/GraphicsContext.h
 //                  Source/WebCore/platform/graphics/GraphicsContext.cpp
 // Completeness: 90%
 // Simplifications:
@@ -344,11 +344,11 @@ var CanvasRestoreCount int
 // (Save/Restore/Clip/Translate), sampled with time.Now per call. Debug-only:
 // read via CanvasTimingSummary().
 var (
-	CgoTimingRestore time.Duration
-	CgoTimingSave    time.Duration
-	CgoTimingClip    time.Duration
-	CgoTimingTrans   time.Duration
-	CgoTimingDraw    time.Duration
+	CgoTimingRestore   time.Duration
+	CgoTimingSave      time.Duration
+	CgoTimingClip      time.Duration
+	CgoTimingTrans     time.Duration
+	CgoTimingDraw      time.Duration
 	CgoTimingSaveLayer time.Duration
 )
 
@@ -1363,14 +1363,52 @@ func (c *Canvas) drawTextWithFallback(x, y float64, text string, font Font, prim
 	}
 }
 
-// getCJKSkiaFont returns a *skia.Font using the OS CJK Typeface (Microsoft
-// YaHei) at the same size as font, or nil if none available.
+// getCJKSkiaFont returns the *skia.Font used to render CJK runs, following
+// the browser's font-fallback semantics: the **primary family** is used
+// whenever it covers CJK glyphs (Microsoft YaHei, Noto Sans SC, SimSun …),
+// and the OS CJK fallback Typeface is only used when the primary family
+// lacks them (Arial, Consolas, …).
+//
+// ★ D7（默认族 / 默认 CJK）：此前实现把所有 CJK run 一律交给
+// FontManager.CJKTypeface()，等于无视 CSS 声明的族 —— `font-family:
+// Arial` 的中文、`font-family: SimSun` 的中文都会被画成雅黑。改为
+// 主字体优先后：
+//   - 默认族 / sans-serif（浏览器解析到 Noto Sans SC，自带中文）→ 中文用
+//     Noto Sans SC，与 Edge 基准一致（deffont 中文行二值轮廓差异 7.0% → 1.0%，
+//     墨迹 bbox 与 Edge 完全相同）；
+//   - system-ui / 微软雅黑 → 中文仍用雅黑（与 Edge 一致）；
+//   - 显式 CJK 族（SimSun/SimHei…）→ 真正生效，不再被雅黑覆盖；
+//   - 无 CJK 覆盖的族（Arial/Consolas）→ 回退 CJKTypeface（Noto Sans SC，
+//     缺失时雅黑），不出现豆腐块。
 func (c *Canvas) getCJKSkiaFont(font Font) *skia.Font {
+	return c.makeSkiaFont(cjkTypefaceFor(font), font.Size)
+}
+
+// cjkTypefaceFor 返回**实际绘制 CJK 字形**的 Typeface，遵循浏览器字体回退
+// 语义：主字体自带 CJK 字形（微软雅黑 / Noto Sans SC / 宋体…）时用主字体，
+// 否则用 OS CJK 回退字体（FontManager.CJKTypeface）。
+//
+// ★ 绘制（Canvas.getCJKSkiaFont）与布局度量（GlobalCJKFontMetrics）共用本
+// 函数，保证「行盒用哪套度量」与「字形由哪个字体画」始终一致。此前绘制用
+// 主字体优先、布局只用主字体族名取度量，两处口径不同 —— `font-family:Arial`
+// 的中文行盒按 Arial 算（24px = 28px 高），字形却由 CJK 字体画（Noto Sans SC
+// 的行盒应为 35px），基线因此整体偏高 5px。
+func cjkTypefaceFor(font Font) *skia.Typeface {
 	mgr := GetFontManager()
 	if mgr == nil {
 		return nil
 	}
-	return c.makeSkiaFont(mgr.CJKTypeface(), font.Size)
+	weight := font.Weight
+	if weight == 0 {
+		weight = 400
+	}
+	if tf := mgr.LookupTypeface(font.Family, weight, font.Style); tf != nil {
+		// UnicharToGlyph('中') != 0 表示该族自带 CJK 字形（0 = .notdef）。
+		if tf.UnicharToGlyph('\u4e2d') != 0 {
+			return tf
+		}
+	}
+	return mgr.CJKTypeface()
 }
 
 // FontAscent returns the ascent (distance from baseline up to the top of the
@@ -1666,6 +1704,7 @@ func containsNonASCII(text string) bool {
 	}
 	return false
 }
+
 // PixelAt returns a single pixel, mirroring ImageBuffer::getImageData()'s pixel
 // access — with one crucial difference: the bytes are **premultiplied** (the
 // backing surface is N32Premul and ensurePixels reads it raw, so a 50%-alpha red
@@ -1813,7 +1852,7 @@ func (c *Canvas) FillRectFull(x, y, w, h float64, col Color, alpha float64, blen
 }
 
 // FillRectShader 以渐变/图案 shader + globalAlpha + blend mode 填充矩形
-//（canvas 2D fillStyle 为 CanvasGradient/CanvasPattern 时的 fillRect）。
+// （canvas 2D fillStyle 为 CanvasGradient/CanvasPattern 时的 fillRect）。
 // shader 的所有权属于调用方（此处不 Release）。
 func (c *Canvas) FillRectShader(x, y, w, h float64, sh *skia.Shader, alpha float64, blend skia.BlendMode) {
 	if c.canvas == nil || sh == nil || alpha <= 0 {
@@ -1828,7 +1867,7 @@ func (c *Canvas) FillRectShader(x, y, w, h float64, sh *skia.Shader, alpha float
 }
 
 // FillPathFull 以颜色 + globalAlpha + blend mode 填充已构建好的 path
-//（canvas 2D fill()）。path 的 fill type（nonzero/evenodd）由调用方设定。
+// （canvas 2D fill()）。path 的 fill type（nonzero/evenodd）由调用方设定。
 func (c *Canvas) FillPathFull(path *skia.Path, col Color, alpha float64, blend skia.BlendMode) {
 	if c.canvas == nil || path == nil || col.A == 0 || alpha <= 0 {
 		return
@@ -2316,9 +2355,9 @@ type widthCacheKey struct {
 }
 
 var (
-	globalWidthCache     = make(map[widthCacheKey]float64)
-	globalWidthCacheMu   sync.Mutex
-	globalWidthCacheMax  = 8192
+	globalWidthCache                             = make(map[widthCacheKey]float64)
+	globalWidthCacheMu                           sync.Mutex
+	globalWidthCacheMax                          = 8192
 	globalWidthCacheHits, globalWidthCacheMisses int64
 )
 
@@ -2609,19 +2648,23 @@ func firstConcreteFamily(list string) string {
 	// （table-track-geometry 的 "separate spacing reserves the outer table
 	// edges" 期望单元格高 23，实测 25.3）。
 	generic := map[string]string{
-		"serif":        "Times New Roman",
-		"sans-serif":   "Arial",
-		"monospace":    "Consolas",
-		"cursive":      "Comic Sans MS",
-		"fantasy":      "Impact",
-		"system-ui":    "Segoe UI",
-		"ui-serif":     "Times New Roman",
-		"ui-sans-serif": "Arial",
-		"ui-monospace": "Consolas",
-		"ui-rounded":   "Arial",
-		"math":         "Cambria Math",
-		"emoji":        "Segoe UI Emoji",
-		"fangsong":     "FangSong",
+		"serif": "Times New Roman",
+		// ★ D7 默认族：与 fontmgr.resolveFamily 保持一致（Edge 基准实测
+		//   sans-serif/ui-sans-serif/-apple-system = Noto Sans SC，
+		//   system-ui = 微软雅黑）。此表只在无字体管理器、或
+		//   LookupTypeface 未命中时兜底，两条路径不得给出不同字体。
+		"sans-serif":    "Noto Sans SC",
+		"monospace":     "Consolas",
+		"cursive":       "Comic Sans MS",
+		"fantasy":       "Impact",
+		"system-ui":     "Microsoft YaHei",
+		"ui-serif":      "Times New Roman",
+		"ui-sans-serif": "Noto Sans SC",
+		"ui-monospace":  "Consolas",
+		"ui-rounded":    "Arial",
+		"math":          "Cambria Math",
+		"emoji":         "Segoe UI Emoji",
+		"fangsong":      "FangSong",
 	}
 	parts := strings.Split(list, ",")
 	for _, p := range parts {
@@ -2715,7 +2758,7 @@ func fontMetricsFor(font Font) fontMetricsEntry {
 }
 
 // ClearFontMetricsCache 丢弃字体度量缓存。字体注册表在运行中变化时
-//（动态加载 web font / 字体回退链变化）必须调用，否则度量停留在旧字体。
+// （动态加载 web font / 字体回退链变化）必须调用，否则度量停留在旧字体。
 func ClearFontMetricsCache() {
 	fontMetricsMu.Lock()
 	fontMetricsCache = map[fontKey]fontMetricsEntry{}
@@ -2732,7 +2775,7 @@ func FontMetricsCacheStats() (size int, hits, misses int64) {
 // GlobalFontMetrics 一次返回四种字体度量（ascent / descent / xHeight / lineGap）。
 // 布局热路径（host 的 FontMetricsFunc）本就需要其中 3 项，逐个调用
 // GlobalFontAscent/Descent/LineGap 会对同一个 key 加锁并查表 3 次
-//（profile：fontMetricsFor cum 6.7%，其中 Mutex.Lock/Unlock 合计约 1.9%）。
+// （profile：fontMetricsFor cum 6.7%，其中 Mutex.Lock/Unlock 合计约 1.9%）。
 func GlobalFontMetrics(font Font) (ascent, descent, xHeight, lineGap float64) {
 	e := fontMetricsFor(font)
 	return e.ascent, e.descent, e.xHeight, e.lineGap
@@ -2767,4 +2810,58 @@ func GlobalFontXHeight(font Font) float64 {
 // hhea/sTypo lineGap value. Returns 0 on failure.
 func GlobalFontLineGap(font Font) float64 {
 	return fontMetricsFor(font).lineGap
+}
+
+// GlobalCJKFontMetrics 返回**该 font 渲染 CJK 字形时实际使用的字体**的
+// (ascent, descent, lineGap)，语义与 Canvas.getCJKSkiaFont 完全一致
+// （主字体自带 CJK 字形 → 主字体度量；否则 → OS CJK 回退字体度量）。
+//
+// 用途：布局层的行盒度量。Blink 的 FontFallbackList 会把参与该行渲染的
+// **所有字体**的度量合并（取行间距最大的那一套），因此
+// `font-family: Arial` 下的中文行盒在 Edge 中等同于 CJK 回退字体的行盒。
+// 实测（24px，line-height:normal，div.offsetHeight）：
+//
+//	| 文本           | Edge | 说明                        |
+//	|----------------|------|-----------------------------|
+//	| Arial + "HHHH" | 28   | Arial 自身度量              |
+//	| Arial + 中文   | 35   | 取 Noto Sans SC 整套度量    |
+//	| Arial + 中英混 | 35   | 同上（回退字体参与该行）    |
+//
+// 未纳入回退字体度量的引擎会得到 28 → 中文行盒矮 7px、基线整体偏高
+// 4–5px（baseline = 行盒顶 + (lineHeight-(a+d))/2 + a）。
+func GlobalCJKFontMetrics(font Font) (ascent, descent, lineGap float64) {
+	size := font.Size
+	if size <= 0 {
+		size = 16
+	}
+	// 缓存键加 \x00 前缀：与普通族名不可能冲突（族名不会以 NUL 开头），
+	// 因此可安全共用同一张度量表与同一套统计。
+	key := fontKey{family: "\x00cjk:" + font.Family, size: float32(size), weight: font.Weight, style: font.Style}
+	fontMetricsMu.Lock()
+	if e, hit := fontMetricsCache[key]; hit {
+		fontMetricsHits++
+		fontMetricsMu.Unlock()
+		return e.ascent, e.descent, e.lineGap
+	}
+	fontMetricsMisses++
+	fontMetricsMu.Unlock()
+
+	e := fontMetricsEntry{ascent: size * 0.8, resolved: false}
+	if tf := cjkTypefaceFor(font); tf != nil {
+		if f := skia.NewFont(tf, float32(size)); f != nil {
+			m, _ := f.Metrics()
+			e.ascent = float64(-m.Ascent)
+			e.descent = float64(m.Descent)
+			e.lineGap = float64(m.Leading)
+			e.resolved = true
+		}
+	}
+
+	fontMetricsMu.Lock()
+	if len(fontMetricsCache) >= fontMetricsCacheMax {
+		fontMetricsCache = map[fontKey]fontMetricsEntry{}
+	}
+	fontMetricsCache[key] = e
+	fontMetricsMu.Unlock()
+	return e.ascent, e.descent, e.lineGap
 }

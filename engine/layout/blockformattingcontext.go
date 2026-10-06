@@ -723,6 +723,22 @@ func heightIsAutoForBox(box *ElementBox) bool {
 	return true
 }
 
+// HeightIsDefiniteForBox reports whether box 的 CSS 高度是**确定值**（definite，
+// 由 CSS 或父格式化上下文给定），而不是 auto（由内容决定）。
+//
+// 渲染层需要这条信息：CSS 2.1 §10.6.3/§10.7 下，definite height 的盒子高度
+// **不因内容溢出而改变**。渲染层的兜底逻辑会把 frame 撑到「文本内容底部」
+// （engine/rendering/renderview.go 的 syncOne，用于让 flex item 里溢出的文本
+// 不被 overflow:hidden 剪掉），这条兜底对 definite height 的盒子必须跳过，
+// 否则 `height:20px` + 16px 文本（行盒 24）会被撑成 24 —— Edge 是 20
+// （minibox 探针 a/e；cssprobe 的 legacy-center 中 #pure-center / .cell-center）。
+func HeightIsDefiniteForBox(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	return !heightIsAutoForBox(box)
+}
+
 // childNeedsHeightConstraintForBox reports whether a block-level child that is
 // itself a grid container must be given the parent's remaining height so its
 // fr rows can resolve (a grid with height:auto has no definite height to

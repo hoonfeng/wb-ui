@@ -27,6 +27,14 @@ func init() {
 	layout.MeasureTextFunc = func(family string, size float64, weight int, style2, text string) float64 {
 		return graphics.MeasureText(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2}, text)
 	}
+	// ★ CJK 回退字体度量：Blink 的行盒度量会合并参与该行的**所有**字体
+	//   （取行间距最大的一套），含中文的 Arial 行因此拿到 CJK 回退字体的
+	//   行盒（24px 实测 Edge 35 / 仅主字体 28）。缺失此注入时 layout 退回
+	//   只算主字体，中文行盒矮 7px、基线偏高 4–5px。
+	layout.CJKFontMetricsFunc = func(family string, size float64, weight int, style2 string) (float64, float64, float64) {
+		a, d, lg := graphics.GlobalCJKFontMetrics(graphics.Font{Family: family, Size: size, Weight: weight, Style: style2})
+		return a, d, lg
+	}
 }
 
 type RenderView struct {
@@ -1500,9 +1508,12 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 					if textRight > frameRight && !renderIsFlexItem(ro) {
 						box.frame.Width = textRight - box.frame.X
 					}
-					textBottom := segs[0].Y + segs[0].Height
+					textBottom := inlineSegBottom(segs[0])
 					frameBottom := box.frame.Y + box.frame.Height
-					if textBottom > frameBottom {
+					// ★ 高度只在「CSS 未指定确定高度」时才允许被文本撑大：
+					//   height:20px 的盒子内容溢出**不改变盒高**（CSS 2.1
+					//   §10.6.3/§10.7），Edge 亦如此（20 而非 24）。
+					if textBottom > frameBottom && !layout.HeightIsDefiniteForBox(lb) {
 						box.frame.Height = textBottom - box.frame.Y
 					}
 				}
@@ -1528,7 +1539,7 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				if len(segs) > 0 {
 					s := segs[0]
 					if r := s.X + s.Width; r > maxRight { maxRight = r }
-					if b := s.Y + s.Height; b > maxBottom { maxBottom = b }
+					if b := inlineSegBottom(s); b > maxBottom { maxBottom = b }
 				}
 			}
 			if rbf, ok := rc.(*RenderBlockFlow); ok {
@@ -1538,7 +1549,7 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 						if len(segs) > 0 {
 							s := segs[0]
 							if r := s.X + s.Width; r > maxRight { maxRight = r }
-							if b := s.Y + s.Height; b > maxBottom { maxBottom = b }
+							if b := inlineSegBottom(s); b > maxBottom { maxBottom = b }
 						}
 					}
 				}
@@ -1549,10 +1560,27 @@ func syncOne(ro RenderObject, lb *layout.ElementBox, state *layout.LayoutState) 
 				box.frame.Width = maxRight - box.frame.X
 			}
 		}
-		if maxBottom > frameBottom {
+		// ★ 同前：文本溢出不撑大 definite height 的盒高。此前无条件撑大，
+		//   `height:20px` + 16px 文本（行盒 24）的 frame 被写到 24，而 layout
+		//   层算出的几何是对的（20）——渲染层反而「修坏」了布局结果。
+		if maxBottom > frameBottom && !layout.HeightIsDefiniteForBox(lb) {
 			box.frame.Height = maxBottom - box.frame.Y
 		}
 	}
+}
+
+// inlineSegBottom 返回文本段的内容底边 —— **行盒底**（LineY+LineHeight），
+// 而不是字形范围底（Y+Height）。
+//
+// ★ 浏览器里「文本内容高度」由**行盒**（line box）决定：`line-height:20px` 的
+// 单行文本，即使字形 ascent+descent 合计 22.5，内容高度仍是 20。用字形范围撑高
+// 会把盒子从 20 撑成 22（minibox 探针 e：Edge 20 / wbui 22）。
+// LineHeight 未填充（0，非行内布局的文本段）时回退到字形范围。
+func inlineSegBottom(s InlineTextBox) float64 {
+	if s.LineHeight > 0 {
+		return s.LineY + s.LineHeight
+	}
+	return s.Y + s.Height
 }
 
 // renderIsFlexItem reports whether ro is an in-flow child of a flex container.
