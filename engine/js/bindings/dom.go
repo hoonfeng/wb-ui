@@ -704,7 +704,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 
 	// Prototype objects — used by wrapElement / wrapText / etc.
 	var nodeProto, elementProto, htmlElementProto, svgElementProto *jsc.JSObject
-	var textProto, commentProto, docFragProto, attrProto *jsc.JSObject
+	var textProto, commentProto, docFragProto, attrProto, docTypeProto *jsc.JSObject
 
 	emptyCtor := func(in *jsc.Interpreter, this jsc.JSValue, _ []jsc.JSValue) *jsc.JSObject {
 		return this.AsObject()
@@ -727,6 +727,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 
 	commentCtor := rt.NewConstructor("Comment", emptyCtor)
 	g.Set("Comment", jsc.FunctionValue(commentCtor))
+
+	// DocumentType 构造器（DOM §4.9）：doctype 节点的接口对象，使
+	// `document.firstChild instanceof DocumentType` 与其原型链成立。与其它 DOM
+	// 构造器一致：不保证可 new（emptyCtor 直接返回 this）。
+	docTypeCtor := rt.NewConstructor("DocumentType", emptyCtor)
+	g.Set("DocumentType", jsc.FunctionValue(docTypeCtor))
 
 	fragCtor := rt.NewConstructor("DocumentFragment", emptyCtor)
 	g.Set("DocumentFragment", jsc.FunctionValue(fragCtor))
@@ -763,6 +769,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	svgElementProto = jsc.FunctionValue(svgCtor).AsObject().GetStr("prototype").AsObject()
 	textProto = jsc.FunctionValue(textCtor).AsObject().GetStr("prototype").AsObject()
 	commentProto = jsc.FunctionValue(commentCtor).AsObject().GetStr("prototype").AsObject()
+	docTypeProto = jsc.FunctionValue(docTypeCtor).AsObject().GetStr("prototype").AsObject()
 	docFragProto = jsc.FunctionValue(fragCtor).AsObject().GetStr("prototype").AsObject()
 	attrProto = jsc.FunctionValue(attrCtor).AsObject().GetStr("prototype").AsObject()
 
@@ -772,6 +779,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	svgElementProto.Set("__proto__", jsc.ObjectValue(elementProto))
 	textProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	commentProto.Set("__proto__", jsc.ObjectValue(nodeProto))
+	docTypeProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	docFragProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	attrProto.Set("__proto__", jsc.ObjectValue(nodeProto))
 	// <video>/<audio> 包装器使用 HTMLVideoElement/HTMLAudioElement 原型
@@ -785,6 +793,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	domElementProto = elementProto
 	domTextProto = textProto
 	domCommentProto = commentProto
+	domDocumentTypeProto = docTypeProto
 	domDocFragProto = docFragProto
 	domAttrProto = attrProto
 	domNamedNodeMapProto = jsc.FunctionValue(nnmCtor).AsObject().GetStr("prototype").AsObject()
@@ -3107,6 +3116,15 @@ type ElementWrapper struct {
 // ─── Document ──────────────────────────────────────────
 
 func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
+	// ★ 第 17 次监督轮：document 包装对象进 nodeWrapperCache —— 同一 *dom.Document
+	// 必须只对应一个 JS 对象。否则 `doctype.parentNode === document`、
+	// `documentElement.parentNode === document`、`el.ownerDocument === document`
+	// 这些**身份**判断全部失败（库与夹具都用 === 判同一文档），且
+	// DOMImplementation.createHTMLDocument 造出的第二个文档与它自己的节点也会
+	// 各自拿到不同包装。
+	if cached, ok := nodeWrapperCache[doc]; ok {
+		return cached
+	}
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.SetClassName("Document")
 	obj.SetInternal(doc)
@@ -3342,6 +3360,17 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 		return jsc.Null()
 	}), nil)
 
+	// ★ 第 17 次监督轮：Document 的 Node/ParentNode/Document 接口族（nodeType/
+	// nodeName/ownerDocument/firstChild/lastChild/childNodes/children/
+	// firstElementChild/lastElementChild/childElementCount/characterSet/charset/
+	// inputEncoding/contentType/documentURI/referrer/implementation/dir/domain/
+	// location/forms/images/links/embeds/plugins/anchors/applets/all/
+	// adoptedStyleSheets/fonts/hidden/visibilityState/pointerLockElement/
+	// pictureInPictureElement/designMode/scrollingElement/timeline/doctype）。
+	// 逐项语义与实现见 dociface.go。
+	installDocumentIfaceProps(rt, obj, doc)
+
+	nodeWrapperCache[doc] = obj
 	return obj
 }
 
@@ -4091,6 +4120,16 @@ func nodeToJS(in *jsc.Interpreter, n dom.Node) jsc.JSValue {
 		return jsc.ObjectValue(wrapText(in, v))
 	case *dom.Comment:
 		return jsc.ObjectValue(wrapComment(in, v))
+	case *dom.DocumentType:
+		// ★ 第 17 次监督轮：doctype 节点（document.firstChild / document.doctype
+		// 的取值，以及 doctype 兄弟指针的回读都经过这里）。
+		return jsc.ObjectValue(wrapDocumentType(in, v))
+	case *dom.Document:
+		// ★ 第 17 次监督轮：节点的父节点可能是 Document（doctype.parentNode、
+		// html.parentNode、attribute 之外的 ownerDocument 链）——必须返回
+		// **document 包装对象本身**才能满足 `=== document`（此前落到 default
+		// → 返回 null，夹具实测 doctype.parentNode.is.document=false）。
+		return jsc.ObjectValue(wrapDocument(in, v))
 	default:
 		return jsc.Null()
 	}
@@ -5296,6 +5335,10 @@ func nodeAcc(rt *jsc.Interpreter, n dom.Node) getterFn {
 		return func(_ *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue {
 			return jsc.ObjectValue(wrapText(rt, v))
 		}
+	case *dom.Document:
+		return func(_ *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue {
+			return jsc.ObjectValue(wrapDocument(rt, v))
+		}
 	}
 	return func(_ *jsc.Interpreter, _ jsc.JSValue) jsc.JSValue { return jsc.Null() }
 }
@@ -5315,6 +5358,10 @@ func nodeAccFn(rt *jsc.Interpreter, fn func() dom.Node) getterFn {
 			return jsc.ObjectValue(wrapText(in, v))
 		case *dom.Comment:
 			return jsc.ObjectValue(wrapComment(in, v))
+		case *dom.DocumentType:
+			return jsc.ObjectValue(wrapDocumentType(in, v))
+		case *dom.Document:
+			return jsc.ObjectValue(wrapDocument(in, v))
 		case *dom.DocumentFragment:
 			return jsc.ObjectValue(wrapDocFrag(in, v))
 		}
@@ -5335,6 +5382,10 @@ func isNilNode(n dom.Node) bool {
 	case *dom.Text:
 		return v == nil
 	case *dom.Comment:
+		return v == nil
+	case *dom.DocumentType:
+		return v == nil
+	case *dom.Document:
 		return v == nil
 	case *dom.DocumentFragment:
 		return v == nil
@@ -5412,6 +5463,10 @@ func arrNode(in *jsc.Interpreter, nodes []dom.Node) jsc.JSValue {
 			return jsc.ObjectValue(wrapText(in, v))
 		case *dom.Comment:
 			return jsc.ObjectValue(wrapComment(in, v))
+		case *dom.DocumentType:
+			return jsc.ObjectValue(wrapDocumentType(in, v))
+		case *dom.Document:
+			return jsc.ObjectValue(wrapDocument(in, v))
 		case *dom.DocumentFragment:
 			return jsc.ObjectValue(wrapDocFrag(in, v))
 		}

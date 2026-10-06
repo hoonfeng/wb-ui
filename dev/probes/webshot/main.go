@@ -76,7 +76,14 @@ func main() {
 			fail("读取 HTML: %v", err)
 		}
 		abs, _ := filepath.Abs(*htmlPath)
-		base := "file:///" + strings.ReplaceAll(filepath.ToSlash(filepath.Dir(abs)), " ", "%20") + "/"
+		// ★ 第 17 次监督轮：base URL 用**文件自身**的 file:// URL，而不是它所在目录
+		// 的 URL —— 浏览器里 document.URL / location.href 是文档自身的 URL（含文件
+		// 名）。此前传目录 URL 使 document.URL 少掉文件名（document_props 夹具实测：
+		// wbui 得 ".../webshot/" vs Edge ".../webshot/document_props.html"）。
+		// 相对引用的解析基准是 URL 的目录部分，且引擎全部经 net/url.ResolveReference
+		// 解析（webkit.resolveIframeSrc / page.cached_resource_loader / dom.ResolveURL），
+		// 因此资源相对解析行为不变。
+		base := "file:///" + strings.ReplaceAll(filepath.ToSlash(abs), " ", "%20")
 		if err := wv.LoadHTMLWithBaseURL(string(data), base); err != nil {
 			fail("LoadHTML: %v", err)
 		}

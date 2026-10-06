@@ -21,15 +21,25 @@ import (
 
 // handleDoctypeInitial processes a DOCTYPE token in the Initial insertion mode.
 func (tb *TreeBuilder) handleDoctypeInitial(tok *Token) {
-	// Append a DocumentType node. This port does not model DocumentType as a
-	// separate node; instead we record the doctype on the document via attributes.
-	// For simplicity we create a comment-like node with the doctype name.
-	if tok.DoctypeData != nil && tok.DoctypeData.ForceQuirks {
-		// Quirks mode would be set on the document; omitted in this port.
+	// ★ 第 17 次监督轮：把 DOCTYPE 建成**真正的 DocumentType 节点**（dom §4.9），
+	// 而不是此前伪装成 Comment 的 `<!--DOCTYPE html-->` 标记。后者让
+	// document.firstChild 返回注释、DocumentType 节点类型整类缺失；浏览器里
+	// doctype 是 document 的第一个子节点（nodeType=10、nodeName="html"、
+	// name/publicId/systemId 来自声明本身）。
+	//
+	// quirks mode 由 html.Parse 依同一 token 设置（isStandardsDoctype），此处
+	// 不重复判定——Initial 模式的"anything else"分支（defaultForInitial）也不
+	// 再需要伪造 doctype。
+	publicID, systemID := "", ""
+	if tok.DoctypeData != nil {
+		if tok.DoctypeData.HasPublicID {
+			publicID = tok.DoctypeData.PublicIdentifier
+		}
+		if tok.DoctypeData.HasSystemID {
+			systemID = tok.DoctypeData.SystemIdentifier
+		}
 	}
-	// Insert the doctype as a child of the document (as a comment-like marker).
-	c := tb.doc.CreateComment("DOCTYPE " + tok.Data)
-	_ = tb.doc.AppendChild(c)
+	_ = tb.doc.AppendChild(dom.NewDocumentType(tb.doc, tok.Data, publicID, systemID))
 	tb.insertionMode = modeBeforeHTML
 }
 

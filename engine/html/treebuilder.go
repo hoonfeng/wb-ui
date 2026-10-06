@@ -553,6 +553,25 @@ func (tb *TreeBuilder) processComment(tok *Token) {
 // modes buffer the characters for foster-parenting.
 func (tb *TreeBuilder) processCharacter(tok *Token) {
 	switch tb.insertionMode {
+	// ★ 第 17 次监督轮：initial / before html 模式下的空白字符一律**忽略**
+	// （HTML §13.2.6.1 / §13.2.6.2）。此前这两个模式直接落到 in-body 分支 →
+	// `<!DOCTYPE html>` 与 `<html>` 之间的换行/缩进被 insertText 插成 document
+	// 的第一个 Text 子节点：document.childNodes.length 变成 3（doctype、#text、
+	// html；浏览器为 2），doctype.nextSibling 指向 #text 而不是 <html>，
+	// documentElement.previousSibling 同理。非空白字符按规范走 "anything else"：
+	// 切到下一个模式后重放（initial → before html → 建 <html> → in body）。
+	case modeInitial:
+		if isHTMLWhitespaceOnly(tok.Data) {
+			return
+		}
+		tb.defaultForInitial()
+		tb.processCharacter(tok)
+	case modeBeforeHTML:
+		if isHTMLWhitespaceOnly(tok.Data) {
+			return
+		}
+		tb.defaultForBeforeHTML()
+		tb.processCharacter(tok)
 	case modeInTable, modeInCaption, modeInTableBody, modeInRow, modeInCell,
 		modeInColumnGroup, modeInSelect, modeInSelectInTable:
 		tb.processCharacterInTable(tok)
@@ -566,6 +585,19 @@ func (tb *TreeBuilder) processCharacter(tok *Token) {
 	default:
 		tb.processCharacterInBody(tok)
 	}
+}
+
+// isHTMLWhitespaceOnly reports whether s consists solely of HTML whitespace
+// (ASCII tab/LF/FF/CR/space, per the tokenizer's isWhitespace). The empty string
+// counts as whitespace-only. Used by the initial / before html insertion modes to
+// discard the inter-tag whitespace that precedes the document element.
+func isHTMLWhitespaceOnly(s string) bool {
+	for _, r := range s {
+		if !isWhitespace(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // processEOF handles end of input by closing open elements and finishing.

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>document_doctype</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<pre id="out"></pre>
+<script>
+// DocumentType 节点建模专项（DOM §4.9）双侧（wbui vs Edge）**值级**比对夹具：
+//   document.firstChild 必须是 doctype 节点（nodeType=10、nodeName/name="html"），
+//   document.doctype 与它同一身份，且父子/兄弟链、cloneNode、DOMImplementation.
+//   createDocumentType 都按标准语义工作。
+// ★ 值转义用可打印标记（<LF>/<TAB>/<BS>/<DQ>），不用反斜杠转义 —— wbui 引擎把源码
+//   里的 `\\` 折叠为单个 `\`，且 gprobe 的 wbui 侧还原步骤会把字面 `\n` 换成真换行，
+//   反斜杠转义会制造假的「行结构差异」。
+// ★ 只输出可比形式：对象本身不直接拼进字符串（两侧的 String(obj) 不同），一律用
+//   === 判定布尔、或不返回 null 时才读它的 nodeName。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+
+  var d = document, dt = d.firstChild;
+
+  // ── 1) firstChild 是 doctype 节点（本轮核心断言）──
+  say('firstChild.nodeType', dt ? dt.nodeType : 'NONE');
+  say('firstChild.nodeName', dt ? dt.nodeName : 'NONE');
+  say('firstChild.name', dt ? dt.name : 'NONE');
+  say('firstChild.is.doctype', dt === d.doctype);
+  say('DocumentType.ctor.typeof', typeof DocumentType);
+  say('firstChild.instanceof.DocumentType',
+      (typeof DocumentType === 'function') && (dt instanceof DocumentType));
+  // ★ 反证：此前实现把 DOCTYPE 伪装成注释节点（<!--DOCTYPE html-->），
+  //   nodeType 会是 8、nodeName 是 "#comment"。
+  say('firstChild.is.comment', dt ? (dt.nodeType === 8) : 'NONE');
+
+  // ── 2) DocumentType 自身接口（DOM §4.9.1）──
+  say('doctype.nodeType', d.doctype ? d.doctype.nodeType : 'NONE');
+  say('doctype.name', d.doctype ? d.doctype.name : 'NONE');
+  say('doctype.nodeName', d.doctype ? d.doctype.nodeName : 'NONE');
+  say('doctype.publicId', d.doctype ? d.doctype.publicId : 'NONE');
+  say('doctype.systemId', d.doctype ? d.doctype.systemId : 'NONE');
+  say('doctype.nodeValue', d.doctype ? d.doctype.nodeValue : 'NONE');
+  say('doctype.textContent', d.doctype ? d.doctype.textContent : 'NONE');
+  say('doctype.firstChild', d.doctype ? d.doctype.firstChild : 'NONE');
+  say('doctype.hasChildNodes', d.doctype ? d.doctype.hasChildNodes() : 'NONE');
+  say('doctype.isConnected', d.doctype ? d.doctype.isConnected : 'NONE');
+
+  // ── 3) 树位置：父子与兄弟链 ──
+  say('doctype.parentNode.is.document', d.doctype ? (d.doctype.parentNode === d) : 'NONE');
+  say('doctype.parentElement', d.doctype ? d.doctype.parentElement : 'NONE');
+  say('doctype.previousSibling', d.doctype ? d.doctype.previousSibling : 'NONE');
+  say('doctype.nextSibling.is.documentElement',
+      d.doctype ? (d.doctype.nextSibling === d.documentElement) : 'NONE');
+  say('documentElement.previousSibling.is.doctype',
+      (typeof d.documentElement !== 'undefined' && d.documentElement)
+        ? (d.documentElement.previousSibling === d.doctype) : 'NONE');
+  say('doctype.ownerDocument.is.document', d.doctype ? (d.doctype.ownerDocument === d) : 'NONE');
+
+  // ── 4) cloneNode：同 name/标识符、无父节点、非同一身份 ──
+  var c = d.doctype.cloneNode(true);
+  say('clone.nodeType', c ? c.nodeType : 'NONE');
+  say('clone.name', c ? c.name : 'NONE');
+  say('clone.publicId', c ? c.publicId : 'NONE');
+  say('clone.systemId', c ? c.systemId : 'NONE');
+  say('clone.parentNode', c ? c.parentNode : 'NONE');
+  say('clone.is.same.identity', c === d.doctype);
+
+  // ── 5) DOMImplementation.createDocumentType（DOM §4.5.1）──
+  var ndt = d.implementation.createDocumentType('html', 'PUB-ID', 'SYS-ID');
+  say('impl.createDocumentType.nodeType', ndt ? ndt.nodeType : 'NONE');
+  say('impl.createDocumentType.name', ndt ? ndt.name : 'NONE');
+  say('impl.createDocumentType.publicId', ndt ? ndt.publicId : 'NONE');
+  say('impl.createDocumentType.systemId', ndt ? ndt.systemId : 'NONE');
+  say('impl.createDocumentType.parentNode', ndt ? ndt.parentNode : 'NONE');
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>document_props</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<form id="f1" name="nf"><input name="i1"></form>
+<img id="im1">
+<a id="a1" href="/x" name="na1">L</a>
+<a id="a2">no-href</a>
+<embed id="e1">
+<pre id="out"></pre>
+<script>
+// Document 接口族（DOM §4.4 Node / §4.5 Document）双侧（wbui vs Edge）**值级**比对：
+//   nodeType/nodeName/childNodes/children/firstChild/lastChild/firstElementChild/
+//   lastElementChild/childElementCount/ownerDocument/characterSet/charset/
+//   inputEncoding/contentType/documentURI/referrer/implementation/dir/domain/
+//   location/forms/images/links/embeds/plugins/anchors/applets/all/
+//   adoptedStyleSheets/fonts/hidden/visibilityState/pointerLockElement/
+//   pictureInPictureElement/designMode/scrollingElement/timeline。
+// ★ 转义/可比性约定同 document_doctype.html（标记转义 + 只输出可比形式）。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+  var d = document;
+
+  // ── 1) 存在性：`'x' in document` 全绿（webplatform 探针 docProps 的口径）──
+  var names = ['nodeType', 'nodeName', 'ownerDocument', 'firstChild', 'lastChild',
+               'childNodes', 'children', 'firstElementChild', 'lastElementChild',
+               'childElementCount', 'characterSet', 'charset', 'inputEncoding',
+               'contentType', 'documentURI', 'referrer', 'implementation', 'dir',
+               'domain', 'location', 'forms', 'images', 'links', 'embeds', 'plugins',
+               'anchors', 'applets', 'all', 'adoptedStyleSheets', 'fonts', 'hidden',
+               'visibilityState', 'pointerLockElement', 'pictureInPictureElement',
+               'designMode', 'scrollingElement', 'timeline'];
+  var miss = [];
+  for (var i = 0; i < names.length; i++) { if (!(names[i] in d)) { miss.push(names[i]); } }
+  say('in.total', names.length);
+  say('in.missing', miss.length ? miss.join(' ') : '(none)');
+
+  // ── 2) Node / ParentNode（DOM §4.4）──
+  say('nodeType', d.nodeType);
+  say('nodeName', d.nodeName);
+  say('nodeValue', d.nodeValue);
+  say('textContent', d.textContent);
+  say('ownerDocument', d.ownerDocument);
+  say('parentNode', d.parentNode);
+  say('parentElement', d.parentElement);
+  say('previousSibling', d.previousSibling);
+  say('nextSibling', d.nextSibling);
+  say('isConnected', d.isConnected);
+  say('childNodes.length', d.childNodes.length);
+  say('childNodes.0.nodeType', d.childNodes[0] ? d.childNodes[0].nodeType : 'NONE');
+  say('childNodes.0.is.doctype', d.childNodes[0] === d.doctype);
+  say('childNodes.1.nodeName', d.childNodes[1] ? d.childNodes[1].nodeName : 'NONE');
+  say('firstChild.nodeType', d.firstChild ? d.firstChild.nodeType : 'NONE');
+  say('lastChild.nodeName', d.lastChild ? d.lastChild.nodeName : 'NONE');
+  say('children.length', d.children.length);
+  say('children.0.tagName', d.children[0] ? d.children[0].tagName : 'NONE');
+  say('firstElementChild.tagName', d.firstElementChild ? d.firstElementChild.tagName : 'NONE');
+  say('lastElementChild.tagName', d.lastElementChild ? d.lastElementChild.tagName : 'NONE');
+  say('childElementCount', d.childElementCount);
+  say('documentElement.is.firstElementChild', d.documentElement === d.firstElementChild);
+  say('documentElement.is.lastElementChild', d.documentElement === d.lastElementChild);
+  say('scrollingElement.is.documentElement', d.scrollingElement === d.documentElement);
+  // 对象身份：同一节点多次读取必须同一包装（库用 === 判断）
+  say('children.0.is.documentElement', d.children[0] === d.documentElement);
+
+  // ── 3) Document 标量成员（DOM §4.5）──
+  say('characterSet', d.characterSet);
+  say('charset', d.charset);
+  say('inputEncoding', d.inputEncoding);
+  say('contentType', d.contentType);
+  say('documentURI.is.URL', d.documentURI === d.URL);
+  say('URL.has.file', d.URL.indexOf('document_props.html') >= 0);
+  say('referrer', d.referrer);
+  say('compatMode', d.compatMode);
+  say('designMode', d.designMode);
+  say('hidden', d.hidden);
+  say('visibilityState', d.visibilityState);
+  say('pointerLockElement', d.pointerLockElement);
+  say('pictureInPictureElement', d.pictureInPictureElement);
+  say('domain', d.domain);
+  // dir：反射 documentElement 的内容属性（getter + setter 双向）
+  say('dir.initial', d.dir);
+  d.documentElement.setAttribute('dir', 'rtl');
+  say('dir.set', d.dir);
+  d.documentElement.removeAttribute('dir');
+  say('dir.removed', d.dir);
+  d.dir = 'ltr';
+  say('dir.viaSetter', d.documentElement.getAttribute('dir'));
+  d.documentElement.removeAttribute('dir');
+
+  // ── 4) location / implementation ──
+  say('location.protocol', d.location.protocol);
+  say('location.href.has.file', d.location.href.indexOf('document_props.html') >= 0);
+  say('location.pathname.has.file', d.location.pathname.indexOf('document_props.html') >= 0);
+  say('location.is.stable', d.location === d.location);
+  say('impl.hasFeature', d.implementation.hasFeature('HTML', '1.0'));
+  say('impl.is.stable', d.implementation === d.implementation);
+
+  // ── 5) 集合成员（live HTMLCollection）──
+  say('forms.length', d.forms.length);
+  say('forms.namedItem.is.f1', d.forms.namedItem('nf') === document.getElementById('f1'));
+  say('forms.item.is.f1', d.forms.item(0) === document.getElementById('f1'));
+  say('images.length', d.images.length);
+  say('images.0.id', d.images[0] ? d.images[0].id : 'NONE');
+  say('links.length', d.links.length);
+  say('links.0.id', d.links[0] ? d.links[0].id : 'NONE');
+  say('anchors.length', d.anchors.length);
+  say('anchors.0.id', d.anchors[0] ? d.anchors[0].id : 'NONE');
+  say('embeds.length', d.embeds.length);
+  say('plugins.length', d.plugins.length);
+  say('applets.length', d.applets.length);
+  say('all.length.gte.5', d.all.length >= 5);
+  say('all.namedItem.is.a1', d.all.namedItem('a1') === document.getElementById('a1'));
+  // live：新插入的表单元素立刻出现在 forms 里
+  var f2 = document.createElement('form');
+  f2.id = 'f2';
+  document.body.appendChild(f2);
+  say('forms.live.after.append', d.forms.length);
+  document.body.removeChild(f2);
+  say('forms.live.after.remove', d.forms.length);
+
+  // ── 6) 其余 ──
+  say('adoptedStyleSheets.length', d.adoptedStyleSheets.length);
+  say('fonts.size', d.fonts.size);
+  say('fonts.status', d.fonts.status);
+  say('fonts.check', d.fonts.check('16px monospace'));
+  say('fonts.is.stable', d.fonts === d.fonts);
+  say('timeline.is.number', typeof d.timeline.currentTime === 'number');
+  say('timeline.is.stable', d.timeline === d.timeline);
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

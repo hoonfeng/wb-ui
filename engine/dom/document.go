@@ -181,6 +181,20 @@ func (d *Document) DocumentElement() *Element {
 	return nil
 }
 
+// Doctype returns the document's DOCTYPE node, or nil when the document has none,
+// mirroring Document::doctype(). The doctype — when present — is always the first
+// child of the document (HTML §13.2.6.1 initial insertion mode appends it before any
+// element), so this is an O(1) lookup for a well-formed document; the loop keeps the
+// accessor correct for documents assembled by script as well.
+func (d *Document) Doctype() *DocumentType {
+	for c := d.firstChild; c != nil; c = nodeBaseOf(c).nextSibling {
+		if dt, ok := c.(*DocumentType); ok {
+			return dt
+		}
+	}
+	return nil
+}
+
 // GetElementById returns the first element in the document whose id matches, mirroring
 // Document::getElementById.
 func (d *Document) GetElementById(id string) *Element {

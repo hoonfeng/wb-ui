@@ -2074,7 +2074,7 @@ Edge 侧同 `elProps` 清单的遍历子集在夹具中逐项验证：`elProps_s
 - **`engine/layout` 零改动**：`git status` 仅 `engine/js/bindings/{lazyelement.go,dom.go}`、
   新测试文件与新增夹具 ⇒ 布局/字体度量收敛态不受影响。
 
-### 15-6｜范围判定：`Document` 侧同类缺口（**未闭合 —— 第 16 次监督轮更正**）
+### 15-6｜范围判定：`Document` 侧同类缺口（**已闭合 —— 第 17 轮完成，逐项见 §17**）
 
 `dev/probes/webplatform` 的 `documentProps` 缺失清单同时含
 `firstChild / lastChild / childNodes / children / childElementCount / firstElementChild /
@@ -2093,22 +2093,24 @@ Node/ParentNode/Document 接口的成组缺失**，与本轮「Element 级遍历
 3. **验收红线**：本轮红线是「只增 DOM API、零回归」，塞入 Document 接口重做会显著扩大
    验证面并引入与布局无关的回归风险。
 
-⇒ **本条未闭合**（第 16 次监督轮更正）：把新发现的同类缺口「登记」当作收尾不成立 ——
-`documentProps` 的 38/56 是**可度量**的固定清单（`elProps` 65 项、`docProps` 56 项，
-无「无底洞」），下一轮直接处理，路径如下：
+⇒ **本条已闭合（第 17 轮）**。第 16 轮定的三步路径全部走完，交付与验收证据见 §17：
 
-1. **先给 DocumentType 节点建模方案**（`engine/dom` 新增 DocumentType 节点类型 +
-   `wrapNode`/`nodeAccFn` 识别该类型 + `Document.firstChild` 返回 doctype）—— 这是
-   `document.firstChild / lastChild / nodeType / nodeName` 一批属性的硬依赖；
-2. **再补 `Document` 包装器的 Node/ParentNode/Document 接口族**：`children`、
-   `childNodes`、`childElementCount`、`firstChild`、`lastChild`、`firstElementChild`、
-   `lastElementChild`、`nodeType`、`nodeName`、`ownerDocument`、`characterSet`、
-   `contentType`、`dir`、`location` 等共 38 项；
-3. **验收口径与本轮一致**：探针 `documentProps.missing` 清零（或逐项附实测定性）+
-   16 探针 ALL 快照零差异 + 新夹具双侧 IDENTICAL + build/test/vet/gofmt 计数不增。
+1. **DocumentType 建模**：`engine/dom/doctype.go` 新增 `DocumentType` 节点类型 +
+   `Document.Doctype()`；`engine/html/treebuilder_modes.go` 的 `handleDoctypeInitial`
+   改为 append 真正的 DocumentType 节点 —— ★ 此前它把 DOCTYPE 伪装成 Comment
+   （`<!--DOCTYPE html-->`），这正是 `document.firstChild` 是注释、DocumentType 整类
+   缺失的根因；
+2. **Document 接口族 37 项**：`engine/js/bindings/dociface.go`（Node/ParentNode 10 项 +
+   Document 标量 10 项 + 集合 8 项 + 其余 9 项）+ `dom.go` 接线（分派/身份缓存/构造器）；
+3. **验收**：`documentProps` **18/56 → 56/56（missing 清空）**；
+   `document_doctype.html` 34/34、`document_props.html` 74/74 双侧 IDENTICAL；
+   `ALL7.txt == ALL6.txt` 逐项零差异；`go test ./engine/...` 23 包 0 FAIL；
+   `gofmt -l` 299 = 299；**`engine/layout` 零改动**。
 
 `Element` / `DocumentFragment` / `ShadowRoot` 的 Element 级遍历族与 **Element 侧 23 项属性**
-已在本轮全部闭合（逐项表见 §16），**但「探针无遗留」的整体目标尚未达成**。
+已在第 16 轮全部闭合（逐项表见 §16），Document 侧 38 项在本轮闭合。**整体目标
+（探针无遗留）仍未达成** —— 剩余缺口已在 §17-2 按**三类**逐项界定（应做 / 独立子系统
+WONTFIX 或单独立项 / 探针清单瑕疵），供决策，不再以「globals 全覆盖」为冲刺目标。
 
 ### 15-7｜本轮改动与产物
 
@@ -2230,3 +2232,176 @@ Node/ParentNode/Document 接口的成组缺失**，与本轮「Element 级遍历
   `element_geom.{wbui,edge}.txt`（IDENTICAL 61/61）、
   `webplatform.batchA.json`（57/65）、`webplatform.batchB.json`（65/65，missing 空）、
   `ALL6.txt`（== `ALL5.txt`，零回归）
+
+---
+
+## §17｜第 17 次监督轮：`Document` 侧 38 项闭合 + 遗留范围界定（三类）
+
+### 17-1｜本轮交付：`documentProps` 18/56 → **56/56（missing 清空）**
+
+**建模（`engine/dom` 本轮允许 touch；`engine/layout` 仍零改动）**
+
+- 新增 `engine/dom/doctype.go`：`DocumentType` 节点类型（name/publicID/systemID +
+  `NodeName`/`NodeValue`/`SetNodeValue`/`TextContent`/`SetTextContent`/`cloneShallow`），
+  叶子节点（`canHaveChildren()` 对 nodeType=10 天然返回 false）。
+- `engine/dom/document.go`：新增 `Doctype()` 查询（doctype 恒为文档首子节点，标准文档 O(1)）。
+- `engine/html/treebuilder_modes.go`：`handleDoctypeInitial` 改为 append **真正的
+  `DocumentType` 节点**。★ 此前它把 DOCTYPE 伪装成 Comment 节点（`<!--DOCTYPE html-->`）
+  —— 这是 `document.firstChild` 在旧实现里是注释、`DocumentType` 整类缺失的根因。
+
+**绑定层（`engine/js/bindings`）**
+
+- 新增 `dociface.go`：`wrapDocumentType` + `installDocumentIfaceProps`（37 项）+
+  `wrapElementCollection`（HTMLCollection/HTMLAllCollection 语义）+ `makeLocationObject` /
+  `makeDOMImplementation` / `makeFontFaceSet` / `makeDocumentTimeline` / `makeResolvedThenable`。
+- `dom.go` 接线：`wrapDocument` 末尾调用接口族安装；`nodeToJS`/`arrNode`/`nodeAccFn`/`nodeAcc`/
+  `isNilNode` 识别 `*dom.DocumentType` 与 `*dom.Document`；document 包装对象进
+  `nodeWrapperCache`（身份稳定）；注册 `DocumentType` 构造器 + prototype 链（`instanceof` 成立）。
+
+**38 项逐项处置（= 37 唯一项 + `scrollingElement` 清单内重复计入）**
+
+| 组 | 项 | 值语义 / 实现要点 |
+|---|---|---|
+| Node/ParentNode（10） | `nodeType` | 9（`dom.NodeDocument`） |
+| | `nodeName` | `"#document"` |
+| | `ownerDocument` | `null`（Document 无 owner） |
+| | `childNodes` | 数组语义（沿用元素侧 `arrNode`）；每次读取重新求值 → live |
+| | `children` / `firstElementChild` / `lastElementChild` / `childElementCount` | 只认 Element 子节点（跳过 doctype） |
+| | `firstChild` / `lastChild` | 经 `nodeAccFn` → doctype 节点（本轮新增该类型分派） |
+| Document 标量（10） | `characterSet` / `charset` / `inputEncoding` | `"UTF-8"`（tokenizer 按 UTF-8 解码；后两者是规范保留别名） |
+| | `contentType` | `doc.ContentType()` → `"text/html"` |
+| | `documentURI` | `doc.URL()` |
+| | `referrer` | `""`（引擎不发送导航请求，无 Referer） |
+| | `implementation` | `DOMImplementation` 单例（hasFeature/createDocumentType/createHTMLDocument/createDocument） |
+| | `dir` | 反射 `documentElement` 的 `dir`（getter + setter） |
+| | `domain` | `URL.Hostname()`（file:// 下为 `""`） |
+| | `location` | `Location` 对象（href/protocol/host/hostname/port/pathname/search/hash/origin/username/password + toString；导航方法 no-op），首读缓存 → 同一身份 |
+| 集合（8） | `forms` / `images` / `embeds` / `plugins` / `applets` | 按标签名的 live 集合（`plugins` 与 `embeds` 同源） |
+| | `links` / `anchors` | links = 带 `href` 的 a/area；anchors = 带 `name` 的 a（文档序） |
+| | `all` | 全部元素（HTMLAllCollection 语义，含 namedItem） |
+| 其余（9） | `adoptedStyleSheets` | 空数组（构造式样式表未移植；赋值接受但不保留） |
+| | `fonts` | `FontFaceSet` 单例（size=0/status="loaded"/check=true/ready 为已履行 thenable） |
+| | `hidden` / `visibilityState` | `false` / `"visible"`（引擎无页面可见性信号） |
+| | `pointerLockElement` / `pictureInPictureElement` | `null` |
+| | `designMode` | `"off"`/`"on"`（每文档状态存绑定层 `designModeByDoc`） |
+| | `scrollingElement` | standards → documentElement；quirks → body |
+| | `timeline` | `DocumentTimeline` 单例（`currentTime` = 自创建起的毫秒数） |
+| 清单外配套（1） | `doctype` | `doc.Doctype()` → DocumentType 包装（本轮建模的自然配套） |
+
+**夹具暴露的三个真实缺陷（已一并修复，非「调夹具掩盖」）**
+
+1. **前导空白成为 document 子节点**：`processCharacter` 在 `modeInitial`/`modeBeforeHTML`
+   直接落到 in-body 分支 → `<!DOCTYPE html>` 与 `<html>` 之间的换行被插成 Text 子节点
+   （`document.childNodes.length=3`：doctype、#text、html；Edge = 2），`doctype.nextSibling`
+   指向 `#text`。按 HTML §13.2.6.1 / §13.2.6.2 修：这两个模式下空白一律忽略，非空白走
+   "anything else"（切模式后重放）。
+2. **`nodeToJS`/`nodeAccFn` 不识别 `*dom.Document`**：`doctype.parentNode` 落到 default →
+   `null`，`doctype.parentNode === document` 为 false（`html.parentNode` 同理）。已加
+   `*dom.Document` 分派（返回 document 包装）并让 `wrapDocument` 走 `nodeWrapperCache`
+   （同一 `*dom.Document` 恒同一 JS 对象；`createHTMLDocument` 造出的第二文档同理）。
+3. **探针加载口径**：`dev/probes/webshot` 用 `filepath.Dir(abs)` 作 base URL →
+   `document.URL` 是**目录**（缺文件名），与 Edge 不一致。改为**文件自身**的 file:// URL；
+   相对解析仍全部经 `net/url.ResolveReference`，解析行为不变（`element_*` 夹具零回归可证）。
+
+**验收（缺一不可，全部实测落盘）**
+
+- 探针：`webplatform.pre17.json`（documentProps **18/56**）→ `webplatform.docpost.json`
+  （**56/56，missing 清空**）；globals 194 → **195**（注册了 `DocumentType` 构造器）。
+- 夹具（双侧 `gprobe_cmp.sh`）：`document_doctype.html` **IDENTICAL 34/34**；
+  `document_props.html` **IDENTICAL 74/74**。值级断言含：firstChild 为 documentType
+  （nodeType=10、name/nodeName=html、`=== document.doctype`、`instanceof DocumentType`）、
+  反证 `nodeType !== 8`、`document.nodeType=9`、`characterSet=UTF-8`、`contentType=text/html`、
+  `compatMode=CSS1Compat`、`scrollingElement === documentElement`、集合 length/namedItem/
+  live 增减、fonts/timeline/implementation 身份稳定、cloneNode/remove、createDocumentType。
+- 零回归：`element_attrs.html` **85/85**、`element_geom.html` **61/61** 仍 IDENTICAL；
+  `ALL7.txt == ALL6.txt` **逐项零差异（17 行）**。
+- `CGO_ENABLED=1 go build ./...` OK；`go test ./engine/...` **23 包 ok / 0 FAIL**；
+  `go vet ./engine/...`（本轮改动文件零新告警；仅有 `engine/platform/ime/ime_windows.go`
+  既有的 3 条 unsafe.Pointer 告警）；`gofmt -l` **299 = 299**（新文件 `doctype.go` 已
+  `gofmt -w`）；**`engine/layout` 零改动**。
+
+### 17-2｜★ 遗留范围界定（三类逐项归类，供用户/监督决策）
+
+判定基准：`dev/output/wbui-audit/webplatform.docpost.json`（globals 195/360、
+documentProps 56/56、documentMethods 20/51、elementMethods 34/64、elementProps 65/65）。
+
+#### 类别 ①：DOM/接口面「**应做**」（延续主线，共 ~59 项唯一）
+
+**①-a `documentMethods` 缺 31 项**（去重后 31）：
+`adoptNode` `append` `caretPositionFromPoint` `caretRangeFromPoint` `close`
+`convertPointFromNode` `convertPointToNode` `createAttribute` `createCDATASection`
+`createExpression` `createNSResolver` `createNodeIterator` `createProcessingInstruction`
+`evaluate` `execCommand` `exitPointerLock` `getAnimations` `getBoxQuads` `getElementsByName`
+`getElementsByTagNameNS` `importNode` `open` `prepend` `queryCommandEnabled`
+`queryCommandState` `queryCommandSupported` `queryCommandValue` `replaceChildren`
+`startViewTransition` `write` `writeln`
+
+**①-b `elementMethods` 缺 30 项**（去重 28；清单内 `before`/`after` 各重复一次）：
+`after` `animate` `append` `before` `checkVisibility` `getAnimations` `getAttributeNS`
+`getAttributeNames` `getElementsByClassName` `getElementsByTagName` `hasAttributeNS`
+`hasPointerCapture` `insertAdjacentElement` `insertAdjacentText` `isEqualNode` `isSameNode`
+`prepend` `releasePointerCapture` `removeAttributeNS` `replaceWith` `scroll`
+`scrollIntoViewIfNeeded` `scrollLeft`(setter) `scrollTop`(setter) `setAttributeNS` `setHTML`
+`setPointerCapture` `webkitMatchesSelector`
+
+**判定：应做**。①全是标准 DOM 方法（ParentNode/ChildNode/Element/CSSOM View 面），现代前端
+高频使用（`append/prepend/before/after/replaceChildren` 已是 DOM 操作主干，
+`getElementsByClassName/getElementsByTagName` 是 Element 侧明确缺口）；②实现成本低（多为对
+既有树操作 API 的薄封装 + 文档序集合）；③与主线「接口收口」同质，验收口径可完全沿用本轮
+（探针 missing 清零 + 夹具双侧 IDENTICAL + ALL 快照零差异）。
+
+**建议分批**：第 18 轮做 `append/prepend/replaceChildren`（Document 与 Element 共用实现）、
+`before/after/remove/replaceWith`（ChildNode）、`insertAdjacentElement/Text`、
+`getElementsBy*` 全套、`isEqualNode/isSameNode`；第 19 轮做命名空间属性族
+（`getAttributeNS/setAttributeNS/hasAttributeNS/removeAttributeNS/getAttributeNames`）、
+`scroll*`、`checkVisibility`、`setHTML`、pointer capture 族。
+
+#### 类别 ②：独立平台子系统「**建议 WONTFIX 或单独立项**」（globals 缺 165 项中的主体）
+
+**判定总纲**：wb-ui 的目标是**轻量 DOM/CSS/布局/渲染引擎**（把 WebKit 的
+DOM↔CSS↔Layout↔Paint↔Editing 链路移植为可嵌入的桌面端 HTML UI 运行时），**不是**完整浏览器
+运行时。下列子系统各自是独立工程（需要 GPU 后端、多线程 JS 运行时、ICU 数据、
+图像/媒体编解码、网络栈、桌面集成），要求引擎逐项实现既不现实也偏离主线；且
+**globals 覆盖率不是有界目标**（清单按浏览器全量 API 面列举，窗口遗留属性与事件构造器
+家族会长期存在）。
+
+| 子系统 | 缺失项（逐项） | 判定与理由 |
+|---|---|---|
+| A. 图形/GPU（14） | `WebGLRenderingContext` `WebGL2RenderingContext` `CanvasRenderingContext2D` `OffscreenCanvas` `ImageBitmap` `createImageBitmap` `ImageData` `Path2D` `DOMMatrix` `DOMPoint` `DOMQuad` `DOMRect` `DOMRectList` `DOMRectReadOnly` | **单独立项**：WebGL 需 GPU 上下文 + GLSL 管线（goskia 只暴露 Skia 表面）；canvas 2D 已有部分实现（`engine/js/bindings/canvas2d.go`），但探针要的是全局构造器 + 完整 2D 上下文语义（渐变/阴影/文本测量/compositing），属「Canvas 子系统」；DOM 几何对象（Matrix/Point/Quad/Rect）属图形子系统 |
+| B. WASM / 并发（4） | `WebAssembly` `SharedArrayBuffer` `Atomics` `crossOriginIsolated` | **WONTFIX（除非更换 JS 运行时）**：goja 无 WASM 编译器、无跨 agent 共享内存；`crossOriginIsolated` 依赖 COOP/COEP 与多进程模型 |
+| C. 国际化（1） | `Intl` | **单独立项**：需要 ICU 数据与本地化算法（数字/日期/排序/复数规则），体积与维护成本不该由 DOM 引擎承担 |
+| D. 调度/导航（9） | `Scheduler` `scheduler` `TaskController` `TaskPriorityChangeEvent` `IdleDetector` `navigation` `Navigation` `ViewTransition` `LaunchQueue` | **WONTFIX / 单独立项**：Web Scheduling API 需要浏览器任务队列上的优先级抢占；Navigation/ViewTransition 属文档级导航与跨文档动画（本引擎不接管导航） |
+| E. CSSOM / Typed OM / 动画对象（25） | `CSSStyleSheet` `CSSStyleRule` `CSSRule` `CSSRuleList` `CSSStyleDeclaration` `CSSKeyframesRule` `CSSMediaRule` `CSSGroupingRule` `CSSConditionRule` `CSSSupportsRule` `CSSFontFaceRule` `StyleSheetList` `MediaQueryList` `MediaQueryListEvent` `Animation` `KeyframeEffect` `DocumentTimeline` `Highlight` `HighlightRegistry` `CSSStyleValue` `CSSUnitValue` `CSSTransformValue` `CSSImageValue` `CSSKeywordValue` `CSSNumericValue` | **分层**：`CSSStyleDeclaration/CSSRule/StyleSheetList/MediaQueryList` 的**实例**引擎已在用（`el.style`、`document.styleSheets` 已 present），缺的是全局构造器 → **应做**（并入类别 ①）；Typed OM（`CSSUnitValue` 等）需要数值类型系统、`Animation/KeyframeEffect/ViewTransition` 需要动画时间线子系统 → **单独立项** |
+| F. 事件构造器（17） | `UIEvent` `PointerEvent` `InputEvent` `DragEvent` `FocusEvent` `TouchEvent` `ClipboardEvent` `AnimationEvent` `TransitionEvent` `ErrorEvent` `PromiseRejectionEvent` `PopStateEvent` `HashChangeEvent` `BeforeUnloadEvent` `PageTransitionEvent` `StorageEvent` `SubmitEvent` | **应做（中低优先，并入类别 ① 后续轮）**：引擎已有 MouseEvent/KeyboardEvent/WheelEvent 构造器与事件对象，这批是同质增量；其中 Touch/Clipboard/Storage/BeforeUnload/PopState/HashChange 的**事件语义**需宿主支持（触摸/剪贴板/历史/卸载），但构造器注册本身可先做 |
+| G. HTML 构造器（1） | `HTMLSummaryElement` | **应做**（1 项，随 HTML 构造器体系补齐） |
+| H. SVG/MathML 构造器（9） | `SVGSVGElement` `SVGGraphicsElement` `SVGGeometryElement` `SVGPathElement` `SVGTextElement` `SVGImageElement` `SVGUseElement` `SVGForeignObjectElement` `MathMLElement` | **应做（中优先）**：SVG 元素**实例**已可用（`createElementNS` 与 `namespaceURI` 已闭合），缺的只是各接口构造器与 `instanceof` 链路 → 注册构造器并入类别 ① |
+| I. DOM 核心构造器/接口对象（25） | `Node` `NodeList` `NodeIterator` `TreeWalker` `Element` `Attr` `NamedNodeMap` `HTMLCollection` `DOMTokenList` `Range` `Selection` `Document` `HTMLDocument` `DocumentFragment` `ShadowRoot` `Text` `Comment` `CDATASection` `ProcessingInstruction` `XMLDocument` `DOMImplementation` `DOMParser` `XMLSerializer` `XPathResult` `XPathExpression` `NodeFilter` | ★ **应做（性价比最高）**：这类**实例基本都已存在**（`document`、`childNodes`、`classList`、`Range`、`TreeWalker`、`Selection` 都在用），缺的只是**全局构造器 + 原型链**。注册后 `x instanceof Node` 一类判断立即成立，该组可成片清零；本轮为 `DocumentType` 做的正是同一件事，模式可直接复用 |
+| J. 存储/网络/编码（11） | `Request` `Response` `Headers` `EventSource` `File` `FormData` `indexedDB` `caches` `CookieStore` `Notification` `Geolocation` | **单独立项**：网络栈（fetch 已 present）/持久化（IndexedDB）/系统权限（Notification/Geolocation）各有安全与 I/O 模型；`FormData`/`File` 较轻，可并入类别 ① |
+| K. 观察者（2） | `PerformanceObserver` `ReportingObserver` | **WONTFIX（除非建性能/报表子系统）**：前者需 Performance Timeline 数据源，后者需 CSP/弃用报表通道 |
+| L. window 杂项（42） | `postMessage` `atob` `btoa` `customElements` `CustomElementRegistry` `scroll` `scrollTo` `scrollBy` `open` `close` `focus` `blur` `print` `alert` `confirm` `prompt` `stop` `find` `moveTo` `resizeTo` `getScreenDetails` `showOpenFilePicker` `showSaveFilePicker` `documentPictureInPicture` `top` `parent` `frames` `length` `name` `origin` `isSecureContext` `outerWidth` `outerHeight` `scrollX` `scrollY` `pageXOffset` `pageYOffset` `menubar` `toolbar` `statusbar` `locationbar` `personalbar` | **三层**：`atob/btoa/scroll/scrollTo/scrollBy/focus/blur/customElements/CustomElementRegistry` 属「轻量且常用」→ **应做**；`top/parent/frames/length/name/origin/outer*/scrollX/scrollY/page*Offset/各 bar` 多为可赋值的遗留 window 属性（每项 1~3 行）；`open/alert/confirm/prompt/print/find/stop/moveTo/resizeTo/getScreenDetails/showOpenFilePicker/showSaveFilePicker/documentPictureInPicture` 属**桌面集成**（需宿主窗口/文件对话框/屏幕 API）→ 单独立项或由宿主桥接 |
+| M. JS 运行时/其它（7） | `AsyncFunction` `AsyncGeneratorFunction` `GeneratorFunction` `BroadcastChannel` | `*Function` 三项是 JS 运行时函数构造器别名（goja 若未暴露全局别名，注册成本极低）→ **应做**；`BroadcastChannel` 属多文档消息（本引擎以单文档为主）→ **WONTFIX / 单独立项** |
+
+#### 类别 ③：探针清单**自身瑕疵**（应修清单，而不是去实现引擎 API）
+
+1. **`globals` 里的 `'undefined'`**：`typeof undefined !== 'undefined'` 恒为 false —— 语言
+   关键字被当成全局属性列举，该条目**永远**计入缺失（把「缺失」的语义污染成不可能达成）。
+   → 从清单移除。
+2. **`globals` 里的 `'frames'` 出现两次** → 去重（把 1 个真实项计成 2 个缺失）。
+3. **`elementMethods` 的 `'before'` / `'after'` 各出现两次** → 去重。
+4. **`documentProps` 的 `'scrollingElement'` 出现两次** → 去重（本轮已实现，两处皆 present，
+   但清单仍重复，总量 56 里含 1 个虚项）。
+5. **类别口径重叠**：`documentProps` 混入了方法名（`hasFocus`、`getSelection`）——
+   建议严格按「属性 vs 方法」分栏，否则同一个名字在两个类别里各计一次。
+
+#### 17-3｜收敛路径建议（供用户/监督拍板）
+
+1. **第 18 轮（建议）**：类别 ① 第一批 + 类别 I/H/G/F 的**构造器注册**（性价比最高：实例已
+   在用，只差全局构造器与原型链）+ 类别 ③ 的清单去重。预期：`elementMethods` 缺 30 → 个位数、
+   `documentMethods` 缺 31 → 个位数、`globals` 缺 165 → 去掉瑕疵项（`undefined`）并按
+   「构造器类成片清零」后显著下降。
+2. **明确「不追」边界**：类别 ② 的 A/B/C/D/E(Typed OM)/J/K 各子系统**不列入冲刺目标**
+   （无界或需独立工程）。若确需，按「单独立项」单独排期并各自写立项理由
+   （GPU 后端 / 多线程 JS 运行时 / ICU 数据 / 网络栈 / 桌面集成）。
+3. **探针口径**：`globals` 类别建议改为**分层清单**（核心 DOM/JS 必需 / 可选子系统 /
+   遗留属性），使「missing 清零」在该类别上成为**有界**目标；否则 165 项里将长期有
+   ~140 项属于「不追」集合，「清零」在数学上不可达。
