@@ -1,0 +1,1032 @@
+{
+  "schema": "paircode.design/1",
+  "kind": "project",
+  "meta": {
+    "title": "AI-PS · AI 驱动图像编辑器 UI",
+    "updatedAt": "2026-10-06T11:04:17.229Z"
+  },
+  "tokens": "design.tokens.json",
+  "screens": [
+    {
+      "id": "main",
+      "name": "AI-PS 主界面",
+      "width": 1440,
+      "height": 900,
+      "background": "$color.bg",
+      "root": {
+        "id": "main_app",
+        "type": "frame",
+        "props": {
+          "pad": "$space.none",
+          "gap": "$space.none",
+          "w": "fill",
+          "h": "fill",
+          "bg": "$color.bg"
+        },
+        "children": [
+          {
+            "id": "main_titlebar",
+            "type": "row",
+            "props": {
+              "pad": "$space.sm",
+              "gap": "$space.md",
+              "align": "center",
+              "w": "fill",
+              "h": 44,
+              "bg": "$color.surface"
+            },
+            "children": [
+              {
+                "id": "tb-brand",
+                "type": "row",
+                "props": {
+                  "align": "center",
+                  "gap": "$space.sm"
+                },
+                "children": [
+                  {
+                    "id": "n2",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.accent-text",
+                      "name": "star",
+                      "size": 18
+                    }
+                  },
+                  {
+                    "id": "n3",
+                    "type": "text",
+                    "props": {
+                      "weight": "$fontWeight.semibold",
+                      "color": "$color.fg",
+                      "size": "$fontSize.md",
+                      "text": "AI-PS"
+                    }
+                  },
+                  {
+                    "id": "n4",
+                    "type": "badge",
+                    "props": {
+                      "label": "本地桩",
+                      "padX": "$space.sm",
+                      "padY": "$space.xs",
+                      "size": "$fontSize.xs"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "tb-menus",
+                "type": "row",
+                "props": {
+                  "align": "center",
+                  "gap": "$space.md"
+                },
+                "children": [
+                  {
+                    "id": "n6",
+                    "type": "text",
+                    "props": {
+                      "size": "$fontSize.sm",
+                      "text": "文件",
+                      "color": "$color.muted"
+                    }
+                  },
+                  {
+                    "id": "n7",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "编辑"
+                    }
+                  },
+                  {
+                    "id": "n8",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "图像"
+                    }
+                  },
+                  {
+                    "id": "n9",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "图层"
+                    }
+                  },
+                  {
+                    "id": "n10",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "选择"
+                    }
+                  },
+                  {
+                    "id": "n11",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "滤镜"
+                    }
+                  },
+                  {
+                    "id": "n12",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.accent-text",
+                      "size": "$fontSize.sm",
+                      "text": "AI",
+                      "weight": "$fontWeight.semibold"
+                    }
+                  },
+                  {
+                    "id": "n13",
+                    "type": "text",
+                    "props": {
+                      "size": "$fontSize.sm",
+                      "text": "视图",
+                      "color": "$color.muted"
+                    }
+                  },
+                  {
+                    "id": "n14",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.sm",
+                      "text": "帮助"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "tb-right",
+                "type": "row",
+                "props": {
+                  "gap": "$space.md",
+                  "align": "center"
+                },
+                "children": [
+                  {
+                    "id": "n16",
+                    "type": "text",
+                    "props": {
+                      "color": "$color.muted",
+                      "size": "$fontSize.xs",
+                      "text": "未连接服务 · 本地桩"
+                    }
+                  },
+                  {
+                    "id": "n17",
+                    "type": "button",
+                    "props": {
+                      "label": "导出",
+                      "padY": "$space.sm",
+                      "variant": "secondary",
+                      "action": "emit:fileExport"
+                    }
+                  },
+                  {
+                    "id": "n18",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "user",
+                      "size": 16
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "main_title-divider",
+            "type": "divider",
+            "props": {
+              "color": "$color.border"
+            }
+          },
+          {
+            "id": "main_body",
+            "type": "row",
+            "props": {
+              "pad": "$space.none",
+              "gap": "$space.none",
+              "w": "fill",
+              "h": 855
+            },
+            "children": [
+              {
+                "id": "main_toolstrip",
+                "type": "col",
+                "props": {
+                  "pad": "$space.xs",
+                  "gap": "$space.xs",
+                  "align": "center",
+                  "w": 48,
+                  "h": "fill",
+                  "bg": "$color.surface"
+                },
+                "children": [
+                  {
+                    "id": "n19",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.accent-text",
+                      "name": "search",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n20",
+                    "type": "icon",
+                    "props": {
+                      "name": "edit",
+                      "size": 20,
+                      "color": "$color.muted"
+                    }
+                  },
+                  {
+                    "id": "n21",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "close",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n22",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "grid",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n23",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "file",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n24",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "folder",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n25",
+                    "type": "icon",
+                    "props": {
+                      "size": 20,
+                      "color": "$color.muted",
+                      "name": "download"
+                    }
+                  },
+                  {
+                    "id": "n26",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "upload",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n27",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "copy",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n28",
+                    "type": "icon",
+                    "props": {
+                      "size": 20,
+                      "color": "$color.muted",
+                      "name": "eye"
+                    }
+                  },
+                  {
+                    "id": "n29",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "refresh",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n30",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.accent-text",
+                      "name": "star",
+                      "size": 20
+                    }
+                  },
+                  {
+                    "id": "n31",
+                    "type": "divider",
+                    "props": {
+                      "color": "$color.border"
+                    }
+                  },
+                  {
+                    "id": "n32",
+                    "type": "icon",
+                    "props": {
+                      "color": "$color.muted",
+                      "name": "settings",
+                      "size": 20
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "main_center",
+                "type": "col",
+                "props": {
+                  "w": 1072,
+                  "h": "fill",
+                  "pad": "$space.none",
+                  "gap": "$space.none"
+                },
+                "children": [
+                  {
+                    "id": "docbar",
+                    "type": "row",
+                    "props": {
+                      "h": 36,
+                      "pad": "$space.sm",
+                      "w": "fill",
+                      "align": "center",
+                      "bg": "$color.bg",
+                      "gap": "$space.md"
+                    },
+                    "children": [
+                      {
+                        "id": "n34",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.fg",
+                          "size": "$fontSize.sm",
+                          "text": "未命名-1.psd"
+                        }
+                      },
+                      {
+                        "id": "n35",
+                        "type": "icon",
+                        "props": {
+                          "color": "$color.muted",
+                          "name": "close",
+                          "size": 14
+                        }
+                      },
+                      {
+                        "id": "n36",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.muted",
+                          "size": "$fontSize.sm",
+                          "text": "logo.ai"
+                        }
+                      },
+                      {
+                        "id": "n37",
+                        "type": "text",
+                        "props": {
+                          "size": "$fontSize.sm",
+                          "text": "banner.png",
+                          "color": "$color.muted"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "canvas-stage",
+                    "type": "frame",
+                    "props": {
+                      "gap": "$space.none",
+                      "h": 791,
+                      "justify": "center",
+                      "pad": "$space.xl",
+                      "w": "fill",
+                      "align": "center",
+                      "bg": "$color.canvas"
+                    },
+                    "children": [
+                      {
+                        "id": "artboard",
+                        "type": "frame",
+                        "props": {
+                          "w": 720,
+                          "bg": "#FFFFFF",
+                          "gap": "$space.none",
+                          "h": 480,
+                          "pad": "$space.none",
+                          "radius": "$radius.sm",
+                          "shadow": "$shadow.md"
+                        },
+                        "children": [
+                          {
+                            "id": "ab-photo",
+                            "type": "frame",
+                            "props": {
+                              "h": 400,
+                              "w": "fill",
+                              "bg": "$color.canvas-checker"
+                            }
+                          },
+                          {
+                            "id": "ab-meta",
+                            "type": "row",
+                            "props": {
+                              "gap": "$space.md",
+                              "pad": "$space.sm",
+                              "w": "fill",
+                              "align": "center"
+                            },
+                            "children": [
+                              {
+                                "id": "n42",
+                                "type": "text",
+                                "props": {
+                                  "color": "$color.muted-on-light",
+                                  "size": "$fontSize.xs",
+                                  "text": "AI 生成占位（桩）"
+                                }
+                              },
+                              {
+                                "id": "n43",
+                                "type": "text",
+                                "props": {
+                                  "color": "$color.muted-on-light",
+                                  "size": "$fontSize.xs",
+                                  "text": "1920 × 1080 px · RGB/8"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "statusbar",
+                    "type": "row",
+                    "props": {
+                      "h": 28,
+                      "pad": "$space.sm",
+                      "w": "fill",
+                      "align": "center",
+                      "bg": "$color.surface",
+                      "gap": "$space.lg"
+                    },
+                    "children": [
+                      {
+                        "id": "n45",
+                        "type": "text",
+                        "props": {
+                          "text": "缩放 100%",
+                          "color": "$color.muted",
+                          "size": "$fontSize.xs"
+                        }
+                      },
+                      {
+                        "id": "n46",
+                        "type": "text",
+                        "props": {
+                          "size": "$fontSize.xs",
+                          "text": "1920 × 1080 px",
+                          "color": "$color.muted"
+                        }
+                      },
+                      {
+                        "id": "n47",
+                        "type": "text",
+                        "props": {
+                          "text": "RGB/8 · sRGB",
+                          "color": "$color.muted",
+                          "size": "$fontSize.xs"
+                        }
+                      },
+                      {
+                        "id": "n48",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.accent-text",
+                          "size": "$fontSize.xs",
+                          "text": "桩模式 · 不走网络"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "main_right",
+                "type": "col",
+                "props": {
+                  "gap": "$space.sm",
+                  "w": 320,
+                  "h": "fill",
+                  "bg": "$color.surface",
+                  "pad": "$space.sm"
+                },
+                "children": [
+                  {
+                    "id": "ai-panel",
+                    "type": "card",
+                    "props": {
+                      "gap": "$space.sm",
+                      "pad": "$space.md",
+                      "w": "fill"
+                    },
+                    "children": [
+                      {
+                        "id": "ai-head",
+                        "type": "row",
+                        "props": {
+                          "align": "center",
+                          "gap": "$space.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "n51",
+                            "type": "icon",
+                            "props": {
+                              "color": "$color.accent-text",
+                              "name": "star",
+                              "size": 18
+                            }
+                          },
+                          {
+                            "id": "n52",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.fg",
+                              "size": "$fontSize.md",
+                              "text": "AI 生成",
+                              "weight": "$fontWeight.semibold"
+                            }
+                          },
+                          {
+                            "id": "n53",
+                            "type": "badge",
+                            "props": {
+                              "padY": "$space.xs",
+                              "size": "$fontSize.xs",
+                              "label": "本地桩",
+                              "padX": "$space.sm"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "ai-hint",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.muted",
+                          "size": "$fontSize.xs",
+                          "text": "描述画面，本地桩返回占位结果"
+                        }
+                      },
+                      {
+                        "id": "ai-prompt",
+                        "type": "input",
+                        "props": {
+                          "h": 36,
+                          "placeholder": "例如：赛博朋克城市夜景，霓虹招牌",
+                          "w": "fill"
+                        }
+                      },
+                      {
+                        "id": "ai-actions",
+                        "type": "row",
+                        "props": {
+                          "align": "center",
+                          "gap": "$space.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "n57",
+                            "type": "button",
+                            "props": {
+                              "action": "emit:aiGenerate",
+                              "label": "生成图像",
+                              "padY": "$space.sm",
+                              "variant": "primary"
+                            }
+                          },
+                          {
+                            "id": "n58",
+                            "type": "button",
+                            "props": {
+                              "action": "emit:aiVariant",
+                              "label": "生成变体",
+                              "padY": "$space.sm",
+                              "variant": "secondary"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "ai-status",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.muted",
+                          "size": "$fontSize.xs",
+                          "text": "未连接模型 · Go 桩记录本次请求"
+                        }
+                      },
+                      {
+                        "id": "ai-results",
+                        "type": "row",
+                        "props": {
+                          "gap": "$space.sm"
+                        },
+                        "children": [
+                          {
+                            "id": "n61",
+                            "type": "frame",
+                            "props": {
+                              "bg": "$color.surface-2",
+                              "border": "$color.border",
+                              "h": 80,
+                              "radius": "$radius.sm",
+                              "w": 80
+                            }
+                          },
+                          {
+                            "id": "n62",
+                            "type": "frame",
+                            "props": {
+                              "h": 80,
+                              "radius": "$radius.sm",
+                              "w": 80,
+                              "bg": "$color.surface-2",
+                              "border": "$color.border"
+                            }
+                          },
+                          {
+                            "id": "n63",
+                            "type": "frame",
+                            "props": {
+                              "w": 80,
+                              "bg": "$color.surface-2",
+                              "border": "$color.border",
+                              "h": 80,
+                              "radius": "$radius.sm"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "props-panel",
+                    "type": "card",
+                    "props": {
+                      "pad": "$space.md",
+                      "w": "fill",
+                      "gap": "$space.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "n65",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.fg",
+                          "size": "$fontSize.sm",
+                          "text": "属性",
+                          "weight": "$fontWeight.semibold"
+                        }
+                      },
+                      {
+                        "id": "n66",
+                        "type": "divider",
+                        "props": {
+                          "color": "$color.border"
+                        }
+                      },
+                      {
+                        "id": "pr-1",
+                        "type": "row",
+                        "props": {
+                          "justify": "between"
+                        },
+                        "children": [
+                          {
+                            "id": "n68",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.muted",
+                              "size": "$fontSize.xs",
+                              "text": "图层"
+                            }
+                          },
+                          {
+                            "id": "n69",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.fg",
+                              "size": "$fontSize.xs",
+                              "text": "AI 生成层"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "pr-2",
+                        "type": "row",
+                        "props": {
+                          "justify": "between"
+                        },
+                        "children": [
+                          {
+                            "id": "n71",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.muted",
+                              "size": "$fontSize.xs",
+                              "text": "不透明度"
+                            }
+                          },
+                          {
+                            "id": "n72",
+                            "type": "text",
+                            "props": {
+                              "text": "80%",
+                              "color": "$color.fg",
+                              "size": "$fontSize.xs"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "pr-3",
+                        "type": "row",
+                        "props": {
+                          "justify": "between"
+                        },
+                        "children": [
+                          {
+                            "id": "n74",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.muted",
+                              "size": "$fontSize.xs",
+                              "text": "混合模式"
+                            }
+                          },
+                          {
+                            "id": "n75",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.fg",
+                              "size": "$fontSize.xs",
+                              "text": "正常"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "id": "pr-4",
+                        "type": "row",
+                        "props": {
+                          "justify": "between"
+                        },
+                        "children": [
+                          {
+                            "id": "n77",
+                            "type": "text",
+                            "props": {
+                              "size": "$fontSize.xs",
+                              "text": "尺寸",
+                              "color": "$color.muted"
+                            }
+                          },
+                          {
+                            "id": "n78",
+                            "type": "text",
+                            "props": {
+                              "color": "$color.fg",
+                              "size": "$fontSize.xs",
+                              "text": "1920 × 1080 px"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "layers-panel",
+                    "type": "card",
+                    "props": {
+                      "pad": "$space.md",
+                      "w": "fill",
+                      "gap": "$space.sm"
+                    },
+                    "children": [
+                      {
+                        "id": "n80",
+                        "type": "text",
+                        "props": {
+                          "color": "$color.fg",
+                          "size": "$fontSize.sm",
+                          "text": "图层",
+                          "weight": "$fontWeight.semibold"
+                        }
+                      },
+                      {
+                        "id": "n81",
+                        "type": "divider",
+                        "props": {
+                          "color": "$color.border"
+                        }
+                      },
+                      {
+                        "id": "layers-list",
+                        "type": "list",
+                        "props": {
+                          "gap": "$space.xs",
+                          "w": "fill"
+                        },
+                        "children": [
+                          {
+                            "id": "n83",
+                            "type": "row",
+                            "props": {
+                              "justify": "between"
+                            },
+                            "children": [
+                              {
+                                "id": "n84",
+                                "type": "row",
+                                "props": {
+                                  "align": "center",
+                                  "gap": "$space.sm"
+                                },
+                                "children": [
+                                  {
+                                    "id": "n85",
+                                    "type": "icon",
+                                    "props": {
+                                      "color": "$color.muted",
+                                      "name": "eye",
+                                      "size": 14
+                                    }
+                                  },
+                                  {
+                                    "id": "n86",
+                                    "type": "text",
+                                    "props": {
+                                      "text": "AI 生成层",
+                                      "color": "$color.fg",
+                                      "size": "$fontSize.xs"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "n87",
+                                "type": "text",
+                                "props": {
+                                  "color": "$color.muted",
+                                  "size": "$fontSize.xs",
+                                  "text": "80%"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n88",
+                            "type": "row",
+                            "props": {
+                              "justify": "between"
+                            },
+                            "children": [
+                              {
+                                "id": "n89",
+                                "type": "row",
+                                "props": {
+                                  "align": "center",
+                                  "gap": "$space.sm"
+                                },
+                                "children": [
+                                  {
+                                    "id": "n90",
+                                    "type": "icon",
+                                    "props": {
+                                      "color": "$color.muted",
+                                      "name": "eye",
+                                      "size": 14
+                                    }
+                                  },
+                                  {
+                                    "id": "n91",
+                                    "type": "text",
+                                    "props": {
+                                      "color": "$color.fg",
+                                      "size": "$fontSize.xs",
+                                      "text": "文字层"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "n92",
+                                "type": "text",
+                                "props": {
+                                  "size": "$fontSize.xs",
+                                  "text": "100%",
+                                  "color": "$color.muted"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "id": "n93",
+                            "type": "row",
+                            "props": {
+                              "justify": "between"
+                            },
+                            "children": [
+                              {
+                                "id": "n94",
+                                "type": "row",
+                                "props": {
+                                  "align": "center",
+                                  "gap": "$space.sm"
+                                },
+                                "children": [
+                                  {
+                                    "id": "n95",
+                                    "type": "icon",
+                                    "props": {
+                                      "name": "eye",
+                                      "size": 14,
+                                      "color": "$color.muted"
+                                    }
+                                  },
+                                  {
+                                    "id": "n96",
+                                    "type": "text",
+                                    "props": {
+                                      "color": "$color.fg",
+                                      "size": "$fontSize.xs",
+                                      "text": "背景"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "id": "n97",
+                                "type": "text",
+                                "props": {
+                                  "color": "$color.muted",
+                                  "size": "$fontSize.xs",
+                                  "text": "100%"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "flow": [],
+  "artifacts": {
+      "html": "design.html",
+      "css": "design.tokens.css",
+      "flow": "design.flow.mmd"
+    }
+}

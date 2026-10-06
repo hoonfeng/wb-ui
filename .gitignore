@@ -73,3 +73,14 @@ __pycache__/
 /dev/probes/**/dist/
 /dev/probes/**/target/
 *.log
+
+# AI-PS 前端构建产物（由 web/ai-ps 源码 `npm run build` 重新生成，不入库）
+web/ai-ps/dist/
+# design_codegen 覆盖前的人工备份
+web/ai-ps/**/*.bak
+
+# tool-design 派生产物 / 报告（含时间戳、可由设计工程随时重新导出，不入库）
+# 真相源 design.project.json / design.tokens.json 与 codegen 产物（web/ai-ps/**）仍入库
+/design.html
+/design.verify.json
+web/ai-ps/codegen.*.json

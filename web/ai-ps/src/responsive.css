@@ -1,0 +1,166 @@
+/* AI-PS 自适应覆盖层（手写层，真相源仍是 design.project.json）────────────
+   vue/Main.vue 由 tool-design 从「固定画布」设计稿生成：其 scoped 样式把
+   固定 px 与 flex:1 1 auto 混写，在非 1440×900 视口下四处失效（实测）：
+     ① body 默认 8px 外边距未清 → 所有容器起点 (8,8)，1440×900 即溢出 8px；
+     ② .screen-main 锁 max-width:1440px + min-height:900px
+        → 大窗口不铺满（1920 宽左右各留 232）、矮视口必然溢出（1024×768 溢出 140px）；
+     ③ .d-main_body(height:855px) 与 .d-canvas-stage(height:791px) 死高
+        → 不随视口高度伸缩，矮窗口整页下溢；
+     ④ 三列「固定 width + flex:1 1 auto」互相冲突 → flex-shrink 生效把
+        .d-main_toolstrip 48→34、.d-main_right 320→224，按钮文字被挤（内容 50 > 盒 39）。
+   本层不解构产物，只把「外壳骨架」弹性化：#app 前缀把特异性提到 (1,1,0)，
+   稳压 scoped 的 .d-main_body[data-v-*] (0,2,0)，故无需 !important。
+   行业惯例：图像编辑器的外壳铺满窗口、工具条与面板定宽、画布区独占伸缩并自行滚动。 */
+
+/* ── 0 视口基准：清除默认外边距，让 #app 铺满；应用型 UI 整页不滚动 ── */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── 1 屏幕根：铺满视口（解除 1440 宽 / 900 高 的锁定）── */
+#app .screen-main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+#app .d-main_app {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;   /* 横向铺满 screen-main */
+  /* ★ 必须用视口单位而非 100%：wb-ui 引擎会把 flex 容器内子项的百分比宽度退化为
+     fit-content（1920 视口实测仅 1440 = 三列理想宽之和，于是大窗口右侧留白），
+     且 align-self:stretch 也无效。100vw 实测可正确铺满。 */
+  width: 100vw;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── 2 纵向骨架：标题栏/分隔线按内容定高，body 独占剩余高度 ── */
+#app .d-main_titlebar {
+  flex: 0 0 auto;
+  height: 44px;      /* 设计高度；配合上下 padding 归零，内容 35px 正好装下（旧产物因 8px 上下 padding 而溢出） */
+  min-height: 44px;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
+  overflow: hidden;
+}
+
+#app .d-tb-brand,
+#app .d-tb-menus,
+#app .d-tb-right {
+  align-self: center;   /* 覆盖产物里的 align-self:flex-start（标题栏内垂直居中） */
+}
+
+#app .d-tb-menus {
+  margin-right: auto;   /* 菜单之后的余量自动填充：品牌+菜单靠左，状态+导出+头像靠右 */
+}
+
+#app .d-main_title-divider {
+  flex: 0 0 auto;
+}
+
+/* 标题栏内按钮：产物用 padding 8/16 + 字号 14 → 自身高 39，把标题栏顶到 58px
+   （设计稿 44px 装不下，原产物因此 content 47 > 盒 44 溢出）。收紧为 4/12 + 12px
+   后按钮高 ≈ 28，标题栏回到 44px 的设计高度。 */
+#app .d-tb-right .d-n17 {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+#app .d-main_body {
+  flex: 1 1 auto;
+  height: auto;      /* 覆盖 height:855px——死高是矮窗口溢出的主因 */
+  min-height: 0;
+}
+
+/* ── 3 横向三列：工具条与右栏定宽且不被压缩，中栏独占弹性宽度 ── */
+#app .d-main_toolstrip {
+  flex: 0 0 48px;    /* 覆盖 width:48px + flex:1 1 auto（后者会参与 shrink） */
+  width: 48px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;  /* 极矮视口时工具条自身滚动，不撑破外壳 */
+}
+
+#app .d-main_center {
+  flex: 1 1 auto;
+  width: auto;       /* 覆盖 width:1072px */
+  min-width: 0;
+  min-height: 0;
+}
+
+#app .d-main_right {
+  flex: 0 0 320px;   /* 覆盖 width:320px + flex:1 1 auto */
+  width: 320px;
+  min-height: 0;
+  overflow-y: auto;  /* 内容高于视口时右栏自身滚动 */
+}
+
+/* 窄视口收窄右栏，避免中栏（画布区）被压得过小 */
+@media (max-width: 1180px) {
+  #app .d-main_right {
+    flex-basis: 288px;
+    width: 288px;
+  }
+}
+
+/* ── 4 中栏三段：文档标签栏/状态栏定高，画布区独占伸缩 ── */
+#app .d-docbar {
+  flex: 0 0 auto;
+}
+
+#app .d-canvas-stage {
+  flex: 1 1 auto;
+  height: auto;      /* 覆盖 height:791px */
+  min-height: 0;
+  overflow: auto;    /* 画板固定尺寸（设计稿 720×480），视口不够时滚动查看而非裁切 */
+}
+
+#app .d-statusbar {
+  flex: 0 0 auto;
+}
+
+/* ── 5 画板：宽度够时保持设计尺寸 720×480；容器不足时按宽度等比缩小 ──
+   .d-ab-photo 是空占位块，用 padding-bottom 百分比（基准=含块**宽度**）等比缩高，
+   于是整块画板随容器缩放——窄视口不再出现横向滚动条，比例也不失真。 */
+#app .d-artboard {
+  flex: none;
+  width: 720px;
+  max-width: 100%;
+  height: auto;
+}
+
+#app .d-ab-photo {
+  flex: none;
+  width: 100%;
+  height: auto;
+  padding-bottom: 55.56%;   /* 400 / 720 */
+}
+
+/* 视口窄到画布区容不下 720px 画板时（stage 内容宽 < 720），改为撑满容器宽度：
+   .d-ab-photo 的百分比 padding 同步缩高 ⇒ 整板等比缩放、比例不失真。
+   断点推导：视口 W → 中栏 W-48-288，减 stage 左右 padding 48 即画板可用宽，
+   W ≤ 1100 时该值 < 720。（wb-ui 引擎不支持百分比 max-width，故用媒体查询而非常量上限。） */
+@media (max-width: 1100px) {
+  #app .d-artboard {
+    width: 100%;
+  }
+}

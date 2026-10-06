@@ -1,0 +1,19 @@
+{
+  "name": "ai-ps-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI-PS 前端（AI 驱动的 PS 替代品 UI）—— 由 tool-design 设计工程生成，vite 构建为静态产物供 wb-ui 直接加载",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^5.4.11"
+  }
+}
