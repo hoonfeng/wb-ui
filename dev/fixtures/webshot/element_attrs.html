@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>element_attrs</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}</style>
+</head><body>
+<div id="stage"></div>
+<pre id="out"></pre>
+<script>
+// Element 侧属性收口 · 批 A（Node/Element 核心 15 项）双侧（wbui vs Edge）值级比对夹具：
+//   localName / namespaceURI / prefix / tabIndex / innerText / outerText / lang /
+//   dir / draggable / spellcheck / translate / accessKey / nonce / inert / autofocus
+// 每条断言输出一行 key=转义后的 value：两侧文本逐行 diff 全等即「值语义逐项一致」。
+// ★ 值里的控制字符用**可打印标记**（<LF>/<TAB>/<BS>/<DQ>）表示，不用反斜杠转义：
+//   1) wbui 引擎把源码里的 `\\` 解析为单个 `\`（实测 `'\\n'.length === 1`、
+//      码点 10），反斜杠转义序列在两侧不可比；
+//   2) gprobe_cmp.sh 的 wbui 侧还原步骤是 `sed -e 's/\\n/\n/g'`，会把输出里的
+//      **字面 `\n`** 直接换成真换行（Edge 侧没有这一步）→ 用反斜杠转义会制造
+//      假的「行结构差异」。标记里不含反斜杠，两侧才真正可比。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) { for (var k in attrs) { e.setAttribute(k, attrs[k]); } }
+    return e;
+  }
+
+  // ── 1) 属性存在性：`'x' in el === true`（webplatform 探针 elProps 的本批子集）──
+  var names = ['localName', 'namespaceURI', 'prefix', 'tabIndex', 'innerText', 'outerText',
+               'lang', 'dir', 'draggable', 'spellcheck', 'translate', 'accessKey',
+               'nonce', 'inert', 'autofocus'];
+  var probe = document.createElement('div');
+  var miss = [];
+  for (var i = 0; i < names.length; i++) { if (!(names[i] in probe)) { miss.push(names[i]); } }
+  say('in.total', names.length);
+  say('in.missing', miss.length ? miss.join(' ') : '(none)');
+
+  // ── 2) localName / namespaceURI / prefix（DOM §4.3.1）──
+  say('localName.div', probe.localName);
+  say('namespaceURI.div', probe.namespaceURI);
+  say('prefix.div', probe.prefix);
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  say('localName.svg', svg.localName);
+  say('namespaceURI.svg', svg.namespaceURI);
+  say('prefix.svg', svg.prefix);
+  var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  svg.appendChild(rect);
+  say('localName.rect', rect.localName);
+  say('namespaceURI.rect', rect.namespaceURI);
+  var ptag = document.createElement('p');
+  say('localName.p', ptag.localName);
+  say('localName.differsFromTagName', probe.localName !== probe.tagName);
+
+  // ── 3) tabIndex（HTML §6.6.3：反射 + 默认值 0/-1）──
+  say('tabIndex.div', probe.tabIndex);
+  say('tabIndex.span', document.createElement('span').tabIndex);
+  say('tabIndex.button', document.createElement('button').tabIndex);
+  say('tabIndex.input', document.createElement('input').tabIndex);
+  say('tabIndex.select', document.createElement('select').tabIndex);
+  say('tabIndex.textarea', document.createElement('textarea').tabIndex);
+  say('tabIndex.iframe', document.createElement('iframe').tabIndex);
+  say('tabIndex.img', document.createElement('img').tabIndex);
+  say('tabIndex.aNoHref', document.createElement('a').tabIndex);
+  say('tabIndex.aHref', el('a', { href: '#' }).tabIndex);
+  say('tabIndex.details', document.createElement('details').tabIndex);
+  say('tabIndex.summary', document.createElement('summary').tabIndex);
+  var det2 = document.createElement('details');
+  var sm2 = document.createElement('summary');
+  det2.appendChild(sm2);
+  say('tabIndex.summaryInDetails', sm2.tabIndex);
+  say('tabIndex.attr3', el('div', { tabindex: '3' }).tabIndex);
+  say('tabIndex.attrNeg', el('div', { tabindex: '-2' }).tabIndex);
+  say('tabIndex.attrZero', el('div', { tabindex: '0' }).tabIndex);
+  say('tabIndex.attrBad', el('div', { tabindex: 'abc' }).tabIndex);
+  say('tabIndex.attrEmpty', el('div', { tabindex: '' }).tabIndex);
+  say('tabIndex.attrSpaced', el('div', { tabindex: ' 7 ' }).tabIndex);
+  var ti = document.createElement('div');
+  ti.tabIndex = 5;
+  say('tabIndex.set5.attr', ti.getAttribute('tabindex'));
+  say('tabIndex.set5.value', ti.tabIndex);
+  ti.tabIndex = -1;
+  say('tabIndex.setNeg.attr', ti.getAttribute('tabindex'));
+  say('tabIndex.setNeg.value', ti.tabIndex);
+
+  // ── 4) lang / dir（HTML §3.2.6：纯反射，不做祖先继承）──
+  say('lang.div', probe.lang);
+  var lt = el('div', { lang: 'en' });
+  var ls = document.createElement('span');
+  lt.appendChild(ls);
+  say('lang.set', lt.lang);
+  say('lang.inherit', ls.lang);
+  say('dir.div', probe.dir);
+  say('dir.set', el('div', { dir: 'rtl' }).dir);
+
+  // ── 5) draggable（HTML §6.7.4：枚举 true/false；默认 auto = img/a[href] 为 true）──
+  say('draggable.div', probe.draggable);
+  say('draggable.img', document.createElement('img').draggable);
+  say('draggable.aNoHref', document.createElement('a').draggable);
+  say('draggable.aHref', el('a', { href: '#' }).draggable);
+  say('draggable.attrTrue', el('div', { draggable: 'true' }).draggable);
+  say('draggable.attrFalse', el('div', { draggable: 'false' }).draggable);
+  say('draggable.attrBad', el('div', { draggable: 'x' }).draggable);
+  var dg = document.createElement('div');
+  dg.draggable = true;
+  say('draggable.setTrue.attr', dg.getAttribute('draggable'));
+  dg.draggable = false;
+  say('draggable.setFalse.attr', dg.getAttribute('draggable'));
+  say('draggable.setFalse.value', dg.draggable);
+
+  // ── 6) spellcheck / translate（枚举 + 默认值 true）──
+  say('spellcheck.div', probe.spellcheck);
+  say('spellcheck.attrFalse', el('div', { spellcheck: 'false' }).spellcheck);
+  say('spellcheck.attrTrue', el('div', { spellcheck: 'true' }).spellcheck);
+  say('spellcheck.attrEmpty', el('div', { spellcheck: '' }).spellcheck);
+  say('spellcheck.attrBad', el('div', { spellcheck: 'x' }).spellcheck);
+  say('translate.div', probe.translate);
+  say('translate.no', el('div', { translate: 'no' }).translate);
+  say('translate.yes', el('div', { translate: 'yes' }).translate);
+  say('translate.empty', el('div', { translate: '' }).translate);
+
+  // ── 7) accessKey / nonce / inert / autofocus ──
+  say('accessKey.div', probe.accessKey);
+  say('accessKey.set', el('div', { accesskey: 'k' }).accessKey);
+  say('nonce.div', probe.nonce);
+  say('nonce.set', el('div', { nonce: 'abc' }).nonce);
+  say('inert.div', probe.inert);
+  say('inert.attr', el('div', { inert: '' }).inert);
+  var inr = document.createElement('div');
+  inr.inert = true;
+  say('inert.setTrue.attr', inr.hasAttribute('inert'));
+  say('inert.setTrue.value', inr.inert);
+  inr.inert = false;
+  say('inert.setFalse.attr', inr.hasAttribute('inert'));
+  say('inert.setFalse.value', inr.inert);
+  say('autofocus.div', probe.autofocus);
+  say('autofocus.attr', el('div', { autofocus: '' }).autofocus);
+
+  // ── 8) innerText / outerText（HTML §3.2.7）──
+  // 未渲染（detached）→ 规范要求回退 textContent（不做空白折叠）
+  var det = document.createElement('div');
+  det.textContent = 'a  b';
+  say('innerText.detached', det.innerText);
+  say('outerText.detached', det.outerText);
+
+  var host = document.getElementById('stage');
+  var t1 = document.createElement('div');
+  t1.innerHTML = 'Hello <span>World</span>';
+  host.appendChild(t1);
+  say('innerText.inline', t1.innerText);
+
+  var t2 = document.createElement('div');
+  t2.innerHTML = 'a<br>b';
+  host.appendChild(t2);
+  say('innerText.br', t2.innerText);
+
+  var t3 = document.createElement('div');
+  t3.innerHTML = '<div>a</div><div>b</div>';
+  host.appendChild(t3);
+  say('innerText.nestedBlocks', t3.innerText);
+
+  var t4 = document.createElement('div');
+  t4.innerHTML = 'a<span style="display:none">hidden</span>b';
+  host.appendChild(t4);
+  say('innerText.displayNoneChild', t4.innerText);
+
+  var t5 = document.createElement('div');
+  t5.textContent = 'a   \n   b';
+  host.appendChild(t5);
+  say('innerText.whitespace', t5.innerText);
+
+  var t6 = document.createElement('div');
+  t6.innerHTML = 'x<span style="visibility:hidden">vh</span>y';
+  host.appendChild(t6);
+  say('innerText.visibilityHiddenChild', t6.innerText);
+
+  var t7 = document.createElement('div');
+  host.appendChild(t7);
+  t7.innerText = 'a\nb';
+  // ★ 不断言 innerHTML 序列化文本：wbui 侧对空元素输出 `<br></br>`（既有序列化
+  //   缺口，见 WORKITEMS §16 旁证），与本轮的 innerText 值语义无关 → 断言结构。
+  say('innerText.set.childCount', t7.childNodes.length);
+  say('innerText.set.tagSeq', (function () {
+    var s = [];
+    for (var i = 0; i < t7.childNodes.length; i++) { s.push(t7.childNodes[i].nodeName); }
+    return s.join(',');
+  })());
+  say('innerText.set.brPresent', !!t7.querySelector('br'));
+  say('innerText.set.readback', t7.innerText);
+
+  say('outerText.sameAsInnerText', t1.outerText === t1.innerText);
+  var wrap = document.createElement('div');
+  host.appendChild(wrap);
+  var t8 = document.createElement('span');
+  t8.textContent = 'old';
+  wrap.appendChild(t8);
+  t8.outerText = 'new';
+  say('outerText.set.parentHTML', wrap.innerHTML);
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

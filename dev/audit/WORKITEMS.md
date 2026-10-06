@@ -2074,7 +2074,7 @@ Edge 侧同 `elProps` 清单的遍历子集在夹具中逐项验证：`elProps_s
 - **`engine/layout` 零改动**：`git status` 仅 `engine/js/bindings/{lazyelement.go,dom.go}`、
   新测试文件与新增夹具 ⇒ 布局/字体度量收敛态不受影响。
 
-### 15-6｜范围判定：`Document` 侧同类缺口（**明确关闭，非「建议后续补」**）
+### 15-6｜范围判定：`Document` 侧同类缺口（**未闭合 —— 第 16 次监督轮更正**）
 
 `dev/probes/webplatform` 的 `documentProps` 缺失清单同时含
 `firstChild / lastChild / childNodes / children / childElementCount / firstElementChild /
@@ -2093,9 +2093,22 @@ Node/ParentNode/Document 接口的成组缺失**，与本轮「Element 级遍历
 3. **验收红线**：本轮红线是「只增 DOM API、零回归」，塞入 Document 接口重做会显著扩大
    验证面并引入与布局无关的回归风险。
 
-⇒ **本轮范围正式关闭**：该条登记为**独立可执行工作项**（缺失清单与依赖已在上文逐项明列，
-非「建议后续补」）。`Element` / `DocumentFragment` / `ShadowRoot` 三处的 Element 级遍历族
-**已全部闭合，无剩余同类开放项**。
+⇒ **本条未闭合**（第 16 次监督轮更正）：把新发现的同类缺口「登记」当作收尾不成立 ——
+`documentProps` 的 38/56 是**可度量**的固定清单（`elProps` 65 项、`docProps` 56 项，
+无「无底洞」），下一轮直接处理，路径如下：
+
+1. **先给 DocumentType 节点建模方案**（`engine/dom` 新增 DocumentType 节点类型 +
+   `wrapNode`/`nodeAccFn` 识别该类型 + `Document.firstChild` 返回 doctype）—— 这是
+   `document.firstChild / lastChild / nodeType / nodeName` 一批属性的硬依赖；
+2. **再补 `Document` 包装器的 Node/ParentNode/Document 接口族**：`children`、
+   `childNodes`、`childElementCount`、`firstChild`、`lastChild`、`firstElementChild`、
+   `lastElementChild`、`nodeType`、`nodeName`、`ownerDocument`、`characterSet`、
+   `contentType`、`dir`、`location` 等共 38 项；
+3. **验收口径与本轮一致**：探针 `documentProps.missing` 清零（或逐项附实测定性）+
+   16 探针 ALL 快照零差异 + 新夹具双侧 IDENTICAL + build/test/vet/gofmt 计数不增。
+
+`Element` / `DocumentFragment` / `ShadowRoot` 的 Element 级遍历族与 **Element 侧 23 项属性**
+已在本轮全部闭合（逐项表见 §16），**但「探针无遗留」的整体目标尚未达成**。
 
 ### 15-7｜本轮改动与产物
 
@@ -2106,3 +2119,114 @@ Node/ParentNode/Document 接口的成组缺失**，与本轮「Element 级遍历
   `webplatform.wbui.json`（elementProps 42/65，4 个 accessor 已不在缺失清单）、
   `ALL5.txt`（== `ALL4.txt`，零回归）
 - 定位：`engine/layout` **零改动**
+
+---
+
+## §16｜第 16 次监督轮：Element 侧剩余 23 项属性收口（批 A 15 项 + 批 B 8 项）
+
+### 16-0｜目标与收敛判据
+
+以 `dev/probes/webplatform` 的 `missing` 清单为**唯一进度刻度**（固定清单：`elProps`
+65 项、`docProps` 56 项，可度量、无底洞不成立）。本轮只做 Element 侧 23 项，
+**只动 `engine/js/bindings/`（`engine/layout` 零改动）**，分两批：
+
+- 批 A（Node/Element 核心 15 项）：`localName`、`namespaceURI`、`prefix`、`tabIndex`、
+  `innerText`、`outerText`、`lang`、`dir`、`draggable`、`spellcheck`、`translate`、
+  `accessKey`、`nonce`、`inert`、`autofocus`；
+- 批 B（几何 / Shadow 相关 8 项）：`offsetParent`、`clientTop`、`clientLeft`、`part`、
+  `slot`、`assignedSlot`、`contentEditable`、`isContentEditable`。
+
+硬要求：`'x' in el === true`（登记进 `elemKnownPropNames`）+ 值语义与 Edge 逐项一致 +
+`part/slot/assignedSlot` 在无 shadow 分配时**属性存在、值为空表/`""`/`null`**（不得跳过）。
+
+### 16-1｜批 A 交付（15 项）
+
+- **实现**：`engine/js/bindings/elemattr.go`（新建）+ `lazyelement.go`（登记 15 个属性名、
+  12 个进 `elemAccessorProps` 活值表、`installElementProperty` 委派）+
+  `dom.go` 的 `createElementNS` 记录命名空间（供 `namespaceURI` 取值）。
+- **探针**：`elementProps` **42/65 → 57/65**（`webplatform.batchA.json`），
+  缺失清单只剩批 B 的 8 项。
+- **夹具**：`dev/fixtures/webshot/element_attrs.html` →
+  `gprobe_cmp.sh` **IDENTICAL（wbui=85 行 / Edge=85 行）**。
+
+### 16-2｜批 B 交付（8 项）
+
+- **实现**：`elemattr.go` 追加 8 个 case + `offsetParentOf`、`borderWidthPxForSide`、
+  `borderStyleForSide`、`cssShorthandEdge`、`makePartTokenList` 等辅助；
+  `lazyelement.go` 登记 8 项（`part` 故意不进活值表以保持 DOMTokenList 同一实例）。
+- **探针**：`elementProps` **57/65 → 65/65（missing 为空）**（`webplatform.batchB.json`）。
+- **夹具**：`dev/fixtures/webshot/element_geom.html` →
+  `gprobe_cmp.sh` **IDENTICAL（wbui=61 行 / Edge=61 行）**。
+
+### 16-3｜23 项逐项处置表
+
+（证据列均为 `element_attrs.html` / `element_geom.html` 的断言键；两份夹具双侧
+`gprobe_cmp.sh → IDENTICAL` 是「值语义与 Edge 逐项一致」的判据。）
+
+| 属性名 | 标准归属 | 实现位置（`engine/js/bindings/`） | 值语义证据（夹具断言键） | 状态 |
+|---|---|---|---|---|
+| `localName` | DOM §4.3.1 | `elemattr.go` `case "localName"`（data 值 → 缓存） | `localName.div=div`、`localName.svg=svg`、`localName.differsFromTagName=true` | DONE |
+| `namespaceURI` | DOM §4.3.1 | `case "namespaceURI"` + `elementNamespaceURI`（createElementNS 记录 → svg/math 祖先 → HTML）+ `dom.go` createElementNS 钩子 | `namespaceURI.div=http://www.w3.org/1999/xhtml`、`namespaceURI.svg=http://www.w3.org/2000/svg`、`namespaceURI.rect=…/svg` | DONE |
+| `prefix` | DOM §4.3.1 | `case "prefix"`（引擎不建模限定名前缀 → 恒 `null`） | `prefix.div=null`、`prefix.svg=null` | DONE |
+| `tabIndex` | HTML §6.6.3 | `case "tabIndex"` + `elementTabIndex`/`defaultTabIndex`/`parseHTMLInteger`/`idlLong` | `tabIndex.div=-1`、`button=0`、`aNoHref=0`、`aHref=0`、`summary=-1`、`summaryInDetails=0`、`attrBad=-1`、`attrSpaced=7`、`set5.attr=5` | DONE |
+| `innerText` | HTML §3.2.7 | `case "innerText"` + `elementInnerText`/`collectRenderedText`/`collapseRenderedText`/`setElementInnerText` | `inline=Hello World`、`br=a<LF>b`、`nestedBlocks=a<LF>b`、`displayNoneChild=ab`、`visibilityHiddenChild=xy`、`whitespace=a b`、`detached=a  b`(回退 textContent)、`set.tagSeq=#text,BR,#text` | DONE |
+| `outerText` | HTML §3.2.7 | `case "outerText"`（getter 同 `innerText`）+ `setElementOuterText` | `outerText.sameAsInnerText=true`、`outerText.set.parentHTML=new` | DONE |
+| `lang` | HTML §3.2.6.2 | `case "lang"`（纯反射，不继承） | `lang.div=`（空）、`lang.set=en`、`lang.inherit=`（空） | DONE |
+| `dir` | HTML §3.2.6.1 | `case "dir"`（纯反射） | `dir.div=`（空）、`dir.set=rtl` | DONE |
+| `draggable` | HTML §6.7.4 | `case "draggable"` + `elementDraggable`（auto 默认：`img`/`a[href]` 为 true） | `draggable.div=false`、`img=true`、`aHref=true`、`attrTrue=true`、`attrFalse=false`、`attrBad=false`、`setTrue.attr=true` | DONE |
+| `spellcheck` | HTML §6.7.4 | `case "spellcheck"` + `elementEnumeratedBool`（默认 true） | `spellcheck.div=true`、`attrFalse=false`、`attrEmpty=true`、`attrBad=true` | DONE |
+| `translate` | HTML §3.2.6.3 | `case "translate"`（yes/no，默认 true） | `translate.div=true`、`no=false`、`yes=true`、`empty=true` | DONE |
+| `accessKey` | HTML §6.6.3 | `case "accessKey"`（反射 `accesskey`） | `accessKey.div=`（空）、`accessKey.set=k` | DONE |
+| `nonce` | HTML §3.2.6.4 | `case "nonce"`（反射 `nonce`） | `nonce.div=`（空）、`nonce.set=abc` | DONE |
+| `inert` | HTML §6.7.4 | `case "inert"` + `elementReflectedBool`/`setElementReflectedBool` | `inert.div=false`、`inert.attr=true`、`setTrue.attr=true`、`setFalse.attr=false` | DONE |
+| `autofocus` | HTML §4.12.5 | `case "autofocus"`（布尔反射） | `autofocus.div=false`、`autofocus.attr=true` | DONE |
+| `offsetParent` | CSSOM View §7.2 | `case "offsetParent"` + `offsetParentOf` | `detached=null`、`plain=BODY`、`positionedAncestor=DIV#rel`、`selfPositioned=BODY`、`fixed=null`、`displayNone=null`、`body=null`、`td=TABLE` | DONE |
+| `clientTop` | CSSOM View §7.1 | `case "clientTop"` + `borderWidthPxForSide`/`borderStyleForSide`/`cssShorthandEdge` | `unbordered=0`、`bordered=2`、`topOnly=1`、`detached=0` | DONE |
+| `clientLeft` | CSSOM View §7.1 | 同上 | `unbordered=0`、`bordered=2`、`topOnly=0`、`detached=0` | DONE |
+| `part` | DOM §4.5 | `case "part"` + `makePartTokenList`（cached attribute value → 同一实例） | `part.type=object`、`notNull=true`、`length.empty=0`、`value.empty=`（空）、`sameInstance=true`、`contains.missing=false`、`attr.length=2`、`add.value=a b c`、`remove.value=b c`、`toggle.d=true` | DONE |
+| `slot` | DOM §4.8.5 | `case "slot"`（反射 `slot`，默认 `""`） | `slot.default=`（空）、`slot.attr=s1`、`slot.setter.attr=x` | DONE |
+| `assignedSlot` | DOM §4.8.6 | `case "assignedSlot"` + `Element.AssignedSlot()`（无分配 → `null`） | `assignedSlot.noShadow=null`、`assigned=SLOT`、`assignedIsSlotEl=true`、`notDirectChild=null`、`named=SLOT` | DONE |
+| `contentEditable` | HTML §6.7.4 | `case "contentEditable"` + `elementContentEditable`/`setElementContentEditable` | `default=inherit`、`attrTrue=true`、`attrEmpty=true`、`attrFalse=false`、`attrPlain=plaintext-only`、`attrBad=inherit`、`attrUpper=true`、`setInherit.hasAttr=false` | DONE |
+| `isContentEditable` | HTML §6.7.4 | `case "isContentEditable"` + `elementIsContentEditable`（自身或最近可编辑祖先） | `default=false`、`attrTrue=true`、`attrFalse=false`、`selfTrue=true`、`inherited=true`、`explicitFalse=false` | DONE |
+
+**23/23 DONE**（本表无 WONTFIX 条目 —— 含 `part/slot/assignedSlot` 在内全部按标准语义实现，
+无 shadow 分配时值为空表 / `""` / `null`，见表中对应证据键）。
+
+### 16-4｜零回归验收（红线全过）
+
+- **16 探针 ALL 快照逐项零差异**：`dev/output/wbui-audit/ALL6.txt` vs `ALL5.txt`
+  → `diff` **零差异**，17 行 = 17 行（16 探针 + `ALLDONE`）。
+- `CGO_ENABLED=1 go build ./...` **OK**；`go test ./engine/...` **23 个包全 ok、无 FAIL**；
+  `go vet ./engine/js/bindings/` **OK**。
+- `gofmt -l .` 计数 **299 = 299**（与第 15 轮基线一致；新增 `elemattr.go`、
+  `element_attrprops_test.go` 均不在 dirty 列表）。
+- **`engine/layout` 零改动**（`git status` 仅 `engine/js/bindings/{dom.go,lazyelement.go}`
+  修改 + `elemattr.go`、`element_attrprops_test.go`、两份夹具新增）。
+- **新增单测 9 用例全 PASS**：`go test ./engine/js/bindings/ -run TestElementAttr -v`
+  （属性存在性 / 命名空间 / tabIndex / innerText+outerText / 反射属性 / 几何 /
+  Shadow / contentEditable / Go 层辅助）。
+
+### 16-5｜本轮新发现（既有缺陷，**不属**本轮 23 项，仅作旁证）
+
+这三条都是**与本轮 23 项无关**的引擎既有缺口，实测证据如下（不作为任何一条的闭合依据）：
+
+1. **`JSON.stringify` 不转义控制字符**：wbui 侧 `JSON.stringify("a\nb")` 返回含真换行的字符串
+   （Edge 返回 `"a\nb"`）→ 夹具改用自带 `q()` 转义。
+2. **字符串字面量 `\\` 折叠**：wbui 侧 `'\\n'.length === 1`（码点 10，等价于 `\n`）、
+   `'\\\\'.length === 1` → 转义表改用 `String.fromCharCode` 构造。
+3. **`innerHTML` 空元素序列化**：wbui 侧 `<br>` 序列化为 `<br></br>`
+   （Edge 为 `<br>`）→ 夹具对 setter 改用**结构级**断言（`childNodes` 数与 `nodeName` 序列），
+   避免与本轮 `innerText` 值语义混淆。
+
+另外 `gprobe_cmp.sh` 的 wbui 侧还原步骤是 `sed -e 's/\\n/\n/g'`（Edge 侧无此步），
+夹具输出因此**避免出现字面 `\n`**（用 `<LF>` 标记），否则会产生假的「行结构差异」。
+
+### 16-6｜本轮产物
+
+- 代码：`engine/js/bindings/elemattr.go`（新增）、`lazyelement.go`、`dom.go`
+- 测试：`engine/js/bindings/element_attrprops_test.go`（新增，9 用例）
+- 夹具：`dev/fixtures/webshot/element_attrs.html`、`dev/fixtures/webshot/element_geom.html`
+- 证据：`dev/output/wbui-audit/element_attrs.{wbui,edge}.txt`（IDENTICAL 85/85）、
+  `element_geom.{wbui,edge}.txt`（IDENTICAL 61/61）、
+  `webplatform.batchA.json`（57/65）、`webplatform.batchB.json`（65/65，missing 空）、
+  `ALL6.txt`（== `ALL5.txt`，零回归）

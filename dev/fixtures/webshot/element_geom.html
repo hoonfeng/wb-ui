@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>element_geom</title>
+<style>body{margin:0;font:16px/normal monospace}#out{white-space:pre;margin:0}
+#rel{position:relative}
+#fixed{position:fixed;top:0;left:0}
+#hidden{display:none}
+#bordered{border:2px solid #000}
+#topOnly{border-top:1px solid #000}
+</style>
+</head><body>
+<div id="stage"></div>
+<pre id="out"></pre>
+<script>
+// Element 侧属性收口 · 批 B（几何 / Shadow 相关 8 项）双侧（wbui vs Edge）值级比对夹具：
+//   offsetParent / clientTop / clientLeft / part / slot / assignedSlot /
+//   contentEditable / isContentEditable
+// 每条断言输出一行 key=值：两侧文本逐行 diff 全等即「值语义逐项一致」。
+// ★ 控制字符用可打印标记（<LF> 等），不用反斜杠转义：见 element_attrs.html 的说明
+//   （wbui 引擎把源码 `\\` 解析为单个 `\`；gprobe_cmp.sh 的 wbui 侧还会把字面 `\n` 换成真换行）。
+(function () {
+  var lines = [];
+  var CH_LF = String.fromCharCode(10), CH_CR = String.fromCharCode(13),
+      CH_TAB = String.fromCharCode(9), CH_BS = String.fromCharCode(92),
+      CH_DQ = String.fromCharCode(34);
+  function q(v) {
+    if (v === null) { return 'null'; }
+    if (v === undefined) { return 'undefined'; }
+    if (typeof v === 'string') {
+      var out = '';
+      for (var i = 0; i < v.length; i++) {
+        var c = v.charAt(i);
+        if (c === CH_BS) { out += '<BS>'; }
+        else if (c === CH_DQ) { out += '<DQ>'; }
+        else if (c === CH_LF) { out += '<LF>'; }
+        else if (c === CH_CR) { out += '<CR>'; }
+        else if (c === CH_TAB) { out += '<TAB>'; }
+        else { out += c; }
+      }
+      return '<' + out + '>';
+    }
+    return String(v);
+  }
+  function say(k, v) { lines.push(k + '=' + q(v)); }
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) { for (var k in attrs) { e.setAttribute(k, attrs[k]); } }
+    return e;
+  }
+  function name(n) {
+    if (n === null || n === undefined) { return 'null'; }
+    return n.id || String(n.nodeName);
+  }
+  var stage = document.getElementById('stage');
+
+  // ── 1) 属性存在性：`'x' in el === true` ──
+  var names = ['offsetParent', 'clientTop', 'clientLeft', 'part', 'slot',
+               'assignedSlot', 'contentEditable', 'isContentEditable'];
+  var probe = document.createElement('div');
+  var miss = [];
+  for (var i = 0; i < names.length; i++) { if (!(names[i] in probe)) { miss.push(names[i]); } }
+  say('in.total', names.length);
+  say('in.missing', miss.length ? miss.join(' ') : '(none)');
+
+  // ── 2) part（DOMTokenList；无 part 属性时为空表，属性存在且不是 null）──
+  var p0 = document.createElement('div');
+  say('part.type', typeof p0.part);
+  say('part.notNull', p0.part !== null);
+  say('part.length.empty', p0.part.length);
+  say('part.value.empty', p0.part.value);
+  say('part.sameInstance', p0.part === p0.part);
+  say('part.contains.missing', p0.part.contains('x'));
+  say('part.item0.empty', p0.part.item(0));
+  p0.setAttribute('part', 'a b');
+  say('part.attr.length', p0.part.length);
+  say('part.attr.value', p0.part.value);
+  say('part.attr.containsA', p0.part.contains('a'));
+  say('part.attr.item1', p0.part.item(1));
+  p0.part.add('c');
+  say('part.add.value', p0.part.value);
+  say('part.add.length', p0.part.length);
+  p0.part.remove('a');
+  say('part.remove.value', p0.part.value);
+  say('part.toggle.d', p0.part.toggle('d'));
+  say('part.toggle.d.again', p0.part.toggle('d'));
+  say('part.afterToggle.value', p0.part.value);
+
+  // ── 3) slot（反射 slot 内容属性；无属性 → ""）──
+  say('slot.default', probe.slot);
+  say('slot.attr', el('div', { slot: 's1' }).slot);
+  var sl = document.createElement('div');
+  sl.slot = 'x';
+  say('slot.setter.attr', sl.getAttribute('slot'));
+  say('slot.setter.value', sl.slot);
+
+  // ── 4) assignedSlot（无分配 → null；有分配 → 对应 <slot>）──
+  say('assignedSlot.noShadow', probe.assignedSlot);
+  var host = document.createElement('div');
+  host.id = 'host1';
+  var sr = host.attachShadow({ mode: 'open' });
+  var slotEl = document.createElement('slot');
+  sr.appendChild(slotEl);
+  stage.appendChild(host);
+  var light = document.createElement('span');
+  light.id = 'light1';
+  host.appendChild(light);
+  say('assignedSlot.assigned', name(light.assignedSlot));
+  say('assignedSlot.assignedIsSlotEl', light.assignedSlot === slotEl);
+  var childOfLight = document.createElement('i');
+  light.appendChild(childOfLight);
+  say('assignedSlot.notDirectChild', childOfLight.assignedSlot);
+
+  var host2 = document.createElement('div');
+  host2.id = 'host2';
+  var sr2 = host2.attachShadow({ mode: 'open' });
+  var namedSlot = document.createElement('slot');
+  namedSlot.setAttribute('name', 'n1');
+  sr2.appendChild(namedSlot);
+  stage.appendChild(host2);
+  var light2 = document.createElement('span');
+  light2.id = 'light2';
+  light2.setAttribute('slot', 'n1');
+  host2.appendChild(light2);
+  say('assignedSlot.named', name(light2.assignedSlot));
+
+  // ── 5) contentEditable / isContentEditable（HTML §6.7.4）──
+  var ce0 = document.createElement('div');
+  say('contentEditable.default', ce0.contentEditable);
+  say('contentEditable.attrTrue', el('div', { contenteditable: 'true' }).contentEditable);
+  say('contentEditable.attrEmpty', el('div', { contenteditable: '' }).contentEditable);
+  say('contentEditable.attrFalse', el('div', { contenteditable: 'false' }).contentEditable);
+  say('contentEditable.attrPlain', el('div', { contenteditable: 'plaintext-only' }).contentEditable);
+  say('contentEditable.attrBad', el('div', { contenteditable: 'x' }).contentEditable);
+  say('contentEditable.attrUpper', el('div', { contenteditable: 'TRUE' }).contentEditable);
+  var ce1 = document.createElement('div');
+  ce1.contentEditable = 'true';
+  say('contentEditable.setTrue.attr', ce1.getAttribute('contenteditable'));
+  say('contentEditable.setTrue.value', ce1.contentEditable);
+  ce1.contentEditable = 'inherit';
+  say('contentEditable.setInherit.hasAttr', ce1.hasAttribute('contenteditable'));
+  say('contentEditable.setInherit.value', ce1.contentEditable);
+
+  say('isContentEditable.default', ce0.isContentEditable);
+  say('isContentEditable.attrTrue', el('div', { contenteditable: 'true' }).isContentEditable);
+  say('isContentEditable.attrFalse', el('div', { contenteditable: 'false' }).isContentEditable);
+  var ce2 = document.createElement('div');
+  ce2.setAttribute('contenteditable', 'true');
+  var ce2c = document.createElement('span');
+  ce2.appendChild(ce2c);
+  var ce2c2 = document.createElement('span');
+  ce2c2.setAttribute('contenteditable', 'false');
+  ce2.appendChild(ce2c2);
+  say('isContentEditable.selfTrue', ce2.isContentEditable);
+  say('isContentEditable.inherited', ce2c.isContentEditable);
+  say('isContentEditable.explicitFalse', ce2c2.isContentEditable);
+
+  // ── 6) offsetParent（CSSOM View §7.2）──
+  var detached = document.createElement('div');
+  say('offsetParent.detached', name(detached.offsetParent));
+  var plain = document.createElement('div');
+  plain.id = 'plain1';
+  stage.appendChild(plain);
+  say('offsetParent.plain', name(plain.offsetParent));
+  var rel = document.createElement('div');
+  rel.id = 'rel';
+  stage.appendChild(rel);
+  var inner = document.createElement('div');
+  inner.id = 'inner1';
+  rel.appendChild(inner);
+  say('offsetParent.positionedAncestor', name(inner.offsetParent));
+  say('offsetParent.selfPositioned', name(rel.offsetParent));
+  var fixedEl = document.createElement('div');
+  fixedEl.id = 'fixed';
+  stage.appendChild(fixedEl);
+  say('offsetParent.fixed', name(fixedEl.offsetParent));
+  var hiddenEl = document.createElement('div');
+  hiddenEl.id = 'hidden';
+  stage.appendChild(hiddenEl);
+  say('offsetParent.displayNone', name(hiddenEl.offsetParent));
+  say('offsetParent.body', name(document.body.offsetParent));
+  var tbl = document.createElement('table');
+  var tbody = document.createElement('tbody');
+  var tr = document.createElement('tr');
+  var td = document.createElement('td');
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+  tbl.appendChild(tbody);
+  stage.appendChild(tbl);
+  say('offsetParent.td', name(td.offsetParent));
+
+  // ── 7) clientTop / clientLeft（CSSOM View §7.1：边框宽度取整）──
+  say('clientTop.unbordered', plain.clientTop);
+  say('clientLeft.unbordered', plain.clientLeft);
+  var borderedEl = document.createElement('div');
+  borderedEl.id = 'bordered';
+  stage.appendChild(borderedEl);
+  say('clientTop.bordered', borderedEl.clientTop);
+  say('clientLeft.bordered', borderedEl.clientLeft);
+  var topOnly = document.createElement('div');
+  topOnly.id = 'topOnly';
+  stage.appendChild(topOnly);
+  say('clientTop.topOnly', topOnly.clientTop);
+  say('clientLeft.topOnly', topOnly.clientLeft);
+  say('clientTop.detached', detached.clientTop);
+  say('clientLeft.detached', detached.clientLeft);
+
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

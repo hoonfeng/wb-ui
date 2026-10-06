@@ -85,6 +85,19 @@ var elemAccessorProps = map[string]bool{
 	"popover": true,
 	"popoverTargetElement": true, "popoverTargetAction": true,
 	"command": true, "commandForElement": true,
+	// Element 侧属性收口（第 16 次监督轮 · 批 A）：反射属性一律是活值——
+	// `el.setAttribute('lang','en')` 之后必须立刻读到 "en"；不登记就会被
+	// 适配器层缓存住第一次读的结果（popover 那批踩过同一个坑）。
+	// tabIndex/innerText/outerText 同理：值随属性与子树变化。
+	"tabIndex": true, "innerText": true, "outerText": true,
+	"lang": true, "dir": true, "draggable": true, "spellcheck": true,
+	"translate": true, "accessKey": true, "nonce": true, "inert": true, "autofocus": true,
+	// 批 B（几何 / Shadow 相关）：几何与分配结果都是活值 —— 树/样式/属性变化
+	// 后立刻反映。★ part 故意不在此表：DOMTokenList 是 cached attribute value，
+	// 需要适配器层缓存住实例（el.part === el.part），其内部读取仍是实时的。
+	"offsetParent": true, "clientTop": true, "clientLeft": true,
+	"slot": true, "assignedSlot": true,
+	"contentEditable": true, "isContentEditable": true,
 }
 
 // Live 实现 jsc.LazyLiveProps：accessor 属性每次读取重新求值。
@@ -347,6 +360,15 @@ var (
 		"popover", "showPopover", "hidePopover", "togglePopover",
 		"popoverTargetElement", "popoverTargetAction",
 		"command", "commandForElement",
+		// Element 侧属性收口（第 16 次监督轮 · 批 A：Node/Element 核心 15 项）。
+		// localName/namespaceURI/prefix 是 data 值（只读、不随 DOM 操作变化），
+		// 其余 12 项是活值 accessor（见 elemAccessorProps）。
+		"localName", "namespaceURI", "prefix",
+		"tabIndex", "innerText", "outerText", "lang", "dir", "draggable",
+		"spellcheck", "translate", "accessKey", "nonce", "inert", "autofocus",
+		// 批 B（几何 / Shadow 相关 8 项）。
+		"offsetParent", "clientTop", "clientLeft",
+		"part", "slot", "assignedSlot", "contentEditable", "isContentEditable",
 	}
 )
 
@@ -374,6 +396,12 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 	// popover.go，这里做一次委派（同 <video>/<audio> 的做法），避免把十几个
 	// case 散进下面的大 switch。
 	if v, acc, ok := installPopoverProperty(rt, el, key); ok {
+		return v, acc, true
+	}
+	// Element 侧属性收口（第 16 次监督轮）：批 A（Node/Element 核心属性）与
+	// 批 B（几何/Shadow 相关属性）集中在 elemattr.go，这里做一次委派，
+	// 避免把 23 个 case 散进下面的大 switch。
+	if v, acc, ok := installElementAttrProperty(rt, el, key); ok {
 		return v, acc, true
 	}
 	switch key {

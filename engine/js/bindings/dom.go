@@ -3161,7 +3161,12 @@ func wrapDocument(rt *jsc.Interpreter, doc *dom.Document) *jsc.JSObject {
 		return jsc.ObjectValue(wrapElement(in, doc.CreateElement(arg)))
 	})))
 	obj.Set("createElementNS", funcVal(fn2(func(in *jsc.Interpreter, ns, arg string) jsc.JSValue {
-		return jsc.ObjectValue(wrapElement(in, doc.CreateElement(arg)))
+		// ★ 第 16 次监督轮：DOM 层 Element 不建模命名空间（只保留本地标签名，
+		//   见 engine/dom/element.go 文件头），绑定层在这里记录显式的非 HTML
+		//   命名空间，供 Element.namespaceURI 的值语义使用（elemattr.go）。
+		el := doc.CreateElement(arg)
+		recordElementNamespace(el, strings.TrimSpace(ns))
+		return jsc.ObjectValue(wrapElement(in, el))
 	})))
 	obj.Set("createTextNode", funcVal(fn1(func(in *jsc.Interpreter, arg string) jsc.JSValue {
 		return jsc.ObjectValue(wrapText(in, doc.CreateTextNode(arg)))
