@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>CJK line-box metric cross scan</title>
+<style>html,body{margin:0}.row{}</style></head><body>
+<div class="row" data-m="TXT|Arial|8|LAT" style='font-family:Arial;font-size:8px'>abc</div>
+<div class="row" data-m="TXT|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'>abc中</div>
+<div class="row" data-m="TXT|Arial|8|CJK" style='font-family:Arial;font-size:8px'>中文字</div>
+<div class="row" data-m="TXT|Arial|10|LAT" style='font-family:Arial;font-size:10px'>abc</div>
+<div class="row" data-m="TXT|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'>abc中</div>
+<div class="row" data-m="TXT|Arial|10|CJK" style='font-family:Arial;font-size:10px'>中文字</div>
+<div class="row" data-m="TXT|Arial|12|LAT" style='font-family:Arial;font-size:12px'>abc</div>
+<div class="row" data-m="TXT|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'>abc中</div>
+<div class="row" data-m="TXT|Arial|12|CJK" style='font-family:Arial;font-size:12px'>中文字</div>
+<div class="row" data-m="TXT|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'>abc</div>
+<div class="row" data-m="TXT|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'>abc中</div>
+<div class="row" data-m="TXT|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'>中文字</div>
+<div class="row" data-m="TXT|Arial|14|LAT" style='font-family:Arial;font-size:14px'>abc</div>
+<div class="row" data-m="TXT|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'>abc中</div>
+<div class="row" data-m="TXT|Arial|14|CJK" style='font-family:Arial;font-size:14px'>中文字</div>
+<div class="row" data-m="TXT|Arial|16|LAT" style='font-family:Arial;font-size:16px'>abc</div>
+<div class="row" data-m="TXT|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'>abc中</div>
+<div class="row" data-m="TXT|Arial|16|CJK" style='font-family:Arial;font-size:16px'>中文字</div>
+<div class="row" data-m="TXT|Arial|20|LAT" style='font-family:Arial;font-size:20px'>abc</div>
+<div class="row" data-m="TXT|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'>abc中</div>
+<div class="row" data-m="TXT|Arial|20|CJK" style='font-family:Arial;font-size:20px'>中文字</div>
+<div class="row" data-m="TXT|Arial|24|LAT" style='font-family:Arial;font-size:24px'>abc</div>
+<div class="row" data-m="TXT|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'>abc中</div>
+<div class="row" data-m="TXT|Arial|24|CJK" style='font-family:Arial;font-size:24px'>中文字</div>
+<div class="row" data-m="TXT|Arial|32|LAT" style='font-family:Arial;font-size:32px'>abc</div>
+<div class="row" data-m="TXT|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'>abc中</div>
+<div class="row" data-m="TXT|Arial|32|CJK" style='font-family:Arial;font-size:32px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'>中文字</div>
+<div class="row" data-m="TXT|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'>abc</div>
+<div class="row" data-m="TXT|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'>abc中</div>
+<div class="row" data-m="TXT|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'>中文字</div>
+<div class="row" data-m="TXT|monospace|8|LAT" style='font-family:monospace;font-size:8px'>abc</div>
+<div class="row" data-m="TXT|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'>abc中</div>
+<div class="row" data-m="TXT|monospace|8|CJK" style='font-family:monospace;font-size:8px'>中文字</div>
+<div class="row" data-m="TXT|monospace|10|LAT" style='font-family:monospace;font-size:10px'>abc</div>
+<div class="row" data-m="TXT|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'>abc中</div>
+<div class="row" data-m="TXT|monospace|10|CJK" style='font-family:monospace;font-size:10px'>中文字</div>
+<div class="row" data-m="TXT|monospace|12|LAT" style='font-family:monospace;font-size:12px'>abc</div>
+<div class="row" data-m="TXT|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'>abc中</div>
+<div class="row" data-m="TXT|monospace|12|CJK" style='font-family:monospace;font-size:12px'>中文字</div>
+<div class="row" data-m="TXT|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'>abc</div>
+<div class="row" data-m="TXT|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'>abc中</div>
+<div class="row" data-m="TXT|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'>中文字</div>
+<div class="row" data-m="TXT|monospace|14|LAT" style='font-family:monospace;font-size:14px'>abc</div>
+<div class="row" data-m="TXT|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'>abc中</div>
+<div class="row" data-m="TXT|monospace|14|CJK" style='font-family:monospace;font-size:14px'>中文字</div>
+<div class="row" data-m="TXT|monospace|16|LAT" style='font-family:monospace;font-size:16px'>abc</div>
+<div class="row" data-m="TXT|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'>abc中</div>
+<div class="row" data-m="TXT|monospace|16|CJK" style='font-family:monospace;font-size:16px'>中文字</div>
+<div class="row" data-m="TXT|monospace|20|LAT" style='font-family:monospace;font-size:20px'>abc</div>
+<div class="row" data-m="TXT|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'>abc中</div>
+<div class="row" data-m="TXT|monospace|20|CJK" style='font-family:monospace;font-size:20px'>中文字</div>
+<div class="row" data-m="TXT|monospace|24|LAT" style='font-family:monospace;font-size:24px'>abc</div>
+<div class="row" data-m="TXT|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'>abc中</div>
+<div class="row" data-m="TXT|monospace|24|CJK" style='font-family:monospace;font-size:24px'>中文字</div>
+<div class="row" data-m="TXT|monospace|32|LAT" style='font-family:monospace;font-size:32px'>abc</div>
+<div class="row" data-m="TXT|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'>abc中</div>
+<div class="row" data-m="TXT|monospace|32|CJK" style='font-family:monospace;font-size:32px'>中文字</div>
+<div class="row" data-m="input|EXP|Arial|8|LAT" style='font-family:Arial;font-size:8px'><input style='font-family:Arial;font-size:8px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|8|LAT" style='font-family:Arial;font-size:8px'><textarea style='font-family:Arial;font-size:8px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|8|LAT" style='font-family:Arial;font-size:8px'><button style='font-family:Arial;font-size:8px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><input style='font-family:Arial;font-size:8px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><textarea style='font-family:Arial;font-size:8px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><button style='font-family:Arial;font-size:8px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|8|CJK" style='font-family:Arial;font-size:8px'><input style='font-family:Arial;font-size:8px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|8|CJK" style='font-family:Arial;font-size:8px'><textarea style='font-family:Arial;font-size:8px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|8|CJK" style='font-family:Arial;font-size:8px'><button style='font-family:Arial;font-size:8px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|10|LAT" style='font-family:Arial;font-size:10px'><input style='font-family:Arial;font-size:10px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|10|LAT" style='font-family:Arial;font-size:10px'><textarea style='font-family:Arial;font-size:10px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|10|LAT" style='font-family:Arial;font-size:10px'><button style='font-family:Arial;font-size:10px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><input style='font-family:Arial;font-size:10px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><textarea style='font-family:Arial;font-size:10px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><button style='font-family:Arial;font-size:10px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|10|CJK" style='font-family:Arial;font-size:10px'><input style='font-family:Arial;font-size:10px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|10|CJK" style='font-family:Arial;font-size:10px'><textarea style='font-family:Arial;font-size:10px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|10|CJK" style='font-family:Arial;font-size:10px'><button style='font-family:Arial;font-size:10px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|12|LAT" style='font-family:Arial;font-size:12px'><input style='font-family:Arial;font-size:12px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|12|LAT" style='font-family:Arial;font-size:12px'><textarea style='font-family:Arial;font-size:12px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|12|LAT" style='font-family:Arial;font-size:12px'><button style='font-family:Arial;font-size:12px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><input style='font-family:Arial;font-size:12px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><textarea style='font-family:Arial;font-size:12px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><button style='font-family:Arial;font-size:12px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|12|CJK" style='font-family:Arial;font-size:12px'><input style='font-family:Arial;font-size:12px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|12|CJK" style='font-family:Arial;font-size:12px'><textarea style='font-family:Arial;font-size:12px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|12|CJK" style='font-family:Arial;font-size:12px'><button style='font-family:Arial;font-size:12px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><input style='font-family:Arial;font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><textarea style='font-family:Arial;font-size:13.3333px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><button style='font-family:Arial;font-size:13.3333px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><input style='font-family:Arial;font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><textarea style='font-family:Arial;font-size:13.3333px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><button style='font-family:Arial;font-size:13.3333px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><input style='font-family:Arial;font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><textarea style='font-family:Arial;font-size:13.3333px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><button style='font-family:Arial;font-size:13.3333px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|14|LAT" style='font-family:Arial;font-size:14px'><input style='font-family:Arial;font-size:14px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|14|LAT" style='font-family:Arial;font-size:14px'><textarea style='font-family:Arial;font-size:14px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|14|LAT" style='font-family:Arial;font-size:14px'><button style='font-family:Arial;font-size:14px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><input style='font-family:Arial;font-size:14px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><textarea style='font-family:Arial;font-size:14px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><button style='font-family:Arial;font-size:14px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|14|CJK" style='font-family:Arial;font-size:14px'><input style='font-family:Arial;font-size:14px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|14|CJK" style='font-family:Arial;font-size:14px'><textarea style='font-family:Arial;font-size:14px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|14|CJK" style='font-family:Arial;font-size:14px'><button style='font-family:Arial;font-size:14px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|16|LAT" style='font-family:Arial;font-size:16px'><input style='font-family:Arial;font-size:16px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|16|LAT" style='font-family:Arial;font-size:16px'><textarea style='font-family:Arial;font-size:16px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|16|LAT" style='font-family:Arial;font-size:16px'><button style='font-family:Arial;font-size:16px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><input style='font-family:Arial;font-size:16px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><textarea style='font-family:Arial;font-size:16px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><button style='font-family:Arial;font-size:16px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|16|CJK" style='font-family:Arial;font-size:16px'><input style='font-family:Arial;font-size:16px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|16|CJK" style='font-family:Arial;font-size:16px'><textarea style='font-family:Arial;font-size:16px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|16|CJK" style='font-family:Arial;font-size:16px'><button style='font-family:Arial;font-size:16px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|20|LAT" style='font-family:Arial;font-size:20px'><input style='font-family:Arial;font-size:20px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|20|LAT" style='font-family:Arial;font-size:20px'><textarea style='font-family:Arial;font-size:20px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|20|LAT" style='font-family:Arial;font-size:20px'><button style='font-family:Arial;font-size:20px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><input style='font-family:Arial;font-size:20px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><textarea style='font-family:Arial;font-size:20px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><button style='font-family:Arial;font-size:20px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|20|CJK" style='font-family:Arial;font-size:20px'><input style='font-family:Arial;font-size:20px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|20|CJK" style='font-family:Arial;font-size:20px'><textarea style='font-family:Arial;font-size:20px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|20|CJK" style='font-family:Arial;font-size:20px'><button style='font-family:Arial;font-size:20px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|24|LAT" style='font-family:Arial;font-size:24px'><input style='font-family:Arial;font-size:24px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|24|LAT" style='font-family:Arial;font-size:24px'><textarea style='font-family:Arial;font-size:24px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|24|LAT" style='font-family:Arial;font-size:24px'><button style='font-family:Arial;font-size:24px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><input style='font-family:Arial;font-size:24px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><textarea style='font-family:Arial;font-size:24px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><button style='font-family:Arial;font-size:24px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|24|CJK" style='font-family:Arial;font-size:24px'><input style='font-family:Arial;font-size:24px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|24|CJK" style='font-family:Arial;font-size:24px'><textarea style='font-family:Arial;font-size:24px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|24|CJK" style='font-family:Arial;font-size:24px'><button style='font-family:Arial;font-size:24px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Arial|32|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Arial|32|LAT" style='font-family:Arial;font-size:32px'><textarea style='font-family:Arial;font-size:32px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Arial|32|LAT" style='font-family:Arial;font-size:32px'><button style='font-family:Arial;font-size:32px' >abc</button></div>
+<div class="row" data-m="input|EXP|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><textarea style='font-family:Arial;font-size:32px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><button style='font-family:Arial;font-size:32px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Arial|32|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Arial|32|CJK" style='font-family:Arial;font-size:32px'><textarea style='font-family:Arial;font-size:32px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Arial|32|CJK" style='font-family:Arial;font-size:32px'><button style='font-family:Arial;font-size:32px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><input style='font-family:"Noto Sans SC";font-size:8px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><textarea style='font-family:"Noto Sans SC";font-size:8px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><button style='font-family:"Noto Sans SC";font-size:8px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><input style='font-family:"Noto Sans SC";font-size:8px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><textarea style='font-family:"Noto Sans SC";font-size:8px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><button style='font-family:"Noto Sans SC";font-size:8px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><input style='font-family:"Noto Sans SC";font-size:8px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><textarea style='font-family:"Noto Sans SC";font-size:8px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><button style='font-family:"Noto Sans SC";font-size:8px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><input style='font-family:"Noto Sans SC";font-size:10px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><textarea style='font-family:"Noto Sans SC";font-size:10px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><button style='font-family:"Noto Sans SC";font-size:10px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><input style='font-family:"Noto Sans SC";font-size:10px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><textarea style='font-family:"Noto Sans SC";font-size:10px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><button style='font-family:"Noto Sans SC";font-size:10px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><input style='font-family:"Noto Sans SC";font-size:10px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><textarea style='font-family:"Noto Sans SC";font-size:10px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><button style='font-family:"Noto Sans SC";font-size:10px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><input style='font-family:"Noto Sans SC";font-size:12px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><textarea style='font-family:"Noto Sans SC";font-size:12px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><button style='font-family:"Noto Sans SC";font-size:12px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><input style='font-family:"Noto Sans SC";font-size:12px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><textarea style='font-family:"Noto Sans SC";font-size:12px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><button style='font-family:"Noto Sans SC";font-size:12px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><input style='font-family:"Noto Sans SC";font-size:12px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><textarea style='font-family:"Noto Sans SC";font-size:12px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><button style='font-family:"Noto Sans SC";font-size:12px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea style='font-family:"Noto Sans SC";font-size:13.3333px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><button style='font-family:"Noto Sans SC";font-size:13.3333px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea style='font-family:"Noto Sans SC";font-size:13.3333px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><button style='font-family:"Noto Sans SC";font-size:13.3333px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea style='font-family:"Noto Sans SC";font-size:13.3333px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><button style='font-family:"Noto Sans SC";font-size:13.3333px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><input style='font-family:"Noto Sans SC";font-size:14px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><textarea style='font-family:"Noto Sans SC";font-size:14px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><button style='font-family:"Noto Sans SC";font-size:14px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><input style='font-family:"Noto Sans SC";font-size:14px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><textarea style='font-family:"Noto Sans SC";font-size:14px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><button style='font-family:"Noto Sans SC";font-size:14px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><input style='font-family:"Noto Sans SC";font-size:14px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><textarea style='font-family:"Noto Sans SC";font-size:14px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><button style='font-family:"Noto Sans SC";font-size:14px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><input style='font-family:"Noto Sans SC";font-size:16px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><textarea style='font-family:"Noto Sans SC";font-size:16px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><button style='font-family:"Noto Sans SC";font-size:16px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><input style='font-family:"Noto Sans SC";font-size:16px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><textarea style='font-family:"Noto Sans SC";font-size:16px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><button style='font-family:"Noto Sans SC";font-size:16px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><input style='font-family:"Noto Sans SC";font-size:16px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><textarea style='font-family:"Noto Sans SC";font-size:16px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><button style='font-family:"Noto Sans SC";font-size:16px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><input style='font-family:"Noto Sans SC";font-size:20px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><textarea style='font-family:"Noto Sans SC";font-size:20px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><button style='font-family:"Noto Sans SC";font-size:20px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><input style='font-family:"Noto Sans SC";font-size:20px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><textarea style='font-family:"Noto Sans SC";font-size:20px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><button style='font-family:"Noto Sans SC";font-size:20px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><input style='font-family:"Noto Sans SC";font-size:20px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><textarea style='font-family:"Noto Sans SC";font-size:20px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><button style='font-family:"Noto Sans SC";font-size:20px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><input style='font-family:"Noto Sans SC";font-size:24px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><textarea style='font-family:"Noto Sans SC";font-size:24px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><button style='font-family:"Noto Sans SC";font-size:24px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><input style='font-family:"Noto Sans SC";font-size:24px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><textarea style='font-family:"Noto Sans SC";font-size:24px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><button style='font-family:"Noto Sans SC";font-size:24px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><input style='font-family:"Noto Sans SC";font-size:24px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><textarea style='font-family:"Noto Sans SC";font-size:24px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><button style='font-family:"Noto Sans SC";font-size:24px' >中文字</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><textarea style='font-family:"Noto Sans SC";font-size:32px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><button style='font-family:"Noto Sans SC";font-size:32px' >abc</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><textarea style='font-family:"Noto Sans SC";font-size:32px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><button style='font-family:"Noto Sans SC";font-size:32px' >abc中</button></div>
+<div class="row" data-m="input|EXP|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><textarea style='font-family:"Noto Sans SC";font-size:32px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><button style='font-family:"Noto Sans SC";font-size:32px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|8|LAT" style='font-family:monospace;font-size:8px'><input style='font-family:monospace;font-size:8px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|8|LAT" style='font-family:monospace;font-size:8px'><textarea style='font-family:monospace;font-size:8px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|8|LAT" style='font-family:monospace;font-size:8px'><button style='font-family:monospace;font-size:8px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><input style='font-family:monospace;font-size:8px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><textarea style='font-family:monospace;font-size:8px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><button style='font-family:monospace;font-size:8px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|8|CJK" style='font-family:monospace;font-size:8px'><input style='font-family:monospace;font-size:8px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|8|CJK" style='font-family:monospace;font-size:8px'><textarea style='font-family:monospace;font-size:8px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|8|CJK" style='font-family:monospace;font-size:8px'><button style='font-family:monospace;font-size:8px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|10|LAT" style='font-family:monospace;font-size:10px'><input style='font-family:monospace;font-size:10px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|10|LAT" style='font-family:monospace;font-size:10px'><textarea style='font-family:monospace;font-size:10px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|10|LAT" style='font-family:monospace;font-size:10px'><button style='font-family:monospace;font-size:10px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><input style='font-family:monospace;font-size:10px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><textarea style='font-family:monospace;font-size:10px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><button style='font-family:monospace;font-size:10px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|10|CJK" style='font-family:monospace;font-size:10px'><input style='font-family:monospace;font-size:10px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|10|CJK" style='font-family:monospace;font-size:10px'><textarea style='font-family:monospace;font-size:10px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|10|CJK" style='font-family:monospace;font-size:10px'><button style='font-family:monospace;font-size:10px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|12|LAT" style='font-family:monospace;font-size:12px'><input style='font-family:monospace;font-size:12px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|12|LAT" style='font-family:monospace;font-size:12px'><textarea style='font-family:monospace;font-size:12px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|12|LAT" style='font-family:monospace;font-size:12px'><button style='font-family:monospace;font-size:12px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><input style='font-family:monospace;font-size:12px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><textarea style='font-family:monospace;font-size:12px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><button style='font-family:monospace;font-size:12px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|12|CJK" style='font-family:monospace;font-size:12px'><input style='font-family:monospace;font-size:12px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|12|CJK" style='font-family:monospace;font-size:12px'><textarea style='font-family:monospace;font-size:12px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|12|CJK" style='font-family:monospace;font-size:12px'><button style='font-family:monospace;font-size:12px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><input style='font-family:monospace;font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><textarea style='font-family:monospace;font-size:13.3333px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><button style='font-family:monospace;font-size:13.3333px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><input style='font-family:monospace;font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><textarea style='font-family:monospace;font-size:13.3333px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><button style='font-family:monospace;font-size:13.3333px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><input style='font-family:monospace;font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><textarea style='font-family:monospace;font-size:13.3333px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><button style='font-family:monospace;font-size:13.3333px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|14|LAT" style='font-family:monospace;font-size:14px'><input style='font-family:monospace;font-size:14px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|14|LAT" style='font-family:monospace;font-size:14px'><textarea style='font-family:monospace;font-size:14px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|14|LAT" style='font-family:monospace;font-size:14px'><button style='font-family:monospace;font-size:14px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><input style='font-family:monospace;font-size:14px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><textarea style='font-family:monospace;font-size:14px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><button style='font-family:monospace;font-size:14px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|14|CJK" style='font-family:monospace;font-size:14px'><input style='font-family:monospace;font-size:14px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|14|CJK" style='font-family:monospace;font-size:14px'><textarea style='font-family:monospace;font-size:14px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|14|CJK" style='font-family:monospace;font-size:14px'><button style='font-family:monospace;font-size:14px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|16|LAT" style='font-family:monospace;font-size:16px'><input style='font-family:monospace;font-size:16px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|16|LAT" style='font-family:monospace;font-size:16px'><textarea style='font-family:monospace;font-size:16px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|16|LAT" style='font-family:monospace;font-size:16px'><button style='font-family:monospace;font-size:16px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><input style='font-family:monospace;font-size:16px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><textarea style='font-family:monospace;font-size:16px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><button style='font-family:monospace;font-size:16px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|16|CJK" style='font-family:monospace;font-size:16px'><input style='font-family:monospace;font-size:16px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|16|CJK" style='font-family:monospace;font-size:16px'><textarea style='font-family:monospace;font-size:16px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|16|CJK" style='font-family:monospace;font-size:16px'><button style='font-family:monospace;font-size:16px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|20|LAT" style='font-family:monospace;font-size:20px'><input style='font-family:monospace;font-size:20px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|20|LAT" style='font-family:monospace;font-size:20px'><textarea style='font-family:monospace;font-size:20px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|20|LAT" style='font-family:monospace;font-size:20px'><button style='font-family:monospace;font-size:20px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><input style='font-family:monospace;font-size:20px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><textarea style='font-family:monospace;font-size:20px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><button style='font-family:monospace;font-size:20px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|20|CJK" style='font-family:monospace;font-size:20px'><input style='font-family:monospace;font-size:20px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|20|CJK" style='font-family:monospace;font-size:20px'><textarea style='font-family:monospace;font-size:20px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|20|CJK" style='font-family:monospace;font-size:20px'><button style='font-family:monospace;font-size:20px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|24|LAT" style='font-family:monospace;font-size:24px'><input style='font-family:monospace;font-size:24px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|24|LAT" style='font-family:monospace;font-size:24px'><textarea style='font-family:monospace;font-size:24px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|24|LAT" style='font-family:monospace;font-size:24px'><button style='font-family:monospace;font-size:24px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><input style='font-family:monospace;font-size:24px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><textarea style='font-family:monospace;font-size:24px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><button style='font-family:monospace;font-size:24px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|24|CJK" style='font-family:monospace;font-size:24px'><input style='font-family:monospace;font-size:24px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|24|CJK" style='font-family:monospace;font-size:24px'><textarea style='font-family:monospace;font-size:24px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|24|CJK" style='font-family:monospace;font-size:24px'><button style='font-family:monospace;font-size:24px' >中文字</button></div>
+<div class="row" data-m="input|EXP|monospace|32|LAT" style='font-family:monospace;font-size:32px'><input style='font-family:monospace;font-size:32px' value="abc"></div>
+<div class="row" data-m="textarea|EXP|monospace|32|LAT" style='font-family:monospace;font-size:32px'><textarea style='font-family:monospace;font-size:32px' rows="1">abc</textarea></div>
+<div class="row" data-m="button|EXP|monospace|32|LAT" style='font-family:monospace;font-size:32px'><button style='font-family:monospace;font-size:32px' >abc</button></div>
+<div class="row" data-m="input|EXP|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><input style='font-family:monospace;font-size:32px' value="abc中"></div>
+<div class="row" data-m="textarea|EXP|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><textarea style='font-family:monospace;font-size:32px' rows="1">abc中</textarea></div>
+<div class="row" data-m="button|EXP|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><button style='font-family:monospace;font-size:32px' >abc中</button></div>
+<div class="row" data-m="input|EXP|monospace|32|CJK" style='font-family:monospace;font-size:32px'><input style='font-family:monospace;font-size:32px' value="中文字"></div>
+<div class="row" data-m="textarea|EXP|monospace|32|CJK" style='font-family:monospace;font-size:32px'><textarea style='font-family:monospace;font-size:32px' rows="1">中文字</textarea></div>
+<div class="row" data-m="button|EXP|monospace|32|CJK" style='font-family:monospace;font-size:32px'><button style='font-family:monospace;font-size:32px' >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|8|LAT" style='font-family:Arial;font-size:8px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|8|LAT" style='font-family:Arial;font-size:8px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|8|LAT" style='font-family:Arial;font-size:8px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|8|LATCJK" style='font-family:Arial;font-size:8px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|8|CJK" style='font-family:Arial;font-size:8px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|8|CJK" style='font-family:Arial;font-size:8px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|8|CJK" style='font-family:Arial;font-size:8px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|10|LAT" style='font-family:Arial;font-size:10px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|10|LAT" style='font-family:Arial;font-size:10px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|10|LAT" style='font-family:Arial;font-size:10px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|10|LATCJK" style='font-family:Arial;font-size:10px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|10|CJK" style='font-family:Arial;font-size:10px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|10|CJK" style='font-family:Arial;font-size:10px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|10|CJK" style='font-family:Arial;font-size:10px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|12|LAT" style='font-family:Arial;font-size:12px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|12|LAT" style='font-family:Arial;font-size:12px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|12|LAT" style='font-family:Arial;font-size:12px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|12|LATCJK" style='font-family:Arial;font-size:12px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|12|CJK" style='font-family:Arial;font-size:12px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|12|CJK" style='font-family:Arial;font-size:12px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|12|CJK" style='font-family:Arial;font-size:12px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|13.3333|LAT" style='font-family:Arial;font-size:13.3333px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:13.3333px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|13.3333|CJK" style='font-family:Arial;font-size:13.3333px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|14|LAT" style='font-family:Arial;font-size:14px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|14|LAT" style='font-family:Arial;font-size:14px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|14|LAT" style='font-family:Arial;font-size:14px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|14|LATCJK" style='font-family:Arial;font-size:14px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|14|CJK" style='font-family:Arial;font-size:14px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|14|CJK" style='font-family:Arial;font-size:14px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|14|CJK" style='font-family:Arial;font-size:14px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|16|LAT" style='font-family:Arial;font-size:16px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|16|LAT" style='font-family:Arial;font-size:16px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|16|LAT" style='font-family:Arial;font-size:16px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|16|LATCJK" style='font-family:Arial;font-size:16px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|16|CJK" style='font-family:Arial;font-size:16px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|16|CJK" style='font-family:Arial;font-size:16px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|16|CJK" style='font-family:Arial;font-size:16px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|20|LAT" style='font-family:Arial;font-size:20px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|20|LAT" style='font-family:Arial;font-size:20px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|20|LAT" style='font-family:Arial;font-size:20px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|20|LATCJK" style='font-family:Arial;font-size:20px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|20|CJK" style='font-family:Arial;font-size:20px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|20|CJK" style='font-family:Arial;font-size:20px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|20|CJK" style='font-family:Arial;font-size:20px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|24|LAT" style='font-family:Arial;font-size:24px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|24|LAT" style='font-family:Arial;font-size:24px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|24|LAT" style='font-family:Arial;font-size:24px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|24|LATCJK" style='font-family:Arial;font-size:24px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|24|CJK" style='font-family:Arial;font-size:24px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|24|CJK" style='font-family:Arial;font-size:24px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|24|CJK" style='font-family:Arial;font-size:24px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Arial|32|LAT" style='font-family:Arial;font-size:32px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Arial|32|LAT" style='font-family:Arial;font-size:32px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Arial|32|LAT" style='font-family:Arial;font-size:32px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Arial|32|CJK" style='font-family:Arial;font-size:32px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Arial|32|CJK" style='font-family:Arial;font-size:32px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Arial|32|CJK" style='font-family:Arial;font-size:32px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|8|LAT" style='font-family:"Noto Sans SC";font-size:8px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|8|LATCJK" style='font-family:"Noto Sans SC";font-size:8px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|8|CJK" style='font-family:"Noto Sans SC";font-size:8px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|10|LAT" style='font-family:"Noto Sans SC";font-size:10px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|10|LATCJK" style='font-family:"Noto Sans SC";font-size:10px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|10|CJK" style='font-family:"Noto Sans SC";font-size:10px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|12|LAT" style='font-family:"Noto Sans SC";font-size:12px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|12|LATCJK" style='font-family:"Noto Sans SC";font-size:12px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|12|CJK" style='font-family:"Noto Sans SC";font-size:12px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|13.3333|LAT" style='font-family:"Noto Sans SC";font-size:13.3333px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|13.3333|LATCJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|13.3333|CJK" style='font-family:"Noto Sans SC";font-size:13.3333px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|14|LAT" style='font-family:"Noto Sans SC";font-size:14px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|14|LATCJK" style='font-family:"Noto Sans SC";font-size:14px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|14|CJK" style='font-family:"Noto Sans SC";font-size:14px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|16|LAT" style='font-family:"Noto Sans SC";font-size:16px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|16|LATCJK" style='font-family:"Noto Sans SC";font-size:16px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|16|CJK" style='font-family:"Noto Sans SC";font-size:16px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|20|LAT" style='font-family:"Noto Sans SC";font-size:20px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|20|LATCJK" style='font-family:"Noto Sans SC";font-size:20px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|20|CJK" style='font-family:"Noto Sans SC";font-size:20px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|24|LAT" style='font-family:"Noto Sans SC";font-size:24px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|24|LATCJK" style='font-family:"Noto Sans SC";font-size:24px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|24|CJK" style='font-family:"Noto Sans SC";font-size:24px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|32|LAT" style='font-family:"Noto Sans SC";font-size:32px'><button >abc</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|32|LATCJK" style='font-family:"Noto Sans SC";font-size:32px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|Noto Sans SC|32|CJK" style='font-family:"Noto Sans SC";font-size:32px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|8|LAT" style='font-family:monospace;font-size:8px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|8|LAT" style='font-family:monospace;font-size:8px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|8|LAT" style='font-family:monospace;font-size:8px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|8|LATCJK" style='font-family:monospace;font-size:8px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|8|CJK" style='font-family:monospace;font-size:8px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|8|CJK" style='font-family:monospace;font-size:8px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|8|CJK" style='font-family:monospace;font-size:8px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|10|LAT" style='font-family:monospace;font-size:10px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|10|LAT" style='font-family:monospace;font-size:10px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|10|LAT" style='font-family:monospace;font-size:10px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|10|LATCJK" style='font-family:monospace;font-size:10px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|10|CJK" style='font-family:monospace;font-size:10px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|10|CJK" style='font-family:monospace;font-size:10px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|10|CJK" style='font-family:monospace;font-size:10px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|12|LAT" style='font-family:monospace;font-size:12px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|12|LAT" style='font-family:monospace;font-size:12px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|12|LAT" style='font-family:monospace;font-size:12px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|12|LATCJK" style='font-family:monospace;font-size:12px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|12|CJK" style='font-family:monospace;font-size:12px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|12|CJK" style='font-family:monospace;font-size:12px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|12|CJK" style='font-family:monospace;font-size:12px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|13.3333|LAT" style='font-family:monospace;font-size:13.3333px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|13.3333|LATCJK" style='font-family:monospace;font-size:13.3333px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|13.3333|CJK" style='font-family:monospace;font-size:13.3333px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|14|LAT" style='font-family:monospace;font-size:14px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|14|LAT" style='font-family:monospace;font-size:14px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|14|LAT" style='font-family:monospace;font-size:14px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|14|LATCJK" style='font-family:monospace;font-size:14px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|14|CJK" style='font-family:monospace;font-size:14px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|14|CJK" style='font-family:monospace;font-size:14px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|14|CJK" style='font-family:monospace;font-size:14px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|16|LAT" style='font-family:monospace;font-size:16px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|16|LAT" style='font-family:monospace;font-size:16px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|16|LAT" style='font-family:monospace;font-size:16px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|16|LATCJK" style='font-family:monospace;font-size:16px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|16|CJK" style='font-family:monospace;font-size:16px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|16|CJK" style='font-family:monospace;font-size:16px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|16|CJK" style='font-family:monospace;font-size:16px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|20|LAT" style='font-family:monospace;font-size:20px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|20|LAT" style='font-family:monospace;font-size:20px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|20|LAT" style='font-family:monospace;font-size:20px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|20|LATCJK" style='font-family:monospace;font-size:20px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|20|CJK" style='font-family:monospace;font-size:20px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|20|CJK" style='font-family:monospace;font-size:20px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|20|CJK" style='font-family:monospace;font-size:20px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|24|LAT" style='font-family:monospace;font-size:24px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|24|LAT" style='font-family:monospace;font-size:24px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|24|LAT" style='font-family:monospace;font-size:24px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|24|LATCJK" style='font-family:monospace;font-size:24px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|24|CJK" style='font-family:monospace;font-size:24px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|24|CJK" style='font-family:monospace;font-size:24px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|24|CJK" style='font-family:monospace;font-size:24px'><button >中文字</button></div>
+<div class="row" data-m="input|UA|monospace|32|LAT" style='font-family:monospace;font-size:32px'><input value="abc"></div>
+<div class="row" data-m="textarea|UA|monospace|32|LAT" style='font-family:monospace;font-size:32px'><textarea rows="1">abc</textarea></div>
+<div class="row" data-m="button|UA|monospace|32|LAT" style='font-family:monospace;font-size:32px'><button >abc</button></div>
+<div class="row" data-m="input|UA|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><input value="abc中"></div>
+<div class="row" data-m="textarea|UA|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><textarea rows="1">abc中</textarea></div>
+<div class="row" data-m="button|UA|monospace|32|LATCJK" style='font-family:monospace;font-size:32px'><button >abc中</button></div>
+<div class="row" data-m="input|UA|monospace|32|CJK" style='font-family:monospace;font-size:32px'><input value="中文字"></div>
+<div class="row" data-m="textarea|UA|monospace|32|CJK" style='font-family:monospace;font-size:32px'><textarea rows="1">中文字</textarea></div>
+<div class="row" data-m="button|UA|monospace|32|CJK" style='font-family:monospace;font-size:32px'><button >中文字</button></div>
+<div class="row" data-m="input|CTRL32|Arial|8|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:8px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|8|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:8px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|8|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:8px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|10|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:10px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|10|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:10px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|10|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:10px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|12|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:12px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|12|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:12px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|12|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:12px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|13.3333|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|13.3333|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|13.3333|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|14|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:14px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|14|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:14px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|14|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:14px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|16|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:16px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|16|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:16px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|16|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:16px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|20|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:20px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|20|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:20px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|20|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:20px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|24|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:24px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|24|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:24px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|24|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:24px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Arial|32|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Arial|32|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Arial|32|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:Arial;font-size:32px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|8|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:8px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|8|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:8px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|8|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:8px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|10|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:10px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|10|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:10px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|10|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:10px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|12|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:12px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|12|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:12px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|12|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:12px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|13.3333|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|13.3333|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|13.3333|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|14|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:14px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|14|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:14px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|14|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:14px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|16|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:16px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|16|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:16px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|16|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:16px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|20|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:20px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|20|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:20px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|20|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:20px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|24|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:24px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|24|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:24px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|24|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:24px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|32|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|32|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|Noto Sans SC|32|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:"Noto Sans SC";font-size:32px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|8|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:8px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|8|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:8px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|8|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:8px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|10|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:10px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|10|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:10px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|10|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:10px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|12|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:12px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|12|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:12px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|12|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:12px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|13.3333|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:13.3333px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|13.3333|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:13.3333px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|13.3333|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:13.3333px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|14|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:14px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|14|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:14px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|14|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:14px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|16|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:16px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|16|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:16px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|16|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:16px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|20|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:20px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|20|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:20px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|20|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:20px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|24|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:24px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|24|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:24px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|24|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:24px' value="中文字"></div>
+<div class="row" data-m="input|CTRL32|monospace|32|LAT" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:32px' value="abc"></div>
+<div class="row" data-m="input|CTRL32|monospace|32|LATCJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:32px' value="abc中"></div>
+<div class="row" data-m="input|CTRL32|monospace|32|CJK" style='font-family:Arial;font-size:32px'><input style='font-family:monospace;font-size:32px' value="中文字"></div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+// 每行输出 meta|cH=|bH=|LH=|rel=
+//   meta 由生成器写入 data-m（TXT|fam|size|kind 或 tag|fam|size|kind）
+//   cH   控件自身 content 高（border-box 高 − border − padding）——「控件高」组
+//   bH   控件 border-box 高
+//   LH   控件所在外层行盒高（父 div 高，div 只含这一行）——「行盒」组
+//   rel  控件顶相对行盒顶偏移（该行内基线摆放的直接体现）——「行盒」组
+// TXT 对照行只输出 LH。
+// ★ 取子元素必须用 children[0]：wbui 当前未实现 Element.firstElementChild
+//   （实测返回 undefined，会让整段脚本抛错终止、#out 为空）。children 两侧都可用。
+// 末尾追加 #rows=N 行作行数自检：两侧 diff 若在此行不等即为抓取口径问题。
+var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+var rows = document.getElementsByClassName('row'), L = [];
+try {
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i], meta = row.getAttribute('data-m'), el = row.children[0];
+    var pr = row.getBoundingClientRect();
+    if (meta.indexOf('TXT|') === 0) { L.push(meta + '|LH=' + r3(pr.height)); continue; }
+    var cs = getComputedStyle(el);
+    var pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+    var bt = parseFloat(cs.borderTopWidth) || 0, bb = parseFloat(cs.borderBottomWidth) || 0;
+    var r = el.getBoundingClientRect();
+    L.push(meta + '|cH=' + r3(r.height - bt - bb - pt - pb)
+      + '|bH=' + r3(r.height) + '|LH=' + r3(pr.height)
+      + '|rel=' + r3(r.top - pr.top));
+  }
+} catch (e) { L.push('SCAN-ERROR: ' + e); }
+L.push('#rows=' + rows.length);
+document.getElementById('out').textContent = L.join('\n');
+</script></body></html>

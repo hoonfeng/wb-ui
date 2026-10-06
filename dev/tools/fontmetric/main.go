@@ -13,9 +13,12 @@
 // advance width，以便定出可用的替代量。
 //
 // 用法（仓库根）：go run ./dev/tools/fontmetric
+//
+//	go run ./dev/tools/fontmetric -scan   # 垂直度量扫描（CJK 行盒/基线反推用）
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math"
 
@@ -23,6 +26,25 @@ import (
 )
 
 func main() {
+	scan := flag.Bool("scan", false, "扫描 Arial / Noto Sans SC / monospace 在 8..32px 的垂直度量")
+	flag.Parse()
+	if *scan {
+		fmt.Printf("%-14s %9s %9s %9s %9s %9s %9s\n",
+			"family", "size", "asc", "desc", "lead", "lineH", "rAsc")
+		for _, fam := range []string{"Arial", "Noto Sans SC", "monospace", "sans-serif"} {
+			for _, s := range []float32{8, 10, 12, 13.3333, 14, 16, 20, 24, 32} {
+				tf := skia.NewTypeface(fam, skia.FontStyleNormal)
+				f := skia.NewFont(tf, s)
+				m, _ := f.Metrics()
+				asc := float64(-m.Ascent)
+				desc := float64(m.Descent)
+				lead := float64(m.Leading)
+				fmt.Printf("%-14s %9g %9.4f %9.4f %9.4f %9.4f %9.4f\n",
+					fam, s, asc, desc, lead, asc+desc+lead, math.Round(asc))
+			}
+		}
+		return
+	}
 	specs := []struct {
 		fam  string
 		size float32

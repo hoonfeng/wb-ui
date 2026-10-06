@@ -836,6 +836,47 @@ func boxHasCJK(box *ElementBox) bool {
 	return false
 }
 
+// boxValueHasCJK reports whether a form control's **value** contains a CJK
+// character.
+//
+// boxHasCJK only walks text children, and an <input> keeps its text in the
+// value **attribute/property** — never in a child node. So a value of
+// "Mixed中英" is invisible to boxHasCJK and the control's line box gets
+// Latin-only metrics, while Edge pulls the OS CJK fallback face in for the
+// very same value. Both <input> and <textarea> are covered: <textarea>'s
+// initial content also lives in the value attribute (its text children stay
+// empty in this engine), so boxHasCJK misses it too.
+//
+// ★ Deliberately NOT folded into boxHasCJK: formControlContentSize sizes the
+// control itself through fontLineGap(box), and letting value-CJK drive that
+// function would change the control's intrinsic height (Edge keeps it at 21
+// for a 13.3333px UA input regardless of the value). Callers that only affect
+// the **line box** opt in explicitly (see effectiveFontMetricsWithCJKValue).
+func boxValueHasCJK(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	el := box.Element()
+	if el == nil {
+		return false
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "input", "textarea":
+		return hasCJKChar(el.GetAttribute("value"))
+	}
+	return false
+}
+
+// hasCJKChar reports whether s contains any CJK character.
+func hasCJKChar(s string) bool {
+	for _, r := range s {
+		if isCJKChar(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // effectiveFontMetrics returns the line-box metrics for box, following Blink's
 // FontFallbackList semantics: take the metrics of the font with the **largest
 // line spacing** (ascent+descent+lineGap) among the fonts that participate in
@@ -846,6 +887,22 @@ func boxHasCJK(box *ElementBox) bool {
 //
 // Latin-only boxes short-circuit and never query the fallback face.
 func effectiveFontMetrics(box *ElementBox) (ascent, descent, lineGap float64) {
+	return effectiveFontMetricsOpt(box, false)
+}
+
+// effectiveFontMetricsWithCJKValue is effectiveFontMetrics with the control's
+// **value** also treated as CJK-bearing inline content (boxValueHasCJK).
+//
+// ★ Only line-box consumers may call this. formControlContentSize must keep
+//   calling fontLineGap/effectiveFontMetrics: the control's own intrinsic
+//   height is value-independent in Edge (21px for a 13.3333px UA input).
+func effectiveFontMetricsWithCJKValue(box *ElementBox) (ascent, descent, lineGap float64) {
+	return effectiveFontMetricsOpt(box, true)
+}
+
+// effectiveFontMetricsOpt implements effectiveFontMetrics; forceCJK additionally
+// considers the form-control value (see boxValueHasCJK).
+func effectiveFontMetricsOpt(box *ElementBox, forceCJK bool) (ascent, descent, lineGap float64) {
 	fs := fontSizeOf(box)
 	// ★ font-size: 0（显式零字号）→ **全部字体相对度量为 0**：CSS 里字体度量
 	//   与 em 一样以 font-size 为单位，0 字号就是 0 行高、0 基线。必须在此
@@ -866,7 +923,7 @@ func effectiveFontMetrics(box *ElementBox) (ascent, descent, lineGap float64) {
 	wt := fontWeightOf(box)
 	st := fontStyleOf(box)
 	ascent, descent, lineGap = fontMetricsHelper(fam, fs, wt, st)
-	if CJKFontMetricsFunc == nil || !boxHasCJK(box) {
+	if CJKFontMetricsFunc == nil || (!forceCJK && !boxHasCJK(box)) {
 		return ascent, descent, lineGap
 	}
 	ca, cd, clg := CJKFontMetricsFunc(fam, fs, wt, st)

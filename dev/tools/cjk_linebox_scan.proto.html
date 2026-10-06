@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>CJK line-box metric cross scan</title>
+<style>html,body{margin:0}.row{}</style></head><body>
+<!--ROWS-->
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+// 每行输出 meta|cH=|bH=|LH=|rel=
+//   meta 由生成器写入 data-m（TXT|fam|size|kind 或 tag|fam|size|kind）
+//   cH   控件自身 content 高（border-box 高 − border − padding）——「控件高」组
+//   bH   控件 border-box 高
+//   LH   控件所在外层行盒高（父 div 高，div 只含这一行）——「行盒」组
+//   rel  控件顶相对行盒顶偏移（该行内基线摆放的直接体现）——「行盒」组
+// TXT 对照行只输出 LH。
+// ★ 取子元素必须用 children[0]：wbui 当前未实现 Element.firstElementChild
+//   （实测返回 undefined，会让整段脚本抛错终止、#out 为空）。children 两侧都可用。
+// 末尾追加 #rows=N 行作行数自检：两侧 diff 若在此行不等即为抓取口径问题。
+var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+var rows = document.getElementsByClassName('row'), L = [];
+try {
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i], meta = row.getAttribute('data-m'), el = row.children[0];
+    var pr = row.getBoundingClientRect();
+    if (meta.indexOf('TXT|') === 0) { L.push(meta + '|LH=' + r3(pr.height)); continue; }
+    var cs = getComputedStyle(el);
+    var pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+    var bt = parseFloat(cs.borderTopWidth) || 0, bb = parseFloat(cs.borderBottomWidth) || 0;
+    var r = el.getBoundingClientRect();
+    L.push(meta + '|cH=' + r3(r.height - bt - bb - pt - pb)
+      + '|bH=' + r3(r.height) + '|LH=' + r3(pr.height)
+      + '|rel=' + r3(r.top - pr.top));
+  }
+} catch (e) { L.push('SCAN-ERROR: ' + e); }
+L.push('#rows=' + rows.length);
+document.getElementById('out').textContent = L.join('\n');
+</script></body></html>

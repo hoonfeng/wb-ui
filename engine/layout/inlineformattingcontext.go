@@ -1378,6 +1378,51 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						ba += (ch - th) / 2
 					}
 				}
+				// ★ 控件**值**含 CJK：内容行盒（含 OS CJK 回退面的度量）在控件
+				//   内容高内垂直居中，基线随之移动。
+				//
+				//   缘起：boxHasCJK 只扫文本子节点，而 <input> 的文本在 value
+				//   属性里 ⇒ 同一个控件把 value 从 "abc" 换成 "abc中"，Edge 会
+				//   把 CJK 回退面纳入该行度量、基线整体下移，wbui 则纹丝不动
+				//   （formtext_probe 的 i2 top 130 vs 129；cjk_text_vs_input_scan
+				//   的 p2/p6 行盒高 25 vs 24）。
+				//
+				//   公式（Edge 实测反推，dev/fixtures/webshot/cjk_linebox_scan.html
+				//   + dev/output/wbui-audit/cjk_linebox_scan.{edge,wbui}.txt）：
+				//
+				//       X = (contentH − lineH_content) / 2 + round(asc_content)
+				//
+				//   contentH        = round(asc)+round(desc)+round(lead)，取**控件
+				//                     自身字体**（= fontLineGap 对控件盒的值，与
+				//                     value 无关；Edge 的 input 内容高恒为此值）
+				//   lineH_content / = 同一套整数化三元组，但取**含 CJK 回退面**的
+				//   asc_content       行度量（effectiveFontMetricsWithCJKValue）
+				//
+				//   实测量（控件字体 Arial，回退面 Noto Sans SC，父块 Arial 32px）：
+				//     size      contentH  lineH_c  round(asc_c)  X(算)  X(Edge)
+				//     8             9        11         9         8.0      8
+				//     10           11        15        12        10.0     10
+				//     12           14        17        14        12.5     12.5
+				//     13.3333      15        19        15        13.0     13
+				//     14           16        20        16        14.0     14
+				//     16           18        24        19        16.0     16
+				//     20           23        29        23        20.0     20
+				//     24           28        35        28        24.5     24.5
+				//   8/8 组字号逐项命中（其中 12/24 的 .5 正是「行盒比内容高多 1、
+				//   居中后落到半像素」的必然结果，不是拟合常数）。
+				//
+				//   退化为既有行为：value 不含 CJK 时 lineH_content == contentH
+				//   且 asc_content == 控件字体 ascent ⇒ X = round(asc)，与本分支
+				//   之前的 ba 完全一致（故仅在含 CJK 时求值，改动面最小）。
+				//
+				//   ★ 刻意不动 formControlContentSize / effectiveFontMetrics 的
+				//     通用路径：控件自身的固有高必须保持 value 无关（Edge 对
+				//     13.3333px 的 UA input 恒为 21，含 CJK 也是 21）。
+				if ch := cldG.ContentHeight(); ch > 0 && boxValueHasCJK(cld) {
+					ca, cd, clg := effectiveFontMetricsWithCJKValue(cld)
+					lineHContent := math.Round(ca) + math.Round(cd) + math.Round(clg)
+					ba = (ch-lineHContent)/2 + math.Round(ca)
+				}
 				if off, ok := formControlBaselineFromBorderTop(el, cldG.BorderTop(), cldG.PaddingTop(), cldG.BorderBoxHeight(), ba); ok {
 					// ★ 控件自身 vertical-align 的取值决定定位口径（CSS 2.1 §10.8）：
 					//   - top    ：控件**顶边**贴行盒顶

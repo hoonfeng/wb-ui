@@ -1563,7 +1563,11 @@ for _, h := range rowHeights { totalHeight += h + spacingY }
 **验收**：`table_rowheight_scan` **IDENTICAL**（t1_h 30 = Edge 30 ✓）；
 `g7_listpseudo` tb 高 30 → **32** ✓（仅剩宽 0.01px 亚像素，记 A7）。
 
-### 12-5｜d 项：`<input>` 的 `value` 含 CJK 时的行盒度量（**未修复，如实登记**）
+### 12-5｜d 项：`<input>` 的 `value` 含 CJK 时的行盒度量（**已于第 13 轮修复 → 见 §13-2/13-4**）
+
+> ★ 状态更新（第 13 轮）：本项的 Edge 规律**可复算**，公式已定出并落地
+> （§13-2 公式 / §13-3 实现 / §13-4 验收）。下列「未修复」为**当时（第 12 轮）的
+> 如实记录**，保留以存档根因分析过程。
 
 **缺口**：`formtext_probe` 的 i2 行 `<input value="Mixed中英">` Edge `top=129` /
 wbui `130`（**1px，≥1px 缺口**）。
@@ -1651,3 +1655,171 @@ Edge 让 **CJK 回退字体的度量参与该行行盒**（与「纯文本 CJK �
 | `textarea_lineheight_scan.html` / `textarea_br_input_scan.html` | textarea 行盒与 `<br>` 影响 |
 | `input_value_baseline_scan.html` / `cjk_text_vs_input_scan.html` / `input_cjk_font_scan.html` | §12-5 的 CJK 触发因子分离 |
 | `dev/tools/fontmetric`（Go） | 打印 Skia 水平/垂直字体度量（avgCharWidth、xMax−xMin、ascent…） |
+
+---
+
+## 第 13 次监督轮（2026-10）：§12-5 收官 —— `value` 含 CJK 的行盒度量（**已修复**）
+
+聚焦第 12 轮遗留的**唯一 ≥1px 正式探针缺口**（§12-5）。结论：**Edge 的规律可
+复算**，已定出闭式公式并落地，`formtext_probe` 的 i2 `top` 由 130 → **129**
+（与 Edge 逐字一致），且公式在表 C 的 **8 组控件字号上逐项命中**。
+
+### 13-1｜扫描表补全（先补证据，再改代码）
+
+把监督者要求的三维交叉表落盘为 `dev/fixtures/webshot/cjk_linebox_scan.html`
+（648 用例，由 `dev/tools/gen_cjk_linebox_scan.py` + 模板 `cjk_linebox_scan.proto.html`
+**静态生成**，不依赖 goja 的 DOM 构建能力）。每个用例同时记录**两组量**，用来
+分离「是否只影响行盒，不影响控件高」：
+
+| 字段 | 含义 |
+|---|---|
+| `cH` | 控件**自身** content 高（border-box 高 − border − padding） |
+| `bH` | 控件 border-box 高 |
+| `LH` | 该控件**所在外层行盒高**（父 div 高；div 只含这一行 ⇒ 块高 = 行盒高） |
+| `rel` | 控件顶相对行盒顶的偏移（该行基线的直接体现） |
+
+四张子表（`data-m` 前缀即表名）：
+
+| 子表 | 维度 | 用例 | 用途 |
+|---|---|---|---|
+| `TXT` | 3 内容 × 9 字号 × 3 字体 | 81 | 纯文本行盒基准（同字体字号的 strut） |
+| `EXP` | 3 元素 × 3 内容 × 9 字号 × 3 字体 | 243 | 父块与控件**同**字体字号 ⇒ 隔离「value 内容」单一变量 |
+| `UA` | 同上，但控件**不设** font（走 UA 默认 Arial 13.3333px） | 243 | 复现 `formtext_probe`/`cjk_text_vs_input_scan` 真实场景（父 `sans-serif 16px` ≠ 控件 UA 字体） |
+| `CTRL32` | 父块固定 Arial 32px，控件**显式**设字体字号 | 81 | 分离「基线偏移随**控件**字号/字体的变化」 |
+
+产物（证据落盘）：`dev/output/wbui-audit/cjk_linebox_scan.{edge,wbui,cmp}.txt`
+（每侧 649 行 = 648 用例 + `#rows` 自检行；两侧行数相等）。
+
+**★ 为什么必须补 `UA`/`CTRL32` 两张子表**：`EXP` 表里父块与控件同字体同字号 ⇒
+控件必然主导行盒（`rel ≡ 0`），**观测不到基线偏移**；`UA` 表才能看到 `rel ≠ 0`；
+`CTRL32` 表才能确认偏移**随控件字号缩放** —— 只看 `UA`（控件字号恒为 UA 的
+13.3333px）会把它误判成「恒定 +1px」的魔数。
+
+### 13-2｜Edge 规律与可复算公式（表 C 8/8 命中）
+
+**判据一：是「CJK 回退面参与」而非固定偏移。** 表 C 中同一父块（Arial 32px）
+下，`dRel = rel(CJK) − rel(LAT)` 只在**控件字体 = Arial** 时非零，控件字体取
+Noto Sans SC / monospace 时恒为 0：
+
+| ctrl 字体 | dRel（8 组字号） |
+|---|---|
+| Arial | −1.0, −1.0, −1.5, −1.0, −1.0, −2.0, −2.0, −2.5（随字号变） |
+| Noto Sans SC | **全 0** |
+| monospace | **全 0** |
+
+Noto 自带 CJK 字形 ⇒ 内容行盒就是控件字体行盒 ⇒ 无处可动；monospace 在本机映射
+到自带 CJK 的等宽字体（其 `TXT` 行盒 LAT/CJK 相同）⇒ 同样为 0。这与「固定
++1px」的假设直接矛盾。
+
+**判据二：控件自身高与 value 无关。** 全部 648 用例中 `bH` 只随「元素 + 控件
+字体字号」变，把 value 从 `abc` 换成 `abc中` 高不变（表 C 的 `bH(LAT/CJK)` 逐对
+相同）⇒ Edge 只改行盒，不改控件高。
+
+**公式**（把内容行盒在控件内容高内垂直居中，各分量先各自整数化）：
+
+```
+X = (contentH − lineH_content) / 2 + round(asc_content)
+
+contentH      = round(asc_ctrl) + round(desc_ctrl) + round(lead_ctrl)   ← 控件自身字体的行盒
+lineH_content = round(asc_c)    + round(desc_c)    + round(lead_c)      ← 含 CJK 回退面的行度量
+asc_content   = asc_c（再 round）
+基线距控件 border-box 顶 = borderTop + paddingTop + X
+```
+
+**表 C 实测反推（父块 Arial 32px ⇒ 行盒 ascent = round(asc_Arial32) = 29，
+故 Edge 的 X = 29 − rel_Edge）**：
+
+| ctrl size | contentH | lineH_c | round(asc_c) | X(公式) | X(Edge) |
+|---|---|---|---|---|---|
+| 8 | 9 | 11 | 9 | 8.0 | 8 ✓ |
+| 10 | 11 | 15 | 12 | 10.0 | 10 ✓ |
+| 12 | 14 | 17 | 14 | **12.5** | **12.5** ✓ |
+| 13.3333 | 15 | 19 | 15 | 13.0 | 13 ✓ |
+| 14 | 16 | 20 | 16 | 14.0 | 14 ✓ |
+| 16 | 18 | 24 | 19 | 16.0 | 16 ✓ |
+| 20 | 23 | 29 | 23 | 20.0 | 20 ✓ |
+| 24 | 28 | 35 | 28 | **24.5** | **24.5** ✓ |
+
+8/8 逐项命中，**无一处拟合常数**。其中 12/24 的 `.5` 不是噪声：这两档的行盒比
+内容高多 1px（`lineH_c − contentH` = 3 / 7），奇数差居中后必然落到半像素 ——
+公式的算术结果，而非人为补偿。
+
+**与既有实现的关系**：value 不含 CJK 时 `lineH_content == contentH` 且
+`asc_c == asc_ctrl` ⇒ 公式退化为 `X = round(asc_ctrl)`，正是本分支之前的写法
+（§第 12 轮前既有代码）。故该公式是既有行为的**严格扩展**，不是替换。
+
+**度量来源**：`dev/tools/fontmetric -scan` 打印 Skia 逐字号三元组（新增开关）。
+行盒 = `round(asc)+round(desc)+round(lead)`（既有 `fontLineGap` 语义，与 Edge 的
+`TXT` 行盒 81/81 一致），CJK 回退面 = Noto Sans SC（`sans-serif` 在本机也解析到
+它：`TXT|Noto Sans SC|16|LAT = 24` 与 `cjk_text_vs_input_scan` 的纯文本行 24 吻合）。
+
+### 13-3｜实现（只影响行盒，不碰通用度量路径）
+
+| 文件 | 改动 |
+|---|---|
+| `engine/layout/layoututil.go` | 新增 `boxValueHasCJK`（扫 `input`/`textarea` 的 **value 属性** —— `boxHasCJK` 只看文本子节点，而控件的文字在 value 里，这正是 §12-5 的根因）+ `hasCJKChar`；把 `effectiveFontMetrics` 拆出 `effectiveFontMetricsOpt(box, forceCJK)`，并新增 `effectiveFontMetricsWithCJKValue` |
+| `engine/layout/inlineformattingcontext.go` | 基线分支（表单控件 `cursor` 处）新增**独立分支**：`if ch := cldG.ContentHeight(); ch > 0 && boxValueHasCJK(cld) { ca,cd,clg := effectiveFontMetricsWithCJKValue(cld); ba = (ch − round(ca)−round(cd)−round(clg))/2 + round(ca) }` |
+
+**红线（已守住，有证据）**：
+
+- `formControlContentSize` 仍走原 `fontLineGap(box)`（= `effectiveFontMetrics`，
+  不识别 value）⇒ 控件固有高**依旧与 value 无关**：表 C 全部 648 用例的
+  `bH(LAT) == bH(CJK)`，`formtext_probe` 的 i1/i2 高仍 21、`h2_control_baseline`
+  的 input 高仍 21；
+- **没有**修改 `boxHasCJK`（否则 `formControlContentSize → fontLineGap` 会连带
+  改控件高）；新公式只在 `boxValueHasCJK` 为真时求值，`textarea` 基线取盒底边
+  （`formControlBaselineFromBorderTop` 的既有分支）不受影响。
+
+### 13-4｜验收（逐条给证据）
+
+| # | 验收项 | 结果 |
+|---|---|---|
+| 1 | `formtext_probe` i2 `top` == Edge（129），该行 cmp 消失 | **✓** i2 行 `rect=10,129,177,21` 两侧逐字相同；探针差异 **4 → 2 行**，仅剩 b1 的宽度浮点表示（`42.671875` vs `42.66659927368164`，既有项） |
+| 2 | `cjk_text_vs_input_scan` p2/p6 行盒高与 Edge 一致 | **✓ IDENTICAL**（wbui=9 行 / Edge=9 行，两侧非空且行数相等） |
+| 3 | `h2_control_baseline`：input 高 21 / j 宽 223 / g 宽 33 | **✓** `a|…rect=10,14,177,21`、`j|…223,30`、`g|…33,19` 三项均保持（仅剩既有 0.15625 亚像素 top） |
+| 4 | `h2_baseline_matrix` 不新增 ≥1px | **✓** 47/47，仍**仅 `v_middle` 1 对**（`4.156/25.156`，<1px） |
+| 5 | 收尾前全量 16 探针无回归 | **✓** 见 §13-5 |
+| 6 | `go build ./...` + `go test ./engine/...` 通过 | **✓** build OK；测试 23 包全 ok（含 `engine/layout`/`rendering`/`page`） |
+
+### 13-5｜全量 16 探针回归（`dev/output/wbui-audit/ALL3.txt`）
+
+| 探针 | 第 12 轮 | 第 13 轮 | 探针 | 第 12 轮 | 第 13 轮 |
+|---|---|---|---|---|---|
+| `g1_formctl` | 2 | 2 | `minibox` | 16 | 16 |
+| `g2_transform` | 0 | 0 | `h2_baseline_formula` | 0 | 0 |
+| `g3_scrollbar` | 0 | 0 | `h2_baseline_matrix` | 2 | 2 |
+| `g4_inlineblock` | 10 | 10 | `h2_control_baseline` | 16 | 16 |
+| `g5_mixedtext` | 0 | 0 | `h2_replaced_linebox` | 10 | 10 |
+| `g6_supports` | 0 | 0 | `h4_supports_bounds` | 0 | 0 |
+| `g7_listpseudo` | 2 | 2 | `h6_misc_props` | 0 | 0 |
+| **`formtext_probe`** | **4** | **2** ⬇ | `h7_transform_norm` | 0 | 0 |
+
+⇒ **零回归**，唯一变化是目标项改善 2 行。
+
+### 13-6｜残留差异分类（全部 <1px 或已有定性，无 ≥1px 新增）
+
+扫描表按字段细分的残留（`cjk_linebox_scan.cmp.txt`）：
+
+| 残留 | 处数 | 定性 |
+|---|---|---|
+| `input/UA` LH 16→**10**、rel 28→**18** | 18 | **全部是父字体 Arial/Courier 20/24/32px 的既有 0.5 半像素**：同一用例的 `LAT` 行**同样差 0.5**（如 `20|LAT` Edge `24,3` / wbui `24.5,3.5`）。修复前 CJK 行差 **1.5**、现在 0.5 ⇒ **CJK 特有偏差已消除，净改善恰好 1px**。Noto 组（父字体 Noto 14/16/20/24/32）**已全部清零** |
+| `input/EXP` | 2 | `<input style="font-size:32px">`（控件主导行盒）LH Edge 43.5 / wbui 43 ⇒ 0.5，`rel` 同为 0 |
+| `input/CTRL32` | 69 | 同上 0.5 半像素（LAT 与 CJK **残差相同**，证明非本轮公式问题）；其中 monospace 控件的 1.5 来自 wbui 的 monospace 映射字体度量与 Edge 有差（既有，与 CJK 无关：同一行 LAT 也差 1.5） |
+| `textarea/*` | 42 | textarea 基线取盒底边，不在本轮范围（既有） |
+| `button/UA` LH 16 / rel 20 | 36 | **根因不同，未修**：button 的内容含 CJK 时 `contentH == lineH_content`（1px 6px 内边距 + UA 字体下恰为 19 = Noto 13.3333px 行盒）⇒ 新公式给出与现状**相同**的结果，说明该差异来自 button 行盒定位的**另一条分支**，不是「值含 CJK 的度量」问题。如实登记，留待后续单独立项 |
+
+⇒ 16 个**正式探针**中**已无 ≥1px 缺口**（第 12 轮 §12-6 判据里的唯一例外 §12-5 已关闭）。
+
+### 13-7｜本轮新增工具与夹具（均可复跑）
+
+| 新增 | 用途 |
+|---|---|
+| `dev/tools/jsread`（Go） | 在 wbui 管线里执行 JS 并把**完整**结果落盘（不经 `webshot -js` 的 400 字符截断），供长输出探针一次读回 |
+| `dev/tools/jsprobe_cmp.sh` | 长输出探针的 wbui/Edge 逐行对比（wbui 侧走 `jsread`；Edge 侧与 `gprobe_cmp.sh` 同口径，含视口补偿与防假 IDENTICAL 断言） |
+| `dev/tools/gen_cjk_linebox_scan.py` + `cjk_linebox_scan.proto.html` | 静态生成 648 用例扫描表 |
+| `dev/tools/fontmetric -scan` | 逐字号垂直度量扫描（asc/desc/lead/lineH/rAsc） |
+| `dev/fixtures/webshot/cjk_linebox_scan.html` | 扫描表夹具本体（可重复生成） |
+
+**顺带发现（登记，未在本轮处理）**：wbui 的 `Element.firstElementChild` 实测返回
+`undefined`（`children[0]` 正常），会让依赖它的页面脚本静默终止 —— 夹具已改用
+`children[0]` 规避，建议后续补 DOM 实现。
