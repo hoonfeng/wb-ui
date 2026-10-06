@@ -25,6 +25,7 @@
 package style
 
 import (
+	"math"
 	neturl "net/url"
 	"path"
 	"regexp"
@@ -97,6 +98,11 @@ type Resolver struct {
 	// mediaQueryCtx holds the current viewport/device context for media query
 	// evaluation. Updated by SetMediaQueryContext / SetViewportSize.
 	mediaQueryCtx css.MediaQueryContext
+	// rootFontPx 缓存**文档根元素**的 computed font-size（px），供 rem
+	// 绝对化使用（CSS Values §5.1.2：1rem = 根元素的 computed font-size）。
+	// ResolveElement 总是从根往叶递归（父先于子完成），因此解析后代时该值
+	// 已就位；仍为 0 时按初始字号回退。
+	rootFontPx float64
 	// StyleSheetLoader is an optional callback for resolving @import URLs.
 	// When set, encountering an @import rule in AddStyleSheet triggers a fetch
 	// via this callback, the response is parsed as CSS and the resulting rules
@@ -601,7 +607,7 @@ var keyStyleProp = map[string]bool{
 	"grid-template-areas": true, "grid-column": true, "grid-row": true,
 	"top": true, "right": true, "bottom": true, "left": true,
 	"background": true, "background-color": true, "color": true,
-	"font-size": true, "line-height": true, "white-space": true,
+	"font": true, "font-size": true, "line-height": true, "white-space": true,
 	"text-overflow": true, "z-index": true, "opacity": true, "float": true,
 }
 
@@ -827,8 +833,113 @@ func (r *Resolver) ResolveElement(el *dom.Element) *ComputedStyle {
 		}
 	}
 
+	// ★ font-size 绝对化（D1）：computed value 必须是无单位 px，否则绘制侧
+	// 把 em/rem/% 的数值直接当 px 画（见 absolutizeFontSize 说明）。
+	if DiagEnabled("style") && el != nil {
+		if tag := strings.ToLower(el.LocalName()); tag == "img" || tag == "input" {
+			Diagf("style", "after-cascade <%s> display=%d displaySet=%v", tag, int(cs.Display), cs.DisplaySet)
+		}
+	}
+	r.absolutizeFontSize(cs, parentCS, el)
+	if el != nil && parentElement(el) == nil {
+		// 根元素字号就位后才能解析后代 rem；本函数父先于子返回。
+		r.rootFontPx = cs.FontSize.Value
+	}
+
 	r.cache[el] = cachedStyle{cs: cs, ver: el.AttrVersion()}
 	return cs
+}
+
+// initialFontSizePx 是 CSS 初始 font-size（medium = 16px），用作根元素
+// 相对字号的解析基准。
+const initialFontSizePx = 16.0
+
+// absolutizeFontSize 把元素声明的 font-size 归一为 px。
+//
+// CSS Fonts Level 4 §3.1 规定 font-size 的 **computed value 是绝对长度**，
+// 但本引擎此前把声明原样（em / rem / % / calc(...)）留在 ComputedStyle 里：
+// 只有布局侧 layout.resolveFontSizeOf 沿父链换算，绘制侧
+// painter.toGraphicsFont 则直接取 FontSize.Value 当 px 用。于是
+// `font-size:2em` 的文字被画成 **2px**（几乎不可见）、`font-size:150%` 被画成
+// **150px**、`font-size:2rem`（Tailwind text-* / 组件库字号）同样错——而布局
+// 几何却是对的，文字因此与盒子完全脱节（h1~h6 首当其冲，UA 样式是 2em/1.5em）。
+//
+// 在样式解析阶段绝对化后：样式 / 布局 / 绘制 / JS 读值（getComputedStyle）
+// 四方同源；font-size 的继承自然变成「继承父的 computed px」，正是浏览器语义。
+func (r *Resolver) absolutizeFontSize(cs, parent *ComputedStyle, el *dom.Element) {
+	fs := cs.FontSize
+	switch fs.Unit {
+	case "", "px":
+		return // 已是绝对长度（或初始值）
+	}
+	isRoot := el == nil || parentElement(el) == nil
+	// em/% 相对**父元素的 computed font-size**；根元素无父，按 CSS 2.1 §15.7
+	// 相对**初始字号**解析（与 layout.resolveFontSizeOf 的根分支同理）。
+	parentPx := initialFontSizePx
+	if !isRoot && parent != nil && parent.FontSize.Value > 0 {
+		parentPx = parent.FontSize.Value
+	}
+	rootPx := r.rootFontPx
+	if rootPx <= 0 {
+		rootPx = initialFontSizePx
+	}
+	var px float64
+	switch fs.Unit {
+	case "em":
+		px = fs.Value * parentPx
+	case "rem":
+		px = fs.Value * rootPx
+	case "%":
+		px = fs.Value / 100 * parentPx
+	case "ex", "ch":
+		// 无字体度量时按规范允许的近似：1ex ≈ 1ch ≈ 0.5em。
+		px = fs.Value * 0.5 * parentPx
+	case "pt":
+		px = fs.Value * 96 / 72
+	case "pc":
+		px = fs.Value * 16
+	case "in":
+		px = fs.Value * 96
+	case "cm":
+		px = fs.Value * 96 / 2.54
+	case "mm":
+		px = fs.Value * 96 / 25.4
+	case "q":
+		px = fs.Value * 96 / 101.6
+	case "calc", "min", "max", "clamp", "round":
+		// 含相对单位的数学函数：此处已能拿到父字号 / 根字号 / 视口。
+		v, err := css.EvalCalcString(fs.CalcExpr, css.CalcContext{
+			FontSize:       parentPx,
+			RootFontSize:   rootPx,
+			ViewportWidth:  float64(r.mediaQueryCtx.Width),
+			ViewportHeight: float64(r.mediaQueryCtx.Height),
+		})
+		if err != nil {
+			return
+		}
+		px = v
+	case "vw", "vh", "vmin", "vmax":
+		vw, vh := float64(r.mediaQueryCtx.Width), float64(r.mediaQueryCtx.Height)
+		if vw <= 0 && vh <= 0 {
+			return
+		}
+		switch fs.Unit {
+		case "vw":
+			px = fs.Value * vw / 100
+		case "vh":
+			px = fs.Value * vh / 100
+		case "vmin":
+			px = fs.Value * math.Min(vw, vh) / 100
+		case "vmax":
+			px = fs.Value * math.Max(vw, vh) / 100
+		}
+	default:
+		return // 未知单位：保持原样，交给下游兜底
+	}
+	if px < 0 {
+		return
+	}
+	cs.FontSize = Length{Value: px, Unit: "px"}
 }
 
 // resolveInheritKeyword resolves the `inherit` keyword for properties that do
@@ -1644,12 +1755,12 @@ func (r *Resolver) collectPartDeclarations(sheet *css.CSSStyleSheet, el *dom.Ele
 
 // importanceRank returns the cascade ordering key for (origin, !important). The
 // standard CSS cascade order from lowest to highest is:
-//   1. UA normal
-//   2. User normal
-//   3. Author normal
-//   4. Author important
-//   5. User important
-//   6. UA important
+//  1. UA normal
+//  2. User normal
+//  3. Author normal
+//  4. Author important
+//  5. User important
+//  6. UA important
 func importanceRank(origin css.Origin, important bool) int {
 	switch origin {
 	case css.OriginUserAgent:
@@ -1935,26 +2046,33 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		if st, v, wt, sz, lh, fam, ok := parseFontShorthand(valueString); ok {
 			if fam != "" {
 				cs.FontFamily = strings.Trim(fam, `"'`)
+				cs.SetProperty("font-family", cs.FontFamily)
 			}
 			if sz != "" {
 				if l, ok2 := parseLength(sz); ok2 {
 					cs.FontSize = l
 				}
+				cs.SetProperty("font-size", sz)
 			}
 			if wt != "" {
 				cs.FontWeight = wt
+				cs.SetProperty("font-weight", wt)
 			}
 			if st != "" {
 				cs.FontStyle = st
+				cs.SetProperty("font-style", st)
 			}
 			if v != "" {
 				cs.FontVariant = v
+				cs.SetProperty("font-variant", v)
 			}
 			if lh != "" {
 				if strings.EqualFold(strings.TrimSpace(lh), "normal") {
 					cs.LineHeight = Length{Value: 0, Unit: "normal"}
+					cs.SetProperty("line-height", "normal")
 				} else if l, ok2 := parseLength(lh); ok2 {
 					cs.LineHeight = l
+					cs.SetProperty("line-height", lh)
 				}
 			}
 		}
@@ -2268,9 +2386,26 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			cs.StaticOpacity = v
 		}
 	case "z-index":
-		if v, err := strconv.Atoi(valueString); err == nil {
-			cs.ZIndex = v
+
+		// ★ `auto` 与 `0` 必须区分（见 ComputedStyle.ZIndexAuto 注释）：
+		//   解析失败/关键字 auto 保持 auto 语义，不得静默落成显式的 0
+		//   （那会让每个相对定位元素都被当成层叠上下文边界）。
+		if v := strings.ToLower(strings.TrimSpace(valueString)); v == "auto" || v == "" {
+			cs.ZIndexAuto = true
+			cs.ZIndex = 0
+		} else if n, err := strconv.Atoi(v); err == nil {
+			cs.ZIndex = n
+			cs.ZIndexAuto = false
+		} else {
+			cs.ZIndexAuto = true
+			cs.ZIndex = 0
 		}
+	case "will-change":
+		// CSS Will Change §2：原样保存，由渲染层判定是否创建层叠上下文
+		// （见 layerCreatesStackingContext）。
+		cs.WillChange = strings.ToLower(strings.TrimSpace(valueString))
+	case "isolation":
+		cs.Isolation = strings.ToLower(strings.TrimSpace(valueString))
 	case "flex":
 		// CSS flex shorthand: <grow> <shrink> <basis>. Single number => grow,
 		// basis 0%; single length => grow 1, basis length; none/auto/initial keywords.
@@ -2459,6 +2594,26 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 		cs.GridColumnStart = valueString
 	case "grid-column-end":
 		cs.GridColumnEnd = valueString
+	case "list-style":
+		// ★ list-style 简写（CSS Lists §6）：此前只存进 Properties["list-style"]，
+		// ComputedStyle.ListStyleType 仍为空 → listMarkerFor（blockformattingcontext）
+		// 回退 disc → 于是 `list-style: square` / `decimal` 的标记都被画成圆点
+		// （G7 探针：wbui 的 square/decimal 与 disc 无差别，Edge 分别是 ■ 与 "3."）。
+		for _, tok := range strings.Fields(valueString) {
+			switch strings.ToLower(tok) {
+			case "disc", "circle", "square", "decimal", "decimal-leading-zero",
+				"lower-alpha", "upper-alpha", "lower-roman", "upper-roman",
+				"lower-greek", "lower-latin", "upper-latin", "armenian", "georgian",
+				"none":
+				cs.ListStyleType = strings.ToLower(tok)
+			case "inside", "outside":
+				cs.ListStylePosition = strings.ToLower(tok)
+			default:
+				if strings.HasPrefix(tok, "url(") || strings.HasPrefix(tok, "linear-gradient(") {
+					cs.ListStyleImage = tok
+				}
+			}
+		}
 	case "list-style-type":
 		cs.ListStyleType = valueString
 	case "list-style-position":
@@ -2712,6 +2867,14 @@ func parseLength(s string) (Length, bool) {
 		// CSS keywords like "auto" are valid for margins.
 		if s == "auto" {
 			return Length{Unit: "auto"}, true
+		}
+		// ★ CSS-SIZING-3 固有尺寸关键字：保留为独立 Unit，由布局层按
+		// shrink-to-fit 求值（layout.isIntrinsicSizeKeyword）。此前它们被
+		// 当作非法值丢弃 → `width:fit-content` 退化成 initial auto，
+		// popover 的 UA 规则无法表达「收缩但不拉伸填满视口」。
+		switch s {
+		case "fit-content", "min-content", "max-content":
+			return Length{Unit: s}, true
 		}
 		return Length{}, false
 	}
@@ -3140,12 +3303,14 @@ func hexDigit(c byte) uint8 {
 //   - <length>|%      => 1 1 <length>      (e.g. "flex: 100px")
 //   - <n> <n>         => <n> <n> 0%
 //   - <n> <n> <basis> => <n> <n> <basis>
+//
 // Numeric values map to grow then shrink; the first non-numeric, non-keyword token is
 // the basis. The default basis for the numeric form is 0% (per spec).
 // parseAspectRatio 解析 aspect-ratio 的 <ratio> 值（CSS-SIZING-4 §5）：
 //   - "1.72"    -> 1.72
 //   - "16 / 9"  -> 1.777…
 //   - "auto" / "none" / 空 / 非法 -> 0（不参与尺寸推导）
+//
 // auto 可与比例组合（`auto 16 / 9`）：只取比例部分。
 func parseAspectRatio(v string) float64 {
 	s := strings.TrimSpace(strings.ToLower(v))
@@ -3206,91 +3371,17 @@ func parseFlexShorthand(s string) (grow, shrink float64, basis Length) {
 	return grow, shrink, basis
 }
 
-// fontSizeTokenRe 匹配 font 简写里的字号 token：13px、13px/1.4、12pt/1.5em、
-// 12px/normal 以及以斜杠收尾的 12px/ 等。
-//
-// ★ `/normal`（以及 thin/thick 之外的关键字形式）必须被捕获：此前 line-height
-// 组只允许「数字 + 可选单位」，`font: 12px/normal Arial` 整个 token 匹配失败
-// → 简写不展开、size 丢失、family 被解析成 `normal "Arial"`（把 line-height
-// 关键字一起吞进字体名）→ 字体族无从匹配、退回默认 typeface，行高与字宽全错
-// （font-metric-line-height 夹具：期望 Arial 网格对齐行高 14px，实测按默认
-// 字体度量 16px，整列 marker 下移 20px）。
-// 允许斜杠后为空（`12px/` 与后随独立 token 的情形在 parseFontShorthand 里接续）。
-var fontSizeTokenRe = regexp.MustCompile(`^([0-9]*\.?[0-9]+(?:px|em|rem|pt|%|vh|vw|vmin|vmax))(?:/(normal|[0-9]*\.?[0-9]*(?:px|em|rem|pt|%)?))?$`)
-
 // parseFontShorthand 解析 CSS font 简写（浏览器标准）：
 //
 //	font: [ <font-style> || <font-variant> || <font-weight> || <font-stretch> ]?
 //	      <font-size> [ / <line-height> ]? <font-family>
 //
-// 返回展开的 (style, variant, weight, size, lineHeight, family)。family 可含
-// 空格（如 "Times New Roman"），取 size 后的剩余部分；关键字按标准归类。
+// ★ 实现已迁到 css 包（css.ParseFontShorthand）：engine/js/bindings 的
+// computedStyleFor（getComputedStyle 的级联 map）需要同一份展开逻辑，否则
+// `font:24px sans-serif` 只在布局侧生效、computed 侧读到初始值 16px。
+// 两处共用一份实现（单一真相源），简写语义不会再分叉。
 func parseFontShorthand(s string) (style, variant, weight, size, lineHeight, family string, ok bool) {
-	tokens := strings.Fields(s)
-	if len(tokens) == 0 {
-		return
-	}
-	// 1) 找 size token（可能含 /line-height 或后随独立 /lh token）
-	sizeIdx := -1
-	for i, tok := range tokens {
-		if m := fontSizeTokenRe.FindStringSubmatch(tok); m != nil {
-			sizeIdx = i
-			size = m[1]
-			if m[2] != "" {
-				lineHeight = m[2]
-			}
-			break
-		}
-	}
-	if sizeIdx < 0 {
-		return
-	}
-	// 2) size 前：style / variant / weight / stretch 关键字
-	for _, tok := range tokens[:sizeIdx] {
-		switch strings.ToLower(tok) {
-		case "italic", "oblique":
-			style = strings.ToLower(tok)
-		case "small-caps":
-			variant = "small-caps"
-		case "bold", "bolder", "lighter":
-			weight = strings.ToLower(tok)
-		case "normal":
-			// normal 既可能是 font-style 也可能是 font-weight，取缺省
-			if style == "" {
-				style = "normal"
-			}
-		default:
-			if n, err := strconv.Atoi(tok); err == nil && n >= 100 && n <= 900 && n%100 == 0 {
-				weight = tok
-			}
-		}
-	}
-	// 3) size 后：独立 /lh token 或 family
-	rest := tokens[sizeIdx+1:]
-	if lineHeight == "" && len(rest) > 0 {
-		switch {
-		case rest[0] == "/":
-			// `font: 12px / normal Arial`：斜杠独立成 token，行高是下一个 token。
-			if len(rest) > 1 {
-				lineHeight = rest[1]
-				rest = rest[2:]
-			} else {
-				rest = rest[1:]
-			}
-		case strings.HasPrefix(rest[0], "/"):
-			// `font: 12px/1.4 Arial` 或 `font: 12px/ normal Arial`（斜杠粘在
-			// 字号 token 尾部且其后另有 token）。
-			lineHeight = strings.TrimPrefix(rest[0], "/")
-			rest = rest[1:]
-			if lineHeight == "" && len(rest) > 0 {
-				lineHeight = rest[0]
-				rest = rest[1:]
-			}
-		}
-	}
-	family = strings.Join(rest, " ")
-	ok = true
-	return
+	return css.ParseFontShorthand(s)
 }
 
 // parseEdgeShorthand parses a 1-to-4 value edge shorthand like "padding: 10px 20px"
@@ -4626,7 +4717,9 @@ func parseAnimationShorthand(s string) (name string, duration float64, iteration
 }
 
 // parseTransitionShorthand parses the CSS transition shorthand:
-//   transition: <property> <duration> <timing-function> <delay>
+//
+//	transition: <property> <duration> <timing-function> <delay>
+//
 // Examples: "all 0.3s ease", "opacity 0.2s", "transform 0.5s ease-in-out"
 // parseTransformOrigin parses "transform-origin: <x> <y>" where each value is
 // a percentage, length, or keyword (left/center/right, top/middle/bottom).

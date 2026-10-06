@@ -155,12 +155,6 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 	if isReplacedElement(el.LocalName()) {
 		return
 	}
-	// ::before 伪元素（第一个子节点）。
-	if b.resolver != nil {
-		if cs, content, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementBefore); ok && cs.Display != style.DisplayNone {
-			parent.AddChild(b.createPseudoObject(cs, content), nil)
-		}
-	}
 	// Flex / grid containers: per CSS (flexbox §4) every element child of a flex
 	// container becomes a flex item directly — no anonymous block wrappers are
 	// generated around inline-level children. Inline-level children are
@@ -171,6 +165,7 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 	if parent.Style() != nil && (isFlexContainerDisplay(parent.Style().Display) ||
 		parent.Style().Display == style.DisplayGrid ||
 		parent.Style().Display == style.DisplayInlineGrid) {
+		b.appendPseudoBefore(parent, el)
 		b.buildFlexChildren(parent, el)
 		b.appendPseudoAfter(parent, el)
 		return
@@ -190,6 +185,20 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 		}
 		parent.AddChild(anon, nil)
 		inlineRun = nil
+	}
+	// ::before 伪元素（第一个子节点）——inline level 时并入 inlineRun。与
+	// engine/layout/box.go 的 buildChildren 插入点与分流完全一致，两棵树必须
+	// 逐节点对应（linkLayoutBoxes 按匿名位置配对伪元素对象）。此前无条件
+	// AddChild 一个 RenderBlockFlow 裸对象：既绕过匿名块包装、又把 inline
+	// 伪元素当块级渲染 → 宿主文本与 ::before/::after 各占一行（G7 探针 `#ps`
+	// 72px vs Edge 24px）。
+	if pb := b.pseudoObjectFor(el, css.PseudoElementBefore); pb != nil {
+		if cs := pb.Style(); cs != nil && b.isInlineLevel(cs) {
+			inlineRun = append(inlineRun, pb)
+		} else {
+			flush()
+			parent.AddChild(pb, nil)
+		}
 	}
 	// appendChildNode 处理单个 DOM 节点（element/text），创建 render object 并
 	// 追加到 parent。inline 节点进 inlineRun，block 节点 flush 后直接挂 parent。
@@ -242,27 +251,71 @@ func (b *RenderTreeBuilder) buildChildren(parent RenderObject, el *dom.Element) 
 	}
 	// 组合树遍历：<slot> 展开为分配节点，display:contents 元素展开为子节点。
 	b.walkComposedChildren(el, appendChildNode)
+	// ::after 伪元素（最后插入）——同样并入 inlineRun（见 ::before 的说明）。
+	if pa := b.pseudoObjectFor(el, css.PseudoElementAfter); pa != nil {
+		if cs := pa.Style(); cs != nil && b.isInlineLevel(cs) {
+			inlineRun = append(inlineRun, pa)
+		} else {
+			flush()
+			parent.AddChild(pa, nil)
+		}
+	}
 	flush()
-	// ::after 伪元素（最后插入）。
-	b.appendPseudoAfter(parent, el)
 }
 
 // appendPseudoAfter 为宿主插入 ::after 伪元素渲染对象。
 func (b *RenderTreeBuilder) appendPseudoAfter(parent RenderObject, el *dom.Element) {
-	if b.resolver == nil {
-		return
-	}
-	if cs, content, ok := b.resolver.ResolvePseudoElement(el, css.PseudoElementAfter); ok && cs.Display != style.DisplayNone {
-		parent.AddChild(b.createPseudoObject(cs, content), nil)
+	if obj := b.pseudoObjectFor(el, css.PseudoElementAfter); obj != nil {
+		parent.AddChild(obj, nil)
 	}
 }
 
+// appendPseudoBefore 为宿主插入 ::before 伪元素渲染对象（flex/grid 容器的
+// item 插入点；非 flex 容器由 buildChildren 并入 inlineRun）。
+func (b *RenderTreeBuilder) appendPseudoBefore(parent RenderObject, el *dom.Element) {
+	if obj := b.pseudoObjectFor(el, css.PseudoElementBefore); obj != nil {
+		parent.AddChild(obj, nil)
+	}
+}
+
+// pseudoObjectFor 返回宿主 el 的 ::before/::after 渲染对象（无匹配规则或
+// display:none 时返回 nil）。appendPseudoBefore/After 与 buildChildren 的
+// inline-run 分支共用本判定，与 engine/layout 的 pseudoBoxFor 一一对应。
+func (b *RenderTreeBuilder) pseudoObjectFor(el *dom.Element, pe css.PseudoElement) RenderObject {
+	if b.resolver == nil {
+		return nil
+	}
+	cs, content, ok := b.resolver.ResolvePseudoElement(el, pe)
+	if !ok || cs.Display == style.DisplayNone {
+		return nil
+	}
+	return b.createPseudoObject(cs, content)
+}
+
 	// createPseudoObject 为 ::before/::after 创建渲染对象。
-	// content 非空时附加一个 RenderText（镜像 WebKit 伪元素文本内容）。
+	// content 解析出文本时附加一个 RenderText（镜像 WebKit 伪元素文本内容）。
+	// ★ content 是 CSSOM 序列化值（`content: '▸'` → `"▸"`，带引号，见
+	// css.serializeToken）——必须经 style.ParseContentText 还原成真实文本，
+	// 否则会把引号一起画到界面上（桌面端实测渲染树里出现文本 `"▸"`）。
 	func (b *RenderTreeBuilder) createPseudoObject(cs *style.ComputedStyle, content string) RenderObject {
+		// ★ 对象类型必须与 display 一致：未声明 display 的 ::before/::after 是
+		//   inline（CSS 2.1 §12.1），此前恒造 RenderBlockFlow，与布局树
+		//   （pseudoElementBox 的盒按 cs.Display 判 IsInlineLevel）不一致，且把
+		//   inline 伪元素渲染成块级 → 与宿主文本各占一行。
+		//   out-of-flow（absolute/fixed）的伪元素必须 blockify 成 RenderBlockFlow：
+		//   RenderInline 不生成盒子，inset/背景都无处安放（与 createRenderObject
+		//   对 `position:absolute` 的 span 做同样处理 —— css-stack/composite.html
+		//   的 `#c5 .ps::before{position:absolute;…}` 正是这种用例）。
+		if cs != nil && cs.Display == style.DisplayInline &&
+			cs.Position != style.PositionAbsolute && cs.Position != style.PositionFixed {
+			inline := NewRenderInline(nil, cs)
+			if text := style.ParseContentText(content); text != "" {
+				inline.AddChild(NewRenderTextWith(nil, cs, text), nil)
+			}
+			return inline
+		}
 		block := NewRenderBlockFlow(nil, cs)
-		text := strings.TrimSpace(content)
-		if text != "" && text != "none" {
+		if text := style.ParseContentText(content); text != "" {
 			rt := NewRenderTextWith(nil, cs, text)
 			block.AddChild(rt, nil)
 		}

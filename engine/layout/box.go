@@ -130,7 +130,18 @@ func isReplacedNodeType(t NodeType) bool {
 	return t == NodeReplacedElement || t == NodeImage || t == NodeIFrame
 }
 
-func (b *ElementBox) IsBlock() bool { return !b.IsInline() && !b.IsReplaced() }
+// IsBlock reports whether the box is block-level.
+//
+// ★ 替换元素（img/svg/canvas…）的块级性同样由 used `display` 决定，与普通元素
+// 无异（CSS 2.1 §9.2.1：computed display 的外侧类型决定盒是块级还是行内级）。
+// `<img>` 的 UA display 是 inline，所以默认仍是行内级；但 `img { display: block }`
+// 会让它像块一样独占一行。此前这里多加了 `&& !b.IsReplaced()`：替换元素**永远**
+// 不算块级，于是 `#authored-block img { display: block }` 的 img 仍与前后
+// inline-block 同行——cssprobe inline-replaced-flow 的
+// "content after authored block image follows below" 期望后续 `.tail` 落在
+// y=100（img 下方），wbui 却把它放在同一行的 x=100（参照浏览器 Chrome headless
+// 实测也是 y=100，该项 cssoracle 判 MATCH，故为 wb-ui 真 bug）。
+func (b *ElementBox) IsBlock() bool { return !b.IsInline() }
 
 func (b *ElementBox) IsInline() bool {
 	if b.style == nil { return false }
@@ -508,12 +519,11 @@ func isReplacedElement(localName string) bool {
 }
 func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 	if isReplacedElement(el.LocalName()) { return }
-	// ::before 伪元素（镜像 WebKit：伪元素作为宿主的子 box，before 在最前）。
-	// 无 DOM 节点（Element()==nil），通过 NodePseudoElement 标记；linkLayoutBoxes
-	// 按匿名位置配对 render/layout 两侧的伪元素 box。
-	appendPseudoBefore(box, el, resolver)
 	if box.style != nil && (isFlexContainerDisplay(box.style.Display) ||
 		box.style.Display == style.DisplayGrid || box.style.Display == style.DisplayInlineGrid) {
+		// flex/grid 容器：伪元素作为独立 item（与渲染树的 buildFlexChildren
+		// 插入点一致，两棵树必须逐节点对应）。
+		appendPseudoBefore(box, el, resolver)
 		buildFlexChildren(box, el, resolver)
 		appendPseudoAfter(box, el, resolver)
 		return
@@ -572,6 +582,23 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 		box.AddChild(wrap)
 		inlineRun = nil
 	}
+	// ::before 伪元素（镜像 WebKit：伪元素作为宿主的子 box，before 在最前）。
+	// 无 DOM 节点（Element()==nil），通过 NodePseudoElement 标记；linkLayoutBoxes
+	// 按匿名位置配对 render/layout 两侧的伪元素 box。
+	//
+	// ★ inline level 的伪元素必须并入 inlineRun（由 flush 包进匿名块），与宿主
+	// 文本同处一个行内流：此前无条件 box.AddChild 一个裸盒、绕过匿名块包装，
+	// 于是宿主文本被 flush 成一个匿名块、::before/::after 各自成块 → 宿主高
+	// 3 行（G7 探针 `#ps`：72px vs Edge 24px）。未声明 display 的 ::before/
+	// ::after 是 inline（CSS 2.1 §12.1）。渲染树侧同步按 display 选 RenderInline。
+	if pb := pseudoBoxFor(el, resolver, css.PseudoElementBefore); pb != nil {
+		if pb.IsInlineLevel() {
+			inlineRun = append(inlineRun, pb)
+		} else {
+			flush()
+			box.AddChild(pb)
+		}
+	}
 	appendChildNode := func(node dom.Node) {
 		switch v := node.(type) {
 		case *dom.Element:
@@ -613,29 +640,60 @@ func buildChildren(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
 	// 组合树遍历：<slot> 展开为分配节点，display:contents 元素展开为子节点
 	// （contents 元素自身不生成盒，只有它的子节点参与父容器的布局）。
 	walkComposedChildren(el, resolver, appendChildNode)
+	// ::after 伪元素（最后）——同样并入 inlineRun（见 ::before 的说明）。
+	if pa := pseudoBoxFor(el, resolver, css.PseudoElementAfter); pa != nil {
+		if pa.IsInlineLevel() {
+			inlineRun = append(inlineRun, pa)
+		} else {
+			flush()
+			box.AddChild(pa)
+		}
+	}
 	flush()
-	// ::after 伪元素（最后）。
-	appendPseudoAfter(box, el, resolver)
 }
 
 // appendPseudoBefore/appendPseudoAfter 为宿主元素插入 ::before/::after 伪元素 box
 //（无 DOM 节点）。样式经 resolver.ResolvePseudoElement 解析；display:none 时跳过。
+//
+// ★ 有 content 文本时必须挂一个 InlineTextBox 子节点：此前伪元素盒是**空的**，
+// 布局不知道它有文本 → 不生成行段 → `content:'▸'` 这类文本型伪元素在桌面端
+// 完全不显示（gou-ide 监督者面板折叠行的 ▸/▾ 三角即此缺陷）。渲染树侧
+// createPseudoObject 有相同子节点（RenderText），两棵树逐节点对应。
 func appendPseudoBefore(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
-	if resolver == nil {
-		return
-	}
-	if cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementBefore); ok && cs.Display != style.DisplayNone {
-		box.AddChild(&ElementBox{nodeType: NodePseudoElement, style: cs})
+	if b := pseudoBoxFor(el, resolver, css.PseudoElementBefore); b != nil {
+		box.AddChild(b)
 	}
 }
 
 func appendPseudoAfter(box *ElementBox, el *dom.Element, resolver *style.Resolver) {
+	if b := pseudoBoxFor(el, resolver, css.PseudoElementAfter); b != nil {
+		box.AddChild(b)
+	}
+}
+
+// pseudoBoxFor 返回宿主 el 的 ::before/::after 布局盒（无匹配规则或 display:none
+// 时返回 nil）。appendPseudoBefore/After（flex/grid 容器的 item 插入）与
+// buildChildren 的 inline-run 分支共用本判定，避免两处各自演化。
+func pseudoBoxFor(el *dom.Element, resolver *style.Resolver, pe css.PseudoElement) *ElementBox {
 	if resolver == nil {
-		return
+		return nil
 	}
-	if cs, _, ok := resolver.ResolvePseudoElement(el, css.PseudoElementAfter); ok && cs.Display != style.DisplayNone {
-		box.AddChild(&ElementBox{nodeType: NodePseudoElement, style: cs})
+	cs, content, ok := resolver.ResolvePseudoElement(el, pe)
+	if !ok || cs.Display == style.DisplayNone {
+		return nil
 	}
+	return pseudoElementBox(cs, content)
+}
+
+// pseudoElementBox 构造 ::before/::after 的布局盒：content 解析出文本时挂一个
+// InlineTextBox（无 DOM 节点，node 留空），与渲染树 createPseudoObject 的
+// RenderText 子节点一一对应（linkLayoutBoxes 按匿名位置配对）。
+func pseudoElementBox(cs *style.ComputedStyle, content string) *ElementBox {
+	b := &ElementBox{nodeType: NodePseudoElement, style: cs}
+	if text := style.ParseContentText(content); text != "" {
+		b.children = []Box{&InlineTextBox{text: text, style: cs}}
+	}
+	return b
 }
 
 // backdropBoxFor 返回 top layer 元素的 ::backdrop 伪元素盒（模态 <dialog>、

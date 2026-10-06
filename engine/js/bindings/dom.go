@@ -150,6 +150,12 @@ var (
 	// rebuild（~22ms）会造成测量-布局风暴（事件响应慢主因）。调用方
 	// 只在「布局已稳定」时依赖该值。
 	GetElementBoxRectFast func(el *dom.Element) (left, top, width, height float64)
+	// GetElementComputedSnapshot 返回元素在**渲染树**上的 resolved computed
+	// style 关键属性快照（含继承值、font-size 已绝对化为 px、颜色归一化为
+	// rgb(...)）。getComputedStyle 用它补齐「继承值 / 计算值」——
+	// computedStyleFor 的级联 map 只含元素**自身命中**的声明（见 D2 说明）。
+	// 元素不在渲染树（display:none 子树 / 尚未布局）时返回 nil。
+	GetElementComputedSnapshot func(el *dom.Element) map[string]string
 )
 
 // ── ResizeObserver 真实现（浏览器标准）───────────────
@@ -389,10 +395,11 @@ var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
 // 行为逐字一致：重复项只是重复写同一个键/属性，无副作用）。
 //
 // ★ 为什么提到包级：该回写循环对**每次** getComputedStyle 调用都执行，原先
-//   写法在函数内构造 []string 切片、并对每一项跑一次 camelToKebab（字符串
-//   扫描 + 可能分配）。真实编辑器 DOM 上 getComputedStyle 1e3 实测 47~62ms
-//   （≈47µs/次），而浏览器同操作约 1µs —— 其中一笔固定开销就是每次调用的
-//   ~120 次转换与 ~120 元素切片分配。预计算后每次调用只剩 map 查找 + cs.Set。
+//
+//	写法在函数内构造 []string 切片、并对每一项跑一次 camelToKebab（字符串
+//	扫描 + 可能分配）。真实编辑器 DOM 上 getComputedStyle 1e3 实测 47~62ms
+//	（≈47µs/次），而浏览器同操作约 1µs —— 其中一笔固定开销就是每次调用的
+//	~120 次转换与 ~120 元素切片分配。预计算后每次调用只剩 map 查找 + cs.Set。
 const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath"
 
 // computedStylePropEntry 是白名单的一项：prop 是回写到 JS 对象的 camelCase
@@ -770,17 +777,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}
 		name := args[0].ToString()
 		el.SetAttribute(name, args[1].ToString())
-		// ★ computed style 缓存失效（class/style 等属性影响样式匹配）
-		InvalidateComputedStyle(el)
 		invalidateNamedNodeMap(el)
-		// ★ class 属性变化（CM6/Vue 用 setAttribute('class') 加 cm-focused）
-		// 影响后代选择器匹配——触发 OnClassChanged（清 resolver 缓存 +
-		// 重建渲染树）。
-		if name == "class" {
-			if OnClassChanged != nil {
-				OnClassChanged(el)
-			}
-		}
+		// ★ computed style 缓存失效（class/style 与 IDL 状态属性影响样式
+		// 匹配）：按属性分流——状态属性（checked/disabled/open…）的影响会
+		// 波及兄弟/后继组合器，需父级范围；其余按 el 子树。
+		invalidateAttrChange(el, name)
 		// ★ iframe 的 src 是「导航属性」：JS 改 src 应重载子文档
 		// （浏览器 iframe navigation 语义）。webkit 注入 IFrameSrcChanged
 		// 回调处理重载；未注入时静默（如测试环境）。
@@ -801,13 +802,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		}
 		name := args[0].ToString()
 		el.RemoveAttribute(name)
-		InvalidateComputedStyle(el)
 		invalidateNamedNodeMap(el)
-		if name == "class" {
-			if OnClassChanged != nil {
-				OnClassChanged(el)
-			}
-		}
+		invalidateAttrChange(el, name)
 		return jsc.Undefined()
 	})
 	protoAttr("toggleAttribute", 1, func(el *dom.Element, args []jsc.JSValue) jsc.JSValue {
@@ -818,10 +814,12 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		if el.HasAttribute(name) {
 			el.RemoveAttribute(name)
 			invalidateNamedNodeMap(el)
+			invalidateAttrChange(el, name)
 			return jsc.BooleanValue(false)
 		}
 		el.SetAttribute(name, "")
 		invalidateNamedNodeMap(el)
+		invalidateAttrChange(el, name)
 		return jsc.BooleanValue(true)
 	})
 
@@ -850,11 +848,8 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		if name == "" || !el.RemoveAttribute(name) {
 			return jsc.Null()
 		}
-		InvalidateComputedStyle(el)
 		invalidateNamedNodeMap(el)
-		if name == "class" && OnClassChanged != nil {
-			OnClassChanged(el)
-		}
+		invalidateAttrChange(el, name)
 		return args[0]
 	})
 
@@ -3619,7 +3614,7 @@ var sstate = &selState{}
 // makeSelRange 构造 Selection 同步用 range 对象（结构同 Range 构造：
 // startContainer/startOffset/endContainer/endOffset），供 collapse /
 // setBaseAndExtent / extend 填充 sstate.ranges——InsertTextAtSelection
-//（contenteditable 光标插入）只读 sstate.ranges[0]。
+// （contenteditable 光标插入）只读 sstate.ranges[0]。
 func makeSelRange(rt *jsc.Interpreter, anchor jsc.JSValue, anchorOff int64, focus jsc.JSValue, focusOff int64) *jsc.JSObject {
 	r := jsc.NewObject(rt.ObjectPrototype())
 	r.Set("startContainer", anchor)
@@ -5641,10 +5636,23 @@ func computedStyleFor(el dom.Node) map[string]string {
 	//   浏览器  → borderTopStyle="dashed"、
 	//   borderTopColor="rgb(18, 52, 86)" 等长写恒有值。
 	expandBorderStyleLonghand(out)
+	// ★ font 简写展开（与 engine/style 的 applyDeclaration 共用
+	//   css.ParseFontShorthand）：级联 map 里 `font: 24px sans-serif` 只落在
+	//   "font" 键上，而 getComputedStyle(el).fontSize 查 "font-size" → 缺失 →
+	//   回退初始值 16px；布局侧读 ComputedStyle.FontSize 却是 24px —— 同一元素
+	//   「读到的字号」与「画出来的字号」脱节（E4/G5 探针命中）。
+	expandFontShorthand(out)
 	// 解析 var(--xxx) 引用（自定义属性继承链：:root → body → ... → el）。
 	// 浏览器语义：自定义属性随级联继承，子元素 var() 引用解析为最近祖先的
 	// 定义值。wb-ui 级联 map 本身不含继承值，此处补收集 + 替换。
 	resolveVarInComputed(out, el)
+	// ★ 继承与计算值补全（D2）：级联 map 只含元素自身声明，inherited:yes 的
+	//   属性（color/font-size/font-family/line-height…）未声明时必须继承父元素的
+	//   **computed** 值；font-size 还必须是绝对长度（px）、color 建议归一化为
+	//   rgb(...)，与布局/绘制同源。缺了这一步，`body{font-size:40px}` 的子元素
+	//   会读回初始值 16px、`color` 读回 undefined（而布局实际用的是 40px 红字）。
+	inheritComputedProps(out, el)
+	applyComputedSnapshot(out, el)
 	// ★ 浏览器语义：getComputedStyle 的 width/height 返回「实际布局尺寸」
 	// （即使无显式 CSS 声明，flex/grid 拉伸的元素也有计算值）。引擎的级联
 	// map 只含声明值——FitAddon.proposeDimensions 用
@@ -5681,6 +5689,120 @@ func computedStyleFor(el dom.Node) map[string]string {
 	}
 	cssCachePut(el, out)
 	return out
+}
+
+// inheritedComputedProps 是 CSS 中 inherited:yes、且 getComputedStyle 会被读到的
+// 属性：子元素未声明时继承**父元素的 computed 值**（CSS Cascade §2.1）。
+var inheritedComputedProps = []string{
+	"color", "cursor", "direction", "font-family", "font-size", "font-style",
+	"font-variant", "font-weight", "letter-spacing", "line-height",
+	"list-style-image", "list-style-position", "list-style-type",
+	"text-align", "text-indent", "text-transform", "visibility",
+	"white-space", "word-spacing", "border-collapse", "border-spacing",
+	"caption-side", "empty-cells", "quotes",
+}
+
+// domParentElement 返回 DOM 父元素（跨 shadow 边界时返回 shadow host，与
+// style.parentElement 的继承链语义一致）。
+func domParentElement(el *dom.Element) *dom.Element {
+	if el == nil {
+		return nil
+	}
+	p := el.ParentNode()
+	switch v := p.(type) {
+	case *dom.Element:
+		return v
+	case *dom.ShadowRoot:
+		return v.Host()
+	}
+	return nil
+}
+
+// inheritComputedProps 沿父链补齐 inherited 属性。
+//
+// ★ 为什么需要（D2）：computedStyleFor 只把「匹配到本元素的声明」写进
+// map，未声明属性既不继承父值、也不出现在 map 里。调用方（getComputedStyle）
+// 的白名单回退随后把它们补成 **CSS 初始值** —— 于是
+// `<body style="font-size:40px;color:#ff0000"><div>` 里的 div 读
+// `getComputedStyle(div).fontSize` 得到 "16px"、`color` 得到 undefined，
+// 而同一次渲染的布局用 40px 红字。所有依赖 computed style 做决策的库
+// （CSS-in-JS、虚拟列表测量、组件库尺寸探测、xterm fit）都会拿到错误值。
+//
+// computedStyleFor 有 per-element 缓存，沿父链递归代价可控。
+func inheritComputedProps(out map[string]string, n dom.Node) {
+	el, ok := n.(*dom.Element)
+	if !ok || el == nil {
+		return
+	}
+	missing := missingInheritedProps(out)
+	if len(missing) == 0 {
+		return
+	}
+	parent := domParentElement(el)
+	if parent == nil {
+		return
+	}
+	pcs := computedStyleFor(parent)
+	if len(pcs) == 0 {
+		return
+	}
+	for _, p := range missing {
+		if v, has := pcs[p]; has {
+			out[p] = v
+		}
+	}
+}
+
+// missingInheritedProps 返回 out 里尚未出现、且属于 inherited 集合的属性名。
+// 抽成独立函数是为了让三个 computed 路径（元素 / 伪元素）共用同一判断。
+func missingInheritedProps(out map[string]string) []string {
+	var missing []string
+	for _, p := range inheritedComputedProps {
+		if _, has := out[p]; !has {
+			missing = append(missing, p)
+		}
+	}
+	return missing
+}
+
+// applyComputedSnapshot 用渲染树上的 resolved computed style 覆盖关键属性
+// （font-size / color / font-family …），使 JS 读值与布局、绘制三方同源。
+//
+// font-size 尤其重要：字符串继承只能传递「父声明的原样文本」，若声明是
+// `2em` / `150%` / `1.2rem` 就无法在 JS 侧得到 px —— 渲染树快照给出的
+// 是布局实际使用的 used font-size（px）。
+func applyComputedSnapshot(out map[string]string, n dom.Node) {
+	if GetElementComputedSnapshot == nil {
+		return
+	}
+	el, ok := n.(*dom.Element)
+	if !ok || el == nil {
+		return
+	}
+	// ★ 按需取快照：getComputedStyle 是热路径（IDE 场景 1e3 次调用实测
+	//   ~47ms），快照要构造 map。绝大多数元素已在级联 map 里带上 font-size
+	//   （绝对）与 color，此时无需访问渲染树 —— 只有「font-size 缺失」或
+	//   「拿到的不是绝对长度（继承到 em/%/rem 文本）」或「color 缺失」时，
+	//   才需要渲染树的 used 值。
+	need := false
+	if v, has := out["font-size"]; !has || !strings.HasSuffix(strings.TrimSpace(v), "px") {
+		need = true
+	}
+	// 浏览器把 color 的 computed 值归一化为 rgb()/rgba() 文本，而级联 map 里
+	// 是声明原样（"red" / "#ff0000" / "var(--x)" 解析结果）。非 rgb 前缀时
+	// 也走快照归一化，避免 JS 侧按浏览器格式解析颜色失败。
+	if v, has := out["color"]; !has || !strings.HasPrefix(strings.TrimSpace(v), "rgb") {
+		need = true
+	}
+	if !need {
+		return
+	}
+	snap := GetElementComputedSnapshot(el)
+	for k, v := range snap {
+		if v != "" {
+			out[k] = v
+		}
+	}
 }
 
 // expandBoxShorthand 把四边简写（padding/margin 等）展开为子属性：
@@ -5957,22 +6079,12 @@ func withDisplayFallback(m map[string]string, n dom.Node) map[string]string {
 	if !ok || e == nil {
 		return m
 	}
-	d := "inline"
-	if e.HasAttribute("hidden") {
-		d = "none"
-	} else {
-		switch e.LocalName() {
-		case "html", "body", "div", "p", "section", "article", "header", "footer",
-			"main", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol",
-			"li", "form", "blockquote", "pre", "figure", "figcaption", "fieldset",
-			"details", "summary", "dialog", "address", "hr":
-			d = "block"
-		case "button", "input", "select", "textarea", "img", "svg", "canvas",
-			"video", "audio", "iframe", "embed", "object", "progress", "meter":
-			d = "inline-block"
-		}
-	}
-	m["display"] = d
+	// ★ 与 uaDefaultDisplayFor 共用同一张 UA display 表（单一真相源）。
+	// 此前本函数内嵌了一份与之重复的 switch，两张表各自演化：`li` 在这份里是
+	// "block"、在 UA 样式表（defaultcss.go）与 applyDefaultDisplay（resolver.go）
+	// 里是 "list-item" —— getComputedStyle(el).display 因此报 block，与布局实际
+	// 使用的 list-item 脱节（G7 探针：Edge list-item vs wbui block）。
+	m["display"] = uaDefaultDisplayFor(e)
 	return m
 }
 
@@ -5988,9 +6100,14 @@ func uaDefaultDisplayFor(e *dom.Element) string {
 		return "none"
 	}
 	switch e.LocalName() {
+	// ★ li 的 UA display 是 list-item，不是 block：与 UA 样式表
+	//   defaultcss.go 的 `li{display:list-item}`、applyDefaultDisplay
+	//   （resolver.go）保持一致（三处原先不一致 → computed 读到 block）。
+	case "li":
+		return "list-item"
 	case "html", "body", "div", "p", "section", "article", "header", "footer",
 		"main", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol",
-		"li", "form", "blockquote", "pre", "figure", "figcaption", "fieldset",
+		"form", "blockquote", "pre", "figure", "figcaption", "fieldset",
 		"details", "summary", "dialog", "address", "hr":
 		return "block"
 	case "button", "input", "select", "textarea", "img", "svg", "canvas",
@@ -6068,7 +6185,8 @@ var uaInitialComputedValues = map[string]string{
 
 // expandOverflowShorthand 把 overflow 简写展开为 overflow-x / overflow-y：
 // HTML 语义（CSS Overflow 3）：单值  同时设定两轴；双值
-//  分别为 x / y。已显式声明的长写不覆盖。
+//
+//	分别为 x / y。已显式声明的长写不覆盖。
 func expandOverflowShorthand(out map[string]string) {
 	if _, ok := out["overflow-x"]; ok {
 		if _, ok2 := out["overflow-y"]; ok2 {
@@ -6097,7 +6215,8 @@ func expandOverflowShorthand(out map[string]string) {
 
 // expandBorderStyleLonghand 由 border / border-style 简写展开四边的 style 与
 // color 长写（width 已由 bwTok 路径处理）。浏览器 getComputedStyle 下
-//  的 borderTopStyle/borderTopColor 恒有值。
+//
+//	的 borderTopStyle/borderTopColor 恒有值。
 func expandBorderStyleLonghand(out map[string]string) {
 	styleTok := func(s string) string {
 		for _, f := range strings.Fields(s) {
@@ -6149,6 +6268,44 @@ func expandBorderStyleLonghand(out map[string]string) {
 				}
 			}
 			break
+		}
+	}
+}
+
+// expandFontShorthand 把 font 简写展开为字体子属性长写。浏览器
+// getComputedStyle 对 `font` 简写恒返回展开后的 font-style / font-variant /
+// font-weight / font-size / line-height / font-family（getPropertyValue
+// ('font-size') 有值）。级联 map 只存简写键 "font" 时，读 fontSize 会落空并回退
+// 默认值 16px，而布局用的是简写里的字号 —— 同一元素「读到的字号」与「画出来的
+// 字号」脱节。解析复用 css.ParseFontShorthand（与 engine/style 同一份实现）。
+// 已显式声明的长写不覆盖（与 expandOverflowShorthand 一致）。
+func expandFontShorthand(out map[string]string) {
+	v, ok := out["font"]
+	if !ok {
+		return
+	}
+	st, variant, weight, size, lineHeight, family, ok2 := css.ParseFontShorthand(v)
+	if !ok2 {
+		return
+	}
+	set := func(k, val string) {
+		if val == "" {
+			return
+		}
+		if _, exists := out[k]; !exists {
+			out[k] = val
+		}
+	}
+	set("font-style", st)
+	set("font-variant", variant)
+	set("font-weight", weight)
+	set("font-size", size)
+	set("font-family", strings.Trim(family, `"'`))
+	if lineHeight != "" {
+		if strings.EqualFold(strings.TrimSpace(lineHeight), "normal") {
+			set("line-height", "normal")
+		} else {
+			set("line-height", lineHeight)
 		}
 	}
 }
