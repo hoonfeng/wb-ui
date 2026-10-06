@@ -57,17 +57,37 @@ EDGE="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 
 ### 0.3 回归门槛（改动后必须全部满足）
 
-| 页面 | 门槛 |
-|---|---|
-| `webshot/deffont.html` | ≤ 14.62% |
-| `framework/vue-app.html` | ≤ 2.83% ✅ **当前 2.83%**（G8 已关闭） |
-| `framework/react-app.html` | ≤ 3.04% ✅ **当前 3.04%**（G8 已关闭） |
-| `webshot/fontshort.html` | ≤ 12.54% |
-| `css-stack/stack.html` | ≤ 2.56% |
-| `css-stack/sticky.html` | ≤ 5.55% |
-| `css-stack/zorder.html` | ≤ 0.84% |
-| `css-stack/composite.html` | ≤ 2.89% |
-| `go test ./engine/... -count=1` | 无 FAIL |
+**参照物 = 冻结的独立 Edge 基准 PNG**（`dev/audit/baselines/edge/<页面>.png`）。
+这些 PNG 由**真实 Edge 无头渲染**得到并已入库冻结（见 §P3「冻结 Edge 基准」），
+**不是 wbui 自身的输出** —— 用 wbui 输出当基线会让差异率恒为 0（「自证基线」）。
+
+**门槛口径**：逐页计算 `wbui 渲染 vs 冻结 Edge PNG` 的像素差异率，**不得超过**
+下表值（表中数值 = 冻结基线冻结时刻记录的差异率，故「≤ 表中值」等价于
+「不劣化于冻结基线」）。
+
+| 页面 | 冻结基线（Edge 实渲 PNG） | 差异率门槛（不劣化） |
+|---|---|---|
+| `webshot/deffont.html` | `baselines/edge/deffont.png` | ≤ 14.62% |
+| `framework/vue-app.html` | `baselines/edge/vue.png` | ≤ 2.83% ✅（G8 已关闭） |
+| `framework/react-app.html` | `baselines/edge/react.png` | ≤ 3.04% ✅（G8 已关闭） |
+| `webshot/fontshort.html` | `baselines/edge/fontshort.png` | ≤ 12.54% |
+| `css-stack/stack.html` | `baselines/edge/stack.png` | ≤ 2.56% |
+| `css-stack/sticky.html` | `baselines/edge/sticky.png` | ≤ 5.55% |
+| `css-stack/zorder.html` | `baselines/edge/zorder.png` | ≤ 0.84% |
+| `css-stack/composite.html` | `baselines/edge/composite.png` | ≤ 2.89% |
+| `go test ./engine/... -count=1` | — | 无 FAIL |
+
+**容差口径**：差异率比较允许 **+0.05 个百分点**的抖动（亚像素定位 / 抗锯齿
+在两次渲染间不稳定，实测同版本重跑存在 ~0.01–0.04pp 波动）。超出 0.05pp
+判为**劣化**，必须修复或给出同等硬度的实测理由。差异率**下降**时，应把表中的
+门槛值下调到新实测值（基线随之收敛），避免门槛长期虚高。
+
+**对比命令**（绝对路径要求见 §0.2）：
+
+```bash
+CGO_ENABLED=1 go run ./dev/probes/webshot -html dev/fixtures/<页面>.html -out /abs/path/<页面>.wbui.png
+# 再与 dev/audit/baselines/edge/<页面>.png 逐像素比对，输出差异率
+```
 
 > ✅ **vue / react 两行已满足**（G8 于本轮关闭）。根因不是渲染层撑高口径，而是
 > **layout 层移位文本段时漏移 `LineY`**：`flexformattingcontext.go` 的
@@ -1049,3 +1069,177 @@ L72-73 `ib_empty` = 空 `<span style="display:inline-block;width:30px">`。
 
 **方法学备注**：以上所有 `Edge` 侧值均取自 `gprobe_cmp.sh` 的 `--dump-dom` 产物，
 两侧行数相等（g1=7/7、matrix=47/47）且均非空，满足 P2-1 的假 IDENTICAL 防护断言。
+
+---
+
+## P2 / P3 收尾（第 10 次监督轮）
+
+本轮提交链（每步 `go build ./...` OK + `go test ./engine/... -count=1` 无 FAIL）：
+
+| 提交 | 内容 |
+|---|---|
+| `19a1952` | 表单控件 `vertical-align:top/bottom` 分派（v_top/v_bottom） |
+| `26d133c` | 空 inline-block 高度归 0 + 底边基线定位（ib_empty） |
+| `03da1fc` | 大字号 inline 文本盒参与行盒基线（t_text_bigger） |
+| 本轮文档 | §0.3 门槛切冻结基线 + 本篇 |
+
+**矩阵收敛**：`h2_baseline_matrix` 差异 **10 行 → 2 行**（仅剩 v_middle），
+两侧行数恒为 **47/47**（`gprobe_cmp.sh` 硬断言，非空）。
+
+### P2-a｜v_top / v_bottom（**已修**）
+
+**根因（实测，非读码推断）**。用 `WBUI_IFC_DEBUG=1` 诊断日志实测：
+
+```
+[ifc-va] <INPUT id="v_top">    field="top"    prop="top"    formctl=true
+[ifc-form-baseline] <INPUT id="v_top">    va="top"    relTop=4.000 off=15.000 maxBaseline=19.000
+[ifc-va] <INPUT id="v_bottom"> field="bottom" prop="bottom" formctl=true
+[ifc-form-baseline] <INPUT id="v_bottom"> va="bottom" relTop=4.000 off=15.000 maxBaseline=19.000
+[ifc-va] <INPUT id="v_middle"> field="middle" prop="middle" formctl=true
+[ifc-form-baseline] <INPUT id="v_middle"> va="middle" relTop=4.000 off=15.000 maxBaseline=19.000
+```
+
+三个来源取值**都正确**：`ComputedStyle.VerticalAlign` 字段有值（`resolver.go:2624`
+对内联 style 生效）、`Properties["vertical-align"]` 有值、表单控件分支也读到了 `va`；
+但落位恒为 `relTop = 4.000 = maxBaseline(19) − off(15)`，**与 va 取值完全无关**。
+
+**「已有 `topOffset=0` 为何不生效」**：`L680/L1253` 的
+`cldCS.VerticalAlign == "top" → topOffset = 0` **确实执行了**（字段实测就是 `"top"`），
+但其 `SetTopLeft` 处于**更早的语句位置**，随即被表单控件基线分支的
+`cldG.SetTopLeft(currentLine.y + maxBaseline − off, ...)` **无条件覆盖**
+（`formControlBaselineFromBorderTop` 对表单控件恒返回 ok）。
+⇒ 在 `L680/L1253` 处补 top/bottom 分支**永远不会生效**；修改点必须在基线分支内。
+
+**修复**：在表单控件基线分支内按 `fcVA` 分派——`top` 顶边贴行盒顶、`bottom` 底边贴行盒底，
+其余（baseline/middle/继承 middle）沿用原基线对齐。top/bottom 时不参与基线
+（不改 `maxBaseline/maxDescent`、不进 `baselineBoxes`），只把行盒撑到至少容纳控件。
+
+**验收**：`v_top` Edge `0.000/24.000` → wbui `0.000/24.000` ✓；
+`v_bottom` Edge `3.000/24.000` → wbui `3.000/24.000` ✓；
+二者已从 cmp 差异列表消失；`v_baseline` 保持 `4.000/25.000` 未回归。
+
+### P2-b｜ib_empty（**已修**）
+
+**根因（两处）**：夹具 `<span style="display:inline-block;width:30px"></span>`：
+
+1. **ctrlH 24 vs 0** —— `inlineformattingcontext.go` 的「内容高 ≤0 → 用行高兜底」
+   对**所有** inline 子盒无条件生效，把空 inline-block 撑成 24。
+2. **relTop 0 vs 19** —— 高度非 0 时它被当成有高度的盒子贴行盒顶；且空 inline-block
+   的基线处理此前只覆盖「**有显式高度**」的情形。
+
+**修复**：① 行高兜底排除「无内容的 inline-block」（纯 inline span 高度对布局无影响，
+`CSS 2.1 §10.6.1`，保留原兜底）；② 空 inline-block 基线分支拆两支——有显式高度沿用原逻辑，
+无显式高度则高度 0、基线 = 底边 margin 边（`CSS 2.1 §10.8.1`）⇒ `top = strutAscent`。
+
+**验收**：`ib_empty` Edge `relTop=19.000 | ctrlH=0.000 | lineH=24.000` →
+wbui **逐项一致** ✓；未回归：`ib_30x30`、`ib_noheight`、`ib_va_middle`、`ib_va_top`。
+
+### P2-c｜t_text_bigger（**已修**）
+
+**根因**：`<span style="font-size:32px">X</span><input value="A">`，lineH 两侧已一致 46，
+差在 relTop：控件落位 = `y + maxBaseline − off(15)`。
+Edge `maxBaseline = 37`（32px span 的 ascent），wbui `maxBaseline = 19`（只有容器 strut）。
+⇒ 同行「字号大于容器 strut」的纯 inline 文本盒**从未参与 `maxBaseline`**（该机制此前只由
+替换元素与表单控件贡献）。
+
+**修复**：对纯 inline 子盒计算其「行盒顶→基线」= `halfLeading + round(fontAscent)`；
+若**大于** strutAscent 则提升 `maxBaseline` 并整体下移本行已放置的基线盒与文本段
+（与表单控件分支同一机制）。仅大于 strut 时才生效 ⇒ 同级字号场景零影响。
+
+**验收**：`t_text_bigger` Edge `22.000/21.000/46.000` → wbui **逐项一致** ✓；
+未回归：`t_text_before`、`t_text_after`、`t_button_text`、`v_middle`、`v_baseline`。
+
+### P2-d｜v_middle（**口径已分离 → WONTFIX（亚像素）**）
+
+**来源分离（实测）**：写临时度量探针打印字体度量（用完即删）：
+
+```
+Noto Sans SC 16px: ascent=18.5600 descent=4.6080 xHeight=8.6880 lineGap=0.0000
+                   round→19/5/0  lineH=24  未取整 strut=18.9760
+```
+
+Edge `relTop = 4.156` 精确吻合 **x-height 语义**：
+
+```
+top = strutAscent(19) − xHeight/2(4.344) − childH/2(10.5) = 4.156 ✓
+```
+
+⇒ **来源是 x-height 度量语义（middle 专用），不是取整误差**（baseline 用例 `4.000`
+与 wbui 的取整口径精确吻合，可作对照）。
+
+**为何不修（附实测依据）**：Edge 侧数据证明「**默认**控件」与「**显式 baseline**」完全相同
+（`c_input_f16` / `c_button_f16` / `v_baseline` 均为 `4.000 | 25.000`），只有**显式 middle**
+不同（`4.156 | 25.156`）⇒ Edge 的 input/button **默认是 baseline**；而 wbui 的 UA 给它们设的
+是 `middle`（日志 `field="middle"`），当前因「把 middle 当 baseline 算」而**凑巧同值**。
+若实现 x-height 语义，**必须同时**把 input/button 默认 `vertical-align` 改为 baseline，
+否则 30 行已对齐用例（`c_input_*` / `c_button_*` …）会全部退化到 4.156。
+收益 **0.156px（亚像素 < 1px）**，风险 = 改动 UA 默认值 + middle 公式，影响所有表单控件布局。
+⇒ 按「仅亚像素精度类可 WONTFIX」的规则判 **WONTFIX**，依据如上（字号/度量/公式三者可复算）。
+
+### P3｜四个遗留探针的重跑结论（本轮全部重跑，两侧行数相等且非空）
+
+| 探针 | 两侧行数 | 差异 | 定性 |
+|---|---|---|---|
+| `g5_mixedtext` | 5/5 | 1 行（m2） | **wbui 真 bug**（fixed-width 被内容撑开） |
+| `h2_replaced_linebox` | 6/6 | 5 行（0.25px 级） | **亚像素** → WONTFIX |
+| `g4_inlineblock` | 7/7 | 7 行 | **探针视口口径差**（主）+ 亚像素 → WONTFIX |
+| `g1_formctl` | 7/7 | 3 行 | t5 亚像素 WONTFIX；t6/t7 ≥1px **遗留** |
+
+#### P3-a｜`g5_mixedtext` m2：fixed-width 容器被内容撑开（**真 bug，遗留**）
+
+夹具 `<div class="l" id="m2">abcdefghijklmnopqrstuvwxyz0123456789</div>`，
+`.l{font:16px/24px sans-serif;width:200px}`（36 字符连续英文串，`word-break:normal` 不可断行）。
+
+```
+Edge: m2 | rect=0,32,200,24
+wbui: m2 | rect=0,32,309.3760681152344,24      ← 宽被内容撑开（+109.376）
+```
+
+**根因**：IFC 收尾处的「内容宽回填」把容器宽改成了文本实宽
+（`inlineformattingcontext.go` 的 `Update content width to match the actual text
+content width` 段；该段已有 flex-item 例外，但**没有「显式 width」例外**）。
+浏览器语义：`width:200px` 的块，内容溢出**不改元素 `border-box` 宽**。
+**判定**：≥1px 真实缺口，根因明确；因涉及 IFC 宽度回填的通用路径（影响面大），
+本轮聚焦 P2 四项未扩范围，列为遗留项。
+
+#### P3-b｜`h2_replaced_linebox`：0.25px（**WONTFIX，亚像素**）
+
+```
+Edge: host h=68.500 top=0.000 | im h=64.000 | host2 top=68.500 | im2 top=68.500
+wbui: host h=68.250 top=0.000 | im h=64.000 | host2 top=68.250 | im2 top=68.250
+```
+
+`im`（64×64 img）两侧**完全一致**；差集中在**行盒高**：`68.5 = 64 + strut descent`，
+wbui `68.25`。即 13px/1.5 宿主下 strut descent 的**亚像素取值口径**差 0.25px（<1px），
+并沿垂直方向等比传到后续兄弟元素。属亚像素精度类 ⇒ WONTFIX。
+（附带事实：该夹具原意是校验 `z_replaced_baseline_test.go` 的 `want 64` —— 实测 Edge
+`host=68.5 ≠ 64`，说明该测试期望值与浏览器行为不符，是**测试期望**问题，不在本次渲染改动范围。）
+
+#### P3-c｜`g4_inlineblock`：754 vs 1280 是**探针视口口径差**（非布局 bug）
+
+```
+Edge: l1..l4 | rect=0,4,754,25 ...   （块宽 754）
+wbui: l1..l4 | rect=0,4,1280,25 ...  （块宽 1280）
+```
+
+夹具 `.line{font:16px sans-serif}` —— **未设 width**，块宽 = 含块宽（视口宽）。
+关键反证：同夹具里**显式定宽**的元素两侧一致 —— `i1/i2`（`width:30px` inline-block）
+均为 `30` ✓。而 `gprobe_cmp.sh` 调 Edge 时**未传 `--window-size`**（脚本仅
+`--headless --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget`），
+Edge 无头默认视口 ≠ wbui webshot 的 1280 ⇒ 754 与 1280 是**两侧视口不同**所致。
+**结论：非 wbui 布局 bug**；建议后续给 `gprobe_cmp.sh` 的 Edge 调用补
+`--window-size=1280,800` 以统一口径（口径修正后本项可再评估）。
+其余为亚像素：`l3` 高 `24.65625 vs 24`、`w1` 宽 `29.65625 vs 29.648`、
+`i2` x `33.59375 vs 33.584` ⇒ WONTFIX（<1px）。
+
+#### P3-d｜`g1_formctl`：t5 / t6 / t7
+
+| 行 | Edge | wbui | 判定 |
+|---|---|---|---|
+| t5 按钮 | `rect=8,109,36.015625,21` | `rect=8,109,36.012969970703125,21` | 差 **0.0027px**，位置/高度/样式逐项一致 ⇒ **亚像素 → WONTFIX** |
+| t6 select | `rect=8,135,31,19` | `rect=8,135,10.893206596374512,19` | 宽差 **20.1px**：Edge 31 = 最长 option 文本宽 + Chromium select 的**下拉箭头区**；wbui 10.89 = 仅 option 文本宽 + border ⇒ **≥1px 遗留**（固有尺寸公式 `formcontrol.go`，缺箭头/额外内边距项）。高度与 y 已由上一轮 `min-height:19px` 修复对齐（17→19、136→135 ✓） |
+| t7 textarea | `rect=8,154,161,21` | `rect=8,154,166,21` | 宽差 **5px**：`rows=1` 无 `cols` 的默认列宽公式差（monospace 13.3333px，Edge 161 / wbui 166）⇒ **≥1px 遗留**（同属固有尺寸公式） |
+
+> t6/t7 同属 `engine/layout/formcontrol.go` 的**控件固有尺寸**公式，与已提交的表单
+> **交互**任务线（`webkit/forminteract.go`）不同模块；本轮按「严格聚焦 P2 四项、
+> 不扩散范围」的要求列为遗留，未在无实测公式依据的情况下擅改。
