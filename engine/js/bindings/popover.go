@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"wb-ui/engine/dom"
+	"wb-ui/engine/html5"
 	"wb-ui/engine/js/jsc"
 	"wb-ui/engine/popover"
 )
@@ -34,6 +35,10 @@ func init() {
 	// 派发 toggle 事件（无 JS 引擎的宿主与 dom 层单测场景）。
 	popover.InvalidateStyle = invalidateStateStyle
 	popover.FocusElement = focusElement
+	// <summary> 的点击激活行为（html5.ActivateSummary）在**宿主点击管线**里运行
+	// （app.Host / webkit.Interaction），不在 bindings 内——它切换 <details> 的
+	// open 后同样需要失效样式（与脚本侧 `details.open = true` 走同一条链路）。
+	html5.InvalidateStyle = invalidateStateStyle
 }
 
 // popoverErrorPanic 把 popover 算法返回的错误抛给脚本（DOMException 等价对象，

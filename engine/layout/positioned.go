@@ -269,7 +269,10 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	right, rightAuto := resolveOffset(asLength(cs.Properties["right"]), cbWidth)
 	// CSS: when left AND right are both specified and width is auto, the
 	// box stretches to fill the space (inset:0 → full-width overlay).
-	if !leftAuto && !rightAuto && wAuto {
+	// ★ 固有尺寸关键字（fit-content 等）例外：它们已在上面的 wAuto 分支
+	//   走 shrink-to-fit，不能再被拉伸，否则 `inset:0 + width:fit-content`
+	//   的 popover 会拉满整个视口。
+	if !leftAuto && !rightAuto && wAuto && !isIntrinsicSizeKeyword(cs.Width) {
 		stretchW := cbWidth - left - right - margin.Horizontal() - border.Horizontal() - padding.Horizontal()
 		if stretchW < 0 {
 			stretchW = 0
@@ -290,9 +293,21 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	// 「假若它仍在正常流中」的位置（CSS2.1 §10.3.7 / §10.6.4），而不是贴包含块
 	// padding box 边缘。
 	staticX, staticY, hasStatic := staticPositionFor(box, root, state)
+	// CSS 2.1 §10.3.7：left/right/width 均非 auto 时，水平 margin 的 auto
+	// 吸收剩余空间 —— 两侧都是 auto 即水平居中。规范 popover 的
+	// `inset:0; margin:auto` 靠这条居中（html5/defaultcss.go）。
+	mlAuto := cs.MarginLeft.Unit == "auto"
+	mrAuto := cs.MarginRight.Unit == "auto"
 	switch {
 	case !leftAuto && !rightAuto:
-		x = cbg.PaddingBoxLeft() + left + margin.Left
+		switch {
+		case mlAuto && mrAuto:
+			x = cbg.PaddingBoxLeft() + left + (cbWidth-left-right-g.BorderBoxWidth())/2
+		case mlAuto:
+			x = cbg.PaddingBoxLeft() + cbWidth - right - g.BorderBoxWidth() - margin.Right
+		default:
+			x = cbg.PaddingBoxLeft() + left + margin.Left
+		}
 	case !leftAuto:
 		x = cbg.PaddingBoxLeft() + left + margin.Left
 	case !rightAuto:
@@ -337,7 +352,8 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 	// box stretches to fill the space (e.g. position:fixed; inset:0 →
 	// full-viewport overlay). Without this the overlay collapses to its
 	// content height and ends up pinned to the top.
-	if !topAuto && !bottomAuto && hAuto {
+	// ★ 固有尺寸关键字例外，同宽度分支。
+	if !topAuto && !bottomAuto && hAuto && !isIntrinsicSizeKeyword(cs.Height) {
 		stretchH := cbHeight - top - bottom - margin.Vertical() - border.Vertical() - padding.Vertical()
 		if stretchH < 0 {
 			stretchH = 0
@@ -347,9 +363,20 @@ func layoutAbsolute(box *ElementBox, cb *ElementBox, root *ElementBox, state *La
 		hAuto = false
 	}
 	y := cbg.PaddingBoxTop()
+	// 垂直方向同理（CSS 2.1 §10.6.4）：top/bottom 均非 auto 时 margin 的
+	// auto 吸收剩余空间，两侧 auto 即垂直居中（规范 popover 的居中所依赖）。
+	mtAuto := cs.MarginTop.Unit == "auto"
+	mbAuto := cs.MarginBottom.Unit == "auto"
 	switch {
 	case !topAuto && !bottomAuto:
-		y = cbg.PaddingBoxTop() + top + margin.Top
+		switch {
+		case mtAuto && mbAuto:
+			y = cbg.PaddingBoxTop() + top + (cbHeight-top-bottom-g.BorderBoxHeight())/2
+		case mtAuto:
+			y = cbg.PaddingBoxTop() + cbHeight - bottom - g.BorderBoxHeight() - margin.Bottom
+		default:
+			y = cbg.PaddingBoxTop() + top + margin.Top
+		}
 	case !topAuto:
 		y = cbg.PaddingBoxTop() + top + margin.Top
 	case !bottomAuto:

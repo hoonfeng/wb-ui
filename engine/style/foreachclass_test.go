@@ -27,12 +27,12 @@ func TestForEachClassMatchesStringsFields(t *testing.T) {
 		"a b c",
 		"  leading and trailing  ",
 		"\t\n\v\f\r mixed \t whitespace \n",
-		"a  b",             // 连续空白
-		"one-two_three",    // 非空白分隔符不得被切分
-		"a.b",              // 点号不是分隔符（class 名里不允许，但语义必须一致）
-		"多字节 class 中",     // 非 ASCII 内容
-		"a\u00a0b",         // U+00A0 不换行空格：Fields 视为空白
-		"caf\u00e9 other",  // 带重音的类名
+		"a  b",                // 连续空白
+		"one-two_three",       // 非空白分隔符不得被切分
+		"a.b",                 // 点号不是分隔符（class 名里不允许，但语义必须一致）
+		"多字节 class 中",         // 非 ASCII 内容
+		"a\u00a0b",            // U+00A0 不换行空格：Fields 视为空白
+		"caf\u00e9 other",     // 带重音的类名
 		"\u2028line\u2029sep", // unicode 行/段分隔符
 	}
 	for _, in := range cases {

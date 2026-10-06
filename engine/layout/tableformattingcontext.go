@@ -666,6 +666,9 @@ func shiftCellContent(cell *ElementBox, dy float64, state *LayoutState) {
 		case *InlineTextBox:
 			for i := range c.TextSegments {
 				c.TextSegments[i].Y += dy
+				// ★ 同行 flex 的 shiftBoxAndDescendants：LineY 漏移位会让
+				// 行盒底虚高，撑大无显式高度的盒。
+				c.TextSegments[i].LineY += dy
 			}
 		}
 	}

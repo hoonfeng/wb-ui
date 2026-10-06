@@ -18,9 +18,9 @@ import (
 //   - 拿不到 thumb/track 配色（滚动条回落到写死的浅灰）；
 //   - 压不住 ::-webkit-scrollbar 自定义宽度 → 滚动条被画成 9px 细条无箭头，
 //     而浏览器是 17px 经典样式（带上下箭头、thumb 宽 14 居中）。
-//   实测（2026-09-26）：修复前 .pp-list 的 diag 是
-//   `scrollW=9 webkitSB=true sbc=""`，修复后为
-//   `scrollW=17 webkitSB=false sbc="#414b64 transparent"`。
+//     实测（2026-09-26）：修复前 .pp-list 的 diag 是
+//     `scrollW=9 webkitSB=true sbc=""`，修复后为
+//     `scrollW=17 webkitSB=false sbc="#414b64 transparent"`。
 func TestScrollbarColorInheritance(t *testing.T) {
 	sheet := css.NewCSSStyleSheet()
 	p := css.NewParser(`

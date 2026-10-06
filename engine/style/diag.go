@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	diagOnce sync.Once
+	diagOnce  sync.Once
 	diagAreas map[string]bool
 )
 

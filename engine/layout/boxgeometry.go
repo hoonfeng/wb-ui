@@ -4,7 +4,13 @@
 
 package layout
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"runtime"
+)
 
 // Edges groups four CSS box-model sides. Used in box-model computations.
 type Edges struct {
@@ -55,7 +61,17 @@ func (g *BoxGeometry) SetTopLeft(top, left float64) { g.top = top; g.left = left
 func (g *BoxGeometry) ContentWidth() float64        { return g.contentWidth }
 func (g *BoxGeometry) ContentHeight() float64       { return g.contentHeight }
 func (g *BoxGeometry) SetContentWidth(w float64)    { g.contentWidth = w }
-func (g *BoxGeometry) SetContentHeight(h float64)   { g.contentHeight = h }
+func (g *BoxGeometry) SetContentHeight(h float64) {
+	// 诊断开关：WBUI_DEBUG_SCH=1 时打印每个内容高度**赋值点的调用者行号**。
+	// 用于回答「这个盒子的高度究竟是谁写的」——布局链路上 SetContentHeight
+	// 有二十余处调用，光读代码无法确定哪一处生效（尤其当某条路径是死代码时）。
+	if os.Getenv("WBUI_DEBUG_SCH") != "" {
+		if _, file, line, ok := runtime.Caller(1); ok {
+			fmt.Fprintf(os.Stderr, "[sch] %s:%d h=%.2f\n", filepath.Base(file), line, h)
+		}
+	}
+	g.contentHeight = h
+}
 
 // ── border-box size ──
 

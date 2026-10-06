@@ -869,11 +869,19 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 				return jsc.BooleanValue(el.HasAttribute("checked"))
 			},
 			set: func(v jsc.JSValue) {
+				if v.ToBoolean() == el.HasAttribute("checked") {
+					return
+				}
 				if v.ToBoolean() {
 					el.SetAttribute("checked", "checked")
 				} else {
 					el.RemoveAttribute("checked")
 				}
+				// :checked 的匹配结果变了（`input:checked + .track::after`
+				// 开关滑块等兄弟/后继组合器同样受牵连）→ 失效样式与渲染。
+				// 此前这条 setter 只改属性、不失效：实测 el.checked = true
+				// 后连元素自身的 getComputedStyle 都还是旧值。
+				invalidateStateStyle(el)
 			}}, true
 	case "type":
 		if tag != "input" {
