@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>H2 control baseline formula probe</title>
+<style>html,body{margin:0}</style><body>
+<div style="position:absolute;left:0;top:0;font-size:16px;line-height:normal"><input id="a" value="A"></div>
+<div style="position:absolute;left:0;top:100px;font-size:16px;line-height:20px"><input id="b" value="B"></div>
+<div style="position:absolute;left:0;top:200px;font-size:32px;line-height:normal"><input id="c" value="C"></div>
+<div style="position:absolute;left:0;top:300px;font-size:8px;line-height:normal"><input id="d" value="D"></div>
+<div style="position:absolute;left:0;top:400px;font-size:16px;line-height:normal">x<input id="e" value="E"></div>
+<div style="position:absolute;left:0;top:500px;font-size:16px;line-height:normal;vertical-align:baseline"><input id="f" value="F" style="vertical-align:baseline"></div>
+<div style="position:absolute;left:0;top:600px;font-size:16px;line-height:normal"><button id="g">G</button></div>
+<div style="position:absolute;left:0;top:700px;font-size:16px;line-height:normal"><span id="h" style="display:inline-block;width:30px;height:30px;background:#ccc"></span></div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var ids=['a','b','c','d','e','f','g','h'],L=[];
+for(var i=0;i<ids.length;i++){var el=document.getElementById(ids[i]),r=el.getBoundingClientRect();
+var host=el.parentElement,hr=host.getBoundingClientRect(),cs=getComputedStyle(el);
+L.push(ids[i]+' | relTop='+(r.top-hr.top).toFixed(3)+' | h='+r.height+' | hostFont='+getComputedStyle(host).fontSize+'/'+getComputedStyle(host).lineHeight);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

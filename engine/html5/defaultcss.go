@@ -50,7 +50,15 @@ label {
    WebCore's -webkit-small-control default for form controls. */
 input, button, select, textarea {
 	display: inline-block;
-	font-family: inherit;
+	/* ★ Chromium 的 UA 规则是 font: 400 13.3333px Arial（html.css）：
+	   表单控件**既不继承文档字号、也不继承文档字体族**。此前这里写
+	   font-family: inherit，控件于是继承文档字体（默认 sans-serif →
+	   Noto Sans SC）；同样 13.3333px 下 Noto Sans SC 的行盒是 19px，
+	   而 Arial 是 15px —— input 的边框盒因此是 25px 而不是 Edge 的 21px
+	   （content 19+2 padding+4 border vs 15+2+4）。quirks 模式 form
+	   的 1em 下边距把后面 .form-marker 从 37 推到了 41
+	   （cssprobe form-control-quirks 的唯一失败项，cssoracle 确认 Edge=37）。 */
+	font-family: Arial;
 	font-size: 13.3333px;
 	color: inherit;
 	vertical-align: middle;
@@ -69,6 +77,11 @@ input {
 
 textarea {
 	padding: 2px;
+	/* ★ H2：Chromium html.css 给 textarea 单独的 monospace 字体
+	   （textarea { font-family: monospace }），而上面那条
+	   input, button, select, textarea { font-family: Arial } 会被它覆盖。
+	   Edge 实测 formtext_probe 的 t1：font=monospace/13.3333px。 */
+	font-family: monospace;
 	/* ★ textarea 的 UA 边框是 1px，不是 input 的 2px（两者不同！）：
 	   实测（TestPxTextarea，Edge 参考）该用例的外盒 = content 150×50 +
 	   padding 2px×2 + border 1px×2 = 156×56，Edge 的上下边框各只占 1 行
@@ -178,7 +191,10 @@ input[type="submit"], input[type="reset"], input[type="button"],
 button {
 	display: inline-block;
 	padding: 1px 6px;
-	border: 1px solid #767676;
+	/* ★ H2/H6（Edge 实测）：Chromium 的 button UA 边框是 **2px**，不是 1px ——
+	   g1_formctl 的 t5 计算值 borderWidth=2px（wbui 曾输出 1px），其 border-box
+	   宽度差 2px（Edge 36.02 vs wbui 34.01）也与此吻合。 */
+	border: 2px solid #767676;
 	background-color: #f0f0f0;
 	color: #000000;
 	text-align: center;
@@ -194,7 +210,10 @@ button[disabled], input[disabled] {
 /* Select and option. */
 select {
 	display: inline-block;
-	padding: 1px;
+	/* ★ H2（Edge 实测）：Chromium 的 select UA padding 是 **0**，不是 1px
+	   —— formtext_probe 的 s1 / g1_formctl 的 t6 计算值均为 pad=0px
+	   （select 的内部留白由控件自身绘制，不占 CSS padding）。 */
+	padding: 0;
 	border: 1px solid #767676;
 	background-color: #ffffff;
 	box-sizing: border-box;
@@ -345,10 +364,14 @@ dialog:not([open]) {
  * （1200）。popover stack 内部的先后顺序由作者样式/文档顺序决定，本引擎不做
  * 「后显示的必然在上」——这是本端口已知的 top layer 近似差异。
  *
- * 规范 UA 的居中写法是 inset:0 + width/height:fit-content + margin:auto，
- * 本引擎尚不支持 width/height 的 fit-content 关键字（宽度会退化
- * 成拉伸填满视口），因此沿用 dialog[open] 的等价近似：top/left 50% + transform
- * 反向平移，尺寸按 fixed 定位的 shrink-to-fit 求值。
+ * 居中写法照抄规范 UA：inset:0 + width/height:fit-content + margin:auto。
+ * 本引擎对 fit-content/min-content/max-content 统一按 shrink-to-fit 求值
+ * （layout.isIntrinsicSizeKeyword），并对 left/right（top/bottom）都非 auto
+ * 的绝对定位盒解 margin:auto（CSS 2.1 §10.3.7 / §10.6.4）——两侧 auto 即居中。
+ * 这样作者样式能按正常级联覆盖 UA：夹具 popover.html 的 #centered 给的是
+ * margin:0，抵消 UA 的 margin:auto 后盒子落在包含块左上角 (0,0)，与 Edge
+ * 实测一致；此前用 top/left 50% + translate 恒居中且无法被 margin 覆盖，
+ * cssoracle 报 MISMATCH。
  *
  * 未显示的 popover 不生成盒（规范规则的逐字翻译；dialog[open] 例外：同时带
  * popover 属性的 <dialog> 以 dialog 方式打开时仍要显示）。 */
@@ -360,9 +383,10 @@ dialog:popover-open {
 }
 [popover] {
 	position: fixed;
-	top: 50%;
-	left: 50%;
-	transform: translate(-50%, -50%);
+	inset: 0;
+	margin: auto;
+	width: fit-content;
+	height: fit-content;
 	z-index: 1100;
 	border: 1px solid rgba(0, 0, 0, 0.3);
 	padding: 0.25em;

@@ -393,6 +393,10 @@ var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
 // 属性清单，**逐字保留原先函数内字面量的成员与顺序**（含 backgroundRepeat /
 // backgroundPosition / backgroundSize 三项重复——保留重复以保证与优化前
 // 行为逐字一致：重复项只是重复写同一个键/属性，无副作用）。
+// ★ H5：末尾追加 scrollbarGutter —— scrollbar-gutter 的 computed 值。
+//   注意 H4 已把 scrollbar-gutter 纳入**已知 CSS 属性表**，但 getComputedStyle
+//   的输出白名单是**独立**的一张表，两者都要有（H6 踩过同一坑：初始值表只对
+//   白名单属性生效）。
 //
 // ★ 为什么提到包级：该回写循环对**每次** getComputedStyle 调用都执行，原先
 //
@@ -400,7 +404,7 @@ var ElementFromPoint func(in *jsc.Interpreter, x, y float64) *dom.Element
 //	扫描 + 可能分配）。真实编辑器 DOM 上 getComputedStyle 1e3 实测 47~62ms
 //	（≈47µs/次），而浏览器同操作约 1µs —— 其中一笔固定开销就是每次调用的
 //	~120 次转换与 ~120 元素切片分配。预计算后每次调用只剩 map 查找 + cs.Set。
-const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath,listStyleType,borderSpacing,lineBreak"
+const computedStylePropWhitelistCSV = "color,backgroundColor,background,fontFamily,fontSize,lineHeight,fontWeight,borderColor,width,height,display,position,opacity,visibility,marginTop,marginRight,marginBottom,marginLeft,paddingTop,paddingRight,paddingBottom,paddingLeft,textAlign,whiteSpace,overflow,overflowX,overflowY,overflowWrap,wordBreak,textOverflow,cursor,zIndex,verticalAlign,maxHeight,minHeight,maxWidth,minWidth,borderRadius,boxShadow,userSelect,pointerEvents,top,left,right,bottom,transform,flexDirection,alignItems,justifyContent,fontStyle,fontVariant,letterSpacing,textDecoration,borderTop,borderBottom,borderLeft,borderRight,borderStyle,borderWidth,borderTopStyle,borderRightStyle,borderBottomStyle,borderLeftStyle,borderTopColor,borderRightColor,borderBottomColor,borderLeftColor,alignSelf,flexWrap,backgroundSize,backgroundRepeat,backgroundPosition,backgroundClip,flex,flexGrow,flexShrink,flexBasis,order,objectFit,mixBlendMode,filter,transition,animation,willChange,tableLayout,borderCollapse,direction,writingMode,textTransform,wordSpacing,textIndent,aspectRatio,gridGap,gridColumn,gridRow,borderTopWidth,borderRightWidth,borderBottomWidth,borderLeftWidth,padding,margin,gap,rowGap,columnGap,gridTemplateColumns,gridTemplateRows,boxSizing,float,clear,listStyle,backgroundImage,backgroundRepeat,backgroundPosition,backgroundSize,outline,content,clipPath,listStyleType,borderSpacing,lineBreak,scrollbarGutter,transformOrigin,textWrap"
 
 // computedStylePropEntry 是白名单的一项：prop 是回写到 JS 对象的 camelCase
 // 属性名（getComputedStyle(el).fontSize），key 是级联 map 里的 kebab-case 键
@@ -1225,10 +1229,41 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			cs := jsc.NewObject(in.ObjectPrototype())
 			var computed map[string]string
+			// ★ H6：transform-origin 需要在回写阶段实时算（依赖 border-box 几何，
+			//   不能进 computedStyleFor 的 per-element 缓存）—— 此处记住元素。
+			var targetEl *dom.Element
 			if len(args) >= 1 {
 				if n := unwrapNode(args[0]); n != nil {
+					if e, ok2 := n.(*dom.Element); ok2 {
+						targetEl = e
+					}
 					computed = computedStyleFor(n)
 					computed = withDisplayFallback(computed, n)
+					// ★ H7：getComputedStyle 的 transform 必须按 CSSOM 归一为
+					//   matrix(...)（浏览器行为）。级联里存的是**原始值**
+					//   （"translate(20px, 10px)"），直接回写 → 与 Edge 不一致
+					//   （g2_transform.html 实测：Edge 得 matrix(1, 0, 0, 1, 20, 10)）。
+					//   百分比参照元素 **border-box** 尺寸、em/ex/ch 参照 font-size
+					//   —— 只有值里真的含这些单位时才去取（GetElementBoxRect 内部
+					//   forceLayout，常态避免开销）。未知/3D 语法归一失败时保留原值。
+					if tv, ok := computed["transform"]; ok && tv != "" {
+						refW, refH, fs := 0.0, 0.0, 16.0
+						if tfNeedsGeometry(tv) {
+							if e, eok := n.(*dom.Element); eok {
+								if GetElementBoxRect != nil {
+									_, _, refW, refH = GetElementBoxRect(e)
+								}
+								if GetElementComputedFont != nil {
+									if _, size, _, _ := GetElementComputedFont(e); size > 0 {
+										fs = size
+									}
+								}
+							}
+						}
+						if norm, nok := css.TransformToMatrix(tv, refW, refH, fs); nok {
+							computed["transform"] = norm
+						}
+					}
 					// ★ display 回退：computedStyleFor 的级联只收录**声明过**的属性，
 					//   未声明 display 的元素（如 `<span>`、插件注入的 div）不会出现在
 					//   表里 → `getComputedStyle(el).display` 返回 undefined，污染一切
@@ -1264,6 +1299,31 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					//   parseFloat(cs.fontSize)=NaN 一类分支走错。此处仅补 JS 对象层，
 					//   不改 computedStyleFor 的 map（避免影响布局与继承链计算）。
 					cs.Set(prop, jsc.StringValue(init))
+				}
+			}
+			// ★ H6：transform-origin 的 computed 值是**绝对 px**（浏览器语义：未声明
+			//   时等价于 50% 50%，按 **border-box** 尺寸解析）。Edge 实测 g2_transform：
+			//   100×40 的元素 → "50px 20px"；transform-origin:0 0 → "0px 0px"；
+			//   40×40 → "20px 20px"；h6_misc_props：left top → "0px 0px"、
+			//   25% 75% → "25px 75px"、right bottom → "100px 100px"。
+			//   几何随布局变化 → 在**回写阶段**实时算（不进 computedStyleFor 缓存）。
+			if targetEl != nil {
+				var bw, bh float64
+				if GetElementBoxRectFast != nil {
+					_, _, bw, bh = GetElementBoxRectFast(targetEl)
+				}
+				// ★ GetElementBoxRectFast 直读布局缓存 —— 页面内**同步** <script>
+				//   执行 getComputedStyle 时布局尚未跑，它返回 0 → transform-origin
+				//   落空（实测 h6_misc_props 探针：页面内读全 undefined，而 webshot
+				//   的 -js 在渲染后读则为 "50px 50px"）。浏览器语义是「getComputedStyle
+				//   前必有布局」，故此处用 GetElementBoxRect（forceLayout）兜底；
+				//   布局一旦跑过，Fast 即有值，不会每次都重建。
+				if (bw <= 0 || bh <= 0) && GetElementBoxRect != nil {
+					_, _, bw, bh = GetElementBoxRect(targetEl)
+				}
+				if bw > 0 && bh > 0 {
+					cs.Set("transformOrigin", jsc.StringValue(
+						resolveTransformOrigin(computed["transform-origin"], bw, bh)))
 				}
 			}
 			// background 简写展开：浏览器 getComputedStyle 的 backgroundColor
@@ -2022,33 +2082,16 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			if len(args) >= 2 {
 				prop := strings.ToLower(strings.TrimSpace(args[0].ToString()))
 				val := strings.TrimSpace(args[1].ToString())
-				if !isKnownCSSProperty(prop) || val == "" {
-					return jsc.BooleanValue(false)
-				}
-				return jsc.BooleanValue(cssValueSupported(prop, val))
+				return jsc.BooleanValue(cssSupportsDeclaration(prop, val))
 			}
-			// (property: value) 声明形式：校验 property 为已知 CSS 属性
-			if strings.HasPrefix(s, "(") && strings.Contains(s, ":") {
-				inner := strings.TrimSuffix(strings.TrimPrefix(s, "("), ")")
-				parts := strings.SplitN(inner, ":", 2)
-				prop := strings.ToLower(strings.TrimSpace(parts[0]))
-				if isKnownCSSProperty(prop) {
-					return jsc.BooleanValue(true)
-				}
-				// 未知属性按现代浏览器行为返回 false
-				return jsc.BooleanValue(false)
-			}
-			// selector 形式：CSS.supports('selector') 返回选择器是否被引擎支持。
-			// 用 css 包真实解析，并检测未知伪类/伪元素（浏览器对未知伪类返回
-			// false；对不支持的选择器语法同样 false），替代此前的保守 true。
-			sel := css.NewParser(s).ParseSelectorList()
-			if sel == nil || len(sel.Selectors) == 0 {
-				return jsc.BooleanValue(false)
-			}
-			if selectorHasUnknownPseudo(sel) {
-				return jsc.BooleanValue(false)
-			}
-			return jsc.BooleanValue(true)
+			// 单参数形式 CSS.supports(conditionText)：参数是 @supports 的**条件
+			// 文本** —— 裸声明 / 括号声明 / not-and-or 组合。
+			// ★ Edge 实测（dev/fixtures/webshot/h4_supports_bounds.html）：单参数
+			// 并**不是选择器语义** —— 'div > p'、'a:hover'、'display' 在 Edge 一律
+			// false。此前此处把参数当选择器解析，'display' 是合法 tag 名 → 恒 true，
+			// 与 Edge 相反；'a:hover' 也因 hover 是已知伪类而误判 true。故改为按
+			// 条件文本求值（含值语法校验），不再回退到选择器解析。
+			return jsc.BooleanValue(cssSupportsCondition(args[0].ToString()))
 		}, 1)))
 	g.Set("CSS", jsc.ObjectValue(cssObj))
 
@@ -5692,8 +5735,167 @@ func computedStyleFor(el dom.Node) map[string]string {
 			out[k] = "0px"
 		}
 	}
+	// ★ H6：padding/margin 的**简写** computed 值。浏览器
+	//   getComputedStyle(el).padding 恒有值（四边拼接，如 "1px 2px"）；wbui 此前
+	//   只有 expandBoxShorthand（简写 → 四边）这一向，四边齐备时未反向拼装 →
+	//   `cs.padding` 读到 undefined。border-width 同理（四边齐备时拼装）。
+	composeBoxShorthand(out, "padding", []string{"padding-top", "padding-right", "padding-bottom", "padding-left"})
+	composeBoxShorthand(out, "margin", []string{"margin-top", "margin-right", "margin-bottom", "margin-left"})
+	// ★ H6：border-*-width 四边 —— 级联 map 里通常只有 `border` / `border-width`
+	//   简写（或个别 longhand），而浏览器 getComputedStyle 四边恒有值。
+	//   规则（CSS 2.1 §8.5.1）：border-style 为 none/hidden（或未声明）时宽度
+	//   的计算值是 0px；否则取简写里的宽度 token（缺省 medium = 3px）。
+	//   补完四边后下面的 composeBoxShorthand 才能拼出 `borderWidth`
+	//   （g1_formctl 的 t1/t5/t6/t7 与 h6_misc_props 的 #p 都依赖它）。
+	for _, side := range []string{"top", "right", "bottom", "left"} {
+		wKey, sKey := "border-"+side+"-width", "border-"+side+"-style"
+		if _, ok := out[wKey]; ok {
+			continue
+		}
+		st := out[sKey]
+		if st == "" {
+			st = cssBorderStyleToken(out["border"])
+		}
+		if st == "" {
+			st = firstCSSKeyword(out["border-style"])
+		}
+		if st == "" || st == "none" || st == "hidden" {
+			out[wKey] = "0px"
+			continue
+		}
+		w := cssBorderWidthToken(out["border-width"])
+		if w == "" {
+			w = cssBorderWidthToken(out["border"])
+		}
+		if w == "" {
+			w = cssBorderWidthToken(out["border-"+side])
+		}
+		if w == "" {
+			w = "3px" // medium（border-width 初始值）
+		}
+		out[wKey] = w
+	}
+	composeBoxShorthand(out, "border-width", []string{"border-top-width", "border-right-width", "border-bottom-width", "border-left-width"})
+	// ★ 注意：transform-origin 的 computed 值是**绝对 px**、依赖 border-box 几何，
+	//   而几何随布局变化 —— 它**不能**进 per-element 缓存（cssCachePut），
+	//   否则首次调用时若布局尚未就绪就缓存了 "undefined"，之后永远读不到。
+	//   故该属性在 getComputedStyle 的回写阶段**实时**计算（见彼处注释）。
 	cssCachePut(el, out)
 	return out
+}
+
+// cssBorderWidthToken 从 border / border-width / border-<side> 简写里取出宽度
+// token（数字开头者，如 1px / 2px / 0.5em），跳过样式（solid）与颜色关键字。
+func cssBorderWidthToken(s string) string {
+	for _, f := range strings.Fields(s) {
+		if f == "" {
+			continue
+		}
+		if (f[0] >= '0' && f[0] <= '9') || f[0] == '.' || f[0] == '-' || f[0] == '+' {
+			// 排除负数以外的纯数字（border 宽度不允许负值，但宽松接受）
+			return f
+		}
+	}
+	return ""
+}
+
+// cssBorderStyleToken 从 border 简写里取出样式关键字（solid/dashed/…）。
+func cssBorderStyleToken(s string) string {
+	for _, f := range strings.Fields(s) {
+		switch strings.ToLower(f) {
+		case "none", "hidden", "dotted", "dashed", "solid", "double",
+			"groove", "ridge", "inset", "outset":
+			return strings.ToLower(f)
+		}
+	}
+	return ""
+}
+
+// firstCSSKeyword 返回字符串里第一个空白分隔的 token（小写）。
+func firstCSSKeyword(s string) string {
+	for _, f := range strings.Fields(s) {
+		return strings.ToLower(f)
+	}
+	return ""
+}
+
+// composeBoxShorthand 在四边 longhand 齐备而简写缺失时按 CSS 规则拼出简写
+// （浏览器 getComputedStyle(el).padding 恒有值）。与 expandBoxShorthand 互逆。
+func composeBoxShorthand(out map[string]string, shorthand string, subs []string) {
+	if _, has := out[shorthand]; has {
+		return
+	}
+	if len(subs) != 4 {
+		return
+	}
+	var v [4]string
+	for i, s := range subs {
+		x, ok := out[s]
+		if !ok || x == "" {
+			return
+		}
+		v[i] = x
+	}
+	out[shorthand] = composeFourValueShorthand(v[0], v[1], v[2], v[3])
+}
+
+// composeFourValueShorthand 按 CSS 简写最小化规则拼装四值（top right bottom left）：
+// 四边相同 → 1 值；上下/左右相同 → 2 值；左右相同 → 3 值；否则 4 值。
+// 例：1px/2px/1px/2px → "1px 2px"；3px/3px/3px/4px → "3px 3px 3px 4px"。
+func composeFourValueShorthand(t, r, b, l string) string {
+	switch {
+	case t == r && r == b && b == l:
+		return t
+	case t == b && r == l:
+		return t + " " + r
+	case r == l:
+		return t + " " + r + " " + b
+	}
+	return t + " " + r + " " + b + " " + l
+}
+
+// resolveTransformOrigin 把 transform-origin 的计算值解析为浏览器序列化的
+// 绝对 px 形式 "Xpx Ypx"。v 为空（未声明）时等价于 "50% 50%"。
+// 支持关键字 left/center/right/top/bottom、<length>（px/无单位）与 <percentage>。
+func resolveTransformOrigin(v string, w, h float64) string {
+	fields := strings.Fields(v)
+	if len(fields) == 0 {
+		return fmt.Sprintf("%gpx %gpx", w/2, h/2)
+	}
+	x := resolveOriginComponent(fields[0], w, h, true)
+	y := resolveOriginComponent("center", w, h, false)
+	if len(fields) > 1 {
+		y = resolveOriginComponent(fields[1], w, h, false)
+	}
+	return fmt.Sprintf("%gpx %gpx", x, y)
+}
+
+// resolveOriginComponent 解析 transform-origin 的单个分量；isX 决定
+// 百分比/关键字的参照轴（x → 宽，y → 高）。
+func resolveOriginComponent(s string, w, h float64, isX bool) float64 {
+	ref := h
+	if isX {
+		ref = w
+	}
+	t := strings.ToLower(strings.TrimSpace(s))
+	switch t {
+	case "left", "top":
+		return 0
+	case "right", "bottom":
+		return ref
+	case "center":
+		return ref / 2
+	}
+	if strings.HasSuffix(t, "%") {
+		if pct, err := strconv.ParseFloat(strings.TrimSuffix(t, "%"), 64); err == nil {
+			return ref * pct / 100
+		}
+		return ref / 2
+	}
+	if val, err := strconv.ParseFloat(strings.TrimSuffix(t, "px"), 64); err == nil {
+		return val
+	}
+	return ref / 2
 }
 
 // inheritedComputedProps 是 CSS 中 inherited:yes、且 getComputedStyle 会被读到的
@@ -5799,6 +6001,15 @@ func applyComputedSnapshot(out map[string]string, n dom.Node) {
 	if v, has := out["color"]; !has || !strings.HasPrefix(strings.TrimSpace(v), "rgb") {
 		need = true
 	}
+	// ★ H2：表单控件（input/button/select/textarea）在 UA 样式表里有**自己的**
+	//   font（Arial 13.3333px；textarea 是 monospace）与 padding/border，且
+	//   **不继承**文档字体。computedStyleFor 只级联作者样式 → 控件的 font-family
+	//   会落到 inheritComputedProps 给的继承值（如容器的 sans-serif/16px）、
+	//   padding 落空（undefined）。渲染树 style 是布局实际使用的值（含 UA 表，
+	//   与绘制同源），故控件**无条件**取快照。
+	if !need && isUAFormControl(el) {
+		need = true
+	}
 	if !need {
 		return
 	}
@@ -5808,6 +6019,20 @@ func applyComputedSnapshot(out map[string]string, n dom.Node) {
 			out[k] = v
 		}
 	}
+}
+
+// isUAFormControl 报告元素是否是带 UA 样式（font-family/font-size/padding/
+// border）的表单控件 —— 即 engine/html5/defaultcss.go 里
+// `input, button, select, textarea` 那组规则覆盖的元素。
+func isUAFormControl(el *dom.Element) bool {
+	if el == nil {
+		return false
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "input", "button", "select", "textarea":
+		return true
+	}
+	return false
 }
 
 // expandBoxShorthand 把四边简写（padding/margin 等）展开为子属性：
@@ -5965,38 +6190,185 @@ func mediaMatches(rule *css.MediaRule) bool {
 	return css.MatchesAny(rule.Parsed, ctx)
 }
 
-// selectorHasUnknownPseudo 检测选择器列表是否含有引擎未知的伪类/伪元素
-// （CSS.supports 对未知伪类返回 false）。注意 PseudoClassUnknown/PseudoElementUnknown
-// 与“无伪类”共用 0 值，必须结合 Match 类型判断：只有 MatchPseudoClass /
-// MatchPseudoElement 时才检查对应枚举。
-func selectorHasUnknownPseudo(sel *css.SelectorList) bool {
-	if sel == nil {
+// ── CSS.supports() 的条件求值 ──────────────────────────────────────────────
+//
+// 单参数 CSS.supports(conditionText) 的参数是 @supports 的**条件文本**，不是
+// 选择器。支持的条件形态（与 Edge 逐项实测对齐，基线见
+// dev/fixtures/webshot/h4_supports_bounds.html）：
+//
+//	<declaration>                    display:grid          → true
+//	( <declaration> )                ( display : grid )    → true
+//	not <condition>                  not (display:grid)    → false（内层为真）
+//	<condition> and <condition>      (a:1) and (b:2)      → 与
+//	<condition> or  <condition>      (a:1) or  (b:2)      → 或
+//	@container (min-width:1px){}     at-rule 不是条件       → false
+//	display / div > p / a:hover      非条件也非声明         → false
+
+// cssSupportsCondition 求值一段 @supports 条件文本。
+func cssSupportsCondition(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return false
 	}
-	for _, cs := range sel.Selectors {
-		for _, comp := range cs.Compounds {
-			for _, s := range comp.Selectors {
-				switch s.Match {
-				case css.MatchPseudoClass:
-					if s.PseudoClass == css.PseudoClassUnknown {
-						return true
-					}
-				case css.MatchPseudoElement:
-					if s.PseudoElem == css.PseudoElementUnknown {
-						return true
-					}
-				}
-			}
-		}
+	// at-rule 不是条件表达式（Edge：'@container (min-width:1px){}' → false）。
+	if strings.HasPrefix(s, "@") {
+		return false
 	}
+	// not 的优先级高于 and/or，先处理。
+	if rest, ok := cutKeywordPrefix(s, "not"); ok {
+		return !cssSupportsCondition(rest)
+	}
+	if i := indexTopLevelKeyword(s, "or"); i >= 0 {
+		return cssSupportsCondition(s[:i]) || cssSupportsCondition(s[i+len("or"):])
+	}
+	if i := indexTopLevelKeyword(s, "and"); i >= 0 {
+		return cssSupportsCondition(s[:i]) && cssSupportsCondition(s[i+len("and"):])
+	}
+	// 整串被一对括号包裹 → 剥掉后再求值（'(display:grid)' → 'display:grid'）。
+	if inner, ok := stripOuterParens(s); ok {
+		return cssSupportsCondition(inner)
+	}
+	// 裸声明 <property>: <value>。
+	if i := strings.Index(s, ":"); i > 0 {
+		return cssSupportsDeclaration(strings.ToLower(strings.TrimSpace(s[:i])),
+			strings.TrimSpace(s[i+1:]))
+	}
+	// 既不是声明也不是组合条件（'display'、'div > p'、'a:hover'）→ 不支持。
 	return false
 }
 
-// cssValueSupported reports whether value is valid syntax for prop. Only the
-// shorthands whose grammar the engine actually implements are checked; every
-// other known property falls back to "accepted", which matches CSS.supports'
-// role as a feature-detection API rather than a full CSS validator.
+// cssSupportsDeclaration 判定一条 <property>: <value> 声明是否为 wbui 认识的
+// 语法。对齐 Edge：未知属性 → false；已知属性但值语法非法 → false；自定义属性
+// （--x: ...）→ true；厂商前缀剥掉后再判。
+func cssSupportsDeclaration(prop, val string) bool {
+	if prop == "" || val == "" {
+		return false
+	}
+	// 自定义属性（--x: ...）语法上永远合法。
+	if strings.HasPrefix(prop, "--") {
+		return true
+	}
+	if p, ok := stripVendorPrefix(prop); ok {
+		prop = p
+	}
+	if !isKnownCSSProperty(prop) {
+		return false
+	}
+	return cssValueSupported(prop, val)
+}
+
+// cutKeywordPrefix 在 s 以关键字 kw 开头且其后紧跟空白或 '(' 时返回剩余部分；
+// 否则 ok=false（避免把 'nothing' 当成 'not' 处理）。
+func cutKeywordPrefix(s, kw string) (string, bool) {
+	if !strings.HasPrefix(s, kw) {
+		return "", false
+	}
+	rest := s[len(kw):]
+	if rest == "" || (rest[0] != ' ' && rest[0] != '\t' && rest[0] != '(') {
+		return "", false
+	}
+	return strings.TrimSpace(rest), true
+}
+
+// indexTopLevelKeyword 在括号深度 0 处查找独立关键字 kw（前后为空白），返回
+// 其起始下标；不存在时 -1。'(display:grid) and (color:red)' 里括号内的文本不
+// 会干扰：两个条件各自成对，深度 0 处只剩 ' and '。
+func indexTopLevelKeyword(s, kw string) int {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+			continue
+		case ')':
+			depth--
+			continue
+		}
+		if depth != 0 || i+len(kw) > len(s) || s[i:i+len(kw)] != kw {
+			continue
+		}
+		if i > 0 && !isCSSSpaceByte(s[i-1]) {
+			continue
+		}
+		if j := i + len(kw); j < len(s) && !isCSSSpaceByte(s[j]) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+// stripOuterParens 在一对**匹配**的外层括号包裹整个 s 时返回内部文本；
+// '(a) and (b)' 不会被误剥（首括号在中途就闭合了）。
+func stripOuterParens(s string) (string, bool) {
+	if len(s) < 2 || s[0] != '(' || s[len(s)-1] != ')' {
+		return "", false
+	}
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(s)-1 {
+				return "", false
+			}
+		}
+	}
+	if depth != 0 {
+		return "", false
+	}
+	return s[1 : len(s)-1], true
+}
+
+// stripVendorPrefix 剥掉厂商前缀；'-webkit-mask-image' → 'mask-image'。
+func stripVendorPrefix(prop string) (string, bool) {
+	for _, p := range []string{"-webkit-", "-moz-", "-ms-", "-o-"} {
+		if strings.HasPrefix(prop, p) && len(prop) > len(p) {
+			return prop[len(p):], true
+		}
+	}
+	return prop, false
+}
+
+func isCSSSpaceByte(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f'
+}
+
+// cssValueSupported 判定 value 是否是 prop 的合法语法。分三层：
+//  1. 单关键字枚举属性（display/position/…）→ 值必须命中该属性的关键字集合
+//     （因此 'display:grid grid' 与 'display:bogusvalue' 都判 false，与 Edge 一致）；
+//  2. 多关键字枚举属性（color-scheme/scrollbar-gutter/…）→ 每个空白分隔的 token
+//     都须命中集合（'color-scheme:light dark'、'scrollbar-gutter:stable both-edges' 合法）；
+//  3. 其余已知属性 → 只做通用语法检查（cssValueSyntaxOK），保持 CSS.supports
+//     作为特性探测 API 的宽松语义，不做完整 CSS 校验。
+//
+// 全局关键字（inherit/initial/unset/revert）对任何属性都合法。
 func cssValueSupported(prop, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "inherit", "initial", "unset", "revert", "revert-layer":
+		return true
+	}
+	if kw, ok := cssSingleKeywordProps[prop]; ok {
+		return kw[strings.ToLower(value)]
+	}
+	if kw, ok := cssMultiKeywordProps[prop]; ok {
+		toks := strings.Fields(strings.ToLower(value))
+		if len(toks) == 0 {
+			return false
+		}
+		for _, t := range toks {
+			if !kw[t] {
+				return false
+			}
+		}
+		return true
+	}
 	switch prop {
 	case "flex-flow":
 		_, ok := css.ParseFlexFlow(value)
@@ -6014,7 +6386,131 @@ func cssValueSupported(prop, value string) bool {
 		}
 		return false
 	}
-	return true
+	return cssValueSyntaxOK(value)
+}
+
+// cssValueSyntaxOK 对没有专门语法的属性做通用检查：非空、引号/括号配平、
+// 不含声明级非法字符（; { }）。宽松通过——CSS.supports 是特性探测而非完整
+// CSS 校验器。
+func cssValueSyntaxOK(v string) bool {
+	depth := 0
+	var inStr byte
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if inStr != 0 {
+			if c == inStr {
+				inStr = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			inStr = c
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		case ';', '{', '}':
+			return false
+		}
+	}
+	return depth == 0 && inStr == 0
+}
+
+// tfNeedsGeometry 报告 transform 值是否含需要元素几何/字体度量的单位：
+// %（参照 border-box 尺寸）、em/rem/ex/ch（参照 font-size）。
+// transform 的函数名（translate/translateX/scale/skew/rotate/matrix）都不含
+// 这些子串，故用子串判断即可。
+func tfNeedsGeometry(v string) bool {
+	if strings.Contains(v, "%") {
+		return true
+	}
+	return strings.Contains(v, "em") || strings.Contains(v, "ex") || strings.Contains(v, "ch")
+}
+
+// cssKeywordSet 把关键字列表折叠成集合。
+func cssKeywordSet(kw ...string) map[string]bool {
+	m := make(map[string]bool, len(kw))
+	for _, k := range kw {
+		m[k] = true
+	}
+	return m
+}
+
+// cssSingleKeywordProps 是「值只能是**单个**关键字」的属性表。仅收纯关键字
+// 属性——值可为长度/数字/函数的属性（width、opacity、aspect-ratio、line-height、
+// font-weight…）不在此表，交给通用检查，否则会把 'aspect-ratio:1' 误判为 false。
+var cssSingleKeywordProps = map[string]map[string]bool{
+	"display": cssKeywordSet("block", "inline", "inline-block", "flex", "inline-flex",
+		"grid", "inline-grid", "flow-root", "list-item", "table", "inline-table",
+		"table-row", "table-row-group", "table-cell", "table-caption", "contents", "none"),
+	"position":   cssKeywordSet("static", "relative", "absolute", "fixed", "sticky"),
+	"float":      cssKeywordSet("none", "left", "right", "inline-start", "inline-end"),
+	"clear":      cssKeywordSet("none", "left", "right", "both", "inline-start", "inline-end"),
+	"visibility": cssKeywordSet("visible", "hidden", "collapse"),
+	"box-sizing": cssKeywordSet("content-box", "border-box"),
+	"object-fit": cssKeywordSet("fill", "contain", "cover", "none", "scale-down"),
+	"table-layout":    cssKeywordSet("auto", "fixed"),
+	"border-collapse": cssKeywordSet("separate", "collapse"),
+	"direction":       cssKeywordSet("ltr", "rtl"),
+	"writing-mode":    cssKeywordSet("horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr"),
+	"text-orientation": cssKeywordSet("mixed", "upright", "sideways"),
+	"mix-blend-mode": cssKeywordSet("normal", "multiply", "screen", "overlay", "darken",
+		"lighten", "color-dodge", "color-burn", "hard-light", "soft-light",
+		"difference", "exclusion", "hue", "saturation", "color", "luminosity", "plus-lighter"),
+	"isolation":       cssKeywordSet("auto", "isolate"),
+	"text-wrap":       cssKeywordSet("wrap", "nowrap", "balance", "pretty", "stable"),
+	"scroll-behavior": cssKeywordSet("auto", "smooth"),
+	"pointer-events":  cssKeywordSet("auto", "none", "all"),
+	"user-select":     cssKeywordSet("auto", "none", "text", "all", "contain"),
+	"resize":          cssKeywordSet("none", "both", "horizontal", "vertical", "block", "inline"),
+	"white-space":     cssKeywordSet("normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces"),
+	"word-break":      cssKeywordSet("normal", "keep-all", "break-all", "break-word"),
+	"line-break":      cssKeywordSet("auto", "loose", "normal", "strict", "anywhere"),
+	"overflow-wrap":   cssKeywordSet("normal", "break-word", "anywhere"),
+	"word-wrap":       cssKeywordSet("normal", "break-word", "anywhere"),
+	"text-align":      cssKeywordSet("left", "right", "center", "justify", "start", "end", "match-parent"),
+	"text-transform":  cssKeywordSet("none", "capitalize", "uppercase", "lowercase", "full-width"),
+	"font-style":      cssKeywordSet("normal", "italic", "oblique"),
+	"list-style-type": cssKeywordSet("disc", "circle", "square", "decimal", "decimal-leading-zero",
+		"lower-roman", "upper-roman", "lower-alpha", "upper-alpha", "lower-latin",
+		"upper-latin", "lower-greek", "none"),
+	"list-style-position": cssKeywordSet("inside", "outside"),
+	"overflow":            cssKeywordSet("visible", "hidden", "scroll", "auto", "clip"),
+	"overflow-x":          cssKeywordSet("visible", "hidden", "scroll", "auto", "clip"),
+	"overflow-y":          cssKeywordSet("visible", "hidden", "scroll", "auto", "clip"),
+	"backface-visibility": cssKeywordSet("visible", "hidden"),
+	"transform-style":     cssKeywordSet("flat", "preserve-3d"),
+	"object-position": cssKeywordSet("center", "top", "bottom", "left", "right",
+		"center center", "center top", "center bottom", "left center", "right center"),
+}
+
+// cssMultiKeywordProps 是「值可由多个关键字组成」的属性表；每个空白分隔的
+// token 都须命中集合。'contain: layout paint'、'color-scheme: light dark'、
+// 'scrollbar-gutter: stable both-edges' 都合法。
+var cssMultiKeywordProps = map[string]map[string]bool{
+	"contain": cssKeywordSet("none", "strict", "content", "size", "layout", "style",
+		"paint", "inline-size", "block-size"),
+	"color-scheme": cssKeywordSet("normal", "light", "dark", "only"),
+	"scrollbar-gutter": cssKeywordSet("auto", "stable", "always", "both-edges"),
+	"overscroll-behavior": cssKeywordSet("auto", "contain", "none"),
+	"overscroll-behavior-x": cssKeywordSet("auto", "contain", "none"),
+	"overscroll-behavior-y": cssKeywordSet("auto", "contain", "none"),
+	"touch-action": cssKeywordSet("auto", "none", "manipulation", "pan-x", "pan-y",
+		"pan-left", "pan-right", "pan-up", "pan-down", "pinch-zoom"),
+	"font-variant-numeric": cssKeywordSet("normal", "ordinal", "slashed-zero",
+		"lining-nums", "oldstyle-nums", "proportional-nums", "tabular-nums",
+		"diagonal-fractions", "stacked-fractions"),
+	"font-variant": cssKeywordSet("normal", "none", "small-caps", "all-small-caps",
+		"petite-caps", "all-petite-caps", "unicase", "titling-caps", "common-ligatures",
+		"no-common-ligatures", "discretionary-ligatures", "no-discretionary-ligatures",
+		"historical-ligatures", "no-historical-ligatures", "contextual",
+		"no-contextual", "ordinal", "slashed-zero", "tabular-nums", "oldstyle-nums",
+		"proportional-nums", "lining-nums", "small-caps-nums"),
+	"grid-auto-flow": cssKeywordSet("row", "column", "dense"),
 }
 
 // knownCSSProps 是 CSS.supports('(prop: value)') 判断用的已知属性表
@@ -6060,9 +6556,33 @@ var knownCSSProps = map[string]bool{
 	"word-wrap": true, "z-index": true,
 }
 
-// isKnownCSSProperty 判断属性名是否在已知 CSS 属性表中。
+// modernCSSProps 是对 knownCSSProps 的补充：现代 CSS 属性（逻辑属性、视觉效果、
+// 滚动与书写模式、字体变体等），也包括 wbui 已经消费但基础表漏收的属性
+// （contain/will-change/mix-blend-mode/writing-mode/mask-image 在
+// engine/rendering、engine/layout、engine/style 里都有真实实现）。
+// 单独成表而非混入 knownCSSProps 的字母序字面量，便于增删；isKnownCSSProperty
+// 合并查询两者。
+var modernCSSProps = map[string]bool{
+	"accent-color": true, "background-position": true, "background-repeat": true,
+	"backface-visibility": true, "border-spacing": true, "color-scheme": true,
+	"column-count": true, "column-fill": true, "column-width": true,
+	"contain": true, "content-visibility": true, "font-stretch": true,
+	"font-variant-numeric": true, "grid-auto-flow": true, "grid-column-start": true,
+	"grid-column-end": true, "grid-row-start": true, "grid-row-end": true,
+	"hyphens": true, "image-rendering": true, "isolation": true, "line-break": true,
+	"mask-image": true, "mask-position": true, "mask-repeat": true, "mask-size": true,
+	"mix-blend-mode": true, "orphans": true, "overscroll-behavior": true,
+	"overscroll-behavior-x": true, "overscroll-behavior-y": true, "perspective": true,
+	"perspective-origin": true, "scroll-margin": true, "scroll-padding": true,
+	"scrollbar-gutter": true, "tab-size": true, "text-orientation": true,
+	"text-underline-offset": true, "text-wrap": true, "touch-action": true,
+	"transform-style": true, "widows": true, "will-change": true, "writing-mode": true,
+}
+
+// isKnownCSSProperty 判断属性名是否在已知 CSS 属性表中（基础表 + 现代属性补充表）。
 func isKnownCSSProperty(prop string) bool {
-	return knownCSSProps[strings.ToLower(prop)]
+	prop = strings.ToLower(prop)
+	return knownCSSProps[prop] || modernCSSProps[prop]
 }
 
 // Silence unused import warning
@@ -6110,6 +6630,28 @@ func uaDefaultDisplayFor(e *dom.Element) string {
 	//   （resolver.go）保持一致（三处原先不一致 → computed 读到 block）。
 	case "li":
 		return "list-item"
+	// ★ H6（第 5 次监督轮）：table 系列的 UA display 与 defaultcss.go 的
+	//   `table { display: table }` / `tr { display: table-row }` 等规则保持一致
+	//   —— 本表此前缺这些分支，`getComputedStyle(table).display` 回退成
+	//   "inline"（Edge 实测 g7_listpseudo 的 tb = "table"）。
+	case "table":
+		return "table"
+	case "caption":
+		return "table-caption"
+	case "thead":
+		return "table-header-group"
+	case "tbody":
+		return "table-row-group"
+	case "tfoot":
+		return "table-footer-group"
+	case "tr":
+		return "table-row"
+	case "td", "th":
+		return "table-cell"
+	case "col":
+		return "table-column"
+	case "colgroup":
+		return "table-column-group"
 	case "html", "body", "div", "p", "section", "article", "header", "footer",
 		"main", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol",
 		"form", "blockquote", "pre", "figure", "figcaption", "fieldset",
@@ -6143,6 +6685,10 @@ var uaInitialComputedValues = map[string]string{
 	"maxHeight":          "none",
 	"overflowX":          "visible",
 	"overflowY":          "visible",
+	// ★ H5：scrollbar-gutter 的 CSS 初始值是 auto（不为滚动条预留空间）。
+	"scrollbarGutter":    "auto",
+	// ★ H6：text-wrap 的初始值是 wrap（Edge 实测 h6_misc_props 的默认元素 tw=wrap）。
+	"textWrap":           "wrap",
 	"zIndex":             "auto",
 	"boxSizing":          "content-box",
 	"textAlign":          "start",

@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>H7 transform normalization probe</title>
+<style>html,body{margin:0}.c{width:200px;height:100px}</style><body>
+<div id="host"></div>
+<pre id="out" style="margin:0"></pre>
+<script>
+var cases=['translate(20px,10px)','translateX(5px)','translateY(-3px)','translate(50%,25%)',
+'translate(1em,2em)','translate(0.5px)','translate(0.125px)','scale(0.5)','scale(2,3)',
+'scaleX(1.5)','scaleY(0.25)','scale(0.1)','scale(3)',
+'rotate(45deg)','rotate(90deg)','rotate(180deg)','rotate(270deg)','rotate(360deg)',
+'rotate(0.25turn)','rotate(1rad)','skew(10deg,20deg)','skewX(10deg)','skewY(-5deg)',
+'matrix(1,2,3,4,5,6)','matrix(0.5,0,0,0.5,10,20)','rotate(30deg) scale(2)',
+'translate(10px) rotate(90deg)','none','  '];
+var host=document.getElementById('host'),els=[],L=[];
+for(var i=0;i<cases.length;i++){
+  var d=document.createElement('div');d.className='c';d.style.transform=cases[i];host.appendChild(d);els.push(d);
+}
+for(var i=0;i<cases.length;i++){
+  var c=getComputedStyle(els[i]);
+  L.push('['+cases[i]+'] => tr='+c.transform+' | wo='+c.transformOrigin);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

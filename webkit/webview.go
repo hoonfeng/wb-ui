@@ -16,10 +16,10 @@ import (
 	"strings"
 	"sync"
 
-	"wb-ui/engine/js/bindings"
 	"wb-ui/bridge"
 	"wb-ui/engine/css"
 	"wb-ui/engine/dom"
+	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/js/jsc"
 	"wb-ui/engine/layout"
 	"wb-ui/engine/page"
@@ -45,11 +45,11 @@ const (
 // 改为分派器（按元素 OwnerDocument / 解释器 找到所属 WebView，调它的闭包）。
 // 单 WebView 行为与之前完全一致（注册表只有一个），多 WebView 各查各的。
 var (
-	webviewsMu      sync.RWMutex
-	webviews        = map[*WebView]bool{}
-	webviewBridges  = map[*WebView]*wvBridge{}
-	webviewInterps  = map[*jsc.Interpreter]*WebView{}
-	bridgeDispatch  sync.Once
+	webviewsMu     sync.RWMutex
+	webviews       = map[*WebView]bool{}
+	webviewBridges = map[*WebView]*wvBridge{}
+	webviewInterps = map[*jsc.Interpreter]*WebView{}
+	bridgeDispatch sync.Once
 )
 
 // wvBridge 保存某个 WebView 自己的绑定闭包（injectRenderTreeBridge / LoadHTML
@@ -364,7 +364,7 @@ func installBridgeDispatch() {
 				b.iframeSrcChanged(el, src)
 			}
 		}
-				// window.innerWidth/innerHeight 按解释器归属分派（挂件 Resize
+		// window.innerWidth/innerHeight 按解释器归属分派（挂件 Resize
 		// 不再覆盖配置窗口的视口尺寸）。
 		bindings.ViewportSizeForInterpreter = func(in *jsc.Interpreter) (float64, float64, bool) {
 			wv := webViewForInterpreter(in)
@@ -414,7 +414,7 @@ type WebView struct {
 	// hoverCapability/pointerCapability 是 (hover)/(pointer) 媒体特性能力，
 	// 默认 "hover"/"fine"（desktop 鼠标场景）；宿主可经
 	// SetPointerCapabilities 调整为触屏（coarse/none）等场景。
-	hoverCapability  string
+	hoverCapability   string
 	pointerCapability string
 
 	// currentURL 是主文档的加载 URL（LoadURL 设置，LoadHTML 直出内容时为
@@ -424,7 +424,7 @@ type WebView struct {
 	// 解析（WebKit completeURL 语义）。
 	//
 	// 读写加锁：LoadURL 在宿主线程写，fetch/XHR 在解释器线程读。
-	currentURL   string
+	currentURL string
 	// baseHref 是主文档 `<base href>` 的原始值缓存。文档基准（document.baseURI）
 	// = ResolveURL(currentURL, baseHref)（见 documentBaseURL）。为什么缓存而不是
 	// 每次读 Document.BaseURL()：fetch/XHR 在**解释器线程**解析相对 URL，而
@@ -733,11 +733,11 @@ func (wv *WebView) handleIFrameSrcChanged(el *dom.Element, src string) {
 	wv.loadSubframe(el, abs)
 }
 
-func (wv *WebView) Page() *page.Page          { return wv.page }
-func (wv *WebView) MainFrame() *WebFrame       { return wv.mainFrame }
-func (wv *WebView) Settings() *page.Settings    { return wv.settings }
-func (wv *WebView) Width() int                 { return wv.width }
-func (wv *WebView) Height() int                { return wv.height }
+func (wv *WebView) Page() *page.Page         { return wv.page }
+func (wv *WebView) MainFrame() *WebFrame     { return wv.mainFrame }
+func (wv *WebView) Settings() *page.Settings { return wv.settings }
+func (wv *WebView) Width() int               { return wv.width }
+func (wv *WebView) Height() int              { return wv.height }
 
 // SetPrefersColorScheme 设置 (prefers-color-scheme) 的值（"light"/"dark"），
 // 供 matchMedia 与 CSS 媒体查询使用。
@@ -824,7 +824,9 @@ func (wv *WebView) LoadHTMLWithBaseURL(src, baseURL string) error {
 // 传真实 URL，LoadHTML 传 ""），它决定 location.href / document.URL 以及
 // 所有相对引用（<link>/<script src>/fetch/XHR/iframe src）的解析基准。
 func (wv *WebView) loadHTMLFrom(src, docURL string) error {
-	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
+	if wv.destroyed || wv.mainFrame == nil {
+		return ErrDestroyed
+	}
 	// ★ 装配期间标记 + 结束处理：页面脚本里发起的导航（location 赋值、
 	// history 遍历）排队到装配结束后执行——浏览器里导航是异步的，不会在
 	// 当前脚本执行中途替换文档/渲染树。
@@ -920,7 +922,7 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		}
 		bindings.RegisterDOMBindings(wv.jsInterpreter, wv.mainFrame.Document())
 		// ★ 模式接线（2/4）：Worker/WebSocket 是浏览器并发/长连接能力，
-		//   UI 库模式下从全局隐藏（typeof Worker === "undefined" / 
+		//   UI 库模式下从全局隐藏（typeof Worker === "undefined" /
 		//   typeof WebSocket === "undefined"），库的 feature detect 才能
 		//   得到正确结论（引擎不内置真实 WebSocket 传输，Worker 是真实
 		//   线程——UI 库模式下宿主不需要页面自己起线程）。
@@ -1008,8 +1010,17 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 			if fr == nil {
 				return
 			}
+			// 失效范围取**父级子树**（2026-09 实测修正）：兄弟/后继组合器让
+			// 邻近元素的匹配结果随 el 的 class/状态一起变——`.tab.active + .panel`、
+			// `input:checked + .track::after`（开关滑块）。只清 el 子树时兄弟沿用
+			// 旧 resolver 缓存，画面停在旧样式（实测：#c:checked + #s 在勾选后
+			// #s 恒为旧色，重建渲染树也不恢复）。
+			scope := el
+			if p := el.ParentElement(); p != nil {
+				scope = p
+			}
 			if rsv := fr.Resolver(); rsv != nil {
-				rsv.InvalidateSubtree(el)
+				rsv.InvalidateSubtree(scope)
 			}
 			fr.MarkRenderTreeDirty()
 			fr.SetNeedsLayout(true)
@@ -1042,6 +1053,13 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		fr.ExecuteScripts()
 		fr.RebuildRenderTree()
 	}
+	// ★ DOMContentLoaded（document）：DOM 解析完、同步脚本执行完、渲染树已建。
+	//   规范此刻 document.readyState 仍为 "interactive"（load 之前），因此必须在
+	//   SetReadyState("complete") 之前派发。此前引擎从不派发该事件 → 所有
+	//   document.addEventListener('DOMContentLoaded', fn) 的页面脚本永不执行。
+	if fr := wv.mainFrame.Frame(); fr != nil && wv.jsInterpreter != nil {
+		bindings.FireDocumentEvent(wv.jsInterpreter, fr.Document(), "DOMContentLoaded")
+	}
 	// iframe 子文档：主文档加载完成后，为带 src 的 <iframe> 创建子 Frame
 	// 并加载（WebKit: FrameLoader 在解析到 iframe 元素时创建子 Frame）。
 	// 子 Frame 拥有独立 ScriptEngine（独立 JS 全局环境），子文档脚本
@@ -1051,11 +1069,20 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	if wv.mode.allowsSubframes() {
 		wv.loadIFrameDocuments()
 	}
-	// 加载流程收尾：DOM 已解析、页面脚本已执行、渲染树已重建 ⇒ readyState
-	// 推进到 "complete"（HTML §3.1.4，load 事件之后的状态）。此前页面脚本
-	// 执行时读到的是 SetDocument 置的 "interactive"。
+	// 加载流程收尾（HTML §3.1.4）：DOM 已解析、页面脚本已执行、渲染树已重建，
+	// 资源也已同步就位 ⇒ 推进 readyState 到 "complete"，随后派发 load（window）。
+	//
+	// ★ 此前只推进 readyState 而**从不派发 load / DOMContentLoaded**：挂在两个
+	//   事件上的页面脚本永不执行且不报错，页面静默停在初始状态。实测
+	//   dev/fixtures/css-stack/sticky.html 的 `window.addEventListener('load',
+	//   …)` 里 `sc.scrollTop = 60` 从未发生（探针 loadFired=false、scrollTop=0，
+	//   而 Edge 为 60）——与 Edge 对照的整段滚动容器差异即由此而来。
+	//   详见 bindings/lifecycle.go 的说明。
 	if fr := wv.mainFrame.Frame(); fr != nil {
 		fr.SetReadyState("complete")
+		if wv.jsInterpreter != nil {
+			bindings.FireWindowEvent(wv.jsInterpreter, "load")
+		}
 	}
 	return nil
 }
@@ -1509,9 +1536,15 @@ func (wv *WebView) Render() ([]byte, error) {
 }
 
 func (wv *WebView) Resize(width, height int) {
-	if wv.destroyed || wv.page == nil { return }
-	if width < 0 { width = 0 }
-	if height < 0 { height = 0 }
+	if wv.destroyed || wv.page == nil {
+		return
+	}
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
 	wv.width, wv.height = width, height
 	// ★ window.innerWidth/innerHeight（CM6 visiblePixelRange 依赖；undefined
 	// 会让 Math.min(win.innerHeight,…) 产生 NaN → viewport 永不更新 → 滚动
@@ -1526,7 +1559,9 @@ func (wv *WebView) Resize(width, height int) {
 }
 
 func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
-	if wv.destroyed { return jsc.Undefined(), ErrDestroyed }
+	if wv.destroyed {
+		return jsc.Undefined(), ErrDestroyed
+	}
 	if !wv.settings.JavaScriptEnabled {
 		return jsc.Undefined(), ErrJavaScriptDisabled
 	}
@@ -1567,7 +1602,9 @@ func (wv *WebView) EvalJS(script string) (jsc.JSValue, error) {
 // 浏览器语义：函数内的 this 绑定为全局对象（window.fn() 的 this）。
 // 返回值可直接用 jsc.JSValue 的 ToString/ToNumber/ToBoolean/AsObject 读取。
 func (wv *WebView) CallFunction(name string, args ...any) (jsc.JSValue, error) {
-	if wv.destroyed { return jsc.Undefined(), ErrDestroyed }
+	if wv.destroyed {
+		return jsc.Undefined(), ErrDestroyed
+	}
 	if !wv.settings.JavaScriptEnabled {
 		return jsc.Undefined(), ErrJavaScriptDisabled
 	}
@@ -1615,7 +1652,9 @@ func (wv *WebView) CallFunction(name string, args ...any) (jsc.JSValue, error) {
 // 字符串（含数据）后调用，即可整体刷新一块 UI——无需逐元素命令式
 // 创建/插入/改样式。
 func (wv *WebView) RenderHTML(id, html string) error {
-	if wv.destroyed || wv.mainFrame == nil { return ErrDestroyed }
+	if wv.destroyed || wv.mainFrame == nil {
+		return ErrDestroyed
+	}
 	doc := wv.mainFrame.Document()
 	if doc == nil {
 		return ErrNoDocument
@@ -1635,7 +1674,9 @@ func (wv *WebView) RenderHTML(id, html string) error {
 }
 
 func (wv *WebView) ConsoleOutput() string {
-	if wv.jsLogger == nil { return "" }
+	if wv.jsLogger == nil {
+		return ""
+	}
 	return wv.jsLogger.String()
 }
 
@@ -1649,12 +1690,16 @@ func (wv *WebView) SetConsoleLogger(l *jsc.BufferLogger) {
 }
 
 func (wv *WebView) ResetConsole() {
-	if wv.jsLogger == nil { return }
+	if wv.jsLogger == nil {
+		return
+	}
 	wv.jsLogger.Lines = nil
 }
 
 func (wv *WebView) ensureJSRuntime() {
-	if wv.jsInterpreter != nil { return }
+	if wv.jsInterpreter != nil {
+		return
+	}
 	wv.jsInterpreter = jsc.NewInterpreter()
 	// ★ 解释器注册表：window.innerWidth 分派（ViewportSizeForInterpreter）
 	// 按解释器归属查 WebView 视口尺寸（多 WebView 不被挂件 Resize 覆盖）。
@@ -1677,7 +1722,9 @@ func (wv *WebView) JSInterpreter() *jsc.Interpreter {
 }
 
 func (wv *WebView) Document() *dom.Document {
-	if wv.destroyed || wv.mainFrame == nil { return nil }
+	if wv.destroyed || wv.mainFrame == nil {
+		return nil
+	}
 	return wv.mainFrame.Document()
 }
 
@@ -1787,7 +1834,8 @@ func (wv *WebView) injectRenderTreeBridge() {
 	wvBridgeOf(wv).getElementScrollOffset = func(el *dom.Element) (float64, float64) {
 		return wrapBox(el, func(box *rendering.RenderBox) (float64, float64) {
 			if rv := wv.RenderView(); rv != nil {
-				return rv.BoxScrollOffset(box)			}
+				return rv.BoxScrollOffset(box)
+			}
 			return 0, 0
 		})
 	}
@@ -1860,6 +1908,22 @@ func (wv *WebView) injectRenderTreeBridge() {
 			queueScrollEvent(el)
 		}
 	}
+	// gutterReservesSpace 报告元素是否因 scrollbar-gutter: stable/always 需要为
+	// 垂直滚动条**常驻预留**空间（CSS Overflow 4）：auto → 不预留；stable → 该轴
+	// overflow 非 visible 时预留；always → 同样预留。
+	gutterReservesSpace := func(st *style.ComputedStyle) bool {
+		if st == nil {
+			return false
+		}
+		g := strings.TrimSpace(st.GetProperty("scrollbar-gutter"))
+		if g == "" || g == "auto" {
+			return false
+		}
+		if !strings.HasPrefix(g, "stable") && !strings.HasPrefix(g, "always") {
+			return false
+		}
+		return st.OverflowY != style.OverflowVisible
+	}
 	installBridgeDispatch()
 	wvBridgeOf(wv).getElementScrollMetrics = func(el *dom.Element) (viewW, viewH, totalW, totalH float64, scrollable bool) {
 		forceLayout()
@@ -1889,16 +1953,36 @@ func (wv *WebView) injectRenderTreeBridge() {
 		}
 		pb := box.PaddingBoxRect()
 		tw, th := rv.BoxContentSize(box)
+		// ★ H5-1：scrollWidth/scrollHeight 至少等于 padding box 尺寸
+		//   （CSSOM View §6.2/6.3）。空内容的 overflow:scroll 容器其 scroll
+		//   尺寸 = client 尺寸；Edge 实测 #scroll（200x60 容器、无内容）= 200x60，
+		//   而 BoxContentSize 对空内容返回 0x0。
+		if tw < pb.Width {
+			tw = pb.Width
+		}
+		if th < pb.Height {
+			th = pb.Height
+		}
+		// ★ H5-2：scrollbar-gutter: stable/always 为垂直滚动条**常驻预留**空间
+		//   → clientWidth 扣掉滚动条宽度。Edge 实测：200x60 容器 + overflow:auto
+		//   + scrollbar-gutter:stable → clientWidth = 185 = 200-15，而 offsetWidth
+		//   仍为 200（布局宽度不变，只影响 CSSOM 读数）。
+		vw := pb.Width
+		if gutterReservesSpace(box.Style()) {
+			if vw -= style.ScrollbarWidth(box.Style()); vw < 0 {
+				vw = 0
+			}
+		}
 		vm := rendering.VerticalScrollbarMetrics(rv, box)
 		hm := rendering.HorizontalScrollbarMetrics(rv, box)
-		return pb.Width, pb.Height, tw, th, (vm.OK || hm.OK)
+		return vw, pb.Height, tw, th, (vm.OK || hm.OK)
 	}
 	// GetElementBoxRectFast：布局缓存直读（不触发 rebuild/layout）。
 	// computedStyleFor 的 height/width 兜底用它——CM6 measure 期间渲染树
 	// 频繁 dirty，若每次强制全量 rebuild（~22ms）→ 测量-布局风暴。
 	bindings.GetElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
 		rv := wv.RenderView()
-	wvBridgeOf(wv).getElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
+		wvBridgeOf(wv).getElementBoxRectFast = func(el *dom.Element) (left, top, width, height float64) {
 			return 0, 0, 0, 0
 		}
 		box := rv.FindRenderBoxForNode(el)
@@ -1930,6 +2014,125 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return 0, 0, 0, 0
 		}
 		return x0, y0, w, h
+	}
+	// cssShorthand4 把四边值拼成 CSS 简写（与浏览器 computed 的序列化一致）：
+	// 四边相同 → 1 值；上下/左右相同 → 2 值；左右相同 → 3 值；否则 4 值。
+	// 例：input 的 1px/2px/1px/2px → "1px 2px"；button 的 1px/6px/1px/6px →
+	// "1px 6px"；select 的 0 → "0px"。
+	cssShorthand4 := func(t, r, b, l string) string {
+		if t == r && r == b && b == l {
+			return t
+		}
+		if t == b && r == l {
+			return t + " " + r
+		}
+		if r == l {
+			return t + " " + r + " " + b
+		}
+		return t + " " + r + " " + b + " " + l
+	}
+	// GetElementComputedSnapshot：把渲染树上的 resolved computed style 关键
+	// 属性交给 getComputedStyle（见 bindings.GetElementComputedSnapshot）。
+	// 级联 map 只含元素**自身命中**的声明，缺继承值时 JS 会读到 CSS 初始值
+	// （`body{font-size:40px}` 的子元素读回 16px），而布局用的是继承来的 40px。
+	// 这里给出的是布局/绘制实际使用的值（font-size 已是 D1 绝对化后的 px），
+	// 保证 JS / 布局 / 绘制三方同源。
+	bindings.GetElementComputedSnapshot = func(el *dom.Element) map[string]string {
+		rv := wv.RenderView()
+		if rv == nil || el == nil {
+			return nil
+		}
+		ro := rv.FindRenderObjectForNode(el)
+		if ro == nil {
+			return nil // display:none 子树 / 尚未建树
+		}
+		st := ro.Style()
+		if st == nil {
+			return nil
+		}
+		snap := make(map[string]string, 12)
+		if st.FontSize.Value > 0 {
+			snap["font-size"] = fmt.Sprintf("%gpx", st.FontSize.Value)
+		}
+		switch {
+		case st.Color.A == 0xFF:
+			snap["color"] = fmt.Sprintf("rgb(%d, %d, %d)", st.Color.R, st.Color.G, st.Color.B)
+		default:
+			snap["color"] = fmt.Sprintf("rgba(%d, %d, %d, %g)",
+				st.Color.R, st.Color.G, st.Color.B, float64(st.Color.A)/255)
+		}
+		if st.FontFamily != "" {
+			snap["font-family"] = st.FontFamily
+		}
+		if st.FontStyle != "" {
+			snap["font-style"] = st.FontStyle
+		}
+		if st.FontVariant != "" {
+			snap["font-variant"] = st.FontVariant
+		}
+		if st.TextTransform != "" {
+			snap["text-transform"] = st.TextTransform
+		}
+		// text-align / white-space 在引擎里是 int 枚举（TextAlignType /
+		// WhiteSpaceType），此处不做枚举→关键字映射：字符串继承 + JS 初值
+		// 兜底已经能覆盖这两个属性的常见读法，宁可不写也不写错。
+		if st.Direction != "" {
+			snap["direction"] = st.Direction
+		}
+		if st.Visibility != "" {
+			snap["visibility"] = st.Visibility
+		}
+		if st.Cursor != "" {
+			snap["cursor"] = st.Cursor
+		}
+		// line-height：computed 值要么是关键字 normal，要么是绝对 px
+		// （数值倍率在布局期已折算，此处无法判定换算基准，故只报可确定的）。
+		switch st.LineHeight.Unit {
+		case "normal":
+			snap["line-height"] = "normal"
+		case "px":
+			snap["line-height"] = fmt.Sprintf("%gpx", st.LineHeight.Value)
+		}
+		if st.LetterSpacing.Value == 0 || st.LetterSpacing.Unit == "normal" {
+			snap["letter-spacing"] = "normal"
+		} else if st.LetterSpacing.Unit == "px" {
+			snap["letter-spacing"] = fmt.Sprintf("%gpx", st.LetterSpacing.Value)
+		}
+		// ★ H2：表单控件的 UA padding / border-width（Chromium html.css）。
+		//   computedStyleFor 只级联作者 <style>，UA 规则对它不可见 → 控件读到
+		//   padding=undefined；而渲染树 style 是布局实际使用值（作者 + UA）。
+		//   只对控件补，避免改变其它元素的 computed 输出。
+		switch strings.ToLower(el.LocalName()) {
+		case "input", "button", "select", "textarea":
+			// 只在四边都是 px（或空单位）时补，避免把 auto/% 误报成 "0px"。
+			pxLen := func(l style.Length) string {
+				if l.Unit == "" || l.Unit == "px" {
+					return fmt.Sprintf("%gpx", l.Value)
+				}
+				return ""
+			}
+			// set4 写四边 longhand + CSS 简写（Edge 的 computed 简写即四边拼接）。
+			set4 := func(prefix string, a, b, c, d style.Length) {
+				ls := [4]style.Length{a, b, c, d}
+				names := [4]string{"-top", "-right", "-bottom", "-left"}
+				var s [4]string
+				for i := range ls {
+					s[i] = pxLen(ls[i])
+					if s[i] == "" {
+						return
+					}
+					snap[prefix+names[i]] = s[i]
+				}
+				snap[prefix] = cssShorthand4(s[0], s[1], s[2], s[3])
+			}
+			set4("padding", st.PaddingTop, st.PaddingRight, st.PaddingBottom, st.PaddingLeft)
+			// ★ margin 同样是 UA 规则给的：checkbox 3px 3px 3px 4px、
+			//   radio 3px 3px 0 5px、range 2px，其余控件 0（Edge 实测
+			//   g1_formctl 的 t2/t3/t4/t1）。
+			set4("margin", st.MarginTop, st.MarginRight, st.MarginBottom, st.MarginLeft)
+			set4("border-width", st.BorderTopWidth, st.BorderRightWidth, st.BorderBottomWidth, st.BorderLeftWidth)
+		}
+		return snap
 	}
 	// GetTextBasePos：返回文本节点自身首个 render segment 的绝对位置。
 	// ★ 裸文本节点（CM6 行内标点/空格直接挂在 .cm-line 下，父元素是 block
@@ -2203,12 +2406,13 @@ func (wv *WebView) injectRenderTreeBridge() {
 	}
 }
 
-func (wv *WebView) RenderView() *rendering.RenderView {	return wv.mainFrame.RenderView()
+func (wv *WebView) RenderView() *rendering.RenderView {
+	return wv.mainFrame.RenderView()
 }
 
 // TopLayerRects 返回当前文档渲染层树中位于文档内容之上的浮层矩形
-//（z-index>0 / fixed：遮罩/弹窗/toast/下拉）。应用层「外部合成内容」
-//（画布预览挂件像素 blit）合成前查询：与浮层相交的区域不绘制，弹层
+// （z-index>0 / fixed：遮罩/弹窗/toast/下拉）。应用层「外部合成内容」
+// （画布预览挂件像素 blit）合成前查询：与浮层相交的区域不绘制，弹层
 // 遮挡语义自动正确（引擎层提供层叠真相，应用无需 JS 探测弹窗）。
 func (wv *WebView) TopLayerRects() []layout.LayoutRect {
 	rv := wv.RenderView()
@@ -2240,9 +2444,13 @@ func stickyHasInset(b *rendering.RenderBox) bool {
 }
 
 func (wv *WebView) EnsureLayout() {
-	if wv.destroyed || wv.page == nil || wv.mainFrame == nil { return }
+	if wv.destroyed || wv.page == nil || wv.mainFrame == nil {
+		return
+	}
 	view := wv.page.MainFrame().View()
-	if view != nil && view.NeedsLayout() { view.Layout() }
+	if view != nil && view.NeedsLayout() {
+		view.Layout()
+	}
 	wv.syncIFrameSizes()
 }
 
@@ -2251,7 +2459,9 @@ func (wv *WebView) EnsureLayout() {
 // （弹窗 display 等）后的首个点击若用陈旧树命中会穿透到后方元素）。
 // 通过 FlushRenderTreeDirty 忽略重建 cooldown；树无脏标记时零开销。
 func (wv *WebView) EnsureHitTestReady() {
-	if wv.destroyed || wv.mainFrame == nil { return }
+	if wv.destroyed || wv.mainFrame == nil {
+		return
+	}
 	if fr := wv.mainFrame.Frame(); fr != nil {
 		fr.FlushRenderTreeDirty()
 	}
@@ -2283,8 +2493,12 @@ func (wv *WebView) syncIFrameSizes() {
 			h -= iframePadLen(st.PaddingTop) + iframePadLen(st.PaddingBottom) +
 				iframePadLen(st.BorderTopWidth) + iframePadLen(st.BorderBottomWidth)
 		}
-		if w < 0 { w = 0 }
-		if h < 0 { h = 0 }
+		if w < 0 {
+			w = 0
+		}
+		if h < 0 {
+			h = 0
+		}
 		fv := f.View()
 		if fv != nil && (fv.Width() != int(w) || fv.Height() != int(h)) {
 			fv.SetSize(int(w), int(h))

@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>H2 baseline / UA control probe</title>
+<style>html,body{margin:0}</style><body>
+<div style="padding:10px;font:16px sans-serif">
+<input id="a" value="A"><br>
+<input id="b" value="B" style="vertical-align:baseline"><br>
+<input id="c" value="C" style="vertical-align:middle"><br>
+<input id="d" value="D" style="vertical-align:top"><br>
+<input id="e" value="E" style="vertical-align:bottom"><br>
+<button id="f">F</button><br>
+<select id="g"><option>G</option></select><br>
+<textarea id="h" rows="1">H</textarea><br>
+<span id="i" style="display:inline-block;width:20px;height:20px"></span><br>
+<input id="j" value="J" style="font:16px sans-serif">
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var ids=['a','b','c','d','e','f','g','h','i','j'],L=[];
+for(var i=0;i<ids.length;i++){var el=document.getElementById(ids[i]),r=el.getBoundingClientRect(),cs=getComputedStyle(el);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | va='+cs.verticalAlign+' | font='+cs.fontFamily+'/'+cs.fontSize+' | pad='+cs.padding+' | lh='+cs.lineHeight);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><title>H4 CSS.supports bounds probe</title>
+<style>html,body{margin:0}</style><body>
+<pre id="out" style="margin:0"></pre>
+<script>
+var one=['display:grid','(display:grid)','( display : grid )','foo:bar','a:hover','div > p',
+'not (display:grid)','(display:grid) and (color:red)','(display:grid) or (foo:bar)',
+'@container (min-width:1px){}','--x:1','color:red','transform:translate(1px)',
+'flex-flow:row column','display:grid grid','', 'display', '(unknownprop:foo)', '(display:bogusvalue)'];
+var L=[];
+for(var i=0;i<one.length;i++){
+  var r='?';
+  try{ r=CSS.supports(one[i])?'yes':'no'; }catch(e){ r='err:'+e.name; }
+  L.push('1arg ['+one[i]+'] => '+r);
+}
+var two=[['display','grid'],['display','bogusvalue'],['flex-flow','row column'],['flex-flow','column wrap'],
+['unknownprop','foo'],['color','red'],['transform','translate(1px)']];
+for(var j=0;j<two.length;j++){
+  var r2='?';
+  try{ r2=CSS.supports(two[j][0],two[j][1])?'yes':'no'; }catch(e){ r2='err:'+e.name; }
+  L.push('2arg ['+two[j][0]+', '+two[j][1]+'] => '+r2);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>H6 misc computed props</title>
+<style>html,body{margin:0}
+.box{width:100px;height:100px;background:#ddd;margin:4px}
+#a{line-break:strict}#b{line-break:loose}#c{line-break:anywhere}#d{line-break:normal}
+#e{word-break:break-all}#f{overflow-wrap:anywhere}#g{text-wrap:balance}
+#h{will-change:transform}#i{clip-path:circle(50%)}#j{filter:blur(2px)}
+#k{transform-origin:left top}#l{transform-origin:25% 75%}#m{transform-origin:right bottom}
+#n{padding:1px 2px}#o{margin:3px}#p{border:2px solid #000}
+</style><body>
+<div class="box" id="a"></div><div class="box" id="b"></div><div class="box" id="c"></div>
+<div class="box" id="d"></div><div class="box" id="e"></div><div class="box" id="f"></div>
+<div class="box" id="g"></div><div class="box" id="h"></div><div class="box" id="i"></div>
+<div class="box" id="j"></div><div class="box" id="k"></div><div class="box" id="l"></div>
+<div class="box" id="m"></div><div class="box" id="n"></div><div class="box" id="o"></div>
+<div class="box" id="p"></div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),c=getComputedStyle(e);
+L.push(ids[i]+' | lb='+c.lineBreak+' | wo='+c.transformOrigin+' | pad='+c.padding+' | mar='+c.margin+' | bor='+c.borderWidth+' | wc='+c.willChange+' | cp='+c.clipPath+' | fil='+c.filter+' | tw='+c.textWrap);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>
