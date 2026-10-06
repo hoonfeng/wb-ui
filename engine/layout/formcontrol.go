@@ -81,6 +81,27 @@ func formControlBaselineFromBorderTop(el *dom.Element, borderTop, paddingTop, bo
 	return 0, false
 }
 
+// isFormControlElement 报告元素是否为 UA 表单控件。
+//
+// ★ 用途：IFC 的行内基线定位有**两条**分支 —— 通用替换元素分支（基线 =
+//   margin box 底边，见 inlineformattingcontext.go 的 va/baseline 分支）
+//   与表单控件分支（基线 = 内部文本基线 = borderTop+paddingTop+字体 ascent）。
+//   input/button/select/output 的基线是**内部文本基线**，若同时被通用分支
+//   按「底边」处理，会把 maxBaseline 抬到 border-box 高（实测
+//   h2_baseline_formula 的 f 用例：input 显式 vertical-align:baseline 时
+//   maxBaseline 被抬到 21 → relTop 6，而 Edge 为 4）。此处集中判定，
+//   让表单控件**只**走表单控件分支。
+func isFormControlElement(el *dom.Element) bool {
+	if el == nil {
+		return false
+	}
+	switch strings.ToLower(el.LocalName()) {
+	case "input", "textarea", "button", "select", "output", "progress", "meter":
+		return true
+	}
+	return false
+}
+
 // formControlContentSize returns the UA intrinsic CONTENT-box size of a form
 // control box. ok is false for elements whose width is not intrinsic (a
 // <select> is as wide as its widest option) and for hidden inputs, so callers

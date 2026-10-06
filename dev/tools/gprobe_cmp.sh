@@ -60,11 +60,26 @@ doc = open(src, encoding='utf-8', errors='replace').read()
 m = re.search(r'<[a-zA-Z]+[^>]*\bid="%s"[^>]*>(.*?)</[a-zA-Z]+>' % re.escape(elemid), doc, re.S)
 txt = html.unescape(m.group(1)) if m else ''
 # 末尾补一个换行，避免 Edge 侧缺尾换行时 diff 把整份判成差异。
-open(dst, 'w', encoding='utf-8').write(txt.rstrip('\n') + '\n' if txt else '')
+# newline='' 是必须的：Windows 上 Python 文本模式默认把 '\n' 写成 '\r\n'，
+# 会让 Edge 侧整份变 CRLF 而 wbui 侧是 LF —— 于是 diff 全是假差异。
+open(dst, 'w', encoding='utf-8', newline='').write(txt.rstrip('\n') + '\n' if txt else '')
+PY
+
+echo "== [$NAME] 归一（CRLF→LF + 末尾换行统一）=="
+python - "$OUTDIR/$NAME.edge.txt" "$OUTDIR/$NAME.wbui.txt" <<'PY'
+import sys
+# 两侧统一口径：CRLF/CR → LF；去掉末尾所有空行后，各补且仅补一个 '\n'。
+# 这样 *.cmp.txt 非空就只代表真实内容差异，而不是换行噪声。
+for p in sys.argv[1:]:
+    with open(p, encoding='utf-8', errors='replace', newline='') as f:
+        s = f.read()
+    s = s.replace('\r\n', '\n').replace('\r', '\n').rstrip('\n')
+    with open(p, 'w', encoding='utf-8', newline='') as f:
+        f.write(s + '\n' if s else '')
 PY
 
 echo "== [$NAME] diff =="
-if diff -u "$OUTDIR/$NAME.edge.txt" "$OUTDIR/$NAME.wbui.txt" > "$OUTDIR/$NAME.cmp.txt"; then
+if diff -u --strip-trailing-cr "$OUTDIR/$NAME.edge.txt" "$OUTDIR/$NAME.wbui.txt" > "$OUTDIR/$NAME.cmp.txt"; then
   echo "IDENTICAL（Edge 基线 == wbui）"
 else
   echo "DIFF（- Edge / + wbui），共 $(grep -c '^[-+][^-+]' "$OUTDIR/$NAME.cmp.txt") 行差异"

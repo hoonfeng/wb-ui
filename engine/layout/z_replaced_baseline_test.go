@@ -77,8 +77,16 @@ func TestInlineReplacedTallerThanTextStaysInsideLineBox(t *testing.T) {
 	ig := state.GeometryForBox(imgBox)
 
 	// 行盒高度必须容纳替换元素（这条修复前后都成立，作为场景前提钉住）。
-	if math.Abs(wg.BorderBoxHeight()-64) > 0.5 {
-		t.Fatalf("wrap height = %.2f, want 64（行盒未计入替换元素高度）", wg.BorderBoxHeight())
+	// ★ 期望值 68.5 = img 高 64 + strut 的 descent 4.5（13px / line-height:1.5
+	//   宿主），由 **Edge 实测**钉住 —— 见探针
+	//   dev/fixtures/webshot/h2_replaced_linebox.html（同构场景，Edge 的 #wrap
+	//   高 68.500，chromium 把 strut 的 descent 计入行盒，CSS 2.1 §10.8：
+	//   行盒高 = max(ascent) + max(descent)）。
+	//   此前期望 64（只算 img 高、漏 strut descent），与浏览器行为不符 ——
+	//   同一轮 h2_baseline_matrix 的 r_img（16px/normal + 30×30 img）Edge 也得
+	//   35 = 30 + 5，两处一致。容差 0.5 覆盖字体度量的取整差（wbui 68.25）。
+	if math.Abs(wg.BorderBoxHeight()-68.5) > 0.5 {
+		t.Fatalf("wrap height = %.2f, want 68.5（= img 64 + strut descent 4.5，Edge 实测）", wg.BorderBoxHeight())
 	}
 	// ★ 核心断言：图片顶边相对父内容顶的偏移必须为 0。
 	//   修复前 = -50（图片底边坐文本基线 → 整体上浮 50px）。

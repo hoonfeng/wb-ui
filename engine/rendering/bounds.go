@@ -6,7 +6,11 @@
 // position, not the layout position).
 package rendering
 
-import "math"
+import (
+	"math"
+
+	"wb-ui/engine/style"
+)
 
 // transform2D 是 2D 仿射变换（3x3 矩阵的 2D 部分：a c e / b d f / 0 0 1）。
 type transform2D struct {
@@ -196,6 +200,57 @@ func TransformRect(transform string, refW, refH, x, y, w, h float64) (float64, f
 	maxX := math.Max(math.Max(x0, x1), math.Max(x2, x3))
 	maxY := math.Max(math.Max(y0, y1), math.Max(y2, y3))
 	return minX, minY, maxX - minX, maxY - minY, true
+}
+
+// TransformRectWithOrigin 在 TransformRect 之上加入 transform-origin 语义：
+// CSS Transforms L1 §4 —— 变换绕 origin 进行，等价于 painter 端的
+// [Translate(O) → M → Translate(−O)]（见 applyOwnOverflowClip）。
+// originX/originY 是相对元素 border-box 左上角的 px 偏移；x/y/w/h 是**元素局部
+// 坐标系**下的矩形（左上角为 0,0）。其余语义与 TransformRect 相同。
+func TransformRectWithOrigin(transform string, refW, refH, originX, originY, x, y, w, h float64) (float64, float64, float64, float64, bool) {
+	nx, ny, nw, nh, ok := TransformRect(transform, refW, refH, x-originX, y-originY, w, h)
+	if !ok {
+		return x, y, w, h, false
+	}
+	return nx + originX, ny + originY, nw, nh, true
+}
+
+// TransformRectByStyleOrigin 同 TransformRectWithOrigin，但 origin 直接取自
+// style（未声明时 Length 为零值哨兵 → 回退左上角，与 painter 端
+// resolveTransformOrigin 的 -1 语义一致）。供祖先 transform 链累计使用。
+func TransformRectByStyleOrigin(st *style.ComputedStyle, refW, refH, x, y, w, h float64) (float64, float64, float64, float64, bool) {
+	if st == nil {
+		return x, y, w, h, false
+	}
+	ox, oy := 0.0, 0.0
+	if v := resolveTransformOrigin(st.TransformOriginX, refW); v >= 0 {
+		ox = v
+	}
+	if v := resolveTransformOrigin(st.TransformOriginY, refH); v >= 0 {
+		oy = v
+	}
+	return TransformRectWithOrigin(st.Transform, refW, refH, ox, oy, x, y, w, h)
+}
+
+// TransformRectForStyle 计算带 transform 的元素**自身**（不含祖先）在视口坐标
+// 下的变换后矩形：vx/vy 为元素左上角的视口坐标，w/h 为矩形尺寸，refW/refH 为
+// 元素 border-box 尺寸（translate 与 transform-origin 百分比的参照）。
+// ok=false 表示无变换或恒等变换（矩形不变）。
+//
+// ★ 必须用**元素局部坐标**（左上角为 0,0）算完再平移回视口：TransformRect 的
+//   语义是「绕元素原点变换」，直接喂视口绝对坐标会把元素自身的位置一并缩放 ——
+//   实测 g2_transform 的 #sc（scale(0.5) + transform-origin:0 0，布局 top=140）
+//   报 rect.top=70（= 140×0.5），而 Edge 报 140（缩放在元素局部坐标系内进行，
+//   不移动左上角）。
+func TransformRectForStyle(st *style.ComputedStyle, refW, refH, vx, vy, w, h float64) (float64, float64, float64, float64, bool) {
+	if st == nil || st.Transform == "" || st.Transform == "none" {
+		return vx, vy, w, h, false
+	}
+	nx, ny, nw, nh, ok := TransformRectByStyleOrigin(st, refW, refH, 0, 0, w, h)
+	if !ok {
+		return vx, vy, w, h, false
+	}
+	return vx + nx, vy + ny, nw, nh, true
 }
 
 // ── 简化字符串辅助（避免引入 strings 依赖冲突的命名空间）──

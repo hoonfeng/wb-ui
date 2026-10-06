@@ -134,9 +134,26 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	if lineHeight <= 0 {
 		lineHeight = fs * 1.2
 	}
+	// ★ quirks 模式的 strut 抑制（实测行为，非规范推导）。
+	//   实测（本机「参照浏览器」Chrome headless，cssoracle 与 cssprobe 共用）：
+	//     quirks   <form><input size=17></form> → form 高 21.2（= input 边框盒高）
+	//     standards 同一结构                      → form 高 25.8（= strut descent 4.6
+	//                                               + input 21.2，即 strut 参与）
+	//   即 quirks 文档中，当行的内容**只有 atomic inline 子盒、没有任何文本**时，
+	//   strut 的 ascent 与 descent 都不进行盒；行盒高 = 子盒的 margin box 高。
+	//   cssprobe form-control-quirks 的 `.form-marker` 因此停在 y=40（= wbui 的
+	//   strut 24 + form 的 1em 下边距 16）而浏览器是 37（= input 边框盒 21 + 16）。
+	// ★ 该判定同时决定 strut 是否进入 maxBaseline/maxDescent（下文 strutAscent/
+	//   strutDescent），故保存为变量复用（纯判定、无副作用）。
+	quirksNoStrut := quirksStrutSuppressed(box)
+	if quirksNoStrut {
+		lineHeight = 0
+	}
 	// Use CSS line-height if explicitly set (overrides font metrics).
-	cssLH := cssLineHeight(box)
-	if cssLH > 0 {
+	// ★ 用 ok（而非 `> 0`）判断「显式设置」：`line-height: 0` 是有效值
+	//   （零行高），而 normal/未声明用 Unit="normal" 表示 → 回退字体度量。
+	cssLH, cssLHSet := cssLineHeight(box)
+	if cssLHSet {
 		lineHeight = cssLH
 	}
 	// baseLineHeight 是本 IFC 的【基准行高】（字体度量或 CSS line-height），
@@ -153,8 +170,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		if el := box.Element(); el != nil {
 			name, class = el.NodeName(), el.GetAttribute("class")
 		}
-		fmt.Fprintf(os.Stderr, "[ifc] <%s class=%q> fs=%.4f fontLineGap=%.4f cssLH=%.4f lineHeight=%.4f family=%q\n",
-			name, class, fs, fontLineGap(box), cssLineHeight(box), lineHeight, fontFamilyOf(box))
+		fmt.Fprintf(os.Stderr, "[ifc] <%s class=%q> fs=%.4f fontLineGap=%.4f cssLH=%.4f set=%v lineHeight=%.4f family=%q\n",
+			name, class, fs, fontLineGap(box), cssLH, cssLHSet, lineHeight, fontFamilyOf(box))
 	}
 	// Text segment height should be the actual font metrics height, not CSS
 	// line-height. The line-height determines line spacing and centering.
@@ -183,12 +200,19 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	isPlainInline := cs != nil && box.IsInline() && !box.IsReplaced() &&
 		cs.Display == style.DisplayInline && !isFlexItem(box) &&
 		!(box.Element() == nil && parentIsFlexItem)
-	if !isPlainInline && cssLH > 0 {
+	if !isPlainInline && cssLHSet {
 		centeringOffset = (cssLH - textHeight) / 2
 	}
 	// 本行文本段的字体 ascent：基线对齐时文本段的 Y = 行盒基线 - ascent
 	// （见下面的 lineTextOffset / 表单控件基线定位）。
-	textAscent, _ := fontAscentDescent(box)
+	textAscent, textDescent := fontAscentDescent(box)
+	// ★ 字体度量**各自四舍五入到整像素**后再参与行盒计算（与 fontLineGap 同一
+	//   口径）：浏览器把 ascent/descent/lineGap 分别取整后才相加，行盒基线也
+	//   用取整后的 ascent —— Edge 实测 fs16 → 19/5、fs32 → 37/9，正是
+	//   round(1.15625·fs) / round(0.293·fs)（h2_baseline_matrix 的 46 例逐一
+	//   吻合）。用未取整值会让 strut 基线差 0.094px（h2_baseline_formula：
+	//   relTop 3.906 vs Edge 4.000）。
+	textAscent, textDescent = math.Round(textAscent), math.Round(textDescent)
 	// halfLeading：行盒高与字体度量高之差的一半（字体在行盒内的上下留白）。
 	// 行盒高取 CSS line-height（已解析为 px）或字体度量行高（line-height:normal
 	// 与未声明时）。cssLineHeight 对 normal 返回 0（见其文档），故此处按
@@ -199,14 +223,31 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	//   子盒 border-box 顶 = 行盒顶 + halfLeading + ascent - 子盒高
 	halfLeading := 0.0
 	{
-		asc, desc := fontAscentDescent(box)
 		lineBoxH := textHeight
-		if cssLH > 0 {
+		if cssLHSet {
 			lineBoxH = cssLH
 		}
-		if lineBoxH > asc+desc {
-			halfLeading = (lineBoxH - (asc + desc)) / 2
-		}
+		// ★ 半行距**可为负**（CSS 2.1 §10.8.1）：line-height 小于字体度量行高
+		//   时文字上下都溢出行盒。此前 `if lineBoxH > asc+desc` 把负半行距
+		//   静默归零 —— `line-height:20px`（< 字体行高 23）的 strut ascent 被
+		//   算成 18.5 而非 17，其中的控件/替换元素整体偏高 2px。Edge 实测
+		//   （h2_baseline_matrix）：lh20px 的 input relTop=2、lh40px relTop=12
+		//   （= 8.5 半行距 + 18.5 ascent − 15 控件基线），只有负半行距能复现。
+		halfLeading = (lineBoxH - (textAscent + textDescent)) / 2
+	}
+	// strut（本 IFC 容器自身字体）在行盒里的 ascent/descent：行盒顶→基线 /
+	// 基线→行盒底。CSS 2.1 §10.8：行盒高 = max(各 inline 盒 ascent) +
+	// max(descent)，**strut 本身也是其中一个参与项**。
+	// 此前 maxBaseline/maxDescent 只由控件/替换元素贡献、strut 完全不参与 →
+	// 控件永远贴行盒顶（h2_baseline_matrix 实测 relTop 恒 0，Edge 为
+	// 4/22/2/12；行盒底也少了 strut descent，ib_30x30 行盒 30 而 Edge 35）。
+	strutAscent := halfLeading + textAscent
+	strutDescent := halfLeading + textDescent
+	// ★ quirks 下（本行只有 atomic inline 子盒、无文本）strut 不参与行盒：
+	//   ascent/descent 一并归零，否则子盒会被抬到「strut 基线」上——
+	//   form-control-quirks 的 .form-marker 又停回 y=41（浏览器 37）。
+	if quirksNoStrut {
+		strutAscent, strutDescent = 0, 0
 	}
 
 	// When contentWidth is auto (derived from intrinsic text width), widen it
@@ -352,10 +393,17 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 浏览器语义：行盒因更高的 atomic inline 变高后，同行文本仍坐在基线上。
 	lineTextOffset := func() float64 {
 		off := centeringOffset
-		if currentLine.maxBaseline > 0 {
-			if d := currentLine.maxBaseline - (centeringOffset + textAscent); d > 0 {
-				off += d
-			}
+		// ★ 比较基准是 **strut 的 ascent**（行盒顶→基线）：maxBaseline 现在
+		//   含 strut 项，只有当某个控件/替换元素把基线抬得比 strut 更高时，
+		//   同行文本才随基线下移（CSS 2.1 §10.8：文本仍坐在新基线上）。
+		//   等于 strutAscent 时不移动 → 对无控件的普通文本行零影响。
+		// quirks 下 strut 不参与，基准回到「文本自身基线位置」以保持旧行为。
+		base := strutAscent
+		if quirksNoStrut {
+			base = centeringOffset + textAscent
+		}
+		if d := currentLine.maxBaseline - base; d > 0 {
+			off += d
 		}
 		return off
 	}
@@ -586,6 +634,17 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				}
 			}
 		case *ElementBox:
+			if debugenv.Enabled("WBUI_IFC_DEBUG") {
+				nm, cls, disp := "<anon>", "", "nil"
+				if e := cld.Element(); e != nil {
+					nm, cls = e.NodeName(), e.GetAttribute("class")
+				}
+				if cs := cld.Style(); cs != nil {
+					disp = cs.Display.String()
+				}
+				fmt.Fprintf(os.Stderr, "[ifc-disp] %s class=%q display=%s inlineLevel=%v replaced=%v\n",
+					nm, cls, disp, cld.IsInlineLevel(), cld.IsReplaced())
+			}
 			// Absolute/fixed children are out-of-flow: collect for deferred
 			// layout against their containing block (handled above).
 			if cld.IsAbsolutelyPositioned() {
@@ -618,7 +677,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// 背景不居中、文字偏下的根因）。inline-block/replaced 保留
 			// centeringOffset（垂直居中于行框）。
 			topOffset := centeringOffset
-			if cldCS := cld.Style(); cldCS != nil && cld.IsInline() && !cld.IsReplaced() && cldCS.Display == style.DisplayInline {
+			if cldCS := cld.Style(); cldCS != nil && ((cld.IsInline() && !cld.IsReplaced() && cldCS.Display == style.DisplayInline) || cldCS.VerticalAlign == "top") {
 				topOffset = 0
 			}
 			cldG.SetTopLeft(currentLine.y+topOffset+margin.Top, currentLine.contentX+currentLine.widthUsed+margin.Left)
@@ -988,7 +1047,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						targetTop := lineTop + (lineH-childH)/2 + margin.Top
 						cldG.SetTopLeft(targetTop, cldG.Left())
 					}
-				} else if (va == "" || va == "baseline") && cld.IsReplaced() && textAscent > 0 {
+				} else if (va == "" || va == "baseline") && cld.IsReplaced() && textAscent > 0 &&
+					!isFormControlElement(cld.Element()) {
+					// ★ 表单控件不走通用替换元素分支（其基线是**内部文本基线**，
+					//   不是 margin box 底边）——统一交给下面的表单控件基线分支
+					//   （formControlBaselineFromBorderTop）。两条分支同时作用时
+					//   通用分支会把 maxBaseline 抬到 border-box 高（h2_baseline_formula
+					//   的 f 用例 relTop 6 而 Edge 4）。
 					// ★ vertical-align:baseline（默认）——替换元素（svg/img/…）
 					// 的基线 = 其下外边距边缘（CSS 2.1 §10.8.1：替换元素无内联
 					// 内容，基线取 margin box 底边），必须坐在父行盒的基线上：
@@ -1028,8 +1093,83 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						cldG.SetTopLeft(baseLine-childBH-margin.Bottom, cldG.Left())
 						// 基线在 margin box 底边 → 基线以下深度即 margin.Bottom。
 						currentLine.baselineBoxes = append(currentLine.baselineBoxes, cld)
+						// ★ strut 的 descent 也参与：替换元素底部之上，行盒底仍要
+						//   容纳 strut 基线以下的深度（Edge 实测 r_img/ib_30x30
+						//   的行盒高 35 = 30 控件 + 5 strut descent）。
+						if strutDescent > currentLine.maxDescent {
+							currentLine.maxDescent = strutDescent
+						}
 						if margin.Bottom > currentLine.maxDescent {
 							currentLine.maxDescent = margin.Bottom
+						}
+					}
+				}
+				// ★ inline-block 参与行盒高度（CSS 2.1 §10.8.1）：基线对齐的
+				//   inline-block 其基线是**底边 margin 边**（无行内内容时），
+				//   行盒至少要容纳「margin-top + border-box 高」在基线上方、
+				//   「margin-bottom」在基线下方。
+				//   此前只有 replaced 元素与 vertical-align:middle 参与，
+				//   inline-block 完全不计入行盒：正常字体下行盒被基准行高
+				//   （如 24）兜住看不出来；但 `font-size:0; line-height:0` 的
+				//   容器基准行高为 0，行盒塌成 0，20px 的 inline-block 溢出
+				//   行盒 —— cssprobe legacy-center 的 `#legacy` 首个行盒因此
+				//   为 0（Edge 20），其后所有块整体上移。
+				//   只提升行盒高、不改子盒定位（仍放在
+				//   currentLine.y+centeringOffset）：仅当 inline-block 高于
+				//   当前行盒时生效，因此对正常字体页面零影响。
+				if va == "" || va == "baseline" {
+					if cldCS := cld.Style(); cldCS != nil && cldCS.Display == style.DisplayInlineBlock {
+						// ★ 空 inline-block（无行内内容）的基线是其**底边 margin 边**
+						//   （CSS 2.1 §10.8.1）→ 把「marginTop + border-box 高」放在
+						//   基线上方、margin-bottom 放在下方，于是
+						//   行盒高 = max(strutAscent, 子盒 ascent) +
+						//            max(strutDescent, 子盒 descent)。
+						//   此前只把 lineH 提升到「子盒高」，漏了 strut 的 descent ——
+						//   minibox 的 d（16px 容器 + 100×20 空 inline-block）行盒
+						//   24 而 Edge 为 25（= 20 + strut descent 5）。
+						//   有内容的 inline-block 基线在**内部**（≈ 内部 strut 基线），
+						//   与「底边」不同，故此处只处理空内容情形（现有 lineH 提升
+						//   分支对它们已正确）。
+						// ★ 表单控件（input/button/select/textarea…）同样没有子节点
+						//   （inlineIsEmpty 为真），但它们的基线是**内部文本基线**而非
+						//   底边，须由下面的表单控件分支统一处理 —— 此处必须排除，
+						//   否则控件被当成「空 inline-block」按底边抬到 21px
+						//   （h2_baseline_formula 的 f 用例 relTop 6，Edge 4）。
+						// ★ 表单控件（input/button/select/textarea…）同样没有子节点
+						//   （inlineIsEmpty 为真），但它们的基线是**内部文本基线**而非
+						//   底边，须由下面的表单控件分支统一处理 —— 此处必须排除，
+						//   否则控件被当成「空 inline-block」按底边抬到 21px
+						//   （h2_baseline_formula 的 f 用例 relTop 6，Edge 4）。
+						// ★ 另一条限定「有显式高度」：无高度的空 inline-block 自身高为 0
+						//   （Edge 的 ib_empty 即 ctrlH=0），其 ascent 也是 0，不该改变
+						//   行盒；只有**带显式高度**的空 inline-block（基线 = 底边、
+						//   ascent = 高度）才参与 max(ascent)+max(descent)。
+						//   （实测若不加此条件，含文本的 ib_noheight 行盒会从 24 涨到 29。）
+						chnCS := cld.Style()
+						// ★ el != nil 是必须的：匿名盒（Element() == nil）没有 DOM 元素，
+						//   inlineIsEmpty(nil) 会解引用空指针 panic（CJK 夹具必经此路径）。
+						if el := cld.Element(); el != nil && !isFormControlElement(el) && inlineIsEmpty(el) &&
+							chnCS != nil && chnCS.Height.Unit != "" && chnCS.Height.Unit != "auto" {
+							asc := margin.Top + cldG.BorderBoxHeight()
+							if strutAscent > asc {
+								asc = strutAscent
+							}
+							desc := margin.Bottom
+							if strutDescent > desc {
+								desc = strutDescent
+							}
+							if asc > currentLine.maxBaseline {
+								currentLine.maxBaseline = asc
+							}
+							if desc > currentLine.maxDescent {
+								currentLine.maxDescent = desc
+							}
+							if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
+								currentLine.lineH = h
+							}
+						}
+						if need := margin.Top + cldG.BorderBoxHeight() + margin.Bottom; need > currentLine.lineH {
+							currentLine.lineH = need
 						}
 					}
 				}
@@ -1075,6 +1215,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// cldW），垂直方向是对称补齐。
 			// ★ 只记到【本行】的高度。原先写全局 lineHeight（跨行累积），会让
 			// 后续每一行都继承本行的最高子盒——容器高度被放大的来源之一。
+			if debugenv.Enabled("WBUI_IFC_DEBUG") {
+				nm := "<anon-inline>"
+				if e := cld.Element(); e != nil {
+					nm = e.NodeName()
+				}
+				fmt.Fprintf(os.Stderr, "[ifc-child] %s borderBoxH=%.3f marginV=%.3f contentH=%.3f fs=%.3f floor(before)=%.3f\n",
+					nm, cldG.BorderBoxHeight(), margin.Vertical(), cldG.ContentHeight(), fontSizeOf(cld), currentLine.lineH)
+			}
 			if cldBH := cldG.BorderBoxHeight() + margin.Vertical(); cldBH > currentLine.lineH {
 				currentLine.lineH = cldBH
 			}
@@ -1102,7 +1250,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 				}
 				// 与初始放置同一规则：纯 inline 顶贴行框顶。
 				topOffset := centeringOffset
-				if csc := cld.Style(); csc != nil && cld.IsInline() && !cld.IsReplaced() && csc.Display == style.DisplayInline {
+				if csc := cld.Style(); csc != nil && ((cld.IsInline() && !cld.IsReplaced() && csc.Display == style.DisplayInline) || csc.VerticalAlign == "top") {
 					topOffset = 0
 				}
 				cldG.SetTopLeft(currentLine.y+topOffset, currentLine.contentX+currentLine.widthUsed)
@@ -1130,8 +1278,22 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// 只能靠 30px 的宽松容差掩盖。
 			if el := cld.Element(); el != nil {
 				ba, _ := fontAscentDescent(cld)
+				// ★ 控件自身的字体 ascent 同样取整（浏览器把字体度量各自 round
+				//   后再用于基线定位）：Edge 的控件基线距顶恒为
+				//   2(border) + 1(padding) + round(12.07) = 15，用未取整的
+				//   12.07 会让 relTop 差 0.07（h2_baseline_formula 实测
+				//   3.930 vs Edge 4.000）。
+				ba = math.Round(ba)
 				if off, ok := formControlBaselineFromBorderTop(el, cldG.BorderTop(), cldG.PaddingTop(), cldG.BorderBoxHeight(), ba); ok {
+					// ★ 行盒顶→基线的距离取「strut 与控件要求」的较大者：控件
+					//   基线坐在行盒基线上，而行盒基线至少由 strut 的 ascent
+					//   决定（CSS 2.1 §10.8）。此前只取控件自身要求 → 控件永远
+					//   贴行盒顶（h2_baseline_matrix：input/fs16 relTop 恒 0，
+					//   Edge 为 4 = strutAscent 19 − 控件基线 15）。
 					align := margin.Top + off
+					if strutAscent > align {
+						align = strutAscent
+					}
 					if align > currentLine.maxBaseline {
 						delta := align - currentLine.maxBaseline
 						currentLine.maxBaseline = align
@@ -1149,7 +1311,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// 基线对齐后元素底边可能超过最高的盒子，所以不能再用
 					// 「max(border-box 高 + 垂直 margin)」那一套（本文件后面
 					// 对非控件仍保留它作为兜底）。
-					if d := (cldG.BorderBoxHeight() - off) + margin.Bottom; d > currentLine.maxDescent {
+					// ★ strut 的 descent 同样参与（行盒底至少到 strut 基线下方）。
+					d := (cldG.BorderBoxHeight() - off) + margin.Bottom
+					if strutDescent > d {
+						d = strutDescent
+					}
+					if d > currentLine.maxDescent {
 						currentLine.maxDescent = d
 					}
 					if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
@@ -1337,11 +1504,24 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		ps.textBox.TextSegments = append(ps.textBox.TextSegments, ps.seg)
 	}
 
-	// ★ 绝对/固定定位容器（out-of-flow）：高度由 layoutAbsolute 决定
-	// （box-sizing 扣减 border/padding），此处按文本内容高度回写会覆盖
-	// 正确值（按钮 height 18 → 22，border-box 失效）。与上方
-	// SetContentWidth 的 absolute 跳过同因。
-	if !box.IsAbsolutelyPositioned() {
+	// ★ 不写回内容的两种情形（写回内容尺寸前必须先排除"高度已由 CSS 或父
+	// 布局上下文确定"的盒子）：
+	//
+	// 1) 绝对/固定定位容器（out-of-flow）：高度由 layoutAbsolute 决定
+	//    （box-sizing 扣减 border/padding），此处按文本内容高度回写会覆盖
+	//    正确值（按钮 height 18 → 22，border-box 失效）。
+	//
+	// 2) **显式 height（definite）的盒子**：CSS 2.1 §10.6.3/§10.7 下块级盒高
+	//    由 CSS 高度或内容决定，二者**互斥**——height 为 definite 时盒高就是它，
+	//    内容溢出既不缩小也不撑大盒高。此前无条件 max(boxHeight, totalHeight)
+	//    等于把 height 当成 min-height：`height:20px` + 16px 文本（行盒 24）
+	//    被撑成 24，而 Edge 是 20（minibox 探针 a：cssHeight=20px / rect 24）。
+	//    cssprobe 的 legacy-center 里 `#pure-center`、`.cell-center` 都写着
+	//    `height:20px` 却量到 24，同一根因。
+	//    注意：height:auto 时必须保留 max(boxHeight, …)——boxHeight 可能是父
+	//    格式化上下文已分配的高度（flex cross-axis stretch / grid area），
+	//    内容比它矮时不能把盒子缩回去。
+	if !box.IsAbsolutelyPositioned() && heightIsAutoForBox(box) {
 		g.SetContentHeight(math.Max(boxHeight, totalHeight))
 	}
 }
@@ -1475,6 +1655,67 @@ func computeInlineContentWidth(box *ElementBox, state *LayoutState) float64 {
 		return 0
 	}
 	return maxRight - base
+}
+
+// quirksStrutSuppressed reports whether the line-box strut must be dropped for
+// box. Only quirks-mode documents do this, and only when the box's inline
+// content is exclusively atomic (replaced / inline-block) boxes with no text —
+// exactly the `<form><input size=17></form>` shape.
+//
+// 实测（Chrome headless，本机参考浏览器）：
+//
+//	quirks    <form><input size=17></form> → form 21.2（= input 边框盒高）
+//	standards 同一结构                      → form 25.8（input 21.2 + strut descent 4.6）
+//
+// 即 quirks 下 strut 的 ascent/descent 都不进行盒，行盒高 = 子盒 margin box 高。
+// 该分支只在「全部子盒都是 atomic 且无可见文本」时成立：任何文本节点或行内非
+// 替换盒都会让判定失败，从而保持原有的 strut 语义（正常字体页面零影响）。
+func quirksStrutSuppressed(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	// 文档 quirks 判定：box 可能是匿名盒（Element() == nil），沿父链找元素。
+	quirks := false
+	for b := box; b != nil; b = b.Parent() {
+		el := b.Element()
+		if el == nil {
+			continue
+		}
+		if doc := el.OwnerDocument(); doc != nil {
+			quirks = doc.Quirks()
+		}
+		break
+	}
+	if !quirks {
+		return false
+	}
+	children := box.Children()
+	if len(children) == 0 {
+		return false
+	}
+	for _, c := range children {
+		switch t := c.(type) {
+		case *InlineTextBox:
+			for _, r := range t.Text() {
+				switch r {
+				case ' ', '\t', '\n', '\r', '\f', '\v':
+				default:
+					return false
+				}
+			}
+		case *ElementBox:
+			cs := t.Style()
+			if cs == nil {
+				return false
+			}
+			if !t.IsReplaced() && cs.Display != style.DisplayInlineBlock {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // inlineIsEmpty reports whether an inline element has no visible content

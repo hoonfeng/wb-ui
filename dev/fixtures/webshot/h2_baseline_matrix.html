@@ -1,0 +1,103 @@
+<!doctype html><meta charset="utf-8"><title>H2 baseline formula MATRIX (Edge 期望矩阵)</title>
+<style>html,body{margin:0}</style><body>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+// 参数扫描（H2/A3/H8 同一处代码）：父字号 × line-height(px/normal/数字) ×
+// 控件类型(input/button/select/textarea) × 控件显式 height × vertical-align
+// × 行内有无文本 × 纯 inline-block(30×30 有/无 height) × replaced(img)。
+//
+// 每例输出三个观测量：
+//   relTop = 控件顶 − 行盒(host)顶      控件相对行盒顶的落点
+//   ctrlH  = 控件高
+//   lineH  = 行盒高（host 高度 = 单行行盒高）
+// 「行盒高 = max(上沿) + max(下沿)」「控件基线 = 内部文本基线」这两个假设
+// 是否成立，直接由 relTop / ctrlH / lineH 的数值关系判定。
+var n=0, cases=[];
+function mkHost(css){
+  var d=document.createElement('div');
+  d.style.cssText='position:absolute;left:0;top:'+(n++*160)+'px;'+css;
+  document.body.appendChild(d);
+  return d;
+}
+function addCase(id,hostCss,ctrlHtml){
+  var h=mkHost(hostCss);
+  h.innerHTML=ctrlHtml;
+  cases.push({id:id,host:h});
+}
+var FONTS=[8,16,32];
+var LHS=['normal','20px','1.5','40px'];
+var CTLS=[
+  ['input',   '<input id="%ID%" value="A">'],
+  ['button',  '<button id="%ID%">B</button>'],
+  ['select',  '<select id="%ID%"><option>O</option></select>'],
+  ['textarea','<textarea id="%ID%">T</textarea>']
+];
+// 1) 控件 × 父字号（无同行文本，baseline，lh normal）
+for(var c=0;c<CTLS.length;c++){
+  for(var i=0;i<FONTS.length;i++){
+    var id='c_'+CTLS[c][0]+'_f'+FONTS[i];
+    addCase(id,'font-size:'+FONTS[i]+'px;line-height:normal',
+      CTLS[c][1].replace('%ID%',id));
+  }
+}
+// 2) 控件 × line-height（父字号 16）
+for(var c2=0;c2<CTLS.length;c2++){
+  for(var j=0;j<LHS.length;j++){
+    var id2='l_'+CTLS[c2][0]+'_lh'+LHS[j].replace(/[^a-z0-9]/g,'');
+    addCase(id2,'font-size:16px;line-height:'+LHS[j],
+      CTLS[c2][1].replace('%ID%',id2));
+  }
+}
+// 3) input × vertical-align（父 16/normal）
+var VAS=['baseline','middle','top','bottom'];
+for(var k=0;k<VAS.length;k++){
+  var id3='v_'+VAS[k];
+  addCase(id3,'font-size:16px;line-height:normal',
+    '<input id="'+id3+'" value="V" style="vertical-align:'+VAS[k]+'">');
+}
+// 4) 同行文本场景（父 16/normal）
+addCase('t_text_before','font-size:16px;line-height:normal',
+  'x<input id="t_text_before" value="A">');
+addCase('t_text_after','font-size:16px;line-height:normal',
+  '<input id="t_text_after" value="A">x');
+addCase('t_text_bigger','font-size:16px;line-height:normal',
+  '<span style="font-size:32px">X</span><input id="t_text_bigger" value="A">');
+addCase('t_button_text','font-size:16px;line-height:normal',
+  'x<button id="t_button_text">B</button>');
+// 5) 纯 inline-block（父 16/normal）
+addCase('ib_30x30','font-size:16px;line-height:normal',
+  '<span id="ib_30x30" style="display:inline-block;width:30px;height:30px;background:#ccc"></span>');
+addCase('ib_noheight','font-size:16px;line-height:normal',
+  '<span id="ib_noheight" style="display:inline-block;width:30px;background:#ccc">z</span>');
+addCase('ib_empty','font-size:16px;line-height:normal',
+  '<span id="ib_empty" style="display:inline-block;width:30px;background:#ccc"></span>');
+addCase('ib_va_middle','font-size:16px;line-height:normal',
+  '<span id="ib_va_middle" style="display:inline-block;width:30px;height:30px;background:#ccc;vertical-align:middle"></span>');
+addCase('ib_va_top','font-size:16px;line-height:normal',
+  '<span id="ib_va_top" style="display:inline-block;width:30px;height:30px;background:#ccc;vertical-align:top"></span>');
+// 6) replaced img（父 16/normal）
+addCase('r_img','font-size:16px;line-height:normal',
+  '<img id="r_img" width="30" height="30" alt="">');
+addCase('r_img_text','font-size:16px;line-height:normal',
+  'x<img id="r_img_text" width="30" height="30" alt="">');
+// 7) 控件显式 height（父 16/normal）
+addCase('e_input_h30','font-size:16px;line-height:normal',
+  '<input id="e_input_h30" value="A" style="height:30px">');
+addCase('e_button_h30','font-size:16px;line-height:normal',
+  '<button id="e_button_h30" style="height:30px">B</button>');
+// 8) 大字父 + 同行文本
+addCase('f32_input','font-size:32px;line-height:normal',
+  '<input id="f32_input" value="A">');
+addCase('f32_text_input','font-size:32px;line-height:normal',
+  'x<input id="f32_text_input" value="A">');
+var L=[];
+for(var q=0;q<cases.length;q++){
+  var c=cases[q], el=document.getElementById(c.id);
+  if(!el){ L.push(c.id+' | MISSING'); continue; }
+  var r=el.getBoundingClientRect(), hr=c.host.getBoundingClientRect();
+  var hcs=getComputedStyle(c.host);
+  L.push(c.id+' | relTop='+(r.top-hr.top).toFixed(3)+' | ctrlH='+r.height.toFixed(3)+
+    ' | lineH='+hr.height.toFixed(3)+' | fs='+hcs.fontSize+' | lh='+hcs.lineHeight);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

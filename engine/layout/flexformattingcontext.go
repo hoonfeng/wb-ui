@@ -726,9 +726,17 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 	//   只剩下 padding+border 的 8px（form-control-geometry 的 text-row /
 	//   checkbox-row / range-row / textarea-row 全部错位）。
 	if w, _, ok := formControlContentSize(box); ok && w > 0 {
-		// 只返回固有**内容**宽：函数末尾统一再加自身的 padding + border。
-		// 多算会污染 flex 容器的 max-content（text-row 量成 161 而非 153）。
-		return w
+		// ★ 返回 **border-box 宽**（固有内容宽 + 自身 padding + border）：本函数
+		//   是 max-content 尺寸查询，上方「显式 width」分支同样是
+		//   `w + padding + border`（即外框宽），两者口径必须一致。
+		//   此前只返回内容宽且**提前 return**，绕过了函数末尾的
+		//   「+ padding + border」，于是输入框**作为子项**被累加时少 8px
+		//   （UA padding 2×2 + border 2×2）→ 收缩宽度容器（absolute +
+		//   width:auto）被量窄，同一行的「文本 + 控件」被误判换行
+		//   （h2_baseline_formula 的 e 用例：host 量成 176.968 而非
+		//   184.968 → "x"+input 被折到第二行，relTop 28 而 Edge 为 4）。
+		_, p, b := computeBoxModel(box, w, fontSizeOf(box))
+		return w + p.Horizontal() + b.Horizontal()
 	}
 	// ★ <select>：内在内容宽 = 最宽 <option> 的文本宽（CSS-SIZING-3 §5.1）。
 	//   formControlContentSize 有意跳过 select（IFC 侧另有 45px 的 UA 兜底），
@@ -884,7 +892,9 @@ func intrinsicContentWidth(box *ElementBox, isRow bool) float64 {
 // anonymous flex item for such a <br>, and a zero-height one makes every
 // following item jump up into the break.
 func breakRowHeight(box *ElementBox) float64 {
-	if lh := cssLineHeight(box); lh > 0 {
+	// ★ 显式 line-height（含 0）直接采信：零行高的 <br> 就该占 0 高，
+	//   落到字体度量会把强制断行撑出行高。
+	if lh, ok := cssLineHeight(box); ok {
 		return lh
 	}
 	if lh := fontLineGap(box); lh > 0 {
@@ -1262,8 +1272,8 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 			// (Arial 13px ≈ 17.2) only when line-height is unset/normal.
 			// Using font metrics unconditionally inflated .ws-item 28→28.8px
 			// (Edge 28px) and shifted project-section 6px down.
-			h := cssLineHeight(box)
-			if h <= 0 {
+			h, ok := cssLineHeight(box)
+			if !ok {
 				h = fontLineGap(box)
 			}
 			if isColFlex { total += h }
@@ -2325,6 +2335,11 @@ func shiftBoxAndDescendants(box *ElementBox, dy, dx float64, state *LayoutState)
 	for i := range box.TextSegments {
 		box.TextSegments[i].X += dx
 		box.TextSegments[i].Y += dy
+		// ★ LineY 也必须跟着移位：渲染层用 `LineY + LineHeight` 判断
+		// 「文本内容底」（inlineSegBottom），漏掉它会让行盒底虚高一个 dy，
+		// 把无显式高度的 flex item 撑高（vue-app 的 .count badge：
+		// Edge 16 / wbui 22）。与 positioned.go 的 offsetDescendants 一致。
+		box.TextSegments[i].LineY += dy
 	}
 	for _, child := range box.Children() {
 		switch c := child.(type) {
@@ -2334,6 +2349,7 @@ func shiftBoxAndDescendants(box *ElementBox, dy, dx float64, state *LayoutState)
 			for i := range c.TextSegments {
 				c.TextSegments[i].X += dx
 				c.TextSegments[i].Y += dy
+				c.TextSegments[i].LineY += dy
 			}
 		}
 	}

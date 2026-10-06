@@ -2297,6 +2297,11 @@ func (wv *WebView) injectRenderTreeBridge() {
 		// 元素 → 两者不一致）。并行切片记录 transform 串 + 参考尺寸 + 布局位置。
 		var trT []string
 		var trW, trH, trX, trY []float64
+		// ★ transform-origin：变换必须**绕 origin** 进行（CSS Transforms L1 §4），
+		//   祖先与自身都要带上。只应用矩阵而不含 origin 时，默认 50% 50% 的
+		//   scale/rotate 会绕左上角发生 —— 视觉矩形与绘制端
+		//   （applyOwnOverflowClip 的 Translate(O)→M→Translate(−O)）不一致。
+		var trS []*style.ComputedStyle
 		anc := rendering.RenderObject(nil)
 		if box != nil {
 			anc = rendering.RenderObject(box)
@@ -2317,6 +2322,7 @@ func (wv *WebView) injectRenderTreeBridge() {
 				trH = append(trH, b.Height())
 				trX = append(trX, b.X())
 				trY = append(trY, b.Y())
+				trS = append(trS, st)
 			}
 			anc = par
 			if stickySeen {
@@ -2354,17 +2360,21 @@ func (wv *WebView) injectRenderTreeBridge() {
 		rx0, ry0, rw, rh := x0, y0, w, h
 		for i := range trT {
 			lx, ly := rx0-trX[i], ry0-trY[i]
-			mx, my, mw, mh, ok := rendering.TransformRect(trT[i], trW[i], trH[i], lx, ly, rw, rh)
+			mx, my, mw, mh, ok := rendering.TransformRectByStyleOrigin(trS[i], trW[i], trH[i], lx, ly, rw, rh)
 			if !ok {
 				continue
 			}
 			rx0, ry0, rw, rh = mx+trX[i], my+trY[i], mw, mh
 		}
 		if box != nil {
-			if st := box.Style(); st != nil && st.Transform != "" && st.Transform != "none" {
-				if nx, ny, nw, nh, ok := rendering.TransformRect(st.Transform, w, h, rx0-sx, ry0-sy, rw, rh); ok {
-					return nx, ny, nw, nh
-				}
+			// ★ 自身 transform：必须绕 transform-origin、且以**元素局部坐标**求
+			//   包围盒再平移回视口。TransformRect 的语义是「绕元素原点变换」，
+			//   此前直接喂 rx0-sx/ry0-sy 视口绝对坐标 → scale(0.5) 把元素自身的
+			//   位置也缩了一半（实测 g2_transform 的 #sc：布局 top=140，wbui 报
+			//   70 = 140×0.5，Edge 报 140）。TransformRectForStyle 内部先转局部
+			//   坐标、按 origin 变换、再平移回视口，与 Edge 语义一致。
+			if nx, ny, nw, nh, ok := rendering.TransformRectForStyle(box.Style(), w, h, rx0-sx, ry0-sy, rw, rh); ok {
+				return nx, ny, nw, nh
 			}
 		}
 		return rx0 - sx, ry0 - sy, rw, rh

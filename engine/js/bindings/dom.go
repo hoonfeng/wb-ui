@@ -4393,8 +4393,23 @@ func (s *styleProxy) Get(key string) goja.Value {
 				return goja.Undefined()
 			}
 			props := parseStyle(s.el.GetAttribute("style"))
-			props[call.Arguments[0].String()] = call.Arguments[1].String()
+			name := call.Arguments[0].String()
+			v := call.Arguments[1].String()
+			// ★ CSSOM 规范：setProperty(name, "") 等价于 removeProperty(name)。
+			//   此前无条件写入 → `setProperty('transform','')` 之后级联里存着
+			//   空值声明，getComputedStyle().transform 返回 "" 而非初始值
+			//   "none"（Edge 实测：h7_transform_norm 的空值 case → Edge none / wbui ""）。
+			if strings.TrimSpace(v) == "" {
+				delete(props, name)
+			} else {
+				props[name] = v
+			}
 			s.el.SetAttribute("style", joinStyle(props))
+			// 与 styleProxy.Set 路径对齐：不失效缓存会让后续 getComputedStyle 读到旧值。
+			InvalidateComputedStyle(s.el)
+			if OnInlineStyleChanged != nil {
+				OnInlineStyleChanged(s.el)
+			}
 			return goja.Undefined()
 		})
 	case "removeProperty":
@@ -4437,7 +4452,12 @@ func (s *styleProxy) Set(key string, val goja.Value) bool {
 		props := parseStyle(s.el.GetAttribute("style"))
 		strVal := val.String()
 		ckey := camelToKebab(key)
-		if strVal == "" || strVal == "undefined" || strVal == "null" {
+		// ★ 空白串（"  "）也须视为「移除属性」：CSSOM 规定属性值首尾空白不计入，
+		//   全空白值等价于空值 → 属性被移除。此前只判 `strVal == ""`，于是
+		//   `el.style.transform = '  '` 会写入 `style="transform:  "`，级联里
+		//   留下一个空值声明，getComputedStyle().transform 返回 ""（Edge 为 none）。
+		//   这是 h7_transform_norm 唯一残留差异的来源。
+		if strings.TrimSpace(strVal) == "" || strVal == "undefined" || strVal == "null" {
 			delete(props, ckey)
 		} else {
 			props[ckey] = strVal
