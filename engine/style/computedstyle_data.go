@@ -18,20 +18,20 @@ type InheritedData struct {
 	FontVariant string
 
 	// ── Text ──
-	Color           Color
-	LineHeight      Length
-	LetterSpacing   Length
-	WordSpacing     Length
-	TextIndent      Length
-	TextAlign       TextAlignType
-	TextDecoration  string
-	TextTransform   string
-	WhiteSpace      WhiteSpaceType
-	TextOverflow    TextOverflowType
-	WordBreak       string // "normal" / "break-all" / "break-word" (inherited)
-	OverflowWrap    string // "normal" / "break-word" (inherited; word-wrap alias)
-	Direction       string
-	UnicodeBidi     string
+	Color          Color
+	LineHeight     Length
+	LetterSpacing  Length
+	WordSpacing    Length
+	TextIndent     Length
+	TextAlign      TextAlignType
+	TextDecoration string
+	TextTransform  string
+	WhiteSpace     WhiteSpaceType
+	TextOverflow   TextOverflowType
+	WordBreak      string // "normal" / "break-all" / "break-word" (inherited)
+	OverflowWrap   string // "normal" / "break-word" (inherited; word-wrap alias)
+	Direction      string
+	UnicodeBidi    string
 
 	// TextShadow 是 CSS 继承属性（spec: text-shadow inherited: yes）。
 	// 字体/颜色类的 text-shadow 在父元素设置（如挂件模板 .txt 的描边
@@ -63,16 +63,16 @@ type InheritedData struct {
 	ListStyleImage    string
 
 	// ── Visibility / interaction ──
-	Visibility    string
+	Visibility string
 	// StaticVisibility 是 visibility 的静态计算值（样式解析时保存），与
 	// StaticOpacity 同一套理由：@keyframes 里声明 visibility 的动画每帧
 	// 改写 Visibility，StaticVisibility 保持解析值不变——插值端点未声明
 	// 该属性时用它作 base，动画结束且无 forwards/both fill 时也用它恢复
 	// （否则关闭动画把弹层永久留在 hidden）。
 	StaticVisibility string
-	Cursor        string
-	UserSelect    string
-	PointerEvents string
+	Cursor           string
+	UserSelect       string
+	PointerEvents    string
 
 	// ── Writing mode ──
 	WritingMode string // "horizontal-tb", "vertical-rl", "vertical-lr"
@@ -100,54 +100,54 @@ type InheritedData struct {
 // 语义最清晰，无隐式共享可变状态）。
 func DefaultInheritedData() *InheritedData {
 	return &InheritedData{
-		Color:               Color{R: 0, G: 0, B: 0, A: 0xFF},
-		FontSize:            Length{Value: 16, Unit: "px"},
-		FontFamily:          "serif",
-		FontWeight:          "400",
-		FontStyle:           "normal",
-		FontVariant:         "normal",
+		Color:       Color{R: 0, G: 0, B: 0, A: 0xFF},
+		FontSize:    Length{Value: 16, Unit: "px"},
+		FontFamily:  "serif",
+		FontWeight:  "400",
+		FontStyle:   "normal",
+		FontVariant: "normal",
 		// ★ line-height 初始值 = normal（浏览器/WebKit 语义）：行高取字体
 		// 度量 ascent+descent+lineGap，而非 1.2×font-size。cssLineHeight /
 		// cssControlLineHeight / measureLineHeight 对 Unit="normal" 返回 0
 		// 后均回退字体度量（fontLineGap），各消费点已一致。
-		LineHeight:          Length{Value: 0, Unit: "normal"},
-		TextAlign:           TextAlignStart,
-		WhiteSpace:          WhiteSpaceNormal,
-		TextOverflow:        TextOverflowClip,
-		Direction:           "ltr",
-		Visibility:          "visible",
-		StaticVisibility:    "visible",
-		Cursor:              "auto",
-		UserSelect:          "auto",
-		PointerEvents:       "auto",
-		WritingMode:         "horizontal-tb",
+		LineHeight:       Length{Value: 0, Unit: "normal"},
+		TextAlign:        TextAlignStart,
+		WhiteSpace:       WhiteSpaceNormal,
+		TextOverflow:     TextOverflowClip,
+		Direction:        "ltr",
+		Visibility:       "visible",
+		StaticVisibility: "visible",
+		Cursor:           "auto",
+		UserSelect:       "auto",
+		PointerEvents:    "auto",
+		WritingMode:      "horizontal-tb",
 	}
 }
 
 // NonInheritedData holds CSS properties that do NOT inherit by default.
 type NonInheritedData struct {
 	// ── Box model ──
-	Display           DisplayType
-	Position          PositionType
-	Float             string
-	Clear             string
-	OverflowX         OverflowType
-	OverflowY         OverflowType
-	Width             Length
-	Height            Length
-	MinWidth          Length
-	MinHeight         Length
-	MaxWidth          Length
-	MaxHeight         Length
+	Display   DisplayType
+	Position  PositionType
+	Float     string
+	Clear     string
+	OverflowX OverflowType
+	OverflowY OverflowType
+	Width     Length
+	Height    Length
+	MinWidth  Length
+	MinHeight Length
+	MaxWidth  Length
+	MaxHeight Length
 
-	MarginTop         Length
-	MarginRight       Length
-	MarginBottom      Length
-	MarginLeft        Length
-	PaddingTop        Length
-	PaddingRight      Length
-	PaddingBottom     Length
-	PaddingLeft       Length
+	MarginTop     Length
+	MarginRight   Length
+	MarginBottom  Length
+	MarginLeft    Length
+	PaddingTop    Length
+	PaddingRight  Length
+	PaddingBottom Length
+	PaddingLeft   Length
 
 	BorderTopWidth    Length
 	BorderRightWidth  Length
@@ -218,12 +218,12 @@ type NonInheritedData struct {
 	ColumnGap           Length
 
 	// ── Multi-column ──
-	ColumnCount      int    // 0 = auto
-	ColumnWidth      Length
-	ColumnRuleColor  string
-	ColumnRuleStyle  string
-	ColumnRuleWidth  Length
-	ColumnFill       string
+	ColumnCount     int // 0 = auto
+	ColumnWidth     Length
+	ColumnRuleColor string
+	ColumnRuleStyle string
+	ColumnRuleWidth Length
+	ColumnFill      string
 
 	// ── Flex / Grid item ──
 	FlexBasis       Length
@@ -251,33 +251,50 @@ type NonInheritedData struct {
 	// 用途见 CSS-SIZING-4 §5：一轴尺寸确定后另一轴由比例推出
 	// （width:100%; height:auto; aspect-ratio:1.72 → 高 = 宽/1.72）。
 	AspectRatio float64
-	ZIndex        int
+	ZIndex      int
+	// ZIndexAuto 标记 z-index 取的是**关键字 auto**（初始值），与显式 `0`
+	// 区分开。二者在层叠排序上等价，但在**是否创建层叠上下文**上不同：
+	// 只有定位元素（relative/absolute）+ `z-index != auto` 才创建层叠上下文
+	// （CSS Positioned Layout §3.4）；`z-index:auto` 的定位元素不创建，其
+	// 子层因而可以与外部兄弟层一起排序。此前 `auto` 被 strconv.Atoi 静默
+	// 丢成 0（与显式 0 不可分），引擎把每个相对定位元素都当成层叠上下文
+	// 边界 → 子元素 z-index 被"困"在父层内（D3 根因之一）。
+	ZIndexAuto bool
 
 	// ── Generated content ──
 	Content string
 
 	// ── Effects ──
-	BoxShadow     string
-	Transform     string
+	BoxShadow        string
+	Transform        string
 	TransformOriginX Length
 	TransformOriginY Length
-	Filter        string
-	BackdropFilter string
+	Filter           string
+	BackdropFilter   string
+	// WillChange 是 will-change 的原始值。值中含会创建层叠上下文的属性
+	// （transform / opacity / filter / perspective）时，该元素**立即**获得
+	// 层叠上下文（CSS Will Change §2）。此前完全未解析 → 依赖它的库
+	// （虚拟滚动、动画层提示、`will-change: transform` 的浮层）层叠顺序
+	// 与浏览器不一致。
+	WillChange string
+	// Isolation 是 isolation 的值（`isolate` 创建层叠上下文，CSS
+	// Compositing §4）。
+	Isolation string
 
 	// ── Transitions / Animations ──
-	Transition              string
-	TransitionProperty      string
-	TransitionDuration      float64
+	Transition               string
+	TransitionProperty       string
+	TransitionDuration       float64
 	TransitionTimingFunction string
-	TransitionDelay         float64
-	Animation               string
-	AnimationName           string
-	AnimationDuration       float64
-	AnimationIterationCount int
-	AnimationDelay          float64
-	AnimationFillMode       string
-	AnimationDirection      string
-	AnimationTimingFunction string
+	TransitionDelay          float64
+	Animation                string
+	AnimationName            string
+	AnimationDuration        float64
+	AnimationIterationCount  int
+	AnimationDelay           float64
+	AnimationFillMode        string
+	AnimationDirection       string
+	AnimationTimingFunction  string
 
 	// ── Animation transform overrides ──
 	TranslateX float64
@@ -293,35 +310,36 @@ type NonInheritedData struct {
 // values.（性能记录见 DefaultInheritedData：共享默认值实测无收益。）
 func DefaultNonInheritedData() *NonInheritedData {
 	return &NonInheritedData{
-		Display:            DisplayInline,
-		Position:           PositionStatic,
-		OverflowX:          OverflowVisible,
-		OverflowY:          OverflowVisible,
-		BorderTopStyle:     "none",
-		BorderRightStyle:   "none",
-		BorderBottomStyle:  "none",
-		BorderLeftStyle:    "none",
-		BackgroundColor:    Color{R: 0, G: 0, B: 0, A: 0},
-		FlexGrow:           0,
-		FlexShrink:         1,
-		Order:              0,
-		ColumnCount:        0,
-		ColumnRuleStyle:    "none",
-		ColumnFill:         "balance",
-		Opacity:            1.0,
-		StaticOpacity:      1.0,
-		ZIndex:             0,
-		Content:            "",
+		Display:           DisplayInline,
+		Position:          PositionStatic,
+		OverflowX:         OverflowVisible,
+		OverflowY:         OverflowVisible,
+		BorderTopStyle:    "none",
+		BorderRightStyle:  "none",
+		BorderBottomStyle: "none",
+		BorderLeftStyle:   "none",
+		BackgroundColor:   Color{R: 0, G: 0, B: 0, A: 0},
+		FlexGrow:          0,
+		FlexShrink:        1,
+		Order:             0,
+		ColumnCount:       0,
+		ColumnRuleStyle:   "none",
+		ColumnFill:        "balance",
+		Opacity:           1.0,
+		StaticOpacity:     1.0,
+		ZIndex:            0,
+		ZIndexAuto:        true, // z-index 初始值 = auto（非 0 的显式声明）
+		Content:           "",
 		// CSS 规范默认 transform-origin 为 50% 50%（盒子中心）。此前为
 		// 零值 Length{}（Unit=""），renderpipeline 的 resolveTransformOrigin
 		// 返回 -1 → 退化为盒子左上角 → rotate/scale 绕左上角旋转导致
 		// 图形"飘"到右上角。
-		TransformOriginX: Length{Value: 50, Unit: "%"},
-		TransformOriginY: Length{Value: 50, Unit: "%"},
-		TransitionProperty: "all",
+		TransformOriginX:         Length{Value: 50, Unit: "%"},
+		TransformOriginY:         Length{Value: 50, Unit: "%"},
+		TransitionProperty:       "all",
 		TransitionTimingFunction: "ease",
 		AnimationTimingFunction:  "linear",
-		AnimationFillMode:       "none",
-		AnimationDirection:      "normal",
+		AnimationFillMode:        "none",
+		AnimationDirection:       "normal",
 	}
 }

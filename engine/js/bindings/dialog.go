@@ -34,6 +34,8 @@
 package bindings
 
 import (
+	"strings"
+
 	"wb-ui/engine/dom"
 	"wb-ui/engine/js/jsc"
 )
@@ -46,10 +48,61 @@ func dialogIsOpen(el *dom.Element) bool { return el.HasAttribute("open") }
 // 这里（<dialog> 的模态/打开状态、<details> 的 open、input 的 indeterminate），
 // 否则 :modal / :open / :indeterminate / dialog[open] / ::backdrop 会停留在
 // 上一次的样式。
+//
+// ★ 失效范围取**父级子树**而非 el 子树（2026-09 实测修正）：状态变化的影响
+// 不限于自身与后代——兄弟/后继组合器同样受牵连，`input:checked + .track::after`
+// （开关滑块）、`details[open] + p`、`.a:checked ~ .b` 都属此类。只清 el 子树时
+// 兄弟的缓存留着旧值：实测 `#c:checked + #s` 在 SetChecked(true) 后 #c 更新、
+// #s 恒为旧色（含重建渲染树后），滑块因此不动。以父级为范围可覆盖所有兄弟，
+// 代价是失效面略大——状态迁移是低频事件（用户点击），可接受。
 func invalidateStateStyle(el *dom.Element) {
-	InvalidateComputedStyle(el)
+	scope := el
+	if p := el.ParentElement(); p != nil {
+		scope = p
+	}
+	InvalidateComputedStyle(scope)
 	if OnClassChanged != nil {
+		// 回调参数保持「变化源」语义（el 本身，不是失效范围 scope）：
+		// 消费方要据此判断是哪个元素变了。范围的扩大由渲染侧承担
+		// （webkit 桥在 onClassChanged 内按父级子树清 resolver 缓存）。
 		OnClassChanged(el)
+	}
+}
+
+// stateAttrNames 是「改了就影响动态伪类匹配、且常出现在兄弟/后继组合器里」
+// 的属性：`input:checked + .track::after`（开关滑块）、`input:disabled + label`、
+// `details[open] + p`、`option:selected` 都让**邻近元素**的匹配结果变化。
+// 这些属性的写入/删除按父级范围失效（invalidateStateStyle）。
+//
+// 其它属性（data-*/src/title 等）仍按 el 子树失效：属性写入是高频路径
+// （框架每次 patch 都可能写），把父级子树（可能是 body）反复清空会让
+// computed style 缓存失去意义；而 `[data-x] ~ .y` 这类远邻组合器在页面里
+// 极罕见，不值得为它付全局代价。
+var stateAttrNames = map[string]bool{
+	"checked":    true,
+	"selected":   true,
+	"open":       true,
+	"disabled":   true,
+	"multiple":   true,
+	"required":   true,
+	"readonly":   true,
+	"indeterminate": true,
+}
+
+// invalidateAttrChange 属性写入/删除后的失效分发（setAttribute /
+// removeAttribute / toggleAttribute / removeAttributeNode 共用）。
+func invalidateAttrChange(el *dom.Element, name string) {
+	if stateAttrNames[strings.ToLower(name)] {
+		invalidateStateStyle(el)
+		return
+	}
+	InvalidateComputedStyle(el)
+	// class 属性变化（CM6/Vue 用 setAttribute('class') 加 cm-focused）影响
+	// 后代选择器匹配——触发 OnClassChanged（清 resolver 缓存 + 重建渲染树）。
+	if strings.EqualFold(name, "class") {
+		if OnClassChanged != nil {
+			OnClassChanged(el)
+		}
 	}
 }
 

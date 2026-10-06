@@ -23,11 +23,26 @@ type lengthResult struct {
 }
 
 func resolveLengthAuto(l style.Length, reference, fontSize float64) lengthResult {
-	if l.Unit == "" || l.Unit == "auto" {
+	if l.Unit == "" || l.Unit == "auto" || isIntrinsicSizeKeyword(l) {
 		return lengthResult{Auto: true}
 	}
 	v := resolveLength(l, reference, fontSize)
 	return lengthResult{Value: v.Value, Definite: v.Definite}
+}
+
+// isIntrinsicSizeKeyword reports whether the length is one of CSS-SIZING-3's
+// intrinsic sizing keywords. 本引擎把三者统一按 **shrink-to-fit** 求值
+// （max-content 受可用空间钳制；min-content 走同一路径——绝对定位的最小
+// 内容宽需要额外的内在测量，本端口暂未区分）。绝对定位求解（positioned.go）
+// 因此把 fit-content 当 auto 走 shrink-to-fit，并**排除** stretch 分支，
+// 于是 `inset:0 + width:fit-content` 得到内容宽而不是拉伸填满视口。
+// 规范 popover 的 UA 样式（html5/defaultcss.go）依赖这条。
+func isIntrinsicSizeKeyword(l style.Length) bool {
+	switch l.Unit {
+	case "fit-content", "min-content", "max-content":
+		return true
+	}
+	return false
 }
 
 func resolveLength(l style.Length, reference, fontSize float64) lengthResult {
@@ -425,6 +440,18 @@ func resolveMinMax(minL, maxL style.Length, reference, fontSize float64) (minV, 
 
 var FontMetricsFunc func(family string, size float64, weight int, style string) (float64, float64, float64)
 
+// CJKFontMetricsFunc returns the metrics of the face that **actually draws CJK
+// glyphs** for the given font description — the primary family when it covers
+// CJK, otherwise the OS CJK fallback face (mirrors the painting side's
+// Canvas.getCJKSkiaFont / graphics.cjkTypefaceFor). Set by the embedder.
+//
+// Needed because Blink's FontFallbackList merges the metrics of *every* font
+// that participates in a line box: `font-family: Arial` with Chinese content
+// gets the CJK fallback face's line box (measured 35px at 24px, vs Arial's
+// own 28px) — omitting it left Chinese line boxes 7px too short and their
+// baselines 4–5px too high. nil → fallback metrics are not merged.
+var CJKFontMetricsFunc func(family string, size float64, weight int, style string) (float64, float64, float64)
+
 // MeasureTextFunc measures the advance width of text. Set by the embedder.
 var MeasureTextFunc func(family string, size float64, weight int, style, text string) float64
 func computeBoxModelForBox(box *ElementBox, cbContentWidth, fontSizeVal float64) (margin, padding, border Edges) {
@@ -678,16 +705,13 @@ func measureTextWordSum(box *ElementBox, text string, spaceWidth float64) float6
 }
 
 func fontAscentDescent(box *ElementBox) (ascent, descent float64) {
-	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
-	a, d, _ := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	// ★ 含 CJK 时回退字体的度量可能主导行盒（见 effectiveFontMetrics）。
+	a, d, _ := effectiveFontMetrics(box)
 	return a, d
 }
 
 func fontLineGap(box *ElementBox) float64 {
-	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
-	a, d, lg := fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	a, d, lg := effectiveFontMetrics(box)
 	// ★ 网格对齐（grid fitting）：浏览器把 ascent/descent/lineGap **各自**
 	// 四舍五入到整数像素后再相加得到 line-height:normal 的行高，而不是用
 	// 浮点度量求和。Chrome 实测（font-metric-line-height 夹具的期望值即由此
@@ -698,39 +722,53 @@ func fontLineGap(box *ElementBox) float64 {
 	return math.Round(a) + math.Round(d) + math.Round(lg)
 }
 
-// cssLineHeight returns the resolved CSS line-height value for the box.
-// It handles px values, unitless numbers (multiplied by font-size), and
-// percentages. Returns 0 if line-height is not explicitly set.
-// ★ line-height:normal 解析为 Unit="normal"：返回字体度量
-// （fontLineGap = ascent+descent+lineGap）——与浏览器一致，而非 1.2×fs。
-// 调用方（inlineformattingcontext）在返回 0 时已回退 fontLineGap，因此
-// normal 只需返回 0 即可自然落到字体度量路径。
-func cssLineHeight(box *ElementBox) float64 {
+// cssLineHeight returns the resolved CSS line-height value for the box, plus
+// whether line-height was **explicitly set**. It handles px values, unitless
+// numbers (multiplied by font-size), and percentages.
+//
+// ★ 第二个返回值区分「显式 0」与「normal/未声明」——两者语义完全不同：
+//   - `line-height: normal` 与未声明：LineHeight = {0, "normal"}（见
+//     computedstyle_data.go 的初始值）→ ok=false，调用方回退字体度量
+//     （fontLineGap = ascent+descent+lineGap），与浏览器一致，而非 1.2×fs；
+//   - `line-height: 0`：**显式零行高**是有效值（常见技巧：消除空白文本节点
+//     撑出的高度）→ ok=true 且值为 0。
+//
+// 旧实现用单个 float64 的 0 同时表示两者，消费点只能写 `if cssLH > 0`，
+// 于是显式 0 被当成 normal → 行盒取字体行高（16px → 24），
+// `font-size:0; line-height:0` 容器的行盒从 20 涨到 24：minibox 探针 c
+// （Edge 20 / wbui 24）与 cssprobe 的 legacy-center（#legacy 首个行盒把
+// 其后所有块整体推下 4px）都由它引起。
+func cssLineHeight(box *ElementBox) (float64, bool) {
 	cs := box.Style()
-	if cs == nil { return 0 }
+	if cs == nil {
+		return 0, false
+	}
 	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
+	// ★ fs==0 是**显式 font-size:0**（未设置时 fontSizeOf 返回继承/默认 16），
+	//   无单位 line-height 与百分比都必须按它缩放为 0；只有取不到字号
+	//   （fs<0）才回退默认值。见 effectiveFontMetrics 的同类短路。
+	if fs < 0 {
+		fs = defaultFontSize
+	}
 	lh := cs.LineHeight
 	switch lh.Unit {
 	case "px":
-		if lh.Value > 0 { return lh.Value }
+		return lh.Value, true
 	case "%":
-		if lh.Value > 0 { return lh.Value / 100 * fs }
+		return lh.Value / 100 * fs, true
 	case "normal":
-		// 返回 0 → 调用方用 fontLineGap（ascent+descent+lineGap），
+		// ok=false → 调用方用 fontLineGap（ascent+descent+lineGap），
 		// 即浏览器的 line-height:normal 语义。
-		return 0
+		return 0, false
 	case "":
-		// Unitless number (e.g. 1.2) — multiply by font-size.
-		if lh.Value > 0 { return lh.Value * fs }
+		// Unitless number (e.g. 1.2, or 0) — multiply by font-size.
+		return lh.Value * fs, true
 	}
-	return 0
+	return 0, false
 }
 
 func fontMetricsTriple(box *ElementBox) (ascent, descent, lineGap float64) {
-	fs := fontSizeOf(box)
-	if fs <= 0 { fs = defaultFontSize }
-	return fontMetricsHelper(fontFamilyOf(box), fs, fontWeightOf(box), fontStyleOf(box))
+	return effectiveFontMetrics(box)
 }
 
 // fontMetricsHelper returns Skia metrics for a given font description.
@@ -757,6 +795,72 @@ func fontMetricsHelper(family string, fs float64, weight int, style string) (asc
 	}
 	return fs * 0.8, fs * 0.2, fs * 0.2
 }
+
+// boxHasCJK reports whether box's inline content (recursively) contains a CJK
+// character — i.e. whether this box's line boxes may pull in the OS CJK
+// fallback face, and with it that face's metrics. Short-circuits on the first
+// CJK character so Latin-only subtrees stay cheap.
+func boxHasCJK(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	for _, c := range box.Children() {
+		switch t := c.(type) {
+		case *InlineTextBox:
+			for _, r := range t.Text() {
+				if isCJKChar(r) {
+					return true
+				}
+			}
+		case *ElementBox:
+			if boxHasCJK(t) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// effectiveFontMetrics returns the line-box metrics for box, following Blink's
+// FontFallbackList semantics: take the metrics of the font with the **largest
+// line spacing** (ascent+descent+lineGap) among the fonts that participate in
+// the line — the whole triple from that font, NOT a per-component max. That
+// distinction is observable: Edge gives Arial(28) + CJK-fallback(35) a 35px
+// line box, whereas a per-component max would yield 36 (28 = round(21.73)+
+// round(5.09)+round(0.78) vs 35 = round(27.66)+round(7.34)+round(0)).
+//
+// Latin-only boxes short-circuit and never query the fallback face.
+func effectiveFontMetrics(box *ElementBox) (ascent, descent, lineGap float64) {
+	fs := fontSizeOf(box)
+	// ★ font-size: 0（显式零字号）→ **全部字体相对度量为 0**：CSS 里字体度量
+	//   与 em 一样以 font-size 为单位，0 字号就是 0 行高、0 基线。必须在此
+	//   短路；回退到默认字号（16px）会让 `font-size:0` 的容器仍带 24px 行高与
+	//   24px 文本高，于是 centeringOffset = (0-24)/2 = -12 把容器内的
+	//   inline-block 整体上移 12px（cssprobe legacy-center 的 .nested-inline /
+	//   .table-inline 各偏 -12）。`font-size:0` 是消除空白文本节点的标准技巧，
+	//   浏览器里这类容器的 strut 高恒为 0。
+	//   fs 只会是 0 当样式显式写了 font-size:0：未设置时 fontSizeOf 返回继承
+	//   值或默认 16px（>0），故 fs<0 才是「取不到」的异常情形。
+	if fs == 0 {
+		return 0, 0, 0
+	}
+	if fs < 0 {
+		fs = defaultFontSize
+	}
+	fam := fontFamilyOf(box)
+	wt := fontWeightOf(box)
+	st := fontStyleOf(box)
+	ascent, descent, lineGap = fontMetricsHelper(fam, fs, wt, st)
+	if CJKFontMetricsFunc == nil || !boxHasCJK(box) {
+		return ascent, descent, lineGap
+	}
+	ca, cd, clg := CJKFontMetricsFunc(fam, fs, wt, st)
+	if ca+cd+clg > ascent+descent+lineGap {
+		return ca, cd, clg
+	}
+	return ascent, descent, lineGap
+}
+
 func isFullWidthRune(r rune) bool {
 	return (r >= 0x1100 && r <= 0x115F) || r == 0x2329 || r == 0x232A ||
 		(r >= 0x2E80 && r <= 0xA4CF) || (r >= 0xAC00 && r <= 0xD7AF) ||
