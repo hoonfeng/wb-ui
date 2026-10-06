@@ -1806,7 +1806,7 @@ asc_content   = asc_c（再 round）
 | `input/EXP` | 2 | `<input style="font-size:32px">`（控件主导行盒）LH Edge 43.5 / wbui 43 ⇒ 0.5，`rel` 同为 0 |
 | `input/CTRL32` | 69 | 同上 0.5 半像素（LAT 与 CJK **残差相同**，证明非本轮公式问题）；其中 monospace 控件的 1.5 来自 wbui 的 monospace 映射字体度量与 Edge 有差（既有，与 CJK 无关：同一行 LAT 也差 1.5） |
 | `textarea/*` | 42 | textarea 基线取盒底边，不在本轮范围（既有） |
-| `button/UA` LH 16 / rel 20 | 36 | **根因不同，未修**：button 的内容含 CJK 时 `contentH == lineH_content`（1px 6px 内边距 + UA 字体下恰为 19 = Noto 13.3333px 行盒）⇒ 新公式给出与现状**相同**的结果，说明该差异来自 button 行盒定位的**另一条分支**，不是「值含 CJK 的度量」问题。如实登记，留待后续单独立项 |
+| `button/UA` LH 16 / rel 20 | **0（已修 → §14）** | **第 14 轮已修**（同主题最后一块 ≥1px）：根因**不是**控件自身基线，而是**父块 strut** 按**父块字号**吸收了 replaced 子元素内容的 CJK 回退面度量（`boxHasCJK` 递归扫到 `<button>中文字</button>` 的文本**子节点**）。修复后该表 `LH/rel` 的 ≥1px 处数 **16+20 → 0**，残留 18 行全部为 0.5px 半像素（与同组 `LAT` 同幅，既有项） |
 
 ⇒ 16 个**正式探针**中**已无 ≥1px 缺口**（第 12 轮 §12-6 判据里的唯一例外 §12-5 已关闭）。
 
@@ -1823,3 +1823,162 @@ asc_content   = asc_c（再 round）
 **顺带发现（登记，未在本轮处理）**：wbui 的 `Element.firstElementChild` 实测返回
 `undefined`（`children[0]` 正常），会让依赖它的页面脚本静默终止 —— 夹具已改用
 `children[0]` 规避，建议后续补 DOM 实现。
+
+---
+
+## 14｜button（replaced inline）内容含 CJK 时**父块 strut** 吸收回退面度量（**已修**）
+
+监督对象：`cjk_linebox_scan` 的 `button|UA|Arial|{20,24,32}|{CJK,LATCJK}`（§13-6 中
+唯一被推后的一块 ≥1px）。修复后该表 `LH/rel` 的 ≥1px 处数 **36 → 0**。
+
+### 14-1｜根因（与监督者预判一致，已实测证实）
+
+IFC 容器的**基准行高**取自容器自身的字体度量：
+
+```
+inlineformattingcontext.go L133   lineHeight := fontLineGap(box)   → baseLineHeight（L165）
+inlineformattingcontext.go L178   textHeight := fontLineGap(box)
+inlineformattingcontext.go L208   textAscent, textDescent := fontAscentDescent(box)
+                        ↓
+layoututil.go fontLineGap → effectiveFontMetricsOpt(box, false)
+                        ↓
+   fs = fontSizeOf(box)                      ← **父块**字号（20/24/32）
+   boxHasCJK(box)                            ← **递归**扫描全部后代
+```
+
+`<button>中文字</button>` 的文本是 button 的**子节点**，于是父块 `div` 被
+`boxHasCJK` 判为「含 CJK」⇒ 取 `CJKFontMetricsFunc(fam, fs=父块字号 32, …)`，父块
+strut 变成 **46 = Noto Sans SC 32px 行盒**（父块 Arial 只有 37）。这正是
+「**父块行盒 strut 把 replaced 子元素内容的 CJK 回退面度量按父块字号吸收**」。
+
+**对照证明这是 button 特有、而非全局缺陷**：
+
+| 控件 | 文本位置 | `boxHasCJK` 可见性 | 父块 strut 是否被污染 |
+|---|---|---|---|
+| `<input value="中英">` | **value 属性** | 扫不到（false） | **否**（故 §12-5 只需在**控件自身基线**补 `boxValueHasCJK`） |
+| `<button>中文字</button>` | **文本子节点** | 扫得到（true） | **是**（本轮修复对象） |
+
+### 14-2｜Edge 规律（可复算，无自由参数）
+
+Edge 语义（CSS 2.1 §10.8）：行盒高 = maxBaseline + maxDescent；**strut 取容器自身
+字体**；atomic inline 子盒只以 **margin-box 高**参与父行盒，其内部字体度量不进入；
+button 是 inline-block，**基线 = 内部文字行的基线**，故顶→基线偏移 `off` 由控件内部
+度量决定（与父块字号无关）。
+
+button\|UA（控件字号恒为 UA `13.3333px`，border 1 + padding 2 ⇒ 顶到内容顶 `3px`）：
+
+| 父块 size | strut asc/desc | `off`(LAT) | `off`(CJK) | Edge LAT LH/rel | Edge CJK LH/rel |
+|---|---|---|---|---|---|
+| 20 | 18 / 6 | 15 | 18 | 24 / 3 | **25 / 0** |
+| 24 | 22 / 6 | 15 | 18 | 28 / 7 | **29 / 4** |
+| 32 | 29 / 8 | 15 | 18 | 37 / 14 | **37 / 11** |
+
+`off` 的可复算来源 = §12-5 的**同一公式**在 button 上的退化形式（button 的
+`contentH == lineH_content`，居中项为 0）：
+
+```
+off = borderTop + paddingTop + X,   X = (contentH − lineH_content)/2 + round(asc_content)
+LAT(15) = 3 + round(12.07)                   ← Arial 13.3333px
+CJK(18) = 3 + round(15.xx)                   ← Noto Sans SC 13.3333px（与 §13 的 X 表 13.3333 档一致）
+```
+
+逐项复算（三档 × {LAT,CJK} = 6 项全部命中）：
+
+```
+rel = max(strutAscent, off) − off
+  20CJK max(18,18)−18 = 0 ✓   20LAT max(18,15)−15 = 3 ✓
+  24CJK max(22,18)−18 = 4 ✓   24LAT max(22,15)−15 = 7 ✓
+  32CJK max(29,18)−18 = 11 ✓  32LAT max(29,15)−15 = 14 ✓
+LH  = maxBaseline + max(strutDescent, (rel + bH) − strutAscent)     bH: 21(LAT) / 25(CJK)
+  20CJK 18 + max(6, 7) = 25 ✓  20LAT 18 + max(6, 6) = 24 ✓
+  24CJK 22 + max(6, 7) = 29 ✓  24LAT 22 + max(6, 6) = 28 ✓
+  32CJK 29 + max(8, 7) = 37 ✓  32LAT 29 + max(8, 6) = 37 ✓
+```
+
+### 14-3｜实现（最小分支，未重构 replaced-inline 行盒）
+
+**只改**「IFC 容器的 strut 三件套」，其余路径全部不动：
+
+| 文件 | 改动 |
+|---|---|
+| `engine/layout/layoututil.go` | 新增 `isAtomicInlineBox(b)`（replaced 或 `display:inline-block/inline-flex/inline-grid`）、`boxHasCJKOwnText(box)`（只扫**自身**行内文本，不进入 atomic inline 子元素）、`effectiveFontMetricsOwnText`、`fontLineGapOwnText`、`fontAscentDescentOwnText`；抽出共用体 `effectiveFontMetricsJudge(box, forceCJK, hasCJK)` |
+| `engine/layout/inlineformattingcontext.go` | L133 `lineHeight`、L178 `textHeight`、L208 `textAscent/textDescent`（+ L174 诊断输出）改用 own-text 版本 |
+
+**刻意未动（红线，附证据）**：
+
+- `boxHasCJK` / `effectiveFontMetrics` / `effectiveFontMetricsOpt` **语义不变** ⇒
+  `formControlContentSize → fontLineGap(button)` 仍看得见 button 的**直接**文本子节点，
+  控件固有高保持 21(LAT)/25(CJK)（扫描表 `bH` 全表一致已验证）；
+- 控件自身基线（`ba`）与 `boxValueHasCJK` 分支（§12-5）不动 ⇒ input/textarea 不退化；
+- `cH` 的 `+4` 是 `getComputedStyle` 的 padding/border 序列化口径（`bH` 两侧一致），
+  不是布局问题，未动。
+
+### 14-4｜目标验收（≤0.5px 逐项）
+
+| 用例 | Edge `LH/rel` | 修复前 | 修复后 | Δ |
+|---|---|---|---|---|
+| `button\|UA\|Arial\|20\|CJK` | 25 / 0 | 30 / 5 | **25.5 / 0.5** | **+0.5 / +0.5** |
+| `button\|UA\|Arial\|20\|LATCJK` | 25 / 0 | 30 / 5 | **25.5 / 0.5** | **+0.5 / +0.5** |
+| `button\|UA\|Arial\|24\|CJK` | 29 / 4 | 35 / 10 | **29.5 / 4.5** | **+0.5 / +0.5** |
+| `button\|UA\|Arial\|24\|LATCJK` | 29 / 4 | 35 / 10 | **29.5 / 4.5** | **+0.5 / +0.5** |
+| `button\|UA\|Arial\|32\|CJK` | 37 / 11 | 46 / 19 | **37 / 11.5** | **0 / +0.5** |
+| `button\|UA\|Arial\|32\|LATCJK` | 37 / 11 | 46 / 19 | **37 / 11.5** | **0 / +0.5** |
+| （附带）`button\|UA\|Arial\|16\|CJK` | 25 / 0 | 26 / 1 | **25 / 0** | **0 / 0** |
+| （须保持）`button\|UA\|Arial\|{20,24,32}\|LAT` | 24/3、28/7、37/14 | 24.5/3.5、28.5/7.5、37/14.5 | 同左 | 0.5（**保持**，未被「修掉」） |
+
+⇒ 全部 ≤0.5px 达标；`LAT` 的 0.5 半像素**保持**（按要求不作为修复目标）。
+
+### 14-5｜回归证据（四路）
+
+**A. 16 探针逐项**（`dev/output/wbui-audit/ALL4.txt` vs `ALL3.txt`）：
+
+| 探针 | ALL3 | ALL4 | 探针 | ALL3 | ALL4 |
+|---|---|---|---|---|---|
+| `g1_formctl` | 2 | 2 | `minibox` | 16 | 16 |
+| `g2_transform` | 0 | 0 | `h2_baseline_formula` | 0 | 0 |
+| `g3_scrollbar` | 0 | 0 | `h2_baseline_matrix` | 2 | 2 |
+| `g4_inlineblock` | 10 | 10 | `h2_control_baseline` | 16 | 16 |
+| `g5_mixedtext` | 0 | 0 | `h2_replaced_linebox` | 10 | 10 |
+| `g6_supports` | 0 | 0 | `h4_supports_bounds` | 0 | 0 |
+| `g7_listpseudo` | 2 | 2 | `h6_misc_props` | 0 | 0 |
+| **`formtext_probe`** | 2 | **2** | `h7_transform_norm` | 0 | 0 |
+
+⇒ **零回归**（总差异 60 = 60，16/16 逐项相同）。
+
+**B. §12-5 项不退**：`cjk_text_vs_input_scan` **IDENTICAL**（wbui=9 / Edge=9 行）；
+`formtext_probe` i2 仍 `rect=10,129,177,21` 两侧逐字一致（cmp 仅剩既有的 b1 宽度
+浮点表示）。
+
+**C. 648 扫描表按字段重算**：`LH/rel` 的 |Δ|≥1 处数 **40 → 24**，其中
+**24 处全部**在 `input|CTRL32` 的 monospace 组（`12/13.3333/14/16` 档 rel 1.5、
+`20/24` 档 LH+rel 1.5），且同一组的 **LAT / LATCJK / CJK 三行差值完全相同** ⇒
+monospace 映射字体度量的既有差（接受项，§13-6 已定性）；button 组 **16+20 → 0**。
+
+**D. 基线对比（最强证据，A/B 同源）**：`git stash` 撤掉本轮改动后重跑 wbui 侧
+（`dev/tools/jsread` 直出 `dev/output/tmp/wbui_before.txt`），与修复后逐行比对：
+
+```
+全 648 行中仅 8 行变化，全部是 button|UA|Arial 的 CJK/LATCJK：
+  16|CJK,LATCJK   LH 26 → 25      rel 1 → 0
+  20|CJK,LATCJK   LH 30 → 25.5    rel 5 → 0.5
+  24|CJK,LATCJK   LH 35 → 29.5    rel 10 → 4.5
+  32|CJK,LATCJK   LH 46 → 37      rel 19 → 11.5
+变化行数 0 的表：input|UA、textarea|UA、input|EXP、textarea|EXP、
+                 input|CTRL32、button|EXP、TXT
+```
+
+⇒ 改动**精确落在目标路径**，无任何越界影响。
+
+### 14-6｜残留（全部 <1px 或既有接受项）
+
+| 残留 | 处数 | 定性 |
+|---|---|---|
+| `button/UA`（含 monospace 组 18 行） | 18 | **全部 0.5px** 半像素，与同组 `LAT` 同幅（父字体既有差） |
+| `input/CTRL32` monospace | 24 | **接受项**（监督者已定性）：LAT/CJK 同差 1.5px，与 CJK 无关 |
+| `cH` 全表 | 81/表 | **接受项**：`getComputedStyle` 的 padding/border 序列化口径（`bH` 两侧一致） |
+
+### 14-7｜本轮改动与产物
+
+- 代码：`engine/layout/layoututil.go`、`engine/layout/inlineformattingcontext.go`
+- 证据：`dev/output/wbui-audit/ALL4.txt`、`cjk_linebox_scan.*`、`cjk_text_vs_input_scan.*`、
+  `dev/output/tmp/wbui_before.txt`（修复前基线快照）

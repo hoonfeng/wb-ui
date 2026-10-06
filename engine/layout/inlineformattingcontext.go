@@ -130,7 +130,15 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// flex-item box, and "创建" inside the button was off-center by the same).
 	containerWidth := contentWidth
 	fs := fontSizeOf(box)
-	lineHeight := fontLineGap(box)
+	// ★ strut 取**本 IFC 容器自身**的行内文本度量（fontLineGapOwnText：不穿
+	//   atomic inline 子元素）。atomic inline（inline-block / replaced，如
+	//   `<button>`）的内容在它自己的行盒里排布，只以 margin-box 高参与本行盒
+	//   （CSS 2.1 §10.8）。此前用 fontLineGap 会把子控件文本的 CJK 回退面按
+	//   **父块字号**吸进 strut ——
+	//   cjk_linebox_scan 的 button|UA|Arial|32|CJK：Edge 37（= Arial 32px
+	//   strut），wbui 46（= 父块 fontLineGap，≈ Noto 32px 行盒）；24 档
+	//   28/35、20 档 24/30 同源。改用自身度量后的三档复算见 WORKITEMS §14。
+	lineHeight := fontLineGapOwnText(box)
 	if lineHeight <= 0 {
 		lineHeight = fs * 1.2
 	}
@@ -171,11 +179,14 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			name, class = el.NodeName(), el.GetAttribute("class")
 		}
 		fmt.Fprintf(os.Stderr, "[ifc] <%s class=%q> fs=%.4f fontLineGap=%.4f cssLH=%.4f set=%v lineHeight=%.4f family=%q\n",
-			name, class, fs, fontLineGap(box), cssLH, cssLHSet, lineHeight, fontFamilyOf(box))
+			name, class, fs, fontLineGapOwnText(box), cssLH, cssLHSet, lineHeight, fontFamilyOf(box))
 	}
 	// Text segment height should be the actual font metrics height, not CSS
 	// line-height. The line-height determines line spacing and centering.
-	textHeight := fontLineGap(box)
+	// ★ 同 lineHeight：文本段高度取容器**自身**行内文本度量（不穿 atomic
+	//   inline 子元素），否则子控件文本的 CJK 回退面会同时抬高本容器的文本段
+	//   高度与 centeringOffset。
+	textHeight := fontLineGapOwnText(box)
 	if textHeight <= 0 {
 		textHeight = fs * 1.2
 	}
@@ -205,7 +216,9 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	}
 	// 本行文本段的字体 ascent：基线对齐时文本段的 Y = 行盒基线 - ascent
 	// （见下面的 lineTextOffset / 表单控件基线定位）。
-	textAscent, textDescent := fontAscentDescent(box)
+	// ★ 同上：strut 的 ascent/descent 取容器**自身**行内文本度量 —— 它决定行盒
+	//   顶→基线的距离（strutAscent）与既有的 halfLeading 居中口径。
+	textAscent, textDescent := fontAscentDescentOwnText(box)
 	// ★ 字体度量**各自四舍五入到整像素**后再参与行盒计算（与 fontLineGap 同一
 	//   口径）：浏览器把 ascent/descent/lineGap 分别取整后才相加，行盒基线也
 	//   用取整后的 ascent —— Edge 实测 fs16 → 19/5、fs32 → 37/9，正是

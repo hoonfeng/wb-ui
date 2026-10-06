@@ -737,6 +737,24 @@ func fontLineGap(box *ElementBox) float64 {
 	return math.Round(a) + math.Round(d) + math.Round(lg)
 }
 
+// fontLineGapOwnText is fontLineGap restricted to the box's **own** inline text
+// content: atomic inline descendants (inline-block / replaced) are not entered
+// (see effectiveFontMetricsOwnText). This is the metric a block container uses
+// for its **strut** — CSS 2.1 §10.8 gives the strut the container's own font,
+// and an atomic inline child reaches the parent line box only through its
+// margin-box height, never through its inner font metrics.
+func fontLineGapOwnText(box *ElementBox) float64 {
+	a, d, lg := effectiveFontMetricsOwnText(box)
+	return math.Round(a) + math.Round(d) + math.Round(lg)
+}
+
+// fontAscentDescentOwnText is fontAscentDescent restricted to the box's own
+// inline text content (see fontLineGapOwnText).
+func fontAscentDescentOwnText(box *ElementBox) (ascent, descent float64) {
+	a, d, _ := effectiveFontMetricsOwnText(box)
+	return a, d
+}
+
 // cssLineHeight returns the resolved CSS line-height value for the box, plus
 // whether line-height was **explicitly set**. It handles px values, unitless
 // numbers (multiplied by font-size), and percentages.
@@ -836,6 +854,71 @@ func boxHasCJK(box *ElementBox) bool {
 	return false
 }
 
+// isAtomicInlineBox reports whether b is an atomic inline-level box: a replaced
+// element (img / input / button / select …), or a box whose used display is
+// inline-block / inline-flex / inline-grid.
+//
+// ★ 为什么祖先的行盒度量不能「看穿」它：atomic inline 盒的内容在**它自己的**
+// 行盒里排布，只有 margin-box 高参与父行盒（CSS 2.1 §10.8）。所以
+// `<div><button>中文字</button></div>` 里父块的 strut 必须取**父块自身**字体
+// （Edge：Arial 32px → 37）；一旦递归进 button 的文本子节点，就会按**父块
+// 字号**把 CJK 回退面度量吸进 strut（wbui 46 ≈ Noto 32px 行盒，即
+// cjk_linebox_scan 的 button|UA|Arial|32|CJK 缺口）。
+func isAtomicInlineBox(b *ElementBox) bool {
+	if b == nil {
+		return false
+	}
+	if b.IsReplaced() {
+		return true
+	}
+	cs := b.Style()
+	if cs == nil {
+		return false
+	}
+	switch cs.Display {
+	case style.DisplayInlineBlock, style.DisplayInlineFlex, style.DisplayInlineGrid:
+		return true
+	}
+	return false
+}
+
+// boxHasCJKOwnText is boxHasCJK restricted to the box's **own** inline content:
+// atomic inline descendants are not entered (their text belongs to their own
+// line boxes — see isAtomicInlineBox).
+//
+// 边界实例（本轮 button 缺口）`<button>中文字</button>`：
+//   - boxHasCJK(button)          → true：文本是 button 的**直接**子节点 ⇒ 控件
+//     自身的固有高与内部基线仍旧按 CJK 回退面算（Edge 的 button 高 21→25、
+//     基线距顶 15→18，必须保持）。
+//   - boxHasCJKOwnText(父块 div) → false：button 是 atomic inline，不进入 ⇒
+//     父块 strut 回到父块字体（Arial）。
+//
+// 非 atomic 的 inline 子元素（span / a / em …）仍然照穿：它们的文本确实属于
+// 父块的行内内容，Edge 也因此拉入回退面（TXT 表各档 fs 的 LH 由 9 变 11）。
+func boxHasCJKOwnText(box *ElementBox) bool {
+	if box == nil {
+		return false
+	}
+	for _, c := range box.Children() {
+		switch t := c.(type) {
+		case *InlineTextBox:
+			for _, r := range t.Text() {
+				if isCJKChar(r) {
+					return true
+				}
+			}
+		case *ElementBox:
+			if isAtomicInlineBox(t) {
+				continue
+			}
+			if boxHasCJKOwnText(t) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // boxValueHasCJK reports whether a form control's **value** contains a CJK
 // character.
 //
@@ -887,7 +970,21 @@ func hasCJKChar(s string) bool {
 //
 // Latin-only boxes short-circuit and never query the fallback face.
 func effectiveFontMetrics(box *ElementBox) (ascent, descent, lineGap float64) {
-	return effectiveFontMetricsOpt(box, false)
+	return effectiveFontMetricsJudge(box, false, boxHasCJK)
+}
+
+// effectiveFontMetricsOwnText is effectiveFontMetrics restricted to the box's
+// **own** inline text content — atomic inline descendants are excluded (see
+// boxHasCJKOwnText).
+//
+// ★ 谁来用：**strut / 行盒**消费者（IFC 容器的基准行高、文本高度、基线
+// ascent/descent）。父块的行盒只受「自身字体的 strut」与「atomic inline 子盒的
+// margin-box 高」影响，不受子控件内部字体的影响。
+// ★ 谁不能用：控件自身的固有高（formControlContentSize → fontLineGap）与控件内部
+// 基线 —— 那些必须继续看控件**自己的**内容（boxHasCJK 对 button 的直接文本子节点
+// 为 true）。
+func effectiveFontMetricsOwnText(box *ElementBox) (ascent, descent, lineGap float64) {
+	return effectiveFontMetricsJudge(box, false, boxHasCJKOwnText)
 }
 
 // effectiveFontMetricsWithCJKValue is effectiveFontMetrics with the control's
@@ -897,12 +994,18 @@ func effectiveFontMetrics(box *ElementBox) (ascent, descent, lineGap float64) {
 //   calling fontLineGap/effectiveFontMetrics: the control's own intrinsic
 //   height is value-independent in Edge (21px for a 13.3333px UA input).
 func effectiveFontMetricsWithCJKValue(box *ElementBox) (ascent, descent, lineGap float64) {
-	return effectiveFontMetricsOpt(box, true)
+	return effectiveFontMetricsJudge(box, true, boxHasCJK)
 }
 
 // effectiveFontMetricsOpt implements effectiveFontMetrics; forceCJK additionally
 // considers the form-control value (see boxValueHasCJK).
 func effectiveFontMetricsOpt(box *ElementBox, forceCJK bool) (ascent, descent, lineGap float64) {
+	return effectiveFontMetricsJudge(box, forceCJK, boxHasCJK)
+}
+
+// effectiveFontMetricsJudge is the shared body of the effective-metric
+// accessors; hasCJK decides whether the CJK fallback face participates.
+func effectiveFontMetricsJudge(box *ElementBox, forceCJK bool, hasCJK func(*ElementBox) bool) (ascent, descent, lineGap float64) {
 	fs := fontSizeOf(box)
 	// ★ font-size: 0（显式零字号）→ **全部字体相对度量为 0**：CSS 里字体度量
 	//   与 em 一样以 font-size 为单位，0 字号就是 0 行高、0 基线。必须在此
@@ -923,7 +1026,7 @@ func effectiveFontMetricsOpt(box *ElementBox, forceCJK bool) (ascent, descent, l
 	wt := fontWeightOf(box)
 	st := fontStyleOf(box)
 	ascent, descent, lineGap = fontMetricsHelper(fam, fs, wt, st)
-	if CJKFontMetricsFunc == nil || (!forceCJK && !boxHasCJK(box)) {
+	if CJKFontMetricsFunc == nil || (!forceCJK && !hasCJK(box)) {
 		return ascent, descent, lineGap
 	}
 	ca, cd, clg := CJKFontMetricsFunc(fam, fs, wt, st)
