@@ -2692,3 +2692,182 @@ NodeIterator/DOMImplementation/Selection 实例 API。
    `caretPositionFromPoint` 用 ElementFromPoint 近似（offset 恒 0）。
 7. `XMLSerializer.serializeToString` 复用 `GetOuterHTML` 的同一序列化器（格式与浏览器
    XMLSerializer 的细节可能不同；夹具只验类型与包含性）。
+
+---
+
+# §20｜CSS OM 收口 + canvas 2D 口径修正 + 判据一致性修正（第 20 次监督轮）
+
+**本轮范围（监督者锁定，其余维持已定案不追）**：A CSS OM 构造器注册（必做）、
+B canvas 系构造器口径（B1/B2 二选一）、C 判据修正（A 项移出不计判据的组）。
+
+## 20-1｜A. CSS OM 构造器与实例原型（**已落地**，逐项）
+
+注册方式复用 `domctors.go` 的 `domRegisterIface` / `domAdoptIface` / `domAttachProto`
+三件套。**父原型按 Edge 实测基线**（`--dump-dom` 实测，非按规范推断 —— 见 §20-7-3）：
+
+| 接口 | 父原型（Edge 实测） | 接的**既有实例** |
+|---|---|---|
+| `CSSStyleDeclaration` | `Object` | `el.style`、`getComputedStyle(el)` |
+| `StyleSheet` | `Object` | —（中间接口） |
+| `CSSStyleSheet` | `StyleSheet` | `document.styleSheets[i]` |
+| `StyleSheetList` | `Object` | `document.styleSheets` |
+| `CSSRule` | `Object` | —（规则族基类） |
+| `CSSRuleList` | `Object` | `styleSheets[i].cssRules` / `.rules` |
+| `CSSStyleRule` | `CSSRule` | `cssRules[i]`（`type === 1`） |
+| `CSSGroupingRule` | `CSSRule` | CSS Nesting 分组规则 |
+| `CSSConditionRule` | `CSSGroupingRule` | — |
+| `CSSMediaRule` | **`CSSConditionRule`** ★ | `@media` 规则对象 |
+| `CSSSupportsRule` | `CSSConditionRule` | `@supports` 规则对象 |
+| `CSSFontFaceRule` | `CSSRule` | `@font-face` 规则对象 |
+| `CSSKeyframesRule` | `CSSRule` | `@keyframes` 规则对象 |
+| `CSSKeyframeRule` | `CSSRule` | 关键帧规则对象 |
+| `CSSImportRule` | `CSSRule` | `@import` 规则对象 |
+| `CSSNamespaceRule` | `CSSRule` | `@namespace` 规则对象 |
+| `CSSPageRule` | **`CSSGroupingRule`** ★ | `@page` 规则对象 |
+| `MediaQueryList` | `EventTarget` | `matchMedia(q)` 返回对象 |
+| `MediaQueryListEvent` | `Event` | 可 `new`（构造器，暂未派发） |
+| 全局 `CSS` 命名空间 | — | 既有（`CSS.escape` / `CSS.supports`） |
+
+★ 与「按规范推断」的差异（夹具先暴露、再按 Edge 基线修引擎）：Edge 里
+`CSSMediaRule.prototype.__proto__ === CSSConditionRule.prototype`（不是 `CSSGroupingRule`）、
+`CSSPageRule.prototype.__proto__ === CSSGroupingRule.prototype`（不是 `CSSRule`）。
+
+**规则对象**（本轮新增，此前 `cssRules.item()` 恒返回 `null`、也无索引属性）：
+`wrapCSSRule` 按引擎 `css.RuleType` 分派原型（`CSSStyleRule` / `CSSMediaRule` /
+`CSSSupportsRule` / `CSSFontFaceRule` / `CSSKeyframesRule` / `CSSKeyframeRule` /
+`CSSImportRule` / `CSSNamespaceRule` / `CSSPageRule` / `CSSGroupingRule`），并暴露
+CSSOM 的 `type` 编号（1/3/4/5/6/7/8/10/12，Chromium 口径）；`CSSRuleList` 预建规则
+对象数组，使 `list[0] === list.item(0)`（身份一致）。
+
+## 20-2｜B. canvas 系口径 → **选 B1 并落地**
+
+注册 `CanvasRenderingContext2D` / `ImageData` / `Path2D` 三个全局构造器，并接实例原型：
+
+| 实例 | 接法 |
+|---|---|
+| `getContext('2d')` 返回对象 | `CanvasRenderingContext2D`（`buildCanvas2DCtx` 内 `SetClassName` + `domAttachProto`） |
+| `createImageData()` / `getImageData()` 返回对象 | `ImageData`（`SetClassName` + `domAttachProto`） |
+| `OffscreenCanvas` | 既有（`applyCanvas2DPatch` 提供），本轮移出 excluded 纳入判据 |
+| `Path2D` | **仅全局构造器（空壳）** —— 引擎尚无 Path2D 对象建模（`fill(path)`/`stroke(path)` 未实现），如实记账（§20-6-4） |
+
+## 20-3｜C. 探针判据分组修正（数字，前后对照）
+
+| 组 | 第 19 轮 | 第 20 轮 |
+|---|---|---|
+| **globalsCore** | 252/252 | **271/271 = 100%（missing = []）** ★ 收敛判据 |
+| globalsOptional | 1/59 | 0/44 |
+| globalsExcluded | 1/45 | 0/41 |
+| globals 全量 | 252/354 | **271/356** |
+| 分层完备性（partition） | dup=0, notCovered=0（**单向**） | dup=0, notCovered=0, **extra=0（双向）** |
+
+两项口径修正（**都不是数字粉饰**，见 §20-5 / §20-7-5）：
+
+1. **补入全量漏列项 2 项**：`HTMLHeadingElement` / `HTMLParamElement` 此前只在
+   `globalsCore` 中列出、被 `globals` 全量清单漏列 → 全量分母 354 → **356**，
+   分子同增 +2（271/356）。发现方式：三组 present 合计 271 ≠ 全量 present 269，
+   差值 = 2 暴露了漏列。**同时给 partition 加反向检查**（`extra` = 三组中不在全量的项），
+   使同类遗漏今后必然报错。
+2. **CSS OM 15 项 + canvas 4 项移入 core**（判据组）：实现后 present 全满。
+
+## 20-4｜B2 表述修正（「需完整 2D 语义」与探针口径不符）
+
+第 18/19 轮把 `CanvasRenderingContext2D` / `ImageData` / `Path2D` / `OffscreenCanvas`
+列入**不追**，理由写作「需要**完整** 2D 上下文语义」。该理由与事实/口径均不符：
+
+1. 探针 `globals` 的判定口径是 `typeof !== 'undefined'`（见探针 `chkBy` 的 `global` 模式），
+   **只需注册全局构造器名**即 present，与「完整 2D 语义」无关；
+2. 引擎实有**完整** canvas 2D 实现（`engine/js/bindings/canvas2d.go`，2073 行 + 测试：
+   绘制走 Skia、`CanvasBitmap` → 渲染管线 Blit），且 xterm 的
+   `cellWidth`/`cellHeight` 测量**实际依赖**它（`dom.go` 的 `applyCanvas2DPatch` 注释）；
+3. `OffscreenCanvas` 早已由 `applyCanvas2DPatch` 提供（旧 excluded 组里唯一 present 项）。
+
+故本轮改判 **B1**：注册构造器 + 接实例原型，并把四项移出 excluded。仅留
+`Path2D` 的空壳状态为遗留（§20-6-4）。
+
+## 20-5｜★ 判据一致性修正（本轮核心记录）
+
+**问题**（监督者指出，核对为真）：§17 类别②E 由本工作 agent 自己写明
+`CSSStyleDeclaration/CSSRule/StyleSheetList/MediaQueryList` 的**实例引擎已在用**
+（`el.style`、`document.styleSheets`），「缺的只是全局构造器 → **应做（并入类别①）**」；
+但第 19 轮把整批 CSS OM 塞进 `globalsOptional`（**不参与判据**）、既未实现也未给
+不追理由。这不是「不追」，而是**应做项从判据里消失**（判据被收窄而非清零）。
+
+**本轮修正**：
+
+1. 把 15 项 CSS OM（`CSSStyleSheet`/`CSSStyleRule`/`CSSRule`/`CSSRuleList`/
+   `CSSStyleDeclaration`/`CSSKeyframesRule`/`CSSMediaRule`/`CSSGroupingRule`/
+   `CSSConditionRule`/`CSSSupportsRule`/`CSSFontFaceRule`/`MediaQueryList`/
+   `MediaQueryListEvent`/`StyleSheetList`/`CSS`）**移出 `globalsOptional`、纳入
+   `globalsCore`（判据组）**；canvas 4 项同样移出 `globalsExcluded`；
+2. 全部**实现**（§20-1 / §20-2），使 core 271/271 成立；
+3. `globalsOptional` 里保留明确注释，说明「可选组不得收纳『实例已在用 + §17 判为应做』的项」。
+
+**降级原因（如实记账）**：第 19 轮的目标是尽快让「核心组 missing=0」成为**有界**判据，
+于是把「构造器缺失但实例已在用」的一整类（CSS OM）与「整个子系统」混同处理——
+放进不计判据的组，实际上把**明确、低成本、与 I 组完全同类**的应做项排除在收敛定义之外。
+本轮恢复正常后，`globalsCore` 分母（271）已覆盖全部「实例已在用的接口构造器」。
+
+## 20-6｜遗留与有意偏差（如实记账）
+
+1. **`el.style` 的原型成员不可达**：`el.style` 是 goja **dynamic object**
+   （`styleProxy`），其 `Get` 拦截所有键（未知属性返回 `""`），且 goja 的
+   `getStr` 在 handler 返回非 nil 时**不再查原型链**。因此 `el.style instanceof
+   CSSStyleDeclaration` / `Object.getPrototypeOf(el.style) === CSSStyleDeclaration.prototype`
+   成立（原型槽已设），但 `el.style.constructor.name` 仍为 `undefined`、原型上的方法与
+   属性不可达（**既有行为**，本轮未改变；夹具只断言 instanceof + `cssText` 行为）。
+   若要做到完整可达，需把 `CSSStyleDeclaration` 方法面下沉进 `styleProxy.Get/Has`
+   分支（下一轮候选）。
+2. **规则对象字段面**：只暴露 `type` 编号与对象身份（原型/constructor/`SetInternal`
+   携带的 Go 规则指针）；`selectorText` / `style` / `media` / `conditionText` 未实现。
+3. **集合类接口父原型**：`NodeList` / `HTMLCollection` / `DOMRectList` 仍指向
+   `Array.prototype`（既有有意偏差）；`CSSRuleList` / `StyleSheetList` **未沿用**该偏差
+   （普通对象、父为 `Object.prototype`，与 Edge 一致）。
+4. **`Path2D` 是空壳构造器**：无实例建模（`fill(path)` / `stroke(path)` 未实现）。
+5. **`cssRules` 每次访问新建**：`sheet.cssRules === sheet.cssRules` 为 `false`
+   （浏览器为同一对象）；夹具以单次引用断言 `list[0] === list.item(0)` 身份一致。
+6. **不可构造接口的宽容语义**：`new CSSStyleDeclaration()` 不抛（Chromium 抛
+   `Illegal constructor`）—— 既有取向，夹具不对比。
+
+## 20-7｜★ 本轮发现并修复的真实缺陷（4 项）
+
+1. **不可重入死锁（最严重）**：`registerDOMInterfaces` 全程持有 `domIfaceMu`
+   **写锁**，而我新增的 `domIfaceProto("EventTarget")` 内部取**读锁** →
+   `sync.RWMutex` 不可重入 → 探针/夹具**挂起在 WebView 初始化**
+   （实测：`webplatform.exe` 184MB 常驻、日志停在 fontmgr 之后无输出）。
+   修法：注册期间父原型一律用**局部变量**传递（`eventTargetProto`），并在原处加注释警示。
+2. **`jsc.SetObjectPrototype` 的 `*Interpreter` 指针比较误判**：同一 runtime 可能有多个
+   `Interpreter` 包装，指针不等被误判成「跨 runtime」→ 静默返回 false →
+   `el.style` 原型未设（夹具实测 `style_instanceof=false`，`getPrototypeOf === Object.prototype`）。
+   修法：去掉指针比较，跨 runtime 交由 goja 自身校验（`SetPrototype` → `runtime.try`
+   捕获并返回 error）。
+3. **`CSSMediaRule` / `CSSPageRule` 父原型按规范推断错误**：夹具先报
+   `proto_links_fail=CSSMediaRule>CSSGroupingRule|CSSPageRule>CSSRule`（仅 Edge 侧失败）→
+   用 Edge 实测确认真实父链（`CSSConditionRule` / `CSSGroupingRule`）→ **按 Edge 基线修引擎**，
+   而不是改夹具掩盖。
+4. **`cssRules.item()` 恒返回 `null`、无索引属性**：规则实例此前完全不可见 →
+   预建规则对象 + 索引属性 + `item()` 身份一致。
+
+## 20-8｜★ 完成定义（**写死**，本类别收敛判据）
+
+当且仅当以下**全部**成立，第 20 轮视为完成（证据见 §20-9 与 `dev/output/wbui-audit/`）：
+
+1. `globalsCore.missing == []`（**271/271**）；
+2. CSS OM 15 项 + canvas 4 项全部 present（`globals` 271/356；探针 + 夹具双重证据）；
+3. 新夹具 **cssom IDENTICAL（29/29）**、**canvas2d IDENTICAL（20/20）**；
+4. 红线四夹具 **IDENTICAL**：`element_attrs` 85/85、`element_geom` 61/61、
+   `document_doctype` 34/34、`document_props` 74/74（`REDLINE10.txt`）；
+5. `ALL10.txt` 的前 16 行与 `ALL9b.txt` **逐字零差异**（`SAME-ZERO-DIFF`）；
+6. `constructors` 夹具**回归** IDENTICAL（62/62）；
+7. 工程红线：`go test ./engine/...` **23 包 ok / 0 FAIL**；`gofmt -l` 全仓 **294**
+   （与基线一致，未新增）；`engine/layout` **零改动**。
+
+## 20-9｜★ 汇报（两行结论，固化）
+
+- **本轮后核心组 present/total = 271/271（100%，missing = []）**；CSS OM 15 项与
+  canvas 2D 4 项已实现并**纳入判据组**（globals 全量 271/356）；探针 `partition` 升级为
+  **双向**完备性检查（dup=0, notCovered=0, extra=0）。
+- **剩余不追清单（globalsExcluded，41 项）**：A 图形/GPU 与 DOM 几何 7（WebGL/WebGL2/
+  ImageBitmap/createImageBitmap/DOMPoint/DOMMatrix/DOMQuad）、B WASM 与并发隔离 4、
+  C Intl 1、宿主内建函数 3、D 调度/导航/系统集成 15、E Typed OM 与 Animation 9、
+  K 观察者 2。另有 **globalsOptional 44 项**（网络/持久化、XPath、字体/视口、
+  Highlight、Window 方法与 BarProp）—— 不计入收敛判据。

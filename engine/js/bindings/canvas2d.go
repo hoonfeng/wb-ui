@@ -828,6 +828,12 @@ func sourceImageOf(arg jsc.JSValue) (*skia.Image, bool) {
 func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.CanvasBitmap) *jsc.JSObject {
 	s := &canvas2DCtxState{el: el, bm: bm}
 	o := jsc.NewObject(rt.ObjectPrototype())
+	// ★ 第 20 轮：getContext('2d') 的返回对象是 CanvasRenderingContext2D 实例
+	//（库的特性检测常写 `ctx instanceof CanvasRenderingContext2D`；
+	// 此前原型为 Object.prototype → 恒 false）。原型链上是空壳构造器
+	//（本引擎的 2D 方法直接挂在对象自身，见 WORKITEMS §20-6）。
+	o.SetClassName("CanvasRenderingContext2D")
+	domAttachProto(o, "CanvasRenderingContext2D")
 
 	o.Set("fillStyle", jsc.StringValue("#000000"))
 	o.Set("strokeStyle", jsc.StringValue("#000000"))
@@ -1557,6 +1563,9 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 			}
 			ret := jsc.NewObject(rt.ObjectPrototype())
 			ret.Set("__wbImageData", jsc.BooleanValue(true))
+			// ★ 第 20 轮：ImageData 实例原型（CSSOM/HTML §4.12.5 ImageData）。
+			ret.SetClassName("ImageData")
+			domAttachProto(ret, "ImageData")
 			ret.Set("width", jsc.NumberValue(float64(iw)))
 			ret.Set("height", jsc.NumberValue(float64(ih)))
 			arr := jsc.NewObject(rt.ObjectPrototype())
@@ -1571,6 +1580,9 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 		func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
 			ret := jsc.NewObject(rt.ObjectPrototype())
 			ret.Set("__wbImageData", jsc.BooleanValue(true))
+			// ★ 第 20 轮：ImageData 实例原型。
+			ret.SetClassName("ImageData")
+			domAttachProto(ret, "ImageData")
 			w, h := bm.W, bm.H
 			sx := int(argNum(a, 0, 0))
 			sy := int(argNum(a, 1, 0))

@@ -1301,7 +1301,10 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	// → 后续 patch 级联失败 → v-if 关闭不移除 DOM。
 	g.Set("getComputedStyle", jsc.FunctionValue(jsc.NewNativeFunction("getComputedStyle",
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-			cs := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 20 轮：返回对象是 CSSStyleDeclaration 实例
+			//（此前原型为 Object.prototype → `cs instanceof CSSStyleDeclaration`
+			// 为 false；CSSOM §1.2 getComputedStyle 的返回类型）。
+			cs := jsc.NewObject(domIfaceProtoOr("CSSStyleDeclaration", in.ObjectPrototype()))
 			var computed map[string]string
 			// ★ H6：transform-origin 需要在回写阶段实时算（依赖 border-box 几何，
 			//   不能进 computedStyleFor 的 per-element 缓存）—— 此处记住元素。
@@ -2205,7 +2208,9 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			if len(args) > 0 {
 				query = args[0].ToString()
 			}
-			mq := jsc.NewObject(in.ObjectPrototype())
+			// ★ 第 20 轮：返回 MediaQueryList 实例（原型 → EventTarget；
+			// 此前原型为 Object.prototype → `mq instanceof MediaQueryList` 为 false）。
+			mq := jsc.NewObject(domIfaceProtoOr("MediaQueryList", in.ObjectPrototype()))
 			mq.Set("media", jsc.StringValue(query))
 			ctx := css.MediaQueryContext{
 				Width: 1280, Height: 800, DeviceWidth: 1280, DeviceHeight: 800,
@@ -4761,7 +4766,18 @@ func (s *styleProxy) Delete(key string) bool {
 func makeStyleObject(rt *jsc.Interpreter, el *dom.Element) *jsc.JSObject {
 	pr := &styleProxy{el: el, vm: rt.VM()}
 	gojaObj := rt.VM().NewDynamicObject(pr)
-	return jsc.WrapObject(gojaObj, rt)
+	obj := jsc.WrapObject(gojaObj, rt)
+	// ★ 第 20 轮：`el.style` 是 CSSStyleDeclaration 实例。
+	// ★ 必须用 jsc.SetObjectPrototype（goja 的 SetPrototype），**不能**走
+	//   obj.Set("__proto__", …)：styleProxy 是 dynamic object，其 Set handler 会把
+	//   "__proto__" 当成 CSS 属性写进元素的 style 属性（属性名变成 "__proto__"）。
+	//   原型上只含 constructor（本引擎不为中心化的 style 对象建模整套
+	//   CSSStyleDeclaration 方法面，见 WORKITEMS §20-6）——故 Get 拦截不受影响：
+	//   `style.getPropertyValue` 之类仍返回 ""（既有行为，本轮未改变）。
+	if p := domIfaceProto("CSSStyleDeclaration"); p != nil {
+		jsc.SetObjectPrototype(obj, p)
+	}
+	return obj
 }
 
 // parseStyle parses "color:red;font-size:16px" → map
@@ -5657,7 +5673,9 @@ func arrJS(in *jsc.Interpreter, els []*dom.Element) jsc.JSValue {
 // styleSheets）：length + item(i) + 索引属性 + 可遍历。库常做
 // `Array.from(document.styleSheets)` 或按 length 判断样式是否已装配。
 func wrapStyleSheetList(in *jsc.Interpreter, sheets []*css.CSSStyleSheet) jsc.JSValue {
-	obj := jsc.NewObject(in.ObjectPrototype())
+	// ★ 第 20 轮：CSSOM §1.5 StyleSheetList 原型
+	//（`document.styleSheets instanceof StyleSheetList`）。
+	obj := jsc.NewObject(domIfaceProtoOr("StyleSheetList", in.ObjectPrototype()))
 	obj.SetClassName("StyleSheetList")
 	// ★ 预建包装对象数组：索引访问与 item(i) 必须返回**同一身份**的对象
 	//   （浏览器里 StyleSheetList 是 reflector，`list[0] === list.item(0)`）。
@@ -5689,7 +5707,9 @@ func wrapStyleSheetList(in *jsc.Interpreter, sheets []*css.CSSStyleSheet) jsc.JS
 // length/item（CSSRule 对象模型未移植，见 css/stylesheet.go 的 Completeness
 // 说明），而库最常用的恰好是 `sheet.cssRules.length` 这一探测。
 func wrapStyleSheet(in *jsc.Interpreter, s *css.CSSStyleSheet) *jsc.JSObject {
-	obj := jsc.NewObject(in.ObjectPrototype())
+	// ★ 第 20 轮：CSSOM §1.5 CSSStyleSheet 原型（→ StyleSheet）
+	//（`document.styleSheets[0] instanceof CSSStyleSheet`）。
+	obj := jsc.NewObject(domIfaceProtoOr("CSSStyleSheet", in.ObjectPrototype()))
 	obj.SetClassName("CSSStyleSheet")
 	obj.SetInternal(s)
 	obj.SetAccessor("href", strAcc(s.Href()), nil)
@@ -5708,14 +5728,32 @@ func wrapStyleSheet(in *jsc.Interpreter, s *css.CSSStyleSheet) *jsc.JSObject {
 	}), nil)
 	ruleListAcc := getter(func(in *jsc.Interpreter) jsc.JSValue {
 		rules := s.Rules()
-		ro := jsc.NewObject(in.ObjectPrototype())
+		// ★ 第 20 轮：CSSRuleList + 规则对象（CSSOM §1.4）。
+		//   预建规则包装对象：索引访问与 item(i) 必须返回**同一身份**的对象
+		//   （浏览器里 CSSRuleList 是 legacy platform object，`list[0] === list.item(0)`）。
+		//   此前 item() 恒返回 null、也没有索引属性 → 前端读 `sheet.cssRules[0]`
+		//   得到 undefined（探针 globals 口径下 CSSRule 家族因此只有全局名可补，
+		//   实例面缺失 —— 本轮补齐实例）。
+		ro := jsc.NewObject(domIfaceProtoOr("CSSRuleList", in.ObjectPrototype()))
 		ro.SetClassName("CSSRuleList")
+		robjs := make([]*jsc.JSObject, len(rules))
+		for i, r := range rules {
+			robjs[i] = wrapCSSRule(in, r)
+			ro.Set(strconv.Itoa(i), jsc.ObjectValue(robjs[i]))
+		}
 		ro.SetAccessor("length", getter(func(_ *jsc.Interpreter) jsc.JSValue {
-			return jsc.NumberValue(float64(len(rules)))
+			return jsc.NumberValue(float64(len(robjs)))
 		}), nil)
 		ro.Set("item", jsc.FunctionValue(jsc.NewNativeFunction("item",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
-				return jsc.Null()
+			func(_ *jsc.Interpreter, _ jsc.JSValue, a []jsc.JSValue) jsc.JSValue {
+				if len(a) == 0 {
+					return jsc.Null()
+				}
+				i := int(a[0].ToNumber())
+				if i < 0 || i >= len(robjs) {
+					return jsc.Null()
+				}
+				return jsc.ObjectValue(robjs[i])
 			}, 1)))
 		return jsc.ObjectValue(ro)
 	})

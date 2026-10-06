@@ -70,7 +70,13 @@ const jsProbe = `(function () {
     // DOM 核心
     'Node','NodeList','NodeFilter','NodeIterator','TreeWalker','Element','Attr','NamedNodeMap','HTMLCollection','DOMTokenList','DOMRect','DOMRectList','DOMRectReadOnly','DOMPoint','DOMMatrix','DOMQuad','Range','Selection','Document','HTMLDocument','DocumentFragment','ShadowRoot','Text','Comment','CDATASection','ProcessingInstruction','DocumentType','XMLDocument','DOMImplementation','DocumentTimeline','Animation','KeyframeEffect','CSSStyleSheet','CSSStyleRule','CSSRule','CSSRuleList','CSSStyleDeclaration','CSSKeyframesRule','CSSMediaRule','CSSGroupingRule','CSSConditionRule','CSSSupportsRule','CSSFontFaceRule','MediaQueryList','MediaQueryListEvent','StyleSheetList','XPathResult','XPathExpression','FontFace','FontFaceSet','VisualViewport','CaretPosition',
     // HTML 元素构造器（React 的 instanceof 检查直接依赖它们）
-    'HTMLElement','HTMLUnknownElement','HTMLDivElement','HTMLSpanElement','HTMLParagraphElement','HTMLAnchorElement','HTMLAreaElement','HTMLImageElement','HTMLCanvasElement','HTMLVideoElement','HTMLAudioElement','HTMLMediaElement','HTMLSourceElement','HTMLTrackElement','HTMLInputElement','HTMLTextAreaElement','HTMLButtonElement','HTMLSelectElement','HTMLOptionElement','HTMLOptGroupElement','HTMLDataListElement','HTMLOutputElement','HTMLFormElement','HTMLFieldSetElement','HTMLLegendElement','HTMLLabelElement','HTMLIFrameElement','HTMLFrameElement','HTMLFrameSetElement','HTMLObjectElement','HTMLEmbedElement','HTMLScriptElement','HTMLStyleElement','HTMLLinkElement','HTMLMetaElement','HTMLBaseElement','HTMLTitleElement','HTMLHeadElement','HTMLHtmlElement','HTMLBodyElement','HTMLTableElement','HTMLTableRowElement','HTMLTableCellElement','HTMLTableSectionElement','HTMLTableCaptionElement','HTMLTableColElement','HTMLUListElement','HTMLOListElement','HTMLLIElement','HTMLDListElement','HTMLMenuElement','HTMLBRElement','HTMLHRElement','HTMLPreElement','HTMLQuoteElement','HTMLModElement','HTMLTemplateElement','HTMLSlotElement','HTMLDialogElement','HTMLDetailsElement','HTMLSummaryElement','HTMLProgressElement','HTMLMeterElement','HTMLPictureElement','HTMLMapElement','HTMLTimeElement','HTMLDataElement','HTMLFontElement','HTMLDirectoryElement','HTMLMarqueeElement',
+    'HTMLElement','HTMLUnknownElement','HTMLDivElement','HTMLSpanElement','HTMLParagraphElement','HTMLAnchorElement','HTMLAreaElement','HTMLImageElement','HTMLCanvasElement','HTMLVideoElement','HTMLAudioElement','HTMLMediaElement','HTMLSourceElement','HTMLTrackElement','HTMLInputElement','HTMLTextAreaElement','HTMLButtonElement','HTMLSelectElement','HTMLOptionElement','HTMLOptGroupElement','HTMLDataListElement','HTMLOutputElement','HTMLFormElement','HTMLFieldSetElement','HTMLLegendElement','HTMLLabelElement','HTMLIFrameElement','HTMLFrameElement','HTMLFrameSetElement','HTMLObjectElement','HTMLEmbedElement','HTMLScriptElement','HTMLStyleElement','HTMLLinkElement','HTMLMetaElement','HTMLBaseElement','HTMLTitleElement','HTMLHeadElement','HTMLHtmlElement','HTMLBodyElement','HTMLTableElement','HTMLTableRowElement','HTMLTableCellElement','HTMLTableSectionElement','HTMLTableCaptionElement','HTMLTableColElement','HTMLUListElement','HTMLOListElement','HTMLLIElement','HTMLDListElement','HTMLMenuElement','HTMLBRElement','HTMLHRElement','HTMLPreElement','HTMLQuoteElement','HTMLModElement','HTMLTemplateElement','HTMLSlotElement','HTMLDialogElement','HTMLDetailsElement','HTMLSummaryElement','HTMLProgressElement','HTMLMeterElement','HTMLPictureElement','HTMLMapElement','HTMLTimeElement','HTMLDataElement','HTMLFontElement','HTMLDirectoryElement','HTMLMarqueeElement','HTMLHeadingElement','HTMLParamElement',
+    // ★ 第 20 轮补全（口径修正，非数字粉饰）：HTMLHeadingElement / HTMLParamElement
+    //   此前只在 globalsCore 里列出、被本全量清单漏列 —— 正向 partition 检查
+    //   （全量 → 三组）发现不了这种「三组超出全量」的不完备，实测表现为
+    //   globalsCore present 271 而 globals 全量 present 仅 269（差 2）。本轮把
+    //   两项补入全量（present/total 同增 +2 → 271/356），并给 partition 加
+    //   **反向**检查（extra：三组中不在全量的项），防同类遗漏再次发生。
     // SVG / 其他命名空间
     'SVGElement','SVGSVGElement','SVGGraphicsElement','SVGGeometryElement','SVGPathElement','SVGTextElement','SVGImageElement','SVGUseElement','SVGForeignObjectElement','MathMLElement','Image','Audio','Option','Path2D','ImageData','OffscreenCanvas','CanvasRenderingContext2D','WebGLRenderingContext','WebGL2RenderingContext','ImageBitmap','createImageBitmap','customElements','CustomElementRegistry','matchMedia','getComputedStyle','getSelection','scroll','scrollTo','scrollBy','open','close','focus','blur','print','alert','confirm','prompt','stop','find','moveTo','resizeTo','getScreenDetails','showOpenFilePicker','showSaveFilePicker','EyeDropper','Scheduler','scheduler','TaskController','TaskPriorityChangeEvent','CSS','CSSStyleValue','CSSUnitValue','CSSTransformValue','CSSImageValue','CSSKeywordValue','CSSNumericValue','Highlight','HighlightRegistry','navigation','Navigation','ViewTransition','documentPictureInPicture','LaunchQueue','IdleDetector','WakeLock','screen','history','location','navigator','document','window','self','top','parent','frames','length','name','origin','isSecureContext','crossOriginIsolated','devicePixelRatio','innerWidth','innerHeight','outerWidth','outerHeight','scrollX','scrollY','pageXOffset','pageYOffset','visualViewport','menubar','toolbar','statusbar','locationbar','personalbar'
   ];
@@ -113,6 +119,15 @@ const jsProbe = `(function () {
     'HTMLElement','HTMLUnknownElement','HTMLDivElement','HTMLSpanElement','HTMLParagraphElement','HTMLHeadingElement','HTMLAnchorElement','HTMLAreaElement','HTMLImageElement','HTMLCanvasElement','HTMLVideoElement','HTMLAudioElement','HTMLMediaElement','HTMLSourceElement','HTMLTrackElement','HTMLInputElement','HTMLTextAreaElement','HTMLButtonElement','HTMLSelectElement','HTMLOptionElement','HTMLOptGroupElement','HTMLDataListElement','HTMLOutputElement','HTMLFormElement','HTMLFieldSetElement','HTMLLegendElement','HTMLLabelElement','HTMLIFrameElement','HTMLFrameElement','HTMLFrameSetElement','HTMLObjectElement','HTMLEmbedElement','HTMLParamElement','HTMLScriptElement','HTMLStyleElement','HTMLLinkElement','HTMLMetaElement','HTMLBaseElement','HTMLTitleElement','HTMLHeadElement','HTMLHtmlElement','HTMLBodyElement','HTMLTableElement','HTMLTableRowElement','HTMLTableCellElement','HTMLTableSectionElement','HTMLTableCaptionElement','HTMLTableColElement','HTMLUListElement','HTMLOListElement','HTMLLIElement','HTMLDListElement','HTMLMenuElement','HTMLBRElement','HTMLHRElement','HTMLPreElement','HTMLQuoteElement','HTMLModElement','HTMLTemplateElement','HTMLSlotElement','HTMLDialogElement','HTMLDetailsElement','HTMLSummaryElement','HTMLProgressElement','HTMLMeterElement','HTMLPictureElement','HTMLMapElement','HTMLTimeElement','HTMLDataElement','HTMLFontElement','HTMLDirectoryElement','HTMLMarqueeElement',
     // SVG / MathML 接口（core，含本轮注册的 H 组 9 项）
     'SVGElement','SVGSVGElement','SVGGraphicsElement','SVGGeometryElement','SVGPathElement','SVGTextElement','SVGImageElement','SVGUseElement','SVGForeignObjectElement','MathMLElement'
+    // ★ 第 20 轮判据一致性修正（WORKITEMS §20-5）：以下两组此前分别置于
+    //   globalsOptional（不计判据）与 globalsExcluded（不追），但它们的**实例**
+    //   引擎早已在用（el.style / getComputedStyle / document.styleSheets /
+    //   styleSheets[i].cssRules / matchMedia / getContext('2d') / getImageData），
+    //   §17 类别②E 亦判定为「应做」——应在判据之内。第 20 轮补齐构造器与实例
+    //   原型后移入 core（判定口径不变：typeof !== 'undefined'）。
+    // CSS 对象模型（CSSOM §1：样式声明 / 样式表 / 规则 / 媒体查询）
+    ,'CSSStyleSheet','CSSStyleRule','CSSRule','CSSRuleList','CSSStyleDeclaration','CSSKeyframesRule','CSSMediaRule','CSSGroupingRule','CSSConditionRule','CSSSupportsRule','CSSFontFaceRule','MediaQueryList','MediaQueryListEvent','StyleSheetList','CSS'    // canvas 2D（引擎已有完整实现：canvas2d.go；xterm 测量实际依赖）
+    ,'Path2D','ImageData','OffscreenCanvas','CanvasRenderingContext2D'
   ];
 
   // optional：可做子系统（非渲染必需；已在本引擎能力边界内或有明确实现路径）。
@@ -121,8 +136,8 @@ const jsProbe = `(function () {
     'Request','Response','Headers','EventSource','File','FormData','indexedDB','caches','CookieStore','Notification','Clipboard','Geolocation','BroadcastChannel','postMessage',
     // 自定义元素
     'customElements','CustomElementRegistry',
-    // CSS 对象模型（规则 / 媒体查询 / 样式表）
-    'CSSStyleSheet','CSSStyleRule','CSSRule','CSSRuleList','CSSStyleDeclaration','CSSKeyframesRule','CSSMediaRule','CSSGroupingRule','CSSConditionRule','CSSSupportsRule','CSSFontFaceRule','MediaQueryList','MediaQueryListEvent','StyleSheetList','CSS',
+    // ★ CSS 对象模型 15 项已于第 20 轮移入 globalsCore（判据一致性修正，
+    //   见 §20-5：可选组不得收纳「实例已在用 + §17 判为应做」的项）。
     // XPath
     'XPathResult','XPathExpression',
     // 字体 / 视口 / 插入符
@@ -138,7 +153,9 @@ const jsProbe = `(function () {
   // excluded：**经监督确认的不追集合**（固化于此，不计入 core 分母）。
   var globalsExcluded = [
     // A 图形 / GPU / DOM 几何
-    'Path2D','ImageData','OffscreenCanvas','CanvasRenderingContext2D','WebGLRenderingContext','WebGL2RenderingContext','ImageBitmap','createImageBitmap','DOMPoint','DOMMatrix','DOMQuad',
+    // ★ Path2D / ImageData / OffscreenCanvas / CanvasRenderingContext2D 已于第 20 轮
+    //   移入 globalsCore（B1：引擎有完整 canvas 2D 实现 → 构造器与实例原型补齐）。
+    'WebGLRenderingContext','WebGL2RenderingContext','ImageBitmap','createImageBitmap','DOMPoint','DOMMatrix','DOMQuad',
     // B WASM / 并发隔离
     'SharedArrayBuffer','Atomics','WebAssembly','crossOriginIsolated',
     // C Intl
@@ -162,6 +179,13 @@ const jsProbe = `(function () {
   for (var __j = 0; __j < globals.length; __j++) {
     if (!__seen[globals[__j]]) { __notCovered.push(globals[__j]); }
   }
+  // ★ 反向检查（第 20 轮）：三组里是否存在 globals 全量**没有**的项。正向检查只
+  //   保证「全量里的每一项都被三组覆盖」，无法发现三组多出的项（第 19 轮遗留的
+  //   HTMLHeadingElement / HTMLParamElement 两项即属此类，本轮已补入全量）。
+  var __extra = [];
+  for (var __m = 0; __m < __all.length; __m++) {
+    if (globals.indexOf(__all[__m]) < 0) { __extra.push(__all[__m]); }
+  }
 
   var out = {
     globals: chkGlobals(window, globals),
@@ -175,7 +199,7 @@ const jsProbe = `(function () {
   };
   out.svgTagName = (function () { try { return String(svg.tagName); } catch (e) { return 'ERR'; } })();
   // ★ 第 19 轮：分层完备性（dup = 三组内重复项；notCovered = 全量里未被任何组覆盖的项）。
-  out.partition = { dup: __dup, notCovered: __notCovered };
+  out.partition = { dup: __dup, notCovered: __notCovered, extra: __extra };
   return JSON.stringify(out);
 })()`
 
@@ -243,6 +267,7 @@ func main() {
 	type partition struct {
 		Dup        []string `json:"dup"`
 		NotCovered []string `json:"notCovered"`
+		Extra      []string `json:"extra"`
 	}
 	var part partition
 	if v, ok := whole["partition"]; ok {
@@ -284,10 +309,11 @@ func main() {
 		}
 		fmt.Println()
 	}
-	if len(part.Dup) == 0 && len(part.NotCovered) == 0 {
-		fmt.Println("分层完备性: 三组恰好覆盖 globals 全量（dup=0, notCovered=0）")
+	if len(part.Dup) == 0 && len(part.NotCovered) == 0 && len(part.Extra) == 0 {
+		fmt.Println("分层完备性: 三组与 globals 全量**互相**恰好覆盖（dup=0, notCovered=0, extra=0）")
 	} else {
-		fmt.Printf("分层完备性: dup=%v notCovered=%v\n", part.Dup, part.NotCovered)
+		fmt.Printf("分层完备性: dup=%v notCovered=%v extra（三组中不在全量）= %v\n",
+			part.Dup, part.NotCovered, part.Extra)
 	}
 	fmt.Println()
 	fmt.Printf("合计 %d/%d = %.1f%%\n", tp, tt, float64(tp)*100/float64(tt))

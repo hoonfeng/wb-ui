@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>canvas 2D 构造器与实例原型（第 20 轮 B1）</title>
+<style>body{font:13px monospace;margin:8px} #out{white-space:pre-wrap}</style>
+</head>
+<body>
+<canvas id="c" width="8" height="4"></canvas>
+<pre id="out"></pre>
+<script>
+(function () {
+  var L = [];
+  function p(k, v) { L.push(k + "=" + v); }
+  function T(k, fn) { try { p(k, fn()); } catch (e) { p(k, "THROW"); } }
+  function bn(v) { return v ? "true" : "false"; }
+  var W = window;
+
+  // ── 1. canvas 系全局构造器存在性 ──
+  var CTORS = ["CanvasRenderingContext2D","ImageData","Path2D","OffscreenCanvas"];
+  var miss = [];
+  for (var i = 0; i < CTORS.length; i++) {
+    if (typeof W[CTORS[i]] !== "function") { miss.push(CTORS[i]); }
+  }
+  p("ctor_missing", miss.length ? miss.join("|") : "NONE");
+
+  // ── 2. getContext('2d') 的返回对象是 CanvasRenderingContext2D 实例 ──
+  var c = document.getElementById("c");
+  var ctx = c.getContext("2d");
+  T("ctx_truthy", function () { return bn(!!ctx); });
+  T("ctx_instanceof", function () { return bn(ctx instanceof W.CanvasRenderingContext2D); });
+  T("ctx_ctor_name", function () { return ctx.constructor.name; });
+  T("ctx_getcontext_idempotent", function () { return bn(c.getContext("2d") === ctx); });
+  T("ctx_fillRect_fn", function () { return typeof ctx.fillRect === "function"; });
+  T("ctx_measureText_fn", function () { return typeof ctx.measureText === "function"; });
+  T("ctx_font_default", function () { return String(ctx.font); });
+  T("ctx_alpha_default", function () { return String(ctx.globalAlpha); });
+
+  // ── 3. ImageData 实例（createImageData / getImageData）──
+  var id = ctx.createImageData(2, 2);
+  T("cid_instanceof", function () { return bn(id instanceof W.ImageData); });
+  T("cid_ctor_name", function () { return id.constructor.name; });
+  T("cid_wh", function () { return id.width + "x" + id.height; });
+  T("cid_data_len", function () { return id.data.length; });
+  T("cid_data0", function () { return id.data[0]; });
+
+  var gid = ctx.getImageData(0, 0, 2, 2);
+  T("gid_instanceof", function () { return bn(gid instanceof W.ImageData); });
+  T("gid_ctor_name", function () { return gid.constructor.name; });
+  T("gid_wh", function () { return gid.width + "x" + gid.height; });
+  T("gid_data_len", function () { return gid.data.length; });
+
+  // ── 4. OffscreenCanvas（本引擎以 <canvas> 元素充当测量载体）──
+  T("offscr_width", function () { return new W.OffscreenCanvas(4, 4).width; });
+
+  // ── 5. Path2D：仅全局构造器（引擎尚无 Path2D 对象建模，见 WORKITEMS §20-6）──
+  T("path2d_typeof", function () { return typeof W.Path2D; });
+
+  document.getElementById("out").textContent = L.join("\n");
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CSS OM 构造器与实例原型（第 20 轮）</title>
+<style>body{font:13px monospace;margin:8px} #out{white-space:pre-wrap}</style>
+</head>
+<body>
+<div id="d" class="a">x</div>
+<style id="probe-sheet">.b{color:rgb(4,5,6)}</style>
+<pre id="out"></pre>
+<script>
+(function () {
+  var L = [];
+  function p(k, v) { L.push(k + "=" + v); }
+  function T(k, fn) { try { p(k, fn()); } catch (e) { p(k, "THROW"); } }
+  function bn(v) { return v ? "true" : "false"; }
+  var W = window;
+
+  // ── 1. CSS OM 全局构造器存在性（CSSOM §1）──
+  var CTORS = [
+    "CSSStyleDeclaration","StyleSheet","CSSStyleSheet","StyleSheetList",
+    "CSSRule","CSSRuleList","CSSStyleRule","CSSGroupingRule","CSSConditionRule",
+    "CSSMediaRule","CSSSupportsRule","CSSFontFaceRule","CSSKeyframesRule",
+    "CSSKeyframeRule","CSSImportRule","CSSNamespaceRule","CSSPageRule",
+    "MediaQueryList","MediaQueryListEvent"
+  ];
+  var miss = [];
+  for (var i = 0; i < CTORS.length; i++) {
+    if (typeof W[CTORS[i]] !== "function") { miss.push(CTORS[i]); }
+  }
+  p("ctor_missing", miss.length ? miss.join("|") : "NONE");
+
+  // ── 2. CSS 命名空间对象（CSSOM §1.7）──
+  p("css_typeof", typeof W.CSS);
+  T("css_escape", function () { return String(W.CSS.escape("a b")); });
+  T("css_supports", function () { return bn(W.CSS.supports("display", "flex")); });
+
+  // ── 3. prototype 链（父接口；CSSOM §1.4 / §1.5）──
+  var LINKS = [
+    ["CSSStyleSheet","StyleSheet"], ["StyleSheet","Object"],
+    ["CSSStyleRule","CSSRule"], ["CSSMediaRule","CSSConditionRule"],
+    ["CSSGroupingRule","CSSRule"], ["CSSConditionRule","CSSGroupingRule"],
+    ["CSSSupportsRule","CSSConditionRule"], ["CSSFontFaceRule","CSSRule"],
+    ["CSSKeyframesRule","CSSRule"], ["CSSKeyframeRule","CSSRule"],
+    ["CSSImportRule","CSSRule"], ["CSSNamespaceRule","CSSRule"], ["CSSPageRule","CSSGroupingRule"],
+    ["CSSRule","Object"], ["CSSStyleDeclaration","Object"],
+    ["StyleSheetList","Object"], ["CSSRuleList","Object"],
+    ["MediaQueryList","EventTarget"], ["MediaQueryListEvent","Event"]
+  ];
+  var badLinks = [];
+  for (var j = 0; j < LINKS.length; j++) {
+    var c = LINKS[j][0], par = LINKS[j][1];
+    try {
+      if (Object.getPrototypeOf(W[c].prototype) !== W[par].prototype) { badLinks.push(c + ">" + par); }
+    } catch (e) { badLinks.push(c + ">THROW"); }
+  }
+  p("proto_links_fail", badLinks.length ? badLinks.join("|") : "NONE");
+
+  // ── 4. 引擎真实实例的原型（el.style / getComputedStyle / styleSheets / cssRules）──
+  var el = document.getElementById("d");
+  T("style_instanceof", function () { return bn(el.style instanceof W.CSSStyleDeclaration); });
+  T("cs_instanceof", function () { return bn(W.getComputedStyle(el) instanceof W.CSSStyleDeclaration); });
+  T("cs_ctor_name", function () { return W.getComputedStyle(el).constructor.name; });
+
+  T("sheets_instanceof", function () { return bn(document.styleSheets instanceof W.StyleSheetList); });
+  T("sheets_ctor_name", function () { return document.styleSheets.constructor.name; });
+  T("sheets_nonempty", function () { return bn(document.styleSheets.length > 0); });
+  T("sheet0_instanceof", function () { return bn(document.styleSheets[0] instanceof W.CSSStyleSheet); });
+  T("sheet0_ctor_name", function () { return document.styleSheets[0].constructor.name; });
+  T("rules_instanceof", function () { return bn(document.styleSheets[0].cssRules instanceof W.CSSRuleList); });
+  T("rules_ctor_name", function () { return document.styleSheets[0].cssRules.constructor.name; });
+  T("rules_item_identity", function () {
+    var r = document.styleSheets[0].cssRules;
+    return bn(r.length > 0 ? r[0] === r.item(0) : true);
+  });
+  T("rule0_instanceof", function () { return bn(document.styleSheets[0].cssRules[0] instanceof W.CSSStyleRule); });
+  T("rule0_is_cssrule", function () { return bn(document.styleSheets[0].cssRules[0] instanceof W.CSSRule); });
+
+  // 专用样式表（按 ownerNode.id 定位 —— 不依赖 styleSheets 的顺序）
+  function sheetById(id) {
+    var ss = document.styleSheets;
+    for (var k = 0; k < ss.length; k++) {
+      try { if (ss[k].ownerNode && ss[k].ownerNode.id === id) { return ss[k]; } } catch (e) {}
+    }
+    return null;
+  }
+  var sh = sheetById("probe-sheet");
+  T("probe_sheet_found", function () { return bn(!!sh); });
+  T("probe_rules_len", function () { return sh ? sh.cssRules.length : -1; });
+  T("probe_rule0_instanceof", function () { return bn(sh.cssRules[0] instanceof W.CSSStyleRule); });
+  T("probe_rule0_ctor_name", function () { return sh ? sh.cssRules[0].constructor.name : "NONE"; });
+  T("probe_rule0_type", function () { return sh ? sh.cssRules[0].type : -1; });
+
+  // ── 5. matchMedia → MediaQueryList（→ EventTarget）──
+  var mq = W.matchMedia("(min-width: 1px)");
+  T("mql_instanceof", function () { return bn(mq instanceof W.MediaQueryList); });
+  T("mql_ctor_name", function () { return mq.constructor.name; });
+  T("mql_is_eventtarget", function () { return bn(mq instanceof W.EventTarget); });
+  T("mql_media", function () { return String(mq.media); });
+  T("mql_matches", function () { return bn(mq.matches); });
+  T("mqle_instanceof", function () { return bn(new W.MediaQueryListEvent("change") instanceof W.Event); });
+
+  document.getElementById("out").textContent = L.join("\n");
+})();
+</script>
+</body>
+</html>

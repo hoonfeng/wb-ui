@@ -729,6 +729,29 @@ func WrapObject(obj *goja.Object, interp *Interpreter) *JSObject {
 	return &JSObject{obj: obj, interp: interp}
 }
 
+// SetObjectPrototype 把 obj 的 [[Prototype]] 设为 proto（等价于 JS 侧
+// Object.setPrototypeOf(obj, proto)），成功返回 true。
+//
+// ★ 为什么需要这个 API：普通对象可以走 `obj.Set("__proto__", …)`（Object.prototype
+// 上 `__proto__` 是访问器属性，赋值即触发 setter），但 **dynamic object**
+// （NewDynamicObject 包装的 handler，如 bindings/styleProxy）会拦截 Set ——
+// 赋 "__proto__" 会被 handler 当成业务属性处理（styleProxy 会把它当 CSS 属性写进
+// style 属性）。goja 的文档亦明确：dynamic object 的原型只能通过
+// Object.SetPrototype()（Go）或 Object.setPrototypeOf()（JS）修改。
+//
+// proto 为 nil、或 proto 属于另一个 runtime 时返回 false（调用方保持原原型）——
+// 跨 runtime 复用对象会被 goja 拒绝（"Illegal runtime transition of an Object"）。
+func SetObjectPrototype(obj *JSObject, proto *JSObject) bool {
+	if obj == nil || obj.obj == nil || proto == nil || proto.obj == nil {
+		return false
+	}
+	// ★ 不要在这里比较 *Interpreter 指针：同一个 runtime 可能有多个 Interpreter
+	//   包装（AsObject 等路径），指针不等会被误判成「跨 runtime」而静默失败
+	//   （第 20 轮实测：el.style 的原型因此未设上）。跨 runtime 传入 proto 由
+	//   goja 自身校验（SetPrototype → runtime.try 捕获，返回 error → 这里返回 false）。
+	return obj.obj.SetPrototype(proto.obj) == nil
+}
+
 func NewArray(proto *JSObject, items []JSValue) *JSObject {
 	var interp *Interpreter
 	if proto != nil && proto.interp != nil {
