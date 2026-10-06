@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>badge probe (G8)</title>
+<style>
+  /* 与 vue-app.html 完全同源的度量：font: 12px Arial,sans-serif */
+  body { margin: 0; background: #ffffff; font: 12px Arial, sans-serif; color: #222; }
+
+  /* A: vue-app 的真实场景 —— fixed-height flex bar 内的 .count（无显式高度） */
+  .bar { display: flex; align-items: center; height: 28px; background: #1976d2; color: #fff;
+         padding: 0 10px; }
+  .title { flex: 1 1 auto; font-weight: bold; }
+  .count { background: #0d47a1; color: #fff; border-radius: 8px; padding: 1px 8px; }
+
+  /* B: auto-height flex bar 内的同款 badge */
+  .flexbox { display: flex; align-items: center; background: #cce5ff; padding: 0 10px; margin-top: 10px; }
+  .c2 { background: #0d47a1; color: #fff; border-radius: 8px; padding: 1px 8px; }
+
+  /* C: 普通块内的 inline-block 同款 badge */
+  .plain { margin-top: 10px; padding: 0 10px; background: #ffe082; }
+  .c3 { display: inline-block; background: #0d47a1; color: #fff; border-radius: 8px; padding: 1px 8px; }
+
+  /* D: 块级同款 badge（无显式高度） */
+  .blk { margin-top: 10px; padding: 0 10px; background: #ffe082; }
+  .c4 { display: block; background: #0d47a1; color: #fff; border-radius: 8px; padding: 1px 8px; width: 40px; }
+
+  /* E: 中文文本的 flex item（累积差的主要来源） */
+  .cjk { margin-top: 10px; padding: 0 10px; background: #e8f5e9; color: #222; }
+</style>
+</head>
+<body>
+<div class="bar" id="A"><span class="title" id="A0">Vue 应用</span><span class="count" id="A1">3</span></div>
+<div class="flexbox" id="B"><span class="c2" id="B1">3</span></div>
+<div class="plain" id="C"><span class="c3" id="C1">3</span></div>
+<div class="blk" id="D"><span class="c4" id="D1">3</span></div>
+<div class="cjk" id="E"><span id="E1">中文行盒</span></div>
+<!-- G8 判别实验：同款 badge，分别给定 line-height / 显式 height，看谁决定盒高 -->
+<div class="flexbox" id="F">
+  <span class="c2" id="F1" style="line-height:14px">3</span>
+  <span class="c2" id="F2" style="height:16px;box-sizing:border-box">3</span>
+  <span class="c2" id="F3" style="line-height:normal">3</span>
+</div>
+<pre id="RESULT" style="margin:0;font:11px monospace;color:#000;background:#fff">PENDING</pre>
+<script>
+(function () {
+  var ids = ['A', 'A0', 'A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'F2', 'F3'];
+  function dump(tag) {
+    var out = ids.map(function (i) {
+      var el = document.getElementById(i);
+      var r = el.getBoundingClientRect();
+      var cs = getComputedStyle(el);
+      return i + ':x=' + r.x.toFixed(1) + ' y=' + r.y.toFixed(1) +
+             ' w=' + r.width.toFixed(1) + ' h=' + r.height.toFixed(1) +
+             ' disp=' + cs.display + ' lh=' + cs.lineHeight;
+    }).join('\n');
+    document.getElementById('RESULT').textContent = 'RESULT[' + tag + ']\n' + out +
+      '\nBODYWH=' + document.body.getBoundingClientRect().width + 'x' + document.body.getBoundingClientRect().height +
+      ' INNER=' + window.innerWidth + 'x' + window.innerHeight +
+      ' DOCW=' + document.documentElement.scrollWidth;
+  }
+  dump('immediate');
+  window.addEventListener('load', function () { dump('load'); });
+  setTimeout(function () { dump('t500'); }, 500);
+})();
+</script>
+</body>
+</html>

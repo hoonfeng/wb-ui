@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>G7 lists tables pseudo</title>
+<style>html,body{margin:0;font:16px sans-serif}
+ul{margin:0;padding-left:40px}
+#li1{list-style:disc}
+#li2{list-style:square}
+#li3{list-style:decimal}
+#li4{list-style-type:none}
+.p::before{content:"PRE-";background:#e8590c}
+.p::after{content:"-POST";background:#2f9e44}
+table{border-collapse:separate;border-spacing:2px;background:#dee2e6}
+td{padding:2px;background:#1971c2}
+</style><body>
+<ul><li id="li1">disc</li><li id="li2">square</li><li id="li3">decimal</li><li id="li4">none</li></ul>
+<div class="p" id="ps">Text</div>
+<table id="tb"><tr><td>A</td><td>B</td></tr></table>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['li1','li2','li3','li4','ps','tb'];
+var L=[];
+for(var i=0;i<ids.length;i++){
+var e=document.getElementById(ids[i]);
+var r=e.getBoundingClientRect();
+var c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | ls='+c.listStyleType+' | bc='+c.borderCollapse+' | bs='+c.borderSpacing+' | disp='+c.display);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

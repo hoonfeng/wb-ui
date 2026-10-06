@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>stacking contexts</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 11px/1.2 Arial, sans-serif; color: #000; }
+  .grid { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
+  .cell { position: relative; width: 220px; height: 170px; background: #f4f4f4; border: 1px solid #999; }
+  .cap { position: absolute; left: 3px; bottom: 2px; font-size: 10px; color: #444; }
+
+  /* ── cell 1: z-index 基本顺序 ───────────────────────────── */
+  #n1 .base { position: static; width: 150px; height: 40px; margin: 30px 0 0 10px; background: #ff0000; }
+  #n1 .absA { position: absolute; left: 40px; top: 45px; width: 80px; height: 60px; background: #00c000; }
+  #n1 .absB { position: absolute; left: 60px; top: 65px; width: 80px; height: 60px; background: #0000ff; z-index: 1; }
+  #n1 .absC { position: absolute; left: 80px; top: 35px; width: 80px; height: 60px; background: #ffcc00; z-index: 2; }
+
+  /* ── cell 2: 负 z-index 与父背景 ────────────────────────── */
+  #n2 .par { position: relative; left: 30px; top: 30px; width: 140px; height: 100px; background: #dddddd; }
+  #n2 .neg { position: absolute; left: 20px; top: 20px; width: 100px; height: 80px; background: #ff00ff; z-index: -1; }
+  #n2 .txt { position: absolute; left: 34px; top: 60px; color: #000; }
+  #n2 .sib { position: absolute; left: 120px; top: 70px; width: 70px; height: 50px; background: #00a0a0; z-index: 0; }
+
+  /* ── cell 3: transform 创建层叠上下文 ───────────────────── */
+  #n3 .tf { position: absolute; left: 20px; top: 40px; width: 120px; height: 80px;
+            background: #c8e6c9; transform: translateX(0); }
+  #n3 .inner { position: absolute; left: 20px; top: 20px; width: 90px; height: 50px;
+               background: #00ffff; z-index: 999; }
+  #n3 .sib { position: absolute; left: 90px; top: 70px; width: 100px; height: 60px;
+             background: #ff8800; z-index: 1; }
+
+  /* ── cell 4: opacity 创建层叠上下文 ─────────────────────── */
+  #n4 .op { position: absolute; left: 20px; top: 40px; width: 120px; height: 80px;
+            background: #bbdefb; opacity: 0.99; }
+  #n4 .inner { position: absolute; left: 20px; top: 20px; width: 90px; height: 50px;
+               background: #00ffff; z-index: 999; }
+  #n4 .sib { position: absolute; left: 90px; top: 70px; width: 100px; height: 60px;
+             background: #ff8800; z-index: 1; }
+
+  /* ── cell 5: float 与层叠 ───────────────────────────────── */
+  #n5 .fl { float: left; width: 70px; height: 70px; margin: 20px 0 0 20px; background: #ff9800; }
+  #n5 .over { position: absolute; left: 60px; top: 60px; width: 80px; height: 40px; background: #3f51b5; }
+  #n5 p { margin: 20px 10px 0 100px; }
+</style>
+</head>
+<body>
+<div class="grid">
+
+  <div class="cell" id="n1">
+    <div class="base"></div>
+    <div class="absA">A</div>
+    <div class="absB">B</div>
+    <div class="absC">C</div>
+    <div class="cap">1: z-index 顺序</div>
+  </div>
+
+  <div class="cell" id="n2">
+    <div class="par">
+      <div class="neg"></div>
+      <div class="txt">TEXT</div>
+    </div>
+    <div class="sib"></div>
+    <div class="cap">2: 负 z-index</div>
+  </div>
+
+  <div class="cell" id="n3">
+    <div class="tf"><div class="inner">inner</div></div>
+    <div class="sib">sib</div>
+    <div class="cap">3: transform 上下文</div>
+  </div>
+
+  <div class="cell" id="n4">
+    <div class="op"><div class="inner">inner</div></div>
+    <div class="sib">sib</div>
+    <div class="cap">4: opacity 上下文</div>
+  </div>
+
+  <div class="cell" id="n5">
+    <div class="fl">float</div>
+    <p>wrap text around float 文字环绕</p>
+    <div class="over">over</div>
+    <div class="cap">5: float 层叠</div>
+  </div>
+
+</div>
+</body>
+</html>

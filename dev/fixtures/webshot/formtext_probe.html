@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>form control text probe (E5)</title>
+<style>html,body{margin:0}</style></head><body>
+<div style="padding:10px;font:16px sans-serif">
+<input id="i1" type="text" value="Hello"><br>
+<button id="b1">按钮</button><br>
+<select id="s1"><option>选项一</option><option>Option</option></select><br>
+<textarea id="t1" rows="2">文本text</textarea><br>
+<input id="i2" type="text" value="Mixed中英">
+</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var ids=['i1','b1','s1','t1','i2'],L=[];
+for(var i=0;i<ids.length;i++){
+  var el=document.getElementById(ids[i]);
+  var r=el.getBoundingClientRect(), cs=getComputedStyle(el);
+  L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')
+    +' | font='+cs.fontFamily+'/'+cs.fontSize+'/'+cs.lineHeight
+    +' | pad='+cs.padding+' | val='+((el.value!==undefined)?el.value:el.textContent));
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body></html>

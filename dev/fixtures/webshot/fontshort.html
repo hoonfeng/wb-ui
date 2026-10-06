@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>font shorthand</title>
+<style>
+  body { margin: 0; background: #fff; font-family: Arial; font-size: 16px; color: #000; }
+  div { height: 40px; line-height: 40px; overflow: hidden; padding-left: 2px; }
+  #a { font: 24px Arial; }                       /* 简写：字号 24 + 族 */
+  #b { font-size: 24px; font-family: Arial; }    /* 长写对照 */
+  #c { font-size: 16px; font-family: Arial; }    /* 16px 对照 */
+  #d { font: 24px/40px Arial; }                  /* 简写含 line-height */
+  #e { font: bold 24px Arial; }                  /* 简写含 weight */
+</style>
+</head>
+<body>
+<div id="a">MMMMMMMMMM</div>
+<div id="b">MMMMMMMMMM</div>
+<div id="c">MMMMMMMMMM</div>
+<div id="d">MMMMMMMMMM</div>
+<div id="e">MMMMMMMMMM</div>
+</body>
+</html>

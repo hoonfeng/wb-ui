@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>z-order &amp; stacking contexts</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 11px Arial, sans-serif; color: #000; }
+  .scene { position: absolute; width: 100px; height: 100px; z-index: auto; }
+  .negpar { position: relative; width: 100px; height: 100px; background: #cccccc; }
+  .neg { position: absolute; left: 20px; top: 20px; width: 60px; height: 60px;
+         background: #ff00ff; z-index: -1; }
+  .ntxt { position: absolute; left: 6px; top: 6px; color: #000; }
+  .sibz0 { position: absolute; left: 60px; top: 20px; width: 80px; height: 80px;
+           background: #00cc00; z-index: 0; }
+  .tag { position: absolute; left: 2px; bottom: -14px; font-size: 10px; color: #333; }
+
+  /* ── 层叠上下文矩阵：父 .par（relative）+ 子 .inner(z-index:999) + 兄弟 .sib(z-index:1) ── */
+  .par { position: relative; width: 100px; height: 100px; background: #eeeeee; }
+  .inner { position: absolute; left: 30px; top: 20px; width: 60px; height: 60px;
+           background: #00ffff; z-index: 999; }
+  .sib { position: absolute; left: 40px; top: 50px; width: 60px; height: 60px;
+         background: #ff8800; z-index: 1; }
+  /* 采样点 (75,70)：inner 覆盖 (30..90,20..80)，sib 覆盖 (40..100,50..100) → 交集内 */
+  #s1 .par { z-index: auto; }
+  #s2 .par { z-index: 0; }
+  #s3 .par { transform: translateX(0); }
+  #s4 .par { opacity: 0.99; }
+  #s5 .par { filter: blur(0px); }
+  #s6 .par { will-change: transform; }
+  #s7 .par { isolation: isolate; }
+  #s8 .par { z-index: 2; }
+</style>
+</head>
+<body>
+
+<!-- 第一部分：负 z-index（父有背景 / 父无背景 / 父有背景+兄弟 z-index:0） -->
+<div class="scene" style="left:20px;top:20px">
+  <div class="negpar"><div class="neg"></div><div class="ntxt">TEXT</div></div>
+  <div class="tag">A neg+父背景</div>
+</div>
+<div class="scene" style="left:140px;top:20px">
+  <div class="negpar" style="background:transparent"><div class="neg"></div></div>
+  <div class="tag">B neg+父透明</div>
+</div>
+<div class="scene" style="left:260px;top:20px">
+  <div class="negpar"><div class="neg"></div></div>
+  <div class="sibz0"></div>
+  <div class="tag">C neg+兄弟z0</div>
+</div>
+
+<!-- 第二部分：层叠上下文矩阵（8 例；采样点块内 (75,70) → 橙=兄弟在上(正确)，青=子逃出(错误)） -->
+<div class="scene" id="s1" style="left:20px;top:160px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">1 auto</div>
+</div>
+<div class="scene" id="s2" style="left:150px;top:160px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">2 z-index:0</div>
+</div>
+<div class="scene" id="s3" style="left:280px;top:160px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">3 transform</div>
+</div>
+<div class="scene" id="s4" style="left:410px;top:160px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">4 opacity</div>
+</div>
+<div class="scene" id="s5" style="left:20px;top:300px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">5 filter</div>
+</div>
+<div class="scene" id="s6" style="left:150px;top:300px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">6 will-change</div>
+</div>
+<div class="scene" id="s7" style="left:280px;top:300px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">7 isolation</div>
+</div>
+<div class="scene" id="s8" style="left:410px;top:300px">
+  <div class="par"><div class="inner"></div></div><div class="sib"></div>
+  <div class="tag">8 z-index:2</div>
+</div>
+
+</body>
+</html>

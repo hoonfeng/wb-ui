@@ -1,56 +1,52 @@
-// Command fontprobe verifies CJK rendering through every font resolution
-// path. Key comparison: OS-name Typeface vs raw-data Typeface (registered via
-// RegisterCustomFont) — data faces may lack the system fallback chain,
-// producing tofu boxes for CJK.
+// fontprobe：D7「默认族」验收用的字体可得性/度量探针。
+//
+// 目的：确认 wb-ui 引擎能否拿到浏览器基准（Edge）实际使用的默认族
+// 「Noto Sans SC」，以及其度量是否与 Edge 一致（24px 下 10 个 M = 194.88）。
+//
+// 运行（需 CGO）：
+//
+//	set CGO_ENABLED=1 && set PATH=F:\syproject\goskia\bin;%PATH%
+//	go run ./dev/probes/fontprobe
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"fmt"
+
+	"github.com/hoonfeng/goskia/skia"
 
 	"wb-ui/engine/platform/graphics"
 )
 
-func canvasInk(family string) int {
-	c := graphics.NewCanvas(200, 60)
-	defer c.Release()
-	c.DrawText(10, 40, "中文", graphics.Font{Family: family, Size: 28, Weight: 400},
-		graphics.Color{R: 0, G: 0, B: 0, A: 255})
-	ink := 0
-	for y := 0; y < 60; y++ {
-		for x := 0; x < 200; x++ {
-			if p := c.PixelAt(x, y); p.A > 0 {
-				ink++
-			}
-		}
-	}
-	return ink
-}
-
 func main() {
-	mgr := graphics.InitFontManager("")
-	mgr.LoadSystemFonts()
+	graphics.InitFontManager("")
 
-	fmt.Println("-- FontManager resolution paths --")
-	for _, fam := range []string{"", "Arial", "Microsoft YaHei", "SimSun", "Segoe UI", "serif", "monospace"} {
-		fmt.Printf("  family=%-18q cjk_ink=%d\n", fam, canvasInk(fam))
+	fmt.Println("=== skia.NewTypeface（OS 名查找）===")
+	for _, n := range []string{
+		"Noto Sans SC", "NotoSansSC", "Noto Sans", "Arial",
+		"Microsoft YaHei", "SimSun", "Times New Roman", "Consolas",
+	} {
+		tf := skia.NewTypeface(n, skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
+		fmt.Printf("  NewTypeface(%-18q) != nil : %v\n", n, tf != nil)
 	}
 
-	// Register raw data faces under distinct families to test the data path.
-	register := func(family, path string, idx int) {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Printf("  read %s: %v\n", path, err)
-			return
-		}
-		if err := mgr.RegisterCustomFont(family, raw, idx); err != nil {
-			fmt.Printf("  register %s: %v\n", family, err)
-			return
-		}
-		fmt.Printf("  registered %-12s cjk_ink=%d\n", family, canvasInk(family))
+	fmt.Println("=== MeasureText(24px, \"MMMMMMMMMM\") —— Edge 基准：Noto Sans SC=194.88, Arial=199.92, YaHei=234.49, serif=234 ===")
+	for _, fam := range []string{
+		"", "Noto Sans SC", "sans-serif", "ui-sans-serif", "system-ui",
+		"serif", "Arial", "Microsoft YaHei", "monospace",
+	} {
+		w := graphics.MeasureText(graphics.Font{Family: fam, Size: 24, Weight: 400, Style: "normal"}, "MMMMMMMMMM")
+		fmt.Printf("  MeasureText(%-16q) = %.2f\n", fam, w)
 	}
-	register("msyhdata0", `C:\Windows\Fonts\msyh.ttc`, 0)
-	register("msyhdata1", `C:\Windows\Fonts\msyh.ttc`, 1)
-	register("simsundata0", `C:\Windows\Fonts\simsun.ttc`, 0)
-	register("simsundata1", `C:\Windows\Fonts\simsun.ttc`, 1)
+
+	fmt.Println("=== 直接加载 C:\\Windows\\Fonts\\NotoSansSC-VF.ttf ===")
+	data, err := os.ReadFile(`C:\Windows\Fonts\NotoSansSC-VF.ttf`)
+	if err != nil {
+		fmt.Println("  read failed:", err)
+		return
+	}
+	fmt.Printf("  file size = %d bytes\n", len(data))
+	tf := skia.NewTypefaceFromData(data, 0)
+	fmt.Printf("  NewTypefaceFromData != nil : %v\n", tf != nil)
 }

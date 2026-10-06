@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>baseline vs line-height sweep (Arial + CJK)</title>
+<style>
+  /* line-height 扫描探针：主字体 Arial（无 CJK 字形，中文回退 Noto Sans SC，
+     合并度量 a+d = 35px @24px）。每行 div 高 40px 互不重叠，文字左对齐。
+     同一字形（中文基线探针）在不同 line-height 下的墨迹 bbox 即 baseline 位置。 */
+  body { margin: 0; background: #ffffff; font-size: 24px; }
+  div { height: 40px; font-family: Arial, sans-serif; }
+  .h20 { line-height: 20px; }
+  .h24 { line-height: 24px; }
+  .h28 { line-height: 28px; }
+  .h32 { line-height: 32px; }
+  .h35 { line-height: 35px; }
+  .h40 { line-height: 40px; }
+</style>
+</head>
+<body>
+<div class="h20">中文基线探针</div>
+<div class="h24">中文基线探针</div>
+<div class="h28">中文基线探针</div>
+<div class="h32">中文基线探针</div>
+<div class="h35">中文基线探针</div>
+<div class="h40">中文基线探针</div>
+</body>
+</html>

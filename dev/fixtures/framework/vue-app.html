@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>vue app</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 12px Arial, sans-serif; color: #222; }
+  .app { position: relative; width: 420px; padding: 10px; }
+  .bar { display: flex; align-items: center; height: 28px; background: #1976d2; color: #fff;
+         border-radius: 4px 4px 0 0; padding: 0 10px; }
+  .title { flex: 1 1 auto; font-weight: bold; }
+  .count { background: #0d47a1; border-radius: 8px; padding: 1px 8px; }
+  .list { margin: 0; padding: 0; list-style: none; border: 1px solid #cfd8dc; border-top: none; }
+  .row { display: flex; align-items: center; height: 26px; padding: 0 8px; border-left: 4px solid #ccc;
+         border-bottom: 1px solid #eceff1; background: #fff; }
+  .row.active { background: #e3f2fd; }
+  .idx { width: 20px; color: #90a4ae; }
+  .txt { flex: 1 1 auto; }
+  .tag { background: #ff9800; color: #fff; border-radius: 6px; padding: 0 6px; }
+  /* 层叠：绝对定位下拉 + z-index + 阴影 + 圆角 */
+  .drop { position: absolute; left: 40px; top: 50px; width: 140px; background: #fff;
+          border: 1px solid #b0bec5; border-radius: 6px; box-shadow: 0 6px 14px rgba(0,0,0,0.35); z-index: 5; }
+  .mi { height: 26px; line-height: 26px; padding: 0 10px; border-bottom: 1px solid #eceff1; }
+  .panel { position: absolute; left: 200px; top: 60px; width: 180px; height: 90px;
+           background: #f3e5f5; border: 1px dashed #8e24aa; z-index: 1; }
+  .btn { display: inline-block; margin-top: 10px; padding: 4px 12px; background: #43a047; color: #fff;
+         border-radius: 4px; cursor: pointer; }
+  .box { margin-top: 8px; padding: 6px 10px; background: linear-gradient(90deg, #ffe082, #ffcc80);
+         border-radius: 6px; }
+  .child { margin-top: 8px; padding: 6px 10px; background: #eceff1; border-left: 4px solid #607d8b; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="vue.global.prod.js"></script>
+<script>
+var ITEMS = [
+  { id: 1, text: 'alpha 项目', tag: 'new', on: false, color: '#e53935' },
+  { id: 2, text: 'beta 项目', tag: '', on: true, color: '#1e88e5' },
+  { id: 3, text: 'gamma 项目', tag: 'wip', on: false, color: '#43a047' }
+];
+
+var Child = {
+  props: ['label'],
+  template: '<div class="child">child: {{ label }}</div>'
+};
+
+var App = {
+  components: { Child: Child },
+  data: function () {
+    return { title: 'Vue 应用', items: ITEMS, open: false, n: 3 };
+  },
+  computed: {
+    upper: function () { return this.title + ' / 共 ' + this.items.length + ' 项'; }
+  },
+  methods: {
+    toggle: function () { this.open = !this.open; },
+    addItem: function () {
+      this.n += 1;
+      this.items.push({ id: this.n, text: 'delta ' + this.n, tag: '', on: false, color: '#8e24aa' });
+    }
+  },
+  template: [
+    '<div class="app">',
+    '  <div class="bar"><span class="title">{{ title }}</span><span class="count">{{ items.length }}</span></div>',
+    '  <ul class="list">',
+    '    <li v-for="(it, i) in items" :key="it.id" class="row" :class="{ active: it.on }"',
+    '        :style="{ borderLeftColor: it.color }">',
+    '      <span class="idx">{{ i + 1 }}</span>',
+    '      <span class="txt">{{ it.text }}</span>',
+    '      <span v-if="it.tag" class="tag">{{ it.tag }}</span>',
+    '    </li>',
+    '  </ul>',
+    '  <div class="panel">panel z-index:1</div>',
+    '  <div class="drop" v-show="open"><div class="mi">menu-1</div><div class="mi">menu-2</div><div class="mi">menu-3</div></div>',
+    '  <div class="btn" @click="toggle">toggle</div>',
+    '  <div class="box">{{ upper }}</div>',
+    '  <child :label="title"></child>',
+    '</div>'
+  ].join('\n')
+};
+
+var vm = Vue.createApp(App).mount('#app');
+window.__vm = vm;
+window.__setOpen = function (v) { vm.open = v; return vm.open; };
+window.__addItem = function () { vm.addItem(); return vm.items.length; };
+window.__state = function () {
+  return JSON.stringify({
+    rows: document.querySelectorAll('.row').length,
+    dropVisible: (function () {
+      var d = document.querySelector('.drop');
+      if (!d) return 'missing';
+      var r = d.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    })(),
+    box: (document.querySelector('.box') || {}).textContent || '',
+    child: (document.querySelector('.child') || {}).textContent || '',
+    lastRow: (function () {
+      var rs = document.querySelectorAll('.row');
+      return rs.length ? rs[rs.length - 1].textContent : '';
+    })()
+  });
+};
+if (location.hash.indexOf('open') >= 0) { window.__setOpen(true); }
+</script>
+</body>
+</html>

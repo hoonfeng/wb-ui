@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sticky &amp; overflow</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 11px Arial, sans-serif; }
+  .outer { position: absolute; left: 10px; top: 10px; width: 200px; }
+  .scroller { height: 100px; overflow: auto; border: 1px solid #999; background: #fafafa; }
+  .head { position: sticky; top: 0; height: 20px; line-height: 20px; background: #e53935; color: #fff;
+          padding-left: 4px; }
+  .content { height: 300px; background: #eeeeee; padding: 4px; }
+  .tail { height: 30px; background: #90caf9; }
+
+  .outer2 { position: absolute; left: 230px; top: 10px; width: 200px; }
+  .clipbox { position: relative; height: 100px; overflow: hidden; border: 1px solid #999; }
+  .absout { position: absolute; left: 10px; top: 120px; width: 60px; height: 40px; background: #8e24aa; }
+  .rel { position: relative; height: 30px; background: #a5d6a7; }
+</style>
+</head>
+<body>
+<div class="outer">
+  <div class="scroller" id="sc">
+    <div class="head" id="hd">STICKY HEAD</div>
+    <div class="content">scroll content line1<br>line2<br>line3<br>line4<br>line5<br>line6</div>
+    <div class="tail"></div>
+  </div>
+  <div style="margin-top:6px">sticky 滚动容器（已滚 60px）</div>
+</div>
+
+<div class="outer2">
+  <div class="clipbox" id="cb">
+    <div class="rel"></div>
+    <div class="absout" id="ao"></div>
+  </div>
+  <div style="margin-top:6px">overflow:hidden 裁剪绝对定位子元素</div>
+</div>
+
+<script>
+  window.addEventListener('load', function () {
+    window.__loadFired = true;
+    var sc = document.getElementById('sc');
+    if (!sc) { return; }
+    // ★ 诊断：记录赋值时的布局状态（供 webshot __probe 读取）——
+    //   __st0：直接赋值（引擎若在渲染树建立前静默丢弃则为 0）
+    //   __st1：先读一次几何（强制布局）后再赋值
+    sc.scrollTop = 60;
+    window.__st0 = sc.scrollTop;
+    window.__shAtLoad = sc.scrollHeight;
+    sc.scrollTop = 60;
+    window.__st1 = sc.scrollTop;
+  });
+  window.__probe = function () {
+    function r(id) { var e = document.getElementById(id); if (!e) return null; var b = e.getBoundingClientRect(); return [+b.left.toFixed(1), +b.top.toFixed(1), +b.width.toFixed(1), +b.height.toFixed(1)]; }
+    var sc = document.getElementById('sc');
+    return JSON.stringify({ loadFired: !!window.__loadFired, st0: window.__st0, st1: window.__st1,
+      shAtLoad: window.__shAtLoad, scrollTop: sc ? sc.scrollTop : -1,
+      head: r('hd'), absout: r('ao'), clipbox: r('cb'), content: r('content') });
+  };
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!doctype html><meta charset="utf-8"><title>G1 form controls</title>
+<style>html,body{margin:0}body{padding:8px}</style><body>
+<div><input id="t1" type="text" value="Hi"></div>
+<div><input id="t2" type="checkbox" checked></div>
+<div><input id="t3" type="radio" checked></div>
+<div><input id="t4" type="range"></div>
+<div><button id="t5">Btn</button></div>
+<div><select id="t6"><option>A</option></select></div>
+<div><textarea id="t7" rows="1">Txt</textarea></div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['t1','t2','t3','t4','t5','t6','t7'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),r=e.getBoundingClientRect(),c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | font='+c.fontFamily+'/'+c.fontSize+' | pad='+c.padding+' | mar='+c.margin+' | bor='+c.borderWidth+' | disp='+c.display);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

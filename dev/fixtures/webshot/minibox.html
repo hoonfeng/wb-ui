@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>minibox: height vs line box vs inline-block baseline</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  .probe { width: 300px; margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<!-- (a) 显式 height:20px + 行内文本：验证「height 是否被行盒撑大」 -->
+<div class="probe" id="a" style="height:20px;background:#eeeeee">centered text</div>
+<!-- (b) 纯拉丁文本、无 height、无 font-family：验证「默认字体行盒高」 -->
+<div class="probe" id="b" style="background:#dddddd">Hamburgefons</div>
+<!-- (c) font-size:0;line-height:0 容器 + 空 inline-block：验证 strut 是否归零 -->
+<div class="probe" id="c" style="font-size:0;line-height:0;background:#cccccc"><span id="c1" style="display:inline-block;width:100px;height:20px;background:#0088ff"></span></div>
+<!-- (d) 同 (c) 但容器字体正常：对照 -->
+<div class="probe" id="d" style="background:#bbbbbb"><span id="d1" style="display:inline-block;width:100px;height:20px;background:#ff8800"></span></div>
+<!-- (e) 显式 line-height:20px + 文本：验证「显式行高下 height 是否仍被撑大」 -->
+<div class="probe" id="e" style="line-height:20px;background:#aaaaaa">centered text</div>
+<!-- (f) 显式 height:20px + 空内容：对照组（应恒为 20） -->
+<div class="probe" id="f" style="height:20px;background:#999999"></div>
+<pre id="out"></pre>
+<script>
+var ids = ['a','b','c','c1','d','d1','e','f'];
+document.getElementById('out').textContent = ids.map(function(i){
+  var el = document.getElementById(i), r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  return i + ' y=' + r.y.toFixed(0) + ' h=' + r.height.toFixed(1) +
+         ' lh=' + cs.lineHeight + ' fs=' + cs.fontSize + ' ff=' + cs.fontFamily;
+}).join('\n');
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>baseline / line-box probe</title>
+<style>
+  /* 基线专项探针：每行一个 40px 高的 div（行盒互不重叠），
+     文字左对齐、无 margin，墨迹 bbox 直接反映「行盒顶 → baseline」。
+     用 'H' 做拉丁样本：墨迹顶 = baseline - capHeight、底 = baseline，
+     故 bbox 底边（+AA 半像素）就是 baseline 位置。 */
+  body { margin: 0; background: #ffffff; font-size: 24px; color: #000; }
+  div { height: 40px; white-space: nowrap; }
+  .lat-arial-32   { font-family: Arial, sans-serif;      line-height: 32px; }
+  .lat-arial-n    { font-family: Arial, sans-serif;      line-height: normal; }
+  .lat-noto-20    { font-family: "Noto Sans SC";         line-height: 20px; }
+  .lat-arial-40   { font-family: Arial, sans-serif;      line-height: 40px; }
+  .lat-default-32 { line-height: 32px; }
+  .cjk-arial-32   { font-family: Arial, sans-serif;      line-height: 32px; }
+  .cjk-arial-n    { font-family: Arial, sans-serif;      line-height: normal; }
+  .cjk-noto-20    { font-family: "Noto Sans SC";         line-height: 20px; }
+</style>
+</head>
+<body>
+<div class="lat-arial-32">HHHHHHHHHH</div>
+<div class="lat-arial-n">HHHHHHHHHH</div>
+<div class="lat-noto-20">HHHHHHHHHH</div>
+<div class="lat-arial-40">HHHHHHHHHH</div>
+<div class="lat-default-32">HHHHHHHHHH</div>
+<div class="cjk-arial-32">中文基线探针</div>
+<div class="cjk-arial-n">中文基线探针</div>
+<div class="cjk-noto-20">中文基线探针</div>
+</body>
+</html>

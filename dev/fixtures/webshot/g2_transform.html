@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>G2 transform / compositing</title>
+<style>html,body{margin:0}
+#p{position:relative;width:200px;height:100px;margin:20px;background:#adb5bd}
+#abs{position:absolute;left:0;top:0;width:40px;height:40px;background:#e8590c}
+#tx{position:relative;width:100px;height:40px;background:#2f9e44;transform:translate(20px,10px)}
+#sc{position:relative;width:100px;height:40px;background:#1971c2;transform:scale(0.5);transform-origin:0 0;margin-top:20px}
+#fi{position:relative;width:100px;height:40px;background:#7048e8;filter:blur(0px);margin-top:20px}
+#wc{position:relative;width:100px;height:40px;background:#f08c00;will-change:transform;margin-top:20px}
+</style><body>
+<div id="p"><div id="tx"></div><div id="abs"></div></div>
+<div id="sc"></div><div id="fi"></div><div id="wc"></div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['tx','abs','sc','fi','wc'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),r=e.getBoundingClientRect(),c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | tr='+c.transform+' | wo='+c.transformOrigin+' | fil='+c.filter+' | wc='+c.willChange+' | cl='+c.clipPath);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

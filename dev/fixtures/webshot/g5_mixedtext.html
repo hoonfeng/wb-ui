@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8"><title>G5 CJK/Latin mixed text</title>
+<style>html,body{margin:0}
+.l{font:16px/24px sans-serif;width:200px;background:#dee2e6;margin:4px 0}
+#wb{word-break:break-all}#lb{line-break:strict}#nw{white-space:nowrap}#nowrap
+</style><body>
+<div class="l" id="m1">中文English混排测试123</div>
+<div class="l" id="m2">abcdefghijklmnopqrstuvwxyz0123456789</div>
+<div class="l" id="m3">中文中文中文中文中文中文中文中文中文</div>
+<div class="l" id="m4" style="word-break:break-all">wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww</div>
+<div class="l" id="m5" style="line-break:strict">、。！）】」中文标点断行</div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['m1','m2','m3','m4','m5'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),r=e.getBoundingClientRect(),c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | wb='+c.wordBreak+' | lb='+c.lineBreak+' | lh='+c.lineHeight+' | f='+c.fontFamily);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

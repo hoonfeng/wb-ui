@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>animation</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 11px Arial, sans-serif; }
+  .track { position: absolute; left: 10px; top: 10px; width: 220px; height: 40px; background: #eceff1; }
+  .anim { position: absolute; top: 10px; left: 10px; width: 40px; height: 40px; background: #e53935;
+          animation: slide 2s linear infinite; }
+  @keyframes slide { 0% { transform: translateX(0px); } 50% { transform: translateX(180px); } 100% { transform: translateX(0px); } }
+
+  .pulse { position: absolute; top: 70px; left: 10px; width: 80px; height: 30px; background: #1e88e5;
+           animation: pulse 1s linear infinite alternate; }
+  @keyframes pulse { 0% { opacity: 1; } 100% { opacity: 0.15; } }
+
+  .trans { position: absolute; top: 120px; left: 10px; width: 60px; height: 30px; background: #43a047;
+           transition: transform 1.5s linear, background-color 1.5s linear; }
+  .trans.on { transform: translateX(150px); background-color: #ff9800; }
+
+  .jstrack { position: absolute; top: 170px; left: 10px; width: 220px; height: 20px; background: #eceff1; }
+  .jsbox { position: absolute; top: 170px; left: 10px; width: 10px; height: 20px; background: #8e24aa; }
+  .cap { position: absolute; left: 240px; font-size: 10px; color: #444; }
+</style>
+</head>
+<body>
+<div class="track"></div><div class="anim"></div><div class="cap" style="top:22px">CSS @keyframes transform</div>
+<div class="pulse"></div><div class="cap" style="top:78px">CSS opacity 动画</div>
+<div class="trans" id="tr"></div><div class="cap" style="top:128px">CSS transition</div>
+<div class="jstrack"></div><div class="jsbox" id="jb"></div><div class="cap" style="top:174px">JS setInterval 宽度</div>
+<script>
+  var n = 0;
+  window.setInterval(function () {
+    n += 1;
+    var jb = document.getElementById('jb');
+    if (jb) { jb.style.width = (10 + (n % 20) * 10) + 'px'; }
+  }, 100);
+  window.setTimeout(function () {
+    var tr = document.getElementById('tr');
+    if (tr) { tr.className = 'trans on'; }
+  }, 200);
+  window.__tick = function () { return n; };
+  window.__anim = function () {
+    var a = document.querySelector('.anim');
+    var p = document.querySelector('.pulse');
+    function rect(e) { if (!e) return null; var r = e.getBoundingClientRect(); return [+r.left.toFixed(1), +r.top.toFixed(1), +r.width.toFixed(1), +r.height.toFixed(1)]; }
+    return JSON.stringify({ tick: n, anim: rect(a), pulse: rect(p), trans: rect(document.getElementById('tr')),
+      jb: rect(document.getElementById('jb')) });
+  };
+</script>
+</body>
+</html>

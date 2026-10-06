@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>emoji / symbol probe (E4)</title>
+<style>html,body{margin:0}
+body{font:24px sans-serif}
+.row{height:36px;line-height:36px;white-space:nowrap}
+</style></head><body>
+<div id="r1" class="row">😀🎉👍</div>
+<div id="r2" class="row">→←↑↓⇒</div>
+<div id="r3" class="row">□✓★☆</div>
+<div id="r4" class="row">👨‍👩‍👧</div>
+<div id="r5" class="row">Héllo Wörld</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+var ids=['r1','r2','r3','r4','r5'],L=[];
+for(var i=0;i<ids.length;i++){
+  var el=document.getElementById(ids[i]);
+  var r=el.getBoundingClientRect(), cs=getComputedStyle(el);
+  L.push(ids[i]+' | text='+el.textContent+' | rect='+[r.width,r.height].join('x')
+    +' | scrollW='+el.scrollWidth+' | font='+cs.fontFamily+'/'+cs.fontSize+'/'+cs.lineHeight);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body></html>

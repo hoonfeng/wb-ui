@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>font identity probe</title>
+<style>
+  body { margin: 0; background: #ffffff; font-size: 24px; }
+  div.sample { display: block; }
+</style>
+</head>
+<body>
+<div id="samples"></div>
+<pre id="out" style="position:absolute;left:-9999px;top:0"></pre>
+<script>
+// 指纹探针（每项三维指纹：M advance / I advance / line-height:normal 行盒高）。
+// ★ 通用族（serif/monospace/sans-serif）**不能加引号**，否则浏览器按族名查找，
+//   找不到就回退默认字体——上一版探针因此把 serif/monospace 测成了默认字体。
+// 同时覆盖 weight(bold) / style(italic)：粗体若被合成（faux bold）会改变 advance。
+var cases = [
+  ["serif", false, "", ""],
+  ["monospace", false, "", ""],
+  ["sans-serif", false, "", ""],
+  ["Times New Roman", true, "", ""],
+  ["SimSun", true, "", ""],
+  ["NSimSun", true, "", ""],
+  ["Georgia", true, "", ""],
+  ["Consolas", true, "", ""],
+  ["Courier New", true, "", ""],
+  ["Arial", true, "", ""],
+  ["Arial", true, "bold", ""],
+  ["Arial", true, "italic", ""],
+  ["Segoe UI", true, "", ""],
+  ["Segoe UI", true, "bold", ""],
+  ["Microsoft YaHei", true, "", ""],
+  ["Microsoft YaHei", true, "bold", ""],
+  ["Noto Sans SC", true, "", ""],
+  ["Noto Serif SC", true, "", ""],
+  ["Noto Serif", true, "", ""],
+  ["STSong", true, "", ""],
+  ["FangSong", true, "", ""],
+  ["\\\u5b8b\u4f53", true, "", ""]
+];
+var cv = document.createElement("canvas").getContext("2d");
+var lines = [];
+for (var i = 0; i < cases.length; i++) {
+  var name = cases[i][0], quoted = cases[i][1], weight = cases[i][2];
+  var spec = (weight ? weight + " " : "") + "24px " + (quoted ? "\"" + name + "\"" : name);
+  cv.font = spec;
+  var wm = Math.round(cv.measureText("MMMMMMMMMM").width * 100) / 100;
+  var wi = Math.round(cv.measureText("IIIIIIIIII").width * 100) / 100;
+  var d = document.createElement("div");
+  d.className = "sample";
+  d.style.fontFamily = quoted ? "\"" + name + "\"" : name;
+  if (weight) { d.style.fontWeight = weight; }
+  d.textContent = "HHHH";
+  document.getElementById("samples").appendChild(d);
+  lines.push(name + (weight ? "/" + weight : "") + " | M10=" + wm + " I10=" + wi + " boxH=" + d.offsetHeight);
+}
+document.getElementById("out").textContent = lines.join("\n");
+</script>
+</body>
+</html>

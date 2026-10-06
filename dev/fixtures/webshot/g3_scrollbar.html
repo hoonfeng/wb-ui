@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>G3 scrollbars</title>
+<style>html,body{margin:0}
+.box{width:200px;height:60px;background:#adb5bd;margin:6px}
+#auto{overflow:auto}#scroll{overflow:scroll}#hidden{overflow:hidden}
+#inner{height:200px;width:300px;background:#e8590c}
+#gutter{overflow:auto;scrollbar-gutter:stable}
+</style><body>
+<div id="auto" class="box"><div id="inner"></div></div>
+<div id="scroll" class="box"></div>
+<div id="hidden" class="box"><div id="inner"><h>H</h></div></div>
+<div id="gutter" class="box"><div id="inner"></div></div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['auto','scroll','hidden','gutter'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),r=e.getBoundingClientRect(),c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | client='+e.clientWidth+'x'+e.clientHeight+' | offset='+e.offsetWidth+'x'+e.offsetHeight+' | scroll='+e.scrollWidth+'x'+e.scrollHeight+' | ov='+c.overflow+' | gutter='+c.scrollbarGutter);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

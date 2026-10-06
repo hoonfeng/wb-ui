@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>composite scenarios</title>
+<style>
+  body { margin: 0; background: #ffffff; font: 10px Arial, sans-serif; color: #000; }
+  .cell { position: absolute; width: 200px; height: 140px; background: #f4f4f4; border: 1px solid #bbb; }
+  .cap { position: absolute; left: 3px; bottom: 2px; font-size: 10px; color: #333; }
+
+  /* 1: overflow:hidden + border-radius（子块应被裁成圆角） */
+  #c1 { left: 10px; top: 10px; }
+  #c1 .clip { position: absolute; left: 20px; top: 20px; width: 80px; height: 80px;
+              border-radius: 40px; overflow: hidden; background: #ffffff; }
+  #c1 .sq { position: absolute; left: 0; top: 0; width: 80px; height: 80px; background: #e53935; }
+  /* 采样 (30,30)=角落应仍为白(被裁)  (60,60)=中心应红 */
+
+  /* 2: box-shadow（方块外应有阴影） */
+  #c2 { left: 220px; top: 10px; }
+  #c2 .sh { position: absolute; left: 30px; top: 30px; width: 60px; height: 60px;
+            background: #1e88e5; box-shadow: 8px 8px 10px rgba(0,0,0,0.9); }
+  /* 采样 (150,150)=方块右下 10px 外应有阴影(非纯白) */
+
+  /* 3: overflow:hidden 裁剪绝对定位子元素 */
+  #c3 { left: 430px; top: 10px; }
+  #c3 .clip { position: absolute; left: 20px; top: 20px; width: 100px; height: 60px;
+              overflow: hidden; background: #ffffff; }
+  #c3 .wide { position: absolute; left: 60px; top: 10px; width: 100px; height: 40px; background: #8e24aa; }
+  /* 采样 (145,60)：父内容区右边界 (120) 之外 → 应白； (105,60) 内 → 紫 */
+
+  /* 4: 渐变 + 圆角 + 阴影复合 */
+  #c4 { left: 640px; top: 10px; }
+  #c4 .grad { position: absolute; left: 20px; top: 20px; width: 120px; height: 70px; border-radius: 12px;
+              background: linear-gradient(90deg, #ff0000 0%, #0000ff 100%);
+              box-shadow: 0 6px 12px rgba(0,0,0,0.6); }
+  /* 采样 (90,65)=左端应偏红， (150,65)=右端应偏蓝 */
+
+  /* 5: ::before / ::after 定位层叠 */
+  #c5 { left: 10px; top: 160px; }
+  #c5 .ps { position: absolute; left: 40px; top: 40px; width: 80px; height: 60px; background: #00bcd4; }
+  #c5 .ps::before { content: ""; position: absolute; left: -20px; top: -20px; width: 60px; height: 40px;
+                    background: #ffab00; }
+  #c5 .ps::after { content: "after"; position: absolute; right: -10px; bottom: -10px;
+                   width: 50px; height: 30px; background: #43a047; color: #fff; }
+  /* 采样 (110,180)=::before 区域应橙； (185,245)=::after 区域应绿 */
+
+  /* 6: flex 容器内的绝对定位子元素（不参与 flex 布局） */
+  #c6 { left: 220px; top: 160px; }
+  #c6 .fx { position: absolute; left: 10px; top: 30px; width: 140px; height: 60px; display: flex;
+            background: #ffffff; }
+  #c6 .it1 { width: 40px; height: 40px; background: #f4511e; }
+  #c6 .it2 { width: 40px; height: 40px; background: #fbc02d; }
+  #c6 .abs { position: absolute; left: 100px; top: 10px; width: 40px; height: 40px; background: #3949ab; }
+  /* it1 在 x 10..50，it2 在 50..90；abs 在 110..150（不占 flex 位） */
+
+  /* 7: grid 内绝对定位 + z-index */
+  #c7 { left: 430px; top: 160px; }
+  #c7 .gd { position: absolute; left: 10px; top: 20px; width: 160px; height: 90px; display: grid;
+            grid-template-columns: 60px 60px; gap: 10px; background: #ffffff; }
+  #c7 .a { background: #ff7043; }
+  #c7 .b { background: #26a69a; }
+  #c7 .c { position: absolute; left: 50px; top: 30px; width: 80px; height: 50px; background: #7e57c2; z-index: 2; }
+
+  /* 8: transform rotate / scale 与内容 */
+  #c8 { left: 640px; top: 160px; }
+  #c8 .rot { position: absolute; left: 60px; top: 40px; width: 60px; height: 60px; background: #ffee58;
+             transform: rotate(30deg); }
+  #c8 .scl { position: absolute; left: 30px; top: 80px; width: 40px; height: 40px; background: #d81b60;
+             transform: scale(1.5); }
+  /* 采样 (690,210)=旋转块覆盖区 黄； (655,250)=缩放块覆盖区 品红 */
+</style>
+</head>
+<body>
+<div class="cell" id="c1"><div class="clip"><div class="sq"></div></div><div class="cap">1 clip+radius</div></div>
+<div class="cell" id="c2"><div class="sh"></div><div class="cap">2 shadow</div></div>
+<div class="cell" id="c3"><div class="clip"><div class="wide"></div></div><div class="cap">3 clip overflow</div></div>
+<div class="cell" id="c4"><div class="grad"></div><div class="cap">4 grad+radius+shadow</div></div>
+<div class="cell" id="c5"><div class="ps"></div><div class="cap">5 pseudo</div></div>
+<div class="cell" id="c6"><div class="fx"><div class="it1"></div><div class="it2"></div><div class="abs"></div></div><div class="cap">6 flex abs</div></div>
+<div class="cell" id="c7"><div class="gd"><div class="a"></div><div class="b"></div><div class="c"></div></div><div class="cap">7 grid abs z</div></div>
+<div class="cell" id="c8"><div class="rot"></div><div class="scl"></div><div class="cap">8 transform</div></div>
+</body>
+</html>

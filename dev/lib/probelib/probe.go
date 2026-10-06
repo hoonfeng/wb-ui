@@ -21,9 +21,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // 参考视口与容差沿用 obscura render-repros 的 check.py 约定（900x1000、
@@ -36,6 +38,18 @@ const (
 	// NearTolerance 是"接近但不等"的每通道窗口，用于区分"画成近似色"
 	// （绘制差异）与"完全没画"（实现缺失）。
 	NearTolerance = 8
+
+	// VirtualTimeBudgetMs 是参照浏览器截图前推进的**虚拟时间**（毫秒）。
+	// Chromium 的 --screenshot 在页面 load 之后立刻截图，不等 CSS 动画与
+	// 定时器结束——`animation-fill-forwards` 夹具因此被截到动画中途的混合
+	// 色（本机 Edge 实测 (0,0)=#2f6535/#455932，而终态应为 #18723a）。
+	// --virtual-time-budget 让渲染器用虚拟时钟把定时器与动画跑到预算耗尽，
+	// 截图于是落在稳定终态（实测连跑 3 次均命中 #18723a）。
+	VirtualTimeBudgetMs = 2000
+
+	// probeWindowPx 是探测窗口装饰差值时使用的窗口边长。探测只在每个浏览器
+	// 首次截图时跑一次（见 viewportDelta）。
+	probeWindowPx = 1000
 )
 
 // Check 是一条期望的纯色连通域（checks.json 的条目）。坐标与尺寸是
@@ -340,22 +354,53 @@ func FindBrowser(probeDir string) (string, error) {
 		out := filepath.Join(probeDir, "browser-probe.png")
 		if err := Screenshot(path, "about:blank", out, 64, 64, probeDir); err == nil {
 			return path, nil
+		} else {
+			// 带出**具体原因**：只说"(不可用)"无法区分「退出码噪声」「路径」「权限」
+			tried = append(tried, fmt.Sprintf("%s(不可用: %v)", path, err))
 		}
-		tried = append(tried, path+"(不可用)")
 	}
 	return "", fmt.Errorf("没有可用的真实浏览器参照：%s", strings.Join(tried, ", "))
+}
+
+// looksLikeURL 报告 path 是否是可以直接交给浏览器加载的 URL，而不是本地文件路径。
+//
+// ★ 不能只判 "://"：`about:blank`（FindBrowser 的探测页）与 `data:` 只有单冒号，
+// 用 "://" 判断会把它们当成本地路径，拼成 `file:///…/about:blank` → 浏览器报
+// net::ERR_FILE_NOT_FOUND、截图静默失败，探测于是把所有浏览器判成"不可用"
+// （本仓库 cssoracle/cssprobe 的 Edge 校准曾因此整体失效）。
+// Windows 盘符（`C:\…` / `C:/…`）不是 scheme，需显式排除。
+func looksLikeURL(v string) bool {
+	if len(v) >= 3 && v[1] == ':' && (v[2] == '\\' || v[2] == '/') {
+		return false // 盘符路径
+	}
+	return strings.Index(v, ":") > 0
 }
 
 // Screenshot 用 headless 浏览器把 htmlPath 渲染为 PNG（视口 w×h，
 // 关闭滚动条以匹配 wb-ui 的离屏渲染约定）。
 func Screenshot(browser, htmlPath, outPNG string, w, h int, profileDir string) error {
 	url := htmlPath
-	if !strings.Contains(url, "://") {
+	if !looksLikeURL(url) {
 		abs, err := filepath.Abs(htmlPath)
 		if err != nil {
 			return err
 		}
 		url = "file:///" + strings.ReplaceAll(abs, `\`, "/")
+	}
+	// ★ 视口语义（实测结论，勿再"修"）：
+	//   在 --screenshot 模式下，Chromium 的 **CSS 布局视口就是 --window-size
+	//   的 W x H** —— 实测 @900x1000：100vw=900、15vh=150、10vmax=100，全部
+	//   与 900x1000 基准吻合（relative-box-edges 6/6 MATCH 即由此而来）。
+	//   同一参数下 window.innerWidth/innerHeight 却只有 874x907 —— 这是
+	//   headless 自身偏差（innerWidth 未等于布局视口），不是窗口尺寸的语义。
+	//   若为了凑齐 innerWidth 而把 --window-size 加大（宽 +26、高 +93），
+	//   布局视口会一并变大，vw/vh 夹具集体失败：实测 relative-box-edges、
+	//   block-auto-margins、direction-rtl、contextual-css-math、
+	//   bootstrap-float-clearfix 五个夹具由 5/5 MATCH 变为 0/5。
+	//   故默认**不补偿**；WBUI_ORACLE_VIEWFIX=1 可启用探测差值做对照实验。
+	dx, dy := 0, 0
+	if os.Getenv("WBUI_ORACLE_VIEWFIX") != "" {
+		dx, dy = viewportDelta(browser)
 	}
 	args := []string{
 		"--headless=new",
@@ -363,22 +408,97 @@ func Screenshot(browser, htmlPath, outPNG string, w, h int, profileDir string) e
 		"--no-sandbox",
 		"--hide-scrollbars",
 		"--force-device-scale-factor=1",
-		"--window-size=" + strconv.Itoa(w) + "," + strconv.Itoa(h),
-		"--screenshot=" + strings.ReplaceAll(outPNG, `\`, "/"),
 	}
+	// ★ 虚拟时间推进：见 VirtualTimeBudgetMs。
+	if os.Getenv("WBUI_ORACLE_NO_VTB") == "" {
+		args = append(args, "--virtual-time-budget="+strconv.Itoa(VirtualTimeBudgetMs))
+	}
+	args = append(args,
+		"--window-size="+strconv.Itoa(w+dx)+","+strconv.Itoa(h+dy),
+		"--screenshot="+strings.ReplaceAll(outPNG, `\`, "/"),
+	)
 	if profileDir != "" {
 		args = append(args, "--user-data-dir="+strings.ReplaceAll(profileDir, `\`, "/"))
 	}
 	args = append(args, url)
 	cmd := exec.Command(browser, args...)
 	out, err := cmd.CombinedOutput()
+	// ★ 判定顺序：**截图是否产出**优先于退出码。
+	//   Edge 在本机可能因导入器/网络噪声以非 0 退出码收尾（例如
+	//   "QQBrowser user data path not found"），但 PNG 已经写好；
+	//   旧实现先看退出码，会把可用的浏览器误判为"不可用"。
+	if _, statErr := os.Stat(outPNG); statErr == nil {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("%s: %v: %s", filepath.Base(browser), err, strings.TrimSpace(string(out)))
 	}
-	if _, err := os.Stat(outPNG); err != nil {
-		return fmt.Errorf("%s 未产出截图（headless 静默失败）：%s", filepath.Base(browser), strings.TrimSpace(string(out)))
+	return fmt.Errorf("%s 未产出截图（headless 静默失败）：%s", filepath.Base(browser), strings.TrimSpace(string(out)))
+}
+
+// viewportDelta 返回 --window-size 与真实布局视口之间的差值 (dx, dy)，
+// 按浏览器缓存（同一进程内每个浏览器只探测一次）。探测失败返回 (0, 0)，
+// 调用方按原样使用窗口尺寸（即退化为修复前的行为）。
+var (
+	vpDeltaMu   sync.Mutex
+	vpDeltaSeen = map[string][2]int{}
+)
+
+var (
+	vpProbeMark = regexp.MustCompile(`<div id="vp-probe-out">(\d+)x(\d+)</div>`)
+	vpProbeHTML = `<!doctype html><meta charset="utf-8"><title>viewport probe</title>` +
+		`<div id="vp-probe-out"></div><script>` +
+		`document.getElementById("vp-probe-out").textContent=innerWidth+"x"+innerHeight;</script>`
+)
+
+func viewportDelta(browser string) (int, int) {
+	vpDeltaMu.Lock()
+	defer vpDeltaMu.Unlock()
+	if d, ok := vpDeltaSeen[browser]; ok {
+		return d[0], d[1]
 	}
-	return nil
+	d := probeViewportDelta(browser)
+	vpDeltaSeen[browser] = d
+	return d[0], d[1]
+}
+
+// probeViewportDelta 用一次 --dump-dom 读真实布局视口，得出装饰差值。
+func probeViewportDelta(browser string) [2]int {
+	dir, err := os.MkdirTemp("", "probevp")
+	if err != nil {
+		return [2]int{}
+	}
+	defer os.RemoveAll(dir)
+	page := filepath.Join(dir, "vp.html")
+	if err := os.WriteFile(page, []byte(vpProbeHTML), 0o644); err != nil {
+		return [2]int{}
+	}
+	args := []string{
+		"--headless=new",
+		"--disable-gpu",
+		"--no-sandbox",
+		"--hide-scrollbars",
+		"--force-device-scale-factor=1",
+		"--window-size=" + strconv.Itoa(probeWindowPx) + "," + strconv.Itoa(probeWindowPx),
+		"--user-data-dir=" + strings.ReplaceAll(filepath.Join(dir, "profile"), `\`, "/"),
+		"--dump-dom",
+		"file:///" + strings.ReplaceAll(page, `\`, "/"),
+	}
+	out, err := exec.Command(browser, args...).Output()
+	if err != nil {
+		return [2]int{}
+	}
+	m := vpProbeMark.FindSubmatch(out)
+	if m == nil {
+		return [2]int{}
+	}
+	iw, errW := strconv.Atoi(string(m[1]))
+	ih, errH := strconv.Atoi(string(m[2]))
+	if errW != nil || errH != nil || iw <= 0 || ih <= 0 ||
+		iw > probeWindowPx || ih > probeWindowPx {
+		return [2]int{}
+	}
+	return [2]int{probeWindowPx - iw, probeWindowPx - ih}
 }
 
 // WithScript 报告 HTML 是否含 <script>。cssprobe 不执行脚本，参照浏览器

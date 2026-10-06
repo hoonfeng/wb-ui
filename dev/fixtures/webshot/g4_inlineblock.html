@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>G4 inline/block boundaries</title>
+<style>html,body{margin:0}
+.line{font:16px sans-serif;background:#dee2e6;margin:4px 0}
+.ib{display:inline-block;width:30px;height:20px;background:#e8590c}
+.vt{display:inline-block;width:30px;height:20px;background:#2f9e44;vertical-align:top}
+.vm{display:inline-block;width:30px;height:20px;background:#1971c2;vertical-align:middle}
+.vb{display:inline-block;width:30px;height:20px;background:#7048e8;vertical-align:bottom}
+.ws{white-space:pre;background:#f08c00}
+</style><body>
+<div class="line" id="l1">A<span class="ib"></span>B</div>
+<div class="line" id="l2">A<span class="vt"></span>B</div>
+<div class="line" id="l3">A<span class="vm"></span>B</div>
+<div class="line" id="l4">A<span class="vb"></span>B</div>
+<div class="line" id="l5"><span class="ws" id="w1">a   b</span></div>
+<div class="line" id="l6"><span class="ib" id="i1"></span> <span class="ib" id="i2"></span></div>
+<pre id="out" style="position:absolute;left:-9999px;margin:0"></pre>
+<script>
+var ids=['l1','l2','l3','l4','w1','i1','i2'],L=[];
+for(var i=0;i<ids.length;i++){var e=document.getElementById(ids[i]),r=e.getBoundingClientRect(),c=getComputedStyle(e);
+L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')+' | va='+c.verticalAlign+' | disp='+c.display+' | ws='+c.whiteSpace+' | lh='+c.lineHeight);}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

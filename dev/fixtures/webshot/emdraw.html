@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>em draw</title>
+<style>
+  body { margin: 0; background: #fff; font-family: Arial; font-size: 16px; color: #000; }
+  /* 每行固定 40px 高、行高 40px，消除换行干扰；用 10 个 M 量宽度 */
+  div { height: 40px; line-height: 40px; overflow: hidden; padding-left: 4px; }
+  #a { font-size: 2em; }      /* 浏览器: 32px */
+  #b { font-size: 150%; }     /* 浏览器: 24px */
+  #c { font-size: 2rem; }     /* 浏览器: 32px */
+  #d { font-size: 32px; }     /* 浏览器: 32px （对照） */
+  #e { font-size: 1.5em; }    /* 浏览器: 24px */
+  #f { font-size: 24px; }     /* 浏览器: 24px （对照） */
+</style>
+</head>
+<body>
+<div id="a">MMMMMMMMMM</div>
+<div id="b">MMMMMMMMMM</div>
+<div id="c">MMMMMMMMMM</div>
+<div id="d">MMMMMMMMMM</div>
+<div id="e">MMMMMMMMMM</div>
+<div id="f">MMMMMMMMMM</div>
+</body>
+</html>

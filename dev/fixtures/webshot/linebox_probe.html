@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>line-box metrics probe</title>
+<style>
+  /* 行盒度量探针：每个 div 高 auto，offsetHeight 即 line-height:normal 的
+     行盒高。用来判定「含 CJK 时行盒度量取主字体还是取回退字体（或两者 max）」。 */
+  body { margin: 0; background: #ffffff; font-size: 24px; }
+  div.sample { display: block; }
+</style>
+</head>
+<body>
+<div id="samples"></div>
+<pre id="out"></pre>
+<script>
+var cases = [
+  ["Arial/latin",   "Arial, sans-serif",  "HHHH"],
+  ["Arial/cjk",     "Arial, sans-serif",  "\u4e2d\u6587\u4e2d\u6587"],
+  ["Arial/mix",     "Arial, sans-serif",  "H\u4e2dH"],
+  ["Noto/latin",    "\"Noto Sans SC\"",   "HHHH"],
+  ["Noto/cjk",      "\"Noto Sans SC\"",   "\u4e2d\u6587\u4e2d\u6587"],
+  ["YaHei/cjk",     "\"Microsoft YaHei\"", "\u4e2d\u6587\u4e2d\u6587"],
+  ["YaHei/latin",   "\"Microsoft YaHei\"", "HHHH"],
+  ["default/latin", "",                   "HHHH"],
+  ["default/cjk",   "",                   "\u4e2d\u6587\u4e2d\u6587"]
+];
+var lines = [];
+cases.forEach(function (c) {
+  var d = document.createElement("div");
+  d.className = "sample";
+  if (c[1]) { d.style.fontFamily = c[1]; }
+  d.textContent = c[2];
+  document.getElementById("samples").appendChild(d);
+  var cs = getComputedStyle(d);
+  lines.push(c[0] + " h=" + d.offsetHeight + " lh=" + cs.lineHeight +
+             " fam=" + cs.fontFamily);
+});
+document.getElementById("out").textContent = lines.join("\n");
+</script>
+</body>
+</html>

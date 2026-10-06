@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>webshot smoke</title>
+<style>
+  body { margin: 0; font: 14px "Segoe UI", "Microsoft YaHei", sans-serif; background: #ffffff; }
+  .row { display: flex; gap: 8px; padding: 12px; }
+  .swatch { width: 60px; height: 40px; }
+  .c1 { background: #ff0000; }
+  .c2 { background: #00ff00; }
+  .c3 { background: #0000ff; }
+  .c4 { background: linear-gradient(90deg, #ff0000, #0000ff); }
+</style>
+</head>
+<body>
+<h1>webshot smoke</h1>
+<div class="row">
+  <div class="swatch c1"></div>
+  <div class="swatch c2"></div>
+  <div class="swatch c3"></div>
+  <div class="swatch c4"></div>
+</div>
+<script>
+  document.body.insertAdjacentHTML('beforeend', '<p id="jsout">js-ran</p>');
+</script>
+</body>
+</html>

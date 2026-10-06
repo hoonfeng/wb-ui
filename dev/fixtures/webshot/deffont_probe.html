@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>font family semantics probe (D7)</title>
+<style>
+  body { margin: 0; font-size: 24px; }
+  div { font-size: 24px; line-height: 32px; }
+</style>
+</head>
+<body>
+<div id="default">MMMMMMMMMM</div>
+<div id="cjk">默认字体族中文测试</div>
+<div id="ss" style="font-family:sans-serif">MMMMMMMMMM</div>
+<div id="uiss" style="font-family:ui-sans-serif">MMMMMMMMMM</div>
+<div id="sr" style="font-family:serif">MMMMMMMMMM</div>
+<div id="mono" style="font-family:monospace">MMMMMMMMMM</div>
+<div id="arial" style="font-family:Arial">MMMMMMMMMM</div>
+<div id="yahei" style="font-family:'Microsoft YaHei'">MMMMMMMMMM</div>
+<div id="noto" style="font-family:'Noto Sans SC'">MMMMMMMMMM</div>
+<div id="sysui" style="font-family:system-ui">MMMMMMMMMM</div>
+<div id="applesys" style="font-family:-apple-system">MMMMMMMMMM</div>
+<div id="segoe" style="font-family:'Segoe UI'">MMMMMMMMMM</div>
+<div id="vmix" style="font-family:'Inter', system-ui, -apple-system, sans-serif">MMMMMMMMMM</div>
+<pre id="out" style="position:absolute;left:-9999px;top:0;margin:0"></pre>
+<script>
+(function () {
+  var ids = ['default', 'cjk', 'ss', 'uiss', 'sr', 'mono', 'arial', 'yahei', 'noto', 'sysui', 'applesys', 'segoe', 'vmix'];
+  var lines = [];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    var cs = getComputedStyle(el);
+    // 真实渲染宽度：块级元素的 scrollWidth = 内容行宽（Range API 引擎未实现）
+    var rw = el.scrollWidth;
+    var cv = document.createElement('canvas').getContext('2d');
+    cv.font = '24px ' + (el.style.fontFamily || 'sans-serif');
+    var cw = Math.round(cv.measureText(el.textContent).width * 100) / 100;
+    lines.push(ids[i] + ' | computed=' + cs.fontFamily + ' | scrollW=' + rw + ' | canvasW=' + cw);
+  }
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body>
+</html>

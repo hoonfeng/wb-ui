@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>writing-mode probe (E6)</title>
+<style>html,body{margin:0}
+#a{writing-mode:vertical-rl;position:absolute;left:20px;top:20px;
+   width:60px;height:160px;background:#e8590c;font:16px sans-serif;color:#fff}
+#b{writing-mode:horizontal-tb;position:absolute;left:120px;top:20px;
+   width:160px;height:60px;background:#1971c2;font:16px sans-serif;color:#fff}
+#c{writing-mode:vertical-lr;position:absolute;left:20px;top:220px;
+   width:60px;height:160px;background:#2f9e44;font:16px sans-serif;color:#fff}
+</style></head><body>
+<div id="a">竖排文本ABC</div>
+<div id="b">横排文本ABC</div>
+<div id="c">竖排LR文本</div>
+<pre id="out" style="position:absolute;left:300px;top:500px;margin:0"></pre>
+<script>
+var ids=['a','b','c'],L=[];
+for(var i=0;i<ids.length;i++){
+  var el=document.getElementById(ids[i]);
+  var r=el.getBoundingClientRect(), cs=getComputedStyle(el);
+  L.push(ids[i]+' | rect='+[r.left,r.top,r.width,r.height].join(',')
+    +' | wm='+cs.writingMode+' | scrollW='+el.scrollWidth+' scrollH='+el.scrollHeight);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body></html>

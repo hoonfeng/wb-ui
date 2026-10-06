@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>G6 property support probe</title>
+<style>html,body{margin:0}</style><body>
+<pre id="out" style="margin:0"></pre>
+<script>
+var props=['display:grid','display:flex','display:inline-block','position:sticky','position:fixed',
+'gap:10px','aspect-ratio:1','inset:0','width:fit-content','width:min-content','contain:layout',
+'will-change:transform','filter:blur(1px)','backdrop-filter:blur(1px)','clip-path:circle(50%)',
+'mix-blend-mode:multiply','writing-mode:vertical-rl','text-orientation:upright','scrollbar-gutter:stable',
+'overscroll-behavior:contain','color-scheme:light','accent-color:#f00','object-fit:cover','mask-image:none',
+'font-variant-numeric:tabular-nums','text-wrap:balance','scroll-behavior:smooth','touch-action:none',
+'transform:translate(1px)','transition:all 1s','animation:spin 1s','@container (min-width:1px){}'];
+var L=[];
+for(var i=0;i<props.length;i++){
+  var r='?';
+  try{ r=CSS.supports(props[i])?'yes':'no'; }catch(e){ r='err:'+e.message; }
+  L.push(props[i]+' => '+r);
+}
+document.getElementById('out').textContent=L.join('\n');
+</script></body>

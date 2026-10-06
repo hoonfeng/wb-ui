@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>font smoke</title>
+<style>
+  body { margin: 0; background: #fff; font-size: 20px; }
+  div { padding: 4px 8px; }
+  /* A: 无 font 声明（继承 UA 默认） */
+  /* B: font-family 简写、无引号单族 */
+  #b { font-family: Arial; }
+  /* C: font-family 多族带引号 */
+  #c { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  /* D: font 简写整体带引号族 */
+  #d { font: 20px "Segoe UI", sans-serif; }
+  /* E: font 简写单族无引号 */
+  #e { font: 20px Arial; }
+  /* F: font 简写 + sans-serif 关键字 */
+  #f { font: 20px sans-serif; }
+  /* G: 显式 serif */
+  #g { font-family: serif; }
+  /* H: monospace */
+  #h { font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<div id="a">A-default 默认字体 ABC 123</div>
+<div id="b">B-font-family:Arial</div>
+<div id="c">C-font-family:带引号多族</div>
+<div id="d">D-font:简写带引号</div>
+<div id="e">E-font:简写Arial</div>
+<div id="f">F-font:简写sans-serif</div>
+<div id="g">G-serif</div>
+<div id="h">H-monospace</div>
+</body>
+</html>
