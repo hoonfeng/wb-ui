@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"wb-ui/engine/dom"
 	"wb-ui/engine/debugenv"
+	"wb-ui/engine/dom"
 	"wb-ui/engine/style"
 )
 
@@ -1027,8 +1027,21 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// shift it so its vertical center aligns with the line's center.
 			{
 				va := ""
+				vaField := ""
 				if cldCS := cld.Style(); cldCS != nil {
 					va = cldCS.Properties["vertical-align"]
+					vaField = cldCS.VerticalAlign
+				}
+				// ★ 诊断（WBUI_IFC_DEBUG）：坐实表单控件路径上 vertical-align
+				//   两个来源的实际取值（字段 VerticalAlign vs Properties map）。
+				if debugenv.Enabled("WBUI_IFC_DEBUG") {
+					if el := cld.Element(); el != nil {
+						switch strings.ToUpper(el.NodeName()) {
+						case "INPUT", "BUTTON", "SELECT", "TEXTAREA":
+							fmt.Fprintf(os.Stderr, "[ifc-va] <%s id=%q> field=%q prop=%q formctl=%v\n",
+								el.NodeName(), el.GetAttribute("id"), vaField, va, isFormControlElement(el))
+						}
+					}
 				}
 				if va == "middle" {
 					// The child's vertical margin participates in the line
@@ -1191,12 +1204,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					// （CSS 2.1 §10.3.9）：computeInlineContentWidth 按文本
 					// 实宽回填（txt-view 148.3px），会覆盖 shrink 分支的
 					// max-width clamp（110px）——欢迎语预览未截断的根因。
-				if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
-					if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && cw > mw {
-						cw = mw
+					if csc := cld.Style(); csc != nil && csc.Display == style.DisplayInlineBlock {
+						if mw, ok := definiteWidth(csc.MaxWidth, contentWidth, fs); ok && mw > 0 && cw > mw {
+							cw = mw
+						}
 					}
-				}
-				cldG.SetContentWidth(cw)
+					cldG.SetContentWidth(cw)
 				}
 			} else if cldG.ContentWidth() <= 0 {
 				if cw := computeInlineContentWidth(cld, state); cw > 0 {
@@ -1299,42 +1312,89 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					}
 				}
 				if off, ok := formControlBaselineFromBorderTop(el, cldG.BorderTop(), cldG.PaddingTop(), cldG.BorderBoxHeight(), ba); ok {
-					// ★ 行盒顶→基线的距离取「strut 与控件要求」的较大者：控件
-					//   基线坐在行盒基线上，而行盒基线至少由 strut 的 ascent
-					//   决定（CSS 2.1 §10.8）。此前只取控件自身要求 → 控件永远
-					//   贴行盒顶（h2_baseline_matrix：input/fs16 relTop 恒 0，
-					//   Edge 为 4 = strutAscent 19 − 控件基线 15）。
-					align := margin.Top + off
-					if strutAscent > align {
-						align = strutAscent
+					// ★ 控件自身 vertical-align 的取值决定定位口径（CSS 2.1 §10.8）：
+					//   - top    ：控件**顶边**贴行盒顶
+					//   - bottom ：控件**底边**贴行盒底（行盒高由最高行内盒决定）
+					//   - 其余（baseline / middle / 继承来的 middle）：行内基线对齐
+					//   ★ 为何在本分支分派、而不是去补 L680/L1253 的 `topOffset=0`：
+					//     那两处对 `VerticalAlign=="top"` **确实生效**（实测字段值
+					//     就是 "top"），但其 SetTopLeft 发生在**本分支之前**，随即
+					//     被下面的无条件基线定位覆盖 —— 实测 v_top / v_bottom /
+					//     v_middle 的 relTop 恒为 4.000（= maxBaseline 19 − off 15），
+					//     与 va 取值完全无关：即 top/bottom 此前被退化成 baseline。
+					fcVA := ""
+					if cldCS := cld.Style(); cldCS != nil {
+						fcVA = cldCS.Properties["vertical-align"]
 					}
-					if align > currentLine.maxBaseline {
-						delta := align - currentLine.maxBaseline
-						currentLine.maxBaseline = align
-						for _, b := range currentLine.baselineBoxes {
-							bg := state.GeometryForBox(b)
-							bg.SetTopLeft(bg.Top()+delta, bg.Left())
+					if fcVA == "top" || fcVA == "bottom" {
+						// 控件不参与基线（不改 maxBaseline / maxDescent，也不进
+						// baselineBoxes）：只按行盒顶/底对齐，并把行盒撑到至少
+						// 容纳它（CSS 2.1 §10.8：行盒高由最高行内盒决定）。
+						boxH := margin.Top + cldG.BorderBoxHeight() + margin.Bottom
+						if fcVA == "top" {
+							cldG.SetTopLeft(currentLine.y+margin.Top, cldG.Left())
+						} else {
+							lineH := currentLine.lineH
+							if boxH > lineH {
+								lineH = boxH
+							}
+							cldG.SetTopLeft(currentLine.y+lineH-cldG.BorderBoxHeight()-margin.Bottom, cldG.Left())
 						}
-						for i := currentLine.segStart; i < len(pending); i++ {
-							pending[i].seg.Y += delta
+						if boxH > currentLine.lineH {
+							currentLine.lineH = boxH
 						}
-					}
-					cldG.SetTopLeft(currentLine.y+currentLine.maxBaseline-off, cldG.Left())
-					currentLine.baselineBoxes = append(currentLine.baselineBoxes, cld)
-					// 行盒高度 = maxAscent(基线) + maxDescent（基线以下最深者）。
-					// 基线对齐后元素底边可能超过最高的盒子，所以不能再用
-					// 「max(border-box 高 + 垂直 margin)」那一套（本文件后面
-					// 对非控件仍保留它作为兜底）。
-					// ★ strut 的 descent 同样参与（行盒底至少到 strut 基线下方）。
-					d := (cldG.BorderBoxHeight() - off) + margin.Bottom
-					if strutDescent > d {
-						d = strutDescent
-					}
-					if d > currentLine.maxDescent {
-						currentLine.maxDescent = d
-					}
-					if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
-						currentLine.lineH = h
+						if debugenv.Enabled("WBUI_IFC_DEBUG") {
+							fmt.Fprintf(os.Stderr, "[ifc-va-align] <%s id=%q> va=%q relTop=%.3f lineH=%.3f\n",
+								el.NodeName(), el.GetAttribute("id"), fcVA, cldG.Top()-currentLine.y, currentLine.lineH)
+						}
+					} else {
+						// ★ 行盒顶→基线的距离取「strut 与控件要求」的较大者：控件
+						//   基线坐在行盒基线上，而行盒基线至少由 strut 的 ascent
+						//   决定（CSS 2.1 §10.8）。此前只取控件自身要求 → 控件永远
+						//   贴行盒顶（h2_baseline_matrix：input/fs16 relTop 恒 0，
+						//   Edge 为 4 = strutAscent 19 − 控件基线 15）。
+						align := margin.Top + off
+						if strutAscent > align {
+							align = strutAscent
+						}
+						if align > currentLine.maxBaseline {
+							delta := align - currentLine.maxBaseline
+							currentLine.maxBaseline = align
+							for _, b := range currentLine.baselineBoxes {
+								bg := state.GeometryForBox(b)
+								bg.SetTopLeft(bg.Top()+delta, bg.Left())
+							}
+							for i := currentLine.segStart; i < len(pending); i++ {
+								pending[i].seg.Y += delta
+							}
+						}
+						cldG.SetTopLeft(currentLine.y+currentLine.maxBaseline-off, cldG.Left())
+						// ★ 诊断：证明本分支是否覆盖了此前按 vertical-align 设置的位置
+						//   （middle/top/bottom 分支的 SetTopLeft 均发生在本分支之前）。
+						if debugenv.Enabled("WBUI_IFC_DEBUG") {
+							va2 := ""
+							if cldCS2 := cld.Style(); cldCS2 != nil {
+								va2 = cldCS2.Properties["vertical-align"]
+							}
+							fmt.Fprintf(os.Stderr, "[ifc-form-baseline] <%s id=%q> va=%q relTop=%.3f off=%.3f maxBaseline=%.3f\n",
+								el.NodeName(), el.GetAttribute("id"), va2, cldG.Top()-currentLine.y, off, currentLine.maxBaseline)
+						}
+						currentLine.baselineBoxes = append(currentLine.baselineBoxes, cld)
+						// 行盒高度 = maxAscent(基线) + maxDescent（基线以下最深者）。
+						// 基线对齐后元素底边可能超过最高的盒子，所以不能再用
+						// 「max(border-box 高 + 垂直 margin)」那一套（本文件后面
+						// 对非控件仍保留它作为兜底）。
+						// ★ strut 的 descent 同样参与（行盒底至少到 strut 基线下方）。
+						d := (cldG.BorderBoxHeight() - off) + margin.Bottom
+						if strutDescent > d {
+							d = strutDescent
+						}
+						if d > currentLine.maxDescent {
+							currentLine.maxDescent = d
+						}
+						if h := currentLine.maxBaseline + currentLine.maxDescent; h > currentLine.lineH {
+							currentLine.lineH = h
+						}
 					}
 				}
 			}
