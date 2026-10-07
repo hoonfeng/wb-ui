@@ -20,8 +20,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-
-	"wb-ui/engine/dom"
 )
 
 // Mode 是 WebView 的运行模式。
@@ -143,13 +141,15 @@ func (wv *WebView) SetResourceResolver(fn ResourceResolver) {
 //
 // 顺序：
 //  1. 缓存命中（按解析后的绝对 URL 索引，见 resource_cache.go）
-//  2. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统），
-//     先按脚本写下的原样引用问一次（宿主常用逻辑名），绝对化后再问一次
+//  2. 宿主 ResourceResolver（两种模式一致，可用它覆盖网络/文件系统）——询问序列由
+//     公共判定内核的 resolverRefForms 给出（原样引用一次、可绝对化时再问一次绝对
+//     URL 形式），与媒体路径 MediaResourceAllowed 共用同一份口径
 //  3. 相对引用以**文档基准**（document.baseURI = 文档 URL + `<base href>`）
 //     解析为绝对 URL（浏览器语义）
 //  4. data: URL（内联内容，非外部输入，两种模式都允许）
-//  5. 模式门禁：http(s)/file 仅 ModeBrowser（UI 库模式返回
-//     ErrExternalResourceBlocked）——★ 门禁在缓存查询**之前**，否则别的
+//  5. 资源策略门禁（**公共判定内核** resourceRefAllowed，见 resource_ref_policy.go
+//     ——本路径**有**网络通道）：http(s)/file 仅 AllowAll 放行，否则返回
+//     ErrExternalResourceBlocked——★ 门禁在缓存查询**之前**，否则别的
 //     WebView（浏览器模式）留下的缓存会让被拒绝的引用穿透模式承诺
 //  6. 取内容 + 按用途做 MIME 检查（nosniff 语义）+ 写缓存
 func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (string, error) {
@@ -157,34 +157,35 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 		return "", errors.New("webkit: empty resource reference")
 	}
 	cache := wv.resourceCacheFor()
-	if wv.resourceResolver != nil {
+	// ★ 宿主 resolver 通道：询问序列（原样引用 → 可绝对化时再问绝对 URL）来自公共
+	//   判定内核（resolverRefForms），与媒体路径 MediaResourceAllowed 共用同一份
+	//   口径——两条链路因此不会在「该问哪些形态」上漂移。
+	forms := wv.resolverRefForms(ref)
+	for i, form := range forms {
+		// 既有行为：原样形态只在宿主设了 resolver 时才处理（含它的缓存查询），
+		// 绝对化形态的缓存查询不设此条件。
+		if i == 0 && wv.resourceResolver == nil {
+			continue
+		}
 		// resolver 的结果也缓存（键带前缀，与取内容通道区分）：UI 库模式下
 		// 样式重扫会重复问同一个引用，宿主不必再自己套一层缓存。
-		if r, ok := cache.get("resolver:" + ref); ok {
+		if r, ok := cache.get("resolver:" + form); ok {
 			return r.content, nil
 		}
-		if content, ok := wv.resourceResolver(ref); ok {
-			cache.put("resolver:"+ref, cachedResource{content: content})
-			return content, nil
+		if wv.resourceResolver != nil {
+			if content, ok := wv.resourceResolver(form); ok {
+				cache.put("resolver:"+form, cachedResource{content: content})
+				return content, nil
+			}
 		}
 	}
 	// ★ 相对引用以「文档 URL」为基准解析（浏览器语义）：真实页面里
 	//   <link href="app.css"> / <script src="/js/x.js"> 都是相对路径，原样
 	//   交给下面的分支必然失败（os.ReadFile("app.css") 会去读宿主进程的
 	//   当前工作目录）。无文档 URL（LoadHTML 直出内容）时不做解析，保持
-	//   既有行为（相对当前目录的文件读取）。
-	if abs := dom.ResolveURL(wv.documentBaseURL(), ref); abs != ref {
-		if r, ok := cache.get("resolver:" + abs); ok {
-			return r.content, nil
-		}
-		if wv.resourceResolver != nil {
-			if content, ok := wv.resourceResolver(abs); ok {
-				cache.put("resolver:"+abs, cachedResource{content: content})
-				return content, nil
-			}
-		}
-		ref = abs
-	}
+	//   既有行为（相对当前目录的文件读取）。绝对化形态由 resolverRefForms 给出：
+	//   没绝对化时 forms 只有原样一种形态，ref 因此保持原值。
+	ref = forms[len(forms)-1]
 	if strings.HasPrefix(ref, "data:") {
 		if r, ok := cache.get(ref); ok {
 			return r.content, nil
@@ -204,7 +205,9 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 	//   按模式推导（ModeBrowser → AllowAll、ModeToolkit → DenyExternal），
 	//   与历史行为一致；需要读盘的 UI 库宿主显式声明 AllowHostResolved
 	//   （其放行发生在上面 resolver 通道，不受本门禁影响）。
-	if !wv.allowsExternalURLs() {
+	// ★ 判定本身走**公共判定内核**（一份判定，见 resource_ref_policy.go）：本路径
+	//   **有**网络通道（下面的 fetchResource），故 hasNetworkChannel=true。
+	if !wv.resourceRefAllowed(ref, true) {
 		return "", fmt.Errorf("%w: %q（UI 库模式请用 SetResourceResolver 提供，或改用 data: URL；"+
 			"需要放行宿主已解析资源的宿主可 SetResourcePolicy(AllowHostResolved)）",
 			ErrExternalResourceBlocked, ref)

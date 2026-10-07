@@ -80,6 +80,12 @@
 
 ⇒ 本文所有「验证」「判定」「基线」相关要求均为**该独立项目的交付物**，不构成 AI-PS 项目的验收项。
 
+**本轮（2026-10-08）改动的归属**：**Q5-B（判定内核重构）**与 **TC-M-603（WebAudio 最小子集）**
+都落在**引擎/宿主代码**（`webkit/`、`engine/js/`、`app/`、`cmd/psai/`），属上表第三行
+**「引擎缺陷修复（U1–U9）」同一条线的 wb-ui 修复范畴**——**不构成**独立媒体验证项目的交付物；
+验证侧对两者只**复跑并记录**（`dev/media/out/` 产物 + §9.6 / §9.9 登记）。上方「待用户确认」
+标注所指的**归属划分本身未作改动**（本轮改动不涉及它）。
+
 ---
 
 ## 1. 目标与范围
@@ -295,7 +301,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D12 | 音频**输出**后端（L4-S） | ✅ **已闭环（2026-10，A3）**：在元数据链路（L1）之上补齐「解码 → 输出设备」——宿主 ffmpeg 解 s16le PCM → 引擎注入通道 → 输出后端（Windows waveOut；其余平台挂钟降级），`currentTime` 由**输出位置**驱动。判据 A（FFT 主峰 439.88Hz）与 TC-M-602 定点全过。★ **`data:` 来源也已闭环**（2026-10 续做，见 §9.8）：宿主把内联字节落盘再交 ffmpeg，data: 由 L1 → **L4**（视频 data: 同步恢复）。TC-M-603（WebAudio）仍缺，见 §9.6 | 12（file/rel/data 全 **L4**） |
+| D12 | 音频**输出**后端（L4-S） | ✅ **已闭环（2026-10，A3）**：在元数据链路（L1）之上补齐「解码 → 输出设备」——宿主 ffmpeg 解 s16le PCM → 引擎注入通道 → 输出后端（Windows waveOut；其余平台挂钟降级），`currentTime` 由**输出位置**驱动。判据 A（FFT 主峰 439.88Hz）与 TC-M-602 定点全过。★ **`data:` 来源也已闭环**（2026-10 续做，见 §9.8）：宿主把内联字节落盘再交 ffmpeg，data: 由 L1 → **L4**（视频 data: 同步恢复）。★ **TC-M-603（WebAudio）于 2026-10-08 闭环**（A3-3 最小子集，见 §9.6「WebAudio 最小子集落地」） | 12（file/rel/data 全 **L4**） |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
 ---
@@ -392,7 +398,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 |---|---|---|---|
 | TC-M-601 | `<audio src=wav/mp3/ogg/m4a>` | 读 `readyState/duration/paused` | **基线**全 0/NaN → L0；**目标**（阶段 3）：`rs=4`、`duration≈1s` → L1 |
 | TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | ✅ **达成（2026-10，A3）**：时钟由**输出位置**驱动——终态到 1.00s（真播完），采样点 `currentTime` **不超前**于「该会话首块 PCM 交付以来经过的时间」。定点口径与设备启动延迟的处置见 §9.6；严格断言在引擎单测 `TestAudioSessionDrivesCurrentTime` |
-| TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | **基线**不存在（无音频后端）；**目标**（阶段 3 若含 WebAudio）存在 |
+| TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | ✅ **达成（2026-10-08，A3-3 最小子集）**：`typeof AudioContext === "function"` ✅（含 `webkitAudioContext` 别名）、`decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / `duration=1.000s`、`getChannelData(0) instanceof Float32Array`），FFT 主峰 **439.95Hz**（判据 A 同一套工具）。★ 范围是**最小子集**：**不含** AudioNode 图 / `AudioParam` 自动化 / `AudioWorklet` / `OfflineAudioContext`（见 `docs/audio-backend-proposal.md` §6/§7 A3-3） |
 | TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音按统一口径如实记录（见 §9.6「判据 B 跳过口径」）——**无设备/无候选 → `SKIP(no-loopback)`**，有候选但录音失败 → `SKIP(loopback-failed)`，录到但主峰不符 → `mismatch`。三者都是「跳过/未通过」，**都不伪装为通过** |
 
 > **决策 4 落点**：G5/G6 基线全部为 L0；因已确认「要真实播放」，本节即阶段 3 的**验收清单**——验收标准为「目标」列全部达成。
@@ -915,7 +921,8 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
   续做（2026-10 `data:` 闭环时）又暴露**第 8 处测量伪影**——「等间隔连拍」的**实际**步长
   （名义步长 + 渲染开销）会贴近某样本的循环周期；改为抖动步长后**连续 3 次全量一致**，见 §9.8。
 
-**仍未达成**：TC-M-603（`AudioContext` / `decodeAudioData`）本轮不做，保持缺口（§3.4 D12）。
+**原「仍未达成」项已闭环**：TC-M-603（`AudioContext` / `decodeAudioData`）已于 **2026-10-08** 按
+**A3-3 最小子集**落地（见下节「WebAudio 最小子集落地」；§3.4 D12）。
 `data:` 来源的 L1 缺口已在本轮续做中闭环（见 §9.8）。
 
 #### WebAudio 最小面侦查（2026-10-07，Q2-D：**只侦查，未实施**）
@@ -960,7 +967,23 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 且要新建"音频图执行引擎 + 实时线程调度"，属 §8.2 已标注的**高风险**项，须单独立项审核。
 
 **侦查结论**：最小面**可行、量级可控**（≈550–810 行，复用现有宿主解码与注入模式）；完整音频图
-**不建议在本阶段做**。**本轮未实施**（Q2-D 只侦查，不写代码）。
+**不建议在本阶段做**。**本轮未实施**（Q2-D 只侦查，不写代码）——**2026-10-08 已按本清单落地，见下节**。
+
+#### WebAudio 最小子集落地（2026-10-08，A3-3：**已实施**）
+
+**结论（一句话）**：按上方 Q2-D 侦查划定的「最小面」落地——页面脚本在**真实宿主环境**里拿到
+`AudioContext`，并把**真音频字节**解成 `AudioBuffer`（样本量纲经判据 A 同一套 FFT 复核为 440Hz 正弦）；
+**完整音频图**仍不做（估 3000–6000 行，须另立项）。
+
+| 项 | 内容 |
+|---|---|
+| 范围（与侦查清单一致，只多不少） | `AudioContext`（构造 + `sampleRate` / `state` / `currentTime` / `destination` / `close`）、`decodeAudioData`（Promise + 回调双形态，**真解码**）、`AudioBuffer`（`sampleRate` / `length` / `duration` / `numberOfChannels` / `getChannelData`）、`webkitAudioContext` 别名；**不含** AudioNode 图（`GainNode` / `OscillatorNode` / `AnalyserNode`…）、`AudioParam` 自动化、`AudioWorklet`、`OfflineAudioContext`——与 `docs/audio-backend-proposal.md` §6「不做」项一致 |
+| 落点（与侦查清单逐条对照） | ① **引擎绑定** `engine/js/bindings/webaudio.go`（新）：构造器 + `decodeAudioData`（Promise/回调）+ `AudioBuffer` + 全局挂载（`bindings/dom.go` 的 `installWebAudio`，与 `Audio`/`Option` 同一时机）；② **宿主** `app/webaudio.go`（新）：`AudioDecoder`（内存字节 → 临时文件 → ffmpeg → `[]float32`）+ `InstallWebAudio`，`app/host.go` 接线；③ **jsc 抽象层**补 `ArrayBufferBytes`（**形态取字节**：ArrayBuffer 直取、TypedArray/DataView 按 `byteOffset`/`byteLength` 切片）；④ **探针** `cmd/psai/webaudio_probe.go`（新）+ `mediaprobe.go` 接线——`runMediaConfig` **也必须** `InstallWebAudio`，否则自检里解码器为空会**如实失败**（不是「通过」） |
+| 未装配解码器时 | `decodeAudioData` **如实 reject**（`EncodingError`）——**不编造** buffer。`app/host.go` 与探针都显式 `InstallWebAudio("")`；未接线宿主保持「API 在、解码不做」 |
+| 验收（单测） | `engine/js/bindings/webaudio_test.go`（特性检测 / 解码成功与失败 / `getChannelData` 长度与样本）、`app/webaudio_test.go`、`engine/js/jsc/bytes_value_test.go`（钉 `[]byte` 的 JS 形态）。全量 `go test`：**ok 29 包 / 无测试 67 / FAIL 0**（EXIT=0） |
+| 验收（探针） | `dev/media/out/report.md` 新增 **TC-M-603 小节**（**只在 Browser 配置上跑一次**——它验的是引擎能力，与资源策略/配置无关，故不重复四遍）：特性检测 ✅、`sampleRate=48000` / `state=running`、输入 `sine-440-1s.wav` **88278 字节** → `AudioBuffer` 44100Hz / 1ch / **44100 帧** / `duration=1.000s`、`getChannelData(0) instanceof Float32Array` ✅、样本峰值 0.1250、**FFT 主峰 439.95Hz**（幅度 0.108） |
+| 顺手修复（**真实缺陷**，非 WebAudio 专属） | `jsc.Interpreter.ValueOf([]byte)` 原实现用 `vm.Call(Uint8Array, ab)`——typed array 构造器要求 **new 调用**，被拒后**静默退化**为 `ArrayBuffer`（且**无** `.buffer` 属性，与注释承诺不符）⇒ 调用方按 `Uint8Array` 读会**踩空**。已改用 `vm.New`，并新增 `engine/js/jsc/bytes_value_test.go` 钉住形态（`Uint8Array` + `has-buffer`）。★ 属「隐藏的类型退化」：`ValueOf([]byte)` 的**所有既有调用方**（live2d 模型字节等）此前都在拿降级值 |
+| 与资源策略的关系 | WebAudio 的输入是**页面自己交来的字节**（`decodeAudioData(arrayBuffer)`），不涉及外部引用选择 ⇒ **不经**资源策略门禁；也无 `src`/URL 形态可供绕过。★ 与 §9.9 的「宿主注入通道」不是一回事：那里是**引擎**请求宿主读盘（须过门禁），这里是宿主按页面给的字节解码 |
 
 ---
 
@@ -1025,6 +1048,21 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 > （`webkit/media_resource_policy.go`，媒体路径）**两份平行判定**——判定基元与顺序同源，但**代码是两份**，
 > 将来各自演化有漂移风险。用户已拍板：**挂账**（本文档记录在案），**本轮不重构**。
 > 若日后做选项 B（抽公共判定内核），验收标准必须是「探针逐格零变化」（与本轮 Q1 的 96 格对照同法）。
+>
+> ✅ **挂账解除（2026-10-08，方案 Q5-B 已实施）**：新增**公共判定内核**
+> `webkit/resource_ref_policy.go`——`resolverRefForms`（宿主 resolver 的**询问序列**）、
+> `classifyResourceRef`（**分类**）、`WebView.resourceRefAllowed`（**放行规则**）各**只有一份实现**。
+> 两处**执行**各自保留与自身职责相关的部分（这不是第二份判定）：`loadExternalResource` 还要取内容
+> （resolver 命中 → 缓存 → 读盘/fetch），`MediaResourceAllowed` 只回布尔，并把
+> **「媒体通道没有网络通道」以 `hasNetworkChannel=false` 显式传入判定函数**——该差异是**能力边界**
+> 而非策略差异，因此不再在两处各写一遍规则。`webkit/media_resource_policy.go` 收窄为「媒体侧的两个特征」。
+>
+> **验收（按挂账登记规定的「探针逐格零变化」口径）**：① 内核单测 `webkit/resource_ref_policy_test.go`
+> **7/7 PASS**（`DenyExternal` 拒 file/rel、`data:` 恒放行、`http(s)`/`blob` **无网络通道**恒拒、
+> `AllowHostResolved` 命中放行/未命中拒、相对引用两轮询问、`AllowAll` 放行）；② 全量 `cmd/psai -media`
+> 报告「**与基线一致（无等级下降）**」、**384 条等级零变化**、8 张 `matrix-*.png` **逐字节 SAME**；
+> ③ 与基线的 diff 仅「**引擎 hash** + m4a/ogg 的 `currentTime` 采样抖动（TC-M-602 的时序性质，既有）」，
+> `geom-*.json` 仅 `generatedAt`——**等级列零变化**。
 
 ---
 
@@ -1033,15 +1071,17 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 > **拍板（2026-10-07）**：用户选择「按本表『建议』列执行」——即 **Q1-B / Q2-D / Q3-A+C / Q4-B /
 > Q5-A / Q6-B(+D) / Q7-B**（Q8 已就地处置）。下表「状态」列记录**本轮实际执行结果**；
 > 详细证据见对应章节（§8.3 / §9.6 / §9.9 / `docs/TECH_DEBT.md`）。
-> 建议列之外的其它选项里，**Q4-C/D（三个 pre-existing 失败的直接修）与 Q7-C（采样根因）已落地**（2026-10-07），Q7-C 遗留的**截图相位抖动**由 **Q7-D** 同轮处置（见 §9.9）；仍未动的只有 **Q2-C 完整音频图**与 **Q5-B 重构**（后者用户已拍板**挂账**）。
+> 建议列之外的其它选项里，**Q4-C/D（三个 pre-existing 失败的直接修）与 Q7-C（采样根因）已落地**（2026-10-07），Q7-C 遗留的**截图相位抖动**由 **Q7-D** 同轮处置（见 §9.9）。
+> **2026-10-08 续做**：**Q2 按 B 落地**（WebAudio 最小子集）与 **Q5-B 重构**（抽公共判定内核）**均已实施**——
+> 至此仍未动的只有 **Q2-C 完整音频图**（估 3000–6000 行，须另立项审核）。
 
 | 编号 | 是什么 | 影响 | 拍板 | 状态（2026-10-07 实测） | 证据去向 |
 |---|---|---|---|---|---|
 | **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**此前从未真正执行** | **B（跑一次）** | ✅ **已执行**。`cmd/psai -media -media-edge` 跑通，Edge 截图 `dev/media/out/edge-matrix.png`（**验收证据，入库**；决策 5 于 2026-10-07 修订后）。程序化逐格对照 **96 格 0 差异**：Edge 有内容而本项目空白 **0 格**、本项目有内容而 Edge 空白 **0 格**；12 个空格**全部是不可见的 `<audio>`**；84 个共有内容格的最大比例差 **0.010** ⇒「不低于 Edge」**实测成立**（逐格一致）。⚠️ 工具侧 `runEdgeComparison` **只截图、不产 Edge 等级列**，故「等级对照」仍属人工/程序化 | §8.3 第 2 条「Edge 对照实测」（含对照脚本正文） |
-| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）** | ✅ **侦查完成、未实施**。全仓 Go 侧零命中；最小面（构造器 + `decodeAudioData` 出 buffer + 特性检测可过）**≈550–810 行**（含测试），复用现有宿主解码与注入模式；唯一真缺口 = `engine/js/jsc` 无「创建 Float32Array」的公开方法；完整音频图 ≈3000–6000 行（高风险） | §9.6「WebAudio 最小面侦查」 |
+| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）→ 2026-10-08 按 B（最小面）落地** | ✅ **最小子集已实施（2026-10-08，A3-3）**：`AudioContext` / `decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / 1.000s，`getChannelData(0)` 为 `Float32Array`，FFT 主峰 **439.95Hz**）；`app.InstallWebAudio` 未装配时**如实 reject**。★ 侦查估量（≈550–810 行）与实际落点相符（`engine/js/bindings/webaudio.go` + `app/webaudio.go` + 探针 + 单测）；**完整音频图（≈3000–6000 行）仍不做** | §9.6「WebAudio 最小面侦查」+「WebAudio 最小子集落地」 |
 | **Q3** | `TC-M-604` 环回录音 | 本机无采集设备 ⇒ 用例恒跳过；「跳过口径」在不同轮次写法不一致 | **A+C（保持现状 + 口径统一）** | ✅ **已完成**。实现侧本就是 `SKIP(no-loopback)`（无设备 / 无 ffmpeg 分支）；文档 **4 处**旧写法 `mismatch` 已统一（`media-format-verification-plan.md` 2 处、`implementation-path.md` 2 处）+ 项目记忆 1 处；全仓 grep 旧写法 **0 残留**。判定语义不变（仍是**跳过**，不是通过）。★ 本机 2026-10-07 实测**有**候选设备（Voicemeeter Out B3，输入未路由）⇒ 记 `mismatch`，属第三种状态。**2026-10-07 结项补**：报告新增「幅度对照」行（判据 A 的 1.000 vs 录回 0.032 = 1/32 ⇒ 只录到底噪、属环境未配置），探针 `Detail` 改为只陈述测得事实、不代下因果结论 | §9.6「判据 B 口径」、§3.3 TC-M-604 |
 | **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）→ 后经 Q4-C/D 直接修** | ✅ **已全部修复，单测基线首次全绿**（`ok 29 包 + 67 无测试 + FAIL 0`，EXIT=0）。① 扁字形断言改判「水平居中 + ink 落在内容框内」（布局居中本身正确：CJK 用例 ink 中心 36.0 与按钮中心 36 完全相等）；② normal 行高口径补 lineGap（14.8281 = 13.0000 + 1.8281）；③ **引擎真缺陷**：`applyComputedSnapshot` 用**尚未重算**的渲染树快照逐键覆盖级联结果（`isUAFormControl` 对 `<input>` 无条件置 `need=true`）⇒ `#c:checked` 的 color/font-size/font-family 被陈旧值覆盖；已改为「补缺 + 归一化 + 控件的 UA 属性」才覆盖。★ 原「`:checked` 读 attribute 而非 IDL 状态」的根因假设**被实测推翻**（attribute 确实被写、querySelector 命中、兄弟组合器生效） | `docs/TECH_DEBT.md`「三条失败的逐条侦查与处置」 |
-| **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）** | ✅ **已登记挂账、未重构** | §9.9「挂账登记」 |
+| **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）→ 2026-10-08 补做 B** | ✅ **Q5-B 已实施（2026-10-08）**：抽公共判定内核 `webkit/resource_ref_policy.go`（`resolverRefForms` / `classifyResourceRef` / `resourceRefAllowed` 各一份实现），两处执行只保留各自职责，媒体「无网络通道」以 `hasNetworkChannel=false` 显式入参。**验收「探针逐格零变化」达成**：内核单测 **7/7 PASS**、**384 条等级零变化**、8 张截图**逐字节 SAME**、产品 diff 仅引擎 hash + `currentTime` 抖动 | §9.9「挂账登记」的**挂账解除**段 + `webkit/resource_ref_policy_test.go` |
 | **Q6** | 单测纪律（每轮是否纳入全量 `go test`） | 只跑定向测试可能漏掉回归 | **B（每轮纳入）+ D（固化入口）** | ✅ **已完成**。`cgo_env.bat` 新增 `test-all`，并**强制 `GOWORK=off`**（修掉 workspace 损坏时 `go list -m` 静默失败）；本轮实跑 **ok 28 包 + FAIL 1 包（`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包**，**失败清单未增** | §6.4「环境前提」、§8.3 第 4 条 |
 | **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下 L0 的**备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到第 8 处 | **B（只修 ① 备注文案）** | ✅ **①已完成**：`judgeCell` 的 `broken` 分支改为**优先** `mediaDenialNote` ⇒ `DenyExternal × file/rel` 的 corrupt.png 备注从「失败路径……契约缺陷」更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」；重跑 `-media` 后**等级全 L0 不变、与基线一致**。②**已另轮落地**（Q7-C，2026-10-07）：`mediaAnimSteps` 按样本声明的帧时长驱动连拍步长，连续 3 次全量跑 384 条等级零变化（见 §9.9「探测伪影」行）；③ **它落地后暴露的截图相位抖动（另一环节）已由 Q7-D 处置**（2026-10-07，见 §9.9「截图相位」行）：渲染层取证相位锁定 + 探针截图期间钉相位 0，连续 3 次全量跑 8 张 `matrix-*.png` **逐字节相同** | §10 本行 + `cmd/psai/mediaprobe.go` 的 `judgeCell` / `mediaAnimSteps` / `engine/rendering/imageanimation.go` 的 `SetAnimatedImagePhase` |
 | **Q8** | 文档剩余范围 | 收敛到两项，本轮已按授权就地处置 | — | ✅ 原地处置（细目见下）：**丙10 已消解（2026-10-07 按实施口径修订决策 5）**、**乙4 已标注待确认** | §3.4、§0.2 |

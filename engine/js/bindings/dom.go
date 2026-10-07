@@ -3114,6 +3114,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 	registerWindowIdentity(rt, g)
 	registerBase64Globals(rt, g)
 	registerExtraElementCtors(rt, g, document)
+	// ★ WebAudio 最小子集（TC-M-603）：AudioContext / decodeAudioData。与 Audio/Option
+	// 同一时机挂载——特性检测（`typeof AudioContext !== 'undefined'`）在 DOM 构造器族
+	// 齐备后即可用；宿主解码器由 app.InstallWebAudio 注入（未注入时 decodeAudioData
+	// 如实 reject，不编造 buffer）。
+	installWebAudio(rt, g)
 	// 完整注册完成——打上幂等标记（后续调用仅刷新 document）。
 	rt.GlobalObject().Set(domBindingsMarker, jsc.BooleanValue(true))
 }

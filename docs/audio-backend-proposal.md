@@ -5,6 +5,18 @@
 > [`media-format-verification-plan.md`](media-format-verification-plan.md) §5 **G6**（TC-M-601..604）。
 > 本文档是**立项材料**，不是实施记录；实施需用户确认后再动（§8 决策点 4「必须用户确认」）。
 
+> **实施状态（2026-10-08）**：**A3-3（WebAudio 最小子集）已实施**（决策点 3 已确认「要」）。
+> 严格按 §6「不做」项划定的边界只做最小子集：`AudioContext`（构造 + `sampleRate` / `state` /
+> `destination` / `close`）、`decodeAudioData`（**真解码**：宿主 ffmpeg → `AudioBuffer`）、
+> `AudioBuffer`（`length` / `duration` / `sampleRate` / `numberOfChannels` / `getChannelData`）、
+> `Float32Array` 量纲；**不含** AudioNode 图（`GainNode` / `OscillatorNode` / `AnalyserNode`…）、
+> AudioParam 自动化、`AudioWorklet`、`OfflineAudioContext`——那些要新建「音频图执行引擎 +
+> 实时线程调度」（估 3000–6000 行），仍属 §6 不做项，要做得另立项。
+> 落点：`engine/js/bindings/webaudio.go`（引擎侧最小子集）+ `app/webaudio.go`（宿主解码器注入
+> `InstallWebAudio`，未注入时 `decodeAudioData` 如实 reject，不编造 buffer）+ 探针
+> `cmd/psai/webaudio_probe.go`；判据实测见 `dev/media/out/report.md` 的 TC-M-603 小节
+> （44100Hz / 1ch / 44100 帧 / 1.000s，判据 A 同一套 FFT：主峰 439.95 Hz）。
+
 ## 1. 一句话结论
 
 引擎侧的音频**状态机与播放时钟已经可用**（本轮实测：元数据 `rs=4`、`duration≈1s`、
@@ -19,7 +31,7 @@
 | 元数据（`rs`/`duration`） | ✅ 已通：`wav/mp3/ogg/m4a` 的 file/rel 三来源 `rs=4`、`duration≈1s`（m4a 1.0 / 部分 1.04）；`loadedmetadata` 派发 | 探针 `sine-440-1s.*` 行 12 格 **L1**；`dev/media/out/geom-*.json` |
 | 播放时钟（`currentTime`） | ✅ 已通：`play()` 后走 `media_element.go` 的时钟推进，file/rel 从 0 → 1（播完）；`timeupdate`/`ended` 派发 | `geom-Browser.json` 的 `playing` 列表：`rs=4, duration=1, ct=1` |
 | 音频**输出**（发声） | ❌ 无：PCM 无去处。`play()` 只推进时钟，没有任何输出调用 | 引擎/`app`/`goskia` 三层均无输出 API |
-| WebAudio | ❌ 不存在：`AudioContext` / `decodeAudioData` 未实现（TC-M-603 基线） | 同上 |
+| WebAudio | ✅ **最小子集已落地**（A3-3）：`AudioContext` / `decodeAudioData`（真解码 → `AudioBuffer`）；**完整**图式音频仍不做 | `dev/media/out/report.md` TC-M-603 小节：44100Hz / 1ch / 44100 帧 / 1.000s、`getChannelData(0) instanceof Float32Array`、FFT 主峰 439.95 Hz |
 | `data:` 来源的音频 | ⚠️ 仅 `rs=1`、`duration=NaN`：宿主元数据探测按**本地文件路径**走 ffmpeg，`data:` URI 无本地路径 | 探针 `sine-440-1s.* × data` 行 |
 | 判据（L4-S） | ⚠️ 未落地：TC-M-604 要求「播放 1s 正弦 → 采回波形 → 频谱主峰 ≈ 440 Hz」 | §5 G6 |
 
@@ -65,7 +77,7 @@
 |---|---|---|---|
 | TC-M-601 | `rs=4`、`duration≈1s` | ✅ **已达成**（12 格 L1） | 保持 |
 | TC-M-602 | `play()` 后 500ms `currentTime ≈ 0.5` | ✅ **已达成**（时钟推进到 1.00 播完；需补一条"500ms 处 ≈0.5"的定点判据） | 保持 + 定点判据 |
-| TC-M-603 | `AudioContext` / `decodeAudioData` 存在 | ❌ 不存在 | 若含 WebAudio：存在（**待用户确认是否要**） |
+| TC-M-603 | `AudioContext` / `decodeAudioData` 存在 | ✅ **已达成**（A3-3 最小子集；真解码 `AudioBuffer` + FFT 复核 440Hz） | 保持（最小子集）；**完整** WebAudio 仍不做 |
 | TC-M-604 | 播放 1s 正弦，采回波形，频谱主峰 ≈ 440 Hz | ❌ 未落地 | **L4-S 达成** |
 
 **TC-M-604 的难点与备选判据**：原判据要求「系统输出设备**录音**比对」，需要环回设备
@@ -86,7 +98,7 @@
 | 时钟同步漂移 | 音频硬件时钟与引擎 RAF 时钟不同步 | 规范做法：以**音频时钟为主时钟**，`currentTime` 跟随输出位置（A3-1 设计要点） |
 | 环回设备 | 多数机器没有「立体声混音」 | 判据 A 为主（§5），判据 B 可选 |
 | 许可与体积 | 若走路线 (b) 引入 miniaudio/oto | 立项时评估；路线 (a) 无第三方依赖 |
-| 不做 | WebAudio **完整**实现（`OscillatorNode`/图式音频等） | **不承诺**；只按 TC-M-603 判断是否需要最小子集（`decodeAudioData` 等） |
+| 不做 | WebAudio **完整**实现（`OscillatorNode`/图式音频等） | **不承诺**；最小子集（`AudioContext` / `decodeAudioData`）已按 §7 **A3-3 落地**，边界见文首「实施状态」 |
 | 不做 | 音频**编码**（`MediaRecorder`） | 不在 G6 判据内，不投入 |
 
 ## 7. 建议分期（供确认）
@@ -95,12 +107,12 @@
 |---|---|---|
 | **A3-1** | PCM 通道 + 宿主 ffmpeg 解码 + Windows 输出后端 | TC-M-602 定点判据 + 判据 A（PCM FFT 主峰 440Hz）→ 音频等级 **L1 → L4**（发声） |
 | **A3-2** | 环回设备录音复核（判据 B，可选） | L4-S（外部视角），无设备时 `SKIP(no-loopback)` |
-| **A3-3** | WebAudio 最小子集（**待确认是否需要**） | TC-M-603 |
+| **A3-3** | WebAudio 最小子集（**✅ 已实施**，边界见文首「实施状态」） | TC-M-603 ✅ **达成** |
 
 ## 8. 待用户确认的决策点
 
 1. **路线**：(a) 宿主注入 PCM（推荐）还是 (b) goskia 内置输出？
 2. **平台范围**：只做 Windows 输出，还是要求三平台同时（后者成本约 ×2~3）？
-3. **WebAudio**：要不要 `AudioContext`/`decodeAudioData`（TC-M-603）？
+3. **WebAudio**：✅ **已确认要**（`AudioContext`/`decodeAudioData`）——最小子集已按 A3-3 实施并达成 TC-M-603。
 4. **L4-S 判据口径**：接受「判据 A 为主 + 判据 B 可选」吗（否则需要一台具备环回设备的机器才能验收）？
 5. **是否与「媒体宿主注入通道未受资源策略约束」的修复（见 `media-format-verification-plan.md` §3.4 待决项）合并立项**——两者都动「宿主注入媒体数据」这条链路，合并可省一次接口设计。

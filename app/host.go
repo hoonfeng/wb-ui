@@ -430,6 +430,10 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	// 全部读不到数据）。探测按 src 惰性触发并缓存；本机没有 ffmpeg 时静默保持
 	// 「时长未知」，不编造进度。
 	InstallMediaMetadataResolver(wv, "")
+	// ★ WebAudio（TC-M-603）：把宿主 ffmpeg 解码器接到 AudioContext.decodeAudioData。
+	// 只挂解码器、不动播放链路——AudioContext 本身由引擎侧 dom 装配段挂出，未装配
+	// 解码器时 decodeAudioData 如实 reject（EncodingError）。
+	InstallWebAudio("")
 	// ★ 动图（实现路径主线 A4）：宿主用 goskia 的 SkCodec 解 GIF/WebP 多帧，渲染层按
 	// 帧时长选帧。不接线时动图仍只显示第一帧（既有行为）。
 	InstallAnimatedImageSource()

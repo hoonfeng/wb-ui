@@ -68,6 +68,19 @@ func beAssertFunction(v beValue) (beCallable, bool) {
 	return goja.AssertFunction(v)
 }
 
+// beArrayBufferBytes 取底层 ArrayBuffer 的字节（非 ArrayBuffer 时 ok=false）。
+// 与其它 be* 句柄一样对上层不透明：上层经 Interpreter.ArrayBufferBytes 使用，
+// 「换后端」时这里换一份同名实现即可。
+func beArrayBufferBytes(v beValue) ([]byte, bool) {
+	if v == nil {
+		return nil, false
+	}
+	if ab, ok := v.Export().(goja.ArrayBuffer); ok {
+		return ab.Bytes(), true
+	}
+	return nil, false
+}
+
 // ─── 常量 / 特殊符号 ─────────────────────────────────────
 
 const (

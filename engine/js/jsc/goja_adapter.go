@@ -2,9 +2,11 @@
 package jsc
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"hash/maphash"
+	"math"
 	"os"
 	"reflect"
 	"runtime"
@@ -295,18 +297,92 @@ func (r *Interpreter) ValueOf(v any) JSValue {
 		return JSValue{v: obj, interp: r}
 	case []byte:
 		// []byte → Uint8Array（live2d 模型字节 / 通用二进制透传）。
+		// ★ 用 vm.New 而不是 vm.Call：typed array 构造器要求 **new 调用**，
+		//   `vm.Call(ctor, undefined, ab)` 会被拒绝 → 静默退化为下面的 ArrayBuffer
+		//   兜底（实测见 engine/js/jsc/bytes_value_test.go：改前 ctor=ArrayBuffer 且
+		//   **没有** .buffer 属性，与注释承诺不符，调用方按 Uint8Array 读会踩空）。
 		vm := r.vm
-		ab := vm.NewArrayBuffer(val)
-		ctorVal := vm.Get("Uint8Array")
-		abVal := vm.ToValue(ab)
-		if ctor, ok := ctorVal.(*beObject); ok {
-			if v, err := vm.Call(ctor, beUndefined(), abVal); err == nil {
-				return JSValue{v: v, interp: r}
+		abVal := vm.ToValue(vm.NewArrayBuffer(val))
+		if ctor := vm.Get("Uint8Array"); ctor != nil {
+			if arr, err := vm.New(ctor, abVal); err == nil {
+				return JSValue{v: arr, interp: r}
 			}
 		}
 		return JSValue{v: abVal, interp: r}
 	}
 	return Undefined()
+}
+
+// ArrayBufferBytes 取 JS 值的字节：ArrayBuffer 直接取；TypedArray / DataView 取其
+// buffer 并按 byteOffset / byteLength 切片（规范上 decodeAudioData 同时接受这两类）。
+// 其他类型返回 ok=false。
+//
+// ★ 为什么要有它：be* 句柄对 bindings 层不透明，「读页面交来的 ArrayBuffer」这种
+// 能力必须由适配层提供（WebAudio 的 decodeAudioData(arrayBuffer) 正是第一处消费者）。
+func (r *Interpreter) ArrayBufferBytes(v JSValue) ([]byte, bool) {
+	if r == nil || r.vm == nil || v.v == nil {
+		return nil, false
+	}
+	if b, ok := beArrayBufferBytes(v.v); ok {
+		return b, true
+	}
+	obj, ok := v.v.(*beObject)
+	if !ok {
+		return nil, false
+	}
+	buf := obj.Get("buffer")
+	if buf == nil || beIsUndefined(buf) || beIsNull(buf) {
+		return nil, false
+	}
+	b, ok := beArrayBufferBytes(buf)
+	if !ok {
+		return nil, false
+	}
+	off, n := 0, len(b)
+	if ov := obj.Get("byteOffset"); ov != nil && !beIsUndefined(ov) {
+		off = int(ov.ToInteger())
+	}
+	if nv := obj.Get("byteLength"); nv != nil && !beIsUndefined(nv) {
+		n = int(nv.ToInteger())
+	}
+	if off < 0 || off > len(b) {
+		return nil, false
+	}
+	if n < 0 || off+n > len(b) {
+		n = len(b) - off
+	}
+	return b[off : off+n], true
+}
+
+// Float32ArrayValue 把样本切片转成 JS 的 Float32Array。
+//
+// ★ 为什么补在适配层：jsc 此前只有内部的 []byte → Uint8Array 转换，没有「创建
+// Float32Array」的公开能力；WebAudio 的 AudioBuffer.getChannelData(i) 按规范必须
+// 返回 Float32Array（库普遍按 length / 下标 / instanceof 使用）。
+//
+// 实现：样本先写进 ArrayBuffer（一次拷贝），再用 Float32Array 视图包装——避免逐
+// 元素 Set（10 万级样本下差异明显）。
+func (r *Interpreter) Float32ArrayValue(data []float32) JSValue {
+	if r == nil || r.vm == nil {
+		return Undefined()
+	}
+	raw := make([]byte, len(data)*4)
+	for i, f := range data {
+		binary.LittleEndian.PutUint32(raw[i*4:], math.Float32bits(f))
+	}
+	abVal := r.vm.ToValue(r.vm.NewArrayBuffer(raw))
+	if ctor := r.vm.Get("Float32Array"); ctor != nil {
+		if arr, err := r.vm.New(ctor, abVal); err == nil {
+			return JSValue{v: arr, interp: r}
+		}
+	}
+	// 退化路径（理论上不可达：Float32Array 是 goja 内建）：返回普通数组——宁可
+	// 慢，也不返回一个类型不对的值让调用方在 instanceof 上踩空。
+	items := make([]interface{}, len(data))
+	for i, f := range data {
+		items[i] = float64(f)
+	}
+	return JSValue{v: r.vm.NewArray(items...), interp: r}
 }
 
 // NewNativeFunction 在正确运行时创建原生函数（推荐用法）。

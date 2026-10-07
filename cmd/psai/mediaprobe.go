@@ -227,6 +227,10 @@ type configResult struct {
 	EdgeNote string       `json:"edge_note,omitempty"`
 	// Audio 是本配置下各音频格的取证（A3-1）：报告小节与逐格判定都用它。
 	Audio []audioCellEvidence `json:"audio,omitempty"`
+	// WebAudio 是 TC-M-603 的自检取证：在**引擎真实 JS 环境**里验证
+	// AudioContext / decodeAudioData（只在一个配置上跑一次——它验的是引擎能力，
+	// 与资源策略/配置无关，报告因此不重复四遍同一份证据）。
+	WebAudio *webAudioEvidence `json:"webaudio,omitempty"`
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────
@@ -578,6 +582,11 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	audioTap := newAudioTapCollector()
 	mediaAudio := app.InstallMediaAudio(wv, "")
 	mediaAudio.SetTap(audioTap.tap)
+	// ★ TC-M-603（WebAudio 最小子集）：把宿主 ffmpeg 解码器接到
+	//   `AudioContext.decodeAudioData`。不装的话自检里的 decodeAudioData 会以
+	//   EncodingError 失败（那是如实失败，不是通过）——探针要验的是**端到端可用**，
+	//   所以这里必须与 psai 主宿主（app/host.go）一样装配。
+	app.InstallWebAudio("")
 
 	html, err := os.ReadFile(matrixPath)
 	if err != nil {
@@ -593,6 +602,16 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	settleReal(wv, 1500*time.Millisecond)
 
 	res.Policy = wv.ResourcePolicy().String()
+
+	// ★ TC-M-603：WebAudio 最小子集自检。只在一个配置上跑（见 configResult.WebAudio
+	//   的注释）；样本是真音频字节，解码走宿主 ffmpeg 通道——失败也在证据里如实记录，
+	//   不按通过处理。
+	if cfg.Name == "Browser" {
+		if p, ok := firstWAVSample(samplesDir); ok {
+			ev := probeWebAudio(wv, p)
+			res.WebAudio = &ev
+		}
+	}
 
 	// ① 静止态采集 + 截图
 	probes, events, err := collectPage(wv, cells)
@@ -1865,6 +1884,14 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 	}
 	b.WriteString("## 音频（A3-1：宿主 ffmpeg 解码 → 引擎 PCM 通道 → 输出后端）\n\n")
 	b.WriteString(audioSection(audioAll, lo))
+
+	// TC-M-603（WebAudio 最小子集）：在真实引擎环境里的自检取证。
+	for _, r := range results {
+		if r.WebAudio != nil {
+			b.WriteString(webAudioSection(*r.WebAudio, r.WebAudio.Sample))
+			break
+		}
+	}
 
 	b.WriteString("## 与基线的差异\n\n")
 	if baseErr != nil {
