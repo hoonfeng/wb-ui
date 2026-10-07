@@ -262,7 +262,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D12 | 音频无解码/输出后端 | L0（预期现状，需音频后端） | 12 |
+| D12 | 音频**输出**后端（L4-S） | 元数据链路**已通**（第三批实测 12 格 **L1**：`rs=4`、`duration≈1s`、`loadedmetadata` 派发）；缺解码/输出后端，且 `AudioContext`/`decodeAudioData` 不存在 → 待阶段 3 立项（§9.6） | 12（L1） |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
 ---
@@ -639,11 +639,30 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | **D10** `<video>` 画面未绘制 | ✅ 已闭环。根因**不是**「帧流没推进」，而是「媒体资源选择算法的启动时机」：本引擎把规范的「`src` 已设置且元素在文档中即启动加载」（HTML §4.8.8）推迟到「首次访问媒体属性」（`mediaStateFor` 惰性创建）——用 HTML 属性写好的 `<video src>` 在脚本读属性之前根本不加载，静止态 `readyState=0`、`duration=NaN`、无首帧；`play()` 走 `media_element.go` 的补触发路径才到 `rs=4`（同一格实测：静止 0 / 播放 4，盒尺寸 120×80 正确）。修法：新增 `bindings.StartMediaElementLoads(in, doc)`，`webkit.loadHTMLFrom` 在页面脚本执行后对文档中已连接的 `<video>/<audio>` 启动资源选择（幂等；无 src 不启动；动态创建的元素仍走各自属性路径） | `TestStartMediaElementLoadsStartsResourceSelection`；探针 `*.mp4`/`*.webm` 行：加载/几何/契约 ✅、绘制 ✅、动画 ✅；`matrix-Browser.png` 经 `read_image` 复核 |
 | 探针：视频判定补齐（第 5 处测量伪影） | ✅ 两处判据缺口：①manifest 的 `phases` 字段（分段期望色）**从未被解析**（`sampleSpec` 缺字段），twophase 这类样本因此没有期望色；②无期望色的视频样本（testsrc 这类自然序列）落到 `sampleCell` 末尾 `return false` → 「绘制」恒 ❌。修法：新增 `mediaPhase` 类型解析 `phases`（取**首段**色作静止态期望）；其余视频按「非灰块」判定（中心点非 `.cell` 底色、非页面白），与 §5 TC-M-502「截图有画面（非灰块）」的达成标准一致 | 修前 12 格「绘制 ❌」→ 修后 file/rel 全 ✅ |
 | 备注语义（避免把预期当缺陷报） | ✅ 报告为两条「非缺陷」情形加注：①`data:` 来源的媒体没有本地路径，宿主帧源（ffmpeg 按路径抽帧）给不出画面 → L1 属预期；②单色样本（solid-red）帧色恒定，动画判据（帧间差异）不适用 → L3 | 报告「备注」列 |
-| 基线维护（第三批） | `dev/media/baseline.json` 更新 **50 行**（video 条目等级 + `generated_at`），其余 334 条不变 | `git diff --numstat dev/media/baseline.json` |
-| 四配置复测（第三批后） | Browser / AllowHostResolved / AllowAll 三者完全一致：**L0 23 / L1 4 / L3 51 / L4 18**；`DenyExternal`：L0 63 / L1 4 / L3 19 / L4 10。连续两次全量跑均「与基线一致」 | `dev/media/out/report.md`（384 行） |
+| 探针：音频状态采集对象修正（第 6 处测量伪影） | ✅ 矩阵页把采集用的 `c.ID` 给了包裹 div、音频元素挂在 `c.ID+"_a"` 上，`collectPage` 因此读到的是 div——`readyState`/`duration` 一律读不到，「加载/几何」两列恒 ❌、音频恒判 L0，把「元数据其实可加载」（TC-M-601 的 L1）压成了 L0。修法：采集 id 交给音频元素本身，包裹 div 改挂 `_box` 后缀。音频 12 格 **L0 → L1**——这正是 A3 的真实起点（元数据通、输出缺） | 探针 `sine-440-1s.*` 行：加载/几何/契约 ✅ → **L1**；备注「音频可加载（元数据可用）；音频输出（L4-S）需音频后端」 |
+| 基线维护（第三批） | 两次更新：① video 条目 **50 行**（含 `generated_at`）；② 音频采集修正再 **49 行**（48 条 `L0 → L1` + `generated_at`） | `git diff --numstat dev/media/baseline.json` |
+| 四配置复测（第三批后） | Browser / AllowHostResolved / AllowAll 三者完全一致：**L0 11 / L1 16 / L3 51 / L4 18**；`DenyExternal`：L0 51 / L1 16 / L3 19 / L4 10。连续两次全量跑均「与基线一致」。余下 11 格 L0 = `data:` 来源的 video 4 格（无本地路径）+ AVIF/TIFF 6 格（预期不支持）+ 失败路径 1 格 | `dev/media/out/report.md`（384 行） |
 | **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ 见 §3.4 缺口表：`DenyExternal` 下 `<video src="file://…">` 仍取得画面（L3/L4），与 `<img>` 在同一策略下 L0 的行为不一致；根因是媒体元数据/帧由宿主按本地路径直接读取，未过策略门禁。**上报待决**——策略语义变更不在本轮范围内擅自处理 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4；同策略下 `*.png` 为 L0 |
 
 ---
+
+### 9.6 阶段 3 立项材料（A3 音频后端）
+
+**A3 音频后端立项评估：见 [`audio-backend-proposal.md`](audio-backend-proposal.md)**（2026-10）。
+
+要点摘录：
+
+- **现状**：引擎侧状态机与播放时钟**已可用**（TC-M-601/602 实测达成：`rs=4`、`duration≈1s`、
+  `play()` 后 `currentTime` 0 → 1 播完）；缺的只是「PCM 解码 → 输出设备」这一段——
+  `goskia` 当前**完全没有音频能力**（无 audio/sound/wave/mixer 任何 API）。
+- **推荐路线**：(a) 宿主注入 PCM（与 A1/A2 的视频帧注入同构，引擎不背解码器），
+  输出后端分阶段交付（先 Windows）。
+- **判据**：TC-M-601/602 已达成；TC-M-603（WebAudio）与 TC-M-604（L4-S）待实施。
+  TC-M-604 建议「宿主输出回调的 PCM 做 FFT（主峰 440 Hz）」为主线判据，
+  环回设备录音作为可选外部复核（无设备标 `SKIP(no-loopback)`）。
+- **待确认**（实施前需用户选定）：路线 (a)/(b)、平台范围（仅 Windows / 三平台）、
+  WebAudio 是否需要、L4-S 判据口径、以及是否与「媒体宿主注入通道未受资源策略约束」
+  的修复（§3.4 待决项）合并立项——两者都动「宿主注入媒体数据」这条链路。
 
 ## 附：本次盘点产出的证据索引
 

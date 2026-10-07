@@ -203,7 +203,7 @@ Linux-macOS 11.1）、`NewValue(int64)` 造 BigInt、分发 +60MB（libv8.dll 28
 | **A0** 元数据（前置，成本最低） | 宿主用 `ffmpeg -i` 探测时长/尺寸 → 注入 `MediaMetadataResolver`（决策 4 的 U8） | `TC-M-501/601` 的 **L1**：`readyState ≥ 1`、`duration≈1s`、`loadedmetadata` 派发 |
 | **A1** 视频出画面（L2） | ✅ **已实装**（2026-10-07，路线 1，见 §0.1 与下方实现形态） | `TC-M-502` 截图有画面（非灰块）；`poster` 正确绘制——两者都有实测判据（A1-1/2/3） |
 | **A2** 视频动态（L4） | ✅ **已实装**（2026-10-07）：`timeupdate` 驱动的换帧重绘、**异步预取 + 帧队列**、**精确到帧的 seek**（帧对齐规则）、**帧率驱动的预取窗口**、**`requestVideoFrameCallback` + 帧就绪重绘**、**连续帧采样** | `TC-M-503/504/507`：事件序列（A2-3）、`currentTime` 跳转后画面（A1-3/A2-5：20 个采样点都落在该时刻所属帧）、播放中画面随时间变化（A2-1/A2-6：连续 5 帧都等于各自参照）、帧呈现回调（A2-7）、播放全程同步抽帧 0 次（A2-4） |
-| **A3** 音频（L1→L4-S） | 音频后端选型 + 输出波形（需平台音频 API；goskia/GLFW 侧需扩展） | `TC-M-601…`：采样比对 |
+| **A3** 音频（L1→L4-S） | **立项材料见 [`docs/audio-backend-proposal.md`](audio-backend-proposal.md)**（2026-10）：推荐「宿主注入 PCM + 输出后端分阶段」；现状已实测——状态机与播放时钟可用（TC-M-601/602 达成），缺「解码 → 输出设备」段（goskia 无任何音频 API） | `TC-M-601…`：采样比对（601/602 已达成；603/604 待实施） |
 | **A4** 动图（W3C 之外的自家能力） | ✅ **已实装**（2026-10-07）：goskia 暴露 `SkCodec` 多帧（`skia.NewCodec` / `DecodeFrames` / `FrameDurationMS`），引擎侧 `engine/rendering/imageanimation.go` 按帧时长选帧（宿主注入帧序列，落点见 §0.1 的 A4 行） | **连续帧差异**：判据 A4-1（6 次采样出现 3 种帧色且都等于样本帧色） |
 
 **A1 的两条实现路线（立项时定，决策 4 已采纳「立项时定」）**：
