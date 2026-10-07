@@ -78,6 +78,7 @@ func TestFramePumpDeliversExactlyOnce(t *testing.T) {
 // TestFramePumpWorkersExitWhenIdle：worker 惰性启动、空闲自退——没有请求时不留
 // goroutine（测试与嵌入式用法都不会泄漏）。
 func TestFramePumpWorkersExitWhenIdle(t *testing.T) {
+	testGateAllowAll(t) // 抽帧链路：本地引用先要获得授权（见 mediaaccess.go）
 	p := NewMediaProbe("") // 没有 ffmpeg：任务立刻交付失败，worker 照样跑一轮
 	src := p.AsyncFrameSourceFor(nil)
 
@@ -129,6 +130,7 @@ func TestAsyncFrameSourceRejectsNonLocalSrcs(t *testing.T) {
 // TestAsyncFrameSourceForwardsLocalFrames：本地文件经 worker 抽到可解码的帧，
 // 并把它交给渲染层（引擎侧再解码成位图）。
 func TestAsyncFrameSourceForwardsLocalFrames(t *testing.T) {
+	testGateAllowAll(t) // 同上：本用例验证本地样本能抽到帧
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("本机没有 ffmpeg：跳过真实抽帧链路")

@@ -34,6 +34,12 @@ const (
 	PurposeScript
 	// PurposeImage：`<img src>` / background-image / mask-image / SVG <image>。
 	PurposeImage
+	// PurposeMedia：`<video src>` / `<audio src>`（含 `<source src>`）——宿主注入
+	// 元数据/帧/PCM 的媒体引用。★ 媒体**不经** loadExternalResource（内容不落
+	// 字符串通道：解码全在宿主，见 app/mediaprobe.go 的文件头），因此它的门禁由
+	// WebView.MediaResourceAllowed 提供；判定基元与顺序与 loadExternalResource
+	// 完全同源（resolver → data: → 策略门禁，见 media_resource_policy.go）。
+	PurposeMedia
 	// PurposeDocument：文档（宿主 LoadURL 走自己的取内容通道，此值用于日志）。
 	PurposeDocument
 )
@@ -46,6 +52,8 @@ func (p ResourcePurpose) String() string {
 		return "script"
 	case PurposeImage:
 		return "image"
+	case PurposeMedia:
+		return "media"
 	default:
 		return "document"
 	}
@@ -161,6 +169,10 @@ func mimeAllowed(purpose ResourcePurpose, contentType string, nosniff bool) bool
 			return true
 		}
 		return !nosniff
+	case PurposeImage, PurposeMedia:
+		// 图片与媒体都不看 MIME：解码成功即采用（浏览器也是「解码失败才算失败」）。
+		// 媒体由解码器（宿主 ffmpeg/SkCodec）判定容器与轨道类型，引擎不代判定。
+		return true
 	default:
 		return true
 	}

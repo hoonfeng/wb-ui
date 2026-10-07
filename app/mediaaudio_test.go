@@ -63,6 +63,7 @@ func (c *pcmCollector) snapshot() ([]byte, rendering.AudioFormat, int64) {
 // TestMediaAudioSessionDelivers440Hz 是判据 A 的宿主侧落地：会话把 440Hz 正弦
 // 解成 PCM 交给输出（tap 取到的就是写进设备的那一份），FFT 主峰必须是 440Hz。
 func TestMediaAudioSessionDelivers440Hz(t *testing.T) {
+	testGateAllowAll(t) // PCM 链路：本地引用先要获得授权（见 mediaaccess.go）
 	_, url := sineSample(t)
 	m := NewMediaAudio("")
 	if m.bin == "" {

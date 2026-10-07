@@ -142,6 +142,7 @@ func TestCleanupMediaDataURLFiles(t *testing.T) {
 // 来源正是卡在「没有路径可交给 ffmpeg」，因此 16 格只能停在 L1。
 // 本机没有 ffmpeg 时跳过（与 TestMediaProbeEndToEnd 同口径）。
 func TestMediaDataURLFeedsFFmpeg(t *testing.T) {
+	testGateAllowAll(t) // 端到端：走 mediaSrcToPath（引用需授权），data: 恒放行
 	t.Cleanup(func() { CleanupMediaDataURLFiles() })
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

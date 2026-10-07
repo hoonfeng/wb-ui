@@ -103,6 +103,13 @@ func InstallMediaMetadataResolver(wv *webkit.WebView, ffmpegPath string) *MediaP
 		}
 		return wv.DocumentBaseURL()
 	}
+	// ★ 资源策略门禁（与引擎 `<img>`/`<script>`/`<link>` 同一条判定，见
+	//   mediaaccess.go）：宿主侧三条链路（元数据/抽帧/帧时刻量化）与引擎侧的
+	//   资源选择（bindings.MediaSrcAllowed）共用**同一个**判定函数——判定逻辑只有
+	//   一份（webkit.MediaResourceAllowed），本层只负责问一次并记住。
+	gate := mediaRefGateFor(wv)
+	SetMediaRefGate(gate, mediaPolicyOf(wv))
+	bindings.MediaSrcAllowed = gate
 	bindings.MediaMetadataResolver = p.ResolverFor(base)
 	// 同一条宿主注入链的第二环（主线 A1）：<video> 的当前帧也由宿主解。引擎侧只
 	// 维护「元素 → 时间点」（绑定层写）与「(url, 时刻) → 已解码帧」（渲染层缓存）。
@@ -500,6 +507,12 @@ func parseFFmpegProbe(out string) (bindings.MediaMetadata, bool) {
 func mediaSrcToPath(src, base string) (string, bool) {
 	s := strings.TrimSpace(src)
 	if s == "" {
+		return "", false
+	}
+	// ★ 资源策略门禁（与引擎 `<img>`/`<script>`/`<link>` 同一条判定，见
+	//   mediaaccess.go）：未授权时**不返回路径**——元数据探测、视频抽帧、音频 PCM
+	//   三条链路都从本函数拿路径，因此一次拦住全部（不在这三条链路上各判一次）。
+	if !allowMediaRef(s) {
 		return "", false
 	}
 	low := strings.ToLower(s)

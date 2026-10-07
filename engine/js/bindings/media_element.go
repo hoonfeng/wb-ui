@@ -61,6 +61,20 @@ type MediaMetadata struct {
 // 探测失败（回退到「时长未知」）。未设置时所有资源都按「时长未知」处理。
 var MediaMetadataResolver func(src string) (MediaMetadata, bool)
 
+// MediaSrcAllowed 由宿主设置：报告媒体引用是否被**宿主资源策略**允许加载
+//（与引擎 `<img>`/`<script>`/`<link>` 同一套判定，宿主通常接
+// webkit.WebView.MediaResourceAllowed）。
+//
+// 未设置（nil）时不做策略判定——引擎不认识宿主的资源策略，保持既有行为；
+// 需要读本地媒体的宿主在装配媒体链路时必须接上它（见 app 包的
+// InstallMediaMetadataResolver / InstallMediaAudio）。
+//
+// ★ 判定发生在**资源选择一开始**（finishLoad 的第一件事）：被拒的引用按
+// 「源不可用」处理（NETWORK_NO_SOURCE + error），不再问元数据 resolver、宿主
+// 也不会被请求帧/PCM——否则媒体通道就绕过了资源策略（本字段不存在时媒体正是
+// 这样绕过的，见 docs/media-format-verification-plan.md §9.9）。
+var MediaSrcAllowed func(src string) bool
+
 // ─── 规范常量 ────────────────────────────────────────────
 
 const (
@@ -425,6 +439,14 @@ func (st *mediaElementState) finishLoad() {
 		return // 资源已变化：这次加载作废
 	}
 	src := st.loadedSrc
+	// ★ 资源策略门禁（最先判定，见 MediaSrcAllowed 注释）：被策略拒绝的引用是
+	//   「源不可用」，与 http(s) 无网络栈走同一条失败路径——脚本的 error 分支能
+	//   走到，宿主也拿不到元数据/帧/PCM。判定与 <img>/<script>/<link> 同源
+	//   （webkit.MediaResourceAllowed），不在媒体链路上另立规则。
+	if MediaSrcAllowed != nil && !MediaSrcAllowed(src) {
+		st.failUnavailableSrc()
+		return
+	}
 	if MediaMetadataResolver != nil {
 		if meta, ok := MediaMetadataResolver(src); ok {
 			st.applyMetadata(meta)
@@ -432,11 +454,7 @@ func (st *mediaElementState) finishLoad() {
 		}
 	}
 	if isUnreachableMediaSrc(src) {
-		st.networkState = mediaNetworkNoSource
-		st.readyState = mediaHaveNothing
-		st.setError(mediaErrSrcNotSupported, "The media resource could not be loaded")
-		st.clearVideoState()
-		st.fireEvent("error")
+		st.failUnavailableSrc()
 		return
 	}
 	// 本地/相对资源：本层不解码（宿主可经 MediaMetadataResolver 补齐时长）。
@@ -485,6 +503,18 @@ func (st *mediaElementState) applyMetadata(meta MediaMetadata) {
 func isUnreachableMediaSrc(src string) bool {
 	l := strings.ToLower(strings.TrimSpace(src))
 	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
+}
+
+// failUnavailableSrc 把资源选择判为失败：NETWORK_NO_SOURCE + error 事件。
+// 「源不可用」的两种情形共用本路径——资源策略拒绝（MediaSrcAllowed）与
+// http(s) 无网络栈（isUnreachableMediaSrc）。语义与浏览器一致：脚本读到
+// readyState=HAVE_NOTHING、error.code=MEDIA_ERR_SRC_NOT_SUPPORTED。
+func (st *mediaElementState) failUnavailableSrc() {
+	st.networkState = mediaNetworkNoSource
+	st.readyState = mediaHaveNothing
+	st.setError(mediaErrSrcNotSupported, "The media resource could not be loaded")
+	st.clearVideoState()
+	st.fireEvent("error")
 }
 
 func (st *mediaElementState) setError(code int, msg string) {

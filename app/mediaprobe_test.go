@@ -90,6 +90,7 @@ func TestParseFFmpegProbe(t *testing.T) {
 // 「不是本地文件」的两类引用（http(s)/blob）、网络基准下的相对引用，以及
 // `data:`（内联字节 → 落盘成本地文件，见 mediadataurl.go）。
 func TestMediaSrcToPath(t *testing.T) {
+	testGateAllowAll(t) // 本用例测 src → 路径的映射：引用先要获得授权（见 mediaaccess.go）
 	t.Cleanup(func() { CleanupMediaDataURLFiles() })
 	tests := []struct {
 		name   string
@@ -325,6 +326,7 @@ func TestAlignFrameTime(t *testing.T) {
 // 时，同一帧区间内的任意时刻都量化到同一个值（渲染层据此复用缓存条目、预取与
 // 绘制互相命中）；帧率未知或 src 不是本地文件时原样返回（不折叠，不猜）。
 func TestFrameTimeQuantizer(t *testing.T) {
+	testGateAllowAll(t) // 折叠规则以「src 能解析成本地路径」为前提
 	p := NewMediaProbe("")
 	clip := filepath.Join(t.TempDir(), "clip.mp4")
 	abs, err := filepath.Abs(clip)

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
@@ -89,6 +90,12 @@ func InstallMediaAudio(wv *webkit.WebView, ffmpegPath string) *MediaAudio {
 		}
 		return wv.DocumentBaseURL()
 	}
+	// ★ 资源策略门禁（与引擎 `<img>`/`<script>`/`<link>` 同一条判定，见
+	//   mediaaccess.go）：音频 PCM 链路与元数据/抽帧共用同一个判定函数；同时把
+	//   引擎侧的资源选择门禁一起接上（两个 Install 都接，谁先谁后都不留缺口）。
+	gate := mediaRefGateFor(wv)
+	SetMediaRefGate(gate, mediaPolicyOf(wv))
+	bindings.MediaSrcAllowed = gate
 	rendering.SetAudioSessionSource(m.SessionSource(base))
 	return m
 }
