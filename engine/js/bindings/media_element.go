@@ -50,6 +50,10 @@ type MediaMetadata struct {
 	// prefetchNextFrame 按帧预取；宿主按同一位移量化取帧时刻，见
 	// app/mediaprobe.go 的 FrameTimeQuantizer）。
 	FPS float64
+	// HasAudio 报告资源是否含音频轨（宿主从容器头解析）。引擎侧用它决定
+	// play() 时要不要打开音频会话（A3）：给纯视频资源开一条永不推进的音频时钟
+	// 会让 currentTime 卡在 0——没有音频就该老老实实走挂钟时钟。
+	HasAudio bool
 }
 
 // MediaMetadataResolver 由宿主设置：探测 src 指向的媒体元数据。宿主可用
@@ -123,6 +127,15 @@ type mediaElementState struct {
 	loadedSrc string
 	clock     bool
 	handlers  map[string]*mediaHandler
+
+	// audio 是本元素的音频播放会话（A3，见 mediaaudio.go）。非 nil 表示
+	// 播放时钟由音频输出位置驱动（currentTime = 输出已播到的位置）。
+	audio *mediaAudioState
+
+	// hasAudio 是宿主探测的「资源含音轨」标志（来自 MediaMetadata）。无音轨的
+	// 资源在 play() 时不开音频会话——一条永不推进的音频时钟会把 currentTime
+	// 钉死在 0，比挂钟时钟更糟。
+	hasAudio bool
 
 	// showPoster 是 HTML 的 show poster flag（§4.8.8）：资源加载后、play() 或
 	// currentTime 设为非 0 之前，<video> 显示的是 poster 替代画面，而不是视频帧。
@@ -353,6 +366,7 @@ func (st *mediaElementState) setSrc(src string) {
 // load 实现 load()：中止当前资源、复位状态、重新选择资源。
 func (st *mediaElementState) load() {
 	st.clock = false
+	st.closeAudio()
 	st.currentTime = 0
 	st.ended = false
 	st.seeking = false
@@ -373,6 +387,9 @@ func (st *mediaElementState) startLoadFor(src string) {
 	if st.el == nil {
 		return
 	}
+	// 切源/重载：旧源的音频会话立即作废（否则会继续听到上一个文件的音频）。
+	st.closeAudio()
+	st.hasAudio = false
 	st.loadedSrc = src
 	if strings.TrimSpace(src) == "" {
 		st.networkState = mediaNetworkEmpty
@@ -439,6 +456,7 @@ func (st *mediaElementState) finishLoad() {
 // 可以开始播放。视频尺寸在此生效（videoWidth/videoHeight）。
 func (st *mediaElementState) applyMetadata(meta MediaMetadata) {
 	st.duration = meta.Duration
+	st.hasAudio = meta.HasAudio
 	if meta.Width > 0 {
 		st.videoW = meta.Width
 	}
@@ -518,6 +536,14 @@ func (st *mediaElementState) play() jsc.JSValue {
 	// 开始播放：show poster flag 清除（放在 startLoadFor 之后——加载算法会把
 	// flag 复位，先清会被它盖掉）。此后 <video> 显示的是真实帧，不是 poster。
 	st.showPoster = false
+	// 音频会话（A3）：没有会话就按当前 src 打开一个（宿主在那里起 ffmpeg 解码
+	// 与输出设备），已有会话（pause() 之后又 play()）则恢复它——重复打开会让
+	// 宿主重起一遍解码进程、从头播。
+	if st.audio == nil {
+		st.startAudio(st.currentTime)
+	} else {
+		st.resumeAudio()
+	}
 	// ★ 先起时钟再同步显示状态：Playing 由「时钟是否在走」推出，反过来写会让
 	// play() 后的头 250ms（首个 tick 之前）仍然声称 Playing=false——painter
 	// 就会去同步取帧，白白在渲染线程上等一次解码。
@@ -538,6 +564,10 @@ func (st *mediaElementState) pause() {
 	}
 	st.paused = true
 	st.clock = false
+	// 输出设备也要停：只停时钟不停输出会让声音继续播（Position 还会继续推进，
+	// 恢复播放时 currentTime 莫名跳一段）。对设备是「挂起」而非「关闭」——恢复
+	// 后从原处继续（缓冲还在）。
+	st.pauseAudio()
 	// 暂停要上报状态（Playing 随之转 false）：此后绘制会在静止态同步取当前
 	// 时刻的帧——暂停瞬间看到的画面必须精确，而不是继续异步凑合。
 	st.syncVideoState()
@@ -553,6 +583,14 @@ func (st *mediaElementState) startClock() {
 }
 
 func (st *mediaElementState) scheduleTick() {
+	st.scheduleTickAfter(mediaTimeUpdateMs)
+}
+
+// scheduleTickAfter 排下一次时钟推进（毫秒后）。挂钟模式用 mediaTimeUpdateMs
+// （250ms，规范建议的 timeupdate 频率量级）；音频驱动模式用更细的
+// mediaAudioTickMs（50ms）——这一步对齐的是**输出位置**，步长越细，脚本读到的
+// currentTime 越贴近耳朵听到的位置。
+func (st *mediaElementState) scheduleTickAfter(ms int64) {
 	if st.interp == nil {
 		return
 	}
@@ -564,15 +602,30 @@ func (st *mediaElementState) scheduleTick() {
 		st.tick()
 		return jsc.Undefined()
 	}, 0)
-	_ = loop.SetTimeout(jsc.FunctionValue(cb), mediaTimeUpdateMs)
+	_ = loop.SetTimeout(jsc.FunctionValue(cb), ms)
 }
 
-// tick 是播放时钟的一步：时长已知时推进 currentTime 并按需派发 timeupdate/
-// ended；时长未知（NaN）时不推进进度，但保持时钟（pause/ended 语义仍正确）。
+// tick 是播放时钟的一步。两种时钟按「有没有活跃音频会话」二选一（A3）：
+//
+//	音频为主时钟（audioActive）→ currentTime 取输出位置，见 tickAudio；
+//	挂钟步进（回退）→ 时长已知时推进 currentTime 并按需派发 timeupdate/ended；
+//	  时长未知（NaN）时不推进进度，但保持时钟（pause/ended 语义仍正确）。
+//
+// 回退路径覆盖「纯视频资源」「宿主没注册音频源（引擎独立使用/单测）」「会话
+// 打开失败」三种情况——它们都不该导致播放时钟停摆。
 func (st *mediaElementState) tick() {
 	if !st.clock || st.paused || st.ended {
 		st.clock = false
 		return
+	}
+	if st.audioActive() {
+		st.tickAudio()
+		return
+	}
+	// 会话不可用（无音轨 / 解码器起不来 / 位置读不到）：摘掉它并退回挂钟时钟
+	// ——播放不能挂在一个永不推进的位置上。
+	if st.audio != nil {
+		st.closeAudio()
 	}
 	if math.IsNaN(st.duration) || st.duration <= 0 {
 		st.scheduleTick()
@@ -595,6 +648,44 @@ func (st *mediaElementState) tick() {
 	st.prefetchNextFrame()
 	st.fireEvent("timeupdate")
 	st.scheduleTick()
+}
+
+// tickAudio 是「音频为主时钟」下的一步：currentTime 直接取输出已播到的位置
+// （不累加挂钟），到末尾即 ended。
+//
+// 为什么不做「挂钟累加 + 与音频对齐」的混合：那等于两个时钟同时写一个变量，谁
+// 后写谁说了算，音画漂移会以难以复现的方式出现。真相只有一个：输出位置（规范
+// 也是这么定的——音频的采样时钟是媒体时钟的主时钟）。
+func (st *mediaElementState) tickAudio() {
+	pos, ok := st.audioPosition()
+	if !ok {
+		// 会话失效（宿主提前关闭、设备被拔）：退回挂钟时钟把这一轮播完，而不是
+		// 让播放无声无息地卡住。
+		st.closeAudio()
+		st.tick()
+		return
+	}
+	st.currentTime = pos
+	dur := st.audioDurationSeconds()
+	if dur > 0 && pos >= dur-mediaAudioEndEpsilonSec {
+		// 播放结束：位置收敛到 duration（规范：ended 时 currentTime == duration），
+		// 会话随即关闭——输出设备不该在结束后继续占着。
+		st.currentTime = dur
+		st.ended = true
+		st.paused = true
+		st.clock = false
+		st.closeAudio()
+		st.syncVideoState()
+		st.maybePresentVideoFrame() // 末尾那一帧也是「新呈现的一帧」
+		st.fireEvent("timeupdate")
+		st.fireEvent("ended")
+		return
+	}
+	st.syncVideoState()
+	st.maybePresentVideoFrame()
+	st.prefetchNextFrame()
+	st.fireEvent("timeupdate")
+	st.scheduleTickAfter(mediaAudioTickMs)
 }
 
 // prefetchNextFrame 请求宿主**异步**预取「下一次时间更新会显示的帧」（A2）：
@@ -738,6 +829,9 @@ func (st *mediaElementState) setCurrentTime(t float64) {
 	}
 	st.currentTime = t
 	st.seeking = true
+	// 输出位置也要跟着走（A3）：只改 currentTime 不改音频会话，会先听到旧位置
+	// 的一段音频、时钟再追上——seek 的听感完全错乱。
+	st.seekAudio(t)
 	if t > 0 {
 		// show poster flag 在 currentTime 被设为非 0 时清除（HTML §4.8.8）：
 		// seek 到中间就该看到画面，而不是继续看 poster。
