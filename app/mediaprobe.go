@@ -436,6 +436,10 @@ func probeWithFFmpeg(bin, path string) (bindings.MediaMetadata, bool) {
 var (
 	// Duration: 00:00:01.00 / Duration: 00:01:23.45
 	ffDurationRe = regexp.MustCompile(`Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)`)
+	// 含音频流的那一行（`Stream #0:1: Audio: aac (LC) …`）。A3：宿主据此告诉
+	// 引擎「这个资源有没有音频轨」——没有音轨的资源不该打开音频会话（否则
+	// play() 之后引擎会挂到一条永不推进的音频时钟上）。
+	ffAudioStreamRe = regexp.MustCompile(`\bAudio:`)
 	// 视频行的像素尺寸（120x80、1920x1080）。首位非 0 才能躲开编解码器串里的
 	// `0x31637661` 一类十六进制。
 	ffVideoSizeRe = regexp.MustCompile(`([1-9]\d{0,4})x([1-9]\d{0,4})`)
@@ -457,6 +461,12 @@ func parseFFmpegProbe(out string) (bindings.MediaMetadata, bool) {
 			sec, _ := strconv.ParseFloat(m[3], 64)
 			meta.Duration = float64(h*3600+mi*60) + sec
 			found = true
+			continue
+		}
+		if ffAudioStreamRe.MatchString(line) {
+			// 有音轨：只置 HasAudio，**不**置 found——「有音频流」本身不是引擎
+			// 能用上的元数据（时长/尺寸才是），与帧率同一处理。
+			meta.HasAudio = true
 			continue
 		}
 		if strings.Contains(line, "Video:") {
