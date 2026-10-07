@@ -251,11 +251,17 @@ webkit/mode.go:66                             allowsExternalURLs()
 | — | **（新发现）SVG 解析缓存绕过资源策略门禁** | ✅ 缓存查询移到策略门禁**之后**。缺陷表现：宽松配置（Browser）先解析过的 SVG 被包级缓存留存，严格配置（`Toolkit+DenyExternal`）随后命中缓存拿到文档 → 出现「加载/几何/契约 ✅ 而绘制 ❌」的自相矛盾 | 探针 `DenyExternal × *.svg × file` 由 L2 → **L0**（安全默认恢复）；两次全量跑结论一致 |
 | D11 | 原判「WebP 动图帧推进未生效」 | ✅ **重新定性为探针判定抖动**：`anim-2frames.webp` 与 GIF 同源（Skia 多帧动图源）本就在推进，旧判据按「采样间隔 mod 周期」偶发同帧 → 误判 A=❌。判据稳定化后 `anim-*.gif/webp` 全部 **L4**（Browser L4 9 → 12） | 两次全量跑下降项每次不同（抖动实证）；修后连续两次「与基线一致」 |
 
-**仍存在的缺口（转入 §8.1 / 阶段 3）**
+**第三批已闭环的缺口（§9.5）**
+
+| 编号 | 缺口 | 修复与结果 | 证据 |
+|---|---|---|---|
+| D10 | `<video>` **画面未绘制**（12 格 L0：帧流在推进、`loadedmetadata` 已派发，但静止态采样无画面） | ✅ **根因是「媒体资源选择算法的启动时机」**：本引擎的媒体状态是「首次访问媒体属性时惰性创建」（`mediaStateFor`），而规范的时机是「`src` 属性已设置且元素在文档中」（HTML §4.8.8）。于是用 HTML 属性写好的 `<video src>` 在脚本读属性之前**完全不加载**——静止态 `readyState=0`、`duration=NaN`、无首帧，`play()` 之后才补到 `rs=4`（同一格实测：静止 0 / 播放 4）。修法：新增 `bindings.StartMediaElementLoads`，`webkit` 在页面脚本执行后对文档里的 `<video>/<audio>` 补齐启动（幂等，动态创建的元素不受影响）。**video 由 L0 → L4**（testsrc mp4/webm、twophase），单色样本 L3 | `TestStartMediaElementLoadsStartsResourceSelection`（启动计数/幂等/无 src 不启动/`loadedmetadata` 派发）；探针 `*.mp4`/`*.webm` 行绘制列 ✅；`matrix-Browser.png` 经 `read_image` 复核（file/rel 三列有真实视频画面：testsrc 彩条、solid-red 纯红、twophase 红首段） |
+| — | **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ **未闭环，上报待决**：`DenyExternal` 下 `<video src="file://…">` 仍取得元数据与画面（L3/L4），与 `<img>` 在同一策略下被严格拒绝（L0）不一致——媒体元数据探测与抽帧由宿主（`app.MediaProbe` → `ffmpeg` 按本地路径读文件）直接完成，未过资源策略门禁。该行为在 D10 修复前**就已存在**（旧报告的「动画 ✅」即帧流在跑的证据），只是当时静止态无画面而未被注意 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4（同一策略下 `*.png` 为 L0） |
+
+**仍存在的缺口（转入阶段 3）**
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D10 | `<video>` **画面未绘制** | 帧流在推进（file/rel 的 A=✅）、`loadedmetadata` 已派发（C=✅），但采样点无画面（D=❌）→ L0 | 12 |
 | D12 | 音频无解码/输出后端 | L0（预期现状，需音频后端） | 12 |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
@@ -547,6 +553,10 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 > 策略门禁」见 §9.4。交付物达成：SVG 九格 **L2 → L3**、GIF/WebP 动画 **L4**、
 > 全 384 格 **L2 归零**（详见 §3.4 总表）。
 
+> **状态（2026-10 续）：视频（A0/A1/A2）已在验证矩阵侧闭环。** D10 见 §9.5：
+> `<video>` 的本地两来源（file/rel）由 **L0 → L4/L3**，宿主帧源注入通道端到端
+> 可用；音频（A3）仍是阶段 3 的主体（12 格 L0，需音频后端）。
+
 **阶段 3：P2 大工程 — 视频/音频真实播放（决策 4，单独立项）**
 
 > ★ 本条的分期（A0–A4）、依赖（goskia/ffmpeg/音频后端）与验收判据已并入
@@ -621,6 +631,17 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 探针：动图判定稳定化（第 4 处测量伪影） | ✅ 旧判据取「静止/播放/再等 900ms」三个**单点**像素，是否判「推进」取决于「采样间隔 mod 动图循环周期」——3 帧×100ms 的 GIF 周期 300ms、900ms 恰为其 3 倍 → 两拍同帧 → 误判未推进。**抖动实证**：同一 HEAD 连跑两次，下降项每次不同（`anim-3frames-rgb` L4/L3 摇摆、`anim-2frames.webp` 亦然）。修法：等间隔连拍 6 帧（130ms，不与常见帧时长成整数倍）+ 采样点由 1 个增到 5 个 + 判据放宽为「任意两帧不同」。修后**连续两次全量跑均「与基线一致」**，且三个非拒配置等级分布完全一致（35/0/0/49/12） | `runMediaConfig` ③、`framesDiffer`/`samplePointsOf`/`framesMaxDiff`；两次跑输出对照 |
 | 基线维护 | `DenyExternal × *.svg × file` 三条期望值原为缺陷放行产生的 L2，已随正确行为更新为 L0（其余 381 条不变） | `dev/media/baseline.json` diff |
 | 四配置复测（第二批后） | Browser / AllowAll / AllowHostResolved 完全一致：**L0 35 / L2 0 / L3 49 / L4 12**；`DenyExternal`：L0 75 / L3 17 / L4 4。**L2 全部归零** | `dev/media/out/report.md`（384 行） |
+
+### 9.5 第三批修复（2026-10，接续 §9.4）：`<video>` 画面（D10）
+
+| 事项 | 结论 | 证据 |
+|---|---|---|
+| **D10** `<video>` 画面未绘制 | ✅ 已闭环。根因**不是**「帧流没推进」，而是「媒体资源选择算法的启动时机」：本引擎把规范的「`src` 已设置且元素在文档中即启动加载」（HTML §4.8.8）推迟到「首次访问媒体属性」（`mediaStateFor` 惰性创建）——用 HTML 属性写好的 `<video src>` 在脚本读属性之前根本不加载，静止态 `readyState=0`、`duration=NaN`、无首帧；`play()` 走 `media_element.go` 的补触发路径才到 `rs=4`（同一格实测：静止 0 / 播放 4，盒尺寸 120×80 正确）。修法：新增 `bindings.StartMediaElementLoads(in, doc)`，`webkit.loadHTMLFrom` 在页面脚本执行后对文档中已连接的 `<video>/<audio>` 启动资源选择（幂等；无 src 不启动；动态创建的元素仍走各自属性路径） | `TestStartMediaElementLoadsStartsResourceSelection`；探针 `*.mp4`/`*.webm` 行：加载/几何/契约 ✅、绘制 ✅、动画 ✅；`matrix-Browser.png` 经 `read_image` 复核 |
+| 探针：视频判定补齐（第 5 处测量伪影） | ✅ 两处判据缺口：①manifest 的 `phases` 字段（分段期望色）**从未被解析**（`sampleSpec` 缺字段），twophase 这类样本因此没有期望色；②无期望色的视频样本（testsrc 这类自然序列）落到 `sampleCell` 末尾 `return false` → 「绘制」恒 ❌。修法：新增 `mediaPhase` 类型解析 `phases`（取**首段**色作静止态期望）；其余视频按「非灰块」判定（中心点非 `.cell` 底色、非页面白），与 §5 TC-M-502「截图有画面（非灰块）」的达成标准一致 | 修前 12 格「绘制 ❌」→ 修后 file/rel 全 ✅ |
+| 备注语义（避免把预期当缺陷报） | ✅ 报告为两条「非缺陷」情形加注：①`data:` 来源的媒体没有本地路径，宿主帧源（ffmpeg 按路径抽帧）给不出画面 → L1 属预期；②单色样本（solid-red）帧色恒定，动画判据（帧间差异）不适用 → L3 | 报告「备注」列 |
+| 基线维护（第三批） | `dev/media/baseline.json` 更新 **50 行**（video 条目等级 + `generated_at`），其余 334 条不变 | `git diff --numstat dev/media/baseline.json` |
+| 四配置复测（第三批后） | Browser / AllowHostResolved / AllowAll 三者完全一致：**L0 23 / L1 4 / L3 51 / L4 18**；`DenyExternal`：L0 63 / L1 4 / L3 19 / L4 10。连续两次全量跑均「与基线一致」 | `dev/media/out/report.md`（384 行） |
+| **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ 见 §3.4 缺口表：`DenyExternal` 下 `<video src="file://…">` 仍取得画面（L3/L4），与 `<img>` 在同一策略下 L0 的行为不一致；根因是媒体元数据/帧由宿主按本地路径直接读取，未过策略门禁。**上报待决**——策略语义变更不在本轮范围内擅自处理 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4；同策略下 `*.png` 为 L0 |
 
 ---
 
