@@ -1288,25 +1288,29 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 					if el.HasAttribute("data-loaded") {
 						return jsc.BooleanValue(true)
 					}
-					return jsc.BooleanValue(imgPixelDim(el, true) > 0)
+					// ★ 按**资源固有尺寸**判定（imgNaturalDim）：位图之外的矢量
+					//   资源（SVG）没有解码位图，此前 complete 因此恒 false——
+					//   而 SVG <img> 其实画得出来，浏览器同页面下 complete 为 true。
+					return jsc.BooleanValue(imgNaturalDim(el, true) > 0)
 				}}, true
 		}
 		return jsc.JSValue{}, nil, false
 	case "naturalWidth":
 		if tag == "img" {
-			// HTMLImageElement.naturalWidth = 解码位图宽度（未解码时 0）。
+			// HTMLImageElement.naturalWidth = 资源固有宽度（位图解码尺寸；SVG
+			// 等矢量资源取 width/height 或 viewBox；都没有时 0）。
 			return jsc.JSValue{}, &elemAccessor{
 				get: func() jsc.JSValue {
-					return jsc.NumberValue(imgPixelDim(el, true))
+					return jsc.NumberValue(imgNaturalDim(el, true))
 				}}, true
 		}
 		return jsc.JSValue{}, nil, false
 	case "naturalHeight":
 		if tag == "img" {
-			// HTMLImageElement.naturalHeight = 解码位图高度（未解码时 0）。
+			// HTMLImageElement.naturalHeight = 资源固有高度（语义同 naturalWidth）。
 			return jsc.JSValue{}, &elemAccessor{
 				get: func() jsc.JSValue {
-					return jsc.NumberValue(imgPixelDim(el, false))
+					return jsc.NumberValue(imgNaturalDim(el, false))
 				}}, true
 		}
 		return jsc.JSValue{}, nil, false

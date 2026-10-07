@@ -956,7 +956,7 @@ func (wv *WebView) mediaQueryContext() *css.MediaQueryContext {
 		DevicePixelRatio: wv.DeviceScaleFactor(), Orientation: orientation,
 		PrefersColorScheme: wv.PrefersColorScheme(),
 		Hover:              wv.HoverCapability(), AnyHover: wv.HoverCapability(),
-		Pointer:            wv.PointerCapability(), AnyPointer: wv.PointerCapability(),
+		Pointer: wv.PointerCapability(), AnyPointer: wv.PointerCapability(),
 	}
 }
 
@@ -1655,7 +1655,7 @@ func (wv *WebView) resolveImageURLFor(src string) string {
 }
 
 // fireImageEventOnce 为元素派发一次事件：同一 src 下每种事件只派发一次
-//（内部属性记录「上次派发时的 src」——元素换 src 后需重新派发）。
+// （内部属性记录「上次派发时的 src」——元素换 src 后需重新派发）。
 func (wv *WebView) fireImageEventOnce(el *dom.Element, ev string) {
 	marker := "data-wb-imgevt-" + ev
 	src := el.GetAttribute("src")
@@ -1670,7 +1670,7 @@ func (wv *WebView) fireImageEventOnce(el *dom.Element, ev string) {
 // fireImageElementEvents 为文档中引用该 URL 的**每一个** `<img>` 派发
 // load（ok=true）或 error（ok=false）。同一 URL 的多个元素都要收到——
 // 规范如此，且「同一 URL 两个 <img>」的元素状态一致性是既有缺陷点
-//（文档 §5 G8 的 TC-M-805）。
+// （文档 §5 G8 的 TC-M-805）。
 func (wv *WebView) fireImageElementEvents(url string, ok bool) {
 	if wv == nil || wv.destroyed {
 		return
@@ -1680,7 +1680,12 @@ func (wv *WebView) fireImageElementEvents(url string, ok bool) {
 		return
 	}
 	ev := "load"
-	if !ok {
+	// ★ SVG 是矢量资源：绘制路径把它交给位图解码（Skia）**必然失败**，那条失败
+	//   通知不能当作「资源加载失败」——同一个元素其实画得出来（浏览器语义：
+	//   能渲染即加载成功）。此处按渲染层的 SVG 探测纠正，与 flushImageEvents
+	//   的补派发逻辑同一判据。真正取不到字节的 SVG（404、策略拒绝、解析失败）
+	//   探测同样失败，仍是 error。
+	if !ok && !rendering.IsSVGReferenceReady(url, &webViewImageLoader{wv: wv}) {
 		ev = "error"
 	}
 	for _, el := range doc.GetElementsByTagName("img") {
@@ -1734,6 +1739,16 @@ func (wv *WebView) flushImageEvents() {
 		}
 		abs := wv.resolveImageURLFor(src)
 		if !rendering.IsImageReady(abs) {
+			// ★ SVG 是**矢量资源**：不进位图解码缓存，IsImageReady 对它恒为假。
+			//   此前它因此既拿不到 load（未就绪 → 走 RequestImageLoad），又要被
+			//   Skia 按位图解码判失败 → 收到 error——而它其实**已经画得出来**。
+			//   浏览器语义：能渲染即「加载成功」。可渲染性由渲染层的 SVG 探测
+			//   回答，它同样吃宿主的策略链（被拒绝 → false → 既不加载也不通知，
+			//   保持「拒绝 ≠ 失败」的既有边界）。
+			if rendering.IsSVGReferenceReady(abs, loader) {
+				wv.fireImageEventOnce(el, "load")
+				continue
+			}
 			rendering.RequestImageLoad(abs, loader)
 			continue
 		}
@@ -2164,6 +2179,23 @@ func (wv *WebView) injectRenderTreeBridge() {
 			return nil
 		}
 		return img.SkiaImage()
+	})
+	// SVG（矢量）资源的固有尺寸：位图 hook 对 SVG 恒 nil（SVG 不进解码缓存），
+	// 于是 naturalWidth/naturalHeight 恒 0、complete 恒 false——依赖图片加载
+	// 状态的懒加载/占位/骨架屏逻辑对 SVG 图标全部走错分支（浏览器同页面为
+	// SVG 的真实尺寸，如 24/120）。资源解析走与绘制同一条链（宿主 resolver +
+	// 逐 URL 策略门禁），所以被策略拒绝的 SVG 这里同样拿到 ok=false。
+	// ★ 与 canvas hook 同模式：包级单例（后建 WebView 覆盖），仅供 IDL 反射查询。
+	bindings.SetImageNaturalSizeHook(func(el *dom.Element) (float64, float64, bool) {
+		if el == nil {
+			return 0, 0, false
+		}
+		src := el.GetAttribute("src")
+		if src == "" {
+			return 0, 0, false
+		}
+		abs := wv.resolveImageURLFor(src)
+		return rendering.SVGReferenceIntrinsicSize(abs, &webViewImageLoader{wv: wv})
 	})
 	installBridgeDispatch()
 	// <img>/<video> src 变化：清除渲染盒的解码图缓存并重建渲染树

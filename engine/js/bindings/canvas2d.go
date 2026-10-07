@@ -52,9 +52,21 @@ const (
 var canvasImageSourceHook func(el *dom.Element) *graphics.SkiaImage
 
 // SetCanvasImageSourceHook 注入 <img> 元素 → 解码位图 的解析函数
-//（webkit.NewWebView 初始化时调用）。
+// （webkit.NewWebView 初始化时调用）。
 func SetCanvasImageSourceHook(fn func(el *dom.Element) *graphics.SkiaImage) {
 	canvasImageSourceHook = fn
+}
+
+// imageNaturalSizeHook 由 webkit 包注入：返回 <img> 元素**资源的固有尺寸**，
+// 覆盖「根本不是位图」的资源——典型是 SVG 矢量图（固有尺寸来自 width/height
+// 或 viewBox，而不是解码位图）。位图仍走 canvasImageSourceHook，本 hook 只在
+// 位图尺寸不可用时被查询。
+var imageNaturalSizeHook func(el *dom.Element) (float64, float64, bool)
+
+// SetImageNaturalSizeHook 注入 <img> 元素 → 资源固有尺寸 的解析函数
+// （webkit.NewWebView 初始化时调用）。
+func SetImageNaturalSizeHook(fn func(el *dom.Element) (float64, float64, bool)) {
+	imageNaturalSizeHook = fn
 }
 
 // canvasCtxCache 缓存每个 canvas 元素的 2D 上下文（getContext 幂等：同一
@@ -144,6 +156,31 @@ func imgPixelDim(el *dom.Element, width bool) float64 {
 	return float64(img.Height())
 }
 
+// imgNaturalDim 返回 <img> 的**固有尺寸**（naturalWidth/naturalHeight 语义）：
+// 优先解码位图尺寸，位图不可用时（典型：SVG 矢量资源——它不进位图解码缓存）
+// 回退到宿主注入的 imageNaturalSizeHook，两者都拿不到才是 0。
+//
+// ★ 此前 naturalWidth/naturalHeight 直接用 imgPixelDim：SVG 的 <img> 因此恒
+// 返回 0，complete 也恒 false（见 lazyelement.go），依赖图片加载状态的懒加载
+// / 占位 / 骨架屏逻辑对 SVG 图标全部走错分支（浏览器同页面同视口为 24/120 等
+// 真实值）。
+func imgNaturalDim(el *dom.Element, width bool) float64 {
+	if d := imgPixelDim(el, width); d > 0 {
+		return d
+	}
+	if imageNaturalSizeHook == nil || el == nil {
+		return 0
+	}
+	w, h, ok := imageNaturalSizeHook(el)
+	if !ok {
+		return 0
+	}
+	if width {
+		return w
+	}
+	return h
+}
+
 // canvas2DGetContext 构建（或取缓存）<canvas> 元素的 2D 上下文。
 func canvas2DGetContext(rt *jsc.Interpreter, el *dom.Element) jsc.JSValue {
 	if el == nil {
@@ -183,23 +220,23 @@ type geomSubpath struct {
 
 // canvas2DSaved 是 save() 时快照的 JS 样式属性。
 type canvas2DSaved struct {
-	fillStyle  jsc.JSValue
-	strokeStyle jsc.JSValue
-	lineWidth  float64
-	miterLimit float64
-	globalAlpha float64
-	shadowBlur float64
-	shadowOffsetX float64
-	shadowOffsetY float64
-	lineDashOffset float64
-	lineCap   string
-	lineJoin  string
-	font      string
-	textAlign string
-	textBaseline string
+	fillStyle                jsc.JSValue
+	strokeStyle              jsc.JSValue
+	lineWidth                float64
+	miterLimit               float64
+	globalAlpha              float64
+	shadowBlur               float64
+	shadowOffsetX            float64
+	shadowOffsetY            float64
+	lineDashOffset           float64
+	lineCap                  string
+	lineJoin                 string
+	font                     string
+	textAlign                string
+	textBaseline             string
 	globalCompositeOperation string
-	shadowColor string
-	lineDash []float32
+	shadowColor              string
+	lineDash                 []float32
 }
 
 // ─── JS 属性读取 helpers ────────────────────────────────────────────
@@ -913,23 +950,23 @@ func buildCanvas2DCtx(rt *jsc.Interpreter, el *dom.Element, bm *rendering.Canvas
 				return jsc.Undefined()
 			}
 			snap := canvas2DSaved{
-				fillStyle:                   propOf(obj, "fillStyle"),
-				strokeStyle:                 propOf(obj, "strokeStyle"),
-				lineWidth:                   c2dNum(obj, "lineWidth", 1),
-				miterLimit:                  c2dNum(obj, "miterLimit", 10),
-				globalAlpha:                 c2dNum(obj, "globalAlpha", 1),
-				shadowBlur:                  c2dNum(obj, "shadowBlur", 0),
-				shadowOffsetX:               c2dNum(obj, "shadowOffsetX", 0),
-				shadowOffsetY:               c2dNum(obj, "shadowOffsetY", 0),
-				lineDashOffset:              c2dNum(obj, "lineDashOffset", 0),
-				lineCap:                     c2dStr(obj, "lineCap", "butt"),
-				lineJoin:                    c2dStr(obj, "lineJoin", "miter"),
-				font:                        c2dStr(obj, "font", "10px sans-serif"),
-				textAlign:                   c2dStr(obj, "textAlign", "start"),
-				textBaseline:                c2dStr(obj, "textBaseline", "alphabetic"),
-				globalCompositeOperation:    c2dStr(obj, "globalCompositeOperation", "source-over"),
-				shadowColor:                 c2dStr(obj, "shadowColor", "rgba(0, 0, 0, 0)"),
-				lineDash:                    append([]float32(nil), s.dash...),
+				fillStyle:                propOf(obj, "fillStyle"),
+				strokeStyle:              propOf(obj, "strokeStyle"),
+				lineWidth:                c2dNum(obj, "lineWidth", 1),
+				miterLimit:               c2dNum(obj, "miterLimit", 10),
+				globalAlpha:              c2dNum(obj, "globalAlpha", 1),
+				shadowBlur:               c2dNum(obj, "shadowBlur", 0),
+				shadowOffsetX:            c2dNum(obj, "shadowOffsetX", 0),
+				shadowOffsetY:            c2dNum(obj, "shadowOffsetY", 0),
+				lineDashOffset:           c2dNum(obj, "lineDashOffset", 0),
+				lineCap:                  c2dStr(obj, "lineCap", "butt"),
+				lineJoin:                 c2dStr(obj, "lineJoin", "miter"),
+				font:                     c2dStr(obj, "font", "10px sans-serif"),
+				textAlign:                c2dStr(obj, "textAlign", "start"),
+				textBaseline:             c2dStr(obj, "textBaseline", "alphabetic"),
+				globalCompositeOperation: c2dStr(obj, "globalCompositeOperation", "source-over"),
+				shadowColor:              c2dStr(obj, "shadowColor", "rgba(0, 0, 0, 0)"),
+				lineDash:                 append([]float32(nil), s.dash...),
 			}
 			s.saved = append(s.saved, snap)
 			return jsc.Undefined()
@@ -2453,4 +2490,3 @@ func canvasObjNum(o *jsc.JSObject, key string, def float64) float64 {
 	}
 	return def
 }
-

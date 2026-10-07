@@ -96,6 +96,7 @@ func loadBackgroundSVG(url string) *svgDocument {
 //   - ModeBrowser / AllowAll：`file://` 与相对路径都可渲染（= Edge 行为）；
 //   - Toolkit + DenyExternal（默认）：仍拒（安全默认不变，TC-M-902）；
 //   - Toolkit + AllowHostResolved：仅放行宿主 resolver 提供的引用。
+//
 // 无 loader（独立渲染测试、dev 探针、纯 rendering 用法）时保留既有的
 // 「本地路径直接读」行为。
 //
@@ -105,26 +106,40 @@ func loadBackgroundSVG(url string) *svgDocument {
 func loadBackgroundSVGWith(url string, loader ImageResourceLoader) *svgDocument {
 	svgBackgroundCache.mu.Lock()
 	defer svgBackgroundCache.mu.Unlock()
-	if d, ok := svgBackgroundCache.docs[url]; ok {
-		return d
-	}
+	// ★ 缓存查询必须放在**资源策略门禁之后**（见 default 分支）：解析结果缓存是
+	//   包级全局的、跨 WebView 与配置共享。若在门禁之前命中缓存，一个宽松配置
+	//   （ModeBrowser）解析过的 SVG 会让后续严格配置（Toolkit+DenyExternal）
+	//   绕过门禁拿到它——实测探针里 `DenyExternal × rel` 的 SVG 因此呈现
+	//   「加载/几何/契约 ✅ 而绘制 ❌」的自相矛盾状态（绘制走门禁路径被拒，
+	//   而 IDL/事件走本函数的缓存路径拿到了文档）。
+	//   `data:` 与策略无关（自包含、无条件放行），在它自己的分支里查缓存。
 	var text string
+	// fallback 是 QueryEscape 风格的兼容解码结果（见下方回退说明），仅当首选
+	// 解码结果解析不出 SVG 时才会被使用。
+	var fallback string
 	cacheKey := url
 	low := strings.ToLower(url)
 	switch {
 	case strings.HasPrefix(low, "data:image/svg+xml"):
 		// data: 自带内容、不经外部通道 → 与资源策略解耦，两种模式都放行。
+		if d, ok := svgBackgroundCache.docs[url]; ok {
+			return d
+		}
 		if strings.Contains(low, ";base64,") {
 			if b, ok := decodeDataURI(url); ok {
 				text = string(b)
 			}
 		} else if i := strings.Index(url, ","); i >= 0 {
+			// ★ RFC 2397：data URI 的载荷是 **percent-编码文本**，`+` 保持字面，
+			//   **不是**空格（那是 form-encoding 的约定）。此前用 QueryUnescape，
+			//   SVG 内容里字面出现的 `+`（如 transform="translate(+1,2)"、
+			//   path 数据里的 `M0+0`）会被吃成空格 → 图形画错或整段解析失败。
+			//   首选按 URL 路径规则解码（与布局侧 readResource 一致）；仅当结果
+			//   解析不出 SVG 时，才回退 query 规则，兼容按 QueryEscape 生成的
+			//   URI（既有测试与历史页面正是这种写法）。
 			raw := url[i+1:]
-			if dec, err := neturl.QueryUnescape(raw); err == nil {
-				text = dec
-			} else {
-				text = raw
-			}
+			text = decodeDataURIText(raw)
+			fallback = decodeQueryURIText(raw)
 		}
 	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"),
 		strings.HasPrefix(low, "//"):
@@ -161,14 +176,24 @@ func loadBackgroundSVGWith(url string, loader ImageResourceLoader) *svgDocument 
 				return nil
 			}
 			text = string(b)
-		} else if b, err := os.ReadFile(localFilePath(ref)); err == nil {
-			text = string(b)
+		} else {
+			// 无 loader（独立渲染测试 / 纯 rendering 用法）：沿用「本地路径直接读」，
+			// 缓存键就是原样引用。
+			if d, ok := svgBackgroundCache.docs[cacheKey]; ok {
+				return d
+			}
+			if b, err := os.ReadFile(localFilePath(ref)); err == nil {
+				text = string(b)
+			}
 		}
 	}
 	if text == "" {
 		return nil
 	}
 	doc := parseSVGText(text)
+	if doc == nil && fallback != "" && fallback != text {
+		doc = parseSVGText(fallback)
+	}
 	if doc == nil {
 		return nil
 	}
@@ -176,8 +201,29 @@ func loadBackgroundSVGWith(url string, loader ImageResourceLoader) *svgDocument 
 	return doc
 }
 
+// decodeDataURIText 按 RFC 2397 解码非 base64 的 data URI 载荷：载荷是
+// **percent-编码文本**，`+` 保持字面（不是空格——那是 form-encoding 的约定，
+// 见 decodeQueryURIText）。解码失败时原样返回（载荷本就是明文的容错路径）。
+func decodeDataURIText(raw string) string {
+	if dec, err := neturl.PathUnescape(raw); err == nil {
+		return dec
+	}
+	return raw
+}
+
+// decodeQueryURIText 按 form-encoding 规则（`+` = 空格）解码 data URI 载荷，
+// 只用于「percent 解码结果解析不出 SVG」时的兼容回退：返回空串表示无可用回退
+// （解码失败或与原文本相同）。
+func decodeQueryURIText(raw string) string {
+	dec, err := neturl.QueryUnescape(raw)
+	if err != nil || dec == raw {
+		return ""
+	}
+	return dec
+}
+
 // localFilePath 把引用转成本地文件路径：`file:///F:/dir/x.svg` → `F:/dir/x.svg`
-//（Windows 盘符形式，URL 的 Path 带前导斜杠），其余（相对/绝对路径）原样
+// （Windows 盘符形式，URL 的 Path 带前导斜杠），其余（相对/绝对路径）原样
 // 返回。与 webkit.FileURLPath 同一套规范化，但渲染层不能反向依赖 webkit。
 func localFilePath(ref string) string {
 	if !strings.HasPrefix(strings.ToLower(ref), "file://") {
@@ -455,6 +501,66 @@ func RequestImageLoad(url string, loader ImageResourceLoader) {
 	go fetchImageViaLoaderAsync(url, loader)
 }
 
+// defaultSVGWidth/Height 是 SVG 固有尺寸缺失时的默认值（CSS Images §3 的
+// 替换元素默认尺寸 300×150，比例 2:1）。
+const (
+	defaultSVGWidth  = 300
+	defaultSVGHeight = 150
+)
+
+// SVGReferenceIntrinsicSize 返回 SVG 引用的**固有尺寸**（对应
+// HTMLImageElement 的 naturalWidth/naturalHeight）：width/height 属性优先，
+// 缺失时用 viewBox；两者都没有时按 CSS 默认尺寸算法取 300×150（只有一边
+// 有效时用 2:1 比例补齐另一边）。
+//
+// ok=false 表示「这个引用不是可渲染的 SVG」：栅格图、远端引用（走异步通道）、
+// 被策略拒绝、解析失败。宿主据此把 SVG 与位图两条路分开——SVG 是矢量资源，
+// 不进位图解码缓存，所以它的固有尺寸只能这样回答。
+func SVGReferenceIntrinsicSize(url string, loader ImageResourceLoader) (float64, float64, bool) {
+	if !isSVGReferenceURL(url) {
+		return 0, 0, false
+	}
+	doc := loadBackgroundSVGWith(url, loader)
+	if doc == nil {
+		return 0, 0, false
+	}
+	w, h := svgIntrinsicSize(doc)
+	switch {
+	case w <= 0 && h <= 0:
+		w, h = defaultSVGWidth, defaultSVGHeight
+	case w <= 0:
+		w = h * defaultSVGWidth / defaultSVGHeight
+	case h <= 0:
+		h = w * defaultSVGHeight / defaultSVGWidth
+	}
+	return w, h, true
+}
+
+// IsSVGReferenceReady 报告某个引用是否为**已经可以渲染**的 SVG 矢量资源。
+//
+// 宿主（webkit）用它补派发 `<img>` 的 load：SVG 不进位图解码缓存，
+// IsImageReady 对它恒为假——照位图逻辑走会变成「Skia 解不出位图 → error」，
+// 而它其实画得出来。浏览器语义是「能渲染即加载成功」。
+func IsSVGReferenceReady(url string, loader ImageResourceLoader) bool {
+	_, _, ok := SVGReferenceIntrinsicSize(url, loader)
+	return ok
+}
+
+// isSVGReferenceURL 报告引用是否为「本地可判定的 SVG」：`data:image/svg+xml`
+// 内联，或本地/相对路径的 `.svg`/`.svgz`。远端引用（http(s)/协议相对）恒
+// false——它们由异步取字节通道负责，不能被同步判定（见 loadBackgroundSVGWith
+// 对 paint 线程阻塞的说明）。
+func isSVGReferenceURL(url string) bool {
+	low := strings.ToLower(url)
+	if strings.HasPrefix(low, "data:") {
+		return strings.HasPrefix(low, "data:image/svg+xml")
+	}
+	if isRemoteReference(url) {
+		return false
+	}
+	return isSVGReference(url)
+}
+
 // LoadImageSync 是 loadBackgroundImage 的导出包装（供 webkit 桥按 <img>
 // 元素的 src 主动解码：canvas 2D drawImage 的图片源）。
 func LoadImageSync(url string) *DecodedImage {
@@ -644,10 +750,10 @@ func fetchBackgroundImageAsync(url string) {
 type bgSizeMode int
 
 const (
-	bgSizeAuto    bgSizeMode = iota // original pixel size
-	bgSizeCover                     // scale to cover the box (crop overflow)
-	bgSizeContain                   // scale to fit inside the box (letterbox)
-	bgSizeExplicit                  // width/height lengths or percentages
+	bgSizeAuto     bgSizeMode = iota // original pixel size
+	bgSizeCover                      // scale to cover the box (crop overflow)
+	bgSizeContain                    // scale to fit inside the box (letterbox)
+	bgSizeExplicit                   // width/height lengths or percentages
 )
 
 // parseBackgroundSize parses a background-size value. Returns the mode and,
