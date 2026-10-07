@@ -504,6 +504,24 @@ go test ./webkit/... -count=1                 REM 分别在 ../wb-ui-head 与工
 **判定 pre-existing**：三项在 HEAD 与工作区的失败用例名、失败文件与行号、断言值完全一致。
 （另有 4 个 webkit 级失败只在 HEAD 侧的 goskia 版本上出现/消失的项，本表只列上述 3 个共同项。）
 
+#### 三条失败的逐条侦查（2026-10-07，Q4-B：只读定位，**未修**）
+
+复跑入口（本轮实跑，已固化为脚本子命令）：
+
+```bat
+MSYS_NO_PATHCONV=1 cmd /c "cgo_env.bat test-all"
+REM → ok 28 包 + 1 FAIL(wb-ui/webkit，3 用例) + 67 无测试 = 96 包，EXIT=1（2026-10-07）
+```
+
+| # | 测试（文件:行） | 失败断言（本轮输出） | 根因假设 | 修复风险 | 建议选项 |
+|---|---|---|---|---|---|
+| 1 | `TestButtonTextVerticalCenter`<br>（`webkit/button_center_test.go:82`） | `glyph vertical center 19.0 too far from button center 21 (range 19.5..22.5)`；同日志 `glyph white pixels=6 y-range=[19,19]` | 22×22 按钮里的 `−`（U+2212）字形**很扁**：阈值 >200 只命中**一行**像素，于是「ink 中心 19.0」对基线/字体度量的**亚像素差**极度敏感（差 0.5px 就越界）。属**断言脆性**（测量口径对扁字形不稳），非布局错误——同文件用大字形的 `TestButtonTextCJK` 通过 | 低（改测试口径）；中高（改引擎的 button 垂直居中会波及全局布局） | **A：改测量口径**（用软阈值 >100 的中心，或改用大字形样本）＞ C：记为已知边界。**不建议**动引擎布局 |
+| 2 | `TestCM6RangeMeasurementMatchesSkia`<br>（`webkit/cm6_measure_skia_test.go:99`） | `getClientRects height 14.8281 != Skia ascent+descent 13.0000` | **口径不一致**（非引擎缺陷）：`14.8281 / 13.0 = 1.1406`，正是 Segoe UI `line-height: normal` 的行距系数 ⇒ 引擎的 normal 行高**含 lineGap**，而断言只取 `GlobalFontAscent + GlobalFontDescent`（**不含** lineGap） | 高（改引擎 normal 行高会改变**所有**页面行高，且很可能**反而偏离**浏览器） | **A：修断言口径**（改为与浏览器一致的 normal 行高，或显式加 lineGap）。**不建议**动引擎 |
+| 3 | `TestCheckedStateInvalidatesStyle`<br>（`webkit/formstate_invalidation_test.go:75/91`） | `引擎 SetChecked(true) 后 #c color="rgb(1, 2, 3)"，want "rgb(9, 9, 9)"`；`JS el.checked=true 后 #c color=%q，want "rgb(9, 9, 9)"` | **`:checked` 匹配读 attribute 而非 IDL 状态**：① `in.SetChecked(true)`（引擎内部）与 ② `el.checked = true`（IDL setter）都只改 **IDL 状态**、不写 `checked` attribute ⇒ `:checked` 不匹配 ⇒ 样式不失效；③ `setAttribute('checked', …)` 路径**通过**（第 103 行断言无报错）。三条路径的通过/失败分布恰好指向这一根因。`getComputedStyle` 走 `computedStyleFor` 的自建级联（见下节 §二），其 `:checked` 判定同样须看 IDL 状态 | 中（`:checked` 判定面 + 失效范围必须覆盖**兄弟/后继组合器** `input:checked + .track::after`，漏掉兄弟会让滑块停在旧样式） | **A：小范围修**（`:checked` 判定同时读 `html5.InputElement.Checked()`，状态变更时按既有 invalidation 路径清兄弟子树）＞ B：挂账 |
+
+- 三项均有上表（§一）的 HEAD worktree 对比证据 ⇒ **均为 pre-existing，不是本计划引入**；
+- 本轮**未修任何一项**（Q4-B 只侦查）；Q4 的「直接修」（选项 C/D）需另行拍板。
+
 ### 二、本轮修掉的缺陷：getComputedStyle 的 @media 判定丢失「元素归属」
 
 **症状**：新增用例 `TestDeviceScaleFactor` 单独 `-run` 跑通过，与同包其他「建 WebView」的用例

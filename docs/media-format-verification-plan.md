@@ -393,7 +393,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-601 | `<audio src=wav/mp3/ogg/m4a>` | 读 `readyState/duration/paused` | **基线**全 0/NaN → L0；**目标**（阶段 3）：`rs=4`、`duration≈1s` → L1 |
 | TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | ✅ **达成（2026-10，A3）**：时钟由**输出位置**驱动——终态到 1.00s（真播完），采样点 `currentTime` **不超前**于「该会话首块 PCM 交付以来经过的时间」。定点口径与设备启动延迟的处置见 §9.6；严格断言在引擎单测 `TestAudioSessionDrivesCurrentTime` |
 | TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | **基线**不存在（无音频后端）；**目标**（阶段 3 若含 WebAudio）存在 |
-| TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音本机无设备 → 如实记 `mismatch`（不伪装为通过） |
+| TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音按统一口径如实记录（见 §9.6「判据 B 跳过口径」）——**无设备/无候选 → `SKIP(no-loopback)`**，有候选但录音失败 → `SKIP(loopback-failed)`，录到但主峰不符 → `mismatch`。三者都是「跳过/未通过」，**都不伪装为通过** |
 
 > **决策 4 落点**：G5/G6 基线全部为 L0；因已确认「要真实播放」，本节即阶段 3 的**验收清单**——验收标准为「目标」列全部达成。
 
@@ -441,7 +441,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | 宿主工装 | `cmd/psai`（`-audit` / `-verify` / `-png` / `-w` / `-h`） | 无头加载 + EvalJS + `wv.Render()` 出图 + 交互模拟 | 见 `.pair/project.md` |
 | 视频帧自检 | `cmd/psai` 的 `mediaFrameSelfCheck`（新） | 判据 A1-1/2/3：无 poster 出画面 / poster 优先 / seek 后让位；期望像素由**独立 ffmpeg 抽帧**给出（不手写），取样点做 `elementFromPoint` 遮挡校验 | `./_temp/psai.exe -verify -png ""` |
 
-环境前提：`CGO_ENABLED=1` + `PATH=F:\syproject\goskia\bin;%PATH%`；样本生成需 **PIL 11.3.0** 与 **ffmpeg**（本机均已具备）。
+环境前提：见 §6.4「环境前提（写实命令）」——`CGO_ENABLED=1` + `GOWORK=off` + `PATH` 加 goskia 模块目录下的
+`skia/lib/windows_amd64`（旧文这里写的 `PATH=F:\syproject\goskia\bin` 是**本地 checkout** 的路径，在
+`GOWORK=off`（按 go.mod 解析，走 module cache）下不适用，已订正）；样本生成需 **PIL 11.3.0** 与 **ffmpeg**（本机均已具备）。
 
 ### 6.2 待固化的工具（落地计划的一部分）
 
@@ -466,6 +468,35 @@ webkit/mode.go:66                             allowsExternalURLs()
 ### 6.4 触发与执行方式（决策 6 修订：不入 CI 门禁）
 
 **决策 6（2026-10 修订）**：媒体验证**不纳入 CI 自动门禁**——CI 属 git 自动 CI 范畴，本方案不写 CI 接线脚本、不把验证接进 `go test`/CI 门禁。交付物是**可复现的按需执行工装**：由开发者手动触发。
+
+**环境前提（写实命令，2026-10-07 本机验证可复现）**
+
+本仓库的 `go` 命令有**两个硬约束**，缺一条即直接报错（不是「偶尔慢」）：
+
+```bash
+export CGO_ENABLED=1            # Windows 默认 0 → 不设则所有 cgo 包不参与编译
+export GOWORK=off               # 父目录 go.work 的 use 列表含不存在的 ./GWui
+export SKIA_DLL_DIR="$(GOWORK=off go list -m -f '{{.Dir}}' github.com/hoonfeng/goskia)/skia/lib/windows_amd64"
+export PATH="$SKIA_DLL_DIR:$PATH"   # libSkiaSharp.dll（链接与运行都要）
+go build ./...                  # → 退出码 0
+go vet ./cmd/psai/              # → 退出码 0
+go test -count=1 $(go list ./... | grep -v 'dev/suites/consistency')
+```
+
+- **`GOWORK=off` 为什么必需**：`F:\syproject\go.work` 的 `use` 里有 `./GWui`，而该目录已无 `go.mod`，
+  于是 workspace 模式**任何** go 命令都直接失败（`cannot load module ..\GWui listed in go.work file`）；
+  下面用来定位 goskia 的 `go list -m` 同样必须继承这个变量（这正是 `cgo_env.bat` 原先会 WARN 的原因）。
+- **`GOWORK=off` 之后 goskia 从 go.mod 解析到 module cache**（当前 `v0.0.0-20261006194810-5015494aa077`，
+  解包路径 `F:\MyGolangPrograms\pkg\mod\github.com\hoonfeng\goskia@v0.0.0-...`），该版本含 `skia.Surface`，
+  因此编译通过。⚠️ **订正**：本计划旧文记「`GOWORK=off` 会报 `undefined: skia.Surface`」——那是更早的
+  goskia 版本留下的**过期结论**（当时 wb-ui 已用 `skia.Surface` 而 go.mod 里的 goskia 还没有它），
+  升级依赖后已不成立，此处按实测改写。
+- **一键封装**：`cgo_env.bat`（2026-10-07 起**强制 `set GOWORK=off`**，并新增 `test-all` 子命令）。
+  `cgo_env.bat build` → `go build ./...`；`cgo_env.bat test-all` → 除 `dev/suites/consistency`
+  外的全量 `go test -count=1`。在 git-bash 中调用写
+  `MSYS_NO_PATHCONV=1 cmd /c "cgo_env.bat test-all"`（**勿**把 `MSYS_NO_PATHCONV=1` 与 `//c` 混用，
+  否则参数被字面传递、cmd 进交互模式并挂住等 stdin）。
+- **样本生成**（与上面独立）：`python dev/media/gen_samples.py --out dev/media/samples`，需 Pillow + ffmpeg。
 
 **执行方式**：
 
@@ -629,7 +660,72 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
      找不到」。根因是取证时用了 bash 的 `$ProgramFiles(x86)`——该变量名在 bash 中非法，会展开成
      字面 `(x86)`，被 stat 的路径自然不存在，于是误判成「本机没装 Edge」。改用 `cmd /c where msedge`
      或 python 读环境变量即可证伪；此处已按实测改写。
-2. 报告等级与 §8.1「修法/路线」的目标一致，且**不低于 Edge 等级**（如 U1 修复后：PNG@Toolkit+DenyExternal@data: ≥ L3，且 = Edge 等级）；
+    - ★ **订正（2026-10-07 晚，Q1-B）**：本条上文的「双端对照**至今从未真正执行**」**已作废**——
+      当日晚已**实际执行** `cmd/psai -media -media-edge`（有效 Edge 命中，见第 2 条「Edge 对照实测」）。
+2. 报告等级与 §8.1「修法/路线」的目标一致，且**不低于 Edge 等级**（如 U1 修复后：PNG@Toolkit+DenyExternal@data: ≥ L3）。
+
+   **Edge 对照实测（2026-10-07 晚，Q1-B，「建议」列方案 B）**
+
+   - **执行**：`cmd/psai -media -media-edge`（本机 Edge 命中 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`）。
+     产物 `dev/media/out/edge-matrix.png`（45,607 字节，1440×1008，与本项目矩阵截图同尺寸）——**本地产物，不入库**（决策 5）。
+   - **工具侧现状（必须说清）**：`runEdgeComparison`（`cmd/psai/mediaprobe.go:1885-1901`）**只把矩阵页交给
+     Edge 截一张图，不做任何等级判定**；日志原文即「已采集 …（等级对照需人工复核或后续扩展）」。
+     因此 **「Edge 等级」列目前并不存在**，报告里也没有 Edge 行（`grep -c Edge dev/media/out/report.md` → 0）。
+     本条的逐格对照由**程序化像素比对**补上（下述），"不低于"的结论因此是**实测的**、不是推定的。
+   - **逐格对照结果（96 格，程序化）**：
+
+     | 分类 | 格数 | 说明 |
+     |---|---|---|
+     | 两边都有内容 | 84 | `img` 72 + `video` 12 |
+     | **Edge 有内容、本项目空白** | **0** | — |
+     | **本项目有内容、Edge 空白** | **0** | — |
+     | 两边都空白 | 12 | **全部是 `<audio>` 元素**（不可见元素，非能力差异） |
+
+     84 个"两边都有内容"的格中，非白像素比例的**最大绝对差 0.010**（video 首帧 `0.905 vs 0.915` 一类亚像素差），
+     **全部 < 0.10**。⇒ **本项目 Browser 配置与 Edge 在 96 格上逐格一致（0 差异），"不低于 Edge"成立。**
+     对照的判定口径是"有内容/空白 + 内容量"，不是逐像素相等（两端的抗锯齿/取整必然有亚像素差）；
+     若要升级为"Edge 等级列"，属于 `runEdgeComparison` 的功能扩展（本轮**未做**）。
+   - **对照脚本（本地产物，不入库；正文如下，供第三方复现）**：
+
+     ```python
+     import json, re
+     from PIL import Image
+     base = 'dev/media/out/'
+     g = json.load(open(base + 'geom-Browser.json', encoding='utf-8'))
+     cells = g['still']                    # 96 个元素：id/tag/x/y/w/h
+     html = open('dev/media/samples/_matrix.html', encoding='utf-8').read()
+     idmap = {}
+     for m in re.finditer(r'<(img|video|audio)\b[^>]*>', html):
+         tag, s = m.group(1), m.group(0)
+         mid, msrc = re.search(r'id="([^"]+)"', s), re.search(r'src="([^"]+)"', s)
+         if mid:
+             idmap[mid.group(1)] = (tag, msrc.group(1) if msrc else '')
+     our = Image.open(base + 'matrix-Browser.png').convert('RGB')
+     edge = Image.open(base + 'edge-matrix.png').convert('RGB')
+
+     def ratio(im, x, y, w, h):             # 非白像素比例（内缩 2px 避开边框）
+         x0, y0 = max(0, x + 2), max(0, y + 2)
+         x1, y1 = min(im.width, x + w - 2), min(im.height, y + h - 2)
+         if x1 <= x0 or y1 <= y0:
+             return 0.0
+         n = c = 0
+         for r, gg, b in im.crop((x0, y0, x1, y1)).getdata():
+             n += 1
+             if not (r > 240 and gg > 240 and b > 240):
+                 c += 1
+         return c / max(1, n)
+
+     rows = [(cell['id'],) + idmap.get(cell['id'], ('?', '')) +
+             (ratio(our, cell['x'], cell['y'], cell['w'], cell['h']),
+              ratio(edge, cell['x'], cell['y'], cell['w'], cell['h'])) for cell in cells]
+     print('A. Edge 有内容而本项目空白:', [r for r in rows if r[4] > 0.05 and r[3] < 0.05])
+     print('B. 本项目有内容而 Edge 空白:', [r for r in rows if r[3] > 0.05 and r[4] < 0.05])
+     print('C. 两边都空白:', [(r[0], r[1]) for r in rows if r[3] < 0.05 and r[4] < 0.05])
+     both = [r for r in rows if r[3] > 0.05 and r[4] > 0.05]
+     print('D. 两边都有内容: %d / 最大绝对差 %.3f' % (len(both), max(abs(r[3] - r[4]) for r in both)))
+     ```
+
+     实跑输出（2026-10-07）：`A: []`、`B: []`、`C: 12 格全为 audio`、`D: 84 / 最大绝对差 0.010`。
 3. 截图经 `read_image` 人眼复核；
 4. 单测作为**回归底线**：不得新增失败（既有 3 个 pre-existing 失败见 `docs/TECH_DEBT.md`），
    **不受本工装影响**；四配置渲染为**本机按需**执行（决策 6 修订：不入 CI 门禁）。
@@ -645,6 +741,9 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
        直接报错；`go list` 也必须继承该变量；
      - 排除 `dev/suites/consistency`：该套件会启动真实 Edge 对照并长时间阻塞，
        故**不**放进默认 `go test ./...`（这也是「默认 `go test ./...`」在本机跑不完的原因）。
+     - **已固化为入口（2026-10-07，Q6-D）**：`cgo_env.bat test-all`（脚本内**强制 `GOWORK=off`**、
+       自动定位 `SKIA_DLL_DIR`、排除 `consistency`）。本轮实跑：**ok 28 包 + FAIL 1 包
+       （`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包，EXIT=1**——与上述基线**逐字一致，失败未新增**。
    - ⚠️ **勘误**：本行旧文记「保持全绿（当前 23 包）」——两处均过期：「23 包」自 `896c670`
      起未更新（实测 96 包 / 28 ok / 1 FAIL），且当前**并非全绿**（webkit 3 个 pre-existing）。
 
@@ -760,7 +859,17 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
   `data:` 来源 16 格当时停在 **L1**
   （宿主只认路径 → 内联字节给不了 ffmpeg）——**2026-10 续做已闭环为 L4，见 §9.8**。
 - **判据 A**：PCM **49041 帧**、主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**（四个格式 × 四配置一致）。
-- **判据 B**（环回录音）：本机**无环回设备** → 报告如实记 `mismatch`（不伪装为通过）。
+- **判据 B 跳过口径（2026-10-07 统一）**：环回录音是**可选外部复核**，任何一步不可用都
+  「如实记录、不伪装为通过」，状态串固定三选一（与 `cmd/psai/mediaaudio_probe.go:318-353`
+  的 `probeLoopback` 分支一一对应）：
+  - 无 ffmpeg / 无环回候选设备 → **`SKIP(no-loopback)`**；
+  - 有候选但录音失败（设备被独占/不可用）→ `SKIP(loopback-failed)`；
+  - 录到声音但主峰不符 → `mismatch`。
+  **本机 2026-10-07 实测落在第三种**：候选设备 `Voicemeeter Out B3 (VB-Audio Voicemeeter VAIO)`
+  录音成功，主峰 **51.3 Hz**（期望 440Hz、幅度 0.066）——该虚拟声卡的输入未路由到系统输出，
+  因此 `mismatch` 是**如实记录**，不是通过。★ 旧文这里写作「本机**无环回设备** → `mismatch`」，
+  与本次实测（本机**有**候选设备）及代码分支（无设备走 `SKIP(no-loopback)`）**两处都不符**，
+  已按实测改写。
 - **TC-M-602 定点**：`play()` 后 `currentTime` 随**输出位置**推进、终态 1.00s（真播完）。
   ★ **定点口径**：各格以**自己首块 PCM 交付的时刻**为零点，判据 =「采样点 `currentTime` **不超前**于该零点以来
   经过的时间，且终态到达 `duration`」。为什么不要求「严格等于经过时间」：设备从收到首块到真正出声有
@@ -774,6 +883,50 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
 **仍未达成**：TC-M-603（`AudioContext` / `decodeAudioData`）本轮不做，保持缺口（§3.4 D12）。
 `data:` 来源的 L1 缺口已在本轮续做中闭环（见 §9.8）。
+
+#### WebAudio 最小面侦查（2026-10-07，Q2-D：**只侦查，未实施**）
+
+针对 §10 Q2 的「B 最小面（构造器 + `decodeAudioData` 出 buffer，特性检测可过）」，只读侦查如下。
+
+**验收口径（"最小面"到底要达成什么）**
+- **特性检测过**：`typeof AudioContext !== 'undefined'`（或 `'AudioContext' in window`）为真——**全局对象上有该构造器即可**，不需要任何音频图；
+- **最小可用**：`new AudioContext()` → `ctx.decodeAudioData(arrayBuffer)` → then 拿到 `AudioBuffer`，
+  且 `sampleRate` / `length` / `numberOfChannels` / `duration` / `getChannelData(0)` 可用。
+
+**现状（全仓只读核实）**
+- `AudioContext` / `decodeAudioData` / `AudioBuffer` / `createGain` 在 **Go 侧零命中** ⇒ WebAudio 完全未建模。
+- 可复用的既有件（这正是"最小面量级不高"的原因）：
+
+  | 能力 | 现有落点 | 对 WebAudio 的作用 |
+  |---|---|---|
+  | 「引擎 → 宿主」函数注入模式 | `bindings.MediaMetadataResolver`（`engine/js/bindings/media_element.go:62`）、`rendering.SetAudioSessionSource`（`engine/rendering/audioframe.go:97`） | 同构新增一个 `bindings.AudioDecoder` 即可 |
+  | 宿主 ffmpeg 解码 | `app/mediaaudio.go`（`-f s16le`）、`app/audio_spectrum.go`（`PCMToMono`） | 抽成「字节 → float32 样本」 |
+  | 内存字节落盘 | `app/mediadataurl.go:42`（`mediaDataURLToFile`） | `data:` URL 已有「内存字节 → 文件 → ffmpeg」先例 |
+  | Promise | goja 原生 + `in.ResolvePromise` / `in.RejectPromise`（`engine/js/bindings/fullscreen.go` 有先例） | `decodeAudioData` 的 Promise 形态现成 |
+  | 构造器注册 | `engine/js/bindings/domctors.go:770`（`registerExtraElementCtors`，注册 `Audio`/`Option`） | `AudioContext` 照抄该形态 |
+  | ArrayBuffer 读取 | goja 原生（`engine/js/goja/builtin_typedarrays.go`） | `decodeAudioData(arrayBuffer)` 可取字节 |
+
+- **唯一真缺口**：`engine/js/jsc` 抽象层**没有"创建 Float32Array"的公开方法**（只有 `goja_adapter.go:299` 内部的
+  `NewArrayBuffer`）。`AudioBuffer.getChannelData(i)` 必须返回 `Float32Array`，故需在 jsc 抽象层补一个
+  typed-array 构造能力（或经 runtime 求值 `new Float32Array(n)`）。
+
+**改动清单（最小面，估算）**
+
+| 层 | 文件（新/改） | 内容 | 量级 |
+|---|---|---|---|
+| jsc 抽象 | `engine/js/jsc/backend.go`、`backend_goja.go`（改） | 新增 `NewFloat32Array` / `NewArrayBuffer` 形态 | ~60–100 行 |
+| 引擎绑定 | `engine/js/bindings/webaudio.go`（新） | `AudioContext`（构造器 + `sampleRate`/`state`/`currentTime`/`close`）、`decodeAudioData`（Promise + 回调双形态）、`AudioBuffer`（`sampleRate`/`length`/`duration`/`numberOfChannels`/`getChannelData`）、全局挂载；注入点 `var AudioDecoder func([]byte) (AudioDecoded, bool)` | ~250–350 行 |
+| 宿主 | `app/webaudio.go`（新）+ `app/host.go` 接线 | `AudioDecoder`：内存字节 → 临时文件 → ffmpeg `-f f32le` → `[]float32`；`InstallWebAudio(wv)` 注册 | ~120–180 行 |
+| 单测 | `engine/js/bindings/webaudio_test.go`（新） | 特性检测 / `decodeAudioData` 成功与失败 / `getChannelData` 样本与长度 | ~120–180 行 |
+| **合计** | | | **≈ 550–810 行**（含测试） |
+
+**完整音频图选项的粗略量级（对照）**：`AudioNode` 图（`GainNode`/`OscillatorNode`/`BiquadFilterNode`/
+`AnalyserNode`/`ConvolverNode`/`DelayNode`/…）+ `AudioParam` 自动化 + `AudioWorklet` + 图执行调度
+（128 帧渲染量子、与输出后端时钟融合）+ `OfflineAudioContext` ⇒ **数千行量级（≈3000–6000 行）**，
+且要新建"音频图执行引擎 + 实时线程调度"，属 §8.2 已标注的**高风险**项，须单独立项审核。
+
+**侦查结论**：最小面**可行、量级可控**（≈550–810 行，复用现有宿主解码与注入模式）；完整音频图
+**不建议在本阶段做**。**本轮未实施**（Q2-D 只侦查，不写代码）。
 
 ---
 
@@ -832,30 +985,38 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 取舍依据（选项 1 / 2 / 3，含反方观点） | **选项 1（本轮采纳）**：媒体并入同一门禁——「收紧而非放松」，与既有纪律一致（§9.4 的 SVG 缓存绕过是先例：那次也是**改实现**而不是改文档），且不动任何既有判据口径。**选项 2**：把「宿主注入 = 宿主授权」写成显式决策（宿主既然自己解码，就不该再受资源策略约束）——**反方观点确有道理**：媒体字节从不进引擎，读盘的是宿主自己的进程，「引擎的门禁」对宿主自己的 IO 本无强制力；但该观点解释不了**同一个宿主**（`cmd/psai`/`app`）在 `DenyExternal` 下对 `<img>` 严格拒绝、对媒体却放行的**自相矛盾**，也无法让「安全默认」覆盖新的资源类型（策略的意义正是「宿主没表态时不读盘」）。**选项 3**：折中（只拦元数据、授权后放行帧/PCM）——语义更细，但需新造「媒体授权」概念，且 `<video>` 的元数据与首帧几乎同时发生，拆分不带来实际保护、只多一层状态。反方观点保留于此，供日后回溯 |
 | 探测伪影（第 8 处的根本解法方向） | 抖动修法已连续多次一致（判据未放宽），但「一遇抖动就调采样参数」已累积到第 8 处，**补丁式累积值得警惕**：根本解法是**按样本自己声明的帧时长驱动采样**（步长取「帧时长的非整数倍 + 抖动」并覆盖一个完整循环周期），而不是继续调全局采样参数 |
 
+> **挂账登记（2026-10-07，已拍板：方案 Q5-A「挂账」）**：本表说的「一份判定、两处执行」是
+> `loadExternalResource`（`webkit/`，图片/样式/脚本的字节路径）与 `MediaResourceAllowed`
+> （`webkit/media_resource_policy.go`，媒体路径）**两份平行判定**——判定基元与顺序同源，但**代码是两份**，
+> 将来各自演化有漂移风险。用户已拍板：**挂账**（本文档记录在案），**本轮不重构**。
+> 若日后做选项 B（抽公共判定内核），验收标准必须是「探针逐格零变化」（与本轮 Q1 的 96 格对照同法）。
+
 ---
 
-## 10. 待用户拍板的开放项（Q1–Q8）
+## 10. 开放项 Q1–Q8：拍板与执行状态（2026-10-07）
 
-> 本节由 2026-10-07 的文档收口整理，**只登记待决事项、不含任何实施**。编号 Q1–Q8 与会话内提交的
-> 报告一致；未获拍板前，相关实施（`TC-M-603`、`TC-M-604`、门禁重构、判据修改、`wb-ui/webkit`
-> 3 个失败修复）**一律不动**。勾选方式：在「选择」列填 A/B/C…，或在会话中按编号回复。
+> **拍板（2026-10-07）**：用户选择「按本表『建议』列执行」——即 **Q1-B / Q2-D / Q3-A+C / Q4-B /
+> Q5-A / Q6-B(+D) / Q7-B**（Q8 已就地处置）。下表「状态」列记录**本轮实际执行结果**；
+> 详细证据见对应章节（§8.3 / §9.6 / §9.9 / `docs/TECH_DEBT.md`）。
+> 建议列之外的其它选项（Q2-C 完整音频图、Q4-C/D 直接修、Q5-B 重构、Q7-C 采样根因）**本轮一律未动**。
 
-| 编号 | 是什么 | 影响 | 可选项 | 当前遗留状态 | 建议 |
+| 编号 | 是什么 | 影响 | 拍板 | 状态（2026-10-07 实测） | 证据去向 |
 |---|---|---|---|---|---|
-| **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**至今从未真正执行**（`-media-edge` 默认关闭，默认报告不含 Edge 列）。本机 Edge 实测可用（首候选命中，§8.3） | **A** 不跑，维持「环境可选」；**B** 跑一次作对照证据（`cmd/psai -media -media-edge`，随机型约 10–30 分钟）；**C** 跑并纳入常规验收 | **未跑**（文档已按「代码具备、本机可用、仅默认关闭」如实记录） | **B** |
-| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 → 依赖 `AudioContext` 的库（可视化、混音、音频处理）不可用 | **A** 不做、文档标「不支持」；**B** 最小面（构造器 + `decodeAudioData` 出 buffer，特性检测可过）；**C** 完整音频图；**D** 先侦查（给出 A/B/C 的精确工作量） | **未实施**（§9.6 记为阶段 3 余项） | **D**（或 **A**） |
-| **Q3** | `TC-M-604` 环回录音 | 本机无采集设备 → 用例恒 `SKIP`；「跳过口径」在不同轮次写法不一致 | **A** 保持现状；**A+C** 现状 + 口径统一为 `SKIP(no-loopback)`；**B** 装虚拟声卡后重跑 | **未实施** | **A+C** |
-| **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**（`go test` 恒为 28 ok + 1 FAIL + 67 无测试 = 96 包，§8.3 第 4 条）；影响对「验收不新增失败」的解读 | **A** 不动；**B** 先侦查定位（只读出根因与风险）；**C** 直接修（`TestCheckedStateInvalidatesStyle` 优先）；**D** 全修 | **未修复**（`docs/TECH_DEBT.md` 有 HEAD worktree 对比证据） | **B** |
-| **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**（§9.9「一份判定、两处执行」），未来改动有漂移风险 | **A** 挂账（本文档记录）；**B** 抽公共判定内核（须以「探针逐格零变化」为验收） | **未重构** | **A** |
-| **Q6** | 单测纪律（每轮是否纳入全量 `go test`） | 只跑定向测试可能漏掉回归 | **A** 维持定向；**B** 每轮收尾纳入（`GOWORK=off` + 排除 `consistency`，实测约 24 秒）；**D** 固化为 `cgo_env.bat` 的 `test-all` | 目前是 **A** | **B**（可顺带 **D**） |
-| **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下的 L0 **备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到**第 8 处**（补丁式调参） | **A** 都不动；**B** 只修 ① 的备注文案；**C** 做 ② 的根本解法（按样本声明的帧时长驱动采样，§9.9 末行） | **未实施** | **B**（**C** 另起一轮） |
-| **Q8** | 文档剩余范围 | 收敛到两项，本轮已按授权就地处置 | — | **丙10 已消除**：§3.4 原写「报告与四配置截图**入库**」与决策 5 冲突 → 已就地改为「同为本地生成产物、不入库」（§3.4 第 216 行）。**乙4 已标注**：§0.2 的「另开独立项目」归属加「**待用户确认**」（§0.2），原结论未动 | 见左 |
+| **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**此前从未真正执行** | **B（跑一次）** | ✅ **已执行**。`cmd/psai -media -media-edge` 跑通，Edge 截图 `dev/media/out/edge-matrix.png`（本地产物、不入库）。程序化逐格对照 **96 格 0 差异**：Edge 有内容而本项目空白 **0 格**、本项目有内容而 Edge 空白 **0 格**；12 个空格**全部是不可见的 `<audio>`**；84 个共有内容格的最大比例差 **0.010** ⇒「不低于 Edge」**实测成立**（逐格一致）。⚠️ 工具侧 `runEdgeComparison` **只截图、不产 Edge 等级列**，故「等级对照」仍属人工/程序化 | §8.3 第 2 条「Edge 对照实测」（含对照脚本正文） |
+| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）** | ✅ **侦查完成、未实施**。全仓 Go 侧零命中；最小面（构造器 + `decodeAudioData` 出 buffer + 特性检测可过）**≈550–810 行**（含测试），复用现有宿主解码与注入模式；唯一真缺口 = `engine/js/jsc` 无「创建 Float32Array」的公开方法；完整音频图 ≈3000–6000 行（高风险） | §9.6「WebAudio 最小面侦查」 |
+| **Q3** | `TC-M-604` 环回录音 | 本机无采集设备 ⇒ 用例恒跳过；「跳过口径」在不同轮次写法不一致 | **A+C（保持现状 + 口径统一）** | ✅ **已完成**。实现侧本就是 `SKIP(no-loopback)`（无设备 / 无 ffmpeg 分支）；文档 **4 处**旧写法 `mismatch` 已统一（`media-format-verification-plan.md` 2 处、`implementation-path.md` 2 处）+ 项目记忆 1 处；全仓 grep 旧写法 **0 残留**。判定语义不变（仍是**跳过**，不是通过）。★ 本机 2026-10-07 实测**有**候选设备（Voicemeeter Out B3，输入未路由）⇒ 记 `mismatch`，属第三种状态 | §9.6「判据 B 跳过口径」、§3.3 TC-M-604 |
+| **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）** | ✅ **侦查完成、未修**。三条各给出测试名/断言原文/根因假设/风险/建议：①按钮字形只命中一行像素 ⇒ 测量脆性；②`14.8281/13.0 = 1.1406` = Segoe UI 的 normal 行距 ⇒ 断言口径过窄；③`:checked` 读 attribute 而非 IDL 状态（②③ 均指向「测试期望/口径」而非引擎缺陷） | `docs/TECH_DEBT.md`「三条失败的逐条侦查」 |
+| **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）** | ✅ **已登记挂账、未重构** | §9.9「挂账登记」 |
+| **Q6** | 单测纪律（每轮是否纳入全量 `go test`） | 只跑定向测试可能漏掉回归 | **B（每轮纳入）+ D（固化入口）** | ✅ **已完成**。`cgo_env.bat` 新增 `test-all`，并**强制 `GOWORK=off`**（修掉 workspace 损坏时 `go list -m` 静默失败）；本轮实跑 **ok 28 包 + FAIL 1 包（`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包**，**失败清单未增** | §6.4「环境前提」、§8.3 第 4 条 |
+| **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下 L0 的**备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到第 8 处 | **B（只修 ① 备注文案）** | ✅ **①已完成**：`judgeCell` 的 `broken` 分支改为**优先** `mediaDenialNote` ⇒ `DenyExternal × file/rel` 的 corrupt.png 备注从「失败路径……契约缺陷」更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」；重跑 `-media` 后**等级全 L0 不变、与基线一致**。②**未做**（属另一轮） | §10 本行 + `cmd/psai/mediaprobe.go` 的 `judgeCell` |
+| **Q8** | 文档剩余范围 | 收敛到两项，本轮已按授权就地处置 | — | ✅ 原地处置（细目见下）：**丙10 已消除**、**乙4 已标注待确认** | §3.4、§0.2 |
 
 > **Q8 细目（两项的处置依据）**
 > - **丙10（口径冲突，已消除）**：决策 5 是「不提交样本与报告，仓库不动」（§0.1、§9.1），§3.4 原句与之
->   冲突；本轮以决策 5 为准就地改写，**未新增任何决策**。
+>   冲突；已以决策 5 为准就地改写，**未新增任何决策**。
 > - **乙4（归属划分，已标注待确认）**：§0.2「格式能力等级验证另开独立项目」只在会话记录里有转写
->   （§9.1 决策 7），**没有用户对该划分本身的直接拍板记录** → 已加「待用户确认」标注，**未擅自更改**。
+>   （§9.1 决策 7），**没有用户对该划分本身的直接拍板记录** ⇒ 已加「待用户确认」标注，**未擅自更改**。
+>   ⚠️ 本轮拍板（方案 A）**不涉及**该归属划分，标注保持原样。
 
 ## 附：本次盘点产出的证据索引
 
