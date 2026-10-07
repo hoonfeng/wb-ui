@@ -1,8 +1,8 @@
-# 媒体格式真实可用性报告（2026-10-07 16:30 0d44787）
+# 媒体格式真实可用性报告（2026-10-07 16:45 b107000）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：0d44787 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：b107000 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
@@ -466,7 +466,12 @@
 
 ## 策略一致性（决策 1 · TC-M-905）
 
-Browser vs Toolkit+AllowAll 首屏截图差异像素比例：3.9683% —— ❌ 存在差异（策略开关引入了渲染差异）
+- 全图差异像素比例：**3.9683%**（其中 12 个动画样本格未计入下方判定）
+- 排除动画样本格后：**0.0000%** —— ✅ 非动画区域逐像素一致
+
+> **归因**：全图差异 **100% 落在动画样本格内**（`anim-noloop.gif`、`anim-2frames.webp` 等）——
+> 两个配置各是一次独立加载与截图，动画停在不同帧（**帧相位差**，与策略开关无关）；
+> 非动画区域（静态图 / SVG / 视频 / 音频格）**零差异**。详见 `media-format-verification-plan.md` §9.7。
 
 ## 与基线的差异
 

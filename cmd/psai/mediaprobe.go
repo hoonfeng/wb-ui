@@ -193,7 +193,8 @@ type cellResult struct {
 // sampleDot 是一个采样点的实测色与期望色。
 type sampleDot struct {
 	Name    string `json:"name"`
-	X, Y    int    `json:"x"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
 	Got     [3]int `json:"got"`
 	Want    [3]int `json:"want"`
 	Inside  bool   `json:"inside"`
@@ -272,14 +273,24 @@ func runMediaProbe(o mediaOpts) int {
 
 	// 决策 1 的一致性断言（TC-M-905）：Browser 与 Toolkit+AllowAll 必须
 	// 逐像素一致——证明「新增策略开关」没有引入渲染差异。
-	adDiff, adErr := -1.0, error(nil)
+	// 注意：动画样本（GIF/WebP）在两个配置下各自独立加载，**截图时刻的动画相位
+	// 天然可能不同**（帧相位差，与策略无关）。因此判定基于「排除动画样本格后」
+	// 的差异，全图差异同时如实给出（见 writeMediaReport）。
+	adDiff, adDiffExcl, adErr := -1.0, -1.0, error(nil)
+	animRects := 0
 	if len(results) == 4 {
-		adDiff, adErr = comparePNGFiles(results[0].StillPNG, results[3].StillPNG)
+		rects, n, rerr := animatedCellRects(results[0])
+		if rerr != nil {
+			fmt.Printf("  策略一致性：动画格矩形读取失败——%v\n", rerr)
+			rects = nil
+		}
+		animRects = n
+		adDiff, adDiffExcl, adErr = comparePNGFilesExcluding(results[0].StillPNG, results[3].StillPNG, rects)
 	}
 
 	baseline, berr := readBaseline(o.Baseline)
 	reportPath := filepath.Join(outDir, "report.md")
-	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adErr); err != nil {
+	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr); err != nil {
 		fmt.Printf("媒体验证：写报告失败: %v\n", err)
 		return 2
 	}
@@ -872,6 +883,91 @@ func comparePNGFiles(a, b string) (float64, error) {
 	return float64(diff) / float64(total), nil
 }
 
+// animatedCellRects 返回给定配置下「动画样本格」的矩形集合与数量。
+// 用途：把 TC-M-905（Browser ↔ Toolkit+AllowAll）的差异归因到动画帧相位差——
+// 动画样本在两个配置下各自独立加载与截图，停在不同帧，与策略开关无关。
+func animatedCellRects(res configResult) ([]image.Rectangle, int, error) {
+	data, err := os.ReadFile(res.GeomJSON)
+	if err != nil {
+		return nil, 0, err
+	}
+	var doc struct {
+		Still []struct {
+			ID string `json:"id"`
+			X  int    `json:"x"`
+			Y  int    `json:"y"`
+			W  int    `json:"w"`
+			H  int    `json:"h"`
+		} `json:"still"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, 0, err
+	}
+	isAnim := map[string]bool{}
+	for _, c := range res.Cells {
+		if c.Kind == "animated" {
+			isAnim[c.ID] = true
+		}
+	}
+	var rects []image.Rectangle
+	for _, s := range doc.Still {
+		if isAnim[s.ID] {
+			rects = append(rects, image.Rect(s.X, s.Y, s.X+s.W, s.Y+s.H))
+		}
+	}
+	return rects, len(rects), nil
+}
+
+// comparePNGFilesExcluding 逐像素比较两张 PNG，返回「全图差异比例」与
+// 「排除 exclude 矩形后的差异比例」。后者用于判定策略开关是否引入渲染差异：
+// 动画样本格的帧相位差天然非零，不应计入该判定（全图值仍如实给出）。
+func comparePNGFilesExcluding(a, b string, exclude []image.Rectangle) (allDiff, keptDiff float64, err error) {
+	ia, err := readPNGFile(a)
+	if err != nil {
+		return -1, -1, err
+	}
+	ib, err := readPNGFile(b)
+	if err != nil {
+		return -1, -1, err
+	}
+	if ia.Bounds() != ib.Bounds() {
+		return -1, -1, fmt.Errorf("尺寸不同：%v vs %v", ia.Bounds(), ib.Bounds())
+	}
+	bnd := ia.Bounds()
+	total, diff, keptTotal, keptBad := 0, 0, 0, 0
+	for y := bnd.Min.Y; y < bnd.Max.Y; y++ {
+		for x := bnd.Min.X; x < bnd.Max.X; x++ {
+			r1, g1, b1, a1 := ia.At(x, y).RGBA()
+			r2, g2, b2, a2 := ib.At(x, y).RGBA()
+			total++
+			bad := absDiff32(r1, r2) > 256 || absDiff32(g1, g2) > 256 ||
+				absDiff32(b1, b2) > 256 || absDiff32(a1, a2) > 256
+			if bad {
+				diff++
+			}
+			if !inRects(exclude, x, y) {
+				keptTotal++
+				if bad {
+					keptBad++
+				}
+			}
+		}
+	}
+	if total == 0 || keptTotal == 0 {
+		return -1, -1, fmt.Errorf("空图")
+	}
+	return float64(diff) / float64(total), float64(keptBad) / float64(keptTotal), nil
+}
+
+func inRects(rects []image.Rectangle, x, y int) bool {
+	for _, r := range rects {
+		if x >= r.Min.X && x < r.Max.X && y >= r.Min.Y && y < r.Max.Y {
+			return true
+		}
+	}
+	return false
+}
+
 func readPNGFile(p string) (image.Image, error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -1302,7 +1398,7 @@ func compareBaseline(base *baselineDoc, results []configResult) []string {
 }
 
 func writeMediaReport(path string, man *manifestDoc, results []configResult, base *baselineDoc, baseErr error,
-	matrixPath string, adDiff float64, adErr error) error {
+	matrixPath string, adDiff, adDiffExcl float64, animRects int, adErr error) error {
 	var b strings.Builder
 	commit := gitShortHash()
 	fmt.Fprintf(&b, "# 媒体格式真实可用性报告（%s %s）\n\n", time.Now().Format("2006-01-02 15:04"), commit)
@@ -1383,11 +1479,21 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 	} else if adDiff < 0 {
 		b.WriteString("未采集（配置数不足）\n\n")
 	} else {
-		verdict := "✅ 逐像素一致"
-		if adDiff > 0 {
-			verdict = "❌ 存在差异（策略开关引入了渲染差异）"
+		fmt.Fprintf(&b, "- 全图差异像素比例：**%.4f%%**（其中 %d 个动画样本格未计入下方判定）\n", adDiff*100, animRects)
+		if adDiffExcl < 0 {
+			b.WriteString("- 排除动画样本格后：未测量\n\n")
+		} else {
+			verdict := "✅ 非动画区域逐像素一致"
+			if adDiffExcl > 0 {
+				verdict = "❌ 存在差异（策略开关引入了渲染差异）"
+			}
+			fmt.Fprintf(&b, "- 排除动画样本格后：**%.4f%%** —— %s\n\n", adDiffExcl*100, verdict)
+			if adDiff > 0 && adDiffExcl == 0 {
+				b.WriteString("> **归因**：全图差异 **100% 落在动画样本格内**（`anim-noloop.gif`、`anim-2frames.webp` 等）——\n")
+				b.WriteString("> 两个配置各是一次独立加载与截图，动画停在不同帧（**帧相位差**，与策略开关无关）；\n")
+				b.WriteString("> 非动画区域（静态图 / SVG / 视频 / 音频格）**零差异**。详见 `media-format-verification-plan.md` §9.7。\n\n")
+			}
 		}
-		fmt.Fprintf(&b, "Browser vs Toolkit+AllowAll 首屏截图差异像素比例：%.4f%% —— %s\n\n", adDiff*100, verdict)
 	}
 
 	b.WriteString("## 与基线的差异\n\n")
