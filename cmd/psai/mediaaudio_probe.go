@@ -409,8 +409,10 @@ func audioSection(evidence []audioCellEvidence, lo loopbackEvidence) string {
 		expect := 0.0
 		if !ev.firstTap.IsZero() && !ev.firstTap.After(ev.sampleAt) {
 			expect = ev.sampleAt.Sub(ev.firstTap).Seconds()
-			if ev.ctEnd > 0 && expect > ev.ctEnd && ev.ctEnd > 0 {
-				// 期望值不该超过该格自己的终态（1 秒样本播完即封顶）
+			// 期望值不该超过该格自己的终态（样本播完即封顶）：采样点若落在终态之后，
+			// 「还应经过多少秒」没有意义，封顶到终态才与判据（不超前）同口径。
+			if ev.ctEnd > 0 && expect > ev.ctEnd {
+				expect = ev.ctEnd
 			}
 		}
 		if ev.frames > 0 {

@@ -97,27 +97,27 @@ func (p *mediaPhase) UnmarshalJSON(b []byte) error {
 
 // sampleSpec 是 manifest.json 的一个样本（由 gen_samples.py 生成）。
 type sampleSpec struct {
-	File      string           `json:"file"`
-	Name      string           `json:"name"`
-	Kind      string           `json:"kind"` // image|animated|svg|svg-inline|video|audio|broken|huge|skipped
-	Format    string           `json:"format"`
-	Mime      string           `json:"mime"`
-	Width     int              `json:"width"`
-	Height    int              `json:"height"`
-	Pattern   string           `json:"pattern"` // quad|solid|gradient
-	Quad      map[string][]int `json:"quad"`
-	Solid     []int            `json:"solid"`
-	Frames    int              `json:"frames"`
-	Delays    []int            `json:"delays"`
-	FrameRGB  [][]int          `json:"frame_colors"`
-	Phases    []mediaPhase     `json:"phases"`
-	Skip      string           `json:"skip"`
-	Inline    string           `json:"inline"`
-	Note      string           `json:"note"`
+	File     string           `json:"file"`
+	Name     string           `json:"name"`
+	Kind     string           `json:"kind"` // image|animated|svg|svg-inline|video|audio|broken|huge|skipped
+	Format   string           `json:"format"`
+	Mime     string           `json:"mime"`
+	Width    int              `json:"width"`
+	Height   int              `json:"height"`
+	Pattern  string           `json:"pattern"` // quad|solid|gradient
+	Quad     map[string][]int `json:"quad"`
+	Solid    []int            `json:"solid"`
+	Frames   int              `json:"frames"`
+	Delays   []int            `json:"delays"`
+	FrameRGB [][]int          `json:"frame_colors"`
+	Phases   []mediaPhase     `json:"phases"`
+	Skip     string           `json:"skip"`
+	Inline   string           `json:"inline"`
+	Note     string           `json:"note"`
 	// AudioHz 是音频样本的期望基频（Hz，A3 判据 A 的比对基准）。gen_samples.py
 	// 早就写进 manifest 了（`hz=440`），此前探针没解析——判据 A 就缺了这一半。
-	AudioHz float64 `json:"hz"`
-	Generated bool             `json:"-"`
+	AudioHz   float64 `json:"hz"`
+	Generated bool    `json:"-"`
 }
 
 type manifestDoc struct {
@@ -659,6 +659,12 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   基线因此每次报警「等级下降」。
 	//   改为等间隔连拍：步长取与常见帧时长**不成整数倍**的 130ms，判据放宽为
 	//   「任意两帧不同」（见 framesDiffer），采样相位不再决定结论。
+	//   ★ 但「等间隔」本身仍有洞（2026-10 实测，第 8 处测量伪影）：名义步长不成整数倍
+	//   不等于**实际**步长不成整数倍——实际步长 = 名义步长 + 每步的渲染开销，可能恰好
+	//   贴近某个样本的循环周期。`anim-uneven-delay.gif` 的帧延迟是 [50,200,100] ⇒ 周期
+	//   350ms：全量第 3 跑时 Browser 配置下它的 data/file/rel 三格**同时**报「最大差异 0」
+	//   （L4→L3），而同一轮其余动图样本全 L4、同一 HEAD 前两跑均正常（抖动特征，与 §9.7
+	//   记录一致）。处置：步长改为**抖动**（两轮基步长不同 + 每步叠加不同抖动，相位锁不死）。
 	//   ★ 两轮连拍（每轮 6 帧 ×130ms，轮间 250ms 让步，总窗口≈1.8s）：单轮
 	//   780ms 窗口在满负载时（尤其排在最后的 Toolkit+AllowAll）仍可能整窗落在
 	//   同一动画帧——实测连跑 6 次全量有 3 次报「动画未推进」的假降级，而把
@@ -670,14 +676,19 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   样本缺陷。audio 元素不参与动图判据，停掉它不影响任何已有判据。
 	stopAudioPlayback(wv, cells)
 	settleReal(wv, 300*time.Millisecond)
-	const animShotCount, animShotStep = 6, 130 * time.Millisecond
+	// 抖动步长：两轮基步长不同（130ms / 190ms），每步再叠加固定抖动，**相邻步长互不相等**
+	// ⇒ 相位不会每一步回到同一帧。判据本身不变（仍是「任意两帧不同」），真静止的样本
+	// 两轮都没有差异，不会被这层放宽。
+	const animShotCount = 6
+	animJitter := [animShotCount]time.Duration{0, 40, -30, 50, -20, 30}
+	animBase := [2]time.Duration{130 * time.Millisecond, 190 * time.Millisecond}
 	animFrames := make([][]byte, 0, animShotCount*2)
 	for round := 0; round < 2; round++ {
 		if round > 0 {
 			settleReal(wv, 250*time.Millisecond)
 		}
 		for i := 0; i < animShotCount; i++ {
-			settleReal(wv, animShotStep)
+			settleReal(wv, animBase[round]+animJitter[i]*time.Millisecond)
 			px, err := renderPixels(wv)
 			if err != nil {
 				return res, err
