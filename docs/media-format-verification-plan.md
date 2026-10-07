@@ -90,7 +90,7 @@
 | 音频 | WAV、MP3、OGG(Vorbis)、M4A(AAC) |
 | 资源来源 | `data:` URI、`file://` 绝对路径、文档相对路径 |
 | 运行模式 | ModeBrowser（浏览器模式）、ModeToolkit（UI 库模式，±宿主 resolver） |
-| 资源策略（决策 1 新增） | `DenyExternal`（默认；`data:` 无条件放行）/ `AllowHostResolved`（仅放行宿主 resolver 明确解析出的资源）/ `AllowAll`（等价 ModeBrowser） |
+| 资源策略（决策 1 新增） | `DenyExternal`（默认；`data:` 无条件放行）/ `AllowHostResolved`（仅放行宿主 resolver 明确解析出的资源）/ `AllowAll`（等价 ModeBrowser）。★ 三档对 `<img>/<script>/<link>` 与 `<video>/<audio>` **一视同仁**（媒体自 §9.9 起并入同一条判定） |
 | 承载方式 | `<img>`、CSS `background-image`、`<video poster>`、`<video src>`、`<audio src>` |
 | 判定基准（决策 2） | **Edge 双端对照**：同一样本页在 Edge 与引擎各跑一次，逐项比对，输出「引擎 / Edge」双列报告 |
 | 项目归属（2026-10 新增） | **独立媒体验证项目**（另开立项；本文为其设计稿）；L0–L4 等级验证**不在 AI-PS 项目内进行**——AI-PS 仅做本机可用性盘点 |
@@ -217,6 +217,7 @@ webkit/mode.go:66                             allowsExternalURLs()
   全部 **L3**（含 `huge-4096.png`、含空格与中文文件名）。
 - **GIF 动图已 L4**：3 个动画样本 × 3 来源 = 9 格达到「内容随时间变化」（A=✅）。
 - **Toolkit+DenyExternal 保持安全默认**：file/rel 一律不加载（L0），只有 `data:` 无条件放行（L3/L4）。
+  ★ **媒体（`<video>/<audio>`）自 §9.9 起纳入同一口径**——本轮之前媒体链路的门禁完全缺失，同来源仍为 L3/L4。
 - ★ **三个非拒配置的等级分布现已完全一致（35/0/0/49/12）**：第一批复测里 Browser 与
   `Toolkit+AllowAll` 曾出现 L3 42/39、L4 9/12 的差异，根因是探针的动图判定依赖
   「采样间隔 mod 动图循环周期」——3 帧 ×100ms 的 GIF 周期正是 300ms，而「再等 900ms
@@ -258,7 +259,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 | 编号 | 缺口 | 修复与结果 | 证据 |
 |---|---|---|---|
 | D10 | `<video>` **画面未绘制**（12 格 L0：帧流在推进、`loadedmetadata` 已派发，但静止态采样无画面） | ✅ **根因是「媒体资源选择算法的启动时机」**：本引擎的媒体状态是「首次访问媒体属性时惰性创建」（`mediaStateFor`），而规范的时机是「`src` 属性已设置且元素在文档中」（HTML §4.8.8）。于是用 HTML 属性写好的 `<video src>` 在脚本读属性之前**完全不加载**——静止态 `readyState=0`、`duration=NaN`、无首帧，`play()` 之后才补到 `rs=4`（同一格实测：静止 0 / 播放 4）。修法：新增 `bindings.StartMediaElementLoads`，`webkit` 在页面脚本执行后对文档里的 `<video>/<audio>` 补齐启动（幂等，动态创建的元素不受影响）。**video 由 L0 → L4**（testsrc mp4/webm、twophase），单色样本 L3 | `TestStartMediaElementLoadsStartsResourceSelection`（启动计数/幂等/无 src 不启动/`loadedmetadata` 派发）；探针 `*.mp4`/`*.webm` 行绘制列 ✅；`matrix-Browser.png` 经 `read_image` 复核（file/rel 三列有真实视频画面：testsrc 彩条、solid-red 纯红、twophase 红首段） |
-| — | **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ **未闭环，上报待决**：`DenyExternal` 下 `<video src="file://…">` 仍取得元数据与画面（L3/L4），与 `<img>` 在同一策略下被严格拒绝（L0）不一致——媒体元数据探测与抽帧由宿主（`app.MediaProbe` → `ffmpeg` 按本地路径读文件）直接完成，未过资源策略门禁。该行为在 D10 修复前**就已存在**（旧报告的「动画 ✅」即帧流在跑的证据），只是当时静止态无画面而未被注意 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4（同一策略下 `*.png` 为 L0） |
+| — | **媒体宿主注入通道未受资源策略约束**（新发现 → **已闭环**） | ✅ **已闭环（2026-10 续做，见 §9.9）**：`DenyExternal` 下 `<video src="file://…">` 此前仍取得元数据与画面（L3/L4），与 `<img>` 在同一策略下被严格拒绝（L0）不一致——媒体元数据探测与抽帧由宿主（`app.MediaProbe` → `ffmpeg` 按本地路径读文件）直接完成，未过资源策略门禁；该行为在 D10 修复前就已存在（旧报告的「动画 ✅」即帧流在跑的证据）。修法：新增 `PurposeMedia` + `WebView.MediaResourceAllowed`（与 `loadExternalResource` 同源判定），引擎侧（`bindings.MediaSrcAllowed`）与宿主侧（`mediaSrcToPath`）**两处执行、一份判定** | 修前 `DenyExternal × *.mp4/*.wav × file/rel` = L3/L4（同策略下 `*.png` 为 L0）→ 修后 **L0**；逐格 diff 见 §9.9 |
 
 **仍存在的缺口（转入阶段 3）**
 
@@ -610,7 +611,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
 | 事项 | 结论 | 证据 |
 |---|---|---|
-| 四配置 × 96 格复测 | Browser：**L3 42 / L4 9** / L2 9 / L0 36；`Toolkit+DenyExternal` 保持安全默认（file/rel 全拒，仅 `data:` 放行） | `dev/media/out/report.md`、`matrix-*.png` |
+| 四配置 × 96 格复测 | Browser：**L3 42 / L4 9** / L2 9 / L0 36；`Toolkit+DenyExternal` 保持安全默认（file/rel 全拒，仅 `data:` 放行；★ 媒体也纳入该口径是 §9.9 的收口内容） | `dev/media/out/report.md`、`matrix-*.png` |
 | 回归基线 | 384 条（配置 × 样本 × 来源）等级期望表，等级下降即非零退出 | `dev/media/baseline.json` |
 | **U2** `<img>` load/error 契约 | ✅ 已闭环：成功派发 `load`、失败派发 `error`、`complete`/`naturalWidth` 正确 | `webkit/img_event_dispatch_test.go`（4 用例）+ 探针失败路径备注 |
 | **U5 / D3** SVG `file://` 与相对路径 | ✅ 已闭环：走与栅格图同一条 loader 链（9 格由 L0 → L2） | 探针 `*.svg` 行的 file/rel 列 D=✅ |
@@ -645,7 +646,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 探针：动图连拍与音频播放耦合（第 7 处测量伪影） | ✅ 满负载下 `Toolkit+AllowAll` 的动图格偶发「**14 帧零差异**」假降级（含音频的全量连跑 8 次命中 4 次，**全落在最后跑的配置**），而只跑动图样本（不带音频）连跑 3 次零失败、同一样本单独复跑恒为 L4——音频会话在播放期持续占用主循环（解码推送 + waveOut 写 + ended 巡检），把动图帧的调度挤到采样窗口之外。修法：动图连拍前只 `pause()` 掉 `<audio>`（**不动 `<video>`**，video 参与动图判据）并让主循环喘息 300ms。另把帧差诊断（`AnimNote`）写进报告备注，降级时能直接读到「最大差异 0 / 共 N 帧」 | 修后连续两次全量跑「与基线一致（无等级下降）」；音频格 file/rel 16 格恒为 L4 |
 | 基线维护（第三批） | 两次更新：① video 条目 **50 行**（含 `generated_at`）；② 音频采集修正再 **49 行**（48 条 `L0 → L1` + `generated_at`） | `git diff --numstat dev/media/baseline.json` |
 | 四配置复测（第三批后） | Browser / AllowHostResolved / AllowAll 三者完全一致：**L0 11 / L1 16 / L3 51 / L4 18**；`DenyExternal`：L0 51 / L1 16 / L3 19 / L4 10。连续两次全量跑均「与基线一致」。余下 11 格 L0 = `data:` 来源的 video 4 格（无本地路径）+ AVIF/TIFF 6 格（预期不支持）+ 失败路径 1 格 | `dev/media/out/report.md`（384 行） |
-| **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ 见 §3.4 缺口表：`DenyExternal` 下 `<video src="file://…">` 仍取得画面（L3/L4），与 `<img>` 在同一策略下 L0 的行为不一致；根因是媒体元数据/帧由宿主按本地路径直接读取，未过策略门禁。**上报待决**——策略语义变更不在本轮范围内擅自处理 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4；同策略下 `*.png` 为 L0 |
+| **媒体宿主注入通道未受资源策略约束**（新发现 → **已闭环**） | ✅ **已闭环（2026-10 续做，见 §9.9）**：`DenyExternal` 下 `<video src="file://…">` 此前仍取得画面（L3/L4），与 `<img>` 在同一策略下 L0 的行为不一致；根因是媒体元数据/帧由宿主按本地路径直接读取，未过策略门禁。修法：新增 `PurposeMedia` 并把媒体并入**同一条**资源策略判定（引擎侧资源选择 + 宿主侧取路径双前置）；**16 格 L4/L3 → L0**，其余三配置零变化 | 探针 `DenyExternal × *.mp4/*.wav × file/rel`：修前 L3/L4 → 修后 **L0**（同策略下 `*.png` 同为 L0）；逐格 diff 见 §9.9 |
 
 ---
 
@@ -665,8 +666,9 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
   TC-M-604 建议「宿主输出回调的 PCM 做 FFT（主峰 440 Hz）」为主线判据，
   环回设备录音作为可选外部复核（无设备标 `SKIP(no-loopback)`）。
 - **待确认**（实施前需用户选定）：路线 (a)/(b)、平台范围（仅 Windows / 三平台）、
-  WebAudio 是否需要、L4-S 判据口径、以及是否与「媒体宿主注入通道未受资源策略约束」
-  的修复（§3.4 待决项）合并立项——两者都动「宿主注入媒体数据」这条链路。
+  WebAudio 是否需要、L4-S 判据口径。★ 原列在这里的「是否与『媒体宿主注入通道未受资源
+  策略约束』的修复合并立项」已不需要决策——该项已在 2026-10 续做中**单独闭环**（§9.9），
+  与 A3 一样动「宿主注入媒体数据」这条链路，但收口在资源策略一侧。
 
 #### 落地记录（2026-10，已实施）
 
@@ -683,7 +685,10 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
 **验收（本机 Windows，`cmd/psai -media` 全量）**：
 
-- 音频格：`sine-440-1s.{wav,mp3,ogg,m4a}` × `file|rel` = **16 格 L4**；`data:` 来源 16 格当时停在 **L1**
+- 音频格：`sine-440-1s.{wav,mp3,ogg,m4a}` × `file|rel` = **16 格 L4**（★ 这是
+  `Browser`/`Toolkit+AllowAll`/`Toolkit+AllowHostResolved` 三配置下的结论；`Toolkit+DenyExternal`
+  下自 §9.9 起同一引用为 **L0**——媒体已并入资源策略门禁，属预期的安全默认）；
+  `data:` 来源 16 格当时停在 **L1**
   （宿主只认路径 → 内联字节给不了 ffmpeg）——**2026-10 续做已闭环为 L4，见 §9.8**。
 - **判据 A**：PCM **49041 帧**、主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**（四个格式 × 四配置一致）。
 - **判据 B**（环回录音）：本机**无环回设备** → 报告如实记 `mismatch`（不伪装为通过）。
@@ -737,6 +742,26 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 基线 | `dev/media/baseline.json` 由 `-media-update-baseline` 重生成（384 条）；随后再跑一次全量 → **「与基线一致（无等级下降）」** |
 | 附带修复（**第 8 处测量伪影**） | 动图连拍原为**等间隔**步长（130ms×6×2 轮）——名义步长与常见帧时长不成整数倍，但**实际**步长（+每步渲染开销）可能贴近某样本的循环周期：`anim-uneven-delay.gif`（[50,200,100] ⇒ 350ms 周期）实测出现「12 次采样最大差异 0」的假降级（Browser 配置下 data/file/rel 三格同降，同轮其余动图样本全 L4）。改为**抖动步长**（130/190 两轮基步长 + 每步不同抖动）后连续 **3 次**全量一致 |
 | 纪律 | 落盘文件**刻意不自动清理**（跨平台复用优先），需要「跑完不留垃圾」时显式调 `CleanupMediaDataURLFiles()`；**不要**在每条链路上各写一套「先解码再喂管道」的分支 |
+
+---
+
+### 9.9 媒体资源门禁收口：`<video>/<audio>` 并入资源策略（2026-10，续做）
+
+**结论（一句话）**：`<video>/<audio>` 的资源选择此前**完全不受资源策略约束**——同一来源
+（`file://` / 相对路径）在 `Toolkit+DenyExternal` 下 `<img>`/background 是 **L0**，而媒体却是
+**L3/L4**；本轮把媒体并入**同一条**判定（新增 `PurposeMedia`）后，媒体在三档下与 `<img>`
+逐格同档：`DenyExternal` **16 格 L4/L3 → L0**，其余三配置 **零变化**、上升 **0 格**。
+
+| 项 | 内容 |
+|---|---|
+| 缺口与根因 | 媒体资源选择**不走** `webkit.loadExternalResource`：图片/样式/脚本的字节要进引擎（字符串通道 + 资源缓存），而媒体**解码全在宿主**（ffmpeg 元数据/抽帧/PCM），引擎只维护状态机——`ResourcePurpose` 里因此从来没有 `PurposeMedia`，媒体引用的门禁**从未存在**。宿主侧三条链路（元数据探测/抽帧/PCM）都从 `app/mediaprobe.go` 的 `mediaSrcToPath` 拿本地路径，该函数此前只看引用形态、不看策略 ⇒ 严格档下照样读盘解码。与 `resource_policy.go` 写明的语义（`DenyExternal` 拒 http(s)/file/相对路径）、以及本文档旧口径「file/rel 全拒、仅 `data:` 放行」**互相矛盾**——本轮判定为「实现错、文档对」，按文档**收紧实现**（与 §9.4 的 SVG 缓存绕过门禁同类处置） |
+| 修法（一份判定、两处执行，不在媒体链路上散判） | ① **判定**：`webkit/resource_cache.go` 新增 `PurposeMedia`（含 `String()`/`mimeAllowed` 分支：媒体不看 MIME，由解码器判定）+ 新文件 `webkit/media_resource_policy.go` 的 `WebView.MediaResourceAllowed(ref)`——判定**基元与顺序**与 `loadExternalResource` 完全同源（宿主 resolver 命中 → `data:` → 策略门禁），只是不取内容、不写缓存；② **引擎侧执行**：`bindings.MediaSrcAllowed` 注入点，资源选择（`finishLoad`）**最先**判定，被拒的引用与 http(s) 不可达走**同一条**失败路径（`NETWORK_NO_SOURCE` + `error`），宿主不会再被请求元数据/帧/PCM；③ **宿主侧执行**：新文件 `app/mediaaccess.go`（判定接线 + **安全默认 = 未装配即拒绝** + 判定缓存，缓存键含策略）+ `mediaSrcToPath` 前置门禁——三条链路都从它拿路径，因此一次拦住全部 |
+| 语义（逐条对齐 `<img>`） | `DenyExternal`：拒 media `file://` / 相对路径 / `http(s)`；`AllowHostResolved`：仅 resolver **明确提供**的引用放行（探针 `hostSamplesResolver` 覆盖 samples 内媒体；相对引用经文档基准绝对化后的第二轮命中，已由单测钉住）；`AllowAll`：放行；`data:`：**与策略解耦，恒放行**。`http(s)`/`blob:` 在媒体通道**恒拒**——这是**能力边界**（引擎不代宿主联网、宿主也没有网络媒体解码通道），不是策略差异：图片有 `fetchResource` 通道、媒体没有，现状即如此、未放宽 |
+| 影响面（逐格 diff） | 旧基线 → 新基线 17 项变化 = **16 格等级 + `generated_at`**，16 格**全部**落在 `Toolkit+DenyExternal × media(video/audio) × file`/`rel` 两种来源（音频 8 格 L4→L0；视频 6 格 L4→L0 + 单色 `solid-red` 2 格 L3→L0），**集合外 0 项、上升 0 项**。逐来源核对：其余三配置的媒体（data/file/rel 各 8 格）与**所有**图片格零变化；`DenyExternal` 下媒体的 `data:` 8 格仍 L3/L4（与策略解耦）。降级**收在 L0 而非 L1** 正是引擎侧拒绝生效的证据：脚本读到 `readyState=0` + `MEDIA_ERR_SRC_NOT_SUPPORTED`，与 `<img>` 被拒同档 |
+| 验收 | 单测：`webkit/media_resource_policy_test.go`（`DenyExternal` 拒 file/rel、`data:` 恒放行、`http(s)`/`blob` 恒拒、`AllowHostResolved` 命中放行/未命中拒、相对引用两轮询问、`AllowAll` 与运行时切档）＋ `app/mediaaccess_test.go`（未装配即拒绝、策略驱动、切档不读旧缓存、resolver 命中/未命中、引擎侧接线）；探针：`-media-update-baseline` 重生成后**连续两次**全量跑均「与基线一致（无等级下降）」；全量 `go test ./...` 失败清单不增（仍只有 webkit 3 个 pre-existing） |
+| 兼容性（先查后改） | 全仓排查实际宿主：`cmd/browser`、`cmd/gouide`、`dev/probes/window_test` 用 `NewWebView()`（ModeBrowser → 默认 `AllowAll`）**不受影响**；`examples/`、`ui/` 无媒体装配；`dev/probes/idepage*` 是压测页、无媒体；**`cmd/psai` 主宿主**（ModeToolkit → 默认 `DenyExternal`）的 A0/A1/A2 自检要读 `_temp/mediaverify` 的 `file://` 样本 ⇒ **显式声明** `SetResourcePolicy(AllowAll)`（自检段内切档、结束**立即恢复**，其余判据仍在原档位下跑）。**契约（新增）**：需要本地媒体的宿主**必须显式声明**策略（`AllowHostResolved` 或 `AllowAll`）——`data:` 与 resolver 命中的引用不需要 |
+| 取舍依据（选项 1 / 2 / 3，含反方观点） | **选项 1（本轮采纳）**：媒体并入同一门禁——「收紧而非放松」，与既有纪律一致（§9.4 的 SVG 缓存绕过是先例：那次也是**改实现**而不是改文档），且不动任何既有判据口径。**选项 2**：把「宿主注入 = 宿主授权」写成显式决策（宿主既然自己解码，就不该再受资源策略约束）——**反方观点确有道理**：媒体字节从不进引擎，读盘的是宿主自己的进程，「引擎的门禁」对宿主自己的 IO 本无强制力；但该观点解释不了**同一个宿主**（`cmd/psai`/`app`）在 `DenyExternal` 下对 `<img>` 严格拒绝、对媒体却放行的**自相矛盾**，也无法让「安全默认」覆盖新的资源类型（策略的意义正是「宿主没表态时不读盘」）。**选项 3**：折中（只拦元数据、授权后放行帧/PCM）——语义更细，但需新造「媒体授权」概念，且 `<video>` 的元数据与首帧几乎同时发生，拆分不带来实际保护、只多一层状态。反方观点保留于此，供日后回溯 |
+| 探测伪影（第 8 处的根本解法方向） | 抖动修法已连续多次一致（判据未放宽），但「一遇抖动就调采样参数」已累积到第 8 处，**补丁式累积值得警惕**：根本解法是**按样本自己声明的帧时长驱动采样**（步长取「帧时长的非整数倍 + 抖动」并覆盖一个完整循环周期），而不是继续调全局采样参数 |
 
 ## 附：本次盘点产出的证据索引
 

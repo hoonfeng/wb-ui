@@ -161,22 +161,10 @@
       "timeupdate": 4
     },
     "c73": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c74": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c75": {
       "canplay": 1,
@@ -188,22 +176,10 @@
       "timeupdate": 4
     },
     "c76": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c77": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c78": {
       "canplay": 1,
@@ -215,25 +191,13 @@
       "timeupdate": 5
     },
     "c79": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 5
+      "error": 1
     },
     "c8": {
       "load": 1
     },
     "c80": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 5
+      "error": 1
     },
     "c81": {
       "canplay": 1,
@@ -245,40 +209,28 @@
       "timeupdate": 4
     },
     "c82": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c83": {
-      "canplay": 1,
-      "ended": 1,
-      "loadeddata": 1,
-      "loadedmetadata": 1,
-      "play": 1,
-      "playing": 1,
-      "timeupdate": 4
+      "error": 1
     },
     "c84": {
       "loadedmetadata": 1
     },
     "c85": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c86": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c87": {
       "loadedmetadata": 1
     },
     "c88": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c89": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c9": {
       "load": 1
@@ -287,22 +239,22 @@
       "loadedmetadata": 1
     },
     "c91": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c92": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c93": {
       "loadedmetadata": 1
     },
     "c94": {
-      "loadedmetadata": 1
+      "error": 1
     },
     "c95": {
-      "loadedmetadata": 1
+      "error": 1
     }
   },
-  "generatedAt": "2026-10-07T19:37:55+08:00",
+  "generatedAt": "2026-10-07T19:59:43+08:00",
   "mode": "toolkit",
   "playing": [
     {
@@ -1483,11 +1435,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c74",
@@ -1499,11 +1451,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c75",
@@ -1531,11 +1483,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c77",
@@ -1547,11 +1499,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c78",
@@ -1579,11 +1531,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
-      "ct": 1.04,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c80",
@@ -1595,11 +1547,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
-      "ct": 1.04,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c81",
@@ -1627,11 +1579,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c83",
@@ -1643,11 +1595,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c84",
@@ -1675,11 +1627,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c86",
@@ -1691,11 +1643,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c87",
@@ -1723,11 +1675,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
-      "ct": 1,
-      "paused": false,
-      "err": 0
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
+      "paused": true,
+      "err": 4
     },
     {
       "id": "c89",
@@ -1739,11 +1691,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
-      "ct": 1,
-      "paused": false,
-      "err": 0
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
+      "paused": true,
+      "err": 4
     },
     {
       "id": "c90",
@@ -1771,11 +1723,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c92",
@@ -1787,11 +1739,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c93",
@@ -1819,11 +1771,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c95",
@@ -1835,11 +1787,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
-      "ct": 1,
+      "rs": 0,
+      "duration": -1,
+      "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     }
   ],
   "policy": "deny-external",
@@ -3022,11 +2974,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c74",
@@ -3038,11 +2990,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c75",
@@ -3070,11 +3022,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c77",
@@ -3086,11 +3038,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c78",
@@ -3118,11 +3070,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c80",
@@ -3134,11 +3086,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c81",
@@ -3166,11 +3118,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c83",
@@ -3182,11 +3134,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c84",
@@ -3214,11 +3166,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c86",
@@ -3230,11 +3182,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c87",
@@ -3262,11 +3214,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c89",
@@ -3278,11 +3230,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1.04,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c90",
@@ -3310,11 +3262,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c92",
@@ -3326,11 +3278,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c93",
@@ -3358,11 +3310,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     },
     {
       "id": "c95",
@@ -3374,11 +3326,11 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 4,
-      "duration": 1,
+      "rs": 0,
+      "duration": -1,
       "ct": 0,
       "paused": true,
-      "err": 0
+      "err": 4
     }
   ],
   "viewport": {

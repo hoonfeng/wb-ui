@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-07T19:26:03+08:00",
+  "generated_at": "2026-10-07T19:57:54+08:00",
   "note": "媒体格式能力等级基线（引擎等级）。Edge 等级在 -media-edge 且本机有 Edge 时回填；由 cmd/psai -media -media-update-baseline 生成（文档 §6.2 第 2 条）。",
   "entries": [
     {
@@ -2458,14 +2458,14 @@
       "sample": "sine-440-1s.m4a",
       "source": "file",
       "format": "m4a",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "sine-440-1s.m4a",
       "source": "rel",
       "format": "m4a",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2479,14 +2479,14 @@
       "sample": "sine-440-1s.mp3",
       "source": "file",
       "format": "mp3",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "sine-440-1s.mp3",
       "source": "rel",
       "format": "mp3",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2500,14 +2500,14 @@
       "sample": "sine-440-1s.ogg",
       "source": "file",
       "format": "ogg",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "sine-440-1s.ogg",
       "source": "rel",
       "format": "ogg",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2521,14 +2521,14 @@
       "sample": "sine-440-1s.wav",
       "source": "file",
       "format": "wav",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "sine-440-1s.wav",
       "source": "rel",
       "format": "wav",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2542,14 +2542,14 @@
       "sample": "solid-red-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L3"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "solid-red-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L3"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2563,14 +2563,14 @@
       "sample": "testsrc-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2584,14 +2584,14 @@
       "sample": "testsrc-1s.webm",
       "source": "file",
       "format": "webm",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.webm",
       "source": "rel",
       "format": "webm",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2605,14 +2605,14 @@
       "sample": "twophase-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "twophase-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L4"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",

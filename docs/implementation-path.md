@@ -72,6 +72,8 @@
 
 27. **宿主只认「路径」，`data:` 必须先落盘**（A3 遗留清理）：宿主把解码/抽帧交给 ffmpeg，而 ffmpeg 读的是文件或管道——`data:`（RFC 2397 内联字节）没有路径可给，修复前 `mediaSrcToPath` 对 data: 一律 false（音频 data: 16 格停在 L1、视频 data: 连抽帧都进不去）。修法：`app/mediadataurl.go` 把 data: 解成字节 → 落到系统临时目录，文件名 = **内容摘要（sha256 前 8 字节）+ 按 MIME 推断的扩展名** ⇒ 同一 URI 只落一次、**跨进程**也命中（连续两次全量跑不重写），且路径随内容而定，探测缓存与帧缓存按 `(路径, 时刻)` 建键才不会每帧重解一次 base64。★ 两条纪律：① **不要**在每条链路上各写一套「先解码再喂管道」的分支（一处落盘、三条链路共用）；② 落盘文件**刻意不自动清理**（跨进程复用），需要「跑完不留垃圾」时显式调 `CleanupMediaDataURLFiles()`。
 
+28. **媒体引用的门禁必须与 `<img>` 同源，而且要挡住「宿主自己读盘」这条链**（A3 遗留清理之三，§9.9）：媒体的字节从不进引擎（解码全在宿主），因此它**不走** `loadExternalResource`，`ResourcePurpose` 里也一直没有 `PurposeMedia` ⇒ 媒体链路的策略门禁**完全缺失**：`Toolkit+DenyExternal` 下同一个 `file://` 引用，`<img>`/background 是 L0、`<video>/<audio>` 却是 L4（宿主真的读盘并解码了）。修法（一份判定、两处执行）：`webkit.MediaResourceAllowed`（判定**基元与顺序**与 `loadExternalResource` 同源——resolver 命中 → `data:` → 策略门禁）＋ 引擎侧 `bindings.MediaSrcAllowed`（资源选择 `finishLoad` 最先判定，被拒的引用与 http(s) 不可达走同一条失败路径 `NETWORK_NO_SOURCE` + `error`）＋ 宿主侧 `app/mediaaccess.go` 与 `mediaSrcToPath` 前置门禁（元数据/抽帧/PCM 三条链路共用这一个入口，因此一次拦全）。★ 三条纪律：① **不在媒体链路上散判**（媒体专属规则零条，判定只有一份）；② `data:` 与策略解耦**恒放行**、`http(s)`/`blob` 在媒体通道**恒拒**（后者是**能力边界**——引擎不代宿主联网、宿主也没有网络媒体解码通道，不是策略差异）；③ **需要本地媒体的宿主必须显式声明策略**（`AllowHostResolved` 或 `AllowAll`；`cmd/psai` 的 A0/A1/A2 自检段即显式切 `AllowAll` 跑完再恢复）——安全默认是「宿主没表态就不读盘」，与 U1 的图片口径同一条规矩。
+
 **§8 决策点的执行情况**：决策 2 取推荐 (a) 自研最小 WS；决策 3 取 (b) 后端化（C-P2 未开工，默认后端仍是 goja）；决策 5 取「三线并行、P0 优先」；**A1 的两条路线取路线 1（宿主注入帧流）**——它把解码器留在宿主，引擎不背 ffmpeg 的体积与许可，因此**不受决策 4（分发体积）约束**，可以先落地。决策 1（CDP 目标场景）与决策 4 涉及 P2/P3，**仍待用户拍板**——在此之前不动 V8 后端与音频后端。
 
 ---
