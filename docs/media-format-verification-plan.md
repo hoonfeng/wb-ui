@@ -201,18 +201,27 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 | 配置 | L0 | L1 | L2 | L3 | L4 |
 |---|---|---|---|---|---|
-| Browser | 36 | 0 | 9 | **42** | **9** |
-| Toolkit+AllowAll | 36 | 0 | 9 | 39 | 12 |
-| Toolkit+AllowHostResolved | 36 | 0 | 9 | 39 | 12 |
-| Toolkit+DenyExternal（默认） | 73 | 0 | 6 | 13 | 4 |
+| Browser | 35 | 0 | **0** | **49** | **12** |
+| Toolkit+AllowAll | 35 | 0 | 0 | 49 | 12 |
+| Toolkit+AllowHostResolved | 35 | 0 | 0 | 49 | 12 |
+| Toolkit+DenyExternal（默认） | 75 | 0 | 0 | 17 | 4 |
+
+> 本表是**第二批修复**（D8/D9 闭环 + 探针动图判定稳定化，§9.4）后的复测值。
+> 与第一批（U2/U5/D4，§9.3）对照：**L2 由 9/6 全部归零**（SVG 的固有尺寸与契约补齐）、
+> Browser L3 42→49、L4 9→12、L0 36→35（内联 SVG 由 L0 升 L3）；
+> `DenyExternal` 的 L0 73→75 是**策略正确化**——原先被缺陷放行的 `file://` SVG 回到 L0（§9.4）。
 
 - **光栅静态全绿**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 在 data / file / rel 三种来源下
   全部 **L3**（含 `huge-4096.png`、含空格与中文文件名）。
 - **GIF 动图已 L4**：3 个动画样本 × 3 来源 = 9 格达到「内容随时间变化」（A=✅）。
 - **Toolkit+DenyExternal 保持安全默认**：file/rel 一律不加载（L0），只有 `data:` 无条件放行（L3/L4）。
-- ★ **Browser 与 Toolkit+AllowAll 的等级差异（L3 42/39、L4 9/12）来自动图帧时机**：同一页
-  在两次运行中截帧落在不同帧，`framesDiffer`（静止/播放/推进三帧采样）判定随之抖动。这是
-  **判定抖动**而非渲染差异——两配置的静态截图仍逐像素一致（报告「A/D 一致性」节）。
+- ★ **三个非拒配置的等级分布现已完全一致（35/0/0/49/12）**：第一批复测里 Browser 与
+  `Toolkit+AllowAll` 曾出现 L3 42/39、L4 9/12 的差异，根因是探针的动图判定依赖
+  「采样间隔 mod 动图循环周期」——3 帧 ×100ms 的 GIF 周期正是 300ms，而「再等 900ms
+  拍一张」恰为其 3 倍，两拍落在**同一帧**、像素完全相同 → 判成「未推进」。
+  实测同一 HEAD 连跑两次，下降项每次不同（`anim-3frames-rgb` 一次 L4 一次 L3，
+  `anim-2frames.webp` 亦然），属**判定抖动**而非渲染差异；判据已改为等间隔连拍 6 帧 +
+  「任意两帧不同」（§9.4 探针缺陷第 4 条），修后连续两次全量跑均「与基线一致」。
 
 **本轮修复的引擎缺陷**
 
@@ -233,14 +242,20 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 修 1–3 后：契约列 **0 → 66 ✅**，Browser 下 L3/L4 由 **0 → 51** 格（`L1` 归零）。
 
+**第二批已闭环的缺口（§9.4）**
+
+| 编号 | 缺口 | 修复与结果 | 证据 |
+|---|---|---|---|
+| D8 | `<img src="*.svg">` 无固有尺寸、无 `complete`/`load` 契约 | ✅ 渲染层新增 `SVGReferenceIntrinsicSize` / `IsSVGReferenceReady`（width/height → viewBox → CSS 默认 300×150），bindings 增加「固有尺寸 hook」（`imgNaturalDim`），`flushImageEvents` 与错误派发按「能渲染即加载成功」纠正 SVG；SVG 九格 **L2 → L3**（`data:`/`file://`/相对路径三来源） | `webkit/img_svg_contract_test.go`、`TestSVGReferenceIntrinsicSize`；探针 `*.svg` 行四列全 ✅ |
+| D9 | `data:image/svg+xml`（非 base64）内联 SVG 不绘制 | ✅ **探针伪影**（不是引擎缺陷）：矩阵页里 data URI 的双引号被按 JS 字面量写成 `\"`，HTML 属性在第一个 `"` 处提前闭合、`src` 只剩 `data:image/svg+xml,<svg xmlns=`；改按 RFC 2397 percent 编码 + 属性走 HTML 实体转义后 L0 → **L3** | 修复前后矩阵页 HTML 片段对照；探针 `inline-svg-data-uri` 行 |
+| — | **（新发现）SVG 解析缓存绕过资源策略门禁** | ✅ 缓存查询移到策略门禁**之后**。缺陷表现：宽松配置（Browser）先解析过的 SVG 被包级缓存留存，严格配置（`Toolkit+DenyExternal`）随后命中缓存拿到文档 → 出现「加载/几何/契约 ✅ 而绘制 ❌」的自相矛盾 | 探针 `DenyExternal × *.svg × file` 由 L2 → **L0**（安全默认恢复）；两次全量跑结论一致 |
+| D11 | 原判「WebP 动图帧推进未生效」 | ✅ **重新定性为探针判定抖动**：`anim-2frames.webp` 与 GIF 同源（Skia 多帧动图源）本就在推进，旧判据按「采样间隔 mod 周期」偶发同帧 → 误判 A=❌。判据稳定化后 `anim-*.gif/webp` 全部 **L4**（Browser L4 9 → 12） | 两次全量跑下降项每次不同（抖动实证）；修后连续两次「与基线一致」 |
+
 **仍存在的缺口（转入 §8.1 / 阶段 3）**
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D8 | `<img src="*.svg">` 无固有尺寸、无 `complete`/`load` 契约 | 画得出（D=✅）但 `naturalWidth=0`、契约 ❌ → 卡在 L2 | 9 |
-| D9 | `data:image/svg+xml`（非 base64、URL 编码形式）内联 SVG 不绘制 | L0（另一条 `data:image/svg+xml;base64` 路径正常） | 1 |
 | D10 | `<video>` **画面未绘制** | 帧流在推进（file/rel 的 A=✅）、`loadedmetadata` 已派发（C=✅），但采样点无画面（D=❌）→ L0 | 12 |
-| D11 | WebP 动图帧推进未生效 | `anim-2frames.webp` A=❌ → L3（GIF 同类样本为 L4） | 3 |
 | D12 | 音频无解码/输出后端 | L0（预期现状，需音频后端） | 12 |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
@@ -470,9 +485,9 @@ D1 … （现象 / 证据文件 / 影响面 / 建议）
 |---|---|---|---|---|---|---|
 | **P0** | U1 | ModeToolkit 下光栅图片一律不渲染（含 `data:`） | A/B 组实测全灰 | **决策 1：(c) 新增资源策略开关**，`data:` 无条件放行、默认值不变（§8.2 阶段 1） | AI-PS 及一切 UI 库模式宿主无法显示任何位图 | ✅ **已闭环**（`data:` 在 Toolkit 下 L3/L4；`AllowHostResolved`/`AllowAll` 开关可用） |
 | **P0** | U2 | 图片契约失效：`complete`/`naturalWidth` 恒 false/0、`onload` 疑似不派发 | C 组报告 vs 截图矛盾 | 阶段 1：按「解码缓存就绪」修 IDL 反射与事件派发 | 所有依赖图片加载事件的业务逻辑失效 | ✅ **已闭环**（契约列 0 → 66 ✅；`load`/`error` 均派发） |
-| **P1** | U3 | WebP/BMP/ICO 无固有尺寸（两套 codec 集不一致） | 实测 Go DecodeConfig ❌ | 阶段 2：Skia 优先 + Go 兜底（或注册 `x/image/webp`+`bmp`） | 未给尺寸的 `<img>` 塌陷 | ✅ **已闭环**（Skia `DecodeSize` 兜底，三者 L3；SVG 仍缺 → D8） |
-| **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 | 🟡 **部分闭环**（GIF 达 L4；**WebP 未推进** → D11） |
-| **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 | ✅ **已闭环**（file/rel 已绘制；固有尺寸与契约仍缺 → D8） |
+| **P1** | U3 | WebP/BMP/ICO 无固有尺寸（两套 codec 集不一致） | 实测 Go DecodeConfig ❌ | 阶段 2：Skia 优先 + Go 兜底（或注册 `x/image/webp`+`bmp`） | 未给尺寸的 `<img>` 塌陷 | ✅ **已闭环**（Skia `DecodeSize` 兜底，三者 L3；SVG 固有尺寸由 **D8** 补齐，§9.4） |
+| **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 | ✅ **已闭环**（GIF 与 WebP 动画均达 **L4**；原 D11「WebP 未推进」经两次对照实证为**探针判定抖动**，判据已稳定化，§9.4） |
+| **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 | ✅ **已闭环**（file/rel 已绘制；**D8** 补齐固有尺寸与 `load`/`complete` 契约 → SVG 九格 **L2 → L3**，§9.4） |
 | **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 | 🟡 **部分闭环**（A0/A1：元数据与帧流在跑；探针采样点仍无画面 → D10） |
 | **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ❌ **未闭环**（12 格 L0，需音频后端） |
 | **P2** | U8 | `MediaMetadataResolver` 宿主未注入 | 仅定义+单测 | 阶段 3 前置：宿主接 `ffmpeg -i` 探测时长（一次赋值） | 即使本地媒体也拿不到时长 | ✅ **已闭环**（A0：探针与 psai 均装配该 resolver） |
@@ -527,6 +542,10 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
   4. 引擎侧接帧推进（复用已实现的 RAF/动画帧队列，`engine/js/jsc/eventloop.go:207`）；
 - **U5**：`loadBackgroundSVG` 解析分支补 `file://` 与相对路径（当前仅 `data:` 可渲染）；
 - 交付物：每项单测 + 报告等级提升（U4：GIF/WebP 动画 L2→**L4**；U3：WebP/BMP/ICO L2→L3）。
+
+> **状态（2026-10）：阶段 2 已完成。** U3/U5 见 §9.3，U4 + D8/D9 + 「SVG 解析缓存绕过
+> 策略门禁」见 §9.4。交付物达成：SVG 九格 **L2 → L3**、GIF/WebP 动画 **L4**、
+> 全 384 格 **L2 归零**（详见 §3.4 总表）。
 
 **阶段 3：P2 大工程 — 视频/音频真实播放（决策 4，单独立项）**
 
@@ -589,7 +608,19 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 全量测试 | `GOWORK=off go test ./... -count=1`：**仅 webkit 3 个 pre-existing 失败**（已用 HEAD 版本实证同样失败，非本轮引入） | `TestButtonTextVerticalCenter` / `TestCM6RangeMeasurementMatchesSkia` / `TestCheckedStateInvalidatesStyle` |
 | 视觉与像素复核（§8.3 第 3 条） | `Browser` 与 `Toolkit+DenyExternal` 截图经 `read_image` **人眼复核**：图案只出现在预期列（后者仅 `data:` 列有内容，file:// 与相对路径全为灰底）；另对 Browser 的 95 格做**自动化像素核验**（报告的绘制判定 vs 截图中心像素）→ **0 处矛盾** | `matrix-Browser.png`、`matrix-Toolkit-DenyExternal.png` |
 
-仍存缺口见 §3.4 末表（D8–D12），全部转入 §8.2 阶段 2/3。
+仍存缺口见 §3.4 末表（D10/D12 与 AVIF/TIFF），转入 §8.2 阶段 3。
+
+### 9.4 第二批修复（2026-10，接续 §9.3）
+
+| 事项 | 结论 | 证据 |
+|---|---|---|
+| **D8** SVG 的固有尺寸与契约 | ✅ 已闭环。渲染层新增 `SVGReferenceIntrinsicSize` / `IsSVGReferenceReady`（解析顺序：`width/height` → `viewBox` → CSS 默认尺寸 300×150）；`bindings` 增加「资源固有尺寸 hook」（`imgNaturalDim`：位图优先、SVG 兜底），`naturalWidth`/`naturalHeight`/`complete` 全部改走它；`webkit` 侧接线 hook + `flushImageEvents` 的 SVG 分支 + 失败通知按「能渲染即加载成功」纠正（此前 SVG 会被 Skia 按位图解码判失败而派发 `error`）。**SVG 九格 L2 → L3** | `webkit/img_svg_contract_test.go`（complete/naturalWidth=24/viewBox=40×20/load=1/err=0）、`TestSVGReferenceIntrinsicSize`；探针 `*.svg` 行「加载/几何/绘制/契约」四列全 ✅ |
+| **D9** 内联 SVG（非 base64）不绘制 | ✅ 已闭环，且**根因是探针伪影而非引擎缺陷**：矩阵页把 data URI 里的 `"` 写成 JS 风格 `\"`，HTML 解析器在第一个 `"` 处结束属性值（`src` 只剩 `data:image/svg+xml,<svg xmlns=`）。修法：data URI 按 **RFC 2397 percent 编码**（`url.PathEscape`）+ 属性值改 `htmlAttrValue`（HTML 实体）。L0 → **L3** | 修复前后矩阵页 HTML 片段对照；探针 `inline-svg-data-uri` 行 |
+| 引擎：data URI 载荷的 `+` 语义 | ✅ RFC 2397 里 data URI 载荷是 percent-编码文本，`+` **保持字面**（form-encoding 才把 `+` 当空格）。原先用 `QueryUnescape`，SVG 内容里字面的 `+`（`transform="translate(+1,2)"` 等）会被吃成空格。改为 `PathUnescape` 优先、解析不出 SVG 时才回退 `QueryUnescape`（兼容按 `QueryEscape` 生成的既有 URI） | `TestDecodeDataURITextKeepsLiteralPlus`、`TestLoadBackgroundSVGPercentEncoded`（既有 `TestLoadBackgroundSVGURLEncoded` 走回退路径仍绿） |
+| 引擎：**SVG 解析缓存绕过资源策略门禁**（D8 修复过程中暴露） | ✅ 解析结果缓存是包级全局、跨 WebView/配置共享，而缓存查询原先在门禁**之前**：Browser 先跑并解析过的 SVG 会被后续 `Toolkit+DenyExternal` 命中缓存拿到，于是同一格出现「加载/几何/契约 ✅ 而绘制 ❌」。缓存查询移到门禁之后（`data:` 与策略无关，保留在自身分支）。`DenyExternal × *.svg × file` 由 L2 → **L0**（安全默认恢复） | 探针 `DenyExternal × *.svg` 三来源全 L0；两次全量跑结论一致 |
+| 探针：动图判定稳定化（第 4 处测量伪影） | ✅ 旧判据取「静止/播放/再等 900ms」三个**单点**像素，是否判「推进」取决于「采样间隔 mod 动图循环周期」——3 帧×100ms 的 GIF 周期 300ms、900ms 恰为其 3 倍 → 两拍同帧 → 误判未推进。**抖动实证**：同一 HEAD 连跑两次，下降项每次不同（`anim-3frames-rgb` L4/L3 摇摆、`anim-2frames.webp` 亦然）。修法：等间隔连拍 6 帧（130ms，不与常见帧时长成整数倍）+ 采样点由 1 个增到 5 个 + 判据放宽为「任意两帧不同」。修后**连续两次全量跑均「与基线一致」**，且三个非拒配置等级分布完全一致（35/0/0/49/12） | `runMediaConfig` ③、`framesDiffer`/`samplePointsOf`/`framesMaxDiff`；两次跑输出对照 |
+| 基线维护 | `DenyExternal × *.svg × file` 三条期望值原为缺陷放行产生的 L2，已随正确行为更新为 L0（其余 381 条不变） | `dev/media/baseline.json` diff |
+| 四配置复测（第二批后） | Browser / AllowAll / AllowHostResolved 完全一致：**L0 35 / L2 0 / L3 49 / L4 12**；`DenyExternal`：L0 75 / L3 17 / L4 4。**L2 全部归零** | `dev/media/out/report.md`（384 行） |
 
 ---
 
