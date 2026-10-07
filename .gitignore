@@ -87,11 +87,11 @@ web/ai-ps/**/*.bak
 /design.verify.json
 web/ai-ps/codegen.*.json
 
-# 媒体验证（docs/media-format-verification-plan.md §6.2 / 决策 5）：
+# 媒体验证（docs/media-format-verification-plan.md §6.2 / 决策 5，2026-10-07 修订）：
 #   - 样本由本地脚本生成（python dev/media/gen_samples.py），**不入库**
 #     （含 samples/_matrix.html：矩阵页必须与样本同级，相对路径来源才命中）；
-#   - 报告与四配置截图是**证据**（§6.3 证据纪律），必须入库 —— 因此对
-#     dev/media/out/ 开例外（上面的 /dev/**/out/ 会连报告一起忽略）。
+#   - 报告、四配置静止/播放截图、逐格几何、Edge 对照图是**验收证据**（§6.3 证据纪律），
+#     必须入库 —— 因此对 dev/media/out/ 开例外（上面的 /dev/**/out/ 会连报告一起忽略）。
 dev/media/samples/
 !dev/media/out/
 !dev/media/out/**
