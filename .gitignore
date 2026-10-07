@@ -37,6 +37,8 @@ dump.txt
 
 # 示例/诊断脚本的渲染产物（examples/uitoolkit、dev/*probe）
 _temp/
+# 临时验证目录（探针 / 基线对比的中间产物副本，不入库；正本见 dev/media/baseline.json）
+_tmpverify/
 ui-toolkit-demo.png
  
 # Consistency suite runtime reports

@@ -1,12 +1,15 @@
-# 媒体格式真实可用性报告（2026-10-07 20:00 71d6fc4）
+# 媒体格式真实可用性报告（2026-10-07 20:16 16daf3c）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：71d6fc4 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：16daf3c ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
 ## 总表
+
+> **列说明**：`加载`/`几何` 对音频行指「元数据可加载 / 时长可用」；**`绘制` 列对音频行不适用（N/A，报告显示 `—`）**——音频无视觉内容，其等级由音频输出判据决定（PCM 交付 + 频谱主峰（判据 A）+ 播放时钟（TC-M-602），见「音频」小节）。
+> **L0 归因**：L0 = 未加载。`deny-external` 下的 `file`/`rel` 引用是被资源策略拒绝——**预期行为，非缺陷**（文档 §9.9）；元素 `error.code` 仅作实测佐证：引擎对「策略拒绝」与「源不可达」共用 `MEDIA_ERR_SRC_NOT_SUPPORTED`（4）。
 
 | 配置 | 格式 | 样本 | 来源 | 加载 | 几何 | 绘制 | 契约 | 动画 | 等级 | 备注 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -15,11 +18,11 @@
 | Toolkit+AllowHostResolved | webp | anim-2frames.webp | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webp | anim-2frames.webp | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | webp | anim-2frames.webp | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | webp | anim-2frames.webp | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | webp | anim-2frames.webp | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | anim-2frames.webp | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webp | anim-2frames.webp | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | webp | anim-2frames.webp | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | webp | anim-2frames.webp | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | webp | anim-2frames.webp | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | anim-2frames.webp | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webp | anim-2frames.webp | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-3frames-rgb.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -27,11 +30,11 @@
 | Toolkit+AllowHostResolved | gif | anim-3frames-rgb.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-3frames-rgb.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-3frames-rgb.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-3frames-rgb.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-3frames-rgb.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-3frames-rgb.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-3frames-rgb.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-3frames-rgb.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-3frames-rgb.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-3frames-rgb.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-3frames-rgb.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-3frames-rgb.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-noloop.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -39,11 +42,11 @@
 | Toolkit+AllowHostResolved | gif | anim-noloop.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-noloop.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-noloop.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-noloop.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-noloop.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-noloop.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-noloop.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-noloop.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-noloop.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-noloop.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-noloop.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-noloop.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-uneven-delay.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -51,11 +54,11 @@
 | Toolkit+AllowHostResolved | gif | anim-uneven-delay.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-uneven-delay.gif | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-uneven-delay.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-uneven-delay.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-uneven-delay.gif | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-uneven-delay.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-uneven-delay.gif | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | gif | anim-uneven-delay.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | gif | anim-uneven-delay.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | gif | anim-uneven-delay.gif | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | anim-uneven-delay.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | gif | anim-uneven-delay.gif | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | png | corrupt.png | data | ✅ | ✅ | ❌ | ✅ | — | **L0** | 失败路径：未绘制，但 onerror 未派发（契约缺陷） |
@@ -75,11 +78,11 @@
 | Toolkit+AllowHostResolved | png | gradient.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | gradient.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | gradient.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | gradient.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | gradient.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | gradient.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | gradient.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | gradient.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | gradient.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | gradient.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | gradient.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | gradient.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | huge-4096.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -87,11 +90,11 @@
 | Toolkit+AllowHostResolved | png | huge-4096.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | huge-4096.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | huge-4096.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | huge-4096.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | huge-4096.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | huge-4096.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | huge-4096.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | huge-4096.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | huge-4096.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | huge-4096.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | huge-4096.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | huge-4096.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -99,11 +102,11 @@
 | Toolkit+AllowHostResolved | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | icon-24.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | icon-24.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | icon-24.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | icon-24.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | inline-svg-data-uri | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -115,11 +118,11 @@
 | Toolkit+AllowHostResolved | jpeg | mislabeled.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | mislabeled.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | mislabeled.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | jpeg | mislabeled.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | jpeg | mislabeled.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | jpeg | mislabeled.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | mislabeled.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | mislabeled.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | jpeg | mislabeled.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | jpeg | mislabeled.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | jpeg | mislabeled.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | mislabeled.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | ico | quad-64.ico | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -127,11 +130,11 @@
 | Toolkit+AllowHostResolved | ico | quad-64.ico | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | ico | quad-64.ico | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | ico | quad-64.ico | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | ico | quad-64.ico | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | ico | quad-64.ico | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | ico | quad-64.ico | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | ico | quad-64.ico | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | ico | quad-64.ico | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | ico | quad-64.ico | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | ico | quad-64.ico | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | ico | quad-64.ico | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | ico | quad-64.ico | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossless.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -139,11 +142,11 @@
 | Toolkit+AllowHostResolved | webp | quad-lossless.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossless.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossless.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | webp | quad-lossless.webp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | webp | quad-lossless.webp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | quad-lossless.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossless.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossless.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | webp | quad-lossless.webp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | webp | quad-lossless.webp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | quad-lossless.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossless.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossy.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -151,11 +154,11 @@
 | Toolkit+AllowHostResolved | webp | quad-lossy.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossy.webp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossy.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | webp | quad-lossy.webp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | webp | quad-lossy.webp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | quad-lossy.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossy.webp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | webp | quad-lossy.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | webp | quad-lossy.webp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | webp | quad-lossy.webp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | webp | quad-lossy.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | webp | quad-lossy.webp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | avif | quad.avif | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 预期不支持（L0，写入基线，不投入） |
@@ -175,11 +178,11 @@
 | Toolkit+AllowHostResolved | bmp | quad.bmp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | bmp | quad.bmp | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | bmp | quad.bmp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | bmp | quad.bmp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | bmp | quad.bmp | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | bmp | quad.bmp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | bmp | quad.bmp | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | bmp | quad.bmp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | bmp | quad.bmp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | bmp | quad.bmp | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | bmp | quad.bmp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | bmp | quad.bmp | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | gif | quad.gif | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -187,11 +190,11 @@
 | Toolkit+AllowHostResolved | gif | quad.gif | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | gif | quad.gif | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | gif | quad.gif | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | gif | quad.gif | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | gif | quad.gif | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | quad.gif | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | gif | quad.gif | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | gif | quad.gif | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | gif | quad.gif | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | gif | quad.gif | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | gif | quad.gif | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | gif | quad.gif | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | quad.jpg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -199,11 +202,11 @@
 | Toolkit+AllowHostResolved | jpeg | quad.jpg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | quad.jpg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | quad.jpg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | jpeg | quad.jpg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | jpeg | quad.jpg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | jpeg | quad.jpg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | quad.jpg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | quad.jpg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | jpeg | quad.jpg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | jpeg | quad.jpg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | jpeg | quad.jpg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | jpeg | quad.jpg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | quad.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -211,11 +214,11 @@
 | Toolkit+AllowHostResolved | png | quad.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | quad.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | quad.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | quad.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | quad.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | quad.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | quad.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | quad.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | quad.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | quad.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | quad.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | quad.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | tiff | quad.tiff | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 预期不支持（L0，写入基线，不投入） |
@@ -235,11 +238,11 @@
 | Toolkit+AllowHostResolved | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | ratio-only.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | ratio-only.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | ratio-only.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | ratio-only.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -247,71 +250,71 @@
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | rect-120x80.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | rect-120x80.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Browser | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.25s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.25s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.26s、结束时 1.00s（TC-M-602） |
-| Browser | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.21s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
-| Browser | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.81s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.79s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.82s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.71s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.70s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.74s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.62s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.63s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.65s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.54s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.54s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.57s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.45s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.44s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.48s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.37s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.35s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.40s、结束时 1.00s（TC-M-602） |
-| Browser | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Browser | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.95s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Browser | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.90s、结束时 1.00s（TC-M-602） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.87s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.90s、结束时 1.00s（TC-M-602） |
+| Browser | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.31s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.25s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.26s、结束时 1.00s（TC-M-602） |
+| Browser | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.21s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.21s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
+| Browser | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.82s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.76s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.76s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.73s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.68s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.69s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.65s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.60s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.61s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.56s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.52s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.54s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.46s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.44s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.45s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.38s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.37s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.37s、结束时 1.00s（TC-M-602） |
+| Browser | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Browser | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.98s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.92s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.91s、结束时 1.00s（TC-M-602） |
+| Browser | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.90s、结束时 1.00s（TC-M-602） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.84s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.84s、结束时 1.00s（TC-M-602） |
 | Browser | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Browser | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
-| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Browser | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
-| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 14 帧） |
 | Browser | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -319,11 +322,11 @@
 | Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | webm | testsrc-1s.webm | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -331,11 +334,11 @@
 | Toolkit+AllowHostResolved | webm | testsrc-1s.webm | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webm | testsrc-1s.webm | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
@@ -343,11 +346,11 @@
 | Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
-| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 所有帧采样点相同（最大差异 0，共 14 帧） |
+| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ❌ | ❌ | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Toolkit+AllowAll | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -355,11 +358,11 @@
 | Toolkit+AllowHostResolved | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | with space.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | with space.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | with space.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | with space.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | with space.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | with space.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | with space.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | with space.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | with space.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | with space.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | zero-bytes.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 失败路径：未绘制 + onerror 已派发（契约正确） |
@@ -375,11 +378,11 @@
 | Toolkit+AllowHostResolved | png | 中文名-方块.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 中文名-方块.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | 中文名-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | 中文名-方块.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | 中文名-方块.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | 中文名-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 中文名-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | 中文名-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | 中文名-方块.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | 中文名-方块.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | 中文名-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 中文名-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | 图标-方块.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -387,11 +390,11 @@
 | Toolkit+AllowHostResolved | png | 图标-方块.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 图标-方块.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | 图标-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | 图标-方块.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | 图标-方块.png | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | 图标-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 图标-方块.png | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | png | 图标-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Toolkit+DenyExternal | png | 图标-方块.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+DenyExternal | png | 图标-方块.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | png | 图标-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | 图标-方块.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 
@@ -405,60 +408,60 @@
 | Browser | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+DenyExternal | quad.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.jpg | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.jpg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.gif | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.gif | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-lossy.webp | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-lossy.webp | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-lossless.webp | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-lossless.webp | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.bmp | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad.bmp | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-64.ico | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | quad-64.ico | rel | 无绘制、无几何 |
+| Toolkit+DenyExternal | quad.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.jpg | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.jpg | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.gif | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.gif | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-lossy.webp | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-lossy.webp | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-lossless.webp | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-lossless.webp | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.bmp | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad.bmp | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-64.ico | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | quad-64.ico | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+DenyExternal | quad.tiff | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+DenyExternal | quad.tiff | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+DenyExternal | quad.tiff | rel | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+DenyExternal | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+DenyExternal | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+DenyExternal | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+DenyExternal | gradient.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | gradient.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-3frames-rgb.gif | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-3frames-rgb.gif | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-uneven-delay.gif | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-uneven-delay.gif | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-noloop.gif | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-noloop.gif | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-2frames.webp | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | anim-2frames.webp | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | mislabeled.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | mislabeled.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | huge-4096.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | huge-4096.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | 中文名-方块.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | 中文名-方块.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | with space.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | with space.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | 图标-方块.png | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | 图标-方块.png | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | rect-120x80.svg | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | rect-120x80.svg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | ratio-only.svg | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | ratio-only.svg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | icon-24.svg | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | icon-24.svg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | solid-red-1s.mp4 | file | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
-| Toolkit+DenyExternal | solid-red-1s.mp4 | rel | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
-| Toolkit+DenyExternal | twophase-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | twophase-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.webm | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.webm | rel | 无绘制、无几何 |
+| Toolkit+DenyExternal | gradient.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | gradient.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-3frames-rgb.gif | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-3frames-rgb.gif | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-uneven-delay.gif | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-uneven-delay.gif | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-noloop.gif | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-noloop.gif | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-2frames.webp | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | anim-2frames.webp | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | mislabeled.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | mislabeled.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | huge-4096.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | huge-4096.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | 中文名-方块.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | 中文名-方块.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | with space.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | with space.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | 图标-方块.png | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | 图标-方块.png | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | rect-120x80.svg | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | rect-120x80.svg | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | ratio-only.svg | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | ratio-only.svg | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | icon-24.svg | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | icon-24.svg | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
+| Toolkit+DenyExternal | testsrc-1s.mp4 | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | testsrc-1s.mp4 | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | solid-red-1s.mp4 | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | solid-red-1s.mp4 | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | twophase-1s.mp4 | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | twophase-1s.mp4 | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | testsrc-1s.webm | file | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
+| Toolkit+DenyExternal | testsrc-1s.webm | rel | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | quad.tiff | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.tiff | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.tiff | rel | 预期不支持（L0，写入基线，不投入） |
@@ -471,6 +474,8 @@
 | Toolkit+AllowAll | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
+
+> 标注「资源策略 … 拒绝该引用（预期，非缺陷）」的行是配置策略的**正确行为**（文档 §9.9 门禁收口），不是实现缺陷；真正的缺陷行不含此标注。
 
 ## 策略一致性（决策 1 · TC-M-905）
 
@@ -557,16 +562,16 @@
 | 配置 | 样本 | 来源 | 采样点（首块后 s） | currentTime | 期望 | 结束 currentTime | 判定 |
 |---|---|---|---|---|---|---|---|
 | Browser | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Browser | sine-440-1s.wav | file | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Browser | sine-440-1s.wav | rel | 0.94 | 0.90 | 0.94 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | data | 0.85 | 0.81 | 0.85 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | file | 0.75 | 0.71 | 0.75 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | rel | 0.67 | 0.62 | 0.67 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | data | 0.58 | 0.54 | 0.58 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | file | 0.50 | 0.45 | 0.50 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | rel | 0.41 | 0.37 | 0.41 | 1.00 | ✅ |
-| Browser | sine-440-1s.m4a | data | 0.33 | 0.25 | 0.33 | 1.00 | ✅ |
-| Browser | sine-440-1s.m4a | file | 0.24 | 0.20 | 0.24 | 1.00 | ✅ |
+| Browser | sine-440-1s.wav | file | 1.00 | 0.98 | 1.00 | 1.00 | ✅ |
+| Browser | sine-440-1s.wav | rel | 0.96 | 0.90 | 0.96 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | data | 0.88 | 0.82 | 0.88 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | file | 0.79 | 0.73 | 0.79 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | rel | 0.71 | 0.65 | 0.71 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | data | 0.62 | 0.56 | 0.62 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | file | 0.52 | 0.46 | 0.52 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | rel | 0.44 | 0.38 | 0.44 | 1.00 | ✅ |
+| Browser | sine-440-1s.m4a | data | 0.35 | 0.31 | 0.35 | 1.00 | ✅ |
+| Browser | sine-440-1s.m4a | file | 0.26 | 0.21 | 0.26 | 1.00 | ✅ |
 | Browser | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
 | Toolkit+DenyExternal | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
 | Toolkit+DenyExternal | sine-440-1s.wav | file | 0.00 | 0.00 | 0.00 | 0.00 | — |
@@ -581,29 +586,29 @@
 | Toolkit+DenyExternal | sine-440-1s.m4a | file | 0.00 | 0.00 | 0.00 | 0.00 | — |
 | Toolkit+DenyExternal | sine-440-1s.m4a | rel | 0.00 | 0.00 | 0.00 | 0.00 | — |
 | Toolkit+AllowHostResolved | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.wav | file | 1.00 | 0.95 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.wav | rel | 0.91 | 0.87 | 0.91 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | data | 0.84 | 0.79 | 0.84 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | file | 0.75 | 0.70 | 0.75 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | rel | 0.67 | 0.63 | 0.67 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | data | 0.59 | 0.54 | 0.59 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | file | 0.49 | 0.44 | 0.49 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | rel | 0.40 | 0.35 | 0.40 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.wav | file | 0.97 | 0.92 | 0.97 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.wav | rel | 0.88 | 0.84 | 0.88 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | data | 0.80 | 0.76 | 0.80 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | file | 0.72 | 0.68 | 0.72 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | rel | 0.64 | 0.60 | 0.64 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | data | 0.56 | 0.52 | 0.56 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | file | 0.48 | 0.44 | 0.48 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | rel | 0.40 | 0.37 | 0.40 | 1.00 | ✅ |
 | Toolkit+AllowHostResolved | sine-440-1s.m4a | data | 0.32 | 0.25 | 0.32 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.m4a | file | 0.24 | 0.21 | 0.24 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.m4a | file | 0.23 | 0.21 | 0.23 | 1.00 | ✅ |
 | Toolkit+AllowHostResolved | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
 | Toolkit+AllowAll | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.wav | file | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.wav | rel | 0.94 | 0.90 | 0.94 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | data | 0.86 | 0.82 | 0.86 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | file | 0.78 | 0.74 | 0.78 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | rel | 0.69 | 0.65 | 0.69 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | data | 0.61 | 0.57 | 0.61 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | file | 0.52 | 0.48 | 0.52 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | rel | 0.44 | 0.40 | 0.44 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.m4a | data | 0.34 | 0.26 | 0.34 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.wav | file | 0.97 | 0.91 | 0.97 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.wav | rel | 0.88 | 0.84 | 0.88 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | data | 0.80 | 0.76 | 0.80 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | file | 0.72 | 0.69 | 0.72 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | rel | 0.65 | 0.61 | 0.65 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | data | 0.58 | 0.54 | 0.58 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | file | 0.49 | 0.45 | 0.49 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | rel | 0.41 | 0.37 | 0.41 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.m4a | data | 0.32 | 0.26 | 0.32 | 1.00 | ✅ |
 | Toolkit+AllowAll | sine-440-1s.m4a | file | 0.24 | 0.20 | 0.24 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.m4a | rel | 0.16 | 0.00 | 0.16 | 1.00 | ✅ |
 
 > 容差 **±0.2s**（采样开销 + 设备启动延迟）。`data:` 来源没有本地路径（宿主解不了码），采样时无 PCM、时钟未起步——不在判据 A 的覆盖范围，保持 L1。
 
