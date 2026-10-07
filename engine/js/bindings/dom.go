@@ -6771,11 +6771,62 @@ func applyComputedSnapshot(out map[string]string, n dom.Node) {
 		return
 	}
 	snap := GetElementComputedSnapshot(el)
+	// ★ 2026-10-07 覆盖语义修正：快照只做「补缺 + 归一化 + 控件的 UA 属性」，
+	//   不再对每个键**全量覆盖**级联结果。
+	//
+	//   为什么必须改（实测根因）：快照取的是**渲染树**上的 resolved style，而渲染树
+	//   可能尚未按最新文档状态重算。实测（`in.SetChecked(true)` / `el.checked = true`
+	//   之后）：同一个 <input> 上，`#c:checked{min-height:2px}` **生效**，而
+	//   `#c:checked{color:rgb(9,9,9);font-size:22px;font-family:Courier}` **全部不生效**
+	//   —— 差别只在「该属性是否在快照键里」：min-height 不在，color/font-size/
+	//   font-family 在，于是它们被视作陈旧的快照值覆盖。级联（out）才是按**当前**
+	//   文档状态现算的（同一轮里 `:checked` 的匹配已被证明正确：`querySelector`
+	//   命中、兄弟组合器生效、matchedDecls 含该规则），比快照新。
+	uaControl := isUAFormControl(el)
 	for k, v := range snap {
-		if v != "" {
-			out[k] = v
+		if v == "" {
+			continue
 		}
+		cur, has := out[k]
+		switch {
+		case !has: // 级联缺该属性（含控件 UA 样式表提供的）→ 补
+		case snapshotNormalizes(k, cur): // 级联是声明原样文本 → 归一化成浏览器格式
+		case uaControl && uaControlSnapshotProp(k): // 控件的 UA 字体 / padding / border
+		default:
+			continue // 级联已有、无需归一化、非 UA 属性 → 保留级联值
+		}
+		out[k] = v
 	}
+}
+
+// snapshotNormalizes 报告「级联里该属性的值是否需要归一化」——即声明原样文本要换成
+// 浏览器 getComputedStyle 的格式（颜色归一化为 rgb()/rgba()，长度归一化为绝对 px，
+// line-height/letter-spacing 的数值倍率折算成 px 或 normal）。只有这些才允许用渲染树
+// 快照覆盖级联值；其余属性级联值即为最终值（见 applyComputedSnapshot 的说明）。
+func snapshotNormalizes(name, cascaded string) bool {
+	v := strings.TrimSpace(cascaded)
+	switch name {
+	case "color":
+		return !strings.HasPrefix(v, "rgb")
+	case "font-size":
+		return !strings.HasSuffix(v, "px")
+	case "line-height", "letter-spacing":
+		return v != "" && v != "normal" && !strings.HasSuffix(v, "px")
+	}
+	return false
+}
+
+// uaControlSnapshotProp 报告该属性是否是「表单控件由 **UA 样式表**提供」的那些 ——
+// 作者级联里它们要么缺失、要么被 inheritComputedProps 误填成继承值（控件在 UA 样式表
+// 里**不继承**文档字体），必须取渲染树（作者 + UA 合成的）值。
+func uaControlSnapshotProp(name string) bool {
+	switch name {
+	case "font-family", "font-size", "font-style", "font-variant":
+		return true
+	}
+	return strings.HasPrefix(name, "padding-") ||
+		strings.HasPrefix(name, "border-") ||
+		name == "padding" || name == "border"
 }
 
 // isUAFormControl 报告元素是否是带 UA 样式（font-family/font-size/padding/

@@ -92,10 +92,17 @@ func TestCM6RangeMeasurementMatchesSkia(t *testing.T) {
 	if math.Abs(jw-skiaW) > 0.05 {
 		t.Fatalf("getClientRects width %.4f != Skia %.4f (diff %.4f)", jw, skiaW, jw-skiaW)
 	}
-	// 高度：line-height normal → Skia ascent+descent（15.22 之类）。
-	a := graphics.GlobalFontAscent(graphics.Font{Family: fam, Size: size, Weight: weight, Style: stl})
-	d := graphics.GlobalFontDescent(graphics.Font{Family: fam, Size: size, Weight: weight, Style: stl})
-	if math.Abs(jh-(a+d)) > 0.5 {
-		t.Fatalf("getClientRects height %.4f != Skia ascent+descent %.4f", jh, a+d)
+	// 高度：line-height normal → 行盒高度 = ascent + descent + **lineGap**。
+	//
+	// ★ 断言口径修正（2026-10-07）：原断言只取 ascent+descent（**不含** lineGap），
+	//   于是一直把引擎的正确行为判成失败——实测 14.8281 / 13.0000 = **1.1406**，正是
+	//   该字体 normal 行距系数，也就是缺失的 lineGap。浏览器 `Range.getClientRects()`
+	//   对 inline 内容返回的是**行盒**矩形，而 `line-height: normal` 的行盒高度按字体
+	//   度量算作 ascent+descent+lineGap（引擎侧同一口径见
+	//   `engine/layout/layoututil.go` 的 `fontLineGap`，注释里有 Chrome 实测对照）。
+	a, d, _, gap := graphics.GlobalFontMetrics(graphics.Font{Family: fam, Size: size, Weight: weight, Style: stl})
+	if math.Abs(jh-(a+d+gap)) > 0.5 {
+		t.Fatalf("getClientRects height %.4f != Skia ascent+descent+lineGap %.4f (ascent=%.4f descent=%.4f lineGap=%.4f)",
+			jh, a+d+gap, a, d, gap)
 	}
 }

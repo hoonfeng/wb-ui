@@ -749,7 +749,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
      实跑输出（2026-10-07）：`A: []`、`B: []`、`C: 12 格全为 audio`、`D: 84 / 最大绝对差 0.010`。
 3. 截图经 `read_image` 人眼复核；
-4. 单测作为**回归底线**：不得新增失败（既有 3 个 pre-existing 失败见 `docs/TECH_DEBT.md`），
+4. 单测作为**回归底线**：不得新增失败（原 3 个 pre-existing 失败已于 2026-10-07 **全部修复**、基线**全绿**，见 `docs/TECH_DEBT.md`），
    **不受本工装影响**；四配置渲染为**本机按需**执行（决策 6 修订：不入 CI 门禁）。
    - ⚠️ **实测（2026-10-07）**：`go test $(go list ./... | grep -v consistency)`
      → **28 包 ok + 1 包 FAIL（`wb-ui/webkit`，3 个既有用例）+ 67 包无测试文件，共 96 包**。
@@ -765,9 +765,9 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
        故**不**放进默认 `go test ./...`（这也是「默认 `go test ./...`」在本机跑不完的原因）。
      - **已固化为入口（2026-10-07，Q6-D）**：`cgo_env.bat test-all`（脚本内**强制 `GOWORK=off`**、
        自动定位 `SKIA_DLL_DIR`、排除 `consistency`）。本轮实跑：**ok 28 包 + FAIL 1 包
-       （`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包，EXIT=1**——与上述基线**逐字一致，失败未新增**。
+       （`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包，EXIT=1 —— 与**当时**基线逐字一致，失败未新增。★ **修复后（同日 Q4-C/D）**：ok 29 包 + **FAIL 0** + 67 无测试，**EXIT=0**，单测基线**首次全绿**。
    - ⚠️ **勘误**：本行旧文记「保持全绿（当前 23 包）」——两处均过期：「23 包」自 `896c670`
-     起未更新（实测 96 包 / 28 ok / 1 FAIL），且当前**并非全绿**（webkit 3 个 pre-existing）。
+     起未更新（实测 96 包）；当时**并非全绿**（webkit 3 个 pre-existing）——**该 3 项已于 2026-10-07 全部修复**（见 `docs/TECH_DEBT.md`），现基线为 ok 29 + FAIL 0。
 
 ---
 
@@ -808,7 +808,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | **D4** WebP/BMP/ICO 固有尺寸 | ✅ 已闭环：Skia `DecodeSize` 兜底（三格式 × 三来源 = 9 格 L3） | 探针 `quad.bmp` / `quad-*.webp` / `quad-64.ico` |
 | **R1**（引入即发现并修掉的回归） | SVG 探测在 paint 线程同步 `loader.Load` → 栅格图/远端引用被同步取字节，`Render()` 扣住整个 HTTP 超时（实测 30 s）且重复发请求；已收紧为「本地 + `.svg` 扩展名」 | `TestAsyncImageLoadMarksFrameDirty`：HEAD PASS(0.12 s) → 引入后 FAIL(60 s) → 修复后 PASS(0.12 s) |
 | 探针 3 处测量伪影 | 已修：①`settleReal` 不渲染即采集；②内联事件属性用双引号字面量作参数导致属性提前闭合；③采样只支持 quad/solid（动图与渐变样本误判未绘制） | 契约列 **0 → 66 ✅**；Browser 下 L3/L4 由 **0 → 51** 格 |
-| 全量测试 | `GOWORK=off go test ./... -count=1`：**仅 webkit 3 个 pre-existing 失败**（已用 HEAD 版本实证同样失败，非本轮引入） | `TestButtonTextVerticalCenter` / `TestCM6RangeMeasurementMatchesSkia` / `TestCheckedStateInvalidatesStyle` |
+| 全量测试 | `GOWORK=off go test ./... -count=1`：**FAIL 0、全绿**（ok 29 包 + 67 无测试，EXIT=0；2026-10-07 Q4-C/D 修复后的基线。修复前曾有 3 个 pre-existing 失败，已用 HEAD 版本实证非本轮引入） | 修复内容见 `docs/TECH_DEBT.md`「三条失败的逐条侦查与处置」（① 扁字形断言 ② normal 行高含 lineGap ③ `applyComputedSnapshot` 快照覆盖语义） |
 | 视觉与像素复核（§8.3 第 3 条） | `Browser` 与 `Toolkit+DenyExternal` 截图经 `read_image` **人眼复核**：图案只出现在预期列（后者仅 `data:` 列有内容，file:// 与相对路径全为灰底）；另对 Browser 的 95 格做**自动化像素核验**（报告的绘制判定 vs 截图中心像素）→ **0 处矛盾** | `matrix-Browser.png`、`matrix-Toolkit-DenyExternal.png` |
 
 仍存缺口见 §3.4 末表（D10/D12 与 AVIF/TIFF），转入 §8.2 阶段 3。
@@ -1030,14 +1030,14 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 > **拍板（2026-10-07）**：用户选择「按本表『建议』列执行」——即 **Q1-B / Q2-D / Q3-A+C / Q4-B /
 > Q5-A / Q6-B(+D) / Q7-B**（Q8 已就地处置）。下表「状态」列记录**本轮实际执行结果**；
 > 详细证据见对应章节（§8.3 / §9.6 / §9.9 / `docs/TECH_DEBT.md`）。
-> 建议列之外的其它选项（Q2-C 完整音频图、Q4-C/D 直接修、Q5-B 重构）**本轮一律未动**；Q7-C（采样根因）已落地（`bc9d8b9`），其**遗留的截图相位抖动由 Q7-D 同轮处置**（见 §9.9）。
+> 建议列之外的其它选项里，**Q4-C/D（三个 pre-existing 失败的直接修）与 Q7-C（采样根因）已落地**（2026-10-07），Q7-C 遗留的**截图相位抖动**由 **Q7-D** 同轮处置（见 §9.9）；仍未动的只有 **Q2-C 完整音频图**与 **Q5-B 重构**（后者用户已拍板**挂账**）。
 
 | 编号 | 是什么 | 影响 | 拍板 | 状态（2026-10-07 实测） | 证据去向 |
 |---|---|---|---|---|---|
 | **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**此前从未真正执行** | **B（跑一次）** | ✅ **已执行**。`cmd/psai -media -media-edge` 跑通，Edge 截图 `dev/media/out/edge-matrix.png`（**验收证据，入库**；决策 5 于 2026-10-07 修订后）。程序化逐格对照 **96 格 0 差异**：Edge 有内容而本项目空白 **0 格**、本项目有内容而 Edge 空白 **0 格**；12 个空格**全部是不可见的 `<audio>`**；84 个共有内容格的最大比例差 **0.010** ⇒「不低于 Edge」**实测成立**（逐格一致）。⚠️ 工具侧 `runEdgeComparison` **只截图、不产 Edge 等级列**，故「等级对照」仍属人工/程序化 | §8.3 第 2 条「Edge 对照实测」（含对照脚本正文） |
 | **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）** | ✅ **侦查完成、未实施**。全仓 Go 侧零命中；最小面（构造器 + `decodeAudioData` 出 buffer + 特性检测可过）**≈550–810 行**（含测试），复用现有宿主解码与注入模式；唯一真缺口 = `engine/js/jsc` 无「创建 Float32Array」的公开方法；完整音频图 ≈3000–6000 行（高风险） | §9.6「WebAudio 最小面侦查」 |
 | **Q3** | `TC-M-604` 环回录音 | 本机无采集设备 ⇒ 用例恒跳过；「跳过口径」在不同轮次写法不一致 | **A+C（保持现状 + 口径统一）** | ✅ **已完成**。实现侧本就是 `SKIP(no-loopback)`（无设备 / 无 ffmpeg 分支）；文档 **4 处**旧写法 `mismatch` 已统一（`media-format-verification-plan.md` 2 处、`implementation-path.md` 2 处）+ 项目记忆 1 处；全仓 grep 旧写法 **0 残留**。判定语义不变（仍是**跳过**，不是通过）。★ 本机 2026-10-07 实测**有**候选设备（Voicemeeter Out B3，输入未路由）⇒ 记 `mismatch`，属第三种状态。**2026-10-07 结项补**：报告新增「幅度对照」行（判据 A 的 1.000 vs 录回 0.032 = 1/32 ⇒ 只录到底噪、属环境未配置），探针 `Detail` 改为只陈述测得事实、不代下因果结论 | §9.6「判据 B 口径」、§3.3 TC-M-604 |
-| **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）** | ✅ **侦查完成、未修**。三条各给出测试名/断言原文/根因假设/风险/建议：①按钮字形只命中一行像素 ⇒ 测量脆性；②`14.8281/13.0 = 1.1406` = Segoe UI 的 normal 行距 ⇒ 断言口径过窄；③`:checked` 读 attribute 而非 IDL 状态（②③ 均指向「测试期望/口径」而非引擎缺陷） | `docs/TECH_DEBT.md`「三条失败的逐条侦查」 |
+| **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）→ 后经 Q4-C/D 直接修** | ✅ **已全部修复，单测基线首次全绿**（`ok 29 包 + 67 无测试 + FAIL 0`，EXIT=0）。① 扁字形断言改判「水平居中 + ink 落在内容框内」（布局居中本身正确：CJK 用例 ink 中心 36.0 与按钮中心 36 完全相等）；② normal 行高口径补 lineGap（14.8281 = 13.0000 + 1.8281）；③ **引擎真缺陷**：`applyComputedSnapshot` 用**尚未重算**的渲染树快照逐键覆盖级联结果（`isUAFormControl` 对 `<input>` 无条件置 `need=true`）⇒ `#c:checked` 的 color/font-size/font-family 被陈旧值覆盖；已改为「补缺 + 归一化 + 控件的 UA 属性」才覆盖。★ 原「`:checked` 读 attribute 而非 IDL 状态」的根因假设**被实测推翻**（attribute 确实被写、querySelector 命中、兄弟组合器生效） | `docs/TECH_DEBT.md`「三条失败的逐条侦查与处置」 |
 | **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）** | ✅ **已登记挂账、未重构** | §9.9「挂账登记」 |
 | **Q6** | 单测纪律（每轮是否纳入全量 `go test`） | 只跑定向测试可能漏掉回归 | **B（每轮纳入）+ D（固化入口）** | ✅ **已完成**。`cgo_env.bat` 新增 `test-all`，并**强制 `GOWORK=off`**（修掉 workspace 损坏时 `go list -m` 静默失败）；本轮实跑 **ok 28 包 + FAIL 1 包（`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包**，**失败清单未增** | §6.4「环境前提」、§8.3 第 4 条 |
 | **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下 L0 的**备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到第 8 处 | **B（只修 ① 备注文案）** | ✅ **①已完成**：`judgeCell` 的 `broken` 分支改为**优先** `mediaDenialNote` ⇒ `DenyExternal × file/rel` 的 corrupt.png 备注从「失败路径……契约缺陷」更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」；重跑 `-media` 后**等级全 L0 不变、与基线一致**。②**已另轮落地**（Q7-C，2026-10-07）：`mediaAnimSteps` 按样本声明的帧时长驱动连拍步长，连续 3 次全量跑 384 条等级零变化（见 §9.9「探测伪影」行）；③ **它落地后暴露的截图相位抖动（另一环节）已由 Q7-D 处置**（2026-10-07，见 §9.9「截图相位」行）：渲染层取证相位锁定 + 探针截图期间钉相位 0，连续 3 次全量跑 8 张 `matrix-*.png` **逐字节相同** | §10 本行 + `cmd/psai/mediaprobe.go` 的 `judgeCell` / `mediaAnimSteps` / `engine/rendering/imageanimation.go` 的 `SetAnimatedImagePhase` |

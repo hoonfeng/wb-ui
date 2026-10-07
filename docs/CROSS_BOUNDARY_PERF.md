@@ -105,10 +105,11 @@
 - **`HandleAccess` 未提升**（见 3.2）——不打算再优化：取句柄不是热点，继续压它属于优化错目标。
 - **`GetPropertyValue` 仍有 4 828 allocs**：读路径每次会构造返回字符串与补白名单属性，
   下一步可做「按需补白名单」或复用小切片，属 C-P4 剩余（未做）。
-- **webkit 包仍有 3 个基线失败测试（非本轮引入，已用干净 HEAD 判定）**：
-  `TestButtonTextVerticalCenter`、`TestCM6RangeMeasurementMatchesSkia`、`TestCheckedStateInvalidatesStyle`
-  在「隔离全部未跟踪文件 + 暂存全部已改文件」的 HEAD 基线上**同样失败** ⇒ 与本轮改动无关，
-  本轮不掩盖、不顺手改（各自属于渲染度量与表单状态失效链，见 TECH_DEBT）。
+- **webkit 包基线失败已清零**（2026-10-07）：`TestButtonTextVerticalCenter`、
+  `TestCM6RangeMeasurementMatchesSkia`、`TestCheckedStateInvalidatesStyle` 三项曾以干净 HEAD
+  判定为 pre-existing（与本轮性能改动无关），**同日已全部修复** —— 前两项是断言口径写错
+  （扁字形断言、normal 行高漏 lineGap），第三项是 `getComputedStyle` 渲染树快照覆盖语义的
+  **引擎缺陷**（见 TECH_DEBT）。修复后全量 `go test` 为 **ok 29 + FAIL 0**。
 
 ## 5.1｜顺带修好的两处真实缺陷（多 WebView 媒体上下文）
 

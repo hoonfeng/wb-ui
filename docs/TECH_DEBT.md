@@ -472,7 +472,7 @@ GIF/WebP 动画已实装（宿主用 goskia 的 SkCodec 解多帧，引擎按帧
   「换 V8 值不值」才是在真实负载上可判定的事；在后端未接入前，`jsc` 的后端抽象只铺到
   「建运行时 / 执行脚本 / 取全局对象」（C-P2 结论：按实际编译错误补齐，不预先想象契约）。
 
-## webkit 测试基线：3 个 pre-existing 失败与 @media 归属缺陷（2026-10-07）
+## webkit 测试基线：3 个 pre-existing 失败（**已全部修复 2026-10-07**）与 @media 归属缺陷（2026-10-07）
 
 ### 一、三个 pre-existing 失败（有 HEAD 对比证据，非本轮引入）
 
@@ -502,25 +502,32 @@ go test ./webkit/... -count=1                 REM 分别在 ../wb-ui-head 与工
 - `TestCheckedStateInvalidatesStyle`：`formstate_invalidation_test.go:75/91: SetChecked(true) 后 #c color="rgb(1, 2, 3)"，want "rgb(9, 9, 9)"`。
 
 **判定 pre-existing**：三项在 HEAD 与工作区的失败用例名、失败文件与行号、断言值完全一致。
+> ★ **2026-10-07 后续：三项已全部修复，单测基线首次全绿**（`ok 29 包 + 67 无测试 + FAIL 0`，EXIT=0）。
+> 其中最关键的订正是上表第 3 行——原根因假设（`:checked` 读 attribute 而非 IDL 状态）经实测被**推翻**，
+> 真正的缺陷在 `getComputedStyle` 的渲染树快照覆盖语义；前两项则是**断言口径**写错（非引擎缺陷）。
 （另有 4 个 webkit 级失败只在 HEAD 侧的 goskia 版本上出现/消失的项，本表只列上述 3 个共同项。）
 
-#### 三条失败的逐条侦查（2026-10-07，Q4-B：只读定位，**未修**）
+#### 三条失败的逐条侦查与处置（2026-10-07：Q4-B 只读定位 → **Q4-C/D 已修**）
 
 复跑入口（本轮实跑，已固化为脚本子命令）：
 
 ```bat
 MSYS_NO_PATHCONV=1 cmd /c "cgo_env.bat test-all"
-REM → ok 28 包 + 1 FAIL(wb-ui/webkit，3 用例) + 67 无测试 = 96 包，EXIT=1（2026-10-07）
+REM → 修复前：ok 28 包 + 1 FAIL(wb-ui/webkit，3 用例) + 67 无测试 = 96 包，EXIT=1（2026-10-07）
+REM → 修复后：ok 29 包 + 0 FAIL + 67 无测试 = 96 包，EXIT=0（2026-10-07，Q4-C/D）
 ```
 
 | # | 测试（文件:行） | 失败断言（本轮输出） | 根因假设 | 修复风险 | 建议选项 |
 |---|---|---|---|---|---|
-| 1 | `TestButtonTextVerticalCenter`<br>（`webkit/button_center_test.go:82`） | `glyph vertical center 19.0 too far from button center 21 (range 19.5..22.5)`；同日志 `glyph white pixels=6 y-range=[19,19]` | 22×22 按钮里的 `−`（U+2212）字形**很扁**：阈值 >200 只命中**一行**像素，于是「ink 中心 19.0」对基线/字体度量的**亚像素差**极度敏感（差 0.5px 就越界）。属**断言脆性**（测量口径对扁字形不稳），非布局错误——同文件用大字形的 `TestButtonTextCJK` 通过 | 低（改测试口径）；中高（改引擎的 button 垂直居中会波及全局布局） | **A：改测量口径**（用软阈值 >100 的中心，或改用大字形样本）＞ C：记为已知边界。**不建议**动引擎布局 |
-| 2 | `TestCM6RangeMeasurementMatchesSkia`<br>（`webkit/cm6_measure_skia_test.go:99`） | `getClientRects height 14.8281 != Skia ascent+descent 13.0000` | **口径不一致**（非引擎缺陷）：`14.8281 / 13.0 = 1.1406`，正是 Segoe UI `line-height: normal` 的行距系数 ⇒ 引擎的 normal 行高**含 lineGap**，而断言只取 `GlobalFontAscent + GlobalFontDescent`（**不含** lineGap） | 高（改引擎 normal 行高会改变**所有**页面行高，且很可能**反而偏离**浏览器） | **A：修断言口径**（改为与浏览器一致的 normal 行高，或显式加 lineGap）。**不建议**动引擎 |
-| 3 | `TestCheckedStateInvalidatesStyle`<br>（`webkit/formstate_invalidation_test.go:75/91`） | `引擎 SetChecked(true) 后 #c color="rgb(1, 2, 3)"，want "rgb(9, 9, 9)"`；`JS el.checked=true 后 #c color=%q，want "rgb(9, 9, 9)"` | **`:checked` 匹配读 attribute 而非 IDL 状态**：① `in.SetChecked(true)`（引擎内部）与 ② `el.checked = true`（IDL setter）都只改 **IDL 状态**、不写 `checked` attribute ⇒ `:checked` 不匹配 ⇒ 样式不失效；③ `setAttribute('checked', …)` 路径**通过**（第 103 行断言无报错）。三条路径的通过/失败分布恰好指向这一根因。`getComputedStyle` 走 `computedStyleFor` 的自建级联（见下节 §二），其 `:checked` 判定同样须看 IDL 状态 | 中（`:checked` 判定面 + 失效范围必须覆盖**兄弟/后继组合器** `input:checked + .track::after`，漏掉兄弟会让滑块停在旧样式） | **A：小范围修**（`:checked` 判定同时读 `html5.InputElement.Checked()`，状态变更时按既有 invalidation 路径清兄弟子树）＞ B：挂账 |
+| 1 | `TestButtonTextVerticalCenter`<br>（`webkit/button_center_test.go`） | `glyph vertical center 19.0 too far from button center 21 (range 19.5..22.5)`；`glyph white pixels=6 y-range=[19,19]` | 「断言脆性」方向对，但更准确的说法是**断言本身错了**：`−`（U+2212）整条横画位于 **x-height 中部**而不是行盒中心，ink 中心**天然偏上**（软阈值 >100 也只给出 `[19,19]` ⇒ 并非抗锯齿边缘差异）。**布局居中本身没问题**：同批实测 `TestButtonTextCJK` 的 ink 中心 = 按钮中心（36.0 vs 36.0，**完全相等**） | **改测试断言**：扁字形改判它**能**判的两件事——① **水平居中**（实测 20.5 vs 21.0，差 0.5px）② ink **完整落在按钮内容框内**；垂直保留 ±3px 宽松中心检查。✅ PASS |
+| 2 | `TestCM6RangeMeasurementMatchesSkia`<br>（`webkit/cm6_measure_skia_test.go`） | `getClientRects height 14.8281 != Skia ascent+descent 13.0000` | 原假设正确：**口径不一致**（非引擎缺陷）。`14.8281 / 13.0 = 1.1406` 正是该字体 `line-height: normal` 的行距系数 ⇒ 行盒高度 = ascent+descent+**lineGap**，而断言只取 `GlobalFontAscent + GlobalFontDescent`（**不含** lineGap）。引擎侧同一口径见 `engine/layout/layoututil.go` 的 `fontLineGap`（注释含 Chrome 实测对照） | **修断言口径**：改用 `graphics.GlobalFontMetrics` 的 `ascent+descent+lineGap`。✅ PASS（13.0000 + 1.8281 = 14.8281 精确吻合） |
+| 3 | `TestCheckedStateInvalidatesStyle`<br>（`webkit/formstate_invalidation_test.go`） | `SetChecked(true) 后 #c color="rgb(1, 2, 3)"，want "rgb(9, 9, 9)"`；`JS el.checked=true 后` 同 | ★ **原根因假设被实测推翻**。原文写「`:checked` 匹配读 attribute 而非 IDL 状态」，但实测：`HasAttribute("checked")` 为 **true**（`SetChecked` **确实写了** attribute）、`querySelector('#c:checked')` = **MATCH**、同夹具里**兄弟** `#c:checked + #s` 的样式**正确更新**、用 `min-height` 写的同构规则（matchedDecls=2）**完全生效**。真实根因在 **`getComputedStyle` 的快照覆盖语义**（`engine/js/bindings/dom.go` 的 `applyComputedSnapshot`）：`isUAFormControl(el)` 对 `<input>` **无条件**置 `need = true` ⇒ 用渲染树快照**逐键全量覆盖**级联结果；而快照取自**尚未按最新文档状态重算**的渲染树（`ro.Style()`），于是 `color`/`font-size`/`font-family` 被陈旧值覆盖（`min-height` 不在快照键里 ⇒ 正常）。完整实测链见 §一 末尾 | **修引擎**：`applyComputedSnapshot` 改为「补缺 + 归一化 + 控件的 UA 属性」才覆盖，不再全量覆盖（新增 `snapshotNormalizes` / `uaControlSnapshotProp`）。✅ PASS |
 
 - 三项均有上表（§一）的 HEAD worktree 对比证据 ⇒ **均为 pre-existing，不是本计划引入**；
-- 本轮**未修任何一项**（Q4-B 只侦查）；Q4 的「直接修」（选项 C/D）需另行拍板。
+- **2026-10-07 已全部修复**（Q4-C/D 落地）：前两项是**测试断言口径**问题（断言本身错），第三项是
+  **引擎真缺陷**（`applyComputedSnapshot` 用**尚未重算**的渲染树快照覆盖级联结果，见上表第 3 行）；
+- **验收**：`go test ./webkit/` 整包 **ok**；全量 `go test`（除 `dev/suites/consistency`）
+  **EXIT=0、FAIL 0**（ok 29 包 + 67 无测试）—— 单测基线**首次全绿**（此前为 ok 28 + FAIL 1 包/3 用例）。
 
 ### 二、本轮修掉的缺陷：getComputedStyle 的 @media 判定丢失「元素归属」
 
