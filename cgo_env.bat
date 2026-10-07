@@ -6,14 +6,23 @@ REM   cgo_env              - show env status
 REM   cgo_env build        - go build ./...
 REM   cgo_env test         - go test ./...
 REM   cgo_env test -v      - go test -v ./...
+REM   cgo_env test-all     - go test -count=1 (all pkgs except dev/suites/consistency)
 REM   cgo_env run <target> - go run <target>
 REM
 REM Skia native library directory resolution order:
 REM   1) SKIA_DLL_DIR if already set in the environment
 REM   2) <goskia module dir>\skia\lib\windows_amd64, located via `go list -m`
+REM
+REM GOWORK is forced to "off" below. The parent F:\syproject\go.work has a
+REM `use ./GWui` entry whose directory no longer holds a go.mod, so ANY `go`
+REM command run from wb-ui under workspace mode dies with
+REM   cannot load module ..\GWui listed in go.work file
+REM With the workspace disabled, goskia resolves through go.mod (module cache)
+REM instead of the local checkout -- `go list -m` above also needs this.
 REM ============================================================
 
 set CGO_ENABLED=1
+set "GOWORK=off"
 
 if not defined SKIA_DLL_DIR (
     for /f "delims=" %%d in ('go list -m -f "{{.Dir}}" github.com/hoonfeng/goskia 2^>nul') do set "SKIA_DLL_DIR=%%d\skia\lib\windows_amd64"
@@ -67,10 +76,11 @@ REM   top-level, bracket-free `if errorlevel 1 goto :xxx_failed`.
 if /i "%1"=="build" goto :do_build
 if /i "%1"=="test"  goto :do_test
 if /i "%1"=="run"   goto :do_run
+if /i "%1"=="test-all" goto :do_test_all
 if "%1"==""         goto :usage
 
 echo [ERROR] Unknown subcommand: %1
-echo Usage: cgo_env [build^|test^|run^|<empty>]
+echo Usage: cgo_env [build^|test^|test-all^|run^|<empty>]
 exit /b 1
 
 :do_build
@@ -95,6 +105,28 @@ exit /b 0
 echo [SOME TESTS FAILED]
 exit /b 1
 
+:do_test_all
+REM Full-suite entry (Q6-B+D, 2026-10-07). Runs every package EXCEPT
+REM dev/suites/consistency: that suite boots a real Edge and blocks for
+REM minutes, which is exactly why a bare `go test ./...` never finishes here.
+REM The package list is built with `go list` and filtered with findstr, then
+REM handed to ONE go test invocation (per-package loops pay the cgo link cost
+REM 96 times). Measured runtime on this machine: about 24 s.
+setlocal enabledelayedexpansion
+set "PKGS="
+for /f "usebackq delims=" %%p in (`go list ./... ^| findstr /v /c:"dev/suites/consistency"`) do set "PKGS=!PKGS! %%p"
+echo ^>^> go test -count=1 (all packages except dev/suites/consistency)
+go test -count=1 !PKGS!
+set "RC=!ERRORLEVEL!"
+endlocal & set "RC=%RC%"
+if not "%RC%"=="0" goto :test_all_failed
+echo [TEST-ALL PASSED]
+exit /b 0
+
+:test_all_failed
+echo [TEST-ALL: SOME TESTS FAILED]
+exit /b 1
+
 :do_run
 shift
 echo ^>^> go run %*
@@ -108,6 +140,7 @@ echo Commands:
 echo   cgo_env build       - build all packages
 echo   cgo_env test        - run all tests
 echo   cgo_env test -v     - run all tests ^(verbose^)
+echo   cgo_env test-all    - all pkgs except dev/suites/consistency ^(~24s^)
 echo   cgo_env run main.go - run a program
 echo.
 exit /b 0

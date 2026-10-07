@@ -1293,11 +1293,15 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 		}
 	case sp.Kind == "broken":
 		if !r.DrawOK {
-			if r.OnError >= 1 {
-				r.Grade = "L0"
+			r.Grade = "L0"
+			// 归因先区分「资源策略拒绝」：deny-external 下 file/rel 引用在到达解码器
+			// 之前就被拒，这一格的 onerror 派发与否与「样本本身损坏」无关 —— 把它写成
+			// 「契约缺陷」与实际走的路径不符（Q7-B）。只改备注文案，等级/判定不变。
+			if n, ok := mediaDenialNote(policy, c.Source, r.ErrCode); ok {
+				r.Note = n
+			} else if r.OnError >= 1 {
 				r.Note = "失败路径：未绘制 + onerror 已派发（契约正确）"
 			} else {
-				r.Grade = "L0"
 				r.Note = "失败路径：未绘制，但 onerror 未派发（契约缺陷）"
 			}
 		} else {
