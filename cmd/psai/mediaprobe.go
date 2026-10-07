@@ -114,6 +114,9 @@ type sampleSpec struct {
 	Skip      string           `json:"skip"`
 	Inline    string           `json:"inline"`
 	Note      string           `json:"note"`
+	// AudioHz 是音频样本的期望基频（Hz，A3 判据 A 的比对基准）。gen_samples.py
+	// 早就写进 manifest 了（`hz=440`），此前探针没解析——判据 A 就缺了这一半。
+	AudioHz float64 `json:"hz"`
 	Generated bool             `json:"-"`
 }
 
@@ -188,6 +191,15 @@ type cellResult struct {
 	Note     string      `json:"note"`
 	AnimNote string      `json:"anim_note,omitempty"`
 	HTTPNote string      `json:"-"`
+	// 音频取证（A3-1；kind=audio 时有效）：
+	//   PCMFrames/PCMPeakHz/PCMPeakMag —— 判据 A（宿主输出回调的 PCM 频谱）；
+	//   CTMid —— TC-M-602 定点（play() 之后 500ms 的 currentTime）；
+	//   AudioOutput —— 本次运行是否有内置输出设备（支持矩阵的逐格依据）。
+	PCMFrames   int64   `json:"pcm_frames,omitempty"`
+	PCMPeakHz   float64 `json:"pcm_peak_hz,omitempty"`
+	PCMPeakMag  float64 `json:"pcm_peak_mag,omitempty"`
+	CTMid       float64 `json:"ct_mid,omitempty"`
+	AudioOutput bool    `json:"audio_output,omitempty"`
 }
 
 // sampleDot 是一个采样点的实测色与期望色。
@@ -209,6 +221,8 @@ type configResult struct {
 	PlayPNG  string       `json:"play_png,omitempty"`
 	GeomJSON string       `json:"geom_json"`
 	EdgeNote string       `json:"edge_note,omitempty"`
+	// Audio 是本配置下各音频格的取证（A3-1）：报告小节与逐格判定都用它。
+	Audio []audioCellEvidence `json:"audio,omitempty"`
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────
@@ -290,7 +304,21 @@ func runMediaProbe(o mediaOpts) int {
 
 	baseline, berr := readBaseline(o.Baseline)
 	reportPath := filepath.Join(outDir, "report.md")
-	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr); err != nil {
+	// 判据 B（可选）：环回录音复核。本机没有环回设备时返回 SKIP(no-loopback)，
+	// 不阻塞主线验收（与 Edge 对照的 SKIP(no-edge) 同一处理方式）。
+	expectHz := 0.0
+	for _, s := range man.Samples {
+		if s.Kind == "audio" && s.AudioHz > 0 {
+			expectHz = s.AudioHz
+			break
+		}
+	}
+	if expectHz == 0 {
+		expectHz = 440
+	}
+	loopback := probeLoopback(expectHz, 1.0)
+	fmt.Printf("  判据 B（环回录音）：%s\n", loopback.Status)
+	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr, loopback); err != nil {
 		fmt.Printf("媒体验证：写报告失败: %v\n", err)
 		return 2
 	}
@@ -541,6 +569,11 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	// 主线 A0/A4 的宿主能力（与 psai 主流程一致：元数据探测 + Skia 多帧动图源）
 	app.InstallMediaMetadataResolver(wv, "")
 	app.InstallAnimatedImageSource()
+	// 主线 A3-1 的宿主音频链路：ffmpeg 解码 s16le →（waveOut 输出 + tap）。
+	// tap 是判据 A 的取证口：它拿到的就是**即将写进输出设备的同一份 PCM**。
+	audioTap := newAudioTapCollector()
+	mediaAudio := app.InstallMediaAudio(wv, "")
+	mediaAudio.SetTap(audioTap.tap)
 
 	html, err := os.ReadFile(matrixPath)
 	if err != nil {
@@ -573,10 +606,34 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	res.StillPNG = stillPath
 
 	// ② 播放态：对 video/audio 调 play()，推进事件循环后再次采集与截图
+	playStart := time.Now()
 	if err := startPlayback(wv, cells); err != nil {
 		return res, err
 	}
-	settleReal(wv, 1500*time.Millisecond)
+	// ★ TC-M-602 定点：play() 之后 **500ms** 采一次 currentTime（音频为主时钟的
+	//   时序证据）。此前只有「1.5 秒后的终态」一个采样点，看不出时钟是否真的跟随
+	//   输出位置——终态到 1.0 用挂钟累加同样做得到。
+	//
+	//   ★ 这里必须按**真实时间**到期，不能用 settleReal 数迭代：settleReal 每步
+	//     都要渲染，而矩阵页渲染一次要几十毫秒（12 个 <video> 在抽帧），于是
+	//     「50ms × 10 次」实际会跑成 800ms~1s——定点值随格式的解码启动速度整体
+	//     漂移（实测 wav 1.00 / mp3 0.84 / ogg 0.68 / m4a 0.51），其中 mp3 因此
+	//     被误判成「播放时钟与输出不同步」。这是测量伪影，不是引擎缺陷：同一批
+	//     运行的 ctEnd 全部为 1.00（真的播完了）。
+	if remain := 500*time.Millisecond - time.Since(playStart); remain > 0 {
+		settleWall(wv, remain)
+	}
+	// 再等各格的首块 PCM 到齐（并发播放时排在后面的格子可能还没轮到），然后让
+	// 真实时间流逝一小段再采样：定点判据的零点是**各格自己的首块时刻**，采样点
+	// 只需落在「时钟已经起步」之后。
+	waitAudioFirstPCM(wv, audioTap, cells, 2*time.Second)
+	settleWall(wv, 150*time.Millisecond)
+	sampleAt := time.Now()
+	midProbes, _, err := collectPage(wv, cells)
+	if err != nil {
+		return res, err
+	}
+	settleReal(wv, 1000*time.Millisecond)
 	probes2, events2, err := collectPage(wv, cells)
 	if err != nil {
 		return res, err
@@ -602,15 +659,31 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   基线因此每次报警「等级下降」。
 	//   改为等间隔连拍：步长取与常见帧时长**不成整数倍**的 130ms，判据放宽为
 	//   「任意两帧不同」（见 framesDiffer），采样相位不再决定结论。
+	//   ★ 两轮连拍（每轮 6 帧 ×130ms，轮间 250ms 让步，总窗口≈1.8s）：单轮
+	//   780ms 窗口在满负载时（尤其排在最后的 Toolkit+AllowAll）仍可能整窗落在
+	//   同一动画帧——实测连跑 6 次全量有 3 次报「动画未推进」的假降级，而把
+	//   同一样本单独复跑恒为 L4（差异恒为 0，说明是采样期间动画根本没被调度，
+	//   不是判据算错）。加一轮让步连拍把跨帧机会翻倍；**真静止的样本两轮也都
+	//   无差异，判据不会因此放宽**。
+	//   ★ 连拍前先停掉音频播放并让主循环喘息：见 stopAudioPlayback 的实测说明
+	//   （音频播放期抢占主循环 → 动图帧不被调度 → 假降级），这是测量耦合而非
+	//   样本缺陷。audio 元素不参与动图判据，停掉它不影响任何已有判据。
+	stopAudioPlayback(wv, cells)
+	settleReal(wv, 300*time.Millisecond)
 	const animShotCount, animShotStep = 6, 130 * time.Millisecond
-	animFrames := make([][]byte, 0, animShotCount)
-	for i := 0; i < animShotCount; i++ {
-		settleReal(wv, animShotStep)
-		px, err := renderPixels(wv)
-		if err != nil {
-			return res, err
+	animFrames := make([][]byte, 0, animShotCount*2)
+	for round := 0; round < 2; round++ {
+		if round > 0 {
+			settleReal(wv, 250*time.Millisecond)
 		}
-		animFrames = append(animFrames, px)
+		for i := 0; i < animShotCount; i++ {
+			settleReal(wv, animShotStep)
+			px, err := renderPixels(wv)
+			if err != nil {
+				return res, err
+			}
+			animFrames = append(animFrames, px)
+		}
 	}
 	probes3, _, err := collectPage(wv, cells)
 	if err != nil {
@@ -637,12 +710,25 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 		byID3[p.ID] = p
 	}
 	_ = byID3
+
+	// 音频取证（A3-1）：PCM 来自 tap，时钟来自上面两个采集点（500ms / 终态）。
+	midByID := map[string]cellProbe{}
+	for _, p := range midProbes {
+		midByID[p.ID] = p
+	}
+	audioEvidence := collectAudioEvidence(cfg.Name, cells, audioTap, midByID, byID2, app.AudioOutputAvailable(), sampleAt)
+	audioByID := map[string]audioCellEvidence{}
+	for _, ev := range audioEvidence {
+		audioByID[ev.ID] = ev
+	}
+	res.Audio = audioEvidence
+
 	for _, c := range cells {
 		p, ok := byID[c.ID]
 		if !ok {
 			continue
 		}
-		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animFrames, vw, pageH)
+		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animFrames, vw, pageH, audioByID[c.ID])
 		res.Cells = append(res.Cells, r)
 	}
 	return res, nil
@@ -744,6 +830,40 @@ func startPlayback(wv *webkit.WebView, cells []cell) error {
 	return err
 }
 
+// stopAudioPlayback 停掉所有 <audio> 元素的播放（pause，**不动 video**）。
+//
+// 用途：动图判据（帧间差异）采样前消除音频播放对主循环的抢占。音频会话在
+// 播放期要持续做解码推送、waveOut 写入与 ended 巡检，满负载时会把动画帧的
+// 调度挤到采样窗口之外，测出来就是「所有帧采样点相同（最大差异 0，共 14 帧）」
+// 的**假降级**——实测含音频的全量连跑 8 次有 4 次命中（全落在最后跑的
+// Toolkit+AllowAll），而只跑动画样本（不带音频）连跑 3 次零失败、同样本单独
+// 复跑恒为 L4。动图是否推进与音频无因果关系，停掉音频再采样才是干净的测量。
+//
+// ★ video 绝不能一起 pause：动图判据同时覆盖 video 的「播放推进」，停掉它
+// 等于把判据废掉。audio 元素不参与动图判据（其 PCM/时钟证据在更早的采样阶段
+// 就已固化进 audioByID，且 pause 不改变 currentTime）。
+func stopAudioPlayback(wv *webkit.WebView, cells []cell) {
+	var ids []string
+	for _, c := range cells {
+		if c.Sample.Kind == "audio" {
+			ids = append(ids, jsString(c.ID))
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	script := `(function(){
+		var ids = [` + strings.Join(ids, ",") + `];
+		for (var i = 0; i < ids.length; i++) {
+			var el = document.getElementById(ids[i]);
+			if (!el || typeof el.pause !== 'function') { continue; }
+			try { el.pause(); } catch (e) {}
+		}
+		return 'ok';
+	})()`
+	_, _ = wv.EvalJS(script)
+}
+
 // ── 像素 ──────────────────────────────────────────────────────────────
 
 // settleReal 交替「推进虚拟事件循环」与「真实 sleep」：渲染层的异步图片
@@ -765,6 +885,31 @@ func settleReal(wv *webkit.WebView, total time.Duration) {
 		if _, err := wv.Render(); err != nil {
 			return
 		}
+	}
+}
+
+// settleWall 让**真实时间**流逝 d 毫秒（推进事件循环，但**不渲染**）。
+//
+// 与 settleReal 的分工：
+//
+//	settleReal 用于「等资源加载 + 契约事件派发」——它必须每步渲染，因为本引擎的
+//	  `<img>`/SVG 加载与 complete/load 派发由绘制路径驱动；
+//	settleWall 用于**测量**（音频的 TC-M-602 定点）：它要求间隔就是墙钟上的 d，
+//	  渲染在这里只是干扰（矩阵页渲染一次几十毫秒，会把 500ms 拉成 800ms+），
+//	  而音频推送跑在宿主自己的 goroutine 上，与渲染无关，不推进绘制也照常播。
+func settleWall(wv *webkit.WebView, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return
+		}
+		step := 10 * time.Millisecond
+		if remain < step {
+			step = remain
+		}
+		driveEventLoop(wv, int64(step/time.Millisecond))
+		time.Sleep(step)
 	}
 }
 
@@ -1001,7 +1146,7 @@ func toleranceFor(sp sampleSpec) int {
 
 // judgeCell 按 §2 的判据给出一格的等级。
 func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string]map[string]int,
-	still, play []byte, animFrames [][]byte, vw, pageH int) cellResult {
+	still, play []byte, animFrames [][]byte, vw, pageH int, audio audioCellEvidence) cellResult {
 
 	sp := c.Sample
 	r := cellResult{ID: c.ID, Sample: sp.Name, Source: c.Source, Format: sp.Format, Kind: sp.Kind, Tag: p.Tag}
@@ -1040,10 +1185,35 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 
 	switch {
 	case sp.Kind == "audio":
-		if r.Ready >= 1 || r.Duration > 0 {
+		r.PCMFrames = audio.frames
+		r.PCMPeakHz = audio.peakHz
+		r.PCMPeakMag = audio.peakMag
+		r.CTMid = audio.ctMid
+		r.AudioOutput = audio.hasOutput
+		// 音频的分级判据（文档 §2 的 L4「动态播放」对音频即「真实发声」）：
+		//   L4-S：PCM 真的交付了 + 频谱主峰与样本频率一致（判据 A）+ 播放时钟与
+		//         输出一致（TC-M-602 定点）；
+		//   L3  ：PCM 有交付但 L4-S 判据不全（例如频谱偏离，说明链路仍有问题）；
+		//   L1  ：只有元数据（没有输出后端 / 资源无音轨）；
+		//   L0  ：连元数据都没有。
+		switch {
+		case audio.frames > 0 && audio.peakOK() && audio.clockOK(r.Duration):
+			r.Grade = "L4"
+			r.Note = fmt.Sprintf("音频输出：交付 %d 帧、PCM 主峰 %.2fHz（期望 %.0fHz，判据 A）；"+
+				"play() 后 500ms currentTime=%.2fs、结束时 %.2fs（TC-M-602）",
+				audio.frames, audio.peakHz, audio.ExpectHz, audio.ctMid, audio.ctEnd)
+		case audio.frames > 0:
+			why := "PCM 主峰偏离期望频率"
+			if audio.peakOK() {
+				why = "播放时钟与输出位置不同步"
+			}
+			r.Grade = "L3"
+			r.Note = fmt.Sprintf("有 PCM 交付（%d 帧、主峰 %.2fHz）但 L4-S 判据不全：%s",
+				audio.frames, audio.peakHz, why)
+		case r.Ready >= 1 || r.Duration > 0:
 			r.Grade = "L1"
-			r.Note = "音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无"
-		} else {
+			r.Note = "音频可加载（元数据可用）；未采到 PCM（无音轨 / 无输出后端）"
+		default:
 			r.Grade = "L0"
 			r.Note = "音频无解码/输出后端（预期现状）"
 		}
@@ -1398,7 +1568,7 @@ func compareBaseline(base *baselineDoc, results []configResult) []string {
 }
 
 func writeMediaReport(path string, man *manifestDoc, results []configResult, base *baselineDoc, baseErr error,
-	matrixPath string, adDiff, adDiffExcl float64, animRects int, adErr error) error {
+	matrixPath string, adDiff, adDiffExcl float64, animRects int, adErr error, lo loopbackEvidence) error {
 	var b strings.Builder
 	commit := gitShortHash()
 	fmt.Fprintf(&b, "# 媒体格式真实可用性报告（%s %s）\n\n", time.Now().Format("2006-01-02 15:04"), commit)
@@ -1440,9 +1610,20 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 		if r.c.Kind == "animated" || r.c.Kind == "video" {
 			anim = mark(r.c.AnimOK)
 		}
+		// 动画判据判否时把帧差诊断写进备注：`AnimNote` 原先只赋值不进报告，
+		// 格子降级时看不出「最大差异是多少、采了几帧」，无法区分「真没动」与
+		// 「采样期没被调度」。
+		note := r.c.Note
+		if (r.c.Kind == "animated" || r.c.Kind == "video") && !r.c.AnimOK && r.c.AnimNote != "" {
+			if note == "" {
+				note = r.c.AnimNote
+			} else {
+				note += "；" + r.c.AnimNote
+			}
+		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | **%s** | %s |\n",
 			r.res.Config, r.c.Format, r.c.Sample, r.c.Source, load, geom, draw, contr, anim, r.c.Grade,
-			escapePipe(r.c.Note))
+			escapePipe(note))
 	}
 	b.WriteString("\n")
 
@@ -1495,6 +1676,14 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 			}
 		}
 	}
+
+	// 音频（A3-1）：判据 A（PCM 频谱）/ 判据 B（环回）/ TC-M-602 定点 / 支持矩阵。
+	var audioAll []audioCellEvidence
+	for _, res := range results {
+		audioAll = append(audioAll, res.Audio...)
+	}
+	b.WriteString("## 音频（A3-1：宿主 ffmpeg 解码 → 引擎 PCM 通道 → 输出后端）\n\n")
+	b.WriteString(audioSection(audioAll, lo))
 
 	b.WriteString("## 与基线的差异\n\n")
 	if baseErr != nil {
