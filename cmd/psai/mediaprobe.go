@@ -406,12 +406,16 @@ func buildMatrix(man *manifestDoc, samplesDir string, vw int, only string) ([]ce
 		}
 		style := fmt.Sprintf("left:%dpx;top:%dpx;width:%dpx;height:%dpx", c.X, c.Y, cellW, cellH)
 		if tag == "audio" {
-			// audio 无视觉内容：用包裹 div 承载，采样点落在 div 上（期望：未绘制）
+			// audio 无视觉内容：用包裹 div 承载采样框（期望：未绘制）。
+			// ★ 探针采集用的 id 必须给**音频元素本身**——媒体状态挂在它上面。
+			//   此前 div 用 `id`、audio 用 `id+"_a"`，采集到的是 div：
+			//   readyState/duration 一律读不到 → 「加载/几何」两列恒 ❌、音频恒判
+			//   L0，掩盖了「元数据其实可加载」（TC-M-601 的 L1）这一真实状态。
 			fmt.Fprintf(&b, "<div class=\"cell\" id=%s style=\"%s\"></div>\n",
-				htmlAttrValue(c.ID), style)
+				htmlAttrValue(c.ID+"_box"), style)
 			fmt.Fprintf(&b, "<audio id=%s style=\"position:absolute;left:%dpx;top:%dpx;width:1px;height:1px\" src=%s "+
 				"onloadedmetadata=\"mvNote(%s,'loadedmetadata')\" onerror=\"mvNote(%s,'error')\"></audio>\n",
-				htmlAttrValue(c.ID+"_a"), c.X, c.Y, htmlAttrValue(c.URL),
+				htmlAttrValue(c.ID), c.X, c.Y, htmlAttrValue(c.URL),
 				jsAttrString(c.ID), jsAttrString(c.ID))
 		} else {
 			events := fmt.Sprintf("onload=\"mvNote(%s,'load')\" onerror=\"mvNote(%s,'error')\"", jsAttrString(c.ID), jsAttrString(c.ID))

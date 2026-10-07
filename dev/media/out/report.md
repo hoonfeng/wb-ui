@@ -1,8 +1,8 @@
-# 媒体格式真实可用性报告（2026-10-07 16:26 5e401ec）
+# 媒体格式真实可用性报告（2026-10-07 16:30 0d44787）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：5e401ec ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：0d44787 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
@@ -254,54 +254,54 @@
 | Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Browser | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Browser | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ✅ | ✅ | ❌ | ✅ | — | **L1** | 音频可加载（元数据可用）；音频输出（L4-S）需音频后端，当前无 |
 | Browser | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
 | Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
 | Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
