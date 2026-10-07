@@ -22,7 +22,9 @@
 1. **光栅图像解码完整**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 都能解码并绘制；
 2. **SVG 走自有矢量路径**，不入 Skia 解码器；
 3. **动画能帧推进**：GIF / WebP 动画均按各自声明的帧时长推进（goskia `SkCodec` 多帧 +
-   引擎按帧时长选帧，A4 实装）——3 个动画样本 × 3 来源均达 **L4**。
+   引擎按帧时长选帧，A4 实装）——**4 个动画样本（3 GIF + 1 WebP）× 3 来源 = 12 格**，
+   在 Browser / AllowHostResolved / AllowAll 下均达 **L4**（`DenyExternal` 的 file/rel 8 格
+   按 §9.9 门禁为 L0，属预期而非缺陷）。
    （原判「动画只取首帧 / WebP 恒为静态首帧（缺口 D11）」已作废：其中 WebP 部分经两次
    对照实证为**探针判定抖动**、非引擎缺陷，判据已稳定化，见 §9.4。）
 4. **视频、音频已在「宿主注入」通道下完整可用**（引擎自身仍不背解码器与许可，解码全在宿主）：
@@ -151,7 +153,15 @@
 | WAV / MP3 / OGG / M4A | ❌ | ❌ | 不支持 |
 | 0 字节 / 垃圾数据 | ❌ | ❌ | 正确失败 |
 
-★ **两套 codec 集合不一致**是本项目的核心结构性缺陷：
+- 绘制走 Skia（`engine/platform/graphics/skia.go:29-42` → `sk_image_new_from_encoded`），支持 7 种；
+- 布局固有尺寸走 Go `image.DecodeConfig`（`engine/layout/replaced.go:408`，仅注册了 `image/png|jpeg|gif`，见 `:21-23`），支持 3 种；
+- 结果：WebP / BMP / ICO **画得出来，但量不出固有尺寸**——`<img>` 不给 CSS 尺寸时盒子可能塌成 0。
+★ **两套 codec 集合不一致**是本项目的核心结构性缺陷（**已由 D4 闭环，见 §3.3**）：
+- 绘制走 Skia（`engine/platform/graphics/skia.go:29-42` → `sk_image_new_from_encoded`），支持 7 种；
+- 布局固有尺寸走 Go `image.DecodeConfig`（`engine/layout/replaced.go:408`，仅注册了 `image/png|jpeg|gif`，见 `:21-23`），支持 3 种；
+- 结果（**修复前**）：WebP / BMP / ICO **画得出来，但量不出固有尺寸**——`<img>` 不给 CSS 尺寸时盒子可能塌成 0。
+  ✅ **现已闭环**：`layout.rasterIntrinsic` 在 Go `DecodeConfig` 失败时用 Skia `DecodeSize` 兜底
+  （`engine/layout/replaced.go:405-412`），三者均达 **L3**。
 - 绘制走 Skia（`engine/platform/graphics/skia.go:29-42` → `sk_image_new_from_encoded`），支持 7 种；
 - 布局固有尺寸走 Go `image.DecodeConfig`（`engine/layout/replaced.go:408`，仅注册了 `image/png|jpeg|gif`，见 `:21-23`），支持 3 种；
 - 结果：WebP / BMP / ICO **画得出来，但量不出固有尺寸**——`<img>` 不给 CSS 尺寸时盒子可能塌成 0。
@@ -184,7 +194,14 @@ webkit/mode.go:66                             allowsExternalURLs()
     return m != ModeToolkit                       ← UI 库模式恒 false
 ```
 
-⇒ **UI 库模式下任何 `<img src>` / `background-image` 都被拦，`data:` 自包含资源也被误伤**（`data:` 不需要任何外部通道，却因门禁位于解析之前而被拒）。唯一漏网的是 `data:image/svg+xml`——它走的是另一条分支（`loadBackgroundSVG`，`painter.go:2248`），不经图片门禁。
+⇒ **UI 库模式下任何 `<img src>` / `background-image` 都被拦，`data:` 自包含资源也被误伤**（`data:` 不需要任何外部通道，却因门禁位于解析之前而被拒）。唯一漏网的是 `data:image/svg+xml`——它走的是另一条分支（`loadBackgroundSVG`，`engine/rendering/backgroundimage.go:85/106`），不经图片门禁。
+
+> ⚠️ **时效（2026-10-07 核实）**：上面这段代码块是**第一轮取证时**的形态，后续收口已改写——
+> 现为 `webkit/resource_policy.go` 的 `ResourcePolicy` 与 `webViewImageLoader.AllowsURL`
+> （`webkit/image_resource.go:91`）、加载入口 `loadBackgroundImageWith`
+> （`engine/rendering/backgroundimage.go:596`）。代码块里的 `AllowsExternal` /
+> `allowsExternalURLs` / `AllowsDataURI` 等名字**在当前 HEAD 全仓 `grep` 零命中**。
+> 本文各轮记录中的「文件名:行号」一律是**当时的快照**，定位请以**符号名 + 当前 HEAD** 为准。
 
 ### 3.3 契约层缺陷（画得出，但脚本测不到）
 
@@ -194,9 +211,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | D2 | ModeToolkit 下 `data:` 自包含图被拒 | A/B 组全灰 | UI 库模式无法使用内联图标/贴图 | ✅ **已修复**（门禁移到 `decodeDataURI` 之后，`data:` 无条件放行） |
 | D3 | `svg` 仅 `data:` 可渲染，`file://`/相对路径空白 | C 组第三列 svg 行为 | 文件引用的 SVG 图标不显示 | ✅ **已修复**（U5：file/rel 的 SVG 已绘制，实测 D=✅） |
 | D4 | WebP/BMP/ICO 无固有尺寸 | §3.1 Go 列 ❌ | `<img>` 未给尺寸时 0×0 塌陷 | ✅ **已修复**（Skia `DecodeSize` 兜底 → 三者均 L3） |
-| D5 | `<video>`/`<audio>` `readyState` 恒 0、`duration=NaN`、`currentTime` 不推进 | `render-out.txt` 中 `"rs":0` 全部 | 播放器类库走「未就绪」分支，永不 ready | 🟡 **部分修复**（A0：视频已派发 `loadedmetadata`，契约 C=✅） |
-| D6 | `MediaMetadataResolver` 宿主从未注入 | `grep` 全仓仅定义(`media_element.go:41`)+单测赋值 | 即便本地 mp4 也拿不到时长 | ✅ **已修复**（A0：`app.InstallMediaMetadataResolver` 已在探针与 psai 装配） |
-| D7 | 动图无帧推进 API | `goskia/skia` 无 codec/frame API（仅 `DecodeImage`/`NewImageFromPixels`） | GIF/WebP 动画恒为静态 | 🟡 **部分修复**（GIF 动图已达 L4；**WebP 动图仍未推进**，见 D11） |
+| D5 | `<video>`/`<audio>` `readyState` 恒 0、`duration=NaN`、`currentTime` 不推进 | `render-out.txt` 中 `"rs":0` 全部 | 播放器类库走「未就绪」分支，永不 ready | ✅ **已修复**（A0 元数据 → A1 帧流 → A2 帧推进/预取/精确 seek/rVFC → A3 音频输出；探针实测视频 **L4**、音频 **L4-S**，见 §9.5/§9.6/§9.8） |
+| D6 | `MediaMetadataResolver` 宿主从未注入 | `grep` 全仓仅定义(`engine/js/bindings/media_element.go:62`)+单测赋值 | 即便本地 mp4 也拿不到时长 | ✅ **已修复**（A0：`app.InstallMediaMetadataResolver` 已在探针与 psai 装配） |
+| D7 | 动图无帧推进 API | `goskia/skia` 无 codec/frame API（仅 `DecodeImage`/`NewImageFromPixels`） | GIF/WebP 动画恒为静态 | ✅ **已修复**（goskia 暴露 `SkCodec` 多帧 + 引擎按帧时长选帧，A4 实装；4 个动画样本 × 3 来源 = 12 格均 **L4**。原判「WebP 仍未推进」已由 D11 重新定性为**探针判定抖动**，见 §3.4/§9.4） |
 
 ### 3.4 本轮复测结果（2026-10）：四配置 × 96 格
 
@@ -215,13 +232,21 @@ webkit/mode.go:66                             allowsExternalURLs()
 > 与第一批（U2/U5/D4，§9.3）对照：**L2 由 9/6 全部归零**（SVG 的固有尺寸与契约补齐）、
 > Browser L3 42→49、L4 9→12、L0 36→35（内联 SVG 由 L0 升 L3）；
 > `DenyExternal` 的 L0 73→75 是**策略正确化**——原先被缺陷放行的 `file://` SVG 回到 L0（§9.4）。
+>
+> ⚠️ **时效（2026-10-07 实测）**：上表是**第二批**快照，已被后续各轮（§9.5 视频 /
+> §9.6·§9.8 音频 / §9.9 媒体门禁收口）超越。当前 `dev/media/baseline.json` 实测
+> （32 样本 + 1 内联条目 × 3 来源 × 4 配置 = **384 格**）：
+> Browser / `AllowHostResolved` / `AllowAll` **三者一致：L0 11 / L3 52 / L4 33**；
+> `Toolkit+DenyExternal`：**L0 67 / L3 18 / L4 11**。本表及后文出现的
+> 「35/0/0/49/12」「L3 42/L4 9」等均为**历史快照**，当前值以本节与基线文件为准。
 
 - **光栅静态全绿**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 在 data / file / rel 三种来源下
   全部 **L3**（含 `huge-4096.png`、含空格与中文文件名）。
 - **GIF 动图已 L4**：3 个动画样本 × 3 来源 = 9 格达到「内容随时间变化」（A=✅）。
 - **Toolkit+DenyExternal 保持安全默认**：file/rel 一律不加载（L0），只有 `data:` 无条件放行（L3/L4）。
   ★ **媒体（`<video>/<audio>`）自 §9.9 起纳入同一口径**——本轮之前媒体链路的门禁完全缺失，同来源仍为 L3/L4。
-- ★ **三个非拒配置的等级分布现已完全一致（35/0/0/49/12）**：第一批复测里 Browser 与
+- ★ **三个非拒配置的等级分布完全一致**（第二批快照 35/0/0/49/12；当前实测 11/0/0/52/33，
+  见上方时效注）：第一批复测里 Browser 与
   `Toolkit+AllowAll` 曾出现 L3 42/39、L4 9/12 的差异，根因是探针的动图判定依赖
   「采样间隔 mod 动图循环周期」——3 帧 ×100ms 的 GIF 周期正是 300ms，而「再等 900ms
   拍一张」恰为其 3 倍，两拍落在**同一帧**、像素完全相同 → 判成「未推进」。
@@ -356,7 +381,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-502 | `<video poster=png src=mp4>` | 同上 + 截图 | poster 是否绘制（基线灰块待确证；阶段 3 应正确绘制）—— ✅ **实测达成（2026-10-07，A1）**：有 poster 未播放时截图中心像素 = poster 色（纯红）；**无 poster** 时截图中心像素 = 宿主注入的当前帧（值取自独立 ffmpeg 抽帧，非手写期望值）→ **L2 达成**；判据 A1-1/2/3 见 `_temp/psai.exe -verify` |
 | TC-M-503 | `video.play()` | 读 Promise 结果 + 事件序列 | **基线**记录实际序列；**目标**：`loadstart→loadedmetadata→loadeddata→canplay→playing` + `timeupdate` 推进 —— ✅ **实测（2026-10-07，A2 起步）**：事件序列 `play→playing→timeupdate×4→ended`，`currentTime` 0→1.00s 递增（A2-3 判据） |
 | TC-M-504 | `video.currentTime = 0.5` | 读 `seeking/seeked` 与几何 | **基线**不退进；**目标**画面跳到 0.5s 帧 —— ✅ **画面部分实测达成（2026-10-07，A1-3）**：`currentTime=0.5` 后截图中心像素 = 0.5s 参照帧（同一纯色样本，参照值由独立 ffmpeg 抽帧得到）；`seeking/seeked` 事件与连续换帧（L4）仍属 A2 |
-| TC-M-505 | `http(s)` 源 | 读 `error.code` | 保留：`MEDIA_ERR_SRC_NOT_SUPPORTED`（`media_element.go:304-309`） |
+| TC-M-505 | `http(s)` 源 | 读 `error.code` | 保留：`MEDIA_ERR_SRC_NOT_SUPPORTED`（`engine/js/bindings/media_element.go:95` 常量 / `:511-539` 错误文本 / `:1396` IDL 导出） |
 | TC-M-506 | `<video>` + `controls` 属性 | 截图 | 引擎是否绘制原生控件（基线预期否；阶段 3 再定） |
 | TC-M-507 | 连续 1s 内取 5 帧截图 | 像素差异 | ✅ **达成（2026-10，A2）**：连续采样 5 帧（帧号 [0 1 2 3 4]），**每帧画面都 = 该帧的独立 ffmpeg 参照**（判据 A2-6）；播放中画面随时间变化（A2-1），播放全程**同步抽帧 0 次**（A2-4：预取 8 次 / 异步交付 9 帧 / 回退上一帧 6 次） |
 
@@ -504,9 +529,9 @@ D1 … （现象 / 证据文件 / 影响面 / 建议）
 | **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 | ✅ **已闭环**（GIF 与 WebP 动画均达 **L4**；原 D11「WebP 未推进」经两次对照实证为**探针判定抖动**，判据已稳定化，§9.4） |
 | **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 | ✅ **已闭环**（file/rel 已绘制；**D8** 补齐固有尺寸与 `load`/`complete` 契约 → SVG 九格 **L2 → L3**，§9.4） |
 | **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 | ✅ **已闭环**（A0/A1/A2 + D10：元数据、帧流、帧推进、异步预取、精确 seek、rVFC；见 §9.5） |
-| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ✅ **已闭环**（A3：宿主 ffmpeg 解 PCM → 注入通道 → waveOut；音频 **48 格 L4**，见 §9.6/§9.8） |
+| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ✅ **已闭环**（A3：宿主 ffmpeg 解 PCM → 注入通道 → waveOut；音频 48 格中 **40 格 L4**——三个非拒配置各 12 格全 L4——另 8 格是 `DenyExternal × file/rel` 按 §9.9 门禁拒为 **L0**，**非能力缺口**；见 §9.6/§9.8） |
 | **P2** | U8 | `MediaMetadataResolver` 宿主未注入 | 仅定义+单测 | 阶段 3 前置：宿主接 `ffmpeg -i` 探测时长（一次赋值） | 即使本地媒体也拿不到时长 | ✅ **已闭环**（A0：探针与 psai 均装配该 resolver） |
-| **P3** | U9 | AVIF/TIFF 不支持 | 实测 ❌ | 维持不支持（写入基线，不投入） | 新格式资源不可用（可接受） | ✅ **维持**（6 格 L0，已入基线） |
+| **P3** | U9 | AVIF/TIFF 不支持 | 实测 ❌ | 维持不支持（写入基线，不投入） | 新格式资源不可用（可接受） | ✅ **维持**（Browser 下 6 格 L0；四配置共 24 格**全 L0**，已入基线） |
 
 ### 8.2 落地计划（分阶段，已按七项决策定型）
 
@@ -523,7 +548,7 @@ D1 … （现象 / 证据文件 / 影响面 / 建议）
 
 *U1（修法已定：(c) 新增模式开关）*
 
-现状：`AllowsExternal()` → `mode.allowsExternalURLs()` → `m != ModeToolkit`，且门禁**位于 `data:` 解析之前**（`backgroundimage.go:350`）。
+现状（**修复前**形态，见 §3.2 根因块）：`AllowsExternal()` → `mode.allowsExternalURLs()` → `m != ModeToolkit`，且门禁**位于 `data:` 解析之前**（`engine/rendering/backgroundimage.go:350`，现该文件亦已改写）。
 
 API 草案：
 
@@ -543,7 +568,13 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 2. **默认值保持现状**——`ModeBrowser → AllowAll`；`ModeToolkit → DenyExternal`（与今天完全一致，唯一差异是 `data:` 由 ❌ 转 ✅）；
 3. 需要读盘的宿主必须**显式**声明 `AllowHostResolved`，安全默认不被静默放宽。
 
-改动点：`webkit/mode.go:66` 拆为 `AllowsDataURI()`（恒 true）与 `AllowsExternalURLs()`（按策略）；`engine/rendering/backgroundimage.go:349-358` 把 `data:` 判定提到门禁之前；`webkit/image_resource.go:88-93` 转发策略。
+改动点（**实际落地形态**）：`data:` 判定提到门禁之前；策略判定收敛为 `webkit/resource_policy.go`
+的 `ResourcePolicy` + `webViewImageLoader.AllowsURL`（`webkit/image_resource.go:91`）；加载入口
+`loadBackgroundImageWith`（`engine/rendering/backgroundimage.go:596`）。
+⚠️ **原记录作废**：此处原写「`webkit/mode.go:66` 拆为 `AllowsDataURI()`（恒 true）与
+`AllowsExternalURLs()`（按策略）；`webkit/image_resource.go:88-93` 转发策略」——该形态**并未落地**
+（`mode.go:64-68` 的注释即说明「外部资源放行不再由模式二元决定」），上述两个函数名在
+**当前 HEAD 全仓 `grep` 零命中**。
 验收：轻量单测（TC-M-901..906）+ 端到端 A/B/C/**D** 四组 PNG 对照（防「修 A 破 B」）。
 
 *U2（契约）*：修 `complete`/`naturalWidth`/`onload` 的 IDL 反射与事件派发，使其以「解码缓存就绪」为准（`DecodedImage.Loaded()` 已可判定）；须同时覆盖「同一 URL 多个 `<img>`」场景（TC-M-805）。
@@ -564,7 +595,9 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
 > **状态（2026-10 续）：视频（A0/A1/A2）已在验证矩阵侧闭环。** D10 见 §9.5：
 > `<video>` 的本地两来源（file/rel）由 **L0 → L4/L3**，宿主帧源注入通道端到端
-> 可用；音频（A3）仍是阶段 3 的主体（12 格 L0，需音频后端）。
+> 可用；**音频（A3）亦已闭环**（§9.6/§9.8）——三个非拒配置下 12 格全 **L4**，
+> `data:` 来源经「内联字节落盘再交 ffmpeg」同样 **L4**。阶段 3 已无剩余主体
+> （余下未决项是 Q1 的 WebAudio，见 §9.6）。
 
 **阶段 3：P2 大工程 — 视频/音频真实播放（决策 4，单独立项）**
 
@@ -581,13 +614,37 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 ### 8.3 每阶段统一的验收方式
 
 1. `cmd/psai -media` 在**四配置**（Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll）下全量跑，并与 **Edge 双端对照**（决策 2；无 Edge 时标 `SKIP(no-edge)`）；
-   - ⚠️ **实测现状（2026-10-07）**：本机三个标准 Edge 安装路径均不存在、`findEdge()` 找不到 →
-     报告里**不存在 Edge 列值**（恒 `SKIP(no-edge)`）。对照代码虽已具备（`-media-edge` /
-     `runEdgeComparison`），但**默认关闭、从未真正执行**。Edge 对照因此是**环境可选**验收项，
-     不是当前验收的必过项（与决策 6「不挂 CI」的取向一致）。
+   - ⚠️ **实测现状（2026-10-07，含勘误）**：本机 **Edge 可用** —— `findEdge()`
+     （`cmd/psai/mediaprobe.go:1903-1921`）按 `ProgramFiles(x86)` → `ProgramFiles` → `LOCALAPPDATA`
+     依次取候选路径，**首候选即命中**：`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+     （5,403,976 字节，2026-10-01），因此本机 `findEdge()` 返回该路径，**不会**走 `SKIP(no-edge)`。
+     复现（任取一条）：`cmd /c where msedge` → 输出上述路径；或
+     `python -c "import os;print(os.environ['ProgramFiles(x86)'])"` → `C:\Program Files (x86)`。
+   - 但 `-media-edge` **默认关闭** → 默认跑的报告里**不含 Edge 列值**，双端对照**至今从未真正执行**。
+     Edge 对照因此定位为**环境可选**验收项：**代码具备、本机 Edge 可用，仅因默认关闭而未跑**
+     （与决策 6「不挂 CI」的取向一致），不是当前验收的必过项。
+   - ⚠️ **勘误**：本行 2026-10-07 首版曾误记「本机三个标准 Edge 安装路径均不存在、`findEdge()`
+     找不到」。根因是取证时用了 bash 的 `$ProgramFiles(x86)`——该变量名在 bash 中非法，会展开成
+     字面 `(x86)`，被 stat 的路径自然不存在，于是误判成「本机没装 Edge」。改用 `cmd /c where msedge`
+     或 python 读环境变量即可证伪；此处已按实测改写。
 2. 报告等级与 §8.1「修法/路线」的目标一致，且**不低于 Edge 等级**（如 U1 修复后：PNG@Toolkit+DenyExternal@data: ≥ L3，且 = Edge 等级）；
 3. 截图经 `read_image` 人眼复核；
-4. 默认 `go test ./...` 保持全绿（当前 23 包，作为回归底线，不受工装影响）；四配置渲染为**本机按需**执行（决策 6 修订：不入 CI 门禁）。
+4. 单测作为**回归底线**：不得新增失败（既有 3 个 pre-existing 失败见 `docs/TECH_DEBT.md`），
+   **不受本工装影响**；四配置渲染为**本机按需**执行（决策 6 修订：不入 CI 门禁）。
+   - ⚠️ **实测（2026-10-07）**：`go test $(go list ./... | grep -v consistency)`
+     → **28 包 ok + 1 包 FAIL（`wb-ui/webkit`，3 个既有用例）+ 67 包无测试文件，共 96 包**。
+   - 正确跑法（两个约束都不可省）：
+     ```bash
+     export GOWORK=off CGO_ENABLED=1
+     export PATH="<goskia>/skia/lib/windows_amd64:$PATH"   # libSkiaSharp.dll
+     go test $(go list ./... | grep -v consistency)
+     ```
+     - `GOWORK=off`：`F:\syproject\go.work` 的 use 列表含**不存在**的 `./GWui`，默认（workspace 模式）
+       直接报错；`go list` 也必须继承该变量；
+     - 排除 `dev/suites/consistency`：该套件会启动真实 Edge 对照并长时间阻塞，
+       故**不**放进默认 `go test ./...`（这也是「默认 `go test ./...`」在本机跑不完的原因）。
+   - ⚠️ **勘误**：本行旧文记「保持全绿（当前 23 包）」——两处均过期：「23 包」自 `896c670`
+     起未更新（实测 96 包 / 28 ok / 1 FAIL），且当前**并非全绿**（webkit 3 个 pre-existing）。
 
 ---
 
