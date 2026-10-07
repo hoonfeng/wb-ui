@@ -163,7 +163,7 @@
 - 布局固有尺寸走 Go `image.DecodeConfig`（`engine/layout/replaced.go:408`，仅注册了 `image/png|jpeg|gif`，见 `:21-23`），支持 3 种；
 - 结果（**修复前**）：WebP / BMP / ICO **画得出来，但量不出固有尺寸**——`<img>` 不给 CSS 尺寸时盒子可能塌成 0。
   ✅ **现已闭环**：`layout.rasterIntrinsic` 在 Go `DecodeConfig` 失败时用 Skia `DecodeSize` 兜底
-  （`engine/layout/replaced.go:405-412`），三者均达 **L3**。
+  （`engine/layout/replaced.go:408-425`，即该函数的完整范围），三者均达 **L3**。
 
 ### 3.2 端到端渲染：真实页面 × 宿主配置
 
@@ -197,7 +197,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 > ⚠️ **时效（2026-10-07 核实）**：上面这段代码块是**第一轮取证时**的形态，后续收口已改写——
 > 现为 `webkit/resource_policy.go` 的 `ResourcePolicy` 与 `webViewImageLoader.AllowsURL`
-> （`webkit/image_resource.go:91`）、加载入口 `loadBackgroundImageWith`
+> （`webkit/image_resource.go:94`）、加载入口 `loadBackgroundImageWith`
 > （`engine/rendering/backgroundimage.go:596`）。代码块里的 `AllowsExternal` /
 > `allowsExternalURLs` / `AllowsDataURI` 等名字**在当前 HEAD 全仓 `grep` 零命中**。
 > 本文各轮记录中的「文件名:行号」一律是**当时的快照**，定位请以**符号名 + 当前 HEAD** 为准。
@@ -402,7 +402,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 |---|---|---|
 | TC-M-701 | WebP/BMP/ICO 不给尺寸的 `<img>` | 记录盒尺寸（验证 D4 是否塌陷） |
 | TC-M-702 | `width:100%` + `object-fit: contain/cover/fill/none` 四值 × PNG | 与 Edge 对照裁剪一致 |
-| TC-M-703 | `srcset` + `sizes`（PNG 1x/2x） | 选源与折算正确（`replaced.go:89-124` 已实现折算） |
+| TC-M-703 | `srcset` + `sizes`（PNG 1x/2x） | 选源与折算正确（`engine/layout/replaced.go:90-125` 的 `srcsetIntrinsic` 已实现折算） |
 | TC-M-704 | 中文文件名 + 中文目录 | 能加载（Windows 路径编码） |
 | TC-M-705 | 路径含空格 / `..` 穿越 | 能加载 / 被 resolver 拒绝（安全） |
 
@@ -452,7 +452,7 @@ webkit/mode.go:66                             allowsExternalURLs()
    - 每格式产出：几何 JSON、`complete/naturalWidth`、事件日志、截图 PNG；
    - 自动判定 L0–L4 并输出 Markdown 报告；
    - **回归比对（本机按需，非 CI 门禁）**：把 §3 的实测结论写成期望表（baseline），任何格式的等级升降都让 `-media` 非零退出，供开发者手动比对。
-3. **像素比对器**：从 `wv.Render()` 读回预乘 RGBA（照 `cmd/psai/main.go:330` 的 `renderPNG` 反预乘），对每格做「命中色比例」判定（避免依赖人眼），并保留 PNG 供 `read_image` 复核。
+3. **像素比对器**：从 `wv.Render()` 读回预乘 RGBA（照 `cmd/psai/main.go:484` 的 `renderPNG`，反预乘在其 495-507 行），对每格做「命中色比例」判定（避免依赖人眼），并保留 PNG 供 `read_image` 复核。
 4. **视觉验证**：`read_image` 看截图（本次已用它确证 A/B 全灰、C 组三列有色）。
 5. **事件日志**：页面侧挂 `onload/onerror` 计数 + `MutationObserver`，结果回传 Go 侧写 JSON。
 
@@ -571,11 +571,11 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 3. 需要读盘的宿主必须**显式**声明 `AllowHostResolved`，安全默认不被静默放宽。
 
 改动点（**实际落地形态**）：`data:` 判定提到门禁之前；策略判定收敛为 `webkit/resource_policy.go`
-的 `ResourcePolicy` + `webViewImageLoader.AllowsURL`（`webkit/image_resource.go:91`）；加载入口
+的 `ResourcePolicy` + `webViewImageLoader.AllowsURL`（`webkit/image_resource.go:94`）；加载入口
 `loadBackgroundImageWith`（`engine/rendering/backgroundimage.go:596`）。
 ⚠️ **原记录作废**：此处原写「`webkit/mode.go:66` 拆为 `AllowsDataURI()`（恒 true）与
 `AllowsExternalURLs()`（按策略）；`webkit/image_resource.go:88-93` 转发策略」——该形态**并未落地**
-（`mode.go:64-68` 的注释即说明「外部资源放行不再由模式二元决定」），上述两个函数名在
+（`webkit/mode.go:65-68` 的注释即说明「外部资源放行不再由模式二元决定」），上述两个函数名在
 **当前 HEAD 全仓 `grep` 零命中**。
 验收：轻量单测（TC-M-901..906）+ 端到端 A/B/C/**D** 四组 PNG 对照（防「修 A 破 B」）。
 
@@ -791,7 +791,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 归因解释 | Browser 与 Toolkit+AllowAll 是**两次独立加载与截图**，动画各自的相位不同（中途抓拍），两配置在动画格上自然停在不同帧；「帧相位差」与策略开关无关。对照组：非动画区域（静态图 / SVG / 视频 / 音频格）**零差异**，说明策略开关**确实没有**引入渲染差异——原判据的**结论意图成立**，只是测量口径把动画格算了进去 |
 | 处置（本轮） | **修正测量口径**（不改引擎）：探针新增 `animatedCellRects`（按 `Kind=="animated"` + 几何矩形）+ `comparePNGFilesExcluding`；报告同时给出**全图差异**（如实保留）与**排除动画格后的差异**（判定依据）。实测：全图 **3.9683%**（12 个动画格排除在外）→ 排除后 **0.0000% ✅**，并输出归因说明 |
 | 附带发现（**已处置**，2026-10 续做） | 两次跑之间出现**动画判据抖动**：`anim-uneven-delay.gif`（帧延迟 [50,200,100] ⇒ **周期 350ms**）的 data/file/rel 三格在 **L4 ↔ L3** 间摇摆（同 HEAD 两次结果不同即抖动特征）。**根因（本轮实测）**：连拍原本是**等间隔**步长——名义 130ms 与常见帧时长不成整数倍，但每步渲染开销叠加后的**实际**步长会贴近该样本的 350ms 周期 ⇒ 相位每一步回到同一帧，12 次连拍「最大差异 0」→ 假降级（全量第 3 跑时 Browser 配置下三格同时 L4→L3，同轮其余动图样本全 L4、前两跑正常）。**修法**：采样改为**抖动步长**（两轮基步长 130ms/190ms + 每步不同抖动 ⇒ 相邻步长互不相等，相位锁不死）；判据本身不变（仍「任意两帧不同」），真静止的样本不受影响。**验收**：修后连续 **3 次**全量「与基线一致（无等级下降）」。详见 §9.8 |
-| 顺手修复（既有缺陷） | `cmd/psai/mediaprobe.go:196` `sampleDot` 的 `X, Y int \`json:"x"\`` 两字段共用同一 json tag——`go vet` 明确报错（`struct field Y repeats json tag "x"`），且 Go 对同层同 tag 字段会**双双忽略**（将来一旦序列化即静默丢 x/y）。取证确认该结构当前**未进入任何入库产物**（`writeGeomJSON` 用 `cellProbe`、`writeBaseline` 用简化 `baselineItem`），故仅表现为 vet 警告。已拆为 `X int \`json:"x"\`` / `Y int \`json:"y"\``，`go vet ./cmd/psai/` 恢复干净 |
+| 顺手修复（既有缺陷） | `cmd/psai/mediaprobe.go:209-218` 的 `sampleDot` 结构里 `X, Y int \`json:"x"\`` 两字段曾共用同一 json tag（现为第 212/213 行的 `X int \`json:"x"\`` / `Y int \`json:"y"\``）——`go vet` 明确报错（`struct field Y repeats json tag "x"`），且 Go 对同层同 tag 字段会**双双忽略**（将来一旦序列化即静默丢 x/y）。取证确认该结构当前**未进入任何入库产物**（`writeGeomJSON` 用 `cellProbe`、`writeBaseline` 用简化 `baselineItem`），故仅表现为 vet 警告。已拆分，`go vet ./cmd/psai/` 恢复干净 |
 
 ---
 
