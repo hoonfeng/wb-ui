@@ -47,3 +47,10 @@ func InstallAnimatedImageSource() func() {
 	})
 	return func() { rendering.SetAnimatedImageSource(nil) }
 }
+
+// PinAnimatedImagePhase 把动图取帧相位钉在 phaseMS 毫秒（取证用：让截图可复现），
+// 见 rendering.SetAnimatedImagePhase 的推导。默认不调用 = 动画按真实时间推进。
+func PinAnimatedImagePhase(phaseMS int) { rendering.SetAnimatedImagePhase(phaseMS) }
+
+// UnpinAnimatedImagePhase 解除动图取帧相位锁定，恢复按真实经过时间选帧。
+func UnpinAnimatedImagePhase() { rendering.ClearAnimatedImagePhase() }

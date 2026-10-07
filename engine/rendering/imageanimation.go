@@ -42,6 +42,10 @@ var animatedImages = struct {
 	src   AnimatedImageSource
 	clock func() time.Duration
 	cache map[string]*animatedEntry
+	// 取证相位锁定（见 SetAnimatedImagePhase）：置位后取帧不再看「经过时间」，
+	// 一律用固定相位，使截图可复现。默认未置位 ⇒ 行为与锁定前逐字节相同。
+	phaseSet bool
+	phaseMS  int
 }{
 	cache: map[string]*animatedEntry{},
 	// 时钟默认取进程单调时钟：动图推进不能受系统时间调整影响。
@@ -67,6 +71,31 @@ func SetAnimatedImageClock(fn func() time.Duration) {
 	animatedImages.cache = map[string]*animatedEntry{}
 	animatedImages.mu.Unlock()
 }
+
+// SetAnimatedImagePhase 把动图取帧的「经过时间」钉成 phaseMS 毫秒——与真实时刻、
+// 也与各动图自己的登记时刻无关。**取证用**（媒体验证计划 §6.3）：截图要能逐像素
+// 复核，而动画帧相位由「加载到截图之间真实流逝了多久」决定 ⇒ 同一 HEAD 重跑截到
+// 不同帧，截图无法比对。
+//
+// 与 SetAnimatedImageClock 的区别（重要）：时钟替换会**清空帧缓存**（见上），已登记
+// 的动图会被当成未登记，绘制回退到缓存的单帧快照；相位锁定**不动缓存、不动登记**，
+// 只把「该显示第几帧」的输入固定下来，解除后动画按原时钟继续（相位跳变一次，
+// 对「等间隔连拍」判据无影响——它只要求任意两帧不同）。
+//
+// phaseMS < 0 等价于 ClearAnimatedImagePhase。
+func SetAnimatedImagePhase(phaseMS int) {
+	animatedImages.mu.Lock()
+	if phaseMS < 0 {
+		animatedImages.phaseSet = false
+	} else {
+		animatedImages.phaseSet = true
+		animatedImages.phaseMS = phaseMS
+	}
+	animatedImages.mu.Unlock()
+}
+
+// ClearAnimatedImagePhase 解除相位锁定，恢复按真实经过时间选帧。
+func ClearAnimatedImagePhase() { SetAnimatedImagePhase(-1) }
 
 // HasAnimatedImages 报告当前是否有动图在播放（宿主据此决定「没有别的脏源也要重绘」）。
 func HasAnimatedImages() bool {
@@ -128,11 +157,16 @@ func animatedFrameForData(url string, data []byte) (*DecodedImage, bool) {
 }
 
 // frameAt 返回 now 时刻应显示的帧。loops == 0（只播一次）时停在末帧；否则按总时长取模。
+//
+// ★ 调用者必须持有 animatedImages.mu（本函数读相位锁定字段）。
 func (e *animatedEntry) frameAt(now time.Duration) *DecodedImage {
 	if e == nil || len(e.frames) == 0 {
 		return nil
 	}
 	elapsed := int((now - e.started).Milliseconds())
+	if animatedImages.phaseSet { // 取证相位锁定：忽略真实经过时间
+		elapsed = animatedImages.phaseMS
+	}
 	if elapsed < 0 {
 		elapsed = 0
 	}

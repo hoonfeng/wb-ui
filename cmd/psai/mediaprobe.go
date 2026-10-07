@@ -599,7 +599,17 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	if err != nil {
 		return res, err
 	}
+	// ★ Q7-D 截图相位锁定（2026-10-07）：动图显示哪一帧 = 「登记时刻到绘制时刻之间
+	//   真实流逝了多久」，那段时长包含加载、事件派发、主循环调度的全部抖动 ⇒ 同一
+	//   HEAD 重跑会截到**不同帧**（实测 matrix-*.png 差异 1.98%~5.95%，逐格定位后
+	//   差异像素 100% 落在动画样本格上）。截图要当验收证据（§6.3 供 read_image 复核、
+	//   供跨跑比对），就必须逐像素可复现。
+	//   处置：仅在**这一次截图绘制**期间把相位钉在 0（各动图首帧），截完立即解除。
+	//   ★ 这不会掩盖缺陷：「动图是否真的在推进」由连拍判据（L4，见 ③）负责，它用的
+	//     是**真实相位**，不受本锁定影响；本锁定只决定「取证那一帧取哪一帧」。
+	app.PinAnimatedImagePhase(0)
 	stillPixels, err := renderPixels(wv)
+	app.UnpinAnimatedImagePhase()
 	if err != nil {
 		return res, err
 	}
@@ -642,7 +652,10 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	if err != nil {
 		return res, err
 	}
+	// ★ 播放态截图同样钉相位（理由同 ①）：播放态与静止态各自的动画相位都不可复现。
+	app.PinAnimatedImagePhase(0)
 	playPixels, err := renderPixels(wv)
+	app.UnpinAnimatedImagePhase()
 	if err != nil {
 		return res, err
 	}
