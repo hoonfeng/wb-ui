@@ -26,8 +26,10 @@
    WebP 动画仍恒为静态首帧（缺口 D11）。
 4. **视频、音频没有内置解码与输出能力**（无解码器、无音频后端）——
    ★ **2026-10-07 更新**：宿主注入元数据（A0）与帧（A1）之后，`<video>` 已能完成资源加载（L1：`readyState=4`、
-   `duration`、`videoWidth/Height`）并**画出画面**（L2：无 poster 时画当前帧、有 poster 时先画 poster）；
-   音频输出（L4-S）仍无。
+   `duration`、`videoWidth/Height`）并**画出画面**（L2：无 poster 时画当前帧、有 poster 时先画 poster）。
+   ★ **2026-10 更新（A3）**：**音频输出（L4-S）已通**——宿主 `ffmpeg` 解 s16le PCM 经注入通道进引擎，
+   音频**为主时钟**驱动 `currentTime`，Windows 用 waveOut 输出（其余平台降级为「按实时速率节流 + 挂钟推算」，
+   播放不停摆）；探针实测 `file|rel` 来源 16+16 格 **L1→L4**（`data:` 来源仍 L1：无本地路径，宿主解不了，属预期）。
 5. ★ **在 UI 库模式（ModeToolkit，即 AI-PS 所用配置）下，光栅图片一律不渲染——连自包含的 `data:` URI 都不渲染**，接宿主 resolver 也无效（A/B 两组渲染结果字节完全相同）。
    ★ **2026-10-07 更新**：这一条已**修复**——`ImageResourceLoader` 的契约本就写着「data: URL 不走
    `AllowsExternal` 判定」，但实现把模式门禁放在了 `decodeDataURI` 之前。门禁顺序改正后 `data:` 无条件
@@ -262,7 +264,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D12 | 音频**输出**后端（L4-S） | 元数据链路**已通**（第三批实测 12 格 **L1**：`rs=4`、`duration≈1s`、`loadedmetadata` 派发）；缺解码/输出后端，且 `AudioContext`/`decodeAudioData` 不存在 → 待阶段 3 立项（§9.6） | 12（L1） |
+| D12 | 音频**输出**后端（L4-S） | ✅ **已闭环（2026-10，A3）**：在元数据链路（L1）之上补齐「解码 → 输出设备」——宿主 ffmpeg 解 s16le PCM → 引擎注入通道 → 输出后端（Windows waveOut；其余平台挂钟降级），`currentTime` 由**输出位置**驱动。判据 A（FFT 主峰 439.88Hz）与 TC-M-602 定点全过；`data:` 来源仍 L1（无本地路径，预期）。TC-M-603（WebAudio）仍缺，见 §9.6 | 12（file/rel 8 格 **L4** + data 4 格 L1） |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
 ---
@@ -358,9 +360,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | 用例 | 输入 | 步骤 | 预期 |
 |---|---|---|---|
 | TC-M-601 | `<audio src=wav/mp3/ogg/m4a>` | 读 `readyState/duration/paused` | **基线**全 0/NaN → L0；**目标**（阶段 3）：`rs=4`、`duration≈1s` → L1 |
-| TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | **基线**不推进（duration=NaN 时空转，`media_element.go:420-423`）；**目标**推进 ≈0.5 |
+| TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | ✅ **达成（2026-10，A3）**：时钟由**输出位置**驱动——终态到 1.00s（真播完），采样点 `currentTime` **不超前**于「该会话首块 PCM 交付以来经过的时间」。定点口径与设备启动延迟的处置见 §9.6；严格断言在引擎单测 `TestAudioSessionDrivesCurrentTime` |
 | TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | **基线**不存在（无音频后端）；**目标**（阶段 3 若含 WebAudio）存在 |
-| TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | **L4-S 判据**：频谱主峰 ≈ 440 Hz |
+| TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音本机无设备 → 如实记 `mismatch`（不伪装为通过） |
 
 > **决策 4 落点**：G5/G6 基线全部为 L0；因已确认「要真实播放」，本节即阶段 3 的**验收清单**——验收标准为「目标」列全部达成。
 
@@ -640,15 +642,17 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 探针：视频判定补齐（第 5 处测量伪影） | ✅ 两处判据缺口：①manifest 的 `phases` 字段（分段期望色）**从未被解析**（`sampleSpec` 缺字段），twophase 这类样本因此没有期望色；②无期望色的视频样本（testsrc 这类自然序列）落到 `sampleCell` 末尾 `return false` → 「绘制」恒 ❌。修法：新增 `mediaPhase` 类型解析 `phases`（取**首段**色作静止态期望）；其余视频按「非灰块」判定（中心点非 `.cell` 底色、非页面白），与 §5 TC-M-502「截图有画面（非灰块）」的达成标准一致 | 修前 12 格「绘制 ❌」→ 修后 file/rel 全 ✅ |
 | 备注语义（避免把预期当缺陷报） | ✅ 报告为两条「非缺陷」情形加注：①`data:` 来源的媒体没有本地路径，宿主帧源（ffmpeg 按路径抽帧）给不出画面 → L1 属预期；②单色样本（solid-red）帧色恒定，动画判据（帧间差异）不适用 → L3 | 报告「备注」列 |
 | 探针：音频状态采集对象修正（第 6 处测量伪影） | ✅ 矩阵页把采集用的 `c.ID` 给了包裹 div、音频元素挂在 `c.ID+"_a"` 上，`collectPage` 因此读到的是 div——`readyState`/`duration` 一律读不到，「加载/几何」两列恒 ❌、音频恒判 L0，把「元数据其实可加载」（TC-M-601 的 L1）压成了 L0。修法：采集 id 交给音频元素本身，包裹 div 改挂 `_box` 后缀。音频 12 格 **L0 → L1**——这正是 A3 的真实起点（元数据通、输出缺） | 探针 `sine-440-1s.*` 行：加载/几何/契约 ✅ → **L1**；备注「音频可加载（元数据可用）；音频输出（L4-S）需音频后端」 |
+| 探针：动图连拍与音频播放耦合（第 7 处测量伪影） | ✅ 满负载下 `Toolkit+AllowAll` 的动图格偶发「**14 帧零差异**」假降级（含音频的全量连跑 8 次命中 4 次，**全落在最后跑的配置**），而只跑动图样本（不带音频）连跑 3 次零失败、同一样本单独复跑恒为 L4——音频会话在播放期持续占用主循环（解码推送 + waveOut 写 + ended 巡检），把动图帧的调度挤到采样窗口之外。修法：动图连拍前只 `pause()` 掉 `<audio>`（**不动 `<video>`**，video 参与动图判据）并让主循环喘息 300ms。另把帧差诊断（`AnimNote`）写进报告备注，降级时能直接读到「最大差异 0 / 共 N 帧」 | 修后连续两次全量跑「与基线一致（无等级下降）」；音频格 file/rel 16 格恒为 L4 |
 | 基线维护（第三批） | 两次更新：① video 条目 **50 行**（含 `generated_at`）；② 音频采集修正再 **49 行**（48 条 `L0 → L1` + `generated_at`） | `git diff --numstat dev/media/baseline.json` |
 | 四配置复测（第三批后） | Browser / AllowHostResolved / AllowAll 三者完全一致：**L0 11 / L1 16 / L3 51 / L4 18**；`DenyExternal`：L0 51 / L1 16 / L3 19 / L4 10。连续两次全量跑均「与基线一致」。余下 11 格 L0 = `data:` 来源的 video 4 格（无本地路径）+ AVIF/TIFF 6 格（预期不支持）+ 失败路径 1 格 | `dev/media/out/report.md`（384 行） |
 | **（新发现·待决）媒体宿主注入通道未受资源策略约束** | ⚠️ 见 §3.4 缺口表：`DenyExternal` 下 `<video src="file://…">` 仍取得画面（L3/L4），与 `<img>` 在同一策略下 L0 的行为不一致；根因是媒体元数据/帧由宿主按本地路径直接读取，未过策略门禁。**上报待决**——策略语义变更不在本轮范围内擅自处理 | 探针 `DenyExternal × *.mp4 × file/rel` = L3/L4；同策略下 `*.png` 为 L0 |
 
 ---
 
-### 9.6 阶段 3 立项材料（A3 音频后端）
+### 9.6 阶段 3 立项材料与落地记录（A3 音频后端）
 
 **A3 音频后端立项评估：见 [`audio-backend-proposal.md`](audio-backend-proposal.md)**（2026-10）。
+**状态：✅ 已按推荐路线 (a) 落地（2026-10）**，落地事实与验收证据见本节「落地记录」。
 
 要点摘录：
 
@@ -663,6 +667,36 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 - **待确认**（实施前需用户选定）：路线 (a)/(b)、平台范围（仅 Windows / 三平台）、
   WebAudio 是否需要、L4-S 判据口径、以及是否与「媒体宿主注入通道未受资源策略约束」
   的修复（§3.4 待决项）合并立项——两者都动「宿主注入媒体数据」这条链路。
+
+#### 落地记录（2026-10，已实施）
+
+按推荐路线 (a)「宿主注入 PCM + 输出后端分阶段」实装，落点与关键实现事实：
+
+| 环节 | 落点 | 关键实现事实 |
+|---|---|---|
+| 解码 | `app/mediaaudio.go` | `ffmpeg -ss <起播秒> -i <path> -f s16le -ar <rate> -ac <ch> -`；宿主按块（`audioChunkFrames`）读出 PCM |
+| 注入 | `engine/rendering/audioframe.go` | PCM 经注入通道交引擎；宿主侧 tap 供探针取证（帧数 / 频谱） |
+| 会话与时钟 | `engine/js/bindings/mediaaudio.go` | 播放时钟 = **输出设备位置**（不是挂钟）；`play/pause/seek/ended` 单调；`AudioSession.Failed()` 表达失败态 |
+| 输出（Windows） | `app/audioout_windows.go` | waveOut；位置查询实测 **`TIME_BYTES = 0x0004`**（`TIME_SAMPLES` 等在本封装下不可用）；`flush` 后位置归零 |
+| 输出（其他平台） | `app/audioout_other.go` | 无输出后端时**降级为按实时速率节流 + 挂钟推算位置**——只报错停播会让「时钟不推进」被误判成引擎缺陷 |
+| 探针 | `cmd/psai/mediaaudio_probe.go`（+ `mediaprobe.go` 接线） | 判据 A（FFT 主峰）/ 判据 B（环回录音，无设备如实记）/ TC-M-602 定点 |
+
+**验收（本机 Windows，`cmd/psai -media` 全量）**：
+
+- 音频格：`sine-440-1s.{wav,mp3,ogg,m4a}` × `file|rel` = **16 格 L4**；`data:` 来源 16 格 **L1**
+  （无本地路径 → 宿主解不了，预期缺口，已入基线）。
+- **判据 A**：PCM **49041 帧**、主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**（四个格式 × 四配置一致）。
+- **判据 B**（环回录音）：本机**无环回设备** → 报告如实记 `mismatch`（不伪装为通过）。
+- **TC-M-602 定点**：`play()` 后 `currentTime` 随**输出位置**推进、终态 1.00s（真播完）。
+  ★ **定点口径**：各格以**自己首块 PCM 交付的时刻**为零点，判据 =「采样点 `currentTime` **不超前**于该零点以来
+  经过的时间，且终态到达 `duration`」。为什么不要求「严格等于经过时间」：设备从收到首块到真正出声有
+  **启动延迟**（12 格并发抢设备时实测可达数百毫秒，采样点因此可能仍是 0.00），这不是引擎能决定的——
+  同一批运行里终态全为 1.00 已说明播放正常；而挂钟驱动的时钟会**超前**，判据②因此仍有区分度。
+  逐值精确断言的严格版本在引擎单测 `TestAudioSessionDrivesCurrentTime`。
+- **稳定性**：口径修正前「含音频的全量」连跑 8 次有 4 次报动图格假降级（第 7 处测量伪影，见 §9 表格）；
+  修后**连续两次全量跑均「与基线一致（无等级下降）」**。
+
+**仍未达成**：TC-M-603（`AudioContext` / `decodeAudioData`）本轮不做，保持缺口（§3.4 D12）。
 
 ---
 

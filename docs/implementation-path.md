@@ -1,6 +1,6 @@
 # wb-ui 实现路径（v1 · 三线总纲：媒体真实播放 / CDP 调试协议 / JS 引擎对标）
 
-> 状态：**P0/P1 与 P2 全部落地**（A1/A2 全项、B2（CDP S2）、C-P2（后端接口抽象）、A4 动图）（2026-10-07 落地 A0 媒体元数据、B0+B1 CDP 调试服务端、C-P0 基线固化，
+> 状态：**P0/P1 与 P2 全部落地，P3 的 A3 音频后端已落地**（A1/A2 全项、**A3 音频 L1→L4**、B2（CDP S2）、C-P2（后端接口抽象）、A4 动图）（2026-10-07 落地 A0 媒体元数据、B0+B1 CDP 调试服务端、C-P0 基线固化，
 > 同日续做 **A1 视频出画面（宿主注入帧流）**、**A2 帧推进（L4 起点）**、
 > **A2 异步预取（渲染线程不再等解码）**，以及 **A2 收尾四项**：
 > 精确到帧的 seek、帧率驱动的预取窗口、`requestVideoFrameCallback`（含帧就绪重绘）、
@@ -203,7 +203,7 @@ Linux-macOS 11.1）、`NewValue(int64)` 造 BigInt、分发 +60MB（libv8.dll 28
 | **A0** 元数据（前置，成本最低） | 宿主用 `ffmpeg -i` 探测时长/尺寸 → 注入 `MediaMetadataResolver`（决策 4 的 U8） | `TC-M-501/601` 的 **L1**：`readyState ≥ 1`、`duration≈1s`、`loadedmetadata` 派发 |
 | **A1** 视频出画面（L2） | ✅ **已实装**（2026-10-07，路线 1，见 §0.1 与下方实现形态） | `TC-M-502` 截图有画面（非灰块）；`poster` 正确绘制——两者都有实测判据（A1-1/2/3） |
 | **A2** 视频动态（L4） | ✅ **已实装**（2026-10-07）：`timeupdate` 驱动的换帧重绘、**异步预取 + 帧队列**、**精确到帧的 seek**（帧对齐规则）、**帧率驱动的预取窗口**、**`requestVideoFrameCallback` + 帧就绪重绘**、**连续帧采样** | `TC-M-503/504/507`：事件序列（A2-3）、`currentTime` 跳转后画面（A1-3/A2-5：20 个采样点都落在该时刻所属帧）、播放中画面随时间变化（A2-1/A2-6：连续 5 帧都等于各自参照）、帧呈现回调（A2-7）、播放全程同步抽帧 0 次（A2-4） |
-| **A3** 音频（L1→L4-S） | **立项材料见 [`docs/audio-backend-proposal.md`](audio-backend-proposal.md)**（2026-10）：推荐「宿主注入 PCM + 输出后端分阶段」；现状已实测——状态机与播放时钟可用（TC-M-601/602 达成），缺「解码 → 输出设备」段（goskia 无任何音频 API） | `TC-M-601…`：采样比对（601/602 已达成；603/604 待实施） |
+| **A3** 音频（L1→L4-S） | ✅ **已实装**（2026-10，按 [`audio-backend-proposal.md`](audio-backend-proposal.md) 的「宿主注入 PCM + 输出后端分阶段」）：宿主 `app/mediaaudio.go` 用 ffmpeg 解 **s16le PCM** 注入引擎（`engine/rendering/audioframe.go` 的注入通道），`engine/js/bindings/mediaaudio.go` 的会话把它推给输出后端并**以输出位置为主时钟**驱动 `currentTime`；输出后端 `app/audioout_windows.go`（waveOut，位置查询实测用 `TIME_BYTES=0x0004`）与 `app/audioout_other.go`（非 Windows 降级为挂钟推算——**播放不停摆**，只是时钟精度降级） | `TC-M-601/602` **L1→L4**：判据 A（PCM **49041 帧**、主峰 **439.88Hz**（期望 440Hz）、幅度 1.000）＋判据 B（环回录音比对；本机无环回设备时如实记 `mismatch`）＋ TC-M-602 定点（`currentTime` 随输出位置推进、终态到 1.00s）。`TC-M-603`（WebAudio）仍缺，见 `media-format-verification-plan.md` §9.6 |
 | **A4** 动图（W3C 之外的自家能力） | ✅ **已实装**（2026-10-07）：goskia 暴露 `SkCodec` 多帧（`skia.NewCodec` / `DecodeFrames` / `FrameDurationMS`），引擎侧 `engine/rendering/imageanimation.go` 按帧时长选帧（宿主注入帧序列，落点见 §0.1 的 A4 行） | **连续帧差异**：判据 A4-1（6 次采样出现 3 种帧色且都等于样本帧色） |
 
 **A1 的两条实现路线（立项时定，决策 4 已采纳「立项时定」）**：

@@ -286,7 +286,7 @@
       "loadedmetadata": 1
     }
   },
-  "generatedAt": "2026-10-07T16:45:01+08:00",
+  "generatedAt": "2026-10-07T17:23:05+08:00",
   "mode": "toolkit",
   "playing": [
     {
@@ -1709,8 +1709,8 @@
       "nh": 0,
       "rs": 4,
       "duration": 1.04,
-      "ct": 1.04,
-      "paused": true,
+      "ct": 1,
+      "paused": false,
       "err": 0
     },
     {
@@ -1725,8 +1725,8 @@
       "nh": 0,
       "rs": 4,
       "duration": 1.04,
-      "ct": 1.04,
-      "paused": true,
+      "ct": 1,
+      "paused": false,
       "err": 0
     },
     {
