@@ -680,25 +680,23 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   样本缺陷。audio 元素不参与动图判据，停掉它不影响任何已有判据。
 	stopAudioPlayback(wv, cells)
 	settleReal(wv, 300*time.Millisecond)
-	// 抖动步长：两轮基步长不同（130ms / 190ms），每步再叠加固定抖动，**相邻步长互不相等**
-	// ⇒ 相位不会每一步回到同一帧。判据本身不变（仍是「任意两帧不同」），真静止的样本
-	// 两轮都没有差异，不会被这层放宽。
-	const animShotCount = 6
-	animJitter := [animShotCount]time.Duration{0, 40, -30, 50, -20, 30}
-	animBase := [2]time.Duration{130 * time.Millisecond, 190 * time.Millisecond}
-	animFrames := make([][]byte, 0, animShotCount*2)
-	for round := 0; round < 2; round++ {
-		if round > 0 {
+	// ★ Q7-C（采样伪影根本解法，2026-10-07）：步长由**样本自己声明的帧时长**驱动，
+	//   不再是全局固定基步长（推导与取舍见 mediaAnimSteps 的说明）。判据不变。
+	animSteps := mediaAnimSteps(man)
+	if len(animSteps) == 0 { // 无动画样本（或 manifest 无 delays）：退回旧口径，行为不变
+		animSteps = []time.Duration{130 * time.Millisecond, 190 * time.Millisecond}
+	}
+	animFrames := make([][]byte, 0, len(animSteps)+1)
+	for i, d := range animSteps {
+		if i > 0 && i%6 == 0 { // 每 6 步让步一次：满负载时给主循环喘息（与旧版两轮让步等效）
 			settleReal(wv, 250*time.Millisecond)
 		}
-		for i := 0; i < animShotCount; i++ {
-			settleReal(wv, animBase[round]+animJitter[i]*time.Millisecond)
-			px, err := renderPixels(wv)
-			if err != nil {
-				return res, err
-			}
-			animFrames = append(animFrames, px)
+		settleReal(wv, d)
+		px, err := renderPixels(wv)
+		if err != nil {
+			return res, err
 		}
+		animFrames = append(animFrames, px)
 	}
 	probes3, _, err := collectPage(wv, cells)
 	if err != nil {
@@ -927,6 +925,71 @@ func settleWall(wv *webkit.WebView, d time.Duration) {
 		driveEventLoop(wv, int64(step/time.Millisecond))
 		time.Sleep(step)
 	}
+}
+
+// mediaAnimSteps 按**样本自己声明的帧时长**生成动图连拍步长（Q7-C：采样伪影根本解法）。
+//
+// 背景（§9.9 第 8 处测量伪影）：旧实现是「全局调一个步长」——基步长 130/190ms +
+// 固定抖动序列，对所有样本一视同仁。洞在于**名义步长不成整数倍 ≠ 实际步长不成整数倍**
+// （实际步长 = 名义步长 + 每步渲染开销），`anim-uneven-delay.gif`（Delays=[50,200,100]
+// ⇒ 周期 350ms）因此被锁相：全量第 3 跑时它的 data/file/rel 三格同时报「最大差异 0」
+// （L4→L3），而同轮其余动图全 L4。
+//
+// 现在改为「按样本声明的帧时长驱动」：对每个**不同周期** P = Σ Delays 生成 3 个步长
+// P×r，r ∈ {0.37, 0.61, 0.83}——互不相同，且刻意避开 1/2、1/3、2/3 这类对称点
+//
+//	（否则两帧样本互换相位后又落回同帧），各再叠加互不相同的抖动。步长按周期**轮转排列**，
+//	使每个周期在整个采样窗口里都有 3 个独立的相位推进量；窗口总长（≈2.1s）远大于最长
+//	周期（400ms）⇒ 覆盖完整循环周期。判据不变（framesDiffer 仍是「任意两帧不同」），
+//	真静止的样本依旧无差异。
+func mediaAnimSteps(man *manifestDoc) []time.Duration {
+	if man == nil {
+		return nil
+	}
+	const maxPeriods = 6 // 上限：周期种类过多时只取前几种，避免连拍窗口无限膨胀
+	var periods []time.Duration
+	seen := map[int64]bool{}
+	for _, s := range man.Samples {
+		if s.Kind != "animated" || len(s.Delays) == 0 {
+			continue
+		}
+		sum := 0
+		for _, d := range s.Delays {
+			sum += d
+		}
+		if sum <= 0 || seen[int64(sum)] {
+			continue
+		}
+		seen[int64(sum)] = true
+		periods = append(periods, time.Duration(sum)*time.Millisecond)
+		if len(periods) >= maxPeriods {
+			break
+		}
+	}
+	if len(periods) == 0 {
+		return nil
+	}
+	ratios := [3]float64{0.37, 0.61, 0.83}
+	jitter := [3]time.Duration{-17 * time.Millisecond, 23 * time.Millisecond, -9 * time.Millisecond}
+	perPeriod := make([][3]time.Duration, 0, len(periods))
+	for _, p := range periods {
+		var st [3]time.Duration
+		for i, r := range ratios {
+			d := time.Duration(float64(p)*r) + jitter[i]
+			if d < 40*time.Millisecond { // 下限：步长过短时渲染开销占主导，相位不可控
+				d = 40 * time.Millisecond
+			}
+			st[i] = d
+		}
+		perPeriod = append(perPeriod, st)
+	}
+	out := make([]time.Duration, 0, len(perPeriod)*len(ratios))
+	for round := 0; round < len(ratios); round++ { // 轮转：每个周期每轮贡献一个步长
+		for _, st := range perPeriod {
+			out = append(out, st[round])
+		}
+	}
+	return out
 }
 
 func renderPixels(wv *webkit.WebView) ([]byte, error) {

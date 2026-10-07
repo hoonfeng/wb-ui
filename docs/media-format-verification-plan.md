@@ -457,7 +457,11 @@ webkit/mode.go:66                             allowsExternalURLs()
    `matrix-Toolkit-DenyExternal.png` 各 **1.98%** 像素变化，两张播放态各 **5.95%**，最大通道差 **255**
    （整格换色）；经逐格定位，差异格正是 `anim-uneven-delay|data|file|rel|gif` 等**动画格**——即 §9.9 的
    **动图采样伪影**，非解码缺陷（同页 `quad.*` 等静止样本逐像素不变）。
-   等级判定与基线比对（§6.4）不经这些数值/像素，**不受影响**；②在 Q7-C（按样本声明帧时长驱动采样）落地后应按帧收敛。
+   等级判定与基线比对（§6.4）不经这些数值/像素，**不受影响**。⚠️ **订正（2026-10-07 实测）**：Q7-C
+   落地后**等级判定确已零变化**（连续 3 次全量跑、384 条等级零漂移），但②**并未收敛**——动画格像素
+   仍在蓝/绿/红之间摇摆。根因：截图是在**固定的 `settleReal` 时刻**拍的（静止态 1.5s、播放态 1.0s 后），
+   该时刻与该动图的帧相位**解耦**，**不经过**连拍采样环节，故 Q7-C 改不动它。要稳定截图需让截图时刻
+   **对齐帧边界**（引擎未暴露「当前帧号」，无法做到），属**遗留项**。
 2. **媒体验证子命令** `cmd/psai -media`（或新 `cmd/mediaprobe`）：
    - **四配置**（Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll）各跑一遍矩阵页，并与 **Edge 对照**（决策 2），产出「引擎 / Edge」双列等级；
    - 每格式产出：几何 JSON、`complete/naturalWidth`、事件日志、截图 PNG；
@@ -993,7 +997,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 验收 | 单测：`webkit/media_resource_policy_test.go`（`DenyExternal` 拒 file/rel、`data:` 恒放行、`http(s)`/`blob` 恒拒、`AllowHostResolved` 命中放行/未命中拒、相对引用两轮询问、`AllowAll` 与运行时切档）＋ `app/mediaaccess_test.go`（未装配即拒绝、策略驱动、切档不读旧缓存、resolver 命中/未命中、引擎侧接线）；探针：`-media-update-baseline` 重生成后**连续两次**全量跑均「与基线一致（无等级下降）」；全量 `go test ./...` 失败清单不增（仍只有 webkit 3 个 pre-existing） |
 | 兼容性（先查后改） | 全仓排查实际宿主：`cmd/browser`、`cmd/gouide`、`dev/probes/window_test` 用 `NewWebView()`（ModeBrowser → 默认 `AllowAll`）**不受影响**；`examples/`、`ui/` 无媒体装配；`dev/probes/idepage*` 是压测页、无媒体；**`cmd/psai` 主宿主**（ModeToolkit → 默认 `DenyExternal`）的 A0/A1/A2 自检要读 `_temp/mediaverify` 的 `file://` 样本 ⇒ **显式声明** `SetResourcePolicy(AllowAll)`（自检段内切档、结束**立即恢复**，其余判据仍在原档位下跑）。**契约（新增）**：需要本地媒体的宿主**必须显式声明**策略（`AllowHostResolved` 或 `AllowAll`）——`data:` 与 resolver 命中的引用不需要 |
 | 取舍依据（选项 1 / 2 / 3，含反方观点） | **选项 1（本轮采纳）**：媒体并入同一门禁——「收紧而非放松」，与既有纪律一致（§9.4 的 SVG 缓存绕过是先例：那次也是**改实现**而不是改文档），且不动任何既有判据口径。**选项 2**：把「宿主注入 = 宿主授权」写成显式决策（宿主既然自己解码，就不该再受资源策略约束）——**反方观点确有道理**：媒体字节从不进引擎，读盘的是宿主自己的进程，「引擎的门禁」对宿主自己的 IO 本无强制力；但该观点解释不了**同一个宿主**（`cmd/psai`/`app`）在 `DenyExternal` 下对 `<img>` 严格拒绝、对媒体却放行的**自相矛盾**，也无法让「安全默认」覆盖新的资源类型（策略的意义正是「宿主没表态时不读盘」）。**选项 3**：折中（只拦元数据、授权后放行帧/PCM）——语义更细，但需新造「媒体授权」概念，且 `<video>` 的元数据与首帧几乎同时发生，拆分不带来实际保护、只多一层状态。反方观点保留于此，供日后回溯 |
-| 探测伪影（第 8 处的根本解法方向） | 抖动修法已连续多次一致（判据未放宽），但「一遇抖动就调采样参数」已累积到第 8 处，**补丁式累积值得警惕**：根本解法是**按样本自己声明的帧时长驱动采样**（步长取「帧时长的非整数倍 + 抖动」并覆盖一个完整循环周期），而不是继续调全局采样参数 |
+| 探测伪影（第 8 处）——**根本解法已落地**（2026-10-07，Q7-C） | 抖动修法虽连续多次一致（判据未放宽），但「一遇抖动就调采样参数」已累积到第 8 处，**补丁式累积值得警惕**：根本解法是**按样本自己声明的帧时长驱动采样**。**本轮已落地**：新增 `mediaAnimSteps(man)`——对每个**不同周期** P = Σ `Delays`（manifest 里早有此字段，探针此前完全没用它）生成 3 个步长 P×r（r ∈ {0.37, 0.61, 0.83}，互不相同且刻意避开 1/2、1/3、2/3 这类对称点——否则两帧样本互换相位后又落回同帧），各叠加互不相同的抖动，再按周期**轮转排列**；窗口总长 ≈2.1s，远大于最长周期（`anim-2frames.webp` 的 400ms）⇒ 覆盖完整循环周期。旧的「固定基步长 130/190ms」退为**无动画样本时的回退分支**。判据不变（`framesDiffer` 仍是「任意两帧不同」），真静止样本不受影响。**实测的四种周期**：`anim-3frames-rgb`/`anim-noloop` 300ms、`anim-uneven-delay` **350ms**（旧口径锁相的那个）、`anim-2frames.webp` 400ms。**验收**：`cmd/psai -media` 连续 **3 次**全量跑均「与基线一致（无等级下降）」，**384 条等级零变化**（三次报告逐格比对）。⚠️ **不含**截图 `matrix-*.png` 的帧相位抖动（另一来源，见 §6.2 副作用②） |
 
 > **挂账登记（2026-10-07，已拍板：方案 Q5-A「挂账」）**：本表说的「一份判定、两处执行」是
 > `loadExternalResource`（`webkit/`，图片/样式/脚本的字节路径）与 `MediaResourceAllowed`
@@ -1018,7 +1022,7 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）** | ✅ **侦查完成、未修**。三条各给出测试名/断言原文/根因假设/风险/建议：①按钮字形只命中一行像素 ⇒ 测量脆性；②`14.8281/13.0 = 1.1406` = Segoe UI 的 normal 行距 ⇒ 断言口径过窄；③`:checked` 读 attribute 而非 IDL 状态（②③ 均指向「测试期望/口径」而非引擎缺陷） | `docs/TECH_DEBT.md`「三条失败的逐条侦查」 |
 | **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）** | ✅ **已登记挂账、未重构** | §9.9「挂账登记」 |
 | **Q6** | 单测纪律（每轮是否纳入全量 `go test`） | 只跑定向测试可能漏掉回归 | **B（每轮纳入）+ D（固化入口）** | ✅ **已完成**。`cgo_env.bat` 新增 `test-all`，并**强制 `GOWORK=off`**（修掉 workspace 损坏时 `go list -m` 静默失败）；本轮实跑 **ok 28 包 + FAIL 1 包（`wb-ui/webkit`，3 用例）+ 67 无测试 = 96 包**，**失败清单未增** | §6.4「环境前提」、§8.3 第 4 条 |
-| **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下 L0 的**备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到第 8 处 | **B（只修 ① 备注文案）** | ✅ **①已完成**：`judgeCell` 的 `broken` 分支改为**优先** `mediaDenialNote` ⇒ `DenyExternal × file/rel` 的 corrupt.png 备注从「失败路径……契约缺陷」更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」；重跑 `-media` 后**等级全 L0 不变、与基线一致**。②**未做**（属另一轮） | §10 本行 + `cmd/psai/mediaprobe.go` 的 `judgeCell` |
+| **Q7** | 判据相关两处 | ① `corrupt.png` 在 `DenyExternal` 下 L0 的**备注文案**与实际路径不符（判定行为本身正确）；② 采样伪影已累积到第 8 处 | **B（只修 ① 备注文案）** | ✅ **①已完成**：`judgeCell` 的 `broken` 分支改为**优先** `mediaDenialNote` ⇒ `DenyExternal × file/rel` 的 corrupt.png 备注从「失败路径……契约缺陷」更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」；重跑 `-media` 后**等级全 L0 不变、与基线一致**。②**已另轮落地**（Q7-C，2026-10-07）：`mediaAnimSteps` 按样本声明的帧时长驱动连拍步长，连续 3 次全量跑 384 条等级零变化（见 §9.9「探测伪影」行） | §10 本行 + `cmd/psai/mediaprobe.go` 的 `judgeCell` / `mediaAnimSteps` |
 | **Q8** | 文档剩余范围 | 收敛到两项，本轮已按授权就地处置 | — | ✅ 原地处置（细目见下）：**丙10 已消解（2026-10-07 按实施口径修订决策 5）**、**乙4 已标注待确认** | §3.4、§0.2 |
 
 > **Q8 细目（两项的处置依据）**
