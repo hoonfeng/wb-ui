@@ -184,6 +184,46 @@ func mediaStateFor(in *jsc.Interpreter, el *dom.Element) *mediaElementState {
 	return st
 }
 
+// StartMediaElementLoads 为文档中已连接的 <video>/<audio> 元素启动资源选择算法
+// （HTML §4.8.8），返回本次启动的元素数。
+//
+// 规范要求「src 属性已设置且元素在文档中」即启动加载，而本引擎的媒体状态是
+// 「首次访问媒体属性时惰性创建」（见 mediaStateFor）：用 HTML 属性写好的
+// `<video src="…">` 在脚本读属性之前根本不加载——readyState 停在 HAVE_NOTHING、
+// duration 为 NaN、首帧不绘制（实测静止态 rs=0，只有 play() 之后才补到 rs=4）。
+// 宿主在文档装配完成后调用本函数补齐规范时机（见 webkit/webview.go 的
+// loadHTMLFrom）。
+//
+// 幂等：已有状态（脚本访问过媒体属性，或 src 变化走过 setSrc）的元素不重复启动；
+// 没有 src 的元素不启动（资源选择本该停在 NETWORK_EMPTY）。
+func StartMediaElementLoads(in *jsc.Interpreter, doc *dom.Document) int {
+	if in == nil || doc == nil {
+		return 0
+	}
+	started := 0
+	for _, tag := range []string{"video", "audio"} {
+		for _, el := range doc.GetElementsByTagName(tag) {
+			if el == nil || !el.IsConnected() {
+				continue
+			}
+			if strings.TrimSpace(el.GetAttribute("src")) == "" {
+				continue
+			}
+			mediaElMu.Lock()
+			_, exists := mediaElCache[el]
+			mediaElMu.Unlock()
+			if exists {
+				continue
+			}
+			// mediaStateFor 首次创建时会把 startLoadFor 排进事件循环。
+			if mediaStateFor(in, el) != nil {
+				started++
+			}
+		}
+	}
+	return started
+}
+
 // clearMediaElementCacheFor 清理媒体元素缓存（clearMediaCachesFor 调用）。
 func clearMediaElementCacheFor(doc *dom.Document) {
 	mediaElMu.Lock()

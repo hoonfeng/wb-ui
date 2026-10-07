@@ -1224,6 +1224,21 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 		fr.ExecuteScripts()
 		fr.RebuildRenderTree()
 	}
+	// ★ 媒体元素（<video>/<audio>）的资源选择算法：规范时机是「src 属性已设置
+	//   且元素在文档中」（HTML §4.8.8），而本引擎把它推迟到「首次访问媒体属性」
+	//   （bindings/media_element.go 的 mediaStateFor）。于是用 HTML 属性写好的
+	//   `<video src>` 在脚本读属性之前**完全不加载**：readyState 恒 0、duration
+	//   为 NaN、首帧不绘制，只有 play() 之后才补加载（实测：静止态 rs=0 →
+	//   播放态 rs=4）。在页面脚本执行后补齐规范时机——此时页面脚本注册的
+	//   loadedmetadata 监听已就位，能收到这次加载的事件（媒体事件本就异步派发）；
+	//   幂等，运行时动态创建的媒体元素仍走各自的属性/setSrc 路径。
+	if wv.jsInterpreter != nil {
+		if doc := wv.mainFrame.Document(); doc != nil {
+			if n := bindings.StartMediaElementLoads(wv.jsInterpreter, doc); n > 0 {
+				page.Logf("Media", "started resource selection for %d media element(s)", n)
+			}
+		}
+	}
 	// ★ DOMContentLoaded（document）：DOM 解析完、同步脚本执行完、渲染树已建。
 	//   规范此刻 document.readyState 仍为 "interactive"（load 之前），因此必须在
 	//   SetReadyState("complete") 之前派发。此前引擎从不派发该事件 → 所有

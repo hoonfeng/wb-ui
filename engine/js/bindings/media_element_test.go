@@ -36,6 +36,60 @@ func drainEventLoop(rt *jsc.Interpreter) {
 	}
 }
 
+// TestStartMediaElementLoadsStartsResourceSelection 覆盖「HTML 属性写好的媒体
+// 元素在脚本读属性之前就启动资源选择算法」：修复前媒体状态只在首次属性访问时
+// 惰性创建（mediaStateFor），脚本不读属性就永不加载——静止态 readyState 恒 0，
+// 只有 play() 之后才补到 HAVE_ENOUGH_DATA。同时覆盖幂等与「无 src 不启动」。
+func TestStartMediaElementLoadsStartsResourceSelection(t *testing.T) {
+	rt, doc, _ := newRuntimeWithDoc(t)
+
+	video := doc.CreateElement("video")
+	video.SetId("video0")
+	video.SetAttribute("src", "clip.mp4")
+	doc.AppendChild(video)
+
+	audio := doc.CreateElement("audio")
+	audio.SetId("audio0")
+	audio.SetAttribute("src", "clip.mp3")
+	doc.AppendChild(audio)
+
+	// 无 src 的元素不应被启动（资源选择本该停在 NETWORK_EMPTY）。
+	bare := doc.CreateElement("video")
+	bare.SetId("bare")
+	doc.AppendChild(bare)
+
+	// 监听先注册：媒体事件是宏任务，此刻排出的任务尚未执行，仍能收到。
+	mustRun(t, rt, `
+		window.__mm = 0;
+		["video0","audio0"].forEach(function(id){
+			document.getElementById(id).addEventListener("loadedmetadata", function(){ window.__mm++; });
+		});
+	`)
+
+	if n := StartMediaElementLoads(rt, doc); n != 2 {
+		t.Fatalf("应启动 2 个媒体元素（无 src 的不算），实际 %d", n)
+	}
+	if n := StartMediaElementLoads(rt, doc); n != 0 {
+		t.Fatalf("重复调用必须幂等，实际又启动了 %d 个", n)
+	}
+	drainEventLoop(rt)
+
+	for _, el := range []*dom.Element{video, audio} {
+		st := mediaStateFor(rt, el)
+		if st == nil {
+			t.Fatalf("id=%s 应有媒体状态", el.GetAttribute("id"))
+		}
+		if st.readyState < mediaHaveMetadata {
+			t.Fatalf("id=%s 静止态应达 HAVE_METADATA，实际 readyState=%d",
+				el.GetAttribute("id"), st.readyState)
+		}
+	}
+	if st := mediaStateFor(rt, bare); st.readyState != mediaHaveNothing {
+		t.Fatalf("无 src 的元素不应进入加载，实际 readyState=%d", st.readyState)
+	}
+	mustRun(t, rt, `if (window.__mm !== 2) throw new Error("loadedmetadata 应各派发一次，实际 " + window.__mm);`)
+}
+
 // TestMediaElementProperties 覆盖 HTMLMediaElement 的初始属性契约：框架挂载
 // <video> 后立刻读这些属性，读到 undefined 就会把整段脚本带崩。
 func TestMediaElementProperties(t *testing.T) {
