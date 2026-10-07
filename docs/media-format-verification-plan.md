@@ -21,15 +21,18 @@
 
 1. **光栅图像解码完整**：PNG / JPEG / GIF / WebP（有损+无损）/ BMP / ICO 都能解码并绘制；
 2. **SVG 走自有矢量路径**，不入 Skia 解码器；
-3. **动画只取首帧**：GIF / WebP 动画无帧推进机制，视觉上恒为静态首帧；
-   ★ **2026-10 复测更新**：GIF 动画已能**帧推进**（3 个动画样本 × 3 来源均达 L4）；
-   WebP 动画仍恒为静态首帧（缺口 D11）。
-4. **视频、音频没有内置解码与输出能力**（无解码器、无音频后端）——
-   ★ **2026-10-07 更新**：宿主注入元数据（A0）与帧（A1）之后，`<video>` 已能完成资源加载（L1：`readyState=4`、
-   `duration`、`videoWidth/Height`）并**画出画面**（L2：无 poster 时画当前帧、有 poster 时先画 poster）。
-   ★ **2026-10 更新（A3）**：**音频输出（L4-S）已通**——宿主 `ffmpeg` 解 s16le PCM 经注入通道进引擎，
-   音频**为主时钟**驱动 `currentTime`，Windows 用 waveOut 输出（其余平台降级为「按实时速率节流 + 挂钟推算」，
-   播放不停摆）；探针实测 `file|rel` 来源 16+16 格 **L1→L4**（`data:` 来源仍 L1：无本地路径，宿主解不了，属预期）。
+3. **动画能帧推进**：GIF / WebP 动画均按各自声明的帧时长推进（goskia `SkCodec` 多帧 +
+   引擎按帧时长选帧，A4 实装）——3 个动画样本 × 3 来源均达 **L4**。
+   （原判「动画只取首帧 / WebP 恒为静态首帧（缺口 D11）」已作废：其中 WebP 部分经两次
+   对照实证为**探针判定抖动**、非引擎缺陷，判据已稳定化，见 §9.4。）
+4. **视频、音频已在「宿主注入」通道下完整可用**（引擎自身仍不背解码器与许可，解码全在宿主）：
+   - `<video>`：元数据（A0）→ 帧流（A1）→ 帧推进 / 异步预取 / 精确到帧的 seek /
+     `requestVideoFrameCallback`（A2）⇒ **L4**（单色样本 L3）；资源选择启动时机修正见 §9.5（D10）。
+   - `<audio>`：宿主 `ffmpeg` 解 s16le PCM → 注入通道 → 输出后端（Windows waveOut；其余平台
+     按实时速率节流 + 挂钟推算，**播放不停摆**），`currentTime` 由**输出位置**驱动 ⇒ **L4-S**；
+     `data:` 来源经「内联字节先落盘再交 ffmpeg」同样 **L4**（§9.8）。
+   - 资源策略：媒体自 §9.9 起并入同一门禁 ⇒ `Toolkit+DenyExternal` 下媒体 `file://`/相对路径
+     与 `<img>` 同档为 **L0**（安全默认，属预期而非缺陷）。
 5. ★ **在 UI 库模式（ModeToolkit，即 AI-PS 所用配置）下，光栅图片一律不渲染——连自包含的 `data:` URI 都不渲染**，接宿主 resolver 也无效（A/B 两组渲染结果字节完全相同）。
    ★ **2026-10-07 更新**：这一条已**修复**——`ImageResourceLoader` 的契约本就写着「data: URL 不走
    `AllowsExternal` 判定」，但实现把模式门禁放在了 `decodeDataURI` 之前。门禁顺序改正后 `data:` 无条件
@@ -37,8 +40,8 @@
    `http(s)` 的拒绝语义不变。
 6. ★ **2026-10 复测新增（契约侧）**：`<img>` 的 `load` / `error` 事件契约已补齐（U2）——
    此前「画得出但脚本测不到」（§3.3 D1）的两侧现在都可用：`complete` / `naturalWidth` 正确，
-   加载成功派发 `load`、失败派发 `error`。**SVG 仍是例外**（无固有尺寸、无 `load`/`complete`，
-   见缺口 D8）。
+   加载成功派发 `load`、失败派发 `error`。**SVG 亦已补齐**（D8：固有尺寸 + `load`/`complete`
+   就绪判定，九格 **L2 → L3**，见 §9.4）——本条**不再有例外项**。
 
 第 5 条是本次盘点最重要的发现，直接决定「AI-PS 界面里图片能不能用」。
 
@@ -355,7 +358,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-504 | `video.currentTime = 0.5` | 读 `seeking/seeked` 与几何 | **基线**不退进；**目标**画面跳到 0.5s 帧 —— ✅ **画面部分实测达成（2026-10-07，A1-3）**：`currentTime=0.5` 后截图中心像素 = 0.5s 参照帧（同一纯色样本，参照值由独立 ffmpeg 抽帧得到）；`seeking/seeked` 事件与连续换帧（L4）仍属 A2 |
 | TC-M-505 | `http(s)` 源 | 读 `error.code` | 保留：`MEDIA_ERR_SRC_NOT_SUPPORTED`（`media_element.go:304-309`） |
 | TC-M-506 | `<video>` + `controls` 属性 | 截图 | 引擎是否绘制原生控件（基线预期否；阶段 3 再定） |
-| TC-M-507 | 连续 1s 内取 5 帧截图 | 像素差异 | **目标**：画面随时间变化 → **L4** —— ◐ **部分达成（2026-10-07，A2 起步）**：播放中画面确实随时间变化（两段式样本：播放前首帧 = 前段色、播放到结束 = 后段色，各自与独立抽帧的参照一致）；「1s 内连续 5 帧」的密集采样判据尚未落地 |
+| TC-M-507 | 连续 1s 内取 5 帧截图 | 像素差异 | ✅ **达成（2026-10，A2）**：连续采样 5 帧（帧号 [0 1 2 3 4]），**每帧画面都 = 该帧的独立 ffmpeg 参照**（判据 A2-6）；播放中画面随时间变化（A2-1），播放全程**同步抽帧 0 次**（A2-4：预取 8 次 / 异步交付 9 帧 / 回退上一帧 6 次） |
 
 ### G6 音频
 | 用例 | 输入 | 步骤 | 预期 |
@@ -440,9 +443,12 @@ webkit/mode.go:66                             allowsExternalURLs()
 **执行方式**：
 
 1. **入口（手动/按需）**
-   - `cmd/psai -media`：四配置真实渲染 + 像素比对 + Edge 对照 + 出 Markdown 报告；
-   - 或 `go test -tags=media -run TestMediaE2E`（等价入口，便于本地调试）；
-   - 两者均**不进默认 `go test ./...`**（需 CGO + 样本 + 耗时），**也不挂 CI**。
+   - `cmd/psai -media`：四配置真实渲染 + 像素比对 + Edge 对照 + 出 Markdown 报告。
+     相关开关：`-media-samples` / `-media-out` / `-media-baseline` / `-media-update-baseline` /
+     `-media-only <子串>`（调试）/ `-media-edge`（启用 Edge 双端对照，**默认关闭**）；
+   - 该入口**不进默认 `go test ./...`**（需 CGO + 样本 + 耗时），**也不挂 CI**；
+   - ⚠️ **订正（2026-10-07）**：原写在这里的「或 `go test -tags=media -run TestMediaE2E`（等价入口）」
+     **并不存在** —— 全仓检索无任何 `media` build tag。若需该形态属**未落地项**，当前一律用上一条入口。
 2. **样本准备（决策 5）**
    - 入库：`dev/media/gen_samples.py`、`-media` 探针、基线期望表（纯文本 JSON，几 KB）；
    - 不入库：`dev/media/samples/`、`dev/media/out/`（写入 `.gitignore`）；
@@ -497,8 +503,8 @@ D1 … （现象 / 证据文件 / 影响面 / 建议）
 | **P1** | U3 | WebP/BMP/ICO 无固有尺寸（两套 codec 集不一致） | 实测 Go DecodeConfig ❌ | 阶段 2：Skia 优先 + Go 兜底（或注册 `x/image/webp`+`bmp`） | 未给尺寸的 `<img>` 塌陷 | ✅ **已闭环**（Skia `DecodeSize` 兜底，三者 L3；SVG 固有尺寸由 **D8** 补齐，§9.4） |
 | **P1** | U4 | 动图（GIF/WebP）不推进帧 | 无 codec/frame API | **决策 3：goskia 暴露 `SkCodec`**（跨仓库联动，§8.2 阶段 2） | 动图退化为静态图 | ✅ **已闭环**（GIF 与 WebP 动画均达 **L4**；原 D11「WebP 未推进」经两次对照实证为**探针判定抖动**，判据已稳定化，§9.4） |
 | **P1** | U5 | `svg` 仅 `data:` 可渲染 | C 组第三列空白 | 阶段 2：`loadBackgroundSVG` 补 `file://`/相对路径分支 | 文件引用 SVG 图标不显示 | ✅ **已闭环**（file/rel 已绘制；**D8** 补齐固有尺寸与 `load`/`complete` 契约 → SVG 九格 **L2 → L3**，§9.4） |
-| **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 | 🟡 **部分闭环**（A0/A1：元数据与帧流在跑；探针采样点仍无画面 → D10） |
-| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ❌ **未闭环**（12 格 L0，需音频后端） |
+| **P2** | U6 | 视频：无解码器、无画面（除 poster）、`duration=NaN` | 实测 rs=0 | **决策 4：要真实播放** → 阶段 3 单独立项（宿主注入 vs 内置 ffmpeg） | 任何 `<video>` 场景不可用 | ✅ **已闭环**（A0/A1/A2 + D10：元数据、帧流、帧推进、异步预取、精确 seek、rVFC；见 §9.5） |
+| **P2** | U7 | 音频：无解码、无输出后端 | 实测 rs=0，goskia 无 audio | **决策 4：要真实播放** → 阶段 3 单独立项（音频繁重最高） | 任何 `<audio>` 场景不可用 | ✅ **已闭环**（A3：宿主 ffmpeg 解 PCM → 注入通道 → waveOut；音频 **48 格 L4**，见 §9.6/§9.8） |
 | **P2** | U8 | `MediaMetadataResolver` 宿主未注入 | 仅定义+单测 | 阶段 3 前置：宿主接 `ffmpeg -i` 探测时长（一次赋值） | 即使本地媒体也拿不到时长 | ✅ **已闭环**（A0：探针与 psai 均装配该 resolver） |
 | **P3** | U9 | AVIF/TIFF 不支持 | 实测 ❌ | 维持不支持（写入基线，不投入） | 新格式资源不可用（可接受） | ✅ **维持**（6 格 L0，已入基线） |
 
@@ -575,6 +581,10 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 ### 8.3 每阶段统一的验收方式
 
 1. `cmd/psai -media` 在**四配置**（Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll）下全量跑，并与 **Edge 双端对照**（决策 2；无 Edge 时标 `SKIP(no-edge)`）；
+   - ⚠️ **实测现状（2026-10-07）**：本机三个标准 Edge 安装路径均不存在、`findEdge()` 找不到 →
+     报告里**不存在 Edge 列值**（恒 `SKIP(no-edge)`）。对照代码虽已具备（`-media-edge` /
+     `runEdgeComparison`），但**默认关闭、从未真正执行**。Edge 对照因此是**环境可选**验收项，
+     不是当前验收的必过项（与决策 6「不挂 CI」的取向一致）。
 2. 报告等级与 §8.1「修法/路线」的目标一致，且**不低于 Edge 等级**（如 U1 修复后：PNG@Toolkit+DenyExternal@data: ≥ L3，且 = Edge 等级）；
 3. 截图经 `read_image` 人眼复核；
 4. 默认 `go test ./...` 保持全绿（当前 23 包，作为回归底线，不受工装影响）；四配置渲染为**本机按需**执行（决策 6 修订：不入 CI 门禁）。
