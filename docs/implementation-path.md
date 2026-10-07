@@ -1,6 +1,6 @@
 # wb-ui 实现路径（v1 · 三线总纲：媒体真实播放 / CDP 调试协议 / JS 引擎对标）
 
-> 状态：**P0/P1 与 P2 全部落地，P3 的 A3 音频后端已落地**（A1/A2 全项、**A3 音频 L1→L4**、B2（CDP S2）、C-P2（后端接口抽象）、A4 动图）（2026-10-07 落地 A0 媒体元数据、B0+B1 CDP 调试服务端、C-P0 基线固化，
+> 状态：**P0/P1 与 P2 全部落地，P3 的 A3 音频后端已落地**（A1/A2 全项、**A3 音频 L1→L4（含 `data:` 来源）**、B2（CDP S2）、C-P2（后端接口抽象）、A4 动图）（2026-10-07 落地 A0 媒体元数据、B0+B1 CDP 调试服务端、C-P0 基线固化，
 > 同日续做 **A1 视频出画面（宿主注入帧流）**、**A2 帧推进（L4 起点）**、
 > **A2 异步预取（渲染线程不再等解码）**，以及 **A2 收尾四项**：
 > 精确到帧的 seek、帧率驱动的预取窗口、`requestVideoFrameCallback`（含帧就绪重绘）、
@@ -8,6 +8,7 @@
 > callFunctionOn(objectId) / releaseObject）、DOM 编辑与查询扩展、**CSS 域**、**console 分级**，
 > **C-P2 后端接口抽象**（jsc 的 goja 耦合收敛到单文件 + `Backend` 契约与注册表），
 > 以及 **A4 动图**（goskia 暴露 `SkCodec` 多帧 + 引擎按帧时长推进）；
+> 以及 **A3 遗留清理**（`data:` 内联字节先落盘再交给 ffmpeg：音频/视频 data: 共 32 格 L1→L4）；
 > 逐项证据见 [§0.1](#01-实装进度2026-10-07-更新)）。设计稿阶段为 2026-10-06。
 > 定位：把三条「需要真实实施（写引擎代码）」的主线收进同一份分期表，避免各写各的。
 > 验证与实现分离：**媒体能力等级的验证**属独立媒体验证项目（设计稿 [docs/media-format-verification-plan.md](media-format-verification-plan.md)），
@@ -32,11 +33,13 @@
 | P0 | **C-P0 基线固化** | `dev/probes/jsesmatrix`（以 `featuresBlackList` 为权威清单，运行时解析 → 不手抄；缺项即报错「不允许未知」；`-v` 逐项、`-out` 快照） | 45 项：supported 7（含引擎自补的 `WeakRef`/`FinalizationRegistry`）/ missing 35（其中 5 项已排期）/ exempt 3；快照 `dev/output/jsesmatrix.json` |
 | P2 | **C-P2 后端接口抽象** | `engine/js/jsc/backend.go`：`Backend` / `RuntimeHandle` 契约 + 后端注册表（`RegisterBackend` / `SetActiveBackend` / `ActiveBackend` / `BackendNames`）；`engine/js/jsc/backend_goja.go`：**全包唯一 import goja 的文件**——goja 的类型与构造器收敛为 `be*` 名字（`beValue` / `beObject` / `beRuntime` / `beFunctionCall` / `beCallable` / …）+ goja 后端注册；`goja_adapter` / `streams` / `webapi` / `env` / `lazy` / `eventloop` 六个文件改为只用 `be*` | `grep -l 'engine/js/goja"' engine/js/jsc/*.go` **只剩 `backend_goja.go`（+ 测试）**；`bindings` **零改动**（`grep 'beValue\|beObject' engine/js/bindings` 为空）；`GOWORK=off go build ./...` + `go test ./engine/js/jsc ./engine/js/bindings ./engine/js/worker ./app` 全绿；`_temp/psai.exe -verify` 仍 **28 ✓ / 0 ✗** |
 | P2 | **A4 动图（GIF/WebP 多帧）** | **goskia**：新 `skia/codec.go`（`NewCodec` / `FrameCount` / `Dimensions` / `FrameDurationMS` / `RepetitionCount` / `DecodeFrame` / `DecodeFrames`，`fPriorFrame = i-1` 处理增量帧）+ `skia/codec_test.go`（3 帧 GIF 逐帧像素不同、静态 PNG 走单帧）；**wb-ui**：`engine/rendering/imageanimation.go`（`AnimatedImageSource` 注入 + 帧序列缓存 + `HasAnimatedImages` + 假时钟可测）、`engine/rendering/image.go` 的 `NewDecodedImageFromSkia`（直接持有帧位图，不走 PNG 中转）、`painter.go` 的 `<img>` 每帧重取当前帧、`backgroundimage.go` 的四个解码点接入（动图**不进单帧缓存**）、`app/imageanimation.go`（宿主用 SkCodec 解多帧）、`app/host.go` 的 `needPaint` 加 `HasAnimatedImages()` | **判据 A4-1（6 次采样、每帧 300ms：出现 3 种帧色，画面随帧推进变化且都等于样本帧色）**；单测：goskia `TestCodec*`（2 项）、`engine/rendering` 的 `TestAnimated*`（3 项：按时钟推进 / 非动图回退单帧 / `loops=0` 停末帧）、`app` 的 `TestAnimatedImageSourceDecodesGIFAndAdvances`（宿主源 + 引擎通道的集成） |
+| P3 | **A3 音频输出后端（L4-S）+ `data:` 来源闭环** | 宿主 `app/mediaaudio.go`（ffmpeg 解 s16le PCM）、`app/audioout_windows.go`（waveOut，位置查询用 `TIME_BYTES=0x0004`）、`app/audioout_other.go`（非 Windows 挂钟降级——播放不停摆、只降时钟精度）、引擎 `engine/rendering/audioframe.go`（PCM 注入通道）+ `engine/js/bindings/mediaaudio.go`（会话与「**输出位置**驱动」的时钟）；`data:` 来源由新 `app/mediadataurl.go` 落盘成普通本地文件（`mediaSrcToPath` 接线，见实现事实 27） | 音频 `sine-440-1s.{wav,mp3,ogg,m4a}` × `file\|rel\|data` × 四配置 = **48 格 L4**（判据 A 主峰 439.88/439.87Hz、幅度 1.000；TC-M-602 终态 1.00s；判据 B 环回录音无设备时如实记 `mismatch`）；`data:` 闭环使音频 16 格 L1→L4、视频 data: 16 格同步恢复（**32 上升 / 0 下降**，随后连续两次「与基线一致」）；单测 `app/mediaaudio_test.go`（判据 A + 设备位置推进/`flush` 归零）、`app/mediadataurl_test.go`（含 `TestMediaDataURLFeedsFFmpeg` 端到端） |
 
 **尚未落地**（按 §6 分期）：
 
 - **P2**：**已全部落地**（A2 全项、A4 动图、B2（CDP S2）、C-P2 后端接口抽象，见上表）。
-- **P3（需用户确认）**：A3 音频后端、B3 `Target` 扁平会话 + `Emulation` + `Page.navigate` → S3、C-P3 V8 后端（+60MB 分发）、C-P4 跨界优化。
+- **P3（需用户确认）**：B3 `Target` 扁平会话 + `Emulation` + `Page.navigate` → S3、C-P3 V8 后端（+60MB 分发）、C-P4 跨界优化。
+  （**A3 音频后端已落地**（2026-10）：宿主注入 PCM + waveOut 输出；`data:` 来源亦已闭环——音频 `file|rel|data` 全 **L4**，见 §2 的 A3 行与 [media-format-verification-plan.md](media-format-verification-plan.md) §9.6/§9.8。）
 
 **本轮新增的实现事实（原设计稿未预见，后续改动请勿踩回）**：
 
@@ -66,6 +69,8 @@
 24. **本仓库 vendored goja 的 `Callable` 签名与上游不同**：这里是 `type Callable func(this Value, args ...Value) (Value, error)`（上游是 `func(FunctionCall) Value`），调用方写 `fn(this, args...)`；`goja.NewString/NewFloat/NewBoolean` 也是**包级**构造器（不接 runtime）。按上游签名写包装会在编译期报「too many arguments」——首版 `be*` 包装正是这样被编译器当场抓住的（别凭记忆写 goja API）。
 25. **动图的帧快照会被 RenderBox 固化（A4 的关键坑）**：`PaintImage` 原来只在 `img == nil || !img.Loaded()` 时才加载图片，并用 `box.SetDecodedImage(img)` 把结果存下来——GIF 的**第一帧因此被固化，动图永远不动**（判据 A4-1 首版实测「6 次采样只出现 1 种颜色」）。修正：绘制 `<img>` 时每次都重新问一次「现在该显示哪一帧」（`animatedFrameForSrc`，走与加载时同一套 URL 解析），box 上的缓存只作兜底。★ 同理，**动图不能进 `backgroundImageCache.imgs`**：那张表一个 url 只存一帧，命中即固化。
 26. **自检探针资源的两个约束**：① 用 **`data:` URI** 注入（psai 有资源拦截器/宿主 loader，`_temp/` 下的新文件不一定取得到；`data:` 不经 loader，直接进解码路径——A1-2 的 poster 同一思路）；② **要注意判据耗时对后续判据的影响**：A4-1 要连续采样约 2 秒，页面状态在等待期间会推进，先跑它会让 CDP 判据的目标元素（工具条/输入框）不再处于初始状态（判据 5 与键盘项实测直接变成「跳过」）——所以它排在 CDP 判据**之后**。
+
+27. **宿主只认「路径」，`data:` 必须先落盘**（A3 遗留清理）：宿主把解码/抽帧交给 ffmpeg，而 ffmpeg 读的是文件或管道——`data:`（RFC 2397 内联字节）没有路径可给，修复前 `mediaSrcToPath` 对 data: 一律 false（音频 data: 16 格停在 L1、视频 data: 连抽帧都进不去）。修法：`app/mediadataurl.go` 把 data: 解成字节 → 落到系统临时目录，文件名 = **内容摘要（sha256 前 8 字节）+ 按 MIME 推断的扩展名** ⇒ 同一 URI 只落一次、**跨进程**也命中（连续两次全量跑不重写），且路径随内容而定，探测缓存与帧缓存按 `(路径, 时刻)` 建键才不会每帧重解一次 base64。★ 两条纪律：① **不要**在每条链路上各写一套「先解码再喂管道」的分支（一处落盘、三条链路共用）；② 落盘文件**刻意不自动清理**（跨进程复用），需要「跑完不留垃圾」时显式调 `CleanupMediaDataURLFiles()`。
 
 **§8 决策点的执行情况**：决策 2 取推荐 (a) 自研最小 WS；决策 3 取 (b) 后端化（C-P2 未开工，默认后端仍是 goja）；决策 5 取「三线并行、P0 优先」；**A1 的两条路线取路线 1（宿主注入帧流）**——它把解码器留在宿主，引擎不背 ffmpeg 的体积与许可，因此**不受决策 4（分发体积）约束**，可以先落地。决策 1（CDP 目标场景）与决策 4 涉及 P2/P3，**仍待用户拍板**——在此之前不动 V8 后端与音频后端。
 
