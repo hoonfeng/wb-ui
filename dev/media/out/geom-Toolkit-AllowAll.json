@@ -212,61 +212,61 @@
       "load": 1
     },
     "c72": {
-      "loadedmetadata": 2,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1
     },
     "c73": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
     "c74": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
     "c75": {
-      "loadedmetadata": 2,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1
     },
     "c76": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
     "c77": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
     "c78": {
-      "loadedmetadata": 2,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1
     },
     "c79": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 5
@@ -275,42 +275,78 @@
       "load": 1
     },
     "c80": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 5
     },
     "c81": {
-      "loadedmetadata": 2,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1
     },
     "c82": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
     "c83": {
-      "canplay": 2,
+      "canplay": 1,
       "ended": 1,
-      "loadeddata": 2,
-      "loadedmetadata": 2,
+      "loadeddata": 1,
+      "loadedmetadata": 1,
       "play": 1,
       "playing": 1,
       "timeupdate": 4
     },
+    "c84": {
+      "loadedmetadata": 1
+    },
+    "c85": {
+      "loadedmetadata": 1
+    },
+    "c86": {
+      "loadedmetadata": 1
+    },
+    "c87": {
+      "loadedmetadata": 1
+    },
+    "c88": {
+      "loadedmetadata": 1
+    },
+    "c89": {
+      "loadedmetadata": 1
+    },
     "c9": {
       "load": 1
+    },
+    "c90": {
+      "loadedmetadata": 1
+    },
+    "c91": {
+      "loadedmetadata": 1
+    },
+    "c92": {
+      "loadedmetadata": 1
+    },
+    "c93": {
+      "loadedmetadata": 1
+    },
+    "c94": {
+      "loadedmetadata": 1
+    },
+    "c95": {
+      "loadedmetadata": 1
     }
   },
-  "generatedAt": "2026-10-07T15:55:22+08:00",
+  "generatedAt": "2026-10-07T16:26:28+08:00",
   "mode": "toolkit",
   "playing": [
     {
@@ -3014,7 +3050,7 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
+      "rs": 1,
       "duration": -1,
       "ct": 0,
       "paused": true,
@@ -3030,8 +3066,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3046,8 +3082,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3062,7 +3098,7 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
+      "rs": 1,
       "duration": -1,
       "ct": 0,
       "paused": true,
@@ -3078,8 +3114,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3094,8 +3130,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3110,7 +3146,7 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
+      "rs": 1,
       "duration": -1,
       "ct": 0,
       "paused": true,
@@ -3126,8 +3162,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1.04,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3142,8 +3178,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1.04,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3158,7 +3194,7 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
+      "rs": 1,
       "duration": -1,
       "ct": 0,
       "paused": true,
@@ -3174,8 +3210,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0
@@ -3190,8 +3226,8 @@
       "complete": "n/a",
       "nw": 0,
       "nh": 0,
-      "rs": 0,
-      "duration": -1,
+      "rs": 4,
+      "duration": 1,
       "ct": 0,
       "paused": true,
       "err": 0

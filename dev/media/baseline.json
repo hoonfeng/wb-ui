@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-07T15:54:35+08:00",
+  "generated_at": "2026-10-07T16:25:35+08:00",
   "note": "媒体格式能力等级基线（引擎等级）。Edge 等级在 -media-edge 且本机有 Edge 时回填；由 cmd/psai -media -media-update-baseline 生成（文档 §6.2 第 2 条）。",
   "entries": [
     {
@@ -519,84 +519,84 @@
       "sample": "solid-red-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Browser",
       "sample": "solid-red-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "solid-red-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.webm",
       "source": "data",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.webm",
       "source": "file",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
       "sample": "testsrc-1s.webm",
       "source": "rel",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
       "sample": "twophase-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Browser",
       "sample": "twophase-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
       "sample": "twophase-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Browser",
@@ -1191,84 +1191,84 @@
       "sample": "solid-red-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "solid-red-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "solid-red-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.webm",
       "source": "data",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.webm",
       "source": "file",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "testsrc-1s.webm",
       "source": "rel",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "twophase-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "twophase-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "twophase-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowAll",
@@ -1863,84 +1863,84 @@
       "sample": "solid-red-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "solid-red-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "solid-red-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.webm",
       "source": "data",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.webm",
       "source": "file",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "testsrc-1s.webm",
       "source": "rel",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "twophase-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "twophase-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "twophase-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+AllowHostResolved",
@@ -2024,7 +2024,7 @@
       "sample": "anim-2frames.webp",
       "source": "data",
       "format": "webp",
-      "grade": "L4"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2535,84 +2535,84 @@
       "sample": "solid-red-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "solid-red-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "solid-red-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.webm",
       "source": "data",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.webm",
       "source": "file",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "testsrc-1s.webm",
       "source": "rel",
       "format": "webm",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "twophase-1s.mp4",
       "source": "data",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L1"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "twophase-1s.mp4",
       "source": "file",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "twophase-1s.mp4",
       "source": "rel",
       "format": "mp4",
-      "grade": "L0"
+      "grade": "L4"
     },
     {
       "config": "Toolkit+DenyExternal",

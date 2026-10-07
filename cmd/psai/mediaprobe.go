@@ -71,6 +71,30 @@ func mediaConfigs() []mediaConfig {
 	}
 }
 
+// mediaPhase 是 manifest 里 video 样本的分段期望色（`phases` 字段），形如
+// [start, end, [r,g,b]]。静止态 currentTime=0 落在第一段，因此判据取首段色。
+type mediaPhase struct {
+	From, To float64
+	RGB      [3]int
+}
+
+func (p *mediaPhase) UnmarshalJSON(b []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if len(raw) != 3 {
+		return fmt.Errorf("phase 应为 [start, end, color]，实际 %d 项", len(raw))
+	}
+	if err := json.Unmarshal(raw[0], &p.From); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &p.To); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw[2], &p.RGB)
+}
+
 // sampleSpec 是 manifest.json 的一个样本（由 gen_samples.py 生成）。
 type sampleSpec struct {
 	File      string           `json:"file"`
@@ -86,6 +110,7 @@ type sampleSpec struct {
 	Frames    int              `json:"frames"`
 	Delays    []int            `json:"delays"`
 	FrameRGB  [][]int          `json:"frame_colors"`
+	Phases    []mediaPhase     `json:"phases"`
 	Skip      string           `json:"skip"`
 	Inline    string           `json:"inline"`
 	Note      string           `json:"note"`
@@ -954,6 +979,17 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 			r.Grade = "L0"
 		}
 	}
+	// 视频的两条「非缺陷」解释：①data: 来源的媒体没有本地路径，宿主帧源
+	// （ffmpeg 按路径抽帧）给不出画面——引擎侧的元数据与契约仍然正确；
+	// ②纯色样本的帧色恒定，动画判据（帧间差异）不适用，画面正确即足。
+	if sp.Kind == "video" && r.Grade != "L4" {
+		switch {
+		case !r.DrawOK && c.Source == "data":
+			r.Note = "data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期）"
+		case !r.AnimOK && len(sp.Solid) == 3:
+			r.Note = "单色视频：帧色恒定，动画判据不适用（画面正确即足）"
+		}
+	}
 	if sp.Format == "avif" || sp.Format == "tiff" {
 		r.Note = "预期不支持（L0，写入基线，不投入）"
 	}
@@ -994,6 +1030,29 @@ func sampleCell(c cell, sp sampleSpec, man *manifestDoc, px []byte, vw int) (boo
 		want := [3]int{sp.Solid[0], sp.Solid[1], sp.Solid[2]}
 		matched := colorNear(got, want, toleranceFor(sp))
 		return matched, []sampleDot{{Name: "center", X: x, Y: y, Got: got, Want: want, Inside: true, Matched: matched}}
+	}
+	// ★ 视频（<video>）：画面由宿主按 (url, 时刻) 抽帧注入，静止态停在
+	//   currentTime=0。manifest 给期望色的两种情形：纯色样本走上一条（solid）；
+	//   分段样本（phases）取**第一段**的色。其余样本（testsrc 这类自然序列）
+	//   没有单点期望色——按「非灰块」判定：中心点既不是 .cell 底色也不是页面
+	//   白，即视为画出了画面（与文档 §5 TC-M-502「截图有画面（非灰块）」的
+	//   达成标准一致）。此前这类样本落到末尾 return false → 「绘制」恒 ❌，
+	//   把已经有画面的视频压在 L1——测量伪影，不是引擎能力。
+	if sp.Kind == "video" {
+		x := c.X + cellW/2
+		y := c.Y + cellH/2
+		got := pixelAt(px, vw, x, y)
+		if len(sp.Phases) > 0 {
+			want := sp.Phases[0].RGB
+			matched := colorNear(got, want, toleranceFor(sp))
+			return matched, []sampleDot{{Name: "center-phase0", X: x, Y: y, Got: got,
+				Want: want, Inside: true, Matched: matched}}
+		}
+		mask := [3]int{238, 238, 238}
+		white := [3]int{255, 255, 255}
+		drawn := !colorNear(got, mask, 6) && !colorNear(got, white, 6)
+		return drawn, []sampleDot{{Name: "center-drawn", X: x, Y: y, Got: got,
+			Want: mask, Inside: true, Matched: drawn}}
 	}
 	// ★ 动图（GIF/WebP 多帧）：manifest 给的是**各帧颜色**，而截图停在哪一帧
 	//   不确定（帧时机）——中心点接近**任一**帧色即算「画出来了」。

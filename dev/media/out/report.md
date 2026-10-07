@@ -1,8 +1,8 @@
-# 媒体格式真实可用性报告（2026-10-07 15:55 021364e）
+# 媒体格式真实可用性报告（2026-10-07 16:26 5e401ec）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：021364e ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：5e401ec ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
@@ -254,102 +254,102 @@
 | Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Browser | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
-| Browser | mp4 | solid-red-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Browser | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | mp4 | testsrc-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Browser | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | webm | testsrc-1s.webm | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+DenyExternal | webm | testsrc-1s.webm | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowAll | webm | testsrc-1s.webm | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Browser | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | webm | testsrc-1s.webm | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | webm | testsrc-1s.webm | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | mp4 | twophase-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | data | ❌ | ❌ | ❌ | ✅ | ❌ | **L0** |  |
-| Browser | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | file | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Browser | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
-| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | rel | ❌ | ❌ | ❌ | ✅ | ✅ | **L0** |  |
+| Browser | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | data | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ❌ | ❌ | ❌ | ✅ | — | **L0** | 音频无解码/输出后端（预期现状） |
+| Browser | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Browser | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Browser | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Toolkit+AllowAll | mp4 | solid-red-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足） |
+| Browser | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Browser | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Browser | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | mp4 | testsrc-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Browser | webm | testsrc-1s.webm | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+DenyExternal | webm | testsrc-1s.webm | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowAll | webm | testsrc-1s.webm | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Browser | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | webm | testsrc-1s.webm | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Browser | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | webm | testsrc-1s.webm | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Browser | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | data | ✅ | ✅ | ❌ | ✅ | ❌ | **L1** | data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期） |
+| Browser | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | file | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Browser | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+DenyExternal | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowHostResolved | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
+| Toolkit+AllowAll | mp4 | twophase-1s.mp4 | rel | ✅ | ✅ | ✅ | ✅ | ✅ | **L4** |  |
 | Browser | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+DenyExternal | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowHostResolved | png | with space.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -405,18 +405,6 @@
 | Browser | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Browser | testsrc-1s.mp4 | data | 无绘制、无几何 |
-| Browser | testsrc-1s.mp4 | file | 无绘制、无几何 |
-| Browser | testsrc-1s.mp4 | rel | 无绘制、无几何 |
-| Browser | solid-red-1s.mp4 | data | 无绘制、无几何 |
-| Browser | solid-red-1s.mp4 | file | 无绘制、无几何 |
-| Browser | solid-red-1s.mp4 | rel | 无绘制、无几何 |
-| Browser | twophase-1s.mp4 | data | 无绘制、无几何 |
-| Browser | twophase-1s.mp4 | file | 无绘制、无几何 |
-| Browser | twophase-1s.mp4 | rel | 无绘制、无几何 |
-| Browser | testsrc-1s.webm | data | 无绘制、无几何 |
-| Browser | testsrc-1s.webm | file | 无绘制、无几何 |
-| Browser | testsrc-1s.webm | rel | 无绘制、无几何 |
 | Toolkit+DenyExternal | quad.png | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | quad.png | rel | 无绘制、无几何 |
 | Toolkit+DenyExternal | quad.jpg | file | 无绘制、无几何 |
@@ -463,54 +451,18 @@
 | Toolkit+DenyExternal | ratio-only.svg | rel | 无绘制、无几何 |
 | Toolkit+DenyExternal | icon-24.svg | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | icon-24.svg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | solid-red-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+DenyExternal | solid-red-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | solid-red-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | twophase-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+DenyExternal | twophase-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | twophase-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.webm | data | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.webm | file | 无绘制、无几何 |
-| Toolkit+DenyExternal | testsrc-1s.webm | rel | 无绘制、无几何 |
 | Toolkit+AllowHostResolved | quad.tiff | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.tiff | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.tiff | rel | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+AllowHostResolved | testsrc-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | testsrc-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | testsrc-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | solid-red-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | solid-red-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | solid-red-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | twophase-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | twophase-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | twophase-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | testsrc-1s.webm | data | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | testsrc-1s.webm | file | 无绘制、无几何 |
-| Toolkit+AllowHostResolved | testsrc-1s.webm | rel | 无绘制、无几何 |
 | Toolkit+AllowAll | quad.tiff | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.tiff | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.tiff | rel | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+AllowAll | testsrc-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowAll | testsrc-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowAll | testsrc-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowAll | solid-red-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowAll | solid-red-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowAll | solid-red-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowAll | twophase-1s.mp4 | data | 无绘制、无几何 |
-| Toolkit+AllowAll | twophase-1s.mp4 | file | 无绘制、无几何 |
-| Toolkit+AllowAll | twophase-1s.mp4 | rel | 无绘制、无几何 |
-| Toolkit+AllowAll | testsrc-1s.webm | data | 无绘制、无几何 |
-| Toolkit+AllowAll | testsrc-1s.webm | file | 无绘制、无几何 |
-| Toolkit+AllowAll | testsrc-1s.webm | rel | 无绘制、无几何 |
 
 ## 策略一致性（决策 1 · TC-M-905）
 
