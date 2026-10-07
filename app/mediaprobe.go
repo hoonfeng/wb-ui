@@ -492,9 +492,11 @@ func parseFFmpegProbe(out string) (bindings.MediaMetadata, bool) {
 	return meta, found
 }
 
-// mediaSrcToPath 把媒体元素的 src 映射成本地文件路径。http(s)/data/blob 一律
-// 返回 false（引擎无网络栈，属另一条主线）；相对引用按文档基准解析；没有基准
-// 时按宿主工作目录（与 LoadHTML 直出内容下的图片读取行为一致）。
+// mediaSrcToPath 把媒体元素的 src 映射成本地文件路径。http(s)/blob 一律返回
+// false（引擎无网络栈，属另一条主线）；`data:` 先把内联字节落盘再当本地文件
+// （见 mediadataurl.go——这条链路只认路径，ffmpeg 读不了「没有路径的字节」）；
+// 相对引用按文档基准解析；没有基准时按宿主工作目录（与 LoadHTML 直出内容下的
+// 图片读取行为一致）。
 func mediaSrcToPath(src, base string) (string, bool) {
 	s := strings.TrimSpace(src)
 	if s == "" {
@@ -502,7 +504,10 @@ func mediaSrcToPath(src, base string) (string, bool) {
 	}
 	low := strings.ToLower(s)
 	switch {
-	case strings.HasPrefix(low, "data:"), strings.HasPrefix(low, "blob:"):
+	case strings.HasPrefix(low, "data:"):
+		// 落盘失败（编码非法 / 内容为空）时与 http(s)/blob 同一条路：拿不到路径。
+		return mediaDataURLToFile(s)
+	case strings.HasPrefix(low, "blob:"):
 		return "", false
 	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"):
 		return "", false

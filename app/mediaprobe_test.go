@@ -87,8 +87,10 @@ func TestParseFFmpegProbe(t *testing.T) {
 }
 
 // TestMediaSrcToPath 覆盖 src → 本地路径映射：file://、相对（按基准）、无基准、
-// 以及三类「不是本地文件」的引用（http(s)/data/blob）与网络基准下的相对引用。
+// 「不是本地文件」的两类引用（http(s)/blob）、网络基准下的相对引用，以及
+// `data:`（内联字节 → 落盘成本地文件，见 mediadataurl.go）。
 func TestMediaSrcToPath(t *testing.T) {
+	t.Cleanup(func() { CleanupMediaDataURLFiles() })
 	tests := []struct {
 		name   string
 		src    string
@@ -100,7 +102,11 @@ func TestMediaSrcToPath(t *testing.T) {
 		{name: "相对引用 + file 基准", src: "clip.mp4", base: "file:///F:/p/index.html", want: "F:/p/clip.mp4", wantOK: true},
 		{name: "相对引用 + 无基准", src: "clip.mp4", want: "clip.mp4", wantOK: true},
 		{name: "http 引用", src: "https://example.com/a.mp4", wantOK: false},
-		{name: "data 引用", src: "data:video/mp4;base64,AAAA", wantOK: false},
+		// data: 落盘后是个真文件，路径由内容摘要决定（want 留空，改断言「文件存在」）。
+		{name: "data 引用（base64）", src: "data:audio/wav;base64,UklGRiQAAABXQVZF", wantOK: true},
+		{name: "data 引用（非 base64 百分号编码）", src: "data:text/plain,hi%20there", wantOK: true},
+		{name: "data 引用（非法 base64）", src: "data:video/mp4;base64,!!!!", wantOK: false},
+		{name: "data 引用（空内容）", src: "data:audio/wav;base64,", wantOK: false},
 		{name: "blob 引用", src: "blob:null/1234", wantOK: false},
 		{name: "相对引用 + 网络基准", src: "clip.mp4", base: "http://host/dir/index.html", wantOK: false},
 		{name: "空 src", src: "  ", wantOK: false},
@@ -111,7 +117,21 @@ func TestMediaSrcToPath(t *testing.T) {
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v，want %v（got %q）", ok, tc.wantOK, got)
 			}
-			if ok && filepath.ToSlash(got) != tc.want {
+			if !ok {
+				return
+			}
+			if tc.want == "" {
+				// data: 落盘：必须是**已存在的常规文件**，否则后面的 ffmpeg 拿它当输入会失败。
+				st, err := os.Stat(got)
+				if err != nil {
+					t.Fatalf("落盘路径不可读：%v", err)
+				}
+				if st.IsDir() || st.Size() == 0 {
+					t.Fatalf("落盘路径不是非空常规文件：%q", got)
+				}
+				return
+			}
+			if filepath.ToSlash(got) != tc.want {
 				t.Errorf("path = %q，want %q", filepath.ToSlash(got), tc.want)
 			}
 		})

@@ -101,12 +101,18 @@ func TestFramePumpWorkersExitWhenIdle(t *testing.T) {
 	t.Fatalf("worker 空闲 %v 后应自行退出，仍有 %d 个在跑", framePumpIdle, pumpLive(p.pump))
 }
 
-// TestAsyncFrameSourceRejectsNonLocalSrcs：非本地源（http/data/blob）直接同步
-// 交付失败，不占用 worker——本引擎没有网络栈，问也问不到。
+// TestAsyncFrameSourceRejectsNonLocalSrcs：拿不到本地路径的源直接同步交付失败，
+// 不占用 worker——本引擎没有网络栈，http(s)/blob 问也问不到；编码非法或内容为空的
+// `data:` 同样没有可交付的字节（能落盘的 data: 已经变成本地文件，不属这一类）。
 func TestAsyncFrameSourceRejectsNonLocalSrcs(t *testing.T) {
 	p := NewMediaProbe("")
 	src := p.AsyncFrameSourceFor(nil)
-	for _, u := range []string{"https://example.com/x.mp4", "data:video/mp4;base64,AAAA", "blob:abc"} {
+	for _, u := range []string{
+		"https://example.com/x.mp4",
+		"blob:abc",
+		"data:video/mp4;base64,!!!!",
+		"data:audio/wav;base64,",
+	} {
 		got := make(chan bool, 1)
 		src(u, 0, func(_ []byte, ok bool) { got <- ok })
 		select {
