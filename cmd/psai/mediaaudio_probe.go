@@ -349,7 +349,10 @@ func probeLoopback(expectHz, seconds float64) loopbackEvidence {
 		ev.Status = "ok"
 	} else {
 		ev.Status = "mismatch"
-		ev.Detail = fmt.Sprintf("主峰 %.1fHz 偏离期望 %.0fHz（该设备的输入未路由到系统输出）", peak, expectHz)
+		// ★ 只陈述测得的事实，**不代下因果结论**（2026-10-07，Q3 结项）：「录到别的声音」
+		//   与「只录到底噪」在频谱上都表现为「主峰≠期望」，但成因与排查方向完全不同。
+		//   二者的区分靠**幅度对照**（判据 A 的同一份 PCM 幅度），报告侧做，见 audioSection。
+		ev.Detail = fmt.Sprintf("录回主峰 %.1fHz 与期望 %.0fHz 不符（幅度 %.3f）", peak, expectHz, mag)
 	}
 	return ev
 }
@@ -395,6 +398,28 @@ func audioSection(evidence []audioCellEvidence, lo loopbackEvidence) string {
 	if lo.Detail != "" {
 		fmt.Fprintf(&b, "- 说明：%s\n", lo.Detail)
 	}
+	// ★ 幅度对照（2026-10-07）：`mismatch` 有两类成因，靠「录回幅度 vs 判据 A 的同一份
+	//   PCM 幅度」区分——同量级 = 确实录到了别的声音（查输出路由）；低若干数量级 =
+	//   只录到底噪（查采集设备有没有被系统输出喂到）。不写这个对照，读者无法判断
+	//   mismatch 是「环境未配置」还是「输出链路有问题」。
+	if refMag := maxAudioPeakMag(evidence); refMag > 0 && lo.PeakMag > 0 {
+		fmt.Fprintf(&b, "- 幅度对照：判据 A 的同一份待输出 PCM 幅度 **%.3f**；",
+			refMag)
+		if ratio := refMag / lo.PeakMag; ratio >= 2 {
+			fmt.Fprintf(&b, "录回幅度仅为其 **1/%.0f** ⇒ 基本只录到底噪，该采集设备未被系统输出喂到。\n", ratio)
+		} else {
+			b.WriteString("两者同量级 ⇒ 确实录到了声音，只是主峰不是期望的正弦。\n")
+		}
+	}
+	b.WriteString("\n**判定条件与语义**（本节口径）：判据 B 是**可选的外部复核**（端到端视角：\n" +
+		"解码 → 输出设备 → 采集设备），四种取值都**如实记录、都不伪装成通过**：\n" +
+		"- `ok`：录回主峰落在期望 ±容差 ⇒ 端到端成立；\n" +
+		"- `SKIP(no-loopback)`：无 ffmpeg，或无环回/虚拟声卡候选 ⇒ 跳过；\n" +
+		"- `SKIP(loopback-failed)`：有候选但打开失败（被独占）⇒ 跳过；\n" +
+		"- `mismatch`：录到数据但主峰不符 ⇒ **不视为通过，也不阻塞验收**。\n" +
+		"L4-S 的**主线判据**是 A（同一份待输出 PCM 的 FFT 主峰/幅度）——它证明的是\n" +
+		"「要写进输出设备的字节正确」；B 只补「设备真的出声且被采回」。因此 B 不可用\n" +
+		"时验收仍成立，只是端到端那一环缺外部证据（本机即此情形）。\n")
 	b.WriteString("\n")
 
 	b.WriteString("### TC-M-602 定点：播放时钟（音频为主时钟）\n\n")
@@ -461,4 +486,18 @@ func orDash(s string) string {
 		return "（无）"
 	}
 	return s
+}
+
+// maxAudioPeakMag 取本次判据 A 中最大的主峰幅度，作为「同一份待输出 PCM」的幅度参考。
+// 判据 B 的 `mismatch` 靠它区分两类成因：录回幅度与之同量级 = 确实录到了别的声音；
+// 低若干数量级 = 只录到底噪（采集设备没被系统输出喂到）。没有这个对照，读者无法判断
+// mismatch 是「环境未配置」还是「输出链路有问题」。
+func maxAudioPeakMag(evidence []audioCellEvidence) float64 {
+	best := 0.0
+	for _, ev := range evidence {
+		if ev.frames > 0 && ev.peakMag > best {
+			best = ev.peakMag
+		}
+	}
+	return best
 }
