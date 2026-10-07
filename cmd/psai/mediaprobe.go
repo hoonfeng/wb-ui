@@ -182,6 +182,10 @@ type cellResult struct {
 	Duration float64     `json:"duration"`
 	OnLoad   int         `json:"onload"`
 	OnError  int         `json:"onerror"`
+	// ErrCode 是元素 error.code 的实测值（media = MediaError.code；img 无此 IDL
+	// 属性，恒 0）。它只用于报告备注的实测佐证（原始值见 geom-*.json 的
+	// still[].err）；**归因本身**按「配置策略 + 来源形态」判定（见 mediaDenialNote）。
+	ErrCode  float64     `json:"err_code,omitempty"`
 	Sampled  []sampleDot `json:"sampled"`
 	DrawOK   bool        `json:"draw_ok"`
 	MetaOK   bool        `json:"meta_ok"`
@@ -739,7 +743,8 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 		if !ok {
 			continue
 		}
-		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animFrames, vw, pageH, audioByID[c.ID])
+		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animFrames, vw, pageH,
+			audioByID[c.ID], res.Policy)
 		res.Cells = append(res.Cells, r)
 	}
 	return res, nil
@@ -1155,9 +1160,56 @@ func toleranceFor(sp sampleSpec) int {
 	return 14
 }
 
+// mediaErrName 把 MediaError.code 映射为规范常量名（报告附注用）。数值与引擎
+// 一致（engine/js/bindings/media_element.go：1=ABORTED、2=NETWORK、3=DECODE、
+// 4=SRC_NOT_SUPPORTED）。
+func mediaErrName(code int) string {
+	switch code {
+	case 1:
+		return "MEDIA_ERR_ABORTED"
+	case 2:
+		return "MEDIA_ERR_NETWORK"
+	case 3:
+		return "MEDIA_ERR_DECODE"
+	case 4:
+		return "MEDIA_ERR_SRC_NOT_SUPPORTED"
+	}
+	return ""
+}
+
+// mediaDenialNote 给出「引用落 L0（未加载）」的**确定性**归因文案。
+//
+// 为什么不能只读 error.code：引擎侧 failUnavailableSrc 对两类「源不可用」派发
+// **同一个** MEDIA_ERR_SRC_NOT_SUPPORTED——① 资源策略拒绝（MediaSrcAllowed
+// 判否）② http(s) 无网络栈；页面侧 error.code 分不出两者。故归因按「配置策略 +
+// 来源形态」判定，error.code 只作实测佐证（有则附注）。
+//
+// 覆盖范围（确定性 100%）：deny-external 下 file/rel 引用必被拒——探针在该配置
+// **不装配**宿主 resolver（hostSamplesResolver 只在 allow-host-resolved 装配），
+// allowsExternalURLs 为假即拒；而 data: 与策略解耦恒放行，故不在本列。
+//
+// ok=false 表示「不是策略拒绝」——调用方应改用后端缺失 / 样本等其他原因归因，
+// 不要把「策略正确拒绝」写成「没有后端」（同一配置的 data: 行即证明后端存在）。
+func mediaDenialNote(policy, source string, errCode float64) (string, bool) {
+	if policy != webkit.DenyExternal.String() {
+		return "", false
+	}
+	switch source {
+	case "file", "rel":
+	default:
+		return "", false
+	}
+	n := "资源策略 deny-external 拒绝该引用（预期，非缺陷）"
+	if errCode > 0 {
+		n += fmt.Sprintf("；实测元素 error.code=%.0f（%s）", errCode, mediaErrName(int(errCode)))
+	}
+	return n, true
+}
+
 // judgeCell 按 §2 的判据给出一格的等级。
 func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string]map[string]int,
-	still, play []byte, animFrames [][]byte, vw, pageH int, audio audioCellEvidence) cellResult {
+	still, play []byte, animFrames [][]byte, vw, pageH int, audio audioCellEvidence,
+	policy string) cellResult {
 
 	sp := c.Sample
 	r := cellResult{ID: c.ID, Sample: sp.Name, Source: c.Source, Format: sp.Format, Kind: sp.Kind, Tag: p.Tag}
@@ -1170,6 +1222,7 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 	if ev := events[c.ID]; ev != nil {
 		r.OnLoad, r.OnError = ev["load"], ev["error"]
 	}
+	r.ErrCode = p.ErrCode
 	r.MetaOK = p.NaturalW > 0 && p.NaturalH > 0
 	if sp.Kind == "video" || sp.Kind == "audio" {
 		r.MetaOK = p.ReadyState >= 1 || p.Duration > 0
@@ -1226,7 +1279,17 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 			r.Note = "音频可加载（元数据可用）；未采到 PCM（无音轨 / 无输出后端）"
 		default:
 			r.Grade = "L0"
-			r.Note = "音频无解码/输出后端（预期现状）"
+			// L0 的归因必须如实：deny-external 下 file/rel 引用是被**资源策略**
+			// 拒绝的（引擎 finishLoad 判否 → failUnavailableSrc），不是「没有
+			// 解码/输出后端」——音频后端全局存在（同配置的 data: 行即 L4，且
+			// audio.hasOutput 记录了本机后端实测值）。
+			if n, ok := mediaDenialNote(policy, c.Source, p.ErrCode); ok {
+				r.Note = n
+			} else if !audio.hasOutput {
+				r.Note = "本机无内置音频输出后端（预期现状）"
+			} else {
+				r.Note = "音频未加载（元数据不可用）：输出后端存在、策略未拒该引用 → 需复核"
+			}
 		}
 	case sp.Kind == "broken":
 		if !r.DrawOK {
@@ -1263,11 +1326,13 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 	// 视频的两条「非缺陷」解释：①data: 来源的媒体没有本地路径，宿主帧源
 	// （ffmpeg 按路径抽帧）给不出画面——引擎侧的元数据与契约仍然正确；
 	// ②纯色样本的帧色恒定，动画判据（帧间差异）不适用，画面正确即足。
+	// ★ 二者都以「该格真的加载出内容」为前提：L0（未加载）谈帧色是错位
+	//   （没加载哪来帧），此类格改由下方 L0 归因给出准确原因。
 	if sp.Kind == "video" && r.Grade != "L4" {
 		switch {
-		case !r.DrawOK && c.Source == "data":
+		case !r.DrawOK && c.Source == "data" && (r.Ready >= 1 || r.Duration > 0):
 			r.Note = "data: 媒体无本地路径，宿主帧源无法抽帧 → 无画面（预期）"
-		case !r.AnimOK && len(sp.Solid) == 3:
+		case !r.AnimOK && len(sp.Solid) == 3 && r.DrawOK:
 			r.Note = "单色视频：帧色恒定，动画判据不适用（画面正确即足）"
 		}
 	}
@@ -1277,6 +1342,14 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 	if p.Tag == "missing" {
 		r.Grade = "L0"
 		r.Note = "元素缺失（页面构建异常）"
+	}
+	// L0 归因兜底：落 L0 且还没有具体备注的格（没加载 → 没画面也没元数据），
+	// 若成因是资源策略拒绝就如实写明——这是本轮门禁收口的**正确行为**，不是
+	// 实现缺陷；不写会让用户把「策略正确」误读成「无后端的遗留缺陷」（§9.9）。
+	if r.Grade == "L0" && r.Note == "" {
+		if n, ok := mediaDenialNote(policy, c.Source, p.ErrCode); ok {
+			r.Note = n
+		}
 	}
 	_ = tol
 	return r
@@ -1589,6 +1662,14 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 	b.WriteString("复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）\n\n")
 
 	b.WriteString("## 总表\n\n")
+	// 列语义说明：音频行的「绘制」列 N/A（音频无视觉内容），其等级由音频输出
+	// 判据决定——不说明会让「绘制 ❌ 而等级 L4」看起来自相矛盾。
+	b.WriteString("> **列说明**：`加载`/`几何` 对音频行指「元数据可加载 / 时长可用」；" +
+		"**`绘制` 列对音频行不适用（N/A，报告显示 `—`）**——音频无视觉内容，其等级由音频输出判据决定" +
+		"（PCM 交付 + 频谱主峰（判据 A）+ 播放时钟（TC-M-602），见「音频」小节）。\n")
+	b.WriteString("> **L0 归因**：L0 = 未加载。`deny-external` 下的 `file`/`rel` 引用是被资源策略拒绝——" +
+		"**预期行为，非缺陷**（文档 §9.9）；元素 `error.code` 仅作实测佐证：" +
+		"引擎对「策略拒绝」与「源不可达」共用 `MEDIA_ERR_SRC_NOT_SUPPORTED`（4）。\n\n")
 	b.WriteString("| 配置 | 格式 | 样本 | 来源 | 加载 | 几何 | 绘制 | 契约 | 动画 | 等级 | 备注 |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|\n")
 	// 按 (样本, 来源, 配置) 排序输出，便于横向对比四配置
@@ -1616,6 +1697,10 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 		load := mark(r.c.MetaOK)
 		geom := mark(r.c.MetaOK)
 		draw := mark(r.c.DrawOK)
+		if r.c.Kind == "audio" {
+			// 音频无视觉内容：绘制列 N/A（等级由音频输出判据决定，见总表上方列说明）。
+			draw = "—"
+		}
 		contr := mark(r.c.ContrOK)
 		anim := "—"
 		if r.c.Kind == "animated" || r.c.Kind == "video" {
@@ -1624,8 +1709,11 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 		// 动画判据判否时把帧差诊断写进备注：`AnimNote` 原先只赋值不进报告，
 		// 格子降级时看不出「最大差异是多少、采了几帧」，无法区分「真没动」与
 		// 「采样期没被调度」。
+		// ★ 只在该格**真的出过画面**（DrawOK）时拼：L0/L1（未加载 / 无画面）时帧差
+		//   恒为 0，写进备注会变成「所有帧采样点相同（最大差异 0，共 14 帧）」——
+		//   与「根本没加载」自相矛盾。
 		note := r.c.Note
-		if (r.c.Kind == "animated" || r.c.Kind == "video") && !r.c.AnimOK && r.c.AnimNote != "" {
+		if (r.c.Kind == "animated" || r.c.Kind == "video") && !r.c.AnimOK && r.c.AnimNote != "" && r.c.DrawOK {
 			if note == "" {
 				note = r.c.AnimNote
 			} else {
@@ -1663,6 +1751,8 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", d.config, d.c.Sample, d.c.Source, escapePipe(note))
 		}
 		b.WriteString("\n")
+		b.WriteString("> 标注「资源策略 … 拒绝该引用（预期，非缺陷）」的行是配置策略的**正确行为**" +
+			"（文档 §9.9 门禁收口），不是实现缺陷；真正的缺陷行不含此标注。\n\n")
 	}
 
 	b.WriteString("## 策略一致性（决策 1 · TC-M-905）\n\n")
