@@ -1,8 +1,8 @@
-# 媒体格式真实可用性报告（2026-10-07 05:24 4f6f7a1）
+# 媒体格式真实可用性报告（2026-10-07 15:55 021364e）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：4f6f7a1 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：021364e ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
@@ -94,22 +94,22 @@
 | Toolkit+DenyExternal | png | huge-4096.png | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
 | Toolkit+AllowHostResolved | png | huge-4096.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | png | huge-4096.png | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Browser | svg | icon-24.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | icon-24.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | icon-24.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | icon-24.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | icon-24.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | icon-24.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | icon-24.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | icon-24.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | icon-24.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
+| Browser | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowHostResolved | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | icon-24.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | icon-24.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+AllowHostResolved | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | icon-24.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+DenyExternal | svg | icon-24.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+AllowHostResolved | svg | icon-24.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | icon-24.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | inline-svg-data-uri | data | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+DenyExternal | svg | inline-svg-data-uri | data | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+AllowHostResolved | svg | inline-svg-data-uri | data | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+AllowAll | svg | inline-svg-data-uri | data | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+AllowHostResolved | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | icon-24.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | inline-svg-data-uri | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | inline-svg-data-uri | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowHostResolved | svg | inline-svg-data-uri | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | inline-svg-data-uri | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | jpeg | mislabeled.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+DenyExternal | jpeg | mislabeled.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowHostResolved | jpeg | mislabeled.png | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
@@ -230,30 +230,30 @@
 | Toolkit+DenyExternal | tiff | quad.tiff | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | tiff | quad.tiff | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | tiff | quad.tiff | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 预期不支持（L0，写入基线，不投入） |
-| Browser | svg | ratio-only.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | ratio-only.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | ratio-only.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | ratio-only.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | ratio-only.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | ratio-only.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | ratio-only.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | ratio-only.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | ratio-only.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
+| Browser | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowHostResolved | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | ratio-only.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | ratio-only.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+AllowHostResolved | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | ratio-only.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+DenyExternal | svg | ratio-only.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+AllowHostResolved | svg | ratio-only.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | ratio-only.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | rect-120x80.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | rect-120x80.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | rect-120x80.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | rect-120x80.svg | data | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | rect-120x80.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+DenyExternal | svg | rect-120x80.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowHostResolved | svg | rect-120x80.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | rect-120x80.svg | file | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Browser | svg | rect-120x80.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
+| Toolkit+AllowHostResolved | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | ratio-only.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowHostResolved | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | rect-120x80.svg | data | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+DenyExternal | svg | rect-120x80.svg | file | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
+| Toolkit+AllowHostResolved | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | rect-120x80.svg | file | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Browser | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** |  |
-| Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
-| Toolkit+AllowAll | svg | rect-120x80.svg | rel | ❌ | ❌ | ✅ | ❌ | — | **L2** | 画得出但无固有尺寸（D4：<img> 未给尺寸时盒子塌陷） |
+| Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
+| Toolkit+AllowAll | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Browser | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
 | Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
 | Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ❌ | ❌ | ❌ | ❌ | — | **L0** | 音频无解码/输出后端（预期现状） |
@@ -405,7 +405,6 @@
 | Browser | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Browser | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Browser | inline-svg-data-uri | data | 无绘制、无几何 |
 | Browser | testsrc-1s.mp4 | data | 无绘制、无几何 |
 | Browser | testsrc-1s.mp4 | file | 无绘制、无几何 |
 | Browser | testsrc-1s.mp4 | rel | 无绘制、无几何 |
@@ -458,10 +457,12 @@
 | Toolkit+DenyExternal | with space.png | rel | 无绘制、无几何 |
 | Toolkit+DenyExternal | 图标-方块.png | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | 图标-方块.png | rel | 无绘制、无几何 |
+| Toolkit+DenyExternal | rect-120x80.svg | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | rect-120x80.svg | rel | 无绘制、无几何 |
+| Toolkit+DenyExternal | ratio-only.svg | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | ratio-only.svg | rel | 无绘制、无几何 |
+| Toolkit+DenyExternal | icon-24.svg | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | icon-24.svg | rel | 无绘制、无几何 |
-| Toolkit+DenyExternal | inline-svg-data-uri | data | 无绘制、无几何 |
 | Toolkit+DenyExternal | testsrc-1s.mp4 | data | 无绘制、无几何 |
 | Toolkit+DenyExternal | testsrc-1s.mp4 | file | 无绘制、无几何 |
 | Toolkit+DenyExternal | testsrc-1s.mp4 | rel | 无绘制、无几何 |
@@ -480,7 +481,6 @@
 | Toolkit+AllowHostResolved | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowHostResolved | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+AllowHostResolved | inline-svg-data-uri | data | 无绘制、无几何 |
 | Toolkit+AllowHostResolved | testsrc-1s.mp4 | data | 无绘制、无几何 |
 | Toolkit+AllowHostResolved | testsrc-1s.mp4 | file | 无绘制、无几何 |
 | Toolkit+AllowHostResolved | testsrc-1s.mp4 | rel | 无绘制、无几何 |
@@ -499,7 +499,6 @@
 | Toolkit+AllowAll | quad.avif | data | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | file | 预期不支持（L0，写入基线，不投入） |
 | Toolkit+AllowAll | quad.avif | rel | 预期不支持（L0，写入基线，不投入） |
-| Toolkit+AllowAll | inline-svg-data-uri | data | 无绘制、无几何 |
 | Toolkit+AllowAll | testsrc-1s.mp4 | data | 无绘制、无几何 |
 | Toolkit+AllowAll | testsrc-1s.mp4 | file | 无绘制、无几何 |
 | Toolkit+AllowAll | testsrc-1s.mp4 | rel | 无绘制、无几何 |

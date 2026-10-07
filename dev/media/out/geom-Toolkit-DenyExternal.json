@@ -137,15 +137,18 @@
       "load": 1
     },
     "c62": {
-      "error": 1
+      "load": 1
     },
     "c65": {
-      "error": 1
+      "load": 1
     },
     "c68": {
-      "error": 1
+      "load": 1
     },
     "c7": {
+      "load": 1
+    },
+    "c71": {
       "load": 1
     },
     "c72": {
@@ -247,7 +250,7 @@
       "load": 1
     }
   },
-  "generatedAt": "2026-10-07T05:24:07+08:00",
+  "generatedAt": "2026-10-07T15:54:57+08:00",
   "mode": "toolkit",
   "playing": [
     {
@@ -1249,9 +1252,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -1297,9 +1300,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -1345,9 +1348,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 24,
+      "nh": 24,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -1389,13 +1392,13 @@
     {
       "id": "c71",
       "tag": "img",
-      "x": 0,
-      "y": 0,
-      "w": 2,
-      "h": 13,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "x": 140,
+      "y": 680,
+      "w": 120,
+      "h": 80,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -2788,9 +2791,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -2836,9 +2839,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -2884,9 +2887,9 @@
       "y": 584,
       "w": 120,
       "h": 80,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "complete": true,
+      "nw": 24,
+      "nh": 24,
       "rs": -1,
       "duration": -1,
       "ct": -1,
@@ -2928,13 +2931,13 @@
     {
       "id": "c71",
       "tag": "img",
-      "x": 0,
-      "y": 0,
-      "w": 2,
-      "h": 13,
-      "complete": false,
-      "nw": 0,
-      "nh": 0,
+      "x": 140,
+      "y": 680,
+      "w": 120,
+      "h": 80,
+      "complete": true,
+      "nw": 120,
+      "nh": 80,
       "rs": -1,
       "duration": -1,
       "ct": -1,

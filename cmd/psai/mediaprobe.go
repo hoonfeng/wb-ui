@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,39 +130,39 @@ type cellProbe struct {
 }
 
 type pageReport struct {
-	Cells  []cellProbe            `json:"cells"`
+	Cells  []cellProbe               `json:"cells"`
 	Events map[string]map[string]int `json:"events"`
-	VW     float64                `json:"vw"`
-	VH     float64                `json:"vh"`
-	DocH   float64                `json:"doch"`
+	VW     float64                   `json:"vw"`
+	VH     float64                   `json:"vh"`
+	DocH   float64                   `json:"doch"`
 }
 
 // cellResult 是一格的最终判定。
 type cellResult struct {
-	ID       string       `json:"id"`
-	Sample   string       `json:"sample"`
-	Source   string       `json:"source"`
-	Format   string       `json:"format"`
-	Kind     string       `json:"kind"`
-	Tag      string       `json:"tag"`
-	BoxW     float64      `json:"box_w"`
-	BoxH     float64      `json:"box_h"`
-	NaturalW float64      `json:"natural_w"`
-	NaturalH float64      `json:"natural_h"`
-	Complete bool         `json:"complete"`
-	Ready    float64      `json:"ready_state"`
-	Duration float64      `json:"duration"`
-	OnLoad   int          `json:"onload"`
-	OnError  int          `json:"onerror"`
-	Sampled  []sampleDot  `json:"sampled"`
-	DrawOK   bool         `json:"draw_ok"`
-	MetaOK   bool         `json:"meta_ok"`
-	ContrOK  bool         `json:"contract_ok"`
-	AnimOK   bool         `json:"anim_ok"`
-	Grade    string       `json:"grade"`
-	Note     string       `json:"note"`
-	AnimNote string       `json:"anim_note,omitempty"`
-	HTTPNote string       `json:"-"`
+	ID       string      `json:"id"`
+	Sample   string      `json:"sample"`
+	Source   string      `json:"source"`
+	Format   string      `json:"format"`
+	Kind     string      `json:"kind"`
+	Tag      string      `json:"tag"`
+	BoxW     float64     `json:"box_w"`
+	BoxH     float64     `json:"box_h"`
+	NaturalW float64     `json:"natural_w"`
+	NaturalH float64     `json:"natural_h"`
+	Complete bool        `json:"complete"`
+	Ready    float64     `json:"ready_state"`
+	Duration float64     `json:"duration"`
+	OnLoad   int         `json:"onload"`
+	OnError  int         `json:"onerror"`
+	Sampled  []sampleDot `json:"sampled"`
+	DrawOK   bool        `json:"draw_ok"`
+	MetaOK   bool        `json:"meta_ok"`
+	ContrOK  bool        `json:"contract_ok"`
+	AnimOK   bool        `json:"anim_ok"`
+	Grade    string      `json:"grade"`
+	Note     string      `json:"note"`
+	AnimNote string      `json:"anim_note,omitempty"`
+	HTTPNote string      `json:"-"`
 }
 
 // sampleDot 是一个采样点的实测色与期望色。
@@ -382,10 +383,10 @@ func buildMatrix(man *manifestDoc, samplesDir string, vw int, only string) ([]ce
 		if tag == "audio" {
 			// audio 无视觉内容：用包裹 div 承载，采样点落在 div 上（期望：未绘制）
 			fmt.Fprintf(&b, "<div class=\"cell\" id=%s style=\"%s\"></div>\n",
-				jsString(c.ID), style)
+				htmlAttrValue(c.ID), style)
 			fmt.Fprintf(&b, "<audio id=%s style=\"position:absolute;left:%dpx;top:%dpx;width:1px;height:1px\" src=%s "+
 				"onloadedmetadata=\"mvNote(%s,'loadedmetadata')\" onerror=\"mvNote(%s,'error')\"></audio>\n",
-				jsString(c.ID+"_a"), c.X, c.Y, jsString(c.URL),
+				htmlAttrValue(c.ID+"_a"), c.X, c.Y, htmlAttrValue(c.URL),
 				jsAttrString(c.ID), jsAttrString(c.ID))
 		} else {
 			events := fmt.Sprintf("onload=\"mvNote(%s,'load')\" onerror=\"mvNote(%s,'error')\"", jsAttrString(c.ID), jsAttrString(c.ID))
@@ -397,7 +398,7 @@ func buildMatrix(man *manifestDoc, samplesDir string, vw int, only string) ([]ce
 					jsAttrString(c.ID), jsAttrString(c.ID), jsAttrString(c.ID))
 			}
 			fmt.Fprintf(&b, "<%s class=\"cell\" id=%s src=%s style=\"%s\" %s></%s>\n",
-				tag, jsString(c.ID), jsString(c.URL), style, events, tag)
+				tag, htmlAttrValue(c.ID), htmlAttrValue(c.URL), style, events, tag)
 		}
 		label := fmt.Sprintf("%s|%s|%s", shortName(c.Sample.Name), c.Source, c.Sample.Format)
 		fmt.Fprintf(&b, "<div class=\"lbl\" style=\"left:%dpx;top:%dpx;width:%dpx\">%s</div>\n",
@@ -423,7 +424,7 @@ func shortName(s string) string {
 // 字面量：用单引号包裹，转义反斜杠/单引号，HTML 敏感字符走实体。
 //
 // ★ 缺陷源（探针自身缺陷，不是引擎缺陷）：内联事件属性此前用 jsString
-//（双引号）传参 → 生成 `onload="mvNote("c0",'load')"`，属性在第二个双引号
+// （双引号）传参 → 生成 `onload="mvNote("c0",'load')"`，属性在第二个双引号
 // 处**提前闭合**，处理器只剩 `mvNote(` → 语法错误 → 页面侧
 // window.__mediaEvents 恒为空。实测后果：96 格契约列全 ❌、Browser 下
 // 0 个 L3——这是测量伪影，掩盖了 U2 修复后的真实等级。
@@ -460,8 +461,25 @@ func htmlEscape(s string) string {
 	return r.Replace(s)
 }
 
+// htmlAttrValue 把字符串编成**双引号包裹的 HTML 属性值**（敏感字符走实体）。
+//
+// ★ 不要用 jsString 拼 HTML 属性：它按 JS 字面量规则把 `"` 写成 `\"`，而 HTML
+// 解析器不认这个转义——属性值会在第一个 `"` 处提前闭合（详见 dataURIText）。
+func htmlAttrValue(s string) string { return `"` + htmlEscape(s) + `"` }
+
+// dataURIText 生成 `data:<mime>,<payload>` 形式的 data URI（非 base64 载荷）。
+//
+// ★ 探针自身缺陷（**不是**引擎缺陷）：此前只把 `#` 换成 `%23`，SVG 文本里的
+// 双引号原样进入 HTML 属性，而属性值又是 jsString（JS 字面量风格）拼的，于是
+// 生成 `src="data:image/svg+xml,<svg xmlns=\"http://…\" width=\"120\" …>"`：
+// HTML 解析器在第一个 `"` 处**提前结束属性值**，src 实际只剩
+// `data:image/svg+xml,<svg xmlns=` → 该格必然 L0。曾据此把「内联 SVG 不绘制」
+// 误判为引擎缺口 D9（引擎的 percent 解码路径本来就是通的）。
+//
+// 修法按 RFC 2397：非 base64 载荷一律 percent 编码（`+` 保持字面，**不是**
+// 空格——那是 form-encoding 的约定），URI 里因此不再有 HTML 敏感字符。
 func dataURIText(mime, text string) string {
-	return "data:" + mime + "," + strings.ReplaceAll(text, "#", "%23")
+	return "data:" + mime + "," + url.PathEscape(text)
 }
 
 // ── 单配置执行 ────────────────────────────────────────────────────────
@@ -534,13 +552,27 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	res.PlayPNG = playPath
 	_ = events
 
-	// ③ 动图帧差异：再推进一段时间后重采样（L4 判据）
-	settleReal(wv, 900*time.Millisecond)
-	probes3, _, err := collectPage(wv, cells)
-	if err != nil {
-		return res, err
+	// ③ 动图帧差异（L4 判据）：**等间隔连拍多帧**。
+	//
+	// ★ 为什么不是「再等 900ms 拍一张」（探针自身缺陷）：两帧像素是否不同取决于
+	//   「采样间隔 mod 动图循环周期」——3 帧 ×100ms 的 GIF 周期正是 300ms，
+	//   900ms 恰好是它的 3 倍，两次采样落在**同一帧**、像素完全相同 → 判成
+	//   「未推进」。实测同一 HEAD 连跑两次全量：动图项的 L4/L3 会摇摆
+	//   （`anim-3frames-rgb` 一次 L4、一次 L3，`anim-2frames.webp` 亦同），
+	//   基线因此每次报警「等级下降」。
+	//   改为等间隔连拍：步长取与常见帧时长**不成整数倍**的 130ms，判据放宽为
+	//   「任意两帧不同」（见 framesDiffer），采样相位不再决定结论。
+	const animShotCount, animShotStep = 6, 130 * time.Millisecond
+	animFrames := make([][]byte, 0, animShotCount)
+	for i := 0; i < animShotCount; i++ {
+		settleReal(wv, animShotStep)
+		px, err := renderPixels(wv)
+		if err != nil {
+			return res, err
+		}
+		animFrames = append(animFrames, px)
 	}
-	animPixels, err := renderPixels(wv)
+	probes3, _, err := collectPage(wv, cells)
 	if err != nil {
 		return res, err
 	}
@@ -570,7 +602,7 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 		if !ok {
 			continue
 		}
-		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animPixels, vw, pageH)
+		r := judgeCell(c, man, p, byID2[c.ID], events2, stillPixels, playPixels, animFrames, vw, pageH)
 		res.Cells = append(res.Cells, r)
 	}
 	return res, nil
@@ -680,10 +712,11 @@ func startPlayback(wv *webkit.WebView, cells []cell) error {
 // 让它完成——必须让真实时间流逝。
 //
 // ★ 每步还要**渲染一帧**：本引擎的 `<img>` 加载由绘制路径发起，`load` /
-//   `error` 契约由 Render 之后的 flushImageEvents 派发（见
-//   webkit/webview.go）。只推进事件循环而不绘制，采集到的
-//   complete/onload/onerror 会**全是 false/0**——那是测量伪影，不是引擎能力
-//   （实测：修前 96 格里契约列几乎全 ❌，Browser 下 0 个 L3）。
+//
+//	`error` 契约由 Render 之后的 flushImageEvents 派发（见
+//	webkit/webview.go）。只推进事件循环而不绘制，采集到的
+//	complete/onload/onerror 会**全是 false/0**——那是测量伪影，不是引擎能力
+//	（实测：修前 96 格里契约列几乎全 ❌，Browser 下 0 个 L3）。
 func settleReal(wv *webkit.WebView, total time.Duration) {
 	const step = 50 * time.Millisecond
 	for elapsed := time.Duration(0); elapsed < total; elapsed += step {
@@ -843,7 +876,7 @@ func toleranceFor(sp sampleSpec) int {
 
 // judgeCell 按 §2 的判据给出一格的等级。
 func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string]map[string]int,
-	still, play, anim []byte, vw, pageH int) cellResult {
+	still, play []byte, animFrames [][]byte, vw, pageH int) cellResult {
 
 	sp := c.Sample
 	r := cellResult{ID: c.ID, Sample: sp.Name, Source: c.Source, Format: sp.Format, Kind: sp.Kind, Tag: p.Tag}
@@ -876,7 +909,7 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 
 	// 动画/播放推进（L4）：静止态与播放/推进后两帧是否不同
 	if sp.Kind == "animated" || sp.Kind == "video" {
-		changed, note := framesDiffer(c, sp, man, still, play, anim, vw)
+		changed, note := framesDiffer(c, sp, man, still, play, animFrames, vw)
 		r.AnimOK, r.AnimNote = changed, note
 	}
 
@@ -1027,19 +1060,55 @@ func sampleCell(c cell, sp sampleSpec, man *manifestDoc, px []byte, vw int) (boo
 
 // framesDiffer 判定「内容随时间变化」：在格中心取三点（静止/播放/再推进）
 // 是否出现差异。
-func framesDiffer(c cell, sp sampleSpec, man *manifestDoc, still, play, anim []byte, vw int) (bool, string) {
-	x := c.X + cellW/2
-	y := c.Y + cellH/2
-	a := pixelAt(still, vw, x, y)
-	b := pixelAt(play, vw, x, y)
-	d := pixelAt(anim, vw, x, y)
-	if a[0] < 0 || b[0] < 0 || d[0] < 0 {
-		return false, "采样越界"
+func framesDiffer(c cell, sp sampleSpec, man *manifestDoc, still, play []byte, animFrames [][]byte, vw int) (bool, string) {
+	frames := make([][]byte, 0, len(animFrames)+2)
+	frames = append(frames, still, play)
+	frames = append(frames, animFrames...)
+	pts := samplePointsOf(c)
+	best, bestPair := 0, ""
+	for i := 0; i < len(frames); i++ {
+		for j := i + 1; j < len(frames); j++ {
+			d := framesMaxDiff(frames[i], frames[j], pts, vw)
+			if d > best {
+				best, bestPair = d, fmt.Sprintf("帧%d↔帧%d 差 %d", i, j, d)
+			}
+		}
 	}
-	diff := func(p, q [3]int) int {
-		m := 0
+	if best > animFrameDiffThreshold {
+		return true, fmt.Sprintf("%s（共 %d 帧采样）", bestPair, len(frames))
+	}
+	return false, fmt.Sprintf("所有帧采样点相同（最大差异 %d，共 %d 帧）", best, len(frames))
+}
+
+// animFrameDiffThreshold 是「两帧之间发生了变化」的像素通道差阈值（0-255）。
+const animFrameDiffThreshold = 10
+
+// samplePointsOf 返回一格的采样点：中心 + 四个 1/4 位置。
+//
+// ★ 不能只看中心点：动图样本多是四象限/双色块，单点既可能漏掉变化，也可能
+// 被同色巧合骗过（原实现只取中心，判据因此脆弱）。
+func samplePointsOf(c cell) [][2]int {
+	qx, qy := cellW/4, cellH/4
+	return [][2]int{
+		{c.X + cellW/2, c.Y + cellH/2},
+		{c.X + qx, c.Y + qy},
+		{c.X + 3*qx, c.Y + qy},
+		{c.X + qx, c.Y + 3*qy},
+		{c.X + 3*qx, c.Y + 3*qy},
+	}
+}
+
+// framesMaxDiff 返回两帧在给定采样点上的最大通道差（越界点忽略）。
+func framesMaxDiff(p, q []byte, pts [][2]int, vw int) int {
+	m := 0
+	for _, pt := range pts {
+		a := pixelAt(p, vw, pt[0], pt[1])
+		b := pixelAt(q, vw, pt[0], pt[1])
+		if a[0] < 0 || b[0] < 0 {
+			continue
+		}
 		for i := 0; i < 3; i++ {
-			v := p[i] - q[i]
+			v := a[i] - b[i]
 			if v < 0 {
 				v = -v
 			}
@@ -1047,15 +1116,8 @@ func framesDiffer(c cell, sp sampleSpec, man *manifestDoc, still, play, anim []b
 				m = v
 			}
 		}
-		return m
 	}
-	ctrl := 10
-	switch {
-	case diff(a, b) > ctrl || diff(b, d) > ctrl:
-		return true, fmt.Sprintf("帧间差异 %d/%d（still→play→anim）", diff(a, b), diff(b, d))
-	default:
-		return false, fmt.Sprintf("三帧相同（差异 %d/%d）", diff(a, b), diff(b, d))
-	}
+	return m
 }
 
 // ── 落盘：几何 JSON / 报告 / 基线 ─────────────────────────────────────
@@ -1191,9 +1253,9 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|\n")
 	// 按 (样本, 来源, 配置) 排序输出，便于横向对比四配置
 	type row struct {
-		res    configResult
-		c      cellResult
-		order  int
+		res   configResult
+		c     cellResult
+		order int
 	}
 	var rows []row
 	for i, res := range results {

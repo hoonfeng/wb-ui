@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-07T05:24:30+08:00",
+  "generated_at": "2026-10-07T15:54:35+08:00",
   "note": "媒体格式能力等级基线（引擎等级）。Edge 等级在 -media-edge 且本机有 Edge 时回填；由 cmd/psai -media -media-update-baseline 生成（文档 §6.2 第 2 条）。",
   "entries": [
     {
@@ -155,28 +155,28 @@
       "sample": "icon-24.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "icon-24.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "icon-24.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "inline-svg-data-uri",
       "source": "data",
       "format": "svg",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
@@ -393,42 +393,42 @@
       "sample": "ratio-only.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "ratio-only.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "ratio-only.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "rect-120x80.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "rect-120x80.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "rect-120x80.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Browser",
@@ -827,28 +827,28 @@
       "sample": "icon-24.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "icon-24.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "icon-24.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "inline-svg-data-uri",
       "source": "data",
       "format": "svg",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
@@ -1065,42 +1065,42 @@
       "sample": "ratio-only.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "ratio-only.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "ratio-only.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "rect-120x80.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "rect-120x80.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "rect-120x80.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
@@ -1499,28 +1499,28 @@
       "sample": "icon-24.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "icon-24.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "icon-24.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "inline-svg-data-uri",
       "source": "data",
       "format": "svg",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
@@ -1737,42 +1737,42 @@
       "sample": "ratio-only.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "ratio-only.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "ratio-only.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "rect-120x80.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "rect-120x80.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "rect-120x80.svg",
       "source": "rel",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
@@ -2171,14 +2171,14 @@
       "sample": "icon-24.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "icon-24.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2192,7 +2192,7 @@
       "sample": "inline-svg-data-uri",
       "source": "data",
       "format": "svg",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2409,14 +2409,14 @@
       "sample": "ratio-only.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "ratio-only.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
@@ -2430,14 +2430,14 @@
       "sample": "rect-120x80.svg",
       "source": "data",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",
       "sample": "rect-120x80.svg",
       "source": "file",
       "format": "svg",
-      "grade": "L2"
+      "grade": "L0"
     },
     {
       "config": "Toolkit+DenyExternal",
