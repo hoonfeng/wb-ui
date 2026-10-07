@@ -329,6 +329,18 @@ func runVerify(wv *webkit.WebView, ic *Interceptor, pngPath string, console *jsc
 		}
 	}
 
+	// ★ 媒体自检段：**显式声明**资源策略（见文档 §9.9 的「需要本地媒体的宿主
+	//   必须显式声明」）。媒体链路（元数据/抽帧/PCM）现在与 `<img>`/`<script>`/
+	//   `<link>` 走同一条资源策略门禁，而本宿主的 ModeToolkit 默认档是
+	//   DenyExternal——它会把这些 `file://` 探针样本（_temp/mediaverify 等）拒掉。
+	//   自检要读它们，就必须显式声明：这里切到 AllowAll（自检宿主全权负责它加载的
+	//   本地资源），自检结束后**立即恢复原档位**，其余判据（CDP / D 系列）仍在原
+	//   策略下跑，因此「ModeToolkit 下外部资源被拒」的语义不受影响。
+	//   ★ 探针的 `data:` 引用不需要这一步（与策略解耦，恒放行）。
+	prevSelfCheckPolicy := wv.ResourcePolicy()
+	wv.SetResourcePolicy(webkit.AllowAll)
+
+	// 主线 A0：媒体元数据（时长/尺寸）——判据 L1。
 	mediaSelfCheck(wv, ic)
 
 	// 主线 A1：视频出画面（宿主注入帧流）——判据 A1-1/2/3。
@@ -342,6 +354,7 @@ func runVerify(wv *webkit.WebView, ic *Interceptor, pngPath string, console *jsc
 	mediaExactSeekSelfCheck(wv, ic)
 	mediaContinuousFrameSelfCheck(wv, ic)
 	mediaFrameCallbackSelfCheck(wv, ic)
+	wv.SetResourcePolicy(prevSelfCheckPolicy)
 
 	devtoolsSelfCheck(dt, wv)
 
