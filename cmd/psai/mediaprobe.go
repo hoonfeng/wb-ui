@@ -167,21 +167,21 @@ type pageReport struct {
 
 // cellResult 是一格的最终判定。
 type cellResult struct {
-	ID       string      `json:"id"`
-	Sample   string      `json:"sample"`
-	Source   string      `json:"source"`
-	Format   string      `json:"format"`
-	Kind     string      `json:"kind"`
-	Tag      string      `json:"tag"`
-	BoxW     float64     `json:"box_w"`
-	BoxH     float64     `json:"box_h"`
-	NaturalW float64     `json:"natural_w"`
-	NaturalH float64     `json:"natural_h"`
-	Complete bool        `json:"complete"`
-	Ready    float64     `json:"ready_state"`
-	Duration float64     `json:"duration"`
-	OnLoad   int         `json:"onload"`
-	OnError  int         `json:"onerror"`
+	ID       string  `json:"id"`
+	Sample   string  `json:"sample"`
+	Source   string  `json:"source"`
+	Format   string  `json:"format"`
+	Kind     string  `json:"kind"`
+	Tag      string  `json:"tag"`
+	BoxW     float64 `json:"box_w"`
+	BoxH     float64 `json:"box_h"`
+	NaturalW float64 `json:"natural_w"`
+	NaturalH float64 `json:"natural_h"`
+	Complete bool    `json:"complete"`
+	Ready    float64 `json:"ready_state"`
+	Duration float64 `json:"duration"`
+	OnLoad   int     `json:"onload"`
+	OnError  int     `json:"onerror"`
 	// ErrCode 是元素 error.code 的实测值（media = MediaError.code；img 无此 IDL
 	// 属性，恒 0）。它只用于报告备注的实测佐证（原始值见 geom-*.json 的
 	// still[].err）；**归因本身**按「配置策略 + 来源形态」判定（见 mediaDenialNote）。
@@ -288,9 +288,13 @@ func runMediaProbe(o mediaOpts) int {
 		fmt.Printf("  配置 %-26s → %s\n", cfg.Name, filepath.Base(res.StillPNG))
 	}
 
+	// Edge 双端对照（决策 2）：开启时把逐格对照节写进报告；未开启时报告里
+	// 明确标「未执行」，不留一个看不出跑没跑的空白（§8.3 第 1 条的证据纪律）。
+	edgeSection := ""
 	if o.Edge {
-		note := runEdgeComparison(results, matrixPath, vw, pageH, outDir)
-		fmt.Printf("  Edge 对照：%s\n", note)
+		summary, section := runEdgeComparison(results, cells, man, matrixPath, vw, pageH, outDir)
+		fmt.Printf("  Edge 对照：%s\n", summary)
+		edgeSection = section
 	}
 
 	// 决策 1 的一致性断言（TC-M-905）：Browser 与 Toolkit+AllowAll 必须
@@ -326,7 +330,7 @@ func runMediaProbe(o mediaOpts) int {
 	}
 	loopback := probeLoopback(expectHz, 1.0)
 	fmt.Printf("  判据 B（环回录音）：%s\n", loopback.Status)
-	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr, loopback); err != nil {
+	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr, loopback, edgeSection); err != nil {
 		fmt.Printf("媒体验证：写报告失败: %v\n", err)
 		return 2
 	}
@@ -480,6 +484,37 @@ func buildMatrix(man *manifestDoc, samplesDir string, vw int, only string) ([]ce
 		fmt.Fprintf(&b, "<div class=\"lbl\" style=\"left:%dpx;top:%dpx;width:%dpx\">%s</div>\n",
 			c.X, c.Y+cellH+2, cellW+gapX, htmlEscape(label))
 	}
+	// ★ Edge 双端对照的**页面内**采集脚本（§8.3 第 1/2 条）：Edge 侧没有引擎的
+	// Go 采集接口（引擎侧走 collectPage → EvalJS），所以把**同一套采集字段**挂进
+	// 页面，让 Edge 自己执行、把结果写进 <pre id="__edge_probe">，Go 侧用
+	// `--dump-dom` 取回后交给**同一个判定内核**（judgeCell）定级。
+	//
+	// 为什么先 encodeURIComponent 再落 DOM：DOM 转储层面就不必处理 HTML 实体
+	// 转义，也不怕 JSON 里出现 `<`/`&`（URL 里确实可能有）。
+	// 采集时机 = load 之后 1500ms（与引擎侧「settleReal 之后采集」的语义对齐）；
+	// Edge 侧靠 --virtual-time-budget 让这个定时器在无头模式下真的触发。
+	edgeIDs := make([]string, 0, len(cells))
+	for i := range cells {
+		edgeIDs = append(edgeIDs, jsString(cells[i].ID))
+	}
+	b.WriteString("<pre id=\"__edge_probe\" style=\"display:none\"></pre>\n<script>\n(function(){\n")
+	b.WriteString("var ids=[" + strings.Join(edgeIDs, ",") + "];\n")
+	b.WriteString("function collect(){var out={cells:[],events:window.__mediaEvents||{},vw:window.innerWidth," +
+		"vh:window.innerHeight,doch:document.documentElement?document.documentElement.scrollHeight:0};")
+	b.WriteString("var num=function(v){return (typeof v==='number'&&isFinite(v))?v:-1;};")
+	b.WriteString("for(var i=0;i<ids.length;i++){var id=ids[i],el=document.getElementById(id);")
+	b.WriteString("if(!el){out.cells.push({id:id,tag:'missing'});continue;}")
+	b.WriteString("var r=el.getBoundingClientRect();")
+	b.WriteString("out.cells.push({id:id,tag:(el.tagName||'').toLowerCase(),x:r.left,y:r.top,w:r.width,h:r.height,")
+	b.WriteString("complete:(el.complete===undefined?'n/a':el.complete),")
+	b.WriteString("nw:num(el.naturalWidth)<0?0:(el.naturalWidth||0),nh:num(el.naturalHeight)<0?0:(el.naturalHeight||0),")
+	b.WriteString("rs:num(el.readyState),duration:num(el.duration),ct:num(el.currentTime),")
+	b.WriteString("paused:(el.paused===undefined?'n/a':el.paused),err:(el.error?el.error.code:0)});}")
+	b.WriteString("var pre=document.getElementById('__edge_probe');")
+	b.WriteString("if(pre){pre.textContent=encodeURIComponent(JSON.stringify(out));}}\n")
+	b.WriteString("var go=function(){setTimeout(collect,1500);};")
+	b.WriteString("if(document.readyState==='complete'){go();}else{window.addEventListener('load',go);}\n")
+	b.WriteString("})();\n</script>\n")
 	b.WriteString("</body></html>\n")
 	return cells, b.String(), pageH
 }
@@ -587,6 +622,10 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   EncodingError 失败（那是如实失败，不是通过）——探针要验的是**端到端可用**，
 	//   所以这里必须与 psai 主宿主（app/host.go）一样装配。
 	app.InstallWebAudio("")
+	// ★ AVIF（对齐浏览器，2026-10-08）：Skia 二进制无 AVIF 解码，浏览器有 ⇒
+	//   探针必须与 psai 主宿主（app/host.go）一样装配宿主转码器，否则 AVIF 会
+	//   被判成 L0（那是「探针没装能力」，不是引擎能力）。
+	app.InstallImageTranscoder("")
 
 	html, err := os.ReadFile(matrixPath)
 	if err != nil {
@@ -600,6 +639,8 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   （loadBackgroundImageWith 的 loader 分支是 goroutine），只推进虚拟
 	//   事件循环时间不会让 goroutine 完成——必须「推进 + 真实 sleep」交替。
 	settleReal(wv, 1500*time.Millisecond)
+	// ★ 就绪即走（2026-10-08 修复）：固定窗口换成「轮询到稳定」，见 waitImagesReady。
+	waitImagesReady(wv, cells, 30*time.Second)
 
 	res.Policy = wv.ResourcePolicy().String()
 
@@ -911,6 +952,94 @@ func stopAudioPlayback(wv *webkit.WebView, cells []cell) {
 }
 
 // ── 像素 ──────────────────────────────────────────────────────────────
+
+// waitImagesReady 轮询等待页面内所有 `<img>` 格子进入稳定态，返回就绪格数、
+// img 格总数与收敛所用步数。
+//
+// 为什么必须「就绪即走」而不是固定时长：本引擎的 `<img>` 取字节跑在 goroutine 上、
+// load/error 契约由绘制路径派发（见 settleReal 注释），**每步绘制能推进的图片数量有限**。
+// 矩阵页 96 格时固定的 settleReal(1500ms)=30 步只够约半数样本，其余格被采集到
+// complete=false / naturalWidth=0，判据如实给出「画得出但无固有尺寸（D4）」⇒ 全量报告
+// 出现 51 条 L4/L3→L2 的**批量假降级**。对照证据：①只降 file/rel，data 来源是页面内联
+// 同步解码故不受影响；②同一份代码跑单样本（3 格）时「与基线一致」；③既有基线本身记录的
+// 就是这些格的 L4/L3 ⇒ 引擎能力没问题，是探针等待窗口与就绪状态解耦。
+//
+// 收敛条件：连续 8 步没有新的格子就绪即认为稳定（样本里本就有故意损坏的
+// corrupt.png / mislabeled.png，永远不就绪，因此不能等「全部就绪」）。
+func waitImagesReady(wv *webkit.WebView, cells []cell, maxWait time.Duration) (ready, total, steps int) {
+	ids := make([]string, 0, len(cells))
+	for _, c := range cells {
+		ids = append(ids, jsString(c.ID))
+	}
+	if len(ids) == 0 {
+		return 0, 0, 0
+	}
+	script := `(function(){
+		var ids = [` + strings.Join(ids, ",") + `];
+		var total = 0, ready = 0, miss = [];
+		for (var i = 0; i < ids.length; i++) {
+			var el = document.getElementById(ids[i]);
+			if (!el || String(el.tagName || '').toLowerCase() !== 'img') { continue; }
+			total++;
+			if (el.complete === true || (el.naturalWidth || 0) > 0) { ready++; } else { miss.push(ids[i]); }
+		}
+		return ready + '/' + total + ' ' + miss.join(',');
+	})()`
+	const step = 100 * time.Millisecond
+	// ★ 采样节流：EvalJS 每 5 步（500ms）一次。每步都注入脚本会打断引擎的加载/重绘推进
+	// （实测每步 EvalJS 时 Browser 配置恒停在 30/72、50 步零推进；而节流后恢复）。
+	const sampleEvery = 5
+	// minSamples 保证「长尾也能等到」：AVIF 走宿主 ffmpeg 子进程转码、huge-4096.png 解码
+	// 都可能在上一次就绪后停顿 1s 以上；只按空窗判稳会提前收敛（实测 8 步空窗时曾停在
+	// 62~63/72，造成 12 条零星 L2 假降级）。因此既要求最短等待，也要求空窗足够长。
+	const minSamples = 10   // 至少 10 次采样（= 5s）
+	const stableSamples = 5 // 连续 5 次采样（2.5s）无新增就绪才认为收敛
+	samples, stable := 0, 0
+	prev := -1
+	notReady := ""
+	for elapsed := time.Duration(0); elapsed < maxWait; elapsed += step {
+		driveEventLoop(wv, int64(step/time.Millisecond))
+		time.Sleep(step)
+		if _, err := wv.Render(); err != nil {
+			break
+		}
+		steps++
+		if steps%sampleEvery != 0 {
+			continue
+		}
+		samples++
+		v, err := wv.EvalJS(script)
+		if err != nil {
+			break
+		}
+		var r, t int
+		if _, err := fmt.Sscanf(v.ToString(), "%d/%d", &r, &t); err != nil {
+			break
+		}
+		ready, total = r, t
+		if sp := strings.IndexByte(v.ToString(), ' '); sp >= 0 {
+			notReady = v.ToString()[sp+1:]
+		} else {
+			notReady = ""
+		}
+		if r > prev {
+			prev, stable = r, 0
+			continue
+		}
+		stable++
+		if stable >= stableSamples && samples >= minSamples {
+			break
+		}
+	}
+	// 未就绪格 id 打进日志：收敛后仍不就绪的应**只有**故意坏样本（corrupt.png /
+	// mislabeled.png）与策略拒绝的格（DenyExternal 的 file/rel）——多出来的即是缺陷线索。
+	fmt.Printf("  图片就绪：%d/%d（%d 步 / %d 次采样收敛）", ready, total, steps, samples)
+	if notReady != "" {
+		fmt.Printf("；未就绪：%s", notReady)
+	}
+	fmt.Println()
+	return ready, total, steps
+}
 
 // settleReal 交替「推进虚拟事件循环」与「真实 sleep」：渲染层的异步图片
 // 取字节跑在 goroutine 上（见 engine/rendering/backgroundimage.go 的
@@ -1435,8 +1564,13 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 			r.Note = "单色视频：帧色恒定，动画判据不适用（画面正确即足）"
 		}
 	}
-	if sp.Format == "avif" || sp.Format == "tiff" {
-		r.Note = "预期不支持（L0，写入基线，不投入）"
+	// TIFF：浏览器同样不支持（Edge 里 `<img src=x.tiff>` 同样是失败路径）⇒
+	// **保持不支持就是对齐浏览器**，L0 属预期而非缺陷。
+	// （AVIF 曾与此同列，2026-10-08 起已支持：Skia 二进制没有编入 AVIF 解码，
+	// 但浏览器支持它，故由宿主用 ffmpeg 转 PNG 再交引擎——见
+	// app/imagetranscode.go。它的 L0 归因见下方「未装配转码器」分支。）
+	if sp.Format == "tiff" {
+		r.Note = "预期不支持（浏览器同样不支持 TIFF，L0 即对齐）"
 	}
 	if p.Tag == "missing" {
 		r.Grade = "L0"
@@ -1449,6 +1583,12 @@ func judgeCell(c cell, man *manifestDoc, p, playing cellProbe, events map[string
 		if n, ok := mediaDenialNote(policy, c.Source, p.ErrCode); ok {
 			r.Note = n
 		}
+	}
+	// AVIF 落到 L0 且没有策略成因 ⇒ 是**没有可用的转码器**（宿主没装配，或
+	// 本机 ffmpeg 不可用/转码失败）。如实写明，不写成「预期不支持」——那是把
+	// 能力缺口说成设计取舍。
+	if sp.Format == "avif" && r.Grade == "L0" && r.Note == "" {
+		r.Note = "AVIF 需宿主图像转码器（ffmpeg）——本机未装配或转码失败"
 	}
 	_ = tol
 	return r
@@ -1751,7 +1891,8 @@ func compareBaseline(base *baselineDoc, results []configResult) []string {
 }
 
 func writeMediaReport(path string, man *manifestDoc, results []configResult, base *baselineDoc, baseErr error,
-	matrixPath string, adDiff, adDiffExcl float64, animRects int, adErr error, lo loopbackEvidence) error {
+	matrixPath string, adDiff, adDiffExcl float64, animRects int, adErr error, lo loopbackEvidence,
+	edgeSection string) error {
 	var b strings.Builder
 	commit := gitShortHash()
 	fmt.Fprintf(&b, "# 媒体格式真实可用性报告（%s %s）\n\n", time.Now().Format("2006-01-02 15:04"), commit)
@@ -1908,6 +2049,14 @@ func writeMediaReport(path string, man *manifestDoc, results []configResult, bas
 		}
 	}
 
+	// Edge 双端对照节（决策 2 / §8.3 第 1-2 条）：程序化逐格对照。未启用
+	// `-media-edge` 时同样写一节并标「未执行」——报告里不该出现「看不出跑没跑」
+	// 的空白（§6.3 证据纪律）。
+	if strings.TrimSpace(edgeSection) == "" {
+		edgeSection = edgeSectionSkip("SKIP(未启用 -media-edge)")
+	}
+	b.WriteString(edgeSection)
+
 	b.WriteString("## 原始证据索引\n\n")
 	for _, res := range results {
 		fmt.Fprintf(&b, "- %s：截图 `%s`", res.Config, relToCwd(res.StillPNG))
@@ -1987,24 +2136,238 @@ func gitShortHash() string {
 	return strings.TrimSpace(string(out))
 }
 
-// runEdgeComparison 尽力而为的 Edge 双端对照（决策 2）：找不到 Edge 就标
-// SKIP(no-edge)（不得默认判通过）。找到时对矩阵页截图并保存，供人工比对。
-func runEdgeComparison(results []configResult, matrixPath string, vw, pageH int, outDir string) string {
+// runEdgeComparison Edge 双端对照（决策 2、§8.3 第 1/2 条）。
+//
+// 早先这里只把矩阵页交给 Edge 截一张图、**不做任何等级判定**（文档 §8.3 记为
+// 「本轮未做」），于是「引擎等级不低于 Edge 等级」这条判据一直只能人工复核。
+// 现在补成程序化逐格对照，做法是让两侧走**同一把尺子**：
+//
+//	Edge 侧：页面内采集脚本（buildMatrix 注入）+ `--dump-dom` 取回 → cellProbe，
+//	         像素用 Edge 自己的截图按格矩形采样；
+//	引擎侧：既有的 collectPage + Render 像素（一字未改）；
+//	判定：两侧都调 judgeCell —— 同一内核、同一阈值、同一等级映射。
+//
+// ★ 比较尺度是 0..3（normGrade3）。
+// Edge 侧不做连拍采样、测不到「动画推进」维度，故引擎的 L4 在比较时按 L3 计。
+// 方向只有「引擎不得低于 Edge」一个。
+// ★ 找不到 Edge → SKIP(no-edge)，**不得默认通过**（决策 2 原文）。
+//
+// 返回 (summary, section)：summary 供终端一行，section 是写进 report.md 的节。
+func runEdgeComparison(results []configResult, cells []cell, man *manifestDoc,
+	matrixPath string, vw, pageH int, outDir string) (string, string) {
 	exe := findEdge()
 	if exe == "" {
-		return "SKIP(no-edge)"
+		return "SKIP(no-edge)", edgeSectionSkip("SKIP(no-edge)")
 	}
+	pageURL := fileURLOf(matrixPath)
 	shot := filepath.Join(outDir, "edge-matrix.png")
 	cmd := exec.Command(exe, "--headless=new", "--disable-gpu", "--hide-scrollbars",
 		fmt.Sprintf("--window-size=%d,%d", vw, pageH),
-		"--screenshot="+shot, fileURLOf(matrixPath))
+		"--screenshot="+shot, pageURL)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Sprintf("SKIP(edge-failed: %v / %s)", err, strings.TrimSpace(string(out)))
+		s := fmt.Sprintf("SKIP(edge-failed: %v / %s)", err, strings.TrimSpace(string(out)))
+		return s, edgeSectionSkip(s)
 	}
 	if _, err := os.Stat(shot); err != nil {
-		return "SKIP(edge-no-screenshot)"
+		return "SKIP(edge-no-screenshot)", edgeSectionSkip("SKIP(edge-no-screenshot)")
 	}
-	return "已采集 " + relToCwd(shot) + "（等级对照需人工复核或后续扩展）"
+	dom, err := edgeDumpDOM(exe, pageURL, vw, pageH)
+	if err != nil {
+		s := fmt.Sprintf("SKIP(edge-dom-failed: %v)", err)
+		return s, edgeSectionSkip(s)
+	}
+	probes, events, err := parseEdgeProbe(dom)
+	if err != nil {
+		s := fmt.Sprintf("SKIP(edge-probe-missing: %v)", err)
+		return s, edgeSectionSkip(s)
+	}
+	px, pw, _, err := pngPixelsPremul(shot)
+	if err != nil {
+		s := fmt.Sprintf("SKIP(edge-png-failed: %v)", err)
+		return s, edgeSectionSkip(s)
+	}
+	if pw != vw {
+		// 截图宽度与视口不一致（DPR ≠ 1 等）会让按格矩形采样整体错位——如实报错，
+		// 不拿错位的采样当判定依据。
+		s := fmt.Sprintf("SKIP(edge-width-mismatch: 截图 %dpx ≠ 视口 %dpx)", pw, vw)
+		return s, edgeSectionSkip(s)
+	}
+	edgeCells := judgeEdgeCells(cells, man, probes, events, px, vw)
+
+	engByID := make(map[string]cellResult, len(results[0].Cells))
+	for _, c := range results[0].Cells {
+		engByID[c.ID] = c
+	}
+	var worse, higher []string
+	compared, equal := 0, 0
+	for _, c := range cells {
+		e, okE := edgeCells[c.ID]
+		g, okG := engByID[c.ID]
+		if !okE || !okG || e.Tag == "missing" || g.Tag == "missing" {
+			continue
+		}
+		compared++
+		eg, gg := normGrade3(e.Grade), normGrade3(g.Grade)
+		label := fmt.Sprintf("%s|%s|%s", shortName(c.Sample.Name), c.Source, c.Sample.Format)
+		switch {
+		case gg < eg:
+			worse = append(worse, fmt.Sprintf("%s：引擎 %s < Edge %s", label, g.Grade, e.Grade))
+		case gg > eg:
+			higher = append(higher, fmt.Sprintf("%s：引擎 %s > Edge %s", label, g.Grade, e.Grade))
+		default:
+			equal++
+		}
+	}
+	sort.Strings(worse)
+	sort.Strings(higher)
+	verdict := "✅ 逐格不低于 Edge 等级"
+	if len(worse) > 0 {
+		verdict = fmt.Sprintf("❌ %d 格低于 Edge 等级", len(worse))
+	}
+	summary := fmt.Sprintf("%s（对照 %d 格：一致 %d、低于 %d、高于 %d；截图 %s）",
+		verdict, compared, equal, len(worse), len(higher), relToCwd(shot))
+
+	var b strings.Builder
+	b.WriteString("## Edge 双端对照（决策 2、§8.3 第 2 条）\n\n")
+	fmt.Fprintf(&b, "执行：`cmd/psai -media -media-edge` ｜ Edge：`%s` ｜ 截图：`%s`（同时用页面内采集 + `--dump-dom` 回传每格状态）\n\n",
+		exe, relToCwd(shot))
+	b.WriteString("> 判据（§8.3 第 2 条原文）：**引擎等级不低于 Edge 等级**。逐格比较，" +
+		"比较尺度 0..3 —— Edge 侧不做连拍采样、测不到「动画推进」维度，故引擎的 L4 在比较时按 L3 计；" +
+		"两侧等级都由**同一个判定内核**（`judgeCell`，同一阈值同一映射）算出。\n\n")
+	b.WriteString("| 项 | 值 |\n|---|---|\n")
+	fmt.Fprintf(&b, "| 对照格数 | %d |\n", compared)
+	fmt.Fprintf(&b, "| 等级一致 | %d |\n", equal)
+	fmt.Fprintf(&b, "| **引擎低于 Edge** | **%d** |\n", len(worse))
+	fmt.Fprintf(&b, "| 引擎高于 Edge | %d |\n", len(higher))
+	fmt.Fprintf(&b, "| 结论 | %s |\n\n", verdict)
+	if len(worse) > 0 {
+		b.WriteString("**低于 Edge 的格（须复核）**\n\n")
+		for _, w := range worse {
+			fmt.Fprintf(&b, "- %s\n", w)
+		}
+		b.WriteString("\n")
+	}
+	if len(higher) > 0 {
+		fmt.Fprintf(&b, "<details><summary>引擎高于 Edge 的格（%d 格，供参考：多为动画推进与音频输出——浏览器侧未采这类维度）</summary>\n\n", len(higher))
+		for _, h := range higher {
+			fmt.Fprintf(&b, "- %s\n", h)
+		}
+		b.WriteString("\n</details>\n\n")
+	}
+	return summary, b.String()
+}
+
+// edgeSectionSkip 是没有 Edge（或对照失败）时写进报告的节：如实标明未执行，
+// **不作为通过**（决策 2：无 Edge 环境时标 SKIP(no-edge)，不得默认通过）。
+func edgeSectionSkip(reason string) string {
+	return "## Edge 双端对照（决策 2、§8.3 第 2 条）\n\n" +
+		"判据：引擎等级不低于 Edge 等级。\n\n" +
+		"| 项 | 值 |\n|---|---|\n" +
+		"| 结论 | " + reason + " —— **未执行，不算通过** |\n\n"
+}
+
+// normGrade3 把等级压到 0..3：Edge 侧只判 L/G/P/E 四维（没有连拍采样，测不到
+// 动画推进），因此「不低于 Edge」的判据在 0..3 的尺度上比较——引擎的 L4 按 L3
+// 计，避免用「浏览器侧量不到的维度」去刷高自己。
+func normGrade3(g string) int {
+	n, ok := gradeOrder[g]
+	if !ok {
+		return 0
+	}
+	if n > 3 {
+		n = 3
+	}
+	return n
+}
+
+// edgeDumpDOM 让 Edge 输出渲染后的 DOM（页面内采集脚本把结果写进 #__edge_probe）。
+// `--virtual-time-budget` 是必需的：采集脚本挂在 setTimeout(collect, 1500) 上，
+// 没有虚拟时间预算时无头模式会在定时器触发前就 dump 完，采集永远是空的。
+func edgeDumpDOM(exe, pageURL string, vw, pageH int) (string, error) {
+	cmd := exec.Command(exe, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+		fmt.Sprintf("--window-size=%d,%d", vw, pageH),
+		"--virtual-time-budget=6000", "--dump-dom", pageURL)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// parseEdgeProbe 从 Edge 的 DOM 转储里取回页面采集结果（buildMatrix 注入的
+// #__edge_probe，内容是 encodeURIComponent 后的 pageReport JSON）。
+func parseEdgeProbe(dom string) ([]cellProbe, map[string]map[string]int, error) {
+	const open = `<pre id="__edge_probe"`
+	i := strings.Index(dom, open)
+	if i < 0 {
+		return nil, nil, fmt.Errorf("DOM 里没有 #__edge_probe（采集脚本未执行）")
+	}
+	gt := strings.Index(dom[i:], ">")
+	if gt < 0 {
+		return nil, nil, fmt.Errorf("#__edge_probe 标签不完整")
+	}
+	rest := dom[i+gt+1:]
+	end := strings.Index(rest, "</pre>")
+	if end < 0 {
+		return nil, nil, fmt.Errorf("#__edge_probe 没有闭合标签")
+	}
+	raw := strings.TrimSpace(rest[:end])
+	if raw == "" {
+		return nil, nil, fmt.Errorf("采集结果为空（页面脚本未在 dump 之前完成采集）")
+	}
+	dec, err := url.QueryUnescape(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("解码采集结果失败: %w", err)
+	}
+	var rep pageReport
+	if err := json.Unmarshal([]byte(dec), &rep); err != nil {
+		return nil, nil, fmt.Errorf("解析采集结果失败: %w", err)
+	}
+	return rep.Cells, rep.Events, nil
+}
+
+// pngPixelsPremul 读 PNG 并按引擎侧采样路径的布局返回**预乘** RGBA 缓冲。
+// Go 的 color.Color.RGBA() 返回的本就是 alpha 预乘的 16 位分量，故 >>8 即为预乘
+// 8 位值——采样链路（pixelAt → unpremul）正是按这个布局写的，于是引擎与 Edge
+// 两侧用同一套采样代码、同一套阈值。
+func pngPixelsPremul(path string) ([]byte, int, int, error) {
+	img, err := readPNGFile(path)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	bd := img.Bounds()
+	w, h := bd.Dx(), bd.Dy()
+	if w <= 0 || h <= 0 {
+		return nil, 0, 0, fmt.Errorf("截图尺寸非法: %dx%d", w, h)
+	}
+	px := make([]byte, w*h*4)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, bl, a := img.At(bd.Min.X+x, bd.Min.Y+y).RGBA()
+			i := (y*w + x) * 4
+			px[i], px[i+1], px[i+2], px[i+3] = byte(r>>8), byte(g>>8), byte(bl>>8), byte(a>>8)
+		}
+	}
+	return px, w, h, nil
+}
+
+// judgeEdgeCells 用**同一个判定内核**（judgeCell）给 Edge 侧每格定级。
+// 与引擎侧的差别只有输入：播放态传与静止态相同的缓冲（Edge 侧不做连拍），动画
+// 帧传 nil ⇒ 动画/播放推进维度恒不成立，等级自然封顶 L3 —— 这正是「浏览器侧
+// 量不到的维度不参与比较」的正确口径，而不是给浏览器放宽判据。
+func judgeEdgeCells(cells []cell, man *manifestDoc, probes []cellProbe,
+	events map[string]map[string]int, px []byte, vw int) map[string]cellResult {
+	byID := make(map[string]cellProbe, len(probes))
+	for _, p := range probes {
+		byID[p.ID] = p
+	}
+	out := make(map[string]cellResult, len(cells))
+	for _, c := range cells {
+		p := byID[c.ID]
+		r := judgeCell(c, man, p, p, events, px, px, nil, vw, 0, audioCellEvidence{}, "allow-all")
+		out[c.ID] = r
+	}
+	return out
 }
 
 func findEdge() string {

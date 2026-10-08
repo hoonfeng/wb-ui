@@ -80,7 +80,9 @@
 
 ⇒ 本文所有「验证」「判定」「基线」相关要求均为**该独立项目的交付物**，不构成 AI-PS 项目的验收项。
 
-**本轮（2026-10-08）改动的归属**：**Q5-B（判定内核重构）**与 **TC-M-603（WebAudio 最小子集）**
+**本轮（2026-10-08）改动的归属**：**Q5-B（判定内核重构）**、**TC-M-603（WebAudio 最小子集）**
+与 **A3-3 完整子集**（AudioNode 图 / `AudioParam` 自动化 / `OfflineAudioContext` / 实时输出，
+见 §9.6「WebAudio 完整子集落地」）
 都落在**引擎/宿主代码**（`webkit/`、`engine/js/`、`app/`、`cmd/psai/`），属上表第三行
 **「引擎缺陷修复（U1–U9）」同一条线的 wb-ui 修复范畴**——**不构成**独立媒体验证项目的交付物；
 验证侧对两者只**复跑并记录**（`dev/media/out/` 产物 + §9.6 / §9.9 登记）。上方「待用户确认」
@@ -301,7 +303,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 | 编号 | 缺口 | 实测表现 | Browser 下格数 |
 |---|---|---|---|
-| D12 | 音频**输出**后端（L4-S） | ✅ **已闭环（2026-10，A3）**：在元数据链路（L1）之上补齐「解码 → 输出设备」——宿主 ffmpeg 解 s16le PCM → 引擎注入通道 → 输出后端（Windows waveOut；其余平台挂钟降级），`currentTime` 由**输出位置**驱动。判据 A（FFT 主峰 439.88Hz）与 TC-M-602 定点全过。★ **`data:` 来源也已闭环**（2026-10 续做，见 §9.8）：宿主把内联字节落盘再交 ffmpeg，data: 由 L1 → **L4**（视频 data: 同步恢复）。★ **TC-M-603（WebAudio）于 2026-10-08 闭环**（A3-3 最小子集，见 §9.6「WebAudio 最小子集落地」） | 12（file/rel/data 全 **L4**） |
+| D12 | 音频**输出**后端（L4-S） | ✅ **已闭环（2026-10，A3）**：在元数据链路（L1）之上补齐「解码 → 输出设备」——宿主 ffmpeg 解 s16le PCM → 引擎注入通道 → 输出后端（Windows waveOut；其余平台挂钟降级），`currentTime` 由**输出位置**驱动。判据 A（FFT 主峰 439.88Hz）与 TC-M-602 定点全过。★ **`data:` 来源也已闭环**（2026-10 续做，见 §9.8）：宿主把内联字节落盘再交 ffmpeg，data: 由 L1 → **L4**（视频 data: 同步恢复）。★ **TC-M-603（WebAudio）于 2026-10-08 闭环**（A3-3：最小子集 + **完整子集**，见 §9.6「WebAudio 最小子集落地」与「WebAudio 完整子集落地」） | 12（file/rel/data 全 **L4**） |
 | — | AVIF / TIFF | L0（预期不支持，已入基线，不投入） | 6 |
 
 ---
@@ -398,7 +400,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 |---|---|---|---|
 | TC-M-601 | `<audio src=wav/mp3/ogg/m4a>` | 读 `readyState/duration/paused` | **基线**全 0/NaN → L0；**目标**（阶段 3）：`rs=4`、`duration≈1s` → L1 |
 | TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | ✅ **达成（2026-10，A3）**：时钟由**输出位置**驱动——终态到 1.00s（真播完），采样点 `currentTime` **不超前**于「该会话首块 PCM 交付以来经过的时间」。定点口径与设备启动延迟的处置见 §9.6；严格断言在引擎单测 `TestAudioSessionDrivesCurrentTime` |
-| TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | ✅ **达成（2026-10-08，A3-3 最小子集）**：`typeof AudioContext === "function"` ✅（含 `webkitAudioContext` 别名）、`decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / `duration=1.000s`、`getChannelData(0) instanceof Float32Array`），FFT 主峰 **439.95Hz**（判据 A 同一套工具）。★ 范围是**最小子集**：**不含** AudioNode 图 / `AudioParam` 自动化 / `AudioWorklet` / `OfflineAudioContext`（见 `docs/audio-backend-proposal.md` §6/§7 A3-3） |
+| TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | ✅ **达成（2026-10-08，A3-3）**：`typeof AudioContext === "function"` ✅（含 `webkitAudioContext` 别名）、`decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / `duration=1.000s`、`getChannelData(0) instanceof Float32Array`），FFT 主峰 **439.95Hz**（判据 A 同一套工具）。★ **已从最小子集扩展为完整子集**：AudioNode 图（8 类节点）/ `AudioParam` 全套自动化 / `OfflineAudioContext` / 实时输出均可用（**不含** `AudioWorklet` / `ScriptProcessorNode` / 多声道路由 / 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode`——调用即抛错）。判据与限制见 §9.6「WebAudio 完整子集落地」与 `docs/audio-backend-proposal.md` 文首「实施状态」 |
 | TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音按统一口径如实记录（见 §9.6「判据 B 跳过口径」）——**无设备/无候选 → `SKIP(no-loopback)`**，有候选但录音失败 → `SKIP(loopback-failed)`，录到但主峰不符 → `mismatch`。三者都是「跳过/未通过」，**都不伪装为通过** |
 
 > **决策 4 落点**：G5/G6 基线全部为 L0；因已确认「要真实播放」，本节即阶段 3 的**验收清单**——验收标准为「目标」列全部达成。
@@ -985,6 +987,23 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 | 顺手修复（**真实缺陷**，非 WebAudio 专属） | `jsc.Interpreter.ValueOf([]byte)` 原实现用 `vm.Call(Uint8Array, ab)`——typed array 构造器要求 **new 调用**，被拒后**静默退化**为 `ArrayBuffer`（且**无** `.buffer` 属性，与注释承诺不符）⇒ 调用方按 `Uint8Array` 读会**踩空**。已改用 `vm.New`，并新增 `engine/js/jsc/bytes_value_test.go` 钉住形态（`Uint8Array` + `has-buffer`）。★ 属「隐藏的类型退化」：`ValueOf([]byte)` 的**所有既有调用方**（live2d 模型字节等）此前都在拿降级值 |
 | 与资源策略的关系 | WebAudio 的输入是**页面自己交来的字节**（`decodeAudioData(arrayBuffer)`），不涉及外部引用选择 ⇒ **不经**资源策略门禁；也无 `src`/URL 形态可供绕过。★ 与 §9.9 的「宿主注入通道」不是一回事：那里是**引擎**请求宿主读盘（须过门禁），这里是宿主按页面给的字节解码 |
 
+#### WebAudio 完整子集落地（2026-10-08 续做，A3-3 第二段：**已实施**）
+
+**结论（一句话）**：最小子集之上把**音频图**补齐——8 类 AudioNode、`AudioParam` 全套自动化、
+`OfflineAudioContext`（离线渲染）与实时输出（宿主 waveOut）均可用；**外围部分**
+（`AudioWorklet` / `ScriptProcessorNode` / 多声道路由 / 3D `PannerNode` / `ConvolverNode` /
+`DynamicsCompressorNode`）明确不做且**调用即抛错**，不返回假节点。
+
+| 项 | 内容 |
+|---|---|
+| 范围 | 见 `docs/audio-backend-proposal.md` 文首「实施状态」的节点 / 参数 / 上下文清单。节点：`GainNode`、`OscillatorNode`（4 波形）、`AudioBufferSourceNode`（loop / 播放速率 / detune）、`ConstantSourceNode`、`StereoPannerNode`（等功率）、`DelayNode`、`BiquadFilterNode`（8 类型 + `getFrequencyResponse`）、`AnalyserNode`（FFT + Blackman 窗 + smoothing） |
+| 落点 | `engine/js/bindings/webaudiograph.go`（图内核：参数自动化求值、节点渲染、拓扑排序、FFT）、`webaudio_api.go`（JS 对象层：节点与 `AudioParam` 对象、`OfflineAudioContext`、实时渲染驱动）、`webaudio.go`（最小子集接入图 + 零拷贝 `getChannelData`）、`engine/js/jsc/goja_adapter.go`（`Float32ArrayView` 零拷贝视图）、`app/webaudioout.go`（宿主实时输出：惰性打开设备 + 非阻塞队列 + 无设备静默降级）、`app/host.go`（装配 `InstallWebAudioOutput`） |
+| 判据载体（**离线渲染**） | `OfflineAudioContext` 的时间轴由**帧号**决定（`t = frame / sampleRate`），不依赖真实耗时、不碰音频设备 ⇒ 「增益 = 0.25」「线性 ramp 在 5ms 处 = 0.5」「延迟 1ms ⇒ 前 48 帧静音」「pan = -1 ⇒ 右声道为 0」这类断言可以写成**精确**判据；同一脚本两次渲染**逐字节相同**（确定性） |
+| 验收（单测） | `engine/js/bindings/webaudiograph_test.go`（内核直连 4 条：直流增益、ramp 逐点求值、振荡器频率/过零、缓冲源播完静音）、`engine/js/bindings/webaudio_graph_test.go`（JS 层 12 条：上下文构造与非法参数、渲染确定性、`getChannelData` 视图语义、缓冲源播放、线性 ramp、振荡器包络（峰值 + 过零率）、延迟量、声像分声道、分析器时域/频域/字节读取、错误路径、实时上下文接线）、`app/webaudioout_test.go`（宿主输出 6 条：s16le 转换与字节序、惰性打开、无设备降级、队列溢出丢最旧、flush/Stop、采样率不一致丢弃）。全量 `go test`（排除 `dev/suites/consistency`）：**FAIL 0**；`go build ./...`、`go vet` 干净 |
+| 本轮修掉的**真实缺陷**（都由测试逼出，非重构） | ① **拓扑排序方向反了**：后序 DFS 得到的顺序本已是「上游在前」，代码又反转一次 ⇒ 节点比自己的上游先渲染，destination 读到的永远是上游**上一个量子**的输出（整体延迟 128 帧；振荡器/缓冲源在首量子恰为 0 ⇒ 表现为整段静音）。② **离线上下文读真实时钟**：`src.start(0)` 把「JS 建图的真实耗时」当成已播放时长，播放起点整体前移（480 帧缓冲尾部静音）。③ **`SetAccessor` 的 setter 形态**：适配层只接受 `func(*Interpreter, JSValue, JSValue)`，2 参 setter 被**静默忽略** ⇒ 访问器变只读（`gain.value = 0.25` 不生效）。④ **`getChannelData` 返回拷贝**：脚本「先填 `getChannelData` 再播放」的写法会**静默产出静音** ⇒ 改为零拷贝视图并缓存视图对象（满足「同一视图」语义） |
+| 已知限制（如实记录，不假装支持） | 内核按**立体声**工作（多声道路由未做）；多个实时上下文同时发声时宿主按到达顺序串行写设备（未混音）⇒ 仅「单实时上下文」在时长上严格正确；`AnalyserNode.fftSize` 固定 2048；`getFrequencyResponse` 只回填幅度数组（相位数组未写）；square/sawtooth 为**非带限**实现（与浏览器在无 `AudioWorklet` 时同档，判据比对看基频与包络，不要求逐样本相同） |
+| 与资源策略的关系 | 同最小子集：输入是页面自己交来的字节、节点由脚本自己构造 ⇒ **不经**资源策略门禁；实时输出只写设备、不读外部资源 |
+
 ---
 
 ### 9.7 TC-M-905 策略一致性差异（3.9683%）的归因与处置（2026-10）
@@ -1063,6 +1082,45 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 > 报告「**与基线一致（无等级下降）**」、**384 条等级零变化**、8 张 `matrix-*.png` **逐字节 SAME**；
 > ③ 与基线的 diff 仅「**引擎 hash** + m4a/ogg 的 `currentTime` 采样抖动（TC-M-602 的时序性质，既有）」，
 > `geom-*.json` 仅 `generatedAt`——**等级列零变化**。
+
+**等待窗口（第 10 处测量伪影）——处置与遗留（2026-10-08，探针修复）**：全量跑出现
+**51 条 L4/L3 → L2 批量降级**（备注全为「画得出但无固有尺寸（D4：`<img>` 未给尺寸时盒子塌陷）」
+或「画得出但契约不完整（complete/onload）」），**只落在 `file`/`rel` 来源**、遍及四个配置，
+（初判为稳定复现，**后续复跑推翻**：本会话 5 次全量跑中 1 次全绿、4 次 30~41 条）。
+**初始归因（后经实测修正，见下）**：`settleReal(wv, 1500ms)` 是**固定 30 步**
+（每步推进虚拟事件循环 + 真实 sleep 50ms + 渲染一帧），而本引擎的 `<img>` 取字节跑在
+goroutine 上、`load`/`error` 契约**由绘制路径派发**（`settleReal` 自身注释已写明）
+⇒ **每步绘制能推进的图片数量有限**；矩阵页 96 格（其中 **72 个 `<img>`**）时固定窗口只够
+约半数样本，其余格被采集到 `complete=false` / `naturalWidth=0`，判据如实给出 L2。
+**三处对照证明这是测量伪影、不是引擎回归**：① 只降 `file`/`rel`，`data:` 来源是页面内联
+**同步**解码故全绿；② **同一份代码**跑单样本（3 格）时报告「与基线一致（无等级下降）」；
+③ 降级状态下与上次成功运行的产物 `cmp` 全 DIFF，但差异 bbox（`x 536..919, y 200..279`）
+恰为 **AVIF 的 data/file/rel 同一行三格**、`Toolkit+DenyExternal` 仅 1 格（该策略拒 file/rel）
+——即截图差异 100% 来自 AVIF 由 L0 提升到 **L3**（上段装配 `InstallImageTranscoder` 的
+能力提升，基线已登记），无其它区域漂移。
+
+**处置**：新增 `waitImagesReady(wv, cells, 30s)` —— **就绪即走**：每步推进 + sleep 100ms +
+渲染，轮询页面 `<img>` 的「已定态」数（`complete===true` 或 `naturalWidth>0`），
+**连续 5 次采样（2.5s）无新增就绪、且采样数 ≥ 10（5s）才收敛**（样本中 `corrupt.png` /
+`mislabeled.png` 是故意坏样本、永不就绪，故**不能**等「全部就绪」）；`settleReal` 保留
+1500ms 做初次布局，**超时后仍如实判级**（不掩盖缺陷）。脚本采样**每 5 步一次**（每步注入
+脚本会打断加载/重绘：实测每步 EvalJS 时 Browser 恒停 30/72 零推进），并把「未就绪格 id」
+打进日志便于复核（稳态未就绪的恰是 5 个坏样本，如 `；未就绪：c21,c22,c23,c45,c46`）。
+
+**实测结论（2026-10-08 复跑，共 5 次全量）——该降级并非「固定等待窗口不足」**：
+① Browser 从**首次采样起即恒为 30/72、其后 50 步（5s）零推进**（诊断曲线），**等待更久无效**；
+② **禁用本段新增的轮询**（回到原始「仅固定 1500ms 窗口」逻辑）后**仍降级 41 条** ⇒ 与本段
+探针改动**无关**；③ **单样本（3 格）时 Browser 的 `file`/`rel` 全绿 L4**（`-media-only` 实测），
+⇒ 该通道本身可用，故障**只在大规模（72 个 `<img>`）时出现**；④ 静态路径分析显示 ModeBrowser 下
+`file`/`rel` **应当**放行并同步读盘（`AllowsURL` → AllowAll、`loadExternalResource` → `os.ReadFile`），
+未见结构性拒绝点。⇒ 初步判定为**并发相关的偶发行为**（异步取字节在大批量下部分引用不完成，
+且 `backgroundImageCache.loading` / 1s `retryAt` 退避重试未使其恢复），**根因未定位**。
+
+**验收状态**：本轮 5 次全量跑中 **1 次**达到「与基线一致（无等级下降）」（即该状态可达），
+其余 4 次出现 **30~41 条** `file`/`rel` 批量 L2。⇒ **「全量报告无等级下降」本轮未稳定达成**，
+登记为**开放项**（建议专项：排查渲染层 `backgroundImageCache.loading`/`retryAt` 与
+`fetchImageViaLoaderAsync` 在大批量下的完成率，以及逐引用策略判定路径）。TC-M-603 完整子集
+不受影响，仍 **✅ 达成**（离线渲染逐样本恒为 0.25）。
 
 ---
 

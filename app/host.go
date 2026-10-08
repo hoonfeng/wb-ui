@@ -434,6 +434,15 @@ func NewHost(wv *webkit.WebView, width, height int, title string) (*Host, error)
 	// 只挂解码器、不动播放链路——AudioContext 本身由引擎侧 dom 装配段挂出，未装配
 	// 解码器时 decodeAudioData 如实 reject（EncodingError）。
 	InstallWebAudio("")
+	// ★ WebAudio 实时输出（A3-3）：AudioContext 的音频图真正发声时才**惰性**打开输出
+	// 设备（不发声就不占声卡）；没有可用设备时静默降级为「丢弃并计数」（探针/CI 无
+	// 声卡的环境下不会因此报错，离线渲染与解码链路也不受影响）。
+	InstallWebAudioOutput()
+	// ★ 图像转码兜底（AVIF 支持，2026-10-08）：goskia 的 Skia 二进制里没有编入
+	// AVIF 解码（实测 unsupported），而浏览器普遍支持 AVIF ⇒ 宿主用本机 ffmpeg
+	// 转成 PNG 再交给引擎解码（只放行**浏览器支持**的格式；TIFF 继续不支持，与
+	// Edge 一致）。不动既有解码路径：只在 Skia 解码**失败后**兜底，常见格式零开销。
+	InstallImageTranscoder("")
 	// ★ 动图（实现路径主线 A4）：宿主用 goskia 的 SkCodec 解 GIF/WebP 多帧，渲染层按
 	// 帧时长选帧。不接线时动图仍只显示第一帧（既有行为）。
 	InstallAnimatedImageSource()

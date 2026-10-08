@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-10-07T19:57:54+08:00",
+  "generated_at": "2026-10-08T10:51:40+08:00",
   "note": "媒体格式能力等级基线（引擎等级）。Edge 等级在 -media-edge 且本机有 Edge 时回填；由 cmd/psai -media -media-update-baseline 生成（文档 §6.2 第 2 条）。",
   "entries": [
     {
@@ -267,21 +267,21 @@
       "sample": "quad.avif",
       "source": "data",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "quad.avif",
       "source": "file",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
       "sample": "quad.avif",
       "source": "rel",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Browser",
@@ -939,21 +939,21 @@
       "sample": "quad.avif",
       "source": "data",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "quad.avif",
       "source": "file",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
       "sample": "quad.avif",
       "source": "rel",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowAll",
@@ -1611,21 +1611,21 @@
       "sample": "quad.avif",
       "source": "data",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "quad.avif",
       "source": "file",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
       "sample": "quad.avif",
       "source": "rel",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+AllowHostResolved",
@@ -2283,7 +2283,7 @@
       "sample": "quad.avif",
       "source": "data",
       "format": "avif",
-      "grade": "L0"
+      "grade": "L3"
     },
     {
       "config": "Toolkit+DenyExternal",

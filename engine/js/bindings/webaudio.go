@@ -74,6 +74,17 @@ func installWebAudio(rt *jsc.Interpreter, g *jsc.JSObject) {
 	if _, ok := g.GetByKey("webkitAudioContext"); !ok {
 		g.Set("webkitAudioContext", jsc.FunctionValue(ctor))
 	}
+	// A3-3：离线上下文。它不碰音频设备、时间轴完全由帧号决定，因此能在无设备
+	// 环境（CI、探针）里做**逐样本确定**的渲染与比对（见 webaudio_api.go）。
+	if _, ok := g.GetByKey("OfflineAudioContext"); !ok {
+		off := rt.NewConstructor("OfflineAudioContext", func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
+			return newOfflineAudioContext(in, args)
+		})
+		g.Set("OfflineAudioContext", jsc.FunctionValue(off))
+		if _, ok := g.GetByKey("webkitOfflineAudioContext"); !ok {
+			g.Set("webkitOfflineAudioContext", jsc.FunctionValue(off))
+		}
+	}
 }
 
 // ─── AudioContext ─────────────────────────────────────────
@@ -167,7 +178,11 @@ func newAudioContext(rt *jsc.Interpreter, args []jsc.JSValue) *jsc.JSObject {
 			}
 		}
 	}
-	clock := newAudioClock(sampleRate)
+	// A3-3：实时上下文的时钟不再独立创建——它与音频图共用一条时间轴：currentTime
+	// 就是渲染游标，保证「脚本读到的时间」与「已经渲染出来的样本」永远一致
+	// （两套时钟会让「按 currentTime 排的事件」和「实际出声时刻」错位）。
+	c := newWGContext(rt, sampleRate, false, 0, wgChannels)
+	clock := c.clock
 	obj := jsc.NewObject(rt.ObjectPrototype())
 	obj.SetClassName("AudioContext")
 	obj.Set("sampleRate", jsc.NumberValue(float64(sampleRate)))
@@ -182,11 +197,12 @@ func newAudioContext(rt *jsc.Interpreter, args []jsc.JSValue) *jsc.JSObject {
 	//   不编造设备参数（规范里它们是设备相关量）。脚本普遍只把它们当数值读。
 	obj.Set("baseLatency", jsc.NumberValue(0))
 	obj.Set("outputLatency", jsc.NumberValue(0))
-	obj.Set("destination", jsc.ObjectValue(newAudioDestination(rt)))
+	// destination / create* / 节点图由 attachAudioGraph 统一装配（A3-3）。
 
 	obj.Set("resume", jsc.FunctionValue(rt.NewNativeFunction("resume",
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			clock.resume()
+			wgEnsureRealTime(c)
 			return in.ResolvePromise(jsc.Undefined())
 		}, 0)))
 	obj.Set("suspend", jsc.FunctionValue(rt.NewNativeFunction("suspend",
@@ -197,6 +213,10 @@ func newAudioContext(rt *jsc.Interpreter, args []jsc.JSValue) *jsc.JSObject {
 	obj.Set("close", jsc.FunctionValue(rt.NewNativeFunction("close",
 		func(in *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 			clock.close()
+			// 上下文关闭 → 通知宿主丢弃已排队的样本（否则残余声音会继续播完）。
+			if WGSinkStop != nil {
+				WGSinkStop()
+			}
 			return in.ResolvePromise(jsc.Undefined())
 		}, 0)))
 	obj.Set("createBuffer", jsc.FunctionValue(rt.NewNativeFunction("createBuffer",
@@ -207,19 +227,8 @@ func newAudioContext(rt *jsc.Interpreter, args []jsc.JSValue) *jsc.JSObject {
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			return decodeAudioDataFor(in, args)
 		}, 1)))
+	attachAudioGraph(rt, obj, c)
 	return obj
-}
-
-// newAudioDestination 返回 destination 的最小等价对象：它不是音频图节点（最小子集
-// 不建图），只承载「上下文有输出端」的存在性与常见的只读属性。
-func newAudioDestination(rt *jsc.Interpreter) *jsc.JSObject {
-	o := jsc.NewObject(rt.ObjectPrototype())
-	o.SetClassName("AudioDestinationNode")
-	o.Set("maxChannelCount", jsc.NumberValue(2))
-	o.Set("channelCount", jsc.NumberValue(2))
-	o.Set("numberOfInputs", jsc.NumberValue(1))
-	o.Set("numberOfOutputs", jsc.NumberValue(0))
-	return o
 }
 
 // ─── decodeAudioData ──────────────────────────────────────
@@ -325,6 +334,13 @@ func newAudioBuffer(rt *jsc.Interpreter, dec AudioDecoded) *jsc.JSObject {
 	obj.Set("length", jsc.NumberValue(float64(length)))
 	obj.Set("numberOfChannels", jsc.NumberValue(float64(len(channels))))
 	obj.Set("duration", jsc.NumberValue(float64(length)/float64(rate)))
+	// 挂上 Go 侧解码数据：AudioBufferSourceNode.buffer 的 setter 需要把它取回来
+	// （见 webaudio_api.go 的 wgBufferOf）。与 getChannelData 共享同一底层样本数组。
+	obj.SetInternal(&dec)
+	// 视图缓存：规范里 getChannelData(i) 每次都返回**同一个** Float32Array 对象，
+	// 脚本会用 `buf.getChannelData(0) === buf.getChannelData(0)` 判断（缓存样本视图
+	// 是实现该语义的常规做法）。
+	views := make([]jsc.JSValue, len(channels))
 	obj.Set("getChannelData", jsc.FunctionValue(rt.NewNativeFunction("getChannelData",
 		func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 			idx := 0
@@ -338,7 +354,13 @@ func newAudioBuffer(rt *jsc.Interpreter, dec AudioDecoded) *jsc.JSObject {
 					"Failed to execute 'getChannelData' on 'AudioBuffer': 声道索引 %d 越界（numberOfChannels=%d）。",
 					idx, len(channels))))
 			}
-			return in.Float32ArrayValue(channels[idx])
+			// ★ 必须是**视图**（零拷贝）而不是拷贝：规范里 getChannelData 返回缓冲区
+			// 样本的视图，脚本写 arr[i]=v 要真的落到缓冲区上（「合成音频」的标准写法：
+			// createBuffer → 填 getChannelData → bufferSource.buffer → start）。
+			if views[idx].IsUndefined() {
+				views[idx] = in.Float32ArrayView(channels[idx])
+			}
+			return views[idx]
 		}, 1)))
 	return obj
 }

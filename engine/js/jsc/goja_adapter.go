@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // ─── BufferLogger ───────────────────────────────────────
@@ -383,6 +384,38 @@ func (r *Interpreter) Float32ArrayValue(data []float32) JSValue {
 		items[i] = float64(f)
 	}
 	return JSValue{v: r.vm.NewArray(items...), interp: r}
+}
+
+// Float32ArrayView 把样本切片包成**零拷贝**的 JS Float32Array：视图与 Go 切片
+// 共享同一段内存，任一侧写入对另一侧**立即可见**。
+//
+// ★ 与 Float32ArrayValue 的分工（这是很容易踩错的一处语义）：
+//   - Value 拷贝样本，适合「只读展示」的返回值；
+//   - View 共享内存，适合规范里明确是**视图**的返回值 —— AudioBuffer.getChannelData
+//     就是典型：脚本先 createBuffer，再往 getChannelData(0) 里填样本，然后交给
+//     AudioBufferSourceNode 播放（几乎所有「合成音频」示例的写法）。若这里用拷贝，
+//     写进去的样本永远到不了缓冲区，播放出来是静音——而且不报任何错。
+//
+// 生命周期安全：goja 的 ArrayBuffer 直接持有 []byte 这个 Go 切片头（指向同一底层
+// 数组），只要 JS 侧还有视图或缓冲区引用，底层数组对 GC 就是可达的；Go 的 GC 不
+// 移动对象，因此也不会出现指针失效。样本切片的存活由调用方保证（AudioDecoded 挂在
+// AudioBuffer 对象上，与视图同生共死）。
+func (r *Interpreter) Float32ArrayView(data []float32) JSValue {
+	if r == nil || r.vm == nil {
+		return Undefined()
+	}
+	if len(data) == 0 {
+		return r.Float32ArrayValue(nil)
+	}
+	raw := unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), len(data)*4)
+	abVal := r.vm.ToValue(r.vm.NewArrayBuffer(raw))
+	if ctor := r.vm.Get("Float32Array"); ctor != nil {
+		if arr, err := r.vm.New(ctor, abVal); err == nil {
+			return JSValue{v: arr, interp: r}
+		}
+	}
+	// 理论上不可达（Float32Array 是引擎内建）：退化为拷贝，保证类型正确。
+	return r.Float32ArrayValue(data)
 }
 
 // NewNativeFunction 在正确运行时创建原生函数（推荐用法）。

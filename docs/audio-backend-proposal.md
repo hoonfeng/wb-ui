@@ -5,17 +5,53 @@
 > [`media-format-verification-plan.md`](media-format-verification-plan.md) §5 **G6**（TC-M-601..604）。
 > 本文档是**立项材料**，不是实施记录；实施需用户确认后再动（§8 决策点 4「必须用户确认」）。
 
-> **实施状态（2026-10-08）**：**A3-3（WebAudio 最小子集）已实施**（决策点 3 已确认「要」）。
-> 严格按 §6「不做」项划定的边界只做最小子集：`AudioContext`（构造 + `sampleRate` / `state` /
-> `destination` / `close`）、`decodeAudioData`（**真解码**：宿主 ffmpeg → `AudioBuffer`）、
-> `AudioBuffer`（`length` / `duration` / `sampleRate` / `numberOfChannels` / `getChannelData`）、
-> `Float32Array` 量纲；**不含** AudioNode 图（`GainNode` / `OscillatorNode` / `AnalyserNode`…）、
-> AudioParam 自动化、`AudioWorklet`、`OfflineAudioContext`——那些要新建「音频图执行引擎 +
-> 实时线程调度」（估 3000–6000 行），仍属 §6 不做项，要做得另立项。
-> 落点：`engine/js/bindings/webaudio.go`（引擎侧最小子集）+ `app/webaudio.go`（宿主解码器注入
-> `InstallWebAudio`，未注入时 `decodeAudioData` 如实 reject，不编造 buffer）+ 探针
-> `cmd/psai/webaudio_probe.go`；判据实测见 `dev/media/out/report.md` 的 TC-M-603 小节
+> **实施状态（2026-10-08，A3-3 完整子集）**：WebAudio 已**从最小子集扩展为完整子集**
+> （决策点 3 已确认「要」）。两部分都不回退：
+>
+> **① 最小子集（原样保留，TC-M-603 的既有取证继续成立）**：`AudioContext`（构造 +
+> `sampleRate` / `state` / `currentTime` / `destination` / `close`）、`decodeAudioData`
+> （**真解码**：宿主 ffmpeg → `AudioBuffer`，未注入解码器时如实 reject）、`AudioBuffer`
+> （`length` / `duration` / `sampleRate` / `numberOfChannels` / `getChannelData`）、
+> `Float32Array` 量纲。判据实测见 `dev/media/out/report.md` TC-M-603 小节
 > （44100Hz / 1ch / 44100 帧 / 1.000s，判据 A 同一套 FFT：主峰 439.95 Hz）。
+>
+> **② 完整子集（本次新增：AudioNode 图 + AudioParam 自动化 + OfflineAudioContext + 实时输出）**：
+>
+> - **节点**：`GainNode`、`OscillatorNode`（sine / square / sawtooth / triangle，相位按每帧推进
+>   以支持频率扫描）、`AudioBufferSourceNode`（loop / loopStart / loopEnd / playbackRate /
+>   detune，线性插值）、`ConstantSourceNode`、`StereoPannerNode`（等功率定律）、
+>   `DelayNode`（环形缓冲，延迟量可自动化）、`BiquadFilterNode`（RBJ cookbook 系数；
+>   lowpass / highpass / bandpass / lowshelf / highshelf / peaking / notch / allpass +
+>   `getFrequencyResponse`）、`AnalyserNode`（FFT + Blackman 窗 + smoothing；时域 / 浮点频域 /
+>   字节频域三种读取，均为**就地填充**传入的 TypedArray）。
+> - **参数自动化**：`setValueAtTime` / `linearRampToValueAtTime` / `exponentialRampToValueAtTime` /
+>   `setTargetAtTime` / `setValueCurveAtTime` / `cancelScheduledValues` / `cancelAndHoldAtTime`；
+>   求值**逐样本**（`t = frame / sampleRate`），因此 ramp 的中间值可与浏览器逐点比对。
+> - **离线上下文**：`new OfflineAudioContext(channels, length, sampleRate)`（对象形式亦可）→
+>   `startRendering()` → `Promise<AudioBuffer>`。时间轴完全由帧号决定 ⇒ **逐样本确定**
+>   （同一脚本两次渲染逐字节相同）、不碰设备、可进 CI —— 这是本轮所有数值判据的载体。
+> - **实时输出**：`AudioContext` 的 destination 渲染出的交错 float32 PCM 交给宿主注入的
+>   `bindings.WGAudioSink`；渲染量随 `currentTime` 流逝补齐（定时器被主循环挤慢时一次补多个
+>   量子，音频不会变调），宿主侧（`app/webaudioout.go`）转 s16le → 非阻塞队列 → waveOut，
+>   设备**惰性打开**且无设备时静默降级。
+>
+> **明确不做**（调用即报错，不返回「假节点」）：`AudioWorklet`、`ScriptProcessorNode`、
+> `ChannelMergerNode` / `ChannelSplitterNode`（多声道路由）、`PannerNode`（3D）、`ConvolverNode`、
+> `DynamicsCompressorNode`、`MediaStreamAudio*`；其中 `createChannelMerger` / `createChannelSplitter`
+> 调用即抛 `TypeError`（见 `webaudiograph.go` 文件头取舍与 `webaudio_api.go`）。
+>
+> **已知限制（如实记录，不假装支持）**：内核按**立体声**工作（`wgChannels = 2`），多声道
+> 路由未实现；多个实时 `AudioContext` 同时发声时宿主按到达顺序**串行**写设备（未混音），
+> 只有「单实时上下文」在时长上严格正确；`AnalyserNode.fftSize` 固定 2048；
+> `getFrequencyResponse` 只回填幅度数组（相位数组未写）。
+>
+> 落点：`engine/js/bindings/webaudiograph.go`（图内核：参数自动化 / 节点渲染 / 拓扑 / FFT）、
+> `engine/js/bindings/webaudio_api.go`（JS 对象层：节点与参数对象 / 离线上下文 / 实时驱动）、
+> `engine/js/bindings/webaudio.go`（最小子集，接入图 + 零拷贝 `getChannelData`）、
+> `engine/js/jsc/goja_adapter.go`（新增 `Float32ArrayView` 零拷贝视图）、
+> `app/webaudio.go`（宿主解码器注入）、`app/webaudioout.go`（宿主实时输出）。
+> 测试：`engine/js/bindings/webaudiograph_test.go`（内核直连 4 条）、
+> `engine/js/bindings/webaudio_graph_test.go`（JS 层 12 条）、`app/webaudioout_test.go`（宿主输出 6 条）。
 
 ## 1. 一句话结论
 
@@ -31,7 +67,7 @@
 | 元数据（`rs`/`duration`） | ✅ 已通：`wav/mp3/ogg/m4a` 的 file/rel 三来源 `rs=4`、`duration≈1s`（m4a 1.0 / 部分 1.04）；`loadedmetadata` 派发 | 探针 `sine-440-1s.*` 行 12 格 **L1**；`dev/media/out/geom-*.json` |
 | 播放时钟（`currentTime`） | ✅ 已通：`play()` 后走 `media_element.go` 的时钟推进，file/rel 从 0 → 1（播完）；`timeupdate`/`ended` 派发 | `geom-Browser.json` 的 `playing` 列表：`rs=4, duration=1, ct=1` |
 | 音频**输出**（发声） | ❌ 无：PCM 无去处。`play()` 只推进时钟，没有任何输出调用 | 引擎/`app`/`goskia` 三层均无输出 API |
-| WebAudio | ✅ **最小子集已落地**（A3-3）：`AudioContext` / `decodeAudioData`（真解码 → `AudioBuffer`）；**完整**图式音频仍不做 | `dev/media/out/report.md` TC-M-603 小节：44100Hz / 1ch / 44100 帧 / 1.000s、`getChannelData(0) instanceof Float32Array`、FFT 主峰 439.95 Hz |
+| WebAudio | ✅ **完整子集已落地**（A3-3）：最小子集（`AudioContext` / `decodeAudioData` 真解码）+ AudioNode 图 / AudioParam 自动化 / `OfflineAudioContext` / 实时输出；不做项与已知限制见文首「实施状态」 | 最小子集：`dev/media/out/report.md` TC-M-603 小节（44100Hz / 1ch / 44100 帧、FFT 主峰 439.95 Hz）；完整子集：`engine/js/bindings/webaudio_graph_test.go` 12 条 + `webaudiograph_test.go` 4 条 + `app/webaudioout_test.go` 6 条（离线渲染逐样本确定、增益/ramp/延迟/声像/分析器数值判据） |
 | `data:` 来源的音频 | ⚠️ 仅 `rs=1`、`duration=NaN`：宿主元数据探测按**本地文件路径**走 ffmpeg，`data:` URI 无本地路径 | 探针 `sine-440-1s.* × data` 行 |
 | 判据（L4-S） | ⚠️ 未落地：TC-M-604 要求「播放 1s 正弦 → 采回波形 → 频谱主峰 ≈ 440 Hz」 | §5 G6 |
 
@@ -77,7 +113,7 @@
 |---|---|---|---|
 | TC-M-601 | `rs=4`、`duration≈1s` | ✅ **已达成**（12 格 L1） | 保持 |
 | TC-M-602 | `play()` 后 500ms `currentTime ≈ 0.5` | ✅ **已达成**（时钟推进到 1.00 播完；需补一条"500ms 处 ≈0.5"的定点判据） | 保持 + 定点判据 |
-| TC-M-603 | `AudioContext` / `decodeAudioData` 存在 | ✅ **已达成**（A3-3 最小子集；真解码 `AudioBuffer` + FFT 复核 440Hz） | 保持（最小子集）；**完整** WebAudio 仍不做 |
+| TC-M-603 | `AudioContext` / `decodeAudioData` 存在 | ✅ **已达成**（A3-3；真解码 `AudioBuffer` + FFT 复核 440Hz） | 保持，并**扩展为完整子集**：AudioContext 的图 / 参数 / 离线渲染 / 实时输出均已可用（不做项见文首「实施状态」） |
 | TC-M-604 | 播放 1s 正弦，采回波形，频谱主峰 ≈ 440 Hz | ❌ 未落地 | **L4-S 达成** |
 
 **TC-M-604 的难点与备选判据**：原判据要求「系统输出设备**录音**比对」，需要环回设备
@@ -98,7 +134,7 @@
 | 时钟同步漂移 | 音频硬件时钟与引擎 RAF 时钟不同步 | 规范做法：以**音频时钟为主时钟**，`currentTime` 跟随输出位置（A3-1 设计要点） |
 | 环回设备 | 多数机器没有「立体声混音」 | 判据 A 为主（§5），判据 B 可选 |
 | 许可与体积 | 若走路线 (b) 引入 miniaudio/oto | 立项时评估；路线 (a) 无第三方依赖 |
-| 不做 | WebAudio **完整**实现（`OscillatorNode`/图式音频等） | **不承诺**；最小子集（`AudioContext` / `decodeAudioData`）已按 §7 **A3-3 落地**，边界见文首「实施状态」 |
+| 不做 | WebAudio 的**外围部分**：`AudioWorklet` / `ScriptProcessorNode` / 多声道路由（`ChannelMerger`·`ChannelSplitter`）/ 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode` / `MediaStreamAudio*` | **不承诺**；调用即抛 `TypeError`（不返回假节点）。**图式音频本身已做**（A3-3 完整子集，见文首「实施状态」） |
 | 不做 | 音频**编码**（`MediaRecorder`） | 不在 G6 判据内，不投入 |
 
 ## 7. 建议分期（供确认）
@@ -107,12 +143,12 @@
 |---|---|---|
 | **A3-1** | PCM 通道 + 宿主 ffmpeg 解码 + Windows 输出后端 | TC-M-602 定点判据 + 判据 A（PCM FFT 主峰 440Hz）→ 音频等级 **L1 → L4**（发声） |
 | **A3-2** | 环回设备录音复核（判据 B，可选） | L4-S（外部视角），无设备时 `SKIP(no-loopback)` |
-| **A3-3** | WebAudio 最小子集（**✅ 已实施**，边界见文首「实施状态」） | TC-M-603 ✅ **达成** |
+| **A3-3** | WebAudio：最小子集 + **完整子集**（图 / 参数 / 离线渲染 / 实时输出）（**✅ 已实施**，边界与限制见文首「实施状态」） | TC-M-603 ✅ **达成**（并覆盖图式音频的数值判据） |
 
 ## 8. 待用户确认的决策点
 
 1. **路线**：(a) 宿主注入 PCM（推荐）还是 (b) goskia 内置输出？
 2. **平台范围**：只做 Windows 输出，还是要求三平台同时（后者成本约 ×2~3）？
-3. **WebAudio**：✅ **已确认要**（`AudioContext`/`decodeAudioData`）——最小子集已按 A3-3 实施并达成 TC-M-603。
+3. **WebAudio**：✅ **已确认要**（`AudioContext`/`decodeAudioData`）——A3-3 已按此实施：最小子集达成 TC-M-603，随后扩展为**完整子集**（图 / 参数 / 离线渲染 / 实时输出），不做项与已知限制见文首「实施状态」。
 4. **L4-S 判据口径**：接受「判据 A 为主 + 判据 B 可选」吗（否则需要一台具备环回设备的机器才能验收）？
 5. **是否与「媒体宿主注入通道未受资源策略约束」的修复（见 `media-format-verification-plan.md` §3.4 待决项）合并立项**——两者都动「宿主注入媒体数据」这条链路，合并可省一次接口设计。
