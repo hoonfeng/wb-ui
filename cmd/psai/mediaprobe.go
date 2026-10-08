@@ -28,11 +28,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"wb-ui/app"
+	"wb-ui/engine/rendering"
 	"wb-ui/webkit"
 )
 
@@ -62,13 +65,46 @@ type mediaConfig struct {
 func policyPtr(p webkit.ResourcePolicy) *webkit.ResourcePolicy { return &p }
 
 func mediaConfigs() []mediaConfig {
-	return []mediaConfig{
+	all := []mediaConfig{
 		{Name: "Browser", Mode: webkit.ModeBrowser},
 		{Name: "Toolkit+DenyExternal", Mode: webkit.ModeToolkit, Policy: policyPtr(webkit.DenyExternal)},
 		{Name: "Toolkit+AllowHostResolved", Mode: webkit.ModeToolkit,
 			Policy: policyPtr(webkit.AllowHostResolved), HostResolver: true},
 		{Name: "Toolkit+AllowAll", Mode: webkit.ModeToolkit, Policy: policyPtr(webkit.AllowAll)},
 	}
+	// ★ 调试开关（`PSAI_MEDIA_CONFIGS=Browser`，逗号分隔）：只跑指定配置。
+	//   排查「加载完成速度 vs 等待窗口」这类**竞态**必须做多组对照实验，而一次四
+	//   配置全量要 ~14 分钟、窗口参数又要逐组变 ⇒ 单配置把每组压到约 1/4。
+	//   未设置时仍是四配置全跑（交付口径不变）。
+	sel := strings.TrimSpace(os.Getenv("PSAI_MEDIA_CONFIGS"))
+	if sel == "" {
+		return all
+	}
+	want := map[string]bool{}
+	for _, n := range strings.Split(sel, ",") {
+		want[strings.TrimSpace(n)] = true
+	}
+	out := make([]mediaConfig, 0, len(all))
+	for _, c := range all {
+		if want[c.Name] {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		fmt.Printf("媒体验证：PSAI_MEDIA_CONFIGS=%q 没匹配到配置，按四配置全跑\n", sel)
+		return all
+	}
+	return out
+}
+
+// envInt 读整数环境变量（调试开关用）；未设置/非法/非正数时取 def。
+func envInt(name string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 // mediaPhase 是 manifest 里 video 样本的分段期望色（`phases` 字段），形如
@@ -640,7 +676,7 @@ func runMediaConfig(cfg mediaConfig, man *manifestDoc, cells []cell, matrixPath,
 	//   事件循环时间不会让 goroutine 完成——必须「推进 + 真实 sleep」交替。
 	settleReal(wv, 1500*time.Millisecond)
 	// ★ 就绪即走（2026-10-08 修复）：固定窗口换成「轮询到稳定」，见 waitImagesReady。
-	waitImagesReady(wv, cells, 30*time.Second)
+	waitImagesReady(wv, cells, samplesDir, 30*time.Second)
 
 	res.Policy = wv.ResourcePolicy().String()
 
@@ -966,7 +1002,7 @@ func stopAudioPlayback(wv *webkit.WebView, cells []cell) {
 //
 // 收敛条件：连续 8 步没有新的格子就绪即认为稳定（样本里本就有故意损坏的
 // corrupt.png / mislabeled.png，永远不就绪，因此不能等「全部就绪」）。
-func waitImagesReady(wv *webkit.WebView, cells []cell, maxWait time.Duration) (ready, total, steps int) {
+func waitImagesReady(wv *webkit.WebView, cells []cell, samplesDir string, maxWait time.Duration) (ready, total, steps int) {
 	ids := make([]string, 0, len(cells))
 	for _, c := range cells {
 		ids = append(ids, jsString(c.ID))
@@ -992,8 +1028,10 @@ func waitImagesReady(wv *webkit.WebView, cells []cell, maxWait time.Duration) (r
 	// minSamples 保证「长尾也能等到」：AVIF 走宿主 ffmpeg 子进程转码、huge-4096.png 解码
 	// 都可能在上一次就绪后停顿 1s 以上；只按空窗判稳会提前收敛（实测 8 步空窗时曾停在
 	// 62~63/72，造成 12 条零星 L2 假降级）。因此既要求最短等待，也要求空窗足够长。
-	const minSamples = 10   // 至少 10 次采样（= 5s）
-	const stableSamples = 5 // 连续 5 次采样（2.5s）无新增就绪才认为收敛
+	// ★ 调试开关：PSAI_MEDIA_MIN_SAMPLES / PSAI_MEDIA_STABLE_SAMPLES 可覆盖下述收敛
+	//   参数，用于「人为缩短/延长等待窗口 ⇒ 未就绪格是否补齐」的对照实验。
+	minSamples := envInt("PSAI_MEDIA_MIN_SAMPLES", 10)      // 至少 10 次采样（= 5s）
+	stableSamples := envInt("PSAI_MEDIA_STABLE_SAMPLES", 5) // 连续 5 次采样（2.5s）无新增就绪才认为收敛
 	samples, stable := 0, 0
 	prev := -1
 	notReady := ""
@@ -1038,6 +1076,45 @@ func waitImagesReady(wv *webkit.WebView, cells []cell, maxWait time.Duration) (r
 		fmt.Printf("；未就绪：%s", notReady)
 	}
 	fmt.Println()
+	// ★ 就绪诊断（排查 file/rel 批量未就绪）：把「未就绪」分成两类，直接区分两条
+	//   互斥的根因方向——
+	//     ①缓存里**已解码**（IsImageReady 为真）：取字节/解码已完成，缺陷在**契约
+	//       派发**（load 事件没到 DOM，el.complete/naturalWidth 不更新）；
+	//     ②缓存里**也没有**：缺陷在**取字节通道**（loader → loadExternalResource）
+	//       或解码失败，即该 URL 没能在等待窗口内完成。
+	//   再打印 goroutine 数：「加载 goroutine 挂起 ⇒ loading[url] 永久为真 ⇒ 永不
+	//   重试 ⇒ 零推进」这条假设若成立，goroutine 数会显著高于稳态。
+	if notReady != "" {
+		byID := make(map[string]cell, len(cells))
+		for _, c := range cells {
+			byID[c.ID] = c
+		}
+		var cached, uncached int
+		var uncachedItems []string
+		for _, id := range strings.Split(notReady, ",") {
+			c, ok := byID[id]
+			if !ok {
+				continue
+			}
+			// 缓存键是**解析后的绝对 URL**：file 形态本就是绝对 URL；rel 形态在渲染层
+			// 经 loader.ResolveURL 解析为 samples 目录下的同一文件。
+			u := c.URL
+			if c.Source != "data" && c.Sample.File != "" {
+				u = fileURLOf(filepath.Join(samplesDir, filepath.FromSlash(c.Sample.File)))
+			}
+			if rendering.IsImageReady(u) {
+				cached++
+			} else {
+				uncached++
+				uncachedItems = append(uncachedItems, id+"@"+c.Source)
+			}
+		}
+		fmt.Printf("  未就绪诊断：%d 格（缓存已解码 %d / 缓存无 %d）；goroutines=%d\n",
+			cached+uncached, cached, uncached, runtime.NumGoroutine())
+		if len(uncachedItems) > 0 {
+			fmt.Printf("    缓存无：%s\n", strings.Join(uncachedItems, " "))
+		}
+	}
 	return ready, total, steps
 }
 
