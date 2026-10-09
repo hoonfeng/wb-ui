@@ -13,9 +13,12 @@ package main
 //
 // 取证全在探针侧：引擎与宿主不参与任何频谱计算（判据工具不该混进播放链路）。
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -264,6 +267,7 @@ const audioClockLagSec = 0.45
 // loopbackEvidence 是判据 B 的结果。
 type loopbackEvidence struct {
 	Status  string // ok / mismatch / SKIP(no-loopback) / SKIP(loopback-failed)
+	Method  string // 采集路径：wasapi-loopback / ffmpeg-dshow
 	Device  string
 	PeakHz  float64
 	PeakMag float64
@@ -313,9 +317,159 @@ func pickLoopbackDevice(devs []string) string {
 	return best
 }
 
-// probeLoopback 执行判据 B：挑一个环回设备录音 1 秒，FFT 找主峰。
+// probeLoopback 执行判据 B：**先起录音、再起播放**，把输出端点真的吐出来的字节采回来
+// 做 FFT。两条采集路径，优先前者（2026-10 实测结论）：
+//
+//	① WASAPI loopback（app.CaptureDefaultRenderLoopback）：由音频引擎在**默认 render
+//	   端点内部**做 tap，录到的就是「应用写给该端点、混音之后」的字节。不需要
+//	   「立体声混音」之类的环回设备、不需要管理员、也不受虚拟声卡内部路由影响——
+//	   实测本机默认输出是虚拟声卡（Voicemeeter VAIO3）且其引擎未运行时，dshow 只能
+//	   录到底噪（rms ≈ 1e-5），而同一窗口的 loopback 照样录到 440.000Hz。
+//	② ffmpeg dshow 录一个环回/虚拟采集设备（回退路径，语义见 probeLoopbackDShow）。
+//
 // 任何一步不可用都返回 SKIP（不阻塞验收），理由写进 Detail。
-func probeLoopback(expectHz, seconds float64) loopbackEvidence {
+func probeLoopback(expectHz, seconds float64, outDir string) loopbackEvidence {
+	if ev, ok := probeLoopbackWASAPI(expectHz, seconds, outDir); ok {
+		return ev
+	}
+	ev := probeLoopbackDShow(expectHz, seconds)
+	if ev.Method == "" {
+		ev.Method = "ffmpeg-dshow"
+	}
+	if ev.Status == "SKIP(no-loopback)" {
+		ev.Detail = "WASAPI loopback 在本机不可用（端点打不开/混音格式不支持）；" + ev.Detail
+	}
+	return ev
+}
+
+// probeLoopbackWASAPI 走 ① 路径：起录音 → 播测试音 → 取回波形做 FFT。
+//
+// 返回 ok=false 的语义是「**采集路径本身不可用**」（端点打不开、混音格式不支持、
+// 录音窗口内一帧都没拿到）——调用方据此回退 ②。而「录到数据但主峰不是期望频率」
+// **不是** ok=false：那是有效证据（mismatch），必须如实记录而不是被回退路径盖掉。
+func probeLoopbackWASAPI(expectHz, seconds float64, outDir string) (loopbackEvidence, bool) {
+	format := rendering.AudioFormat{SampleRate: 48000, Channels: 2}
+	type recResult struct {
+		pcm    []byte
+		format rendering.AudioFormat
+		err    error
+	}
+	ch := make(chan recResult, 1)
+	go func() {
+		pcm, f, err := app.CaptureDefaultRenderLoopback(seconds + 0.8)
+		ch <- recResult{pcm, f, err}
+	}()
+	// ★ 先起录音：Windows 的 loopback 在端点没有音频在播时**不产包**（GetNextPacketSize
+	//   返回 0），「先播后录」会把开头整段丢掉。
+	time.Sleep(250 * time.Millisecond)
+	playErr := app.PlayTestTone(expectHz, seconds, format)
+	r := <-ch
+	if r.err != nil || len(r.pcm) == 0 {
+		return loopbackEvidence{}, false
+	}
+	f := r.format
+	if !f.Valid() {
+		f = format
+	}
+	// 录音原件落盘：判据 B 的结论要能被**复听复核**（不带证据的频谱数字只是断言）。
+	wavNote := ""
+	if outDir != "" {
+		wavPath := filepath.Join(outDir, "loopback-wasapi.wav")
+		if err := writeLoopbackWAV(wavPath, r.pcm, f); err == nil {
+			wavNote = "；录音证据 → " + wavPath
+		} else {
+			wavNote = "；录音落盘失败：" + err.Error()
+		}
+	}
+	// 从「第一段非零音频」开始取 seconds 秒再交给 FFT。
+	pcm := trimLoopbackToAudio(r.pcm, f, seconds)
+	mono := app.PCMToMono(pcm, f.Channels)
+	peak, mag := app.DominantFrequency(mono, f.SampleRate)
+	method := "wasapi-loopback"
+	if playErr != nil {
+		method += "(play-failed)"
+	}
+	ev := loopbackEvidence{
+		Method:  method,
+		Device:  fmt.Sprintf("WASAPI loopback @ 默认输出端点（%dHz %dch）", f.SampleRate, f.Channels),
+		PeakHz:  peak,
+		PeakMag: mag,
+		Command: fmt.Sprintf("app.CaptureDefaultRenderLoopback(%.1fs) ‖ app.PlayTestTone(%.0fHz, %.1fs, %dHz/%dch)%s",
+			seconds+0.8, expectHz, seconds, format.SampleRate, format.Channels, wavNote),
+	}
+	if math.Abs(peak-expectHz) <= audioPeakToleranceHz {
+		ev.Status = "ok"
+	} else {
+		ev.Status = "mismatch"
+		ev.Detail = fmt.Sprintf("录回主峰 %.1fHz 与期望 %.0fHz 不符（幅度 %.3f）", peak, expectHz, mag)
+	}
+	return ev, true
+}
+
+// writeLoopbackWAV 把采回的 s16le 交错 PCM 写成标准 wav（判据 B 的可复听证据）。
+func writeLoopbackWAV(path string, pcm []byte, f rendering.AudioFormat) error {
+	channels := f.Channels
+	if channels < 1 {
+		channels = 1
+	}
+	hdr := make([]byte, 44)
+	copy(hdr[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(hdr[4:8], uint32(36+len(pcm)))
+	copy(hdr[8:12], "WAVE")
+	copy(hdr[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(hdr[16:20], 16)
+	binary.LittleEndian.PutUint16(hdr[20:22], 1) // PCM
+	binary.LittleEndian.PutUint16(hdr[22:24], uint16(channels))
+	binary.LittleEndian.PutUint32(hdr[24:28], uint32(f.SampleRate))
+	binary.LittleEndian.PutUint32(hdr[28:32], uint32(f.SampleRate*channels*2))
+	binary.LittleEndian.PutUint16(hdr[32:34], uint16(channels*2))
+	binary.LittleEndian.PutUint16(hdr[34:36], 16)
+	copy(hdr[36:40], "data")
+	binary.LittleEndian.PutUint32(hdr[40:44], uint32(len(pcm)))
+	return os.WriteFile(path, append(hdr, pcm...), 0o644)
+}
+
+// trimLoopbackToAudio 在录音里定位**第一段非零音频**的起点，返回从那里开始、长度约
+// seconds 秒的切片（不够就取到末尾）。
+//
+// 为什么必须定位而不是裁固定时长：录音**必须先于播放启动**（Windows 的 loopback 在
+// 端点静音时不产包），而「起录音」到「设备真的开始交付数据」之间还隔着 COM 初始化
+// 与输出设备打开——实测静音前缀可达 0.4s。而 DominantFrequency 只对**采样序列的
+// 前 spectrumMaxSamples（16384 ≈ 0.34s @48k）**做 FFT，固定裁 0.3s 会把整个窗口
+// 留在静音里，主峰因此恒为 0（症状：录到的数据非零、判据却报 mismatch）。
+//
+// 整段都是静音时原样返回：让 FFT 如实得出「主峰 0」而不是把判据悄悄变成通过。
+func trimLoopbackToAudio(pcm []byte, f rendering.AudioFormat, seconds float64) []byte {
+	bytesPerFrame := 2 * f.Channels
+	if bytesPerFrame <= 0 || len(pcm) < bytesPerFrame {
+		return pcm
+	}
+	const threshold = 100 // s16 满幅 32767 的约 0.3%（远高于底噪、远低于测试音幅度）
+	frames := len(pcm) / bytesPerFrame
+	start := -1
+	for i := 0; i < frames && start < 0; i++ {
+		off := i * bytesPerFrame
+		for c := 0; c < f.Channels; c++ {
+			v := int16(uint16(pcm[off+c*2]) | uint16(pcm[off+c*2+1])<<8)
+			if v > threshold || v < -threshold {
+				start = off
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return pcm
+	}
+	end := start + int(seconds*float64(f.SampleRate))*bytesPerFrame
+	if end > len(pcm) {
+		end = len(pcm)
+	}
+	return pcm[start:end]
+}
+
+// probeLoopbackDShow 是 ② 回退路径：挑一个环回/虚拟采集设备录音 seconds 秒，FFT 找主峰。
+// 任何一步不可用都返回 SKIP（不阻塞验收），理由写进 Detail。
+func probeLoopbackDShow(expectHz, seconds float64) loopbackEvidence {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return loopbackEvidence{Status: "SKIP(no-loopback)", Detail: "本机没有 ffmpeg"}
@@ -391,6 +545,9 @@ func audioSection(evidence []audioCellEvidence, lo loopbackEvidence) string {
 	if lo.Command != "" {
 		fmt.Fprintf(&b, "命令：`%s`\n\n", lo.Command)
 	}
+	if lo.Method != "" {
+		fmt.Fprintf(&b, "- 采集路径：**%s**\n", lo.Method)
+	}
 	fmt.Fprintf(&b, "- 设备：%s\n- 结果：**%s**\n", orDash(lo.Device), lo.Status)
 	if lo.PeakHz > 0 {
 		fmt.Fprintf(&b, "- 录回音频主峰：%.1f Hz（幅度 %.3f）\n", lo.PeakHz, lo.PeakMag)
@@ -407,6 +564,8 @@ func audioSection(evidence []audioCellEvidence, lo loopbackEvidence) string {
 			refMag)
 		if ratio := refMag / lo.PeakMag; ratio >= 2 {
 			fmt.Fprintf(&b, "录回幅度仅为其 **1/%.0f** ⇒ 基本只录到底噪，该采集设备未被系统输出喂到。\n", ratio)
+		} else if lo.Status == "ok" {
+			b.WriteString("两者同量级 ⇒ **端到端成立**（要写进设备的字节与被采回的波形同量级）。\n")
 		} else {
 			b.WriteString("两者同量级 ⇒ 确实录到了声音，只是主峰不是期望的正弦。\n")
 		}
@@ -414,7 +573,8 @@ func audioSection(evidence []audioCellEvidence, lo loopbackEvidence) string {
 	b.WriteString("\n**判定条件与语义**（本节口径）：判据 B 是**可选的外部复核**（端到端视角：\n" +
 		"解码 → 输出设备 → 采集设备），四种取值都**如实记录、都不伪装成通过**：\n" +
 		"- `ok`：录回主峰落在期望 ±容差 ⇒ 端到端成立；\n" +
-		"- `SKIP(no-loopback)`：无 ffmpeg，或无环回/虚拟声卡候选 ⇒ 跳过；\n" +
+		"- `SKIP(no-loopback)`：WASAPI loopback 不可用，**且**无 ffmpeg / 无环回（立体声混音）\n" +
+		"  或虚拟声卡候选 ⇒ 跳过；\n" +
 		"- `SKIP(loopback-failed)`：有候选但打开失败（被独占）⇒ 跳过；\n" +
 		"- `mismatch`：录到数据但主峰不符 ⇒ **不视为通过，也不阻塞验收**。\n" +
 		"L4-S 的**主线判据**是 A（同一份待输出 PCM 的 FFT 主峰/幅度）——它证明的是\n" +

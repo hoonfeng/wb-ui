@@ -364,13 +364,20 @@ func runMediaProbe(o mediaOpts) int {
 	if expectHz == 0 {
 		expectHz = 440
 	}
-	loopback := probeLoopback(expectHz, 1.0)
+	loopback := probeLoopback(expectHz, 1.0, outDir)
 	fmt.Printf("  判据 B（环回录音）：%s\n", loopback.Status)
 	if err := writeMediaReport(reportPath, man, results, baseline, berr, matrixPath, adDiff, adDiffExcl, animRects, adErr, loopback, edgeSection); err != nil {
 		fmt.Printf("媒体验证：写报告失败: %v\n", err)
 		return 2
 	}
 	fmt.Printf("媒体验证：报告 → %s\n", reportPath)
+	// 补充判据（G3/G4/G6/G7 的 11 个「未单独采证」用例）：独立页面 + 独立报告。
+	// 失败不阻塞主验收（与 Edge 对照的 SKIP 同一处理方式）——但要打印出原因。
+	if xerr := runExtraVerification(filepath.Dir(matrixPath), outDir, vw, pageH, o.Edge); xerr != nil {
+		fmt.Printf("  补充判据：跳过（%v）\n", xerr)
+	} else {
+		fmt.Printf("  补充判据：报告 → %s\n", filepath.Join(outDir, "extra-verification.md"))
+	}
 
 	// 基线比对：等级下降 → 非零退出（§6.2 第 2 条）。
 	if o.Update {

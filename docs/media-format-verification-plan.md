@@ -110,7 +110,7 @@
 | 运行模式 | ModeBrowser（浏览器模式）、ModeToolkit（UI 库模式，±宿主 resolver） |
 | 资源策略（决策 1 新增） | `DenyExternal`（默认；`data:` 无条件放行）/ `AllowHostResolved`（仅放行宿主 resolver 明确解析出的资源）/ `AllowAll`（等价 ModeBrowser）。★ 三档对 `<img>/<script>/<link>` 与 `<video>/<audio>` **一视同仁**（媒体自 §9.9 起并入同一条判定） |
 | 承载方式 | `<img>`、CSS `background-image`、`<video poster>`、`<video src>`、`<audio src>` |
-| 判定基准（决策 2） | **Edge 双端对照**：同一样本页在 Edge 与引擎各跑一次，逐项比对，输出「引擎 / Edge」双列报告 |
+| 判定基准（决策 2） | **Edge 双端对照**：同一样本页在 Edge 与引擎各跑一次，逐项比对，输出「引擎 / Edge」双列报告。★ **现状注（2026-10-08 更新）**：该「引擎 / Edge」双列**等级****已产出**——`runEdgeComparison`（`cmd/psai/mediaprobe.go:2216+`）已扩为**程序化逐格等级对照**，两侧共用同一判定内核 `judgeCell`（0..3 尺度；Edge 侧不做连拍采样、测不到「动画推进」，故引擎 L4 在比较时按 L3 计）。最近一次（`dev/media/out/report.md`，2026-10-08，commit `17225f9`）已写出「Edge 双端对照」小节：**96 格 / 引擎低于 Edge 0 格 / 一致 84 / 高于 12**，结论 **「✅ 逐格不低于 Edge 等级」**。★ 口径：`-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53` `flag.Bool("media-edge", false, …)`）⇒ 该节须**显式启用**才产出——这是**默认关闭**（与决策 6「不挂 CI」一致），**不是未实现**；详见 §8.3 第 2 条、§10 **Q1** |
 | 项目归属（2026-10 新增） | **独立媒体验证项目**（另开立项；本文为其设计稿）；L0–L4 等级验证**不在 AI-PS 项目内进行**——AI-PS 仅做本机可用性盘点 |
 
 ### 1.3 非范围（本轮不做）
@@ -314,6 +314,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 **执行配置（决策 1/2）**：每条用例在**四种配置**下跑 —— `Browser`、`Toolkit+DenyExternal`、`Toolkit+AllowHostResolved`、`Toolkit+AllowAll`；其中 `Browser` 与 `Toolkit+AllowAll` 必须逐像素一致。每个格式再与 **Edge 对照**（决策 2），报告输出「引擎 / Edge」双列等级。
 
+> ★ **现状注（2026-10-08 更新）**：报告**已产出**「引擎 / Edge」双列**等级**——`runEdgeComparison`（`cmd/psai/mediaprobe.go:2216+`）已扩为**程序化逐格等级对照**：两侧共用同一判定内核 `judgeCell`（0..3 尺度，引擎 L4 按 L3 计；Edge 侧不做连拍采样、测不到「动画推进」）。最近一次 `dev/media/out/report.md`（commit `17225f9`）「Edge 双端对照」：**96 格 / 引擎低于 Edge 0 格 / 一致 84 / 高于 12** ⇒ **「✅ 逐格不低于 Edge 等级」**（§8.3 第 2 条、§10 **Q1**）。★ 口径：`-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53`），需**显式启用**才有该节——是**默认关闭**，**非未实现**。
+> ★ 另注：`TC-M-603`（WebAudio）**只在 `Browser` 配置跑一次**——它验的是引擎能力，与资源策略/配置无关，故**不重复四遍**（§9.6「WebAudio 最小子集落地」验收行）。
+
 | 格式 | data: | file:// | 相对 | 模式 | 覆盖维度 | 目标等级 |
 |---|---|---|---|---|---|---|
 | PNG | ✔ | ✔ | ✔ | Browser/Toolkit | L G P E | L3 |
@@ -350,6 +353,10 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-150..152 | ICO 三来源 | 同上 | 同 D4 风险 | 同上 |
 | TC-M-160 | CSS `background-image`（PNG/WebP） | 元素 100×100 | 与 `<img>` 同结论 | 截图 |
 
+> **现状（2026-10）**：✅ **本组全绿**。PNG / JPEG / GIF 静态 / WebP（有损+无损）/ BMP / ICO × `data:` / `file://` / 相对路径，在 `Browser` 与三档 Toolkit 策略下**全部 L3**；`Toolkit+DenyExternal` 下**仅 `data:`** 达 L3（§3.4「光栅静态全绿」）。
+> 上表「预期」列里的 **D4 风险已闭环**——WebP/BMP/ICO 固有尺寸经 Skia `DecodeSize` 兜底可用（§8.1 **U3**）；`data:` 在 Toolkit 下的无条件放行即 **U1** 的修复边界（§8.1 **U1**、§8.2 阶段 1）；`complete` / `naturalWidth` / `onload` 契约即 **U2**（§8.1 **U2**、§9.5）。
+> 证据：§3.4「本轮复测结果」总表与 384 格基线（`dev/media/baseline.json`）、`dev/media/out/report.md`、`geom-*.json`。
+
 **每条额外跑三种 Toolkit 策略配置**（决策 1）：
 - `Toolkit+DenyExternal`（默认）：修复前预期全 ❌；修复后**仅 `data:` 转 ✅**（此即 U1 的修复边界），其余仍 ❌ → 用于回归对比；
 - `Toolkit+AllowHostResolved`：预期 `file://`/相对路径在 resolver 解析成功时 ✅，`http(s)` 仍 ❌；
@@ -364,6 +371,8 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-204 | 带 `width/height` 的 SVG 固有尺寸 | 盒尺寸 = 声明尺寸 | — |
 | TC-M-205 | `<img src=svg>` + `object-fit:cover`（`video-poster` 既有回归场景） | 裁剪正确 | 已有参考用例 |
 
+> **现状（2026-10）**：✅ **D3 已闭环**。上表 TC-M-202/203 的「当前 ❌（D3）」是**修复前**文本——`file://` 与相对路径 SVG 现均已绘制（**U5**，§8.1 **U5**、§9.4），SVG **九格 L2 → L3**（固有尺寸与 `load`/`complete` 契约由 **D8** 补齐）。证据：§9.4「SVG 补齐」、§3.4 总表、§3.3 D3「✅ 已修复」。
+
 ### G3 动图（帧推进）
 | 用例 | 输入 | 步骤 | 预期 |
 |---|---|---|---|
@@ -375,6 +384,15 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-306 | 动图 + `visibility:hidden` 后恢复 | 隐藏 300ms → 恢复 → 比对像素 | 记录隐藏期间是否继续推进（规范：`<img>` 动图不因不可见而暂停） |
 | TC-M-307 | 循环 GIF（loop=0）与不循环（loop=1） | 播放过末尾后读像素 | 循环正确；不循环停在末帧不重头 |
 
+> **现状（2026-10）**：TC-M-301/302 已闭环 → **L4**（GIF 与 WebP 动画均推进；**U4**：goskia 暴露 `SkCodec` 多帧 + 引擎按帧时长选帧，§8.1 **U4**、§9.4）。
+> 样本侧：`anim-3frames-rgb`（300ms）、`anim-uneven-delay`（**350ms**）、`anim-noloop`（300ms）、`anim-2frames.webp`（400ms）均已入矩阵，并**按各样本自己声明的帧时长**驱动连拍采样（§9.9「探测伪影（第 8 处）」行）。
+> ✅ **已单独采证（2026-10-08）**：上列的 TC-M-303/304/305/306/307 五项已由**补充判据探针**
+> （`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与 **Edge 同页面同脚本**对照——
+> 判据口径、「如实记录的缺口」与逐项表见 **§9.10**。摘要：TC-M-305 逐帧 delay 对齐 **达成**；
+> TC-M-303（`image-rendering:pixelated`）**引擎未实现**（Edge 同项生效）⇒ 唯一「低于 Edge」的项；
+> TC-M-304（canvas `drawImage` 取当前帧）**未达成**（取到固化帧）；TC-M-306 隐藏 300ms 内**停推**；
+> TC-M-307a（`loop=1` 停末帧）**未达成**、TC-M-307b（`loop=0` 继续循环）**达成**。
+
 ### G4 不支持格式的失败语义
 | 用例 | 输入 | 预期 |
 |---|---|---|
@@ -383,6 +401,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-403 | 损坏 PNG（截断 50%） | 同上 |
 | TC-M-404 | 扩展名与内容不符（`.png` 实为 JPEG） | 按内容解码（引擎不看扩展名）→ 应渲染成功 |
 | TC-M-405 | 图片路径不存在 | 不渲染 + 无控制台报错刷屏 |
+
+> **现状（2026-10）**：TC-M-401（AVIF/TIFF）**维持 L0 且已入基线**（`Browser` 下 6 格 L0、四配置共 24 格全 L0，**U9**「维持不支持」；§8.1 **U9**、§3.4「仍存在的缺口」表）；TC-M-402（0 字节）/ TC-M-403（损坏 PNG）**同样已入基线**（基线中 `corrupt.png` ×3、`zero-bytes.png` ×2、`quad.tiff` ×3 等 L0 均为**预期坏样本**，§9.9 降级排查段）；且 `DenyExternal × file/rel` 下 `corrupt.png` 的备注文案已更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」（§10 **Q7-B**）。
+> ⚠️ **未单独采证**：TC-M-404（扩展名与内容不符——样本 `mislabeled.png` 已在矩阵内，但**未单列判据**）、TC-M-405（路径不存在时的控制台刷屏）——**未登记**结论。
 
 ### G5 视频
 | 用例 | 输入 | 步骤 | 预期 |
@@ -395,6 +416,11 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-506 | `<video>` + `controls` 属性 | 截图 | 引擎是否绘制原生控件（基线预期否；阶段 3 再定） |
 | TC-M-507 | 连续 1s 内取 5 帧截图 | 像素差异 | ✅ **达成（2026-10，A2）**：连续采样 5 帧（帧号 [0 1 2 3 4]），**每帧画面都 = 该帧的独立 ffmpeg 参照**（判据 A2-6）；播放中画面随时间变化（A2-1），播放全程**同步抽帧 0 次**（A2-4：预取 8 次 / 异步交付 9 帧 / 回退上一帧 6 次） |
 
+> **现状（2026-10）**：TC-M-501/502 = **A0/A1 达成**（元数据 L1、poster 与首帧 L2）；TC-M-503/504/507 = **A2 达成**（事件序列、**精确到帧的 seek**、连续帧采样均实测）——**U6 已闭环**（含异步预取 + 精确 seek + `requestVideoFrameCallback`，§8.1 **U6**、§9.5）。
+> ⚠️ 上表 TC-M-504 行末「`seeking/seeked` 事件与连续换帧（L4）**仍属 A2**」是 **A2 落地前**的表述，两者**均已落地**（§9.5）。
+> TC-M-505（`http(s)`）**维持** `MEDIA_ERR_SRC_NOT_SUPPORTED`；★ 媒体通道对 `http(s)`/`blob:` 属**能力边界**（恒拒，§9.9「语义」行）。
+> TC-M-506（`controls`）：**未单独采证**（无截图判据）。代码侧可确证两点——`controls` 有 **IDL 反射**（`engine/js/bindings/media_element.go` 的内容属性表 + `boolAttr`，默认 `false`），且带 `controls` 时 `<audio>`/`<video>` 的 **tabIndex 默认值 = 0**（`engine/js/bindings/elemattr.go`）；**全 `engine` 未见 UA 原生媒体的控件绘制实现**（`controls` 的命中均为**表单控件**相关）。故「引擎是否绘制原生控件」**尚无用例级结论**，不列为缺陷；§8.3 的 12 个 `<audio>` 格「两边均空白」与此一致，但该 12 格样本是否带 `controls` **未逐格核实**，故不作为判据。
+
 ### G6 音频
 | 用例 | 输入 | 步骤 | 预期 |
 |---|---|---|---|
@@ -402,6 +428,8 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-602 | `audio.play()` 后 500ms | 读 `currentTime` | ✅ **达成（2026-10，A3）**：时钟由**输出位置**驱动——终态到 1.00s（真播完），采样点 `currentTime` **不超前**于「该会话首块 PCM 交付以来经过的时间」。定点口径与设备启动延迟的处置见 §9.6；严格断言在引擎单测 `TestAudioSessionDrivesCurrentTime` |
 | TC-M-603 | `AudioContext` / `decodeAudioData` | 探测 API 存在性 | ✅ **达成（2026-10-08，A3-3）**：`typeof AudioContext === "function"` ✅（含 `webkitAudioContext` 别名）、`decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / `duration=1.000s`、`getChannelData(0) instanceof Float32Array`），FFT 主峰 **439.95Hz**（判据 A 同一套工具）。★ **已从最小子集扩展为完整子集**：AudioNode 图（8 类节点）/ `AudioParam` 全套自动化 / `OfflineAudioContext` / 实时输出均可用（**不含** `AudioWorklet` / `ScriptProcessorNode` / 多声道路由 / 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode`——调用即抛错）。判据与限制见 §9.6「WebAudio 完整子集落地」与 `docs/audio-backend-proposal.md` 文首「实施状态」 |
 | TC-M-604 | 系统输出设备录音比对（需环回设备） | 播放 1s 正弦，采回波形 | ✅ **主线判据达成（2026-10，A3）**：宿主输出回调的 PCM 做 FFT → 主峰 **439.88Hz**（期望 440Hz）、幅度 **1.000**；环回录音按统一口径如实记录（见 §9.6「判据 B 跳过口径」）——**无设备/无候选 → `SKIP(no-loopback)`**，有候选但录音失败 → `SKIP(loopback-failed)`，录到但主峰不符 → `mismatch`。三者都是「跳过/未通过」，**都不伪装为通过** |
+
+> **现状（2026-10）**：上表 TC-M-601 的「**基线**全 0/NaN → L0」是**修复前**文本——音频已由 L0 → **L4**（音频 48 格中 **40 格 L4**：三个非拒配置各 12 格全 L4；另 8 格是 `DenyExternal × file/rel` 按 §9.9 门禁**预期拒为 L0**，非能力缺口；`data:` 来源由 L1 → L4 见 §9.8）。TC-M-602/603/604 均已达成（**时钟由输出位置驱动**、WebAudio **最小子集 + 完整子集**、判据 A FFT 主峰 **439.88Hz**）。证据：§9.6「落地记录 / 验收」、§8.1 **U7/U8**、§3.4 D12。
 
 > **决策 4 落点**：G5/G6 基线全部为 L0；因已确认「要真实播放」，本节即阶段 3 的**验收清单**——验收标准为「目标」列全部达成。
 
@@ -414,6 +442,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-704 | 中文文件名 + 中文目录 | 能加载（Windows 路径编码） |
 | TC-M-705 | 路径含空格 / `..` 穿越 | 能加载 / 被 resolver 拒绝（安全） |
 
+> **现状（2026-10）**：TC-M-701 所验的 **D4（固有尺寸塌陷）已闭环**（WebP/BMP/ICO 固有尺寸可用，**U3**，§8.1 **U3**），盒尺寸逐格落在 `dev/media/out/geom-*.json`；TC-M-703 的选源折算**实现已在**（`engine/layout/replaced.go` 的 `srcsetIntrinsic`，上表已注）。
+> ⚠️ **未单独采证 / 未登记**：TC-M-702（`object-fit` 四值裁剪与 Edge 的逐格对照）、TC-M-704（中文文件名与目录）、TC-M-705（路径含空格 / `..` 穿越被 resolver 拒绝）——均**无独立判据**，本文档不记结论。★ 注：§8.3 的 Edge 对照 96 格以 `<img>`/`<video>`/`<audio>` **元素**为单位，**未**按 `object-fit` 取值展开，故**不构成** TC-M-702 的采证。
+
 ### G8 契约（事件与 IDL）
 | 用例 | 输入 | 预期 |
 |---|---|---|
@@ -422,6 +453,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-803 | `<img onerror>` + 不存在的文件 | 应派发 `error`（当前是否派发待测） |
 | TC-M-804 | `new Image(); img.src=...` 动态创建 | 同 801 |
 | TC-M-805 | 同一 URL 两个 `<img>` | 两者状态都正确（当前 §3.2 报告显示同 URL 元素状态不一致，须复测） |
+
+> **现状（2026-10）**：✅ **U2 已闭环**——TC-M-801/804 的 `complete`/`naturalWidth` 现为 `true`/`>0`（契约列 **0 → 66 ✅**，§8.1 **U2**、§9.5 契约批）；TC-M-802/803 的 `load`/`error` 均已派发；TC-M-805（同一 URL 两个 `<img>`）随 U2 一并修复（§8.2 阶段 1 的 *U2（契约）* 明确要求覆盖该场景）。
+> ⚠️ 上表 TC-M-801 行内「当前 ModeBrowser file:// 为 false/0 → **D1**」与 TC-M-805 行内「须复测」均为**修复前**文本（D1 见 §3.3「✅ 已修复」）。
 
 ### G9 资源策略开关（决策 1 新增）
 | 用例 | 输入 | 预期 |
@@ -433,6 +467,8 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-905 | `Toolkit` + `AllowAll` 与 `Browser` 同页对照 | 两图**逐像素一致** |
 | TC-M-906 | 默认值回归：不设置开关时的 `ModeToolkit` | 与改动前一致，**唯一差异**是 `data:` 由 ❌ 转 ✅（属 bug 修复，非行为放宽） |
 | TC-M-907 | 策略在 WebView 构造后切换 | 切换即生效（新资源按新策略；已缓存资源不重算） |
+
+> **现状（2026-10）**：✅ **三档开关均可用**——TC-M-901（`data:` 无条件放行）已实测（**U1**，§8.1 **U1**）；TC-M-902/903/904 经 §9.9 门禁收口后**逐格验证**（`DenyExternal` 拒 file/rel、`AllowHostResolved` 仅放行 resolver 命中、`http(s)`/`blob:` 恒拒——媒体已并入同一门禁，§9.9「语义」与「影响面」行）；TC-M-905 的 `Browser` ↔ `Toolkit+AllowAll` 差异已**归零**（§9.7）；TC-M-906/907 由 `webkit/media_resource_policy_test.go` 的「默认值 / 运行时切档」用例覆盖（§9.9「验收」行）。
 
 ---
 
@@ -483,6 +519,7 @@ webkit/mode.go:66                             allowsExternalURLs()
    等级判定与基线比对（§6.4）不经这两类数值/像素，**不受影响**。
 2. **媒体验证子命令** `cmd/psai -media`（或新 `cmd/mediaprobe`）：
    - **四配置**（Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll）各跑一遍矩阵页，并与 **Edge 对照**（决策 2），产出「引擎 / Edge」双列等级；
+      ★ **现状注（2026-10-08 更新）**：该「**双列等级**」**已产出**——`runEdgeComparison`（`cmd/psai/mediaprobe.go:2216+`）已扩为**程序化逐格等级对照**，两侧共用判定内核 `judgeCell`（0..3 尺度，引擎 L4 按 L3 计）；最近一次报告（`dev/media/out/report.md`，commit `17225f9`）：96 格、引擎低于 Edge **0** 格、一致 **84**、高于 **12**，结论「✅ 逐格不低于 Edge 等级」（§8.3 第 2 条、§10 **Q1**）。★ `-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53`），需**显式启用**才有该节——是**默认关闭**，**非未实现**。
    - 每格式产出：几何 JSON、`complete/naturalWidth`、事件日志、截图 PNG；
    - 自动判定 L0–L4 并输出 Markdown 报告；
    - **回归比对（本机按需，非 CI 门禁）**：把 §3 的实测结论写成期望表（baseline），任何格式的等级升降都让 `-media` 非零退出，供开发者手动比对。
@@ -495,7 +532,7 @@ webkit/mode.go:66                             allowsExternalURLs()
 - 每条用例必须有：`几何 JSON` + `截图 PNG` + `事件计数`，缺一不算通过；
 - 判定 L4（动态）必须**两张以上时间点截图**并给出像素差异（不接受「应该有动画」）；
 - 对照基准：能安装 Edge 的场景用 `dev/suites/consistency` 既有双端对照机制（`edgeCollect` / `wbuiCollect`）。
-- 决策 2：媒体验证同样复用上述机制，产出「引擎 / Edge」双列报告（见 §6.4）。
+- 决策 2：媒体验证同样复用上述机制，产出「引擎 / Edge」双列报告（见 §6.4）。★ **现状注（2026-10-08 更新）**：该双列**等级**报告**已产出**——`runEdgeComparison`（`cmd/psai/mediaprobe.go:2216+`）**程序化逐格对照**，两侧共用判定内核 `judgeCell`（0..3 尺度，引擎 L4 按 L3 计）；最近一次（`dev/media/out/report.md`，commit `17225f9`）96 格、引擎低于 Edge **0** 格、一致 **84**、高于 **12**，结论「✅ 逐格不低于 Edge 等级」。★ `-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53`）＝需显式启用，**非未实现**。
 
 ### 6.4 触发与执行方式（决策 6 修订：不入 CI 门禁）
 
@@ -701,10 +738,18 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
    - **执行**：`cmd/psai -media -media-edge`（本机 Edge 命中 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`）。
      产物 `dev/media/out/edge-matrix.png`（45,607 字节，1440×1008，与本项目矩阵截图同尺寸）——**验收证据，入库**（决策 5 于 2026-10-07 修订后的口径）。
-   - **工具侧现状（必须说清）**：`runEdgeComparison`（`cmd/psai/mediaprobe.go:1885-1901`）**只把矩阵页交给
+   - **工具侧现状（必须说清）** ★ **已过时：下列为 2026-10-07 快照，最新事实见本 bullet 末尾的「2026-10-08 更新」**：`runEdgeComparison`（`cmd/psai/mediaprobe.go:1885-1901`）**只把矩阵页交给
      Edge 截一张图，不做任何等级判定**；日志原文即「已采集 …（等级对照需人工复核或后续扩展）」。
      因此 **「Edge 等级」列目前并不存在**，报告里也没有 Edge 行（`grep -c Edge dev/media/out/report.md` → 0）。
+     ★ **2026-10-08 更新：本项已过时（下述为 2026-10-07 的取证快照）**——`runEdgeComparison`
+     （`cmd/psai/mediaprobe.go:2216+`）已**扩为程序化逐格等级对照**：两侧共用同一判定内核 `judgeCell`
+     （0..3 尺度、引擎 L4 按 L3 计），报告写出「Edge 双端对照」小节。最近一次 `dev/media/out/report.md`
+     （commit `17225f9`）：**96 格**、引擎低于 Edge **0** 格、一致 **84**、高于 **12**，
+     结论 **「✅ 逐格不低于 Edge 等级」**。行内 `mediaprobe.go:1885-1901` 与 `grep -c Edge → 0`
+     只在 2026-10-07 的取景下成立（该行号现为 `baselineItem`/`readBaseline`），**现已不成立**。
+     ★ 另：`-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53`）⇒ 该节须显式启用才写——是**默认关闭**，**非未实现**。
      本条的逐格对照由**程序化像素比对**补上（下述），"不低于"的结论因此是**实测的**、不是推定的。
+     ★ **2026-10-08 更新：该「程序化像素比对」原在工具外的临时脚本里，其判定逻辑现已内置进 `runEdgeComparison`**——同一判定内核 `judgeCell` 直接产出逐格**等级**对照（见上条更新）。
    - **逐格对照结果（96 格，程序化）**：
 
      | 分类 | 格数 | 说明 |
@@ -716,9 +761,13 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 
      84 个"两边都有内容"的格中，非白像素比例的**最大绝对差 0.010**（video 首帧 `0.905 vs 0.915` 一类亚像素差），
      **全部 < 0.10**。⇒ **本项目 Browser 配置与 Edge 在 96 格上逐格一致（0 差异），"不低于 Edge"成立。**
-     对照的判定口径是"有内容/空白 + 内容量"，不是逐像素相等（两端的抗锯齿/取整必然有亚像素差）；
-     若要升级为"Edge 等级列"，属于 `runEdgeComparison` 的功能扩展（本轮**未做**）。
-   - **对照脚本（本地临时工具、未入库；正文如下，供第三方复现）**：
+     对照的判定口径是"有内容/空白 + 内容量"，不是逐像素相等（两端的抗锯齿/取整必然有亚像素差）。
+     ~~若要升级为"Edge 等级列"，属于 `runEdgeComparison` 的功能扩展（本轮**未做**）。~~
+     ★ **2026-10-08 更新：该「功能扩展」已完成**——`runEdgeComparison` 已产出逐格**等级**对照
+     （两侧共用 `judgeCell`，0..3 尺度、引擎 L4 按 L3 计）：**96 格**、引擎低于 Edge **0** 格、
+     一致 **84**、高于 **12**（多为动画推进与音频输出格），结论 **「✅ 逐格不低于 Edge 等级」**
+     （`dev/media/out/report.md`，commit `17225f9`）。
+   - **对照脚本（本地临时工具、未入库；正文如下，供第三方复现）**：★ **2026-10-08 更新：下述临时脚本的判定逻辑已内置进 `runEdgeComparison`（见上条），此段仅作历史存档与复现参考**——当时是像素口径，现为逐格**等级**口径。
 
      ```python
      import json, re
@@ -863,11 +912,18 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
   `goskia` 当前**完全没有音频能力**（无 audio/sound/wave/mixer 任何 API）。
 - **推荐路线**：(a) 宿主注入 PCM（与 A1/A2 的视频帧注入同构，引擎不背解码器），
   输出后端分阶段交付（先 Windows）。
-- **判据**：TC-M-601/602 已达成；TC-M-603（WebAudio）与 TC-M-604（L4-S）待实施。
-  TC-M-604 建议「宿主输出回调的 PCM 做 FFT（主峰 440 Hz）」为主线判据，
+- **判据**：TC-M-601/602 已达成；~~TC-M-603（WebAudio）与 TC-M-604（L4-S）待实施~~。
+  ★ **2026-10-08 更新：两者均已实施**——TC-M-603 见本节「WebAudio 最小子集落地」与「WebAudio 完整子集落地」；
+  TC-M-604 主线判据已达成（宿主输出回调的 PCM 做 FFT，主峰 **439.88Hz**，见本节「验收」）。
+  ~~TC-M-604 建议「宿主输出回调的 PCM 做 FFT（主峰 440 Hz）」为主线判据，~~ ★ **2026-10-08 更新：该判据已被采纳并达成**（同上）；
   环回设备录音作为可选外部复核（无设备标 `SKIP(no-loopback)`）。
-- **待确认**（实施前需用户选定）：路线 (a)/(b)、平台范围（仅 Windows / 三平台）、
-  WebAudio 是否需要、L4-S 判据口径。★ 原列在这里的「是否与『媒体宿主注入通道未受资源
+- ~~**待确认**（实施前需用户选定）：路线 (a)/(b)、平台范围（仅 Windows / 三平台）、
+  WebAudio 是否需要、L4-S 判据口径。~~ ★ **2026-10-08 更新：四项均已落定，不再待确认**——
+  ① **路线取 (a)**：宿主注入 PCM + 输出后端分阶段（本节首行「状态：✅ 已按推荐路线 (a) 落地」）；
+  ② **平台范围：当前仅 Windows**——输出后端为 `app/audioout_windows.go`（waveOut），其余平台由 `app/audioout_other.go` **挂钟降级**（不报错，但**不等于已支持**）；
+  ③ **WebAudio 需要**：已按最小子集（Q2-D/B）落地，并续做**完整子集**（本节后两个落地小节）；
+  ④ **L4-S 判据口径已统一**：主线 = 判据 A（宿主输出回调的 PCM 做 FFT，主峰 439.88Hz），环回录音为可选复核（四态口径见本节「判据 B 口径」）。
+  ★ 原列在这里的「是否与『媒体宿主注入通道未受资源
   策略约束』的修复合并立项」已不需要决策——该项已在 2026-10 续做中**单独闭环**（§9.9），
   与 A3 一样动「宿主注入媒体数据」这条链路，但收口在资源策略一侧。
 
@@ -969,13 +1025,19 @@ func (wv *WebView) SetResourcePolicy(p ResourcePolicy)
 且要新建"音频图执行引擎 + 实时线程调度"，属 §8.2 已标注的**高风险**项，须单独立项审核。
 
 **侦查结论**：最小面**可行、量级可控**（≈550–810 行，复用现有宿主解码与注入模式）；完整音频图
-**不建议在本阶段做**。**本轮未实施**（Q2-D 只侦查，不写代码）——**2026-10-08 已按本清单落地，见下节**。
+**不建议在本阶段做**（此判断针对 2026-10-07 的「最小面」基线；★ **「完整音频图」一词的当前口径见下节结论段的澄清**，勿与已实施的「内核」混读）。**本轮未实施**（Q2-D 只侦查，不写代码）——**2026-10-08 已按本清单落地，见下节**。
 
 #### WebAudio 最小子集落地（2026-10-08，A3-3：**已实施**）
 
 **结论（一句话）**：按上方 Q2-D 侦查划定的「最小面」落地——页面脚本在**真实宿主环境**里拿到
 `AudioContext`，并把**真音频字节**解成 `AudioBuffer`（样本量纲经判据 A 同一套 FFT 复核为 440Hz 正弦）；
 **完整音频图**仍不做（估 3000–6000 行，须另立项）。
+
+★ **术语澄清（2026-10-08，务必按此读）**：上面这句「**完整音频图仍不做**」指的是**内核之外的外围**——
+`AudioWorklet` / `ScriptProcessorNode` / 多声道路由 / 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode`
+（界定见下节「WebAudio 完整子集落地」的结论段）；而**音频图内核**（8 类 AudioNode / `AudioParam` 全套自动化 /
+`OfflineAudioContext` / 实时输出）**已于同日实施**（下节）。二者**不是一回事**，与下节标题写的「完整子集**已实施**」
+**不矛盾**：本处的 3000–6000 行估算形成于 2026-10-07 侦查，量的是「最小面 → 完整音频图（含外围）」的差额。
 
 | 项 | 内容 |
 |---|---|
@@ -1154,6 +1216,30 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 
 ---
 
+### 9.10 补充判据：G3/G4/G6/G7 「未单独采证」五项逐格对照（2026-10-08，续做）
+
+**结论（一句话）**：G3/G4/G6/G7 里此前「只入样本、不记结论」的 5 个用例（TC-M-303~307）已由
+**补充判据探针**（`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与 **Edge 同页面、
+同套脚本、同套判据内核**对照；对照口径下 **可比 8 项里引擎仅 1 项低于 Edge（TC-M-303）**，
+其余差异（TC-M-304/306/307a）是**引擎自身的真实能力缺口**，一并如实记录（不伪装通过）。
+
+| 项 | 内容 |
+|---|---|
+| 采集方式 | **渲染像素**（引擎 `wv.Render()` 出图后采样 / Edge `--screenshot`）+ 页面内 **canvas 采样**（`drawImage` 取元素当前帧，用于时间序列）。两侧**同一套页面脚本与判据内核**（`judgeExtra`） |
+| 落点 | `cmd/psai/mediaextra_probe.go`（新：页面构造 + 判定内核 + Edge 对照）、`cmd/psai/mediaprobe.go`（接线与报告）；路径类样本（中文名 / 含空格 / `..` 穿越）由探针运行时物化 |
+| 产物 | `dev/media/out/extra-verification.md`（表）、`extra-{Browser,Toolkit+DenyExternal,Edge}.json`（判据）、`extra-raw-*.json`（原始采样）、`extra-*.png`（截图）、`edge-matrix.png`（矩阵页对照） |
+| 判据口径 | ✅ 达成 / ❌ 未达成 / ⚠️ 部分或不符预期（如实记录）/ **SKIP（附原因）**。时间序列 5 项（TC-M-304~307）在 `Toolkit+DenyExternal` 与 **Edge 侧一律 SKIP**——前者本轮不采时序，后者**无头一次性截图无时序**（标 `SKIP(edge-time-series)`），不伪装通过 |
+| 达成项 | TC-M-305（**逐帧 delay 对齐**：色段变化率 **8.7 次/秒** vs 期望 ≈8.6、最长段 **227ms** vs 期望 200ms）、TC-M-307b（`loop=0` 尾部仍多色 ⇒ 回到首帧继续循环）、TC-M-404（`complete=true` 且渲染出图）、TC-M-405（不渲染 + 控制台 0 条）、TC-M-506（`controls` 使 `tabIndex` 默认 0，引擎无 UA 控件绘制路径 ⇒ 如实记录不列缺陷）、TC-M-702（contain/cover/fill/none 四值几何可区分：letterbox / 非等比 / 原始尺寸 / 填满）、TC-M-704（中文文件名+中文目录）、TC-M-705a/b（含空格、`..` 穿越） |
+| **缺口 ①**：TC-M-303 | `image-rendering: pixelated` **引擎未生效**：pixelated 采样 **22 色** ≈ auto **21 色**（放大仍双线性，源图 4 色）；**Edge 同项 pixelated 9 色 vs auto 22 色 ⇒ Edge 生效** ⇒ 按「不低于 Edge」判据，**引擎低于 Edge**（唯一项） |
+| **缺口 ②**：TC-M-304 | canvas `drawImage` **取到固化帧**：60 次采样 canvas 侧只有 **1 种帧色**，同页渲染像素有 **3 种帧色**（动图确在推进）⇒ `drawImage` 未取当前帧 |
+| **缺口 ③**：TC-M-306 | `visibility:hidden` 的 300ms 窗口内帧色**不变**（可见窗口 3 种）⇒ 隐藏期间**停推**。依据：动图播放时钟与「是否渲染」解耦，仅 `display:none`／页面不可见才应暂停；`visibility:hidden` 元素仍在渲染树内 ⇒ 应继续推进 |
+| **缺口 ④**：TC-M-307a | `anim-noloop.gif` 的 GIF **循环扩展块计数=1**（播 2 遍后应停）；帧长 3×100ms，采样窗口远晚于 600ms，尾部仍出现 **3 种帧色** ⇒ **loop 计数终止未实现**（被当作无限循环） |
+| 判据修正（本轮，TC-M-303） | 初版判据「pixelated 色数 = 源色 4」**过严**：元素外沿 1px 与背景抗锯齿混合会产出中间色，**Edge 实测也只得 7 色而被误判 ❌**。修正为①**采样矩形内缩 3px**（排除边界混合像素）+②判据改 **相对区分度**（`pixelated 显著少于 auto` ⇒ 生效；两者差 ≤2 ⇒ 未生效）。修正后 **Edge ✅ / 引擎 ❌**——结论从「两边都 ❌、无从归因」变为「**差异在引擎侧**」 |
+| 缺陷登记 | 四项缺口均为**能力缺口**（非崩溃、非安全），已记入本节与报告 `extra-verification.md`；未进 §8.1 门禁表（该表按「可用性门禁」口径，不因缺少某条 CSS 特性而置不可用） |
+| 复跑 | `cmd/psai -media`（含补充判据）；需要 Edge 侧逐格对照时加 `-media-edge` |
+
+---
+
 ## 10. 开放项 Q1–Q8：拍板与执行状态（2026-10-07）
 
 > **拍板（2026-10-07）**：用户选择「按本表『建议』列执行」——即 **Q1-B / Q2-D / Q3-A+C / Q4-B /
@@ -1162,11 +1248,15 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 > 建议列之外的其它选项里，**Q4-C/D（三个 pre-existing 失败的直接修）与 Q7-C（采样根因）已落地**（2026-10-07），Q7-C 遗留的**截图相位抖动**由 **Q7-D** 同轮处置（见 §9.9）。
 > **2026-10-08 续做**：**Q2 按 B 落地**（WebAudio 最小子集）与 **Q5-B 重构**（抽公共判定内核）**均已实施**——
 > 至此仍未动的只有 **Q2-C 完整音频图**（估 3000–6000 行，须另立项审核）。
+> ★ **口径澄清（2026-10-08）**：此处「完整音频图」＝**内核之外的外围**（`AudioWorklet` / `ScriptProcessorNode` /
+> 多声道路由 / 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode`）；**音频图内核**（8 类 AudioNode /
+> `AudioParam` 自动化 / `OfflineAudioContext` / 实时输出）**已随 A3-3 第二段实施**（§9.6「WebAudio 完整子集落地」），
+> 与 §9.6「完整子集**已实施**」**不矛盾**——两处说的是不同范围，勿混读。
 
 | 编号 | 是什么 | 影响 | 拍板 | 状态（2026-10-07 实测） | 证据去向 |
 |---|---|---|---|---|---|
-| **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**此前从未真正执行** | **B（跑一次）** | ✅ **已执行**。`cmd/psai -media -media-edge` 跑通，Edge 截图 `dev/media/out/edge-matrix.png`（**验收证据，入库**；决策 5 于 2026-10-07 修订后）。程序化逐格对照 **96 格 0 差异**：Edge 有内容而本项目空白 **0 格**、本项目有内容而 Edge 空白 **0 格**；12 个空格**全部是不可见的 `<audio>`**；84 个共有内容格的最大比例差 **0.010** ⇒「不低于 Edge」**实测成立**（逐格一致）。⚠️ 工具侧 `runEdgeComparison` **只截图、不产 Edge 等级列**，故「等级对照」仍属人工/程序化 | §8.3 第 2 条「Edge 对照实测」（含对照脚本正文） |
-| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）→ 2026-10-08 按 B（最小面）落地** | ✅ **最小子集已实施（2026-10-08，A3-3）**：`AudioContext` / `decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / 1.000s，`getChannelData(0)` 为 `Float32Array`，FFT 主峰 **439.95Hz**）；`app.InstallWebAudio` 未装配时**如实 reject**。★ 侦查估量（≈550–810 行）与实际落点相符（`engine/js/bindings/webaudio.go` + `app/webaudio.go` + 探针 + 单测）；**完整音频图（≈3000–6000 行）仍不做** | §9.6「WebAudio 最小面侦查」+「WebAudio 最小子集落地」 |
+| **Q1** | 是否跑一次 `-media-edge`、产出 Edge 对照基线 | 决策 2 的 Edge 双端对照、§8.3 第 2 条「引擎等级**不低于** Edge 等级」**此前从未真正执行** | **B（跑一次）** | ✅ **已执行**。`cmd/psai -media -media-edge` 跑通，Edge 截图 `dev/media/out/edge-matrix.png`（**验收证据，入库**；决策 5 于 2026-10-07 修订后）。程序化逐格对照 **96 格 0 差异**：Edge 有内容而本项目空白 **0 格**、本项目有内容而 Edge 空白 **0 格**；12 个空格**全部是不可见的 `<audio>`**；84 个共有内容格的最大比例差 **0.010** ⇒「不低于 Edge」**实测成立**（逐格一致）。~~⚠️ 工具侧 `runEdgeComparison` **只截图、不产 Edge 等级列**，故「等级对照」仍属人工/程序化~~ ★ **2026-10-08 更新**：`runEdgeComparison`（`cmd/psai/mediaprobe.go:2216+`）已扩为程序化逐格**等级**对照——两侧共用同一判定内核 `judgeCell`（0..3 尺度、引擎 L4 按 L3 计）；最近一次 `dev/media/out/report.md`（commit `17225f9`）：96 格、引擎低于 Edge **0** 格、一致 **84**、高于 **12**，结论「✅ 逐格不低于 Edge 等级」。`-media-edge` 仍**默认关闭**（`cmd/psai/main.go:53`）＝需显式启用，**非未实现** | §8.3 第 2 条「Edge 对照实测」（含对照脚本正文） |
+| **Q2** | `TC-M-603` WebAudio（`AudioContext` / `decodeAudioData`） | 音频**输出**链路已闭环（A3，L4-S），但 WebAudio API 完全缺失 ⇒ 依赖它的库（可视化、混音）不可用 | **D（先侦查）→ 2026-10-08 按 B（最小面）落地** | ✅ **最小子集已实施（2026-10-08，A3-3）**：`AudioContext` / `decodeAudioData` **真解码** → `AudioBuffer`（44100Hz / 1ch / **44100 帧** / 1.000s，`getChannelData(0)` 为 `Float32Array`，FFT 主峰 **439.95Hz**）；`app.InstallWebAudio` 未装配时**如实 reject**。★ 侦查估量（≈550–810 行）与实际落点相符（`engine/js/bindings/webaudio.go` + `app/webaudio.go` + 探针 + 单测）；**完整音频图（≈3000–6000 行）仍不做**——此处指**内核之外的外围**（`AudioWorklet` / `ScriptProcessorNode` / 多声道路由 / 3D `PannerNode` / `ConvolverNode` / `DynamicsCompressorNode`）；**音频图内核**（8 类 AudioNode / `AudioParam` 自动化 / `OfflineAudioContext` / 实时输出）**已于 2026-10-08 续做实施**（§9.6「WebAudio 完整子集落地」） | §9.6「WebAudio 最小面侦查」+「WebAudio 最小子集落地」+「WebAudio 完整子集落地」 |
 | **Q3** | `TC-M-604` 环回录音 | 本机无采集设备 ⇒ 用例恒跳过；「跳过口径」在不同轮次写法不一致 | **A+C（保持现状 + 口径统一）** | ✅ **已完成**。实现侧本就是 `SKIP(no-loopback)`（无设备 / 无 ffmpeg 分支）；文档 **4 处**旧写法 `mismatch` 已统一（`media-format-verification-plan.md` 2 处、`implementation-path.md` 2 处）+ 项目记忆 1 处；全仓 grep 旧写法 **0 残留**。判定语义不变（仍是**跳过**，不是通过）。★ 本机 2026-10-07 实测**有**候选设备（Voicemeeter Out B3，输入未路由）⇒ 记 `mismatch`，属第三种状态。**2026-10-07 结项补**：报告新增「幅度对照」行（判据 A 的 1.000 vs 录回 0.032 = 1/32 ⇒ 只录到底噪、属环境未配置），探针 `Detail` 改为只陈述测得事实、不代下因果结论 | §9.6「判据 B 口径」、§3.3 TC-M-604 |
 | **Q4** | `wb-ui/webkit` 3 个 pre-existing 失败 | 单测基线**非全绿**，影响「验收不新增失败」的解读 | **B（只读侦查）→ 后经 Q4-C/D 直接修** | ✅ **已全部修复，单测基线首次全绿**（`ok 29 包 + 67 无测试 + FAIL 0`，EXIT=0）。① 扁字形断言改判「水平居中 + ink 落在内容框内」（布局居中本身正确：CJK 用例 ink 中心 36.0 与按钮中心 36 完全相等）；② normal 行高口径补 lineGap（14.8281 = 13.0000 + 1.8281）；③ **引擎真缺陷**：`applyComputedSnapshot` 用**尚未重算**的渲染树快照逐键覆盖级联结果（`isUAFormControl` 对 `<input>` 无条件置 `need=true`）⇒ `#c:checked` 的 color/font-size/font-family 被陈旧值覆盖；已改为「补缺 + 归一化 + 控件的 UA 属性」才覆盖。★ 原「`:checked` 读 attribute 而非 IDL 状态」的根因假设**被实测推翻**（attribute 确实被写、querySelector 命中、兄弟组合器生效） | `docs/TECH_DEBT.md`「三条失败的逐条侦查与处置」 |
 | **Q5** | 门禁是否重构 | `loadExternalResource` 与 `MediaResourceAllowed` 是**两份平行判定**，有漂移风险 | **A（挂账）→ 2026-10-08 补做 B** | ✅ **Q5-B 已实施（2026-10-08）**：抽公共判定内核 `webkit/resource_ref_policy.go`（`resolverRefForms` / `classifyResourceRef` / `resourceRefAllowed` 各一份实现），两处执行只保留各自职责，媒体「无网络通道」以 `hasNetworkChannel=false` 显式入参。**验收「探针逐格零变化」达成**：内核单测 **7/7 PASS**、**384 条等级零变化**、8 张截图**逐字节 SAME**、产品 diff 仅引擎 hash + `currentTime` 抖动 | §9.9「挂账登记」的**挂账解除**段 + `webkit/resource_ref_policy_test.go` |
