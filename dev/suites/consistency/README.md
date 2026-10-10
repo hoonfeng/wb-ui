@@ -69,7 +69,7 @@ HTML ──┬──▶ Edge headless（参照物）
 - 文本块的 y 还会按「双方高度差」进一步放大（多行文本逐行累积的行高漂移）
 - inline 元素跳过几何比较（无盒几何，用文本段近似）
 
-## 已知差异（引擎待办）
+## 已知差异（引擎待办；5–8 已修，见各条末标注）
 
 1. **普通 inline-block / replaced 的 vertical-align**：只有表单控件实现了真正的
    行内基线对齐（同行共享一条基线、行盒高 = maxAscent + maxDescent）；普通
@@ -84,13 +84,18 @@ HTML ──┬──▶ Edge headless（参照物）
    scroll **513.5**），于是被误判成「内容溢出」→ 预留 15px 滚动条 → 子元素可用宽度 -15px
    （`.field` 189 vs Edge 204）。Edge 侧同一容器不溢出（534/534，无滚动条）。
    这是「整栏元素宽度系统性少 15px」的根因（MediaStudio 左栏像素差异 19.44%）。
-6. **渐变「颜色 → transparent」的插值空间**：Chromium 在**预乘空间**插值，wb-ui 目前按
-   非预乘 → 中间色偏暗、衰减更快（夹具 `linear-gradient(#ff0000,transparent)`：
-   Edge 8800 红像素 / wb-ui 4800）。
+   （**已修** `72ea2b9`：flex column 的 basis:auto 项改用预布局实测高度）
+6. ~~**渐变「颜色 → transparent」的插值空间**~~（**已修**，2026-10）：Chromium 在
+   **预乘空间**插值，wb-ui 曾按非预乘 → 中间色偏暗、衰减更快（夹具
+   `linear-gradient(#ff0000,transparent)`：Edge 8800 红像素 / wb-ui **4800 → 8800**）。
+   修复落点：`engine/rendering/gradient.go` 的 `premulStopsForShader`
+   （等价色标重算，**非**逐像素；无 alpha 变化的渐变逐字段不变）。
 7. **背景定位与绘制区域**：应为 padding-box（`background-origin` 初始值），当前用
    border-box → 带 1px 边框元素上的硬边渐变首行被边框盖住（Edge 可见 200px / wb-ui 0）。
+   （**已修** `bbc0dee`）
 8. **表单控件 UA `line-height: normal` 缺失**：button/input/textarea 继承了正文
    `line-height:1.5` → 按钮高 38 vs Edge 36。
+   （**已修**：`dev/audit/WORKITEMS.md` §H2）
 9. **getComputedStyle 细节**：`line-height` 序列化按**错误字号**折算（12px 字号的 h2
    报 21px = 1.5×14，Edge 18px；布局实测行高正确为 18px，故属序列化缺陷）、
    `width:100%` 未解析为使用值（报 `"100%"` 而非 `204px`）、颜色与长度序列化格式不一致

@@ -478,7 +478,11 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 	// 存在（方向正确性由 shader 的轴端点天然保证）。
 	// ★ 长度位置色标（`#2a2a2a 1px`）在此换算成比例：gradLen 即渐变线长度
 	// （css 的 <length> 位置沿渐变线量取）。
-	stops := resolveGradientStops(lg.Stops, gradLen)
+	// ★ D3：CSS/Chromium 的色标在**预乘空间**插值，而 Skia 的渐变 shader 是
+	// 非预乘逐通道插值。含 alpha 变化的渐变换成「非预乘插值下等价」的色标
+	// 序列（细节见 premulStopsForShader）；无 alpha 变化的渐变原样返回，
+	// 逐字段不变（零行为变化）。
+	stops := premulStopsForShader(resolveGradientStops(lg.Stops, gradLen), gradLen)
 	colors := make([]graphics.Color, len(stops))
 	positions := make([]float32, len(stops))
 	for i, s := range stops {
@@ -494,6 +498,13 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 		cx+gx*minP, cy+gy*minP, cx+gx*maxP, cy+gy*maxP, colors, positions)
 }
 
+// interpolateColor 取渐变线上 t 处的颜色，按 CSS/Chromium 语义计算：色标之间
+// 在**预乘空间**插值（CSS Images 4 §3.4.2 / css-color-4），返回
+// non-premultiplied 颜色。
+//
+// 两端 alpha 相同时预乘插值与逐通道线性插值逐字段等价 → 走 lerpColor
+// （保证既有渐变逐像素不变）；只有 alpha 发生变化时才走预乘路径 —— 这正是
+// `linear-gradient(#ff0000,transparent)` 不再「向黑色衰减」的原因。
 func interpolateColor(stops []ColorStop, t float64) graphics.Color {
 	if len(stops) == 0 {
 		return graphics.Color{}
@@ -512,8 +523,153 @@ func interpolateColor(stops []ColorStop, t float64) graphics.Color {
 				return stops[i].Color
 			}
 			lt := (t - stops[i].Position) / span
-			return lerpColor(stops[i].Color, stops[i+1].Color, lt)
+			if stops[i].Color.A == stops[i+1].Color.A {
+				return lerpColor(stops[i].Color, stops[i+1].Color, lt)
+			}
+			return premulLerp(stops[i].Color, stops[i+1].Color, lt)
 		}
 	}
 	return stops[len(stops)-1].Color
+}
+
+// --- 预乘空间插值（CSS/Chromium 渐变色标语义）--------------------------------
+//
+// 为什么需要这一层：Skia 的渐变按**非预乘** sRGB 逐通道线性插值，而
+// CSS/Chromium 规定色标在**预乘空间**插值。两者只在相邻色标的 alpha 不同时
+// 才有区别：
+//
+//	`linear-gradient(#ff0000, transparent)`（alpha 255 → 0，合成到 #101010）
+//	  预乘语义  ：颜色恒为 rgb(255,0,0)，只有 alpha 衰减 → R = (1-t)*255 + 16t
+//	  非预乘语义：颜色同时向 transparent 的黑衰减 → R = 255(1-t)² + 16t
+//	              「中间色偏暗、衰减更快」
+//
+// 实测（dev/output/tmp/gradfact.html 的 .h3，200x100 盒子，红像素 = R>150）：
+// Edge 8800 / 修复前 wb-ui 4800；逐行 R 通道分别与上面两条模型吻合到 ±1.2。
+
+// gradientHasAlphaVariation 报告色标序列里是否存在相邻色标的 alpha 变化。
+// 没有 alpha 变化时预乘插值与逐通道插值逐字段等价，调用方必须走原路径
+// （D3 修复要求这类渐变**零行为变化**）。
+func gradientHasAlphaVariation(stops []ColorStop) bool {
+	for i := 0; i+1 < len(stops); i++ {
+		if stops[i].Color.A != stops[i+1].Color.A {
+			return true
+		}
+	}
+	return false
+}
+
+// premulLerp 在**预乘空间**插值 a→b（t∈[0,1]），返回 non-premultiplied 颜色
+// （Skia 的色标颜色是非预乘的）。一端 alpha 为 0 时结果恒为另一端的颜色 ——
+// 正是 CSS 语义下「不向黑色衰减」的由来。
+func premulLerp(a, b graphics.Color, t float64) graphics.Color {
+	af := float64(a.A) / 255.0
+	bf := float64(b.A) / 255.0
+	inv := 1 - t
+	pr := float64(a.R)*af*inv + float64(b.R)*bf*t
+	pg := float64(a.G)*af*inv + float64(b.G)*bf*t
+	pb := float64(a.B)*af*inv + float64(b.B)*bf*t
+	pa := af*inv + bf*t
+	if pa <= 0 {
+		// 完全透明：颜色不可见，取 alpha 较大一侧的原色（避免除零）。
+		if af >= bf {
+			return a
+		}
+		return b
+	}
+	return graphics.Color{
+		R: clampChannel(pr / pa),
+		G: clampChannel(pg / pa),
+		B: clampChannel(pb / pa),
+		A: clampChannel(pa * 255),
+	}
+}
+
+func clampChannel(v float64) uint8 {
+	r := math.Round(v)
+	if r < 0 {
+		return 0
+	}
+	if r > 255 {
+		return 255
+	}
+	return uint8(r)
+}
+
+// maxPremulSubdivs 是单个色标段的最大细分数。细分只增加色标个数（仍是
+// **单次** Skia 渐变绘制，不是逐像素），上限用于约束 shader 构造开销。
+const maxPremulSubdivs = 24
+
+// premulStopsForShader 把「按 CSS 语义（预乘空间插值）」的色标序列，转换为
+// **Skia 非预乘插值**下得到同一结果的等价色标序列。gradLen 是渐变线长度
+// （CSS px），用于决定细分密度。
+//
+// 逐段规则：
+//   - 两端 alpha 相同：两种语义逐字段等价 → 本段只输出起点，不细分。
+//   - 一端 alpha 为 0：预乘语义下整段的 non-premultiplied 颜色**恒为**另一端
+//     的颜色 → 只需把透明端的 RGB 改写为可见端的 RGB（透明像素不可见，
+//     改写不改变任何可见像素），1 个子段即可**精确**表达。
+//   - 两端 alpha 都 >0 且不同：结果是 t 的分式函数，两个色标无法精确表达
+//     → 按段长细分成 N 个子段做折线逼近（每 ~8px 一个采样，N ≤ maxPremulSubdivs）。
+//
+// 无 alpha 变化的序列**原样返回**（同一 slice），保证零行为变化。
+// 位置相同的相邻色标（硬边）在 Skia 里合法（position 非递减）。
+func premulStopsForShader(stops []ColorStop, gradLen float64) []ColorStop {
+	if len(stops) < 2 || !gradientHasAlphaVariation(stops) {
+		return stops
+	}
+	out := make([]ColorStop, 0, len(stops)*2+4)
+	for i := 0; i+1 < len(stops); i++ {
+		c0, c1 := stops[i].Color, stops[i+1].Color
+		p0, p1 := stops[i].Position, stops[i+1].Position
+		if c0.A == c1.A {
+			out = append(out, ColorStop{Color: c0, Position: p0, PositionPx: -1})
+			continue
+		}
+		// 透明端的 RGB 在预乘语义下由可见端决定：transparent 的 RGB 是
+		// (0,0,0)，若照原样交给 Skia 会在非预乘空间把颜色往黑插（正是 D3 的
+		// 症状）；预乘语义里 alpha=0 的像素对合成零贡献，其 RGB 应保持可见端。
+		if c0.A == 0 {
+			c0 = graphics.Color{R: c1.R, G: c1.G, B: c1.B, A: 0}
+		} else if c1.A == 0 {
+			c1 = graphics.Color{R: c0.R, G: c0.G, B: c0.B, A: 0}
+		}
+		n := 1
+		if c0.A != 0 && c1.A != 0 {
+			n = premulSubdivCount((p1 - p0) * gradLen)
+		}
+		for k := 0; k <= n; k++ {
+			col := c0
+			if k == n {
+				col = c1
+			} else if k > 0 {
+				col = premulLerp(c0, c1, float64(k)/float64(n))
+			}
+			pos := p0
+			if n > 0 {
+				pos = p0 + (p1-p0)*(float64(k)/float64(n))
+			}
+			out = append(out, ColorStop{Color: col, Position: pos, PositionPx: -1})
+		}
+	}
+	last := stops[len(stops)-1]
+	if len(out) == 0 || out[len(out)-1].Position < last.Position {
+		out = append(out, ColorStop{Color: last.Color, Position: last.Position, PositionPx: -1})
+	}
+	return out
+}
+
+// premulSubdivCount 按色标段的像素长度决定折线逼近的细分数（每 ~8px 一个
+// 采样；段长未知或过短时下限 2）。
+func premulSubdivCount(segLenPx float64) int {
+	n := 2
+	if segLenPx > 0 {
+		n = int(math.Ceil(segLenPx / 8.0))
+	}
+	if n < 2 {
+		n = 2
+	}
+	if n > maxPremulSubdivs {
+		n = maxPremulSubdivs
+	}
+	return n
 }

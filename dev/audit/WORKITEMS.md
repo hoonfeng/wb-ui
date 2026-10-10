@@ -3634,5 +3634,76 @@ system-ui 的 24 个（字号×文本）组合：修复前高度**恒 +1**，修
 ### 残留（如实记账，不再是「无限期挂账课题」）
 - 本机 Edge 的 system-ui 落在 YaHei UI 是**中文 Windows + 本机 Edge 版本**的实测行为；
   非中文 Windows / 其它 Edge 版本上 system-ui 可能是 Segoe UI —— 换环境须按 §0.2 重取指纹矩阵。
-- `docs/render-consistency-fixes.md` 的 D3（渐变「颜色 → transparent」应在预乘空间插值）仍未修，
-  与本轮无关，留在该文档待修表中。
+- `docs/render-consistency-fixes.md` 的 D3（渐变「颜色 → `transparent`」应在预乘空间插值）
+  **已于第 12 次监督轮修复**（见本文件 §26）。
+
+---
+
+## 26. 第 12 次监督轮（2026-10）：D3 收口 —— 渐变在**预乘空间**插值
+
+### 26-0｜现象与基线（先取双端实测，不凭规范推断）
+
+夹具 `dev/output/tmp/gradfact.html` 的 `.h3`：200×100 盒子（+1px 边框）、`#101010` 底、
+`background-image: linear-gradient(#ff0000, transparent)`。
+**红像素口径（本轮反推确定）**：盒子内部区域（x 9..209 / y 229..329）中 `R > 150` 的像素数。
+
+| 采集 | 红像素 | 说明 |
+| --- | --- | --- |
+| Edge（冻结基线 `gradfact.edge.png`） | **8800** | 与历史记账逐字一致 |
+| wb-ui 修复前（`_temp/webshot` 旧二进制渲染） | **4800** | 同上 |
+
+逐行 R 通道（x=109）对照两个候选模型：
+
+| y | t | Edge 实测 | wb-ui 修复前 | 预乘模型 `(1-t)·255+16t` | 非预乘模型 `255(1-t)²+16t` |
+| --- | --- | --- | --- | --- | --- |
+| 232 | 0.03 | 247 | 238 | 247.8 | 240.4 |
+| 244 | 0.15 | 218 | 184 | 219.2 | 186.6 |
+| 280 | 0.51 | 132 | 69 | 133.1 | 69.4 |
+| 316 | 0.87 | 46 | 18 | 47.1 | 18.2 |
+
+- Edge = **预乘语义**（误差 ≤1.2）：颜色恒为 `rgb(255,0,0)`，只有 alpha 衰减；
+- wb-ui 修复前 = **非预乘语义**（误差 ≤1.3）；
+- 两端 G/B 通道逐行**相同**（1,3,5,7,9,11,13,14）→ alpha 剖面一致，差异纯在颜色插值空间。
+
+### 26-1｜根因
+
+Skia 的渐变 shader 按**非预乘** sRGB 逐通道线性插值；CSS（CSS Images 4 §3.4.2 / css-color-4）
+与 Chromium 规定色标在**预乘空间**插值。goskia 未暴露 `SkGradientShader::Interpolation`。
+
+### 26-2｜实现（无需扩 goskia、**不是**逐像素）
+
+`engine/rendering/gradient.go`：
+
+1. 新增 `premulStopsForShader(stops, gradLen)`：把「CSS 预乘语义的色标序列」改写成
+   「Skia 非预乘插值下**等价**的序列」（仍是一次 Skia 渐变绘制）：
+   - 两端 alpha 相同 → **原样返回**（同一 slice、逐字段不变 → 零行为变化）；
+   - 一端 alpha = 0 → 只把**透明端**的 RGB 改写为可见端的 RGB（透明像素不可见，
+     不改变任何合成结果；1 个子段，色标数不变）→ 精确；
+   - 两端都 >0 且不同 → 按段长细分（每 ~8px 一个采样，`maxPremulSubdivs = 24`）折线逼近。
+2. `interpolateColor`（径向渐变逐像素路径 / SVG）同走预乘插值；alpha 相同时走原 `lerpColor`。
+3. `paintLinearGradient` 接线。
+
+> 不改 goskia 的理由：本地 C API 无插值空间参数，扩 C API 属跨仓库链路；
+> 等价色标重算既不动依赖，也不引入逐像素开销（守 `docs/render-consistency-fixes.md` §6-2 的性能约束）。
+
+### 26-3｜验收证据（全部本轮实测）
+
+| 检查 | 结果 |
+| --- | --- |
+| 夹具红像素（R>150） | 4800 → **8800**（= Edge 8800） |
+| 逐行 R vs 模型 | 修复后吻合预乘模型（误差 ≤1.2） |
+| 单测 `engine/rendering/gradient_premul_test.go` | 5 用例全 PASS（含「无 alpha 变化逐字段不变」「硬边透明端可见像素不变」两个对照用例） |
+| §0.3 八页门槛（vs 冻结 Edge 基线） | deffont 14.62 / vue 2.83 / react 3.04 / fontshort 12.54 / stack 2.56 / sticky 2.81（门槛 5.55） / zorder 0.84 / composite 2.87 % —— 全部 ≤ 门槛 |
+| 八页 before vs after | **逐页 0.00%**（0 差异像素）—— 零行为变化的实证 |
+| `go test ./engine/... -count=1` | 全部 ok，无 FAIL |
+| consistency / cssprobe | **13/13** / **62/64**（既有失败 `img-density-and-alt`、`ratio-only-inline-images` **逐字不变**） |
+| 性能（200×100 盒单次绘制 + 光栅化落地，中位） | 渐隐到 `transparent` **42.7µs**（修复前等价路径 43.9µs，色标数不变 → 无回退）；硬边网格 58.1µs；两端半透明细分 **92.5µs** vs raw 2 色标 57.9µs（**+60%**） |
+
+### 26-4｜残留与边界（如实记账）
+
+- 「两端都半透明且 alpha 不同」的渐变细分到 25 个色标 → Skia 色标 >8 走纹理渐变路径，
+  绘制 +60%。**常见场景（渐隐到 `transparent`：遮罩/淡出/skeleton）色标数不变、无回退**。
+  若后续性能吃紧，可下调 `maxPremulSubdivs`（精度/开销旋钮）。
+- SVG 渐变经 `interpolateColor` 一并按预乘语义（与 Chromium 一致）；`FillLinearGradient`
+  （两色便捷 API，SVG 用）未改 —— 其两端同 alpha 时两种语义等价。
+- 夹具红像素的绝对数依赖视口/盒子尺寸（200×100）；换夹具须按 §26-0 的口径重取。

@@ -132,17 +132,19 @@ python dev/tools/pixdiff.py dev/output/tmp/studio.cmp.wbui.png dev/output/tmp/st
 
 ---
 
-## 3. 已定位、待修缺陷（附最小复现 / 硬证据）
+## 3. 缺陷清单（附最小复现 / 硬证据；状态见末列）
 
-| # | 缺陷 | 证据（Edge vs wb-ui） | 影响面 |
-|---|---|---|---|
-| D3 | 渐变「颜色 → `transparent`」的插值应在**预乘空间**（CSS/Chromium 语义） | 夹具 `linear-gradient(#ff0000,transparent)`：Edge 8800 红 / wb-ui 4800（中间色偏暗、衰减更快） | 所有遮罩/淡出/skeleton 渐变 |
-| D4 | 背景定位与绘制区域应为 **padding-box**（`background-origin` 初始值），现用 border-box | 带 1px 边框的盒子上 `linear-gradient(#ff0000 1px,…)`：Edge 顶部 1px 红线可见（200 px），wb-ui 被边框盖住（0） | 带边框元素的渐定位整体偏 1px |
-| D5 | **flex 内的滚动容器 auto 高度未含末子元素 `margin-bottom`** | `.ctrl-body{overflow:auto}`：Edge client 236×534 / scroll 236×534（**不溢出**）；wb-ui client 236×504 / scroll **236×513.5**（溢出）→ 预留 15px 滚动条 → 子元素 `.field` 宽 189 vs Edge 204 | 所有 flex 里的滚动容器：容器矮 ~10px、**误触发滚动条**、内容宽 -15px（左栏 19.44% 差异的主因） |
-| D6 | 表单控件 UA 样式缺 `line-height:normal` | `#btn-record` 高度 Edge 36 / wb-ui 38；lineHeight Edge `normal` / wb-ui `21px`（继承了正文 1.5） | 所有 button/input/textarea 的高度与文字位置 |
-| D7 | `getComputedStyle('line-height')` 序列化用错字号 | `h2`（font-size 12px）：Edge `18px`（=12×1.5）/ wb-ui `21px`（=14×1.5）。布局实测行高是 18px（`.field .row` 两侧都 18）→ **仅序列化错**，但会误导网页自检脚本 | 依赖 computed style 做适配的页面脚本 |
-| D8 | `appearance` / `accent-color` 未实现 | `input[type=range]`：Edge `auto` / `rgb(20,115,230)`；wb-ui `undefined` | 表单控件外观与配色 |
-| D9 | `getComputedStyle` 未返回**使用值**、序列化格式不一致 | `width:100%` → Edge `204px` / wb-ui `"100%"`；颜色 Edge `rgb(215,55,63)` / wb-ui `#D7373F`；长度 Edge `0px` / wb-ui `0` | 同上（契约一致性，非视觉） |
+> 「视觉一致性」项（D3–D6）已全部收口；D7–D9 属**契约一致性**（非视觉），按需再做。
+
+| # | 缺陷 | 证据（Edge vs wb-ui） | 影响面 | 状态 |
+|---|---|---|---|---|
+| D3 | 渐变「颜色 → `transparent`」的插值应在**预乘空间**（CSS/Chromium 语义） | 夹具 `linear-gradient(#ff0000,transparent)`：Edge 8800 红 / wb-ui 修复前 4800（中间色偏暗、衰减更快）→ **修复后 8800**，逐行 R 与预乘模型误差 ≤1.2 | 所有遮罩/淡出/skeleton 渐变 | **已修**：`engine/rendering/gradient.go` 的 `premulStopsForShader` / `interpolateColor`（2026-10） |
+| D4 | 背景定位与绘制区域应为 **padding-box**（`background-origin` 初始值），现用 border-box | 带 1px 边框的盒子上 `linear-gradient(#ff0000 1px,…)`：Edge 顶部 1px 红线可见（200 px），wb-ui 被边框盖住（0） | 带边框元素的渐定位整体偏 1px | **已修**（`bbc0dee`） |
+| D5 | **flex 内的滚动容器 auto 高度未含末子元素 `margin-bottom`** | `.ctrl-body{overflow:auto}`：Edge client 236×534 / scroll 236×534（**不溢出**）；wb-ui client 236×504 / scroll **236×513.5**（溢出）→ 预留 15px 滚动条 → 子元素 `.field` 宽 189 vs Edge 204 | 所有 flex 里的滚动容器：容器矮 ~10px、**误触发滚动条**、内容宽 -15px（左栏 19.44% 差异的主因） | **已修**（`72ea2b9`） |
+| D6 | 表单控件 UA 样式缺 `line-height:normal` | `#btn-record` 高度 Edge 36 / wb-ui 38；lineHeight Edge `normal` / wb-ui `21px`（继承了正文 1.5） | 所有 button/input/textarea 的高度与文字位置 | **已修**（`dev/audit/WORKITEMS.md` §H2） |
+| D7 | `getComputedStyle('line-height')` 序列化用错字号 | `h2`（font-size 12px）：Edge `18px`（=12×1.5）/ wb-ui `21px`（=14×1.5）。布局实测行高是 18px（`.field .row` 两侧都 18）→ **仅序列化错**，但会误导网页自检脚本 | 依赖 computed style 做适配的页面脚本 | 待修（契约，非视觉） |
+| D8 | `appearance` / `accent-color` 未实现 | `input[type=range]`：Edge `auto` / `rgb(20,115,230)`；wb-ui `undefined` | 表单控件外观与配色 | 待修（契约，非视觉） |
+| D9 | `getComputedStyle` 未返回**使用值**、序列化格式不一致 | `width:100%` → Edge `204px` / wb-ui `"100%"`；颜色 Edge `rgb(215,55,63)` / wb-ui `#D7373F`；长度 Edge `0px` / wb-ui `0` | 同上（契约一致性，非视觉） | 待修（契约，非视觉） |
 
 D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 `clientWidth/scrollWidth/scrollHeight/offsetHeight`，双端对照即见 513.5 vs 504。
@@ -156,6 +158,12 @@ D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 > - D4 已修复：提交 `bbc0dee`（背景按 `background-origin` 定位区域，初始值 padding-box）；
 >   D5 已修复：提交 `72ea2b9`（flex column 的 basis:auto 项改用预布局实测高度）。
 >   两项均按 §0.3 门槛回归（八页像素不劣化）后入库。
+> - **D3 已修复（2026-10）**：`engine/rendering/gradient.go` 的 `premulStopsForShader`
+>   把「CSS 预乘语义的色标序列」转成「Skia 非预乘插值下**等价**的序列」（仍是一次
+>   Skia 渐变绘制，**不是**逐像素；无 alpha 变化的序列原样返回）。夹具
+>   `linear-gradient(#ff0000,transparent)` 红像素（R>150）4800 → **8800**（= Edge），
+>   逐行 R 与预乘模型 `(1-t)·255+16t` 误差 ≤1.2；八页门槛前后逐像素 **0 差异**。
+>   单测见 `engine/rendering/gradient_premul_test.go`，回归数据见 §5。
 
 ---
 
@@ -180,13 +188,32 @@ D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 | `go run ./dev/suites/consistency` | **13/13 passed**（21.3s） |
 | MediaStudio 双端像素对比 | 9.09% → **6.38%**；网格线像素 16 → **29941**（Edge 29924） |
 
+### D3 收口回归（2026-10）
+
+| 检查 | 结果 |
+|---|---|
+| 夹具 `linear-gradient(#ff0000,transparent)` 红像素（R>150，200×100 盒） | 4800 → **8800**（Edge 8800） |
+| 逐行 R 通道 vs 两条模型 | 修复后吻合预乘模型 `(1-t)·255+16t`（误差 ≤1.2）；修复前吻合非预乘模型 `255(1-t)²+16t`（误差 ≤1.3） |
+| §0.3 八页门槛（vs 冻结 Edge 基线，门槛值见 `dev/audit/baselines/README.md`） | deffont 14.62 / vue 2.83 / react 3.04 / fontshort 12.54 / stack 2.56 / sticky 2.81（门槛 5.55） / zorder 0.84 / composite 2.87 % —— **全部 ≤ 门槛** |
+| 八页「修复前 vs 修复后」（wb-ui 自身对照） | 逐页 **0.00%**（差异像素 0）——八页无 alpha 变化渐变，实证「零行为变化」 |
+| `go test ./engine/... -count=1` | 全部 ok，无 FAIL |
+| `go run ./dev/suites/consistency` | **13/13 passed**（20.0s） |
+| `go run ./dev/suites/cssprobe` | 62/64；失败夹具 `img-density-and-alt` / `ratio-only-inline-images` —— **既有失败，逐字不变** |
+| 性能（200×100 盒单次绘制 + 光栅化落地，中位） | 渐隐到 `transparent` 42.7µs（修复前等价路径 43.9µs，色标数不变 → 无回退）；硬边 `1px,transparent 1px` 58.1µs；两端半透明且 alpha 不同（细分为 25 色标）92.5µs vs raw 2 色标 57.9µs（+60%） |
+
 ## 6. 下一步建议（按收益排序）
 
-1. **D5**（flex 滚动容器高度含末子 margin）：修完可消掉「误触发滚动条 → 内容宽 -15px」
-   这一整类差异，左栏 19.44% 差异应大幅下降。注意这是布局深层改动，需跑全量
+1. ~~**D5**~~（**已完成**，`72ea2b9`）：flex 滚动容器高度含末子 margin；已跑全量
    consistency + cssprobe 回归。
-2. **D3**（预乘插值）：`skia.NewLinearGradient` 当前无插值空间选项（goskia 未暴露
-   `SkGradientShader::Interpolation`），需先扩 goskia 或在渲染层对含 alpha 变化的渐变
-   走逐像素预乘插值（注意此前逐像素是性能热点，应只对短渐变启用）。
-3. **D4 / D6 / D7**：单点小改，收益中等。
+2. ~~**D3**~~（**已完成**，2026-10）：最终落点既不是「扩 goskia（暴露
+   `SkGradientShader::Interpolation`）」也不是「逐像素」——而是**等价色标重算**：
+   `premulStopsForShader` 把预乘语义的色标序列改写成 Skia 非预乘插值下等价的序列。
+   渐隐到 `transparent`（最常见：遮罩/淡出/skeleton）只需改写透明端的 RGB，
+   色标数仍是 2 → 零额外开销；只有「两端都半透明且 alpha 不同」才细分（+60%）。
+   故 **goskia 无需任何变更**。
+3. ~~**D4 / D6**~~（**已完成**）**/ D7**：单点小改，收益中等。
 4. **D8 / D9**：契约完备性，配合网页自检脚本需求再做。
+
+> D3 的细分上限 `maxPremulSubdivs`（`engine/rendering/gradient.go`）为 24，是按
+> 「每 ~8px 一个采样」的经验值；若后续遇到大量「两端半透明」渐变导致性能吃紧，
+> 可下调该常量（精度与开销的旋钮），常见场景不受影响。
