@@ -2684,7 +2684,10 @@ func firstConcreteFamily(list string) string {
 		"monospace":     "Consolas",
 		"cursive":       "Comic Sans MS",
 		"fantasy":       "Impact",
-		"system-ui":     "Microsoft YaHei",
+		// system-ui → UI face（与 fontmgr.resolveFamily 保持一致，两条路径
+		// 不得给出不同字体：Edge 的 system-ui 实测 = Microsoft YaHei UI，
+		// 差别在垂直度量，见 fontmgr.go resolveFamily 的 system-ui 注释）。
+		"system-ui":     "Microsoft YaHei UI",
 		"ui-serif":      "Times New Roman",
 		"ui-sans-serif": "Noto Sans SC",
 		"ui-monospace":  "Consolas",

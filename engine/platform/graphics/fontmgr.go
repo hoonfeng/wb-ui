@@ -662,8 +662,17 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			//   （雅黑，黑体无衬线）兜底，绝不回落到衬线族。
 			return "noto sans sc", true // generic → always available
 		case "system-ui":
-			// Edge 实测 system-ui = 微软雅黑（234.49），与 sans-serif 不同。
-			return "microsoft yahei", true // generic → always available
+			// ★ 2026-10（system-ui 收口）：Edge 的 system-ui 解析到
+			//   **Microsoft YaHei UI**（msyh.ttc 的 UI face），**不是** Microsoft YaHei。
+			//   两者从同一 ttf 出，字形宽度完全相同（旧依据「24px M×10 = 234.49」
+			//   因此区分不了它们），差异只在**垂直度量**。指纹矩阵
+			//   （dev 夹具 systemui_matrix：12/14/16/20/24/32px ×
+			//   Hamburgefonstiv / REC / 录制中 / REC 录制）实测行盒高：
+			//     Microsoft YaHei     16 / 19 / 21 / 26 / 31 / 42   ← 旧映射落点
+			//     Microsoft YaHei UI  15 / 18 / 20 / 25 / 30 / 41   ← Edge 的 system-ui（逐项吻合）
+			//   即：MediaStudio #btn-record 的高 37（Edge 36）由此而来。
+			//   见 dev/audit/WORKITEMS.md §25 的 A/B 表。
+			return "microsoft yahei ui", true // generic → always available
 		case "serif", "ui-serif":
 			// ★ Edge 基准实测（24px 三维指纹 M10/I10/line-height:normal 行盒高）：
 			//   serif → Noto Serif SC（234 / 97.2 / 35）。此前映射到 kochi
@@ -697,10 +706,14 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "seguisym", false
 		case "segoe ui emoji":
 			return "seguiemj", false
-		case "microsoft yahei", "微软雅黑", "microsoft yahei ui",
+		case "microsoft yahei", "微软雅黑",
 			"pingfang sc", "pingfang", "hiragino sans gb", "hiragino", "simhei",
 			"heiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
 			return "microsoft yahei", false
+		case "microsoft yahei ui":
+			// 显式声明 UI face：与 system-ui 同落点（见上）。此前并入上面的雅黑组，
+			// 导致显式 `font-family: "Microsoft YaHei UI"` 也拿到雅黑度量（+1px）。
+			return "microsoft yahei ui", false
 		case "simsun", "nsimsun":
 			// ★ 宋体/新宋体是**具体的衬线族**，不是雅黑的别名：实测把两者并入
 			//   雅黑组后，`font-family: SimSun` 的拉丁 advance 变成 234.49
@@ -765,8 +778,13 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *skia.Typeface {
 	var osName string
 	switch targetFamily {
-	case "microsoft yahei", "微软雅黑", "microsoft yahei ui":
+	case "microsoft yahei", "微软雅黑":
 		osName = "Microsoft YaHei"
+	case "microsoft yahei ui":
+		// msyh.ttc 除 Microsoft YaHei 外还含 UI face（注册表名
+		// 「Microsoft YaHei & Microsoft YaHei UI」），DirectWrite 按族名可区分，
+		// 其 hhea 等垂直度量不同于 YaHei（行盒少 1px @12px，见 resolveFamily 注释）。
+		osName = "Microsoft YaHei UI"
 	case "nsimsun":
 		osName = "NSimSun"
 	case "simsun":
