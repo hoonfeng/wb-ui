@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MediaStudio · 录屏剪辑台</title>
+<style>
+/* 配色取自本仓 design.tokens.json（AI-PS 深色专业配色），不另造色板 */
+:root{
+  --bg:#1E1E1E; --surface:#323232; --surface-2:#3C3C3C; --border:#464646;
+  --fg:#E1E1E1; --muted:#A0A0A0; --subtle:#7A7A7A;
+  --accent:#1473E6; --accent-fg:#FFFFFF; --accent-soft:#0D66D0; --accent-text:#4A9EFF;
+  --success:#2D9D78; --warning:#E68619; --danger:#D7373F;
+  --canvas:#141414; --canvas-grid:#2A2A2A;
+  --sp-xs:4px; --sp-sm:8px; --sp-md:12px; --sp-lg:16px; --sp-xl:24px;
+  --r-sm:4px; --r-md:6px; --r-lg:8px;
+  --fs-xs:11px; --fs-sm:12px; --fs-md:14px; --fs-lg:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:var(--fs-md); line-height:1.5;
+  display:flex; flex-direction:column; height:100vh; overflow:hidden;
+}
+/* ── 顶栏 ─────────────────────────────────────────────── */
+.topbar{
+  display:flex; align-items:center; gap:var(--sp-md);
+  padding:0 var(--sp-lg); height:52px; flex:0 0 52px;
+  background:var(--surface); border-bottom:1px solid var(--border);
+}
+.brand{display:flex; align-items:center; gap:var(--sp-sm); font-size:var(--fs-lg); font-weight:600}
+.brand svg{display:block}
+.topbar .spacer{flex:1}
+.chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:3px 10px; border-radius:999px; font-size:var(--fs-sm);
+  background:var(--surface-2); color:var(--muted); border:1px solid var(--border);
+}
+.chip .dot{width:7px; height:7px; border-radius:999px; background:var(--subtle)}
+.chip[data-state="ready"] .dot{background:var(--success)}
+.chip[data-state="recording"] .dot{background:var(--danger)}
+.chip[data-state="done"] .dot{background:var(--accent-text)}
+.meta{color:var(--subtle); font-size:var(--fs-sm)}
+/* ── 主区 ─────────────────────────────────────────────── */
+.work{display:flex; gap:1px; background:var(--border); flex:1; min-height:0}
+.panel{background:var(--bg); display:flex; flex-direction:column; min-height:0}
+.panel.ctrl{flex:0 0 236px}
+.panel.stagep{flex:1; min-width:0}
+.panel.assets{flex:0 0 268px}
+.panel > h2{
+  font-size:var(--fs-sm); font-weight:600; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.06em;
+  padding:var(--sp-md) var(--sp-lg) var(--sp-sm);
+}
+.ctrl-body{padding:0 var(--sp-lg) var(--sp-lg); overflow:auto}
+.field{display:block; margin-bottom:var(--sp-md)}
+.field .row{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px}
+.field label{font-size:var(--fs-sm); color:var(--muted)}
+.field .val{font-size:var(--fs-sm); color:var(--accent-text); font-variant-numeric:tabular-nums}
+input[type=range]{width:100%; height:18px; accent-color:var(--accent)}
+input[type=checkbox]{width:15px; height:15px; accent-color:var(--accent); margin-right:6px; vertical-align:-2px}
+.sec{border-top:1px solid var(--border); margin:var(--sp-lg) 0 var(--sp-md); padding-top:var(--sp-lg)}
+.btn{
+  display:flex; align-items:center; justify-content:center; gap:6px; width:100%;
+  padding:8px 10px; margin-bottom:var(--sp-sm);
+  background:var(--surface-2); color:var(--fg);
+  border:1px solid var(--border); border-radius:var(--r-md);
+  font-size:var(--fs-md); font-family:inherit; cursor:pointer;
+}
+.btn:hover{background:#454545}
+.btn:disabled{opacity:.45; cursor:default}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-fg)}
+.btn.primary:hover{background:var(--accent-soft)}
+.btn.rec{background:var(--danger); border-color:var(--danger); color:#fff}
+.btn.rec:hover{background:#BF2F36}
+.btn svg{display:block}
+/* ── 舞台 ─────────────────────────────────────────────── */
+.stagewrap{flex:1; min-height:0; padding:0 var(--sp-lg) var(--sp-lg); display:flex}
+#stage{
+  position:relative; flex:1; border-radius:var(--r-lg); overflow:hidden;
+  background:var(--canvas); border:1px solid var(--border);
+}
+#stage .grid{
+  position:absolute; inset:0;
+  background-image:linear-gradient(var(--canvas-grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--canvas-grid) 1px,transparent 1px);
+  background-size:32px 32px;
+}
+/* 演示动画：录制对象（CSS 动画 + 图片 + 视频 + 文字） */
+#orb{
+  position:absolute; top:70px; left:36px; width:74px; height:74px; border-radius:14px;
+  background:var(--accent);
+  animation:orb-move 2.4s linear infinite alternate;
+}
+@keyframes orb-move{
+  /* 本文件的两处写法都由实测确定（引擎补间路径的取值口径）：
+     1) keyframes 内用**字面色值**——补间按声明原文取色、不展开 CSS 变量，
+        写 var(--accent) 会让该帧 background 取到 (0,0,0,0)；
+     2) transform 用**函数式** translateX()/translateY()（引擎按函数名提取补间，
+        `translate(x,y)` 简写与 rotate() 不会被提取）。 */
+  0%{transform:translateX(0px) translateY(0px); background-color:#1473E6}
+  50%{transform:translateX(190px) translateY(64px); background-color:#2D9D78}
+  100%{transform:translateX(380px) translateY(0px); background-color:#E68619}
+}
+#stage .shot{
+  position:absolute; top:176px; left:36px; width:120px; height:80px;
+  border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface);
+  image-rendering:pixelated;
+}
+#stage video{
+  position:absolute; top:176px; left:176px; width:160px; height:106px;
+  border:1px solid var(--border); border-radius:var(--r-sm); object-fit:cover;
+}
+#stage .caption{
+  position:absolute; right:20px; bottom:16px; text-align:right;
+}
+#stage .caption .t1{font-size:20px; font-weight:600; color:var(--fg)}
+#stage .caption .t2{font-size:var(--fs-sm); color:var(--muted)}
+#stage .stamp{
+  position:absolute; left:36px; bottom:16px; font-size:var(--fs-sm); color:var(--accent-text);
+  font-variant-numeric:tabular-nums;
+}
+#stage .badge-live{
+  position:absolute; top:14px; right:16px; display:none; align-items:center; gap:6px;
+  padding:3px 9px; border-radius:999px; font-size:var(--fs-xs);
+  background:rgba(215,55,63,.18); color:#FF8C92; border:1px solid rgba(215,55,63,.5);
+}
+#stage.recording .badge-live{display:inline-flex}
+/* ── 产物面板 ─────────────────────────────────────────── */
+.assets-body{padding:0 var(--sp-lg) var(--sp-lg); display:flex; flex-direction:column; gap:var(--sp-md); overflow:auto}
+#preview{
+  width:100%; height:150px; background:var(--canvas);
+  border:1px solid var(--border); border-radius:var(--r-md); object-fit:contain;
+}
+#assets{list-style:none; display:flex; flex-direction:column; gap:6px}
+#assets li{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm);
+  padding:7px 9px; font-size:var(--fs-sm);
+}
+#assets li .n{color:var(--fg)}
+#assets li .d{color:var(--subtle); font-size:var(--fs-xs); font-variant-numeric:tabular-nums}
+#log{
+  height:104px; resize:none; width:100%;
+  background:var(--canvas); color:var(--muted); border:1px solid var(--border);
+  border-radius:var(--r-sm); font-size:var(--fs-xs); padding:6px 8px; font-family:inherit;
+}
+/* ── 时间轴 ───────────────────────────────────────────── */
+.timeline{
+  flex:0 0 92px; background:var(--surface); border-top:1px solid var(--border);
+  padding:var(--sp-sm) var(--sp-lg) 0;
+}
+.timeline .head{display:flex; align-items:baseline; gap:var(--sp-md); margin-bottom:6px}
+.timeline .head .title{font-size:var(--fs-sm); font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em}
+.timeline .head .info{font-size:var(--fs-sm); color:var(--subtle); font-variant-numeric:tabular-nums}
+.rail{position:relative; height:38px; background:var(--canvas); border:1px solid var(--border); border-radius:var(--r-sm); overflow:hidden}
+.rail .frames{position:absolute; inset:0; display:flex; gap:1px; padding:1px; opacity:.55}
+.rail .frames span{flex:1; background:var(--canvas-grid)}
+.rail .sel{position:absolute; top:0; bottom:0; background:rgba(74,158,255,.22); border-left:2px solid var(--accent-text); border-right:2px solid var(--accent-text)}
+.rail .playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--danger); left:0}
+.rail .ticks{position:absolute; inset:0; display:flex; align-items:flex-end; padding:2px 4px; font-size:10px; color:var(--subtle)}
+.rail .ticks span{flex:1}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A9EFF" stroke-width="1.8" stroke-linecap="round">
+      <rect x="3" y="5" width="13" height="14" rx="2"></rect>
+      <path d="M16 10l4-2.6v9.2L16 14z"></path>
+    </svg>
+    MediaStudio
+  </div>
+  <span class="chip" id="status-chip" data-state="ready"><i class="dot"></i><span id="status-text">就绪</span></span>
+  <div class="spacer"></div>
+  <span class="meta" id="mode-meta">录屏 · 录音 · 剪辑 · 导出 · 回放</span>
+</header>
+
+<div class="work">
+  <!-- 控制面板 -->
+  <section class="panel ctrl">
+    <h2>录制</h2>
+    <div class="ctrl-body">
+      <div class="field">
+        <div class="row"><label for="rec-seconds">时长</label><span class="val" id="rec-seconds-val">3.0 s</span></div>
+        <input type="range" id="rec-seconds" min="1" max="4" step="0.5" value="3">
+      </div>
+      <div class="field">
+        <div class="row"><label for="rec-fps">帧率</label><span class="val" id="rec-fps-val">10 fps</span></div>
+        <input type="range" id="rec-fps" min="5" max="15" step="1" value="10">
+      </div>
+      <div class="field">
+        <label for="rec-audio"><input type="checkbox" id="rec-audio" checked>录制系统声音（环回）</label>
+      </div>
+      <button class="btn rec" id="btn-record">
+        <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#fff"></circle></svg>
+        开始录制
+      </button>
+
+      <div class="sec"></div>
+      <h2 style="padding:0 0 8px">剪辑</h2>
+      <div class="field">
+        <div class="row"><label for="clip-in">入点</label><span class="val" id="clip-in-val">0.5 s</span></div>
+        <input type="range" id="clip-in" min="0" max="3" step="0.1" value="0.5">
+      </div>
+      <div class="field">
+        <div class="row"><label for="clip-out">出点</label><span class="val" id="clip-out-val">2.5 s</span></div>
+        <input type="range" id="clip-out" min="0" max="3" step="0.1" value="2.5">
+      </div>
+      <button class="btn" id="btn-export-clip">导出剪辑片段</button>
+      <button class="btn" id="btn-frames">导出当前帧 PNG</button>
+      <button class="btn" id="btn-frame-jpg">导出当前帧 JPEG</button>
+    </div>
+  </section>
+
+  <!-- 舞台（录制对象） -->
+  <section class="panel stagep">
+    <h2>录制舞台</h2>
+    <div class="stagewrap">
+      <div id="stage">
+        <div class="grid"></div>
+        <div id="orb"></div>
+        <img class="shot" id="shot-img" alt="样本图">
+        <video id="stage-video" muted loop playsinline></video>
+        <div class="caption">
+          <div class="t1">MediaStudio</div>
+          <div class="t2">wb-ui 引擎渲染 · 录制对象</div>
+        </div>
+        <div class="stamp" id="stamp">t = 0.0s</div>
+        <div class="badge-live"><i class="dot" style="width:7px;height:7px;border-radius:99px;background:#FF8C92"></i>REC</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 产物 -->
+  <section class="panel assets">
+    <h2>产物与回放</h2>
+    <div class="assets-body">
+      <video id="preview" controls></video>
+      <button class="btn" id="btn-play">回放录制结果</button>
+      <ul id="assets"><li><span class="n">（尚无产物）</span></li></ul>
+      <textarea id="log" readonly></textarea>
+    </div>
+  </section>
+</div>
+
+<!-- 时间轴 -->
+<footer class="timeline">
+  <div class="head">
+    <span class="title">时间轴</span>
+    <span class="info" id="rail-info">—</span>
+  </div>
+  <div class="rail" id="rail">
+    <div class="frames" id="rail-frames"></div>
+    <div class="sel" id="rail-sel"></div>
+    <div class="playhead" id="rail-playhead"></div>
+    <div class="ticks" id="rail-ticks"></div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var S = {
+    seconds: 3, fps: 10, audio: true,
+    clipIn: 0.5, clipOut: 2.5,
+    duration: 0, assets: [], recording: false
+  };
+  window.__studio = S;
+
+  function $(id){ return document.getElementById(id); }
+  function log(msg){
+    var el = $("log");
+    el.value = (el.value ? el.value + "\n" : "") + msg;
+    el.scrollTop = el.scrollHeight;
+  }
+  function setStatus(state, text){
+    var chip = $("status-chip");
+    chip.setAttribute("data-state", state);
+    $("status-text").textContent = text;
+  }
+  function fmtBytes(n){
+    if (n > 1048576) return (n/1048576).toFixed(2) + " MB";
+    if (n > 1024) return (n/1024).toFixed(1) + " KB";
+    return n + " B";
+  }
+  function renderAssets(){
+    var ul = $("assets");
+    ul.innerHTML = "";
+    if (!S.assets.length){
+      var li = document.createElement("li");
+      li.innerHTML = '<span class="n">（尚无产物）</span>';
+      ul.appendChild(li);
+      return;
+    }
+    S.assets.forEach(function(a){
+      var li = document.createElement("li");
+      var name = document.createElement("span"); name.className = "n"; name.textContent = a.name;
+      var desc = document.createElement("span"); desc.className = "d";
+      desc.textContent = " · " + fmtBytes(a.bytes);
+      if (a.detail) desc.textContent += " · " + a.detail;
+      li.appendChild(name); li.appendChild(desc);
+      ul.appendChild(li);
+    });
+  }
+  function renderRail(){
+    var fr = $("rail-frames");
+    if (!fr.childElementCount){
+      for (var i = 0; i < 28; i++){
+        var s = document.createElement("span"); fr.appendChild(s);
+      }
+    }
+    var ticks = $("rail-ticks");
+    if (!ticks.childElementCount){
+      for (var k = 0; k < 4; k++){
+        var t = document.createElement("span");
+        t.textContent = k === 0 ? "0.0s" : (k * 0.25 * S.seconds).toFixed(1) + "s";
+        ticks.appendChild(t);
+      }
+    }
+    var dur = S.duration > 0 ? S.duration : S.seconds;
+    var a = Math.max(0, Math.min(1, S.clipIn / dur));
+    var b = Math.max(0, Math.min(1, S.clipOut / dur));
+    var sel = $("rail-sel");
+    sel.style.left = (a * 100).toFixed(2) + "%";
+    sel.style.width = Math.max(0, (b - a) * 100).toFixed(2) + "%";
+    $("rail-info").textContent = "入点 " + S.clipIn.toFixed(1) + "s · 出点 " + S.clipOut.toFixed(1) +
+      "s · 选中 " + Math.max(0, S.clipOut - S.clipIn).toFixed(1) + "s（共 " + dur.toFixed(1) + "s）";
+  }
+
+  // ── 控件绑定 ──────────────────────────────────────────
+  $("rec-seconds").oninput = function(){
+    S.seconds = parseFloat(this.value); $("rec-seconds-val").textContent = S.seconds.toFixed(1) + " s";
+    if (!S.duration){ $("clip-in").max = S.seconds; $("clip-out").max = S.seconds; }
+    renderRail();
+  };
+  $("rec-fps").oninput = function(){
+    S.fps = parseInt(this.value, 10); $("rec-fps-val").textContent = S.fps + " fps";
+  };
+  $("rec-audio").onchange = function(){ S.audio = this.checked; };
+  $("clip-in").oninput = function(){
+    S.clipIn = parseFloat(this.value);
+    if (S.clipIn > S.clipOut) { S.clipOut = S.clipIn; $("clip-out").value = S.clipOut; $("clip-out-val").textContent = S.clipOut.toFixed(1) + " s"; }
+    $("clip-in-val").textContent = S.clipIn.toFixed(1) + " s"; renderRail();
+  };
+  $("clip-out").oninput = function(){
+    S.clipOut = parseFloat(this.value);
+    if (S.clipOut < S.clipIn) { S.clipIn = S.clipOut; $("clip-in").value = S.clipIn; $("clip-in-val").textContent = S.clipIn.toFixed(1) + " s"; }
+    $("clip-out-val").textContent = S.clipOut.toFixed(1) + " s"; renderRail();
+  };
+
+  // ── 宿主桥（fetch → bridge → Go）───────────────────────
+  function api(path, body){
+    return fetch(path, body ? {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    } : { method: "GET" }).then(function(r){ return r.json(); });
+  }
+
+  function applyResult(res){
+    if (res.assets) { S.assets = res.assets; renderAssets(); }
+    if (res.duration) {
+      S.duration = res.duration;
+      $("clip-in").max = res.duration; $("clip-out").max = res.duration;
+      if (S.clipOut > res.duration) { S.clipOut = res.duration; $("clip-out").value = S.clipOut; }
+      $("clip-out-val").textContent = S.clipOut.toFixed(1) + " s";
+    }
+    if (res.preview) { $("preview").src = res.preview; }
+    if (res.message) log(res.message);
+    applyStage(res);
+    renderRail();
+  }
+
+  $("btn-record").onclick = function(){
+    setStatus("recording", "录制中");
+    $("btn-record").disabled = true;
+    $("stage").classList.add("recording");
+    log("开始录制：" + S.seconds + "s @" + S.fps + "fps" + (S.audio ? " + 系统声音" : ""));
+    api("/api/record/start", {seconds: S.seconds, fps: S.fps, audio: S.audio}).then(function(res){
+      applyResult(res);
+      $("stage").classList.remove("recording");
+      $("btn-record").disabled = false;
+      setStatus(res.ok ? "done" : "ready", res.ok ? "已录制" : "失败");
+    });
+  };
+  $("btn-export-clip").onclick = function(){
+    log("导出剪辑：" + S.clipIn.toFixed(1) + "s → " + S.clipOut.toFixed(1) + "s");
+    api("/api/clip/export", {in: S.clipIn, out: S.clipOut}).then(applyResult);
+  };
+  $("btn-frames").onclick = function(){
+    api("/api/frame/export", {format: "png"}).then(applyResult);
+  };
+  $("btn-frame-jpg").onclick = function(){
+    api("/api/frame/export", {format: "jpeg"}).then(applyResult);
+  };
+  $("btn-play").onclick = function(){
+    var v = $("preview");
+    if (!v.src){ log("尚无产物可回放"); return; }
+    v.currentTime = 0;
+    var p = v.play();
+    if (p && p.catch) p.catch(function(e){ log("回放失败：" + e); });
+  };
+
+  // 舞台素材由宿主提供（宿主给出样本图/样本视频的 file:// 绝对路径）：
+  // 引擎侧的资源选择与宿主侧的解码共用同一条资源策略（AllowHostResolved）。
+  function applyStage(res){
+    var img = $("shot-img"), v = $("stage-video");
+    if (res.shotUrl && img.getAttribute("src") !== res.shotUrl){ img.src = res.shotUrl; }
+    if (res.videoUrl && v.getAttribute("src") !== res.videoUrl){
+      v.addEventListener("loadedmetadata", function(){
+        log("舞台视频元数据：" + v.videoWidth + "x" + v.videoHeight + " · " + v.duration.toFixed(2) + "s");
+      });
+      v.src = res.videoUrl;
+      var pp = v.play(); if (pp && pp.catch) pp.catch(function(){});
+    }
+  }
+  // 舞台时间戳（录制对象的一部分：随时间变化的文字）
+  var t0 = Date.now();
+  setInterval(function(){
+    $("stamp").textContent = "t = " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+  }, 100);
+
+  renderAssets(); renderRail();
+  api("/api/status").then(applyResult).catch(function(e){ log("宿主桥未就绪：" + e); });
+})();
+</script>
+</body>
+</html>
