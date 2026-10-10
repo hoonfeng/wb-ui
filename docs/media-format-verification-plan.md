@@ -509,6 +509,13 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 1. **样本生成脚本（入库）** `dev/media/gen_samples.py`：PIL 生成 png/jpeg/gif(静态+动画)/webp/bmp/ico/tiff/avif/svg，ffmpeg 生成 mp4/webm/wav/mp3/ogg/m4a（各 1 秒 testsrc/sine）。
    ★ **决策 5（2026-10-07 修订）：脚本入库、样本不入库；报告与四配置截图作为验收证据入库**——样本生成到 `dev/media/samples/`（进 `.gitignore`）；报告、四配置静止/播放截图、逐格几何与基线生成到 `dev/media/out/`（`.gitignore` 对该目录**开例外**）。取舍理由：① 样本随仓库走会让二进制长期堆积且难以更新，而固定生成参数 + 入库脚本即可保证「同一份样本、可重复判定」，故样本不入库；② 报告/截图/几何是 §6.3 证据纪律所要求的判定依据，不入库则等级判定不可复核，故必须入库。
+   ★ **「例外中的例外」：`out/` 内的本机采集产物不入库（2026-10-08 收口）**——`out/` 的验收证据口径
+   **不覆盖本机环回录音**：`loopback-wasapi.wav`（判据 B 的 WASAPI 录回音频）依赖本机声卡与设备名、
+   且每次探针复跑二进制都变，已由 `.gitignore` 的 `dev/media/out/*loopback*.wav` 显式排除
+   （与 `dev/media/loopback/` 同口径：**属本机证据，不入库**）。判据 B 的结论落在 `report.md` 正文
+   （结果 / 录回主峰 / 幅度对照），**音频本体不入库不影响其可复核性**。
+   ★ 全仓自查（`git ls-files | grep -iE '\.(wav|log)$'`）：**仅此一处**本机采集产物曾被入库，
+   已 `git rm --cached` 清理（工作区文件保留）。
    ⚠️ **副作用（提交时必须知情；2026-10-07 实测）**：同一代码重跑**必产生 diff**，共两类——
    ① **报告数值**：`report.md` 含 TC-M-602 的 `currentTime` 等采样数值。实测重跑 628 行中 **140 行变化**：
    报告头 4 行（日期/commit）+ 播放时钟 122 行（描述行 60 + 判据表 62）+ 像素比对比例 2 行 + 环回录音 4 行
@@ -1245,6 +1252,13 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 **本轮追加收尾（2026-10-08，监督复核后）**：把 `image-rendering` 从 `<img>`（`PaintImage`）**补齐到
 background-image 路径**（见下方「引擎修复 ①」行末）；**SVG `<image>` 如实登记为路径边界**（同上行）；
 TC-M-303 的**期望栏文字**改为与判据一致的口径（见「判据修正 ①」行末）。
+
+**本轮第 2 次收口（2026-10-08，产物一致性）**：① `-media-edge` 默认关闭时，`extra-verification.md`
+的 `## Edge` 段改由 `loadArchivedEdgeRun` 从上一轮存档 `extra-Edge.json` **复用渲染**（段首注明
+「本节取自 `cafc37d` 的 Edge 对照存档…**本轮未重跑 Edge**」），`## 引擎 vs Edge 逐项对照` 随之恢复
+（可比 **8** 项、引擎无一项低于 Edge）——此前这类复跑会把 Edge 段**整段抹掉**、结论只在 git 历史里
+留痕，与「产物即证据」的纪律相悖。② `out/` 内的本机环回录音 `loopback-wasapi.wav` 按「本机采集
+产物不入库」口径由 `.gitignore` 排除并 `git rm --cached`（§6.2）。两项都不改任何已判 ✅ 的阈值与判据逻辑。
 
 | 项 | 内容 |
 |---|---|

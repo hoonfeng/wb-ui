@@ -1062,8 +1062,29 @@ func runExtraVerification(samplesDir, outDir string, vw, pageH int, withEdge boo
 	if withEdge {
 		ec, summary := runExtraEdge(pagePath, outDir, vw, pageH)
 		runs = append(runs, extraRun{Label: "Edge", Cases: ec, Summary: summary})
+	} else if ec, ok := loadArchivedEdgeRun(filepath.Join(outDir, "extra-Edge.json")); ok {
+		// 未随本轮跑 Edge（-media-edge 默认关闭）：复用上一次的 Edge 存档，
+		// 让「## Edge 逐项对照」与「引擎 vs Edge」结论不因复跑从产物里消失。
+		runs = append(runs, extraRun{Label: "Edge", Cases: ec,
+			Summary: "本节取自 `cafc37d` 的 Edge 对照存档（`extra-Edge.json`）：**本轮未重跑 Edge**" +
+				"（`-media-edge` 默认关闭），故沿用原数值口径；重跑 `-media-edge` 会用新数据覆盖本节。"})
 	}
 	return writeExtraReport(outDir, runs, pagePath)
+}
+
+// loadArchivedEdgeRun 读取上一次 Edge 对照的存档（extra-Edge.json，[]extraCase）。
+// 用途：本轮没跑 `-media-edge` 时，把上一轮的 Edge 逐项对照重新渲染进产物，
+// 避免「复跑一次就抹掉已达成结论」的产物回退（数据来源由段首 Summary 如实标注）。
+func loadArchivedEdgeRun(path string) ([]extraCase, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var cases []extraCase
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		return nil, false
+	}
+	return cases, true
 }
 
 func runByLabel(runs []extraRun, label string) (extraRun, bool) {

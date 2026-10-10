@@ -97,5 +97,9 @@ dev/media/samples/
 dev/media/loopback/
 !dev/media/out/
 !dev/media/out/**
+# 例外中的例外：out/ 里的**本机环回录音**（如 loopback-wasapi.wav）仍属本机证据
+# —— 依赖本机声卡与设备名，且每次探针复跑二进制都变；上面的 !dev/media/out/** 会把它
+# 重新纳入，故在此显式排除（环回结论落在 report.md 正文，音频本体不入库）
+dev/media/out/*loopback*.wav
 # 生成脚本要入库（决策 5）——上面的 `gen_*.py`（临时夹具脚本）会误伤它，开例外
 !dev/media/gen_samples.py
