@@ -998,6 +998,17 @@ func resolveInheritKeyword(cs, parent *ComputedStyle) {
 			cs.VerticalAlign = "baseline"
 		}
 	}
+	// font-family 是**可继承**属性，但同样需要显式收敛：applyDeclaration 只在字段里
+	// 留下字面量（见 case "font-family"），而 InheritFrom 复制进来的父值可能已被 UA
+	// 的控件字体声明覆盖（`input, button { font-family: Arial }` 优先级高于继承值）。
+	if cs.FontFamily == "inherit" {
+		if parent != nil && parent.FontFamily != "" && parent.FontFamily != "inherit" {
+			cs.FontFamily = parent.FontFamily
+		} else {
+			// 根元素（parent == nil）：CSS 初始值（CSS Fonts 3 §2.1）。
+			cs.FontFamily = "sans-serif"
+		}
+	}
 }
 
 // declContainsVar reports whether the declaration value references a var()
@@ -2092,11 +2103,19 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			}
 		}
 	case "font-family":
-		if valueString == "inherit" {
-			// UA stylesheet uses font-family: inherit for form controls;
-			// the inherited value was already copied from the parent in
-			// ResolveElement via InheritFrom — keep it (do not overwrite
-			// with the literal keyword).
+		if strings.EqualFold(strings.TrimSpace(valueString), "inherit") {
+			// ★ CSS Cascade §7.3：`inherit` = 取**父元素的计算值**。
+			//   不能只「break 保留当前字段」：声明按级联顺序逐个应用，作者声明排在 UA
+			//   之后，此时字段可能已被更低优先级的 UA 声明改写（UA 表有
+			//   `input, button, select, textarea { font-family: Arial }`）——break 会把 Arial 当成「继承值」，
+			//   作者的 `font-family: inherit` 静默失效。
+			//   实测（dev/output/tmp/min_ff.html，双端 getComputedStyle 对照）：
+			//   `button.b{font-family:inherit}`（父 font-family:monospace）Edge=monospace、wb-ui=Arial；
+			//   MediaStudio 的 `.btn{font-family:inherit}` 因此拿到 Arial 而非 body 的
+			//   system-ui → `#btn-record` 的 normal 行高多 3px、高 38（Edge 36）。
+			//   此处写入关键字字面量，交由 ResolveElement 末尾的
+			//   resolveInheritKeyword 用父元素计算值收敛。
+			cs.FontFamily = "inherit"
 			break
 		}
 		cs.FontFamily = strings.Trim(valueString, `"'`)

@@ -3447,3 +3447,60 @@ h2_baseline_matrix 2 行、h2_control_baseline 16 行、h2_replaced_linebox 10 �
   `ALL11` 前 16 行与 `ALL10` 逐字零差异、`go test ./engine/...` 23 包 0 FAIL、
   `engine/layout` 零改动。降级项（Path2D 的 SVG 字符串解析、规则 style 只读快照、
   规则 style shorthand 不展开、@supports conditionText 未验证）已在 §21-4/§21-6 记账。**
+
+
+# §24｜D6 收口：`font-family: inherit` 被 UA 控件字体静默覆盖（**已修**）+ system-ui 行盒高 1px（**遗留**）
+
+## 24-0｜现象与基线（先取 Edge 实测，不凭规范推断）
+
+MediaStudio（`cmd/mediastudio/web/index.html`）的 `#btn-record`：
+
+| 侧 | 宽 | 高 | computed font-family |
+| --- | --- | --- | --- |
+| Edge headless（`--dump-dom` + 注入脚本读 title） | 204 | **36** | `system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif`（继承自 body） |
+| wb-ui（`laydump`，修复前） | 204 | **34** | —（实际落到 UA 的 Arial） |
+| wb-ui（`laydump`，修复后） | 204 | **37** | 继承栈（同 Edge） |
+
+## 24-1｜根因（三条证据闭环）
+
+1. UA 表 `engine/html5/defaultcss.go:61` 有 `input, button, select, textarea { font-family: Arial }`
+   （对齐 Chromium html.css 的 `font: 400 13.3333px Arial`）。
+2. 级联排序后**逐条应用**：UA 声明先应用 → `cs.FontFamily = "Arial"`；作者的
+   `.btn{font-family:inherit}` 后应用，但 `applyDeclaration` 的 `case "font-family"` 对
+   `inherit` 只 `break`（原注释称「保留当前字段，InheritFrom 已复制父值」）——**保留的其实是 UA 的 Arial**。
+3. `ResolveElement` 末尾的 `resolveInheritKeyword` 当时只覆盖 `box-sizing` / `vertical-align`，
+   font-family 的 inherit 无人解析。
+
+⇒ 作者的 `font-family: inherit` **静默失效**：控件用 Arial 的 normal 行盒（20px @13.33px）
+而非父元素 system-ui 栈的（17px）。
+
+## 24-2｜修复（`engine/style/resolver.go`，2 处）
+
+1. `case "font-family"`：`inherit` 写入字面量（`cs.FontFamily = "inherit"`），不再 break 保留字段。
+2. `resolveInheritKeyword`：新增 font-family 分支 —— 取**父元素计算值**；根元素（`parent == nil`）
+   落 CSS 初始值 `sans-serif`（CSS Fonts 3 §2.1）。
+
+## 24-3｜验收证据（全部本轮实测）
+
+- 新增单测 `engine/style/font_family_inherit_test.go`（4 例）全绿，含直接复现本例的
+  「UA `font-family: Arial` + 作者 `font-family: inherit`」用例；
+- `go test ./engine/style ./engine/layout ./engine/html5` → 三包 ok；
+- `cssprobe` 全套 62/64；两个失败夹具（`img-density-and-alt`、`ratio-only-inline-images`）
+  经 `git stash push -- engine/style/resolver.go` 前后对照**失败项逐字相同** → 既有失败，与本改动无关；
+- `laydump -html cmd/mediastudio/web/index.html -sel '#btn-record'`：修复前 204×34 → 修复后 204×37；
+- 双端最小夹具（Edge `_temp/min_systemui_edge.html` vs wb-ui `_temp/min_systemui.html`）：
+
+| 用例 | Edge | wb-ui |
+| --- | --- | --- |
+| `inherit`（body 栈首项 system-ui） | 52×**36** | 1264×**37** |
+| 显式 `"Segoe UI"` | 50×**37** | **37** |
+| 显式 `"Microsoft YaHei"` | 52×**37** | **37** |
+
+## 24-4｜遗留（本次未动，如实记账）
+
+`system-ui` 关键字的**行盒高**：Edge 的 system-ui 表现为「雅黑字形宽度（52，与显式雅黑相同）
++ 36 行盒高（等于 Segoe UI 度量）」；wb-ui 把 system-ui 映射为 Microsoft YaHei
+（`engine/platform/graphics/fontmgr.go:664`，依据是 24px 下 `M`×10 宽度实测 234.49），
+宽度一致 ✓、行盒高 37（+1px）。**显式族名两侧完全一致** ⇒ 1px 只出在 `system-ui` 这一个
+关键字上，属「字体映射 × 行盒度量」课题：改映射会波及全局文档度量，须先按 §0.2 口径重取
+Edge 基线（含 CJK 混排、多字号）再决策，本轮不动。
