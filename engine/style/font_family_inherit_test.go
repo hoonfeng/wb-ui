@@ -20,7 +20,11 @@ func uaSheet(t *testing.T, input string) *css.CSSStyleSheet {
 }
 
 // TestResolver_FontFamilyInheritOverridesUAControlFont 锁定 MediaStudio
-// `#btn-record` 按钮高度差（wb-ui 38 / Edge 36）的样式侧根因：
+// `#btn-record` 按钮高度差的样式侧根因。实测高度（laydump 1280x860，同树同命令，
+// 仅把 resolver.go 切到本修复前的版本）：**修复前 204x34 → 修复后 204x37**（Edge 204x36）。
+//
+// ★ 本文曾写「wb-ui 38 / Edge 36」：38 是更早的 D6 缺陷（UA 控件缺
+// `line-height: normal`，见 docs/render-consistency-fixes.md）时期的数字，**已作废**。
 //
 //	UA 表（defaultcss.go）有 `input, button, select, textarea { font-family: Arial }`，
 //	作者的 `.btn { font-family: inherit }` 排在它**之后**应用。修复前

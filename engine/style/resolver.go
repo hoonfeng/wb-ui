@@ -2112,7 +2112,13 @@ func applyDeclaration(cs *ComputedStyle, d css.Declaration) {
 			//   实测（dev/output/tmp/min_ff.html，双端 getComputedStyle 对照）：
 			//   `button.b{font-family:inherit}`（父 font-family:monospace）Edge=monospace、wb-ui=Arial；
 			//   MediaStudio 的 `.btn{font-family:inherit}` 因此拿到 Arial 而非 body 的
-			//   system-ui → `#btn-record` 的 normal 行高多 3px、高 38（Edge 36）。
+			//   system-ui → `#btn-record` 的行盒随字体族变化。实测（laydump，
+			//   `-html cmd/mediastudio/web/index.html -sel '#btn-record' -w 1280 -h 860`，
+			//   同一棵树、同一命令，仅把本文件切到本节修复前的版本）：
+			//   修复前 **204x34** → 修复后 **204x37**（Edge 204x36）。
+			//   ★ 本节曾写「高 38」：那是更早的 D6 缺陷（UA 控件缺
+			//   `line-height: normal`，见 docs/render-consistency-fixes.md）时期的数字，
+			//   **已作废**，请勿再引用——同一元素「修复前」只有一个权威值 34。
 			//   此处写入关键字字面量，交由 ResolveElement 末尾的
 			//   resolveInheritKeyword 用父元素计算值收敛。
 			cs.FontFamily = "inherit"

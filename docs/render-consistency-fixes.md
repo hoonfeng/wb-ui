@@ -147,6 +147,16 @@ python dev/tools/pixdiff.py dev/output/tmp/studio.cmp.wbui.png dev/output/tmp/st
 D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 `clientWidth/scrollWidth/scrollHeight/offsetHeight`，双端对照即见 513.5 vs 504。
 
+> **口径校准与状态更新（2026-10）**
+> - 上表 D6 的「wb-ui **38**」是**该缺陷修复前**的历史值。D6 已修复（UA 表单控件
+>   `line-height: normal`，见 `dev/audit/WORKITEMS.md` §H2），此后同一元素
+>   `#btn-record` 的「修复前」高度实测为 **204×34** —— 即后来 font-family inherit
+>   缺陷（WORKITEMS §24）的基线；该缺陷修复后为 **204×37**（Edge 204×36）。
+>   **同一元素同一状态只有一个权威值**：34 是现行值，38 已作废，勿混用。
+> - D4 已修复：提交 `bbc0dee`（背景按 `background-origin` 定位区域，初始值 padding-box）；
+>   D5 已修复：提交 `72ea2b9`（flex column 的 basis:auto 项改用预布局实测高度）。
+>   两项均按 §0.3 门槛回归（八页像素不劣化）后入库。
+
 ---
 
 ## 4. 允许的已知差异（非缺陷）
