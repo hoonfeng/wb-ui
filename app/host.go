@@ -2165,6 +2165,45 @@ func (h *Host) processEventLoop() {
 	el.ProcessTasks(elapsedMs)
 }
 
+// drainEventLoop 派发事件后**同步**驱动事件循环，直到没有可立即执行的任务
+// （微任务 / 到期的 setTimeout·setInterval / requestAnimationFrame / setImmediate）
+// 或超时返回。
+//
+// ★ 这里必须用 EventLoop.HasReadyTasks 判断，**不能**用 PendingTasks：
+// PendingTasks 把**尚未到期**的定时器也算作 pending，而页面上几乎总有一个
+// 未到期定时器（Vue 的 nextTick 兜底 setTimeout、框架轮询/心跳、CM6/xterm 的
+// 自调度……）。用它当「事件循环是否已排空」的判据，循环永远等不到 0，只能靠
+// timeout 退出——每次点击 / 右键 / 鼠标释放都白等满 120~180ms，期间主循环既不
+// 布局也不绘制，用户看到的就是「一触发事件，画面就停止更新」。
+//
+// 浏览器语义：未到期的定时器不阻塞当前帧，交给宿主的帧循环按时间推进即可
+// （每帧的 processEventLoop 都会调 ProcessTasks，定时器到点照常执行）。
+// timeout 只作上限保护（自调度链：rAF 递归、setTimeout(0) 循环、长 async 链）。
+func (h *Host) drainEventLoop(timeout time.Duration) {
+	interp := h.wv.JSInterpreter()
+	if interp == nil {
+		return
+	}
+	el := interp.GetEventLoop()
+	if el == nil {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		interp.RunJobs()
+		h.processEventLoop()
+		if !el.HasReadyTasks() {
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		// 就绪任务持续存在（rAF 链/短定时器链）：短暂让出，避免在 JS 侧
+		// 一口气跑完整段超时预算。
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // processEvents drains the platform event queue and dispatches each event.
 // Resize updates the WebView viewport; scroll adjusts scrollY; mouse clicks
 // are hit-tested against the render tree and forwarded to the click handler.
@@ -4407,20 +4446,8 @@ func (h *Host) processEvents(rv *rendering.RenderView) {
 			// contextmenu 分支一致），再 EnsureLayout 让光标新位置
 			// 本帧布局生效。
 			if h.wv.JSInterpreter() != nil {
-				interp := h.wv.JSInterpreter()
-				deadline := time.Now().Add(180 * time.Millisecond)
-				for {
-					interp.RunJobs()
-					h.processEventLoop()
-					el := interp.GetEventLoop()
-					if el == nil || el.PendingTasks() == 0 {
-						break
-					}
-					if time.Now().After(deadline) {
-						break
-					}
-					time.Sleep(5 * time.Millisecond)
-				}
+				// 同步驱动 CM6 的 measure 链到排空（判据见 drainEventLoop）。
+				h.drainEventLoop(180 * time.Millisecond)
 				h.wv.EnsureLayout()
 			}
 		case window.EventChar:
@@ -4974,22 +5001,9 @@ func (h *Host) handleContextMenu(rv *rendering.RenderView, ev window.Event) {
 	notPrevented := deepest.DispatchEvent(me)
 	// Vue 菜单打开（visible=true）是响应式更新：跑微任务 + 事件循环 + 重建。
 	h.processEventLoop()
-	if h.wv.JSInterpreter() != nil {
-		interp := h.wv.JSInterpreter()
-		deadline := time.Now().Add(180 * time.Millisecond)
-		for {
-			interp.RunJobs()
-			h.processEventLoop()
-			el := interp.GetEventLoop()
-			if el == nil || el.PendingTasks() == 0 {
-				break
-			}
-			if time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	// 同步驱动到排空（判据见 drainEventLoop：未到期的定时器不算就绪，
+	// 否则页面只要有未到期定时器，菜单一打开就要白等满超时、画面冻结）。
+	h.drainEventLoop(180 * time.Millisecond)
 	h.wv.RebuildRenderTree()
 
 	// ★ 默认编辑菜单（浏览器语义）：contextmenu 未被 JS preventDefault
@@ -5123,31 +5137,15 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// （goja 队列），与 processEventLoop 驱动的 queueMicrotask（jsc 队列）
 		// 是两套：dispatch 时 jsListener 里已 RunJobs 一次，但 Vue 的
 		// flushJobs 可能在 await 恢复链更后面，这里再补一次确保触发。
-		if h.wv.JSInterpreter() != nil {
-			interp := h.wv.JSInterpreter()
-			// ★ 智能等待（替代原固定 8×15ms=120ms sleep）：
-			//   事件派发后 Vue 的 async 链（@click → await apiPost →
-			//   await loadXXX …）由 RunJobs（goja microtask）+ ProcessTasks
-			//   （宏任务/rAF）交替驱动。普通点击无异步链，PendingTasks
-			//   立即排空 → 提前退出（省 120ms 固定延迟，点击响应更快）；
-			//   切换工作区等长链持续驱动直到排空或超时（上限保护）。
-			//   Vue 的 nextTick 是 Promise.microtask，RunJobs 一次会清空
-			//   队列；仅当链中调度了宏任务（setTimeout/rAF）才需要
-			//   ProcessTasks 补一轮，因此无需人为固定 sleep。
-			el := interp.GetEventLoop()
-			deadline := time.Now().Add(180 * time.Millisecond)
-			for {
-				interp.RunJobs()
-				h.processEventLoop()
-				if el == nil || el.PendingTasks() == 0 {
-					break
-				}
-				if time.Now().After(deadline) {
-					break
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
-		}
+		// ★ 智能等待：点击 handler 里的 async 链（@click → await apiPost →
+		//   await loadXXX …）由 RunJobs（goja microtask）+ ProcessTasks
+		//   （宏任务/rAF）交替同步驱动到排空（上限保护），不必依赖下一帧
+		//   渲染循环才推进。
+		//   ★ 判据见 drainEventLoop：未到期的定时器**不算**就绪。历史上这里
+		//   用的是 PendingTasks（含未到期项）——页面只要有一个未到期定时器
+		//   （Vue 的 nextTick 兜底 setTimeout / 框架轮询 / 心跳），判定就恒为
+		//   false，每次点击都要白等满 180ms 且期间不布局不绘制（画面冻结）。
+		h.drainEventLoop(180 * time.Millisecond)
 		h.wv.RebuildRenderTree()
 		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
 			if v, err := h.wv.JSInterpreter().RunJS(`(function(){
@@ -5204,23 +5202,10 @@ func (h *Host) handleClick(rv *rendering.RenderView, ev window.Event) {
 		// （goja 队列），与 processEventLoop 驱动的 queueMicrotask（jsc 队列）
 		// 是两套：dispatch 后必须补 goja RunJobs，否则 Vue 的
 		// flushJobs 不跑，DOM 永远停留在旧状态（点击"看起来没反应"）。
-		if h.wv.JSInterpreter() != nil {
-			interp := h.wv.JSInterpreter()
-			interp.RunJobs()
-			// 智能等待：点击 handler 里的 async 链（@click → await fetch →
-			// Vue 更新）立即推进到排空，避免依赖下一帧渲染循环才推进。
-			if el0 := interp.GetEventLoop(); el0 != nil {
-				deadline := time.Now().Add(120 * time.Millisecond)
-				for {
-					interp.RunJobs()
-					h.processEventLoop()
-					if el0.PendingTasks() == 0 || time.Now().After(deadline) {
-						break
-					}
-					time.Sleep(5 * time.Millisecond)
-				}
-			}
-		}
+		// 智能等待：点击 handler 里的 async 链（@click → await fetch →
+		// Vue 更新）立即推进到排空，避免依赖下一帧渲染循环才推进。
+		// 判据见 drainEventLoop（HasReadyTasks）：未到期的定时器不算就绪。
+		h.drainEventLoop(120 * time.Millisecond)
 		h.wv.RebuildRenderTree()
 		if os.Getenv("WB_EVT_DEBUG") != "" && h.wv.JSInterpreter() != nil {
 			if v, err := h.wv.JSInterpreter().RunJS(`(function(){

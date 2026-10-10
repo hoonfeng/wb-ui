@@ -149,7 +149,11 @@ func (w *Worker) run() {
 		case data := <-w.toWorker:
 			w.dispatchMessage(data)
 		case <-ticker.C:
-			if w.el.PendingTasks() > 0 {
+			// ★ HasReadyTasks（而非 PendingTasks）：未到期的 setTimeout/
+			//   setInterval 不算就绪——用 PendingTasks 会让 worker 每 4ms 都
+			//   空转 ProcessTasks（该函数语义同样是「宿主可立即推进的任务」，
+			//   见 jsc.EventLoop.HasReadyTasks 的注释）。
+			if w.el.HasReadyTasks() {
 				w.el.ProcessTasks(0)
 			}
 		case <-w.quit:

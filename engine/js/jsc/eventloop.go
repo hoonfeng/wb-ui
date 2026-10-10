@@ -345,6 +345,38 @@ func (el *EventLoop) PendingTasks() int {
 	return len(el.macrotasks) + len(el.microtasks) + len(el.animFrames) + len(el.immediates)
 }
 
+// HasReadyTasks 报告是否存在**可立即执行**的任务：到期的 setTimeout/setInterval
+// 宏任务、setImmediate、微任务（Promise.then）、requestAnimationFrame 回调。
+//
+// ★ 与 PendingTasks 的差别（这是宿主最容易踩的坑）：PendingTasks 把**尚未到期**
+// 的定时器也算作 pending（len(macrotasks) 含未到期项——它们留在队列里等时间到）。
+// 宿主若拿它当「事件循环是否已排空」的判据，页面只要存在任何未到期定时器
+// （几乎所有框架页面都有：轮询/心跳、Vue 的 nextTick 兜底 setTimeout、CM6/xterm
+// 的自调度），判据就**恒为 false**，宿主只能靠超时退出——每帧白等 120~180ms，
+// 期间既不布局也不绘制，用户看到的就是「一触发事件（点击/右键/鼠标释放）
+// 画面就停止更新」。
+//
+// 浏览器语义：未到期的定时器**不阻塞当前帧**（定时器到点了也不抢占正在进行的
+// 帧），由宿主在后续帧按时间推进即可——宿主的帧循环每帧都会调 ProcessTasks，
+// 定时器该到点时会照常执行。因此「派发事件后是否需要继续同步驱动事件循环」
+// 必须看 HasReadyTasks，而不是 PendingTasks。
+func (el *EventLoop) HasReadyTasks() bool {
+	if el == nil {
+		return false
+	}
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	// 微任务 / 动画帧 / setImmediate：入队即可执行，不看时间。
+	if len(el.microtasks) > 0 || len(el.animFrames) > 0 || len(el.immediates) > 0 {
+		return true
+	}
+	if len(el.macrotasks) == 0 {
+		return false
+	}
+	// macrotasks 按 DueTime 升序（insertMacrotask），只看队首即可判断有无到期项。
+	return el.macrotasks[0].IsDue(el.nowMs())
+}
+
 // ─── 内部方法 ──────────────────────────────────────────
 
 func (el *EventLoop) nowMs() int64 {
