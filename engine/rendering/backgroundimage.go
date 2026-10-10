@@ -306,8 +306,12 @@ func paintSVGScaled(canvas *graphics.Canvas, svg *svgDocument, x, y, w, h float6
 // edge start at the tile's own offset so the pattern stays aligned with the
 // position origin (matching CSS: the position defines the first tile's
 // location).
+//
+// sampling 由调用方按元素的 CSS `image-rendering` 判定后传入（见 painter.go 的
+// imageSamplingFor）：CSS Images §3 中该属性适用于元素的一切图像源，背景图与 <img>
+// 必须同口径。所有平铺出的瓦片用同一采样模式。
 func paintBackgroundImageTiled(canvas *graphics.Canvas, img *DecodedImage,
-	x, y, w, h, dx, dy, dw, dh float64, repeat string) {
+	x, y, w, h, dx, dy, dw, dh float64, repeat string, sampling graphics.ImageSampling) {
 	if canvas == nil || img == nil || !img.Loaded() || dw <= 0 || dh <= 0 {
 		return
 	}
@@ -324,7 +328,7 @@ func paintBackgroundImageTiled(canvas *graphics.Canvas, img *DecodedImage,
 			if repY && ty+dh < y {
 				continue
 			}
-			img.Draw(canvas, tx, ty, dw, dh)
+			img.DrawSampling(canvas, tx, ty, dw, dh, sampling)
 			if !repX {
 				break
 			}

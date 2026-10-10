@@ -93,6 +93,8 @@ web/ai-ps/codegen.*.json
 #   - 报告、四配置静止/播放截图、逐格几何、Edge 对照图是**验收证据**（§6.3 证据纪律），
 #     必须入库 —— 因此对 dev/media/out/ 开例外（上面的 /dev/**/out/ 会连报告一起忽略）。
 dev/media/samples/
+# 本机音频环回采集产物（rec_*.wav 录音 / lb*.log 日志；依赖本机声卡与设备名，属本机证据，不入库）
+dev/media/loopback/
 !dev/media/out/
 !dev/media/out/**
 # 生成脚本要入库（决策 5）——上面的 `gen_*.py`（临时夹具脚本）会误伤它，开例外

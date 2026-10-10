@@ -62,7 +62,11 @@ type extraCaseDef struct {
 
 func extraCaseDefs() []extraCaseDef {
 	return []extraCaseDef{
-		{"TC-M-303", "image-rendering: pixelated 的最近邻缩放", "放大后不产生插值中间色（色数 = 源色数 4）"},
+		// ★ 期望栏与判据口径一致：pixelated 的达标线是「采样色数**显著少于** auto 对照」
+		// 且「自身不出现整幅插值」（源色 4；残留色仅来自色块交界的混合像素——放大后
+		// 相邻色块之间有 1px 过渡，属几何混色而非双线性插值，Edge 同样如此）。
+		// 旧文案写「色数 = 源色数 4」会把实际判据（8 vs 21 判 ✅）读成「达标线被放宽」。
+		{"TC-M-303", "image-rendering: pixelated 的最近邻缩放", "pixelated 采样色数显著少于 auto 对照（源色 4；残留色仅来自色块交界混合像素），自身不走整幅插值"},
 		{"TC-M-304", "<canvas> drawImage 取动图当前帧", "连续采样出现 ≥2 种帧色（取到的是当前帧、不是首帧常量）"},
 		{"TC-M-305", "逐帧 delay 对齐（帧延迟 [50,200,100]ms，周期 350ms）", "三段帧色时长之比 ≈ 50:200:100，周期 ≈350ms"},
 		{"TC-M-306", "visibility:hidden 后动图是否继续推进", "隐藏 300ms 期间帧色仍变化（规范：不因不可见而暂停）"},

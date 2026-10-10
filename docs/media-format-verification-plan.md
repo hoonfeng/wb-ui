@@ -390,7 +390,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 > 五项已由**补充判据探针**（`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与
 > **Edge 同页面同脚本**对照——判据口径、逐项表与三处**判据修正**见 **§9.10**。
 > 摘要（复跑**全部达成**）：TC-M-305 逐帧 delay 对齐 **达成**；TC-M-303（`image-rendering:pixelated`）
-> 首轮为**引擎缺口**（未实现最近邻，22 色 ≈ auto 21 色）→ **已补实现**（复跑 8 色 vs 21 色；Edge 9 vs 22）；
+> 首轮为**引擎缺口**（未实现最近邻，22 色 ≈ auto 21 色）→ **已补实现**（复跑 8 色 vs 21 色；Edge 9 vs 22），
+> 并**收尾补齐 background-image 路径**（判定共用 `imageSamplingFor`，背景图改走 `DrawSampling`；
+> **SVG `<image>` 如实登记为路径边界**——`svgPaintContext` 不含样式，拿不到可继承值。详见 §9.10）；
 > TC-M-304（canvas `drawImage` 取当前帧）首轮结论系**采样点越界伪影**（样本 GIF 120×80、采样点固定 (80,80)
 > 越界 ⇒ 恒透明黑）→ **已修正判据**并**达成**；TC-M-306（`visibility:hidden` 后仍推进）首轮结论系
 > **观测器误用**（用渲染像素观测不可见元素，采到的是容器背景色）→ **已修正判据**并**达成**；
@@ -1240,6 +1242,10 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 结论是**判据伪影**（采样点越界 / 观测器误用）→ 已修正判据，并顺带根治了 canvas 对不可见元素取
 **过期帧**的真实缺陷。复跑后 **可比 8 项里引擎无一项低于 Edge**。
 
+**本轮追加收尾（2026-10-08，监督复核后）**：把 `image-rendering` 从 `<img>`（`PaintImage`）**补齐到
+background-image 路径**（见下方「引擎修复 ①」行末）；**SVG `<image>` 如实登记为路径边界**（同上行）；
+TC-M-303 的**期望栏文字**改为与判据一致的口径（见「判据修正 ①」行末）。
+
 | 项 | 内容 |
 |---|---|
 | 采集方式 | **渲染像素**（引擎 `wv.Render()` 出图后采样 / Edge `--screenshot`）+ 页面内 **canvas 采样**（`drawImage` 取元素当前帧，用于时间序列）。两侧**同一套页面脚本与判据内核**（`judgeExtra`） |
@@ -1247,13 +1253,13 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 | 产物 | `dev/media/out/extra-verification.md`（表）、`extra-{Browser,Toolkit+DenyExternal,Edge}.json`（判据）、`extra-raw-*.json`（原始采样）、`extra-*.png`（截图）、`edge-matrix.png`（矩阵页对照） |
 | 判据口径 | ✅ 达成 / ❌ 未达成 / ⚠️ 部分或不符预期（如实记录）/ **SKIP（附原因）**。时间序列 5 项（TC-M-304~307）在 `Toolkit+DenyExternal` 与 **Edge 侧一律 SKIP**——前者本轮不采时序，后者**无头一次性截图无时序**（标 `SKIP(edge-time-series)`），不伪装通过 |
 | 达成项（复跑全绿） | **五项全部达成**：TC-M-303（最近邻生效：pixelated **8 色** vs auto **21 色**）、TC-M-304（canvas 取当前帧：60 次采样 **3 种**帧色）、TC-M-305（逐帧 delay 对齐：色段变化率 **7.6~8.7 次/秒** vs 期望 ≈8.6、最长段 **227~242ms** vs 期望 200ms）、TC-M-306（隐藏窗口 canvas 采样仍 **3 种**帧色 ⇒ 未暂停）、TC-M-307a（`loop=1` 尾部恒定 **1 种**色 = 停末帧）/ 307b（`loop=0` 尾部 **3 种**色 = 继续循环）；静态项 TC-M-404/405/506/702/704/705 亦全部达成 |
-| **引擎修复 ①**：TC-M-303 | `image-rendering: pixelated` **已实现最近邻放大**：`painter.PaintImage` 按元素的 `image-rendering` 选采样（`pixelated`/`crisp-edges`/`-webkit-optimize-contrast` ⇒ `graphics.SamplingNearest`，其余 ⇒ 双线性），经 `DecodedImage.DrawSampling` → `Canvas.DrawImageSampling` 落到 Skia `SamplingNearest`；`image-rendering` 是 **inherited** 属性，已在 `ComputedStyle.InheritFrom` 下发（父元素声明即对整棵子树生效，与 Edge 一致）。修复前 pixelated **22 色** ≈ auto **21 色**（放大仍双线性）；修复后 **8 色** vs **21 色**（Edge 对照 9 vs 22） |
+| **引擎修复 ①**：TC-M-303 | `image-rendering: pixelated` **已实现最近邻放大**：`painter.PaintImage` 按元素的 `image-rendering` 选采样（`pixelated`/`crisp-edges`/`-webkit-optimize-contrast` ⇒ `graphics.SamplingNearest`，其余 ⇒ 双线性），经 `DecodedImage.DrawSampling` → `Canvas.DrawImageSampling` 落到 Skia `SamplingNearest`；`image-rendering` 是 **inherited** 属性，已在 `ComputedStyle.InheritFrom` 下发（父元素声明即对整棵子树生效，与 Edge 一致）。修复前 pixelated **22 色** ≈ auto **21 色**（放大仍双线性）；修复后 **8 色** vs **21 色**（Edge 对照 9 vs 22）。<br>**2026-10-08 收尾（监督复核后）——补齐 background-image 路径**：判定抽为**共用** `painter.imageSamplingFor(st)`（`<img>` 与背景图**同一套口径**，不写第二套语义），`paintBackgroundFill` 判定后把结果传给 `paintBackgroundImageTiled`（新增 `sampling` 形参，所有平铺瓦片同模式）并改走 `img.DrawSampling`——CSS Images §3 中该属性适用于元素的**一切**图像源（含背景图），此前背景图恒双线性 ⇒ `pixelated` 对 background-image 不生效，与 Edge 不符。<br>**路径边界（如实登记）**：**SVG `<image>`**（`engine/rendering/svg.go` 的 `svgImage.paint`）拿不到可继承值——`svgPaintContext` 只携带填充/描边/渐变/clip/mask 等 SVG 绘制态，**不含任何 `ComputedStyle` 字段**，`svgImage.paint(canvas, ctx)` 签名中亦无样式入参 ⇒ SVG 内嵌 `<image>`（内联 SVG 与外部 `.svg` 同路径）不参与 `image-rendering` 判定，仍走线性。属**既有结构边界、非本轮回归**；要支持须给 `svgPaintContext` 串入元素样式链（本轮不做，避免过度设计） |
 | **引擎修复 ②**：TC-M-307a | GIF **循环计数终止已实现**：`animatedEntry.frameAt` 此前只判 `loops == 0` 停末帧，把 `loops = 1`（Skia 语义「**首播之后再播 1 次**」⇒ 共播 2 遍）当成无限循环 ⇒ 现按 `elapsed >= (loops+1)*totalMS` 停末帧（`loops < 0` 仍按总时长取模）。`anim-noloop.gif`（Netscape 循环扩展块计数 = 1 ⇒ SkCodec 报 1）修复后尾部恒定、`loop=0` 的 TC-M-307b 尾部仍多色 |
-| **判据修正 ①**：TC-M-303 | 初版判据「pixelated 色数 = 源色 4」**过严**：元素外沿 1px 与背景抗锯齿混合会产出中间色，**Edge 实测也只得 7 色而被误判 ❌**。修正为①**采样矩形内缩 3px**（排除边界混合像素）+②判据改 **相对区分度**（`pixelated 显著少于 auto` ⇒ 生效；两者差 ≤2 ⇒ 未生效）。修正后 **Edge ✅ / 引擎 ❌**——结论从「两边都 ❌、无从归因」收敛为「**差异在引擎侧**」，据此才定位到绘制路径 |
+| **判据修正 ①**：TC-M-303 | 初版判据「pixelated 色数 = 源色 4」**过严**：元素外沿 1px 与背景抗锯齿混合会产出中间色，**Edge 实测也只得 7 色而被误判 ❌**。修正为①**采样矩形内缩 3px**（排除边界混合像素）+②判据改 **相对区分度**（`pixelated 显著少于 auto` ⇒ 生效；两者差 ≤2 ⇒ 未生效）。修正后 **Edge ✅ / 引擎 ❌**——结论从「两边都 ❌、无从归因」收敛为「**差异在引擎侧**」，据此才定位到绘制路径。<br>**2026-10-08 收尾**：**期望栏文字**同步改为与判据一致的口径（`cmd/psai/mediaextra_probe.go` 的 `extraCaseDefs`：「pixelated 采样色数**显著少于** auto 对照（源色 4；残留色仅来自色块交界混合像素），自身不走整幅插值」）——旧文案「色数 = 源色数 4」会把实际的相对判据（**8 vs 21** 判 ✅、Edge **9 vs 22**）误读成「达标线被放宽」 |
 | **判据修正 ②**：TC-M-304 | 原结论「canvas `drawImage` 取到固化帧」系**采样点越界伪影**：页面内采样点固定 `(80,80)`，而样本 GIF 为 **120×80**（y 有效 0..79）⇒ 源矩形与图像**无交集**，canvas 规范是「什么都不画」⇒ 恒返回透明黑，与「取值恒定」在像素上不可区分。修正：采样点由元素内容尺寸**自适应取中心** + 越界显式返回 `OOB` 并在判据中**剔除**（有效 60/60）。复跑 **3 种帧色 ⇒ 达成**（`debugenv` 日志亦证 hook 返回 120×80 的图） |
 | **判据修正 ③**：TC-M-306 | 原结论「`visibility:hidden` 期间停推」系**观测器误用**：用**渲染像素**观测隐藏元素——元素在隐藏窗口内**本来就不绘制**，采到的是场景容器的背景色（magenta，恒定）。修正为用**页面内 canvas 采样**观测（隐藏窗口内 5 次采样 **3 种**帧色 ⇒ 仍推进）。原始数据亦可交叉验证：隐藏前 347ms=绿、恢复后 755ms=蓝，与「时钟未暂停」应得的相位（周期 300ms）一致 |
 | **引擎修复 ③（附带）**：canvas 取当前帧 | `SetCanvasImageSourceHook` 此前只取 `RenderBox` 上固化的 `DecodedImage` 快照（仅在**绘制**时更新）⇒ 不可见/未绘制过的元素被 `drawImage` 取到**过期帧**（判据修正 ②③ 暴露出的真实缺陷）。现优先按 `src`（宿主 loader 解析后的绝对 URL）取**动图当前帧**（新增 `rendering.AnimatedFrameForURL`），与浏览器语义一致——`drawImage(img)` 取 img 当前显示的帧，与元素是否可见、是否绘制过无关 |
-| 单测 | `engine/rendering/imageanimation_test.go`（`TestAnimatedFiniteLoopsStopsAtLastFrame`）、`engine/rendering/image_sampling_test.go`（`TestImageRenderingPixelatedUsesNearestSampling`、`TestDrawImageKeepsLinearDefault`）——分别锁住 loop 终止语义与「pixelated⇒最近邻 / auto⇒双线性」的绘制层契约 |
+| 单测 | `engine/rendering/imageanimation_test.go`（`TestAnimatedFiniteLoopsStopsAtLastFrame`）、`engine/rendering/image_sampling_test.go`（`TestImageRenderingPixelatedUsesNearestSampling`、`TestDrawImageKeepsLinearDefault`、**`TestImageSamplingForCSSValues`**、**`TestImageRenderingOnBackgroundImage`**）——分别锁住 loop 终止语义、「pixelated⇒最近邻 / auto⇒双线性」的绘制层契约、`image-rendering` 取值口径（三关键字/大小写/空白/缺省/nil），以及**背景图端到端契约**（2×2 四色 `data:` URI 作 background-image，走真实 `paintBackgroundFill` → `paintBackgroundImageTiled` → `DrawSampling`：pixelated 只产源色 ≤4 色、auto 产插值中间色） |
 | 缺陷登记 | 首轮报的四项**全部闭环**（两项引擎实现 + 两项判据伪影修正 + 一项附带根治）；未进 §8.1 门禁表（该表按「可用性门禁」口径，不因缺少某条 CSS 特性而置不可用） |
 | 复跑 | `cmd/psai -media`（含补充判据）；Edge 侧逐格对照加 `-media-edge`（本次：96 格、低于 Edge **0** 格、一致 84、高于 12） |
 

@@ -2,7 +2,7 @@
   {
     "id": "TC-M-303",
     "title": "image-rendering: pixelated 的最近邻缩放",
-    "expect": "放大后不产生插值中间色（色数 = 源色数 4）",
+    "expect": "pixelated 采样色数显著少于 auto 对照（源色 4；残留色仅来自色块交界混合像素），自身不走整幅插值",
     "actual": "pixelated 采样色数 8（源色 4）；auto 对照色数 21（采样内缩 3px）",
     "verdict": "✅",
     "note": "pixelated 显著少于 auto（8 vs 21）⇒ `image-rendering:pixelated` 生效（放大走最近邻；残留色来自色块交界 ±1px 采样，非整幅插值）"

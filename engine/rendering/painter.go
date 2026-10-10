@@ -278,6 +278,28 @@ func paintOpacity(o RenderObject, info *PaintInfo) float64 {
 // (background clips to the border-box by default). Background images are not supported in
 // this port. Painting is skipped when the background is fully transparent or the box is
 // outside the dirty rect.
+
+// imageSamplingFor 把 CSS `image-rendering`（inherited，默认 auto）映射为绘制层的采样
+// 模式：`pixelated` / `crisp-edges` / `-webkit-optimize-contrast` ⇒ 最近邻（放大不插值、
+// 保留源像素硬边），其余（auto / smooth / high-quality）⇒ 双线性。
+//
+// 图片元素（PaintImage）与背景图（paintBackgroundFill → paintBackgroundImageTiled）共用
+// 本函数：CSS Images §3 中 image-rendering 适用于元素的一切图像源（含背景图），两条路径
+// 必须同口径，各写一份必然漂移。
+//
+// 值以原文存在 ComputedStyle.Properties，这里按原文判（属性名在 CSS 已知表里即可，
+// 无需新增强类型字段）。
+func imageSamplingFor(st *style.ComputedStyle) graphics.ImageSampling {
+	if st == nil {
+		return graphics.SamplingLinear
+	}
+	switch strings.ToLower(strings.TrimSpace(st.GetProperty("image-rendering"))) {
+	case "pixelated", "crisp-edges", "-webkit-optimize-contrast":
+		return graphics.SamplingNearest
+	}
+	return graphics.SamplingLinear
+}
+
 // paintBackgroundFill 绘制背景**填充**：background-image 层（真实图片 / SVG /
 // 渐变）与 background-color（分层顺序：色在最下、渐变自下而上、第一层在最上）。
 // 不画边框与阴影。
@@ -301,7 +323,7 @@ func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInf
 			dx, dy, dw, dh := computeBackgroundDest(rect.X, rect.Y, rect.Width, rect.Height,
 				st.BackgroundSize, st.BackgroundPosition, img.Width(), img.Height())
 			paintBackgroundImageTiled(info.canvas, img, rect.X, rect.Y, rect.Width, rect.Height,
-				dx, dy, dw, dh, st.BackgroundRepeat)
+				dx, dy, dw, dh, st.BackgroundRepeat, imageSamplingFor(st))
 		} else if svg := loadBackgroundSVG(url); svg != nil {
 			// Vector SVG: no intrinsic raster size — gradient-like dest
 			// (auto/cover/contain fill the box; explicit sizes confine it).
@@ -2313,16 +2335,11 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	// content box, mirroring CSS Images §3. object-position (default 50%
 	// 50%) controls alignment within the box.
 	iw, ih := float64(img.Width()), float64(img.Height())
-	// CSS `image-rendering`（inherited，默认 auto）：`pixelated` / `crisp-edges` 要求
-	// **最近邻**放大（放大不插值、保留源像素硬边）。此前绘制路径固定走双线性，该属性
-	// 只出现在 CSS 已知属性表里、绘制层从没读过 ⇒ `image-rendering:pixelated` 与 auto
-	// 的渲染结果完全相同（TC-M-303 的缺口）。值以原文存在 ComputedStyle.Properties，
-	// 这里按原文判（属性名在已知表里即可，无需新增强类型字段）。
-	sampling := graphics.SamplingLinear
-	switch strings.ToLower(strings.TrimSpace(st.GetProperty("image-rendering"))) {
-	case "pixelated", "crisp-edges", "-webkit-optimize-contrast":
-		sampling = graphics.SamplingNearest
-	}
+	// CSS `image-rendering`（inherited，默认 auto）选采样模式：`pixelated` /
+	// `crisp-edges` ⇒ **最近邻**放大（放大不插值、保留源像素硬边）。此前绘制路径固定走
+	// 双线性、绘制层从没读过该属性 ⇒ `pixelated` 与 auto 的结果完全相同（TC-M-303 的
+	// 缺口）。判定集中在 imageSamplingFor，背景图路径同口径。
+	sampling := imageSamplingFor(st)
 	drawImg := func(dx, dy, dw, dh float64) {
 		img.DrawSampling(info.canvas, dx, dy, dw, dh, sampling)
 	}

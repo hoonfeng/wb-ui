@@ -1,8 +1,8 @@
-# 媒体格式真实可用性报告（2026-10-10 13:06 c56f8f1）
+# 媒体格式真实可用性报告（2026-10-10 13:16 cafc37d）
 
 ## 环境
 
-配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：c56f8f1 ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
+配置：Browser / Toolkit+DenyExternal / Toolkit+AllowHostResolved / Toolkit+AllowAll ｜ 引擎：cafc37d ｜ 样本：本地脚本生成、不入库（决策 5）｜ 模型：L0–L4（文档 §2）
 
 复现：`python dev/media/gen_samples.py` → `cmd/psai -media`（本机按需，不入 CI 门禁——决策 6）
 
@@ -257,54 +257,54 @@
 | Toolkit+DenyExternal | svg | rect-120x80.svg | rel | ❌ | ❌ | ❌ | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷） |
 | Toolkit+AllowHostResolved | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
 | Toolkit+AllowAll | svg | rect-120x80.svg | rel | ✅ | ✅ | ✅ | ✅ | — | **L3** |  |
-| Browser | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.31s、结束时 1.00s（TC-M-602） |
+| Browser | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.26s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.31s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.31s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | m4a | sine-440-1s.m4a | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.26s、结束时 1.00s（TC-M-602） |
 | Browser | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | m4a | sine-440-1s.m4a | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.21s、结束时 1.00s（TC-M-602） |
 | Toolkit+AllowAll | m4a | sine-440-1s.m4a | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.20s、结束时 1.00s（TC-M-602） |
 | Browser | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | m4a | sine-440-1s.m4a | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+AllowAll | m4a | sine-440-1s.m4a | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 49041 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.00s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.87s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.79s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.90s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.88s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.78s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.83s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.78s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.70s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.80s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.79s、结束时 1.00s（TC-M-602） |
-| Browser | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.69s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.75s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.69s、结束时 1.00s（TC-M-602） |
+| Browser | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.63s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | mp3 | sine-440-1s.mp3 | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.72s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.71s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.59s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.67s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | mp3 | sine-440-1s.mp3 | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.61s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.54s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.60s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.62s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.48s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.57s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.53s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.44s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | ogg | sine-440-1s.ogg | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.51s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.53s、结束时 1.00s（TC-M-602） |
-| Browser | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.39s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.49s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.44s、结束时 1.00s（TC-M-602） |
+| Browser | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.36s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | ogg | sine-440-1s.ogg | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.41s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.43s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.39s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | ogg | sine-440-1s.ogg | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 47861 帧、PCM 主峰 439.87Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.36s、结束时 1.00s（TC-M-602） |
 | Browser | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+AllowHostResolved | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
 | Toolkit+AllowAll | wav | sine-440-1s.wav | data | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Browser | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
+| Browser | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.96s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | wav | sine-440-1s.wav | file | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
 | Toolkit+AllowHostResolved | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Browser | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.96s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | file | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.95s、结束时 1.00s（TC-M-602） |
+| Browser | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.88s、结束时 1.00s（TC-M-602） |
 | Toolkit+DenyExternal | wav | sine-440-1s.wav | rel | ❌ | ❌ | — | ❌ | — | **L0** | 资源策略 deny-external 拒绝该引用（预期，非缺陷）；实测元素 error.code=4（MEDIA_ERR_SRC_NOT_SUPPORTED） |
-| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=1.00s、结束时 1.00s（TC-M-602） |
-| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.96s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowHostResolved | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.91s、结束时 1.00s（TC-M-602） |
+| Toolkit+AllowAll | wav | sine-440-1s.wav | rel | ✅ | ✅ | — | ✅ | — | **L4** | 音频输出：交付 48000 帧、PCM 主峰 439.88Hz（期望 440Hz，判据 A）；play() 后 500ms currentTime=0.86s、结束时 1.00s（TC-M-602） |
 | Browser | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 11 帧） |
 | Toolkit+DenyExternal | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 11 帧） |
 | Toolkit+AllowHostResolved | mp4 | solid-red-1s.mp4 | data | ✅ | ✅ | ✅ | ✅ | ❌ | **L3** | 单色视频：帧色恒定，动画判据不适用（画面正确即足）；所有帧采样点相同（最大差异 0，共 11 帧） |
@@ -560,16 +560,16 @@ L4-S 的**主线判据**是 A（同一份待输出 PCM 的 FFT 主峰/幅度）�
 | 配置 | 样本 | 来源 | 采样点（首块后 s） | currentTime | 期望 | 结束 currentTime | 判定 |
 |---|---|---|---|---|---|---|---|
 | Browser | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Browser | sine-440-1s.wav | file | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Browser | sine-440-1s.wav | rel | 1.00 | 0.96 | 1.00 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | data | 0.91 | 0.87 | 0.91 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | file | 0.82 | 0.78 | 0.82 | 1.00 | ✅ |
-| Browser | sine-440-1s.mp3 | rel | 0.73 | 0.69 | 0.73 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | data | 0.63 | 0.59 | 0.63 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | file | 0.52 | 0.48 | 0.52 | 1.00 | ✅ |
-| Browser | sine-440-1s.ogg | rel | 0.43 | 0.39 | 0.43 | 1.00 | ✅ |
-| Browser | sine-440-1s.m4a | data | 0.34 | 0.31 | 0.34 | 1.00 | ✅ |
-| Browser | sine-440-1s.m4a | file | 0.25 | 0.20 | 0.25 | 1.00 | ✅ |
+| Browser | sine-440-1s.wav | file | 1.00 | 0.96 | 1.00 | 1.00 | ✅ |
+| Browser | sine-440-1s.wav | rel | 0.92 | 0.88 | 0.92 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | data | 0.84 | 0.79 | 0.84 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | file | 0.75 | 0.70 | 0.75 | 1.00 | ✅ |
+| Browser | sine-440-1s.mp3 | rel | 0.67 | 0.63 | 0.67 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | data | 0.58 | 0.54 | 0.58 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | file | 0.48 | 0.44 | 0.48 | 1.00 | ✅ |
+| Browser | sine-440-1s.ogg | rel | 0.40 | 0.36 | 0.40 | 1.00 | ✅ |
+| Browser | sine-440-1s.m4a | data | 0.32 | 0.26 | 0.32 | 1.00 | ✅ |
+| Browser | sine-440-1s.m4a | file | 0.23 | 0.20 | 0.23 | 1.00 | ✅ |
 | Browser | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
 | Toolkit+DenyExternal | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
 | Toolkit+DenyExternal | sine-440-1s.wav | file | 0.00 | 0.00 | 0.00 | 0.00 | — |
@@ -585,27 +585,27 @@ L4-S 的**主线判据**是 A（同一份待输出 PCM 的 FFT 主峰/幅度）�
 | Toolkit+DenyExternal | sine-440-1s.m4a | rel | 0.00 | 0.00 | 0.00 | 0.00 | — |
 | Toolkit+AllowHostResolved | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
 | Toolkit+AllowHostResolved | sine-440-1s.wav | file | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.wav | rel | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | data | 0.94 | 0.90 | 0.94 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | file | 0.84 | 0.80 | 0.84 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.mp3 | rel | 0.76 | 0.72 | 0.76 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | data | 0.64 | 0.60 | 0.64 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | file | 0.55 | 0.51 | 0.55 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.ogg | rel | 0.46 | 0.41 | 0.46 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.m4a | data | 0.37 | 0.31 | 0.37 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.m4a | file | 0.24 | 0.20 | 0.24 | 1.00 | ✅ |
-| Toolkit+AllowHostResolved | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.wav | rel | 0.95 | 0.91 | 0.95 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | data | 0.87 | 0.83 | 0.87 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | file | 0.79 | 0.75 | 0.79 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.mp3 | rel | 0.71 | 0.67 | 0.71 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | data | 0.61 | 0.57 | 0.61 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | file | 0.53 | 0.49 | 0.53 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.ogg | rel | 0.43 | 0.39 | 0.43 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.m4a | data | 0.36 | 0.31 | 0.36 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.m4a | file | 0.24 | 0.21 | 0.24 | 1.00 | ✅ |
+| Toolkit+AllowHostResolved | sine-440-1s.m4a | rel | 0.16 | 0.00 | 0.16 | 1.00 | ✅ |
 | Toolkit+AllowAll | sine-440-1s.wav | data | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.wav | file | 1.00 | 1.00 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.wav | rel | 1.00 | 0.96 | 1.00 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | data | 0.92 | 0.88 | 0.92 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | file | 0.83 | 0.79 | 0.83 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.mp3 | rel | 0.74 | 0.71 | 0.74 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | data | 0.65 | 0.62 | 0.65 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | file | 0.56 | 0.53 | 0.56 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.ogg | rel | 0.47 | 0.43 | 0.47 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.m4a | data | 0.38 | 0.31 | 0.38 | 1.00 | ✅ |
-| Toolkit+AllowAll | sine-440-1s.m4a | file | 0.28 | 0.20 | 0.28 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.wav | file | 0.99 | 0.95 | 0.99 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.wav | rel | 0.91 | 0.86 | 0.91 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | data | 0.82 | 0.78 | 0.82 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | file | 0.74 | 0.69 | 0.74 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.mp3 | rel | 0.65 | 0.61 | 0.65 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | data | 0.58 | 0.53 | 0.58 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | file | 0.49 | 0.44 | 0.49 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.ogg | rel | 0.41 | 0.36 | 0.41 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.m4a | data | 0.33 | 0.26 | 0.33 | 1.00 | ✅ |
+| Toolkit+AllowAll | sine-440-1s.m4a | file | 0.23 | 0.20 | 0.23 | 1.00 | ✅ |
 | Toolkit+AllowAll | sine-440-1s.m4a | rel | 0.15 | 0.00 | 0.15 | 1.00 | ✅ |
 
 > 容差 **±0.2s**（采样开销 + 设备启动延迟）。`data:` 来源没有本地路径（宿主解不了码），采样时无 PCM、时钟未起步——不在判据 A 的覆盖范围，保持 L1。
@@ -638,34 +638,11 @@ L4-S 的**主线判据**是 A（同一份待输出 PCM 的 FFT 主峰/幅度）�
 
 ## Edge 双端对照（决策 2、§8.3 第 2 条）
 
-执行：`cmd/psai -media -media-edge` ｜ Edge：`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` ｜ 截图：`dev/media/out/edge-matrix.png`（同时用页面内采集 + `--dump-dom` 回传每格状态）
-
-> 判据（§8.3 第 2 条原文）：**引擎等级不低于 Edge 等级**。逐格比较，比较尺度 0..3 —— Edge 侧不做连拍采样、测不到「动画推进」维度，故引擎的 L4 在比较时按 L3 计；两侧等级都由**同一个判定内核**（`judgeCell`，同一阈值同一映射）算出。
+判据：引擎等级不低于 Edge 等级。
 
 | 项 | 值 |
 |---|---|
-| 对照格数 | 96 |
-| 等级一致 | 84 |
-| **引擎低于 Edge** | **0** |
-| 引擎高于 Edge | 12 |
-| 结论 | ✅ 逐格不低于 Edge 等级 |
-
-<details><summary>引擎高于 Edge 的格（12 格，供参考：多为动画推进与音频输出——浏览器侧未采这类维度）</summary>
-
-- sine-440-1s.m4a|data|m4a：引擎 L4 > Edge L1
-- sine-440-1s.m4a|file|m4a：引擎 L4 > Edge L1
-- sine-440-1s.m4a|rel|m4a：引擎 L4 > Edge L1
-- sine-440-1s.mp3|data|mp3：引擎 L4 > Edge L1
-- sine-440-1s.mp3|file|mp3：引擎 L4 > Edge L1
-- sine-440-1s.mp3|rel|mp3：引擎 L4 > Edge L1
-- sine-440-1s.ogg|data|ogg：引擎 L4 > Edge L1
-- sine-440-1s.ogg|file|ogg：引擎 L4 > Edge L1
-- sine-440-1s.ogg|rel|ogg：引擎 L4 > Edge L1
-- sine-440-1s.wav|data|wav：引擎 L4 > Edge L1
-- sine-440-1s.wav|file|wav：引擎 L4 > Edge L1
-- sine-440-1s.wav|rel|wav：引擎 L4 > Edge L1
-
-</details>
+| 结论 | SKIP(未启用 -media-edge) —— **未执行，不算通过** |
 
 ## 原始证据索引
 
