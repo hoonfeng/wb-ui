@@ -1065,16 +1065,33 @@ func runExtraVerification(samplesDir, outDir string, vw, pageH int, withEdge boo
 	} else if ec, ok := loadArchivedEdgeRun(filepath.Join(outDir, "extra-Edge.json")); ok {
 		// 未随本轮跑 Edge（-media-edge 默认关闭）：复用上一次的 Edge 存档，
 		// 让「## Edge 逐项对照」与「引擎 vs Edge」结论不因复跑从产物里消失。
+		// ★ 段首来源必须**中性**：存档会被 `-media-edge` 覆盖写；若在这里写死轮次/commit，
+		// 「重跑 Edge（存档更新）→ 再跑 -media」就会数据是新的、标注还是旧的（来源撒谎）。
+		// 故只说「上一轮存档」+ 存档文件时间（重写后自动跟着变），不锁定具体是哪一次 run。
 		runs = append(runs, extraRun{Label: "Edge", Cases: ec,
-			Summary: "本节取自 `cafc37d` 的 Edge 对照存档（`extra-Edge.json`）：**本轮未重跑 Edge**" +
-				"（`-media-edge` 默认关闭），故沿用原数值口径；重跑 `-media-edge` 会用新数据覆盖本节。"})
+			Summary: "本节取自上一轮 Edge 对照存档（`extra-Edge.json`" + edgeArchiveStamp(outDir) +
+				"）：**本轮未重跑 Edge**（`-media-edge` 默认关闭），故沿用存档中的数值口径；" +
+				"重跑 `-media-edge` 会用新数据覆盖本节。"})
 	}
 	return writeExtraReport(outDir, runs, pagePath)
 }
 
+// edgeArchiveStamp 返回存档文件的时间描述（供段首如实标注「这份数据是什么时候写的」）。
+// 取文件 mtime 而不往 JSON 里塞 commit 字段：存档结构保持 `[]extraCase` 不变，
+// 且 `-media-edge` 重写存档后时间自动跟着变——段首标注不会因重跑而失真。
+// stat 失败（存档缺失/权限异常）返回空串，段首退化为不带时间的同义表述。
+func edgeArchiveStamp(outDir string) string {
+	fi, err := os.Stat(filepath.Join(outDir, "extra-Edge.json"))
+	if err != nil {
+		return ""
+	}
+	return "，存档文件时间 " + fi.ModTime().Format("2006-01-02 15:04:05")
+}
+
 // loadArchivedEdgeRun 读取上一次 Edge 对照的存档（extra-Edge.json，[]extraCase）。
 // 用途：本轮没跑 `-media-edge` 时，把上一轮的 Edge 逐项对照重新渲染进产物，
-// 避免「复跑一次就抹掉已达成结论」的产物回退（数据来源由段首 Summary 如实标注）。
+// 避免「复跑一次就抹掉已达成结论」的产物回退（数据来源由段首 Summary 如实标注：
+// 中性措辞 + 存档文件时间，不锁定具体轮次/commit）。
 func loadArchivedEdgeRun(path string) ([]extraCase, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

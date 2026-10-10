@@ -1254,11 +1254,20 @@ background-image 路径**（见下方「引擎修复 ①」行末）；**SVG `<i
 TC-M-303 的**期望栏文字**改为与判据一致的口径（见「判据修正 ①」行末）。
 
 **本轮第 2 次收口（2026-10-08，产物一致性）**：① `-media-edge` 默认关闭时，`extra-verification.md`
-的 `## Edge` 段改由 `loadArchivedEdgeRun` 从上一轮存档 `extra-Edge.json` **复用渲染**（段首注明
-「本节取自 `cafc37d` 的 Edge 对照存档…**本轮未重跑 Edge**」），`## 引擎 vs Edge 逐项对照` 随之恢复
-（可比 **8** 项、引擎无一项低于 Edge）——此前这类复跑会把 Edge 段**整段抹掉**、结论只在 git 历史里
-留痕，与「产物即证据」的纪律相悖。② `out/` 内的本机环回录音 `loopback-wasapi.wav` 按「本机采集
-产物不入库」口径由 `.gitignore` 排除并 `git rm --cached`（§6.2）。两项都不改任何已判 ✅ 的阈值与判据逻辑。
+的 `## Edge` 段改由 `loadArchivedEdgeRun` 从上一轮存档 `extra-Edge.json` **复用渲染**（段首
+**中性标注**来源：「本节取自上一轮 Edge 对照存档（`extra-Edge.json`，存档文件时间 …）…**本轮未重跑
+Edge**」），`## 引擎 vs Edge 逐项对照` 随之恢复（可比 **8** 项、引擎无一项低于 Edge）——此前这类
+复跑会把 Edge 段**整段抹掉**、结论只在 git 历史里留痕，与「产物即证据」的纪律相悖。
+② `out/` 内的本机环回录音 `loopback-wasapi.wav` 按「本机采集产物不入库」口径由 `.gitignore` 排除并
+`git rm --cached`（§6.2）。两项都不改任何已判 ✅ 的阈值与判据逻辑。
+
+**本轮第 3 次收口（2026-10-08，来源标注中性化）**：上一条的段首**曾把轮次写死**为 `cafc37d`——而存档
+`extra-Edge.json` 在 `-media-edge` 开启时会被 `writeExtraReport` **覆盖重写**，于是「重跑 Edge（存档
+更新）→ 再跑 `-media`」会得到**新数据 + 旧标注**，来源标注失真（本轮由监督复核指出）。已改为**中性措辞
++ 动态时间**：正文只说「上一轮 Edge 对照存档」，并附 `edgeArchiveStamp()` 从存档文件 mtime 取的
+**存档文件时间**（时间随存档重写自动更新）；**不为此改动存档 JSON 结构**（仍为 `[]extraCase`，未加
+commit 字段）。语义是：**数据会随 `-media-edge` 覆盖，而来源标注无需人工维护**——因为标注里已不含任何
+写死的轮次/commit，无论存档来自哪一轮 run 都不会失真。
 
 | 项 | 内容 |
 |---|---|
