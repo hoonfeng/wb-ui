@@ -351,6 +351,40 @@ func insetRectByEdges(r Rect, e layout.Edges) Rect {
 	}
 }
 
+// nativeAppearanceRange reports whether box is an <input type="range"> that
+// still paints its native (appearance:auto) slider chrome. Such an element is
+// special-cased in Chromium: its computed background-color is white (UA
+// html.css — see engine/html5/defaultcss.go) but the browser does NOT paint
+// that background. The native track/thumb are drawn over the whole box and the
+// remaining rows show whatever is behind the element.
+//
+// Measured on Edge (2026-10, probe page: <input type=range> on a #1e1e1e page,
+// rect 129×16 at 2,2): rows y=2..5 and y=14..17 are the page background
+// (30,30,30) all the way across, only the 8 track rows in between carry pixels.
+// wb-ui used to fill the box with white → an 129×8 pure-white block on dark
+// pages (carrier page left column: 8868 white px vs Edge 179).
+//
+// appearance:none (author override) disables the native chrome, so the author
+// background is painted normally in that case.
+func nativeAppearanceRange(box *RenderBox) bool {
+	if box == nil {
+		return false
+	}
+	el, ok := box.Node().(*dom.Element)
+	if !ok || el.LocalName() != "input" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(el.GetAttribute("type")), "range") {
+		return false
+	}
+	if st := box.Style(); st != nil {
+		if a := strings.ToLower(strings.TrimSpace(st.GetProperty("appearance"))); a == "none" {
+			return false
+		}
+	}
+	return true
+}
+
 func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInfo, rect Rect, opacity float64) bool {
 	// 背景**定位区域**（background-origin，初始值 padding-box）：背景图片与
 	// 渐变的 position/size 参照它；平铺覆盖区与裁剪仍用调用方给的 border-box
@@ -433,6 +467,12 @@ func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInf
 		for i := len(bgLayers) - 1; i >= 0; i-- {
 			drawGradientLayer(i)
 		}
+		return true
+	}
+	// ★ <input type="range"> 的 background-color **不绘制**（computed 仍为白，
+	//   保持样式契约；Chromium 只画滑轨/滑块，其余透出下层）。见
+	//   nativeAppearanceRange 的实测记录。
+	if nativeAppearanceRange(box) {
 		return true
 	}
 	bg := toGraphicsColor(st.BackgroundColor)

@@ -130,7 +130,15 @@ input[type="radio"] {
    ★ background-color 实测为**白色**（与 checkbox/radio 相反）：Chromium/Edge
    的 range 计算样式里 background-color = rgb(255,255,255)（滑轨与滑块由主题
    绘制在其上）。此前这里写成 transparent，一致性套件 form_controls 报出
-   range 的 bg 差异（edge=白 / wbui=透明）。 */
+   range 的 bg 差异（edge=白 / wbui=透明）。
+   ★★ 但该白色**只存在于 computed，Chromium 并不把它画出来**（2026-10 实测）：
+   在 #1e1e1e 的深色页上，Edge 的 129×16 range 盒内只有中间 8 行滑轨像素，
+   其余整行是页面背景 (30,30,30)。wb-ui 曾按 computed 把白底**实画** → 深色
+   主题页面出现白色实心块（载体页左栏纯白 8868 px vs Edge 179）。
+   绘制侧的跳过在 engine/rendering/painter.go 的 nativeAppearanceRange（D10，
+   见 docs/render-consistency-fixes.md §3 D10）。
+   ⚠️ 不要因此把这里改回 transparent：一致性套件 form_controls 比的是
+   **computed**，Edge = 白 → 改回透明会 FAIL（契约与视觉是两条路径）。 */
 input[type="range"] {
 	display: inline-block;
 	/* Chromium: 129×16 —— 宽高都不随控件字体缩放。 */

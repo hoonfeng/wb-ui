@@ -944,13 +944,12 @@ func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64,
 	c.FillRect(cx, cy, size, size, applyOpacity(bg, op))
 	c.StrokeRect(cx, cy, size, size, 1, applyOpacity(border, op))
 	if checked {
-		// Use element's text color for checkmark (acts as accent-color),
-		// fall back to default dark checkmark.
-		check := toGraphicsColor(st.Color)
-		if check.A == 0 {
-			check = FormControlColors.CheckboxCheck
-		}
-		check = applyOpacity(check, op)
+		// ★ 勾色恒为白色（Edge/Chromium 实测，2026-10）：checked 的 checkbox
+		// 是「accent 色底 + 白勾」，勾色**不随** accent-color / 文本色变化。
+		// Edge 探针（深色页 #1e1e1e，accent 未设 → 默认蓝）实测勾像素
+		// = (255,255,255)；wb-ui 曾用元素文本色（载体页 #E1E1E1 → (225,225,225)，
+		// 差 30 > tol 12；套件页无 color 声明 → 黑勾，与 Edge 的白勾整条反相）。
+		check := applyOpacity(FormControlColors.CheckboxCheck, op)
 		// Draw a simple checkmark: two line segments forming an "L" rotated.
 		inset := size * 0.22
 		p1x := cx + inset
@@ -988,12 +987,9 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 	c.FillCircle(cx, cy, radius, applyOpacity(bg, op))
 	c.StrokeCircle(cx, cy, radius, 1, applyOpacity(border, op))
 	if checked {
-		// Use element's text color for the dot (accent-color equivalent),
-		// fall back to default dark.
-		dot := toGraphicsColor(st.Color)
-		if dot.A == 0 {
-			dot = FormControlColors.RadioDot
-		}
+		// ★ 圆点色恒为白色，理由同 paintCheckbox（Edge 实测 checked radio
+		// 同样「accent 色圆环 + 白点」）。
+		dot := FormControlColors.RadioDot
 		// Inner dot: ~45% of the outer radius.
 		c.FillCircle(cx, cy, radius*0.45, applyOpacity(dot, op))
 	}
