@@ -79,6 +79,51 @@ HTML ──┬──▶ Edge headless（参照物）
 3. **字体度量**：行高取决于系统字体（非引擎 bug）
 4. **表单控件默认宽度残差**：textarea 168 vs Edge 161（差 7px，量化见下）
 
+5. **flex 内滚动容器的 auto 高度未含末子元素 margin-bottom**：`overflow:auto` 容器的
+   clientHeight 少算最后一个子元素的 margin-bottom（实测 `.ctrl-body` client 504 /
+   scroll **513.5**），于是被误判成「内容溢出」→ 预留 15px 滚动条 → 子元素可用宽度 -15px
+   （`.field` 189 vs Edge 204）。Edge 侧同一容器不溢出（534/534，无滚动条）。
+   这是「整栏元素宽度系统性少 15px」的根因（MediaStudio 左栏像素差异 19.44%）。
+6. **渐变「颜色 → transparent」的插值空间**：Chromium 在**预乘空间**插值，wb-ui 目前按
+   非预乘 → 中间色偏暗、衰减更快（夹具 `linear-gradient(#ff0000,transparent)`：
+   Edge 8800 红像素 / wb-ui 4800）。
+7. **背景定位与绘制区域**：应为 padding-box（`background-origin` 初始值），当前用
+   border-box → 带 1px 边框元素上的硬边渐变首行被边框盖住（Edge 可见 200px / wb-ui 0）。
+8. **表单控件 UA `line-height: normal` 缺失**：button/input/textarea 继承了正文
+   `line-height:1.5` → 按钮高 38 vs Edge 36。
+9. **getComputedStyle 细节**：`line-height` 序列化按**错误字号**折算（12px 字号的 h2
+   报 21px = 1.5×14，Edge 18px；布局实测行高正确为 18px，故属序列化缺陷）、
+   `width:100%` 未解析为使用值（报 `"100%"` 而非 `204px`）、颜色与长度序列化格式不一致
+   （`#D7373F` vs `rgb(215,55,63)`、`0` vs `0px`）；`appearance` / `accent-color` 未实现。
+
+> 5–9 的完整证据、最小复现与修复方向见 `docs/render-consistency-fixes.md`。
+
+## 已修复（2026-10-10）
+
+### ① 渐变色标的**长度位置**（`#2a2a2a 1px`）被丢弃 → 整条渐变消失
+
+`parseColorStop` 此前只认 `%` 位置：`"#2a2a2a 1px"` 整串被当作颜色 → 解析失败 → 色标丢弃；
+两个色标都这样时 `stops<2` → `parseGradient` 返回 nil。于是
+`linear-gradient(#2a2a2a 1px, transparent 1px)` 这类**硬边条纹/网格**背景整片不画
+（实测 MediaStudio `#stage .grid`：Edge 29924 网格线像素 / wb-ui **16**）。
+
+修复：支持 `<length-percentage>`（`%` 与 `px`）；只在括号深度 0 处用最后一个空格切分颜色
+与位置；`ColorStop` 增加 `PositionPx`，长度位置延后到绘制期由
+`resolveGradientStops(stops, length)` 按渐变线长度换算（无长度色标时零回归）。
+
+### ② 渐变背景层**未实现 background-repeat 平铺**
+
+渐变层只画**一个** tile，`url()` 背景图早有平铺路径。于是 `background-size:32px 32px` +
+默认 repeat 的网格/条纹渐变只出现一个方块（因子夹具：Edge 8300 红像素 / wb-ui 341）。
+
+修复：新增 `paintBackgroundGradientTiled`，linear/radial 两条绘制路径统一接线；tile 覆盖
+整个区域时走单次绘制快路径。顺带修正 `TestPaintGradientSized`（原先未声明
+`background-repeat` 却断言「tile 外透明」，与 CSS 初始值 repeat 冲突），新增
+`TestPaintGradientRepeats`。
+
+**回归**：MediaStudio 整页像素差异 9.09% → **6.38%**，网格线像素 16 → **29941**
+（Edge 29924，误差 0.06%）；`go test ./engine/...` 全通过；本套件 13/13 passed。
+
 ## 已修复（2026-09-22）
 
 ### ① 表单控件行内基线对齐（vertical-align:baseline）

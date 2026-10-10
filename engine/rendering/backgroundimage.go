@@ -339,6 +339,54 @@ func paintBackgroundImageTiled(canvas *graphics.Canvas, img *DecodedImage,
 	}
 }
 
+// paintBackgroundGradientTiled 按 CSS 背景平铺语义绘制**一个渐变层**：
+// tile 的尺寸与首块位置来自 background-size / background-position（即
+// computeGradientDest 算出的 dx,dy,dw,dh），再按 background-repeat
+// （默认 repeat）在背景区域 (x,y,w,h) 内平铺，与 url() 背景图的
+// paintBackgroundImageTiled 同口径。
+//
+// ★ 为什么必须有：渐变此前只画**一个** tile。于是「`background-size:32px 32px`
+// + 默认 repeat」这种网格/条纹背景在 wb-ui 里整片消失 —— 实测 MediaStudio 的
+// `#stage .grid`（`linear-gradient(#2A2A2A 1px,transparent 1px)` 双层 +
+// background-size:32px 32px）在 Edge 有 29924 个网格线像素、wb-ui 只有 16；
+// 因子隔离夹具进一步确认：无 size 的渐变两侧逐像素一致，加 size 后 wb-ui
+// 只画出一个 32x32 方块（341/372 像素）而不平铺。url() 背景图早已走平铺
+// 路径，渐变层漏了这一环。
+//
+// 未设 background-size（tile 覆盖整个区域）时走单次绘制快路径，既有渐变
+// 的绘制次数与结果逐像素不变。
+func paintBackgroundGradientTiled(x, y, w, h, dx, dy, dw, dh float64, repeat string,
+	draw func(tx, ty, tw, th float64)) {
+	if draw == nil || dw <= 0 || dh <= 0 || w <= 0 || h <= 0 {
+		return
+	}
+	rep := strings.ToLower(strings.TrimSpace(repeat))
+	repX := rep != "no-repeat" && rep != "repeat-y"
+	repY := rep != "no-repeat" && rep != "repeat-x"
+	// tile 已覆盖整个区域（未设 background-size 的常见情形）→ 单次绘制。
+	if (!repX || dw >= w) && (!repY || dh >= h) {
+		draw(dx, dy, dw, dh)
+		return
+	}
+	for ty := dy; ty < y+h; ty += dh {
+		if repY && ty+dh < y {
+			continue
+		}
+		for tx := dx; tx < x+w; tx += dw {
+			if repX && tx+dw < x {
+				continue
+			}
+			draw(tx, ty, dw, dh)
+			if !repX {
+				break
+			}
+		}
+		if !repY {
+			break
+		}
+	}
+}
+
 // decodeDataURI decodes a data: URI (data:image/png;base64,XXXX) to bytes.
 // Returns (data, true) for base64 data URIs; (nil, false) otherwise.
 func decodeDataURI(uri string) ([]byte, bool) {

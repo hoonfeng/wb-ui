@@ -37,8 +37,13 @@ func TestComputeGradientDest(t *testing.T) {
 	}
 }
 
-// TestPaintGradientSized: a gradient confined by background-size paints only
-// inside its sub-rect, leaving the rest transparent.
+// TestPaintGradientSized: background-size 限定渐变 tile 的尺寸；在
+// `background-repeat:no-repeat` 下只画这一个 tile，其余区域透明。
+//
+// ★ 本用例此前**没有**设置 background-repeat，等于依赖「渐变永远只画一个
+// tile」的旧行为 —— 与 CSS 默认值 repeat 冲突（默认必须平铺，见
+// TestPaintGradientRepeats）。浏览器里 `background-size:60px 60px` +
+// 未声明 repeat 会在整个盒内铺满 60x60 的 tile。
 func TestPaintGradientSized(t *testing.T) {
 	canvas := graphics.NewCanvas(120, 60)
 	defer canvas.Release()
@@ -51,6 +56,7 @@ func TestPaintGradientSized(t *testing.T) {
 	st.BackgroundImage = "linear-gradient(to right,#ff0000,#ff0000)"
 	st.BackgroundSize = "60px 60px"
 	st.BackgroundPosition = "left top"
+	st.BackgroundRepeat = "no-repeat"
 	box := NewRenderBox(el, st)
 	box.SetLocation(0, 0)
 	box.SetSize(120, 60)
@@ -60,9 +66,42 @@ func TestPaintGradientSized(t *testing.T) {
 	if px := canvas.PixelAt(30, 30); px.R != 255 || px.G != 0 {
 		t.Fatalf("inside gradient (30,30) = %+v, want red", px)
 	}
-	// Right half stays transparent.
+	// no-repeat：右半（tile 之外）保持透明。
 	if px := canvas.PixelAt(90, 30); px.A != 0 {
 		t.Fatalf("outside gradient (90,30) = %+v, want transparent", px)
+	}
+}
+
+// TestPaintGradientRepeats: 未声明 background-repeat 时取 CSS 初始值
+// **repeat** —— 被 background-size 限定的渐变 tile 必须在背景区域内平铺。
+//
+// 反例（旧行为）：只画一个 tile → 真实页面里 `background-size:32px 32px` +
+// 双层硬边渐变的网格背景整片消失（MediaStudio `#stage .grid` 实测
+// Edge 29924 个网格线像素 / wb-ui 16）。
+func TestPaintGradientRepeats(t *testing.T) {
+	canvas := graphics.NewCanvas(120, 60)
+	defer canvas.Release()
+	info := NewPaintInfo(canvas, Rect{X: 0, Y: 0, Width: 120, Height: 60})
+
+	doc := dom.NewDocument()
+	el := doc.CreateElement("div")
+	st := style.NewComputedStyle()
+	st.BackgroundImage = "linear-gradient(to right,#ff0000,#ff0000)"
+	st.BackgroundSize = "30px 30px"
+	st.BackgroundPosition = "left top"
+	// 不设 BackgroundRepeat：按 CSS 初始值 repeat 语义处理（空串与 "repeat" 等价）。
+	box := NewRenderBox(el, st)
+	box.SetLocation(0, 0)
+	box.SetSize(120, 60)
+
+	paintObjectBackground(box, info)
+
+	// 首块内、第二块（x=30 起）内、第二行块（y=30 起）内都应被平铺覆盖。
+	for _, p := range [][2]int{{15, 15}, {45, 15}, {105, 45}, {75, 55}} {
+		px := canvas.PixelAt(p[0], p[1])
+		if px.R != 255 || px.G != 0 || px.A == 0 {
+			t.Fatalf("tile 平铺缺失：(%d,%d) = %+v, want 红色不透明", p[0], p[1], px)
+		}
 	}
 }
 

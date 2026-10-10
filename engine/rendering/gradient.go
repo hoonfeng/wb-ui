@@ -16,6 +16,13 @@ type GradientDirection struct {
 type ColorStop struct {
 	Color    graphics.Color
 	Position float64
+	// PositionPx >= 0 表示该色标的位置以**长度**（px）给出，例如
+	// `linear-gradient(#2a2a2a 1px, transparent 1px)` 的硬边条纹网格。
+	// 长度位置的语义是「沿渐变线的距离」，而线长要到绘制期才知道，
+	// 因此解析期只保留原始长度、把 Position 置 -1（未定），由
+	// resolveGradientStops 在 paint 时按线长换算成比例。
+	// -1 = 该色标没有长度位置。
+	PositionPx float64
 }
 
 type LinearGradient struct {
@@ -65,7 +72,10 @@ func parseRadialGradient(s string) *RadialGradient {
 	if len(rg.Stops) < 2 {
 		return nil
 	}
-	assignGradientPositions(rg.Stops)
+	// 含长度位置时延后到绘制期（需要渐变线长度）再补全。
+	if !hasPixelStop(rg.Stops) {
+		assignGradientPositions(rg.Stops)
+	}
 	return rg
 }
 
@@ -96,7 +106,10 @@ func parseGradient(s string) *LinearGradient {
 	if len(lg.Stops) < 2 {
 		return nil
 	}
-	assignGradientPositions(lg.Stops)
+	// 含长度位置时延后到绘制期（需要渐变线长度）再补全。
+	if !hasPixelStop(lg.Stops) {
+		assignGradientPositions(lg.Stops)
+	}
 	return lg
 }
 
@@ -199,6 +212,8 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 		if radius <= 0 {
 			return
 		}
+		// 长度色标（`1px`）按径向渐变线（半径）换算。
+		stops := resolveGradientStops(rg.Stops, radius)
 		for py := 0; py < ih; py++ {
 			for px := 0; px < iw; px++ {
 				dxp := (x + float64(px) + 0.5) - cx
@@ -207,7 +222,7 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 				if t > 1 {
 					t = 1
 				}
-				canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+				canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(stops, t))
 			}
 		}
 		return
@@ -218,6 +233,8 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 	if radiusX <= 0 || radiusY <= 0 {
 		return
 	}
+	// 椭圆：长度位置按较大半径换算（<length> 位置沿渐变线量取）。
+	stops := resolveGradientStops(rg.Stops, math.Max(radiusX, radiusY))
 	for py := 0; py < ih; py++ {
 		for px := 0; px < iw; px++ {
 			dxn := ((x + float64(px) + 0.5) - cx) / radiusX
@@ -226,60 +243,129 @@ func paintRadialGradient(canvas *graphics.Canvas, x, y, w, h float64, rg *Radial
 			if t > 1 {
 				t = 1
 			}
-			canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(rg.Stops, t))
+			canvas.FillRectNoAA(x+float64(px), y+float64(py), 1, 1, interpolateColor(stops, t))
 		}
 	}
 }
 
+// parseStopPositionToken 解析色标的位置 token（CSS 的
+// `<length-percentage>`）：返回（数值, 是否百分比, 是否可用）。
+// 长度目前支持 px（引擎布局的绝对单位）；em/rem 等相对长度需要字号
+// 上下文，暂不支持（返回 false → 该 token 不被当作位置，与原行为一致）。
+func parseStopPositionToken(tok string) (val float64, isPct bool, ok bool) {
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return 0, false, false
+	}
+	if strings.HasSuffix(tok, "%") {
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(tok, "%")), 64)
+		if err != nil {
+			return 0, false, false
+		}
+		return v, true, true
+	}
+	if strings.HasSuffix(tok, "px") {
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(tok, "px")), 64)
+		if err != nil {
+			return 0, false, false
+		}
+		return v, false, true
+	}
+	return 0, false, false
+}
+
+// parseColorStop 解析单个色标 `<color> [<length-percentage>]`。
+//
+// ★ 位置写在颜色**之后**，且颜色本身可能含空格（`rgb(42, 42, 42)`）→
+// 只在**括号深度 0**的位置上取最后一个空格切分，避免切进函数参数内部。
+//
+// ★ 长度位置（`#2a2a2a 1px`）此前只认 `%`：整串 "#2a2a2a 1px" 被当作
+// 颜色交给 parseColorSimple → 解析失败 → 色标被丢；两个色标都带长度位置时
+// 整条渐变因 stops<2 被丢弃（实测 `linear-gradient(#2a2a2a 1px,transparent
+// 1px)` 网格背景在真实页面里整片消失，而 Edge 正常）。
 func parseColorStop(s string) *ColorStop {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
-	pctPos := -1
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '%' {
-			// Walk back over the position's numeric part only (digits and
-			// decimal point). Must NOT consume the separating space, or
-			// "#ff0000 0%" would fail (the space would be skipped and j
-			// would land inside the color).
-			j := i - 1
-			for j >= 0 && (s[j] >= '0' && s[j] <= '9' || s[j] == '.') {
-				j--
+	depth, lastSpace := 0, -1
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
 			}
-			if j >= 0 && s[j] == ' ' {
-				pctPos = j
-				break
+		case ' ':
+			if depth == 0 {
+				lastSpace = i
 			}
 		}
 	}
-	var colorStr string
-	var pct float64
-	hasPos := pctPos >= 0
-	if hasPos {
-		colorStr = strings.TrimSpace(s[:pctPos])
-		pctStr := strings.TrimSpace(s[pctPos+1:])
-		pctStr = strings.TrimSuffix(pctStr, "%")
-		v, err := strconv.ParseFloat(pctStr, 64)
-		if err == nil {
-			pct = v / 100.0
-		} else {
-			hasPos = false
+	colorStr := s
+	cs := &ColorStop{Position: -1, PositionPx: -1}
+	if lastSpace > 0 {
+		if val, isPct, ok := parseStopPositionToken(s[lastSpace+1:]); ok {
+			colorStr = strings.TrimSpace(s[:lastSpace])
+			if isPct {
+				cs.Position = val / 100.0
+			} else {
+				cs.PositionPx = val
+			}
 		}
-	} else {
-		colorStr = s
 	}
 	c, ok := parseColorSimple(colorStr)
 	if !ok {
 		return nil
 	}
-	cs := &ColorStop{Color: c}
-	if hasPos {
-		cs.Position = pct
-	} else {
-		cs.Position = -1
-	}
+	cs.Color = c
 	return cs
+}
+
+// hasPixelStop 报告色标集合里是否存在以长度（px）给出的位置。长度位置
+// 必须等绘制期知道渐变线长度后再换算，故解析期若有它则**跳过**
+// assignGradientPositions —— 否则长度色标会被当成「未指定位置」而被填入
+// 插值位置，换算时再覆盖就成了错误的锚点。
+func hasPixelStop(stops []ColorStop) bool {
+	for _, s := range stops {
+		if s.PositionPx >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveGradientStops 在已知渐变线长度后，把长度位置换算成比例（clamp 到
+// [0,1]）并补齐未指定位置的色标。无长度色标时返回与入参逐字段相同的副本
+// （Position 已由解析期的 assignGradientPositions 填好，不会重算）——保证
+// 既有渐变路径逐像素不变。
+func resolveGradientStops(stops []ColorStop, length float64) []ColorStop {
+	out := make([]ColorStop, len(stops))
+	copy(out, stops)
+	needFill := false
+	for i := range out {
+		if out[i].PositionPx >= 0 {
+			p := 0.0
+			if length > 0 {
+				p = out[i].PositionPx / length
+			}
+			if p < 0 {
+				p = 0
+			} else if p > 1 {
+				p = 1
+			}
+			out[i].Position = p
+			out[i].PositionPx = -1
+		}
+		if out[i].Position < 0 {
+			needFill = true
+		}
+	}
+	if needFill {
+		assignGradientPositions(out)
+	}
+	return out
 }
 
 func assignGradientPositions(stops []ColorStop) {
@@ -390,9 +476,12 @@ func paintLinearGradient(canvas *graphics.Canvas, x, y, w, h float64, lg *Linear
 	// TileModeClamp 保证）。多色标按 CSS 语义整段插值——旧版本对角分支
 	// 曾用「首尾色 + 纵向近似」把 135deg 七色渐变画成纯色，这条路径不再
 	// 存在（方向正确性由 shader 的轴端点天然保证）。
-	colors := make([]graphics.Color, len(lg.Stops))
-	positions := make([]float32, len(lg.Stops))
-	for i, s := range lg.Stops {
+	// ★ 长度位置色标（`#2a2a2a 1px`）在此换算成比例：gradLen 即渐变线长度
+	// （css 的 <length> 位置沿渐变线量取）。
+	stops := resolveGradientStops(lg.Stops, gradLen)
+	colors := make([]graphics.Color, len(stops))
+	positions := make([]float32, len(stops))
+	for i, s := range stops {
 		colors[i] = s.Color
 		positions[i] = float32(s.Position)
 		// Skia 要求色标位置非递减；CSS 里手写越界/逆序的 stop 在此钳平，

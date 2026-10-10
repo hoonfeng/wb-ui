@@ -50,7 +50,8 @@ def main() -> int:
             if d > args.tol:
                 diff_px += 1
                 row_diff[y] += 1
-                grid[y // gh][x // gw] += 1
+                # 尺寸非 8 的倍数时 gh/gw 的整除会少分一块，最后一行/列越界 → 夹取
+                grid[min(y // gh, grid_rows - 1)][min(x // gw, grid_cols - 1)] += 1
             sum_ch += d
             if d > max_ch:
                 max_ch = d

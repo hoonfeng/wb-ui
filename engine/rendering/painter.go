@@ -347,27 +347,34 @@ func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInf
 			st.BackgroundSize, st.BackgroundPosition)
 		drawGradientLayer := func(i int) {
 			layer := bgLayers[i]
-			if lg := parseGradient(layer); lg != nil {
-				if r > 0 {
-					info.canvas.Save()
-					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-					paintLinearGradient(info.canvas, gdx, gdy, gdw, gdh, lg)
-					info.canvas.Restore()
-				} else {
-					paintLinearGradient(info.canvas, gdx, gdy, gdw, gdh, lg)
-				}
+			lg := parseGradient(layer)
+			var rg *RadialGradient
+			if lg == nil {
+				rg = parseRadialGradient(layer)
+			}
+			if lg == nil && rg == nil {
 				return
 			}
-			if rg := parseRadialGradient(layer); rg != nil {
-				if r > 0 {
-					info.canvas.Save()
-					info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
-					paintRadialGradient(info.canvas, gdx, gdy, gdw, gdh, rg)
-					info.canvas.Restore()
-				} else {
-					paintRadialGradient(info.canvas, gdx, gdy, gdw, gdh, rg)
-				}
-			}
+			// ★ 平铺：tile 尺寸/首块位置由 background-size/position 决定，再按
+			// background-repeat（默认 repeat）铺满背景区域 —— 与 url() 背景图
+			// 同口径。此前只画一个 tile，于是 `background-size:32px 32px` 的
+			// 网格/条纹渐变整片消失（#stage .grid 实测 Edge 29924 / wb-ui 16）。
+			paintBackgroundGradientTiled(rect.X, rect.Y, rect.Width, rect.Height,
+				gdx, gdy, gdw, gdh, st.BackgroundRepeat,
+				func(tx, ty, tw, th float64) {
+					if r > 0 {
+						info.canvas.Save()
+						info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, r)
+					}
+					if lg != nil {
+						paintLinearGradient(info.canvas, tx, ty, tw, th, lg)
+					} else {
+						paintRadialGradient(info.canvas, tx, ty, tw, th, rg)
+					}
+					if r > 0 {
+						info.canvas.Restore()
+					}
+				})
 		}
 		// Color beneath the layers.
 		if bgc := toGraphicsColor(st.BackgroundColor); bgc.A != 0 {
