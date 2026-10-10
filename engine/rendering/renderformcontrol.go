@@ -49,6 +49,7 @@ var FormControlColors = struct {
 	RadioBg           graphics.Color
 	RadioBgHot        graphics.Color
 	SliderTrack       graphics.Color
+	SliderEdgeMix     graphics.Color
 	SliderThumb       graphics.Color
 	SliderThumbBorder graphics.Color
 	SliderFill        graphics.Color
@@ -62,7 +63,8 @@ var FormControlColors = struct {
 	ButtonHighlight   graphics.Color
 	ButtonShadow      graphics.Color
 }{
-	CheckboxBorder:    graphics.Color{R: 120, G: 120, B: 120, A: 255},
+	// Edge/Chromium 未勾选 checkbox 的边框实测 #767676（与按钮 UA 边框同色）。
+	CheckboxBorder:    graphics.Color{R: 118, G: 118, B: 118, A: 255},
 	CheckboxCheck:     graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	CheckboxBg:        graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	// Windows accent blue for the checked state (matches Edge).
@@ -75,6 +77,10 @@ var FormControlColors = struct {
 	//   track 未填充 #EFEFEF（239,239,239）、已填充段 #0075FF（0,117,255）、
 	//   thumb 主体 #0075FF + 右侧白色高光（3D 立体感）。
 	SliderTrack:       graphics.Color{R: 239, G: 239, B: 239, A: 255},
+	// Edge(Chromium) 轨道 8px 结构中，上下各 1px 的边缘色 = 主体色与此灰各半
+	// 混合。实测两组（2026-10，深色页 #1e1e1e）：未填充 #efefef→#b2b2b2、
+	// 已填充 #1473e6→#4574ae，都精确等于 (主体色 + #757575)/2。
+	SliderEdgeMix:     graphics.Color{R: 117, G: 117, B: 117, A: 255},
 	SliderThumb:       graphics.Color{R: 0, G: 117, B: 255, A: 255},
 	SliderThumbBorder: graphics.Color{R: 0, G: 117, B: 255, A: 255},
 	SliderFill:        graphics.Color{R: 0, G: 117, B: 255, A: 255},
@@ -948,11 +954,18 @@ func accentColorFor(st *style.ComputedStyle, fallback graphics.Color) graphics.C
 	return out
 }
 
-// paintCheckbox draws a classic checkbox: a square border with a checkmark when checked.
-// Mirrors RenderTheme::paintCheckbox. Uses default classic colors for the widget
-// background (light) independent of the element's background-color, matching
-// browser behavior where form controls use OS-native widget colors. The
-// checkmark color uses the element's text color (accent-color equivalent).
+// paintCheckbox draws a checkbox matching Chromium/Edge's "auto" appearance:
+// a 2px-rounded square that fills the element box, carrying a 1px inner border
+// when unchecked and a solid accent fill (no separate border) when checked.
+//
+// 像素取证（2026-10，Edge headless，深色页 #1e1e1e，元素盒 15×15）：
+//   - unchecked：盒内白底 + 1px #767676 边框；非背景像素恰好 15×15 —— 边框
+//     完全落在元素盒内；
+//   - checked：盒内纯 accent 色（声明了 accent-color 取该色，否则 UA 蓝），
+//     **没有独立描边**（边缘像素只是 accent 与背景的抗锯齿混合，不存在成片的
+//     灰色边框）。旧实现对两种状态都恒画 1px 灰描边，而 StrokeRect 以矩形
+//     边界为中心线，向外多出半像素 → 15×15 的盒实测画出 17×16 的外轮廓，
+//     即用户反馈的「checkbox 比浏览器多出描边/边框」。
 func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, checked bool, op float64) {
 	c := info.canvas
 	size := w
@@ -962,20 +975,14 @@ func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64,
 	// Center the square in the box.
 	cx := x + (w-size)/2
 	cy := y + (h-size)/2
-	// Classic widget background: always light (white) by default, like browser's
-	// native form control rendering. The element's background-color is NOT used
-	// here because form controls are replaced elements whose appearance is
-	// independent of the page theme.
-	bg := FormControlColors.CheckboxBg
+	// Edge 的 checkbox 方块带约 2px 圆角（角像素是 accent/边框色与页面背景的
+	// 抗锯齿混合，直角实现会在四角多出整块实色）。
+	const cbRadius = 2.0
 	if checked {
 		// Checked state: 元素 accent-color 的着色底（Edge 实测：声明了
 		// accent-color 就用它，未声明才回退 UA 默认蓝）。
-		bg = accentColorFor(st, FormControlColors.CheckboxBgHot)
-	}
-	border := FormControlColors.CheckboxBorder
-	c.FillRect(cx, cy, size, size, applyOpacity(bg, op))
-	c.StrokeRect(cx, cy, size, size, 1, applyOpacity(border, op))
-	if checked {
+		bg := accentColorFor(st, FormControlColors.CheckboxBgHot)
+		c.FillRoundRect(cx, cy, size, size, cbRadius, applyOpacity(bg, op))
 		// ★ 勾色恒为白色（Edge/Chromium 实测，2026-10）：checked 的 checkbox
 		// 是「accent 色底 + 白勾」，勾色**不随** accent-color / 文本色变化。
 		// Edge 探针（深色页 #1e1e1e，accent 未设 → 默认蓝）实测勾像素
@@ -993,7 +1000,12 @@ func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64,
 		strokeW := size * 0.14
 		c.StrokeLine(p1x, p1y, p2x, p2y, strokeW, check)
 		c.StrokeLine(p2x, p2y, p3x, p3y, strokeW, check)
+		return
 	}
+	// Unchecked: 盒内白底 + 1px 边框。StrokeRoundRect 自带半宽内缩，描边完整
+	// 落在元素盒内，不改变外轮廓尺寸（Edge 实测 15×15 盒 → 15×15 像素）。
+	c.FillRoundRect(cx, cy, size, size, cbRadius, applyOpacity(FormControlColors.CheckboxBg, op))
+	c.StrokeRoundRect(cx, cy, size, size, cbRadius, 1, applyOpacity(FormControlColors.CheckboxBorder, op))
 }
 
 // paintRadio draws a classic radio button: a circle with a filled dot when checked.
@@ -1033,22 +1045,35 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 // a thumb positioned at the value's fraction along the range. Mirrors
 // RenderTheme::paintSlider. Pixel-fitted against Edge (Chromium) native range
 // (edge_range.png 实测, 2026-08-08):
-//   - track: 固定 6px 高（UA 固定值，与 input box 高度无关），圆角 3px，
-//     两段式：已填充段 (0..value) accent blue #0075FF、未填充段灰 #EFEFEF。
-//     Edge 像素：grey track 仅 6 行（y=73..78 与 y=105..110）。
-//   - thumb: 固定 14px 直径圆（Edge 像素 blue 段仅 14 行 y=69..82），
-//     body #0075FF。Chromium 深色主题悬停变色是「分开」的（用户实测）：
+//   - track: 固定 8px 高、圆角 4px（UA 固定值，与 input box 高度无关），
+//     两段式：已填充段 (0..value) = accent 色、未填充段 = 灰 #EFEFEF。
+//     ★ 8px 里上下各 1px 是边缘色 = (主体色 + #757575)/2（见 FormControlColors.
+//     SliderEdgeMix）。2026-10 垂直剖面实测（深色页 #1e1e1e、18px 高的 input）：
+//       x=100 未填充 y45=#b2b2b2, y46..51=#efefef, y52=#b2b2b2
+//       x=20  已填充 y45=#4574ae, y46..51=#1473e6, y52=#4574ae
+//     旧实现只画 6px 主体（无边缘行），轨道比浏览器细 2px。
+//   - thumb: 固定 16px 直径圆（Edge 实测 y41..56 = 16 行），body = accent 色。
+//     Chromium 深色主题悬停变色是「分开」的（用户实测）：
 //     悬停在圆(thumb)上 → 蓝条 fill + 圆整体变暗；悬停在条(track)上 →
 //     只有蓝条 fill 变暗（圆不变、灰 track 不变）。:active 按下时蓝条+
 //     圆整体更暗。鼠标在圆内与否用 RenderView.CursorPos（app.Host 每次
 //     鼠标移动写入，页面 CSS 坐标）判定——与 :hover/:active 伪类同源。
 func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, in html5.HTMLInputElement, op float64) {
 	c := info.canvas
-	// Track: 固定 6px 圆角条，垂直居中于 input box。浏览器 UA 是固定尺寸
-	// （不随 input 高度缩放），此前用 h*0.5 导致 input≈21px 时 track 10px
-	// 过粗（浏览器 6px）。
-	const trackH = 6.0
+	// Track: 8px 高的圆角条（上下各 1px 边缘 + 中间 6px 主体），垂直居中于
+	// input box。浏览器 UA 是固定尺寸（不随 input 高度缩放），此前用 h*0.5
+	// 导致 input≈21px 时 track 10px 过粗（浏览器 8px）。
+	const trackH = 8.0
+	const trackCoreH = 6.0
 	trackY := y + (h-trackH)/2
+	// ★ 轨道相对元素盒左右各内缩 1px（Edge 实测，双端逐像素）：
+	//   探针页（盒 x2..131、w=129）：Edge 轨道核心行像素 x3..129；
+	//   载体页（盒 x16..220、w=204）：Edge 轨道核心行像素 x17..218。
+	// wb-ui 此前按整盒宽绘制 → 轨道每边比 Edge 宽 1px（载体页实测 x16..219，
+	// 差 2px）。注意 thumb 的行程仍按**元素盒**计算（见 rangeThumbCenterX）。
+	const trackInset = 1.0
+	trackX := x + trackInset
+	trackW := w - 2*trackInset
 
 	min, max := rangeBounds(in)
 	val := parseFloatOr(in.Value(), min)
@@ -1062,9 +1087,14 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 		}
 	}
 
-	// Thumb 几何：固定 14px 直径圆（浏览器 UA 固定值），居中于 track。
-	const thumbR = 7.0
-	thumbX := x + frac*w
+	// Thumb 几何：Edge(Chromium) 实测 16px 直径圆。证据：value=min/50%/max
+	// 三个探针的圆心 x = 10 / 66.5 / 123（轨道盒 x=2 宽 129），行程
+	// 113 = 129 - 2×8 = 轨道宽 - 2R —— 即圆心范围 [trackX+R, trackX+trackW-R]，
+	// 值取端点时滑块正好内切轨道两端。旧实现写死 14px 直径 + x+frac*w
+	// （行程 = 全宽），端点值下滑块有一半溢出行外，是「滑动条与浏览器不同」
+	// 的主因之一。
+	const thumbR = 8.0
+	thumbX := rangeThumbCenterX(x, w, frac, thumbR)
 	cy := y + h/2
 
 	// 悬停变色（与浏览器分开，见函数注释）。
@@ -1084,7 +1114,7 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 					if _, so := info.rv.BoxScrollOffset(ab); so > 0 {
 						absLeft -= so
 					}
-					absThumbX := absLeft + frac*ab.Width()
+					absThumbX := rangeThumbCenterX(absLeft, ab.Width(), frac, thumbR)
 					absCy := ab.AbsoluteY() + ab.Height()/2
 					dx, dy := mx-absThumbX, my-absCy
 					onThumb = dx*dx+dy*dy <= thumbR*thumbR
@@ -1105,12 +1135,54 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 	}
 
 	// Unfilled portion first (whole track), then filled portion over it.
-	c.FillRoundRect(x, trackY, w, trackH, trackH/2, applyOpacity(FormControlColors.SliderTrack, op))
+	// 每段都是「边缘色 8px 条（圆角 4）+ 主体色 6px 条（圆角 3）」，边缘色随
+	// 主体色推导，accent-color 变化时自动跟随（见 SliderEdgeMix 注释）。
+	trackEdge := mixColors(FormControlColors.SliderTrack, FormControlColors.SliderEdgeMix, 0.5)
+	c.FillRoundRect(trackX, trackY, trackW, trackH, trackH/2, applyOpacity(trackEdge, op))
+	c.FillRoundRect(trackX, trackY+1, trackW, trackCoreH, trackCoreH/2, applyOpacity(FormControlColors.SliderTrack, op))
 	if frac > 0 {
-		fillW := w * frac
-		c.FillRoundRect(x, trackY, fillW, trackH, trackH/2, applyOpacity(fillCol, op))
+		// 填充段从轨道左端延伸到**滑块右边缘**（Edge 实测：探针 frac=0.5 时
+		// 两侧 fill 都蓝到 x74、x75 起为灰 track —— 即 fill 右端 = 圆心 + R；
+		// 载体页 rec-seconds Edge 蓝到 x156.5 == 圆心 148.5 + 8）。
+		fillW := thumbX + thumbR - trackX
+		if fillW > trackW {
+			fillW = trackW
+		}
+		fillEdge := mixColors(fillCol, FormControlColors.SliderEdgeMix, 0.5)
+		c.FillRoundRect(trackX, trackY, fillW, trackH, trackH/2, applyOpacity(fillEdge, op))
+		c.FillRoundRect(trackX, trackY+1, fillW, trackCoreH, trackCoreH/2, applyOpacity(fillCol, op))
 	}
 	c.FillCircle(thumbX, cy, thumbR, applyOpacity(thumbCol, op))
+}
+
+// mixColors 按 t∈[0,1] 线性混合两个不透明颜色（t=0 取 a，t=1 取 b，取 a 的
+// alpha）。用于 range 轨道上下 1px 边缘色 —— Edge 实测该色 = (主体色 + #757575)/2。
+func mixColors(a, b graphics.Color, t float64) graphics.Color {
+	if t <= 0 {
+		return a
+	}
+	if t >= 1 {
+		return b
+	}
+	lerp := func(x, y uint8) uint8 {
+		return uint8(float64(x)*(1-t) + float64(y)*t + 0.5)
+	}
+	return graphics.Color{R: lerp(a.R, b.R), G: lerp(a.G, b.G), B: lerp(a.B, b.B), A: a.A}
+}
+
+// rangeThumbCenterX 返回 range 滑块圆心在给定轨道几何下的 x 坐标。
+//
+// Edge(Chromium) 实测（129px 宽、margin 2px 的 input，深色页 #1e1e1e）：
+// value=min/50%/max 时滑块圆心 = 轨道左 + 8 / 轨道左 + 64.5 / 轨道左 + 121，
+// 行程 113 = 轨道宽 129 - 2×8 → 圆心范围 [trackX+R, trackX+trackW-R]。即
+// 轨道两端各让出 R（滑块半径），端点值下滑块内切轨道端点而不是溢出行外。
+//
+// trackW 极小时（小于直径）退化为轨道中心，避免公式反向。
+func rangeThumbCenterX(trackX, trackW, frac, thumbR float64) float64 {
+	if trackW <= 2*thumbR {
+		return trackX + trackW/2
+	}
+	return trackX + thumbR + frac*(trackW-2*thumbR)
 }
 
 // mixWithBlack linearly blends a color toward black by the given factor
