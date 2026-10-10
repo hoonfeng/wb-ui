@@ -1,0 +1,84 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>va_carrier_field</title>
+<style>
+/* 逐字复刻 cmd/mediastudio/web/index.html 的相关条件，再单变量隔离。 */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+     font-size:14px;line-height:1.5}
+.field{display:block;margin-bottom:12px}
+.field .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.field label{font-size:12px;color:#A0A0A0}
+input[type=checkbox]{width:15px;height:15px;margin-right:6px;vertical-align:-2px}
+
+/* ── 单变量隔离 ─────────────────────────────────────── */
+.gB input[type=checkbox]{vertical-align:baseline}       /* 去掉 -2px */
+.gC label{display:block}                                /* label 变块级 */
+.gD input[type=checkbox]{margin:0 6px 0 0}              /* 清掉 UA 的 3px/4px */
+.gF input[type=checkbox]{width:13px;height:13px}        /* 保持 UA 尺寸 */
+.gG{font:16px 'Arial'}                                  /* 换字体族 + 字号 */
+.gG .field label{font-size:16px}
+.gH .field label{line-height:normal}                    /* label 行高 normal */
+</style></head><body>
+
+<div class="field gA" id="gA_f">
+  <div class="row" id="gA_r"><label id="gA_l1">时长</label><span class="val" id="gA_v">3.0 s</span></div>
+  <label id="gA_l" for="gA_c"><input type="checkbox" id="gA_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gB" id="gB_f">
+  <div class="row" id="gB_r"><label id="gB_l1">时长</label><span class="val" id="gB_v">3.0 s</span></div>
+  <label id="gB_l" for="gB_c"><input type="checkbox" id="gB_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gC" id="gC_f">
+  <div class="row" id="gC_r"><label id="gC_l1">时长</label><span class="val" id="gC_v">3.0 s</span></div>
+  <label id="gC_l" for="gC_c"><input type="checkbox" id="gC_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gD" id="gD_f">
+  <div class="row" id="gD_r"><label id="gD_l1">时长</label><span class="val" id="gD_v">3.0 s</span></div>
+  <label id="gD_l" for="gD_c"><input type="checkbox" id="gD_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gE" id="gE_f">
+  <label id="gE_l" for="gE_c"><input type="checkbox" id="gE_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gF" id="gF_f">
+  <div class="row" id="gF_r"><label id="gF_l1">时长</label><span class="val" id="gF_v">3.0 s</span></div>
+  <label id="gF_l" for="gF_c"><input type="checkbox" id="gF_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gG" id="gG_f">
+  <div class="row" id="gG_r"><label id="gG_l1">时长</label><span class="val" id="gG_v">3.0 s</span></div>
+  <label id="gG_l" for="gG_c"><input type="checkbox" id="gG_c" checked>录制系统声音（环回）</label>
+</div>
+
+<div class="field gH" id="gH_f">
+  <div class="row" id="gH_r"><label id="gH_l1">时长</label><span class="val" id="gH_v">3.0 s</span></div>
+  <label id="gH_l" for="gH_c"><input type="checkbox" id="gH_c" checked>录制系统声音（环回）</label>
+</div>
+
+<pre id="out"></pre>
+<script>
+(function(){
+  function R(el){
+    if(!el) return 'null';
+    var r = el.getBoundingClientRect();
+    return [r.left,r.top,r.width,r.height].map(function(v){return Math.round(v*1000)/1000}).join(',');
+  }
+  var ids = ['gA','gB','gC','gD','gE','gF','gG','gH'];
+  var lines = [];
+  for (var i=0;i<ids.length;i++){
+    var b = ids[i];
+    lines.push(b
+      + '|F[' + R(document.getElementById(b+'_f')) + ']'
+      + '|R[' + R(document.getElementById(b+'_r')) + ']'
+      + '|L1[' + R(document.getElementById(b+'_l1')) + ']'
+      + '|L[' + R(document.getElementById(b+'_l')) + ']'
+      + '|C[' + R(document.getElementById(b+'_c')) + ']');
+  }
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

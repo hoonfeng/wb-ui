@@ -1,8 +1,8 @@
 # 渲染一致性排查与修复（2026-10-10）
 
 起因：实际界面（wb-ui 引擎渲染）与浏览器（Edge）观感差异明显。本文记录**同视口双端像素
-对照**的排查方法、已修的视觉一致性缺陷（D1–D6、**D10–D15**，含根因与证据）、剩余缺陷清单
-（D7–D9 契约序列化类；载体页 checkbox 的 `vertical-align:-2px` 定位差 2px），以及载体页的
+对照**的排查方法、已修的视觉一致性缺陷（D1–D6、**D10–D17**，含根因与证据）、剩余缺陷清单
+（**仅剩契约序列化/使用值口径类 D7–D9 + inline 元素 rect 口径**，均不影响可见像素），以及载体页的
 收敛指标与差异归因（§0）。
 
 载体页面：`cmd/mediastudio/web/index.html`（MediaStudio 录屏剪辑台，1280×860，深色三栏 +
@@ -557,7 +557,7 @@ strutDescent = halfLeadingDown + textDescent
 | `probe_halfleading` 行盒高（lh16..23 + YaHeiUI/Segoe + 40px ib） | 修复后**两侧逐一相同**：21/22/22/23/23/24/24/25、YaHeiUI-lh21 24、Segoe-lh21 23、ib40 45/46 |
 | 载体页 form 控件 y（亚像素，容差 ±2） | **range 4/4 全 0**（rec-seconds / rec-fps / clip-in / clip-out）；`.field` #5/#7/#11/#13 均为 **h46.00 == Edge**；3 个按钮 dy=0 |
 | 载体页整页像素（冻结 `#orb` 动画 + `--hide-scrollbars` + 同一 Edge 参照） | **2.25% → 1.66%**（mean_ch 2.04 → 1.39）；clip-in 带 y362-373 **1762→1653**、y379-403 **2291→1891** |
-| 载体页残余 | `input#rec-audio` dy=−2、`label#3` rect h 15 vs 20 —— checkbox 的 `vertical-align:-2px` 分支，**另一独立问题**（不属 D15） |
+| 载体页残余 | `input#rec-audio` dy=−2 —— checkbox 的 `vertical-align:-2px` 分支，**另一独立问题**（不属 D15，**已由 D17 收口**）；`label#3` rect h 15 vs 20 则属 **inline 元素 rect 口径**（非该分支，见 D17 末节） |
 
 > **口径教训（整页像素验收的坑）**：载体页 `#orb{animation:orb-move 2.4s linear infinite
 > alternate}` 是**无限动画**，wb-ui（`webshot -frames N -step M` 走真实时间）与 Edge
@@ -565,6 +565,94 @@ strutDescent = halfLeadingDown + textDescent
 > 测得「2.69%」即此，同时我漏了 `--hide-scrollbars` 又叠加 26px 内容宽差 → 2.69% 全属口径
 > 错误）。**做整页像素验收必须：冻结动画、统一 `--hide-scrollbars`、并用同一张 Edge 参照图
 > 对比「修复前 / 修复后」两版代码**（临时 `git checkout` 旧版渲染一次再恢复）。
+
+#### D16（**已修**，2026-10-11，绘制层）：UA 默认 checked 底色值错了来源，radio 还画反了
+
+**现象**（**未声明** `accent-color` 的页面）：checked checkbox / radio 的底色与浏览器不同 ——
+wb-ui 恒用 `FormControlColors.CheckboxBgHot/RadioBgHot = #1A73E8`，而 Edge 的 UA 默认勾选蓝是
+**`#0075FF`**（与同组 `SliderFill` 同色 —— 该常量组内部本就自相矛盾）。
+
+**判定链**：双端像素用例 `TestPxCheckboxRadio`（夹具 `<input type=checkbox checked>` +
+`<input type=radio checked>`，**不含** accent-color）修复前成片 `got=#1a73e8 exp=#0075ff`
+（`px_checkbox` 0.276%）。夹具未声明 accent-color ⇒ 走的正是 **UA 默认分支**（载体页声明了
+`accent-color` 才把它掩盖）。`#1A73E8` 是 **Windows 系统 accent**，不是浏览器 UA 值。
+
+**修复（两处）**：
+
+1. `CheckboxBgHot` / `RadioBgHot` → `(0,117,255)` `#0075FF`（`renderformcontrol.go` 常量 + 注释更正）。
+2. **radio 的几何与结构**（在残余归因中实测发现，同属「与浏览器不同」）：
+   - **描边外扩 1px**：`StrokeCircle` 以圆的**中心线**描边（同 `StrokeRect` 语义，见 `canvas.go`），
+     13×13 的元素盒因此画出 **15×15** 的像素外轮廓 —— Edge 非白区域 `x[43,55]/y[14,26]`（13×13），
+     wb-ui 曾是 `x[42,56]/y[13,27]`（15×15）。修法与 D14 对 checkbox 的一致：**描边半径内缩半宽**。
+   - **checked 结构反相**：圆心列竖直剖面实测（13×13 盒、accent `#0075FF`，圆心行 y20.5）：
+
+     | y | Edge | wb-ui（修复前） |
+     |---|---|---|
+     | 14 | `#4097ff` 蓝环（75% 覆盖） | `#c8c8c8` 灰（外扩描边） |
+     | 15 | `#ffffff` 白 | `#0075ff` 蓝 |
+     | 16 | `#87beff` 内点边（47%） | `#0075ff` 蓝 |
+     | 17..23 | `#0075ff` 纯蓝 | `#ffffff` 白点 |
+
+     即 Edge 是「**1px accent 环 + 1px 白间隙 + accent 内点（半径 `radius−2.5`）**」，
+     wb-ui 旧实现是「accent 实心整圆 + 白点」，**恰好反相**。
+
+**验收**（`TestPxCheckboxRadio`）：
+
+| 检查 | 结果 |
+|---|---|
+| `px_checkbox` 差异率 | 0.276% → **0.135%**（216 → 162 px；用例预算 0.035）|
+| 成片 `got=#1a73e8 exp=#0075ff` | **消失** |
+| 残余 162 px 的性质 | **混合线检验**（对每个差异像素在「白↔accent」直线上解覆盖 α）：**162/162 落在混合线上，off-line = 0** ⇒ 纯抗锯齿覆盖率差，无结构/颜色/位置差异 |
+| 元素轮廓 | checkbox `x[14,26]/y[14,26]`、radio `x[43,55]/y[14,26]` 与 Edge 均 13×13 对齐（radio 最外一列仍是淡 AA，属覆盖率带）|
+| 回归 | 全量 `TestPx*` **21/21 PASS**；`go test ./engine/...` **25 包 ok**（同步更新 `formcontrol_accent_test.go` 里硬编码的旧 UA 蓝期望值）|
+
+#### D17（**已修**，2026-10-11，布局层）：`vertical-align: <length>` 未实现 —— 载体页 checkbox 高 2px
+
+**现象**：载体页 `input#rec-audio`（`vertical-align:-2px`）比 Edge 高 2px（Edge y208 / wb-ui y206）。
+
+**定位（先做 Edge 最小复现探针再改）**：`dev/fixtures/webshot/va_carrier_field.html`
+**逐字复刻载体页条件**（`*{box-sizing;margin:0;padding:0}`、`system-ui` 14px/`line-height:1.5`、
+`.field` + `.row` flex、`.field label{font-size:12px}`、checkbox 只覆盖 `margin-right`）并做
+**单变量隔离**，`dev/tools/gprobe_cmp.sh` 双端跑（读数为 checkbox 顶相对行盒顶）：
+
+| 组 | 变量 | Edge | wb-ui（修复前） |
+|---|---|---|---|
+| gA | 复刻载体页（inline label + UA margin + `-2px`） | **+2** | **+0** ← 复现 |
+| gB | 只把 `-2px` 换成 `baseline` | +0 | +0 ← **双端一致** |
+| gC | label 改 `display:block` | +0 | +0 |
+| gF | checkbox 13×13（其余同 gA） | +4 | +0 |
+| gH | label `line-height:normal` | +2 | +0 |
+
+⇒ 差异**只在 `vertical-align` 取长度值的组**（gB/gC 双端一致即证），且行盒高 `F=46` 双端一致
+⇒ 行盒高算对、**元素在行盒内的位置**算错。
+
+**根因**：`engine/layout/inlineformattingcontext.go` 的表单控件基线分支只识别 `top`/`bottom`
+两个关键词，长度值落进 else 分支后与 `baseline` **完全等价**（位移恒 0）。
+
+**修复**：分支入口解析长度值（`parseCSSLength` + `resolveLength`；`em` 走元素字号、`%` 走元素
+line-height = CSS 2.1 §10.8 的参考值；关键词/非法值解析为 auto ⇒ 位移 0，与修复前逐位相同 →
+零回归）；基线定位照旧，只在最终 `SetTopLeft` 与 descent 里应用位移。
+
+> **★ 踩坑（差点把修复做成空操作）**：第一版把 `vaShift` 并进了 `align`
+> （`margin.Top + off + vaShift`），元素抬起时 `maxBaseline` 同步抬起，两者在
+> `maxBaseline - off - vaShift` 里**自我抵消** ⇒ 位移恒为 0（`WBUI_IFC_DEBUG` 实测 gA
+> `relTop=0.000`，与修复前逐位相同）。**长度位移不参与「行盒顶→基线」的竞争**，它只是相对
+> 基线的平移。（该中间版本还顺带把 gC 的行盒高 45 改成 43，是副作用而非收益。）
+
+**验收**：
+
+| 检查 | 结果 |
+|---|---|
+| 探针 `va_carrier_field` gA/gD/gE/gH | 相对行盒顶 **+2 == Edge**（修复前 +0）|
+| 载体页几何对照（110 元素双端，`dev/output/tmp/studio.geo.{edge,wbui}.txt`，`bash dev/output/tmp/studio_geo_cmp.sh` 复现） | `input#rec-audio` **Edge `16,208,15,15` / wb-ui `16,208,15,15`** ⇒ **dy = 0** |
+| 回归 | `go test ./engine/...` 25 包 ok、GEO **13/13**、`TestPx*` **21/21** |
+
+**同源线索的结论（`label#3` rect h 15 vs 20 不属这条分支）**：把 `-2px` 换成 `baseline` 的 gB 组里
+`label` 的 rect 仍是 **Edge h15 / wb-ui h20**（差恒定 5px）⇒ 与 `vertical-align` 无关。真因是
+**inline 元素 `getBoundingClientRect()` 的口径**：Edge 返回**字体内容区**（12px 字体 content area
+≈ 15px，top = 行盒顶 + half-leading），wb-ui 返回**行盒高**（20px，top = 行盒顶）。载体页所有
+inline 元素皆然（`span||n` h15 vs 18 同源），**不影响任何可见像素**（元素实际渲染位置由行盒决定，
+已对齐）⇒ 归入契约完备性，与 D7/D8/D9 同批（见 §6 第 6 条）。
 
 ## 6. 下一步建议（按收益排序）
 
@@ -587,7 +675,11 @@ strutDescent = halfLeadingDown + textDescent
    底锚定渐变 + `#333333` 平台；右栏 14.53% → **0.80%**、整页 4.61% → **2.22%**（面板区 26365 →
    **20 px**）。**剩余**：media-controls 的**控件 UI 与交互**（播放/进度/时间/音量/全屏、命中测试、
    悬停态）—— 仅在「有有效源的视频」上出现，仍是范围外主线。
-6. **D7 / D9 / D8(computed 侧)**：契约完备性（序列化格式与使用值），配合网页自检脚本需求再做。
+6. **D7 / D9 / D8(computed 侧) + inline 元素 rect 口径**：契约完备性（序列化格式与使用值），
+   配合网页自检脚本需求再做。**本轮新增确认**：inline 元素的 `getBoundingClientRect()` 口径
+   也不同 —— Edge 返回**字体内容区**（12px 字体 ≈ 15px，top = 行盒顶 + half-leading），wb-ui 返回
+   **行盒高**（20px，top = 行盒顶）；载体页所有 inline 元素皆然（`label#3` h15 vs 20、
+   `span||n` h15 vs 18）。**不影响任何可见像素**（元素实际渲染位置由行盒决定），与 D7/D8/D9 同批。
 7. ~~**D15**~~（**已完成**，2026-10-11，**布局层**）：载体页 range 垂直漂移 = strut
    half-leading 未按 Chromium 的 `floor(上侧) / ceil(下侧)` 分配 —— 当
    `line-height − (取整 ascent + 取整 descent)` 为**奇数**时，精确对半会让行盒底部少
@@ -596,8 +688,17 @@ strutDescent = halfLeadingDown + textDescent
    见 §5「D15」（含探针逐点扫描与口径教训）。同时按当时的建议把 GEO 的
    `FormControlYTolerance` 由 6.0 **收紧到 2.0**（`dev/suites/consistency/compare.go`）——
    收紧后 `form_controls` 仍 **13/13** 通过（探针页控件 y 偏差本就 ≤2px，真正的漂移只在
-   载体页累积）。**残余**：载体页 checkbox `input#rec-audio` 比 Edge 高 2px、`label#3` 的
-   inline rect 15 vs 20 —— 属 `vertical-align:-2px` 分支，另立项。
+   载体页累积）。**残余已收口**：`input#rec-audio` 见下面第 9 条（**D17**，dy 已归零）；
+   `label#3` inline rect 15 vs 20 经探针否证不属该分支，归入第 6 条（inline 元素 rect 口径）。
+8. ~~**D16**~~（**已完成**，2026-10-11，**绘制层**）：未声明 `accent-color` 的页面里 UA 默认 checked
+   底色错误（`#1A73E8` 是 Windows 系统 accent；Edge 的 UA 值是与 `SliderFill` 同色的 **`#0075FF`**），
+   且 radio 还有「描边外扩 1px + checked 结构反相（蓝底白点 vs 蓝环 + 白间隙 + 蓝点）」；
+   修复后 `px_checkbox` **0.276% → 0.135%**，残余经混合线检验证明 **100% 是 AA 覆盖率差**。
+   见 §5「D16」。
+9. ~~**D17**~~（**已完成**，2026-10-11，**布局层**）：`vertical-align: <length>` 未实现 —— 长度值落进
+   表单控件基线分支的 else 后与 `baseline` 等价，载体页 `input#rec-audio` 因此比 Edge 高 2px。
+   修复后载体页 110 元素几何对照里 `input#rec-audio` **Edge / wb-ui 均为 `16,208,15,15`（dy=0）**。
+   见 §5「D17」（含 Edge 最小复现探针与「长度位移不得并入 align」的踩坑）。
 
 > D3 的细分上限 `maxPremulSubdivs`（`engine/rendering/gradient.go`）为 24，是按
 > 「每 ~8px 一个采样」的经验值；若后续遇到大量「两端半透明」渐变导致性能吃紧，

@@ -1,0 +1,47 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<title>va_checkbox_linebox</title>
+<style>
+  /* 最小复现：载体页 #rec-audio 场景 —— label 内 15px checkbox + vertical-align:-2px。
+     读三类 rect：label（display:block，无 padding/border ⇒ 高 = 行盒高）、
+     checkbox（inline-block 替换元素）、文本 span（inline，其 rect 反映基线位置）。*/
+  body{margin:0;font:16px Arial}
+  label{display:block;margin:0;padding:0;border:0}
+  input[type=checkbox]{width:15px;height:15px;margin:0 6px 0 0}
+  .ib{display:inline-block;width:15px;height:15px;background:#0075ff;margin:0 6px 0 0}
+  .va0>*{vertical-align:baseline}
+  .vaM2>*{vertical-align:-2px}
+  .vaM5>*{vertical-align:-5px}
+  .vaP2>*{vertical-align:2px}
+  .sm{font-size:13.3333px}
+  .big input[type=checkbox]{width:20px;height:20px}
+</style></head><body>
+<label id="l_plain" class="va0"><span id="l_plain_t">录制系统声音（环回）</span></label>
+<label id="l_cb_0" class="va0"><input type="checkbox" id="l_cb_0_c" checked><span id="l_cb_0_t">录制系统声音（环回）</span></label>
+<label id="l_cb_m2" class="vaM2"><input type="checkbox" id="l_cb_m2_c" checked><span id="l_cb_m2_t">录制系统声音（环回）</span></label>
+<label id="l_cb_m5" class="vaM5"><input type="checkbox" id="l_cb_m5_c" checked><span id="l_cb_m5_t">录制系统声音（环回）</span></label>
+<label id="l_cb_p2" class="vaP2"><input type="checkbox" id="l_cb_p2_c" checked><span id="l_cb_p2_t">录制系统声音（环回）</span></label>
+<label id="l_ib_0" class="va0"><span class="ib" id="l_ib_0_c"></span><span id="l_ib_0_t">录制系统声音（环回）</span></label>
+<label id="l_ib_m2" class="vaM2"><span class="ib" id="l_ib_m2_c"></span><span id="l_ib_m2_t">录制系统声音（环回）</span></label>
+<label id="l_cb_m2_sm" class="vaM2 sm"><input type="checkbox" id="l_cb_m2_sm_c" checked><span id="l_cb_m2_sm_t">录制系统声音（环回）</span></label>
+<label id="l_cb_m2_big" class="vaM2 big"><input type="checkbox" id="l_cb_m2_big_c" checked><span id="l_cb_m2_big_t">录制系统声音（环回）</span></label>
+<pre id="out"></pre>
+<script>
+(function(){
+  function R(el){
+    if(!el) return 'null';
+    var r = el.getBoundingClientRect();
+    return [r.left,r.top,r.width,r.height].map(function(v){return Math.round(v*1000)/1000}).join(',');
+  }
+  var ids = ['l_plain','l_cb_0','l_cb_m2','l_cb_m5','l_cb_p2','l_ib_0','l_ib_m2','l_cb_m2_sm','l_cb_m2_big'];
+  var lines = [];
+  for (var i=0;i<ids.length;i++){
+    var b = ids[i];
+    var L = document.getElementById(b);
+    var C = document.getElementById(b+'_c');
+    var T = document.getElementById(b+'_t');
+    lines.push(b + '|L[' + R(L) + ']|B[' + R(C) + ']|T[' + R(T) + ']');
+  }
+  document.getElementById('out').textContent = lines.join('\n');
+})();
+</script>
+</body></html>

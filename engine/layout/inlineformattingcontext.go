@@ -1468,6 +1468,29 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 					if cldCS := cld.Style(); cldCS != nil {
 						fcVA = cldCS.Properties["vertical-align"]
 					}
+					// ★ vertical-align: <length>（CSS 2.1 §10.8）：把盒**相对其
+					//   基线位置** raise（正值上移）/ lower（负值下移）该距离。
+					//   此前只识别 top/bottom 两个关键词，长度值落进下面的基线
+					//   分支后与 baseline **完全等价** —— 载体页 input#rec-audio
+					//   的 `vertical-align:-2px` 因此不生效：Edge 的控件比 wb-ui
+					//   低 2px。最小复现见 dev/fixtures/webshot/va_carrier_field.html
+					//   （复刻载体页条件的 gA 组：Edge 相对行盒顶 +2 / wb-ui +0；
+					//   把 -2px 换成 baseline 的 gB 组双端一致 → 差异只在长度分支）。
+					//   em 走元素字号、% 走元素 line-height（CSS 2.1 §10.8 的
+					//   参考值），关键词/非法值解析为 auto → 位移 0，行为与
+					//   修复前逐位相同（零回归）。
+					vaShift := 0.0
+					switch fcVA {
+					case "", "baseline", "middle", "top", "bottom", "sub", "super", "text-top", "text-bottom":
+					default:
+						lh, okLH := cssLineHeight(cld)
+						if !okLH {
+							lh = fontLineGap(cld)
+						}
+						if r := resolveLength(parseCSSLength(fcVA), lh, fontSizeOf(cld)); r.Definite {
+							vaShift = r.Value
+						}
+					}
 					if fcVA == "top" || fcVA == "bottom" {
 						// 控件不参与基线（不改 maxBaseline / maxDescent，也不进
 						// baselineBoxes）：只按行盒顶/底对齐，并把行盒撑到至少
@@ -1495,6 +1518,13 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						//   决定（CSS 2.1 §10.8）。此前只取控件自身要求 → 控件永远
 						//   贴行盒顶（h2_baseline_matrix：input/fs16 relTop 恒 0，
 						//   Edge 为 4 = strutAscent 19 − 控件基线 15）。
+						// ★ vaShift **不参与** align：CSS 2.1 §10.8 的 <length> 是
+						//   「相对基线的位移」，不改变控件对「行盒顶→基线」的要求。
+						//   若并入 align，控件抬起时 maxBaseline 同步抬起，两者在
+						//   下面的 `maxBaseline - off - vaShift` 里**自我抵消** →
+						//   位移恒为 0（实测 WBUI_IFC_DEBUG：gA relTop=0.000，
+						//   而 Edge 为 2.000 —— 与修复前逐位相同，等于没修）。
+						//   正确做法：基线定位照旧，只在最终 SetTopLeft 平移。
 						align := margin.Top + off
 						if strutAscent > align {
 							align = strutAscent
@@ -1510,7 +1540,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 								pending[i].seg.Y += delta
 							}
 						}
-						cldG.SetTopLeft(currentLine.y+currentLine.maxBaseline-off, cldG.Left())
+						cldG.SetTopLeft(currentLine.y+currentLine.maxBaseline-off-vaShift, cldG.Left())
 						// ★ 诊断：证明本分支是否覆盖了此前按 vertical-align 设置的位置
 						//   （middle/top/bottom 分支的 SetTopLeft 均发生在本分支之前）。
 						if debugenv.Enabled("WBUI_IFC_DEBUG") {
@@ -1527,7 +1557,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						// 「max(border-box 高 + 垂直 margin)」那一套（本文件后面
 						// 对非控件仍保留它作为兜底）。
 						// ★ strut 的 descent 同样参与（行盒底至少到 strut 基线下方）。
-						d := (cldG.BorderBoxHeight() - off) + margin.Bottom
+						d := (cldG.BorderBoxHeight() - off - vaShift) + margin.Bottom
 						if strutDescent > d {
 							d = strutDescent
 						}
