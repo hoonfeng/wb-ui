@@ -243,9 +243,10 @@ python dev/tools/pixdiff_region.py dev/output/tmp/studio.final.wbui.png dev/outp
 
 ## 3. 缺陷清单（附最小复现 / 硬证据；状态见末列）
 
-> 「视觉一致性」项（D3–D6、**D10**）已全部收口；D7–D9 属**契约一致性**（非视觉），
-> D11 属 `accent-color` 取值（D8 家族），按需再做。
-> 载体页残留差异的归因（哪些属未实现的 UA 元素渲染、哪些属文字光栅化）见 §0.1 与 §4。
+> 「视觉一致性」项（D3–D6、**D10–D12**）已**全部收口**；**D11**（`accent-color` 取值接入
+> 控件**绘制**）同属视觉项，也**已修**（见下表 D11 行）。仍在「待修」的只有 **D7–D9 的
+> computed 序列化**（`getComputedStyle` 契约完备性，**非视觉**，按需再做）。
+> 载体页残留差异的归因（哪些属 UA 元素渲染、哪些属文字光栅化）见 §0.1 与 §4。
 
 | # | 缺陷 | 证据（Edge vs wb-ui） | 影响面 | 状态 |
 |---|---|---|---|---|
@@ -258,7 +259,7 @@ python dev/tools/pixdiff_region.py dev/output/tmp/studio.final.wbui.png dev/outp
 | D9 | `getComputedStyle` 未返回**使用值**、序列化格式不一致 | `width:100%` → Edge `204px` / wb-ui `"100%"`；颜色 Edge `rgb(215,55,63)` / wb-ui `#D7373F`；长度 Edge `0px` / wb-ui `0` | 同上（契约一致性，非视觉） | 待修（契约，非视觉） |
 | **D10** | ★ `input[type=range]` 的 UA `background-color: #ffffff` 被**实画**（Chromium 只算、不画）；同族：checked 控件勾/点色应用**白色**而非元素文本色 | Edge（`#1e1e1e` 页、129×16 range，`x[2,131) y[2,18)`）：盒内只有 8 行滑轨像素，其余整行 `(30,30,30)`＝页面背景；wb-ui 画 `(255,255,255)` → 左栏纯白(>250) **8868** px（Edge **179**）。checked checkbox：Edge 勾 `(255,255,255)` / wb-ui 元素文本色（套件页=黑，载体页 `#E1E1E1`） | 深色主题页面的**所有** range（白块）+ 所有 checked 控件的勾/点色；左栏差异 **-4.51 pp / -7625 px** | **已修**（2026-10）：`engine/rendering/painter.go` 的 `nativeAppearanceRange` + `renderformcontrol.go` 的勾/点色 |
 | D11 | range 已填充段 / 滑块 / checked 控件底色应取 **元素声明的 `accent-color`**（此前恒用 UA 常量） | 载体页 `accent-color:var(--accent)`=`#1473E6`：Edge 填充段 `(20,115,230)` / wb-ui 修复前 `FormControlColors.SliderFill` `#0075FF` `(0,117,255)`（B 差 25 > tol 12）；checkbox 底 wb-ui `(26,115,232)` vs Edge `(20,115,230)` | 设了 `accent-color` 的页面；左栏 **-1.47 pp / -2475 px**（整页 -2475 px，见 §0.3） | **已修**（2026-10）：`renderformcontrol.go` 新增 `accentColorFor`，接入 `paintCheckbox`/`paintRadio`/`paintRangeSlider`；未声明/`auto`/非法值时回退 UA 默认色（故 consistency `form_controls` 不受影响：其夹具未声明 `accent-color`） |
-| **D12** | ★ 空 `<video controls>`（`controls` 属性 + **无有效媒体源**）的 **UA 占位面板**未实现：Edge 画「#333333 平台 + 底锚定 105px 竖向渐变到 #000000」，wb-ui 完全不画 | 载体页 `#preview`（`x[1012,1280) y[91,239)`，268×148=39664 px）：Edge 面板 y91..133 为 `(51,51,51)` 平台、y134..238 由 50 降到 0；wb-ui 只为作者背景 `(20,20,20)` → 该区差异 **26365 px（66.47%）**，占右栏差异 94.5% | 所有「带 controls 但无源」的视频元素；右栏 **-14.94 pp / -26345 px**、整页 4.61% → **2.22%** | **已修**（2026-10）：`painter.go` 新增 `nativeAppearanceVideoPanel` / `videoHasUsableMediaSource` / `paintNativeVideoPanel`，在作者背景**之上**绘制；无 `controls` 不画、有源（src/子 `<source src>`/宿主帧状态）不画 |
+| **D12** | ★ 空 `<video controls>`（`controls` 属性 + **无有效媒体源**）的 **UA 占位面板**此前未实现（现**已修**）：Edge 画「#333333 平台 + 底锚定 105px 竖向渐变到 #000000」，wb-ui 完全不画 | 载体页 `#preview`（`x[1012,1280) y[91,239)`，268×148=39664 px）：Edge 面板 y91..133 为 `(51,51,51)` 平台、y134..238 由 50 降到 0；wb-ui 只为作者背景 `(20,20,20)` → 该区差异 **26365 px（66.47%）**，占右栏差异 94.5% | 所有「带 controls 但无源」的视频元素；右栏 **-14.94 pp / -26345 px**、整页 4.61% → **2.22%** | **已修**（2026-10）：`painter.go` 新增 `nativeAppearanceVideoPanel` / `videoHasUsableMediaSource` / `paintNativeVideoPanel`，在作者背景**之上**绘制；无 `controls` 不画、有源（src/子 `<source src>`/宿主帧状态）不画 |
 
 D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 `clientWidth/scrollWidth/scrollHeight/offsetHeight`，双端对照即见 513.5 vs 504。
@@ -278,9 +279,12 @@ D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 >   `linear-gradient(#ff0000,transparent)` 红像素（R>150）4800 → **8800**（= Edge），
 >   逐行 R 与预乘模型 `(1-t)·255+16t` 误差 ≤1.2；八页门槛前后逐像素 **0 差异**。
 >   单测见 `engine/rendering/gradient_premul_test.go`，回归数据见 §5。
-> - **载体页剩余差异的两大项不是缺陷（2026-10 实测，数字见 §0.1）**：空 `<video controls>` 的
+> - ~~**载体页剩余差异的两大项不是缺陷（2026-10 实测，数字见 §0.1）**：空 `<video controls>` 的
 >   UA 占位渲染（占右栏差异 **94.5%**）与 `input[type=range]` 轨道 UA 外观（占左栏差异 **58%**），
->   均属 **D8 同类**（UA 元素外观 / `appearance`、`accent-color` 未实现），本轮按范围不动。
+>   均属 **D8 同类**（UA 元素外观 / `appearance`、`accent-color` 未实现），本轮按范围不动。~~
+>   ★ **该条为历史判断，其结论已被逐项推翻（勿再援引）**：range 轨道 UA 外观是**纯视觉缺陷**，
+>   已按 **D10** 修复（见下一条归因更正）；空 `<video controls>` 的 UA 占位面板同样是**视觉缺陷**，
+>   已按 **D12** 实现（2026-10，见 §4.2）。两项现均为**已修**。
 > - ★ **归因更正（2026-10，第 5 次监督轮）**：上一条把 `input[type=range]` 的白色实底归为
 >   「D8 同类 / 契约非视觉 / 本轮不动」——**该判断是错的**。实测（Edge 深色页 + 分控件遮蔽）：
 >   range 的 UA `background-color` **算作白**（computed 与 Edge 一致，`defaultcss.go` 那条注释
@@ -288,16 +292,19 @@ D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 >   左栏差异 **-4.51 pp**。这是**纯视觉缺陷**，已按 **D10** 修复。
 >   **教训**：computed（契约）与 paint（视觉）是两条路径，「UA 元素外观」不等于「不可修」——
 >   判定缺陷归属时必须两条路径各查一遍，不能由 computed 相符就推断绘制相符。
-> - 空 `<video controls>` 的占位底（占右栏差异 **94.5%**）仍属未实现：已单独评估并记为
->   「**已知未实现**」（§4.2，含实测参数、成本与收益），不再写作「非缺陷」。
+> - 空 `<video controls>` 的占位底（占右栏差异 **94.5%**）**已按 D12 实现**（2026-10，
+>   见 §4.2）。历史判断「仍属未实现 / 已单独评估并记为『**已知未实现**』，不再写作『非缺陷』」
+>   **已被 D12 推翻**：第 6 次监督轮裁图确认无源时 Chromium **不渲染任何控件 UI**、只画该渐变
+>   面板，故实现面板即**完全保真**，既非「未实现」也非「非缺陷」。
 
 ---
 
-## 4. 非缺陷差异 vs「已知未实现」
+## 4. 非缺陷差异 vs 曾判「不可修」项
 
-> 本章此前把「可修的视觉缺陷」（range 白底）与「不可修项」（文字光栅化）并列成「非缺陷」，
-> 属误导。现分两节：**4.1 非缺陷**（算法/环境固有，改不动）与 **4.2 已知未实现**（可修，
-> 但成本/范围超出当前主线，**不是**「非缺陷」）。
+> 本章此前把「可修的视觉缺陷」（range 白底、空 `<video controls>` 占位面板）与「不可修项」
+> （文字光栅化）并列成「非缺陷」，属误导。现分两节：**4.1 非缺陷**（算法/环境固有，改不动）
+> 与 **4.2 当时记为「已知未实现」的项**（判定可修、但当时范围超主线）—— **该两项现均已随
+> D10 / D12 实现**，4.2 的标题保留原分节名以便追溯，**不存在「未实现」项**。
 
 ### 4.1 非缺陷差异
 
