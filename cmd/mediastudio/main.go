@@ -51,6 +51,7 @@ type options struct {
 	clipIn  float64
 	clipOut float64
 	hold    time.Duration
+	auto    bool
 }
 
 func main() {
@@ -67,6 +68,7 @@ func main() {
 	flag.Float64Var(&cfg.clipIn, "clip-in", 0.5, "自动模式的剪辑入点（秒）")
 	flag.Float64Var(&cfg.clipOut, "clip-out", 2.5, "自动模式的剪辑出点（秒）")
 	flag.DurationVar(&cfg.hold, "hold", 0, "结束后保持进程存活（供外部截图/调试）")
+	flag.BoolVar(&cfg.auto, "auto", false, "窗口模式自动演示：页面自行点击「开始录制」，录完后上报状态")
 	flag.Parse()
 
 	for _, dir := range []string{cfg.out, cfg.tmp} {
@@ -124,6 +126,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("mediastudio: 窗口创建失败: %v", err)
 	}
+	if cfg.auto {
+		// 窗口模式自动演示：由**页面自己**在 2.5s 后对「开始录制」按钮派发一次真实
+		// click（走 onclick → fetch → bridge → 宿主录制），12s 后再上报一次布局/状态。
+		// 这条路径的关键点：录制发生在 host.Run() 的帧循环里（主循环内嵌套执行），
+		// 与无头模式的顶层调用是不同的驱动环境，因此要单独验一次。
+		script := `(function(){
+			setTimeout(function(){ var b = document.getElementById('btn-record'); if (b) b.click(); }, 2500);
+			setTimeout(function(){ if (window.__reportDiag) window.__reportDiag('t+12s-after-record'); }, 12000);
+			return 'scheduled';
+		})()`
+		if _, err := wv.EvalJS(script); err != nil {
+			log.Printf("mediastudio: 注入自动演示脚本失败: %v", err)
+		} else {
+			log.Printf("mediastudio: 自动演示已注入（2.5s 后点击「开始录制」，12s 后上报状态）")
+		}
+	}
 	log.Printf("mediastudio: 窗口已开（%dx%d）——点「开始录制」录屏+录音，再导出剪辑", cfg.w, cfg.h)
 	host.Run()
 }
@@ -132,7 +150,7 @@ func main() {
 
 // runAuto 走一遍完整的应用流程：界面渲染 → 录制 → 剪辑 → 帧导出 → 回放验证 → 报告。
 // 录制/剪辑/导出都通过「模拟点击页面按钮」触发，即走真实交互路径
-//（命中测试 → DOM 事件 → 页面 onclick → fetch → bridge 路由 → 宿主动作）。
+// （命中测试 → DOM 事件 → 页面 onclick → fetch → bridge 路由 → 宿主动作）。
 func (s *studio) runAuto() int {
 	fail := 0
 	s.note("无头自动演示：视口 %dx%d，录制 %.1fs @%dfps，音轨=%v",

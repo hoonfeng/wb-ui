@@ -421,6 +421,35 @@ input[type=checkbox]{width:15px; height:15px; accent-color:var(--accent); margin
     $("stamp").textContent = "t = " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
   }, 100);
 
+  // 布局自上报：窗口模式下宿主主循环被 Run() 占用、无法从外部读页面几何，
+  // 由页面自己把视口与关键面板矩形报回宿主（/api/diag → 应用日志）。
+  function reportDiag(tag){
+    function r(sel){
+      var el = document.querySelector(sel);
+      if (!el) return sel + ':missing';
+      var b = el.getBoundingClientRect();
+      return sel + '=' + Math.round(b.left) + ',' + Math.round(b.top) + ',' +
+        Math.round(b.width) + 'x' + Math.round(b.height);
+    }
+    var payload = {
+      tag: tag,
+      win: window.innerWidth + 'x' + window.innerHeight,
+      doc: document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight,
+      body: document.body.scrollWidth + 'x' + document.body.scrollHeight,
+      status: $("status-text").textContent,
+      assets: String($("assets").children.length),
+      rects: [r('.work'), r('.panel.ctrl'), r('.panel.stagep'), r('.panel.assets'), r('#stage'), r('.timeline')].join(' | ')
+    };
+    return fetch('/api/diag', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).catch(function(){});
+  }
+  window.__reportDiag = reportDiag;
+  setTimeout(function(){ reportDiag('t+800ms'); }, 800);
+  setTimeout(function(){ reportDiag('t+3000ms'); }, 3000);
+
   renderAssets(); renderRail();
   api("/api/status").then(applyResult).catch(function(e){ log("宿主桥未就绪：" + e); });
 })();

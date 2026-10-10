@@ -298,7 +298,7 @@ func (s *studio) stageRect() (image.Rectangle, error) {
 }
 
 // record 执行一次录屏 + 录音 + 合成。drive 表示录制循环内是否推进事件循环
-//（无头/宿主顶层调用为 true；嵌套在引擎事件循环内调用时为 false，避免重入）。
+// （无头/宿主顶层调用为 true；嵌套在引擎事件循环内调用时为 false，避免重入）。
 func (s *studio) record(seconds float64, fps int, withAudio, drive bool) (*take, error) {
 	s.mu.Lock()
 	if s.busy {

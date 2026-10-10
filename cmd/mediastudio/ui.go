@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"wb-ui/bridge"
 )
@@ -84,6 +85,14 @@ func (s *studio) registerRoutes() {
 			res["message"] = "已导出当前帧：" + path
 		}
 		writeJSON(w, res)
+	})
+
+	// 页面布局自上报：窗口模式下宿主主循环被 Run() 占用、无法从外部读页面几何，
+	// 由页面自己把视口与关键面板的矩形报回来（写进应用日志/报告）。
+	bridge.RegisterHTTP("POST", "/api/diag", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		s.note("布局自上报 %s", strings.TrimSpace(string(body)))
+		writeJSON(w, map[string]any{"ok": true})
 	})
 }
 

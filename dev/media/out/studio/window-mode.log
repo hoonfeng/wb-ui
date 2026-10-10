@@ -1,0 +1,11 @@
+[fontmgr] loaded 60 system font(s) total
+[window-dpi] css=1280x860 glfwSize=1600x1075 fb=1600x1075 scale=(1.25,1.25)
+2026/10/10 15:27:55 mediastudio: 自动演示已注入（2.5s 后点击「开始录制」，12s 后上报状态）
+2026/10/10 15:27:55 mediastudio: 窗口已开（1280x860）——点「开始录制」录屏+录音，再导出剪辑
+[mediastudio] 布局自上报 {"tag":"t+800ms","win":"1280x860","doc":"1280x860","body":"1280x860","status":"就绪","assets":"1","rects":".work=0,52,1280x716 | .panel.ctrl=0,52,236x716 | .panel.stagep=237,52,774x716 | .panel.assets=1012,52,268x716 | #stage=253,90,742x662 | .timeline=0,768,1280x92"}
+[mediastudio] 开始录制：(253,90)-(995,752)（3.0s @ 10fps，音轨=true）
+[mediastudio] 布局自上报 {"tag":"t+3000ms","win":"1280x860","doc":"1280x860","body":"1280x860","status":"录制中","assets":"1","rects":".work=0,52,1280x716 | .panel.ctrl=0,52,236x716 | .panel.stagep=237,52,774x716 | .panel.assets=1012,52,268x716 | #stage=253,90,742x662 | .timeline=0,768,1280x92"}
+[mediastudio] 抓帧完成：30 帧，首末帧变化像素占比 0.64%（舞台区域）
+[mediastudio] 环回录音：652800 字节 PCM（48000Hz 2ch，3.40s）
+[mediastudio] 合成完成：record.mp4（68363 字节）
+[mediastudio] 布局自上报 {"tag":"t+12s-after-record","win":"1280x860","doc":"1280x860","body":"1280x860","status":"已录制","assets":"3","rects":".work=0,52,1280x716 | .panel.ctrl=0,52,236x716 | .panel.stagep=237,52,774x716 | .panel.assets=1012,52,268x716 | #stage=253,90,742x662 | .timeline=0,768,1280x92"}

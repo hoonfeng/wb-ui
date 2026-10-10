@@ -102,12 +102,12 @@
 | 1 | 界面渲染 | 引擎布局/绘制/CSS 动画/图片解码 | `ui.png` 1280×860 | ✅ |
 | 2 | 录屏抓帧 | `WebView.Render()`（预乘 RGBA → PNG） | 30 帧 @10fps，最小帧 20.8KB，舞台 742×662 | ✅ |
 | 3 | 画面推进 | CSS 动画 + 事件循环/动画时钟驱动 | 舞台区域首末帧变化像素占比 0.95%（静止基线 <0.1%） | ✅ |
-| 4 | 环回录音 | WASAPI loopback + 输出设备播测试音 | 650880 字节 PCM（48000Hz 2ch，3.39s）→ `rec.wav` | ✅ |
-| 5 | 视频合成 | ffmpeg（宿主编码侧） | `record.mp4` 66.9KB：h264 High yuv420p 742×662 @10fps + aac 48kHz stereo，时长 3.00s | ✅ |
+| 4 | 环回录音 | WASAPI loopback + 输出设备播测试音 | 654720 字节 PCM（48000Hz 2ch，3.41s）→ `rec.wav` | ✅ |
+| 5 | 视频合成 | ffmpeg（宿主编码侧） | `record.mp4` 69.9KB：h264 High yuv420p 742×662 @10fps + aac 48kHz stereo，时长 3.00s | ✅ |
 | 6 | 剪辑 | 自持帧序列区间 + 音轨输入级裁剪 | `clip.mp4` 20 帧 / 2.0s（0.5→2.5s） | ✅ |
-| 7 | 帧导出 | PNG / JPEG 编码 | `frame-now.png` 69KB / `frame-now.jpg` 105KB | ✅ |
+| 7 | 帧导出 | PNG / JPEG 编码 | `frame-now.png` 69.0KB / `frame-now.jpg` 105.1KB | ✅ |
 | 8 | 回放 | 引擎 `<video>` + 宿主元数据/抽帧通道 | duration=3.00s · videoWidth=742 · readyState=4 · seek 生效 | ✅ |
-| 9 | 回放一致性 | 录制中间帧 vs 回放截图（16×16 网格签名） | 平均色差 6.85（0-255 尺度，越小越像） | ✅ |
+| 9 | 回放一致性 | 录制中间帧 vs 回放截图（16×16 网格签名） | 平均色差 6.51（0-255 尺度，越小越像） | ✅ |
 
 - 证据：`dev/media/out/studio/`（`report.md` + `ui.png` + `replay.png` + `record.mp4` + `clip.mp4` + 两帧导出）；
   中间帧序列在 `_temp/mediastudio/`（不入库，与 `_temp` 同规矩）。
@@ -120,6 +120,23 @@
      （现象：录 30 帧画面纹丝不动，首末帧差异仅来自时间戳文字）；
   2. **keyframes 内补间的取值口径**：颜色补间按声明原文取色（写 `var(--x)` 会取到全 0）、transform 补间按
      函数名提取（`translateX()/translateY()/scale()` 可用，`translate(x,y)` 简写与 `rotate()` 不被提取）。
+
+**窗口模式复核（同日，`-auto`）**：无头与窗口两种模式的**驱动环境不同**——窗口模式下录制发生在
+`app.Host.Run()` 的帧循环内部（主循环内嵌套执行），不是无头那种顶层直调，因此单独验一次：
+
+| 检查项 | 实测 | 结论 |
+|---|---|---|
+| 视口与 DPI | `css=1280x860 · glfwSize=1600x1075 · fb=1600x1075 · scale=1.25` | ✅ 逻辑尺寸按 CSS 布局、物理帧缓冲按 DPI 放大 |
+| 面板几何（页面自上报） | `.work=0,52,1280x716` · `.panel.ctrl=0,52,236x716` · `.panel.stagep=237,52,774x716` · `.panel.assets=1012,52,268x716` · `#stage=253,90,742x662` · `.timeline=0,768,1280x92` | ✅ 三栏 + 时间轴全在 1280×860 视口内，与无头模式逐项一致 |
+| 交互录制（窗口模式） | 页面真实 `click` → `开始录制：(253,90)-(995,752)` → 抓帧 30 帧（变化 0.64%）→ 环回录音 652800 字节 PCM → `record.mp4` 68363 字节 | ✅ 主循环内嵌套录制可用 |
+| UI 状态流转 | 自上报 `status`：就绪 → 录制中 → 已录制（产物列表 1 → 3 项） | ✅ 录制期间帧循环仍在推进页面状态 |
+
+- 证据：`dev/media/out/studio/window-mode.log`（窗口模式全量日志留档，含全部自上报快照）。
+- 复现：`CGO_ENABLED=1 GOWORK=off go run ./cmd/mediastudio -auto`（页面 2.5s 后自行点击「开始录制」，
+  12s 后再上报一次布局/状态；该 flag 仅用于自动演示，正常交互模式不带任何 flag）。
+- ★ **坑（易误判为渲染缺陷）**：本机窗口 DPI 缩放 1.25（物理 1600×1075 / CSS 1280×860），
+  外部截图工具按 CSS 尺寸去取窗口时会截偏/截残，甚至匹配到别的窗口——**不要据此判定布局错**；
+  判定口径用页面自上报的 `getBoundingClientRect()` 几何（`POST /api/diag` → 应用日志），它与无头模式完全一致。
 
 ---
 

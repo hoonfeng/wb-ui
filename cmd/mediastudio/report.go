@@ -57,7 +57,7 @@ func (s *studio) writeReport(tk, clip *take, rec *replayRec, uiPNG string) strin
 		want := wantFrames(tk.seconds, tk.fps)
 		minSize := minFrameBytes(tk.dir, tk.frames)
 		framesV = verdict{
-			ok:  tk.frames == want && minSize > 1024,
+			ok: tk.frames == want && minSize > 1024,
 			got: fmt.Sprintf("%d 帧（期望 %d）· 最小帧 %d 字节 · 舞台区域首末帧变化像素占比 %.2f%%",
 				tk.frames, want, minSize, tk.frameDiff),
 		}
