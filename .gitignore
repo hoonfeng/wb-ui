@@ -22,6 +22,8 @@ Thumbs.db
 # Go workspace
 go.work
 go.work.sum
+# `go work` 中途产物（工具链临时校验文件，非用户文件；实测 2026-10 出现在仓库根）
+go.work.tmpwork.sum
 
 # Test coverage
 coverage.txt
