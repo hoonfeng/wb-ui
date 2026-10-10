@@ -234,7 +234,19 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 用途：inline-block/replaced 的基线对齐（CSS 2.1 §10.8）——
 	//   行盒基线（相对行盒顶）= halfLeading + ascent
 	//   子盒 border-box 顶 = 行盒顶 + halfLeading + ascent - 子盒高
-	halfLeading := 0.0
+	// halfLeadingUp / halfLeadingDown：行盒高与字体度量高之差（leading）在
+	// 行盒上侧与下侧的分配量。★ Chromium 不是把 leading 精确对半，而是
+	// **上侧 floor(leading/2)、下侧 ceil(leading/2)**（LayoutUnit 精度）：
+	//   - 行盒底部：probe_halfleading（Arial 14px，取整 asc13/desc3，lh16..23
+	//     逐点扫描）实测含 18px inline-block 的匿名行盒 Edge 恒为
+	//     `18 + desc + ceil(leading/2)`（lh17→22、lh19→23、lh21→24、lh23→25，
+	//     全为整数），精确半值则给出 21.5/22.5/23.5/24.5。
+	//   - 基线：probe_baseline2 实测 Edge 基线 = round(asc) + floor(leading/2)
+	//     （lh20→15、lh21→15、lh22→16、lh23→16、YaHeiUI lh21→15、fs20 lh30→22）。
+	// 用精确 halfLeading 时，leading 为奇数的行盒底部少 0.5px、基线低 0.5px
+	// ——载体页（system-ui→YaHei UI 14px/line-height:1.5 → leading=3）每个
+	// .field 矮 0.5px，4 个 field 累积成 range 垂直错位 2px，即 D15。
+	halfLeadingUp, halfLeadingDown := 0.0, 0.0
 	{
 		lineBoxH := textHeight
 		if cssLHSet {
@@ -246,7 +258,12 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 		//   算成 18.5 而非 17，其中的控件/替换元素整体偏高 2px。Edge 实测
 		//   （h2_baseline_matrix）：lh20px 的 input relTop=2、lh40px relTop=12
 		//   （= 8.5 半行距 + 18.5 ascent − 15 控件基线），只有负半行距能复现。
-		halfLeading = (lineBoxH - (textAscent + textDescent)) / 2
+		leading := lineBoxH - (textAscent + textDescent)
+		// 先归到 Chromium 的 LayoutUnit（1/64 px）再分配，防浮点噪声把整数
+		// leading 推到 floor/ceil 的另一侧。
+		leading = math.Round(leading*64) / 64
+		halfLeadingUp = math.Floor(leading / 2)
+		halfLeadingDown = math.Ceil(leading / 2)
 	}
 	// strut（本 IFC 容器自身字体）在行盒里的 ascent/descent：行盒顶→基线 /
 	// 基线→行盒底。CSS 2.1 §10.8：行盒高 = max(各 inline 盒 ascent) +
@@ -254,8 +271,8 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 	// 此前 maxBaseline/maxDescent 只由控件/替换元素贡献、strut 完全不参与 →
 	// 控件永远贴行盒顶（h2_baseline_matrix 实测 relTop 恒 0，Edge 为
 	// 4/22/2/12；行盒底也少了 strut descent，ib_30x30 行盒 30 而 Edge 35）。
-	strutAscent := halfLeading + textAscent
-	strutDescent := halfLeading + textDescent
+	strutAscent := halfLeadingUp + textAscent
+	strutDescent := halfLeadingDown + textDescent
 	// ★ quirks 下（本行只有 atomic inline 子盒、无文本）strut 不参与行盒：
 	//   ascent/descent 一并归零，否则子盒会被抬到「strut 基线」上——
 	//   form-control-quirks 的 .form-marker 又停回 y=41（浏览器 37）。
@@ -1129,7 +1146,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 						//   矮于文本行的图标（如 .qexec-caret 的 8px svg）required
 						//   被文本基线兜住 → 定位与旧公式逐位相同，零回归。
 						required := margin.Top + childBH
-						textBase := halfLeading + textAscent
+						textBase := halfLeadingUp + textAscent
 						if required > textBase && required > currentLine.maxBaseline {
 							// 本行基线随最高的替换元素下沉；本元素登记进
 							// baselineBoxes，后续出现更高者时一并下移
@@ -1252,7 +1269,7 @@ func (c *InlineFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			if cldCS := cld.Style(); cldCS != nil && cld.IsInline() && !cld.IsReplaced() &&
 				cldCS.Display == style.DisplayInline && cld.Element() != nil {
 				if ba, _ := fontAscentDescent(cld); ba > 0 {
-					base := halfLeading + math.Round(ba)
+					base := halfLeadingUp + math.Round(ba)
 					if base > strutAscent && base > currentLine.maxBaseline {
 						delta := base - currentLine.maxBaseline
 						currentLine.maxBaseline = base

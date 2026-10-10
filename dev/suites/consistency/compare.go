@@ -31,7 +31,10 @@ const (
 	// FormControlYTolerance：行内基线对齐已实现（IFC maxBaseline/maxDescent），
 	// 实测 form_controls 的 9 个控件 y 偏差 ≤3px；曾是 30px（掩盖未实现的
 	// vertical-align:baseline），2026-09-22 收紧到 6px。
-	FormControlYTolerance = 6.0
+	// ★ 2026-10-11（D15）：收紧到 2px——载体页 mediastudio 的 range 垂直错位
+	// （fps/clip-in 比 Edge 高 0.6~1.6px）长期被 6px 容差放行，探针页同样只有
+	// 3px 量级的偏差，2px 才能把这层「行高/基线取整漂移」暴露在门禁里。
+	FormControlYTolerance = 2.0
 	// FormControlWidthTolerance：控件默认宽度依赖 UA 常量字符宽度
 	// （wb-ui 用固定 8px/char，浏览器按字体度量），见 README 的量化残差。
 	FormControlWidthTolerance = 10.0

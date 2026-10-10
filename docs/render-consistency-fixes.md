@@ -1,8 +1,8 @@
 # 渲染一致性排查与修复（2026-10-10）
 
 起因：实际界面（wb-ui 引擎渲染）与浏览器（Edge）观感差异明显。本文记录**同视口双端像素
-对照**的排查方法、已修的视觉一致性缺陷（D1–D6、**D10–D14**，含根因与证据）、剩余缺陷清单
-（D7–D9 契约序列化类；**D15** 载体页 range 垂直漂移，布局层，见 §5 末），以及载体页的
+对照**的排查方法、已修的视觉一致性缺陷（D1–D6、**D10–D15**，含根因与证据）、剩余缺陷清单
+（D7–D9 契约序列化类；载体页 checkbox 的 `vertical-align:-2px` 定位差 2px），以及载体页的
 收敛指标与差异归因（§0）。
 
 载体页面：`cmd/mediastudio/web/index.html`（MediaStudio 录屏剪辑台，1280×860，深色三栏 +
@@ -22,6 +22,15 @@
 | D1–D6 + D10 后 | 50765 px（4.61%） | 2.51 | 9.29% | 0.51% | 14.53% |
 | + D12（空 `<video controls>` 的 UA 占位面板） | 24420 px（2.22%） | 1.94 | 9.29% | 0.51% | **0.80%** |
 | **D1–D12 全修后（本次实测）** | **21945 px（1.99%）** | **1.88** | **7.82%** | 0.51% | **0.80%** |
+| + D13/D14（checkbox 描边 / range 几何，绘制层） | 21968 px（2.00%） | 1.78 | 7.83% | 0.51% | 0.80% |
+| **+ D15（half-leading 按 Chromium 取整分配，布局层）** | **18236 px（1.66%）** | **1.39** | **4.75%** | 0.52% | 2.22% |
+
+> **口径说明**：D13/D14 行沿用上表口径；**D15 行（2026-10-11 复测）**改用更严的口径——
+> 冻结 `#orb` 无限动画（否则 wb-ui 与 Edge 相位不可比，混入 ~1% 噪声）、统一
+> `--hide-scrollbars`（否则 Edge 内容区窄 26px，凭空多出整列差异）、并用**同一张 Edge 参照
+> 图**对比「旧版代码 / 新版代码」两次渲染（旧版经临时 `git checkout` 渲染后立即恢复）。
+> 该口径下旧版代码是 **2.25%（左栏 7.95%）**，故 D15 的前后对比（2.25% → 1.66%、
+> 左栏 7.95% → 4.75%）为**同口径内部对比**，不可与 1.99% 那行直接相减。
 
 舞台网格线像素（色 `#2A2A2A`，Edge=29924）：修复前 **16**（≈完全没有）→ 修复后 **29941**（误差 0.06%）。
 
@@ -492,16 +501,70 @@ D5 的定位过程可复现：`dev/output/tmp/studio.diag3.html` 注入脚本读
 | 新增回归用例 | `dev/suites/consistency/formctl_probe_test.go::TestPxFormControl`（预算 1.5%；同时把行跨度表 + 5× 放大并排图落盘到 `dev/output/` 供目视与排查） |
 | Edge 侧稳定性 | 本轮新截 Edge 图与历史 Edge 图 `--tol 0` **逐像素 0 差异**（差异全部来自 wb-ui 侧） |
 
-#### 新发现（未修，下一步）：载体页 range 的**垂直位置**漂移
+#### D15（**已修**，2026-10，布局层）：range 垂直错位 = half-leading 未按 Chromium 取整分配
 
-修复后详查载体页残余差异，垂直剖面显示 wb-ui 的轨道比 Edge **整体偏高**：fps 区高 0.6px、
-clip-in 区高 1.6px（同页不同 field 漂移量不同 → 累积漂移）。该差异在**布局层**（`.field` /
-label 行高累积），与绘制无关，长期被 GEO 套件的「表单控件 y ±2→±6」容差覆盖（§README）。
+**现象**：载体页 `input[type=range]`（fps / clip-in / clip-out）比 Edge 偏高 0.6~1.6px
+（同期 D14 把轨道由 6px 修正为 Edge 真实的 8px 后，参与错位的行变多，可见度更高）。
 
-**影响**：轨道高度由 6px 修正为 Edge 真实的 8px 后，参与错位的行变多，故载体页
-fps/clip-in/clip-out 的区域差异像素上升（sec_range 因该处恰好对齐而大幅下降），净效果 ≈ 0
-（整页 1.99% → 2.00%）。**处理原则**：8px 是 Edge 的真实结构（探针页双端几何对齐时逐像素
-验证），不用错误绘制去掩盖布局漂移；漂移本身单独立项修。
+**定位（载体页逐元素亚像素几何对照）**：`_temp/probe_pair.py` 把同一 collector 注入
+`cmd/mediastudio/web/index.html`，Edge 侧 `--dump-dom` 读 `document.title`、wb-ui 侧
+`dev/tools/jsread`（一次读回、不截断）双侧采集 109 个元素（`toFixed(2)` 亚像素）：
+
+| 元素 | Edge | wb-ui（修复前） | 差 |
+|---|---|---|---|
+| `.field` 时长（div#5） | y90.00 **h46.00** | y90.00 **h45.50** | **−0.50** |
+| `.field` 帧率（div#7） | y148.00 h46.00 | y147.50 h45.50 | −0.50 |
+| `input#clip-in` | y381.50 | y380.50 | −1.00 |
+| `input#clip-out` | y439.50 | y438.00 | −1.50 |
+| `button#btn-export-clip` | y475.50 | y473.50 | −2.00 |
+
+即**每个 `.field` 矮 0.5px** 并逐 field 累积。`.field` = `.row`(18px) + margin 4px + range
+匿名行盒 ⇒ 0.5px 精确落在 **range 所在匿名行盒的高度**（Edge 24.00 / wb-ui 23.50）。
+
+**根因（探针逐点扫描）**：`engine/layout/inlineformattingcontext.go` 的 strut half-leading
+用**精确对半** `halfLeading = (lineBoxH − (textAscent + textDescent)) / 2`，而 Chromium 是
+**上侧 `floor(leading/2)`、下侧 `ceil(leading/2)`**：
+
+| `probe_halfleading`（Arial 14px，取整 asc13/desc3，leading = lh−16） | lh16 | lh17 | lh18 | lh19 | lh21 | lh23 |
+|---|---|---|---|---|---|---|
+| Edge：含 18px inline-block 的匿名行盒 | 21.00 | 22.00 | 22.00 | 23.00 | **24.00** | 25.00 |
+| wb-ui（修复前） | 21.00 | 21.50 | 22.00 | 22.50 | **23.50** | 24.50 |
+| 恒等式 `18 + desc + ceil(leading/2)` | 3+0 | 3+1 | 3+1 | 3+2 | 3+3 | 3+4 |
+
+基线同一规律（`probe_baseline2`：8px baseline 对齐 inline-block 的底边即基线）——
+Edge 基线 = `round(asc) + floor(leading/2)`：lh20→15、lh21→**15**、lh22→16、lh23→**16**、
+YaHeiUI lh21→15、fs20 lh30→22；wb-ui 修复前在 leading 为奇数时低 0.5px。
+
+载体页命中条件：`body{font:14px system-ui;line-height:1.5}` ⇒ 行盒 21px；YaHei UI 14px
+取整 asc/desc = 14/4 ⇒ leading = **3（奇数）** ⇒ 精确半值 1.5 使行盒底部少 0.5px。
+
+**修复**（纯布局层；绘制层常量一律未动）：
+
+```go
+leading := lineBoxH - (textAscent + textDescent)
+leading = math.Round(leading*64) / 64 // 归到 Chromium LayoutUnit(1/64)，防浮点噪声
+halfLeadingUp = math.Floor(leading / 2)   // 行盒上侧
+halfLeadingDown = math.Ceil(leading / 2)  // 行盒下侧
+strutAscent = halfLeadingUp + textAscent
+strutDescent = halfLeadingDown + textDescent
+```
+
+`floor + ceil = leading` ⇒ **纯文本行盒高仍 = line-height（零回归面）**；只有含 inline-block /
+替换元素（range 等控件）的行盒底部与基线按 Chromium 取整。
+
+| 检查 | 结果 |
+|---|---|
+| `probe_halfleading` 行盒高（lh16..23 + YaHeiUI/Segoe + 40px ib） | 修复后**两侧逐一相同**：21/22/22/23/23/24/24/25、YaHeiUI-lh21 24、Segoe-lh21 23、ib40 45/46 |
+| 载体页 form 控件 y（亚像素，容差 ±2） | **range 4/4 全 0**（rec-seconds / rec-fps / clip-in / clip-out）；`.field` #5/#7/#11/#13 均为 **h46.00 == Edge**；3 个按钮 dy=0 |
+| 载体页整页像素（冻结 `#orb` 动画 + `--hide-scrollbars` + 同一 Edge 参照） | **2.25% → 1.66%**（mean_ch 2.04 → 1.39）；clip-in 带 y362-373 **1762→1653**、y379-403 **2291→1891** |
+| 载体页残余 | `input#rec-audio` dy=−2、`label#3` rect h 15 vs 20 —— checkbox 的 `vertical-align:-2px` 分支，**另一独立问题**（不属 D15） |
+
+> **口径教训（整页像素验收的坑）**：载体页 `#orb{animation:orb-move 2.4s linear infinite
+> alternate}` 是**无限动画**，wb-ui（`webshot -frames N -step M` 走真实时间）与 Edge
+> （`--virtual-time-budget`）的相位不可能一致 ⇒ 直接对比会混入 ~1% 的相位噪声（本轮首次
+> 测得「2.69%」即此，同时我漏了 `--hide-scrollbars` 又叠加 26px 内容宽差 → 2.69% 全属口径
+> 错误）。**做整页像素验收必须：冻结动画、统一 `--hide-scrollbars`、并用同一张 Edge 参照图
+> 对比「修复前 / 修复后」两版代码**（临时 `git checkout` 旧版渲染一次再恢复）。
 
 ## 6. 下一步建议（按收益排序）
 
@@ -525,10 +588,16 @@ fps/clip-in/clip-out 的区域差异像素上升（sec_range 因该处恰好对�
    **20 px**）。**剩余**：media-controls 的**控件 UI 与交互**（播放/进度/时间/音量/全屏、命中测试、
    悬停态）—— 仅在「有有效源的视频」上出现，仍是范围外主线。
 6. **D7 / D9 / D8(computed 侧)**：契约完备性（序列化格式与使用值），配合网页自检脚本需求再做。
-7. **D15**（新增，**布局层**）：载体页 `input[type=range]` 的**垂直位置累积漂移**（实测
-   fps 偏高 0.6px、clip-in 偏高 1.6px）。定位路径：`.field > .row(label)` 行高 → field 间距
-   → range 盒 y。GEO 现用「表单控件 y ±6」容差掩盖，建议先把该容差收紧到 ±2 让
-   `form_controls` 暴露偏差，再查行高/字体度量链路。本轮不动（无充分证据前不碰布局）。
+7. ~~**D15**~~（**已完成**，2026-10-11，**布局层**）：载体页 range 垂直漂移 = strut
+   half-leading 未按 Chromium 的 `floor(上侧) / ceil(下侧)` 分配 —— 当
+   `line-height − (取整 ascent + 取整 descent)` 为**奇数**时，精确对半会让行盒底部少
+   0.5px、基线低 0.5px，逐 `.field` 累积成 range 错位 2px。修复后载体页 form 控件 y 偏差
+   **全 0**（range 4/4）、整页 **2.25% → 1.66%**、左栏 **7.95% → 4.75%**（舞台/右栏零变化），
+   见 §5「D15」（含探针逐点扫描与口径教训）。同时按当时的建议把 GEO 的
+   `FormControlYTolerance` 由 6.0 **收紧到 2.0**（`dev/suites/consistency/compare.go`）——
+   收紧后 `form_controls` 仍 **13/13** 通过（探针页控件 y 偏差本就 ≤2px，真正的漂移只在
+   载体页累积）。**残余**：载体页 checkbox `input#rec-audio` 比 Edge 高 2px、`label#3` 的
+   inline rect 15 vs 20 —— 属 `vertical-align:-2px` 分支，另立项。
 
 > D3 的细分上限 `maxPremulSubdivs`（`engine/rendering/gradient.go`）为 24，是按
 > 「每 ~8px 一个采样」的经验值；若后续遇到大量「两端半透明」渐变导致性能吃紧，
