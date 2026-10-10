@@ -282,7 +282,11 @@ func (c *ComputedStyle) InheritFrom(parent *ComputedStyle) {
 	// 调用顺序安全：ResolveElement 在应用元素**自身声明之前**调用本函数
 	// （resolver.go 的 `cs.InheritFrom(parentCS)`），因此这里下发的值会被
 	// 元素自己的声明正确覆盖。
-	for _, name := range []string{"scrollbar-color", "scrollbar-width"} {
+	// `image-rendering` 同样是 inherited: yes（CSS Images §3 / Filter Effects）：
+	// 父元素声明 `image-rendering: pixelated` 后，后代 `<img>` 都按最近邻放大
+	// （Edge 实测：只在容器上声明即可对整棵子树生效）。绘制层按元素的
+	// GetProperty("image-rendering") 选采样模式，所以必须在这里下发。
+	for _, name := range []string{"scrollbar-color", "scrollbar-width", "image-rendering"} {
 		if _, ok := c.Properties[name]; ok {
 			continue
 		}

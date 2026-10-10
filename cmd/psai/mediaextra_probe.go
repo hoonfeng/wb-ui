@@ -210,13 +210,33 @@ func buildExtraPage(samplesDir string) (string, error) {
 
 	// 引擎侧逐 tick 驱动 + 静态状态采集 + Edge 侧自采集（同一套读法）。
 	b.WriteString(`<script>
+// 源的**内容尺寸**：drawImage 的源矩形按图像像素计（img 用 naturalWidth/naturalHeight，
+// 不是 CSS 尺寸）；缺自然尺寸时回退 CSS 尺寸。
+function __pxSize(el) {
+  var w = el.naturalWidth || el.videoWidth || el.width || 0;
+  var h = el.naturalHeight || el.videoHeight || el.height || 0;
+  return [w, h];
+}
+// 采样点取**内容中心**（自适应元素尺寸）。
+function __pxCenter(el) {
+  var d = __pxSize(el);
+  return [d[0] > 0 ? Math.floor(d[0] / 2) : 0, d[1] > 0 ? Math.floor(d[1] / 2) : 0];
+}
+// 越界必须显式标记：源矩形与图像无交集时 canvas 规范是「什么都不画」，得到透明黑
+// ——与「drawImage 取到恒定首帧」在像素上无法区分。此前采样点固定 (80,80)，而这些
+// 样本 GIF 是 120x80（y 有效 0..79）⇒ 源矩形空集 ⇒ 整条序列恒定透明黑，被误读成
+// 「canvas drawImage 取到的是固化帧」。
 function __px(el, sx, sy) {
+  var d = __pxSize(el);
+  if (d[0] > 0 && d[1] > 0 && (sx < 0 || sy < 0 || sx >= d[0] || sy >= d[1])) {
+    return 'OOB';
+  }
   var c = document.getElementById('__pxcanvas');
   var ctx = c.getContext('2d');
   ctx.clearRect(0, 0, 1, 1);
   ctx.drawImage(el, Math.floor(sx), Math.floor(sy), 1, 1, 0, 0, 1, 1);
-  var d = ctx.getImageData(0, 0, 1, 1).data;
-  return d[0] + ',' + d[1] + ',' + d[2];
+  var g = ctx.getImageData(0, 0, 1, 1).data;
+  return g[0] + ',' + g[1] + ',' + g[2];
 }
 window.__tsTick = function(t) {
   var keys = ['e304', 'e305', 'e306', 'e307a', 'e307b'];
@@ -224,7 +244,8 @@ window.__tsTick = function(t) {
     var id = keys[i], el = document.getElementById(id);
     if (!el) { continue; }
     var arr = window.__ts[id] || (window.__ts[id] = []);
-    try { arr.push({t: t, c: __px(el, 80, 80)}); }
+    var p = __pxCenter(el);
+    try { arr.push({t: t, c: __px(el, p[0], p[1])}); }
     catch (e) { arr.push({t: t, c: 'ERR'}); }
   }
 };
@@ -664,6 +685,20 @@ func judgeExtra(px []byte, vw int, st extraState, ts, tsCanvas map[string][]extr
 		}
 		return s
 	}
+	// validColors 剔除越界（OOB）与异常（ERR）样本色。
+	// ★ 为什么必须剔除：源矩形与图像无交集时，canvas 规范是「什么都不画」，得到的是
+	//   透明黑——与「drawImage 取到恒定首帧」在像素上完全无法区分。不剔除就会把
+	//   采样点越界读成「canvas 取到固化帧」（TC-M-304 的初版结论即由此而来）。
+	validColors := func(cols []string) []string {
+		out := make([]string, 0, len(cols))
+		for _, c := range cols {
+			if c == "OOB" || c == "ERR" {
+				continue
+			}
+			out = append(out, c)
+		}
+		return out
+	}
 
 	// TC-M-303：最近邻缩放（渲染像素的色数）
 	// ★ 采样矩形**内缩 3px**：元素外沿 1px 与背景抗锯齿混合会产出中间色，不内缩则
@@ -702,7 +737,10 @@ func judgeExtra(px []byte, vw int, st extraState, ts, tsCanvas map[string][]extr
 		add("TC-M-303", "场景缺失", "SKIP", "页面里没有 e303a")
 	}
 
-	// TC-M-304：canvas drawImage 取当前帧（以 canvas 采样为准 + 渲染像素交叉验证）
+	// TC-M-304：canvas drawImage 取当前帧（观测器＝页面内 canvas 采样 + 渲染像素交叉验证）
+	// ★ 越界样本必须剔除后再判：源矩形与图像无交集时 canvas 按规范「不画」，得到透明黑，
+	//   与「取到恒定首帧」不可区分。初版固定采样点 (80,80) 对 120x80 的样本 GIF 越界
+	//   ⇒ 整条序列恒定透明黑，被误判成「canvas 取到固化帧」（2026-10-08 复核修正）。
 	if timeSeries {
 		colorsOf := func(s []extraTsSample) []string {
 			out := make([]string, 0, len(s))
@@ -711,17 +749,20 @@ func judgeExtra(px []byte, vw int, st extraState, ts, tsCanvas map[string][]extr
 			}
 			return out
 		}
-		cv := colorsOf(tsCanvas["e304"])
+		cvAll := colorsOf(tsCanvas["e304"])
+		cv := validColors(cvAll)
 		rd := colorsOf(ts["e304"])
 		cn, rn := extraDistinct(cv), extraDistinct(rd)
-		actual := fmt.Sprintf("canvas 采样 %d 次出现 %d 种帧色；渲染像素 %d 次出现 %d 种帧色",
-			len(cv), cn, len(rd), rn)
+		actual := fmt.Sprintf("canvas 采样 %d 次（有效 %d）出现 %d 种帧色；渲染像素 %d 次出现 %d 种帧色",
+			len(cvAll), len(cv), cn, len(rd), rn)
 		switch {
+		case len(cv) == 0:
+			add("TC-M-304", actual, "⚠️", "canvas 采样全部越界/异常 ⇒ 判据不完整（须查采样点与元素内容尺寸）")
 		case cn >= 2:
-			add("TC-M-304", actual, "✅", "canvas 的 drawImage 取到的是当前帧（>1 色）", head(cv, 12)...)
+			add("TC-M-304", actual, "✅", "canvas 的 drawImage 取到的是当前帧（帧色随播放推进变化）", head(cv, 12)...)
 		case rn >= 2:
 			add("TC-M-304", actual, "❌",
-				"动图在页面上确实在推进（渲染像素多色），但 **canvas drawImage 取到的是固化帧** ⇒ 该项能力缺口如实记录",
+				"动图在页面上确实在推进（渲染像素多色），但 canvas drawImage 取到恒定帧 ⇒ 能力缺口",
 				head(cv, 12)...)
 		default:
 			add("TC-M-304", actual, "❌", "两条路径都恒色 ⇒ 未采到动图推进（须查样本是否在推进）", head(cv, 12)...)
@@ -773,20 +814,29 @@ func judgeExtra(px []byte, vw int, st extraState, ts, tsCanvas map[string][]extr
 	}
 
 	// TC-M-306：visibility:hidden 期间的推进
+	// ★ 观测器必须是 canvas 采样，**不能**用渲染像素：元素在隐藏窗口内本来就不绘制，
+	//   渲染像素采到的是场景容器背景色（恒定）——把「看不见」读成「动画停了」。
+	//   实测复核（2026-10-08，extra-raw-Browser.json）：隐藏窗口 405~697ms 渲染像素恒为
+	//   容器背景 magenta，而恢复后的帧相位与「时钟未暂停」应得的相位一致（347ms 绿、
+	//   755ms 蓝，周期 300ms）⇒ 引擎在隐藏期间一直在推进，初版「停推」结论是判据伪影。
 	if timeSeries {
-		hid := extraWindowColors(ts["e306"], extraHideAtMs, extraShowAtMs)
-		vis := extraWindowColors(ts["e306"], 0, extraHideAtMs)
+		hidRender := extraWindowColors(ts["e306"], extraHideAtMs, extraShowAtMs)
+		visRender := extraWindowColors(ts["e306"], 0, extraHideAtMs)
+		hid := validColors(extraWindowColors(tsCanvas["e306"], extraHideAtMs, extraShowAtMs))
 		nh := extraDistinct(hid)
-		v := "❌"
-		note := "隐藏窗口内帧色不变 ⇒ 动图被暂停。依据：动图的播放时钟与「是否渲染」解耦，" +
-			"只有 `display:none`／页面不可见才应暂停；`visibility:hidden` 的元素仍在渲染树内 ⇒ 应继续推进。" +
-			"引擎暂停属差异（Edge 侧时间序列不可采：无头一次性截图无时序，见 Edge 节 SKIP）"
-		if nh >= 2 {
-			v = "✅"
-			note = "隐藏期间仍在推进（符合规范：`visibility:hidden` 不暂停动图）"
+		v, note := "❌", "隐藏窗口内 canvas 采样帧色不变 ⇒ 动图被暂停。依据：动图的播放时钟与"+
+			"「是否渲染」解耦，只有 `display:none`／页面不可见才应暂停；`visibility:hidden` 的"+
+			"元素仍在渲染树内 ⇒ 应继续推进（Edge 侧时间序列不可采：无头一次性截图无时序，见 Edge 节 SKIP）"
+		switch {
+		case len(hid) == 0:
+			v, note = "⚠️", "隐藏窗口内 canvas 采样全部越界/异常 ⇒ 判据不完整（须查采样点与元素内容尺寸）"
+		case nh >= 2:
+			v, note = "✅", "隐藏期间仍在推进（canvas 观测：帧色仍变化）⇒ 符合规范（`visibility:hidden` 不暂停动图）"
 		}
-		add("TC-M-306", fmt.Sprintf("隐藏窗口(%d~%dms) %d 次采样出现 %d 种帧色；可见窗口 %d 种",
-			extraHideAtMs, extraShowAtMs, len(hid), nh, extraDistinct(vis)), v, note, head(hid, 8)...)
+		add("TC-M-306", fmt.Sprintf("隐藏窗口(%d~%dms) canvas 采样 %d 次出现 %d 种帧色；同窗口渲染像素 %d 种"+
+			"（元素不可见 ⇒ 采到的是容器背景色，不能作推进判据）；可见窗口渲染像素 %d 种",
+			extraHideAtMs, extraShowAtMs, len(hid), nh, extraDistinct(hidRender), extraDistinct(visRender)),
+			v, note, head(hid, 8)...)
 	} else {
 		tsSkip("TC-M-306")
 	}

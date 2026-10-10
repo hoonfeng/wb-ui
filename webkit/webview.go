@@ -2157,8 +2157,28 @@ func (wv *WebView) injectRenderTreeBridge() {
 	}
 	// canvas 2D drawImage(<img>) 的位图源：从渲染树取 <img> 解码图。
 	bindings.SetCanvasImageSourceHook(func(el *dom.Element) *graphics.SkiaImage {
+		if el == nil {
+			return nil
+		}
 		if os.Getenv("WB_CANVAS2D_DEBUG") != "" {
 			log.Printf("[canvas2d-hook] img el=%p tag=%q src=%q", el, el.LocalName(), el.GetAttribute("src"))
+		}
+		// ★ 动图必须先取**当前帧**：RenderBox 上的 DecodedImage 是「某次绘制取到的帧」
+		//   的快照（首帧加载后由 SetDecodedImage 固化、之后只在**绘制**时更新）。元素
+		//   不可见（visibility:hidden）或尚未绘制时它就是过期帧——与浏览器语义不符
+		//   （`drawImage(img)` 取的是 img 当前显示的帧，与是否可见、是否绘制过无关）。
+		//   实测（媒体验证 TC-M-306）：隐藏窗口内 canvas 采样帧色恒定，而同元素在可见
+		//   窗口的渲染像素按周期推进。
+		if src := el.GetAttribute("src"); src != "" {
+			ref := src
+			if abs := (&webViewImageLoader{wv: wv}).ResolveURL(src); abs != "" {
+				ref = abs
+			}
+			if anim, ok := rendering.AnimatedFrameForURL(ref); ok && anim != nil {
+				if sk := anim.SkiaImage(); sk != nil {
+					return sk
+				}
+			}
 		}
 		if fr := wv.mainFrame.Frame(); fr != nil {
 			fr.RebuildRenderTreeIfNeeded()

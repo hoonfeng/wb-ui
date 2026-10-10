@@ -386,12 +386,16 @@ webkit/mode.go:66                             allowsExternalURLs()
 
 > **现状（2026-10）**：TC-M-301/302 已闭环 → **L4**（GIF 与 WebP 动画均推进；**U4**：goskia 暴露 `SkCodec` 多帧 + 引擎按帧时长选帧，§8.1 **U4**、§9.4）。
 > 样本侧：`anim-3frames-rgb`（300ms）、`anim-uneven-delay`（**350ms**）、`anim-noloop`（300ms）、`anim-2frames.webp`（400ms）均已入矩阵，并**按各样本自己声明的帧时长**驱动连拍采样（§9.9「探测伪影（第 8 处）」行）。
-> ✅ **已单独采证（2026-10-08）**：上列的 TC-M-303/304/305/306/307 五项已由**补充判据探针**
-> （`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与 **Edge 同页面同脚本**对照——
-> 判据口径、「如实记录的缺口」与逐项表见 **§9.10**。摘要：TC-M-305 逐帧 delay 对齐 **达成**；
-> TC-M-303（`image-rendering:pixelated`）**引擎未实现**（Edge 同项生效）⇒ 唯一「低于 Edge」的项；
-> TC-M-304（canvas `drawImage` 取当前帧）**未达成**（取到固化帧）；TC-M-306 隐藏 300ms 内**停推**；
-> TC-M-307a（`loop=1` 停末帧）**未达成**、TC-M-307b（`loop=0` 继续循环）**达成**。
+> ✅ **已单独采证（2026-10-08；同日把首轮报出的差异全部闭环）**：上列的 TC-M-303/304/305/306/307
+> 五项已由**补充判据探针**（`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与
+> **Edge 同页面同脚本**对照——判据口径、逐项表与三处**判据修正**见 **§9.10**。
+> 摘要（复跑**全部达成**）：TC-M-305 逐帧 delay 对齐 **达成**；TC-M-303（`image-rendering:pixelated`）
+> 首轮为**引擎缺口**（未实现最近邻，22 色 ≈ auto 21 色）→ **已补实现**（复跑 8 色 vs 21 色；Edge 9 vs 22）；
+> TC-M-304（canvas `drawImage` 取当前帧）首轮结论系**采样点越界伪影**（样本 GIF 120×80、采样点固定 (80,80)
+> 越界 ⇒ 恒透明黑）→ **已修正判据**并**达成**；TC-M-306（`visibility:hidden` 后仍推进）首轮结论系
+> **观测器误用**（用渲染像素观测不可见元素，采到的是容器背景色）→ **已修正判据**并**达成**；
+> TC-M-307a（`loop=1` 停末帧）首轮为**引擎缺口**（循环计数终止未实现）→ **已补实现**，
+> TC-M-307b（`loop=0` 继续循环）**达成**。
 
 ### G4 不支持格式的失败语义
 | 用例 | 输入 | 预期 |
@@ -403,7 +407,9 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-405 | 图片路径不存在 | 不渲染 + 无控制台报错刷屏 |
 
 > **现状（2026-10）**：TC-M-401（AVIF/TIFF）**维持 L0 且已入基线**（`Browser` 下 6 格 L0、四配置共 24 格全 L0，**U9**「维持不支持」；§8.1 **U9**、§3.4「仍存在的缺口」表）；TC-M-402（0 字节）/ TC-M-403（损坏 PNG）**同样已入基线**（基线中 `corrupt.png` ×3、`zero-bytes.png` ×2、`quad.tiff` ×3 等 L0 均为**预期坏样本**，§9.9 降级排查段）；且 `DenyExternal × file/rel` 下 `corrupt.png` 的备注文案已更正为「资源策略 deny-external 拒绝该引用（预期，非缺陷）」（§10 **Q7-B**）。
-> ⚠️ **未单独采证**：TC-M-404（扩展名与内容不符——样本 `mislabeled.png` 已在矩阵内，但**未单列判据**）、TC-M-405（路径不存在时的控制台刷屏）——**未登记**结论。
+> ✅ **已单独采证（2026-10-08）**：TC-M-404（扩展名与内容不符 → **按内容解码**）与 TC-M-405（路径不存在 →
+> **不渲染且无控制台刷屏**）均已由补充判据探针逐项采证并**达成**（含 Edge 同页面逐项对照；策略配置下
+> 该引用被 resolver 拒绝属预期），逐项表见 §9.10。
 
 ### G5 视频
 | 用例 | 输入 | 步骤 | 预期 |
@@ -419,7 +425,11 @@ webkit/mode.go:66                             allowsExternalURLs()
 > **现状（2026-10）**：TC-M-501/502 = **A0/A1 达成**（元数据 L1、poster 与首帧 L2）；TC-M-503/504/507 = **A2 达成**（事件序列、**精确到帧的 seek**、连续帧采样均实测）——**U6 已闭环**（含异步预取 + 精确 seek + `requestVideoFrameCallback`，§8.1 **U6**、§9.5）。
 > ⚠️ 上表 TC-M-504 行末「`seeking/seeked` 事件与连续换帧（L4）**仍属 A2**」是 **A2 落地前**的表述，两者**均已落地**（§9.5）。
 > TC-M-505（`http(s)`）**维持** `MEDIA_ERR_SRC_NOT_SUPPORTED`；★ 媒体通道对 `http(s)`/`blob:` 属**能力边界**（恒拒，§9.9「语义」行）。
-> TC-M-506（`controls`）：**未单独采证**（无截图判据）。代码侧可确证两点——`controls` 有 **IDL 反射**（`engine/js/bindings/media_element.go` 的内容属性表 + `boolAttr`，默认 `false`），且带 `controls` 时 `<audio>`/`<video>` 的 **tabIndex 默认值 = 0**（`engine/js/bindings/elemattr.go`）；**全 `engine` 未见 UA 原生媒体的控件绘制实现**（`controls` 的命中均为**表单控件**相关）。故「引擎是否绘制原生控件」**尚无用例级结论**，不列为缺陷；§8.3 的 12 个 `<audio>` 格「两边均空白」与此一致，但该 12 格样本是否带 `controls` **未逐格核实**，故不作为判据。
+> ✅ **已单独采证（2026-10-08）**：TC-M-506 由补充判据探针采证——契约侧符合（无 `controls` 的 `tabIndex`=-1、
+> 带 `controls`=0），**引擎无 UA 原生媒体的控件绘制实现**（两格像素差异如实记录，**不列为缺陷**），
+> 逐项表见 §9.10。代码侧佐证：`controls` 有 **IDL 反射**（`engine/js/bindings/media_element.go` 的内容
+> 属性表 + `boolAttr`，默认 `false`），带 `controls` 时 `<audio>`/`<video>` 的 **tabIndex 默认值 = 0**
+> （`engine/js/bindings/elemattr.go`）；§8.3 的 12 个 `<audio>` 格「两边均空白」与此一致。
 
 ### G6 音频
 | 用例 | 输入 | 步骤 | 预期 |
@@ -443,7 +453,11 @@ webkit/mode.go:66                             allowsExternalURLs()
 | TC-M-705 | 路径含空格 / `..` 穿越 | 能加载 / 被 resolver 拒绝（安全） |
 
 > **现状（2026-10）**：TC-M-701 所验的 **D4（固有尺寸塌陷）已闭环**（WebP/BMP/ICO 固有尺寸可用，**U3**，§8.1 **U3**），盒尺寸逐格落在 `dev/media/out/geom-*.json`；TC-M-703 的选源折算**实现已在**（`engine/layout/replaced.go` 的 `srcsetIntrinsic`，上表已注）。
-> ⚠️ **未单独采证 / 未登记**：TC-M-702（`object-fit` 四值裁剪与 Edge 的逐格对照）、TC-M-704（中文文件名与目录）、TC-M-705（路径含空格 / `..` 穿越被 resolver 拒绝）——均**无独立判据**，本文档不记结论。★ 注：§8.3 的 Edge 对照 96 格以 `<img>`/`<video>`/`<audio>` **元素**为单位，**未**按 `object-fit` 取值展开，故**不构成** TC-M-702 的采证。
+> ✅ **已单独采证（2026-10-08）**：TC-M-702（`object-fit` 四值**可区分**：contain 有 letterbox／cover 等比
+> 填满／fill 非等比（h/v=0.88）／none 原始尺寸）、TC-M-704（中文文件名 + 中文目录）、TC-M-705a/b（文件名含
+> 空格、`..` 穿越；策略配置下被 resolver 拒绝属预期）均已由补充判据探针逐项采证并**达成**（Edge 同页面
+> 逐项对照），逐项表见 §9.10。★ 注：§8.3 的 Edge 对照 96 格以 `<img>`/`<video>`/`<audio>` **元素**为
+> 单位，**未**按 `object-fit` 取值展开，故**不构成** TC-M-702 的采证——本节的逐项表才是。
 
 ### G8 契约（事件与 IDL）
 | 用例 | 输入 | 预期 |
@@ -1220,8 +1234,11 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 
 **结论（一句话）**：G3/G4/G6/G7 里此前「只入样本、不记结论」的 5 个用例（TC-M-303~307）已由
 **补充判据探针**（`cmd/psai/mediaextra_probe.go`，随 `-media` 一起跑）逐项采证，并与 **Edge 同页面、
-同套脚本、同套判据内核**对照；对照口径下 **可比 8 项里引擎仅 1 项低于 Edge（TC-M-303）**，
-其余差异（TC-M-304/306/307a）是**引擎自身的真实能力缺口**，一并如实记录（不伪装通过）。
+同套脚本、同套判据内核**对照。**首轮采证（同日）曾报 4 项差异**，逐项追根因后**全部闭环**：
+**TC-M-303**（`image-rendering:pixelated`）与 **TC-M-307a**（GIF loop 计数终止）是**引擎真实能力缺口
+→ 已补实现**；**TC-M-304**（canvas `drawImage`）与 **TC-M-306**（`visibility:hidden`）的原「未达成」
+结论是**判据伪影**（采样点越界 / 观测器误用）→ 已修正判据，并顺带根治了 canvas 对不可见元素取
+**过期帧**的真实缺陷。复跑后 **可比 8 项里引擎无一项低于 Edge**。
 
 | 项 | 内容 |
 |---|---|
@@ -1229,14 +1246,16 @@ zero-bytes ×2）相符，**无一条非预期未就绪**。⇒ 上文的「4/5 
 | 落点 | `cmd/psai/mediaextra_probe.go`（新：页面构造 + 判定内核 + Edge 对照）、`cmd/psai/mediaprobe.go`（接线与报告）；路径类样本（中文名 / 含空格 / `..` 穿越）由探针运行时物化 |
 | 产物 | `dev/media/out/extra-verification.md`（表）、`extra-{Browser,Toolkit+DenyExternal,Edge}.json`（判据）、`extra-raw-*.json`（原始采样）、`extra-*.png`（截图）、`edge-matrix.png`（矩阵页对照） |
 | 判据口径 | ✅ 达成 / ❌ 未达成 / ⚠️ 部分或不符预期（如实记录）/ **SKIP（附原因）**。时间序列 5 项（TC-M-304~307）在 `Toolkit+DenyExternal` 与 **Edge 侧一律 SKIP**——前者本轮不采时序，后者**无头一次性截图无时序**（标 `SKIP(edge-time-series)`），不伪装通过 |
-| 达成项 | TC-M-305（**逐帧 delay 对齐**：色段变化率 **8.7 次/秒** vs 期望 ≈8.6、最长段 **227ms** vs 期望 200ms）、TC-M-307b（`loop=0` 尾部仍多色 ⇒ 回到首帧继续循环）、TC-M-404（`complete=true` 且渲染出图）、TC-M-405（不渲染 + 控制台 0 条）、TC-M-506（`controls` 使 `tabIndex` 默认 0，引擎无 UA 控件绘制路径 ⇒ 如实记录不列缺陷）、TC-M-702（contain/cover/fill/none 四值几何可区分：letterbox / 非等比 / 原始尺寸 / 填满）、TC-M-704（中文文件名+中文目录）、TC-M-705a/b（含空格、`..` 穿越） |
-| **缺口 ①**：TC-M-303 | `image-rendering: pixelated` **引擎未生效**：pixelated 采样 **22 色** ≈ auto **21 色**（放大仍双线性，源图 4 色）；**Edge 同项 pixelated 9 色 vs auto 22 色 ⇒ Edge 生效** ⇒ 按「不低于 Edge」判据，**引擎低于 Edge**（唯一项） |
-| **缺口 ②**：TC-M-304 | canvas `drawImage` **取到固化帧**：60 次采样 canvas 侧只有 **1 种帧色**，同页渲染像素有 **3 种帧色**（动图确在推进）⇒ `drawImage` 未取当前帧 |
-| **缺口 ③**：TC-M-306 | `visibility:hidden` 的 300ms 窗口内帧色**不变**（可见窗口 3 种）⇒ 隐藏期间**停推**。依据：动图播放时钟与「是否渲染」解耦，仅 `display:none`／页面不可见才应暂停；`visibility:hidden` 元素仍在渲染树内 ⇒ 应继续推进 |
-| **缺口 ④**：TC-M-307a | `anim-noloop.gif` 的 GIF **循环扩展块计数=1**（播 2 遍后应停）；帧长 3×100ms，采样窗口远晚于 600ms，尾部仍出现 **3 种帧色** ⇒ **loop 计数终止未实现**（被当作无限循环） |
-| 判据修正（本轮，TC-M-303） | 初版判据「pixelated 色数 = 源色 4」**过严**：元素外沿 1px 与背景抗锯齿混合会产出中间色，**Edge 实测也只得 7 色而被误判 ❌**。修正为①**采样矩形内缩 3px**（排除边界混合像素）+②判据改 **相对区分度**（`pixelated 显著少于 auto` ⇒ 生效；两者差 ≤2 ⇒ 未生效）。修正后 **Edge ✅ / 引擎 ❌**——结论从「两边都 ❌、无从归因」变为「**差异在引擎侧**」 |
-| 缺陷登记 | 四项缺口均为**能力缺口**（非崩溃、非安全），已记入本节与报告 `extra-verification.md`；未进 §8.1 门禁表（该表按「可用性门禁」口径，不因缺少某条 CSS 特性而置不可用） |
-| 复跑 | `cmd/psai -media`（含补充判据）；需要 Edge 侧逐格对照时加 `-media-edge` |
+| 达成项（复跑全绿） | **五项全部达成**：TC-M-303（最近邻生效：pixelated **8 色** vs auto **21 色**）、TC-M-304（canvas 取当前帧：60 次采样 **3 种**帧色）、TC-M-305（逐帧 delay 对齐：色段变化率 **7.6~8.7 次/秒** vs 期望 ≈8.6、最长段 **227~242ms** vs 期望 200ms）、TC-M-306（隐藏窗口 canvas 采样仍 **3 种**帧色 ⇒ 未暂停）、TC-M-307a（`loop=1` 尾部恒定 **1 种**色 = 停末帧）/ 307b（`loop=0` 尾部 **3 种**色 = 继续循环）；静态项 TC-M-404/405/506/702/704/705 亦全部达成 |
+| **引擎修复 ①**：TC-M-303 | `image-rendering: pixelated` **已实现最近邻放大**：`painter.PaintImage` 按元素的 `image-rendering` 选采样（`pixelated`/`crisp-edges`/`-webkit-optimize-contrast` ⇒ `graphics.SamplingNearest`，其余 ⇒ 双线性），经 `DecodedImage.DrawSampling` → `Canvas.DrawImageSampling` 落到 Skia `SamplingNearest`；`image-rendering` 是 **inherited** 属性，已在 `ComputedStyle.InheritFrom` 下发（父元素声明即对整棵子树生效，与 Edge 一致）。修复前 pixelated **22 色** ≈ auto **21 色**（放大仍双线性）；修复后 **8 色** vs **21 色**（Edge 对照 9 vs 22） |
+| **引擎修复 ②**：TC-M-307a | GIF **循环计数终止已实现**：`animatedEntry.frameAt` 此前只判 `loops == 0` 停末帧，把 `loops = 1`（Skia 语义「**首播之后再播 1 次**」⇒ 共播 2 遍）当成无限循环 ⇒ 现按 `elapsed >= (loops+1)*totalMS` 停末帧（`loops < 0` 仍按总时长取模）。`anim-noloop.gif`（Netscape 循环扩展块计数 = 1 ⇒ SkCodec 报 1）修复后尾部恒定、`loop=0` 的 TC-M-307b 尾部仍多色 |
+| **判据修正 ①**：TC-M-303 | 初版判据「pixelated 色数 = 源色 4」**过严**：元素外沿 1px 与背景抗锯齿混合会产出中间色，**Edge 实测也只得 7 色而被误判 ❌**。修正为①**采样矩形内缩 3px**（排除边界混合像素）+②判据改 **相对区分度**（`pixelated 显著少于 auto` ⇒ 生效；两者差 ≤2 ⇒ 未生效）。修正后 **Edge ✅ / 引擎 ❌**——结论从「两边都 ❌、无从归因」收敛为「**差异在引擎侧**」，据此才定位到绘制路径 |
+| **判据修正 ②**：TC-M-304 | 原结论「canvas `drawImage` 取到固化帧」系**采样点越界伪影**：页面内采样点固定 `(80,80)`，而样本 GIF 为 **120×80**（y 有效 0..79）⇒ 源矩形与图像**无交集**，canvas 规范是「什么都不画」⇒ 恒返回透明黑，与「取值恒定」在像素上不可区分。修正：采样点由元素内容尺寸**自适应取中心** + 越界显式返回 `OOB` 并在判据中**剔除**（有效 60/60）。复跑 **3 种帧色 ⇒ 达成**（`debugenv` 日志亦证 hook 返回 120×80 的图） |
+| **判据修正 ③**：TC-M-306 | 原结论「`visibility:hidden` 期间停推」系**观测器误用**：用**渲染像素**观测隐藏元素——元素在隐藏窗口内**本来就不绘制**，采到的是场景容器的背景色（magenta，恒定）。修正为用**页面内 canvas 采样**观测（隐藏窗口内 5 次采样 **3 种**帧色 ⇒ 仍推进）。原始数据亦可交叉验证：隐藏前 347ms=绿、恢复后 755ms=蓝，与「时钟未暂停」应得的相位（周期 300ms）一致 |
+| **引擎修复 ③（附带）**：canvas 取当前帧 | `SetCanvasImageSourceHook` 此前只取 `RenderBox` 上固化的 `DecodedImage` 快照（仅在**绘制**时更新）⇒ 不可见/未绘制过的元素被 `drawImage` 取到**过期帧**（判据修正 ②③ 暴露出的真实缺陷）。现优先按 `src`（宿主 loader 解析后的绝对 URL）取**动图当前帧**（新增 `rendering.AnimatedFrameForURL`），与浏览器语义一致——`drawImage(img)` 取 img 当前显示的帧，与元素是否可见、是否绘制过无关 |
+| 单测 | `engine/rendering/imageanimation_test.go`（`TestAnimatedFiniteLoopsStopsAtLastFrame`）、`engine/rendering/image_sampling_test.go`（`TestImageRenderingPixelatedUsesNearestSampling`、`TestDrawImageKeepsLinearDefault`）——分别锁住 loop 终止语义与「pixelated⇒最近邻 / auto⇒双线性」的绘制层契约 |
+| 缺陷登记 | 首轮报的四项**全部闭环**（两项引擎实现 + 两项判据伪影修正 + 一项附带根治）；未进 §8.1 门禁表（该表按「可用性门禁」口径，不因缺少某条 CSS 特性而置不可用） |
+| 复跑 | `cmd/psai -media`（含补充判据）；Edge 侧逐格对照加 `-media-edge`（本次：96 格、低于 Edge **0** 格、一致 84、高于 12） |
 
 ---
 

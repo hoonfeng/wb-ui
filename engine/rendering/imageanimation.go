@@ -156,7 +156,8 @@ func animatedFrameForData(url string, data []byte) (*DecodedImage, bool) {
 	return img, img != nil
 }
 
-// frameAt 返回 now 时刻应显示的帧。loops == 0（只播一次）时停在末帧；否则按总时长取模。
+// frameAt 返回 now 时刻应显示的帧。有限循环（loops >= 0）播完 (loops+1) 遍后停在末帧；
+// loops < 0（无限循环）按总时长取模。
 //
 // ★ 调用者必须持有 animatedImages.mu（本函数读相位锁定字段）。
 func (e *animatedEntry) frameAt(now time.Duration) *DecodedImage {
@@ -170,8 +171,18 @@ func (e *animatedEntry) frameAt(now time.Duration) *DecodedImage {
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	if e.loops == 0 && elapsed >= e.totalMS {
-		return e.frames[len(e.frames)-1].Image // 只播一次：停在末帧
+	// 有限循环：Skia 语义里 loops 是「**首播之后再播几次**」（见 AnimatedImageSource
+	// 注释；app/imageanimation.go 直接透传 SkCodec::getRepetitionCount），因此总播放
+	// 遍数 = loops + 1。loops == 0（只播一次）与 loops > 0（再播 n 次）都要在播完后
+	// 停在末帧。
+	//
+	// 此前只判 loops == 0 ⇒ 循环计数 n > 0 的容器被当成无限循环、永远停不下来
+	// （TC-M-307a：anim-noloop.gif 的 Netscape 循环扩展块计数 = 1 ⇒ SkCodec 报 1，
+	// 应播 2 遍后停在末帧）。
+	if e.loops >= 0 && e.totalMS > 0 {
+		if elapsed >= (e.loops+1)*e.totalMS {
+			return e.frames[len(e.frames)-1].Image // 播完 loops+1 遍：停在末帧
+		}
 	}
 	t := 0
 	if e.totalMS > 0 {
@@ -214,6 +225,22 @@ func IsAnimatedImageURL(url string) bool {
 	defer animatedImages.mu.Unlock()
 	_, hit := animatedImages.cache[url]
 	return hit
+}
+
+// AnimatedFrameForURL 按**已登记**的动图取「当前时刻应显示的那一帧」，供渲染树之外
+// 的调用点使用（宿主把 `<img>` 交给 canvas 2D `drawImage` 作位图源）。
+//
+// 为什么需要它：绘制路径自己每次绘制都会走 animatedFrameForSrc 取当前帧，但 canvas 2D
+// 的源解析发生在**渲染树之外**——它此前只拿 `RenderBox` 上固化的 `DecodedImage` 快照，
+// 而那个快照只在**绘制**时更新。于是 `visibility:hidden`（不绘制）或尚未绘制过的元素，
+// `drawImage` 会取到**过期帧**（实测：隐藏窗口内 canvas 采样帧色恒定，同元素在可见时
+// 的渲染像素却按周期推进）。浏览器语义是「`drawImage` 取元素**当前显示的帧**」，与元素
+// 是否可见、是否绘制过无关。
+//
+// url 必须是登记时用的那个引用（宿主 loader 解析后的绝对 URL）；未登记/非动图时返回
+// ok=false，调用方回退单帧路径（行为与此前一致）。
+func AnimatedFrameForURL(url string) (*DecodedImage, bool) {
+	return animatedFrameForURL(url)
 }
 
 // decodeImageOrAnimated 解码图片字节：若宿主注册了动图解码器且识别为动图，返回**当前

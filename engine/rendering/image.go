@@ -29,11 +29,11 @@ import (
 // because the underlying skia.Image is immutable. The loading flag
 // prevents concurrent decoding of the same image.
 type DecodedImage struct {
-	mu      sync.Mutex
-	skImg   *graphics.SkiaImage
-	loaded  bool
-	width   int
-	height  int
+	mu     sync.Mutex
+	skImg  *graphics.SkiaImage
+	loaded bool
+	width  int
+	height int
 }
 
 // SkiaImage is an alias for the goskia Image type, exposed here so
@@ -107,6 +107,19 @@ func (di *DecodedImage) Draw(canvas *graphics.Canvas, x, y, w, h float64) {
 		return
 	}
 	canvas.DrawImage(img, x, y, w, h)
+}
+
+// DrawSampling 与 Draw 相同，但显式指定采样模式（CSS `image-rendering`：
+// `pixelated`/`crisp-edges` ⇒ graphics.SamplingNearest，放大不插值；`auto` ⇒
+// graphics.SamplingLinear）。图片元素绘制路径按元素的 image-rendering 选。
+func (di *DecodedImage) DrawSampling(canvas *graphics.Canvas, x, y, w, h float64, sampling graphics.ImageSampling) {
+	di.mu.Lock()
+	img := di.skImg
+	di.mu.Unlock()
+	if img == nil || canvas == nil {
+		return
+	}
+	canvas.DrawImageSampling(img, x, y, w, h, sampling)
 }
 
 // SkiaImage returns the underlying skia image, or nil if not loaded. Used by

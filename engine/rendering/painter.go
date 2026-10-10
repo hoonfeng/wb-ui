@@ -2313,6 +2313,19 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 	// content box, mirroring CSS Images §3. object-position (default 50%
 	// 50%) controls alignment within the box.
 	iw, ih := float64(img.Width()), float64(img.Height())
+	// CSS `image-rendering`（inherited，默认 auto）：`pixelated` / `crisp-edges` 要求
+	// **最近邻**放大（放大不插值、保留源像素硬边）。此前绘制路径固定走双线性，该属性
+	// 只出现在 CSS 已知属性表里、绘制层从没读过 ⇒ `image-rendering:pixelated` 与 auto
+	// 的渲染结果完全相同（TC-M-303 的缺口）。值以原文存在 ComputedStyle.Properties，
+	// 这里按原文判（属性名在已知表里即可，无需新增强类型字段）。
+	sampling := graphics.SamplingLinear
+	switch strings.ToLower(strings.TrimSpace(st.GetProperty("image-rendering"))) {
+	case "pixelated", "crisp-edges", "-webkit-optimize-contrast":
+		sampling = graphics.SamplingNearest
+	}
+	drawImg := func(dx, dy, dw, dh float64) {
+		img.DrawSampling(info.canvas, dx, dy, dw, dh, sampling)
+	}
 	fit := strings.ToLower(st.GetProperty("object-fit"))
 	opx, opy := parseObjectPosition(st.GetProperty("object-position"))
 	switch fit {
@@ -2323,9 +2336,9 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 				ratio = h / ih
 			}
 			dw, dh := iw*ratio, ih*ratio
-			img.Draw(info.canvas, x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
+			drawImg(x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
 		} else {
-			img.Draw(info.canvas, x, y, w, h)
+			drawImg(x, y, w, h)
 		}
 	case "contain":
 		if iw > 0 && ih > 0 {
@@ -2334,21 +2347,21 @@ func PaintImage(box *RenderBox, info *PaintInfo) bool {
 				ratio = h / ih
 			}
 			dw, dh := iw*ratio, ih*ratio
-			img.Draw(info.canvas, x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
+			drawImg(x+(w-dw)*opx, y+(h-dh)*opy, dw, dh)
 		} else {
-			img.Draw(info.canvas, x, y, w, h)
+			drawImg(x, y, w, h)
 		}
 	case "none":
 		if iw > 0 && ih > 0 {
-			img.Draw(info.canvas, x+(w-iw)*opx, y+(h-ih)*opy, iw, ih)
+			drawImg(x+(w-iw)*opx, y+(h-ih)*opy, iw, ih)
 		} else {
-			img.Draw(info.canvas, x, y, w, h)
+			drawImg(x, y, w, h)
 		}
 	default: // fill (stretch to the content box)
 		if debugenv.Enabled("WB_IMG_DEBUG") {
 			log.Printf("[imgdbg] drawing %dx%d img at (%.0f,%.0f)", img.Width(), img.Height(), x, y)
 		}
-		img.Draw(info.canvas, x, y, w, h)
+		drawImg(x, y, w, h)
 	}
 	return true
 }

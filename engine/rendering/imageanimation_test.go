@@ -103,3 +103,47 @@ func TestAnimatedLoopsZeroStopsAtLastFrame(t *testing.T) {
 		t.Error("loops=0 时应停在末帧，不该循环")
 	}
 }
+
+// TestAnimatedFiniteLoopsStopsAtLastFrame：容器声明「首播之后再播 n 次」（Skia 的
+// loops = n > 0，即 SkCodec::getRepetitionCount 语义）时，播完 loops+1 遍后停在末帧。
+//
+// 用例来源：anim-noloop.gif 由 PIL 以 loop=1 生成（Netscape 循环扩展块计数 = 1），
+// SkCodec 报 1 ⇒ 应播 2 遍（600ms）后停在末帧。此前 frameAt 只判 loops == 0，把
+// loops == 1 当无限循环，尾部一直在推进（TC-M-307a）。
+//
+// 反向验证：把 frameAt 的有限循环条件改回 `e.loops == 0`，本测试在最后两步立刻失败。
+func TestAnimatedFiniteLoopsStopsAtLastFrame(t *testing.T) {
+	advance := useFakeAnimatedClock(t)
+	green := solidPNG(t, greenFrame, 4, 4)
+	blue := solidPNG(t, blueFrame, 4, 4)
+	SetAnimatedImageSource(func(url string, data []byte) ([]AnimatedFrame, int, bool) {
+		return []AnimatedFrame{
+			{Image: NewDecodedImage(green), DurationMS: 100},
+			{Image: NewDecodedImage(blue), DurationMS: 100},
+		}, 1, true
+	})
+	first := decodeImageOrAnimated("twice.gif", []byte("x"))
+	if first == nil {
+		t.Fatal("动图应返回当前帧")
+	}
+	// 第 1 遍：t=100ms 第 2 帧。
+	advance(100 * time.Millisecond)
+	second, _ := animatedFrameForURL("twice.gif")
+	if second == first {
+		t.Fatal("第 1 遍的第 2 帧应可见")
+	}
+	// 第 2 遍内（t=300ms，总时长 200ms ⇒ 第 2 遍覆盖 200~400ms）：应仍循环。
+	advance(200 * time.Millisecond)
+	if got, _ := animatedFrameForURL("twice.gif"); got != second {
+		t.Error("t=300ms（第 2 遍内）应仍在循环，帧色应与第 1 遍同位相同")
+	}
+	// 播完 2 遍（400ms）之后：停在末帧，不再回首帧。
+	advance(150 * time.Millisecond)
+	if got, _ := animatedFrameForURL("twice.gif"); got != second {
+		t.Error("播完 loops+1=2 遍后应停在末帧")
+	}
+	advance(10 * time.Second)
+	if got, _ := animatedFrameForURL("twice.gif"); got != second {
+		t.Error("loops=1 播完应停在末帧，不该无限循环（TC-M-307a）")
+	}
+}

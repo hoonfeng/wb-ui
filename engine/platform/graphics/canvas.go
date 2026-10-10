@@ -1790,10 +1790,37 @@ func (c *Canvas) Snapshot() *skia.Image {
 // Release frees the Skia resources backing this canvas. After Release the canvas
 // must not be used. If the canvas wraps an externally-owned surface (e.g. a GPU
 // window surface), the surface itself is not freed.
+// ImageSampling 是图片缩放的采样模式（CSS `image-rendering` 的引擎侧映射）。
+type ImageSampling int
+
+const (
+	// SamplingLinear 双线性插值（CSS `image-rendering: auto`，默认）——放大时
+	// 产生插值中间色，视觉平滑。
+	SamplingLinear ImageSampling = iota
+	// SamplingNearest 最近邻（CSS `image-rendering: pixelated` / `crisp-edges`）
+	// ——放大时不插值，保留源像素的硬边（像素画、放大镜、坐标网格场景）。
+	SamplingNearest
+)
+
+// skiaOptions 把引擎侧采样模式映射为 Skia 的采样选项（Skia 细节只留在本包）。
+func (s ImageSampling) skiaOptions() skia.SamplingOptions {
+	if s == SamplingNearest {
+		return skia.SamplingNearest
+	}
+	return skia.SamplingLinear
+}
+
 // DrawImage draws an skia.Image at the given position and size.
 // Mirrors GraphicsContext::drawImage(). The image is scaled to fill the
-// destination rect (w, h) preserving no aspect ratio.
+// destination rect (w, h) preserving no aspect ratio. 采样为双线性
+// （等价 CSS `image-rendering: auto`）；需要最近邻时用 DrawImageSampling。
 func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
+	c.DrawImageSampling(img, x, y, w, h, SamplingLinear)
+}
+
+// DrawImageSampling 与 DrawImage 相同，但显式指定采样模式——对应 CSS
+// `image-rendering`（`pixelated`/`crisp-edges` ⇒ 最近邻；`auto` ⇒ 双线性）。
+func (c *Canvas) DrawImageSampling(img *skia.Image, x, y, w, h float64, sampling ImageSampling) {
 	if img == nil || c.canvas == nil {
 		return
 	}
@@ -1803,7 +1830,7 @@ func (c *Canvas) DrawImage(img *skia.Image, x, y, w, h float64) {
 	paint.SetStyle(skia.PaintStyleFill)
 	paint.SetAntialias(true)
 	defer paint.Release()
-	c.canvas.DrawImageRect(img, src, dst, skia.SamplingLinear, paint)
+	c.canvas.DrawImageRect(img, src, dst, sampling.skiaOptions(), paint)
 }
 
 // ─── Canvas 2D support (HTMLCanvasElement 2D context) ───────────────
@@ -2700,17 +2727,17 @@ func firstConcreteFamily(list string) string {
 // 即：宽度缓存解决了「测量文本」，但「查询字体度量」每次布局都在重复做。
 
 type fontMetricsEntry struct {
-	ascent   float64
-	descent  float64
-	xHeight  float64
-	lineGap  float64
+	ascent  float64
+	descent float64
+	xHeight float64
+	lineGap float64
 	// maxCharWidth = Skia 的 (fXMax − fXMin)：字体全部字形的水平 extent（px）。
 	// WebKit/Blink 用它计算表单控件的 UA 固有内容宽 ——
 	// RenderTextControlSingleLine::preferredContentLogicalWidth 的 maxCharWidth
 	// 即 platform/graphics/skia/FontSkia.cpp 的 initCharWidths() 里的
 	// round(fXMax − fXMin)。实测见 dev/tools/fontmetric。
 	maxCharWidth float64
-	resolved bool // false = Skia 字体无法解析（值为 fallback）
+	resolved     bool // false = Skia 字体无法解析（值为 fallback）
 }
 
 var (
