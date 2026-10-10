@@ -335,6 +335,12 @@ func DefaultNonInheritedData() *NonInheritedData {
 		BorderBottomStyle: "none",
 		BorderLeftStyle:   "none",
 		BackgroundColor:   Color{R: 0, G: 0, B: 0, A: 0},
+		// background-clip / background-origin 的规范初始值（CSS-BACKGROUNDS-3
+		// §3.7 / §3.8）。此前两者都是空串：绘制端没有 origin 可依据，只能按
+		// border-box 定位背景图/渐变 → 带 1px 边框的元素，其顶部 1px 硬边
+		// 渐变被边框盖住（实测 Edge 按 padding-box 可见，wb-ui 整条不见）。
+		BackgroundClip:   "border-box",
+		BackgroundOrigin: "padding-box",
 		FlexGrow:          0,
 		FlexShrink:        1,
 		Order:             0,

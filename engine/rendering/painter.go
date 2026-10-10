@@ -314,20 +314,61 @@ func imageSamplingFor(st *style.ComputedStyle) graphics.ImageSampling {
 // rect 因此由调用方给出：元素自身盒，或传播时的整个 viewport 矩形；opacity
 // 同理（元素路径传 paintOpacity(box, info)，传播路径传 1——传播到画布的背景
 // 不再是元素自身绘制效果的一部分）。
+// backgroundOriginRect 返回背景的**定位区域**（background-origin，初始值
+// padding-box；CSS-BACKGROUNDS-3 §3.7）：background-position 与
+// background-size:auto 都以此为参照。
+//
+// rect 是调用方给出的 border-box 矩形（元素自身路径）。html/body 的背景传播
+// 路径（renderpipeline.go 的 paintViewportBackground）传的是视口矩形，那两条
+// 盒子没有 border/padding，三种 origin 取值等价 → 传播路径不受影响。
+//
+// 为什么需要它：绘制端此前一律用 border-box 定位背景图/渐变，而浏览器默认
+// 按 padding-box 定位 —— 带 1px 边框的元素，其顶部 1px 硬边
+// （linear-gradient(#x 1px, transparent 1px)）被边框盖住（实测 Edge 可见
+// 200px / wb-ui 0）。
+func backgroundOriginRect(box *RenderBox, st *style.ComputedStyle, rect Rect) Rect {
+	origin := "padding-box"
+	if st != nil && st.BackgroundOrigin != "" {
+		origin = st.BackgroundOrigin
+	}
+	switch origin {
+	case "border-box":
+		return rect
+	case "content-box":
+		return insetRectByEdges(insetRectByEdges(rect, box.Border()), box.Padding())
+	default: // padding-box（初始值）
+		return insetRectByEdges(rect, box.Border())
+	}
+}
+
+// insetRectByEdges 把矩形按四边内缩（负值则外扩；border/padding 均为非负）。
+func insetRectByEdges(r Rect, e layout.Edges) Rect {
+	return Rect{
+		X:      r.X + e.Left,
+		Y:      r.Y + e.Top,
+		Width:  r.Width - e.Left - e.Right,
+		Height: r.Height - e.Top - e.Bottom,
+	}
+}
+
 func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInfo, rect Rect, opacity float64) bool {
+	// 背景**定位区域**（background-origin，初始值 padding-box）：背景图片与
+	// 渐变的 position/size 参照它；平铺覆盖区与裁剪仍用调用方给的 border-box
+	// rect（background-clip 初始值 border-box）。无边框元素两者相同 → 零回归。
+	origin := backgroundOriginRect(box, st, rect)
 	// background-image: url(...) — decode and draw with size/position.
 	if url, ok := parseBackgroundURL(st.BackgroundImage); ok {
 		if img := loadBackgroundImage(url, ""); img != nil && img.Loaded() {
 			// Raster image: dest math uses the intrinsic size for
 			// cover/contain aspect ratio.
-			dx, dy, dw, dh := computeBackgroundDest(rect.X, rect.Y, rect.Width, rect.Height,
+			dx, dy, dw, dh := computeBackgroundDest(origin.X, origin.Y, origin.Width, origin.Height,
 				st.BackgroundSize, st.BackgroundPosition, img.Width(), img.Height())
 			paintBackgroundImageTiled(info.canvas, img, rect.X, rect.Y, rect.Width, rect.Height,
 				dx, dy, dw, dh, st.BackgroundRepeat, imageSamplingFor(st))
 		} else if svg := loadBackgroundSVG(url); svg != nil {
 			// Vector SVG: no intrinsic raster size — gradient-like dest
 			// (auto/cover/contain fill the box; explicit sizes confine it).
-			dx, dy, dw, dh := computeGradientDest(rect.X, rect.Y, rect.Width, rect.Height,
+			dx, dy, dw, dh := computeGradientDest(origin.X, origin.Y, origin.Width, origin.Height,
 				st.BackgroundSize, st.BackgroundPosition)
 			paintSVGScaled(info.canvas, svg, dx, dy, dw, dh)
 		}
@@ -343,7 +384,7 @@ func paintBackgroundFill(box *RenderBox, st *style.ComputedStyle, info *PaintInf
 		r := lengthValue(st.BorderRadius)
 		// Gradient destination honors background-size/position (a sub-rect
 		// confined by explicit sizes, offset by position; fill box default).
-		gdx, gdy, gdw, gdh := computeGradientDest(rect.X, rect.Y, rect.Width, rect.Height,
+		gdx, gdy, gdw, gdh := computeGradientDest(origin.X, origin.Y, origin.Width, origin.Height,
 			st.BackgroundSize, st.BackgroundPosition)
 		drawGradientLayer := func(i int) {
 			layer := bgLayers[i]
