@@ -71,7 +71,12 @@ func TestCheckboxUsesAccentColorWhenChecked(t *testing.T) {
 	if px := noAccent.PixelAt(8, 2); px.R == 20 && px.G == 115 && px.B == 230 {
 		t.Fatal("未声明 accent-color 时不应使用载体页的 accent 值")
 	}
-	if px := noAccent.PixelAt(8, 2); px.R != 26 || px.G != 115 || px.B != 232 {
-		t.Fatalf("未声明 accent-color 的 checked 底 = %+v，want UA 默认 (26,115,232)", px)
+	// ★ UA 默认 checked 蓝 = #0075FF（0,117,255），与同组 SliderFill 同色。
+	//   旧期望 (26,115,232)#1A73E8 是 **Windows 系统 accent**，不是浏览器 UA 值：
+	//   未声明 accent-color 的双端像素用例（dev/suites/consistency 的
+	//   TestPxCheckboxRadio，夹具不含 accent-color）逐像素实测 Edge 勾选底
+	//   = #0075ff，修复前 wb-ui 成片 #1a73e8（0.276% → 0.135%）。
+	if px := noAccent.PixelAt(8, 2); px.R != 0 || px.G != 117 || px.B != 255 {
+		t.Fatalf("未声明 accent-color 的 checked 底 = %+v，want UA 默认 (0,117,255) #0075FF", px)
 	}
 }

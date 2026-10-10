@@ -67,12 +67,15 @@ var FormControlColors = struct {
 	CheckboxBorder:    graphics.Color{R: 118, G: 118, B: 118, A: 255},
 	CheckboxCheck:     graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	CheckboxBg:        graphics.Color{R: 255, G: 255, B: 255, A: 255},
-	// Windows accent blue for the checked state (matches Edge).
-	CheckboxBgHot:     graphics.Color{R: 26, G: 115, B: 232, A: 255},
+	// Edge/Chromium UA 默认 checked 蓝实测 #0075FF（与同组 SliderFill 同色；
+	// 2026-10 双端像素用例 pixels_test.go：未声明 accent-color 时 Edge 勾选底
+	// 逐像素实测 #0075ff，旧值 #1A73E8 是 Windows 系统 accent，非浏览器 UA 值）。
+	CheckboxBgHot:     graphics.Color{R: 0, G: 117, B: 255, A: 255},
 	RadioBorder:       graphics.Color{R: 120, G: 120, B: 120, A: 255},
 	RadioDot:          graphics.Color{R: 255, G: 255, B: 255, A: 255},
 	RadioBg:           graphics.Color{R: 255, G: 255, B: 255, A: 255},
-	RadioBgHot:        graphics.Color{R: 26, G: 115, B: 232, A: 255},
+	// 同上：Edge/Chromium UA 默认 checked 圆点控件底色实测 #0075FF。
+	RadioBgHot:        graphics.Color{R: 0, G: 117, B: 255, A: 255},
 	// Edge (Chromium) 深色主题实测 range 颜色：
 	//   track 未填充 #EFEFEF（239,239,239）、已填充段 #0075FF（0,117,255）、
 	//   thumb 主体 #0075FF + 右侧白色高光（3D 立体感）。
@@ -929,8 +932,8 @@ func cssControlLineHeight(st *style.ComputedStyle, fontSize float64) float64 {
 //
 // 为什么需要（D11）：载体页 <input type=range> 与 <input type=checkbox> 都声明了
 // `accent-color: var(--accent)`（--accent:#1473E6 = (20,115,230)），而 wb-ui 此前
-// 恒用 UA 常量（SliderFill #0075FF = (0,117,255)，B 通道差 25 > 本仓对照口径
-// tol=12；checkbox 底 #1A73E8 = (26,115,232) 差 6）。Edge 实测：声明了 accent-color
+// 恒用 UA 常量（#0075FF = (0,117,255)，B 通道差 25 > 本仓对照口径 tol=12；
+// checkbox/radio 的 checked 底色同为 #0075FF）。Edge 实测：声明了 accent-color
 // 的元素其 range 已填充段/滑块与 checked 底色都取该值。
 //
 // 属性值里的 var() 已由样式解析器展开并写入 ComputedStyle.Properties
@@ -1008,9 +1011,23 @@ func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64,
 	c.StrokeRoundRect(cx, cy, size, size, cbRadius, 1, applyOpacity(FormControlColors.CheckboxBorder, op))
 }
 
-// paintRadio draws a classic radio button: a circle with a filled dot when checked.
-// Mirrors RenderTheme::paintRadio. Uses classic widget colors (light bg) matching
-// browser native rendering. The dot color uses the element's text color.
+// paintRadio draws a radio button: white disc + 1px ring, plus an accent inner
+// dot when checked. Mirrors RenderTheme::paintRadio / Chromium's form-controls
+// refresh look.
+//
+// ★ 几何口径（2026-10 双端位图逐像素实测，px_checkbox 用例：
+// dev/output/tmp/px_checkbox.edge.png 与 .wbui.png）：
+//   - **描边必须内缩半宽**：StrokeCircle 以圆的**中心线**描边，不内缩会让
+//     13×13 的元素盒画出 15×15 的外轮廓 —— Edge 的非白区域是
+//     x[43,55]/y[14,26]（13×13），wb-ui 曾是 x[42,56]/y[13,27]（15×15，
+//     四周各溢出 1px），是 px_checkbox 残余（216 px）的主因（占 166 px）。
+//   - **checked 的结构是「环 + 白间隙 + 点」，不是「实心底 + 白点」**：
+//     圆心列竖直剖面实测（13×13 盒、accent #0075FF）——
+//        Edge ：y14 蓝环(75% 覆盖) / y15 白 / y16 蓝点边(47%) / y17..22 纯蓝
+//        wb-ui：y15..16 蓝            / y17 浅蓝 / y18..22 白点 ← 恰好**反相**
+//     ⇒ 外环 = accent 1px（描边中心线 radius−0.5，行内覆盖 75% ~ 86% 属 AA 带）、
+//       间隙 1px（白底露出）、内点 = accent 半径 radius−2.5（按 y16 的 47% 反推：
+//       半径 4.5 时该行覆盖到 94%，与 Edge 的 47% 相差一倍）。
 func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, checked bool, op float64) {
 	c := info.canvas
 	size := w
@@ -1020,24 +1037,21 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 	cx := x + w/2
 	cy := y + h/2
 	radius := size / 2
-	// Classic widget background: always light, like browser native rendering.
-	// Checked state uses the Windows accent blue (matches Edge).
-	bg := FormControlColors.RadioBg
-	if checked {
-		// 同 paintCheckbox：checked 底取元素 accent-color。
-		bg = accentColorFor(st, FormControlColors.RadioBgHot)
+	const ringW = 1.0
+	ringR := radius - ringW/2
+	if ringR < 0 {
+		ringR = 0
 	}
-	border := FormControlColors.RadioBorder
-	// Outer circle (background + border).
-	c.FillCircle(cx, cy, radius, applyOpacity(bg, op))
-	c.StrokeCircle(cx, cy, radius, 1, applyOpacity(border, op))
+	// 白色圆底：unchecked 时是圆内底色，checked 时是环与内点之间的间隙。
+	c.FillCircle(cx, cy, radius, applyOpacity(FormControlColors.RadioBg, op))
 	if checked {
-		// ★ 圆点色恒为白色，理由同 paintCheckbox（Edge 实测 checked radio
-		// 同样「accent 色圆环 + 白点」）。
-		dot := FormControlColors.RadioDot
-		// Inner dot: ~45% of the outer radius.
-		c.FillCircle(cx, cy, radius*0.45, applyOpacity(dot, op))
+		// checked：accent 环 + accent 内点（点色与环色同源，均取 accent-color）。
+		accent := accentColorFor(st, FormControlColors.RadioBgHot)
+		c.StrokeCircle(cx, cy, ringR, ringW, applyOpacity(accent, op))
+		c.FillCircle(cx, cy, radius-2.5, applyOpacity(accent, op))
+		return
 	}
+	c.StrokeCircle(cx, cy, ringR, ringW, applyOpacity(FormControlColors.RadioBorder, op))
 }
 
 // paintRangeSlider draws a horizontal slider: a track plus a thumb positioned at the
