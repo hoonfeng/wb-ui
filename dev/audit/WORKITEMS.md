@@ -3504,3 +3504,135 @@ MediaStudio（`cmd/mediastudio/web/index.html`）的 `#btn-record`：
 宽度一致 ✓、行盒高 37（+1px）。**显式族名两侧完全一致** ⇒ 1px 只出在 `system-ui` 这一个
 关键字上，属「字体映射 × 行盒度量」课题：改映射会波及全局文档度量，须先按 §0.2 口径重取
 Edge 基线（含 CJK 混排、多字号）再决策，本轮不动。
+
+> **→ 已于第 2 次监督轮收口（已修）**：重取指纹矩阵后确认 Edge 的 `system-ui` 落在
+> **Microsoft YaHei UI**（非 Microsoft YaHei，两者宽度相同、垂直度量差 1px）。修复与
+> 全部验证见下节 **§25-3**。
+
+---
+
+# §25｜第 2 次监督轮：口径唯一化 + 悬挂改动处置 + system-ui 收口（三项全关闭）
+
+## 25-1｜「修复前高度」口径唯一化 —— 权威值 204×34（旧文 38 作废）
+
+**问题**：同一元素 `#btn-record` 的「修复前高度」在仓库内有两个数字（`resolver.go` 与测试注释
+写 38，§24-0 表与提交信息写 34），方向还相反（34→37 向 Edge 靠拢，38→37 反而偏离），
+动摇了「本修复让渲染更接近浏览器」的论证。
+
+**实测（唯一权威口径）** —— 同一棵树、同一命令，仅切换 `engine/style/resolver.go` 到修复前版本：
+
+```bash
+export CGO_ENABLED=1 GOWORK=off PATH="/f/syproject/goskia/bin:$PATH"
+git restore --source=ae31b7c^ --worktree engine/style/resolver.go   # 切到 D6 修复前
+go run ./dev/tools/laydump -html cmd/mediastudio/web/index.html -sel '#btn-record' -w 1280 -h 860
+git restore --source=HEAD   --worktree engine/style/resolver.go     # 切回（status 归零）
+```
+
+| 状态 | 实测（`button#btn-record`） | 说明 |
+| --- | --- | --- |
+| 修复前（resolver.go = `ae31b7c^`） | `x=16 y=237 w=204 h=34` | **权威值** |
+| 修复后（HEAD） | `x=16 y=238 w=204 h=37` | —— |
+| Edge headless 参照 | 204×36 | —— |
+
+**38 的来源与作废**：38 出自 `docs/render-consistency-fixes.md` 的 D6 条
+（「UA 控件缺 `line-height: normal`」缺陷期的高度）。D6 已在第 5 次监督轮修复（§H2），
+其后「font-family inherit 未修」状态实测就是 **34**。两处注释沿用旧文，已修正：
+- `engine/style/resolver.go`（`case "font-family"` 注释）：38 → 实测 34 / 37，并注明 38 作废；
+- `engine/style/font_family_inherit_test.go`（用例头注释）：同上；
+- `docs/render-consistency-fixes.md`：在 D3–D9 表后加「口径校准与状态更新」注，
+  声明 D6 的 38 是历史值，且 D4 / D5 已由 `bbc0dee` / `72ea2b9` 修复。
+
+**验收**：三处文本 + §24-0 表现在只有一个口径：修复前 **34** / 修复后 **37** / Edge **36**，
+可由上述命令逐字复现。
+
+## 25-2｜4 项悬挂改动逐项处置 —— `git status --porcelain` 归零
+
+处置前有 4 个已修改文件 + 1 个未跟踪文件。**判据**：完整根因注释 + 实测证据 + 通过 §0.3 门槛，
+三者齐备才判「已完成」并提交。
+
+| # | 文件 | 判定 | 依据 |
+| --- | --- | --- | --- |
+| 1 | `engine/layout/flexformattingcontext.go` | **已完成 → 提交 `72ea2b9`** | flex column 的 `basis:auto` 项改用预布局实测高度（只增不减）。实测 `.field` 189→204（Edge 204）；新单测通过 |
+| 2 | `engine/layout/flexheight_test.go` | **已完成 → 同 `72ea2b9`** | 第 1 项的回归单测（边距折叠：实测 120 vs 估算 108）；`engine/layout` 包 ok |
+| 3 | `engine/rendering/painter.go` | **已完成 → 提交 `bbc0dee`** | 新增 `backgroundOriginRect` / `insetRectByEdges`，背景图与渐变按 `background-origin` 定位区域绘制 |
+| 4 | `engine/style/computedstyle_data.go` | **已完成 → 同 `bbc0dee`** | 补 `background-clip/origin` 规范初始值；唯一消费者是 painter 的 `!= ""` 分支，取值与 default 分支同值 → 零行为风险（`grep BackgroundOrigin/BackgroundClip` 全仓 8 处，无其它语义） |
+| 5 | `go.work.tmpwork.sum`（未跟踪） | **非仓库内容 → `.gitignore` 规则（`50fc23d`）** | `go work` 工具链临时校验文件（492B 校验和），与已忽略的 `go.work` / `go.work.sum` 同类 |
+
+**★ 证据口径（重要）**：以上验证全部在**含这些改动的树**上执行（提交发生在验证之后），
+故 `HEAD` 提交本身不等于被测状态；被测状态 =「工作树 = 上述 4 文件已应用」。证据：
+- `go build ./...` ✓；`go test ./engine/... -count=1` 无 FAIL（含新用例）；
+- **§0.3 八页像素门槛全 PASS**（数值表见 §25-3，与 system-ui 修复后逐项相同）；
+- `dev/suites/consistency` **13/13 passed**；`cssprobe` **62/64**（失败夹具
+  `img-density-and-alt` / `ratio-only-inline-images` 为既有失败，与本改动无关）；
+- 背景课题夹具 `dev/output/tmp/gradbg.html` 同视口 260x900：网格色像素 **0 → 6300**（Edge 5915），
+  顶部 1px 线所在第 9 行 Edge 200px / wb-ui 223px 均可见。
+
+**★ 复跑口径（新增记录）**：§0.3 的 react 页必须用 `-frames 5 -step 50` 渲染
+（React 挂载异步，单帧会抓到未挂载画面 → 差异率虚高到 42.86%）。八页视口取
+`dev/audit/baselines/README.md` 表（400x100 / 460x320 / 400x230 / 740x400 / 460x220 / 700x420 / 860x320）。
+
+## 25-3｜system-ui 收口（**已修**：与 Edge 一致，零劣化）
+
+### 结论
+Edge 的 `system-ui` 在本机（中文 Windows + 本机 Edge）解析到 **Microsoft YaHei UI**
+（`msyh.ttc` 的 UI face），**不是** Microsoft YaHei。wb-ui 此前映射到 Microsoft YaHei；
+两者**字形宽度完全相同**（同一 ttf，24px M×10 都是 234.49 —— 旧依据因此无法区分），
+**差异只在垂直度量**（行盒高少 1px @12px）。按此改映射后，行盒与 Edge 逐项一致。
+
+### 证据 A｜多字号 × CJK 混排指纹矩阵（决定性）
+夹具 `_temp/systemui_matrix.html`：12 个族 × 6 字号（12/14/16/20/24/32px) × 4 文本
+（`Hamburgefonstiv` / `REC` / `录制中` / `REC 录制`）= 288 个 inline-block，逐元素取几何。
+- Edge 侧：`msedge --headless --dump-dom`（页面脚本写入 `#out`）；
+- wb-ui 侧：`laydump -sel .t` —— **注意 laydump 不执行 JS，夹具必须静态生成**
+  （脚本动态建的元素在 laydump 下不存在，会报 `no element matched`）。
+
+12px `Hamburgefonstiv` 一行即可分辨（px，宽×高）：
+
+| 族 | Edge | wb-ui（修复前） | wb-ui（修复后） |
+| --- | --- | --- | --- |
+| `system-ui` | 99.83×**15** | 100.00×**16** | 100.00×**15** ✅ |
+| `Microsoft YaHei` | 99.83×16 | 100.00×16 | 100.00×16 |
+| `Microsoft YaHei UI` | 99.83×**15** | 100.00×**15** | 100.00×**15** |
+
+**⇒ Edge 的 system-ui 指纹 = Microsoft YaHei UI**（宽度与高度都相同），与 Microsoft YaHei 差 1px。
+system-ui 的 24 个（字号×文本）组合：修复前高度**恒 +1**，修复后**恒 +0**
+（宽度差 ≤0.43px，属亚像素累积/取整）。
+
+### 证据 B｜真实页面
+- `laydump cmd/mediastudio/web/index.html -sel '#btn-record' -w 1280 -h 860`：
+  修复前 `w=204 h=37` → 修复后 **`w=204 h=36`**（Edge 204×36）；
+- `_temp/min_systemui.html`：`#b-inherit` **36**（Edge 36）、`#b-segoe` 37、`#b-yahei` 37。
+
+### 修复（2 文件 4 处，均为「映射落点」对齐）
+1. `fontmgr.go` `resolveFamily`：`case "system-ui"` → 返回内部族键 `"microsoft yahei ui"`
+   （原本 `"microsoft yahei"`）；
+2. `fontmgr.go` `osLookup`：新增 `case "microsoft yahei ui": osName = "Microsoft YaHei UI"`
+   （原本整个「雅黑组」都取 `"Microsoft YaHei"`）；
+3. `fontmgr.go` `resolveFamily`：把**显式** `"microsoft yahei ui"` 从雅黑组拆出单独返回
+   `"microsoft yahei ui"`（显式声明此前也被折到雅黑，同样差 1px）；
+4. `canvas.go` `firstConcreteFamily` 兜底表：`"system-ui"` → `"Microsoft YaHei UI"`
+   （无字体管理器路径，如 laydump；两条路径必须同落点）。
+
+### 验证（全部在含本修复的树上）
+- 指纹矩阵：system-ui 24/24 组合行盒高 = Edge（+0）；侧证修复后 system-ui ≡ YaHei UI ≠ YaHei；
+- **§0.3 八页门槛全 PASS 且逐项持平（零劣化）**：
+
+| 页面 | 门槛 | 修复前实测 | 修复后实测 |
+| --- | --- | --- | --- |
+| deffont | ≤14.62% | 14.62% | 14.62% |
+| vue | ≤2.83% | 2.83% | 2.83% |
+| react | ≤3.04% | 3.04% | 3.04% |
+| fontshort | ≤12.54% | 12.54% | 12.54% |
+| stack | ≤2.56% | 2.56% | 2.56% |
+| sticky | ≤5.55% | 2.81% | 2.81% |
+| zorder | ≤0.84% | 0.84% | 0.84% |
+| composite | ≤2.89% | 2.87% | 2.87% |
+
+- `go build ./...` ✓；`go test ./engine/... -count=1` 无 FAIL；`consistency` 13/13；
+  `cssprobe` 62/64（既有失败不变）。
+
+### 残留（如实记账，不再是「无限期挂账课题」）
+- 本机 Edge 的 system-ui 落在 YaHei UI 是**中文 Windows + 本机 Edge 版本**的实测行为；
+  非中文 Windows / 其它 Edge 版本上 system-ui 可能是 Segoe UI —— 换环境须按 §0.2 重取指纹矩阵。
+- `docs/render-consistency-fixes.md` 的 D3（渐变「颜色 → transparent」应在预乘空间插值）仍未修，
+  与本轮无关，留在该文档待修表中。
