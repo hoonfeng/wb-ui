@@ -238,6 +238,33 @@ func (c *FlexFormattingContext) Layout(box *ElementBox, state *LayoutState) {
 			// 终端内容底部间隙 6px vs 浏览器 19px）。
 			it.baseSize = clampSize(it.baseSize, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
 		}
+		// ★ Column flex + main size 完全由内容决定（basis:auto，grow<=0）的项：
+		//   用**预布局实测高度**替代 intrinsic 估算，且只增不减。
+		//
+		//   为什么必须实测：intrinsicContentHeight 是纯估算，会漏算两类内容尺寸——
+		//     (1) 行盒里的 inline replaced 控件（input[type=range]、复选框所在行）
+		//         实际行盒比控件声明高度更高（MediaStudio .field：估算 40，实际 45）；
+		//     (2) 相邻块的外边距折叠（.btn margin-bottom:8px 与 .sec margin-top:16px
+		//         折叠成 16，估算按 8 计）。
+		//   实测（cmd/mediastudio/web/index.html 1280x860，div.ctrl-body）：估算
+		//   content 471.5 / 实际 497.5，估低 26px → 盒子高 487.5 小于内容 497.5
+		//   → 误判溢出并预留 15px 滚动条 → 子元素内容宽被压到 189（浏览器 204）。
+		//   浏览器对 basis:auto 的 flex base size 取 max-content 实测值，与上方
+		//   「冻结项」分支同源（CSS-FLEXBOX §9.2.3）。
+		//   ★ 只增不减：估算偏高的既有场景保持原样，把回归面限制在「估算偏低」
+		//   这一确凿有误的区间内。
+		if !isRow && it.flexShrink > 0 && !it.basisExplicit && it.flexBasis <= 0 && it.flexGrow <= 0 {
+			ig := state.GeometryForBox(it.box)
+			if ig.ContentWidth() <= 0 {
+				ig.SetContentWidth(cw)
+			}
+			ctx := contextFor(it.box, state)
+			ctx.Layout(it.box, state)
+			if bh := state.GeometryForBox(it.box).BorderBoxHeight(); bh > it.baseSize {
+				it.baseSize = bh
+			}
+			it.baseSize = clampSize(it.baseSize, it.minHeight, it.maxHeight, it.minHeight <= 0, it.maxHeight <= 0)
+		}
 		it.hypothetical = it.baseSize
 		it.targetSize = it.baseSize
 		if wbFlexDebug && (flexName(box) == "div.titlebar" || flexName(box) == "div.chat-area") {
@@ -1254,6 +1281,18 @@ func intrinsicContentHeight(box *ElementBox) float64 {
 				// include it (CSS2.1 §8.3.1: padding prevents margin collapse).
 				if csc := c.Style(); csc != nil {
 					total += resolveOrZero(csc.MarginBottom, 0, fontSizeOf(c))
+				}
+				// 诊断（WB_FLEX_DEBUG=1）：打印块容器 intrinsic 的逐项贡献，
+				// 用于对照「估算高度 vs 实际 BFC 布局高度」的差额来自哪一项。
+				if wbFlexDebug && flexName(box) == "div.ctrl-body" {
+					mb := 0.0
+					hv := ""
+					if csc := c.Style(); csc != nil {
+						mb = resolveOrZero(csc.MarginBottom, 0, fontSizeOf(c))
+						hv = csc.Height.String()
+					}
+					fmt.Fprintf(os.Stderr, "[intr] %s child %s: h=%.1f cssH=%s mb=%.1f total=%.1f\n",
+						flexName(box), flexName(c), h, hv, mb, total)
 				}
 			}
 			if h > maxH { maxH = h }
