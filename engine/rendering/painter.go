@@ -300,6 +300,117 @@ func imageSamplingFor(st *style.ComputedStyle) graphics.ImageSampling {
 	return graphics.SamplingLinear
 }
 
+// nativeVideoPanelGradientHeight 是 UA 媒体控件面板底部「底锚定竖向渐变」的
+// 跨度（CSS px）。
+//
+// 实测（Edge 2026-10，探针页 probe_video3/probe_video5：<video controls> 无 src，
+// 盒高 148/160/200/300 四个样本）：渐变**底部贴内容盒底**、跨度恒为 105px，与盒高
+// **解耦**——盒高 148 与 300 的同一色值出现在距盒底完全相同的像素距离上
+//（如 #2f2f2f 恒在距底 90..92、#1f1f1f 恒在距底 63..64）。高出部分为纯
+// #333333 平台，与渐变起点同色。盒高小于跨度时（探针 h=100）顶部被裁，
+// 首行仍是 #323232（51 级附近的量化结果），故实现上取 min(跨度, 盒高)。
+//
+// 曲线：实测在 sRGB 空间近似线性（像素级偏差 ≤5 级，远小于本仓一致性口径
+// tol=12），故直接用 Skia 的两色线性渐变（sRGB 插值）即可保真。
+const nativeVideoPanelGradientHeight = 105
+
+// nativeAppearanceVideoPanel reports whether box is a <video> that paints the
+// native media-controls placeholder panel: an element with the `controls`
+// attribute and **no usable media source**.
+//
+// Measured on Edge (2026-10, probe pages probe_video3/probe_video5):
+//   - <video controls> with no src        → panel painted (platform #333333 +
+//     bottom-anchored 105px gradient to #000000).
+//   - <video controls src="missing.mp4">  → same panel (failed load is still
+//     "no usable source": the UA shows the placeholder, not controls UI).
+//   - <video controls> with a working src → media controls UI instead; out of
+//     scope here (交互控件子系统).
+//   - <video> WITHOUT controls            → nothing at all is painted
+//     (the page background shows through).
+//   - `appearance:none` makes NO difference: <video> already computes to
+//     `appearance:none` in Chromium (probe_video4 实测), so unlike
+//     <input type=range> there is no author override that disables the panel.
+//   - Author background/border are painted as usual **under** the panel — the
+//     panel is opaque, so on the carrier page (#preview{background:var(--canvas)})
+//     Edge shows the panel, not the author colour.
+//
+// ★ 那条位于距底 20..23px 的 208x4 灰条（#4f4f4f「轨道」）**不实现**：同一页面
+// 同一命令重采三次（studio.probeA/B 与基线 studio.final.edge.png），只有一次
+// 出现该灰条 —— 它是 Chromium 媒体控件的**竞态产物**（异步创建控件），绝大多数
+// 截图（含本仓全部验收基线）都没有它。实现它反而会与基线引入差异。
+func nativeAppearanceVideoPanel(box *RenderBox) bool {
+	if box == nil {
+		return false
+	}
+	el, ok := box.Node().(*dom.Element)
+	if !ok || el.LocalName() != "video" {
+		return false
+	}
+	if !el.HasAttribute("controls") {
+		return false
+	}
+	return !videoHasUsableMediaSource(el)
+}
+
+// videoHasUsableMediaSource 报告 <video> 是否声明了可用的媒体源：src 属性、子
+// <source src>，或媒体绑定层已为该元素声明显示状态（宿主注入帧的主线 A1）。
+// 任一成立即认为「有源」→ 不画 UA 占位面板（此时该由媒体控件/帧负责画面）。
+func videoHasUsableMediaSource(el *dom.Element) bool {
+	if el == nil {
+		return false
+	}
+	if strings.TrimSpace(el.GetAttribute("src")) != "" {
+		return true
+	}
+	for c := el.FirstChild(); c != nil; c = c.NextSibling() {
+		child, ok := c.(*dom.Element)
+		if !ok {
+			continue
+		}
+		if child.LocalName() == "source" && strings.TrimSpace(child.GetAttribute("src")) != "" {
+			return true
+		}
+	}
+	if st, ok := ElementVideoState(el); ok && strings.TrimSpace(st.URL) != "" {
+		return true
+	}
+	return false
+}
+
+// paintNativeVideoPanel 画 <video controls> 无源时的 UA 占位面板：整个面板填
+// #333333（渐变起点色）平台，底部 105px 画底锚定竖向渐变 #333333 → #000000。
+// 圆角与作者背景同口径（border-radius 裁切）。
+//
+// 渐变跨度**恒为 105px，不随盒高压缩**：盒高小于跨度时 Chromium 裁掉渐变顶部
+// 若干像素。实测（探针 probe_video3，盒高 60）：面板顶部像素 28，与盒高 160 的
+// 样本在「距底 59px」处的值完全一致 —— 被裁的是渐变顶部，而不是把渐变压扁
+//（盒高 100 的样本同理：顶部 50 与 160 盒「距底 99」处的 50 一致）。
+// 因此这里恒定画 105px 高并把绘制裁到面板矩形内（否则溢出部分会画到相邻元素上）。
+//
+// 面板不透明：调用方必须在**作者背景之后**调用（实测 Edge 的面板盖住作者
+// background，见 nativeAppearanceVideoPanel）。
+func paintNativeVideoPanel(info *PaintInfo, rect Rect, radius float64) {
+	if info == nil || info.canvas == nil || rect.Width <= 0 || rect.Height <= 0 {
+		return
+	}
+	platform := graphics.Color{R: 0x33, G: 0x33, B: 0x33, A: 255}
+	black := graphics.Color{A: 255}
+	if radius > 0 {
+		info.canvas.FillRoundRect(rect.X, rect.Y, rect.Width, rect.Height, radius, platform)
+	} else {
+		info.canvas.FillRect(rect.X, rect.Y, rect.Width, rect.Height, platform)
+	}
+	gh := float64(nativeVideoPanelGradientHeight)
+	info.canvas.Save()
+	if radius > 0 {
+		info.canvas.ClipRoundRect(rect.X, rect.Y, rect.Width, rect.Height, radius)
+	} else {
+		info.canvas.Clip(graphics.Rect{X: rect.X, Y: rect.Y, Width: rect.Width, Height: rect.Height})
+	}
+	info.canvas.FillLinearGradient(rect.X, rect.Y+rect.Height-gh, rect.Width, gh, platform, black)
+	info.canvas.Restore()
+}
+
 // paintBackgroundFill 绘制背景**填充**：background-image 层（真实图片 / SVG /
 // 渐变）与 background-color（分层顺序：色在最下、渐变自下而上、第一层在最上）。
 // 不画边框与阴影。
@@ -637,7 +748,15 @@ func PaintBackground(box *RenderBox, info *PaintInfo) {
 	//   路径与「html/body 背景传播到画布」路径（renderpipeline.go 的
 	//   paintViewportBackground）共用同一份实现——两处要画的背景必须逐像素
 	//   一致（渐变方向、background-size/position、平铺），各写一份必然漂移。
-	if skip := paintBackgroundFill(box, st, info, rect, paintOpacity(box, info)); skip {
+	skipInsetShadow := paintBackgroundFill(box, st, info, rect, paintOpacity(box, info))
+	// ★ <video controls> 无媒体源时的 UA 占位面板：画在**作者背景之上**
+	//   （Chromium 的面板不透明，盖住作者 background —— 实测见
+	//   nativeAppearanceVideoPanel）。因此必须在 paintBackgroundFill 之后、
+	//   且在「背景已画完即 return」之前调用。
+	if nativeAppearanceVideoPanel(box) {
+		paintNativeVideoPanel(info, insetRectByEdges(rect, box.Border()), lengthValue(st.BorderRadius))
+	}
+	if skipInsetShadow {
 		return
 	}
 	// Inset shadows paint ABOVE the background (below the border): inset 6px

@@ -917,6 +917,37 @@ func cssControlLineHeight(st *style.ComputedStyle, fontSize float64) float64 {
 	return 0
 }
 
+// accentColorFor 返回元素的 accent-color 计算值（CSS-UI-4 §3：checked 控件的
+// 填充色、range 已填充段与滑块、progress 填充用它着色）。未声明、`auto`、
+// 解析失败或解析结果全透明时返回 fallback（UA 默认色）。
+//
+// 为什么需要（D11）：载体页 <input type=range> 与 <input type=checkbox> 都声明了
+// `accent-color: var(--accent)`（--accent:#1473E6 = (20,115,230)），而 wb-ui 此前
+// 恒用 UA 常量（SliderFill #0075FF = (0,117,255)，B 通道差 25 > 本仓对照口径
+// tol=12；checkbox 底 #1A73E8 = (26,115,232) 差 6）。Edge 实测：声明了 accent-color
+// 的元素其 range 已填充段/滑块与 checked 底色都取该值。
+//
+// 属性值里的 var() 已由样式解析器展开并写入 ComputedStyle.Properties
+//（style.Resolver.resolveVarInProperties），这里只做颜色解析。
+func accentColorFor(st *style.ComputedStyle, fallback graphics.Color) graphics.Color {
+	if st == nil {
+		return fallback
+	}
+	raw := strings.TrimSpace(st.GetProperty("accent-color"))
+	if raw == "" || strings.EqualFold(raw, "auto") {
+		return fallback
+	}
+	c, ok := style.ParseColorValue(raw)
+	if !ok {
+		return fallback
+	}
+	out := toGraphicsColor(c)
+	if out.A == 0 {
+		return fallback
+	}
+	return out
+}
+
 // paintCheckbox draws a classic checkbox: a square border with a checkmark when checked.
 // Mirrors RenderTheme::paintCheckbox. Uses default classic colors for the widget
 // background (light) independent of the element's background-color, matching
@@ -937,8 +968,9 @@ func paintCheckbox(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64,
 	// independent of the page theme.
 	bg := FormControlColors.CheckboxBg
 	if checked {
-		// Checked state: slightly tinted background for visual feedback.
-		bg = FormControlColors.CheckboxBgHot
+		// Checked state: 元素 accent-color 的着色底（Edge 实测：声明了
+		// accent-color 就用它，未声明才回退 UA 默认蓝）。
+		bg = accentColorFor(st, FormControlColors.CheckboxBgHot)
 	}
 	border := FormControlColors.CheckboxBorder
 	c.FillRect(cx, cy, size, size, applyOpacity(bg, op))
@@ -980,7 +1012,8 @@ func paintRadio(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float64, ch
 	// Checked state uses the Windows accent blue (matches Edge).
 	bg := FormControlColors.RadioBg
 	if checked {
-		bg = FormControlColors.RadioBgHot
+		// 同 paintCheckbox：checked 底取元素 accent-color。
+		bg = accentColorFor(st, FormControlColors.RadioBgHot)
 	}
 	border := FormControlColors.RadioBorder
 	// Outer circle (background + border).
@@ -1035,8 +1068,10 @@ func paintRangeSlider(info *PaintInfo, st *style.ComputedStyle, x, y, w, h float
 	cy := y + h/2
 
 	// 悬停变色（与浏览器分开，见函数注释）。
-	fillCol := FormControlColors.SliderFill
-	thumbCol := FormControlColors.SliderThumb
+	// accent-color：已填充段与滑块主体都取元素声明的 accent-color（Edge 实测
+	// 载体页为 (20,115,230)）；未声明回退 UA 默认蓝。
+	fillCol := accentColorFor(st, FormControlColors.SliderFill)
+	thumbCol := accentColorFor(st, FormControlColors.SliderThumb)
 	if in.El != nil {
 		onThumb := false
 		if info.rv != nil {
