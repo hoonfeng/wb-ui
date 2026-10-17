@@ -20,6 +20,87 @@ import (
 // "front-end code can call via standard fetch() / XMLHttpRequest without
 // modification" —— 下面五条用例把该承诺钉死。
 
+// TestBridgeRouteResponseHeaders 验证 bridge 路由的响应头对页面可见
+// （2026-09-28 缺口）：宿主 handler 用 w.Header() 写的头此前被
+// dispatchHTTP 丢弃，XHR 的 getResponseHeader 恒 null、getAllResponseHeaders
+// 恒空串，fetch 的 res.headers 只有一个写死的 application/json。
+//
+// 语义要求（与真实 HTTP 路径一致）：
+//   - 头名大小写不敏感；单值原样返回；多值按 ", " 连接；
+//   - GetAllResponseHeaders 走唯一序列化（小写、字典序、CRLF 结尾）；
+//   - Set-Cookie 在 bridge 路径同样不可见（同源也剔除 forbidden 头）；
+//   - handler 未设 Content-Type 时才补默认 application/json（不回归）。
+func TestBridgeRouteResponseHeaders(t *testing.T) {
+	bridge.RegisterHTTP("GET", "/api/hdr-bridge-probe", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("X-Total-Count", "3")
+		w.Header().Add("X-Multi", "a")
+		w.Header().Add("X-Multi", "b")
+		w.Header().Set("Set-Cookie", "s=1; Path=/")
+		fmt.Fprint(w, "a,b\n1,2\n")
+	})
+	// handler 完全不设 Content-Type：引擎按既有行为补 application/json。
+	bridge.RegisterHTTP("GET", "/api/hdr-default-probe", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ok":true}`)
+	})
+
+	out := runXHRJS(t, `
+		var xhr = new XMLHttpRequest();
+		xhr.open("GET", "/api/hdr-bridge-probe");
+		xhr.onload = function() {
+			console.log("ct:" + xhr.getResponseHeader("content-type"));
+			console.log("ct-upper:" + xhr.getResponseHeader("Content-Type"));
+			console.log("total:" + xhr.getResponseHeader("X-Total-Count"));
+			console.log("multi:" + xhr.getResponseHeader("x-multi"));
+			var all = xhr.getAllResponseHeaders();
+			console.log("has-total:" + (all.indexOf("x-total-count: 3") >= 0));
+			console.log("has-cookie:" + (all.indexOf("set-cookie") >= 0));
+			console.log("all-csv:" + (all.indexOf("content-type: text/csv") >= 0));
+			console.log("ends-crlf:" + (all.length > 0 && all.slice(-2) === "\r\n"));
+			console.log("sorted:" + (all.indexOf("content-type") < all.indexOf("x-multi")));
+		};
+		xhr.send();
+	`)
+	for _, want := range []string{
+		"ct:text/csv",
+		"ct-upper:text/csv",
+		"total:3",
+		"multi:a, b",
+		"has-total:true",
+		"has-cookie:false",
+		"all-csv:true",
+		"ends-crlf:true",
+		"sorted:true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("XHR 输出缺少 %q\n实际输出：\n%s", want, out)
+		}
+	}
+
+	fout := runFetchJS(t, `
+		fetch("/api/hdr-bridge-probe").then(function(res) {
+			console.log("f-ct:" + res.headers.get("content-type"));
+			console.log("f-total:" + res.headers.get("x-total-count"));
+			console.log("f-multi:" + res.headers.get("X-Multi"));
+			console.log("f-cookie:" + res.headers.get("set-cookie"));
+		});
+		fetch("/api/hdr-default-probe").then(function(res) {
+			console.log("d-ct:" + res.headers.get("content-type"));
+		});
+	`)
+	for _, want := range []string{
+		"f-ct:text/csv",
+		"f-total:3",
+		"f-multi:a, b",
+		"f-cookie:null",
+		"d-ct:application/json",
+	} {
+		if !strings.Contains(fout, want) {
+			t.Errorf("fetch 输出缺少 %q\n实际输出：\n%s", want, fout)
+		}
+	}
+}
+
 // TestXHRBridgeRouteIntercept 验证 XHR 与 fetch 一样命中 bridge 路由（绕开真实
 // HTTP）。路径故意用相对形式：桌面壳里没有本地 HTTP 服务，走真实网络必然失败。
 func TestXHRBridgeRouteIntercept(t *testing.T) {

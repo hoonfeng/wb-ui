@@ -88,8 +88,14 @@ func registerRoute(method, pattern string, handler bindings.GoCallback) {
 
 // dispatchHTTP adapts a JS fetch() call (args[0]=url, args[1]=options) into a
 // *http.Request + synthetic ResponseWriter and invokes the handler.
-// Returns a JS object {"status": N, "body": "..."} so the caller can build a
-// proper fetch() Response with the right status code.
+// Returns a JS object {"status": N, "body": "...", "headers": {...}} so the
+// caller can build a proper fetch() Response with the right status code and
+// the headers the handler actually wrote.
+//
+// headers 的约定：头名保持 handler 写入时的原样；单值头 → 字符串，同名多值
+// （Add 多次）→ 字符串数组（保序、不合并），调用方按 http.Header 语义还原。
+// 没有任何头时 headers 是空对象——virtualWriter.Header() 从未被调用时
+// vw.hdr 为 nil，此处无需特判（遍历 nil map 得到空对象）。
 func dispatchHTTP(args []jsc.JSValue, handler http.HandlerFunc) (jsc.JSValue, error) {
 	urlStr := ""
 	if len(args) > 0 && args[0].IsString() {
@@ -153,6 +159,27 @@ func dispatchHTTP(args []jsc.JSValue, handler http.HandlerFunc) (jsc.JSValue, er
 	obj := jsc.NewObject(nil)
 	obj.Set("status", jsc.NumberValue(float64(vw.status)))
 	obj.Set("body", jsc.StringValue(vw.buf.String()))
+	// ★ 响应头回传（2026-09-28）：virtualWriter.header 早已捕获 handler 写的
+	//   头（Header() 里按需初始化 hdr），但此前 dispatchHTTP 只返回 status/body
+	//   把它们丢掉了 → 页面侧只能凭空造 Content-Type、getResponseHeader 恒 null。
+	//   这里只是把已捕获的 hdr 原样回传，不做任何过滤（过滤属引擎侧 CORS 语义，
+	//   由 engine/page/cors.go filterResponseHeaders 统一负责）。
+	headersObj := jsc.NewObject(obj) // 同一 runtime，避免跨 runtime 对象赋值
+	for name, values := range vw.hdr {
+		if strings.TrimSpace(name) == "" || len(values) == 0 {
+			continue
+		}
+		if len(values) == 1 {
+			headersObj.Set(name, jsc.StringValue(values[0]))
+			continue
+		}
+		items := make([]jsc.JSValue, len(values))
+		for i, v := range values {
+			items[i] = jsc.StringValue(v)
+		}
+		headersObj.Set(name, jsc.ObjectValue(jsc.NewArray(obj, items)))
+	}
+	obj.Set("headers", jsc.ObjectValue(headersObj))
 	return jsc.ObjectValue(obj), nil
 }
 

@@ -620,7 +620,7 @@ func TestCORSResponseHeaderExposure(t *testing.T) {
 	}
 }
 
-// TestSameOriginResponseHeadersNotFiltered 同时覆盖两件事：
+// TestSameOriginResponseHeadersStripCookies 同时覆盖三件事：
 //
 //  1. 回归保护：同源请求不走跨源可读性白名单，自定义头（X-Internal）照常可读；
 //  2. 收紧保护：Set-Cookie / Set-Cookie2 是 Fetch 的 forbidden response
@@ -628,7 +628,10 @@ func TestCORSResponseHeaderExposure(t *testing.T) {
 //     不出现；
 //  3. getAllResponseHeaders 的浏览器序列化：头名小写、按名字典序、每行
 //     `name: value`、整体以 `\r\n` 结尾。
-func TestSameOriginResponseHeadersNotFiltered(t *testing.T) {
+//
+// 名字不再叫 "NotFiltered"：同源确实**不走**跨源白名单，但 forbidden 头
+// （Set-Cookie 系列）在所有路径都被剔除，旧名字与现状相反。
+func TestSameOriginResponseHeadersStripCookies(t *testing.T) {
 	same := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("X-Internal", "secret")

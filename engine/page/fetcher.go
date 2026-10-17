@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -322,12 +323,12 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			route = matchRoute(url)
 		}
 		if route != nil {
-			status, bodyText := xhrBridgeCall(in, route, rawURL, method, bodyStr, headers)
+			status, bodyText, respHeaders := xhrBridgeCall(in, route, rawURL, method, bodyStr, headers)
 			obj.Set("readyState", jsc.NumberValue(2))
 			xhrFireReadyStateChange(in, obj)
 			obj.Set("readyState", jsc.NumberValue(3))
 			xhrFireReadyStateChange(in, obj)
-			xhrSetResponse(in, obj, status, bodyText)
+			xhrSetResponse(in, obj, status, bodyText, respHeaders)
 			obj.Set("readyState", jsc.NumberValue(4))
 			xhrFireReadyStateChange(in, obj)
 			xhrDispatch(in, obj, "load")
@@ -377,29 +378,10 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		//   同源/跨源都应剔除 Set-Cookie（forbidden response header），
 		//   跨源时只能看到 safelisted + ACEH 头。
 		//   序列化与 fetch 的 Headers 语义一致，且只此一处实现。
-		visibleHeaders := corsReq.filterResponseHeaders(resp.Header)
-		obj.Set("_responseHeaders", jsc.StringValue(serializeResponseHeaders(visibleHeaders)))
-		getAllRespHeadersFn := jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			if v, ok := obj.GetByKey("_responseHeaders"); ok {
-				return v
-			}
-			return jsc.StringValue("")
-		}, 0)
-		obj.Set("getAllResponseHeaders", jsc.FunctionValue(getAllRespHeadersFn))
 		// ★ XMLHttpRequest.getResponseHeader / responseURL：此前只有
 		//   getAllResponseHeaders，前端最常见的 `xhr.getResponseHeader('Content-Type')`
 		//   直接抛 "Object has no member 'getResponseHeader'"（探针实测）。
-		respHeaderState := headersStateFromHTTP(visibleHeaders)
-		obj.Set("getResponseHeader", jsc.FunctionValue(jsc.NewNativeFunction("getResponseHeader",
-			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
-				if len(args) < 1 {
-					return jsc.Null()
-				}
-				if v, ok := respHeaderState.get(jscToString(args[0])); ok {
-					return jsc.StringValue(v)
-				}
-				return jsc.Null()
-			}, 1)))
+		xhrAttachResponseHeaders(obj, corsReq.filterResponseHeaders(resp.Header))
 		obj.Set("responseURL", jsc.StringValue(url))
 		obj.Set("responseText", jsc.StringValue(string(respBody)))
 		obj.Set("response", jsc.StringValue(string(respBody)))
@@ -633,33 +615,114 @@ func serializeResponseHeaders(h http.Header) string {
 	return b.String()
 }
 
-// xhrSetResponse 填终态响应字段（status/statusText/responseText/response 与
-// getAllResponseHeaders），供 bridge 路径使用，保证与真实 HTTP 路径语义一致。
-func xhrSetResponse(in *jsc.Interpreter, obj *jsc.JSObject, status int, bodyText string) {
-	obj.Set("status", jsc.NumberValue(float64(status)))
-	obj.Set("statusText", jsc.StringValue(http.StatusText(status)))
-	obj.Set("responseText", jsc.StringValue(bodyText))
-	obj.Set("response", jsc.StringValue(bodyText))
-	obj.Set("_responseHeaders", jsc.StringValue(""))
-	obj.Set("getAllResponseHeaders", jsc.FunctionValue(jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
+// xhrAttachResponseHeaders 把**已过滤**的响应头挂到 XHR 对象上：
+// _responseHeaders（getAllResponseHeaders 的唯一序列化出口）与
+// getResponseHeader 的头状态。
+//
+// ★ 真实 HTTP 与 bridge 两条路径都只调这里，禁止各自再拼字符串或另写过滤：
+// 过滤在 cors.go filterResponseHeaders，序列化在 serializeResponseHeaders。
+func xhrAttachResponseHeaders(obj *jsc.JSObject, visible http.Header) {
+	obj.Set("_responseHeaders", jsc.StringValue(serializeResponseHeaders(visible)))
+	obj.Set("getAllResponseHeaders", jsc.FunctionValue(jsc.NewNativeFunction("getAllResponseHeaders", func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
 		if v, ok := obj.GetByKey("_responseHeaders"); ok {
 			return v
 		}
 		return jsc.StringValue("")
 	}, 0)))
-	// bridge 路径没有真实响应头：getResponseHeader 恒返回 null（浏览器语义：
-	// 不存在的头返回 null），但方法本身必须存在，否则调用即抛错。
+	// 浏览器语义：不存在的头返回 null；头名大小写不敏感。
+	respHeaderState := headersStateFromHTTP(visible)
 	obj.Set("getResponseHeader", jsc.FunctionValue(jsc.NewNativeFunction("getResponseHeader",
-		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+		func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+			if len(args) < 1 {
+				return jsc.Null()
+			}
+			if v, ok := respHeaderState.get(jscToString(args[0])); ok {
+				return jsc.StringValue(v)
+			}
 			return jsc.Null()
 		}, 1)))
+}
+
+// xhrSetResponse 填终态响应字段（status/statusText/responseText/response 与
+// 响应头），供 bridge 路径使用，保证与真实 HTTP 路径语义一致。
+func xhrSetResponse(in *jsc.Interpreter, obj *jsc.JSObject, status int, bodyText string, respHeaders http.Header) {
+	obj.Set("status", jsc.NumberValue(float64(status)))
+	obj.Set("statusText", jsc.StringValue(http.StatusText(status)))
+	obj.Set("responseText", jsc.StringValue(bodyText))
+	obj.Set("response", jsc.StringValue(bodyText))
+	// ★ bridge 响应头（2026-09-28）：此前这里把 _responseHeaders 置空、让
+	// getResponseHeader 恒返回 null——宿主 handler 写的头全被丢掉。现在走与
+	// 真实 HTTP 完全相同的两步：cors 过滤（bridge 属宿主同源端点 → 只剔除
+	// Set-Cookie 系列）+ 唯一序列化实现。
+	xhrAttachResponseHeaders(obj, bridgeFilteredResponseHeaders(respHeaders))
 	obj.Set("responseURL", jsc.StringValue(""))
 }
 
-// xhrBridgeCall 调用命中的 bridge 路由，返回 (status, body)。与 fetch 的
-// bridgeFetch 共用 Route.Handler 契约：args = [url, options]，返回
-// {"status": N, "body": "..."}（见 bridge.dispatchHTTP）。
-func xhrBridgeCall(in *jsc.Interpreter, route *bridge.Route, rawURL, method, bodyStr string, headers http.Header) (int, string) {
+// bridgeFilteredResponseHeaders 把 bridge 回传的响应头交给**唯一**的过滤实现。
+//
+// bridge 路由是宿主进程内的同源端点（没有真实文档源 / 跨源概念），因此这里
+// 构造的 CORS 上下文 docOrigin 为空 → needsCheck()==false → 走同源分支：
+// 只剔除 Set-Cookie / Set-Cookie2（forbidden response header），其余头（含
+// 自定义头、多值头）原样可见。禁止在本函数内另写过滤逻辑。
+func bridgeFilteredResponseHeaders(h http.Header) http.Header {
+	c := newCORSRequest("", "", http.MethodGet, nil, false, corsModeCORS)
+	return c.filterResponseHeaders(h)
+}
+
+// bridgeResponseHeaders 把 dispatchHTTP 回传的 headers 对象解析成 http.Header。
+//
+// 约定（见 bridge/bridge.go dispatchHTTP）：单值头 → 字符串，同名多值 → 字符串
+// 数组（保序）。类型不符的条目忽略；result/headers 缺失或不是对象时返回空头，
+// 与「handler 一个头都没写」等价。
+func bridgeResponseHeaders(result jsc.JSValue) http.Header {
+	out := http.Header{}
+	if !result.IsObject() {
+		return out
+	}
+	o := result.AsObject()
+	if o == nil {
+		return out
+	}
+	hv, ok := o.GetByKey("headers")
+	if !ok || !hv.IsObject() {
+		return out
+	}
+	hObj := hv.AsObject()
+	if hObj == nil {
+		return out
+	}
+	for _, name := range hObj.Keys() {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		v, ok2 := hObj.GetByKey(name)
+		if !ok2 || v.IsUndefined() || v.IsNull() {
+			continue
+		}
+		if !v.IsObject() {
+			out.Add(name, v.ToString())
+			continue
+		}
+		// 多值：数组按下标顺序还原（Add 多次的头不合并、不丢序）。
+		arr := v.AsObject()
+		if arr == nil {
+			continue
+		}
+		for i := 0; ; i++ {
+			item, ok3 := arr.GetByKey(strconv.Itoa(i))
+			if !ok3 {
+				break
+			}
+			out.Add(name, item.ToString())
+		}
+	}
+	return out
+}
+
+// xhrBridgeCall 调用命中的 bridge 路由，返回 (status, body, headers)。与 fetch
+// 的 bridgeFetch 共用 Route.Handler 契约：args = [url, options]，返回
+// {"status": N, "body": "...", "headers": {...}}（见 bridge.dispatchHTTP）。
+func xhrBridgeCall(in *jsc.Interpreter, route *bridge.Route, rawURL, method, bodyStr string, headers http.Header) (int, string, http.Header) {
 	opts := jsc.NewObject(in.ObjectPrototype())
 	opts.Set("method", jsc.StringValue(method))
 	if bodyStr != "" {
@@ -677,7 +740,7 @@ func xhrBridgeCall(in *jsc.Interpreter, route *bridge.Route, rawURL, method, bod
 
 	result, err := route.Handler([]jsc.JSValue{jsc.StringValue(rawURL), jsc.ObjectValue(opts)})
 	if err != nil {
-		return 500, fmt.Sprintf(`{"error":%q}`, err.Error())
+		return 500, fmt.Sprintf(`{"error":%q}`, err.Error()), nil
 	}
 	status := 200
 	bodyText := "null"
@@ -697,7 +760,7 @@ func xhrBridgeCall(in *jsc.Interpreter, route *bridge.Route, rawURL, method, bod
 	} else if result.IsString() {
 		bodyText = result.ToString()
 	}
-	return status, bodyText
+	return status, bodyText, bridgeResponseHeaders(result)
 }
 
 // xhrNumber2 读取 XHR 对象上的数值属性（属性缺失/非数字 → 0）。
@@ -756,14 +819,23 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 		bodyText = fmt.Sprintf("%v", result.Export())
 	}
 
-	statusText := "OK"
-	if status >= 400 {
-		statusText = "Error"
+	statusText := http.StatusText(status)
+	if statusText == "" {
+		statusText = "OK"
+		if status >= 400 {
+			statusText = "Error"
+		}
 	}
 	// ★ 与真实 HTTP 分支一致：返回 Response 实例（headers 是 Headers 对象，
 	//   页面可直接 headers.get/has/forEach/entries）。
-	hdrs := newHeadersState()
-	hdrs.set("Content-Type", "application/json")
+	// ★ bridge 响应头（2026-09-28）：此前无条件写死 Content-Type:
+	//   application/json，连 handler 明写的类型都被覆盖。现在把 handler 写的
+	//   头原样交给唯一的过滤实现（同源 → 只剔除 Set-Cookie），只有 handler
+	//   **完全没设** Content-Type 时才补原来的默认值（保持既有探针/前端行为）。
+	hdrs := headersStateFromHTTP(bridgeFilteredResponseHeaders(bridgeResponseHeaders(result)))
+	if !hdrs.has("content-type") {
+		hdrs.set("Content-Type", "application/json")
+	}
 	return resolvePromise(in, jsc.ObjectValue(newResponseInstance(in, &responseState{
 		body:       bodyText,
 		headers:    hdrs,
