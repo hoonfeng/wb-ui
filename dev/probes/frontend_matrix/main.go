@@ -427,6 +427,21 @@ func main() {
 	}))
 	defer corsDocOriginACAO.Close()
 
+	// ★ 跨源响应头可读性（Access-Control-Expose-Headers）探针服务器：
+	//   默认只暴露 CORS-safelisted 响应头；/exposed 额外声明 X-Internal 可读。
+	//   Set-Cookie 是 forbidden response header，任何情况下都不可读。
+	corsHdr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("X-Internal", "secret")
+		w.Header().Set("Set-Cookie", "sid=probe; Path=/")
+		if r.URL.Path == "/exposed" {
+			w.Header().Set("Access-Control-Expose-Headers", "X-Internal")
+		}
+		fmt.Fprint(w, "hdr-body")
+	}))
+	defer corsHdr.Close()
+
 	load := func(name, path string) *webkit.WebView {
 		wv := webkit.NewWebViewWithMode(webkit.ModeBrowser)
 		if err := wv.LoadURL(srv.URL + path); err != nil {
@@ -637,6 +652,88 @@ fetch("` + corsThirdPartyACAO.URL + `/x").then(function (r) { return r.text(); }
 			"ACAO 指向 <base href> 源（第三方）必须 reject（不能因 baseURI 伪造源而放行）")
 		check(strings.Contains(got, `"docOrigin":"doc-origin-body"`),
 			"ACAO=文档源时通过（对照组）")
+		wv.Destroy()
+	}
+
+	// ── 7c. 跨源响应头可读性（Access-Control-Expose-Headers）────
+	fmt.Println("\n── 7c. 跨源响应头可读性（ACEH）──")
+	{
+		hdrPage := `<!DOCTYPE html><html><body><script>
+window.__corsHdr = {};
+function hdrOf(r) {
+  return {
+    ct: String(r.headers.get("content-type") || "<null>"),
+    xi: String(r.headers.get("x-internal") || "<null>"),
+    sc: String(r.headers.get("set-cookie") || "<null>")
+  };
+}
+function applyHdr(prefix, o) {
+  window.__corsHdr[prefix + "Ct"] = o.ct;
+  window.__corsHdr[prefix + "Xi"] = o.xi;
+  window.__corsHdr[prefix + "Sc"] = o.sc;
+  if (o.allXi !== undefined) {
+    window.__corsHdr[prefix + "AllXi"] = o.allXi;
+    window.__corsHdr[prefix + "AllSc"] = o.allSc;
+  }
+  if (o.error !== undefined) { window.__corsHdr[prefix + "Error"] = o.error; }
+}
+function xhrProbe(path) {
+  return new Promise(function (resolve) {
+    var x = new XMLHttpRequest();
+    x.open("GET", "` + corsHdr.URL + `" + path);
+    x.onload = function () {
+      var all = String(x.getAllResponseHeaders()).toLowerCase();
+      resolve({
+        ct: String(x.getResponseHeader("Content-Type") || "<null>"),
+        xi: String(x.getResponseHeader("X-Internal") || "<null>"),
+        sc: String(x.getResponseHeader("Set-Cookie") || "<null>"),
+        allXi: all.indexOf("x-internal") >= 0,
+        allSc: all.indexOf("set-cookie") >= 0
+      });
+    };
+    x.onerror = function () { resolve({ error: "xhr-error" }); };
+    x.send();
+  });
+}
+fetch("` + corsHdr.URL + `/plain").then(function (r) { return hdrOf(r); }).then(function (o) {
+  applyHdr("fetchPlain", o);
+  return xhrProbe("/plain");
+}).then(function (o) {
+  applyHdr("xhrPlain", o);
+  return fetch("` + corsHdr.URL + `/exposed").then(function (r) { return hdrOf(r); });
+}).then(function (o) {
+  applyHdr("fetchExposed", o);
+  return xhrProbe("/exposed");
+}).then(function (o) {
+  applyHdr("xhrExposed", o);
+  window.__done = true;
+});
+</script></body></html>`
+		mux.HandleFunc("/cors/hdr.html", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, hdrPage)
+		})
+		wv := load("cors-hdr", "/cors/hdr.html")
+		got := evalStr(wv, `JSON.stringify(window.__corsHdr)`)
+		fmt.Printf("     window.__corsHdr = %s\n", got)
+		check(strings.Contains(got, `"fetchPlainCt":"text/plain"`) &&
+			strings.Contains(got, `"fetchPlainXi":"<null>"`) &&
+			strings.Contains(got, `"fetchPlainSc":"<null>"`),
+			"跨源 fetch 无 ACEH：自定义头 / Set-Cookie 不可读，content-type 可读")
+		check(strings.Contains(got, `"xhrPlainCt":"text/plain"`) &&
+			strings.Contains(got, `"xhrPlainXi":"<null>"`) &&
+			strings.Contains(got, `"xhrPlainSc":"<null>"`) &&
+			strings.Contains(got, `"xhrPlainAllXi":false`) &&
+			strings.Contains(got, `"xhrPlainAllSc":false`),
+			"跨源 XHR 无 ACEH：getResponseHeader / getAllResponseHeaders 看不到自定义头 / Set-Cookie")
+		check(strings.Contains(got, `"fetchExposedXi":"secret"`) &&
+			strings.Contains(got, `"fetchExposedSc":"<null>"`),
+			"跨源 fetch 有 ACEH：X-Internal 可读，Set-Cookie 恒不可读")
+		check(strings.Contains(got, `"xhrExposedXi":"secret"`) &&
+			strings.Contains(got, `"xhrExposedSc":"<null>"`) &&
+			strings.Contains(got, `"xhrExposedAllXi":true`) &&
+			strings.Contains(got, `"xhrExposedAllSc":false`),
+			"跨源 XHR 有 ACEH：X-Internal 可读，Set-Cookie 恒不可读")
 		wv.Destroy()
 	}
 

@@ -189,7 +189,10 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		//   "Object has no member 'get'"（gou-ide 导出/下载链路实测中断）。
 		respObj := newResponseInstance(in, &responseState{
 			body:       string(respBody),
-			headers:    headersStateFromHTTP(resp.Header),
+			// ★ 跨源响应头可读性限制（Access-Control-Expose-Headers）：
+			//   只暴露 safelisted 头 + ACEH 列出的头，Set-Cookie 恒不可见。
+			//   同源/不透明源原样返回（filterResponseHeaders 内部判定）。
+			headers:    headersStateFromHTTP(corsReq.filterResponseHeaders(resp.Header)),
 			status:     resp.StatusCode,
 			statusText: http.StatusText(resp.StatusCode),
 			url:        url,
@@ -369,8 +372,12 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			return xhrFail(in, obj, err)
 		}
 		obj.Set("status", jsc.NumberValue(float64(resp.StatusCode)))
+		// ★ 与 fetch 共用同一份过滤逻辑（cors.go filterResponseHeaders）：
+		//   跨源时 getAllResponseHeaders/getResponseHeader 只能看到
+		//   safelisted + ACEH 头，Set-Cookie 恒不可见。
+		visibleHeaders := corsReq.filterResponseHeaders(resp.Header)
 		var hdrLines []string
-		for k, vs := range resp.Header {
+		for k, vs := range visibleHeaders {
 			hdrLines = append(hdrLines, fmt.Sprintf("%s: %s", k, strings.Join(vs, ", ")))
 		}
 		obj.Set("_responseHeaders", jsc.StringValue(strings.Join(hdrLines, "\r\n")))
@@ -384,7 +391,7 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		// ★ XMLHttpRequest.getResponseHeader / responseURL：此前只有
 		//   getAllResponseHeaders，前端最常见的 `xhr.getResponseHeader('Content-Type')`
 		//   直接抛 "Object has no member 'getResponseHeader'"（探针实测）。
-		respHeaderState := headersStateFromHTTP(resp.Header)
+		respHeaderState := headersStateFromHTTP(visibleHeaders)
 		obj.Set("getResponseHeader", jsc.FunctionValue(jsc.NewNativeFunction("getResponseHeader",
 			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 				if len(args) < 1 {

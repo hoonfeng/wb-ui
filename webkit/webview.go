@@ -833,7 +833,11 @@ func (wv *WebView) handleIFrameSrcChanged(el *dom.Element, src string) {
 	if el == nil {
 		return
 	}
-	abs := resolveIframeSrc(src, wv.documentURL())
+	// ★ 解析基准必须用 documentBaseURL（与初始 iframe 路径 webview.go:3098 /
+	//   动态 script 一致）：`<base href>` 影响相对 URL 解析。安全不受影响——
+	//   CORS 的「源」由 DocumentURL 提供（page.DocumentURL），基准只决定
+	//   相对路径指向哪里，不参与源判定。
+	abs := resolveIframeSrc(src, wv.documentBaseURL())
 	// 旧子 Frame 卸载：注销注册表 + 清理其 JS 环境。
 	if old := page.IFrameFrame(el); old != nil {
 		page.UnregisterIFrame(el)

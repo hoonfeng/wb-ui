@@ -464,3 +464,192 @@ func portOf(t *testing.T, raw string) string {
 	}
 	return raw[i+1:]
 }
+
+// TestCORSPreflightWildcardRequiresNoCredentials 守预检 `*` 通配的凭证约束：
+//
+//   - Fetch 标准：Access-Control-Allow-Headers / Allow-Methods 的 `*` 只在
+//     **非凭证**请求（credentials mode 不是 include）下作通配；
+//   - credentials 模式下 `*` 是字面 token，不匹配任何方法/头名（不能借通配
+//     放大带凭证请求的权限）；
+//   - 非凭证请求仍正常享受 `*` 通配（不能因修复凭证侧而过度拒绝）。
+func TestCORSPreflightWildcardRequiresNoCredentials(t *testing.T) {
+	mkResp := func(credentials bool) *http.Response {
+		h := http.Header{}
+		h.Set("Access-Control-Allow-Origin", "http://a.test") // 与文档源精确一致
+		if credentials {
+			h.Set("Access-Control-Allow-Credentials", "true")
+		}
+		h.Set("Access-Control-Allow-Methods", "*")
+		h.Set("Access-Control-Allow-Headers", "*")
+		return &http.Response{Header: h}
+	}
+	reqHeaders := http.Header{"X-Token": {"t"}} // 非 safelisted 头，必须走 ACAH 判定
+
+	// a) ACAH:`*` + 非 safelisted 头：非凭证 → 通过；凭证 → reject。
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "GET", reqHeaders, false, corsModeCORS).
+		validatePreflightResponse(mkResp(false)); err != nil {
+		t.Fatalf("非凭证预检 ACAH:* 应放行任意非 safelisted 头，err=%v", err)
+	}
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "GET", reqHeaders, true, corsModeCORS).
+		validatePreflightResponse(mkResp(true)); err == nil {
+		t.Fatal("credentials 模式下 ACAH:* 不能放行非 safelisted 头")
+	}
+	// 对照：凭证模式明确列出头名 → 通过（证明不是一律拒绝）。
+	h := mkResp(true)
+	h.Header.Set("Access-Control-Allow-Methods", "GET") // 凭证下 ACAM:* 无效，须显式列出
+	h.Header.Set("Access-Control-Allow-Headers", "x-token")
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "GET", reqHeaders, true, corsModeCORS).
+		validatePreflightResponse(h); err != nil {
+		t.Fatalf("credentials 模式下明确列出的头应通过，err=%v", err)
+	}
+
+	// b) ACAM:`*` + POST：非凭证 → 通过；凭证 → reject。
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "POST", http.Header{}, false, corsModeCORS).
+		validatePreflightResponse(mkResp(false)); err != nil {
+		t.Fatalf("非凭证预检 ACAM:* 应放行任意方法，err=%v", err)
+	}
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "POST", http.Header{}, true, corsModeCORS).
+		validatePreflightResponse(mkResp(true)); err == nil {
+		t.Fatal("credentials 模式下 ACAM:* 不能放行 POST")
+	}
+	// 对照：凭证模式明确列出方法 → 通过。
+	h = mkResp(true)
+	h.Header.Set("Access-Control-Allow-Methods", "GET, POST")
+	h.Header.Set("Access-Control-Allow-Headers", "*") // 本用例无自定义头，ACAH 不参与判定
+	if err := newCORSRequest("http://a.test/x", "http://b.test/api", "POST", http.Header{}, true, corsModeCORS).
+		validatePreflightResponse(h); err != nil {
+		t.Fatalf("credentials 模式下明确列出的方法应通过，err=%v", err)
+	}
+}
+
+// TestCORSResponseHeaderExposure 守跨源响应头可读性（Access-Control-Expose-Headers）：
+//
+//   - 跨源响应默认只暴露 CORS-safelisted 响应头（content-type 等）；
+//   - 自定义头（X-Internal）只有 ACEH 列出才可读；
+//   - Set-Cookie 恒不可见（即使 ACEH 显式列出）；
+//   - fetch 与 XHR 必须走同一份实现（cors.go filterResponseHeaders）。
+func TestCORSResponseHeaderExposure(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Internal", "secret")
+		w.Header().Set("Set-Cookie", "sid=abc; Path=/")
+		switch r.URL.Path {
+		case "/exposed":
+			w.Header().Set("Access-Control-Expose-Headers", "X-Internal")
+		case "/exposed-cookie":
+			// Set-Cookie 是 forbidden response header：写进 ACEH 也不可读。
+			w.Header().Set("Access-Control-Expose-Headers", "X-Internal, Set-Cookie")
+		}
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer api.Close()
+	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer doc.Close()
+	base := doc.URL + "/index.html"
+
+	fetchScript := func(path string) string {
+		return fmt.Sprintf(`
+			fetch("%s%s").then(function (r) {
+				var xi = r.headers.get("x-internal");
+				var sc = r.headers.get("set-cookie");
+				console.log("ct=" + r.headers.get("content-type"));
+				console.log("xi=" + (xi || "<null>"));
+				console.log("sc=" + (sc || "<null>"));
+			}, function (e) { console.log("rejected:" + e); });
+		`, api.URL, path)
+	}
+	// 无 ACEH：自定义头与 Set-Cookie 都不可读，content-type 仍可见。
+	out := runFetchJSWithBase(t, base, fetchScript("/plain"))
+	if !strings.Contains(out, "ct=application/json") {
+		t.Fatalf("跨源响应 content-type 应可读，输出：%q", out)
+	}
+	if !strings.Contains(out, "xi=<null>") || !strings.Contains(out, "sc=<null>") {
+		t.Fatalf("无 ACEH 时 x-internal / set-cookie 必须不可读，输出：%q", out)
+	}
+	// ACEH: X-Internal → x-internal 可读，set-cookie 仍不可读。
+	out = runFetchJSWithBase(t, base, fetchScript("/exposed"))
+	if !strings.Contains(out, "xi=secret") {
+		t.Fatalf("ACEH 列出 X-Internal 后应可读，输出：%q", out)
+	}
+	if !strings.Contains(out, "sc=<null>") {
+		t.Fatalf("Set-Cookie 必须恒不可读，输出：%q", out)
+	}
+	// ACEH 显式列出 Set-Cookie → 仍不可读。
+	out = runFetchJSWithBase(t, base, fetchScript("/exposed-cookie"))
+	if !strings.Contains(out, "sc=<null>") {
+		t.Fatalf("Set-Cookie 即使写进 ACEH 也不可读，输出：%q", out)
+	}
+
+	xhrScript := func(path string) string {
+		return fmt.Sprintf(`
+			var x = new XMLHttpRequest();
+			x.open("GET", "%s%s");
+			x.onload = function () {
+				var xi = x.getResponseHeader("X-Internal");
+				var sc = x.getResponseHeader("Set-Cookie");
+				var all = x.getAllResponseHeaders().toLowerCase();
+				console.log("ct=" + x.getResponseHeader("Content-Type"));
+				console.log("xi=" + (xi || "<null>"));
+				console.log("sc=" + (sc || "<null>"));
+				console.log("all-xi=" + (all.indexOf("x-internal") >= 0));
+				console.log("all-sc=" + (all.indexOf("set-cookie") >= 0));
+			};
+			x.onerror = function () { console.log("error:" + x.status); };
+			x.send();
+		`, api.URL, path)
+	}
+	// XHR 无 ACEH：getResponseHeader / getAllResponseHeaders 都看不到自定义头。
+	out = runXHRJSWithBase(t, base, xhrScript("/plain"))
+	if !strings.Contains(out, "ct=application/json") {
+		t.Fatalf("XHR 跨源 content-type 应可读，输出：%q", out)
+	}
+	if !strings.Contains(out, "xi=<null>") || !strings.Contains(out, "sc=<null>") ||
+		!strings.Contains(out, "all-xi=false") || !strings.Contains(out, "all-sc=false") {
+		t.Fatalf("XHR 无 ACEH 时自定义头 / Set-Cookie 必须不可读，输出：%q", out)
+	}
+	// XHR 有 ACEH：getResponseHeader 与 getAllResponseHeaders 都能看到 X-Internal。
+	out = runXHRJSWithBase(t, base, xhrScript("/exposed"))
+	if !strings.Contains(out, "xi=secret") || !strings.Contains(out, "all-xi=true") {
+		t.Fatalf("XHR 在 ACEH 列出后应可读 X-Internal，输出：%q", out)
+	}
+	if !strings.Contains(out, "sc=<null>") || !strings.Contains(out, "all-sc=false") {
+		t.Fatalf("XHR 的 Set-Cookie 必须恒不可读，输出：%q", out)
+	}
+}
+
+// TestSameOriginResponseHeadersNotFiltered 是回归保护：同源请求不经过跨源
+// 头过滤（needsCheck()==false 原样返回），自定义响应头照常可读。
+func TestSameOriginResponseHeadersNotFiltered(t *testing.T) {
+	same := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("X-Internal", "secret")
+		fmt.Fprint(w, "ok")
+	}))
+	defer same.Close()
+	base := same.URL + "/index.html"
+
+	out := runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/data").then(function (r) {
+			var xi = r.headers.get("x-internal");
+			console.log("xi=" + (xi || "<null>"));
+		}, function (e) { console.log("rejected:" + e); });
+	`, same.URL))
+	if !strings.Contains(out, "xi=secret") {
+		t.Fatalf("同源 fetch 响应头不应被过滤，输出：%q", out)
+	}
+
+	out = runXHRJSWithBase(t, base, fmt.Sprintf(`
+		var x = new XMLHttpRequest();
+		x.open("GET", "%s/data");
+		x.onload = function () {
+			var xi = x.getResponseHeader("X-Internal");
+			console.log("xi=" + (xi || "<null>"));
+		};
+		x.onerror = function () { console.log("error:" + x.status); };
+		x.send();
+	`, same.URL))
+	if !strings.Contains(out, "xi=secret") {
+		t.Fatalf("同源 XHR 响应头不应被过滤，输出：%q", out)
+	}
+}

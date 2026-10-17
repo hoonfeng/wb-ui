@@ -149,6 +149,66 @@ func corsSafelistedContentType(v string) bool {
 	return false
 }
 
+// corsSafelistedResponseHeaders 是**跨源响应**默认可读的响应头集合
+// （Fetch 标准「CORS-safelisted response header」）。
+//
+// 跨源响应里，页面只能读到这些头 + Access-Control-Expose-Headers 列出的
+// 头；其余（X-Internal-*、X-Request-Id 等）按浏览器语义一律不可见。
+var corsSafelistedResponseHeaders = map[string]bool{
+	"cache-control":    true,
+	"content-language": true,
+	"content-length":   true,
+	"content-type":     true,
+	"expires":          true,
+	"last-modified":    true,
+	"pragma":           true,
+}
+
+// exposedHeaderSet 解析 Access-Control-Expose-Headers 为 token 集合。
+//
+// `*` 通配只在**非凭证**请求下生效（Fetch 标准：credentials mode 为 include
+// 时 `*` 是字面 token）；这里直接把 `*` 摘掉，后续按字面 token 匹配，等价于
+// 「不匹配任何头名」。
+func (c *corsRequest) exposedHeaderSet(h http.Header) map[string]bool {
+	tokens := headerTokenSet(h, "Access-Control-Expose-Headers")
+	if c != nil && c.credentials {
+		delete(tokens, "*")
+	}
+	return tokens
+}
+
+// filterResponseHeaders 返回页面**实际可读**的响应头（跨源可读性限制）。
+//
+//   - h 为 nil → nil（nil 安全）；
+//   - 同源 / 不透明源（needsCheck()==false）→ 原样返回，行为不变；
+//   - 跨源 → 先恒剔除 Set-Cookie / Set-Cookie2（浏览器里是不可见的
+//     forbidden response header，即使 ACEH 列出也读不到），再只保留
+//     safelisted ∪ Access-Control-Expose-Headers 中的头。
+//
+// ★ 唯一的响应头过滤实现：fetch 与 XHR 都必须调这里，禁止各写一份。
+func (c *corsRequest) filterResponseHeaders(h http.Header) http.Header {
+	if h == nil {
+		return nil
+	}
+	if c == nil || !c.needsCheck() {
+		return h
+	}
+	exposed := c.exposedHeaderSet(h)
+	wildcard := exposed["*"]
+	out := make(http.Header, len(h))
+	for name, values := range h {
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if lower == "" || lower == "set-cookie" || lower == "set-cookie2" {
+			continue
+		}
+		if !corsSafelistedResponseHeaders[lower] && !exposed[lower] && !wildcard {
+			continue
+		}
+		out[name] = values
+	}
+	return out
+}
+
 // nonSafelistedHeaderNames 返回需要预检的请求头名（小写、排序、逗号分隔）。
 func (c *corsRequest) nonSafelistedHeaderNames() string {
 	var names []string
@@ -207,13 +267,19 @@ func (c *corsRequest) validatePreflightResponse(resp *http.Response) error {
 	}
 	// ★ 逐 token 精确匹配（不区分大小写），禁止子串匹配。
 	allowMethods := headerTokenSet(resp.Header, "Access-Control-Allow-Methods")
-	if !allowMethods[strings.ToLower(c.method)] {
+	// `*` 通配：Fetch 标准中 Access-Control-Allow-Methods: * 只对**非凭证**
+	// 请求生效（credentials mode 为 include 时 `*` 是字面方法名，不匹配任何
+	// 方法）——带凭证的请求不能靠通配放大权限。
+	methodWildcard := allowMethods["*"] && !c.credentials
+	if !methodWildcard && !allowMethods[strings.ToLower(c.method)] {
 		return corsFail("preflight: Access-Control-Allow-Methods 不含 %s（收到 %q）",
 			c.method, strings.Join(resp.Header.Values("Access-Control-Allow-Methods"), ","))
 	}
 	allowHeaders := headerTokenSet(resp.Header, "Access-Control-Allow-Headers")
-	// `*` 作为 ACAH 的通配（Fetch 标准：非 credentialed 预检可用 * 表示任意头）。
-	wildcard := allowHeaders["*"]
+	// `*` 作为 ACAH 的通配，同样只在**非凭证**请求下生效（Fetch 标准：
+	// credentials mode 为 include 时 `*` 是字面 token，不匹配任何头名，
+	// 因此带凭证请求无法借 `*` 放行任意非 safelisted 头）。
+	wildcard := allowHeaders["*"] && !c.credentials
 	for _, name := range strings.Split(c.nonSafelistedHeaderNames(), ",") {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
