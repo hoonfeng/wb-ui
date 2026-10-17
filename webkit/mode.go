@@ -188,11 +188,16 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 	//   既有行为（相对当前目录的文件读取）。绝对化形态由 resolverRefForms 给出：
 	//   没绝对化时 forms 只有原样一种形态，ref 因此保持原值。
 	ref = forms[len(forms)-1]
-	// ★ blob: URL：页面用 URL.createObjectURL 生成的内存对象 URL，内容在
-	//   本进程的 blob 存储里，不经网络/文件系统——与 data: 同属「页面自产
-	//   内容」，不参与资源策略门禁（见 resource_ref_policy.go 的 refKindBlob）。
-	//   未登记/已 revoke 的按浏览器语义失败（fetch 同样 reject）。
-	if strings.HasPrefix(strings.ToLower(ref), "blob:") {
+	// ★ blob:/data: 都是页面自产内容（不经网络/文件系统）。**放行判定只有一份**：
+	//   resourceRefVerdict（resource_ref_policy.go）。blob 的登记查询也在内核里
+	//   （refKindBlob + BlobKnown）——本函数不再自己写 HasPrefix+LookupBlobURL
+	//   那套策略判断，只负责「取内容」。
+	verdict := wv.resourceRefVerdict(ref, true)
+	if verdict.Kind == refKindBlob {
+		if !verdict.BlobKnown {
+			return "", fmt.Errorf("webkit: unknown blob URL: %q", ref)
+		}
+		// 取内容（判定与取内容之间被 revoke 的竞态：按未登记处理）。
 		entry, ok := jsc.LookupBlobURL(ref)
 		if !ok {
 			return "", fmt.Errorf("webkit: unknown blob URL: %q", ref)
@@ -203,7 +208,7 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 		}
 		return entry.Data, nil
 	}
-	if strings.HasPrefix(ref, "data:") {
+	if verdict.Kind == refKindInline {
 		if r, ok := cache.get(ref); ok {
 			return r.content, nil
 		}
@@ -224,7 +229,7 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 	//   （其放行发生在上面 resolver 通道，不受本门禁影响）。
 	// ★ 判定本身走**公共判定内核**（一份判定，见 resource_ref_policy.go）：本路径
 	//   **有**网络通道（下面的 fetchResource），故 hasNetworkChannel=true。
-	if !wv.resourceRefAllowed(ref, true) {
+	if !verdict.Allowed {
 		return "", fmt.Errorf("%w: %q（UI 库模式请用 SetResourceResolver 提供，或改用 data: URL；"+
 			"需要放行宿主已解析资源的宿主可 SetResourcePolicy(AllowHostResolved)）",
 			ErrExternalResourceBlocked, ref)

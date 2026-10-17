@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"wb-ui/engine/dom"
-	"wb-ui/engine/js/jsc"
 	"wb-ui/engine/page"
 	"wb-ui/engine/rendering"
 )
@@ -88,27 +87,24 @@ func (l *webViewImageLoader) ResolveURL(ref string) string {
 // 给了、那个没给」。渲染层在**缓存查询之前**调用它——否则进程级全局图片
 // 缓存会让别的 WebView 已取回的同名 URL 穿透策略：
 //   - data: 自带内容、不经外部通道 → 恒放行（与策略解耦）；
+//   - blob: 页面自产内存内容 → 已登记放行、未登记/已 revoke 拒绝（与策略解耦）；
 //   - AllowAll → 放行；
 //   - AllowHostResolved → 仅放行宿主 ResourceResolver 明确提供的引用
 //     （resolver 未命中即拒，TC-M-903；http(s) 仍拒，TC-M-904）；
 //   - DenyExternal → 拒（http(s)/file/相对路径一律不加载）。
+//
+// ★ 判定只有一份：resourceRefVerdict（resource_ref_policy.go）。本函数不自写
+// HasPrefix+LookupBlobURL 之类的策略，只把「图片通道有取内容能力」传进去。
 func (l *webViewImageLoader) AllowsURL(url string) bool {
 	if l == nil || l.wv == nil {
 		return false
 	}
-	if strings.HasPrefix(strings.ToLower(url), "data:") {
+	// 图片通道有取内容能力（fetchResource）：hasContentChannel=true。
+	if l.wv.resourceRefAllowed(url, true) {
 		return true
 	}
-	// blob: 是页面自产的内存内容（与 data: 同类，见 resource_ref_policy.go）：
-	// 已登记的 URL 在任何策略下都放行；未登记/已 revoke 的拒绝。
-	if strings.HasPrefix(strings.ToLower(url), "blob:") {
-		_, ok := jsc.LookupBlobURL(url)
-		return ok
-	}
-	switch l.wv.effectiveResourcePolicy() {
-	case AllowAll:
-		return true
-	case AllowHostResolved:
+	// AllowHostResolved 档：宿主 resolver 明确提供的引用逐条放行。
+	if l.wv.effectiveResourcePolicy() == AllowHostResolved {
 		return l.wv.resolverProvides(url)
 	}
 	return false

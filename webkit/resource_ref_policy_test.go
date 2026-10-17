@@ -17,6 +17,8 @@ package webkit
 import (
 	"errors"
 	"testing"
+
+	"wb-ui/engine/js/jsc"
 )
 
 func TestClassifyResourceRefKinds(t *testing.T) {
@@ -29,7 +31,7 @@ func TestClassifyResourceRefKinds(t *testing.T) {
 		{"  data:text/plain,hi  ", refKindInline},
 		{"http://example.com/a.png", refKindNetwork},
 		{"https://example.com/a.png", refKindNetwork},
-		{"blob:null/1234", refKindNetwork},
+		{"blob:null/1234", refKindBlob},
 		{"file:///C:/tmp/a.png", refKindExternal},
 		{"a.png", refKindExternal},
 		{"", refKindExternal},
@@ -57,7 +59,8 @@ func TestResourceRefAllowedTruthTable(t *testing.T) {
 		"data:text/plain,hi":   refKindInline,
 		"http://example.com/a": refKindNetwork,
 		"https://example.com/a": refKindNetwork,
-		"blob:null/1":          refKindNetwork,
+		// 未登记的 blob：恒拒（登记状态由 TestBlobRefPolicy 覆盖）。
+		"blob:null/never-registered": refKindBlob,
 		"file:///C:/tmp/a.png": refKindExternal,
 		"a.png":                refKindExternal,
 	}
@@ -70,6 +73,8 @@ func TestResourceRefAllowedTruthTable(t *testing.T) {
 				switch kind {
 				case refKindInline:
 					want = true // 与策略解耦，任何策略、任何通道都放行
+				case refKindBlob:
+					want = false // 未登记/已 revoke ⇒ 恒拒
 				case refKindNetwork:
 					want = hasNet && pol == AllowAll // 无网络通道 ⇒ 恒拒
 				default:
@@ -145,17 +150,76 @@ func TestPolicyVerdictConsistentAcrossBothPaths(t *testing.T) {
 	}
 }
 
-// TestMediaPathHasNoNetworkChannel 守**有意差异**：同一 http(s)/blob 引用下，有网络
-// 通道的取内容路径在 AllowAll 放行，而媒体路径恒拒——因为媒体没有 fetchResource。
-// 这条差异由 hasNetworkChannel 参数表达，不是第二份策略规则。
-func TestMediaPathHasNoNetworkChannel(t *testing.T) {
+// TestMediaPathHasNoContentChannel 守**有意差异**：同一 http(s)/已登记 blob 引用下，
+// 有内容注入通道的取内容路径在 AllowAll 放行，而媒体路径恒拒——因为媒体通道没有
+// fetchResource（也没有 blob → 媒体字节的注入路径）。这条差异由 hasContentChannel
+// 参数表达，不是第二份策略规则。
+func TestMediaPathHasNoContentChannel(t *testing.T) {
+	blobURL := jsc.RegisterBlobURL("null", "blob-bytes", "image/png")
+	t.Cleanup(func() { jsc.RevokeBlobURL(blobURL) })
 	wv := &WebView{mode: ModeBrowser} // ModeBrowser → 默认 AllowAll
-	for _, ref := range []string{"http://example.com/a.png", "https://example.com/a.png", "blob:null/1"} {
+	for _, ref := range []string{"http://example.com/a.png", "https://example.com/a.png", blobURL} {
 		if !wv.resourceRefAllowed(ref, true) {
-			t.Errorf("有网络通道且 AllowAll 时应放行 %q", ref)
+			t.Errorf("有内容通道时（AllowAll / 已登记 blob）应放行 %q", ref)
 		}
 		if wv.MediaResourceAllowed(ref) {
-			t.Errorf("媒体通道没有网络栈：%q 必须恒拒", ref)
+			t.Errorf("媒体通道没有内容注入通道：%q 必须恒拒", ref)
+		}
+	}
+}
+
+// TestBlobRefPolicy 守 blob 的三条语义（唯一判定内核表达，两条执行路径共用）：
+//
+//  1. 已登记 blob 与**资源策略解耦**：DenyExternal 下同样放行（页面自产内容，
+//     不经网络/文件系统）；
+//  2. 未登记/已 revoke 的 blob 恒拒（浏览器同样失败）；
+//  3. 媒体通道即便 blob 已登记也恒拒——**能力边界**：媒体没有内容注入通道。
+//     该语义在内核里显式表达为 `BlobKnown && hasContentChannel`。
+func TestBlobRefPolicy(t *testing.T) {
+	blobURL := jsc.RegisterBlobURL("null", "blob-image-bytes", "image/png")
+
+	wv := &WebView{mode: ModeToolkit} // 默认 DenyExternal
+	wv.SetResourcePolicy(DenyExternal)
+
+	// ① 内核判定：已登记 blob 与策略解耦。
+	if !wv.resourceRefAllowed(blobURL, true) {
+		t.Fatalf("DenyExternal 下已登记 blob 必须放行（与策略解耦）：%s", blobURL)
+	}
+	v := wv.resourceRefVerdict(blobURL, true)
+	if v.Kind != refKindBlob || !v.BlobKnown {
+		t.Fatalf("内核必须显式表达 blob 类型与登记状态，得到 %+v", v)
+	}
+	// 取内容路径：同一判定下能拿到字节。
+	content, err := wv.loadExternalResource(blobURL, PurposeImage)
+	if err != nil || content != "blob-image-bytes" {
+		t.Fatalf("已登记 blob 应可取到内容，得到 content=%q err=%v", content, err)
+	}
+
+	// ③ 媒体通道：能力边界（已登记也拒），但内核仍能表达登记状态。
+	if wv.MediaResourceAllowed(blobURL) {
+		t.Fatal("媒体通道无内容注入通道：已登记 blob 也必须拒绝（能力边界）")
+	}
+	// 内核可表达「blob 已登记，但调用方无内容通道」——这是能力边界而非策略拒绝。
+	if mv := wv.resourceRefVerdict(blobURL, false); mv.Allowed || mv.Kind != refKindBlob || !mv.BlobKnown {
+		t.Fatalf("媒体通道判决应为 Kind=blob/BlobKnown=true/Allowed=false，得到 %+v", mv)
+	}
+
+	// ② 未登记 / 已 revoke：恒拒。
+	jsc.RevokeBlobURL(blobURL)
+	if wv.resourceRefAllowed(blobURL, true) {
+		t.Fatal("已 revoke 的 blob 必须拒绝")
+	}
+	if v := wv.resourceRefVerdict(blobURL, true); v.BlobKnown || v.Allowed {
+		t.Fatalf("已 revoke 的 blob 判决应为 BlobKnown=false，得到 %+v", v)
+	}
+	if _, err := wv.loadExternalResource(blobURL, PurposeImage); err == nil {
+		t.Fatal("已 revoke 的 blob 取内容必须失败")
+	}
+
+	// ④ 策略语义未受影响：http/file 在 DenyExternal 下仍拒。
+	for _, ref := range []string{"http://example.com/a.png", "file:///C:/tmp/a.png"} {
+		if wv.resourceRefAllowed(ref, true) {
+			t.Errorf("DenyExternal 下 %q 必须拒绝", ref)
 		}
 	}
 }

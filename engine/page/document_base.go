@@ -23,6 +23,9 @@ import (
 var (
 	documentBaseProvidersMu sync.RWMutex
 	documentBaseProviders   = map[*jsc.Interpreter]func() string{}
+
+	documentURLProvidersMu sync.RWMutex
+	documentURLProviders   = map[*jsc.Interpreter]func() string{}
 )
 
 // SetDocumentBaseProvider 登记解释器所属文档的 URL 提供器（nil 等于摘除）。
@@ -52,6 +55,53 @@ func DocumentBase(rt *jsc.Interpreter) string {
 	documentBaseProvidersMu.RLock()
 	fn := documentBaseProviders[rt]
 	documentBaseProvidersMu.RUnlock()
+	if fn == nil {
+		return ""
+	}
+	return fn()
+}
+
+// 文档 URL 与解析基准是**两个概念**，必须分开登记：
+//
+//   - 文档 URL = 浏览器地址栏里的地址（`location.href`），决定**源**（Origin）；
+//   - 解析基准 = `document.baseURI`，受 `<base href>` 影响，只决定相对引用
+//     解析到哪个绝对 URL。
+//
+// 两者混用会打开一个真实的绕过通道：页面写 `<base href="http://evil.test/">`
+// 后，若 CORS 用 baseURI 算文档源，请求就会声称自己来自 evil.test——跨源
+// 限制被页面自己「改写」掉。浏览器里 `<base href>` 只影响 URL 解析，**从不**
+// 改变文档的源。
+
+// SetDocumentURLProvider 登记解释器所属**文档 URL**（不含 `<base href>` 影响）
+// 的提供器；nil 等于摘除。
+func SetDocumentURLProvider(rt *jsc.Interpreter, fn func() string) {
+	if rt == nil {
+		return
+	}
+	documentURLProvidersMu.Lock()
+	defer documentURLProvidersMu.Unlock()
+	if fn == nil {
+		delete(documentURLProviders, rt)
+		return
+	}
+	documentURLProviders[rt] = fn
+}
+
+// ClearDocumentURLProvider 摘除文档 URL 登记（WebView 销毁时调用）。
+func ClearDocumentURLProvider(rt *jsc.Interpreter) {
+	SetDocumentURLProvider(rt, nil)
+}
+
+// DocumentURL 返回解释器所属文档的当前 URL（**不是** baseURI）；未登记时为 ""。
+//
+// CORS 的文档源只能从这里取：baseURI 可能被页面用 `<base href>` 改写。
+func DocumentURL(rt *jsc.Interpreter) string {
+	if rt == nil {
+		return ""
+	}
+	documentURLProvidersMu.RLock()
+	fn := documentURLProviders[rt]
+	documentURLProvidersMu.RUnlock()
 	if fn == nil {
 		return ""
 	}

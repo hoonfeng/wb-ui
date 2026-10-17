@@ -153,7 +153,10 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		client := &http.Client{}
 		// ★ CORS：跨源请求按浏览器语义校验（同源请求不受影响；文档源为
 		//   file:/data:（不透明源）时跳过——见 cors.go 的已知差异）。
-		corsReq := newCORSRequest(DocumentBase(in), url, method, headers, credentials == "include", mode)
+		//   ★ 文档源必须取**文档 URL**（location.href），不能取 DocumentBase：
+		//   baseURI 受页面 `<base href>` 影响，用它会允许页面把 Origin 伪造成
+		//   任意源（见 document_base.go 的说明）。相对 URL 解析仍用 DocumentBase。
+		corsReq := newCORSRequest(DocumentURL(in), url, method, headers, credentials == "include", mode)
 		opaque, cerr := corsReq.prepare(client)
 		if cerr != nil {
 			return rejectPromise(in, fmt.Errorf("fetch(%s): %w", raw, cerr))
@@ -347,7 +350,8 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		if v, ok := obj.GetByKey("withCredentials"); ok {
 			withCredentials = v.ToBoolean()
 		}
-		corsReq := newCORSRequest(DocumentBase(in), url, method, headers, withCredentials, corsModeCORS)
+		// ★ 文档源取文档 URL（非 baseURI）：理由同 fetch 侧。
+		corsReq := newCORSRequest(DocumentURL(in), url, method, headers, withCredentials, corsModeCORS)
 		if _, cerr := corsReq.prepare(client); cerr != nil {
 			return xhrFail(in, obj, cerr)
 		}

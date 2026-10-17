@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"wb-ui/engine/dom"
+	"wb-ui/engine/js/jsc"
 )
 
 // resourceRefKind 是引用在资源策略判定中的类别。
@@ -36,7 +37,11 @@ const (
 	// refKindInline：`data:`（RFC 2397 内联内容）——自带内容、不经任何外部通道，
 	// 与策略**解耦**，恒放行。
 	refKindInline resourceRefKind = iota
-	// refKindNetwork：`http(s)` / `blob:`——要取内容就得有网络通道。
+	// refKindBlob：`blob:`——页面用 URL.createObjectURL 生成的内存对象 URL，
+	// 内容在本进程 blob 存储里（**不是**网络资源）。是否放行取决于登记状态，
+	// 与资源策略解耦；调用方还需要有内容注入通道（见 resourceRefVerdict）。
+	refKindBlob
+	// refKindNetwork：`http(s)`——要取内容就得有网络通道。
 	refKindNetwork
 	// refKindExternal：`file://` / 相对路径——走文件系统通道。
 	refKindExternal
@@ -48,8 +53,9 @@ func classifyResourceRef(ref string) resourceRefKind {
 	switch {
 	case strings.HasPrefix(low, "data:"):
 		return refKindInline
-	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"),
-		strings.HasPrefix(low, "blob:"):
+	case strings.HasPrefix(low, "blob:"):
+		return refKindBlob
+	case strings.HasPrefix(low, "http://"), strings.HasPrefix(low, "https://"):
 		return refKindNetwork
 	}
 	return refKindExternal
@@ -87,29 +93,61 @@ func (wv *WebView) resolverRefForms(ref string) []string {
 	return forms
 }
 
-// resourceRefAllowed 是**唯一的策略判定**（一份判定）：报告该引用在当前资源策略下
-// 是否放行。hasNetworkChannel 表示调用方**是否有网络通道**——图片/样式/脚本有
-// （fetchResource），媒体通道没有（引擎不代宿主联网，宿主也没有网络媒体解码通道）。
+// resourceRefVerdict 是判定内核的输出：引用类别 + 是否放行 + blob 登记状态。
+//
+// BlobKnown 只在 Kind==refKindBlob 时有意义——取内容方据此区分「未登记/已
+// revoke」与「策略拒绝」，给出与浏览器一致的行为（unknown blob URL）。
+type resourceRefVerdict struct {
+	Kind      resourceRefKind
+	Allowed   bool
+	BlobKnown bool
+}
+
+// blobRegistered 报告 blob URL 是否仍登记在本进程 blob 存储里（唯一实现）。
+func blobRegistered(ref string) bool {
+	_, ok := jsc.LookupBlobURL(ref)
+	return ok
+}
+
+// resourceRefVerdict 是**唯一的策略判定**（一份判定）：报告该引用在当前资源
+// 策略下是否放行。hasContentChannel 表示调用方**是否有内容注入通道**——
+// 图片/样式/脚本有（fetchResource 取回字节进引擎），媒体通道没有（引擎不代
+// 宿主联网，宿主也没有网络/blob 媒体解码通道）。
 //
 // 语义（与两侧既有行为逐条一致）：
 //   - `data:`：与策略解耦，恒放行（resource_policy.go 的三条兼容原则之一）；
-//   - `blob:`：页面自产的内存内容（本进程 blob 存储里有登记才放行），与
-//     data: 一样不受资源策略约束；未登记/已 revoke 的恒拒；
-//   - `http(s)`：有网络通道时按策略（只有 AllowAll 放行）；**无**网络通道时
-//     恒拒——这是**能力边界**，不是策略差异；
+//   - `blob:`：页面自产的内存内容。**已登记**（本进程 blob 存储命中）且调用方
+//     有内容注入通道 → 放行，与资源策略解耦（DenyExternal 下同样放行）；
+//     未登记/已 revoke → 恒拒；没有内容注入通道（媒体通道）→ 恒拒，这是
+//     **能力边界**而非策略差异（见 media_resource_policy.go）；
+//   - `http(s)`：有内容通道时按策略（只有 AllowAll 放行）；**无**通道时恒拒；
 //   - `file://` / 相对路径：只有 AllowAll（allowsExternalURLs）放行。
 //
 // ★ 宿主 resolver 命中**不在**本函数内：resolver 通道先于策略（命中即放行），且取
 // 内容方需要 resolver 的返回值——两处都先按 resolverRefForms 询问，未命中才落到这里。
-func (wv *WebView) resourceRefAllowed(ref string, hasNetworkChannel bool) bool {
+func (wv *WebView) resourceRefVerdict(ref string, hasContentChannel bool) resourceRefVerdict {
+	kind := classifyResourceRef(ref)
+	v := resourceRefVerdict{Kind: kind}
 	if wv == nil {
-		return false
+		return v
 	}
-	switch classifyResourceRef(ref) {
+	switch kind {
 	case refKindInline:
-		return true
+		v.Allowed = true
+	case refKindBlob:
+		v.BlobKnown = blobRegistered(ref)
+		// ★ 与策略解耦：blob 是页面自产内容，DenyExternal 下也不该拦；
+		//   唯一前提是「调用方有内容注入通道」+「blob 仍登记」。
+		v.Allowed = v.BlobKnown && hasContentChannel
 	case refKindNetwork:
-		return hasNetworkChannel && wv.allowsExternalURLs()
+		v.Allowed = hasContentChannel && wv.allowsExternalURLs()
+	default:
+		v.Allowed = wv.allowsExternalURLs()
 	}
-	return wv.allowsExternalURLs()
+	return v
+}
+
+// resourceRefAllowed 是 resourceRefVerdict 的布尔投影（调用方只关心放行与否）。
+func (wv *WebView) resourceRefAllowed(ref string, hasContentChannel bool) bool {
+	return wv.resourceRefVerdict(ref, hasContentChannel).Allowed
 }

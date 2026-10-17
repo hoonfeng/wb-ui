@@ -87,6 +87,10 @@ func TestCORSValidateResponseHeaders(t *testing.T) {
 		{"missing", "", "", false, true},
 		{"credentials-wildcard", "*", "true", true, true},
 		{"credentials-exact", "http://a.test", "true", true, false},
+		// ★ credentials 模式下 ACAO 必须精确等于文档源：指向第三方源即使带
+		//   ACAC:true 也必须拒绝（修复前这里会放行）。
+		{"credentials-mismatch", "http://evil.test", "true", true, true},
+		{"credentials-exact-case-insensitive", "HTTP://A.TEST", "true", true, false},
 		{"credentials-no-acac", "http://a.test", "", true, true},
 	}
 	for _, c := range cases {
@@ -105,17 +109,127 @@ func TestCORSValidateResponseHeaders(t *testing.T) {
 	}
 }
 
+// TestCORSPreflightTokenMatching 守预检头的 token 精确匹配：
+//
+//   - ACAM/ACAH 都是逗号分隔的 token 列表，必须逐 token 比较；
+//   - 子串匹配会把 `POSTX` 当作允许 `POST`、`content-type-evil` 当作允许
+//     `content-type`——安全边界直接失效；
+//   - ACAH 的 `*` 是通配。
+func TestCORSPreflightTokenMatching(t *testing.T) {
+	mkResp := func(extra map[string]string) *http.Response {
+		h := http.Header{}
+		h.Set("Access-Control-Allow-Origin", "http://a.test") // 文档源精确匹配
+		for k, v := range extra {
+			h.Set(k, v)
+		}
+		return &http.Response{Header: h}
+	}
+	cases := []struct {
+		name       string
+		method     string
+		reqHeaders http.Header
+		resp       map[string]string
+		wantErr    bool
+	}{
+		{
+			name:    "acam 子串不算允许",
+			method:  "POST",
+			resp:    map[string]string{"Access-Control-Allow-Methods": "POSTX"},
+			wantErr: true,
+		},
+		{
+			name:    "acam 逗号列表精确命中",
+			method:  "POST",
+			resp:    map[string]string{"Access-Control-Allow-Methods": "GET, POST"},
+			wantErr: false,
+		},
+		{
+			name:    "acam 大小写不敏感",
+			method:  "POST",
+			resp:    map[string]string{"Access-Control-Allow-Methods": "get, post"},
+			wantErr: false,
+		},
+		{
+			name:       "acah 子串不算允许",
+			method:     "GET",
+			reqHeaders: http.Header{"Content-Type": {"application/json"}},
+			resp: map[string]string{
+				"Access-Control-Allow-Methods": "GET",
+				"Access-Control-Allow-Headers": "content-type-evil",
+			},
+			wantErr: true,
+		},
+		{
+			name:       "acah 精确命中",
+			method:     "GET",
+			reqHeaders: http.Header{"Content-Type": {"application/json"}},
+			resp: map[string]string{
+				"Access-Control-Allow-Methods": "GET",
+				"Access-Control-Allow-Headers": "content-type",
+			},
+			wantErr: false,
+		},
+		{
+			name:       "acah 通配 *",
+			method:     "GET",
+			reqHeaders: http.Header{"Content-Type": {"application/json"}},
+			resp: map[string]string{
+				"Access-Control-Allow-Methods": "GET",
+				"Access-Control-Allow-Headers": "*",
+			},
+			wantErr: false,
+		},
+	}
+	for _, c := range cases {
+		r := newCORSRequest("http://a.test/x", "http://b.test/api", c.method, c.reqHeaders, false, corsModeCORS)
+		err := r.validatePreflightResponse(mkResp(c.resp))
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err=%v，期望 wantErr=%v", c.name, err, c.wantErr)
+		}
+	}
+}
+
 // ── 端到端：JS fetch / XHR 跨源行为 ───────────────────────────────
 
-// runFetchJSWithBase 在指定文档基准下运行脚本（跨源判定需要文档源）。
-func runFetchJSWithBase(t *testing.T, base, script string) string {
+// runFetchJSWithURLs 在指定**文档 URL** 与**解析基准**下运行脚本。
+//
+// 两者必须分开：CORS 的源取文档 URL（location.href），相对引用解析取
+// document.baseURI（含 `<base href>`）。只设一个会让另一侧静默退化。
+func runFetchJSWithURLs(t *testing.T, docURL, base, script string) string {
 	t.Helper()
 	in := jsc.NewInterpreter()
 	log := &jsc.BufferLogger{}
 	in.SetupGlobal(log)
 	RegisterFetch(in)
+	SetDocumentURLProvider(in, func() string { return docURL })
 	SetDocumentBaseProvider(in, func() string { return base })
-	t.Cleanup(func() { ClearDocumentBaseProvider(in) })
+	t.Cleanup(func() {
+		ClearDocumentBaseProvider(in)
+		ClearDocumentURLProvider(in)
+	})
+	if _, err := in.Run(script); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	return log.String()
+}
+
+// runFetchJSWithBase 是「文档 URL == baseURI」的常用情形包装。
+func runFetchJSWithBase(t *testing.T, base, script string) string {
+	return runFetchJSWithURLs(t, base, base, script)
+}
+
+func runXHRJSWithURLs(t *testing.T, docURL, base, script string) string {
+	t.Helper()
+	in := jsc.NewInterpreter()
+	log := &jsc.BufferLogger{}
+	in.SetupGlobal(log)
+	RegisterXMLHttpRequest(in)
+	SetDocumentURLProvider(in, func() string { return docURL })
+	SetDocumentBaseProvider(in, func() string { return base })
+	t.Cleanup(func() {
+		ClearDocumentBaseProvider(in)
+		ClearDocumentURLProvider(in)
+	})
 	if _, err := in.Run(script); err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
@@ -123,17 +237,69 @@ func runFetchJSWithBase(t *testing.T, base, script string) string {
 }
 
 func runXHRJSWithBase(t *testing.T, base, script string) string {
-	t.Helper()
-	in := jsc.NewInterpreter()
-	log := &jsc.BufferLogger{}
-	in.SetupGlobal(log)
-	RegisterXMLHttpRequest(in)
-	SetDocumentBaseProvider(in, func() string { return base })
-	t.Cleanup(func() { ClearDocumentBaseProvider(in) })
-	if _, err := in.Run(script); err != nil {
-		t.Fatalf("Run error: %v", err)
+	return runXHRJSWithURLs(t, base, base, script)
+}
+
+// TestCORSOriginUsesDocumentURLNotBase 守**源与解析基准分离**：
+//
+// 文档 URL = http://a.test/x.html、`<base href>` 指向另一个源（evil）时，
+// 跨源请求的 Origin 必须是**文档源**，服务器返回 ACAO=evil 必须 reject——
+// 否则页面只要写一行 `<base href="http://evil.test/">` 就能绕过 CORS。
+func TestCORSOriginUsesDocumentURLNotBase(t *testing.T) {
+	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer doc.Close()
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer evil.Close()
+	docOrigin := "http://127.0.0.1:" + portOf(t, doc.URL)
+	evilOrigin := "http://127.0.0.1:" + portOf(t, evil.URL)
+
+	var sawOrigin string
+	// 服务器只认 evil（即 `<base href>` 指向的源）——引擎若用 baseURI 算源就会误判为匹配。
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawOrigin = r.Header.Get("Origin")
+		w.Header().Set("Access-Control-Allow-Origin", evilOrigin)
+		fmt.Fprint(w, "leaked-body")
+	}))
+	defer api.Close()
+
+	docURL := doc.URL + "/x.html"
+	base := evil.URL + "/" // 模拟 <base href="http://evil.test/">
+	out := runFetchJSWithURLs(t, docURL, base, fmt.Sprintf(`
+		fetch("%s/data").then(function (r) {
+			console.log("unexpected:" + r.status);
+			return r.text();
+		}).then(function (t) {
+			console.log("leaked:" + t);
+		}, function (e) {
+			console.log("rejected:" + e);
+		});
+	`, api.URL))
+	if sawOrigin != docOrigin {
+		t.Fatalf("Origin 必须取文档 URL（%s），不能取 baseURI（%s），实际 %q", docOrigin, evilOrigin, sawOrigin)
 	}
-	return log.String()
+	if !strings.Contains(out, "rejected") || strings.Contains(out, "leaked-body") {
+		t.Fatalf("ACAO=%s（baseURI 源）与文档源不匹配，必须 reject，输出：%q", evilOrigin, out)
+	}
+
+	// 对照组：ACAO=文档源 → 成功（证明不是一律拒绝）。
+	apiOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", docOrigin)
+		fmt.Fprint(w, "doc-origin-body")
+	}))
+	defer apiOK.Close()
+	out = runFetchJSWithURLs(t, docURL, base, fmt.Sprintf(`
+		fetch("%s/data").then(function (r) {
+			console.log("status=" + r.status);
+			return r.text();
+		}).then(function (t) {
+			console.log("body=" + t);
+		}, function (e) {
+			console.log("rejected:" + e);
+		});
+	`, apiOK.URL))
+	if !strings.Contains(out, "doc-origin-body") {
+		t.Fatalf("ACAO=文档源时应成功，输出：%q", out)
+	}
 }
 
 func TestFetchCrossOriginCORS(t *testing.T) {

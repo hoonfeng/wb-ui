@@ -182,24 +182,48 @@ func (c *corsRequest) isSimple() bool {
 	return c.nonSafelistedHeaderNames() == ""
 }
 
+// headerTokenSet 把响应头按逗号拆成 token 集合（小写、trim、去空）。
+//
+// CORS 的 Access-Control-Allow-Methods / Allow-Headers 都是 **token 列表**，
+// 必须逐 token 精确比较：子串匹配会把 `POSTX` 当作允许 `POST`、把
+// `content-type-evil` 当作允许 `content-type`——安全边界直接失效。
+func headerTokenSet(h http.Header, name string) map[string]bool {
+	tokens := map[string]bool{}
+	for _, v := range h.Values(name) {
+		for _, tok := range strings.Split(v, ",") {
+			tok = strings.ToLower(strings.TrimSpace(tok))
+			if tok != "" {
+				tokens[tok] = true
+			}
+		}
+	}
+	return tokens
+}
+
 // validatePreflightResponse 校验 OPTIONS 预检响应。
 func (c *corsRequest) validatePreflightResponse(resp *http.Response) error {
 	if err := c.validateResponseHeaders(resp.Header); err != nil {
 		return err
 	}
-	allowMethods := strings.ToUpper(strings.Join(resp.Header.Values("Access-Control-Allow-Methods"), ","))
-	if !strings.Contains(allowMethods, c.method) {
-		return corsFail("preflight: Access-Control-Allow-Methods 不含 %s（收到 %q）", c.method, allowMethods)
+	// ★ 逐 token 精确匹配（不区分大小写），禁止子串匹配。
+	allowMethods := headerTokenSet(resp.Header, "Access-Control-Allow-Methods")
+	if !allowMethods[strings.ToLower(c.method)] {
+		return corsFail("preflight: Access-Control-Allow-Methods 不含 %s（收到 %q）",
+			c.method, strings.Join(resp.Header.Values("Access-Control-Allow-Methods"), ","))
 	}
-	allowHeaders := strings.ToLower(strings.Join(resp.Header.Values("Access-Control-Allow-Headers"), ","))
+	allowHeaders := headerTokenSet(resp.Header, "Access-Control-Allow-Headers")
+	// `*` 作为 ACAH 的通配（Fetch 标准：非 credentialed 预检可用 * 表示任意头）。
+	wildcard := allowHeaders["*"]
 	for _, name := range strings.Split(c.nonSafelistedHeaderNames(), ",") {
-		name = strings.TrimSpace(name)
+		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
-		if !strings.Contains(allowHeaders, name) {
-			return corsFail("preflight: Access-Control-Allow-Headers 不含 %q（收到 %q）", name, allowHeaders)
+		if wildcard || allowHeaders[name] {
+			continue
 		}
+		return corsFail("preflight: Access-Control-Allow-Headers 不含 %q（收到 %q）",
+			name, strings.Join(resp.Header.Values("Access-Control-Allow-Headers"), ","))
 	}
 	return nil
 }
@@ -214,10 +238,16 @@ func (c *corsRequest) validateResponseHeaders(h http.Header) error {
 		if acao == "*" {
 			return corsFail("credentials 模式下 Access-Control-Allow-Origin 不能是 *")
 		}
+		// ★ credentials 模式必须**精确**等于文档源：既不能是 *，也不能是任何
+		//   其他源（浏览器语义）。只查 ACAC 而不查源等于放行任意第三方。
+		if !strings.EqualFold(acao, c.docOrigin) {
+			return corsFail("credentials 模式下 Access-Control-Allow-Origin=%q 必须精确等于文档源 %q",
+				acao, c.docOrigin)
+		}
 		if !strings.EqualFold(strings.TrimSpace(h.Get("Access-Control-Allow-Credentials")), "true") {
 			return corsFail("credentials 模式缺少 Access-Control-Allow-Credentials: true")
 		}
-	} else if acao != "*" && acao != c.docOrigin {
+	} else if acao != "*" && !strings.EqualFold(acao, c.docOrigin) {
 		return corsFail("Access-Control-Allow-Origin=%q 与文档源 %q 不匹配", acao, c.docOrigin)
 	}
 	return nil

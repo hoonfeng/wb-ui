@@ -19,9 +19,13 @@
 //  1. 宿主 ResourceResolver **命中即放行**（任何策略下）：resolver 通道先于策略，
 //     宿主显式提供的资源不受策略限制（AllowHostResolved 档正是靠它放行，见
 //     resource_policy.go）；
-//  2. 媒体通道**没有网络通道**：`http(s)` / `blob:` 因此**恒拒**——这是**能力边界**
-//     而非策略差异（图片有 fetchResource 通道、媒体没有；现状即如此，未放宽）。该
-//     差异以 `hasNetworkChannel=false` 显式传给判定内核，而不是在这里写一遍规则。
+//  2. 媒体通道**没有内容注入通道**：`http(s)` / `blob:` 因此**恒拒**——这是**能力
+//     边界**而非策略差异（图片/样式/脚本有 fetchResource 取字节进引擎，媒体解码
+//     全在宿主，宿主没有「blob → 媒体字节」的注入路径；现状即如此，未放宽）。该
+//     差异以 `hasContentChannel=false` 显式传给判定内核 `resourceRefVerdict`
+//     （resource_ref_policy.go），内核里 blob 分支显式表达为
+//     `BlobKnown && hasContentChannel`——因此媒体侧**不需要**、也**不允许**再写
+//     一份 blob 规则；测试对这条语义有断言（resource_ref_policy_test.go）。
 
 package webkit
 
@@ -50,6 +54,7 @@ func (wv *WebView) MediaResourceAllowed(ref string) bool {
 		}
 	}
 	// ② 策略判定（唯一实现）：data: 恒放行、file/相对路径仅 AllowAll 放行、
-	//    http(s)/blob 在**没有网络通道**的媒体路径上恒拒。
+	//    http(s)/blob 在**没有内容注入通道**的媒体路径上恒拒
+	//    （blob 即便已登记也拒：媒体通道无内容注入通道，属能力边界）。
 	return wv.resourceRefAllowed(s, false)
 }

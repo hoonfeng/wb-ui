@@ -1109,6 +1109,10 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 			// ★ 相对引用基准 = document.baseURI（含 `<base href>`）：loadExternalResource
 			//   （link/script/img/@import）与 fetch/XHR 共用同一个基准定义。
 			page.SetDocumentBaseProvider(wv.jsInterpreter, func() string { return wv.documentBaseURL() })
+			// ★ 文档 URL 单独登记：CORS 的**源**只能取文档 URL。`<base href>`
+			//   只改解析基准、不改源（见 document_base.go）；两者混用会让页面
+			//   用 `<base href="http://evil.test/">` 伪造 Origin 绕过 CORS。
+			page.SetDocumentURLProvider(wv.jsInterpreter, wv.documentURL)
 		}
 	}
 	// DOM bindings MUST be registered BEFORE executing page scripts so that
@@ -1585,6 +1589,7 @@ func (wv *WebView) Destroy() {
 	// 1b. 文档基地址提供器（page 的全局登记表，闭包捕获本 WebView）——
 	// 不摘除会让全局表永久持有已销毁的 WebView。
 	page.ClearDocumentBaseProvider(wv.jsInterpreter)
+	page.ClearDocumentURLProvider(wv.jsInterpreter)
 	// 1c. 图片加载完成监听器（rendering 的全局集合同样捕获本 WebView）。
 	if wv.imageLoadedOff != nil {
 		wv.imageLoadedOff()

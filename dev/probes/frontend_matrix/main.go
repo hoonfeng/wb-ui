@@ -407,6 +407,26 @@ func main() {
 	defer srv.Close()
 	fmt.Printf("本地服务器：%s\n跨源（允许）：%s\n跨源（拒绝）：%s\n\n", srv.URL, corsOK.URL, corsDeny.URL)
 
+	// ★ CORS 严格断言用的两个源（第 7 场景）：
+	//   corsThirdPartyACAO：ACAO 设为**第三方源**（corsDeny 的源，不是文档源、也不是 *），
+	//     并带 ACAC:true——credentials 模式下只查 ACAC 不查源的话就会误放行；
+	//   corsDocOriginACAO：ACAO 设为文档源（对照组，证明不是一律拒绝）。
+	var corsSawOrigin string
+	corsThirdPartyACAO := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		corsSawOrigin = r.Header.Get("Origin")
+		w.Header().Set("Access-Control-Allow-Origin", corsDeny.URL)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "third-party-body")
+	}))
+	defer corsThirdPartyACAO.Close()
+	corsDocOriginACAO := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", srv.URL)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "doc-origin-body")
+	}))
+	defer corsDocOriginACAO.Close()
+
 	load := func(name, path string) *webkit.WebView {
 		wv := webkit.NewWebViewWithMode(webkit.ModeBrowser)
 		if err := wv.LoadURL(srv.URL + path); err != nil {
@@ -541,6 +561,12 @@ fetch("` + corsOK.URL + `/ok").then(function (r) { return r.text(); }).then(func
     .then(function (r) { return "ok:" + r.status; }, function (e) { return "rejected:" + e; });
 }).then(function (t) {
   window.__cors.credentials = t;
+  // ★ credentials + ACAO 指向**第三方源**（带 ACAC:true）：必须 reject——
+  //   credentials 模式下 ACAO 必须精确等于文档源，不能是任何其他源。
+  return fetch("` + corsThirdPartyACAO.URL + `/cred", { credentials: "include" })
+    .then(function (r) { return "ok:" + r.status; }, function (e) { return "rejected:" + e; });
+}).then(function (t) {
+  window.__cors.credentialsThirdParty = t;
   // no-cors：opaque 响应（status 0 / type opaque / 内容不可读）。
   return fetch("` + corsOK.URL + `/ok", { mode: "no-cors" })
     .then(function (r) { return "status:" + r.status + ":type:" + r.type; },
@@ -570,8 +596,47 @@ fetch("` + corsOK.URL + `/ok").then(function (r) { return r.text(); }).then(func
 			"跨源 fetch（无 ACAO）被拒绝（错误信息指出缺少 ACAO）")
 		check(strings.Contains(got, `"preflight":"cors-body"`), "非简单请求：OPTIONS 预检通过后成功")
 		check(strings.Contains(got, `"credentials":"rejected`), "credentials:include + ACAO:* 被拒绝")
+		check(strings.Contains(got, `"credentialsThirdParty":"rejected`),
+			"credentials:include + ACAO 指向第三方源被拒绝（必须精确等于文档源）")
 		check(strings.Contains(got, `"noCors":"status:0:type:opaque"`), "mode:no-cors 返回 opaque 响应")
 		check(strings.Contains(got, `"sameOrigin":"same-origin-body"`), "同源请求不受 CORS 限制")
+		wv.Destroy()
+	}
+
+	// ── 7b. 源与解析基准分离（<base href> 指向异源）──────────────
+	fmt.Println("\n── 7b. 源与解析基准分离 ──")
+	{
+		// 页面用 <base href> 把**解析基准**指到异源；fetch 用绝对 URL，因此这里
+		// 只考察 Origin 的计算。正确行为：Origin 取文档 URL（本文档服务器的源），
+		// 而不是 baseURI —— 否则页面写一行 <base href> 就能伪造源绕过 CORS。
+		basePage := `<!DOCTYPE html><html><head>
+<base href="` + corsDeny.URL + `/">` + `</head><body><script>
+window.__corsBase = {};
+fetch("` + corsThirdPartyACAO.URL + `/x").then(function (r) { return r.text(); })
+  .then(function (t) { window.__corsBase.thirdParty = "leaked:" + t; },
+        function (e) { window.__corsBase.thirdParty = "rejected:" + e; })
+  .then(function () {
+    return fetch("` + corsDocOriginACAO.URL + `/y")
+      .then(function (r) { return r.text(); }, function (e) { return "rejected:" + e; });
+  }).then(function (t) {
+    window.__corsBase.docOrigin = t;
+    window.__done = true;
+  });
+</script></body></html>`
+		mux.HandleFunc("/cors/base.html", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, basePage)
+		})
+		corsSawOrigin = ""
+		wv := load("cors-base", "/cors/base.html")
+		got := evalStr(wv, `JSON.stringify(window.__corsBase)`)
+		fmt.Printf("     window.__corsBase = %s（服务器收到 Origin=%q）\n", got, corsSawOrigin)
+		check(corsSawOrigin == srv.URL,
+			"<base href> 指向异源时 Origin 仍取文档源（实际 "+corsSawOrigin+"，期望 "+srv.URL+"）")
+		check(strings.Contains(got, `"thirdParty":"rejected`),
+			"ACAO 指向 <base href> 源（第三方）必须 reject（不能因 baseURI 伪造源而放行）")
+		check(strings.Contains(got, `"docOrigin":"doc-origin-body"`),
+			"ACAO=文档源时通过（对照组）")
 		wv.Destroy()
 	}
 
