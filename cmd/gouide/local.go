@@ -131,6 +131,35 @@ func (a *localAssets) LoadPage(wv *webkit.WebView) error {
 	return nil
 }
 
+// loadLocal 执行完整的本地装配：定位目录 → 注册 /api 拦截与插件资产拦截 →
+// 安装 WebSocket 桥 → 读磁盘 index.html 装配。返回的桥由调用方负责 Shutdown。
+//
+// 失败时调用方应回退到 hybrid（HTTP 装配）：本地形态是实验分支，不因目录
+// 缺失/磁盘产物过期把用户挡在门外。
+func loadLocal(wv *webkit.WebView, base, webDirFlag, pluginsFlag string) (*wsBridge, error) {
+	webDir, err := discoverWebDir(webDirFlag)
+	if err != nil {
+		return nil, err
+	}
+	pluginsDir, err := discoverPluginsDir(pluginsFlag)
+	if err != nil {
+		return nil, err
+	}
+	assets := &localAssets{webDir: webDir, pluginsDir: pluginsDir}
+	logf("本地加载：web=%s plugins=%s", webDir, pluginsDir)
+	// 拦截与 WS 桥必须先于装配注册（bridge 路由与 Go 全局函数都在 LoadHTML
+	// 期间被注入解释器；页面脚本一执行就可能 fetch / new WebSocket）。
+	installIntercepts(base, assets)
+	wsb := newWSBridge(base)
+	wsb.Install(wv)
+	if err := assets.LoadPage(wv); err != nil {
+		wsb.Shutdown()
+		return nil, err
+	}
+	logf("页面已本地装配：%s（拦截 /api 与 WebSocket → %s）", docBaseURL, base)
+	return wsb, nil
+}
+
 // injectHeadScript 把脚本插到 <head> 之后（大小写不敏感）；没有 <head> 时插到
 // 文档最前。script 内容来自本包常量，不需要转义。
 func injectHeadScript(html, script string) string {

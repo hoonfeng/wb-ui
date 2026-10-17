@@ -5,12 +5,16 @@
 // 绝不占用默认 9090）。双击本程序即可得到完整的 IDE 桌面窗口；关闭窗口时由
 // 本程序拉起的后端进程一并退出（-keep-alive 可保留服务）。
 //
-// 页面加载有两条路：
+// 页面加载有三种模式（-mode，默认 hybrid）：
 //
-//	-local（默认）  本地加载 + 拦截：index.html 与插件资产直接从磁盘读
-//	                （local.go），/api/* 由宿主拦截转发到后端（intercept.go），
-//	                页面不需要 HTTP 服务器提供任何静态文件。
-//	-http          旧形态：LoadURL(http://127.0.0.1:<port>/)，整站走真实 HTTP。
+//	hybrid（默认）  HTTP 装配 + WebSocket 桥：从后端取 index.html，以
+//	                http://127.0.0.1:<port>/ 为文档来源装配。origin/host/protocol、
+//	                脚本/样式/图片/fetch 全部与浏览器一致（httpmode.go）；引擎的
+//	                WebSocket 是 stub，故仍注入 shim 由宿主桥接（wsbridge.go）。
+//	local          纯本地装配 + 请求拦截（实验形态）：index.html 与插件资产读磁盘
+//	                （local.go），/api/* 由宿主拦截转发（intercept.go）。文档 origin
+//	                为空串、cookie 不可写、资源型 URL 不走拦截 —— 功能面窄于 hybrid。
+//	http           LoadURL 旧形态：整站真实 HTTP，但没有 WS 桥，终端/事件流不可用。
 //
 // 用法：
 //
@@ -18,8 +22,8 @@
 //	gouide.exe -port 9098 -width 1600 -height 1000
 //	gouide.exe -attach                  # 只连接已在运行的后端（不拉起新进程）
 //	gouide.exe -backend D:/x/pair.exe   # 显式指定后端可执行文件
-//	gouide.exe -webdir D:/x/web -plugins D:/x/.pair/plugins
-//	gouide.exe -http                    # 回退到整站 HTTP 加载
+//	gouide.exe -mode local -webdir D:/x/web -plugins D:/x/.pair/plugins
+//	gouide.exe -mode http               # 整站 HTTP，但无 WebSocket 桥
 //	gouide.exe -headless -out x.png     # 无窗口自检：加载页面、打印摘要、可存 PNG
 package main
 
@@ -75,8 +79,9 @@ func main() {
 	port := flag.Int("port", defaultPort, "后端端口（作为 WEB_PORT 传给子进程；-attach 时连接该端口）")
 	backend := flag.String("backend", "", "后端可执行文件（pair.exe/companion.exe）；缺省自动发现")
 	attach := flag.Bool("attach", false, "只连接已在运行的后端，不拉起新进程")
-	local := flag.Bool("local", true, "本地加载 + 拦截（默认）：页面与插件资产读磁盘，/api 由宿主转发")
-	httpMode := flag.Bool("http", false, "回退到整站 HTTP 加载（LoadURL）")
+	mode := flag.String("mode", "hybrid", "页面加载模式：hybrid（HTTP 装配 + WS 桥，默认）/ local（纯本地 + 拦截）/ http（LoadURL，无 WS 桥）")
+	local := flag.Bool("local", false, "等价 -mode=local（兼容旧参数）")
+	httpMode := flag.Bool("http", false, "等价 -mode=http（兼容旧参数）")
 	webDirFlag := flag.String("webdir", "", "前端产物目录（含 index.html）；缺省自动发现")
 	pluginsFlag := flag.String("plugins", "", "插件包根目录；缺省自动发现 .pair/plugins")
 	width := flag.Int("width", 1600, "窗口宽（CSS px）")
@@ -127,39 +132,63 @@ func main() {
 	wv := webkit.NewWebView()
 	defer wv.Destroy()
 	wv.Resize(*width, *height)
-	// wsb 仅在本地模式创建（HTTP 模式由引擎真实网络承担，不需要桥）。
+	// 加载模式（2026-10 排查后默认 hybrid）：
+	//   hybrid = HTTP 装配 + WS 桥：origin/子资源/响应头与浏览器一致，终端与
+	//            事件流仍可用（引擎 WebSocket 是 stub，必须由宿主桥接）；
+	//   local  = 纯本地装配 + 拦截（实验：origin 为空、cookie 不可写）；
+	//   http   = LoadURL 旧形态（无 WS 桥）。
+	loadMode := strings.ToLower(strings.TrimSpace(*mode))
+	if *local {
+		loadMode = "local"
+	}
+	if *httpMode {
+		loadMode = "http"
+	}
+	if loadMode != "hybrid" && loadMode != "local" && loadMode != "http" {
+		logf("未知加载模式 %q（可用：hybrid/local/http）", loadMode)
+		os.Exit(2)
+	}
 	var wsb *wsBridge
-	// ★ 默认本地加载 + 拦截：静态资源读磁盘，/api 由宿主转发；-http 回退旧形态。
-	if *local && !*httpMode {
-		webDir, err := discoverWebDir(*webDirFlag)
-		if err != nil {
-			logf("本地加载失败：%v", err)
-			os.Exit(2)
-		}
-		pluginsDir, err := discoverPluginsDir(*pluginsFlag)
-		if err != nil {
-			logf("本地加载失败：%v", err)
-			os.Exit(2)
-		}
-		assets := &localAssets{webDir: webDir, pluginsDir: pluginsDir}
-		logf("本地加载：web=%s plugins=%s", webDir, pluginsDir)
-		// 拦截与 WS 桥必须先于装配注册（bridge 路由与 Go 全局函数都在 LoadHTML
-		// 期间被注入解释器；页面脚本一执行就可能 fetch / new WebSocket）。
-		installIntercepts(base, assets)
+	if loadMode == "hybrid" {
+		// WS 桥先装：shim 在装配时注入 <head> 最前，页面脚本一执行就可能 new WebSocket。
 		wsb = newWSBridge(base)
 		wsb.Install(wv)
 		defer wsb.Shutdown()
-		if err := assets.LoadPage(wv); err != nil {
-			logf("页面加载失败（%s）：%v", webDir, err)
+		if err := loadHTTPPage(wv, base); err != nil {
+			logf("HTTP 装配失败：%v；回退 LoadURL（无 WS 桥）", err)
+			if err2 := wv.LoadURL(base + "/"); err2 != nil {
+				logf("页面加载失败（%s/）：%v", base, err2)
+			}
 		} else {
-			logf("页面已本地装配：%s（拦截 /api 与 WebSocket → %s）", docBaseURL, base)
+			logf("页面已 HTTP 装配：%s/（子资源走真实 HTTP，WebSocket 由宿主桥接）", base)
 		}
-	} else {
-		url := base + "/"
-		if err := wv.LoadURL(url); err != nil {
-			logf("页面加载失败（%s）：%v", url, err)
+	}
+	if loadMode == "local" {
+		b, err := loadLocal(wv, base, *webDirFlag, *pluginsFlag)
+		if err != nil {
+			logf("本地装配失败：%v；回退 HTTP 装配", err)
+			loadMode = "hybrid"
+			wsb = newWSBridge(base)
+			wsb.Install(wv)
+			defer wsb.Shutdown()
+			if err := loadHTTPPage(wv, base); err != nil {
+				logf("HTTP 装配失败：%v；回退 LoadURL（无 WS 桥）", err)
+				if err2 := wv.LoadURL(base + "/"); err2 != nil {
+					logf("页面加载失败（%s/）：%v", base, err2)
+				}
+			} else {
+				logf("页面已 HTTP 装配：%s/（本地装配失败后的回退）", base)
+			}
 		} else {
-			logf("页面已加载：%s", url)
+			wsb = b
+			defer wsb.Shutdown()
+		}
+	}
+	if loadMode == "http" {
+		if err := wv.LoadURL(base + "/"); err != nil {
+			logf("页面加载失败（%s/）：%v", base, err)
+		} else {
+			logf("页面已加载：%s/（无 WebSocket 桥）", base)
 		}
 	}
 	// -eval 在窗口模式下也执行一次（诊断/标记用：如注入可见角标以便

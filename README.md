@@ -47,7 +47,7 @@
 | 目录 | 职责 |
 |---|---|
 | `cmd/browser` | 最小浏览器（导航/前进后退/刷新，`-verify` 为无头能力验证） |
-| `cmd/gouide` | PairCode IDE 桌面壳：本地加载 + 请求拦截（`-local` 默认）或整站 HTTP（`-http`），见 [docs/gouide-local-mode.md](docs/gouide-local-mode.md) |
+| `cmd/gouide` | PairCode IDE 桌面壳：`-mode hybrid`（默认，HTTP 装配 + WebSocket 桥）/ `local`（纯本地装配 + 拦截）/ `http`（LoadURL，无 WS 桥），见 [docs/gouide-local-mode.md](docs/gouide-local-mode.md) |
 | `cmd/pipeline_diag` | 解析 `[PIPELINE:Stage]` 日志并检测管线异常 |
 | `cmd/translation-progress` | 统计各文件的翻译元数据头（Translation of / Completeness） |
 | `examples/` | 示例程序（minibrowser / mixed / uitoolkit / bridge_demo / vue_load_test） |
