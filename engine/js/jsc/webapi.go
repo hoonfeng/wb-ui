@@ -28,7 +28,11 @@ func (r *Interpreter) RegisterWebAPIs() {
 	r.registerAbortController()
 	r.registerWeakRef()
 	r.registerBlob()
+	r.registerFile()
 	r.registerFileReader()
+	r.registerFormData()
+	r.registerEventSource()
+	r.registerBrowserStubs()
 }
 
 // ── Blob / File / FileReader ─────────────────────────────

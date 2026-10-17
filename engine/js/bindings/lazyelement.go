@@ -42,6 +42,30 @@ type lazyElemProps struct {
 	// 属性，与内联 onclick attribute 联动：getter 优先返回它，其次返回
 	// 基于 attribute 代码的包装函数）。
 	onclickFn jsc.JSValue
+
+	// handlers 记录 `el.on<type> = fn` 注册到 dom 层的事件监听器（IDL 事件
+	// 处理器属性语义）。★ 必须真的注册进 dom 层：宿主派发的资源事件
+	// （<img> load/error、<script> load、media 等）走 dom.EventTarget 的
+	// 监听器列表，只在 JS 侧存一个 expando 属性永远不会被回调。
+	// 此前只有 onclick 走这条通路，`img.onload = fn` 因此永不触发
+	// （图片预览/懒加载/骨架屏全部失效）。
+	handlers map[string]*jsListener
+}
+
+// isEventHandlerProp 判断属性名是否为 IDL 事件处理器属性（`on<event>`）。
+// 浏览器语义：任何 `on` + 小写字母串都可以当事件处理器（未知名永不触发），
+// 这里只按形态判断，注册到 dom 层后由实际派发决定是否命中。
+func isEventHandlerProp(key string) bool {
+	if len(key) <= 2 || key[0] != 'o' || key[1] != 'n' {
+		return false
+	}
+	for i := 2; i < len(key); i++ {
+		c := key[i]
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 // elemAccessorProps：accessor（活值）属性名集合——每次读取重新求值，
@@ -126,6 +150,10 @@ func (p *lazyElemProps) Get(key string) jsc.JSValue {
 	}
 	val, acc, ok := installElementProperty(p.interp, p.el, key)
 	if !ok {
+		// 未设置处理器的 on* 属性在浏览器里是 null（不是 undefined）。
+		if isEventHandlerProp(key) {
+			return jsc.Null()
+		}
 		return jsc.Undefined()
 	}
 	if acc != nil {
@@ -154,10 +182,44 @@ func (p *lazyElemProps) Set(key string, v jsc.JSValue) bool {
 		}
 		return true
 	}
+	// IDL 事件处理器属性（onload/onerror/onscroll/…）：注册进 dom 层才会有回调。
+	// 放在 installElementProperty 之后：媒体元素的 on* 由 mediaElement 状态机
+	// 先行处理，剩下的通用事件走这条通路。
+	if isEventHandlerProp(key) {
+		p.setEventHandler(key[2:], v)
+		return true
+	}
 	// data 属性/未知属性：expando 覆写（el.appendChild = fn 与浏览器一致）。
 	delete(p.cached, key)
 	p.expando[key] = v
 	return true
+}
+
+// setEventHandler 安装/替换/移除一个 IDL 事件处理器属性（`el.on<type> = fn`）。
+// 与 addEventListener 等价（浏览器语义：处理器属性就是一个监听器槽位），
+// 只是同一类型只保留最新一个函数。
+func (p *lazyElemProps) setEventHandler(evType string, v jsc.JSValue) {
+	key := "on" + evType
+	// 先移除旧的监听器与 expando 值。
+	if old := p.handlers[evType]; old != nil {
+		p.el.RemoveEventListener(evType, old, false)
+		delete(p.handlers, evType)
+	}
+	delete(p.expando, key)
+	if v.IsNull() || v.IsUndefined() {
+		return
+	}
+	// 非函数值在浏览器里按 null 处理（不注册），attribute 反射留空。
+	if !v.IsFunction() {
+		return
+	}
+	if p.handlers == nil {
+		p.handlers = map[string]*jsListener{}
+	}
+	l := &jsListener{interp: p.interp, fn: v}
+	p.el.AddEventListener(evType, l, false)
+	p.handlers[evType] = l
+	p.expando[key] = v
 }
 
 func (p *lazyElemProps) Has(key string) bool {

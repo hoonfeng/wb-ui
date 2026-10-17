@@ -495,15 +495,40 @@ func (r *Interpreter) wrapNativeFunc(fn NativeFunc, interp *Interpreter) beValue
 	})
 }
 
+// promiseArgOf 把 JSValue 转成 goja Promise resolve/reject 的实参。
+//
+// ★ 同一运行时的值必须**原样传入**：vendored goja 的 ToValue 对 Value 返回
+// 自身，原型链与 Internal 状态（Headers/Response 的 Go 侧状态）都保留。
+// 若一律 Export()，对象会被摊平成 map（只剩 own 字段、丢掉原型），
+// `fetch().then(function (r) { r.text() })` 就会抛 "Object has no member 'text'"，
+// `r instanceof Response` 也恒为 false（实测探针 browser_api_probe 复现）。
+//
+// ★ 反面：本仓库存在用 `jsc.NewObject(nil)`（独立 goja runtime）构造的
+// 对象（如 newDOMExceptionValue）。goja 禁止跨 runtime 传递 Object，直接
+// 原样传会抛 "Illegal runtime transition of an Object"。这类跨 runtime
+// 值只能退回 Export()，由 ToValue 在本 runtime 重新建对象（与旧行为一致）。
+func (r *Interpreter) promiseArgOf(v JSValue) interface{} {
+	if v.v != nil {
+		if v.interp != nil && v.interp != r {
+			return v.Export()
+		}
+		return v.v
+	}
+	if v.nativeFn != nil {
+		return v.val(r.vm)
+	}
+	return beUndefined()
+}
+
 func (r *Interpreter) ResolvePromise(val JSValue) JSValue {
 	p, resolve, _ := r.vm.NewPromise()
-	_ = resolve(val.Export())
+	_ = resolve(r.promiseArgOf(val))
 	return JSValue{v: p.PromiseObj(), interp: r}
 }
 
 func (r *Interpreter) RejectPromise(errStr JSValue) JSValue {
 	p, _, reject := r.vm.NewPromise()
-	_ = reject(errStr.Export())
+	_ = reject(r.promiseArgOf(errStr))
 	return JSValue{v: p.PromiseObj(), interp: r}
 }
 

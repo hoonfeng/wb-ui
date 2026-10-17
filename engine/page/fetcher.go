@@ -1,7 +1,6 @@
 package page
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +25,10 @@ func RegisterFetch(rt *jsc.Interpreter) {
 // 真实网络请求。适配 UI 库模式：无隐式外部输入，且引擎的 fetch 是同步
 // 实现（阻塞 UI 线程），对 UI 宿主是危险操作。
 func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
+	// ★ 先装 Headers / Response / Request 构造器：fetch 返回的 Response 实例
+	//   要挂在这些构造器的 prototype 上（`r.headers instanceof Headers`、
+	//   `r instanceof Response` 成立），且页面可直接 `new Headers({...})`。
+	registerWebAPIObjects(rt)
 	fetchFn := jsc.NewNativeFunction("fetch", func(in *jsc.Interpreter, this jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
 		if len(args) < 1 {
 			return rejectPromise(in, fmt.Errorf("fetch: missing url argument"))
@@ -122,62 +125,18 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		if err != nil {
 			return rejectPromise(in, fmt.Errorf("fetch: read response failed: %w", err))
 		}
-		respObj := jsc.NewObject(in.ObjectPrototype())
-		respObj.SetClassName("Response")
-		respObj.Set("status", jsc.NumberValue(float64(resp.StatusCode)))
-		respObj.Set("ok", jsc.BooleanValue(resp.StatusCode >= 200 && resp.StatusCode < 300))
-		respObj.Set("statusText", jsc.StringValue(resp.Status))
-		respObj.Set("url", jsc.StringValue(url))
-		bodyText := string(respBody)
-		textFn := jsc.NewNativeFunction("text", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			return resolvePromise(in2, jsc.StringValue(bodyText))
-		}, 0)
-		respObj.Set("text", jsc.FunctionValue(textFn))
-		jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			// ★ 与 bridgeFetch 同一实现：Go 侧 encoding/json 解析 → ToJSValue
-			//   直转 JS 对象/数组。绝不能用 Run/RunJS 把响应体当 JS 代码执行：
-			//   JSON 文本 {"rev":…} 处于语句位置会被读成「块 + 标签语句」→
-			//   SyntaxError: Unexpected token :（实测 /api/ui-boot 即死于此）；
-			//   即便写成表达式（[…]），旧代码还会用 fmt.Sprintf("%v") 把结果
-			//   转成**字符串**返回 —— 调用方 `await res.json()` 拿到字符串而非
-			//   对象/数组，前端装配链路（gou-ide：/api/ui-boot → 区域包 client
-			//   半装载）整条断掉，槽位全部空态占位。
-			var parsed any
-			if err := json.Unmarshal([]byte(bodyText), &parsed); err != nil {
-				return rejectPromise(in2, fmt.Errorf("fetch: json parse failed: %w", err))
-			}
-			// ★ 必须在**当前解释器**里构造：bindings.ToJSValue 内部走
-			//   jsc.NewObject(nil)，proto 为 nil 时会新建一个独立 goja runtime，
-			//   返回的对象属于另一个 runtime → goja 抛
-			//   "Illegal runtime transition of an Object"。解释器自带的 ValueOf
-			//   用本 runtime 的 vm.NewObject/NewArray 构造，且覆盖 json.Unmarshal
-			//   的全部产出类型（nil/bool/float64/string/[]any/map[string]any）。
-			return resolvePromise(in2, in2.ValueOf(parsed))
-		}, 0)
-		respObj.Set("json", jsc.FunctionValue(jsonFn))
-		// Response.blob()：字节以内部字段 __wbBlobData 承载（与 jsc 包 registerBlob/
-		// registerFileReader 约定一致），FileReader.readAsDataURL 直接消费。
-		blobFn := jsc.NewNativeFunction("blob", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-			bo := jsc.NewObject(in2.ObjectPrototype())
-			bo.Set("size", jsc.NumberValue(float64(len(respBody))))
-			bo.Set("type", jsc.StringValue(resp.Header.Get("Content-Type")))
-			bo.Set("__wbBlobData", jsc.StringValue(bodyText))
-			bo.Set("text", jsc.FunctionValue(jsc.NewNativeFunction("text",
-				func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
-					return resolvePromise(in3, jsc.StringValue(bodyText))
-				}, 0)))
-			bo.Set("arrayBuffer", jsc.FunctionValue(jsc.NewNativeFunction("arrayBuffer",
-				func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
-					return resolvePromise(in3, jsc.StringValue(bodyText))
-				}, 0)))
-			return resolvePromise(in2, jsc.ObjectValue(bo))
-		}, 0)
-		respObj.Set("blob", jsc.FunctionValue(blobFn))
-		headersObj := jsc.NewObject(in.ObjectPrototype())
-		for k, vs := range resp.Header {
-			headersObj.Set(k, jsc.StringValue(strings.Join(vs, ", ")))
-		}
-		respObj.Set("headers", jsc.ObjectValue(headersObj))
+		// ★ 返回真正的 Response 实例（全局 Response 构造器的 prototype）：
+		//   headers 是 Headers 对象（get/has/forEach/entries 齐全），body 由
+		//   responseState 承载（text/json/blob/clone/arrayBuffer）。此前 headers
+		//   是纯数据对象，页面按浏览器习惯调 r.headers.get(...) 直接抛
+		//   "Object has no member 'get'"（gou-ide 导出/下载链路实测中断）。
+		respObj := newResponseInstance(in, &responseState{
+			body:       string(respBody),
+			headers:    headersStateFromHTTP(resp.Header),
+			status:     resp.StatusCode,
+			statusText: http.StatusText(resp.StatusCode),
+			url:        url,
+		})
 		return resolvePromise(in, jsc.ObjectValue(respObj))
 	}, 1)
 	rt.GlobalObject().Set("fetch", jsc.FunctionValue(fetchFn))
@@ -350,6 +309,21 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 			return jsc.StringValue("")
 		}, 0)
 		obj.Set("getAllResponseHeaders", jsc.FunctionValue(getAllRespHeadersFn))
+		// ★ XMLHttpRequest.getResponseHeader / responseURL：此前只有
+		//   getAllResponseHeaders，前端最常见的 `xhr.getResponseHeader('Content-Type')`
+		//   直接抛 "Object has no member 'getResponseHeader'"（探针实测）。
+		respHeaderState := headersStateFromHTTP(resp.Header)
+		obj.Set("getResponseHeader", jsc.FunctionValue(jsc.NewNativeFunction("getResponseHeader",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) < 1 {
+					return jsc.Null()
+				}
+				if v, ok := respHeaderState.get(jscToString(args[0])); ok {
+					return jsc.StringValue(v)
+				}
+				return jsc.Null()
+			}, 1)))
+		obj.Set("responseURL", jsc.StringValue(url))
 		obj.Set("responseText", jsc.StringValue(string(respBody)))
 		obj.Set("response", jsc.StringValue(string(respBody)))
 		obj.Set("readyState", jsc.NumberValue(4))
@@ -393,6 +367,16 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		xhr.Set("response", jsc.Null())
 		xhr.Set("timeout", jsc.NumberValue(0))
 		xhr.Set("withCredentials", jsc.BooleanValue(false))
+		xhr.Set("responseType", jsc.StringValue(""))
+		xhr.Set("responseURL", jsc.StringValue(""))
+		// upload（XMLHttpRequestUpload）：前端上传进度条读 xhr.upload.onprogress；
+		// 引擎没有真上传进度，但对象与方法必须存在（注册不抛错即可）。
+		upload := jsc.NewObject(nil)
+		upload.Set("addEventListener", jsc.FunctionValue(jsc.NewNativeFunction("addEventListener",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue { return jsc.Undefined() }, 2)))
+		upload.Set("removeEventListener", jsc.FunctionValue(jsc.NewNativeFunction("removeEventListener",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue { return jsc.Undefined() }, 2)))
+		xhr.Set("upload", jsc.ObjectValue(upload))
 		return xhr
 	})
 	// Link constructor.prototype = proto so new XMLHttpRequest() inherits methods
@@ -544,6 +528,13 @@ func xhrSetResponse(in *jsc.Interpreter, obj *jsc.JSObject, status int, bodyText
 		}
 		return jsc.StringValue("")
 	}, 0)))
+	// bridge 路径没有真实响应头：getResponseHeader 恒返回 null（浏览器语义：
+	// 不存在的头返回 null），但方法本身必须存在，否则调用即抛错。
+	obj.Set("getResponseHeader", jsc.FunctionValue(jsc.NewNativeFunction("getResponseHeader",
+		func(_ *jsc.Interpreter, _ jsc.JSValue, _ []jsc.JSValue) jsc.JSValue {
+			return jsc.Null()
+		}, 1)))
+	obj.Set("responseURL", jsc.StringValue(""))
 }
 
 // xhrBridgeCall 调用命中的 bridge 路由，返回 (status, body)。与 fetch 的
@@ -650,52 +641,15 @@ func bridgeFetch(in *jsc.Interpreter, args []jsc.JSValue, url string, route *bri
 	if status >= 400 {
 		statusText = "Error"
 	}
-	respObj := jsc.NewObject(in.ObjectPrototype())
-	respObj.SetClassName("Response")
-	respObj.Set("status", jsc.NumberValue(float64(status)))
-	respObj.Set("ok", jsc.BooleanValue(status >= 200 && status < 300))
-	respObj.Set("statusText", jsc.StringValue(statusText))
-	respObj.Set("url", jsc.StringValue(url))
-
-	textFn := jsc.NewNativeFunction("text", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		return resolvePromise(in2, jsc.StringValue(bodyText))
-	}, 0)
-	respObj.Set("text", jsc.FunctionValue(textFn))
-
-	jsonFn := jsc.NewNativeFunction("json", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		// ★ 性能：不要用 RunJS("(" + body + ")") 把 JSON 当 JS 代码解析——
-		//   goja 对 MB 级 JSON 的 parse+codegen 极慢（启动 22 秒热点之一）。
-		//   改用 Go 侧 encoding/json 解析 + ToJSValue 直转 JS 对象，快一个量级。
-		var parsed any
-		if err := json.Unmarshal([]byte(bodyText), &parsed); err != nil {
-			return rejectPromise(in2, fmt.Errorf("bridge: json parse failed: %w", err))
-		}
-		// ★ 用当前解释器的 ValueOf，不要 bindings.ToJSValue：后者经
-		//   jsc.NewObject(nil) 会新建独立 runtime，对象跨 runtime 使用即抛
-		//   "Illegal runtime transition of an Object"（与真实 HTTP 分支同因）。
-		return resolvePromise(in2, in2.ValueOf(parsed))
-	}, 0)
-	respObj.Set("json", jsc.FunctionValue(jsonFn))
-	blobFn := jsc.NewNativeFunction("blob", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
-		bo := jsc.NewObject(in2.ObjectPrototype())
-		bo.Set("size", jsc.NumberValue(float64(len(bodyText))))
-		bo.Set("type", jsc.StringValue("application/json"))
-		bo.Set("__wbBlobData", jsc.StringValue(bodyText))
-		bo.Set("text", jsc.FunctionValue(jsc.NewNativeFunction("text",
-			func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
-				return resolvePromise(in3, jsc.StringValue(bodyText))
-			}, 0)))
-		bo.Set("arrayBuffer", jsc.FunctionValue(jsc.NewNativeFunction("arrayBuffer",
-			func(in3 *jsc.Interpreter, t3 jsc.JSValue, a3 []jsc.JSValue) jsc.JSValue {
-				return resolvePromise(in3, jsc.StringValue(bodyText))
-			}, 0)))
-		return resolvePromise(in2, jsc.ObjectValue(bo))
-	}, 0)
-	respObj.Set("blob", jsc.FunctionValue(blobFn))
-
-	headersObj := jsc.NewObject(in.ObjectPrototype())
-	headersObj.Set("Content-Type", jsc.StringValue("application/json"))
-	respObj.Set("headers", jsc.ObjectValue(headersObj))
-
-	return resolvePromise(in, jsc.ObjectValue(respObj))
+	// ★ 与真实 HTTP 分支一致：返回 Response 实例（headers 是 Headers 对象，
+	//   页面可直接 headers.get/has/forEach/entries）。
+	hdrs := newHeadersState()
+	hdrs.set("Content-Type", "application/json")
+	return resolvePromise(in, jsc.ObjectValue(newResponseInstance(in, &responseState{
+		body:       bodyText,
+		headers:    hdrs,
+		status:     status,
+		statusText: statusText,
+		url:        url,
+	})))
 }

@@ -364,9 +364,11 @@ func FireResourceEvent(rt *jsc.Interpreter, el *dom.Element, typ string) {
 	ev.Set("type", jsc.StringValue(typ))
 	ev.Set("target", jsc.ObjectValue(wrapped))
 	evVal := jsc.ObjectValue(ev)
-	if h, ok := wrapped.GetByKey("on" + typ); ok && h.IsCallable() {
-		_, _ = rt.Call(h, jsc.ObjectValue(wrapped), []jsc.JSValue{evVal})
-	}
+	// ★ 只走 dispatchEvent：`el.on<type> = fn` 已由 lazyElemProps.setEventHandler
+	//   注册成 dom 层监听器（IDL 事件处理器槽位语义），在这里再手动调用
+	//   `on<type>` 会让同一个处理器被触发两次（实测 dynamic_script_test 的
+	//   events=["load","load"]）。dispatchEvent 会遍历监听器列表，属性处理器
+	//   与 addEventListener 注册的监听器各被调用一次，与浏览器一致。
 	if d, ok := wrapped.GetByKey("dispatchEvent"); ok && d.IsCallable() {
 		_, _ = rt.Call(d, jsc.ObjectValue(wrapped), []jsc.JSValue{evVal})
 	}
@@ -2524,6 +2526,11 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 			}
 			return jsc.BooleanValue(true)
 		}, 1)))
+
+	// window 的浏览器基础方法（open/close/postMessage/alert/confirm/prompt）。
+	// 注册在 window 事件系统之后：postMessage 要复用 windowEventListeners
+	// 派发 message 事件（同窗口/iframe 语义）。
+	registerWindowExtras(rt, g)
 
 	// MutationObserver 构造函数
 	g.Set("MutationObserver", jsc.FunctionValue(rt.NewConstructor("MutationObserver",
