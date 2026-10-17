@@ -2327,6 +2327,27 @@ func (c *Canvas) ApplyImageMaskTiled(img *skia.Image, maskRect, tileRect Rect, t
 	c.invalidatePixels()
 }
 
+// ResetFontCache drops every cached *skia.Font (Canvas-level plus the
+// package-level measurement caches). Call it after registering a new
+// typeface (@font-face): cached fonts hold the fallback face resolved
+// before the family existed, so text that already rendered once would
+// keep the old glyphs, and the width cache would keep laying out with the
+// old metrics.
+func (c *Canvas) ResetFontCache() {
+	if c == nil {
+		return
+	}
+	c.fontCacheMu.Lock()
+	c.fontCache = make(map[fontKey]*skia.Font)
+	c.fontCacheMu.Unlock()
+	globalFontCacheMu.Lock()
+	globalFontCache = make(map[fontKey]*skia.Font)
+	globalFontCacheMu.Unlock()
+	globalWidthCacheMu.Lock()
+	globalWidthCache = make(map[widthCacheKey]float64)
+	globalWidthCacheMu.Unlock()
+}
+
 // Release frees Skia resources held by this Canvas.
 func (c *Canvas) Release() {
 	if c.fillPaint != nil {
@@ -2680,10 +2701,10 @@ func firstConcreteFamily(list string) string {
 		//   sans-serif/ui-sans-serif/-apple-system = Noto Sans SC，
 		//   system-ui = 微软雅黑）。此表只在无字体管理器、或
 		//   LookupTypeface 未命中时兜底，两条路径不得给出不同字体。
-		"sans-serif":    "Noto Sans SC",
-		"monospace":     "Consolas",
-		"cursive":       "Comic Sans MS",
-		"fantasy":       "Impact",
+		"sans-serif": "Noto Sans SC",
+		"monospace":  "Consolas",
+		"cursive":    "Comic Sans MS",
+		"fantasy":    "Impact",
 		// system-ui → UI face（与 fontmgr.resolveFamily 保持一致，两条路径
 		// 不得给出不同字体：Edge 的 system-ui 实测 = Microsoft YaHei UI，
 		// 差别在垂直度量，见 fontmgr.go resolveFamily 的 system-ui 注释）。

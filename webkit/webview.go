@@ -207,6 +207,19 @@ func installBridgeDispatch() {
 			}
 			return fr.StyleSheets()
 		}
+		// getComputedStyle 的规则来源：比 document.styleSheets 多出 @import
+		// 展开出来的导入表（它们不进入 CSSOM 顶层列表，但参与样式计算）。
+		bindings.DocumentCascadeSheets = func(doc *dom.Document) []*css.CSSStyleSheet {
+			wv := webViewForDocument(doc)
+			if wv == nil || wv.mainFrame == nil {
+				return nil
+			}
+			fr := wv.mainFrame.Frame()
+			if fr == nil {
+				return nil
+			}
+			return fr.AllStyleSheets()
+		}
 		bindings.GetElementBoxRectFast = func(el *dom.Element) (float64, float64, float64, float64) {
 			wv := webViewForNode(el)
 			if wv == nil {
@@ -497,6 +510,12 @@ type WebView struct {
 	// destroyed 标记 WebView 已销毁（Destroy 后不可再使用）。
 	destroyed bool
 
+	// fontFaces 记录已处理过的 @font-face（family+候选集合去重，见
+	// fontface.go）。样式表随 DOM 变更反复接入，没有这条去重会反复下载
+	// 同一份字体并重置字体缓存。
+	fontFaceMu sync.Mutex
+	fontFaces  map[string]bool
+
 	// interact 引擎级鼠标交互管线（惰性创建）：裸 WebView 宿主（配置
 	// 窗口）喂入 HandleMouseButton/MouseMove/Wheel 获得浏览器标准交互
 	// （含 select 下拉弹层）。app.Host 场景仍走 Host 自身管线。
@@ -511,6 +530,11 @@ type WebView struct {
 	// 编辑/blur-Enter 提交 onchange。裸 WebView 宿主（configwin）此前
 	// 自建 NewFormFocus — 统一走引擎入口。
 	formFocus *FormFocus
+
+	// esm 是 `<script type="module">` 的模块图（惰性创建，见 esm.go）：
+	// 同一文档内所有模块脚本与动态 import 共享一份实例缓存；文档重新加载
+	// （loadHTMLFrom / LoadURL）时重置。
+	esm *esmLoader
 
 	// mode 是运行模式（见 mode.go）：决定装配阶段接入哪些浏览器专属
 	// 能力（外部网络/子框架/并发脚本/导航/外部资源）。零值 = ModeBrowser，
@@ -750,6 +774,13 @@ func NewWebViewWithMode(mode Mode) *WebView {
 		//   同一策略链——宿主 ResourceResolver 优先、相对引用按文档 URL
 		//   解析、UI 库模式拒绝 http(s)/file（渲染层不再自己 httpGet）。
 		mf.ImageLoader = &webViewImageLoader{wv: wv}
+		// ★ ES Module 执行器：<script type="module"> 不交给 ScriptEngine
+		//   （后端解析器不支持 import/export），由 webkit/esm.go 完成
+		//   转译 + 依赖图 + 执行。
+		mf.ModuleExecutor = wv.RunModuleScript
+		// ★ @font-face：页面层在样式表接入时发现规则（含 @import 展开的
+		//   导入表），这里加载字体字节并注册到渲染字体管理器。
+		mf.FontFaceLoader = wv.loadFontFace
 	}
 	// ★ 异步图片加载完成 → 自动置脏重绘（浏览器语义：资源到位即
 	//   invalidate）。按需渲染的宿主（app.Host 的空闲帧跳过 Paint）若不等
@@ -1019,6 +1050,9 @@ func (wv *WebView) loadHTMLFrom(src, docURL string) error {
 	wv.navMu.Unlock()
 	defer wv.finishAssembly()
 	wv.setDocumentURL(docURL)
+	// 新文档 = 新模块图：ESM 实例缓存不能跨文档复用（与浏览器的
+	// 「每个 document 一份 module map」一致，也避免旧解释器的值泄漏）。
+	wv.resetESM()
 	// 模式在此刻生效并锁定（注入阶段按模式接线，见 mode.go）。
 	wv.modeLocked = true
 	if wv.mainFrame != nil {

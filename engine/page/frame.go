@@ -21,12 +21,12 @@ import (
 	"strings"
 	"time"
 
-	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/css"
 	"wb-ui/engine/debugenv"
 	"wb-ui/engine/dom"
 	"wb-ui/engine/html"
 	"wb-ui/engine/html5"
+	"wb-ui/engine/js/bindings"
 	"wb-ui/engine/rendering"
 	"wb-ui/engine/style"
 )
@@ -109,6 +109,20 @@ type Frame struct {
 	// ResourceResolver 设置（见 rendering.ImageResourceLoader）。
 	ImageLoader rendering.ImageResourceLoader
 
+	// FontFaceLoader is the host wiring for `@font-face` rules: the family
+	// name (unquoted CSS family) plus every `src: url(...)` candidate in
+	// declaration order (absolute URLs; the first one the renderer can
+	// decode wins — same fallback order as browsers). The host loads the
+	// font bytes through its resource policy and registers them with the
+	// renderer's font manager.
+	//
+	// Why discovery lives here and loading lives in the host: browsers split
+	// the two as well — CSSOM produces a CSSFontFaceRule, the font loader
+	// then fetches/decode the file. Stylesheet entry points (inline <style>,
+	// <link>, dynamic <link>, @import-expanded sheets) all funnel through
+	// registerFontFaces, so a page never needs a separate "font scan" pass.
+	FontFaceLoader FontFaceLoader
+
 	// ScriptLoader is an optional callback for loading external scripts
 	// referenced by <script src="..."> elements. It receives the src URL and
 	// should return the JS text, or an error. When nil AND ResourceLoader is
@@ -118,6 +132,14 @@ type Frame struct {
 	ScriptLoader func(src string) (string, error)
 
 	ResourceLoader *CachedResourceLoader
+
+	// ModuleExecutor 执行 `<script type="module">`（ES Module）。引擎的 JS
+	// 后端不支持 import/export 语法，因此模块脚本不走 ScriptEngine，而由
+	// WebView 侧的实现（webkit/esm.go）完成转译、依赖加载与执行。
+	//
+	// srcURL 是模块的绝对 URL（内联模块是文档 URL）；code 为空表示外部模块，
+	// 由执行器自行加载；inline 标记内联模块（同一文档可有多条，注册键需要区分）。
+	ModuleExecutor func(srcURL, code string, inline bool) error
 
 	// needsRenderTreeRebuild is set by MarkRenderTreeDirty when DOM mutations
 	// (appendChild / removeChild / style changes) occur. The flag is flushed
@@ -218,12 +240,24 @@ func (f *Frame) SetReadyState(s string) { f.readyState = s }
 // script-inserted <link rel=stylesheet> (how every gou-ide plugin ships its
 // CSS). It backs document.styleSheets (CSSOM §document.styleSheets).
 // ★ 两个列表都要报：仅报 styleSheets 会让插件注入的样式在页面上可见、
-//   却不出现在 document.styleSheets 里（库据此判断「样式已就绪」会误判）。
+//
+//	却不出现在 document.styleSheets 里（库据此判断「样式已就绪」会误判）。
 func (f *Frame) StyleSheets() []*css.CSSStyleSheet {
 	out := make([]*css.CSSStyleSheet, 0, len(f.styleSheets)+len(f.dynamicStyleSheets))
 	out = append(out, f.styleSheets...)
 	out = append(out, f.dynamicStyleSheets...)
 	return out
+}
+
+// AllStyleSheets 返回参与级联的**全部**样式表：除 StyleSheets 之外，还包含
+// 样式表里 `@import` 递归展开出来的导入表（它们不进入 document.styleSheets，
+// 但参与样式计算）。getComputedStyle 的读取方必须用它，否则用 @import 组织
+// 的 CSS 读不到规则（见 Resolver.Sheets 的注释）。
+func (f *Frame) AllStyleSheets() []*css.CSSStyleSheet {
+	if f == nil || f.resolver == nil {
+		return f.StyleSheets()
+	}
+	return f.resolver.Sheets()
 }
 
 // Resolver returns the style resolver used to build this frame's render tree.
@@ -291,6 +325,9 @@ func (f *Frame) SetDocument(doc *dom.Document) {
 	//   @import 拆分样式）。闭包读 f.StyleSheetLoader 字段：宿主后续替换
 	//   该字段时接线自动跟随。
 	f.resolver.StyleSheetLoader = f.importStyleSheetLoader()
+	// ★ @font-face 发现：导入表（@import 展开）不经过 extractAndAddStyles，
+	//   由解析器在展开时回调本 frame 注册字体（见 registerFontFaces）。
+	f.resolver.OnImportedStyleSheet = f.registerFontFaces
 
 	f.extractAndAddStyles()
 	// ★ 指纹同步：SetDocument 已按当前文档提取过样式，这里记下指纹，
@@ -672,6 +709,7 @@ func (f *Frame) extractAndAddStyles() {
 		rules := sheet.Rules()
 		f.resolver.AddStyleSheet(sheet)
 		f.styleSheets = append(f.styleSheets, sheet)
+		f.registerFontFaces(sheet)
 		Logf("extractAndAddStyles", "style[%d]: cssLen=%d rules=%d", i, len(cssText), len(rules))
 	}
 
@@ -718,6 +756,7 @@ func (f *Frame) extractAndAddStyles() {
 			p.ParseStyleSheetInto(sheet)
 			f.resolver.AddStyleSheet(sheet)
 			f.styleSheets = append(f.styleSheets, sheet)
+			f.registerFontFaces(sheet)
 			Logf("extractAndAddStyles", "link[%d]: sync loaded len=%d", linkCount, len(cssText))
 		}
 	}
@@ -748,6 +787,7 @@ func (f *Frame) AddStyleSheetFromText(owner dom.Node, href, cssText string) {
 	// ★ 进 dynamicStyleSheets 而非 styleSheets：外部样式表只加载一次，
 	//   绝不能参与 extractAndAddStyles 的「先全撤再重扫」（见字段注释）。
 	f.dynamicStyleSheets = append(f.dynamicStyleSheets, sheet)
+	f.registerFontFaces(sheet)
 	if f.renderView != nil {
 		f.renderView.MarkAllDirty()
 	}
@@ -786,9 +826,17 @@ func (c *frameStyleSheetClient) NotifyFinished(resource *CachedResource) {
 	rules := sheet.Rules()
 	c.frame.resolver.AddStyleSheet(sheet)
 	c.frame.styleSheets = append(c.frame.styleSheets, sheet)
+	c.frame.registerFontFaces(sheet)
 	Logf("extractAndAddStyles", "async: href=%q loaded len=%d rules=%d", c.href, len(cssText), len(rules))
 
+	// ★ 与 AddStyleSheetFromText 同理：AddStyleSheet **不清 per-element 样式
+	//   缓存**。装配期异步到达的 <link> 样式表若不清缓存，已经解析过样式的
+	//   元素（脚本/首帧期间访问过 getComputedStyle 或参与过布局）会继续返回
+	//   旧样式——整张表「加载成功但样式不生效」（探针 frontend_matrix 复现：
+	//   body 背景色与 #app 颜色都不变）。
+	c.frame.resolver.ClearCache()
 	if c.frame.renderView != nil {
+		c.frame.renderView.MarkAllDirty()
 		c.frame.view.SetNeedsLayout(true)
 		Logf("extractAndAddStyles", "async: setNeedsLayout")
 	}
@@ -812,6 +860,47 @@ func (f *Frame) executeInlineScripts() {
 		t := s.Type()
 		if t != "" && t != "text/javascript" && t != "module" {
 			Logf("ScriptLoad", "[%d] skip: type=%q", i, t)
+			continue
+		}
+
+		// ── ES Module：走宿主的模块执行器（转译 + 依赖图 + 执行）──────
+		// 引擎 JS 后端不支持 import/export 语法，不能交给 ScriptEngine。
+		if t == "module" {
+			if f.ModuleExecutor == nil {
+				Logf("ScriptLoad", "[%d] module: no executor, skip", i)
+				continue
+			}
+			if src := s.Src(); src != "" {
+				abs := f.resolveRef(src)
+				Logf("ScriptLoad", "[%d] module external: src=%q", i, abs)
+				code := ""
+				if f.ScriptLoader != nil {
+					if c, err := f.ScriptLoader(abs); err == nil {
+						code = c
+					} else {
+						Logf("ScriptLoad", "[%d] module load FAIL: %v", i, err)
+					}
+				}
+				if err := f.ModuleExecutor(abs, code, false); err != nil {
+					Logf("ScriptLoad", "[%d] module EXEC FAIL: %v", i, err)
+				} else {
+					Logf("ScriptLoad", "[%d] module OK: src=%q", i, abs)
+				}
+				continue
+			}
+			code := s.Text()
+			if strings.TrimSpace(code) == "" {
+				Logf("ScriptLoad", "[%d] module inline empty", i)
+				continue
+			}
+			base := ""
+			if f.document != nil {
+				base = f.document.BaseURL()
+			}
+			Logf("ScriptLoad", "[%d] module inline: base=%q len=%d", i, base, len(code))
+			if err := f.ModuleExecutor(base, code, true); err != nil {
+				Logf("ScriptLoad", "[%d] module INLINE FAIL: %v", i, err)
+			}
 			continue
 		}
 

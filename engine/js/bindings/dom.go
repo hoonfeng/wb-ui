@@ -38,6 +38,12 @@ var DocumentReadyState func(doc *dom.Document) string
 // document.styleSheets 为空列表。
 var DocumentStyleSheets func(doc *dom.Document) []*css.CSSStyleSheet
 
+// DocumentCascadeSheets 由宿主（webkit.WebView）注入：返回参与**样式计算**的
+// 全部样式表 —— 比 DocumentStyleSheets 多出 @import 递归展开出来的导入表
+// （浏览器不把导入表算作顶层 document.styleSheets，但它们参与级联）。
+// 未注入时 getComputedStyle 退回 DocumentStyleSheets。
+var DocumentCascadeSheets func(doc *dom.Document) []*css.CSSStyleSheet
+
 // ViewportWidth / ViewportHeight 为 window.innerWidth/innerHeight 提供值
 // （webkit.WebView.Resize 同步）。CM6 的 visiblePixelRange 用它们计算可见
 // 像素视口，undefined 会产生 NaN → viewport 永不更新（滚动不重渲染行号）。
@@ -2087,7 +2093,7 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 		})))
 
 	// URL / URLSearchParams
-	g.Set("URL", jsc.FunctionValue(rt.NewConstructor("URL",
+	urlCtor := rt.NewConstructor("URL",
 		func(in *jsc.Interpreter, thisVal jsc.JSValue, args []jsc.JSValue) *jsc.JSObject {
 			obj := jsc.NewObject(in.ObjectPrototype())
 			href := ""
@@ -2165,7 +2171,49 @@ func RegisterDOMBindings(rt *jsc.Interpreter, document *dom.Document) {
 					return jsc.StringValue(href)
 				}, 0)))
 			return obj
-		})))
+		})
+	// ★ URL.createObjectURL / revokeObjectURL：blob: URL 是前端项目的常用
+	//   能力（文件预览、下载、Worker、图片本地预览）。Blob 在 jsc 层把原始
+	//   字节存在 BlobDataField 字段里，这里登记到 jsc 的会话表；fetch 与
+	//   资源加载再按 URL 取回内容（与浏览器一致，不经过网络）。
+	urlCtorValue := jsc.FunctionValue(urlCtor)
+	if ctor := urlCtorValue.AsObject(); ctor != nil {
+		ctor.Set("createObjectURL", jsc.FunctionValue(jsc.NewNativeFunction("createObjectURL",
+			func(in *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) < 1 || !args[0].IsObject() {
+					return jsc.StringValue("")
+				}
+				blob := args[0].AsObject()
+				if blob == nil {
+					return jsc.StringValue("")
+				}
+				data := ""
+				if v, ok := blob.GetByKey(jsc.BlobDataField); ok && !v.IsUndefined() && !v.IsNull() {
+					data = v.ToString()
+				}
+				mimeType := ""
+				if v, ok := blob.GetByKey("type"); ok && !v.IsUndefined() && !v.IsNull() {
+					mimeType = v.ToString()
+				}
+				origin := ""
+				if loc, ok := in.GlobalObject().GetByKey("location"); ok && loc.IsObject() {
+					if lo := loc.AsObject(); lo != nil {
+						if o, ok2 := lo.GetByKey("origin"); ok2 && !o.IsUndefined() && !o.IsNull() {
+							origin = o.ToString()
+						}
+					}
+				}
+				return jsc.StringValue(jsc.RegisterBlobURL(origin, data, mimeType))
+			}, 1)))
+		ctor.Set("revokeObjectURL", jsc.FunctionValue(jsc.NewNativeFunction("revokeObjectURL",
+			func(_ *jsc.Interpreter, _ jsc.JSValue, args []jsc.JSValue) jsc.JSValue {
+				if len(args) >= 1 {
+					jsc.RevokeBlobURL(args[0].ToString())
+				}
+				return jsc.Undefined()
+			}, 1)))
+	}
+	g.Set("URL", urlCtorValue)
 
 	// URLSearchParams 全局构造器
 	g.Set("URLSearchParams", jsc.FunctionValue(rt.NewConstructor("URLSearchParams",
@@ -6377,10 +6425,37 @@ func computedStyleFor(el dom.Node) map[string]string {
 	}
 	// 收集 document 中所有 <style> 元素文本并解析（指纹缓存复用）
 	texts, finger := collectStyleTexts(doc)
+	// ★ 外部样式表同样参与级联：浏览器 getComputedStyle 看到的是**整份文档**
+	//   的样式（<style> + <link rel=stylesheet> + 运行时注入的表）。此前这里
+	//   只解析 <style> 文本 —— 任何用外部 CSS 的站点 computed style 全是初始
+	//   值（探针 frontend_matrix：外部 CSS 的 body 背景仍是 rgba(0,0,0,0)、
+	//   #app 颜色仍是 rgb(0,0,0)），而布局/绘制走 frame.resolver 所以视觉正常，
+	//   形成「JS 读到的样式」与「画出来的样式」两套口径。
+	var extRules []css.Rule
+	allSheets := DocumentCascadeSheets
+	if allSheets == nil {
+		allSheets = DocumentStyleSheets
+	}
+	if allSheets != nil {
+		for _, sh := range allSheets(doc) {
+			if sh == nil {
+				continue
+			}
+			rs := sh.Rules()
+			extRules = append(extRules, rs...)
+			// 外部表数量/规则数混入指纹：HMR 或运行时注入改变样式表时让
+			// 解析缓存失效（<style> 文本指纹覆盖不到外部表）。
+			finger ^= uint64(len(rs)+1) * 1099511628211
+			finger *= 1099511628211
+		}
+	}
 	var rules []css.Rule
 	if styleSheetCache.doc == doc && styleSheetCache.finger == finger {
 		rules = styleSheetCache.rules
 	} else {
+		// 外部表在前、<style> 在后：内联样式通常写在文档后部，与浏览器
+		// 「按文档顺序级联」的方向一致。
+		rules = append(rules, extRules...)
 		for _, t := range texts {
 			rules = append(rules, css.NewParser(t).ParseStyleSheet()...)
 		}

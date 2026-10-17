@@ -71,6 +71,13 @@ func (r *Interpreter) blobPartBytes(p beValue) []byte {
 	if p == nil || beIsUndefined(p) || beIsNull(p) {
 		return nil
 	}
+	// ★ 字符串必须直接取 UTF-8 字节：String 包装对象同样有 length 与数字
+	//   索引（"abc".length === 3），走下面的类数组分支会把每个字符经
+	//   ToInteger() 变成 0 —— 实测 new Blob(["blob-body"]) 读回 9 个 NUL
+	//   （前端矩阵探针 blob 场景复现）。
+	if s, ok := p.Export().(string); ok {
+		return []byte(s)
+	}
 	if o := p.ToObject(r.vm); o != nil {
 		if d := o.Get(blobDataKey); d != nil && !beIsUndefined(d) && !beIsNull(d) {
 			return []byte(d.String())

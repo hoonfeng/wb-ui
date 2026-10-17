@@ -1568,7 +1568,23 @@ func installElementProperty(rt *jsc.Interpreter, el *dom.Element, key string) (j
 			return jsc.JSValue{}, nil, false
 		}
 		return jsc.JSValue{}, &elemAccessor{
-			get: func() jsc.JSValue { return jsc.StringValue(el.GetAttribute("src")) },
+			// ★ 反射属性返回**绝对化 URL**（浏览器语义：`img.src` / `script.src`
+			//   返回解析后的绝对地址，`getAttribute('src')` 才是原文）。此前直接
+			//   回传属性原文 → 依赖 `.src` 做拼接/比较/上报的库全部拿到相对路径
+			//   （探针 frontend_matrix：静态站 `img.src` 是 "img/logo.png"，
+			//   浏览器里是 http://host/static/img/logo.png）。
+			get: func() jsc.JSValue {
+				raw := el.GetAttribute("src")
+				if raw == "" {
+					return jsc.StringValue("")
+				}
+				if doc := el.OwnerDocument(); doc != nil {
+					if abs := dom.ResolveURL(doc.BaseURL(), raw); abs != "" {
+						return jsc.StringValue(abs)
+					}
+				}
+				return jsc.StringValue(raw)
+			},
 			set: func(v jsc.JSValue) {
 				el.SetAttribute("src", v.ToString())
 				if IFrameSrcChanged != nil && el.LocalName() == "iframe" {

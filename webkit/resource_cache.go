@@ -42,6 +42,10 @@ const (
 	PurposeMedia
 	// PurposeDocument：文档（宿主 LoadURL 走自己的取内容通道，此值用于日志）。
 	PurposeDocument
+	// PurposeFont：CSS `@font-face { src: url(...) }` 的字体文件。字体
+	// **不看 MIME**（与图片同理）：解码成功即采用，失败才算失败——真实
+	// 站点常把字体配成 application/octet-stream 或省略 content-type。
+	PurposeFont
 )
 
 func (p ResourcePurpose) String() string {
@@ -54,6 +58,8 @@ func (p ResourcePurpose) String() string {
 		return "image"
 	case PurposeMedia:
 		return "media"
+	case PurposeFont:
+		return "font"
 	default:
 		return "document"
 	}
@@ -169,7 +175,7 @@ func mimeAllowed(purpose ResourcePurpose, contentType string, nosniff bool) bool
 			return true
 		}
 		return !nosniff
-	case PurposeImage, PurposeMedia:
+	case PurposeImage, PurposeMedia, PurposeFont:
 		// 图片与媒体都不看 MIME：解码成功即采用（浏览器也是「解码失败才算失败」）。
 		// 媒体由解码器（宿主 ffmpeg/SkCodec）判定容器与轨道类型，引擎不代判定。
 		return true

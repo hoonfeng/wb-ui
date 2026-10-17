@@ -43,6 +43,28 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		//   的内容）时原样返回，行为不变。
 		url := dom.ResolveURL(DocumentBase(in), raw)
 
+		// ★ blob: URL（URL.createObjectURL 产物）由引擎内存表直接供给：
+		//   浏览器同样不发起网络请求。blob: 是绝对 scheme，ResolveURL 原样
+		//   返回；登记表在 jsc 层（与 URL.createObjectURL 同一张表，见
+		//   jsc/bloburl.go）。未登记/已 revoke 的 URL 按浏览器语义 reject。
+		if strings.HasPrefix(url, "blob:") {
+			entry, ok := jsc.LookupBlobURL(url)
+			if !ok {
+				return rejectPromise(in, fmt.Errorf("fetch: unknown blob URL: %s", url))
+			}
+			hdrs := newHeadersState()
+			if entry.MIMEType != "" {
+				hdrs.set("Content-Type", entry.MIMEType)
+			}
+			return resolvePromise(in, jsc.ObjectValue(newResponseInstance(in, &responseState{
+				body:       entry.Data,
+				headers:    hdrs,
+				status:     200,
+				statusText: "OK",
+				url:        url,
+			})))
+		}
+
 		method := "GET"
 		if len(args) >= 2 && args[1].IsObject() {
 			if o := args[1].AsObject(); o != nil {

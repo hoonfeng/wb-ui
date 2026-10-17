@@ -108,6 +108,13 @@ type Resolver struct {
 	// via this callback, the response is parsed as CSS and the resulting rules
 	// are merged into the cascade. When nil, @import rules are silently skipped.
 	StyleSheetLoader func(href string) (string, error)
+
+	// OnImportedStyleSheet 在 @import 展开出一张导入表后调用（表已解析完成、
+	// 尚未并入级联）。页面层用它把导入表里的 @font-face 交给宿主加载字体：
+	// 导入表只存在于 Resolver.sheets，**不进** document.styleSheets，页面层
+	// 平时看不到它们——没有这个回调，用 @import 组织样式的项目（Vite 产物
+	// 常见）里定义在导入表中的字体永远不会开始下载。
+	OnImportedStyleSheet func(sheet *css.CSSStyleSheet)
 }
 
 // cachedStyle 是带版本号的 per-element 计算样式缓存项。
@@ -285,6 +292,20 @@ func (r *Resolver) RemoveStyleSheet(sheet *css.CSSStyleSheet) {
 	}
 }
 
+// Sheets 返回当前级联里的全部样式表（含 @import 递归展开出来的导入表），
+// 顺序即源序。
+//
+// 与 Frame.StyleSheets 的区别：document.styleSheets **不**包含 @import 展开
+// 出来的表（浏览器语义：它们是导入表的规则，不是顶层表），而「按整份文档
+// 计算样式」的读取方（getComputedStyle）必须看到这些规则——否则用
+// `@import` 组织的 CSS（Vite/Rollup 产物常见）在 JS 读 computed style 时
+// 全是初始值（探针 frontend_matrix 复现：#app 颜色 rgb(0,0,0)）。
+func (r *Resolver) Sheets() []*css.CSSStyleSheet {
+	out := make([]*css.CSSStyleSheet, len(r.sheets))
+	copy(out, r.sheets)
+	return out
+}
+
 // ClearCache drops the per-element ComputedStyle cache. Call this after mutating
 // the stylesheets or DOM so subsequent calls compute fresh values.
 func (r *Resolver) ClearCache() {
@@ -404,6 +425,9 @@ func (r *Resolver) resolveImportsDepth(sheet *css.CSSStyleSheet, depth int) {
 
 		r.sheets = append(r.sheets, importedSheet)
 		r.addKeyframesFromSheet(importedSheet)
+		if r.OnImportedStyleSheet != nil {
+			r.OnImportedStyleSheet(importedSheet)
+		}
 	}
 }
 
