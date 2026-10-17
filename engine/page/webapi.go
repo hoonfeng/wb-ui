@@ -408,6 +408,9 @@ type responseState struct {
 	statusText string
 	url        string
 	bodyUsed   bool
+	// responseType 是 Response.type（"basic" 默认；跨源 CORS 成功响应也是
+	// "basic" 语义，no-cors 返回 "opaque"——见 page/cors.go）。
+	responseType string
 }
 
 func responseStateOf(this jsc.JSValue) *responseState {
@@ -442,7 +445,11 @@ func newResponseInstance(in *jsc.Interpreter, st *responseState) *jsc.JSObject {
 	obj := jsc.NewObject(proto)
 	obj.SetClassName("Response")
 	obj.SetInternal(st)
-	obj.Set("type", jsc.StringValue("basic"))
+	respType := st.responseType
+	if respType == "" {
+		respType = "basic"
+	}
+	obj.Set("type", jsc.StringValue(respType))
 	obj.Set("url", jsc.StringValue(st.url))
 	obj.Set("redirected", jsc.BooleanValue(false))
 	obj.Set("status", jsc.NumberValue(float64(st.status)))
@@ -602,14 +609,14 @@ func registerResponseCtor(in *jsc.Interpreter) {
 
 // requestState 是 Request 实例的 Go 侧状态。
 type requestState struct {
-	url        string
-	method     string
-	headers    *headersState
-	body       string
-	bodyUsed   bool
+	url         string
+	method      string
+	headers     *headersState
+	body        string
+	bodyUsed    bool
 	credentials string
-	mode       string
-	cache      string
+	mode        string
+	cache       string
 }
 
 func requestStateOf(this jsc.JSValue) *requestState {
@@ -671,7 +678,7 @@ func installRequestMethods(proto *jsc.JSObject) {
 			}
 			cp := &requestState{
 				url: st.url, method: st.method, body: st.body,
-				headers: cloneHeadersState(st.headers),
+				headers:     cloneHeadersState(st.headers),
 				credentials: st.credentials, mode: st.mode, cache: st.cache,
 			}
 			return jsc.ObjectValue(newRequestInstance(in, cp))

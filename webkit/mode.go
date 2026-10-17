@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"wb-ui/engine/js/jsc"
 )
 
 // Mode 是 WebView 的运行模式。
@@ -186,6 +188,21 @@ func (wv *WebView) loadExternalResource(ref string, purpose ResourcePurpose) (st
 	//   既有行为（相对当前目录的文件读取）。绝对化形态由 resolverRefForms 给出：
 	//   没绝对化时 forms 只有原样一种形态，ref 因此保持原值。
 	ref = forms[len(forms)-1]
+	// ★ blob: URL：页面用 URL.createObjectURL 生成的内存对象 URL，内容在
+	//   本进程的 blob 存储里，不经网络/文件系统——与 data: 同属「页面自产
+	//   内容」，不参与资源策略门禁（见 resource_ref_policy.go 的 refKindBlob）。
+	//   未登记/已 revoke 的按浏览器语义失败（fetch 同样 reject）。
+	if strings.HasPrefix(strings.ToLower(ref), "blob:") {
+		entry, ok := jsc.LookupBlobURL(ref)
+		if !ok {
+			return "", fmt.Errorf("webkit: unknown blob URL: %q", ref)
+		}
+		if !mimeAllowed(purpose, entry.MIMEType, false) {
+			return "", fmt.Errorf("webkit: %q: Content-Type %q 不适用于 %s",
+				ref, entry.MIMEType, purpose)
+		}
+		return entry.Data, nil
+	}
 	if strings.HasPrefix(ref, "data:") {
 		if r, ok := cache.get(ref); ok {
 			return r.content, nil

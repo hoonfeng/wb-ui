@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"wb-ui/engine/dom"
+	"wb-ui/engine/js/jsc"
 	"wb-ui/engine/page"
 	"wb-ui/engine/rendering"
 )
@@ -97,6 +98,12 @@ func (l *webViewImageLoader) AllowsURL(url string) bool {
 	}
 	if strings.HasPrefix(strings.ToLower(url), "data:") {
 		return true
+	}
+	// blob: 是页面自产的内存内容（与 data: 同类，见 resource_ref_policy.go）：
+	// 已登记的 URL 在任何策略下都放行；未登记/已 revoke 的拒绝。
+	if strings.HasPrefix(strings.ToLower(url), "blob:") {
+		_, ok := jsc.LookupBlobURL(url)
+		return ok
 	}
 	switch l.wv.effectiveResourcePolicy() {
 	case AllowAll:

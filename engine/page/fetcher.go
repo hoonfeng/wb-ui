@@ -101,11 +101,24 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 
 		var body io.Reader
 		headers := http.Header{}
+		// ★ fetch 的 CORS 选项（见 page/cors.go）：credentials 决定跨源
+		//   响应是否必须带 ACAC；mode 决定是否允许跨源/是否返回 opaque。
+		credentials := "same-origin"
+		mode := corsModeCORS
 		if len(args) >= 2 {
 			opts := args[1]
 			if opts.IsObject() {
 				o := opts.AsObject()
 				if o != nil {
+					if v, ok := o.GetByKey("credentials"); ok && !v.IsUndefined() && !v.IsNull() {
+						credentials = strings.ToLower(jscToString(v))
+					}
+					if v, ok := o.GetByKey("mode"); ok && !v.IsUndefined() && !v.IsNull() {
+						switch m := strings.ToLower(jscToString(v)); m {
+						case "cors", "no-cors", "same-origin":
+							mode = corsMode(m)
+						}
+					}
 					if b, ok := o.GetByKey("body"); ok && !b.IsUndefined() && !b.IsNull() {
 						body = strings.NewReader(jscToString(b))
 					}
@@ -138,11 +151,30 @@ func RegisterFetchWithPolicy(rt *jsc.Interpreter, allowNetwork bool) {
 		}
 		req.Header = headers
 		client := &http.Client{}
+		// ★ CORS：跨源请求按浏览器语义校验（同源请求不受影响；文档源为
+		//   file:/data:（不透明源）时跳过——见 cors.go 的已知差异）。
+		corsReq := newCORSRequest(DocumentBase(in), url, method, headers, credentials == "include", mode)
+		opaque, cerr := corsReq.prepare(client)
+		if cerr != nil {
+			return rejectPromise(in, fmt.Errorf("fetch(%s): %w", raw, cerr))
+		}
+		corsReq.applyOriginHeader(req)
 		resp, err := client.Do(req)
 		if err != nil {
 			return rejectPromise(in, fmt.Errorf("fetch: request failed: %w", err))
 		}
 		defer resp.Body.Close()
+		if opaque {
+			// mode=no-cors：浏览器返回 opaque 响应——status 0、body/headers
+			// 不可读（页面拿不到跨源内容）。
+			return resolvePromise(in, jsc.ObjectValue(newResponseInstance(in, &responseState{
+				status:       0,
+				responseType: "opaque",
+			})))
+		}
+		if err := corsReq.validateFinal(resp); err != nil {
+			return rejectPromise(in, fmt.Errorf("fetch(%s): %w", raw, err))
+		}
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return rejectPromise(in, fmt.Errorf("fetch: read response failed: %w", err))
@@ -309,11 +341,25 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		if tmo := xhrNumber2(obj, "timeout"); tmo > 0 {
 			client.Timeout = time.Duration(tmo) * time.Millisecond
 		}
+		// ★ CORS：XHR 同样受跨源限制（浏览器里 XHR 与 fetch 共用同一套
+		//   CORS 校验）。withCredentials 决定 ACAO 能否为 *。
+		withCredentials := false
+		if v, ok := obj.GetByKey("withCredentials"); ok {
+			withCredentials = v.ToBoolean()
+		}
+		corsReq := newCORSRequest(DocumentBase(in), url, method, headers, withCredentials, corsModeCORS)
+		if _, cerr := corsReq.prepare(client); cerr != nil {
+			return xhrFail(in, obj, cerr)
+		}
+		corsReq.applyOriginHeader(req)
 		resp, err := client.Do(req)
 		if err != nil {
 			return xhrFail(in, obj, err)
 		}
 		defer resp.Body.Close()
+		if cerr := corsReq.validateFinal(resp); cerr != nil {
+			return xhrFail(in, obj, cerr)
+		}
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return xhrFail(in, obj, err)

@@ -1,0 +1,300 @@
+package page
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"wb-ui/engine/js/jsc"
+)
+
+// ── 单元：CORS 判定内核 ────────────────────────────────────────────
+
+func TestCanonicalOrigin(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+		ok   bool
+	}{
+		{"http://Example.COM:80/a", "http://example.com", true},
+		{"https://example.com:443/a", "https://example.com", true},
+		{"http://example.com:8080/a", "http://example.com:8080", true},
+		{"file:///C:/x.html", "", false},
+		{"data:text/html,x", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := canonicalOrigin(c.raw)
+		if ok != c.ok || got != c.want {
+			t.Errorf("canonicalOrigin(%q) = (%q, %v)，期望 (%q, %v)", c.raw, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestCORSRequestNeedsCheck(t *testing.T) {
+	// 同源：不校验。
+	if r := newCORSRequest("http://a.test/x.html", "http://a.test/api", "GET", http.Header{}, false, corsModeCORS); r.needsCheck() {
+		t.Fatal("同源请求不应走 CORS 校验")
+	}
+	// 默认端口归一化后仍是同源。
+	if r := newCORSRequest("http://a.test:80/x.html", "http://a.test/api", "GET", http.Header{}, false, corsModeCORS); r.needsCheck() {
+		t.Fatal("默认端口应归一化为同源")
+	}
+	// 跨源：校验。
+	if r := newCORSRequest("http://a.test/x.html", "http://b.test/api", "GET", http.Header{}, false, corsModeCORS); !r.needsCheck() {
+		t.Fatal("跨源请求必须走 CORS 校验")
+	}
+	// 不透明源（file:/data:）：不校验（见 cors.go 已知差异）。
+	if r := newCORSRequest("file:///C:/x.html", "http://b.test/api", "GET", http.Header{}, false, corsModeCORS); r.needsCheck() {
+		t.Fatal("file 文档的跨源请求不校验（宿主本地上下文）")
+	}
+}
+
+func TestCORSRequestIsSimple(t *testing.T) {
+	mk := func(method string, hdr http.Header) *corsRequest {
+		return newCORSRequest("http://a.test/x", "http://b.test/api", method, hdr, false, corsModeCORS)
+	}
+	if !mk("GET", http.Header{}).isSimple() {
+		t.Error("GET 无头应为简单请求")
+	}
+	if !mk("POST", http.Header{"Content-Type": []string{"text/plain"}}).isSimple() {
+		t.Error("POST + text/plain 应为简单请求")
+	}
+	if mk("PUT", http.Header{}).isSimple() {
+		t.Error("PUT 不是简单请求")
+	}
+	if mk("POST", http.Header{"Content-Type": []string{"application/json"}}).isSimple() {
+		t.Error("POST + application/json 不是简单请求")
+	}
+	if mk("GET", http.Header{"X-Token": []string{"t"}}).isSimple() {
+		t.Error("自定义请求头不是简单请求")
+	}
+}
+
+func TestCORSValidateResponseHeaders(t *testing.T) {
+	cases := []struct {
+		name        string
+		acao        string
+		acac        string
+		credentials bool
+		wantErr     bool
+	}{
+		{"wildcard", "*", "", false, false},
+		{"exact", "http://a.test", "", false, false},
+		{"mismatch", "http://evil.test", "", false, true},
+		{"missing", "", "", false, true},
+		{"credentials-wildcard", "*", "true", true, true},
+		{"credentials-exact", "http://a.test", "true", true, false},
+		{"credentials-no-acac", "http://a.test", "", true, true},
+	}
+	for _, c := range cases {
+		r := newCORSRequest("http://a.test/x", "http://b.test/api", "GET", http.Header{}, c.credentials, corsModeCORS)
+		h := http.Header{}
+		if c.acao != "" {
+			h.Set("Access-Control-Allow-Origin", c.acao)
+		}
+		if c.acac != "" {
+			h.Set("Access-Control-Allow-Credentials", c.acac)
+		}
+		err := r.validateResponseHeaders(h)
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err=%v，期望 wantErr=%v", c.name, err, c.wantErr)
+		}
+	}
+}
+
+// ── 端到端：JS fetch / XHR 跨源行为 ───────────────────────────────
+
+// runFetchJSWithBase 在指定文档基准下运行脚本（跨源判定需要文档源）。
+func runFetchJSWithBase(t *testing.T, base, script string) string {
+	t.Helper()
+	in := jsc.NewInterpreter()
+	log := &jsc.BufferLogger{}
+	in.SetupGlobal(log)
+	RegisterFetch(in)
+	SetDocumentBaseProvider(in, func() string { return base })
+	t.Cleanup(func() { ClearDocumentBaseProvider(in) })
+	if _, err := in.Run(script); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	return log.String()
+}
+
+func runXHRJSWithBase(t *testing.T, base, script string) string {
+	t.Helper()
+	in := jsc.NewInterpreter()
+	log := &jsc.BufferLogger{}
+	in.SetupGlobal(log)
+	RegisterXMLHttpRequest(in)
+	SetDocumentBaseProvider(in, func() string { return base })
+	t.Cleanup(func() { ClearDocumentBaseProvider(in) })
+	if _, err := in.Run(script); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	return log.String()
+}
+
+func TestFetchCrossOriginCORS(t *testing.T) {
+	var sawOrigin, sawPreflight string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawOrigin = r.Header.Get("Origin")
+		if r.Method == http.MethodOptions {
+			sawPreflight = r.Header.Get("Access-Control-Request-Method") + "|" +
+				r.Header.Get("Access-Control-Request-Headers")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET")
+			w.Header().Set("Access-Control-Allow-Headers", "content-type")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/allow" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			fmt.Fprint(w, "allow-body")
+			return
+		}
+		fmt.Fprint(w, "deny-body")
+	}))
+	defer api.Close()
+
+	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer doc.Close()
+	base := doc.URL + "/index.html"
+
+	// 允许：ACAO:* → 成功读到内容，且请求带 Origin。
+	out := runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/allow").then(function (r) {
+			console.log("status=" + r.status + " type=" + r.type);
+			return r.text();
+		}).then(function (t) {
+			console.log("body=" + t);
+		}, function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "status=200") || !strings.Contains(out, "allow-body") {
+		t.Fatalf("ACAO:* 跨源请求应成功，输出：%q", out)
+	}
+	if sawOrigin != "http://127.0.0.1:"+portOf(t, doc.URL) {
+		t.Errorf("跨源请求应带 Origin=%s，实际 %q", base, sawOrigin)
+	}
+
+	// 拒绝：无 ACAO → fetch reject，内容不可读。
+	out = runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/deny").then(function (r) {
+			console.log("unexpected:" + r.text());
+		}, function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "rejected") || strings.Contains(out, "deny-body") {
+		t.Fatalf("无 ACAO 的跨源响应必须 reject，输出：%q", out)
+	}
+	if !strings.Contains(out, "Access-Control-Allow-Origin") {
+		t.Errorf("错误信息应指出缺少 ACAO，输出：%q", out)
+	}
+
+	// 非简单请求：预检通过 → 成功；预检头正确。
+	out = runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/allow", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+			.then(function (r) { console.log("status=" + r.status + " body=" + r.text()); },
+			      function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "status=200") {
+		t.Fatalf("预检通过的跨源 POST 应成功，输出：%q", out)
+	}
+	if !strings.Contains(sawPreflight, "POST|content-type") {
+		t.Errorf("预检应带 Access-Control-Request-Method/Headers，实际 %q", sawPreflight)
+	}
+
+	// credentials: include + ACAO:* → 拒绝（浏览器语义）。
+	out = runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/allow", { credentials: "include" }).then(function (r) {
+			console.log("unexpected:" + r.status);
+		}, function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "rejected") {
+		t.Fatalf("credentials:include 下 ACAO:* 必须 reject，输出：%q", out)
+	}
+
+	// mode: no-cors → opaque（status 0、body 空、type opaque）。
+	out = runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/allow", { mode: "no-cors" }).then(function (r) {
+			console.log("status=" + r.status + " type=" + r.type);
+		}, function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "status=0") || !strings.Contains(out, "type=opaque") {
+		t.Fatalf("no-cors 应返回 opaque 响应，输出：%q", out)
+	}
+
+	// mode: same-origin → 跨源直接失败。
+	out = runFetchJSWithBase(t, base, fmt.Sprintf(`
+		fetch("%s/allow", { mode: "same-origin" }).then(function (r) {
+			console.log("unexpected:" + r.status);
+		}, function (e) { console.log("rejected:" + e); });
+	`, api.URL))
+	if !strings.Contains(out, "rejected") {
+		t.Fatalf("mode=same-origin 的跨源请求必须 reject，输出：%q", out)
+	}
+
+	// 同源（文档与请求同源）：无 ACAO 也应成功。
+	sameDoc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "same-origin-body")
+	}))
+	defer sameDoc.Close()
+	out = runFetchJSWithBase(t, sameDoc.URL+"/index.html", fmt.Sprintf(`
+		fetch("%s/data").then(function (r) {
+			console.log("status=" + r.status);
+			return r.text();
+		}).then(function (t) {
+			console.log("body=" + t);
+		}, function (e) { console.log("rejected:" + e); });
+	`, sameDoc.URL))
+	if !strings.Contains(out, "same-origin-body") || strings.Contains(out, "rejected") {
+		t.Fatalf("同源请求不应受 CORS 限制，输出：%q", out)
+	}
+}
+
+func TestXHRCrossOriginCORS(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/allow" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			fmt.Fprint(w, "xhr-allow")
+			return
+		}
+		fmt.Fprint(w, "xhr-deny")
+	}))
+	defer api.Close()
+	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer doc.Close()
+	base := doc.URL + "/index.html"
+
+	out := runXHRJSWithBase(t, base, fmt.Sprintf(`
+		var x = new XMLHttpRequest();
+		x.open("GET", "%s/allow");
+		x.onload = function () { console.log("load:" + x.status + ":" + x.responseText); };
+		x.onerror = function () { console.log("error:" + x.statusText); };
+		x.send();
+	`, api.URL))
+	if !strings.Contains(out, "load:200:xhr-allow") {
+		t.Fatalf("XHR 跨源（ACAO:*）应成功，输出：%q", out)
+	}
+
+	out = runXHRJSWithBase(t, base, fmt.Sprintf(`
+		var x = new XMLHttpRequest();
+		x.open("GET", "%s/deny");
+		x.onload = function () { console.log("unexpected:" + x.responseText); };
+		x.onerror = function () { console.log("error:blocked"); };
+		x.send();
+	`, api.URL))
+	if !strings.Contains(out, "error:blocked") || strings.Contains(out, "xhr-deny") {
+		t.Fatalf("XHR 跨源（无 ACAO）必须 error，输出：%q", out)
+	}
+}
+
+// portOf 从 httptest URL 里取端口（用于构造期望的 Origin）。
+func portOf(t *testing.T, raw string) string {
+	t.Helper()
+	i := strings.LastIndexByte(raw, ':')
+	if i < 0 {
+		t.Fatalf("no port in %q", raw)
+	}
+	return raw[i+1:]
+}

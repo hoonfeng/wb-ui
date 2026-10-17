@@ -41,6 +41,7 @@ import (
 	"sync"
 	"time"
 
+	"wb-ui/engine/platform/graphics"
 	"wb-ui/webkit"
 )
 
@@ -125,6 +126,14 @@ func (l *reqLog) dump() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.seen, " ")
+}
+
+// reset 清空请求轨迹（按场景隔离断言：上一个场景的请求不能把「外部资源
+// 已被堵住」的断言喂成误报）。
+func (l *reqLog) reset() {
+	l.mu.Lock()
+	l.seen = nil
+	l.mu.Unlock()
 }
 
 func mkPNG(w, h int, c color.RGBA) []byte {
@@ -307,6 +316,22 @@ window.__done = true;
 
 func main() {
 	log := &reqLog{}
+	// ★ @font-face 端到端必须用**真实** woff2 容器：假字节会让「解码器坏了」
+	//   也照样绿。这里先过一遍解码器（非空且产出 sfnt 魔数），再把同一份
+	//   字节挂到 Vite 产物的字体 URL 上。
+	woff2Fixture, err := os.ReadFile("engine/platform/graphics/testdata/ahem.woff2")
+	if err != nil {
+		fmt.Printf("读取 woff2 fixture 失败（请在 wb-ui 根目录运行）：%v\n", err)
+		os.Exit(1)
+	}
+	sfnt, derr := graphics.DecodeEmbeddedFont(woff2Fixture)
+	if derr != nil {
+		fmt.Printf("woff2 fixture 解码失败：%v\n", derr)
+		os.Exit(1)
+	}
+	check(len(sfnt) > 12 && (string(sfnt[:4]) == "\x00\x01\x00\x00" || string(sfnt[:4]) == "OTTO"),
+		"woff2 解码器产出合法 sfnt（%d → %d 字节）", len(woff2Fixture), len(sfnt))
+	viteSite["/vite/assets/probe.woff2"] = string(woff2Fixture)
 	mux := http.NewServeMux()
 	serve := func(files map[string]string) {
 		for p, body := range files {
@@ -359,6 +384,14 @@ func main() {
 
 	// 跨源服务器（CORS）：一个允许任意源，一个不允许。
 	corsOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			// 预检：允许 POST + content-type（覆盖非简单请求场景）。
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+			w.Header().Set("Access-Control-Allow-Headers", "content-type")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, "cors-body")
@@ -445,6 +478,8 @@ func main() {
 		check(log.has("/vite/assets/bg-card.png"), "CSS background-image 请求")
 		check(strings.Contains(evalStr(wv, `getComputedStyle(document.getElementById("app")).color`), "1, 2, 3"),
 			"@import 进来的样式参与层叠（#app 颜色=%s）", evalStr(wv, `getComputedStyle(document.getElementById("app")).color`))
+		check(strings.Contains(evalStr(wv, `getComputedStyle(document.getElementById("app")).fontFamily`), "ProbeFont"),
+			"@font-face 规则进入层叠（字体族=%s）", evalStr(wv, `getComputedStyle(document.getElementById("app")).fontFamily`))
 		wv.Destroy()
 	}
 
@@ -490,10 +525,33 @@ func main() {
 window.__cors = {};
 fetch("` + corsOK.URL + `/ok").then(function (r) { return r.text(); }).then(function (t) {
   window.__cors.ok = t;
+  // 拒绝：无 ACAO → fetch 必须 reject（内容不可读）。
   return fetch("` + corsDeny.URL + `/deny").then(function (r) { return r.text(); },
      function (e) { return "rejected:" + e; });
 }).then(function (t) {
   window.__cors.deny = t;
+  // 非简单请求：先 OPTIONS 预检，通过后再发 POST。
+  return fetch("` + corsOK.URL + `/pre", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+    }).then(function (r) { return r.text(); }, function (e) { return "rejected:" + e; });
+}).then(function (t) {
+  window.__cors.preflight = t;
+  // credentials: include + ACAO:* → 必须 reject（浏览器语义）。
+  return fetch("` + corsOK.URL + `/ok", { credentials: "include" })
+    .then(function (r) { return "ok:" + r.status; }, function (e) { return "rejected:" + e; });
+}).then(function (t) {
+  window.__cors.credentials = t;
+  // no-cors：opaque 响应（status 0 / type opaque / 内容不可读）。
+  return fetch("` + corsOK.URL + `/ok", { mode: "no-cors" })
+    .then(function (r) { return "status:" + r.status + ":type:" + r.type; },
+          function (e) { return "rejected:" + e; });
+}).then(function (t) {
+  window.__cors.noCors = t;
+  // 同源：文档自己的服务器（无 ACAO）——不受 CORS 限制。
+  return fetch("/cors/same-origin")
+    .then(function (r) { return r.text(); }, function (e) { return "rejected:" + e; });
+}).then(function (t) {
+  window.__cors.sameOrigin = t;
   window.__done = true;
 });
 </script></body></html>`
@@ -501,12 +559,19 @@ fetch("` + corsOK.URL + `/ok").then(function (r) { return r.text(); }).then(func
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			fmt.Fprint(w, page)
 		})
+		mux.HandleFunc("/cors/same-origin", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "same-origin-body")
+		})
 		wv := load("cors", "/cors/index.html")
 		got := evalStr(wv, `JSON.stringify(window.__cors)`)
 		fmt.Printf("     window.__cors = %s\n", got)
 		check(strings.Contains(got, `"ok":"cors-body"`), "跨源 fetch（ACAO:*）成功")
-		check(strings.Contains(got, `rejected`) || strings.Contains(got, `denied-body`),
-			"跨源 fetch（无 ACAO）：引擎目前不做同源限制（记录为差异）")
+		check(strings.Contains(got, `"deny":"rejected`) && strings.Contains(got, "Access-Control-Allow-Origin"),
+			"跨源 fetch（无 ACAO）被拒绝（错误信息指出缺少 ACAO）")
+		check(strings.Contains(got, `"preflight":"cors-body"`), "非简单请求：OPTIONS 预检通过后成功")
+		check(strings.Contains(got, `"credentials":"rejected`), "credentials:include + ACAO:* 被拒绝")
+		check(strings.Contains(got, `"noCors":"status:0:type:opaque"`), "mode:no-cors 返回 opaque 响应")
+		check(strings.Contains(got, `"sameOrigin":"same-origin-body"`), "同源请求不受 CORS 限制")
 		wv.Destroy()
 	}
 
@@ -517,6 +582,50 @@ fetch("` + corsOK.URL + `/ok").then(function (r) { return r.text(); }).then(func
 		got := evalStr(wv, `JSON.stringify(window.__ws)`)
 		fmt.Printf("     window.__ws = %s\n", got)
 		check(strings.Contains(got, `"ok":true`), "new WebSocket(...) 不抛异常（引擎 stub）")
+		wv.Destroy()
+	}
+
+	// ── 9. ModeToolkit 宿主堵漏 ─────────────────────────────────
+	// UI 库模式必须：外部资源（http CSS/图片/字体）一律拒绝且**不发请求**，
+	// 页面自产内容（blob:）照常可用，fetch 无桥路由时拒绝联网。
+	fmt.Println("\n── 9. ModeToolkit 宿主堵漏 ──")
+	{
+		log.reset()
+		wv := webkit.NewWebViewWithMode(webkit.ModeToolkit)
+		html := `<!DOCTYPE html><html><head>
+<link rel="stylesheet" href="` + srv.URL + `/static/css/site.css">
+<style>@font-face { font-family: "Ext"; src: url("` + srv.URL + `/vite/assets/probe.woff2"); }</style>
+</head><body><img id="img" src="` + srv.URL + `/static/img/logo.png">
+<div id="out">toolkit-ok</div>
+<script>
+window.__tk = {};
+var u = URL.createObjectURL(new Blob(["tk-blob"], { type: "text/plain" }));
+fetch(u).then(function (r) { return r.text(); }).then(function (t) {
+  window.__tk.blob = t;
+  return fetch("` + srv.URL + `/static/js/app.js").then(
+    function () { window.__tk.net = "leaked"; },
+    function (e) { window.__tk.net = String(e); });
+}).then(function () {
+  window.__done = true;
+});
+</script></body></html>`
+		if err := wv.LoadHTML(html); err != nil {
+			fmt.Printf("Toolkit LoadHTML 失败: %v\n", err)
+			failures++
+		}
+		pumpAsync(wv)
+		got := evalStr(wv, `JSON.stringify(window.__tk)`)
+		fmt.Printf("     window.__tk = %s\n", got)
+		check(evalStr(wv, `String(document.getElementById("out").textContent)`) == "toolkit-ok",
+			"Toolkit：页面仍装配/渲染（被拒资源不中断装配）")
+		check(strings.Contains(got, `"blob":"tk-blob"`),
+			"Toolkit：页面自产 blob 可读取（fetch(blob:) 不联网）")
+		check(strings.Contains(got, "UI 库模式") && !strings.Contains(got, "leaked"),
+			"Toolkit：fetch 外部 URL 被拒（无桥路由不联网）")
+		check(!log.has("/static/css/site.css"), "Toolkit：外部 CSS 被拒（未发出网络请求）")
+		check(!log.has("/static/img/logo.png"), "Toolkit：外部图片被拒（未发出网络请求）")
+		check(!log.has("/vite/assets/probe.woff2"), "Toolkit：外部字体被拒（未发出网络请求）")
+		check(!log.has("/static/js/app.js"), "Toolkit：外部脚本被拒（未发出网络请求）")
 		wv.Destroy()
 	}
 

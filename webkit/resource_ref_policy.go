@@ -93,7 +93,9 @@ func (wv *WebView) resolverRefForms(ref string) []string {
 //
 // 语义（与两侧既有行为逐条一致）：
 //   - `data:`：与策略解耦，恒放行（resource_policy.go 的三条兼容原则之一）；
-//   - `http(s)` / `blob:`：有网络通道时按策略（只有 AllowAll 放行）；**无**网络通道时
+//   - `blob:`：页面自产的内存内容（本进程 blob 存储里有登记才放行），与
+//     data: 一样不受资源策略约束；未登记/已 revoke 的恒拒；
+//   - `http(s)`：有网络通道时按策略（只有 AllowAll 放行）；**无**网络通道时
 //     恒拒——这是**能力边界**，不是策略差异；
 //   - `file://` / 相对路径：只有 AllowAll（allowsExternalURLs）放行。
 //

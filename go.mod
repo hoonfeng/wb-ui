@@ -12,3 +12,5 @@ require (
 	github.com/hoonfeng/goskia v0.0.0-20261006194810-5015494aa077
 	golang.org/x/text v0.3.8
 )
+
+require github.com/andybalholm/brotli v1.2.2 // indirect

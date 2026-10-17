@@ -44,13 +44,21 @@ func (wv *WebView) loadFontFace(family string, srcs []string) {
 			page.Logf("FontFace", "family=%q src=%q empty", family, src)
 			continue
 		}
-		if err := fm.RegisterCustomFont(family, []byte(content), 0); err != nil {
-			// 最常见的是 woff2（Skia 不内置 woff2 解码器）——继续下一个候选，
-			// 与浏览器的 src 回退顺序一致（真实站点会同时给出 woff/ttf）。
+		// ★ WOFF/WOFF2 → sfnt：Skia 的 Typeface 只接受 sfnt（ttf/otf），
+		//   不内置 woff/woff2 解码；而真实站点的 @font-face 几乎只提供
+		//   woff2。解码失败（或容器损坏）按 src 回退顺序继续下一个候选。
+		data, derr := graphics.DecodeEmbeddedFont([]byte(content))
+		if derr != nil {
+			page.Logf("FontFace", "family=%q src=%q container decode FAIL: %v", family, src, derr)
+			continue
+		}
+		if err := fm.RegisterCustomFont(family, data, 0); err != nil {
+			// 容器解码成功但 Skia 仍拒绝（罕见：轮廓类型不支持/字体损坏）——
+			// 继续下一个候选，与浏览器的 src 回退顺序一致。
 			page.Logf("FontFace", "family=%q src=%q decode FAIL: %v", family, src, err)
 			continue
 		}
-		page.Logf("FontFace", "registered family=%q src=%q bytes=%d", family, src, len(content))
+		page.Logf("FontFace", "registered family=%q src=%q bytes=%d (sfnt %d)", family, src, len(content), len(data))
 		wv.invalidateForFontChange()
 		return
 	}
