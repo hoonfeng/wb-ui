@@ -677,12 +677,13 @@ function applyHdr(prefix, o) {
   }
   if (o.error !== undefined) { window.__corsHdr[prefix + "Error"] = o.error; }
 }
-function xhrProbe(path) {
+function xhrProbe(url) {
   return new Promise(function (resolve) {
     var x = new XMLHttpRequest();
-    x.open("GET", "` + corsHdr.URL + `" + path);
+    x.open("GET", url);
     x.onload = function () {
-      var all = String(x.getAllResponseHeaders()).toLowerCase();
+      // 序列化按浏览器语义输出小写头名，无需 toLowerCase 掩盖差异。
+      var all = String(x.getAllResponseHeaders());
       resolve({
         ct: String(x.getResponseHeader("Content-Type") || "<null>"),
         xi: String(x.getResponseHeader("X-Internal") || "<null>"),
@@ -695,15 +696,23 @@ function xhrProbe(path) {
     x.send();
   });
 }
-fetch("` + corsHdr.URL + `/plain").then(function (r) { return hdrOf(r); }).then(function (o) {
+// 同源对照：X-Internal 可读（不走跨源白名单），Set-Cookie 必须不可读
+// （forbidden response header，同源同样剔除）。
+fetch("` + srv.URL + `/cors/same").then(function (r) { return hdrOf(r); }).then(function (o) {
+  applyHdr("fetchSame", o);
+  return xhrProbe("` + srv.URL + `/cors/same");
+}).then(function (o) {
+  applyHdr("xhrSame", o);
+  return fetch("` + corsHdr.URL + `/plain").then(function (r) { return hdrOf(r); });
+}).then(function (o) {
   applyHdr("fetchPlain", o);
-  return xhrProbe("/plain");
+  return xhrProbe("` + corsHdr.URL + `/plain");
 }).then(function (o) {
   applyHdr("xhrPlain", o);
   return fetch("` + corsHdr.URL + `/exposed").then(function (r) { return hdrOf(r); });
 }).then(function (o) {
   applyHdr("fetchExposed", o);
-  return xhrProbe("/exposed");
+  return xhrProbe("` + corsHdr.URL + `/exposed");
 }).then(function (o) {
   applyHdr("xhrExposed", o);
   window.__done = true;
@@ -713,9 +722,24 @@ fetch("` + corsHdr.URL + `/plain").then(function (r) { return hdrOf(r); }).then(
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			fmt.Fprint(w, hdrPage)
 		})
+		// 同源对照端点：与页面同源（srv.URL），同样的 X-Internal + Set-Cookie。
+		mux.HandleFunc("/cors/same", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("X-Internal", "secret")
+			w.Header().Set("Set-Cookie", "sid=same; Path=/")
+			fmt.Fprint(w, "same-body")
+		})
 		wv := load("cors-hdr", "/cors/hdr.html")
 		got := evalStr(wv, `JSON.stringify(window.__corsHdr)`)
 		fmt.Printf("     window.__corsHdr = %s\n", got)
+		check(strings.Contains(got, `"fetchSameXi":"secret"`) &&
+			strings.Contains(got, `"fetchSameSc":"<null>"`),
+			"同源 fetch：X-Internal 可读（不过滤白名单），Set-Cookie 同源也恒不可读")
+		check(strings.Contains(got, `"xhrSameXi":"secret"`) &&
+			strings.Contains(got, `"xhrSameSc":"<null>"`) &&
+			strings.Contains(got, `"xhrSameAllXi":true`) &&
+			strings.Contains(got, `"xhrSameAllSc":false`),
+			"同源 XHR：X-Internal 可读，getAllResponseHeaders 不含 set-cookie")
 		check(strings.Contains(got, `"fetchPlainCt":"text/plain"`) &&
 			strings.Contains(got, `"fetchPlainXi":"<null>"`) &&
 			strings.Contains(got, `"fetchPlainSc":"<null>"`),

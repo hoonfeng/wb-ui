@@ -177,28 +177,45 @@ func (c *corsRequest) exposedHeaderSet(h http.Header) map[string]bool {
 	return tokens
 }
 
-// filterResponseHeaders 返回页面**实际可读**的响应头（跨源可读性限制）。
+// filterResponseHeaders 返回页面**实际可读**的响应头。
 //
 //   - h 为 nil → nil（nil 安全）；
-//   - 同源 / 不透明源（needsCheck()==false）→ 原样返回，行为不变；
-//   - 跨源 → 先恒剔除 Set-Cookie / Set-Cookie2（浏览器里是不可见的
-//     forbidden response header，即使 ACEH 列出也读不到），再只保留
-//     safelisted ∪ Access-Control-Expose-Headers 中的头。
+//   - Set-Cookie / Set-Cookie2 在**所有路径**上剔除（同源、跨源、不透明源
+//     一致）：它们是 Fetch 标准的 forbidden response header（「forbidden
+//     response header name」），与请求是否跨源无关。浏览器里即使 ACEH
+//     显式列出也读不到——这正是防 XSS 窃取 HttpOnly 会话值的关键。
+//     opaque 响应本身不带任何头，自然不受影响；
+//   - 同源 / 不透明源（needsCheck()==false）→ 返回**剔除后的新 map 副本**。
+//     ★ 禁止原地修改 resp.Header：那会污染 net/http 响应对象以及后续
+//     依赖真实响应头的逻辑（重定向、cookie jar 写入等）；
+//   - 跨源 → 在上述剔除基础上，再只保留 safelisted ∪
+//     Access-Control-Expose-Headers 中的头（credentials 下 `*` 失效）。
 //
 // ★ 唯一的响应头过滤实现：fetch 与 XHR 都必须调这里，禁止各写一份。
 func (c *corsRequest) filterResponseHeaders(h http.Header) http.Header {
 	if h == nil {
 		return nil
 	}
+	// forbiddenResponseHeader 判定：Set-Cookie 系列永不暴露给页面脚本。
+	forbiddenResponseHeader := func(lower string) bool {
+		return lower == "" || lower == "set-cookie" || lower == "set-cookie2"
+	}
 	if c == nil || !c.needsCheck() {
-		return h
+		out := make(http.Header, len(h))
+		for name, values := range h {
+			if forbiddenResponseHeader(strings.ToLower(strings.TrimSpace(name))) {
+				continue
+			}
+			out[name] = values
+		}
+		return out
 	}
 	exposed := c.exposedHeaderSet(h)
 	wildcard := exposed["*"]
 	out := make(http.Header, len(h))
 	for name, values := range h {
 		lower := strings.ToLower(strings.TrimSpace(name))
-		if lower == "" || lower == "set-cookie" || lower == "set-cookie2" {
+		if forbiddenResponseHeader(lower) {
 			continue
 		}
 		if !corsSafelistedResponseHeaders[lower] && !exposed[lower] && !wildcard {

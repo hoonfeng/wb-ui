@@ -588,7 +588,9 @@ func TestCORSResponseHeaderExposure(t *testing.T) {
 			x.onload = function () {
 				var xi = x.getResponseHeader("X-Internal");
 				var sc = x.getResponseHeader("Set-Cookie");
-				var all = x.getAllResponseHeaders().toLowerCase();
+				// 序列化已保证小写，这里直接用小写 needle 匹配即可；
+				// 若引擎返回大写头名，下面的 all-xi 断言会失败（不再用 toLowerCase 掩盖差异）。
+				var all = x.getAllResponseHeaders();
 				console.log("ct=" + x.getResponseHeader("Content-Type"));
 				console.log("xi=" + (xi || "<null>"));
 				console.log("sc=" + (sc || "<null>"));
@@ -618,12 +620,21 @@ func TestCORSResponseHeaderExposure(t *testing.T) {
 	}
 }
 
-// TestSameOriginResponseHeadersNotFiltered 是回归保护：同源请求不经过跨源
-// 头过滤（needsCheck()==false 原样返回），自定义响应头照常可读。
+// TestSameOriginResponseHeadersNotFiltered 同时覆盖两件事：
+//
+//  1. 回归保护：同源请求不走跨源可读性白名单，自定义头（X-Internal）照常可读；
+//  2. 收紧保护：Set-Cookie / Set-Cookie2 是 Fetch 的 forbidden response
+//     header，同源同样不可读（与浏览器一致），getAllResponseHeaders 里也
+//     不出现；
+//  3. getAllResponseHeaders 的浏览器序列化：头名小写、按名字典序、每行
+//     `name: value`、整体以 `\r\n` 结尾。
 func TestSameOriginResponseHeadersNotFiltered(t *testing.T) {
 	same := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("X-Internal", "secret")
+		w.Header().Set("X-Alpha", "one")
+		w.Header().Set("Set-Cookie", "sid=abc; Path=/")
+		w.Header().Set("Set-Cookie2", "legacy=1")
 		fmt.Fprint(w, "ok")
 	}))
 	defer same.Close()
@@ -632,24 +643,81 @@ func TestSameOriginResponseHeadersNotFiltered(t *testing.T) {
 	out := runFetchJSWithBase(t, base, fmt.Sprintf(`
 		fetch("%s/data").then(function (r) {
 			var xi = r.headers.get("x-internal");
+			var sc = r.headers.get("set-cookie");
+			var sc2 = r.headers.get("set-cookie2");
 			console.log("xi=" + (xi || "<null>"));
+			console.log("sc=" + (sc || "<null>"));
+			console.log("sc2=" + (sc2 || "<null>"));
 		}, function (e) { console.log("rejected:" + e); });
 	`, same.URL))
 	if !strings.Contains(out, "xi=secret") {
-		t.Fatalf("同源 fetch 响应头不应被过滤，输出：%q", out)
+		t.Fatalf("同源 fetch 自定义响应头应可读，输出：%q", out)
+	}
+	if !strings.Contains(out, "sc=<null>") || !strings.Contains(out, "sc2=<null>") {
+		t.Fatalf("同源 fetch 的 Set-Cookie / Set-Cookie2 必须不可读，输出：%q", out)
 	}
 
 	out = runXHRJSWithBase(t, base, fmt.Sprintf(`
+		function hasCRLFEnd(s) {
+			return s.length >= 2 && s.charCodeAt(s.length - 2) === 13 && s.charCodeAt(s.length - 1) === 10;
+		}
+		function linesOf(s) {
+			var out = [];
+			var cur = "";
+			for (var i = 0; i < s.length; i++) {
+				if (s.charCodeAt(i) === 13 && s.charCodeAt(i + 1) === 10) { out.push(cur); cur = ""; i++; }
+				else { cur += s.charAt(i); }
+			}
+			if (cur !== "") { out.push(cur); }
+			return out;
+		}
 		var x = new XMLHttpRequest();
 		x.open("GET", "%s/data");
 		x.onload = function () {
 			var xi = x.getResponseHeader("X-Internal");
+			var sc = x.getResponseHeader("Set-Cookie");
+			var sc2 = x.getResponseHeader("Set-Cookie2");
+			var all = x.getAllResponseHeaders();
+			var ls = linesOf(all);
+			var okForm = true, okLower = true, okSorted = true, prev = "";
+			for (var i = 0; i < ls.length; i++) {
+				var idx = ls[i].indexOf(": ");
+				if (idx <= 0 || ls[i].slice(idx, idx + 2) !== ": ") { okForm = false; continue; }
+				var nm = ls[i].slice(0, idx);
+				if (nm !== nm.toLowerCase()) { okLower = false; }
+				if (prev !== "" && !(prev < nm)) { okSorted = false; }
+				prev = nm;
+			}
 			console.log("xi=" + (xi || "<null>"));
+			console.log("sc=" + (sc || "<null>"));
+			console.log("sc2=" + (sc2 || "<null>"));
+			console.log("all-sc=" + (all.indexOf("set-cookie") >= 0));
+			console.log("lines=" + ls.length);
+			console.log("ends-crlf=" + hasCRLFEnd(all));
+			console.log("lower=" + okLower);
+			console.log("form=" + okForm);
+			console.log("sorted=" + okSorted);
+			console.log("names=" + ls.length);
 		};
 		x.onerror = function () { console.log("error:" + x.status); };
 		x.send();
 	`, same.URL))
-	if !strings.Contains(out, "xi=secret") {
-		t.Fatalf("同源 XHR 响应头不应被过滤，输出：%q", out)
+	for _, want := range []string{
+		"xi=secret",
+		"sc=<null>",
+		"sc2=<null>",
+		"all-sc=false",
+		"ends-crlf=true",
+		"lower=true",
+		"form=true",
+		"sorted=true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("同源 XHR 响应头断言 %q 未满足，输出：%q", want, out)
+		}
+	}
+	// 至少要有 content-type / x-internal 这类可见头，避免空串误判格式全绿。
+	if strings.Contains(out, "lines=0") {
+		t.Fatalf("同源 getAllResponseHeaders 不应为空，输出：%q", out)
 	}
 }

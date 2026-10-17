@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -373,14 +374,11 @@ func RegisterXMLHttpRequest(rt *jsc.Interpreter) {
 		}
 		obj.Set("status", jsc.NumberValue(float64(resp.StatusCode)))
 		// ★ 与 fetch 共用同一份过滤逻辑（cors.go filterResponseHeaders）：
-		//   跨源时 getAllResponseHeaders/getResponseHeader 只能看到
-		//   safelisted + ACEH 头，Set-Cookie 恒不可见。
+		//   同源/跨源都应剔除 Set-Cookie（forbidden response header），
+		//   跨源时只能看到 safelisted + ACEH 头。
+		//   序列化与 fetch 的 Headers 语义一致，且只此一处实现。
 		visibleHeaders := corsReq.filterResponseHeaders(resp.Header)
-		var hdrLines []string
-		for k, vs := range visibleHeaders {
-			hdrLines = append(hdrLines, fmt.Sprintf("%s: %s", k, strings.Join(vs, ", ")))
-		}
-		obj.Set("_responseHeaders", jsc.StringValue(strings.Join(hdrLines, "\r\n")))
+		obj.Set("_responseHeaders", jsc.StringValue(serializeResponseHeaders(visibleHeaders)))
 		getAllRespHeadersFn := jsc.NewNativeFunction("getAllResponseHeaders", func(in2 *jsc.Interpreter, this2 jsc.JSValue, args2 []jsc.JSValue) jsc.JSValue {
 			if v, ok := obj.GetByKey("_responseHeaders"); ok {
 				return v
@@ -591,6 +589,48 @@ func xhrFail(in *jsc.Interpreter, obj *jsc.JSObject, err error) jsc.JSValue {
 	}
 	xhrDispatch(in, obj, "loadend")
 	return jsc.Undefined()
+}
+
+// serializeResponseHeaders 按浏览器 XMLHttpRequest.getAllResponseHeaders()
+// 的语义序列化响应头：
+//
+//   - 头名小写；
+//   - 按头名做字典序排序；
+//   - 每个头一行 `name: value\r\n`（同名多值用 ", " 连接）；
+//   - 整体以 `\r\n` 结尾；
+//   - 没有任何可见头时返回空字符串（不是 "\r\n"）。
+//
+// ★ 唯一的响应头序列化实现：真实 HTTP 的 XHR 走这里；fetch 用 Headers
+// 对象（headersStateFromHTTP）读取同一份 filterResponseHeaders 结果，
+// 二者都不允许各自拼字符串。
+func serializeResponseHeaders(h http.Header) string {
+	if len(h) == 0 {
+		return ""
+	}
+	type headerLine struct {
+		name  string
+		value string
+	}
+	lines := make([]headerLine, 0, len(h))
+	for name, values := range h {
+		lower := strings.ToLower(strings.TrimSpace(name))
+		if lower == "" {
+			continue
+		}
+		lines = append(lines, headerLine{name: lower, value: strings.Join(values, ", ")})
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	sort.Slice(lines, func(i, j int) bool { return lines[i].name < lines[j].name })
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l.name)
+		b.WriteString(": ")
+		b.WriteString(l.value)
+		b.WriteString("\r\n")
+	}
+	return b.String()
 }
 
 // xhrSetResponse 填终态响应字段（status/statusText/responseText/response 与
