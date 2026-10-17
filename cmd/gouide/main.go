@@ -5,12 +5,21 @@
 // 绝不占用默认 9090）。双击本程序即可得到完整的 IDE 桌面窗口；关闭窗口时由
 // 本程序拉起的后端进程一并退出（-keep-alive 可保留服务）。
 //
+// 页面加载有两条路：
+//
+//	-local（默认）  本地加载 + 拦截：index.html 与插件资产直接从磁盘读
+//	                （local.go），/api/* 由宿主拦截转发到后端（intercept.go），
+//	                页面不需要 HTTP 服务器提供任何静态文件。
+//	-http          旧形态：LoadURL(http://127.0.0.1:<port>/)，整站走真实 HTTP。
+//
 // 用法：
 //
 //	gouide.exe                          # 自动发现后端 + 拉起 + 开窗口（双击体验）
 //	gouide.exe -port 9098 -width 1600 -height 1000
 //	gouide.exe -attach                  # 只连接已在运行的后端（不拉起新进程）
 //	gouide.exe -backend D:/x/pair.exe   # 显式指定后端可执行文件
+//	gouide.exe -webdir D:/x/web -plugins D:/x/.pair/plugins
+//	gouide.exe -http                    # 回退到整站 HTTP 加载
 //	gouide.exe -headless -out x.png     # 无窗口自检：加载页面、打印摘要、可存 PNG
 package main
 
@@ -66,6 +75,10 @@ func main() {
 	port := flag.Int("port", defaultPort, "后端端口（作为 WEB_PORT 传给子进程；-attach 时连接该端口）")
 	backend := flag.String("backend", "", "后端可执行文件（pair.exe/companion.exe）；缺省自动发现")
 	attach := flag.Bool("attach", false, "只连接已在运行的后端，不拉起新进程")
+	local := flag.Bool("local", true, "本地加载 + 拦截（默认）：页面与插件资产读磁盘，/api 由宿主转发")
+	httpMode := flag.Bool("http", false, "回退到整站 HTTP 加载（LoadURL）")
+	webDirFlag := flag.String("webdir", "", "前端产物目录（含 index.html）；缺省自动发现")
+	pluginsFlag := flag.String("plugins", "", "插件包根目录；缺省自动发现 .pair/plugins")
 	width := flag.Int("width", 1600, "窗口宽（CSS px）")
 	height := flag.Int("height", 1000, "窗口高（CSS px）")
 	title := flag.String("title", "PairCode IDE", "窗口标题")
@@ -114,11 +127,40 @@ func main() {
 	wv := webkit.NewWebView()
 	defer wv.Destroy()
 	wv.Resize(*width, *height)
-	url := base + "/"
-	if err := wv.LoadURL(url); err != nil {
-		logf("页面加载失败（%s）：%v", url, err)
+	// wsb 仅在本地模式创建（HTTP 模式由引擎真实网络承担，不需要桥）。
+	var wsb *wsBridge
+	// ★ 默认本地加载 + 拦截：静态资源读磁盘，/api 由宿主转发；-http 回退旧形态。
+	if *local && !*httpMode {
+		webDir, err := discoverWebDir(*webDirFlag)
+		if err != nil {
+			logf("本地加载失败：%v", err)
+			os.Exit(2)
+		}
+		pluginsDir, err := discoverPluginsDir(*pluginsFlag)
+		if err != nil {
+			logf("本地加载失败：%v", err)
+			os.Exit(2)
+		}
+		assets := &localAssets{webDir: webDir, pluginsDir: pluginsDir}
+		logf("本地加载：web=%s plugins=%s", webDir, pluginsDir)
+		// 拦截与 WS 桥必须先于装配注册（bridge 路由与 Go 全局函数都在 LoadHTML
+		// 期间被注入解释器；页面脚本一执行就可能 fetch / new WebSocket）。
+		installIntercepts(base, assets)
+		wsb = newWSBridge(base)
+		wsb.Install(wv)
+		defer wsb.Shutdown()
+		if err := assets.LoadPage(wv); err != nil {
+			logf("页面加载失败（%s）：%v", webDir, err)
+		} else {
+			logf("页面已本地装配：%s（拦截 /api 与 WebSocket → %s）", docBaseURL, base)
+		}
 	} else {
-		logf("页面已加载：%s", url)
+		url := base + "/"
+		if err := wv.LoadURL(url); err != nil {
+			logf("页面加载失败（%s）：%v", url, err)
+		} else {
+			logf("页面已加载：%s", url)
+		}
 	}
 	// -eval 在窗口模式下也执行一次（诊断/标记用：如注入可见角标以便
 	// 在窗口截图里确认「抓到的是本窗口而非同名浏览器标签」）。
@@ -132,7 +174,7 @@ func main() {
 
 	// 3) 无窗口自检模式（自动化验证用，不创建窗口）。
 	if *headless {
-		pump(wv, *frames)
+		pump(wv, wsb, *frames)
 		fmt.Println("=== 页面摘要 ===")
 		fmt.Println(evalStr(wv, jsSummary))
 		if *console {
@@ -147,7 +189,7 @@ func main() {
 			// ★ 再推进 *frames 轮事件循环：让 -eval 里触发的事件（dispatchEvent /
 			//   fetch 回调 / Vue 渲染）真正落地后再取结果。用于复现「一次交互是否
 			//   被处理两次」这类必须跨帧观察的问题（如 toast 双弹）。
-			pump(wv, *frames)
+			pump(wv, wsb, *frames)
 			fmt.Println("=== eval2 ===")
 			fmt.Println(evalStr(wv, *eval2))
 		}
@@ -174,6 +216,10 @@ func main() {
 		stopBackend(proc)
 		os.Exit(1)
 	}
+	// ★ 每帧在主线程消费 WS 桥队列（goja 非线程安全，读循环只入队）。
+	if wsb != nil {
+		host.OnFrame = wsb.Flush
+	}
 	logf("窗口已打开（标题 %q）；关闭窗口即退出", *title)
 	// 置顶并显示：双击启动后窗口必须在前台（GLFW 默认只创建窗口，
 	// 可能被其它窗口遮挡，用户会以为「没启动」）。
@@ -183,6 +229,9 @@ func main() {
 	host.Run()
 	logf("窗口已关闭")
 
+	if wsb != nil {
+		wsb.Shutdown()
+	}
 	if !*keepAlive {
 		stopBackend(proc)
 	}
@@ -190,12 +239,16 @@ func main() {
 }
 
 // pump 驱动事件循环 + 微任务 + 一帧渲染，让 Promise/定时器/图片推进。
-func pump(wv *webkit.WebView, rounds int) {
+// wsb 非空时每轮顺带消费 WebSocket 桥队列（无窗口自检没有 Host.OnFrame）。
+func pump(wv *webkit.WebView, wsb *wsBridge, rounds int) {
 	for i := 0; i < rounds; i++ {
 		if el := wv.JSInterpreter().GetEventLoop(); el != nil {
 			el.ProcessTasks(0)
 		}
 		wv.JSInterpreter().RunJobs()
+		if wsb != nil {
+			wsb.Flush()
+		}
 		wv.EnsureLayout()
 		_, _ = wv.Render()
 		time.Sleep(5 * time.Millisecond)
