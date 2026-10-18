@@ -11,6 +11,7 @@
 package window
 
 /*
+#cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Cocoa -framework CoreGraphics
 #include <stdlib.h>
 #include <objc/runtime.h>

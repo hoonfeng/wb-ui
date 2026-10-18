@@ -17,9 +17,30 @@ package window
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
 #include <stdlib.h>
+#include <string.h>
 
 // XDestroyImage 在 Xutil.h 里是函数式宏，cgo 无法解析宏 -> 用 inline 包装。
 static void pc_destroy_image(XImage* img) { if (img) XDestroyImage(img); }
+
+// XEvent / XClientMessageEvent 含 C union 成员（xclient、data）。
+// cgo 只把它们当字节块（Go 侧看不到 .xclient / .data.l），
+// 因此 union 访问全部留在 C 侧，Go 只调这几个 inline 函数。
+static int pc_ev_type(XEvent* e) { return e->type; }
+static long pc_client_l(XClientMessageEvent* e, int i) { return e->data.l[i]; }
+static void pc_client_msg_reply(XEvent* out, Display* dpy, Window target, Atom messageType,
+                                int fmt, long l0, long l1, long l2, long l3, long l4) {
+    memset(out, 0, sizeof(*out));
+    out->xclient.type = ClientMessage;
+    out->xclient.display = dpy;
+    out->xclient.window = target;
+    out->xclient.message_type = messageType;
+    out->xclient.format = fmt;
+    out->xclient.data.l[0] = l0;
+    out->xclient.data.l[1] = l1;
+    out->xclient.data.l[2] = l2;
+    out->xclient.data.l[3] = l3;
+    out->xclient.data.l[4] = l4;
+}
 */
 import "C"
 
@@ -155,7 +176,7 @@ func NewWindow(width, height int, title string) (*Window, error) {
 	w := &Window{
 		display: dpy,
 		xwin:    xwin,
-		screen:  screen,
+		screen:  int(screen),
 		gc:      gc,
 		canvas:  gfxCanvas,
 		width:   width,
@@ -344,7 +365,7 @@ func (w *Window) PollEvents() []Event {
 	for C.XPending(w.display) > 0 {
 		var xev C.XEvent
 		C.XNextEvent(w.display, &xev)
-		switch typ := xev._type; typ {
+		switch typ := C.pc_ev_type(&xev); typ {
 		case C.Expose:
 		case C.ConfigureNotify:
 			cfg := (*C.XConfigureEvent)(unsafe.Pointer(&xev))
@@ -414,7 +435,7 @@ func (w *Window) PollEvents() []Event {
 			w.eventsMu.Unlock()
 		case C.ClientMessage:
 			cm := (*C.XClientMessageEvent)(unsafe.Pointer(&xev))
-			msgType := C.Atom(cm.data.l[0])
+			msgType := C.Atom(C.pc_client_l(cm, 0))
 			if msgType == w.atomDeleteWindow {
 				w.shouldClose = true
 				if w.closeCallback != nil {
@@ -423,26 +444,17 @@ func (w *Window) PollEvents() []Event {
 			} else if msgType == w.atomXdndEnter {
 				// XdndEnter: a drag entered the window
 				// Extract version from the upper byte of data.l[1]
-				w.dropVersion = int(cm.data.l[1] >> 24)
-				_ = cm.data.l[2] // source window
+				w.dropVersion = int(C.pc_client_l(cm, 1) >> 24)
+				_ = C.pc_client_l(cm, 2) // source window
 				w.expectingDrop = true
 			} else if msgType == w.atomXdndPosition {
 				// XdndPosition: drag position update
 				// Reply with XdndStatus to accept the drop
-				srcWin := C.Window(cm.data.l[0])
+				srcWin := C.Window(C.pc_client_l(cm, 0))
 				status := C.XInternAtom(w.display, C.CString("XdndStatus"), C.False)
 				if status != 0 {
 					var xevReply C.XEvent
-					xevReply.xclient._type = C.ClientMessage
-					xevReply.xclient.display = w.display
-					xevReply.xclient.window = srcWin
-					xevReply.xclient.message_type = status
-					xevReply.xclient.format = 32
-					xevReply.xclient.data.l[0] = 1 // accept the drop
-					xevReply.xclient.data.l[1] = 0 // specify action rectangle
-					xevReply.xclient.data.l[2] = 0
-					xevReply.xclient.data.l[3] = 0
-					xevReply.xclient.data.l[4] = int64(w.atomXdndActionCopy)
+					C.pc_client_msg_reply(&xevReply, w.display, srcWin, status, 32, 1, 0, 0, 0, C.long(w.atomXdndActionCopy))
 					C.XSendEvent(w.display, srcWin, 0, 0, &xevReply)
 					C.XFlush(w.display)
 				}
@@ -496,16 +508,11 @@ func (w *Window) PollEvents() []Event {
 				w.expectingDrop = false
 
 				// Send XdndFinished to source
-				srcWin := C.Window(cm.data.l[0])
+				srcWin := C.Window(C.pc_client_l(cm, 0))
 				finished := C.XInternAtom(w.display, C.CString("XdndFinished"), C.False)
 				if finished != 0 {
 					var xevReply C.XEvent
-					xevReply.xclient._type = C.ClientMessage
-					xevReply.xclient.display = w.display
-					xevReply.xclient.window = srcWin
-					xevReply.xclient.message_type = finished
-					xevReply.xclient.format = 32
-					xevReply.xclient.data.l[0] = 1 // success
+					C.pc_client_msg_reply(&xevReply, w.display, srcWin, finished, 32, 1, 0, 0, 0, 0)
 					C.XSendEvent(w.display, srcWin, 0, 0, &xevReply)
 					C.XFlush(w.display)
 				}
