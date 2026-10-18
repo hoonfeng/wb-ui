@@ -1,20 +1,9 @@
-// Command gouide 是 PairCode IDE 的桌面端外壳：wb-ui 渲染引擎 + 原生窗口。
+// Command gouide 是 PairCode IDE 的「分离模式」桌面壳：wb-ui 渲染引擎 + 原生窗口，
+// 后端以内置子进程方式拉起（pair.exe / companion.exe）。
 //
-// 形态：本程序承载原生窗口（wb-ui WebKit + Skia 渲染）；gou-ide 内核后端以
-// 子进程方式拉起（pair.exe / companion.exe），监听本机独立端口（默认 9098，
-// 绝不占用默认 9090）。双击本程序即可得到完整的 IDE 桌面窗口；关闭窗口时由
-// 本程序拉起的后端进程一并退出（-keep-alive 可保留服务）。
-//
-// 页面加载有三种模式（-mode，默认 hybrid）：
-//
-//	hybrid（默认）  HTTP 装配 + WebSocket 桥：从后端取 index.html，以
-//	                http://127.0.0.1:<port>/ 为文档来源装配。origin/host/protocol、
-//	                脚本/样式/图片/fetch 全部与浏览器一致（httpmode.go）；引擎的
-//	                WebSocket 是 stub，故仍注入 shim 由宿主桥接（wsbridge.go）。
-//	local          纯本地装配 + 请求拦截（实验形态）：index.html 与插件资产读磁盘
-//	                （local.go），/api/* 由宿主拦截转发（intercept.go）。文档 origin
-//	                为空串、cookie 不可写、资源型 URL 不走拦截 —— 功能面窄于 hybrid。
-//	http           LoadURL 旧形态：整站真实 HTTP，但没有 WS 桥，终端/事件流不可用。
+// ★ 一体化模式（推荐）：gou-ide 的 pair.exe 在 `-tags gui` 下已内嵌同一套窗口
+// 装配（ideapp.Run），后端与窗口同进程、无需外部 exe。本程序保留为「分离壳」，
+// 用于：连接已在运行的后端（-attach）、调试 GUI 与后端解耦、或后端不在同目录时。
 //
 // 用法：
 //
@@ -23,57 +12,27 @@
 //	gouide.exe -attach                  # 只连接已在运行的后端（不拉起新进程）
 //	gouide.exe -backend D:/x/pair.exe   # 显式指定后端可执行文件
 //	gouide.exe -mode local -webdir D:/x/web -plugins D:/x/.pair/plugins
-//	gouide.exe -mode http               # 整站 HTTP，但无 WebSocket 桥
 //	gouide.exe -headless -out x.png     # 无窗口自检：加载页面、打印摘要、可存 PNG
 package main
 
 import (
 	"flag"
 	"fmt"
-	"image"
-	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"wb-ui/app"
-	"wb-ui/engine/rendering"
-	"wb-ui/webkit"
+	"wb-ui/ideapp"
 )
 
 // defaultPort 桌面端专用端口。★ 绝不动默认 9090（9090 属 Web 模式与用户
 // 正在运行的实例；桌面壳必须错开，测试一律非默认端口）。
 const defaultPort = 9098
 
-// logf 全局日志函数，由 main 替换为「文件 + stdout」落盘实现。
+// logf 全局日志函数，main 中替换为「文件 + stdout」落盘实现。
 var logf = func(format string, a ...any) { fmt.Printf(format, a...); fmt.Println() }
-
-// jsSummary 页面摘要（headless 自检用）：标题/元素数/关键区域几何/UI 运行时。
-// 任意一项失败都不影响其余项（逐项 try/catch）。
-const jsSummary = `(function () {
-  function safe(fn, dflt) { try { var v = fn(); return (v === undefined || v === null) ? dflt : v; } catch (e) { return 'ERR:' + String(e && e.message || e); } }
-  var o = {};
-  o.title = safe(function () { return document.title; }, '');
-  o.elements = safe(function () { return document.getElementsByTagName('*').length; }, -1);
-  o.appChildren = safe(function () { var a = document.getElementById('app'); return a ? a.children.length : -1; }, -1);
-  o.geom = {};
-  ['#app', '.titlebar', '.activity-bar', '.sidebar', '.main-area'].forEach(function (s) {
-    o.geom[s] = safe(function () {
-      var e = document.querySelector(s);
-      if (!e) return 'missing';
-      var b = e.getBoundingClientRect();
-      return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)].join(',');
-    }, 'missing');
-  });
-  o.runtime = safe(function () {
-    var pr = window.__pluginRuntime;
-    if (!pr) return 'no-runtime';
-    return 'instances=' + pr.instances().length + ' slots=' + pr.clientSlots().length;
-  }, '');
-  return JSON.stringify(o, null, 2);
-})()`
 
 func main() {
 	port := flag.Int("port", defaultPort, "后端端口（作为 WEB_PORT 传给子进程；-attach 时连接该端口）")
@@ -91,7 +50,7 @@ func main() {
 	frames := flag.Int("frames", 60, "headless 模式的渲染/事件循环轮数")
 	out := flag.String("out", "", "headless 模式额外写出 PNG 截图（如 dev/output/gouide.png）")
 	eval := flag.String("eval", "", "headless 模式额外执行该 JS 并打印结果（诊断用）")
-	eval2 := flag.String("eval2", "", "headless 模式：-eval 之后再跑 *frames 轮，然后执行该 JS 并打印（观察事件触发后的异步结果）")
+	eval2 := flag.String("eval2", "", "headless 模式：-eval 之后再跑 *frames 轮，然后执行该 JS 并打印")
 	dumpText := flag.Bool("dump-text", false, "headless 模式 dump 渲染树中的文本对象（诊断文字污染用）")
 	keepAlive := flag.Bool("keep-alive", false, "窗口关闭后保留后端服务（默认一并退出）")
 	console := flag.Bool("console", false, "打印页面 console 输出（调试用）")
@@ -99,7 +58,7 @@ func main() {
 
 	logf = newLogger()
 	base := fmt.Sprintf("http://127.0.0.1:%d", *port)
-	logf("PairCode IDE 桌面端启动：端口 %d，视口 %dx%d", *port, *width, *height)
+	logf("PairCode IDE 桌面端（分离壳）启动：端口 %d，视口 %dx%d", *port, *width, *height)
 
 	// 1) 后端编排：已在运行则直接连接；否则拉起子进程并等待就绪。
 	var proc *exec.Cmd
@@ -128,15 +87,7 @@ func main() {
 		}
 	}
 
-	// 2) 渲染引擎：WebView 加载前端。
-	wv := webkit.NewWebView()
-	defer wv.Destroy()
-	wv.Resize(*width, *height)
-	// 加载模式（2026-10 排查后默认 hybrid）：
-	//   hybrid = HTTP 装配 + WS 桥：origin/子资源/响应头与浏览器一致，终端与
-	//            事件流仍可用（引擎 WebSocket 是 stub，必须由宿主桥接）；
-	//   local  = 纯本地装配 + 拦截（实验：origin 为空、cookie 不可写）；
-	//   http   = LoadURL 旧形态（无 WS 桥）。
+	// 2) 窗口装配交给 ideapp（与一体化 pair.exe 共用同一套代码）。
 	loadMode := strings.ToLower(strings.TrimSpace(*mode))
 	if *local {
 		loadMode = "local"
@@ -144,177 +95,46 @@ func main() {
 	if *httpMode {
 		loadMode = "http"
 	}
-	if loadMode != "hybrid" && loadMode != "local" && loadMode != "http" {
-		logf("未知加载模式 %q（可用：hybrid/local/http）", loadMode)
-		os.Exit(2)
-	}
-	var wsb *wsBridge
-	if loadMode == "hybrid" {
-		// WS 桥先装：shim 在装配时注入 <head> 最前，页面脚本一执行就可能 new WebSocket。
-		wsb = newWSBridge(base)
-		wsb.Install(wv)
-		defer wsb.Shutdown()
-		if err := loadHTTPPage(wv, base); err != nil {
-			logf("HTTP 装配失败：%v；回退 LoadURL（无 WS 桥）", err)
-			if err2 := wv.LoadURL(base + "/"); err2 != nil {
-				logf("页面加载失败（%s/）：%v", base, err2)
-			}
-		} else {
-			logf("页面已 HTTP 装配：%s/（子资源走真实 HTTP，WebSocket 由宿主桥接）", base)
-		}
-	}
-	if loadMode == "local" {
-		b, err := loadLocal(wv, base, *webDirFlag, *pluginsFlag)
-		if err != nil {
-			logf("本地装配失败：%v；回退 HTTP 装配", err)
-			loadMode = "hybrid"
-			wsb = newWSBridge(base)
-			wsb.Install(wv)
-			defer wsb.Shutdown()
-			if err := loadHTTPPage(wv, base); err != nil {
-				logf("HTTP 装配失败：%v；回退 LoadURL（无 WS 桥）", err)
-				if err2 := wv.LoadURL(base + "/"); err2 != nil {
-					logf("页面加载失败（%s/）：%v", base, err2)
-				}
-			} else {
-				logf("页面已 HTTP 装配：%s/（本地装配失败后的回退）", base)
-			}
-		} else {
-			wsb = b
-			defer wsb.Shutdown()
-		}
-	}
-	if loadMode == "http" {
-		if err := wv.LoadURL(base + "/"); err != nil {
-			logf("页面加载失败（%s/）：%v", base, err)
-		} else {
-			logf("页面已加载：%s/（无 WebSocket 桥）", base)
-		}
-	}
-	// -eval 在窗口模式下也执行一次（诊断/标记用：如注入可见角标以便
-	// 在窗口截图里确认「抓到的是本窗口而非同名浏览器标签」）。
-	if *eval != "" {
-		if _, err := wv.EvalJS(*eval); err != nil {
-			logf("-eval 执行失败：%v", err)
-		} else {
-			logf("-eval 已执行")
-		}
+	opts := ideapp.Options{
+		BaseURL:    base,
+		Mode:       loadMode,
+		WebDir:     *webDirFlag,
+		PluginsDir: *pluginsFlag,
+		Width:      *width,
+		Height:     *height,
+		Title:      *title,
+		Headless:   *headless,
+		Frames:     *frames,
+		Out:        *out,
+		Eval:       *eval,
+		Eval2:      *eval2,
+		DumpText:   *dumpText,
+		Console:    *console,
+		Logf:       logf,
 	}
 
-	// 3) 无窗口自检模式（自动化验证用，不创建窗口）。
 	if *headless {
-		pump(wv, wsb, *frames)
-		fmt.Println("=== 页面摘要 ===")
-		fmt.Println(evalStr(wv, jsSummary))
-		if *console {
-			fmt.Println("=== console 输出 ===")
-			fmt.Println(wv.ConsoleOutput())
-		}
-		if *eval != "" {
-			fmt.Println("=== eval ===")
-			fmt.Println(evalStr(wv, *eval))
-		}
-		if *eval2 != "" {
-			// ★ 再推进 *frames 轮事件循环：让 -eval 里触发的事件（dispatchEvent /
-			//   fetch 回调 / Vue 渲染）真正落地后再取结果。用于复现「一次交互是否
-			//   被处理两次」这类必须跨帧观察的问题（如 toast 双弹）。
-			pump(wv, wsb, *frames)
-			fmt.Println("=== eval2 ===")
-			fmt.Println(evalStr(wv, *eval2))
-		}
-		if *dumpText {
-			fmt.Println("=== 渲染树文本对象 ===")
-			fmt.Println(dumpRenderTexts(wv))
-		}
-		if *out != "" {
-			if err := writePNG(wv, *out, *width, *height); err != nil {
-				logf("PNG 写出失败：%v", err)
-			} else {
-				logf("PNG 已写出：%s", *out)
-			}
+		err := ideapp.Headless(opts)
+		if err != nil {
+			logf("自检失败：%v", err)
 		}
 		stopBackend(proc)
 		logf("自检完成，退出")
+		if err != nil {
+			os.Exit(1)
+		}
 		return
 	}
 
-	// 4) 原生窗口模式。
-	host, err := app.NewHost(wv, *width, *height, *title)
-	if err != nil {
-		logf("窗口创建失败：%v", err)
+	if err := ideapp.Run(opts); err != nil {
+		logf("窗口运行失败：%v", err)
 		stopBackend(proc)
 		os.Exit(1)
-	}
-	// ★ 每帧在主线程消费 WS 桥队列（goja 非线程安全，读循环只入队）。
-	if wsb != nil {
-		host.OnFrame = wsb.Flush
-	}
-	logf("窗口已打开（标题 %q）；关闭窗口即退出", *title)
-	// 置顶并显示：双击启动后窗口必须在前台（GLFW 默认只创建窗口，
-	// 可能被其它窗口遮挡，用户会以为「没启动」）。
-	if win := host.Window(); win != nil {
-		win.Focus()
-	}
-	host.Run()
-	logf("窗口已关闭")
-
-	if wsb != nil {
-		wsb.Shutdown()
 	}
 	if !*keepAlive {
 		stopBackend(proc)
 	}
 	logf("退出")
-}
-
-// pump 驱动事件循环 + 微任务 + 一帧渲染，让 Promise/定时器/图片推进。
-// wsb 非空时每轮顺带消费 WebSocket 桥队列（无窗口自检没有 Host.OnFrame）。
-func pump(wv *webkit.WebView, wsb *wsBridge, rounds int) {
-	for i := 0; i < rounds; i++ {
-		if el := wv.JSInterpreter().GetEventLoop(); el != nil {
-			el.ProcessTasks(0)
-		}
-		wv.JSInterpreter().RunJobs()
-		if wsb != nil {
-			wsb.Flush()
-		}
-		wv.EnsureLayout()
-		_, _ = wv.Render()
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-// evalStr 执行页面 JS 并取字符串结果（失败时返回错误文本，不中断流程）。
-func evalStr(wv *webkit.WebView, script string) string {
-	v, err := wv.EvalJS(script)
-	if err != nil {
-		return "<eval error: " + err.Error() + ">"
-	}
-	return v.ToString()
-}
-
-// writePNG 把当前渲染结果写成 PNG（headless 自检留证用）。
-func writePNG(wv *webkit.WebView, out string, w, h int) error {
-	pix, err := wv.Render()
-	if err != nil {
-		return err
-	}
-	if len(pix) == 0 {
-		return fmt.Errorf("渲染无像素输出")
-	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	if len(pix) >= len(img.Pix) {
-		copy(img.Pix, pix[:len(img.Pix)])
-	}
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(out)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return png.Encode(f, img)
 }
 
 // executableDir 本程序所在目录（日志/相对路径的基准）。
@@ -326,52 +146,6 @@ func executableDir() string {
 		return wd
 	}
 	return "."
-}
-
-// dumpRenderTexts 遍历渲染树，列出所有非空 RenderText 的内容及来源 DOM 节点类型。
-// 用于诊断「画面上出现不该有的文字」（如 svg 内注释被画成文字污染图标区域）。
-func dumpRenderTexts(wv *webkit.WebView) string {
-	rv := wv.RenderView()
-	if rv == nil {
-		return "(RenderView 为空)"
-	}
-	var sb strings.Builder
-	total, shown := 0, 0
-	var walk func(o rendering.RenderObject)
-	walk = func(o rendering.RenderObject) {
-		if o == nil {
-			return
-		}
-		if rt, ok := o.(*rendering.RenderText); ok {
-			if s := strings.TrimSpace(rt.Text()); s != "" {
-				total++
-				if shown < 80 {
-					nodeType, nodeName := "?", "?"
-					if n := o.Node(); n != nil {
-						nodeType = fmt.Sprintf("%d", n.NodeType())
-						nodeName = n.NodeName()
-					}
-					sb.WriteString(fmt.Sprintf("  [%d] nodeType=%s name=%s %q\n", total, nodeType, nodeName, truncateRunes(s, 60)))
-					shown++
-				}
-			}
-		}
-		for c := o.FirstChild(); c != nil; c = c.NextSibling() {
-			walk(c)
-		}
-	}
-	walk(rv)
-	sb.WriteString(fmt.Sprintf("  (共 %d 个非空白 RenderText，显示前 %d 个)\n", total, shown))
-	return sb.String()
-}
-
-// truncateRunes 按 rune 截断，避免切断多字节字符。
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }
 
 // newLogger 返回「stdout + <exeDir>/logs/gouide-desktop.log」双写日志函数。

@@ -13,7 +13,7 @@
 // 直调需要把 webServer 抽成库，属于另一层重构；本轮的「拦截」目标是让页面
 // 不依赖 HTTP 服务器提供静态资源、且请求路径统一由宿主答复，转发层对前端
 // 完全透明（前端代码零改动）。
-package main
+package ideapp
 
 import (
 	"io"

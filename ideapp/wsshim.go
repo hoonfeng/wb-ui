@@ -9,7 +9,7 @@
 //	ws.onopen / onmessage / onerror / onclose + addEventListener
 //	readyState 0=CONNECTING 1=OPEN 2=CLOSING 3=CLOSED
 //	ev.data 为字符串（终端 PTY 输出由宿主按字符串推送；前端已按此处理）
-package main
+package ideapp
 
 // wsShimJS 注入到页面 <head> 最前的脚本。
 const wsShimJS = `(function () {

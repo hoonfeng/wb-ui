@@ -10,7 +10,7 @@
 // WebView 用 LoadHTMLWithBaseURL(html, "app://ide/") 装配：文档获得稳定的来源
 // URL，页面里的相对引用因此能被引擎解析成 app://ide/... 后交给 ResourceResolver。
 // 引用在引擎里最多问两种形态（原样 + 绝对化），Resolve 两种都接受。
-package main
+package ideapp
 
 import (
 	"fmt"

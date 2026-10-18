@@ -7,7 +7,7 @@
 // 只实现桌面壳需要的子集：客户端握手、文本/二进制帧、ping/pong、close。
 // 刻意不引第三方依赖（wb-ui 的 go.mod 里没有 gorilla/websocket），也不复刻
 // engine/devtools/cdp/ws 的服务端实现（那是 Upgrade 方向）。
-package main
+package ideapp
 
 import (
 	"bufio"

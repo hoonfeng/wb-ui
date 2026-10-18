@@ -15,7 +15,7 @@
 // 磁盘产物与后端版本漂移），在 <head> 最前注入 WS shim，再以 base+"/" 作为
 // 文档 URL 调用 LoadHTMLWithBaseURL —— 页面里所有相对/绝对引用都按
 // http://127.0.0.1:<port>/ 解析，走真实网络。
-package main
+package ideapp
 
 import (
 	"fmt"

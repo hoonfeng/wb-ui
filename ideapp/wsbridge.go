@@ -14,7 +14,7 @@
 //
 // ★ 线程模型：goja 非线程安全，任何跨 goroutine 的 RunJS 都必须经主线程。
 // 所以读循环只往队列里塞「待执行的 JS 脚本字符串」，Flush 在主线程消费。
-package main
+package ideapp
 
 import (
 	"encoding/json"
