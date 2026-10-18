@@ -429,7 +429,7 @@ func (w *Window) PollEvents() []Event {
 				status := C.XInternAtom(w.display, C.CString("XdndStatus"), C.False)
 				if status != 0 {
 					var xevReply C.XEvent
-					xevReply.xclient.type = C.ClientMessage
+					xevReply.xclient._type = C.ClientMessage
 					xevReply.xclient.display = w.display
 					xevReply.xclient.window = srcWin
 					xevReply.xclient.message_type = status
@@ -496,7 +496,7 @@ func (w *Window) PollEvents() []Event {
 				finished := C.XInternAtom(w.display, C.CString("XdndFinished"), C.False)
 				if finished != 0 {
 					var xevReply C.XEvent
-					xevReply.xclient.type = C.ClientMessage
+					xevReply.xclient._type = C.ClientMessage
 					xevReply.xclient.display = w.display
 					xevReply.xclient.window = srcWin
 					xevReply.xclient.message_type = finished
