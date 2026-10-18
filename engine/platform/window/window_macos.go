@@ -760,9 +760,10 @@ const (
 type Event struct {
 	Type    EventType
 	X, Y    float64
-	Button  int // 0=left, 1=right
-	Action  int // 0=release, 1=press
-	Key     int // macOS keyCode
+	Button  int  // 0=left, 1=right
+	Action  int  // 0=release, 1=press
+	Char    rune // Unicode codepoint (for EventChar)
+	Key     int  // macOS keyCode
 	Mods    int
 	Width   int // for EventResize
 	Height  int

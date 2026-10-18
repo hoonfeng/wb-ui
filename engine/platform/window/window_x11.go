@@ -74,9 +74,10 @@ const (
 type Event struct {
 	Type    EventType
 	X, Y    float64
-	Button  int // 1=left, 2=middle, 3=right
-	Action  int // 0=release, 1=press
-	Key     int // X11 keysym (lower 32 bits)
+	Button  int  // 1=left, 2=middle, 3=right
+	Action  int  // 0=release, 1=press
+	Char    rune // Unicode codepoint (for EventChar)
+	Key     int  // X11 keysym (lower 32 bits)
 	Mods    int
 	Width   int // for EventResize
 	Height  int

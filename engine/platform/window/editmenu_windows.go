@@ -10,14 +10,6 @@ import (
 	"unsafe"
 )
 
-// 编辑菜单命令 ID（PopupEditMenu 返回值；引擎层按此执行编辑操作）。
-const (
-	EditMenuCut       = 1
-	EditMenuCopy      = 2
-	EditMenuPaste     = 3
-	EditMenuSelectAll = 4
-)
-
 var (
 	user32E                 = syscall.NewLazyDLL("user32.dll")
 	procCreatePopupMenu     = user32E.NewProc("CreatePopupMenu")
