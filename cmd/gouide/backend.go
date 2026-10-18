@@ -15,7 +15,12 @@ import (
 //  2. 环境变量 PAIRCODE_BACKEND
 //  3. 本程序同目录：pair.exe / companion.exe / paircode.exe / pair
 //  4. 本程序同目录 bin/：pair.exe / pair / companion.exe
-//  5. PATH 中的 pair.exe / companion.exe
+//  5. 本程序同目录 release/PairCode/pair.exe（安装目录布局）
+//  6. 从本程序目录逐级向上最多 4 层，找兄弟仓库 gou-ide：
+//     <up>/gou-ide/release/PairCode/pair.exe → <up>/gou-ide/companion.exe
+//     → <up>/gou-ide/bin/pair.exe
+//     （开发/自举场景：程序常构建在 wb-ui/_temp、wb-ui/out、wb-ui/bin 下）
+//  7. PATH 中的 pair.exe / companion.exe
 func discoverBackend(explicit string) (string, error) {
 	var cands []string
 	if explicit != "" {
@@ -31,6 +36,21 @@ func discoverBackend(explicit string) (string, error) {
 		}
 		for _, n := range []string{"pair.exe", "pair", "companion.exe"} {
 			cands = append(cands, filepath.Join(dir, "bin", n))
+		}
+		cands = append(cands, filepath.Join(dir, "release", "PairCode", "pair.exe"))
+		// 逐级向上找兄弟仓库 gou-ide（开发/自举场景）。
+		up := dir
+		for i := 0; i < 4; i++ {
+			parent := filepath.Dir(up)
+			if parent == up || parent == "" {
+				break // 已到盘根
+			}
+			up = parent
+			cands = append(cands,
+				filepath.Join(up, "gou-ide", "release", "PairCode", "pair.exe"),
+				filepath.Join(up, "gou-ide", "companion.exe"),
+				filepath.Join(up, "gou-ide", "bin", "pair.exe"),
+			)
 		}
 	}
 	for _, n := range []string{"pair.exe", "companion.exe"} {
