@@ -14,6 +14,9 @@ package window
 #cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Cocoa -framework CoreGraphics
 #include <stdlib.h>
+// Cocoa/AppKit 头：提供 NSPoint/NSRect/NSUInteger、NSApplicationActivationPolicy*
+// 等类型与常量（缺它时 CI 上报 unknown type name 'NSPoint' / undeclared identifier）。
+#import <Cocoa/Cocoa.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
 // cocoa_present 直接用 CoreGraphics 位图上下文与 dispatch_async 投递到主队列，
@@ -435,11 +438,11 @@ static void ensureViewClass(void) {
         IMP imp = imp_implementationWithBlock(^(id self, id event) {
             CocoaWindow* cw = *(CocoaWindow**)((char*)self + ivar_getOffset(class_getInstanceVariable(viewClass, "ctxPtr")));
             if (!cw) return;
-            id touches = ((id(*)(id, SEL, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 1, self); // NSTouchPhaseBegan
+            id touches = ((id(*)(id, SEL, unsigned long, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 1, self); // NSTouchPhaseBegan
             id enumerator = ((id(*)(id, SEL))objc_msgSend)(touches, sel_registerName("objectEnumerator"));
             id touch;
             while ((touch = ((id(*)(id, SEL))objc_msgSend)(enumerator, sel_registerName("nextObject")))) {
-                id loc = ((id(*)(id, SEL))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
+                id loc = ((id(*)(id, SEL, id))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
                 CGFloat x = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("x"));
                 CGFloat y = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("y"));
                 // Flip y coordinate
@@ -457,11 +460,11 @@ static void ensureViewClass(void) {
         IMP imp = imp_implementationWithBlock(^(id self, id event) {
             CocoaWindow* cw = *(CocoaWindow**)((char*)self + ivar_getOffset(class_getInstanceVariable(viewClass, "ctxPtr")));
             if (!cw) return;
-            id touches = ((id(*)(id, SEL, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 2, self); // NSTouchPhaseMoved
+            id touches = ((id(*)(id, SEL, unsigned long, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 2, self); // NSTouchPhaseMoved
             id enumerator = ((id(*)(id, SEL))objc_msgSend)(touches, sel_registerName("objectEnumerator"));
             id touch;
             while ((touch = ((id(*)(id, SEL))objc_msgSend)(enumerator, sel_registerName("nextObject")))) {
-                id loc = ((id(*)(id, SEL))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
+                id loc = ((id(*)(id, SEL, id))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
                 CGFloat x = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("x"));
                 CGFloat y = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("y"));
                 id bounds = ((id(*)(id, SEL))objc_msgSend)(self, sel_registerName("bounds"));
@@ -478,11 +481,11 @@ static void ensureViewClass(void) {
         IMP imp = imp_implementationWithBlock(^(id self, id event) {
             CocoaWindow* cw = *(CocoaWindow**)((char*)self + ivar_getOffset(class_getInstanceVariable(viewClass, "ctxPtr")));
             if (!cw) return;
-            id touches = ((id(*)(id, SEL, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 4, self); // NSTouchPhaseEnded
+            id touches = ((id(*)(id, SEL, unsigned long, id))objc_msgSend)(event, sel_registerName("touchesMatchingPhase:inView:"), 4, self); // NSTouchPhaseEnded
             id enumerator = ((id(*)(id, SEL))objc_msgSend)(touches, sel_registerName("objectEnumerator"));
             id touch;
             while ((touch = ((id(*)(id, SEL))objc_msgSend)(enumerator, sel_registerName("nextObject")))) {
-                id loc = ((id(*)(id, SEL))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
+                id loc = ((id(*)(id, SEL, id))objc_msgSend)(touch, sel_registerName("locationInView:"), self);
                 CGFloat x = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("x"));
                 CGFloat y = ((CGFloat(*)(id, SEL))objc_msgSend)(loc, sel_registerName("y"));
                 id bounds = ((id(*)(id, SEL))objc_msgSend)(self, sel_registerName("bounds"));
@@ -588,7 +591,6 @@ static CocoaWindow* cocoa_create_window(int width, int height, const char* ctitl
     cw->width = width;
     cw->height = height;
     cw->scale = 1.0;
-    cw->head = 0; cw->tail = 0;
 
     // Create content rect
     CGRect contentRect = CGRectMake(0, 0, width, height);
@@ -596,7 +598,7 @@ static CocoaWindow* cocoa_create_window(int width, int height, const char* ctitl
     // Use NSValue's rectValue as NSRect for NSWindow init
 
     // NSWindow* — use simple style mask
-    id win = ((id(*)(id, SEL, CGRect, int, int, int))objc_msgSend)(
+    id win = ((id(*)(id, SEL))objc_msgSend)(
         (id)objc_getClass("NSWindow"),
         sel_registerName("alloc")
     );
@@ -614,7 +616,7 @@ static CocoaWindow* cocoa_create_window(int width, int height, const char* ctitl
     ((void(*)(id, SEL, id))objc_msgSend)(win, sel_registerName("setTitle:"), titleStr);
 
     // Create GoCocoaView as contentView
-    id view = ((id(*)(id, SEL, CGRect))objc_msgSend)((id)viewClass, sel_registerName("alloc"));
+    id view = ((id(*)(id, SEL))objc_msgSend)((id)viewClass, sel_registerName("alloc"));
     view = ((id(*)(id, SEL, CGRect))objc_msgSend)(view, sel_registerName("initWithFrame:"), contentRect);
     cw->view = (void*)view;
 
@@ -632,7 +634,7 @@ static CocoaWindow* cocoa_create_window(int width, int height, const char* ctitl
     ((void(*)(id, SEL, id))objc_msgSend)(win, sel_registerName("setContentView:"), view);
 
     // Make key and order front
-    ((void(*)(id, SEL))objc_msgSend)(win, sel_registerName("makeKeyAndOrderFront:"), win);
+    ((void(*)(id, SEL, id))objc_msgSend)(win, sel_registerName("makeKeyAndOrderFront:"), win);
 
     // Get backing scale factor (Retina support)
     id screen = ((id(*)(id, SEL))objc_msgSend)(win, sel_registerName("screen"));
