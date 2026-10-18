@@ -594,9 +594,9 @@ func (w *Window) Close() {
 		C.XFreeGC(w.display, w.gc)
 		w.gc = nil
 	}
-	if w.xwin != nil {
+	if w.xwin != 0 {
 		C.XDestroyWindow(w.display, w.xwin)
-		w.xwin = nil
+		w.xwin = 0
 	}
 	if w.display != nil {
 		C.XCloseDisplay(w.display)
