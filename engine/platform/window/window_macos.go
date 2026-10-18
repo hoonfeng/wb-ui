@@ -15,6 +15,11 @@ package window
 #include <stdlib.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
+// cocoa_present 直接用 CoreGraphics 位图上下文与 dispatch_async 投递到主队列，
+// 之前只靠 -framework 链接、缺头文件声明，CI 上 clang 报一片 undeclared identifier。
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
 
 // --- Event queue (thread-safe, lock-free single-producer single-consumer) ---
 #define MAX_EVENTS 256
@@ -653,7 +658,7 @@ static int cocoa_poll_events(CocoaWindow* cw, NativeEvent* out, int max) {
     id distantPast = ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("NSDate"), sel_registerName("distantPast"));
     id event = ((id(*)(id, SEL, unsigned long, id, id, BOOL))objc_msgSend)(
         app, sel_registerName("nextEventMatchingMask:untilDate:inMode:dequeue:"),
-        0xFFFFFFFF, distantPast, ((id(*)(id, SEL))objc_msgSend)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "kCFRunLoopDefaultMode"), 1
+        0xFFFFFFFF, distantPast, ((id(*)(id, SEL, const char*))objc_msgSend)((id)objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "kCFRunLoopDefaultMode"), 1
     );
     if (event) {
         ((void(*)(id, SEL, id))objc_msgSend)(app, sel_registerName("sendEvent:"), event);

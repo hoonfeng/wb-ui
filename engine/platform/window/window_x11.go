@@ -16,6 +16,10 @@ package window
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <X11/Xatom.h>
+#include <stdlib.h>
+
+// XDestroyImage 在 Xutil.h 里是函数式宏，cgo 无法解析宏 -> 用 inline 包装。
+static void pc_destroy_image(XImage* img) { if (img) XDestroyImage(img); }
 */
 import "C"
 
@@ -233,7 +237,7 @@ func (w *Window) blitToWindow() {
 	if ximg == nil {
 		return
 	}
-	defer C.XDestroyImage(ximg)
+	defer C.pc_destroy_image(ximg)
 	data := C.malloc(C.size_t(int(ximg.bytes_per_line) * fbH))
 	if data == nil {
 		return
@@ -308,7 +312,7 @@ func (w *Window) Display(srcImg *skia.Image) {
 	if ximg == nil {
 		return
 	}
-	defer C.XDestroyImage(ximg)
+	defer C.pc_destroy_image(ximg)
 	data := C.malloc(C.size_t(int(ximg.bytes_per_line) * imgH))
 	if data == nil {
 		return
