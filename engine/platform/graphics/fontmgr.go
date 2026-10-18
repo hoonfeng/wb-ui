@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -80,10 +82,15 @@ type FontManager struct {
 	emojiTF   *skia.Typeface            // emoji font (Segoe UI Emoji / Noto Color Emoji)
 	symbolTF  *skia.Typeface            // symbol font (Segoe UI Symbol) for geometric shapes/arrows
 	cjkTF     *skia.Typeface            // CJK fallback for primary faces without CJK glyphs
+	cjkFamily string                    // 实际选中的 CJK 族名（日志/CI 断言用，如 PingFang SC）
 
 	// systemFontsLoaded guards LoadSystemFonts against duplicate scans
 	// (ensureFonts / NewHost may both call it; fonts must load only once).
 	systemFontsLoaded bool
+
+	// loadedKeys 按「文件名#faceIndex」去重：TTC 会按 index 加载多个 face，
+	// 且 InitFontManager(dir) 与 LoadSystemFonts() 可能扫到同一文件。
+	loadedKeys map[string]bool
 }
 
 var (
@@ -177,12 +184,10 @@ func (m *FontManager) loadDir(dir string) {
 			fmt.Fprintf(os.Stderr, "[fontmgr] read %s failed: %v\n", name, err)
 			continue
 		}
-		tf := skia.NewTypefaceFromData(data, 0)
-		if tf == nil {
+		if m.addTypefacesFromData(name, data) == 0 {
 			fmt.Fprintf(os.Stderr, "[fontmgr] load %s failed (NewTypefaceFromData returned nil)\n", name)
 			continue
 		}
-		m.fonts = append(m.fonts, classifyFont(name, tf))
 	}
 	m.selectDefaults()
 	fmt.Fprintf(os.Stderr, "[fontmgr] loaded %d font(s); default=%v sans=%v serif=%v mono=%v\n",
@@ -258,32 +263,137 @@ func (m *FontManager) loadSystemFontDir(dir string, loaded *int) int {
 // ≈110MB）：CJK 仅保留微软雅黑（sans）+ 宋体/NSimSun（serif/mono），
 // 其他语种（日/韩/繁/其他族系）通过 Skia 系统字体名查找回退
 // （skia.NewTypeface），不影响 CSS font-family 解析与试水渲染。
+//
+// ★ 2026-10-19（多平台中文字体，P0）：白名单**按平台分表**。旧实现只有
+// Windows 文件名表（msyh.ttc / simsun.ttc / consola.ttf …），macOS 的
+// PingFang.ttc、Hiragino Sans GB.ttc 与 Linux 的 NotoSansCJK*.ttc、
+// wqy-zenhei.ttc 全被过滤掉 → selectDefaults 拿不到任何 CJK 字体 →
+// 非 Windows 上所有中文渲染成豆腐块（真实用户与 CI headless 同样中招）。
+// Windows 表逐项保持原样，行为不变。
 func systemFontWhitelist(fileName string) bool {
-	base := strings.ToLower(fileName)
-	// 精确文件名白名单——只加载挂件/配置 UI 实际会用到的字体：
-	// 中文（雅黑 sans / 宋体 NSimSun mono / 黑体）+ emoji/symbol + 西文主流。
-	// 其余（日/韩/繁/装饰字体合集）由 Skia 系统字体名查找回退，
-	// 避免全量加载 C:\Windows\Fonts 294 个字体（≈526MB 驻留）。
-	exact := map[string]bool{
-		"msyh.ttc": true, "msyhbd.ttc": true,
-		"simsun.ttc": true, "simhei.ttf": true,
-		"seguiemj.ttf": true, "seguisym.ttf": true,
-		"segoeui.ttf": true, "segoeuib.ttf": true, "segoeuii.ttf": true, "segoeuiz.ttf": true,
-		"seguisb.ttf": true, "seguisbi.ttf": true, "seguili.ttf": true,
-		"arial.ttf": true, "arialbd.ttf": true, "ariali.ttf": true, "arialbi.ttf": true,
-		"calibri.ttf": true, "calibrib.ttf": true, "calibrii.ttf": true, "calibriz.ttf": true,
-		"times.ttf": true, "timesbd.ttf": true, "timesi.ttf": true, "timesbi.ttf": true,
-		"georgia.ttf": true, "georgiab.ttf": true, "georgiai.ttf": true, "georgiaz.ttf": true,
-		"tahoma.ttf": true, "tahomabd.ttf": true,
-		"verdana.ttf": true, "verdanab.ttf": true, "verdanai.ttf": true, "verdanaz.ttf": true,
-		"consola.ttf": true, "consolab.ttf": true, "consolai.ttf": true, "consolaz.ttf": true,
-		"cour.ttf": true, "courbd.ttf": true, "couri.ttf": true, "courbi.ttf": true,
-		"impact.ttf": true, "comic.ttf": true, "comicbd.ttf": true, "comici.ttf": true, "comicz.ttf": true,
-		"cambria.ttc": true, "cambriab.ttf": true, "cambriai.ttf": true, "cambriaz.ttf": true,
-		"constan.ttf": true, "constanb.ttf": true, "constani.ttf": true, "constanz.ttf": true,
-		"corbel.ttf": true, "corbelb.ttf": true, "corbeli.ttf": true, "corbelz.ttf": true,
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(fileName)))
+	switch runtime.GOOS {
+	case "windows":
+		return windowsFontWhitelist[base]
+	case "darwin":
+		return darwinFontWhitelist[base]
+	default:
+		return linuxFontWhitelist[base] || linuxCJKPrefixMatch(base)
 	}
-	return exact[base]
+}
+
+// windowsFontWhitelist：Windows 精确文件名白名单（既有的 ~55 个文件，
+// 只加载挂件/配置 UI 实际会用到：中文 + emoji/symbol + 西文主流）。
+var windowsFontWhitelist = map[string]bool{
+	"msyh.ttc": true, "msyhbd.ttc": true,
+	"simsun.ttc": true, "simhei.ttf": true,
+	"seguiemj.ttf": true, "seguisym.ttf": true,
+	"segoeui.ttf": true, "segoeuib.ttf": true, "segoeuii.ttf": true, "segoeuiz.ttf": true,
+	"seguisb.ttf": true, "seguisbi.ttf": true, "seguili.ttf": true,
+	"arial.ttf": true, "arialbd.ttf": true, "ariali.ttf": true, "arialbi.ttf": true,
+	"calibri.ttf": true, "calibrib.ttf": true, "calibrii.ttf": true, "calibriz.ttf": true,
+	"times.ttf": true, "timesbd.ttf": true, "timesi.ttf": true, "timesbi.ttf": true,
+	"georgia.ttf": true, "georgiab.ttf": true, "georgiai.ttf": true, "georgiaz.ttf": true,
+	"tahoma.ttf": true, "tahomabd.ttf": true,
+	"verdana.ttf": true, "verdanab.ttf": true, "verdanai.ttf": true, "verdanaz.ttf": true,
+	"consola.ttf": true, "consolab.ttf": true, "consolai.ttf": true, "consolaz.ttf": true,
+	"cour.ttf": true, "courbd.ttf": true, "couri.ttf": true, "courbi.ttf": true,
+	"impact.ttf": true, "comic.ttf": true, "comicbd.ttf": true, "comici.ttf": true, "comicz.ttf": true,
+	"cambria.ttc": true, "cambriab.ttf": true, "cambriai.ttf": true, "cambriaz.ttf": true,
+	"constan.ttf": true, "constanb.ttf": true, "constani.ttf": true, "constanz.ttf": true,
+	"corbel.ttf": true, "corbelb.ttf": true, "corbeli.ttf": true, "corbelz.ttf": true,
+}
+
+// darwinFontWhitelist：macOS 系统字体（小写文件名），覆盖
+// /System/Library/Fonts 与 /System/Library/Fonts/Supplemental：
+//   - 中文：PingFang.ttc（SC/TC/HK 合集）、Hiragino Sans GB.ttc、
+//     STHeiti Light/Medium.ttc、Songti.ttc、Arial Unicode.ttf
+//   - 西文/等宽：Helvetica(Neue)、SFNS、Menlo、Monaco、Arial、Times、
+//     Courier New、Geneva、Lucida Grande
+//   - emoji：Apple Color Emoji.ttc
+var darwinFontWhitelist = map[string]bool{
+	"pingfang.ttc":          true,
+	"hiragino sans gb.ttc":  true,
+	"stheiti light.ttc":     true,
+	"stheiti medium.ttc":    true,
+	"songti.ttc":            true,
+	"songtisc.ttc":          true,
+	"arial unicode.ttf":     true,
+	"apple symbols.ttf":     true,
+	"helvetica.ttc":         true,
+	"helveticaneue.ttc":     true,
+	"sfns.ttf":              true,
+	"sfnsmono.ttf":          true,
+	"menlo.ttc":             true,
+	"monaco.ttf":            true,
+	"arial.ttf":             true,
+	"arial bold.ttf":        true,
+	"times.ttf":             true,
+	"times new roman.ttf":   true,
+	"courier new.ttf":       true,
+	"geneva.ttf":            true,
+	"lucida grande.ttf":     true,
+	"apple color emoji.ttc": true,
+}
+
+// linuxFontWhitelist：Linux 常见字体精确名（Debian/Ubuntu/Fedora/Arch 的
+// 命名差异由 linuxCJKPrefixMatch 兜住）。
+var linuxFontWhitelist = map[string]bool{
+	"notosanscjk-regular.ttc":      true,
+	"notosanscjk-bold.ttc":         true,
+	"notoserifcjk-regular.ttc":     true,
+	"notoserifcjk-bold.ttc":        true,
+	"notosanssc-vf.ttf":            true,
+	"notoserifsc-vf.ttf":           true,
+	"wqy-zenhei.ttc":               true,
+	"wqy-microhei.ttc":             true,
+	"droidsansfallback.ttf":        true,
+	"droidsansfallbackfull.ttf":    true,
+	"dejavusans.ttf":               true,
+	"dejavusans-bold.ttf":          true,
+	"dejavusansmono.ttf":           true,
+	"dejavusansmono-bold.ttf":      true,
+	"dejavuserif.ttf":              true,
+	"dejavuserif-bold.ttf":         true,
+	"liberationsans-regular.ttf":   true,
+	"liberationsans-bold.ttf":      true,
+	"liberationmono-regular.ttf":   true,
+	"liberationmono-bold.ttf":      true,
+	"liberationserif-regular.ttf":  true,
+	"liberationserif-bold.ttf":     true,
+	"freesans.ttf":                 true,
+	"freeserif.ttf":                true,
+	"freemono.ttf":                 true,
+	"ubuntu-r.ttf":                 true,
+	"ubuntu-b.ttf":                 true,
+	"ubuntu-mono-r.ttf":            true,
+	"notosans-regular.ttf":         true,
+	"notosans-bold.ttf":            true,
+	"notosansmono-regular.ttf":     true,
+	"notocoloremoji.ttf":           true,
+	"sourcehansanssc-regular.otf":  true,
+	"sourcehanserifsc-regular.otf": true,
+}
+
+// linuxCJKPrefixMatch 覆盖各发行版对 Noto CJK / 思源黑体的命名差异
+// （NotoSansCJKsc-Regular.otf、NotoSansCJKJP-Regular.otf、
+// SourceHanSansSC-Regular.otf …）。只收 Regular/Bold 一类字重：
+// 每个 NotoSansCJK*.ttc ≈19MB，把 Light/Thin/Black 全收进来会白吃上百 MB。
+func linuxCJKPrefixMatch(base string) bool {
+	if strings.Contains(base, "light") || strings.Contains(base, "thin") ||
+		strings.Contains(base, "black") || strings.Contains(base, "medium") ||
+		strings.Contains(base, "demi") || strings.Contains(base, "semi") {
+		return false
+	}
+	if !strings.HasSuffix(base, ".ttc") && !strings.HasSuffix(base, ".otf") && !strings.HasSuffix(base, ".ttf") {
+		return false
+	}
+	for _, p := range []string{"notosanscjk", "notoserifcjk", "sourcehansans", "sourcehanserif"} {
+		if strings.HasPrefix(base, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *FontManager) tryLoadFont(path string, loaded *int) bool {
@@ -301,26 +411,182 @@ func (m *FontManager) tryLoadFont(path string, loaded *int) bool {
 	if err != nil {
 		return false
 	}
-	var index int
-	if strings.HasSuffix(name, ".ttc") {
-		// For .ttc files we try loading each font collection entry;
-		// NewTypefaceFromData with different indices picks each face.
-	}
-	tf := skia.NewTypefaceFromData(data, index)
-	if tf == nil {
+	n := m.addTypefacesFromData(name, data)
+	if n == 0 {
 		return false
 	}
-	// Check for duplicates: skip if we already have an identical Typeface.
-	for _, existing := range m.fonts {
-		if existing.tf == tf {
-			return false
-		}
-	}
-	m.fonts = append(m.fonts, classifyFont(name, tf))
 	if loaded != nil {
-		*loaded++
+		*loaded += n
 	}
 	return true
+}
+
+// maxTTCFaces 是单个 TTC 最多尝试的 face 数。Noto Sans CJK 合集有 5 个
+// face（JP/KR/SC/TC/HK），PingFang 类似；8 足够覆盖，且避免恶意/异常
+// 文件导致的长循环。
+const maxTTCFaces = 8
+
+// isCJKCapable reports whether tf actually maps 中 to a real glyph — the
+// only reliable "this face can render Chinese" test available through the
+// Skia C API (glyph 0 is .notdef = 豆腐块).
+func isCJKCapable(tf *skia.Typeface) bool {
+	return tf != nil && tf.UnicharToGlyph('中') != 0
+}
+
+// addTypefacesFromData registers the face(s) of one font file and returns how
+// many were added.
+//
+// ★ 2026-10-19（TTC 多 face，P0）：旧实现对 .ttc 固定 index=0。
+//   - NotoSansCJK-Regular.ttc 的 index 0 是 **JP** face，中文字形是日式写法；
+//   - 某些合集首个 face 甚至不含 CJK 覆盖（Cambria.ttc 的 index 0 是拉丁
+//     Cambria，index 1 才是 Cambria Math）。
+//   现在逐个 index 尝试，取第一个真正能画「中」的 face；整包都没有 CJK
+//   覆盖时退回 index 0（拉丁字体正常加载，中文交给 CJKTypeface 回退）。
+//   face 必须是「CJK 优先」的，因为它决定了 Linux/macOS 上中文的落点。
+func (m *FontManager) addTypefacesFromData(fileName string, data []byte) int {
+	lower := strings.ToLower(filepath.Base(fileName))
+	if !strings.HasSuffix(lower, ".ttc") {
+		tf := skia.NewTypefaceFromData(data, 0)
+		if tf == nil {
+			return 0
+		}
+		return m.addFace(fileName, 0, tf)
+	}
+	added := 0
+	chosenIdx := -1
+	// 1) 已知合集按约定顺序优先（Noto CJK 的 SC face 是 index 2，
+	//    直接选 index 0 会拿到日文 JP face：字形能画但写法是日式）。
+	for _, idx := range preferredTTCFaces(lower) {
+		tf := skia.NewTypefaceFromData(data, idx)
+		if tf == nil {
+			continue
+		}
+		if isCJKCapable(tf) {
+			chosenIdx = idx
+			added += m.addFace(fileName, idx, tf)
+			break
+		}
+		tf.Release()
+	}
+	// 2) 通用路径：逐个 index 尝试，取第一个 CJK face；整包无 CJK 覆盖
+	//    （Cambria.ttc 等）则退回 index 0。
+	var first *skia.Typeface
+	for idx := 0; idx < maxTTCFaces; idx++ {
+		if chosenIdx >= 0 {
+			break
+		}
+		tf := skia.NewTypefaceFromData(data, idx)
+		if tf == nil {
+			break // 越过最后一个 face
+		}
+		if idx == 0 {
+			first = tf
+			if isCJKCapable(tf) {
+				chosenIdx = 0
+				added += m.addFace(fileName, 0, tf)
+				break
+			}
+			continue
+		}
+		if isCJKCapable(tf) {
+			chosenIdx = idx
+			added += m.addFace(fileName, idx, tf)
+			break
+		}
+		// 未选中的中间 face 立即释放（每 face 持有一份字体数据副本）。
+		tf.Release()
+	}
+	if chosenIdx < 0 && first != nil {
+		added += m.addFace(fileName, 0, first)
+	}
+	// 3) 合集里另有必须保留的 face（simsun.ttc 的 index 1 = NSimSun 等宽）。
+	for _, idx := range ttcExtraFaces(lower) {
+		tf := skia.NewTypefaceFromData(data, idx)
+		if tf != nil {
+			added += m.addFace(fileName, idx, tf)
+		}
+	}
+	return added
+}
+
+// preferredTTCFaces 返回已知 TTC 合集的 face 优选顺序。
+// Noto Sans/Serif CJK 的标准合集顺序：0=JP 1=KR 2=SC 3=TC 4=HK；
+// UI 默认族要的是 SC，所以先试 2，再退回 0 兜底。
+func preferredTTCFaces(base string) []int {
+	if strings.HasPrefix(base, "notosanscjk") || strings.HasPrefix(base, "notoserifcjk") {
+		return []int{2, 0, 1, 3, 4}
+	}
+	return nil
+}
+
+// ttcExtraFaces 返回除主 CJK face 外还需额外加载的 face index。
+// simsun.ttc：index 1 = NSimSun（新宋体，CJK 等宽），mono 回退要用。
+func ttcExtraFaces(base string) []int {
+	if base == "simsun.ttc" {
+		return []int{1}
+	}
+	return nil
+}
+
+// ttcFaceFamily 按文件名 + face index 推断 TTC 合集里各 face 的 CSS 族名。
+// 返回空串表示不是已知的 TTC 合集，调用方按文件名走默认规则。
+//
+// 为什么必须按 index 命名：NotoSansCJK-Regular.ttc 的 5 个 face 是
+// JP/KR/SC/TC/HK，字形不同但都覆盖「中」。旧实现只有 index 0（JP），
+// Linux 上中文用的是日式写法；按族名 "noto sans cjk sc" 查找也永远 miss。
+func ttcFaceFamily(base string, index int) string {
+	switch {
+	case strings.HasPrefix(base, "notosanscjk"):
+		return cjkFaceName("noto sans cjk", index)
+	case strings.HasPrefix(base, "notoserifcjk"):
+		return cjkFaceName("noto serif cjk", index)
+	case strings.HasPrefix(base, "notosanscjksc"), strings.HasPrefix(base, "notosanssc"):
+		return "noto sans cjk sc"
+	case strings.HasPrefix(base, "notoserifcjksc"), strings.HasPrefix(base, "notoserifsc"):
+		return "noto serif cjk sc"
+	case strings.HasPrefix(base, "pingfang"):
+		// PingFang.ttc：SC/TC/HK 各字重的合集，首个 face 即 PingFang SC。
+		return "pingfang sc"
+	case strings.HasPrefix(base, "hiragino"):
+		return "hiragino sans gb"
+	case strings.HasPrefix(base, "stheiti"), strings.HasPrefix(base, "heiti"):
+		return "heiti sc"
+	case strings.HasPrefix(base, "songti"):
+		return "songti sc"
+	case strings.HasPrefix(base, "wqy-zenhei"):
+		return "wenquanyi zen hei"
+	case strings.HasPrefix(base, "wqy-microhei"):
+		return "wenquanyi micro hei"
+	case strings.HasPrefix(base, "sourcehansans"):
+		return "source han sans sc"
+	case strings.HasPrefix(base, "sourcehanserif"):
+		return "source han serif sc"
+	}
+	return ""
+}
+
+// cjkFaceName 把 Noto CJK 合集的 index 映射为族名（SC/TC/JP…）。
+func cjkFaceName(prefix string, index int) string {
+	names := []string{"jp", "kr", "sc", "tc", "hk"}
+	if index >= 0 && index < len(names) {
+		return prefix + " " + names[index]
+	}
+	return prefix
+}
+
+// addFace registers one face, deduped by「文件名#faceIndex」.
+func (m *FontManager) addFace(fileName string, index int, tf *skia.Typeface) int {
+	key := strings.ToLower(filepath.Base(fileName)) + "#" + strconv.Itoa(index)
+	if m.loadedKeys == nil {
+		m.loadedKeys = make(map[string]bool)
+	}
+	if m.loadedKeys[key] {
+		tf.Release()
+		return 0
+	}
+	m.loadedKeys[key] = true
+	m.fonts = append(m.fonts, classifyFont(fileName, index, tf))
+	return 1
 }
 
 // Legacy LoadSystemFonts kept for backward compatibility.
@@ -349,7 +615,7 @@ func (m *FontManager) LoadSystemFontsLegacy() {
 			fmt.Fprintf(os.Stderr, "[fontmgr] system font %s index %d: NewTypefaceFromData returned nil\n", t.filename, t.index)
 			continue
 		}
-		m.fonts = append(m.fonts, classifyFont(t.filename, tf))
+		m.fonts = append(m.fonts, classifyFont(t.filename, t.index, tf))
 		fmt.Fprintf(os.Stderr, "[fontmgr] loaded system font %s index %d\n", t.filename, t.index)
 	}
 	m.selectDefaults()
@@ -359,15 +625,29 @@ func (m *FontManager) LoadSystemFontsLegacy() {
 // weight, italic flag). Real WebKit reads the font's name table; this port uses
 // filename conventions matching the WebKit test font collection (e.g.
 // DejaVuSans-Bold.ttf) and Skia Typeface style queries where available.
-func classifyFont(filename string, tf *skia.Typeface) loadedFont {
-	name := strings.ToLower(filename)
+// classifyFont inspects the font file name (and TTC face index) to derive its
+// CSS metadata (family name, weight, italic flag). Real WebKit reads the font's
+// name table; this port uses filename conventions plus the known face order of
+// well-known collections (Noto CJK / PingFang).
+func classifyFont(filename string, index int, tf *skia.Typeface) loadedFont {
+	name := strings.ToLower(filepath.Base(filename))
 	entry := loadedFont{
 		tf:     tf,
 		family: "default",
 		weight: 400,
 	}
 	// Region/script detection.
-	if strings.Contains(name, "kochi") || strings.Contains(name, "cjk") || strings.Contains(name, "noto") {
+	// ★ 2026-10-19：补 macOS/Linux 的中文字体特征（pingfang / hiragino /
+	// heiti / songti / noto sans cjk / wqy / source han / droid fallback）。
+	// 此前只认 kochi/cjk/noto/msyh/simhei/simsun，导致即使文件被白名单放行，
+	// selectDefaults 也不会把它们当 CJK 回退候选。
+	if strings.Contains(name, "cjk") || strings.Contains(name, "noto") ||
+		strings.Contains(name, "pingfang") || strings.Contains(name, "hiragino") ||
+		strings.Contains(name, "heiti") || strings.Contains(name, "songti") ||
+		strings.Contains(name, "wqy") || strings.Contains(name, "wenquanyi") ||
+		strings.Contains(name, "droidsansfallback") || strings.Contains(name, "sourcehan") ||
+		strings.Contains(name, "simhei") || strings.Contains(name, "simsun") ||
+		strings.Contains(name, "msyh") || strings.Contains(name, "kochi") {
 		entry.cjk = true
 	}
 	if strings.Contains(name, "emoji") || strings.Contains(name, "coloremoji") || strings.Contains(name, "seguiemj") {
@@ -375,6 +655,27 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	}
 	if strings.Contains(name, "symbol") || strings.Contains(name, "seguisym") {
 		entry.symbol = true
+	}
+	// ★ 2026-10-19：TTC 合集按 face index 命名（Noto CJK 标准顺序为
+	// 0=JP 1=KR 2=SC 3=TC 4=HK）。此前一律落回文件名，Linux 上
+	// NotoSansCJK-Regular.ttc 会被记成 "notosanscjk-regular"，
+	// 按族名 "noto sans cjk sc" 查找永远 miss → 中文走不到该 face。
+	if fam := ttcFaceFamily(name, index); fam != "" {
+		entry.family = fam
+		entry.cjk = true
+		if strings.Contains(name, "mono") {
+			entry.mono = true
+		}
+		if strings.Contains(name, "serif") || strings.Contains(name, "songti") {
+			entry.serif = true
+		}
+		if strings.Contains(name, "bold") {
+			entry.weight = 700
+		}
+		if strings.Contains(name, "oblique") || strings.Contains(name, "italic") {
+			entry.italic = true
+		}
+		return entry
 	}
 	// Weight override from filename for common patterns.
 	switch {
@@ -409,7 +710,7 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 	case strings.HasPrefix(name, "consola"):
 		entry.family = "consolas"
 		entry.mono = true
-	case name == "simsun.ttc":
+	case name == "simsun.ttc" && index == 1:
 		// index 1 of simsun.ttc is NSimSun (新宋�?, a CJK monospace face.
 		entry.family = "nsimsun"
 		entry.mono = true
@@ -438,97 +739,168 @@ func classifyFont(filename string, tf *skia.Typeface) loadedFont {
 // sans-serif/serif/monospace. Following GWui's strategy, we prefer Microsoft
 // YaHei (a proportional CJK font) as the default sans-serif so UI text looks
 // natural. NSimSun is reserved for the monospace generic family only.
+// fontCand 描述一个默认字体候选：
+//   - os:     平台字体名，走 skia.NewTypeface（保留系统 fallback 链）
+//   - family: 已加载字体集合里的族名，走 findBest（按文件加载的 face）
+type fontCand struct {
+	os     string
+	family string
+}
+
+// pickFont 按候选顺序返回第一个可用的 Typeface 与其标签（族名）。
+func (m *FontManager) pickFont(cands []fontCand, weight int) (*skia.Typeface, string) {
+	for _, c := range cands {
+		if c.os != "" {
+			if tf := skia.NewTypeface(c.os, skia.FontStyle{Weight: weight, Width: 5, Slant: 0}); tf != nil {
+				return tf, c.os
+			}
+		}
+		if c.family != "" {
+			if tf := m.findBest(c.family, weight, false); tf != nil {
+				return tf, c.family
+			}
+		}
+	}
+	return nil, ""
+}
+
+// monoCandidates 返回当前平台的等宽候选（首个可用者胜出）。
+func monoCandidates() []fontCand {
+	switch runtime.GOOS {
+	case "darwin":
+		return []fontCand{
+			{os: "Menlo"}, {family: "menlo"},
+			{os: "Monaco"}, {os: "SF Mono"},
+			{os: "Consolas"}, {os: "Courier New"},
+			{family: "dejavu sans mono"}, {family: "liberation mono"},
+		}
+	case "windows":
+		// Windows 保持既有行为：Consolas（与 Edge 度量一致），NSimSun 作 CJK 兜底。
+		return []fontCand{
+			{os: "Consolas"}, {family: "consolas"},
+			{os: "NSimSun"}, {family: "nsimsun"},
+			{family: "liberation mono"}, {family: "dejavu sans mono"},
+		}
+	default:
+		return []fontCand{
+			{os: "DejaVu Sans Mono"}, {family: "dejavu sans mono"},
+			{os: "Liberation Mono"}, {family: "liberation mono"},
+			{os: "Noto Sans Mono CJK SC"}, {os: "Noto Sans Mono"},
+			{os: "Consolas"},
+		}
+	}
+}
+
+// sansCandidates 返回当前平台的无衬线候选。
+// ★ 非 Windows 必须包含真正的 CJK 字体（PingFang SC / Noto Sans CJK SC）：
+// 旧实现只有 Microsoft YaHei / Segoe UI / Arial，macOS/Linux 全部 miss →
+// sansTF 退化成不含 CJK 的西文字体 → 中文全部豆腐块。
+func sansCandidates() []fontCand {
+	switch runtime.GOOS {
+	case "darwin":
+		return []fontCand{
+			{os: "PingFang SC"}, {family: "pingfang sc"},
+			{os: "Hiragino Sans GB"}, {family: "hiragino sans gb"},
+			{os: "Heiti SC"}, {family: "heiti sc"},
+			{os: "Helvetica Neue"}, {os: "Helvetica"}, {os: "Arial"},
+			{family: "dejavu sans"}, {family: "liberation sans"},
+		}
+	case "windows":
+		return []fontCand{
+			{os: "Microsoft YaHei"}, {family: "microsoft yahei"},
+			{os: "Segoe UI"}, {os: "Arial"}, {os: "Times New Roman"},
+			{family: "kochi gothic"}, {family: "dejavu sans"}, {family: "liberation sans"},
+		}
+	default:
+		return []fontCand{
+			{os: "Noto Sans CJK SC"}, {family: "noto sans cjk sc"},
+			{os: "Noto Sans SC"}, {family: "noto sans sc"},
+			{os: "WenQuanYi Zen Hei"}, {family: "wenquanyi zen hei"},
+			{os: "Droid Sans Fallback"}, {family: "droidsansfallback"},
+			{os: "DejaVu Sans"}, {os: "Liberation Sans"}, {os: "FreeSans"},
+		}
+	}
+}
+
+// serifCandidates 返回当前平台的衬线候选。
+func serifCandidates() []fontCand {
+	switch runtime.GOOS {
+	case "darwin":
+		return []fontCand{
+			{os: "Songti SC"}, {family: "songti sc"},
+			{os: "Times New Roman"}, {os: "Times"},
+			{family: "dejavu serif"}, {family: "liberation serif"},
+		}
+	case "windows":
+		return []fontCand{
+			{os: "SimSun"}, {family: "kochi mincho"},
+			{family: "dejavu serif"}, {family: "liberation serif"},
+		}
+	default:
+		return []fontCand{
+			{os: "Noto Serif CJK SC"}, {family: "noto serif cjk sc"},
+			{os: "Noto Serif SC"}, {family: "noto serif sc"},
+			{os: "DejaVu Serif"}, {os: "Liberation Serif"}, {os: "FreeSerif"},
+		}
+	}
+}
+
+// cjkCandidates 返回 CJK 回退候选（按平台）。
+func cjkCandidates() []fontCand {
+	switch runtime.GOOS {
+	case "darwin":
+		return []fontCand{
+			{os: "PingFang SC"}, {family: "pingfang sc"},
+			{os: "Hiragino Sans GB"}, {family: "hiragino sans gb"},
+			{os: "Heiti SC"}, {family: "heiti sc"},
+			{os: "STHeiti"}, {os: "Arial Unicode MS"},
+		}
+	case "windows":
+		// 与 Edge 对齐：Windows 上「拉丁主字体 + 中文」回退到 Noto Sans SC
+		//（系统装有 NotoSansSC-VF.ttf），取不到再回落雅黑。
+		return []fontCand{
+			{os: "Noto Sans SC"}, {family: "noto sans sc"},
+			{os: "Microsoft YaHei"}, {family: "microsoft yahei"},
+		}
+	default:
+		return []fontCand{
+			{os: "Noto Sans CJK SC"}, {family: "noto sans cjk sc"},
+			{os: "WenQuanYi Zen Hei"}, {family: "wenquanyi zen hei"},
+			{os: "Noto Sans SC"}, {family: "noto sans sc"},
+			{os: "Droid Sans Fallback"}, {family: "droidsansfallback"},
+		}
+	}
+}
+
+// selectDefaults picks the generic-family Typefaces used to resolve
+// sans-serif/serif/monospace.
+//
+// ★ 2026-10-19（多平台中文字体，P0）：候选按 runtime.GOOS 分表。
+// 旧实现只认识 Microsoft YaHei / Segoe UI / Arial / SimSun / Consolas，
+// macOS（PingFang/Hiragino）与 Linux（Noto CJK/WQY）上一律 miss，
+// cjkTF 最终退化成无 CJK 覆盖的西文字体 → 中文全是豆腐块。
+// 现在非 Windows 的 cjkTF **必须**通过 isCJKCapable（能画「中」）校验，
+// 找不到就保持 nil，而不是塞一个画不出中文的西文字体。
 func (m *FontManager) selectDefaults() {
-	// monospace: prefer Consolas — the OS standard monospace that Edge falls
-	// back to when Google Fonts (JetBrains Mono) is unreachable, so ASCII/code
-	// metrics match the browser reference (.cs-val "0 / 1.0M" 12px = 56px in
-	// Edge; NSimSun measured 49px). CJK glyphs still fall back per-rune to
-	// the CJK face in drawTextWithFallback.
-	m.monoTF = skia.NewTypeface("Consolas", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	if m.monoTF == nil {
-		m.monoTF = m.findBest("consolas", 400, false)
-	}
-	// NSimSun (CJK monospace) as the CJK-capable monospace fallback.
-	if m.monoTF == nil {
-		m.monoTF = skia.NewTypeface("NSimSun", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	}
-	if m.monoTF == nil {
-		m.monoTF = m.findBest("nsimsun", 400, false)
-	}
-	if m.monoTF == nil {
-		m.monoTF = m.findBest("liberation mono", 400, false)
-	}
-	if m.monoTF == nil {
-		m.monoTF = m.findBest("dejavu sans mono", 400, false)
-	}
-	// sans-serif: prefer OS Microsoft YaHei (CJK coverage + intact system
-	// fallback chain) over raw-data faces. OS-name lookup (skia.NewTypeface)
-	// is used first because NewTypefaceFromData on TTC files may return a
-	// Typeface that fails to render glyphs, and OS faces keep Skia's system
-	// fallback for characters the face lacks. Arial is a LAST resort (no
-	// CJK coverage — would render tofu for Chinese without fallback).
-	if dt := skia.NewTypeface("Microsoft YaHei", skia.FontStyle{Weight: 400, Width: 5, Slant: 0}); dt != nil {
-		m.sansTF = dt
-	}
-	if m.sansTF == nil {
-		m.sansTF = m.findBest("microsoft yahei", 400, false)
-	}
-	if m.sansTF == nil {
-		m.sansTF = skia.NewTypeface("Segoe UI", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	}
-	if m.sansTF == nil {
-		m.sansTF = skia.NewTypeface("Arial", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	}
-	if m.sansTF == nil {
-		m.sansTF = skia.NewTypeface("Times New Roman", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	}
-	if m.sansTF == nil {
-		m.sansTF = m.findBest("kochi gothic", 400, false)
-	}
-	if m.sansTF == nil {
-		m.sansTF = m.findBest("dejavu sans", 400, false)
-	}
-	if m.sansTF == nil {
-		m.sansTF = m.findBest("liberation sans", 400, false)
-	}
+	m.monoTF, _ = m.pickFont(monoCandidates(), 400)
+	m.sansTF, _ = m.pickFont(sansCandidates(), 400)
 	if m.sansTF == nil && len(m.fonts) > 0 {
 		m.sansTF = m.fonts[0].tf
 	}
-	// serif: prefer OS SimSun (Chinese serif, matches browser default serif
-	// for CJK), then kochi mincho / DejaVuSerif / LiberationSerif.
-	m.serifTF = skia.NewTypeface("SimSun", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	if m.serifTF == nil {
-		m.serifTF = m.findBest("kochi mincho", 400, false)
-	}
-	if m.serifTF == nil {
-		m.serifTF = m.findBest("dejavu serif", 400, false)
-	}
-	if m.serifTF == nil {
-		m.serifTF = m.findBest("liberation serif", 400, false)
-	}
+	m.serifTF, _ = m.pickFont(serifCandidates(), 400)
 	if m.serifTF == nil {
 		m.serifTF = m.sansTF
 	}
-	// default = sans-serif (proportional) so UI text looks natural, matching
-	// browser behaviour where the initial value of font-family is a proportional
-	// sans-serif. Monospace is only used when explicitly requested via CSS.
+	// default = sans-serif（比例字体），与浏览器默认族一致。
 	m.defaultTF = m.sansTF
 	if m.defaultTF == nil {
 		m.defaultTF = m.monoTF
 	}
-	// CJK 回退（主字体无 CJK 字形时使用，见 CJKTypeface）：与 Edge 对齐取
-	// Noto Sans SC —— Chromium/Edge 在 Windows 上对「拉丁主字体 + 中文」的
-	// 回退落在 Noto Sans SC（系统装有 NotoSansSC-VF.ttf），其行盒度量与雅黑
-	// 不同（24px 实测 div.offsetHeight：Noto Sans SC 35px / 雅黑 31px），
-	// 字形也不同。此前一律回落雅黑 → 含中文的 Arial 行盒矮 4px、基线偏移
-	// 4–5px。取不到 Noto Sans SC 时回落雅黑（sansTF），再回落 defaultTF。
-	m.cjkTF = skia.NewTypeface("Noto Sans SC", skia.FontStyle{Weight: 400, Width: 5, Slant: 0})
-	if m.cjkTF == nil {
-		m.cjkTF = m.sansTF
-	}
-	if m.cjkTF == nil {
-		m.cjkTF = m.defaultTF
-	}
+	// CJK 回退（主字体无 CJK 字形时使用，见 CJKTypeface）。
+	m.cjkTF, m.cjkFamily = m.pickCJK()
+	// CI 断言点（release.yml grep `[fontmgr] cjk=`）：
+	// 非 Windows 上必须是非 "(none)" 的真实 CJK 族名。
+	fmt.Fprintf(os.Stderr, "[fontmgr] cjk=%s fonts=%d\n", m.cjkLabel(), len(m.fonts))
 	// emoji: find the first font with emoji flag set (e.g. Segoe UI Emoji
 	// on Windows, Noto Color Emoji on Linux/macOS).
 	m.emojiTF = nil
@@ -570,6 +942,46 @@ func (m *FontManager) selectDefaults() {
 			}
 		}
 	}
+}
+
+// pickCJK 选择 CJK 回退 Typeface，并返回其族名标签。
+//
+// 校验顺序：
+//  1. 平台 CJK 候选（os 名查找 → 文件族名查找），每个都必须 isCJKCapable；
+//  2. 已加载文件集合里带 CJK 标记且真能画「中」的 face；
+//  3. Windows 额外容许回落 sansTF（雅黑本身就是 CJK 字体）；
+//  4. 否则返回 nil —— 宁可不画，也不回落到画不出中文的西文字体
+//     （旧实现正是这么把「Noto Sans SC miss → 雅黑/Arial」写成了方块）。
+func (m *FontManager) pickCJK() (*skia.Typeface, string) {
+	for _, c := range cjkCandidates() {
+		if c.os != "" {
+			if tf := skia.NewTypeface(c.os, skia.FontStyle{Weight: 400, Width: 5, Slant: 0}); isCJKCapable(tf) {
+				return tf, c.os
+			}
+		}
+		if c.family != "" {
+			if tf := m.findBest(c.family, 400, false); isCJKCapable(tf) {
+				return tf, c.family
+			}
+		}
+	}
+	for _, f := range m.fonts {
+		if f.cjk && isCJKCapable(f.tf) {
+			return f.tf, f.family
+		}
+	}
+	if runtime.GOOS == "windows" && isCJKCapable(m.sansTF) {
+		return m.sansTF, "microsoft yahei"
+	}
+	return nil, ""
+}
+
+// cjkLabel 返回日志用的 CJK 族名（未命中时为 "(none)"）。
+func (m *FontManager) cjkLabel() string {
+	if m.cjkFamily != "" {
+		return m.cjkFamily
+	}
+	return "(none)"
 }
 
 // findBest returns the Typeface for family whose weight/italic most closely
@@ -672,13 +1084,13 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			//     Microsoft YaHei UI  15 / 18 / 20 / 25 / 30 / 41   ← Edge 的 system-ui（逐项吻合）
 			//   即：MediaStudio #btn-record 的高 37（Edge 36）由此而来。
 			//   见 dev/audit/WORKITEMS.md §25 的 A/B 表。
-			return "microsoft yahei ui", true // generic → always available
+			return platformSystemUIFamily(), true // generic → always available
 		case "serif", "ui-serif":
 			// ★ Edge 基准实测（24px 三维指纹 M10/I10/line-height:normal 行盒高）：
 			//   serif → Noto Serif SC（234 / 97.2 / 35）。此前映射到 kochi
 			//   mincho（未加载）→ 最终落到 serifTF = SimSun（120 / 120 / 27），
 			//   拉丁字形宽度只有 Edge 的一半（120 vs 234），整行文本全部重排。
-			return "noto serif sc", true // generic → always available
+			return platformSerifFamily(), true // generic → always available
 		case "times", "times new roman":
 			// 显式族名 → 真 Times New Roman（Edge 指纹 213.4 / 79.92 / 27）。
 			// 此前并入 serif 组 → 落到宋体（120 / 120 / 27），M 宽差 78%。
@@ -687,7 +1099,7 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			// ★ Edge 基准实测：monospace → SimSun（120 / 120 / 27），**不是**
 			//   Consolas（131.95 / 131.95 / 28）—— 中文 Windows 的等宽默认字体
 			//   是宋体，每字符宽 0.5em 而非 Consolas 的 0.5498em，长行会累积整行错位。
-			return "simsun", true // generic → always available
+			return platformMonoFamily(), true // generic → always available
 		case "arial", "helvetica":
 			// ★ 不再硬别名到微软雅黑（D7 根因）：雅黑的拉丁字形显著宽于 Arial
 			//   —— 实测 10 个 `M` @24px：雅黑 234.5px，浏览器 Arial 197px
@@ -708,8 +1120,11 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "seguiemj", false
 		case "microsoft yahei", "微软雅黑",
 			"pingfang sc", "pingfang", "hiragino sans gb", "hiragino", "simhei",
-			"heiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
-			return "microsoft yahei", false
+			"heiti", "stheiti", "songti", "wenquanyi zen hei", "wenquanyi", "noto sans cjk":
+			// ★ 2026-10-19：按平台落到各自真实 CJK 族。旧实现一律返回
+			// "microsoft yahei"，macOS/Linux 上 osLookup 与 findBest 全 miss
+			// → 最终连兜底都拿不到 CJK 字体 → 中文方块。
+			return platformCJKFamily(f), false
 		case "microsoft yahei ui":
 			// 显式声明 UI face：与 system-ui 同落点（见上）。此前并入上面的雅黑组，
 			// 导致显式 `font-family: "Microsoft YaHei UI"` 也拿到雅黑度量（+1px）。
@@ -722,7 +1137,12 @@ func (m *FontManager) LookupTypeface(family string, weight int, style string) *s
 			return "simsun", false
 		case "noto sans sc", "noto sans", "notosanssc":
 			// 浏览器基准的默认无衬线族（见上）：显式声明同样解析到此目标。
-			return "noto sans sc", false
+			// 非 Windows 上 Linux 装的是 Noto Sans CJK SC 合集（无独立
+			// NotoSansSC-VF），按平台映射过去。
+			if runtime.GOOS == "windows" {
+				return "noto sans sc", false
+			}
+			return platformCJKFamily("noto sans cjk"), false
 		case "roboto":
 			return "roboto", false
 		}
@@ -817,6 +1237,75 @@ func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *sk
 		osName = "Segoe UI Symbol"
 	case "seguiemj":
 		osName = "Segoe UI Emoji"
+	// ── ★ 2026-10-19：macOS / Linux 平台族名（CoreText / fontconfig 名）──
+	// 缺这些分支时，非 Windows 上 osLookup 一律返回 nil，CJK 族只能靠
+	// findBest 命中已加载文件；一旦白名单/族名有一处对不上就退化成方块。
+	case "pingfang sc", "pingfang":
+		osName = "PingFang SC"
+	case "hiragino sans gb", "hiragino":
+		osName = "Hiragino Sans GB"
+	case "heiti sc", "stheiti":
+		osName = "Heiti SC"
+	case "songti sc", "songti":
+		osName = "Songti SC"
+	case "arial unicode ms":
+		osName = "Arial Unicode MS"
+	case "noto sans cjk sc":
+		osName = "Noto Sans CJK SC"
+	case "noto sans cjk jp":
+		osName = "Noto Sans CJK JP"
+	case "noto sans cjk kr":
+		osName = "Noto Sans CJK KR"
+	case "noto sans cjk tc":
+		osName = "Noto Sans CJK TC"
+	case "noto sans cjk hk":
+		osName = "Noto Sans CJK HK"
+	case "noto sans cjk":
+		osName = "Noto Sans CJK SC"
+	case "noto serif cjk sc":
+		osName = "Noto Serif CJK SC"
+	case "noto serif cjk":
+		osName = "Noto Serif CJK SC"
+	case "wenquanyi zen hei":
+		osName = "WenQuanYi Zen Hei"
+	case "wenquanyi micro hei":
+		osName = "WenQuanYi Micro Hei"
+	case "droidsansfallback":
+		osName = "Droid Sans Fallback"
+	case "source han sans sc":
+		osName = "Source Han Sans SC"
+	case "dejavu sans":
+		osName = "DejaVu Sans"
+	case "dejavu sans mono":
+		osName = "DejaVu Sans Mono"
+	case "dejavu serif":
+		osName = "DejaVu Serif"
+	case "liberation sans":
+		osName = "Liberation Sans"
+	case "liberation mono":
+		osName = "Liberation Mono"
+	case "liberation serif":
+		osName = "Liberation Serif"
+	case "menlo":
+		osName = "Menlo"
+	case "monaco":
+		osName = "Monaco"
+	case "helvetica":
+		osName = "Helvetica"
+	case "helvetica neue":
+		osName = "Helvetica Neue"
+	case "sf mono":
+		osName = "SF Mono"
+	case "freesans":
+		osName = "FreeSans"
+	case "freeserif":
+		osName = "FreeSerif"
+	case "freemono":
+		osName = "FreeMono"
+	case "apple color emoji":
+		osName = "Apple Color Emoji"
+	case "apple symbols":
+		osName = "Apple Symbols"
 	default:
 		return nil
 	}
@@ -825,6 +1314,87 @@ func (m *FontManager) osLookup(targetFamily string, weight int, italic bool) *sk
 		slant = skia.FontSlantItalic
 	}
 	return skia.NewTypeface(osName, skia.FontStyle{Weight: weight, Width: 5, Slant: slant})
+}
+
+// platformSystemUIFamily 返回当前平台 system-ui 的落点族名。
+// Windows 保持既有对齐：Microsoft YaHei UI（msyh.ttc 的 UI face）。
+func platformSystemUIFamily() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "microsoft yahei ui"
+	case "darwin":
+		return "pingfang sc"
+	default:
+		return "noto sans cjk sc"
+	}
+}
+
+// platformSerifFamily 返回当前平台 serif 通用族的落点族名。
+func platformSerifFamily() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "noto serif sc"
+	case "darwin":
+		return "songti sc"
+	default:
+		return "noto serif cjk sc"
+	}
+}
+
+// platformMonoFamily 返回当前平台 monospace 通用族的落点族名。
+func platformMonoFamily() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "simsun"
+	case "darwin":
+		return "menlo"
+	default:
+		return "dejavu sans mono"
+	}
+}
+
+// platformCJKFamily 把跨平台 CJK 别名映射到当前平台的真实族名。
+// 旧实现不分平台一律 "microsoft yahei"：macOS/Linux 上没有该族，
+// osLookup/findBest 双双 miss，CJKTypeface 最终退化成西文字体。
+func platformCJKFamily(alias string) string {
+	if runtime.GOOS == "windows" {
+		return "microsoft yahei"
+	}
+	a := strings.ToLower(alias)
+	switch {
+	case strings.Contains(a, "pingfang"), strings.Contains(a, "hiragino"),
+		strings.Contains(a, "heiti"), strings.Contains(a, "songti"):
+		if runtime.GOOS == "darwin" {
+			switch {
+			case strings.Contains(a, "hiragino"):
+				return "hiragino sans gb"
+			case strings.Contains(a, "songti"):
+				return "songti sc"
+			default:
+				return "pingfang sc"
+			}
+		}
+		return "noto sans cjk sc"
+	case strings.Contains(a, "wenquanyi"):
+		if runtime.GOOS == "darwin" {
+			return "pingfang sc"
+		}
+		return "wenquanyi zen hei"
+	case strings.Contains(a, "noto"):
+		if runtime.GOOS == "darwin" {
+			return "pingfang sc"
+		}
+		return "noto sans cjk sc"
+	case strings.Contains(a, "simhei"):
+		if runtime.GOOS == "darwin" {
+			return "pingfang sc"
+		}
+		return "noto sans cjk sc"
+	}
+	if runtime.GOOS == "darwin" {
+		return "pingfang sc"
+	}
+	return "noto sans cjk sc"
 }
 
 // splitFontFamily splits a CSS font-family value into individual family names,
@@ -872,20 +1442,49 @@ func (m *FontManager) SymbolTypeface() *skia.Typeface {
 	return m.symbolTF
 }
 
-// CJKTypeface returns the OS CJK Typeface (Microsoft YaHei on Windows,
-// fallback to the default sans-serif). Used to render Chinese/Japanese/
-// Korean characters that the primary font lacks (e.g. Consolas).
+// CJKTypeface returns the CJK fallback Typeface used to render
+// Chinese/Japanese/Korean characters that the primary font lacks
+// (e.g. Consolas, Arial, DejaVu Sans).
+//
+// ★ 2026-10-19（多平台中文字体，P0）：旧实现找不到 cjkTF 时无条件回落
+// sansTF → 在 macOS/Linux 上 sansTF 是无 CJK 覆盖的西文字体（Arial /
+// DejaVu Sans），中文因此全部渲染成豆腐块。现在每次回落都必须通过
+// isCJKCapable（能画「中」）校验；确实没有 CJK 字体时返回 nil，
+// 让调用方显式看到「缺字体」，而不是拿到一个画不出中文的字体。
 func (m *FontManager) CJKTypeface() *skia.Typeface {
 	if m == nil {
 		return nil
 	}
-	if m.cjkTF != nil {
+	if isCJKCapable(m.cjkTF) {
 		return m.cjkTF
 	}
-	if m.sansTF != nil {
+	if isCJKCapable(m.sansTF) {
 		return m.sansTF
 	}
-	return m.defaultTF
+	if isCJKCapable(m.defaultTF) {
+		return m.defaultTF
+	}
+	for _, f := range m.fonts {
+		if isCJKCapable(f.tf) {
+			return f.tf
+		}
+	}
+	return nil
+}
+
+// CJKFamilyName 返回当前选中的 CJK 族名（诊断/日志用，如 "PingFang SC"）。
+// 未命中 CJK 字体时返回空串。
+func (m *FontManager) CJKFamilyName() string {
+	if m == nil {
+		return ""
+	}
+	if m.cjkFamily != "" {
+		return m.cjkFamily
+	}
+	if isCJKCapable(m.cjkTF) {
+		return "(unknown)"
+	}
+	return ""
 }
 
 // TypefaceWeight returns the CSS weight of the loaded Typeface (400 for regular,
