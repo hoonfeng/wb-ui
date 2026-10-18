@@ -15,20 +15,6 @@ import (
 	"github.com/go-gl/glfw/v3.3/glfw"
 )
 
-// CursorShape enumerates the cursor shapes the Host may request, mirroring
-// the CSS cursor values the renderer resolves.
-type CursorShape int
-
-const (
-	CursorArrow   CursorShape = iota // default / cursor:default
-	CursorIBeam                      // cursor:text — text input / textarea body
-	CursorHand                       // cursor:pointer — links (a[href]) and explicit pointer
-	CursorNWSE                       // cursor:nwse-resize — ↘ double arrow (textarea handle)
-	CursorNESW                       // cursor:nesw-resize — ↙ double arrow
-	CursorNS                         // cursor:ns-resize — vertical double arrow
-	CursorEW                         // cursor:ew-resize — horizontal double arrow
-)
-
 // SetCursorShape sets the window cursor to the given shape. Repeated calls
 // with the same shape are cheap (cursor objects are cached in the window).
 func (w *Window) SetCursorShape(shape CursorShape) {

@@ -897,18 +897,18 @@ func (w *Window) PollEvents() []Event {
 		case 0: // mouse button
 			w.events = append(w.events, Event{
 				Type: EventMouseButton,
-				X: ne.x, Y: ne.y,
-				Button: ne.button, Action: ne.action,
+				X: float64(ne.x), Y: float64(ne.y),
+				Button: int(ne.button), Action: int(ne.action),
 			})
 		case 1: // cursor move / drag
 			w.events = append(w.events, Event{
 				Type: EventCursorMove,
-				X: ne.x, Y: ne.y,
+				X: float64(ne.x), Y: float64(ne.y),
 			})
 		case 2: // key
 			w.events = append(w.events, Event{
 				Type: EventKey,
-				Key: ne.key, Action: ne.action,
+				Key: int(ne.key), Action: int(ne.action),
 			})
 		case 3: // resize
 			newW, newH := int(ne.width), int(ne.height)
@@ -928,15 +928,15 @@ func (w *Window) PollEvents() []Event {
 		case 4: // scroll
 			w.events = append(w.events, Event{
 				Type: EventScroll,
-				ScrollY: ne.scrollY,
+				ScrollY: float64(ne.scrollY),
 			})
 		case 5: // touch
 			w.events = append(w.events, Event{
 				Type:      EventTouch,
-				X:         ne.x,
-				Y:         ne.y,
-				TouchID:   ne.key,
-				TouchAction: ne.action,
+				X:         float64(ne.x),
+				Y:         float64(ne.y),
+				TouchID:   int(ne.key),
+				TouchAction: int(ne.action),
 			})
 		case 6: // drop
 			text := C.GoString(&ne.text[0])
